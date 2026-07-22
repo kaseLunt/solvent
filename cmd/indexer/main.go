@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -36,14 +38,20 @@ func run(ctx context.Context, configPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := store.Migrate(cfg.DatabaseURL); err != nil {
-		return err
-	}
 	st, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+	// Enforce the single-writer contract before touching any state — even
+	// migrations — so a second indexer process fails fast.
+	if err := st.AcquireWriterLock(ctx); err != nil {
+		return err
+	}
+	slog.Info("writer lock acquired")
+	if err := store.Migrate(ctx, cfg.DatabaseURL); err != nil {
+		return err
+	}
 
 	clients := map[string]*chain.Failover{}
 	for name, c := range cfg.Chains {
@@ -51,6 +59,10 @@ func run(ctx context.Context, configPath string) error {
 		if err != nil {
 			return err
 		}
+		if err := fc.VerifyChainID(ctx, c.ChainID); err != nil {
+			return fmt.Errorf("chain %q: %w", name, err)
+		}
+		slog.Info("chain id verified", "chain", name, "chainId", c.ChainID)
 		clients[name] = fc
 	}
 
@@ -67,22 +79,35 @@ func run(ctx context.Context, configPath string) error {
 		slog.Info("stream configured", "stream", s.Name, "start", s.StartBlock)
 	}
 
+	// stepsPerRound bounds how long one walker may hold the loop: a stream
+	// deep in backfill yields after this many windows so its siblings keep
+	// making progress (fair round-robin instead of per-walker full drain).
+	const stepsPerRound = 5
+
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	for {
-		for _, w := range walkers {
-			for {
-				advanced, err := w.Step(ctx)
-				if err != nil {
-					slog.Error("step failed; will retry next tick", "err", err)
-					break
+		for {
+			anyAdvanced := false
+			for _, w := range walkers {
+				for i := 0; i < stepsPerRound; i++ {
+					advanced, err := w.Step(ctx)
+					if err != nil {
+						if errors.Is(err, context.Canceled) {
+							slog.Info("shutting down", "stream", w.Name())
+						} else {
+							slog.Error("step failed; will retry next tick", "stream", w.Name(), "err", err)
+						}
+						break
+					}
+					if !advanced {
+						break
+					}
+					anyAdvanced = true
 				}
-				if !advanced {
-					break
-				}
-				if ctx.Err() != nil {
-					return nil
-				}
+			}
+			if !anyAdvanced || ctx.Err() != nil {
+				break
 			}
 		}
 		select {

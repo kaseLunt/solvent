@@ -55,6 +55,9 @@ func NewWalker(ch Chain, st Store, cfg WalkerConfig) *Walker {
 	return &Walker{chain: ch, store: st, cfg: cfg, addrSet: set}
 }
 
+// Name returns the stream name this walker ingests, for log attribution.
+func (w *Walker) Name() string { return w.cfg.Stream }
+
 // Step performs one bounded unit of work: a reorg check + at most one
 // getLogs window. Returns advanced=false when caught up to the safe head.
 //
