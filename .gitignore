@@ -1,0 +1,7 @@
+.env
+*.exe
+/bin/
+coverage.out
+.superpowers/
+recon/cash-v3/
+recon/DefiLlama-Adapters/
