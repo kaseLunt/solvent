@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -338,4 +339,124 @@ func TestLogsAreConvertedAndSaved(t *testing.T) {
 	require.Equal(t, uint32(3), got.LogIndex)
 	require.Equal(t, common.HexToHash("0x0c").Bytes(), got.TxHash)
 	require.Equal(t, []byte{0x0d}, got.Data)
+}
+
+// Invariant: two logs at the same height with different block hashes describe
+// two forks — the whole batch is fork-inconsistent and must be rejected.
+func TestRejectsMixedHashesAtSameHeight(t *testing.T) {
+	a := testLog(110)
+	b := testLog(110)
+	b.TxHash = common.HexToHash("0x0cc")
+	b.BlockHash = common.HexToHash("0x0f") // differs from a's 0x0e at the same height
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {a, b}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "mixed block hashes at height 110")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a log at the window tip must sit on the fork the cursor is being
+// anchored to (tipBefore) — otherwise logs and cursor describe different forks.
+func TestRejectsTipLogNotMatchingAnchor(t *testing.T) {
+	l := testLog(149) // window tip; BlockHash 0x0e != the fake's HeaderHash(149)
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{149: {l}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "does not match anchored tip hash")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a byte-identical duplicate in one response is coalesced — one
+// copy saved, no error.
+func TestCoalescesIdenticalDuplicateLogs(t *testing.T) {
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {testLog(110), testLog(110)}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.saved, 1)
+	require.Len(t, st.saved[0], 1) // exactly one copy survives
+}
+
+// Invariant: the same (TxHash, Index) identity with ANY differing field is a
+// protocol violation — error out, save nothing.
+func TestRejectsConflictingDuplicateLogs(t *testing.T) {
+	a := testLog(110)
+	b := testLog(110)
+	b.Data = []byte{0xff} // same identity, different payload
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {a, b}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "conflicting duplicate log")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: the store's log_index column is INT — an index that cannot
+// survive the int32 narrowing is rejected before conversion.
+func TestRejectsOversizedLogIndex(t *testing.T) {
+	l := testLog(110)
+	l.Index = uint(math.MaxInt32) + 1
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {l}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "exceeds int32 range")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a cursor at MaxUint64 is caught up — next must not wrap to 0 and
+// silently restart the walk from genesis.
+func TestCursorAtMaxUint64DoesNotWrap(t *testing.T) {
+	tip := common.HexToHash("0x01")
+	ch := &fakeChain{head: math.MaxUint64,
+		hashes: map[uint64]common.Hash{math.MaxUint64: tip}}
+	st := &fakeStore{cursor: &store.CursorPos{Block: math.MaxUint64, Hash: tip.Bytes()}}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+	require.Nil(t, st.rewound)
+}
+
+// Invariant: a verified (stored == live) ancestor is accepted even below this
+// stream's StartBlock — a hash match is chain-canonical proof, and clamping up
+// would anchor sibling cursors to unverified hashes.
+func TestVerifiedMatchBelowStartBlockAccepted(t *testing.T) {
+	stored50 := common.HexToHash("0xc050")
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
+		200: common.HexToHash("0x11"), // mismatches cursor
+		50:  stored50,                 // live agrees with stored log below StartBlock (100)
+	}}
+	st := &fakeStore{
+		cursor:      &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
+		highestLogs: map[uint64][]byte{50: stored50.Bytes()},
+	}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.NotNil(t, st.rewound)
+	require.Equal(t, uint64(50), st.rewound.toBlock)
+	require.Equal(t, stored50.Bytes(), st.rewound.hash)
 }
