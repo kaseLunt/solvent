@@ -66,3 +66,17 @@ func TestFailoverErrorsWhenAllFail(t *testing.T) {
 	_, err := f.BlockNumber(context.Background())
 	require.ErrorContains(t, err, "all rpc endpoints failed")
 }
+
+func TestDoStopsWhenContextCancelled(t *testing.T) {
+	a := &fakeRPC{name: "a", fail: true}
+	b := &fakeRPC{name: "b", blockNum: 42}
+	f := newFailover([]rpcClient{a, b})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := f.BlockNumber(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 0, a.calls)
+	require.Equal(t, 0, b.calls)
+}

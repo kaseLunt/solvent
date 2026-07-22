@@ -22,7 +22,11 @@ type rpcClient interface {
 type Failover struct {
 	clients []rpcClient
 	mu      sync.Mutex
-	active  int
+	// active is a routing hint, not a health registry: it always names the
+	// endpoint that most recently succeeded. Under concurrent callers the
+	// last writer wins, which is safe — every candidate value refers to an
+	// endpoint that just served a successful call.
+	active int
 }
 
 func Dial(ctx context.Context, urls []string) (*Failover, error) {
@@ -51,6 +55,9 @@ func (f *Failover) do(ctx context.Context, op string, fn func(rpcClient) error) 
 
 	var lastErr error
 	for i := 0; i < len(f.clients); i++ {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%s aborted: %w", op, err)
+		}
 		idx := (start + i) % len(f.clients)
 		if err := fn(f.clients[idx]); err != nil {
 			lastErr = err
@@ -81,6 +88,9 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
 		if err != nil {
 			return err
+		}
+		if h == nil {
+			return fmt.Errorf("header %d not found", n)
 		}
 		out = h.Hash()
 		return nil
