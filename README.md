@@ -15,3 +15,7 @@ depth are handled, not just shallow ones.
     cp .env.example .env
     make db-up
     make test
+
+Store integration tests need the database: they skip when `TEST_DATABASE_URL`
+is unset (the Makefile loads it from `.env`, so the three commands above run
+them for real).

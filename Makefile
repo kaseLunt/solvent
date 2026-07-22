@@ -1,3 +1,9 @@
+# Load local dev env (created via `cp .env.example .env`) and export every
+# make variable so db-up/test/run-indexer see it. Missing .env is fine — CI
+# sets its own environment.
+-include .env
+export
+
 .PHONY: db-up db-down test fmt vet run-indexer
 
 db-up:
