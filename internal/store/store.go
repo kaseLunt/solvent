@@ -12,10 +12,12 @@ import (
 // Store persists raw chain logs (the source of truth — positions are derived
 // state) and per-stream ingest cursors.
 //
-// Concurrency contract: SINGLE WRITER. One indexer process owns all writes;
-// its walkers step sequentially, so SaveBatch and Rewind never run
-// concurrently. Running multiple writer processes against one database is
-// out of contract — a Rewind racing an in-flight SaveBatch could interleave.
+// Concurrency contract: SINGLE WRITER, ENFORCED at daemon startup via
+// AcquireWriterLock (a session-level Postgres advisory lock). One indexer
+// process owns all writes; its walkers step sequentially, so SaveBatch and
+// Rewind never run concurrently. A second writer process fails fast at
+// startup instead of racing — a Rewind racing an in-flight SaveBatch could
+// interleave.
 //
 // Replay semantics: inserts are idempotent on (chain_id, tx_hash, log_index)
 // via ON CONFLICT DO NOTHING. Divergent payloads under the same key are
@@ -24,7 +26,15 @@ import (
 // verify-on-conflict is planned alongside the batched-insert rework.
 type Store struct {
 	pool *pgxpool.Pool
+	// writerConn pins the session holding the writer advisory lock; nil until
+	// AcquireWriterLock succeeds. Released in Close.
+	writerConn *pgxpool.Conn
 }
+
+// writerLockKey is the cluster-wide advisory lock key for the single-writer
+// contract: 0x536F6C76, ASCII "Solv". Passed as a bind parameter so the SQL
+// works on any Postgres version (hex literals need PG16+).
+const writerLockKey = int64(0x536F6C76)
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
@@ -38,7 +48,36 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	return &Store{pool: pool}, nil
 }
 
-func (s *Store) Close() { s.pool.Close() }
+// AcquireWriterLock takes the cluster-wide indexer writer lock (advisory key
+// 0x536F6C76 "Solv"). Returns an error if another writer holds it. The lock
+// is held for the pool session that acquired it; Close releases it.
+func (s *Store) AcquireWriterLock(ctx context.Context) error {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire writer-lock connection: %w", err)
+	}
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, writerLockKey).Scan(&locked); err != nil {
+		conn.Release()
+		return fmt.Errorf("writer lock: %w", err)
+	}
+	if !locked {
+		conn.Release()
+		return fmt.Errorf("another indexer process holds the writer lock")
+	}
+	s.writerConn = conn // pin the locked session for the Store's lifetime
+	return nil
+}
+
+func (s *Store) Close() {
+	if s.writerConn != nil {
+		s.writerConn.Release()
+		s.writerConn = nil
+	}
+	// Closing the pool terminates its sessions, which releases the advisory
+	// lock server-side.
+	s.pool.Close()
+}
 
 type CursorPos struct {
 	Block uint64

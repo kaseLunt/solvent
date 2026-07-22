@@ -14,7 +14,7 @@ func testStore(t *testing.T) *Store {
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
 	}
-	require.NoError(t, Migrate(dsn))
+	require.NoError(t, Migrate(context.Background(), dsn))
 	s, err := Open(context.Background(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
@@ -150,6 +150,34 @@ func TestHighestLogAtOrBelow(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, uint64(104), b)
+}
+
+// Single-writer enforcement: while one Store holds the writer lock, a second
+// Store (a separate pool — i.e. a separate would-be indexer process) must be
+// rejected; after the holder closes, a fresh Store can acquire.
+func TestAcquireWriterLockEnforcesSingleWriter(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
+	}
+	ctx := context.Background()
+
+	s1, err := Open(ctx, dsn)
+	require.NoError(t, err)
+	require.NoError(t, s1.AcquireWriterLock(ctx))
+
+	s2, err := Open(ctx, dsn)
+	require.NoError(t, err)
+	err = s2.AcquireWriterLock(ctx)
+	require.ErrorContains(t, err, "another indexer process holds the writer lock")
+	s2.Close()
+
+	s1.Close() // terminates the locked session, releasing the advisory lock
+
+	s3, err := Open(ctx, dsn)
+	require.NoError(t, err)
+	defer s3.Close()
+	require.NoError(t, s3.AcquireWriterLock(ctx))
 }
 
 func TestSaveBatchRejectsMismatchedChainID(t *testing.T) {

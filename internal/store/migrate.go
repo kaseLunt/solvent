@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -12,7 +13,7 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-func Migrate(dsn string) error {
+func Migrate(ctx context.Context, dsn string) error {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return fmt.Errorf("open for migrate: %w", err)
@@ -22,7 +23,7 @@ func Migrate(dsn string) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
-	if err := goose.Up(db, "migrations"); err != nil {
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
 		return fmt.Errorf("goose up: %w", err)
 	}
 	return nil
