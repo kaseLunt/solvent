@@ -1,0 +1,26 @@
+{
+  "chains": {
+    "op":  { "chainId": 10, "rpcEnv": "SOLVENT_RPC_OP" },
+    "eth": { "chainId": 1,  "rpcEnv": "SOLVENT_RPC_ETH" }
+  },
+  "streams": [
+    {
+      "name": "op:debt-manager",
+      "chain": "op",
+      "engine": "debt_manager",
+      "addresses": ["0x0078C5a459132e279056B2371fE8A8eC973A9553"],
+      "startBlock": 149521228,
+      "window": 2000,
+      "confirmations": 5
+    },
+    {
+      "name": "eth:aave-etherfi",
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "addresses": ["0x0AA97c284e98396202b6A04024F5E2c65026F3c0"],
+      "startBlock": 20625519,
+      "window": 2000,
+      "confirmations": 5
+    }
+  ]
+}
