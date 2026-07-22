@@ -12,8 +12,8 @@
 
 ## Global Constraints
 
-- **Product root:** `C:\Users\kasel\source\repos\etherfi\Solvent` — a folder in this repo; future projects will be sibling folders under `/etherfi`. All file paths below are relative to that folder, and all shell commands run from it unless stated otherwise. Public-ready discipline from day one anyway: no secrets ever committed, `.env` gitignored, conventional-commit messages, small commits (the commit history is itself a hiring artifact). Publishing Solvent as a standalone public repo later (Plan 5) extracts it with `git subtree split --prefix=Solvent`.
-- **Planning artifacts** (specs/plans under `docs/`, recon under `recon/`) stay at the repo root, outside `Solvent/`. Recon artifacts that feed the product (`contracts.json`, ABIs) get copied into `Solvent/`.
+- **Product root:** `C:\Users\kasel\source\repos\etherfi\Solvent` — a SELF-CONTAINED git repository (branch `main`). The parent `/etherfi` folder is NOT ours to touch: no file writes, no git operations outside `Solvent/`. Future sibling projects get their own folders/repos. All file paths below are relative to `Solvent/`, and all shell commands run from it. Public-ready from day one: no secrets ever committed, `.env` gitignored, conventional-commit messages, small commits (the commit history is itself a hiring artifact). Plan 5's public flip is just `gh repo create` + push — no history surgery needed.
+- **Planning artifacts** live inside the repo: specs/plans under `docs/`, recon under `recon/` (clones gitignored), SDD scratch under `.superpowers/` (gitignored).
 - **Go module path:** `github.com/kaselunt/solvent` — adjust in Task 2 Step 2 if the GitHub handle differs; it appears nowhere else by hand (imports follow the module path).
 - **Dependencies (Go):** go-ethereum, jackc/pgx/v5, pressly/goose/v3, stretchr/testify. Nothing else without a plan change. No ORM.
 - **Env var names (exact, used across all plans):** `SOLVENT_DATABASE_URL`, `SOLVENT_RPC_OP` (comma-separated URLs, failover order), `SOLVENT_RPC_ETH`, `SOLVENT_POLL_INTERVAL` (Go duration, default `5s`).
@@ -62,10 +62,10 @@ Expected: three version lines. `jq` missing on Windows: `winget install jqlang.j
 
 ### Task 1: Day-0 recon spike (GO/NO-GO gate)
 
-Everything below verifies the spec's §1 research against the actual chain. Work happens in the **planning repo** under `recon/` (private). ~Half a day.
+Everything below verifies the spec's §1 research against the actual chain. Work happens under `recon/` inside the Solvent repo (clones gitignored). ~Half a day.
 
 **Files:**
-- Create: `recon/report.md` (in planning repo `C:\Users\kasel\source\repos\etherfi`)
+- Create: `recon/report.md`
 - Create: `recon/contracts.json`
 - Create: `recon/abis/` (directory of ABI JSON files)
 
@@ -76,7 +76,7 @@ Everything below verifies the spec's §1 research against the actual chain. Work
 - [ ] **Step 1: Clone the two source-of-truth repos (shallow)**
 
 ```bash
-cd /c/Users/kasel/source/repos/etherfi
+cd /c/Users/kasel/source/repos/etherfi/Solvent
 mkdir -p recon/abis
 git clone --depth 1 https://github.com/etherfi-protocol/cash-v3 recon/cash-v3
 git clone --depth 1 https://github.com/etherfi-protocol/DefiLlama-Adapters recon/DefiLlama-Adapters
@@ -189,29 +189,29 @@ Structure: `## Addresses (verified)` table (label, chain, address, deploy block,
 - [ ] **Step 10: Commit (planning repo) and STOP for user review**
 
 ```bash
-cd /c/Users/kasel/source/repos/etherfi
 git add recon/report.md recon/contracts.json recon/abis/
-git commit -m "docs: Solvent Day-0 recon — addresses, event coverage, gate decision"
+git commit -m "docs: Day-0 recon — addresses, event coverage, gate decision"
 ```
-**HARD GATE: present `report.md` to the user. Do not start Task 2 until the user confirms the GO/Fallback-GO decision.** (`recon/cash-v3` and `recon/DefiLlama-Adapters` clones stay uncommitted; add `recon/cash-v3/` and `recon/DefiLlama-Adapters/` to the planning repo's `.gitignore` in this commit.)
+**HARD GATE: present `report.md` to the user. Do not start Task 2 until the user confirms the GO/Fallback-GO decision.** (`recon/cash-v3` and `recon/DefiLlama-Adapters` clones are already gitignored.)
 
 ---
 
 ### Task 2: Product folder scaffold + CI
 
 **Files:**
-- Create: `go.mod`, `.gitignore`, `.env.example`, `LICENSE`, `README.md`, `Makefile`, `docker-compose.yml`, `cmd/indexer/main.go` (stub)
-- Create: `<repo-root>/.github/workflows/solvent-ci.yml` (workflows must live at the repo root)
+- Create: `go.mod`, `.env.example`, `LICENSE`, `README.md`, `Makefile`, `docker-compose.yml`, `.github/workflows/ci.yml`, `cmd/indexer/main.go` (stub)
+- Modify: `.gitignore` (exists from repo init)
 
 **Interfaces:**
 - Consumes: nothing from other tasks.
 - Produces: module path `github.com/kaselunt/solvent`; `make db-up|db-down|test|fmt`; CI that runs gofmt/vet/test with a Postgres service; local Postgres at `postgres://solvent:solvent@localhost:5432/solvent`.
 
-- [ ] **Step 1: Create the folder (no git init — Solvent lives inside this repo)**
+- [ ] **Step 1: Confirm you are in the Solvent repo (already initialized, branch `main`)**
 
 ```bash
-mkdir -p /c/Users/kasel/source/repos/etherfi/Solvent && cd /c/Users/kasel/source/repos/etherfi/Solvent
+cd /c/Users/kasel/source/repos/etherfi/Solvent && git rev-parse --show-toplevel
 ```
+Expected: prints the Solvent path itself (NOT the parent). Never run git commands that resolve to the parent folder.
 
 - [ ] **Step 2: Initialize the Go module**
 
@@ -316,19 +316,13 @@ func main() {
 }
 ```
 
-- [ ] **Step 7: Write `<repo-root>/.github/workflows/solvent-ci.yml`**
+- [ ] **Step 7: Write `.github/workflows/ci.yml`**
 
 ```yaml
-name: solvent-ci
+name: ci
 on:
-  push:
-    branches: [main, master]
-    paths: ["Solvent/**", ".github/workflows/solvent-ci.yml"]
+  push: { branches: [main] }
   pull_request:
-    paths: ["Solvent/**", ".github/workflows/solvent-ci.yml"]
-defaults:
-  run:
-    working-directory: Solvent
 jobs:
   go:
     runs-on: ubuntu-latest
@@ -365,12 +359,9 @@ Expected: build silent; compose reports db healthy.
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /c/Users/kasel/source/repos/etherfi
-git add Solvent/ .github/workflows/solvent-ci.yml
-git commit -m "chore: scaffold Solvent — Go module, compose db, CI"
-cd Solvent
+git add go.mod .gitignore .env.example LICENSE README.md Makefile docker-compose.yml .github/workflows/ci.yml cmd/indexer/main.go
+git commit -m "chore: scaffold Go module, compose db, CI"
 ```
-(Folder-scoped `git add Solvent/` is acceptable ONLY for this first scaffold commit — everything under it was just authored above. All later commits stage files by name; running `git add` with relative paths from inside `Solvent/` works normally.)
 
 ---
 
@@ -1451,7 +1442,7 @@ git commit -m "feat: reorg-safe log window walker with cursor rewind"
 
 ```bash
 mkdir -p config
-cp ../recon/contracts.json config/contracts.json
+cp recon/contracts.json config/contracts.json
 ```
 Review the copy: it must contain only verified addresses (Task 1 Step 8), no comments, valid JSON (`jq . config/contracts.json`).
 
@@ -1595,15 +1586,12 @@ git commit -m "feat: wire indexer daemon; live OP Mainnet ingestion verified (<N
 - Consumes: everything above.
 - Produces: pushed repo with green CI; input state for Plan 2.
 
-- [ ] **Step 1: Push this repo to GitHub**
+- [ ] **Step 1: Create the GitHub repo and push**
 
 ```bash
-git remote -v
-# If a remote exists:   git push -u origin master
-# If none (confirm repo name with user first):
-#   gh repo create etherfi --private --source /c/Users/kasel/source/repos/etherfi --push
+gh repo create solvent --private --source . --push
 ```
-(This monorepo stays private; Solvent's public flip is a deliberate Plan 5 step via `git subtree split --prefix=Solvent`. **Confirm with the user before creating a remote or pushing** — externally visible action.)
+(Private for now; the public flip is a deliberate Plan 5 step, history intact. **Confirm with the user before running** — externally visible action. Run from the Solvent repo root only.)
 
 - [ ] **Step 2: Verify CI is green**
 
@@ -1614,9 +1602,9 @@ Expected: `ci / go` succeeds. If gofmt/vet/test diverge from local, fix forward 
 
 Append under the title:
 ```markdown
-![ci](https://github.com/<owner>/<repo>/actions/workflows/solvent-ci.yml/badge.svg)
+![ci](https://github.com/<owner>/solvent/actions/workflows/ci.yml/badge.svg)
 ```
-(Substitute `<owner>/<repo>` with the actual remote from Step 1; the badge URL is re-pointed at the standalone repo during the Plan 5 public split.)
+(Substitute `<owner>` with the actual GitHub handle from Step 1.)
 ```markdown
 
 Reorg-safe indexer → PostgreSQL event log → (coming) risk engine, public API, alerts, web.
@@ -1632,7 +1620,7 @@ git push
 - [ ] **Step 4: Tag the phase**
 
 ```bash
-git tag solvent-v0.1.0-foundation && git push --tags
+git tag v0.1.0-foundation && git push --tags
 ```
 
 - [ ] **Step 5: Report phase results to the user**
