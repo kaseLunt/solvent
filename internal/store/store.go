@@ -70,6 +70,24 @@ func (s *Store) Cursor(ctx context.Context, stream string) (*CursorPos, error) {
 	return &c, nil
 }
 
+// HighestLogAtOrBelow returns the block number and block hash of the most
+// recently stored log for chainID at or below height. found is false when
+// no such log exists.
+func (s *Store) HighestLogAtOrBelow(ctx context.Context, chainID, height uint64) (block uint64, blockHash []byte, found bool, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT block_number, block_hash FROM raw_logs
+		 WHERE chain_id = $1 AND block_number <= $2
+		 ORDER BY block_number DESC LIMIT 1`,
+		chainID, height).Scan(&block, &blockHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil, false, nil
+	}
+	if err != nil {
+		return 0, nil, false, fmt.Errorf("highest log at or below %d (chain %d): %w", height, chainID, err)
+	}
+	return block, blockHash, true, nil
+}
+
 func (s *Store) SaveBatch(ctx context.Context, stream string, chainID uint64, logs []RawLog, tipBlock uint64, tipHash []byte) error {
 	for _, l := range logs {
 		if l.ChainID != chainID {

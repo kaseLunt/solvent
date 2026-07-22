@@ -101,6 +101,57 @@ func TestRewindResetsSiblingCursorsOnSameChain(t *testing.T) {
 	require.Equal(t, uint64(500), curC.Block) // other chain untouched
 }
 
+func TestHighestLogAtOrBelow(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	// chain 10 holds logs at blocks 100..104; chain 1 holds one log at 500
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, sampleLogs(5, 100), 104, []byte{0x04}))
+	chain1Log := []RawLog{{
+		ChainID: 1, BlockNumber: 500, BlockHash: []byte{0xee},
+		TxHash: []byte{0x99}, LogIndex: 0, Address: []byte{0xaa},
+		Topics: [][]byte{{0x01}}, Data: []byte{0x02},
+	}}
+	require.NoError(t, s.SaveBatch(ctx, "eth:c", 1, chain1Log, 500, []byte{0x05}))
+
+	// found at exact height
+	b, h, found, err := s.HighestLogAtOrBelow(ctx, 10, 104)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(104), b)
+	require.Equal(t, []byte{0xbb, 0x04}, h)
+
+	// found below: highest stored log <= 200 is 104
+	b, h, found, err = s.HighestLogAtOrBelow(ctx, 10, 200)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(104), b)
+	require.Equal(t, []byte{0xbb, 0x04}, h)
+
+	// found below at an interior height: highest stored log <= 102 is 102
+	b, h, found, err = s.HighestLogAtOrBelow(ctx, 10, 102)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(102), b)
+	require.Equal(t, []byte{0xbb, 0x02}, h)
+
+	// not found: nothing stored at or below 99
+	_, _, found, err = s.HighestLogAtOrBelow(ctx, 10, 99)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	// chain isolation: chain 1 only sees its own log, chain 10 never sees 500
+	b, h, found, err = s.HighestLogAtOrBelow(ctx, 1, 1000)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(500), b)
+	require.Equal(t, []byte{0xee}, h)
+
+	b, _, found, err = s.HighestLogAtOrBelow(ctx, 10, 1000)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(104), b)
+}
+
 func TestSaveBatchRejectsMismatchedChainID(t *testing.T) {
 	s := testStore(t)
 	logs := sampleLogs(1, 100) // logs carry ChainID 10
