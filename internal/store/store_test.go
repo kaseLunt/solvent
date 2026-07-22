@@ -81,3 +81,33 @@ func TestRewindDeletesLogsAboveBlock(t *testing.T) {
 	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM raw_logs WHERE block_number > 101").Scan(&count))
 	require.Equal(t, 0, count)
 }
+
+func TestRewindResetsSiblingCursorsOnSameChain(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.SaveBatch(ctx, "op:a", 10, sampleLogs(3, 100), 102, []byte{0x02}))
+	require.NoError(t, s.SaveBatch(ctx, "op:b", 10, nil, 102, []byte{0x02}))
+	require.NoError(t, s.SaveBatch(ctx, "eth:c", 1, nil, 500, []byte{0x05}))
+
+	require.NoError(t, s.Rewind(ctx, "op:a", 10, 101, []byte{0x01}))
+
+	curB, err := s.Cursor(ctx, "op:b")
+	require.NoError(t, err)
+	require.Equal(t, uint64(101), curB.Block) // sibling on chain 10 rewound too
+	require.Equal(t, []byte{0x01}, curB.Hash)
+
+	curC, err := s.Cursor(ctx, "eth:c")
+	require.NoError(t, err)
+	require.Equal(t, uint64(500), curC.Block) // other chain untouched
+}
+
+func TestSaveBatchRejectsMismatchedChainID(t *testing.T) {
+	s := testStore(t)
+	logs := sampleLogs(1, 100) // logs carry ChainID 10
+	err := s.SaveBatch(context.Background(), "eth:c", 1, logs, 100, []byte{0x01})
+	require.ErrorContains(t, err, "does not match batch chain id")
+
+	cur, cerr := s.Cursor(context.Background(), "eth:c")
+	require.NoError(t, cerr)
+	require.Nil(t, cur) // nothing persisted
+}

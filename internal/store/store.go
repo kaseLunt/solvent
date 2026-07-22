@@ -9,6 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Store persists raw chain logs (the source of truth — positions are derived
+// state) and per-stream ingest cursors.
+//
+// Concurrency contract: SINGLE WRITER. One indexer process owns all writes;
+// its walkers step sequentially, so SaveBatch and Rewind never run
+// concurrently. Running multiple writer processes against one database is
+// out of contract — a Rewind racing an in-flight SaveBatch could interleave.
+//
+// Replay semantics: inserts are idempotent on (chain_id, tx_hash, log_index)
+// via ON CONFLICT DO NOTHING. Divergent payloads under the same key are
+// prevented by the reorg protocol (the walker rewinds and deletes above the
+// fork point before re-ingesting), not by this layer; payload
+// verify-on-conflict is planned alongside the batched-insert rework.
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -58,6 +71,13 @@ func (s *Store) Cursor(ctx context.Context, stream string) (*CursorPos, error) {
 }
 
 func (s *Store) SaveBatch(ctx context.Context, stream string, chainID uint64, logs []RawLog, tipBlock uint64, tipHash []byte) error {
+	for _, l := range logs {
+		if l.ChainID != chainID {
+			return fmt.Errorf("log %x/%d: chain id %d does not match batch chain id %d",
+				l.TxHash, l.LogIndex, l.ChainID, chainID)
+		}
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -79,7 +99,7 @@ func (s *Store) SaveBatch(ctx context.Context, stream string, chainID uint64, lo
 		`INSERT INTO ingest_cursors (stream, chain_id, last_block, last_block_hash, updated_at)
 		 VALUES ($1,$2,$3,$4,now())
 		 ON CONFLICT (stream) DO UPDATE
-		 SET last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
+		 SET chain_id = EXCLUDED.chain_id, last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
 		stream, chainID, tipBlock, tipHash)
 	if err != nil {
 		return fmt.Errorf("upsert cursor: %w", err)
@@ -99,10 +119,16 @@ func (s *Store) Rewind(ctx context.Context, stream string, chainID uint64, toBlo
 		return fmt.Errorf("delete logs: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
+		`UPDATE ingest_cursors SET last_block = $2, last_block_hash = $3, updated_at = now()
+		 WHERE chain_id = $1 AND last_block > $2`,
+		chainID, toBlock, hashAtBlock); err != nil {
+		return fmt.Errorf("rewind sibling cursors: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO ingest_cursors (stream, chain_id, last_block, last_block_hash, updated_at)
 		 VALUES ($1,$2,$3,$4,now())
 		 ON CONFLICT (stream) DO UPDATE
-		 SET last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
+		 SET chain_id = EXCLUDED.chain_id, last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
 		stream, chainID, toBlock, hashAtBlock); err != nil {
 		return fmt.Errorf("reset cursor: %w", err)
 	}
