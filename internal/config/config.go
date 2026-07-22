@@ -84,7 +84,17 @@ func Load(path string) (*Config, error) {
 		cfg.Chains[name] = Chain{ChainID: fc.ChainID, RPCURLs: strings.Split(urls, ",")}
 	}
 
+	seenStreams := make(map[string]struct{}, len(root.Streams))
 	for _, fs := range root.Streams {
+		if fs.Name == "" {
+			return nil, fmt.Errorf("stream name must not be empty")
+		}
+		// The cursor table is keyed by stream name: two streams sharing a
+		// name would silently clobber each other's cursor.
+		if _, dup := seenStreams[fs.Name]; dup {
+			return nil, fmt.Errorf("duplicate stream name %q", fs.Name)
+		}
+		seenStreams[fs.Name] = struct{}{}
 		if _, ok := cfg.Chains[fs.Chain]; !ok {
 			return nil, fmt.Errorf("stream %q references unknown chain %q", fs.Name, fs.Chain)
 		}
@@ -93,6 +103,12 @@ func Load(path string) (*Config, error) {
 		}
 		if fs.StartBlock == 0 {
 			return nil, fmt.Errorf("stream %q: startBlock must be > 0 (genesis-start streams unsupported)", fs.Name)
+		}
+		// Streams must name their contracts: an empty address set would mean
+		// a wildcard getLogs over every contract, which is unsupported (and
+		// the walker rejects any log outside its configured address set).
+		if len(fs.Addresses) == 0 {
+			return nil, fmt.Errorf("stream %q: addresses must not be empty", fs.Name)
 		}
 		s := Stream{
 			Name: fs.Name, Chain: fs.Chain, Engine: fs.Engine,

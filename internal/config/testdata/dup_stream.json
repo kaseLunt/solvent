@@ -1,0 +1,25 @@
+{
+  "chains": {
+    "op": { "chainId": 10, "rpcEnv": "SOLVENT_RPC_OP" }
+  },
+  "streams": [
+    {
+      "name": "op:test",
+      "chain": "op",
+      "engine": "aave_v3_etherfi",
+      "addresses": ["0x794a61358D6845594F94dc1DB02A252b5b4814aD"],
+      "startBlock": 100,
+      "window": 2000,
+      "confirmations": 5
+    },
+    {
+      "name": "op:test",
+      "chain": "op",
+      "engine": "debt_manager",
+      "addresses": ["0x0078C5a459132e279056B2371fE8A8eC973A9553"],
+      "startBlock": 200,
+      "window": 2000,
+      "confirmations": 5
+    }
+  ]
+}

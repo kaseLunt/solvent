@@ -47,3 +47,21 @@ func TestLoadFailsOnZeroStartBlock(t *testing.T) {
 	_, err := Load("testdata/zero_start.json")
 	require.ErrorContains(t, err, "startBlock must be > 0")
 }
+
+// Invariant: streams must name their contracts — an empty address set would
+// be a wildcard getLogs subscription, which is unsupported.
+func TestLoadFailsOnEmptyAddresses(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/empty_addresses.json")
+	require.ErrorContains(t, err, "addresses must not be empty")
+}
+
+// Invariant: the cursor table is keyed by stream name, so duplicate names
+// would clobber each other's cursor.
+func TestLoadFailsOnDuplicateStreamName(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/dup_stream.json")
+	require.ErrorContains(t, err, `duplicate stream name "op:test"`)
+}

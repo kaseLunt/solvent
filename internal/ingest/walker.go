@@ -37,9 +37,13 @@ type WalkerConfig struct {
 }
 
 type Walker struct {
-	chain   Chain
-	store   Store
-	cfg     WalkerConfig
+	chain Chain
+	store Store
+	cfg   WalkerConfig
+	// addrSet mirrors cfg.Addresses for O(1) log-address membership checks.
+	// It is never empty: wildcard streams (empty address set) are unsupported
+	// and rejected by config validation, so an empty set here would silently
+	// fail every batch on the address check.
 	addrSet map[common.Address]struct{}
 }
 
