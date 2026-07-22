@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -12,14 +13,20 @@ import (
 )
 
 type fakeChain struct {
-	head   uint64
-	hashes map[uint64]common.Hash // height -> hash
-	logs   map[uint64][]types.Log // height -> logs at that height
+	head      uint64
+	hashes    map[uint64]common.Hash   // height -> hash
+	headerSeq map[uint64][]common.Hash // height -> per-call overrides, consumed in order
+	logs      map[uint64][]types.Log   // height -> logs at that height
 }
 
 func (f *fakeChain) BlockNumber(ctx context.Context) (uint64, error) { return f.head, nil }
 
 func (f *fakeChain) HeaderHash(ctx context.Context, n uint64) (common.Hash, error) {
+	if seq := f.headerSeq[n]; len(seq) > 0 {
+		h := seq[0]
+		f.headerSeq[n] = seq[1:]
+		return h, nil
+	}
 	if h, ok := f.hashes[n]; ok {
 		return h, nil
 	}
@@ -34,10 +41,17 @@ func (f *fakeChain) Logs(ctx context.Context, from, to uint64, addrs []common.Ad
 	return out, nil
 }
 
+type rewindCall struct {
+	toBlock uint64
+	hash    []byte
+}
+
 type fakeStore struct {
-	cursor    *store.CursorPos
-	saved     [][]store.RawLog
-	rewoundTo *uint64
+	cursor      *store.CursorPos
+	saved       [][]store.RawLog
+	saveErr     error
+	rewound     *rewindCall
+	highestLogs map[uint64][]byte // stored raw_logs: block -> block hash
 }
 
 func (f *fakeStore) Cursor(ctx context.Context, stream string) (*store.CursorPos, error) {
@@ -45,23 +59,54 @@ func (f *fakeStore) Cursor(ctx context.Context, stream string) (*store.CursorPos
 }
 
 func (f *fakeStore) SaveBatch(ctx context.Context, stream string, chainID uint64, logs []store.RawLog, tipBlock uint64, tipHash []byte) error {
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	f.saved = append(f.saved, logs)
 	f.cursor = &store.CursorPos{Block: tipBlock, Hash: tipHash}
 	return nil
 }
 
 func (f *fakeStore) Rewind(ctx context.Context, stream string, chainID uint64, toBlock uint64, hashAtBlock []byte) error {
-	f.rewoundTo = &toBlock
+	f.rewound = &rewindCall{toBlock: toBlock, hash: hashAtBlock}
 	f.cursor = &store.CursorPos{Block: toBlock, Hash: hashAtBlock}
 	return nil
 }
 
+func (f *fakeStore) HighestLogAtOrBelow(ctx context.Context, chainID, height uint64) (uint64, []byte, bool, error) {
+	var (
+		best     uint64
+		bestHash []byte
+		found    bool
+	)
+	for b, h := range f.highestLogs {
+		if b <= height && (!found || b > best) {
+			best, bestHash, found = b, h, true
+		}
+	}
+	return best, bestHash, found, nil
+}
+
+var testAddr = common.HexToAddress("0xaa00000000000000000000000000000000000000")
+
 func walker(ch Chain, st Store) *Walker {
 	return NewWalker(ch, st, WalkerConfig{
 		Stream: "op:test", ChainID: 10,
-		Addresses:  []common.Address{common.HexToAddress("0xaa00000000000000000000000000000000000000")},
+		Addresses:  []common.Address{testAddr},
 		StartBlock: 100, Window: 50, Confirmations: 5,
 	})
+}
+
+func testLog(block uint64) types.Log {
+	return types.Log{
+		Address:     testAddr,
+		Topics:      []common.Hash{common.HexToHash("0x0b")},
+		Data:        []byte{0x0d},
+		BlockNumber: block,
+		TxHash:      common.HexToHash("0x0c"),
+		Index:       3,
+		BlockHash:   common.HexToHash("0x0e"),
+	}
 }
 
 func TestFreshWalkStartsAtStartBlockAndCapsAtWindow(t *testing.T) {
@@ -96,44 +141,190 @@ func TestNoAdvanceWhenCaughtUp(t *testing.T) {
 	advanced, err := w.Step(context.Background())
 	require.NoError(t, err)
 	require.False(t, advanced)
-	require.Nil(t, st.rewoundTo)
+	require.Nil(t, st.rewound)
 }
 
-func TestReorgDetectedRewindsTwiceConfirmations(t *testing.T) {
-	// stored hash at 200 disagrees with chain
-	ch := &fakeChain{head: 300, hashes: map[uint64]common.Hash{200: common.HexToHash("0x11")}}
-	st := &fakeStore{cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()}}
+// Invariant: the reorg check runs even when caught up — a mismatched cursor
+// must rewind rather than be skipped by the caught-up early return.
+func TestCaughtUpWithMismatchStillRewinds(t *testing.T) {
+	ch := &fakeChain{head: 130, hashes: map[uint64]common.Hash{
+		125: common.HexToHash("0x11"), // live disagrees with stored cursor hash
+		99:  common.HexToHash("0x99"),
+	}}
+	st := &fakeStore{cursor: &store.CursorPos{Block: 125, Hash: common.HexToHash("0x22").Bytes()}}
 	w := walker(ch, st)
 
 	advanced, err := w.Step(context.Background())
 	require.NoError(t, err)
-	require.True(t, advanced) // the rewind itself counts as work
-	require.NotNil(t, st.rewoundTo)
-	require.Equal(t, uint64(190), *st.rewoundTo) // 200 - 2*5
+	require.True(t, advanced)
+	require.NotNil(t, st.rewound)
+	require.Equal(t, uint64(99), st.rewound.toBlock) // no stored logs -> StartBlock-1
+	require.Equal(t, common.HexToHash("0x99").Bytes(), st.rewound.hash)
 }
 
-func TestRewindNeverGoesBelowStartBlock(t *testing.T) {
-	ch := &fakeChain{head: 300, hashes: map[uint64]common.Hash{105: common.HexToHash("0x11")}}
-	st := &fakeStore{cursor: &store.CursorPos{Block: 105, Hash: common.HexToHash("0x22").Bytes()}}
+// Invariant: rewind lands on a PROVEN canonical ancestor (stored hash == live
+// hash), not a fixed distance — a fork deeper than any constant is still found.
+func TestDeepForkWalksBackToVerifiedAncestor(t *testing.T) {
+	stored180 := common.HexToHash("0xf180")
+	stored150 := common.HexToHash("0xc150")
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
+		200: common.HexToHash("0x11"),   // mismatches cursor
+		180: common.HexToHash("0xdead"), // live disagrees with stored log at 180
+		150: stored150,                  // live agrees with stored log at 150
+	}}
+	st := &fakeStore{
+		cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
+		highestLogs: map[uint64][]byte{
+			180: stored180.Bytes(),
+			150: stored150.Bytes(),
+		},
+	}
 	w := walker(ch, st)
 
-	_, err := w.Step(context.Background())
+	advanced, err := w.Step(context.Background())
 	require.NoError(t, err)
-	require.NotNil(t, st.rewoundTo)
-	require.Equal(t, uint64(100), *st.rewoundTo) // clamped to StartBlock, not 95
+	require.True(t, advanced)
+	require.NotNil(t, st.rewound)
+	require.Equal(t, uint64(150), st.rewound.toBlock)
+	require.Equal(t, stored150.Bytes(), st.rewound.hash)
+}
+
+// Invariant: when no stored log matches the live chain, everything is suspect
+// and the walker re-walks the whole range from StartBlock.
+func TestForkBeyondAllStoredLogsRewindsToStartBlock(t *testing.T) {
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
+		200: common.HexToHash("0x11"),   // mismatches cursor
+		180: common.HexToHash("0xdead"), // disagrees with stored log at 180
+		150: common.HexToHash("0xbeef"), // disagrees with stored log at 150
+		99:  common.HexToHash("0x99"),
+	}}
+	st := &fakeStore{
+		cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
+		highestLogs: map[uint64][]byte{
+			180: common.HexToHash("0xf180").Bytes(),
+			150: common.HexToHash("0xc150").Bytes(),
+		},
+	}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.NotNil(t, st.rewound)
+	require.Equal(t, uint64(99), st.rewound.toBlock) // StartBlock-1
+	require.Equal(t, common.HexToHash("0x99").Bytes(), st.rewound.hash)
+}
+
+// Invariant: a window fetched while the chain tip moved is incoherent and
+// must be discarded, not saved.
+func TestTipChangedMidStepAborts(t *testing.T) {
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		headerSeq: map[uint64][]common.Hash{
+			149: {common.HexToHash("0xa1"), common.HexToHash("0xa2")}, // tip hash changes across the Logs call
+		}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+	require.Nil(t, st.cursor)
+}
+
+// Invariant: a reorg landing under the cursor mid-Step must abort the save;
+// the next Step's cursor check performs the rewind.
+func TestCursorRecheckMismatchAborts(t *testing.T) {
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		headerSeq: map[uint64][]common.Hash{
+			200: {common.HexToHash("0x01"), common.HexToHash("0x02")}, // matches at step start, differs on pre-save recheck
+		}}
+	st := &fakeStore{cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x01").Bytes()}}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+	require.Nil(t, st.rewound)
+	require.Equal(t, uint64(200), st.cursor.Block) // cursor untouched
+}
+
+// Invariant: a provider handing back a removed log is a protocol violation —
+// error out, save nothing.
+func TestRejectsRemovedLog(t *testing.T) {
+	l := testLog(110)
+	l.Removed = true
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {l}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "removed log")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a log outside the requested window is a protocol violation —
+// error out, save nothing.
+func TestRejectsOutOfRangeLog(t *testing.T) {
+	l := testLog(500) // claims block 500, window is [100,149]
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {l}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "outside requested window")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a log from an address we never asked for is a protocol
+// violation — error out, save nothing.
+func TestRejectsForeignAddressLog(t *testing.T) {
+	l := testLog(110)
+	l.Address = common.HexToAddress("0xbb00000000000000000000000000000000000000")
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
+		logs: map[uint64][]types.Log{110: {l}}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "not in the configured address set")
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: head below Confirmations means no safe block exists yet — no
+// work, no underflow.
+func TestHeadBelowConfirmationsNoAdvance(t *testing.T) {
+	ch := &fakeChain{head: 3, hashes: map[uint64]common.Hash{}}
+	st := &fakeStore{}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.saved)
+}
+
+// Invariant: a failed SaveBatch propagates and leaves the cursor unchanged.
+func TestSaveBatchErrorPropagates(t *testing.T) {
+	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{}}
+	st := &fakeStore{saveErr: errors.New("boom")}
+	w := walker(ch, st)
+
+	advanced, err := w.Step(context.Background())
+	require.ErrorContains(t, err, "boom")
+	require.False(t, advanced)
+	require.Nil(t, st.cursor)
 }
 
 func TestLogsAreConvertedAndSaved(t *testing.T) {
 	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{}, logs: map[uint64][]types.Log{
-		110: {{
-			Address:     common.HexToAddress("0xaa00000000000000000000000000000000000000"),
-			Topics:      []common.Hash{common.HexToHash("0x0b")},
-			Data:        []byte{0x0d},
-			BlockNumber: 110,
-			TxHash:      common.HexToHash("0x0c"),
-			Index:       3,
-			BlockHash:   common.HexToHash("0x0e"),
-		}},
+		110: {testLog(110)},
 	}}
 	st := &fakeStore{}
 	w := walker(ch, st)
@@ -146,4 +337,5 @@ func TestLogsAreConvertedAndSaved(t *testing.T) {
 	require.Equal(t, uint64(110), got.BlockNumber)
 	require.Equal(t, uint32(3), got.LogIndex)
 	require.Equal(t, common.HexToHash("0x0c").Bytes(), got.TxHash)
+	require.Equal(t, []byte{0x0d}, got.Data)
 }
