@@ -91,6 +91,9 @@ func Load(path string) (*Config, error) {
 		if fs.Window == 0 || fs.Confirmations == 0 {
 			return nil, fmt.Errorf("stream %q: window and confirmations must be > 0", fs.Name)
 		}
+		if fs.StartBlock == 0 {
+			return nil, fmt.Errorf("stream %q: startBlock must be > 0 (genesis-start streams unsupported)", fs.Name)
+		}
 		s := Stream{
 			Name: fs.Name, Chain: fs.Chain, Engine: fs.Engine,
 			StartBlock: fs.StartBlock, Window: fs.Window, Confirmations: fs.Confirmations,

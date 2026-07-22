@@ -38,3 +38,12 @@ func TestLoadFailsOnUnknownChainRef(t *testing.T) {
 	_, err := Load("testdata/bad_chain_ref.json")
 	require.ErrorContains(t, err, "unknown chain")
 }
+
+// Invariant: genesis-start streams are unsupported — StartBlock 0 would make
+// the walker's StartBlock-1 full-rewalk target underflow-prone and ambiguous.
+func TestLoadFailsOnZeroStartBlock(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/zero_start.json")
+	require.ErrorContains(t, err, "startBlock must be > 0")
+}
