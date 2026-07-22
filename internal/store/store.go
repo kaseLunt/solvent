@@ -1,0 +1,110 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+func Open(ctx context.Context, dsn string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("pgx pool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db ping: %w", err)
+	}
+	return &Store{pool: pool}, nil
+}
+
+func (s *Store) Close() { s.pool.Close() }
+
+type CursorPos struct {
+	Block uint64
+	Hash  []byte
+}
+
+type RawLog struct {
+	ChainID     uint64
+	BlockNumber uint64
+	BlockHash   []byte
+	TxHash      []byte
+	LogIndex    uint32
+	Address     []byte
+	Topics      [][]byte
+	Data        []byte
+}
+
+func (s *Store) Cursor(ctx context.Context, stream string) (*CursorPos, error) {
+	var c CursorPos
+	err := s.pool.QueryRow(ctx,
+		`SELECT last_block, last_block_hash FROM ingest_cursors WHERE stream = $1`,
+		stream).Scan(&c.Block, &c.Hash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read cursor %q: %w", stream, err)
+	}
+	return &c, nil
+}
+
+func (s *Store) SaveBatch(ctx context.Context, stream string, chainID uint64, logs []RawLog, tipBlock uint64, tipHash []byte) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, l := range logs {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO raw_logs (chain_id, block_number, block_hash, tx_hash, log_index, address, topics, data)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			 ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING`,
+			l.ChainID, l.BlockNumber, l.BlockHash, l.TxHash, int32(l.LogIndex), l.Address, l.Topics, l.Data)
+		if err != nil {
+			return fmt.Errorf("insert log: %w", err)
+		}
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO ingest_cursors (stream, chain_id, last_block, last_block_hash, updated_at)
+		 VALUES ($1,$2,$3,$4,now())
+		 ON CONFLICT (stream) DO UPDATE
+		 SET last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
+		stream, chainID, tipBlock, tipHash)
+	if err != nil {
+		return fmt.Errorf("upsert cursor: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) Rewind(ctx context.Context, stream string, chainID uint64, toBlock uint64, hashAtBlock []byte) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM raw_logs WHERE chain_id = $1 AND block_number > $2`, chainID, toBlock); err != nil {
+		return fmt.Errorf("delete logs: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO ingest_cursors (stream, chain_id, last_block, last_block_hash, updated_at)
+		 VALUES ($1,$2,$3,$4,now())
+		 ON CONFLICT (stream) DO UPDATE
+		 SET last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
+		stream, chainID, toBlock, hashAtBlock); err != nil {
+		return fmt.Errorf("reset cursor: %w", err)
+	}
+	return tx.Commit(ctx)
+}
