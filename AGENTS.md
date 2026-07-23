@@ -43,7 +43,9 @@ verified a concurrent-writer contract.
 
 ## Project Review Policy (owner-ratified)
 
-- **Codex is the standing senior reviewer** — see `roadmap/decisions/D-005-codex-senior-reviewer.md`
-  for the binding cadence: adversarial pass on every correctness-critical component, whole-branch
-  review at phase close, verification of fix waves. Dispatch via the `codex-reviewer` agent type.
+- **Codex is the standing senior reviewer** — see `roadmap/decisions/D-006-codex-approval-gate.md`
+  (supersedes D-005) for the binding policy: adversarial pass on every correctness-critical
+  component, whole-branch review at phase close. Dispatch via the `codex-reviewer` agent type.
+- **Complex work is not trusted until Codex approves it** (D-006 clauses 4-6): fix waves on Codex
+  findings return to Codex; dependents don't execute against unapproved complex components.
 - Standard per-task reviews still run for everything; Codex is additive, not a replacement.

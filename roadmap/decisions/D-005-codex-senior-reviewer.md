@@ -2,11 +2,12 @@
 id: D-005
 type: decision
 title: Codex is the standing senior/adversarial reviewer
-status: accepted
+status: superseded
+superseded_by: D-006
 approved_by: Kase Lunt (explicit directive, 2026-07-22)
 date: 2026-07-22
 supersedes: []
-updated: 2026-07-22
+updated: 2026-07-23
 ---
 
 # D-005 — Codex is the standing senior/adversarial reviewer
