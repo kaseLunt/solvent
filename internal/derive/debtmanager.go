@@ -1,8 +1,8 @@
 package derive
 
 import (
-	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -41,32 +41,52 @@ import (
 // so each seed becomes a migration_genesis debt event with delta =
 // NormalizedAmount directly -- no index division.
 //
-// The deriver keeps a running per-account normalized cache so it can model
-// the contract's silent 1-wei residue zeroing after full liquidation
-// (DebtManagerCore.sol:549-553 emits nothing; recon caveat 2). The cache is
-// warm-startable: NewDebtManager takes a prior-state seed map so a runner
-// resuming from a derive cursor injects the balances it already persisted
-// (see NewDebtManager).
+// State lifecycle (derive.Engine): the running normalized cache is
+// two-layered. The PROMOTED layer mirrors committed truth, hydrated lazily
+// per account, on first touch inside a batch, from the batch's StateReader
+// (side "debt" of store.BalancesFor -- the running normalized sum
+// ApplyDerived maintains). Absence of a committed row mechanically means
+// zero: derivation always starts at genesis (migration seeds + full replay),
+// so there is no seed map and no implicit warm start. The WORKING layer is a
+// copy-on-write overlay taking every Process mutation until CommitBatch
+// promotes it (after the runner's ApplyDerived transaction committed) or
+// DiscardBatch drops it (persistence failure -- a retry of the same logs
+// reproduces identical events with no double-mutation). Reset drops
+// everything (after RewindDerived); the next BeginBatch re-hydrates. The
+// per-token index snapshots and per-tx liquidation markers are batch-scoped
+// the same way but never hydrated: mutating events REQUIRE a same-block
+// index update (re-emitted in any replayed range) and same-tx log runs never
+// span a rewind point (rewinds are block-aligned).
+//
+// The running cache exists so the deriver can model the contract's silent
+// 1-wei residue zeroing after full liquidation (DebtManagerCore.sol:549-553
+// emits nothing; recon caveat 2) and refuse impossible negative balances.
 //
 // DebtManager is NOT safe for concurrent use; the runner's single-writer
 // contract (D-004) provides serial Process calls in (block, logIndex) order.
 type DebtManager struct {
 	chain DMChainReads
 
-	// normalized: account -> borrow token -> running normalized debt.
-	normalized map[common.Address]map[common.Address]*big.Int
+	// Promoted layer (committed truth).
+	promoted      map[common.Address]map[common.Address]*big.Int // account -> borrow token -> normalized
+	hydrated      map[common.Address]bool
+	promotedIndex map[common.Address]indexSnapshot // borrow token -> latest index
+	promotedLiq   dmLiqMarkers
 
-	// index: borrow token -> latest DMInterestIndexUpdated.newIndex and the
-	// block it was emitted in (same-block join for mutating events).
-	index map[common.Address]indexSnapshot
-
-	// Per-tx Liquidated bookkeeping for the residue rule: the contract's
-	// liquidate() runs up to two passes (50% then remainder) inside ONE tx
-	// and zeroes a <=1-wei normalized leftover silently after the second.
-	liqTx     []byte
-	liqCounts map[liqPair]int
+	// Working layer (current attempt), valid only while inBatch.
+	inBatch      bool
+	batchCtx     context.Context
+	reader       StateReader
+	working      map[common.Address]map[common.Address]*big.Int
+	workingIndex map[common.Address]indexSnapshot
+	workingLiq   dmLiqMarkers
 }
 
+var _ Engine = (*DebtManager)(nil)
+
+// indexSnapshot values are immutable once stored (updates replace the whole
+// value with a fresh big.Int), which makes the shallow per-batch map copy
+// sound.
 type indexSnapshot struct {
 	value *big.Int
 	block uint64
@@ -74,6 +94,23 @@ type indexSnapshot struct {
 
 type liqPair struct {
 	user, token common.Address
+}
+
+// dmLiqMarkers is the per-tx Liquidated bookkeeping for the residue rule:
+// the contract's liquidate() runs up to two passes (50% then remainder)
+// inside ONE tx and zeroes a <=1-wei normalized leftover silently after the
+// second. Batch-scoped like all other engine state.
+type dmLiqMarkers struct {
+	tx     string // lowercase hex of the tx the counts belong to
+	counts map[liqPair]int
+}
+
+func (m dmLiqMarkers) clone() dmLiqMarkers {
+	c := dmLiqMarkers{tx: m.tx, counts: make(map[liqPair]int, len(m.counts))}
+	for k, v := range m.counts {
+		c.counts[k] = v
+	}
+	return c
 }
 
 // DMChainReads is the single chain dependency of the Debt Manager deriver:
@@ -113,45 +150,171 @@ const (
 
 const sideDebt = "debt"
 
-// NewDebtManager builds the Debt Manager deriver.
+// dmEngineName is the engine identifier shared with config/contracts.json,
+// the decode registry and the store's derived tables.
+const dmEngineName = "debt_manager"
+
+// NewDebtManager builds the Debt Manager deriver with no in-memory state:
+// the first BeginBatch hydrates committed truth per touched account (there
+// is deliberately NO seed-map constructor path -- committed state is read
+// through the StateReader, never injected).
 //
 // chain supplies migration-tx calldata (may be nil in contexts that are
 // guaranteed to never traverse a MigrationBorrowerPositionsSet log; hitting
 // one with a nil chain is a loud error, never a skip).
-//
-// priorNormalized warm-seeds the running normalized cache: account -> borrow
-// token -> normalized amount. A runner resuming from a derive cursor MUST
-// seed every account it will re-touch with the event-sourced "debt" balances
-// it already persisted (store.BalancesFor shape: asset-hex -> side -> amount,
-// converted to this map's address keys), because the residue rule and the
-// negative-balance guard both need the true running value. The map is
-// deep-copied; later caller mutations are invisible to the deriver. A full
-// from-genesis replay passes nil.
-func NewDebtManager(chain DMChainReads, priorNormalized map[common.Address]map[common.Address]*big.Int) *DebtManager {
-	normalized := make(map[common.Address]map[common.Address]*big.Int, len(priorNormalized))
-	for acct, tokens := range priorNormalized {
-		inner := make(map[common.Address]*big.Int, len(tokens))
-		for tok, v := range tokens {
-			inner[tok] = new(big.Int).Set(v)
-		}
-		normalized[acct] = inner
-	}
-	return &DebtManager{
-		chain:      chain,
-		normalized: normalized,
-		index:      make(map[common.Address]indexSnapshot),
-		liqCounts:  make(map[liqPair]int),
-	}
+func NewDebtManager(chain DMChainReads) *DebtManager {
+	dm := &DebtManager{chain: chain}
+	dm.Reset()
+	return dm
 }
 
 // Name implements Engine.
-func (dm *DebtManager) Name() string { return "debt_manager" }
+func (dm *DebtManager) Name() string { return dmEngineName }
+
+// BeginBatch implements Engine: starts an attempt whose mutations land in a
+// working overlay, hydrated lazily from reader (committed truth) on first
+// touch of each account.
+func (dm *DebtManager) BeginBatch(ctx context.Context, reader StateReader) error {
+	if dm.inBatch {
+		return fmt.Errorf("debt_manager: BeginBatch while a batch is in progress -- Commit or Discard the previous attempt first")
+	}
+	if ctx == nil || reader == nil {
+		return fmt.Errorf("debt_manager: BeginBatch requires a non-nil context and StateReader -- committed-truth hydration is not optional")
+	}
+	dm.batchCtx, dm.reader = ctx, reader
+	dm.working = make(map[common.Address]map[common.Address]*big.Int)
+	dm.workingIndex = make(map[common.Address]indexSnapshot, len(dm.promotedIndex))
+	for tok, snap := range dm.promotedIndex {
+		dm.workingIndex[tok] = snap // snapshots are immutable; shallow copy is sound
+	}
+	dm.workingLiq = dm.promotedLiq.clone()
+	dm.inBatch = true
+	return nil
+}
+
+// CommitBatch implements Engine: promotes the working overlay. Call ONLY
+// after the runner's ApplyDerived transaction committed. No-op outside a
+// batch.
+func (dm *DebtManager) CommitBatch() {
+	if !dm.inBatch {
+		return
+	}
+	for acct, tokens := range dm.working {
+		dm.promoted[acct] = tokens
+	}
+	dm.promotedIndex = dm.workingIndex
+	dm.promotedLiq = dm.workingLiq
+	dm.endBatch()
+}
+
+// DiscardBatch implements Engine: drops the working overlay (persistence
+// failure); promoted state and hydration marks are untouched -- hydrated
+// values are committed truth and stay valid across a failed attempt. No-op
+// outside a batch.
+func (dm *DebtManager) DiscardBatch() {
+	if !dm.inBatch {
+		return
+	}
+	dm.endBatch()
+}
+
+func (dm *DebtManager) endBatch() {
+	dm.working, dm.workingIndex = nil, nil
+	dm.workingLiq = dmLiqMarkers{}
+	dm.batchCtx, dm.reader = nil, nil
+	dm.inBatch = false
+}
+
+// Reset implements Engine: drops ALL in-memory state (promoted, hydration
+// marks, index snapshots, liquidation markers, any in-flight attempt). Call
+// after RewindDerived; the next BeginBatch re-hydrates from committed truth.
+func (dm *DebtManager) Reset() {
+	dm.promoted = make(map[common.Address]map[common.Address]*big.Int)
+	dm.hydrated = make(map[common.Address]bool)
+	dm.promotedIndex = make(map[common.Address]indexSnapshot)
+	dm.promotedLiq = dmLiqMarkers{}
+	dm.endBatch()
+}
+
+// hydrate loads the account's committed normalized debt through the batch's
+// reader into the promoted layer, once per account per engine lifetime
+// (until Reset). Hydration writes are durable across DiscardBatch by design:
+// they mirror committed truth, which a failed attempt does not change.
+func (dm *DebtManager) hydrate(account common.Address) error {
+	if dm.hydrated[account] {
+		return nil
+	}
+	bals, err := dm.reader.BalancesFor(dm.batchCtx, dmEngineName, account.Bytes())
+	if err != nil {
+		return fmt.Errorf("debt_manager: hydrating account %s from committed state: %w", hexAddr(account), err)
+	}
+	tokens := make(map[common.Address]*big.Int)
+	for assetHex, sides := range bals {
+		raw, err := hex.DecodeString(assetHex)
+		if err != nil || len(raw) != common.AddressLength {
+			return fmt.Errorf("debt_manager: hydrating account %s: committed asset key %q is not an address", hexAddr(account), assetHex)
+		}
+		token := common.BytesToAddress(raw)
+		for side, amount := range sides {
+			switch side {
+			case sideDebt:
+				if amount == nil || amount.Sign() < 0 {
+					return fmt.Errorf("debt_manager: hydrating account %s: committed debt balance for token %s is %v -- committed truth must be a non-negative integer",
+						hexAddr(account), hexAddr(token), amount)
+				}
+				tokens[token] = new(big.Int).Set(amount)
+			case "collateral":
+				// Snapshot-owned (recon caveat 4): collateral rows belong to
+				// the snapshotter, not to this deriver's normalized cache.
+			default:
+				return fmt.Errorf("debt_manager: hydrating account %s: committed token %s carries unknown side %q", hexAddr(account), hexAddr(token), side)
+			}
+		}
+	}
+	dm.promoted[account] = tokens
+	dm.hydrated[account] = true
+	return nil
+}
+
+// tokensFor returns the account's normalized-debt map for reading: working
+// overlay first, else the (hydrated-on-demand) promoted layer. Callers must
+// not mutate the result -- use mutableTokensFor for writes.
+func (dm *DebtManager) tokensFor(account common.Address) (map[common.Address]*big.Int, error) {
+	if tokens, ok := dm.working[account]; ok {
+		return tokens, nil
+	}
+	if err := dm.hydrate(account); err != nil {
+		return nil, err
+	}
+	return dm.promoted[account], nil
+}
+
+// mutableTokensFor copies the account's promoted map into the working
+// overlay (copy-on-write) so Process mutations never touch committed truth.
+func (dm *DebtManager) mutableTokensFor(account common.Address) (map[common.Address]*big.Int, error) {
+	if tokens, ok := dm.working[account]; ok {
+		return tokens, nil
+	}
+	if err := dm.hydrate(account); err != nil {
+		return nil, err
+	}
+	tokens := make(map[common.Address]*big.Int, len(dm.promoted[account]))
+	for tok, v := range dm.promoted[account] {
+		tokens[tok] = new(big.Int).Set(v)
+	}
+	dm.working[account] = tokens
+	return tokens, nil
+}
 
 // Process implements Engine. It MUST be called in (block, logIndex) order;
 // the same-block index join relies on it (the contract updates the index
 // before any same-block debt math, so the InterestIndexUpdated log always
-// precedes the mutating log it prices).
+// precedes the mutating log it prices). Only valid inside a batch
+// (BeginBatch).
 func (dm *DebtManager) Process(l store.RawLog, d decode.Event) ([]store.PositionEvent, error) {
+	if !dm.inBatch {
+		return nil, fmt.Errorf("debt_manager: Process called outside a batch -- BeginBatch starts the attempt lifecycle (see derive.Engine)")
+	}
 	switch ev := d.(type) {
 	case decode.DMInterestIndexUpdated:
 		return dm.processIndexUpdated(l, ev)
@@ -215,7 +378,7 @@ func (dm *DebtManager) processIndexUpdated(l store.RawLog, ev decode.DMInterestI
 		return nil, fmt.Errorf("debt_manager: InterestIndexUpdated for %s at block %d carries non-positive newIndex %v",
 			hexAddr(ev.Token), l.BlockNumber, ev.NewIndex)
 	}
-	dm.index[ev.Token] = indexSnapshot{value: new(big.Int).Set(ev.NewIndex), block: l.BlockNumber}
+	dm.workingIndex[ev.Token] = indexSnapshot{value: new(big.Int).Set(ev.NewIndex), block: l.BlockNumber}
 	return nil, nil
 }
 
@@ -232,7 +395,9 @@ func (dm *DebtManager) processBorrowed(l store.RawLog, ev decode.DMBorrowed) ([]
 	}
 	usd := ev.Amount // USDC is 6-dec and snapped to exactly 1e6: usd == amount.
 	delta := mulDivCeil(usd, oneE18, idx)
-	dm.credit(ev.User, ev.Token, delta)
+	if err := dm.credit(ev.User, ev.Token, delta); err != nil {
+		return nil, err
+	}
 	return []store.PositionEvent{dm.debtEvent(l, 0, dmEvBorrow, ev.User, ev.Token, delta, map[string]string{
 		"token_amount": ev.Amount.String(),
 		"usd":          usd.String(),
@@ -306,15 +471,16 @@ func (dm *DebtManager) processLiquidated(l store.RawLog, ev decode.DMLiquidated)
 	// contract silently zeroes a remaining normalized amount <= 1 wei. Model
 	// it with an explicit residue_zeroed event so the derived balance matches
 	// on-chain state bit-exactly instead of drifting by 1 wei forever.
-	if !bytes.Equal(dm.liqTx, l.TxHash) {
-		dm.liqTx = append(dm.liqTx[:0], l.TxHash...)
-		dm.liqCounts = make(map[liqPair]int)
+	if tx := hex.EncodeToString(l.TxHash); tx != dm.workingLiq.tx {
+		dm.workingLiq = dmLiqMarkers{tx: tx, counts: make(map[liqPair]int)}
 	}
 	pair := liqPair{ev.User, ev.DebtToken}
-	dm.liqCounts[pair]++
-	if dm.liqCounts[pair] == 2 && remaining.Sign() > 0 && remaining.Cmp(big.NewInt(1)) <= 0 {
+	dm.workingLiq.counts[pair]++
+	if dm.workingLiq.counts[pair] == 2 && remaining.Sign() > 0 && remaining.Cmp(big.NewInt(1)) <= 0 {
 		residue := new(big.Int).Set(remaining)
-		dm.setNormalized(ev.User, ev.DebtToken, new(big.Int))
+		if err := dm.setNormalized(ev.User, ev.DebtToken, new(big.Int)); err != nil {
+			return nil, err
+		}
 		events = append(events, dm.debtEvent(l, uint16(len(ev.Collateral)+1), dmEvResidueZeroed,
 			ev.User, ev.DebtToken, new(big.Int).Neg(residue), map[string]string{
 				"residue": residue.String(),
@@ -333,10 +499,10 @@ func (dm *DebtManager) processMigration(l store.RawLog, ev decode.DMMigrationBor
 	if dm.chain == nil {
 		return nil, fmt.Errorf("debt_manager: MigrationBorrowerPositionsSet at block %d needs the emitting tx's calldata but no DMChainReads was configured", l.BlockNumber)
 	}
-	// Process carries no context (frozen Engine interface); the fetch is a
-	// read-only idempotent call bounded per-attempt by the chain layer's
-	// own timeout (chain.Failover.attemptTimeout).
-	calldata, err := dm.chain.TxCalldata(context.Background(), common.BytesToHash(l.TxHash))
+	// The fetch runs under the batch's context (BeginBatch) and is a
+	// read-only idempotent call additionally bounded per-attempt by the
+	// chain layer's own timeout (chain.Failover.attemptTimeout).
+	calldata, err := dm.chain.TxCalldata(dm.batchCtx, common.BytesToHash(l.TxHash))
 	if err != nil {
 		return nil, fmt.Errorf("debt_manager: fetch migration tx %x calldata: %w", l.TxHash, err)
 	}
@@ -350,7 +516,9 @@ func (dm *DebtManager) processMigration(l store.RawLog, ev decode.DMMigrationBor
 	events := make([]store.PositionEvent, 0, len(seeds))
 	for i, s := range seeds {
 		delta := new(big.Int).Set(s.NormalizedAmount)
-		dm.credit(s.Borrower, ev.Token, delta)
+		if err := dm.credit(s.Borrower, ev.Token, delta); err != nil {
+			return nil, err
+		}
 		// uint16 cast is safe: DecodeMigrationCalldata bounds len(seeds) at
 		// 65,536 (the seq-column bound), so i <= 65,535.
 		events = append(events, dm.debtEvent(l, uint16(i), dmEvMigrationGenesis, s.Borrower, ev.Token, delta, map[string]string{
@@ -369,7 +537,7 @@ func (dm *DebtManager) processMigration(l store.RawLog, ev decode.DMMigrationBor
 // must come from THIS block, or the fold would silently price with a stale
 // index.
 func (dm *DebtManager) sameBlockIndex(token common.Address, block uint64) (*big.Int, error) {
-	snap, ok := dm.index[token]
+	snap, ok := dm.workingIndex[token]
 	if !ok {
 		return nil, fmt.Errorf("debt_manager: no InterestIndexUpdated seen for token %s before mutating event at block %d (same-block index required)",
 			hexAddr(token), block)
@@ -381,39 +549,55 @@ func (dm *DebtManager) sameBlockIndex(token common.Address, block uint64) (*big.
 	return snap.value, nil
 }
 
-func (dm *DebtManager) normalizedOf(user, token common.Address) *big.Int {
-	if tokens, ok := dm.normalized[user]; ok {
-		if v, ok := tokens[token]; ok {
-			return v
-		}
+// normalizedOf returns the account's running normalized debt for token,
+// hydrating the account's committed truth on first touch. Zero when no
+// committed or working entry exists (absence means zero, post-genesis
+// invariant). The result must not be mutated.
+func (dm *DebtManager) normalizedOf(user, token common.Address) (*big.Int, error) {
+	tokens, err := dm.tokensFor(user)
+	if err != nil {
+		return nil, err
 	}
-	return new(big.Int)
+	if v, ok := tokens[token]; ok {
+		return v, nil
+	}
+	return new(big.Int), nil
 }
 
-func (dm *DebtManager) setNormalized(user, token common.Address, v *big.Int) {
-	tokens, ok := dm.normalized[user]
-	if !ok {
-		tokens = make(map[common.Address]*big.Int)
-		dm.normalized[user] = tokens
+func (dm *DebtManager) setNormalized(user, token common.Address, v *big.Int) error {
+	tokens, err := dm.mutableTokensFor(user)
+	if err != nil {
+		return err
 	}
 	tokens[token] = v
+	return nil
 }
 
-func (dm *DebtManager) credit(user, token common.Address, amount *big.Int) {
-	dm.setNormalized(user, token, new(big.Int).Add(dm.normalizedOf(user, token), amount))
+func (dm *DebtManager) credit(user, token common.Address, amount *big.Int) error {
+	cur, err := dm.normalizedOf(user, token)
+	if err != nil {
+		return err
+	}
+	return dm.setNormalized(user, token, new(big.Int).Add(cur, amount))
 }
 
 // debit subtracts amount from the account's running normalized debt,
 // refusing to go negative: the contract's uint256 cannot, so a negative here
-// means the replay diverged from chain state (most likely a missing genesis
-// seed / warm-start seed) and continuing would persist garbage.
+// means the replay diverged from chain state (most likely missing committed
+// genesis state) and continuing would persist garbage.
 func (dm *DebtManager) debit(user, token common.Address, amount *big.Int, what string, l store.RawLog) (*big.Int, error) {
-	next := new(big.Int).Sub(dm.normalizedOf(user, token), amount)
+	cur, err := dm.normalizedOf(user, token)
+	if err != nil {
+		return nil, err
+	}
+	next := new(big.Int).Sub(cur, amount)
 	if next.Sign() < 0 {
-		return nil, fmt.Errorf("debt_manager: %s at block %d (tx %x) would drive %s/%s normalized negative (%s): missing genesis seed / warm-start state, or divergent replay",
+		return nil, fmt.Errorf("debt_manager: %s at block %d (tx %x) would drive %s/%s normalized negative (%s): missing genesis seed / committed warm-start state, or divergent replay",
 			what, l.BlockNumber, l.TxHash, hexAddr(user), hexAddr(token), next)
 	}
-	dm.setNormalized(user, token, next)
+	if err := dm.setNormalized(user, token, next); err != nil {
+		return nil, err
+	}
 	return next, nil
 }
 

@@ -81,7 +81,7 @@
 //     emits DeficitCreated with no LiquidationCall pairing). The fold
 //     therefore zeroes the tracked scaled debt at DeficitCreated and treats a
 //     same-tx LiquidationCall for the same (user, debtAsset) as delta 0 —
-//     exact in both regimes and independent of event order and of any index.
+//     exact in both regimes and independent of any index.
 //     (Regime A's v3.3/v3.4 deficit burn is the half-up round-trip
 //     rayDivHalfUp(rayMulHalfUp(s, i), i) == s, i >= RAY — same conclusion.)
 //     The regime-A deficit at block 22014623 (era Pool 0x56401d66...) and the
@@ -109,7 +109,7 @@
 // ceil(N*RAY / i): the true s' satisfies s'*i in [N*RAY, (N+1)*RAY) and is
 // the UNIQUE such integer whenever i >= RAY (each scaled wei moves the floor
 // balance by >= 1), so the smallest integer in the interval is s' itself. The
-// recovery is verified (rayMulFloor(s', i) == N) and any mismatch is a loud
+// recovery is verified (rayMulFloor(s', index) == N) and any mismatch is a loud
 // error. Validated bit-exact against archive scaledBalanceOf on the committed
 // liquidation tx 0x7714dcf7...c09d during authoring.
 //
@@ -157,6 +157,7 @@
 package derive
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -250,61 +251,272 @@ func rayMulCeil(a, b *big.Int) *big.Int {
 // ---------------------------------------------------------------------------
 
 // aaveReserveRates is the cached payload of the latest ReserveDataUpdated
-// seen for a reserve.
+// seen for a reserve. Entries are immutable once stored (updates replace the
+// whole pointer), which is what makes the shallow per-batch copy of the rates
+// map sound.
 type aaveReserveRates struct {
 	variableBorrowIndex *big.Int
 	liquidityIndex      *big.Int
 	block               uint64
 }
 
-// AaveEngine folds decoded aave_v3_etherfi logs into scaled-balance position
-// events. It is stateful (tracked scaled balances, cached reserve indexes,
-// same-tx deficit pairing) and MUST be fed the engine's logs in ascending
-// (block, logIndex) order from the engine's genesis (block 20625519) — the
-// regime-B collateral inversion and the deficit zero-out are exact only
-// against complete tracked state. Determinism: identical log sequences
-// produce identical events (map iteration order is never observable).
-type AaveEngine struct {
-	rates      map[common.Address]*aaveReserveRates           // reserve -> latest ReserveDataUpdated
-	debt       map[common.Address]map[common.Address]*big.Int // reserve -> account -> scaled variable debt
-	collateral map[common.Address]map[common.Address]*big.Int // reserve -> account -> scaled aToken balance
-	curTx      string                                         // lowercase hex of the tx the deficit markers belong to
-	deficits   map[string]bool                                // "user|debtAsset" seen in curTx
+// aaveAccountState is one account's tracked scaled balances, keyed by
+// reserve. It is the copy-on-write unit of the two-layer state.
+type aaveAccountState struct {
+	debt       map[common.Address]*big.Int // reserve -> scaled variable debt
+	collateral map[common.Address]*big.Int // reserve -> scaled aToken balance
 }
 
-// NewAaveEngine returns an empty AaveEngine positioned at engine genesis.
-func NewAaveEngine() *AaveEngine {
-	return &AaveEngine{
-		rates:      make(map[common.Address]*aaveReserveRates),
-		debt:       make(map[common.Address]map[common.Address]*big.Int),
-		collateral: make(map[common.Address]map[common.Address]*big.Int),
-		deficits:   make(map[string]bool),
+func newAaveAccountState() *aaveAccountState {
+	return &aaveAccountState{
+		debt:       make(map[common.Address]*big.Int),
+		collateral: make(map[common.Address]*big.Int),
 	}
+}
+
+func (s *aaveAccountState) clone() *aaveAccountState {
+	c := newAaveAccountState()
+	for r, v := range s.debt {
+		c.debt[r] = new(big.Int).Set(v)
+	}
+	for r, v := range s.collateral {
+		c.collateral[r] = new(big.Int).Set(v)
+	}
+	return c
+}
+
+// bySide selects the balance map for a PositionEvent side string.
+func (s *aaveAccountState) bySide(side string) map[common.Address]*big.Int {
+	if side == "debt" {
+		return s.debt
+	}
+	return s.collateral
+}
+
+// aaveTxMarkers is the same-tx bookkeeping (deficit pairing), batch-scoped
+// like all other engine state.
+type aaveTxMarkers struct {
+	curTx    string          // lowercase hex of the tx the markers belong to
+	deficits map[string]bool // "user|debtAsset" DeficitCreated seen in curTx
+}
+
+func (m aaveTxMarkers) clone() aaveTxMarkers {
+	c := aaveTxMarkers{curTx: m.curTx, deficits: make(map[string]bool, len(m.deficits))}
+	for k, v := range m.deficits {
+		c.deficits[k] = v
+	}
+	return c
+}
+
+// AaveEngine folds decoded aave_v3_etherfi logs into scaled-balance position
+// events under the attempt-scoped Engine lifecycle:
+//
+//   - The PROMOTED layer mirrors committed truth: per-account balances are
+//     hydrated lazily, on first touch inside a batch, from the batch's
+//     StateReader. Absence of a committed row mechanically means zero —
+//     trustworthy because derivation always starts at engine genesis (block
+//     20625519), never from a partial seed. There is no in-memory seed map.
+//   - The WORKING layer is a copy-on-write overlay receiving every Process
+//     mutation. CommitBatch promotes it (call only after store.ApplyDerived
+//     committed); DiscardBatch drops it, leaving promoted state exactly as it
+//     was, so a retry of the same logs reproduces identical events with no
+//     double-mutation.
+//   - Reset drops everything (after store.RewindDerived / a reorg); the next
+//     BeginBatch re-hydrates from committed truth. The rates cache and same-tx
+//     markers are NOT persisted and need no hydration: every action's own tx
+//     re-emits its reserve's ReserveDataUpdated first, and same-tx log runs
+//     never span a rewind point (rewinds are block-aligned).
+//
+// Logs MUST be fed in ascending (block, logIndex) order — the regime-B
+// collateral inversion and the deficit zero-out are exact only against
+// complete tracked state. Determinism: identical log sequences over identical
+// committed state produce identical events (map iteration order is never
+// observable). Not safe for concurrent use (single-writer contract D-004).
+type AaveEngine struct {
+	// Promoted layer (committed truth).
+	promoted      map[common.Address]*aaveAccountState
+	hydrated      map[common.Address]bool // accounts whose committed truth is loaded
+	promotedRates map[common.Address]*aaveReserveRates
+	promotedTx    aaveTxMarkers
+
+	// Working layer (current attempt), valid only while inBatch.
+	inBatch      bool
+	batchCtx     context.Context // hydration context for the current attempt
+	reader       StateReader
+	working      map[common.Address]*aaveAccountState
+	workingRates map[common.Address]*aaveReserveRates
+	workingTx    aaveTxMarkers
+}
+
+var _ Engine = (*AaveEngine)(nil)
+
+// NewAaveEngine returns an AaveEngine with no in-memory state: the first
+// BeginBatch hydrates committed truth per touched account.
+func NewAaveEngine() *AaveEngine {
+	e := &AaveEngine{}
+	e.Reset()
+	return e
 }
 
 // Name implements Engine.
 func (e *AaveEngine) Name() string { return AaveEngineName }
 
-// tokenMathRegime reports whether block folds under regime B (v3.5 TokenMath
-// floor/ceil) rather than regime A (half-up in-token rayDiv/rayMul).
-func tokenMathRegime(block uint64) bool { return block >= aaveTokenMathFromBlock }
-
-func aaveBalance(m map[common.Address]map[common.Address]*big.Int, reserve, account common.Address) *big.Int {
-	if inner, ok := m[reserve]; ok {
-		if v, ok := inner[account]; ok {
-			return v
-		}
+// BeginBatch implements Engine: starts an attempt whose mutations land in a
+// working overlay, hydrated lazily from reader (committed truth) on first
+// touch of each account.
+func (e *AaveEngine) BeginBatch(ctx context.Context, reader StateReader) error {
+	if e.inBatch {
+		return fmt.Errorf("aave: BeginBatch while a batch is in progress — Commit or Discard the previous attempt first")
 	}
-	return new(big.Int)
+	if ctx == nil || reader == nil {
+		return fmt.Errorf("aave: BeginBatch requires a non-nil context and StateReader — committed-truth hydration is not optional")
+	}
+	e.batchCtx, e.reader = ctx, reader
+	e.working = make(map[common.Address]*aaveAccountState)
+	e.workingRates = make(map[common.Address]*aaveReserveRates, len(e.promotedRates))
+	for r, v := range e.promotedRates {
+		e.workingRates[r] = v // entries are immutable; shallow copy is sound
+	}
+	e.workingTx = e.promotedTx.clone()
+	e.inBatch = true
+	return nil
 }
 
-func aaveSetBalance(m map[common.Address]map[common.Address]*big.Int, reserve, account common.Address, v *big.Int) {
-	inner, ok := m[reserve]
-	if !ok {
-		inner = make(map[common.Address]*big.Int)
-		m[reserve] = inner
+// CommitBatch implements Engine: promotes the working overlay. Call ONLY
+// after the runner's ApplyDerived transaction committed. No-op outside a
+// batch.
+func (e *AaveEngine) CommitBatch() {
+	if !e.inBatch {
+		return
 	}
-	inner[account] = v
+	for acct, st := range e.working {
+		e.promoted[acct] = st
+	}
+	e.promotedRates = e.workingRates
+	e.promotedTx = e.workingTx
+	e.endBatch()
+}
+
+// DiscardBatch implements Engine: drops the working overlay (persistence
+// failure); promoted state and hydration marks are untouched — hydrated
+// values are committed truth and stay valid across a failed attempt. No-op
+// outside a batch.
+func (e *AaveEngine) DiscardBatch() {
+	if !e.inBatch {
+		return
+	}
+	e.endBatch()
+}
+
+func (e *AaveEngine) endBatch() {
+	e.working, e.workingRates = nil, nil
+	e.workingTx = aaveTxMarkers{}
+	e.batchCtx, e.reader = nil, nil
+	e.inBatch = false
+}
+
+// Reset implements Engine: drops ALL in-memory state (promoted, hydration
+// marks, rates, tx markers, any in-flight attempt). Call after RewindDerived
+// or a reorg; the next BeginBatch re-hydrates from committed truth.
+func (e *AaveEngine) Reset() {
+	e.promoted = make(map[common.Address]*aaveAccountState)
+	e.hydrated = make(map[common.Address]bool)
+	e.promotedRates = make(map[common.Address]*aaveReserveRates)
+	e.promotedTx = aaveTxMarkers{}
+	e.endBatch()
+}
+
+// hydrate loads the account's committed balances through the batch's reader
+// into the promoted layer, once per account per engine lifetime (until
+// Reset). Hydration writes are durable across DiscardBatch by design: they
+// mirror committed truth, which a failed attempt does not change. Every
+// promoted entry is created either here or by CommitBatch promoting a working
+// entry whose account was hydrated first, so promoted entries are never
+// clobbered.
+func (e *AaveEngine) hydrate(account common.Address) error {
+	if e.hydrated[account] {
+		return nil
+	}
+	bals, err := e.reader.BalancesFor(e.batchCtx, AaveEngineName, account.Bytes())
+	if err != nil {
+		return fmt.Errorf("aave: hydrating account %s from committed state: %w", account.Hex(), err)
+	}
+	st := newAaveAccountState()
+	for assetHex, sides := range bals {
+		raw, err := hex.DecodeString(assetHex)
+		if err != nil || len(raw) != common.AddressLength {
+			return fmt.Errorf("aave: hydrating account %s: committed asset key %q is not an address", account.Hex(), assetHex)
+		}
+		reserve := common.BytesToAddress(raw)
+		for side, amount := range sides {
+			if amount == nil || amount.Sign() < 0 {
+				return fmt.Errorf("aave: hydrating account %s: committed %s balance for reserve %s is %v — committed truth must be a non-negative integer",
+					account.Hex(), side, reserve.Hex(), amount)
+			}
+			switch side {
+			case "debt", "collateral":
+				st.bySide(side)[reserve] = new(big.Int).Set(amount)
+			default:
+				return fmt.Errorf("aave: hydrating account %s: committed reserve %s carries unknown side %q", account.Hex(), reserve.Hex(), side)
+			}
+		}
+	}
+	e.promoted[account] = st
+	e.hydrated[account] = true
+	return nil
+}
+
+// stateFor returns the account's current state for reading: working overlay
+// first, else the (hydrated-on-demand) promoted layer. Callers must not
+// mutate the result — use mutableStateFor for writes.
+func (e *AaveEngine) stateFor(account common.Address) (*aaveAccountState, error) {
+	if st, ok := e.working[account]; ok {
+		return st, nil
+	}
+	if err := e.hydrate(account); err != nil {
+		return nil, err
+	}
+	return e.promoted[account], nil
+}
+
+// mutableStateFor copies the account's promoted state into the working
+// overlay (copy-on-write) so Process mutations never touch committed truth.
+func (e *AaveEngine) mutableStateFor(account common.Address) (*aaveAccountState, error) {
+	if st, ok := e.working[account]; ok {
+		return st, nil
+	}
+	if err := e.hydrate(account); err != nil {
+		return nil, err
+	}
+	st := e.promoted[account].clone()
+	e.working[account] = st
+	return st, nil
+}
+
+// balanceFor returns the account's tracked scaled balance for (side,
+// reserve); zero when the account has no committed or working entry for the
+// reserve (absence means zero, post-genesis invariant). The result must not
+// be mutated.
+func (e *AaveEngine) balanceFor(side string, reserve, account common.Address) (*big.Int, error) {
+	st, err := e.stateFor(account)
+	if err != nil {
+		return nil, err
+	}
+	if v, ok := st.bySide(side)[reserve]; ok {
+		return v, nil
+	}
+	return new(big.Int), nil
+}
+
+// setBalance writes the account's (side, reserve) balance into the working
+// overlay.
+func (e *AaveEngine) setBalance(side string, reserve, account common.Address, v *big.Int) error {
+	st, err := e.mutableStateFor(account)
+	if err != nil {
+		return err
+	}
+	st.bySide(side)[reserve] = v
+	return nil
 }
 
 // event assembles a PositionEvent with the engine's identity fields filled.
@@ -325,12 +537,16 @@ func aaveEvent(l store.RawLog, seq uint16, eventType string, account, asset comm
 	}
 }
 
+// tokenMathRegime reports whether block folds under regime B (v3.5 TokenMath
+// floor/ceil) rather than regime A (half-up in-token rayDiv/rayMul).
+func tokenMathRegime(block uint64) bool { return block >= aaveTokenMathFromBlock }
+
 // requireIndex returns the cached variableBorrowIndex for reserve, erroring
 // loudly when no ReserveDataUpdated has been seen — every debt action's own
 // tx emits one first (see package comment), so a miss means the stream is
 // incomplete or out of order.
 func (e *AaveEngine) requireIndex(reserve common.Address, l store.RawLog, action string) (*big.Int, error) {
-	r, ok := e.rates[reserve]
+	r, ok := e.workingRates[reserve]
 	if !ok {
 		return nil, fmt.Errorf("aave: %s at block %d log %d (tx %x): no cached ReserveDataUpdated for reserve %s — action events are always preceded by their reserve's index update in the same tx; refusing to fold without it",
 			action, l.BlockNumber, l.LogIndex, l.TxHash, reserve.Hex())
@@ -369,14 +585,16 @@ func invertScaledFromNominal(n, index *big.Int, l store.RawLog, what string) (*b
 
 // Process implements Engine. One decoded log in, zero or more position
 // events out; see the package comment for the per-event semantics and their
-// source citations.
+// source citations. Only valid inside a batch (BeginBatch).
 func (e *AaveEngine) Process(l store.RawLog, d decode.Event) ([]store.PositionEvent, error) {
+	if !e.inBatch {
+		return nil, fmt.Errorf("aave: Process called outside a batch — BeginBatch starts the attempt lifecycle (see derive.Engine)")
+	}
 	// Same-tx deficit pairing: markers live only for the duration of one
 	// transaction's log run (a tx's logs are contiguous in (block, logIndex)
 	// order).
-	if tx := hex.EncodeToString(l.TxHash); tx != e.curTx {
-		e.curTx = tx
-		e.deficits = make(map[string]bool)
+	if tx := hex.EncodeToString(l.TxHash); tx != e.workingTx.curTx {
+		e.workingTx = aaveTxMarkers{curTx: tx, deficits: make(map[string]bool)}
 	}
 
 	switch ev := d.(type) {
@@ -437,7 +655,7 @@ func (e *AaveEngine) processReserveDataUpdated(l store.RawLog, ev decode.AaveRes
 	if err := requireRayIndex(ev.LiquidityIndex, l, "ReserveDataUpdated liquidityIndex"); err != nil {
 		return nil, err
 	}
-	e.rates[ev.Reserve] = &aaveReserveRates{
+	e.workingRates[ev.Reserve] = &aaveReserveRates{
 		variableBorrowIndex: new(big.Int).Set(ev.VariableBorrowIndex),
 		liquidityIndex:      new(big.Int).Set(ev.LiquidityIndex),
 		block:               l.BlockNumber,
@@ -472,8 +690,13 @@ func (e *AaveEngine) processBorrow(l store.RawLog, ev decode.AaveBorrow) ([]stor
 	} else {
 		delta = rayDivHalfUp(ev.Amount, idx)
 	}
-	cur := aaveBalance(e.debt, ev.Reserve, ev.OnBehalfOf)
-	aaveSetBalance(e.debt, ev.Reserve, ev.OnBehalfOf, new(big.Int).Add(cur, delta))
+	cur, err := e.balanceFor("debt", ev.Reserve, ev.OnBehalfOf)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.setBalance("debt", ev.Reserve, ev.OnBehalfOf, new(big.Int).Add(cur, delta)); err != nil {
+		return nil, err
+	}
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_borrow", ev.OnBehalfOf, ev.Reserve, "debt", delta, map[string]string{
 		"amount":                ev.Amount.String(),
 		"variable_borrow_index": idx.String(),
@@ -495,13 +718,18 @@ func (e *AaveEngine) processRepay(l store.RawLog, ev decode.AaveRepay) ([]store.
 	} else {
 		burned = rayDivHalfUp(ev.Amount, idx)
 	}
-	cur := aaveBalance(e.debt, ev.Reserve, ev.User)
+	cur, err := e.balanceFor("debt", ev.Reserve, ev.User)
+	if err != nil {
+		return nil, err
+	}
 	next := new(big.Int).Sub(cur, burned)
 	if next.Sign() < 0 {
 		return nil, fmt.Errorf("aave: Repay at block %d log %d (tx %x): burning %s scaled would take %s's %s debt (%s scaled) negative — tracked state is inconsistent",
 			l.BlockNumber, l.LogIndex, l.TxHash, burned, ev.User.Hex(), ev.Reserve.Hex(), cur)
 	}
-	aaveSetBalance(e.debt, ev.Reserve, ev.User, next)
+	if err := e.setBalance("debt", ev.Reserve, ev.User, next); err != nil {
+		return nil, err
+	}
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_repay", ev.User, ev.Reserve, "debt", new(big.Int).Neg(burned), map[string]string{
 		"amount":                ev.Amount.String(),
 		"variable_borrow_index": idx.String(),
@@ -524,7 +752,7 @@ func (e *AaveEngine) processLiquidationCall(l store.RawLog, ev decode.AaveLiquid
 	// zero-out already happened at the DeficitCreated fold — this event's
 	// debt movement is already fully accounted. Delta 0 keeps the event
 	// recorded without double-applying.
-	if e.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] {
+	if e.workingTx.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] {
 		payload["deficit_paired"] = "true"
 		return []store.PositionEvent{aaveEvent(l, 0, "aave_liquidation_call", ev.User, ev.DebtAsset, "debt", big.NewInt(0), payload)}, nil
 	}
@@ -545,13 +773,18 @@ func (e *AaveEngine) processLiquidationCall(l store.RawLog, ev decode.AaveLiquid
 	} else {
 		burned = rayDivHalfUp(ev.DebtToCover, idx)
 	}
-	cur := aaveBalance(e.debt, ev.DebtAsset, ev.User)
+	cur, err := e.balanceFor("debt", ev.DebtAsset, ev.User)
+	if err != nil {
+		return nil, err
+	}
 	next := new(big.Int).Sub(cur, burned)
 	if next.Sign() < 0 {
 		return nil, fmt.Errorf("aave: LiquidationCall at block %d log %d (tx %x): burning %s scaled would take %s's %s debt (%s scaled) negative — tracked state is inconsistent",
 			l.BlockNumber, l.LogIndex, l.TxHash, burned, ev.User.Hex(), ev.DebtAsset.Hex(), cur)
 	}
-	aaveSetBalance(e.debt, ev.DebtAsset, ev.User, next)
+	if err := e.setBalance("debt", ev.DebtAsset, ev.User, next); err != nil {
+		return nil, err
+	}
 	payload["variable_borrow_index"] = idx.String()
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_liquidation_call", ev.User, ev.DebtAsset, "debt", new(big.Int).Neg(burned), payload)}, nil
 }
@@ -563,13 +796,18 @@ func (e *AaveEngine) processDeficitCreated(l store.RawLog, ev decode.AaveDeficit
 	// round-trips exactly in both regimes). Fold: zero out the tracked
 	// scaled debt. Needs no index (deliberately — DeficitCreated precedes
 	// its reserve's same-tx ReserveDataUpdated).
-	cur := aaveBalance(e.debt, ev.DebtAsset, ev.User)
+	cur, err := e.balanceFor("debt", ev.DebtAsset, ev.User)
+	if err != nil {
+		return nil, err
+	}
 	if cur.Sign() <= 0 {
 		return nil, fmt.Errorf("aave: DeficitCreated at block %d log %d (tx %x): user %s has no tracked %s debt to write off — tracked state is inconsistent (deficits only arise from positive debt)",
 			l.BlockNumber, l.LogIndex, l.TxHash, ev.User.Hex(), ev.DebtAsset.Hex())
 	}
-	aaveSetBalance(e.debt, ev.DebtAsset, ev.User, new(big.Int))
-	e.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] = true
+	if err := e.setBalance("debt", ev.DebtAsset, ev.User, new(big.Int)); err != nil {
+		return nil, err
+	}
+	e.workingTx.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] = true
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_deficit_created", ev.User, ev.DebtAsset, "debt", new(big.Int).Neg(cur), map[string]string{
 		"amount_created": ev.AmountCreated.String(),
 	})}, nil
@@ -594,7 +832,10 @@ func (e *AaveEngine) processATokenMint(l store.RawLog, ev decode.ATokenMint) ([]
 	if err := requireRayIndex(ev.Index, l, "ATokenMint"); err != nil {
 		return nil, err
 	}
-	s := aaveBalance(e.collateral, reserve, ev.OnBehalfOf)
+	s, err := e.balanceFor("collateral", reserve, ev.OnBehalfOf)
+	if err != nil {
+		return nil, err
+	}
 	var next *big.Int
 	if tokenMathRegime(l.BlockNumber) {
 		// Regime B inversion: bal(s', i) = rayMulFloor(s, i) + Value -
@@ -629,7 +870,9 @@ func (e *AaveEngine) processATokenMint(l store.RawLog, ev decode.ATokenMint) ([]
 			l.BlockNumber, l.LogIndex, l.TxHash, ev.OnBehalfOf.Hex(), reserve.Hex(), s, next)
 	}
 	delta := new(big.Int).Sub(next, s)
-	aaveSetBalance(e.collateral, reserve, ev.OnBehalfOf, next)
+	if err := e.setBalance("collateral", reserve, ev.OnBehalfOf, next); err != nil {
+		return nil, err
+	}
 	return []store.PositionEvent{aaveEvent(l, 0, "atoken_mint", ev.OnBehalfOf, reserve, "collateral", delta, map[string]string{
 		"value":            ev.Value.String(),
 		"balance_increase": ev.BalanceIncrease.String(),
@@ -646,7 +889,10 @@ func (e *AaveEngine) processATokenBurn(l store.RawLog, ev decode.ATokenBurn) ([]
 	if err := requireRayIndex(ev.Index, l, "ATokenBurn"); err != nil {
 		return nil, err
 	}
-	s := aaveBalance(e.collateral, reserve, ev.From)
+	s, err := e.balanceFor("collateral", reserve, ev.From)
+	if err != nil {
+		return nil, err
+	}
 	var next *big.Int
 	if tokenMathRegime(l.BlockNumber) {
 		// Regime B inversion: Burn.Value = previousBalance - nextBalance
@@ -674,7 +920,9 @@ func (e *AaveEngine) processATokenBurn(l store.RawLog, ev decode.ATokenBurn) ([]
 			l.BlockNumber, l.LogIndex, l.TxHash, ev.From.Hex(), reserve.Hex(), s, next)
 	}
 	delta := new(big.Int).Sub(next, s)
-	aaveSetBalance(e.collateral, reserve, ev.From, next)
+	if err := e.setBalance("collateral", reserve, ev.From, next); err != nil {
+		return nil, err
+	}
 	return []store.PositionEvent{aaveEvent(l, 0, "atoken_burn", ev.From, reserve, "collateral", delta, map[string]string{
 		"value":            ev.Value.String(),
 		"balance_increase": ev.BalanceIncrease.String(),
@@ -692,15 +940,25 @@ func (e *AaveEngine) processATokenBalanceTransfer(l store.RawLog, ev decode.ATok
 	// AToken.sol :188 / era-2 :206/:221; regime B AToken.sol :310) — applied
 	// EXACTLY ONCE per peer transfer: Seq 0 debits the sender, Seq 1 credits
 	// the recipient. The paired ERC20 Transfer (nominal) is record-only.
-	from := aaveBalance(e.collateral, reserve, ev.From)
+	from, err := e.balanceFor("collateral", reserve, ev.From)
+	if err != nil {
+		return nil, err
+	}
 	nextFrom := new(big.Int).Sub(from, ev.Value)
 	if nextFrom.Sign() < 0 {
 		return nil, fmt.Errorf("aave: ATokenBalanceTransfer at block %d log %d (tx %x): moving %s scaled would take %s's %s balance (%s scaled) negative — tracked state is inconsistent",
 			l.BlockNumber, l.LogIndex, l.TxHash, ev.Value, ev.From.Hex(), reserve.Hex(), from)
 	}
-	aaveSetBalance(e.collateral, reserve, ev.From, nextFrom)
-	to := aaveBalance(e.collateral, reserve, ev.To)
-	aaveSetBalance(e.collateral, reserve, ev.To, new(big.Int).Add(to, ev.Value))
+	if err := e.setBalance("collateral", reserve, ev.From, nextFrom); err != nil {
+		return nil, err
+	}
+	to, err := e.balanceFor("collateral", reserve, ev.To)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.setBalance("collateral", reserve, ev.To, new(big.Int).Add(to, ev.Value)); err != nil {
+		return nil, err
+	}
 	payload := map[string]string{
 		"value": ev.Value.String(),
 		"index": ev.Index.String(),

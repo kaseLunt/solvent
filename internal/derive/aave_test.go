@@ -111,6 +111,23 @@ var (
 	aaveUserB  = common.HexToAddress("0x1111111111111111111111111111111111111102")
 )
 
+// aaveTracked reads the engine's layered tracked balance (working overlay
+// first, then promoted committed truth) without triggering hydration — the
+// test-side view of the two-layer state.
+func aaveTracked(e *AaveEngine, side string, reserve, account common.Address) string {
+	st, ok := e.working[account]
+	if !ok {
+		st, ok = e.promoted[account]
+	}
+	if !ok {
+		return "0"
+	}
+	if v, ok := st.bySide(side)[reserve]; ok {
+		return v.String()
+	}
+	return "0"
+}
+
 // aaveFeedRDU primes the engine's index cache for reserve with the given
 // variable-borrow index (liquidity index RAY) inside tx `tx`.
 func aaveFeedRDU(t *testing.T, e *AaveEngine, block uint64, logIndex uint32, tx byte, reserve common.Address, vbIndex *big.Int) {
@@ -189,6 +206,7 @@ func TestAaveRayMathRounding(t *testing.T) {
 
 func TestAaveReserveDataUpdatedRecordEvent(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	vb := aaveBig("1042000000000000000000000000")
 	li := aaveBig("1017000000000000000000000000")
 	evs, err := e.Process(aaveSynthLog(21000000, 5, 1, aavePool), decode.AaveReserveDataUpdated{
@@ -211,6 +229,7 @@ func TestAaveReserveDataUpdatedRecordEvent(t *testing.T) {
 
 func TestAaveReserveDataUpdatedSubRayIndexError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	_, err := e.Process(aaveSynthLog(21000000, 5, 1, aavePool), decode.AaveReserveDataUpdated{
 		Reserve: aaveUSDC, LiquidityRate: big.NewInt(0), VariableBorrowRate: big.NewInt(0),
 		LiquidityIndex: new(big.Int).Set(rayUnit), VariableBorrowIndex: big.NewInt(1),
@@ -224,6 +243,7 @@ func TestAaveReserveDataUpdatedSubRayIndexError(t *testing.T) {
 
 func TestAaveBorrowMissingIndexError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	_, err := e.Process(aaveSynthLog(21000000, 7, 1, aavePool), decode.AaveBorrow{
 		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
 		Amount: big.NewInt(1000000), InterestRateMode: 2, BorrowRate: big.NewInt(0),
@@ -233,6 +253,7 @@ func TestAaveBorrowMissingIndexError(t *testing.T) {
 
 func TestAaveBorrowNonVariableModeError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	aaveFeedRDU(t, e, 21000000, 6, 1, aaveUSDC, new(big.Int).Set(rayUnit))
 	_, err := e.Process(aaveSynthLog(21000000, 7, 1, aavePool), decode.AaveBorrow{
 		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
@@ -248,6 +269,7 @@ func TestAaveBorrowNonVariableModeError(t *testing.T) {
 func TestAaveBorrowRegimeRounding(t *testing.T) {
 	borrow := func(block uint64) *big.Int {
 		e := NewAaveEngine()
+		beginBatch(t, e, nil)
 		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
 		evs, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserB, // delegated: debt lands on OnBehalfOf
@@ -271,6 +293,7 @@ func TestAaveBorrowRegimeRounding(t *testing.T) {
 func TestAaveRepayRegimeRounding(t *testing.T) {
 	repay := func(block uint64) *big.Int {
 		e := NewAaveEngine()
+		beginBatch(t, e, nil)
 		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
 		_, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
@@ -293,6 +316,7 @@ func TestAaveRepayRegimeRounding(t *testing.T) {
 
 func TestAaveRepayOverdrawnError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	aaveFeedRDU(t, e, 25000000, 1, 1, aaveUSDC, new(big.Int).Set(rayUnit))
 	_, err := e.Process(aaveSynthLog(25000000, 2, 1, aavePool), decode.AaveRepay{
 		Reserve: aaveUSDC, User: aaveUserA, Repayer: aaveUserA,
@@ -306,13 +330,15 @@ func TestAaveRepayOverdrawnError(t *testing.T) {
 func TestAaveLiquidationCallRegimeRounding(t *testing.T) {
 	liq := func(block uint64) *big.Int {
 		e := NewAaveEngine()
+		beginBatch(t, e, nil)
 		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
 		_, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
 			Amount: big.NewInt(100), InterestRateMode: 2, BorrowRate: big.NewInt(0),
 		})
 		require.NoError(t, err)
-		evs, err := e.Process(aaveSynthLog(block, 3, 2, aavePool), decode.AaveLiquidationCall{
+		aaveFeedRDU(t, e, block, 3, 2, aaveUSDC, aaveRayTimes(4))
+		evs, err := e.Process(aaveSynthLog(block, 4, 2, aavePool), decode.AaveLiquidationCall{
 			CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
 			DebtToCover: big.NewInt(11), LiquidatedCollateralAmount: big.NewInt(1),
 			Liquidator: aaveUserB, ReceiveAToken: false,
@@ -334,6 +360,7 @@ func TestAaveLiquidationCallRegimeRounding(t *testing.T) {
 // double-applied. A liquidation in a LATER tx folds normally again.
 func TestAaveDeficitZeroOutAndPairing(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	aaveFeedRDU(t, e, 25000000, 1, 1, aaveUSDC, new(big.Int).Set(rayUnit))
 	_, err := e.Process(aaveSynthLog(25000000, 2, 1, aavePool), decode.AaveBorrow{
 		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
@@ -350,6 +377,7 @@ func TestAaveDeficitZeroOutAndPairing(t *testing.T) {
 	require.Equal(t, "aave_deficit_created", evs[0].EventType)
 	require.Equal(t, "-1000", evs[0].Delta.String(), "zero-out of the entire tracked scaled debt")
 
+	aaveFeedRDU(t, e, 25000100, 15, 2, aaveUSDC, new(big.Int).Set(rayUnit))
 	evs, err = e.Process(aaveSynthLog(25000100, 20, 2, aavePool), decode.AaveLiquidationCall{
 		CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
 		DebtToCover: big.NewInt(600), LiquidatedCollateralAmount: big.NewInt(1),
@@ -368,12 +396,14 @@ func TestAaveDeficitZeroOutAndPairing(t *testing.T) {
 
 	// Pairing does NOT leak across txs: a fresh borrow then an unpaired
 	// liquidation in a new tx folds normally.
-	_, err = e.Process(aaveSynthLog(25000300, 1, 4, aavePool), decode.AaveBorrow{
+	aaveFeedRDU(t, e, 25000300, 1, 4, aaveUSDC, new(big.Int).Set(rayUnit))
+	_, err = e.Process(aaveSynthLog(25000300, 2, 4, aavePool), decode.AaveBorrow{
 		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
 		Amount: big.NewInt(50), InterestRateMode: 2, BorrowRate: big.NewInt(0),
 	})
 	require.NoError(t, err)
-	evs, err = e.Process(aaveSynthLog(25000301, 1, 5, aavePool), decode.AaveLiquidationCall{
+	aaveFeedRDU(t, e, 25000301, 1, 5, aaveUSDC, new(big.Int).Set(rayUnit))
+	evs, err = e.Process(aaveSynthLog(25000301, 2, 5, aavePool), decode.AaveLiquidationCall{
 		CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
 		DebtToCover: big.NewInt(20), LiquidatedCollateralAmount: big.NewInt(1),
 		Liquidator: aaveUserB, ReceiveAToken: false,
@@ -391,12 +421,13 @@ func TestAaveDeficitZeroOutAndPairing(t *testing.T) {
 // 0x1d5165d743631adca230af5fb45f7d8acb6b9a0e4579410c5ffdb3aa65ef54be, block
 // 23357693 log 85 (also decode's atoken_mint.json fixture 0): a transfer-
 // accrual Mint whose scaled delta MUST be zero — the same-tx BalanceTransfer
-// carries the actual move. Pre-state seeded from archive scaledBalanceOf
-// (0xa1940ea3... @23357692 = 3000000000000000, eth.drpc.org, 2026-07-23).
+// carries the actual move. Committed pre-state hydrated from a fake reader
+// carrying archive scaledBalanceOf (0xa1940ea3... @23357692 =
+// 3000000000000000, eth.drpc.org, 2026-07-23).
 func TestAaveMintPureInterestRegimeB(t *testing.T) {
-	e := NewAaveEngine()
 	acct := common.HexToAddress("0xa1940ea3f615559255c59da5b16d6da1d1d60e60")
-	aaveSetBalance(e.collateral, aaveWEETH, acct, aaveBig("3000000000000000"))
+	e := NewAaveEngine()
+	beginBatch(t, e, newFakeReader().seed(acct, aaveWEETH, "collateral", aaveBig("3000000000000000")))
 	l := aaveSynthLog(23357693, 85, 9, aaveAWEETH)
 	evs, err := e.Process(l, decode.ATokenMint{
 		Caller: acct, OnBehalfOf: acct,
@@ -409,7 +440,7 @@ func TestAaveMintPureInterestRegimeB(t *testing.T) {
 	require.Equal(t, "atoken_mint", evs[0].EventType)
 	require.Equal(t, "collateral", evs[0].Side)
 	require.Equal(t, "0", evs[0].Delta.String(), "pure interest capitalization: zero new principal, zero scaled delta")
-	require.Equal(t, "3000000000000000", aaveBalance(e.collateral, aaveWEETH, acct).String())
+	require.Equal(t, "3000000000000000", aaveTracked(e, "collateral", aaveWEETH, acct))
 }
 
 // TestAaveMintRegimeATreasuryAccrual replays the REAL regime-A treasury
@@ -421,9 +452,9 @@ func TestAaveMintPureInterestRegimeB(t *testing.T) {
 // against archive scaledBalanceOf(0x464c71f6...): @22839767 =
 // 376293386263959309, @22839768 = 376293412606470166 (eth.drpc.org, 2026-07-23).
 func TestAaveMintRegimeATreasuryAccrual(t *testing.T) {
-	e := NewAaveEngine()
 	treasury := common.HexToAddress("0x464c71f6c2f760dda6093dcb91c24c39e5d6e18c")
-	aaveSetBalance(e.collateral, aaveWEETH, treasury, aaveBig("376293386263959309"))
+	e := NewAaveEngine()
+	beginBatch(t, e, newFakeReader().seed(treasury, aaveWEETH, "collateral", aaveBig("376293386263959309")))
 	evs, err := e.Process(aaveSynthLog(22839768, 385, 9, aaveAWEETH), decode.ATokenMint{
 		Caller: aavePool, OnBehalfOf: treasury,
 		Value:           aaveBig("607559443350"),
@@ -432,16 +463,17 @@ func TestAaveMintRegimeATreasuryAccrual(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "26342510857", evs[0].Delta.String())
-	require.Equal(t, "376293412606470166", aaveBalance(e.collateral, aaveWEETH, treasury).String(),
+	require.Equal(t, "376293412606470166", aaveTracked(e, "collateral", aaveWEETH, treasury),
 		"post-state must equal archive scaledBalanceOf @22839768")
 }
 
 // TestAaveRegimeAMintBurnFormulas exercises the three regime-A branches with
-// synthetic values: supply-path Mint (Value > BalanceIncrease), burn-path
-// Mint (Value < BalanceIncrease — interest exceeded the withdrawal), and
-// Burn (Value = amount - BalanceIncrease).
+// synthetic values on a hydrated base of 10 scaled: supply-path Mint (Value >
+// BalanceIncrease), burn-path Mint (Value < BalanceIncrease — interest
+// exceeded the withdrawal), and Burn (Value = amount - BalanceIncrease).
 func TestAaveRegimeAMintBurnFormulas(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, newFakeReader().seed(aaveUserA, aaveWEETH, "collateral", big.NewInt(10)))
 	idx := aaveRayTimes(2)
 	// Supply 100 with 7 accrued: Mint(Value=107, BalanceIncrease=7) =>
 	// +rayDivHalfUp(100, 2*RAY) = +50.
@@ -467,7 +499,7 @@ func TestAaveRegimeAMintBurnFormulas(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "-11", evs[0].Delta.String())
-	require.Equal(t, "37", aaveBalance(e.collateral, aaveWEETH, aaveUserA).String(), "50 - 2 - 11")
+	require.Equal(t, "47", aaveTracked(e, "collateral", aaveWEETH, aaveUserA), "10 + 50 - 2 - 11")
 }
 
 // TestAaveTxGroupedPairsNotDoubleApplied is the MANDATORY tx-grouped fixture
@@ -482,11 +514,11 @@ func TestAaveRegimeAMintBurnFormulas(t *testing.T) {
 //
 // The ERC20 Transfers are record-only overlapping views and MUST NOT fold;
 // the Burn folds via the regime-B inversion; the BalanceTransfer's ALREADY-
-// SCALED value applies exactly once (-from/+to). Pre-states seeded from
-// archive scaledBalanceOf @25334453 (borrower 0x2ec19e98... =
-// 474254493198165, treasury 0x464c71f6... = 385079122245736975); post-states
-// asserted against @25334454 (borrower = 0, treasury = 385081806705132437);
-// eth.drpc.org, 2026-07-23.
+// SCALED value applies exactly once (-from/+to). Committed pre-states are
+// hydrated from a fake reader carrying archive scaledBalanceOf @25334453
+// (borrower 0x2ec19e98... = 474254493198165, treasury 0x464c71f6... =
+// 385079122245736975); post-states asserted against @25334454 (borrower = 0,
+// treasury = 385081806705132437); eth.drpc.org, 2026-07-23.
 func TestAaveTxGroupedPairsNotDoubleApplied(t *testing.T) {
 	doc := aaveLoadDoc(t, "aave_atoken_weeth_logs.json")
 	const tx = "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d"
@@ -503,8 +535,9 @@ func TestAaveTxGroupedPairsNotDoubleApplied(t *testing.T) {
 	borrower := common.HexToAddress("0x2ec19e982172ead28b312a07faf25105fb3747d8")
 	treasury := common.HexToAddress("0x464c71f6c2f760dda6093dcb91c24c39e5d6e18c")
 	e := NewAaveEngine()
-	aaveSetBalance(e.collateral, aaveWEETH, borrower, aaveBig("474254493198165"))
-	aaveSetBalance(e.collateral, aaveWEETH, treasury, aaveBig("385079122245736975"))
+	beginBatch(t, e, newFakeReader().
+		seed(borrower, aaveWEETH, "collateral", aaveBig("474254493198165")).
+		seed(treasury, aaveWEETH, "collateral", aaveBig("385079122245736975")))
 
 	r := decode.NewRegistry()
 	var folded []store.PositionEvent
@@ -536,14 +569,15 @@ func TestAaveTxGroupedPairsNotDoubleApplied(t *testing.T) {
 	require.Equal(t, treasury.Bytes(), folded[4].Account)
 	require.Equal(t, "2684459395462", folded[4].Delta.String())
 
-	require.Equal(t, "0", aaveBalance(e.collateral, aaveWEETH, borrower).String(),
+	require.Equal(t, "0", aaveTracked(e, "collateral", aaveWEETH, borrower),
 		"borrower post-state must equal archive scaledBalanceOf @25334454")
-	require.Equal(t, "385081806705132437", aaveBalance(e.collateral, aaveWEETH, treasury).String(),
+	require.Equal(t, "385081806705132437", aaveTracked(e, "collateral", aaveWEETH, treasury),
 		"treasury post-state must equal archive scaledBalanceOf @25334454")
 }
 
 func TestAaveATokenUnknownAddressError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	_, err := e.Process(aaveSynthLog(25000000, 1, 1, aaveUserA), decode.ATokenMint{
 		Caller: aaveUserA, OnBehalfOf: aaveUserA,
 		Value: big.NewInt(1), BalanceIncrease: big.NewInt(0), Index: new(big.Int).Set(rayUnit),
@@ -553,6 +587,7 @@ func TestAaveATokenUnknownAddressError(t *testing.T) {
 
 func TestAaveBalanceTransferOverdrawnError(t *testing.T) {
 	e := NewAaveEngine()
+	beginBatch(t, e, nil)
 	_, err := e.Process(aaveSynthLog(25000000, 1, 1, aaveAWEETH), decode.ATokenBalanceTransfer{
 		From: aaveUserA, To: aaveUserB, Value: big.NewInt(5), Index: new(big.Int).Set(rayUnit),
 	})
@@ -599,6 +634,7 @@ func TestAaveGoldenFullHistoryReplay(t *testing.T) {
 	})
 
 	e := NewAaveEngine()
+	beginBatch(t, e, nil) // from genesis: committed state is empty
 	r := decode.NewRegistry()
 	type key struct {
 		account common.Address
@@ -676,6 +712,7 @@ func TestAaveGoldenReplayDeterminism(t *testing.T) {
 	})
 	run := func() string {
 		e := NewAaveEngine()
+		beginBatch(t, e, nil)
 		r := decode.NewRegistry()
 		var sb []byte
 		for _, fl := range logs {

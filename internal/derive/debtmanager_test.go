@@ -45,6 +45,15 @@ func tLog(block uint64, tx byte, logIndex uint32) store.RawLog {
 	return store.RawLog{ChainID: 10, BlockNumber: block, TxHash: txh, LogIndex: logIndex}
 }
 
+// newDM builds a batch-started DebtManager whose committed state is served by
+// r (empty when nil).
+func newDM(t *testing.T, chain DMChainReads, r StateReader) *DebtManager {
+	t.Helper()
+	dm := NewDebtManager(chain)
+	beginBatch(t, dm, r)
+	return dm
+}
+
 // feedIndex pushes a DMInterestIndexUpdated through Process and requires the
 // no-position-event contract for it.
 func feedIndex(t *testing.T, dm *DebtManager, block uint64, token common.Address, newIndex *big.Int) {
@@ -132,7 +141,7 @@ func buildExecute302Calldata(t *testing.T, borrowers []common.Address, amounts [
 
 func TestDebtManagerImplementsEngine(t *testing.T) {
 	var _ Engine = (*DebtManager)(nil)
-	require.Equal(t, "debt_manager", NewDebtManager(nil, nil).Name())
+	require.Equal(t, "debt_manager", NewDebtManager(nil).Name())
 }
 
 // ---------------------------------------------------------------------------
@@ -140,7 +149,7 @@ func TestDebtManagerImplementsEngine(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBorrowCeilRounding(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tUSDC, num("2000000000000000000")) // idx = 2e18
 
 	// Non-exact division: 5*1e18/2e18 = 2.5 -> ceil = 3.
@@ -168,7 +177,7 @@ func TestBorrowCeilRounding(t *testing.T) {
 }
 
 func TestBorrowNonUSDCErrors(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tUSDT, num("1000000000000000000"))
 
 	evs, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tUSDT, Amount: big.NewInt(5)})
@@ -180,14 +189,14 @@ func TestBorrowNonUSDCErrors(t *testing.T) {
 
 func TestBorrowMissingSameBlockIndexErrors(t *testing.T) {
 	// No index at all.
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	_, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tUSDC, Amount: big.NewInt(5)})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "InterestIndexUpdated")
 
 	// Index exists but from an OLDER block: the one-index-update-per-mutating-
 	// block invariant says the mutating block must carry its own update.
-	dm = NewDebtManager(nil, nil)
+	dm = newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tUSDC, num("1000000000000000000"))
 	_, err = dm.Process(tLog(101, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tUSDC, Amount: big.NewInt(5)})
 	require.Error(t, err)
@@ -200,7 +209,7 @@ func TestBorrowMissingSameBlockIndexErrors(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestRepayFloorRounding(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tUSDC, num("2000000000000000000"))
 	_, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tUSDC, Amount: big.NewInt(8)}) // +4
 	require.NoError(t, err)
@@ -224,7 +233,7 @@ func TestRepayFloorRounding(t *testing.T) {
 }
 
 func TestRepayWithoutPriorDebtErrors(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tUSDC, num("1000000000000000000"))
 	_, err := dm.Process(tLog(100, 0x01, 5), decode.DMRepaid{User: tUser, Payer: tPayer, Token: tUSDC, UsdAmount: big.NewInt(5)})
 	require.Error(t, err)
@@ -233,41 +242,11 @@ func TestRepayWithoutPriorDebtErrors(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Warm-start seeding.
-// ---------------------------------------------------------------------------
-
-func TestWarmSeedFromPriorState(t *testing.T) {
-	seeds := map[common.Address]map[common.Address]*big.Int{
-		tUser: {tUSDC: big.NewInt(10)},
-	}
-	dm := NewDebtManager(nil, seeds)
-	feedIndex(t, dm, 100, tUSDC, num("1000000000000000000"))
-
-	// floor(10*1e18/1e18) = 10: consumes the whole seeded balance.
-	evs, err := dm.Process(tLog(100, 0x01, 5), decode.DMRepaid{User: tUser, Payer: tPayer, Token: tUSDC, UsdAmount: big.NewInt(10)})
-	require.NoError(t, err)
-	require.Equal(t, 0, big.NewInt(-10).Cmp(evs[0].Delta))
-
-	// A further repay must fail: nothing left.
-	_, err = dm.Process(tLog(100, 0x02, 7), decode.DMRepaid{User: tUser, Payer: tPayer, Token: tUSDC, UsdAmount: big.NewInt(1)})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "negative")
-
-	// The constructor must have deep-copied: mutating the caller's map after
-	// construction must not affect the deriver.
-	seeds[tUser2] = map[common.Address]*big.Int{tUSDC: big.NewInt(99)}
-	_, err = dm.Process(tLog(100, 0x03, 9), decode.DMRepaid{User: tUser2, Payer: tPayer, Token: tUSDC, UsdAmount: big.NewInt(1)})
-	require.Error(t, err, "post-construction caller-map mutation must not seed the deriver")
-}
-
-// ---------------------------------------------------------------------------
 // Liquidation: debt decrement + per-tuple collateral records + residue rule.
 // ---------------------------------------------------------------------------
 
 func TestLiquidationFanOut(t *testing.T) {
-	dm := NewDebtManager(nil, map[common.Address]map[common.Address]*big.Int{
-		tUser: {tUSDC: big.NewInt(100)},
-	})
+	dm := newDM(t, nil, newFakeReader().seed(tUser, tUSDC, "debt", big.NewInt(100)))
 	feedIndex(t, dm, 200, tUSDC, num("1000000000000000000"))
 
 	evs, err := dm.Process(tLog(200, 0x01, 5), decode.DMLiquidated{
@@ -305,9 +284,7 @@ func TestLiquidationFanOut(t *testing.T) {
 }
 
 func TestLiquidationResidueZeroedOnSecondPass(t *testing.T) {
-	dm := NewDebtManager(nil, map[common.Address]map[common.Address]*big.Int{
-		tUser: {tUSDC: big.NewInt(100)},
-	})
+	dm := newDM(t, nil, newFakeReader().seed(tUser, tUSDC, "debt", big.NewInt(100)))
 	feedIndex(t, dm, 200, tUSDC, num("1000000000000000000"))
 
 	mkLiq := func(usd int64, withCollateral bool) decode.DMLiquidated {
@@ -348,9 +325,7 @@ func TestLiquidationResidueZeroedOnSecondPass(t *testing.T) {
 }
 
 func TestLiquidationNoResidueAcrossTxBoundary(t *testing.T) {
-	dm := NewDebtManager(nil, map[common.Address]map[common.Address]*big.Int{
-		tUser: {tUSDC: big.NewInt(100)},
-	})
+	dm := newDM(t, nil, newFakeReader().seed(tUser, tUSDC, "debt", big.NewInt(100)))
 	feedIndex(t, dm, 200, tUSDC, num("1000000000000000000"))
 
 	liq := func(usd int64) decode.DMLiquidated {
@@ -382,9 +357,7 @@ func TestLiquidationNoResidueWhenSecondPassLeavesZeroOrMore(t *testing.T) {
 		{"second pass leaves 2 wei", 48, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dm := NewDebtManager(nil, map[common.Address]map[common.Address]*big.Int{
-				tUser: {tUSDC: big.NewInt(100)},
-			})
+			dm := newDM(t, nil, newFakeReader().seed(tUser, tUSDC, "debt", big.NewInt(100)))
 			feedIndex(t, dm, 200, tUSDC, num("1000000000000000000"))
 			liq := func(usd int64) decode.DMLiquidated {
 				return decode.DMLiquidated{Liquidator: tLiqor, User: tUser, DebtToken: tUSDC,
@@ -400,7 +373,7 @@ func TestLiquidationNoResidueWhenSecondPassLeavesZeroOrMore(t *testing.T) {
 }
 
 func TestLiquidationOverdrawErrors(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 200, tUSDC, num("1000000000000000000"))
 	_, err := dm.Process(tLog(200, 0x01, 5), decode.DMLiquidated{
 		Liquidator: tLiqor, User: tUser, DebtToken: tUSDC,
@@ -421,7 +394,7 @@ func TestMigrationGenesisSeedsInCalldataOrder(t *testing.T) {
 	chain := &fakeChainReads{calldata: map[common.Hash][]byte{
 		common.BytesToHash(l.TxHash): buildExecute302Calldata(t, borrowers, amounts),
 	}}
-	dm := NewDebtManager(chain, nil)
+	dm := newDM(t, chain, nil)
 
 	evs, err := dm.Process(l, decode.DMMigrationBorrowerPositionsSet{Token: tUSDC, Count: big.NewInt(3)})
 	require.NoError(t, err)
@@ -450,7 +423,7 @@ func TestMigrationCountMismatchErrors(t *testing.T) {
 		common.BytesToHash(l.TxHash): buildExecute302Calldata(t,
 			[]common.Address{tUser, tUser2}, []*big.Int{big.NewInt(7), big.NewInt(8)}),
 	}}
-	dm := NewDebtManager(chain, nil)
+	dm := newDM(t, chain, nil)
 
 	evs, err := dm.Process(l, decode.DMMigrationBorrowerPositionsSet{Token: tUSDC, Count: big.NewInt(3)})
 	require.Error(t, err)
@@ -460,14 +433,14 @@ func TestMigrationCountMismatchErrors(t *testing.T) {
 
 func TestMigrationChainReadFailurePropagates(t *testing.T) {
 	chain := &fakeChainReads{err: errors.New("rpc down")}
-	dm := NewDebtManager(chain, nil)
+	dm := newDM(t, chain, nil)
 	_, err := dm.Process(tLog(300, 0x0c, 5), decode.DMMigrationBorrowerPositionsSet{Token: tUSDC, Count: big.NewInt(1)})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "rpc down")
 }
 
 func TestMigrationWithoutChainReadsErrors(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	_, err := dm.Process(tLog(300, 0x0c, 5), decode.DMMigrationBorrowerPositionsSet{Token: tUSDC, Count: big.NewInt(1)})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "DMChainReads")
@@ -510,7 +483,7 @@ func TestRecordOnlyEvents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dm := NewDebtManager(nil, nil)
+			dm := newDM(t, nil, nil)
 			evs, err := dm.Process(tLog(400, 0x01, 5), tc.ev)
 			require.NoError(t, err)
 			require.Len(t, evs, 1)
@@ -527,21 +500,19 @@ func TestRecordOnlyEvents(t *testing.T) {
 }
 
 func TestUnsupportedEventTypeErrors(t *testing.T) {
-	dm := NewDebtManager(nil, nil)
+	dm := newDM(t, nil, nil)
 	_, err := dm.Process(tLog(400, 0x01, 5), decode.AaveBorrow{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unsupported")
 }
 
 // ---------------------------------------------------------------------------
-// Determinism: same log stream + same prior state => identical events.
+// Determinism: same log stream + same committed state => identical events.
 // ---------------------------------------------------------------------------
 
 func TestProcessIsDeterministic(t *testing.T) {
 	run := func() []store.PositionEvent {
-		dm := NewDebtManager(nil, map[common.Address]map[common.Address]*big.Int{
-			tUser2: {tUSDC: big.NewInt(40)},
-		})
+		dm := newDM(t, nil, newFakeReader().seed(tUser2, tUSDC, "debt", big.NewInt(40)))
 		var all []store.PositionEvent
 		feedIndex(t, dm, 100, tUSDC, num("1030000000000000000"))
 		for i, step := range []struct {
@@ -614,8 +585,10 @@ func loadGolden(t *testing.T, name string) dmGoldenFile {
 }
 
 // replayGolden decodes every fixture log through the real decode.Registry and
-// folds it through one DebtManager, returning all emitted position events --
-// the full bytes -> decode -> derive path, exactly what the runner will do.
+// folds it through one batch-started DebtManager (empty committed state --
+// these fixtures are complete from genesis), returning all emitted position
+// events -- the full bytes -> decode -> derive path, exactly what the runner
+// will do.
 func replayGolden(t *testing.T, fx dmGoldenFile) []store.PositionEvent {
 	t.Helper()
 	var chain DMChainReads
@@ -626,7 +599,7 @@ func replayGolden(t *testing.T, fx dmGoldenFile) []store.PositionEvent {
 		}
 		chain = &fakeChainReads{calldata: m}
 	}
-	dm := NewDebtManager(chain, nil)
+	dm := newDM(t, chain, nil)
 	reg := decode.NewRegistry()
 	var all []store.PositionEvent
 	for i, fl := range fx.Logs {
