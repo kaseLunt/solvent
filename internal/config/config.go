@@ -34,8 +34,12 @@ type Stream struct {
 type Config struct {
 	DatabaseURL  string
 	PollInterval time.Duration
-	Chains       map[string]Chain
-	Streams      []Stream
+	// SnapshotInterval is the collateral snapshotter's full-sweep cadence
+	// (SOLVENT_SNAPSHOT_INTERVAL, default 1h). Must be positive: a zero or
+	// negative cadence would hot-loop full registry sweeps.
+	SnapshotInterval time.Duration
+	Chains           map[string]Chain
+	Streams          []Stream
 }
 
 type fileChain struct {
@@ -79,8 +83,18 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("SOLVENT_POLL_INTERVAL: %w", err)
 		}
 	}
+	snapshot := time.Hour
+	if v := os.Getenv("SOLVENT_SNAPSHOT_INTERVAL"); v != "" {
+		snapshot, err = time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("SOLVENT_SNAPSHOT_INTERVAL: %w", err)
+		}
+		if snapshot <= 0 {
+			return nil, fmt.Errorf("SOLVENT_SNAPSHOT_INTERVAL must be positive, got %q", v)
+		}
+	}
 
-	cfg := &Config{DatabaseURL: dbURL, PollInterval: poll, Chains: map[string]Chain{}}
+	cfg := &Config{DatabaseURL: dbURL, PollInterval: poll, SnapshotInterval: snapshot, Chains: map[string]Chain{}}
 
 	for name, fc := range root.Chains {
 		urls := os.Getenv(fc.RPCEnv)

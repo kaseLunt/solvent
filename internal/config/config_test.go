@@ -25,6 +25,30 @@ func TestLoadValidConfig(t *testing.T) {
 	require.Equal(t, uint64(5), s.Confirmations)
 }
 
+// SOLVENT_SNAPSHOT_INTERVAL: default 1h, env-parsed, positive-only (a zero
+// or negative cadence would hot-loop full collateral sweeps).
+func TestLoadSnapshotInterval(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+
+	cfg, err := Load("testdata/contracts.json")
+	require.NoError(t, err)
+	require.Equal(t, time.Hour, cfg.SnapshotInterval, "default is 1h")
+
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "30m")
+	cfg, err = Load("testdata/contracts.json")
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Minute, cfg.SnapshotInterval)
+
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "bogus")
+	_, err = Load("testdata/contracts.json")
+	require.ErrorContains(t, err, "SOLVENT_SNAPSHOT_INTERVAL")
+
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "-5m")
+	_, err = Load("testdata/contracts.json")
+	require.ErrorContains(t, err, "must be positive")
+}
+
 func TestLoadFailsWhenRPCEnvMissing(t *testing.T) {
 	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
 	// SOLVENT_RPC_OP deliberately unset
