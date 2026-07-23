@@ -479,3 +479,119 @@ Scope and interfaces locked now; bite-sized steps appended to this file once `re
 ## Execution protocol (carry-over from Phase 1)
 
 Subagent-driven (SDD): per-task implementer + reviewer, review packages via `scripts/review-package`, Codex adversarial passes on the heaviest pieces (Tasks 5, 6, 7 minimum — derivation math is the new money code), consolidated fix waves on whole-branch findings, ledger at `.superpowers/sdd/progress-phase2.md` (new file; Phase 1 ledger is closed history). Implementer dispatches carry the sandbox/PATH/db exports from Global Constraints verbatim.
+
+---
+
+# Tasks 3b–10 (authored post-gate from `recon/derivation-notes.md`)
+
+The recon (commit d779971) is **normative** for all semantics below: event parameter meanings, the normalized-index debt model, rounding modes, the migration-genesis boundary, asset registry, and oracle wiring. Where a step says "per recon §X", the implementer MUST read that section of `recon/derivation-notes.md` — it is committed project truth, not optional background.
+
+## Corrected architecture (supersedes the pre-gate Roadmap sketch)
+
+- **OP debt (engine-exact, validated bit-exact):** position_balances stores the NORMALIZED debt amount (1e18-scale big.Int). Genesis: decode the 80 `MigrationBorrowerPositionsSet` txs' `commitAndExecute(...,(address,uint256)[])` calldata at blocks 149,985,513–149,986,254 into seeded normalized positions (7,337 events via the new `seq` PK dimension — one migration log → N borrower events). Replay from there: `+ceil(usd*1e18/idx)` per Borrowed, `-floor(usd*1e18/idx)` per Repaid/Liquidated, idx = same-block `InterestIndexUpdated.newIndex`, USDC stable-snap `usd = amount`; 1-wei residue zeroing after second liquidation pass (recon "Derivation caveats" 1–2, "Debt identity validation"). Live debt = `floor(normalized * currentIndex / 1e18)` at read.
+- **OP collateral (not event-derivable):** batched multicall view-snapshots of Safe collateral (recon caveat 4), written as position_balances rows with `source='snapshot'`. Safe registry = distinct Borrowed users ∪ migration-genesis borrowers.
+- **OP supplier shares: descoped from position tracking** (contract-balance dependence, recon caveat 3). Supplied/WithdrawBorrowToken index as record-only position_events (flows preserved, no balance application).
+- **ETH Aave debt (Pool-log-exact):** scaled-balance replay with WadRayMath half-up rounding; indexes from ReserveDataUpdated; DeficitCreated handled as debt burn (recon "Aave derivation model"). Live debt = rayMul(scaled, current index).
+- **ETH Aave collateral:** aToken scaled-balance streams (4 aToken contracts — addresses discovered and code-verified in Task 4).
+- **Prices:** OP = poll `PriceProviderV2.price(address)` (engine-exact; 6-dec; stable snap); ETH = `chainlink_feed` walker streams on the four RAW aggregators from `recon/feeds.json` (adapter caveats: cap adapters + weETH getRate composition + phase re-resolution — recon "Oracle wiring" stream caveats i–ii).
+
+Execution order: 3b → 4 → {5, 6 in parallel} → 7 → 8 → 9 → 10. Commit rule everywhere: pathspec form `git commit -m "..." -- <paths>`; report files use the `-p2` suffix.
+
+---
+
+### Task 3b: Schema amendments (review findings + corrected architecture)
+
+**Files:**
+- Modify: `internal/store/migrations/00002_positions.sql` (edit in place — applied only to local dev; cycle with `goose down`/`up`)
+- Modify: `internal/store/derive.go`, `internal/store/derive_test.go`
+
+**Interfaces (deltas — everything else from Task 3 unchanged):**
+- `PositionEvent` gains `Seq uint16` (PK becomes `(chain_id, tx_hash, log_index, seq)`).
+- `position_balances` gains `source TEXT NOT NULL DEFAULT 'event'`; `(*Store).ApplyDerived` unchanged signature (writes `source='event'`); new `(*Store).UpsertSnapshotBalances(ctx, engine string, account []byte, balances map[string]map[string]*big.Int, block uint64) error` — replaces that account's `source='snapshot'` rows wholesale in one tx (asset-hex → side → amount).
+- New table `rate_indexes (engine TEXT, asset BYTEA, block_number BIGINT, kind TEXT, value NUMERIC NOT NULL, PRIMARY KEY (engine, asset, block_number, kind))` with `(*Store).SaveRateIndex(ctx, engine string, asset []byte, block uint64, kind string, value *big.Int) error` (idempotent upsert, divergence errors) and `(*Store).LatestRateIndex(ctx, engine string, asset []byte, atOrBelow uint64, kind string) (*big.Int, uint64, bool, error)`. `kind` values: `borrow_index`, `variable_borrow_index`, `liquidity_index`, `borrow_apy`.
+- Zero-balance consistency: RewindDerived's rebuild DROPS the `HAVING SUM(delta) <> 0` clause (zero-net rows persist, matching live-apply shape); rebuild deletes/rebuilds ONLY `source='event'` rows (snapshots are re-established by the snapshotter, which Task 7's runner triggers after any rewind).
+
+**Steps (TDD, same idioms as Task 3):**
+1. Failing tests: multi-event-per-log (two seize events seq 0/1 from one log identity both persist and both apply); seq-divergence (same identity+seq, different delta → error); snapshot upsert round-trip + wholesale replacement (old snapshot rows for the account vanish); rate-index save/latest (atOrBelow selects the right block; divergent re-save errors); rewind preserves zero-net rows and leaves snapshot rows untouched.
+2. `goose down` to version 1 locally, edit 00002 in place (seq column in PK; source column; rate_indexes table), `goose up` — document the dev-only in-place edit in the migration header comment.
+3. Implement deltas; run `go test ./internal/store/ -v` all green + full suite.
+4. Commit: `feat: seq-discriminated position events, snapshot balances, rate indexes` (pathspec).
+
+Codex senior-review findings on Task 3 (session pending at authoring time) are adjudicated by the controller into this task's dispatch before it runs.
+
+---
+
+### Task 4: `internal/decode` — typed events for every stream
+
+**Files:** Create `internal/decode/decode.go`, `internal/decode/events.go`, `internal/decode/abis/*.json` (embedded copies), `internal/decode/decode_test.go`, `internal/decode/fixtures_test.go`.
+
+**Interfaces (Tasks 5–8 compile against):**
+- `decode.Registry` built from embedded ABIs; `Decode(engine string, l store.RawLog) (Event, bool, error)` — `bool=false` for not-in-allowlist topic0 (skip, never error); error only for malformed data under a known topic0.
+- `Event` = interface `{ Name() string }`; concrete types with exact fields per recon "Debt Manager event semantics" table and "Aave derivation model": `DMBorrowed{User, Token common.Address; Amount *big.Int}`, `DMRepaid{User, Payer, Token common.Address; UsdAmount *big.Int}`, `DMSupplied`, `DMWithdrawBorrowToken`, `DMLiquidated{Liquidator, User, DebtToken common.Address; Collateral []LiquidationTokenData; BeforeDebtUsd, DebtLiquidatedUsd *big.Int}` (`LiquidationTokenData{Token common.Address; Amount, Bonus *big.Int}`), `DMInterestIndexUpdated{Token common.Address; OldIndex, NewIndex *big.Int}`, `DMBorrowApySet`, `DMBorrowTokenConfigSet`, `DMCollateralTokenAdded/Removed/ConfigSet`, `DMMigrationBorrowerPositionsSet{Token common.Address; Count *big.Int}`, `AaveBorrow`, `AaveRepay{Reserve, User, Repayer common.Address; Amount *big.Int; UseATokens bool}`, `AaveSupply`, `AaveWithdraw`, `AaveLiquidationCall`, `AaveReserveDataUpdated{Reserve common.Address; LiquidityRate, VariableBorrowRate, LiquidityIndex, VariableBorrowIndex *big.Int}`, `AaveDeficitCreated`, `ATokenTransfer/Mint/Burn` (aToken stream), `ChainlinkAnswerUpdated{Current, RoundId *big.Int; UpdatedAt uint64}`.
+- MigrationBorrowerPositionsSet's borrower payload comes from TX CALLDATA, not the log — decode exposes `DecodeMigrationCalldata(input []byte) ([]MigrationSeed, error)` (`MigrationSeed{Borrower common.Address; NormalizedAmount *big.Int}`) parsing the `commitAndExecute` `(address,uint256)[]` argument per recon "Migration finding".
+- A discovery step: aToken addresses via `cast call <POOL> "getReserveData(address)" <reserve>` (aTokenAddress field), code-verify each, record in `config/contracts.json` as four `eth:atoken-<sym>` streams (engine `aave_v3_etherfi`) plus four `eth:feed-<sym>` streams (engine `chainlink_feed`) from `recon/feeds.json` startBlocks.
+
+**Steps:** fixture-generation fetches ~3 real logs per event type via cast/RPC into `testdata/*.json` (block, topics, data hex — provenance commented); table-driven decode tests assert every field against hand-verified values; malformed-data and unknown-topic0 cases; ABIs embedded from `recon/abis/` + aToken ABI + aggregator ABI (fetch verified ABIs, commit under `internal/decode/abis/`). Commit: `feat: typed event decoding for all ingest streams` (pathspec).
+
+---
+
+### Task 5: Debt Manager debt deriver (normalized model + genesis)
+
+**Files:** Create `internal/derive/engine.go` (shared interface), `internal/derive/debtmanager.go`, `internal/derive/debtmanager_test.go`.
+
+**Interfaces:**
+- `derive.Engine` = `{ Name() string; Process(l store.RawLog, d decode.Event) ([]store.PositionEvent, error) }`.
+- `derive.NewDebtManager(chain DMChainReads) *DebtManager` where `DMChainReads` = minimal interface for the one chain read the deriver needs (migration-tx calldata fetch). Prices are NOT needed: 100% of historical borrows are USDC stable-snapped; NON-USDC borrows error loudly per recon caveat 1: `"non-stable borrow token %s requires oracle-priced derivation - not yet supported"`.
+
+**Semantics (normative: recon "Debt Manager event semantics" + "Debt identity validation"):**
+- Maintains per-token current index from DMInterestIndexUpdated (runner persists SaveRateIndex on these).
+- Borrowed → `+ceil(usd*1e18/idx)` (usd = amount for USDC); Repaid → `-floor(usd*1e18/idx)`; Liquidated → `-floor(debtAmountLiquidated*1e18/idx)` debt event + one record-only event per collateral tuple element (seq-indexed) + the 1-wei residue rule: second Liquidated in same tx leaving normalized ≤ 1 wei → emit an extra `residue_zeroed` event with delta = −remaining (deriver tracks running normalized per account via a warm cache seeded from BalancesFor on first touch).
+- MigrationBorrowerPositionsSet → fetch tx calldata via DMChainReads, DecodeMigrationCalldata, emit one `migration_genesis` debt event PER SEED (seq 0..N-1) with delta = NormalizedAmount (already normalized — no index division).
+- Supplied/WithdrawBorrowToken/config events → record-only (Side "", nil Delta).
+
+**Golden tests (recon's validation table is the fixture):** replay the three validated borrowers' exact event sequences (fixtures committed as testdata) and assert final normalized == recon's net-normalized values (963,813 / 3,985,789,485 / 7,153,773) and derived-at-PIN == borrowingOf values (1,004,681 / 4,154,797,137 / 7,457,111 with currentIndex 1042402553573226850); the liquidation vector (0xac5f3ce9... @ 151,731,530: removed 15,289,230 normalized, view 15,845,260). Unit tests per event type + rounding-mode edges (ceil vs floor at exact division). Commit: `feat: debt-manager normalized-debt deriver with migration genesis` (pathspec).
+
+---
+
+### Task 6: Aave deriver (debt Pool-exact + aToken collateral)
+
+**Files:** Create `internal/derive/aave.go`, `internal/derive/aave_test.go`.
+
+**Semantics (normative: recon "Aave derivation model"):** WadRayMath half-up rayDiv/rayMul (implement exactly); scaled debt += rayDiv(amount, variableBorrowIndex) on Borrow, −= on Repay/LiquidationCall(debtToCover)/DeficitCreated; index from same-tx ReserveDataUpdated (emitted BEFORE the action event — deriver caches latest ReserveDataUpdated per reserve within the stream); writes rate_indexes (variable_borrow_index, liquidity_index). aToken streams: Mint/Burn carry (amount, index) → scaled collateral ±rayDiv; Transfer/BalanceTransfer → scaled moves between accounts (both sides). Balances stored SCALED (side collateral/debt, source event).
+
+**Golden tests:** full-history replay of the dormant market (138 borrows lifetime) from committed fixtures; assert the two recon golden borrowers' derived-at-head values against `getUserReserveData`/`scaledBalanceOf` view calls captured during fixture generation (block + values in provenance comments). Rounding edges: half-up at exact .5 ray boundaries. Commit: `feat: aave scaled-balance deriver with aToken collateral streams` (pathspec).
+
+---
+
+### Task 7: Runner + snapshotter + daemon integration
+
+**Files:** Create `internal/derive/runner.go`, `internal/derive/runner_test.go`, `internal/snapshot/snapshot.go`, `internal/snapshot/snapshot_test.go`; Modify `cmd/indexer/main.go`.
+
+- **Runner:** per engine, windowed read of raw_logs above derive cursor (store gains a read method if needed — additive only) → Decode → Engine.Process → ApplyDerived (+ SaveRateIndex for index events); after any walker rewind in a round, RewindDerived to the rewind target before continuing; snapshots rows for touched accounts written per round (BalancesFor → snapshots table).
+- **Snapshotter (OP collateral, recon caveat 4):** Safe registry = distinct debt-side accounts from position_events; rotating multicall3 batches of CashLens collateral reads at head; UpsertSnapshotBalances per Safe; full-sweep cadence `SOLVENT_SNAPSHOT_INTERVAL` (default 1h), nonzero-debt Safes prioritized. Post-rewind: immediate re-sweep trigger.
+- **Daemon deferrals (Phase 1 carry-overs):** advisory-lock liveness re-check per round (query on the lock conn; lost → fatal exit); per-walker error backoff (skip N rounds after M consecutive errors); "will retry next round" log wording.
+- Tests with fakes for runner sequencing (derive-after-rewind ordering pinned) and snapshotter batching; daemon changes smoke-tested live in Task 9. Commits: runner+snapshot, then main wiring (pathspec each).
+
+---
+
+### Task 8: `internal/prices`
+
+**Files:** Create `internal/prices/prices.go`, `internal/prices/prices_test.go`; Modify `config/contracts.json` (feed streams — if not already added in Task 4).
+
+- OP poll path: `PriceProviderV2.price(token)` per registry asset each `SOLVENT_PRICE_INTERVAL` (default 60s) → prices rows (source='priceproviderv2', 6-dec); record what the contract returns, never re-derive the stable snap.
+- ETH stream path: ChainlinkAnswerUpdated events (already walker-ingested) → deriver writing prices rows (source='chainlink:<aggregator>', 8-dec); on stream staleness past threshold, re-poll proxy `aggregator()`, WARN with the new address + fail health check; manual config update (automation deferred, honest).
+- weETH USD composition (cap-adapter caveat): record BOTH the ETH/USD stream price and a polled `getRate()` ratio row; the P3 risk engine composes them. Commit: `feat: oracle price ingestion - engine-exact OP polling, chainlink streams` (pathspec).
+
+---
+
+### Task 9: Full backfill + reconciliation harness + invariant scans
+
+- Backfill FROM SCRATCH (local volume was recreated — recon contradiction 2): all streams (2 lending + 4 aToken + 4 aggregator), OP 149,521,228→head (~5M blocks), ETH per-stream startBlocks. **R-001 gate: if free-RPC 403/429 stalls make sustained backfill infeasible, STOP and present the paid-tier decision to the user with observed throughput numbers.**
+- Reconciliation: `cmd/reconcile` — ≥25 sampled DM borrowers (stratified: migrated / post-migration / liquidated) derived-vs-`borrowingOf` at pinned head; Aave golden vectors; collateral snapshot freshness check; drift report artifact (JSON + human summary). W1's acceptance evidence.
+- Invariant scans as tests: distinct-hash-per-height on raw_logs; SUM(position_events.delta) == position_balances per (engine,account,asset,side) for source='event'; rate_indexes monotonic non-decreasing per (engine,asset,'borrow_index').
+
+---
+
+### Task 10: Anvil-fork replay + phase gate
+
+Unchanged from the pre-gate Roadmap: opt-in `ANVIL_FORK_RPC` integration test replaying a covered OP range against a fork and asserting derived balances vs fork view calls; then W1 closure — receipts + `doctor.py --stamp W1`, whole-branch review (standard + Codex per D-005), CI green, phase report, STATUS/ROADMAP transition.
