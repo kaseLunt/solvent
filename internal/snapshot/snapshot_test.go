@@ -17,6 +17,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kaselunt/solvent/internal/store"
 )
 
 var (
@@ -50,10 +52,19 @@ type upsertRec struct {
 	balances map[string]map[string]*big.Int
 }
 
+// sweepRec is one recorded per-account attempt outcome (account hex, the
+// multicall block it was recorded at, and whether it succeeded).
+type sweepRec struct {
+	account string
+	block   uint64
+	success bool
+}
+
 type fakeSnapStore struct {
 	registry      [][]byte
 	registryCalls int
 	upserts       []upsertRec
+	records       []sweepRec
 }
 
 func (s *fakeSnapStore) SnapshotAccounts(context.Context, string) ([][]byte, error) {
@@ -64,6 +75,24 @@ func (s *fakeSnapStore) SnapshotAccounts(context.Context, string) ([][]byte, err
 func (s *fakeSnapStore) UpsertSnapshotBalances(_ context.Context, _ string, account []byte, balances map[string]map[string]*big.Int, block uint64) error {
 	s.upserts = append(s.upserts, upsertRec{account: hex.EncodeToString(account), block: block, balances: balances})
 	return nil
+}
+
+func (s *fakeSnapStore) RecordSnapshotSweep(_ context.Context, _ string, block uint64, outcomes []store.SweepOutcome) error {
+	for _, o := range outcomes {
+		s.records = append(s.records, sweepRec{account: hex.EncodeToString(o.Account), block: block, success: o.Success})
+	}
+	return nil
+}
+
+// recordsFor filters the recorded outcomes for one account.
+func (s *fakeSnapStore) recordsFor(account []byte) []sweepRec {
+	var out []sweepRec
+	for _, r := range s.records {
+		if r.account == hex.EncodeToString(account) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 type mcResult struct {
@@ -112,6 +141,38 @@ func requestCallCount(t *testing.T, data []byte) int {
 	t.Helper()
 	_, calls := unpackRequest(t, data)
 	return len(calls)
+}
+
+// requestAccounts unpacks a captured request into the per-call Safe
+// addresses (raw 20-byte), so responders can answer per account.
+func requestAccounts(t *testing.T, data []byte) [][]byte {
+	t.Helper()
+	_, calls := unpackRequest(t, data)
+	var out [][]byte
+	for _, c := range calls {
+		args, err := dmLensABI.Methods["collateralOf"].Inputs.Unpack(c.data[4:])
+		require.NoError(t, err)
+		out = append(out, args[0].(common.Address).Bytes())
+	}
+	return out
+}
+
+// perAccountResponder answers each requested Safe individually: Safes in
+// failing revert (success=false), the rest succeed with the given tokens.
+func perAccountResponder(t *testing.T, block uint64, failing map[string]bool, tokens []tokenData) func(common.Address, []byte) ([]byte, error) {
+	t.Helper()
+	return func(_ common.Address, data []byte) ([]byte, error) {
+		accounts := requestAccounts(t, data)
+		results := make([]mcResult, len(accounts))
+		for i, acct := range accounts {
+			if failing[hex.EncodeToString(acct)] {
+				results[i] = mcResult{Success: false}
+			} else {
+				results[i] = mcResult{Success: true, ReturnData: encodeCollateralOf(t, tokens, big.NewInt(0))}
+			}
+		}
+		return encodeMulticall(t, block, results), nil
+	}
 }
 
 // unpackRequest decodes a captured tryBlockAndAggregate request into
@@ -306,29 +367,117 @@ func TestZeroAmountsOmittedAndEmptyUpsertClears(t *testing.T) {
 	require.Empty(t, st.upserts[1].balances, "all-zero safe upserts an empty map to clear stale rows")
 }
 
-// TestFailedAccountSkippedPartial: one reverted collateralOf skips that Safe
-// (keeping its previous snapshot) without failing the batch.
-func TestFailedAccountSkippedPartial(t *testing.T) {
-	respond := func(_ common.Address, data []byte) ([]byte, error) {
-		return encodeMulticall(t, 42, []mcResult{
-			{Success: false, ReturnData: nil},
-			{Success: true, ReturnData: encodeCollateralOf(t, []tokenData{
-				{Token: tokenUSDC, Amount: big.NewInt(5)},
-			}, big.NewInt(5))},
-		}), nil
-	}
-	s, st, _, _ := harness(t, [][]byte{acct(1), acct(2)}, respond, 10)
+// TestFailedAccountRetriedBoundedThenDegraded pins the full per-account
+// failure lifecycle: a reverted Safe does not fail its batch (the sibling's
+// upsert lands), is recorded status=failed, joins the immediate-retry queue,
+// gets exactly maxAccountRetries further attempts this sweep — an
+// all-reverted RETRY batch is per-account failure, never the fresh-batch
+// target error — and then the sweep COMPLETES (degraded) instead of wedging.
+func TestFailedAccountRetriedBoundedThenDegraded(t *testing.T) {
+	bad, good := acct(1), acct(2)
+	respond := perAccountResponder(t, 42, map[string]bool{hex.EncodeToString(bad): true},
+		[]tokenData{{Token: tokenUSDC, Amount: big.NewInt(5)}})
+	s, st, ch, _ := harness(t, [][]byte{bad, good}, respond, 10)
 
+	// Fresh batch: good upserts + success record; bad records failed and is
+	// requeued for immediate retry — the sweep is NOT complete yet.
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
 	require.Len(t, st.upserts, 1)
-	require.Equal(t, hex.EncodeToString(acct(2)), st.upserts[0].account)
+	require.Equal(t, hex.EncodeToString(good), st.upserts[0].account)
+	require.Equal(t, []sweepRec{{account: hex.EncodeToString(good), block: 42, success: true}}, st.recordsFor(good))
+	require.Equal(t, []sweepRec{{account: hex.EncodeToString(bad), block: 42, success: false}}, st.recordsFor(bad))
+
+	// Retry batches: one per Step, all reverting, each recorded — until the
+	// budget (maxAccountRetries) is spent and the sweep completes DEGRADED.
+	for i := 0; i < maxAccountRetries; i++ {
+		advanced, err = s.Step(context.Background())
+		require.NoError(t, err, "an all-reverted RETRY batch must not be a target error")
+		require.True(t, advanced)
+	}
+	require.Len(t, ch.calls, 1+maxAccountRetries, "1 fresh + bounded retry multicalls")
+	require.Len(t, st.recordsFor(bad), 1+maxAccountRetries, "every attempt recorded")
+	for _, r := range st.recordsFor(bad) {
+		require.False(t, r.success)
+	}
+	require.Len(t, st.upserts, 1, "the reverting safe never upserts")
+
+	// Sweep is over (degraded): inside the interval nothing more happens —
+	// the failed safe waits for the NEXT sweep, status=failed meanwhile.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Equal(t, 1, st.registryCalls)
 }
 
-// TestAllFailedBatchErrors: a batch where EVERY call reverted is a target
-// failure, not per-safe noise — the queue is untouched and the same batch
-// retries next round.
+// TestFailedAccountRecoversOnRetry: a Safe that reverts once and then
+// succeeds flips to status=success within the same sweep — the retry queue
+// is a recovery path, not just failure accounting.
+func TestFailedAccountRecoversOnRetry(t *testing.T) {
+	flaky, good := acct(1), acct(2)
+	failing := map[string]bool{hex.EncodeToString(flaky): true}
+	respond := perAccountResponder(t, 42, failing, []tokenData{{Token: tokenUSDC, Amount: big.NewInt(5)}})
+	s, st, _, _ := harness(t, [][]byte{flaky, good}, respond, 10)
+
+	_, err := s.Step(context.Background()) // fresh batch: flaky fails, good lands
+	require.NoError(t, err)
+	failing[hex.EncodeToString(flaky)] = false // the view recovers
+
+	advanced, err := s.Step(context.Background()) // retry batch: flaky succeeds
+	require.NoError(t, err)
+	require.True(t, advanced)
+	recs := st.recordsFor(flaky)
+	require.Len(t, recs, 2)
+	require.False(t, recs[0].success)
+	require.True(t, recs[1].success, "a successful retry must flip the status to success")
+	require.Equal(t, hex.EncodeToString(flaky), st.upserts[len(st.upserts)-1].account)
+
+	// Recovered and complete: nothing further inside the interval.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+}
+
+// TestZeroCollateralSuccessDistinguishableFromNeverSwept pins the three-way
+// disambiguation at the snapshotter level: a swept all-zero Safe produces a
+// SUCCESS record plus an empty wholesale upsert, while a Safe absent from
+// the registry produces NO record at all — so "empty because read" and
+// "empty because never read" are different states.
+func TestZeroCollateralSuccessDistinguishableFromNeverSwept(t *testing.T) {
+	swept, neverSwept := acct(1), acct(9)
+	s, st, _, _ := harness(t, [][]byte{swept}, uniformResponder(t, 77, nil), 10)
+
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []sweepRec{{account: hex.EncodeToString(swept), block: 77, success: true}},
+		st.recordsFor(swept), "zero collateral is a SUCCESS outcome")
+	require.Len(t, st.upserts, 1)
+	require.Empty(t, st.upserts[0].balances, "the empty upsert clears any stale rows")
+	require.Empty(t, st.recordsFor(neverSwept), "never-swept means no record, not a failed one")
+}
+
+// TestStartupSweepCoversRewindCrash pins the DURABLE half of the post-rewind
+// re-sweep contract: TriggerResweep is process memory, and a crash between
+// the runner's RewindDerived and the hook loses it — recovery needs no
+// durable marker because a FRESH snapshotter (a restarted process) starts
+// its first sweep unconditionally, superseding any lost re-sweep request.
+func TestStartupSweepCoversRewindCrash(t *testing.T) {
+	// A "restarted process": a brand-new Snapshotter that never saw the
+	// pre-crash TriggerResweep. Its very first Step must sweep.
+	s, st, ch, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 10, nil), 10)
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the startup sweep must start with no trigger and no elapsed interval")
+	require.Equal(t, 1, st.registryCalls)
+	require.Len(t, ch.calls, 1)
+}
+
+// TestAllFailedBatchErrors: a FRESH batch where EVERY call reverted is a
+// target failure, not per-safe noise — the queue is untouched, the same
+// batch retries next round, and NO status rows are recorded (the target
+// being down says nothing about individual Safes).
 func TestAllFailedBatchErrors(t *testing.T) {
 	respond := func(_ common.Address, data []byte) ([]byte, error) {
 		return encodeMulticall(t, 42, []mcResult{
@@ -340,6 +489,7 @@ func TestAllFailedBatchErrors(t *testing.T) {
 	_, err := s.Step(context.Background())
 	require.ErrorContains(t, err, "every collateralOf call")
 	require.Empty(t, st.upserts)
+	require.Empty(t, st.records, "a target-broken batch must not smear failed status over its safes")
 
 	// Queue untouched: the next Step retries the same batch.
 	_, err = s.Step(context.Background())

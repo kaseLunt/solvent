@@ -11,17 +11,35 @@
 // (tryBlockAndAggregate of collateralOf reads against the Debt Manager
 // proxy) and upserts one batch of snapshot-sourced position_balances rows
 // (store.UpsertSnapshotBalances, wholesale per account, at the block the
-// multicall executed in). Sweeps start when due: on first run, every
-// SOLVENT_SNAPSHOT_INTERVAL after the last completed sweep, and IMMEDIATELY
-// after a derived-state rewind (TriggerResweep, wired to the runner's
-// onRewind hook) — a rewind may have shrunk the registry and re-prioritized
-// accounts, so the in-flight queue is dropped and rebuilt.
+// multicall executed in). Sweeps start when due: UNCONDITIONALLY on first
+// run, every SOLVENT_SNAPSHOT_INTERVAL after the last completed sweep, and
+// IMMEDIATELY after a derived-state rewind (TriggerResweep, wired to the
+// runner's onRewind hook) — a rewind may have shrunk the registry and
+// re-prioritized accounts, so the in-flight queue is dropped and rebuilt.
+//
+// CRASH-SAFE POST-REWIND RE-SWEEP: TriggerResweep is process memory, so a
+// crash between the runner's RewindDerived and the hook loses the request —
+// deliberately without a durable marker, because the unconditional STARTUP
+// sweep is the durable leg: a restarted process always sweeps the full
+// registry on its first Step (lastSweep is zero), which supersedes any lost
+// re-sweep request. Pinned by TestStartupSweepCoversRewindCrash.
+//
+// SWEEP STATUS (store.RecordSnapshotSweep, snapshot_sweeps table): every
+// batch bulk-records one attempt outcome per Safe at the multicall block,
+// so zero-collateral success (success row + empty balances) is
+// distinguishable from never-swept (no row) and failed (status='failed').
 //
 // Failure posture: a failed multicall (transport) or a malformed response
 // leaves the queue untouched — the same batch retries next round. An
 // individual collateralOf revert (success=false under requireSuccess=false)
-// skips that Safe until the next sweep with a warning; a batch where EVERY
-// call reverted is an error (the target itself is broken, not one Safe).
+// is recorded status='failed' and the Safe joins an IMMEDIATE-RETRY queue,
+// drained after the fresh queue with up to maxAccountRetries further
+// attempts this sweep (a success flips its status); a Safe that exhausts
+// the budget stays failed until the next sweep, and a sweep that ends with
+// such Safes logs DEGRADED, not complete. A FRESH batch where EVERY call
+// reverted is an error (the target itself is broken, not one Safe); an
+// all-reverted RETRY batch is per-account failure, not a target error —
+// those Safes already reverted amid succeeding siblings.
 //
 // Not safe for concurrent use: Step and TriggerResweep are driven from the
 // daemon's single loop under the single-writer contract (D-004) — snapshot
@@ -54,12 +72,18 @@ var Multicall3Address = common.HexToAddress("0xcA11bde05977b3631167028862bE2a173
 // eth_call gas caps while keeping a full ~7k-Safe sweep under ~70 calls.
 const defaultBatchSize = 100
 
+// maxAccountRetries bounds how many IMMEDIATE retry attempts an
+// individually-reverting Safe gets per sweep beyond its first attempt;
+// after that it stays status='failed' until the next sweep.
+const maxAccountRetries = 3
+
 const sideCollateral = "collateral"
 
 // Store is the snapshotter's store surface (*store.Store satisfies it).
 type Store interface {
 	SnapshotAccounts(ctx context.Context, engine string) ([][]byte, error)
 	UpsertSnapshotBalances(ctx context.Context, engine string, account []byte, balances map[string]map[string]*big.Int, block uint64) error
+	RecordSnapshotSweep(ctx context.Context, engine string, block uint64, outcomes []store.SweepOutcome) error
 }
 
 var _ Store = (*store.Store)(nil)
@@ -147,7 +171,10 @@ type Snapshotter struct {
 	now   func() time.Time // injectable clock (tests)
 
 	// Sweep state (single-loop owned; see the package comment).
-	queue     [][]byte // Safes remaining in the current sweep
+	queue     [][]byte       // fresh Safes remaining in the current sweep
+	retry     [][]byte       // individually-reverted Safes awaiting immediate retry
+	retries   map[string]int // per-Safe retry attempts this sweep (key: raw account bytes)
+	exhausted int            // Safes that burned the whole retry budget this sweep
 	sweeping  bool
 	lastSweep time.Time // completion time of the last full sweep
 	resweep   bool      // an immediate re-sweep was requested (post-rewind)
@@ -177,11 +204,13 @@ func New(st Store, ch Chain, cfg Config) (*Snapshotter, error) {
 	return &Snapshotter{store: st, chain: ch, cfg: cfg, now: time.Now}, nil
 }
 
-// TriggerResweep requests an immediate full sweep: the in-flight queue (if
-// any) is dropped — a post-rewind registry may differ — and the next Step
-// starts fresh. Wired to the derivation runner's onRewind hook.
+// TriggerResweep requests an immediate full sweep: the in-flight queue and
+// retry state (if any) are dropped — a post-rewind registry may differ — and
+// the next Step starts fresh. Wired to the derivation runner's onRewind
+// hook; the crash-safe backstop is the unconditional startup sweep (see the
+// package comment).
 func (s *Snapshotter) TriggerResweep() {
-	s.queue, s.sweeping = nil, false
+	s.queue, s.retry, s.retries, s.exhausted, s.sweeping = nil, nil, nil, 0, false
 	s.resweep = true
 }
 
@@ -194,9 +223,10 @@ func (s *Snapshotter) sweepDue() bool {
 	return s.now().Sub(s.lastSweep) >= s.cfg.Interval
 }
 
-// Step performs one bounded unit of sweep work: at most one multicall batch.
-// Returns advanced=false when no sweep is due and none is in flight. Errors
-// leave the queue untouched, so the same batch retries next round.
+// Step performs one bounded unit of sweep work: at most one multicall batch
+// (fresh Safes first, then the immediate-retry queue). Returns
+// advanced=false when no sweep is due and none is in flight. Errors leave
+// the batch's queue untouched, so the same batch retries next round.
 func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 	if !s.sweeping {
 		if !s.sweepDue() {
@@ -215,80 +245,123 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			return false, nil
 		}
 		s.queue = accounts
+		s.retry, s.retries, s.exhausted = nil, map[string]int{}, 0
 		s.sweeping = true
 	}
 
-	n := s.cfg.BatchSize
-	if n > len(s.queue) {
-		n = len(s.queue)
+	// Fresh queue drains first; the immediate-retry queue follows, in
+	// homogeneous batches (the all-reverted posture differs between them).
+	src, fromRetry := &s.queue, false
+	if len(s.queue) == 0 {
+		src, fromRetry = &s.retry, true
 	}
-	if err := s.sweepBatch(ctx, s.queue[:n]); err != nil {
+	n := s.cfg.BatchSize
+	if n > len(*src) {
+		n = len(*src)
+	}
+	failed, err := s.sweepBatch(ctx, (*src)[:n], fromRetry)
+	if err != nil {
 		return false, err
 	}
-	s.queue = s.queue[n:]
-	if len(s.queue) == 0 {
-		s.queue, s.sweeping = nil, false
+	*src = (*src)[n:]
+
+	// Reverted Safes: bounded immediate retries, then failed-until-next-sweep.
+	for _, acct := range failed {
+		key := string(acct)
+		s.retries[key]++
+		if s.retries[key] <= maxAccountRetries {
+			s.retry = append(s.retry, acct)
+			continue
+		}
+		s.exhausted++
+		slog.Warn("safe exhausted its retry budget; keeping status=failed until the next sweep",
+			"engine", s.cfg.Engine, "account", hex.EncodeToString(acct), "attempts", s.retries[key])
+	}
+
+	if len(s.queue) == 0 && len(s.retry) == 0 {
+		exhausted := s.exhausted
+		s.queue, s.retry, s.retries, s.exhausted, s.sweeping = nil, nil, nil, 0, false
 		s.lastSweep = s.now()
-		slog.Info("collateral snapshot sweep completed", "engine", s.cfg.Engine)
+		if exhausted > 0 {
+			slog.Warn("collateral snapshot sweep completed DEGRADED — some safes stayed failed through the retry budget",
+				"engine", s.cfg.Engine, "failedAccounts", exhausted)
+		} else {
+			slog.Info("collateral snapshot sweep completed", "engine", s.cfg.Engine)
+		}
 	}
 	return true, nil
 }
 
 // sweepBatch reads one batch of Safes' collateral through a single
-// tryBlockAndAggregate call and upserts their snapshot balances at the
-// multicall's execution block.
-func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) error {
+// tryBlockAndAggregate call, upserts their snapshot balances at the
+// multicall's execution block, bulk-records every Safe's attempt outcome
+// (store.RecordSnapshotSweep), and returns the individually-reverted Safes
+// for the caller's retry bookkeeping. fromRetry marks a batch drawn from the
+// immediate-retry queue: its Safes already reverted amid succeeding
+// siblings, so an all-reverted retry batch is per-account failure, never the
+// fresh-batch "target is broken" error.
+func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte, fromRetry bool) ([][]byte, error) {
 	calls := make([]multicall3Call, len(accounts))
 	for i, acct := range accounts {
 		if len(acct) != common.AddressLength {
-			return fmt.Errorf("snapshotter %q: registry account %x is not a 20-byte address", s.cfg.Engine, acct)
+			return nil, fmt.Errorf("snapshotter %q: registry account %x is not a 20-byte address", s.cfg.Engine, acct)
 		}
 		data, err := dmLensABI.Pack("collateralOf", common.BytesToAddress(acct))
 		if err != nil {
-			return fmt.Errorf("snapshotter %q: pack collateralOf(%x): %w", s.cfg.Engine, acct, err)
+			return nil, fmt.Errorf("snapshotter %q: pack collateralOf(%x): %w", s.cfg.Engine, acct, err)
 		}
 		calls[i] = multicall3Call{Target: s.cfg.Target, CallData: data}
 	}
 	// requireSuccess=false: one broken Safe must not fail its whole batch.
 	input, err := multicall3ABI.Pack("tryBlockAndAggregate", false, calls)
 	if err != nil {
-		return fmt.Errorf("snapshotter %q: pack multicall: %w", s.cfg.Engine, err)
+		return nil, fmt.Errorf("snapshotter %q: pack multicall: %w", s.cfg.Engine, err)
 	}
 	out, err := s.chain.Call(ctx, Multicall3Address, input)
 	if err != nil {
-		return fmt.Errorf("snapshotter %q: multicall (%d safes): %w", s.cfg.Engine, len(accounts), err)
+		return nil, fmt.Errorf("snapshotter %q: multicall (%d safes): %w", s.cfg.Engine, len(accounts), err)
 	}
 	block, results, err := unpackMulticallResult(out, len(accounts))
 	if err != nil {
-		return fmt.Errorf("snapshotter %q: %w", s.cfg.Engine, err)
+		return nil, fmt.Errorf("snapshotter %q: %w", s.cfg.Engine, err)
 	}
 
-	failed := 0
+	var failed [][]byte
+	outcomes := make([]store.SweepOutcome, 0, len(accounts))
 	for i, res := range results {
 		if !res.success {
-			// An individual view revert: skip this Safe until the next sweep
-			// (its previous snapshot rows stay in place).
-			failed++
-			slog.Warn("collateralOf reverted for safe; keeping its previous snapshot until the next sweep",
+			// An individual view revert: previous snapshot rows stay in
+			// place; the caller schedules bounded immediate retries.
+			failed = append(failed, accounts[i])
+			outcomes = append(outcomes, store.SweepOutcome{Account: accounts[i], Success: false})
+			slog.Warn("collateralOf reverted for safe; keeping its previous snapshot",
 				"engine", s.cfg.Engine, "account", hex.EncodeToString(accounts[i]))
 			continue
 		}
 		balances, err := decodeCollateralOf(res.returnData)
 		if err != nil {
-			return fmt.Errorf("snapshotter %q: decode collateralOf(%x): %w", s.cfg.Engine, accounts[i], err)
+			return nil, fmt.Errorf("snapshotter %q: decode collateralOf(%x): %w", s.cfg.Engine, accounts[i], err)
 		}
 		// The upsert always runs for a successful read — including with an
 		// EMPTY balances map: wholesale replacement is what clears the rows
-		// of a Safe whose collateral went to zero.
+		// of a Safe whose collateral went to zero, and the paired success
+		// outcome is what distinguishes that from a never-swept Safe.
 		if err := s.store.UpsertSnapshotBalances(ctx, s.cfg.Engine, accounts[i], balances, block); err != nil {
-			return fmt.Errorf("snapshotter %q: upsert snapshot for %x: %w", s.cfg.Engine, accounts[i], err)
+			return nil, fmt.Errorf("snapshotter %q: upsert snapshot for %x: %w", s.cfg.Engine, accounts[i], err)
 		}
+		outcomes = append(outcomes, store.SweepOutcome{Account: accounts[i], Success: true})
 	}
-	if failed == len(accounts) && len(accounts) > 0 {
-		return fmt.Errorf("snapshotter %q: every collateralOf call in a %d-safe batch reverted — target %s is not serving the view",
+	if !fromRetry && len(failed) == len(accounts) && len(accounts) > 0 {
+		// Nothing recorded: the batch retries wholesale next round.
+		return nil, fmt.Errorf("snapshotter %q: every collateralOf call in a %d-safe batch reverted — target %s is not serving the view",
 			s.cfg.Engine, len(accounts), s.cfg.Target.Hex())
 	}
-	return nil
+	if err := s.store.RecordSnapshotSweep(ctx, s.cfg.Engine, block, outcomes); err != nil {
+		// Queue untouched upstream: the batch (idempotent upserts included)
+		// reruns next round rather than losing status rows.
+		return nil, fmt.Errorf("snapshotter %q: record sweep outcomes: %w", s.cfg.Engine, err)
+	}
+	return failed, nil
 }
 
 type multicallResult struct {
