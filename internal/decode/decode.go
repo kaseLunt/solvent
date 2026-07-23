@@ -794,15 +794,49 @@ func DecodeMigrationCalldata(input []byte) ([]MigrationSeed, error) {
 	return buildMigrationSeeds(addrs, amounts)
 }
 
+// unpackOuterCanonical unpacks args from data via go-ethereum's generic
+// abi.Arguments.Unpack, then re-Packs the unpacked values with that same
+// arguments spec and requires the result to be byte-identical to data --
+// a full-consumption canonicality backstop at the OUTER (commitAndExecute /
+// execute302) calldata layer, mirroring the inner migration-message parser's
+// own re-encode-and-compare backstop (unpackAddressUint256Arrays, above).
+//
+// Unpack alone is permissive in exactly the ways that matter here: it
+// tolerates trailing bytes appended after otherwise-complete calldata, dirty
+// (non-zero) upper-12-byte padding on an outer address word, non-canonical
+// (but still resolvable) dynamic-field offsets, and tail-aliasing between two
+// outer dynamic fields. A genuine abi.encode-produced call never produces any
+// of those shapes, so any re-encode mismatch here is treated as malformed/
+// adversarial calldata, not a false positive on real traffic.
+//
+// Error text is deliberately distinct from the inner parser's ("non-canonical
+// offset" / "trailing bytes" / "dirty address padding" / "array length
+// mismatch" / "fan-out exceeds" / "canonicality backstop: ...") so callers
+// can tell which layer rejected the input.
+func unpackOuterCanonical(args abi.Arguments, data []byte, label string) ([]interface{}, error) {
+	vals, err := args.Unpack(data)
+	if err != nil {
+		return nil, fmt.Errorf("unpack %s args: %w", label, err)
+	}
+	reEncoded, err := args.Pack(vals...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: non-canonical outer calldata (re-encode failed: %v)", label, err)
+	}
+	if !bytes.Equal(reEncoded, data) {
+		return nil, fmt.Errorf("%s: non-canonical outer calldata", label)
+	}
+	return vals, nil
+}
+
 func extractCommitAndExecuteMessage(data []byte) (message []byte, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			message, err = nil, fmt.Errorf("commitAndExecute: recovered panic: %v", rec)
 		}
 	}()
-	vals, unpackErr := commitAndExecuteABI.Methods["commitAndExecute"].Inputs.Unpack(data)
+	vals, unpackErr := unpackOuterCanonical(commitAndExecuteABI.Methods["commitAndExecute"].Inputs, data, "commitAndExecute")
 	if unpackErr != nil {
-		return nil, fmt.Errorf("unpack commitAndExecute args: %w", unpackErr)
+		return nil, unpackErr
 	}
 	if len(vals) != 3 {
 		return nil, fmt.Errorf("commitAndExecute: expected 3 args, got %d", len(vals))
@@ -820,9 +854,9 @@ func extractExecute302Message(data []byte) (message []byte, err error) {
 			message, err = nil, fmt.Errorf("execute302: recovered panic: %v", rec)
 		}
 	}()
-	vals, unpackErr := execute302ABI.Methods["execute302"].Inputs.Unpack(data)
+	vals, unpackErr := unpackOuterCanonical(execute302ABI.Methods["execute302"].Inputs, data, "execute302")
 	if unpackErr != nil {
-		return nil, fmt.Errorf("unpack execute302 args: %w", unpackErr)
+		return nil, unpackErr
 	}
 	if len(vals) != 1 {
 		return nil, fmt.Errorf("execute302: expected 1 arg, got %d", len(vals))

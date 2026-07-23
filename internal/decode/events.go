@@ -281,10 +281,12 @@ func (ATokenTransfer) Name() string { return "ATokenTransfer" }
 // uint256 value, uint256 balanceIncrease, uint256 index) -- Index is the
 // liquidity index (ray) at mint time.
 //
-// Value is NOT the action principal: it includes/nets BalanceIncrease
-// (interest accrual); scaled deltas must be derived from the deployed
-// implementation's source (see plan Task 6); Value==BalanceIncrease means
-// pure interest, zero principal.
+// Value is NOT the action principal: per Aave's ScaledBalanceTokenBase, Value
+// = actionAmount + BalanceIncrease (BalanceIncrease is interest accrued since
+// the account's last index checkpoint, folded into the same mint); scaled
+// deltas must be derived from the deployed implementation's source (see plan
+// Task 6). Value==BalanceIncrease therefore means actionAmount == 0: pure
+// interest capitalization, zero principal minted.
 type ATokenMint struct {
 	Caller, OnBehalfOf            common.Address
 	Value, BalanceIncrease, Index *big.Int
@@ -295,10 +297,13 @@ func (ATokenMint) Name() string { return "ATokenMint" }
 // ATokenBurn corresponds to Burn(address indexed from, address indexed
 // target, uint256 value, uint256 balanceIncrease, uint256 index).
 //
-// Value is NOT the action principal: it includes/nets BalanceIncrease
-// (interest accrual); scaled deltas must be derived from the deployed
-// implementation's source (see plan Task 6); Value==BalanceIncrease means
-// pure interest, zero principal.
+// Value is NOT the action principal: per Aave's ScaledBalanceTokenBase, Value
+// = actionAmount - BalanceIncrease (BalanceIncrease is interest accrued since
+// the account's last index checkpoint, netted against the burned amount, not
+// added to it as in Mint); scaled deltas must be derived from the deployed
+// implementation's source (see plan Task 6). Value==BalanceIncrease therefore
+// means actionAmount == 2*BalanceIncrease -- NOT zero principal (that reading
+// only holds for Mint, where the sign is reversed).
 type ATokenBurn struct {
 	From, Target                  common.Address
 	Value, BalanceIncrease, Index *big.Int

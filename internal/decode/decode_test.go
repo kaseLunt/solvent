@@ -338,6 +338,70 @@ func TestUnpackAddressUint256ArraysCanonicalRoundTrips(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Decode fix round 2, Fix 1: outer-layer (commitAndExecute / execute302
+// argument unpacking) full-consumption canonicality backstop
+// (unpackOuterCanonical, decode.go). Mirrors the inner parser's adversarial
+// coverage above, but at the outer layer and grounded in the two REAL
+// migration-calldata fixtures (not synthetic): go-ethereum's generic
+// abi.Arguments.Unpack alone tolerates trailing bytes appended after
+// complete calldata and dirty (non-zero) upper-12-byte padding on an outer
+// address word -- both must now error with "non-canonical outer calldata".
+// The unmodified real fixtures decoding byte-identical seeds is pinned by
+// TestDecodeMigrationCalldataCommitAndExecute / TestDecodeMigrationCalldataExecute302
+// (fixtures_test.go), which continue to pass unchanged against this fix.
+// ---------------------------------------------------------------------------
+
+func TestDecodeMigrationCalldataCommitAndExecuteTrailingWordErrors(t *testing.T) {
+	fx := loadMigrationCalldataFixture(t, "migration_calldata_commit_and_execute.json")
+	input := append(common.FromHex(fx.Input), make([]byte, 32)...) // one extra word appended after complete calldata
+	seeds, err := DecodeMigrationCalldata(input)
+	require.Error(t, err)
+	require.Nil(t, seeds)
+	require.Contains(t, err.Error(), "non-canonical outer calldata")
+}
+
+func TestDecodeMigrationCalldataCommitAndExecuteDirtyOuterAddressPaddingErrors(t *testing.T) {
+	fx := loadMigrationCalldataFixture(t, "migration_calldata_commit_and_execute.json")
+	input := common.FromHex(fx.Input)
+	// _receiveLib is commitAndExecute's first argument and a static
+	// (non-tuple, non-dynamic) address, so its word is always exactly the
+	// first 32 bytes after the 4-byte selector, regardless of the specific
+	// transaction; byte 0 of that word falls in its zero-padding region.
+	require.GreaterOrEqual(t, len(input), 4+32)
+	input[4] = 0xff
+	seeds, err := DecodeMigrationCalldata(input)
+	require.Error(t, err)
+	require.Nil(t, seeds)
+	require.Contains(t, err.Error(), "non-canonical outer calldata")
+}
+
+func TestDecodeMigrationCalldataExecute302TrailingWordErrors(t *testing.T) {
+	fx := loadMigrationCalldataFixture(t, "migration_calldata_execute302.json")
+	input := append(common.FromHex(fx.Input), make([]byte, 32)...) // one extra word appended after complete calldata
+	seeds, err := DecodeMigrationCalldata(input)
+	require.Error(t, err)
+	require.Nil(t, seeds)
+	require.Contains(t, err.Error(), "non-canonical outer calldata")
+}
+
+func TestDecodeMigrationCalldataExecute302DirtyOuterAddressPaddingErrors(t *testing.T) {
+	fx := loadMigrationCalldataFixture(t, "migration_calldata_execute302.json")
+	input := common.FromHex(fx.Input)
+	// execute302 has exactly one argument, _executionParams, a dynamic tuple
+	// (it contains `bytes` fields); as the sole argument its head word
+	// (bytes [4:36] of input) is therefore always exactly the canonical
+	// offset 32, and the tuple's own first field, `receiver` (address,
+	// static), always starts immediately after at bytes [36:68] -- byte 36
+	// falls in that address word's zero-padding region.
+	require.GreaterOrEqual(t, len(input), 68)
+	input[36] = 0xff
+	seeds, err := DecodeMigrationCalldata(input)
+	require.Error(t, err)
+	require.Nil(t, seeds)
+	require.Contains(t, err.Error(), "non-canonical outer calldata")
+}
+
+// ---------------------------------------------------------------------------
 // Sanity: the migration ABI's computed topic0 matches recon's cited hash
 // exactly (0x3f1c4431cbe26a58837755d2461e40a6561ee3edd0e31ca91edb845637acda8b,
 // per recon/derivation-notes.md "Migration finding", cross-checked against
