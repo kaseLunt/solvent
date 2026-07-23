@@ -22,12 +22,6 @@ type fakeRPC struct {
 	chainID    uint64
 	txData     []byte
 	callResult []byte
-
-	// callStarted (closed when CallContract begins) and callGate (blocks
-	// CallContract until closed) let interleaving tests hold a call in
-	// flight deterministically. Nil channels: unused, no gating.
-	callStarted chan struct{}
-	callGate    chan struct{}
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -76,13 +70,6 @@ func (f *fakeRPC) TransactionByHash(ctx context.Context, hash common.Hash) (*typ
 
 func (f *fakeRPC) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	f.calls++
-	if f.callStarted != nil {
-		close(f.callStarted)
-		f.callStarted = nil
-	}
-	if f.callGate != nil {
-		<-f.callGate
-	}
 	if f.fail {
 		return nil, errors.New(f.name + " down")
 	}
@@ -175,123 +162,84 @@ func TestCallReturnsResultWithFailover(t *testing.T) {
 	require.Equal(t, 1, b.calls)
 }
 
-// RotateAwayFrom is the semantic-staleness escape hatch: a caller that
-// discovers a successful-looking response was actually unusable (stale
-// chain state) hands back its serving endpoint's token and forces the
-// sticky active endpoint past it — without an RPC error ever occurring.
-func TestRotateAwayFromAdvancesStickyEndpoint(t *testing.T) {
-	a := &fakeRPC{name: "a", callResult: []byte{0xaa}}
+// CallFrom is the caller-scoped semantic-failover entry: the attempt walk
+// starts at the given index instead of the shared sticky hint, and the
+// shared hint is left alone — a following shared-path call still starts
+// wherever error-driven routing last left it.
+func TestCallFromStartsAtGivenIndexAndLeavesSharedHintAlone(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}, blockNum: 7}
 	b := &fakeRPC{name: "b", callResult: []byte{0xbb}}
 	f := newFailover([]rpcClient{a, b})
 	require.Equal(t, 2, f.EndpointCount())
 
 	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
-	out, tok, err := f.CallWithToken(context.Background(), to, []byte{0x01})
-	require.NoError(t, err)
-	require.Equal(t, []byte{0xaa}, out)
-	require.Equal(t, 0, tok.Index, "the token names the endpoint that served the call")
-	require.Equal(t, 1, a.calls)
-	require.Equal(t, 0, b.calls)
-
-	// The call above "succeeded" but the caller judges its response stale
-	// and rejects it against its serving endpoint — do never saw an error.
-	f.RotateAwayFrom(tok)
-
-	out, tok, err = f.CallWithToken(context.Background(), to, []byte{0x01})
+	out, tok, err := f.CallFrom(context.Background(), 1, to, []byte{0x01})
 	require.NoError(t, err)
 	require.Equal(t, []byte{0xbb}, out)
-	require.Equal(t, 1, tok.Index, "the next call starts at the rotated endpoint")
-	require.Equal(t, 1, a.calls, "a is not retried: rotation moved past it without an error")
+	require.Equal(t, 1, tok.Index, "the token names the endpoint that served the call")
+	require.Equal(t, 0, a.calls, "the walk starts at the caller's index, not the shared hint")
+	require.Equal(t, 1, b.calls)
+
+	// The caller-scoped success wrote nothing shared: the shared path still
+	// starts at endpoint 0.
+	n, err := f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), n)
+	require.Equal(t, 1, a.calls, "the shared hint was untouched by CallFrom")
 	require.Equal(t, 1, b.calls)
 }
 
-// A semantic rotation must linearize against in-flight calls: call A begins
-// on endpoint 0 and BLOCKS; a semantic rotation away from endpoint 0 lands
-// while A is in flight; A then completes successfully. A's completion must
-// NOT pin the sticky active endpoint back onto the rejected endpoint — the
-// rotation's revision bump invalidates A's sticky write — and the next call
-// starts on endpoint 1.
-func TestInFlightSuccessDoesNotRepinRotatedEndpoint(t *testing.T) {
-	started := make(chan struct{})
-	gate := make(chan struct{})
-	a := &fakeRPC{name: "a", callResult: []byte{0xaa}, callStarted: started, callGate: gate}
-	b := &fakeRPC{name: "b", callResult: []byte{0xbb}}
+// CallFrom normalizes its start (mod the endpoint count), rotates on error
+// within its own walk exactly like the shared path, and reports Index -1
+// when every endpoint fails.
+func TestCallFromWrapsModuloAndRotatesOnError(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}}
+	b := &fakeRPC{name: "b", fail: true}
 	f := newFailover([]rpcClient{a, b})
 
+	// start 3 on 2 endpoints → endpoint 1; it fails; the walk wraps to 0.
 	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
-	type callOut struct {
-		res []byte
-		tok EndpointToken
-		err error
-	}
-	done := make(chan callOut, 1)
-	go func() {
-		res, tok, err := f.CallWithToken(context.Background(), to, []byte{0x01})
-		done <- callOut{res: res, tok: tok, err: err}
-	}()
-
-	<-started // call A is in flight on endpoint 0
-	// An earlier response from endpoint 0 is judged semantically stale while
-	// A is still running: the rotation moves active 0→1 and bumps the
-	// revision, so A's snapshot of the pre-rotation state is now invalid for
-	// the sticky write (but not for A's own result).
-	f.RotateAwayFrom(EndpointToken{Index: 0})
-	close(gate) // A completes successfully
-
-	out := <-done
-	require.NoError(t, out.err)
-	require.Equal(t, []byte{0xaa}, out.res, "the in-flight call still returns its own result")
-	require.Equal(t, 0, out.tok.Index, "its token still names the endpoint that served it")
-
-	f.mu.Lock()
-	active := f.active
-	f.mu.Unlock()
-	require.Equal(t, 1, active, "the in-flight completion must not pin active back onto the rejected endpoint")
-
-	_, tok, err := f.CallWithToken(context.Background(), to, []byte{0x01})
+	out, tok, err := f.CallFrom(context.Background(), 3, to, []byte{0x01})
 	require.NoError(t, err)
-	require.Equal(t, 1, tok.Index, "the next call starts on the rotated-to endpoint")
-	require.Equal(t, 1, a.calls, "the rejected endpoint is not re-served")
-	require.Equal(t, 1, b.calls)
+	require.Equal(t, []byte{0xaa}, out)
+	require.Equal(t, 0, tok.Index)
+	require.Equal(t, 1, b.calls, "the walk started at the normalized index")
+	require.Equal(t, 1, a.calls)
+
+	a.fail = true
+	_, tok, err = f.CallFrom(context.Background(), 0, to, []byte{0x01})
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.Equal(t, -1, tok.Index, "all endpoints failed: nothing to reject")
 }
 
-// RotateAwayFrom is ENDPOINT-BOUND: a rejection carrying the token of an
-// endpoint that is no longer active (an interleaved success already moved
-// active elsewhere) must NOT rotate active off the newer endpoint — advancing
-// blindly would punish an unrelated, possibly healthy endpoint.
-func TestRotateAwayFromStaleTokenDoesNotMoveActive(t *testing.T) {
-	a := &fakeRPC{name: "a", callResult: []byte{0xaa}}
-	b := &fakeRPC{name: "b", callResult: []byte{0xbb}}
-	c := &fakeRPC{name: "c", callResult: []byte{0xcc}}
-	f := newFailover([]rpcClient{a, b, c})
+// The counter-schedule that retired the shared-hint semantic rotation, at
+// the chain layer: error-driven routing pins the shared hint onto endpoint 1
+// (endpoint 0 down for the walker-style call); a caller-scoped CallFrom(0)
+// then succeeds on endpoint 0. That caller-scoped success must NOT re-pin
+// the shared hint — the next shared-path call still starts on endpoint 1.
+// Symmetrically (the snapshotter's direction), a semantic caller's routing
+// preference can never be overwritten BY the shared path, because it never
+// lived in shared state at all.
+func TestCallFromSuccessDoesNotRepinSharedHint(t *testing.T) {
+	a := &fakeRPC{name: "a", fail: true, callResult: []byte{0xaa}}
+	b := &fakeRPC{name: "b", callResult: []byte{0xbb}, blockNum: 9}
+	f := newFailover([]rpcClient{a, b})
 
-	// First call: served by endpoint 0; the caller keeps its token.
+	_, err := f.BlockNumber(context.Background()) // a fails, b serves → shared hint = 1
+	require.NoError(t, err)
+
+	a.fail = false // a recovers for the semantic caller's read
 	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
-	_, tokA, err := f.CallWithToken(context.Background(), to, []byte{0x01})
+	out, tok, err := f.CallFrom(context.Background(), 0, to, []byte{0x01})
 	require.NoError(t, err)
-	require.Equal(t, 0, tokA.Index)
+	require.Equal(t, []byte{0xaa}, out)
+	require.Equal(t, 0, tok.Index)
 
-	// Interleaved activity moves active to endpoint 2: 0 and 1 go down and
-	// a second call fails over to 2, pinning it active.
-	a.fail, b.fail = true, true
-	_, tokB, err := f.CallWithToken(context.Background(), to, []byte{0x01})
+	aCalls := a.calls
+	n, err := f.BlockNumber(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 2, tokB.Index)
-
-	// The FIRST call's response is now judged stale. Its endpoint is no
-	// longer active, so the rejection must leave active on endpoint 2.
-	f.RotateAwayFrom(tokA)
-	f.mu.Lock()
-	active := f.active
-	f.mu.Unlock()
-	require.Equal(t, 2, active, "a token that no longer matches active must not move it")
-
-	aCalls, bCalls := a.calls, b.calls
-	_, tok, err := f.CallWithToken(context.Background(), to, []byte{0x01})
-	require.NoError(t, err)
-	require.Equal(t, 2, tok.Index, "the next call still starts on the interleaved success's endpoint")
-	require.Equal(t, aCalls, a.calls, "the down endpoints are not re-walked")
-	require.Equal(t, bCalls, b.calls)
+	require.Equal(t, uint64(9), n)
+	require.Equal(t, aCalls, a.calls, "the shared path still starts at its own hint, not the caller-scoped success")
 }
 
 func TestVerifyChainIDAcceptsMatching(t *testing.T) {

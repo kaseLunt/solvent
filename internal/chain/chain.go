@@ -28,10 +28,12 @@ type rpcClient interface {
 }
 
 // EndpointToken identifies which endpoint served a successful semantic-layer
-// call (CallWithToken). A caller that later judges that response semantically
-// unusable hands the token back to RotateAwayFrom, which rotates ONLY if that
-// exact endpoint is still the sticky active one — an endpoint-bound rejection
-// instead of a blind "advance whatever happens to be active by now".
+// call (CallWithToken / CallFrom). A caller that later judges that response
+// semantically unusable (e.g. an endpoint frozen on stale chain state, which
+// never fails at the RPC layer and so never trips error-driven rotation)
+// routes ITSELF around that exact endpoint on subsequent calls — CallFrom
+// starting one past Token.Index — a caller-scoped exclusion that leaves the
+// shared routing hint alone.
 type EndpointToken struct {
 	// Index is the position of the serving endpoint in the failover's client
 	// list; -1 when the call failed on every endpoint (nothing to reject).
@@ -42,24 +44,19 @@ type Failover struct {
 	clients []rpcClient
 	mu      sync.Mutex
 	// active is a routing hint, not a health registry: it always names the
-	// endpoint that most recently succeeded. Under concurrent callers the
-	// last writer wins, which is safe — every candidate value refers to an
-	// endpoint that just served a successful call. The one deliberate
-	// exception is a SEMANTIC rotation (RotateAwayFrom): a caller that
-	// discovers a "successful" response was semantically unusable (e.g. an
-	// endpoint frozen on stale chain state, which never fails at the RPC
-	// layer and so never trips do's own error-driven rotation) forces active
-	// past that endpoint. Semantic rotations LINEARIZE against in-flight
-	// calls through the rotation revision counter below: each rotation bumps
-	// it, and do's sticky active-write on success is conditional on the
-	// revision it started under — a call begun before the rotation still
-	// returns its result, but can no longer pin active back onto the
-	// rejected endpoint.
+	// endpoint that most recently succeeded on the SHARED path (do). Under
+	// concurrent callers the last writer wins, which is safe — every
+	// candidate value refers to an endpoint that just served a successful
+	// call. Callers holding a SEMANTIC exclusion (a "successful" response
+	// judged unusable, e.g. an endpoint frozen on stale chain state, which
+	// never fails at the RPC layer and so never trips do's error-driven
+	// rotation) deliberately do NOT write this hint: they route themselves
+	// around the bad endpoint with CallFrom, which neither reads nor writes
+	// active. A shared hint cannot carry a caller-specific exclusion — any
+	// other caller's success on the excluded endpoint would legitimately
+	// re-pin the hint right back onto it.
 	active int
-	// rotation is the semantic-rotation revision counter guarding active
-	// (see above). Incremented by RotateAwayFrom, under mu with active.
-	rotation uint64
-	// attemptTimeout bounds each per-endpoint attempt inside do.
+	// attemptTimeout bounds each per-endpoint attempt inside doFrom.
 	attemptTimeout time.Duration
 }
 
@@ -82,29 +79,41 @@ func newFailover(clients []rpcClient) *Failover {
 	return &Failover{clients: clients, attemptTimeout: defaultAttemptTimeout}
 }
 
-// do walks the endpoints starting from the sticky active one and returns the
-// index of the endpoint that served the successful attempt (-1 when all
-// failed). The sticky active-write on success is guarded by the semantic-
-// rotation revision: if a RotateAwayFrom landed while this call was in
-// flight, the write is skipped — the rotation's routing decision wins over
-// the interleaved completion, which at worst forfeits a harmless routing-hint
-// update. (Error-driven rotation inside the loop is unaffected: it is
-// positional within this call's own attempt sequence.)
+// do walks the endpoints starting from the sticky active hint and, on
+// success, re-pins the hint onto the endpoint that served the attempt —
+// SHARED-path routing, moved only by observed successes and failures (see
+// doFrom for the walk itself). Semantic-layer callers with an endpoint
+// exclusion use CallFrom instead, which bypasses this hint entirely.
 func (f *Failover) do(ctx context.Context, op string, fn func(ctx context.Context, c rpcClient) error) (int, error) {
 	f.mu.Lock()
 	start := f.active
-	startRotation := f.rotation
 	f.mu.Unlock()
 
+	idx, err := f.doFrom(ctx, op, start, fn)
+	if err != nil {
+		return idx, err
+	}
+	f.mu.Lock()
+	f.active = idx
+	f.mu.Unlock()
+	return idx, nil
+}
+
+// doFrom walks the endpoints starting at start, rotating on error, and
+// returns the index of the endpoint that served the successful attempt (-1
+// when all failed). Each attempt is bounded by attemptTimeout so a hung
+// endpoint fails its attempt and rotates instead of blocking on the caller's
+// (possibly unbounded) context. doFrom itself NEVER touches the shared
+// active hint: do layers the sticky re-pin on top for shared-path callers,
+// while CallFrom deliberately does not — a caller-scoped routing preference
+// must not fight the error-driven routing other callers depend on.
+func (f *Failover) doFrom(ctx context.Context, op string, start int, fn func(ctx context.Context, c rpcClient) error) (int, error) {
 	var lastErr error
 	for i := 0; i < len(f.clients); i++ {
 		if err := ctx.Err(); err != nil {
 			return -1, fmt.Errorf("%s aborted: %w", op, err)
 		}
 		idx := (start + i) % len(f.clients)
-		// Per-attempt timeout: a hung endpoint fails this attempt and
-		// rotates instead of blocking on the caller's (possibly unbounded)
-		// context.
 		attemptCtx, cancel := context.WithTimeout(ctx, f.attemptTimeout)
 		err := fn(attemptCtx, f.clients[idx])
 		cancel()
@@ -113,41 +122,18 @@ func (f *Failover) do(ctx context.Context, op string, fn func(ctx context.Contex
 			slog.Warn("rpc endpoint failed, rotating", "op", op, "endpoint", idx, "err", err)
 			continue
 		}
-		f.mu.Lock()
-		if f.rotation == startRotation {
-			f.active = idx
-		}
-		f.mu.Unlock()
 		return idx, nil
 	}
 	return -1, fmt.Errorf("all rpc endpoints failed (%s): %w", op, lastErr)
 }
 
-// RotateAwayFrom advances the sticky active endpoint past the endpoint named
-// by tok, under the mutex. It is for SEMANTIC failures — a response that is
-// well-formed at the RPC layer but unusable by the caller (e.g. an endpoint
-// serving stale chain state) — where the eth_call itself succeeded, so do's
-// error-driven rotation never sees a problem and would keep re-serving the
-// same endpoint forever. Complements error-driven rotation, which cannot see
-// semantic staleness — only the caller who interpreted the response can.
-//
-// The rotation is ENDPOINT-BOUND: active advances (mod the endpoint count)
-// only if the rejected endpoint is still the active one. If an interleaved
-// success already moved active elsewhere, advancing blindly would punish an
-// unrelated — possibly healthy — endpoint, so active is left alone. The
-// revision counter increments UNCONDITIONALLY either way: any in-flight call
-// that snapshotted active before this rotation forfeits its sticky
-// active-write, which at worst skips an unrelated routing-hint update — the
-// next successful call simply rewrites the hint. That asymmetry is the point:
-// a semantic rejection must never lose to an in-flight completion racing it.
-func (f *Failover) RotateAwayFrom(tok EndpointToken) {
-	f.mu.Lock()
-	if tok.Index == f.active {
-		f.active = (f.active + 1) % len(f.clients)
-	}
-	f.rotation++
-	f.mu.Unlock()
-}
+// NOTE: RotateAwayFrom (the shared-hint semantic rotation) and its rotation
+// revision counter were retired in fix wave 6, superseded by CallFrom's
+// caller-scoped routing: a shared-hint rotation could not survive an
+// interleaved shared-path success on the rejected endpoint (e.g. the
+// walker's BlockNumber succeeding on an endpoint whose eth_call state is
+// frozen), which legitimately re-pinned the hint and bounced the semantic
+// caller straight back — forever. The exclusion now lives with the caller.
 
 // EndpointCount reports how many RPC endpoints this Failover rotates across.
 func (f *Failover) EndpointCount() int {
@@ -232,12 +218,43 @@ func (f *Failover) Call(ctx context.Context, to common.Address, data []byte) ([]
 
 // CallWithToken is Call plus an EndpointToken naming the endpoint that served
 // the response. Semantic-layer callers (the snapshotter) keep the token so
-// that a response later judged semantically stale can be rejected against
-// EXACTLY the endpoint that produced it (RotateAwayFrom), not against
-// whatever endpoint happens to be active by the time the judgment lands.
+// that a response later judged semantically stale can be routed around
+// EXACTLY the endpoint that produced it (CallFrom starting past the token's
+// index), not around whatever endpoint happens to be active by the time the
+// judgment lands.
 func (f *Failover) CallWithToken(ctx context.Context, to common.Address, data []byte) ([]byte, EndpointToken, error) {
 	var out []byte
 	idx, err := f.do(ctx, "call", func(ctx context.Context, c rpcClient) error {
+		res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, nil)
+		if err != nil {
+			return err
+		}
+		out = res
+		return nil
+	})
+	if err != nil {
+		return nil, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
+// CallFrom is CallWithToken with a CALLER-SCOPED starting endpoint: the
+// attempt walk starts at startIndex (mod the endpoint count) instead of the
+// shared sticky active hint, and a success neither reads nor writes that
+// hint. This is the semantic-failover entry: a caller that judged an
+// endpoint's well-formed responses unusable (stale chain state — invisible
+// to error-driven rotation, since the RPC calls succeed) owns a persistent
+// preference of its own and starts every retry past the rejected endpoint.
+// The shared hint deliberately stays out of it: semantic callers must not
+// fight error-driven routing — any other caller's success on the rejected
+// endpoint would legitimately re-pin the shared hint there, and a shared-
+// hint-driven exclusion would bounce straight back to the bad endpoint.
+// Error-driven rotation WITHIN this call's own attempt walk still applies.
+func (f *Failover) CallFrom(ctx context.Context, startIndex int, to common.Address, data []byte) ([]byte, EndpointToken, error) {
+	n := len(f.clients)
+	start := ((startIndex % n) + n) % n // normalize, negatives included
+	var out []byte
+	idx, err := f.doFrom(ctx, "call", start, func(ctx context.Context, c rpcClient) error {
 		res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, nil)
 		if err != nil {
 			return err

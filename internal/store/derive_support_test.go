@@ -976,6 +976,38 @@ func TestApplySweepBatchRejectsStaleExecutionBlocks(t *testing.T) {
 		"a failed attempt keeps the previous snapshot")
 }
 
+// TestSweepGenerationsReadsDurableStamps: the snapshotter's reconciliation
+// probe returns each requested account's snapshot_sweeps generation stamp —
+// success AND failed rows both carry one — keyed by lowercase account-hex;
+// accounts with no sweep row are absent; an empty account set short-circuits
+// to an empty map; and the read is engine-scoped.
+func TestSweepGenerationsReadsDurableStamps(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	a1, a2, a3 := []byte{0xA1}, []byte{0xA2}, []byte{0xA3}
+
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 100, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{"bb": {"collateral": big.NewInt(5)}}},
+		{Account: a2, OK: false},
+	}))
+
+	got, err := s.SweepGenerations(ctx, engine, [][]byte{a1, a2, a3})
+	require.NoError(t, err)
+	require.Equal(t, map[string]uint64{"a1": gen, "a2": gen}, got,
+		"success and failed rows both stamp; the rowless account is absent")
+
+	got, err = s.SweepGenerations(ctx, engine, nil)
+	require.NoError(t, err)
+	require.Empty(t, got, "an empty account set reads nothing")
+
+	got, err = s.SweepGenerations(ctx, "aave_v3_etherfi", [][]byte{a1, a2})
+	require.NoError(t, err)
+	require.Empty(t, got, "another engine's rows are invisible")
+}
+
 // TestCheckWriterLockLivenessAndLoss: before acquisition the check refuses;
 // while held it passes; after a server-side release on the SAME session it
 // reports the lock lost.

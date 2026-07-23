@@ -37,19 +37,31 @@
 // accounts lagging for retry, and an ALL-stale batch surfaces as
 // store.ErrStaleSweepBatch, logged here as a DEGRADED round rather than
 // treated as applied. A RESPONSIVE endpoint frozen on old chain state passes
-// do's error-driven rotation every time (the eth_call succeeds), so Step also
-// calls RotateAwayFrom on this path, handing back the endpoint token the
-// multicall returned: the rejection is bound to EXACTLY the endpoint that
-// served the stale batch (not whatever endpoint is active by then), and the
-// next Step's multicall starts from a different endpoint instead of
-// re-serving the identical stale batch forever. Step tracks consecutive
-// stale rounds since the last progress transition — a landed batch, a
-// completed generation, or any observed generation change (rewind/re-sweep
-// bumps included) — and only once a FRESH streak has cycled through every
-// configured endpoint without progress logs an explicit "all endpoints
-// stale" DEGRADED warning — the existing DEGRADED posture still stands
-// (nothing wedges), but the operator learns rotation alone cannot save this
-// round. An individual collateralOf revert
+// the failover's error-driven rotation every time (the eth_call succeeds),
+// so Step pins a CALLER-SCOPED PERSISTENT endpoint preference on this path:
+// the next multicall starts one past the endpoint (named by the multicall's
+// token) that served the stale batch — via chain.CallFrom, which leaves the
+// failover's SHARED routing hint alone — and the preference persists,
+// advancing past each further stale server, until real progress releases it
+// back to the shared hint. The shared hint deliberately carries none of
+// this: any other caller's success on the rejected endpoint (the walker's
+// BlockNumber) legitimately re-pins the shared hint there, so a shared-hint
+// rotation cannot hold a caller-specific semantic exclusion — the sweep
+// would bounce straight back to the frozen endpoint forever. Step tracks
+// consecutive stale rounds since the last progress transition — a landed
+// batch, a completed generation, or any observed generation change
+// (rewind/re-sweep bumps included) — and only once a FRESH streak has cycled
+// through every configured endpoint without progress logs an explicit "all
+// endpoints stale" DEGRADED warning — the existing DEGRADED posture still
+// stands (nothing wedges), but the operator learns rotation alone cannot
+// save this round. An ERRORED ApplySweepBatch may nonetheless have COMMITTED
+// (it returns its transaction Commit's error — commit indeterminacy, a lost
+// ack): Step remembers that batch's accounts and generation and, at its next
+// round BEFORE any processing, probes their durable generation stamps
+// (store.SweepGenerations) — a stamp matching the applied generation is
+// durable evidence the batch landed, which counts as progress (streak and
+// preference reset), so a false all-endpoints-stale DEGRADED can never span
+// real durable progress. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -117,32 +129,38 @@ type Store interface {
 	SweepWorkBatch(ctx context.Context, engine string, generation uint64, maxAttempts, limit int) ([][]byte, error)
 	ApplySweepBatch(ctx context.Context, engine string, generation, execBlock uint64, results []store.SweepResult) error
 	CompleteSweepGeneration(ctx context.Context, engine string, generation uint64) (failed int64, stamped bool, err error)
+	// SweepGenerations reads the given accounts' durable generation stamps
+	// (lowercase account-hex → generation; rowless accounts absent) — the
+	// reconciliation probe resolving an errored ApplySweepBatch's commit
+	// indeterminacy at the next Step.
+	SweepGenerations(ctx context.Context, engine string, accounts [][]byte) (map[string]uint64, error)
 }
 
 var _ Store = (*store.Store)(nil)
 
 // Chain is the snapshotter's chain surface (*chain.Failover satisfies it).
-// CallWithToken, RotateAwayFrom and EndpointCount back the semantic-staleness
-// rotation escape hatch: a batch response that is well-formed at the RPC
-// layer but stale per the store's monotonic guard is invisible to the
-// failover client's own error-driven rotation (the eth_call succeeded), so
-// Step rejects it explicitly — bound by token to the exact endpoint that
-// served it — and bounds how many times it does so against how many
-// endpoints exist.
+// CallFrom and EndpointCount back the semantic-staleness failover: a batch
+// response that is well-formed at the RPC layer but stale per the store's
+// monotonic guard is invisible to the failover client's own error-driven
+// rotation (the eth_call succeeded), so the snapshotter routes around it
+// with a caller-scoped persistent preference — starting subsequent
+// multicalls past the endpoint (named by token) that served the stale batch
+// — without touching the shared routing hint that other callers'
+// error-driven routing owns.
 type Chain interface {
 	// CallWithToken executes a read-only eth_call under failover rotation
-	// and returns, alongside the result, a token naming the endpoint that
-	// served it.
+	// from the SHARED sticky active hint and returns, alongside the result,
+	// a token naming the endpoint that served it.
 	CallWithToken(ctx context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
-	// RotateAwayFrom advances the failover client's sticky active endpoint
-	// past the token's endpoint, for a call that succeeded at the RPC layer
-	// but was semantically unusable (e.g. an endpoint serving stale chain
-	// state). The rotation is endpoint-bound: if an interleaved success
-	// already moved active elsewhere, active is left alone.
-	RotateAwayFrom(tok chain.EndpointToken)
+	// CallFrom is CallWithToken with a CALLER-SCOPED starting endpoint: the
+	// attempt walk starts at startIndex (mod the endpoint count) and a
+	// success neither reads nor writes the shared active hint — a semantic
+	// caller's routing preference must not fight error-driven routing.
+	CallFrom(ctx context.Context, startIndex int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
 	// EndpointCount reports how many RPC endpoints the failover client
-	// rotates across, bounding the "cycled through every endpoint without
-	// progress" check after repeated stale-sweep rotations.
+	// rotates across, bounding both the preferred-start arithmetic and the
+	// "cycled through every endpoint without progress" check after repeated
+	// stale rounds.
 	EndpointCount() int
 }
 
@@ -236,17 +254,48 @@ type Snapshotter struct {
 	// intervening progress — the "how many endpoints have we cycled through
 	// without landing anything" measure feeding the all-endpoints-stale
 	// DEGRADED log. It resets on EVERY progress transition: a batch actually
-	// applying, a generation completing (stamped or superseded), and any
+	// applying, a generation completing (stamped or superseded), any
 	// observed generation change (rewind/re-sweep bumps, cadence opens —
-	// tracked via lastSeenGeneration). The DEGRADED warning therefore
-	// requires a FRESH full endpoint cycle of consecutive stale rounds; a
-	// stale round in an older generation never counts toward it.
+	// tracked via lastSeenGeneration), and reconciled durable progress from
+	// an errored-but-committed apply (unackedAccounts below). The DEGRADED
+	// warning therefore requires a FRESH full endpoint cycle of consecutive
+	// stale rounds; a stale round in an older generation never counts
+	// toward it.
 	staleRotations int
 
 	// lastSeenGeneration is the generation the previous working Step ran
 	// against; an observed change is queue-level progress and restarts the
 	// stale streak above.
 	lastSeenGeneration uint64
+
+	// preferredStart is the CALLER-SCOPED persistent routing preference
+	// (-1 = none): while set, every multicall starts its endpoint walk at
+	// this index via chain.CallFrom instead of the failover's shared active
+	// hint. Set one past the endpoint that served the last stale batch,
+	// advanced one past each further stale server, and released (-1) on ANY
+	// progress transition. It is deliberately NOT the shared hint: a shared
+	// exclusion cannot stick — another caller's success on the rejected
+	// endpoint (the walker's BlockNumber against an endpoint whose eth_call
+	// state is frozen) legitimately re-pins the shared hint there, and a
+	// shared-hint-routed sweep would bounce back to the stale endpoint
+	// forever.
+	preferredStart int
+
+	// unackedAccounts/unackedGeneration remember the account set and
+	// generation of the last ERRORED ApplySweepBatch: that error may be a
+	// lost ack on a transaction that actually COMMITTED (ApplySweepBatch
+	// returns its Commit's error — commit indeterminacy). The next Step
+	// reconciles BEFORE any processing: any of those accounts stamped with
+	// that generation is durable evidence the batch landed — progress,
+	// resetting the stale streak and the endpoint preference. One-shot: the
+	// set clears after any successful reconciliation read, evidence or not
+	// (an errored read keeps it for the following Step). The evidence probe
+	// is deliberately conservative-positive: a retried failed account
+	// already carries the generation stamp from its recorded failure, which
+	// can read as progress — acceptable for what is a telemetry-streak
+	// reset, never a correctness input.
+	unackedAccounts   [][]byte
+	unackedGeneration uint64
 }
 
 // New builds a Snapshotter. Engine, target and a positive interval are
@@ -270,7 +319,49 @@ func New(st Store, ch Chain, cfg Config) (*Snapshotter, error) {
 	if cfg.BatchSize == 0 {
 		cfg.BatchSize = defaultBatchSize
 	}
-	return &Snapshotter{store: st, chain: ch, cfg: cfg, now: time.Now}, nil
+	return &Snapshotter{store: st, chain: ch, cfg: cfg, now: time.Now, preferredStart: -1}, nil
+}
+
+// recordProgress resets the caller-scoped failover state on any progress
+// transition: the stale-round streak restarts, and the persistent endpoint
+// preference releases back to the shared routing hint.
+func (s *Snapshotter) recordProgress() {
+	s.staleRotations = 0
+	s.preferredStart = -1
+}
+
+// reconcileUnacked resolves the commit indeterminacy of the last ERRORED
+// ApplySweepBatch (see unackedAccounts): if any remembered account's durable
+// sweep row is stamped with the generation that batch was applied under, the
+// batch COMMITTED and only the ack was lost — real progress, so the stale
+// streak and the endpoint preference reset instead of accumulating across it
+// toward a false all-endpoints-stale DEGRADED. One-shot: a successful probe
+// clears the remembered set whatever it finds (no evidence = the apply
+// genuinely failed and the batch re-pulls as before); an ERRORED probe keeps
+// the set and surfaces as a Step error so the next round retries it.
+func (s *Snapshotter) reconcileUnacked(ctx context.Context) error {
+	if len(s.unackedAccounts) == 0 {
+		return nil
+	}
+	stamps, err := s.store.SweepGenerations(ctx, s.cfg.Engine, s.unackedAccounts)
+	if err != nil {
+		return fmt.Errorf("snapshotter %q: reconcile unacked sweep batch (generation %d): %w",
+			s.cfg.Engine, s.unackedGeneration, err)
+	}
+	landed := false
+	for _, acct := range s.unackedAccounts {
+		if stamps[hex.EncodeToString(acct)] == s.unackedGeneration {
+			landed = true
+			break
+		}
+	}
+	if landed {
+		slog.Info("errored sweep batch reconciled as durably applied — the apply committed and only its ack was lost; counting it as progress",
+			"engine", s.cfg.Engine, "generation", s.unackedGeneration, "accounts", len(s.unackedAccounts))
+		s.recordProgress()
+	}
+	s.unackedAccounts, s.unackedGeneration = nil, 0
+	return nil
 }
 
 // TriggerResweep requests an immediate sweep: the next Step bypasses the
@@ -293,6 +384,13 @@ func (s *Snapshotter) TriggerResweep() {
 // is due. Errors leave the durable queue untouched — the same batch re-pulls
 // next round, and ApplySweepBatch's idempotence makes redo safe.
 func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
+	// BEFORE anything else: resolve a previous round's errored-but-possibly-
+	// committed apply against the durable rows, so real progress breaks the
+	// stale streak before this round can extend it.
+	if err := s.reconcileUnacked(ctx); err != nil {
+		return false, err
+	}
+
 	gen, open, completedAt, err := s.store.SweepGeneration(ctx, s.cfg.Engine)
 	if err != nil {
 		return false, fmt.Errorf("snapshotter %q: read sweep generation: %w", s.cfg.Engine, err)
@@ -317,7 +415,7 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 	// progress, so it restarts here rather than carrying a count from an
 	// older generation into this one.
 	if gen != s.lastSeenGeneration {
-		s.staleRotations = 0
+		s.recordProgress()
 		s.lastSeenGeneration = gen
 	}
 
@@ -335,8 +433,9 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			return false, fmt.Errorf("snapshotter %q: complete sweep generation %d: %w", s.cfg.Engine, gen, err)
 		}
 		// Completion is progress (a superseded stamp too — the generation
-		// ended either way): restart the stale streak.
-		s.staleRotations = 0
+		// ended either way): restart the stale streak and release the
+		// endpoint preference.
+		s.recordProgress()
 		switch {
 		case !stamped:
 			// Superseded (or an empty-registry generation already stamped by a
@@ -361,20 +460,29 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			// failed-over endpoint lagging the chain). The store applied
 			// nothing and the durable queue is untouched — the same accounts
 			// re-pull next round, most likely against a caught-up endpoint.
+			// (The typed refusal is returned BEFORE the store's commit, so no
+			// commit indeterminacy exists on this branch — nothing to
+			// remember for reconciliation.)
 			slog.Warn("collateral snapshot sweep round DEGRADED: stale sweep block — endpoint behind; nothing applied, retrying next round",
 				"engine", s.cfg.Engine, "generation", gen, "execBlock", block, "accounts", len(batch))
 
 			// The eth_call SUCCEEDED (this is semantic staleness, not an RPC
 			// error), so chain.Failover's own error-driven rotation never saw
-			// a problem and would keep re-serving this identical responsive-
-			// but-frozen endpoint forever. Reject explicitly, bound by token
-			// to the endpoint that actually served this batch: the next
-			// Step's multicall starts from the next endpoint, and an
-			// interleaved success on a different endpoint is never punished.
-			s.chain.RotateAwayFrom(servedBy)
+			// a problem — and the SHARED routing hint cannot carry the
+			// exclusion either: any other caller's success on the frozen
+			// endpoint (the walker's BlockNumber) would legitimately re-pin
+			// the hint there and drag the next multicall straight back. The
+			// snapshotter therefore OWNS a persistent caller-scoped
+			// preference: start the next multicall one past the endpoint
+			// (by token) that served this stale batch, and keep starting
+			// there until real progress releases it.
+			if n := s.chain.EndpointCount(); n > 0 {
+				s.preferredStart = (servedBy.Index + 1) % n
+				slog.Warn("preferring next rpc endpoint after stale sweep batch",
+					"engine", s.cfg.Engine, "generation", gen, "execBlock", block,
+					"staleEndpoint", servedBy.Index, "preferredStart", s.preferredStart)
+			}
 			s.staleRotations++
-			slog.Warn("rotating rpc endpoint after stale sweep batch",
-				"engine", s.cfg.Engine, "generation", gen, "execBlock", block, "endpoint", servedBy.Index)
 
 			if n := s.chain.EndpointCount(); n > 0 && s.staleRotations >= n {
 				slog.Warn("collateral snapshot sweep DEGRADED: all endpoints stale — cycled through every rpc endpoint without landing a batch",
@@ -382,13 +490,18 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			}
 			return false, nil
 		}
-		// Durable queue untouched: the batch re-pulls and re-applies next
-		// round (ApplySweepBatch is idempotent under replay).
+		// Durable queue untouched IF the transaction really failed — but
+		// ApplySweepBatch returns its Commit's error, so this error may be a
+		// lost ack on a batch that durably LANDED. Remember the batch so the
+		// next Step reconciles it against the rows before extending the
+		// stale streak across real progress; the re-pull/re-apply posture is
+		// unaffected either way (ApplySweepBatch is idempotent under replay).
+		s.unackedAccounts, s.unackedGeneration = batch, gen
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)
 	}
-	// Progress: reset the stale-rotation streak so a later isolated stale
-	// round doesn't inherit an earlier cycle's count.
-	s.staleRotations = 0
+	// Progress: reset the stale streak and the endpoint preference so a
+	// later isolated stale round doesn't inherit an earlier cycle's count.
+	s.recordProgress()
 	return true, nil
 }
 
@@ -420,7 +533,15 @@ func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) (uint64
 	if err != nil {
 		return 0, nil, noServer, fmt.Errorf("snapshotter %q: pack multicall: %w", s.cfg.Engine, err)
 	}
-	out, servedBy, err := s.chain.CallWithToken(ctx, Multicall3Address, input)
+	var out []byte
+	var servedBy chain.EndpointToken
+	if s.preferredStart >= 0 {
+		// A prior stale round pinned the caller-scoped preference: start
+		// the walk there, leaving the shared routing hint alone.
+		out, servedBy, err = s.chain.CallFrom(ctx, s.preferredStart, Multicall3Address, input)
+	} else {
+		out, servedBy, err = s.chain.CallWithToken(ctx, Multicall3Address, input)
+	}
 	if err != nil {
 		return 0, nil, noServer, fmt.Errorf("snapshotter %q: multicall (%d safes): %w", s.cfg.Engine, len(accounts), err)
 	}

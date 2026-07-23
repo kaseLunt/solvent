@@ -49,12 +49,12 @@ type fakeChain struct {
 	calls   []capturedCall
 	respond func(to common.Address, data []byte) ([]byte, error)
 
-	// rotateCalls / endpointCount back the semantic-staleness rotation
-	// tests below; unused (zero-value) fakeChain instances behave exactly
-	// as before — EndpointCount()==0 means Step's all-endpoints-stale check
-	// never fires.
-	rotateCalls   int
-	endpointCount int
+	// endpointCount backs the semantic-staleness tests below; unused
+	// (zero-value) fakeChain instances behave exactly as before —
+	// EndpointCount()==0 means Step never pins a preferred start and the
+	// all-endpoints-stale check never fires.
+	endpointCount  int
+	callFromStarts []int // start index of each CallFrom, in order
 }
 
 func (c *fakeChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
@@ -63,40 +63,68 @@ func (c *fakeChain) CallWithToken(_ context.Context, to common.Address, data []b
 	return out, chain.EndpointToken{Index: 0}, err
 }
 
-func (c *fakeChain) RotateAwayFrom(chain.EndpointToken) { c.rotateCalls++ }
+// CallFrom mirrors chain.Failover's caller-scoped entry on this single-
+// responder fake: the same responder answers, and the start index is
+// recorded so tests can assert which path Step routed through.
+func (c *fakeChain) CallFrom(ctx context.Context, start int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
+	c.callFromStarts = append(c.callFromStarts, start)
+	return c.CallWithToken(ctx, to, data)
+}
 
 func (c *fakeChain) EndpointCount() int { return c.endpointCount }
 
-// fakeMultiEndpointChain models chain.Failover's semantic-rotation contract
-// for the production-style regressions below: CallWithToken always serves
-// from the sticky active responder (exactly like Failover.do, which never
-// rotates on its own for a call that succeeds) and stamps its token with
-// that responder's index, and RotateAwayFrom is the ONLY thing that advances
-// active — endpoint-bound, exactly like the real Failover: only when the
-// rejected token still names the active responder — proving Step, not the
-// fake, drives the endpoint switch.
+// fakeMultiEndpointChain models chain.Failover's routing contract for the
+// production-style regressions below: CallWithToken serves from the sticky
+// active responder (exactly like Failover.do for a call that succeeds — the
+// SHARED hint, which only error-driven routing moves; sharedBlockNumber
+// models that mover), CallFrom serves from the caller-given start WITHOUT
+// touching active (exactly like the real CallFrom), and every call stamps
+// its token with the responder that served it — proving Step, not the fake,
+// drives the endpoint choice.
 type fakeMultiEndpointChain struct {
 	responders []func(common.Address, []byte) ([]byte, error)
 	active     int
 	calls      []capturedCall
+	served     []int // responder index that served each call, in order
 
-	rotateCalls int
+	// blockNumberFails marks endpoints whose (modeled) BlockNumber errors;
+	// see sharedBlockNumber. Nil: every endpoint's BlockNumber succeeds.
+	blockNumberFails []bool
 }
 
 func (c *fakeMultiEndpointChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
-	c.calls = append(c.calls, capturedCall{to: to, data: data})
-	out, err := c.responders[c.active](to, data)
-	return out, chain.EndpointToken{Index: c.active}, err
+	return c.serve(c.active, to, data)
 }
 
-func (c *fakeMultiEndpointChain) RotateAwayFrom(tok chain.EndpointToken) {
-	c.rotateCalls++
-	if tok.Index == c.active {
-		c.active = (c.active + 1) % len(c.responders)
-	}
+func (c *fakeMultiEndpointChain) CallFrom(_ context.Context, start int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
+	return c.serve(start%len(c.responders), to, data)
+}
+
+func (c *fakeMultiEndpointChain) serve(idx int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
+	c.calls = append(c.calls, capturedCall{to: to, data: data})
+	c.served = append(c.served, idx)
+	out, err := c.responders[idx](to, data)
+	return out, chain.EndpointToken{Index: idx}, err
 }
 
 func (c *fakeMultiEndpointChain) EndpointCount() int { return len(c.responders) }
+
+// sharedBlockNumber models an UNRELATED caller (the walker) making a
+// BlockNumber call through the SHARED path — exactly Failover.do: walk from
+// the sticky active hint with error-driven rotation, and re-pin the hint
+// onto the endpoint that served the success.
+func (c *fakeMultiEndpointChain) sharedBlockNumber(t *testing.T) {
+	t.Helper()
+	for i := 0; i < len(c.responders); i++ {
+		idx := (c.active + i) % len(c.responders)
+		if c.blockNumberFails != nil && c.blockNumberFails[idx] {
+			continue
+		}
+		c.active = idx
+		return
+	}
+	t.Fatal("sharedBlockNumber: all endpoints failed")
+}
 
 // sweepRow mirrors one durable snapshot_sweeps row.
 type sweepRow struct {
@@ -136,10 +164,17 @@ type fakeSnapStore struct {
 	balances map[string]map[string]map[string]*big.Int // account-hex → wholesale snapshot balances
 	history  []historyRec                              // collateral history writes, in order
 
-	genReads, opens, workBatches, completes int
+	genReads, opens, workBatches, completes, stampReads int
 
-	applyErr error // one-shot ApplySweepBatch failure injection
-	applied  []applyRec
+	applyErr error // one-shot ApplySweepBatch failure injection (pre-commit)
+	// applyCommitErr is the one-shot COMMIT-then-lost-ack injection: the
+	// batch persists durably and ONLY the returned ack is an error — the
+	// store's commit indeterminacy (ApplySweepBatch returns its Commit's
+	// error), which the snapshotter's reconciliation exists to resolve.
+	applyCommitErr error
+	// sweepGensErr is a one-shot SweepGenerations failure injection.
+	sweepGensErr error
+	applied      []applyRec
 }
 
 func newFakeSnapStore(registry [][]byte, clock *time.Time) *fakeSnapStore {
@@ -233,7 +268,30 @@ func (f *fakeSnapStore) ApplySweepBatch(_ context.Context, _ string, generation,
 		}
 	}
 	f.applied = append(f.applied, applyRec{generation: generation, block: execBlock, results: results})
+	if f.applyCommitErr != nil {
+		// Everything above LANDED (the transaction committed); only the ack
+		// is lost.
+		err := f.applyCommitErr
+		f.applyCommitErr = nil
+		return err
+	}
 	return nil
+}
+
+func (f *fakeSnapStore) SweepGenerations(_ context.Context, _ string, accounts [][]byte) (map[string]uint64, error) {
+	f.stampReads++
+	if f.sweepGensErr != nil {
+		err := f.sweepGensErr
+		f.sweepGensErr = nil
+		return nil, err
+	}
+	out := map[string]uint64{}
+	for _, acct := range accounts {
+		if row := f.rows[hex.EncodeToString(acct)]; row != nil {
+			out[hex.EncodeToString(acct)] = row.generation
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeSnapStore) CompleteSweepGeneration(_ context.Context, _ string, generation uint64) (int64, bool, error) {
@@ -943,16 +1001,16 @@ func TestStaleSweepBatchIsDegradedRoundNotError(t *testing.T) {
 	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
 }
 
-// TestStaleSweepBatchRotatesToHealthyEndpoint is the Codex-specified
-// production-style regression: endpoint A is RESPONSIVE but frozen at
-// execBlock 150 forever (valid, well-formed eth_call responses — never an
-// RPC error, so chain.Failover's own error-driven rotation would keep
-// re-serving it forever), endpoint B is caught up at 201. The first sweep is
-// rejected (stale) and the rotation is logged; the SAME durable batch retries
-// on the second sweep, but this time the multicall actually lands on B — not
-// forced by the test, but because Step rejected endpoint A by its token
-// (RotateAwayFrom) — and the generation is stamped for real.
-func TestStaleSweepBatchRotatesToHealthyEndpoint(t *testing.T) {
+// TestStaleSweepBatchPrefersNextEndpoint is the production-style semantic-
+// failover regression: endpoint A is RESPONSIVE but frozen at execBlock 150
+// forever (valid, well-formed eth_call responses — never an RPC error, so
+// chain.Failover's own error-driven rotation would keep re-serving it
+// forever), endpoint B is caught up at 201. The first sweep is rejected
+// (stale) and Step pins its caller-scoped preference one past A's token; the
+// SAME durable batch retries on the second sweep, and the multicall actually
+// lands on B — not forced by the test, but routed there by Step's CallFrom —
+// the generation is stamped for real, and the shared hint was never touched.
+func TestStaleSweepBatchPrefersNextEndpoint(t *testing.T) {
 	warnings := captureWarnings(t)
 	registry := [][]byte{acct(1)}
 	tokens := []tokenData{{Token: tokenUSDC, Amount: big.NewInt(999)}}
@@ -971,48 +1029,111 @@ func TestStaleSweepBatchRotatesToHealthyEndpoint(t *testing.T) {
 	st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
 	s := freshSnapshotter(t, st, ch, &clock, 10)
 
-	// Sweep once: the multicall hits endpoint A (frozen@150), the store
-	// refuses it as stale, and Step rotates the failover's active endpoint
-	// instead of leaving it sticky on the responsive-but-frozen A.
+	// Sweep once: the multicall follows the shared hint to endpoint A
+	// (frozen@150), the store refuses it as stale, and Step pins its own
+	// preference past the responsive-but-frozen A — without rotating the
+	// shared hint.
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err, "a stale batch is a degraded round, never a step error")
 	require.False(t, advanced, "nothing applied: the round is not progress")
 	require.Empty(t, st.rows, "the store's typed refusal applied nothing")
-	require.Equal(t, 1, ch.rotateCalls)
-	require.Equal(t, 1, ch.active, "rotation must advance past the frozen endpoint")
+	require.Equal(t, []int{0}, ch.served)
+	require.Equal(t, 1, s.preferredStart, "the preference starts one past the stale server")
+	require.Equal(t, 0, ch.active, "the SHARED hint is not the exclusion's carrier")
 
-	rotated, allStale := false, false
+	preferred, allStale := false, false
 	for _, m := range *warnings {
-		if strings.Contains(m, "rotating rpc endpoint after stale sweep batch") {
-			rotated = true
+		if strings.Contains(m, "preferring next rpc endpoint after stale sweep batch") {
+			preferred = true
 		}
 		if strings.Contains(m, "all endpoints stale") {
 			allStale = true
 		}
 	}
-	require.True(t, rotated, "the rotation must be logged, got %v", *warnings)
+	require.True(t, preferred, "the preference pin must be logged, got %v", *warnings)
 	require.False(t, allStale, "only one of two endpoints has been tried — not yet a full cycle")
 
 	// Sweep again: the SAME durable batch re-pulls (the queue was untouched),
-	// but the multicall now reaches endpoint B — healthy, at 201 — and the
-	// store lands it for real: balances recorded, generation stamped.
+	// and the multicall reaches endpoint B — healthy, at 201 — via the
+	// caller-scoped preference: balances recorded, generation stamped, and
+	// the landing releases the preference back to the shared hint.
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Len(t, ch.calls, 2)
+	require.Equal(t, []int{0, 1}, ch.served)
 	rec := st.applied[len(st.applied)-1]
 	require.Equal(t, uint64(201), rec.block)
 	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
 	require.Equal(t, map[string]map[string]*big.Int{
 		hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(999)},
 	}, st.balances[hex.EncodeToString(acct(1))])
+	require.Equal(t, -1, s.preferredStart, "progress releases the preference")
+}
+
+// TestPreferredEndpointSurvivesSharedHintRepin is the Codex counter-schedule
+// regression that retired the shared-hint semantic rotation: endpoint A
+// serves stale-but-valid multicalls (frozen@150) and a HEALTHY BlockNumber;
+// endpoint B serves current multicalls (201) but an ERRORING BlockNumber. A
+// shared-hint exclusion cannot survive that pairing — the sweep's rotation
+// A→B was undone by the walker's next BlockNumber (errors on B, succeeds on
+// A, legitimately re-pins the shared hint onto A), so the next multicall hit
+// A again, forever. Now the sweep OWNS its preference: after rejecting A's
+// stale batch it starts multicalls at B via CallFrom regardless of where the
+// shared hint points, the batch LANDS, and the preference releases on that
+// progress.
+func TestPreferredEndpointSurvivesSharedHintRepin(t *testing.T) {
+	registry := [][]byte{acct(1)}
+	tokens := []tokenData{{Token: tokenUSDC, Amount: big.NewInt(999)}}
+	frozenA := uniformResponder(t, 150, tokens)
+	healthyB := uniformResponder(t, 201, tokens)
+	ch := &fakeMultiEndpointChain{
+		responders:       []func(common.Address, []byte) ([]byte, error){frozenA, healthyB},
+		blockNumberFails: []bool{false, true}, // A's BlockNumber is fine; B's errors
+	}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	// Round 1: the multicall follows the shared hint to A (frozen@150); the
+	// store refuses it stale; Step pins the caller-scoped preference at B.
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Equal(t, []int{0}, ch.served)
+	require.Equal(t, 1, s.preferredStart)
+
+	// The walker interleaves on the SHARED path. Even from a hint parked on
+	// B (modeling an earlier error-driven failover), its BlockNumber errors
+	// on B, succeeds on A, and legitimately re-pins the shared hint onto A —
+	// the exact interleaving that permanently defeated a shared-hint
+	// semantic rotation.
+	ch.active = 1
+	ch.sharedBlockNumber(t)
+	require.Equal(t, 0, ch.active, "error-driven routing re-pinned the shared hint onto A")
+
+	// Round 2: the sweep is NOT dragged back to A — its caller-scoped
+	// preference routes the multicall to B, which serves current state, and
+	// the batch lands for real.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []int{0, 1}, ch.served)
+	rec := st.applied[len(st.applied)-1]
+	require.Equal(t, uint64(201), rec.block)
+	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
+	require.Equal(t, -1, s.preferredStart, "progress releases the preference back to the shared hint")
+	require.Zero(t, s.staleRotations)
+	require.Equal(t, 0, ch.active, "the caller-scoped landing never wrote the shared hint")
 }
 
 // TestAllEndpointsStaleLogsDegradedAfterFullCycle: when every configured
-// endpoint serves a stale batch in turn — a full cycle of rotations without
-// landing a single batch — Step logs the explicit "all endpoints stale"
-// DEGRADED warning on top of the existing per-round DEGRADED posture; the
-// durable queue still never wedges (each round returns advanced=false, nil).
+// endpoint serves a stale batch in turn — the persistent preference walking
+// the full endpoint ring without landing a single batch — Step logs the
+// explicit "all endpoints stale" DEGRADED warning on top of the existing
+// per-round DEGRADED posture; the durable queue still never wedges (each
+// round returns advanced=false, nil).
 func TestAllEndpointsStaleLogsDegradedAfterFullCycle(t *testing.T) {
 	warnings := captureWarnings(t)
 	registry := [][]byte{acct(1)}
@@ -1029,7 +1150,8 @@ func TestAllEndpointsStaleLogsDegradedAfterFullCycle(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, advanced)
 	}
-	require.Equal(t, ch.EndpointCount(), ch.rotateCalls, "one rotation per stale round")
+	require.Equal(t, []int{0, 1, 2}, ch.served,
+		"the advancing preference must try each endpoint in turn, never re-serving a rejected one")
 
 	allStale := false
 	for _, m := range *warnings {
@@ -1127,6 +1249,7 @@ func TestStaleStreakResetsOnGenerationCompletion(t *testing.T) {
 	require.True(t, advanced, "completing the generation is work")
 	require.False(t, st.open)
 	require.Zero(t, s.staleRotations, "completion stamping must restart the stale streak")
+	require.Equal(t, -1, s.preferredStart, "completion stamping must release the endpoint preference")
 
 	// Cadence elapses; the registry returns; gen 2 opens and its rounds are
 	// stale in turn. Only gen 2's OWN full cycle fires the warning.
@@ -1137,4 +1260,115 @@ func TestStaleStreakResetsOnGenerationCompletion(t *testing.T) {
 		"the pre-completion stale round must not count toward the new generation's cycle")
 	staleRound(t, s, st) // gen 2: streak 2 == endpoints
 	require.Equal(t, 1, countAllStale(warnings))
+}
+
+// TestLostAckApplyReconcilesAsDurableProgress is the Codex counter-schedule
+// regression for the stale streak: a stale round (streak 1 of 2) is followed
+// by an ApplySweepBatch that COMMITS but returns an error — commit
+// indeterminacy: the durable rows advanced, only the ack was lost. Without
+// reconciliation the streak would survive that REAL progress and the next
+// stale round would fire the "all endpoints stale" DEGRADED warning across
+// it. Step remembers the errored batch and, at its next round BEFORE any
+// processing, finds its accounts stamped with the applied generation —
+// durable evidence the batch landed — and resets the streak (and the
+// endpoint preference) so the false DEGRADED never fires; a genuine fresh
+// full cycle afterwards still does.
+func TestLostAckApplyReconcilesAsDurableProgress(t *testing.T) {
+	warnings := captureWarnings(t)
+	a1, a2 := acct(1), acct(2)
+	respond := uniformResponder(t, 42, nil)
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore([][]byte{a1, a2}, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 1) // batch size 1: a1's batch, then a2's
+
+	staleRound(t, s, st) // gen 1, batch [a1]: streak 1 of 2
+	require.Equal(t, 1, s.staleRotations)
+
+	// The retry's apply COMMITS (a1's rows land durably) but the ack is
+	// lost: Step reports the error and remembers the batch.
+	st.applyCommitErr = errors.New("connection reset during commit ack")
+	_, err := s.Step(context.Background())
+	require.ErrorContains(t, err, "connection reset")
+	require.Equal(t, uint64(1), st.rows[hex.EncodeToString(a1)].generation, "the batch durably landed")
+	require.Equal(t, 1, s.staleRotations, "the lost ack alone reveals nothing — the streak stands until reconciled")
+	require.NotEmpty(t, s.unackedAccounts)
+
+	// The next Step reconciles FIRST: a1's generation stamp is durable
+	// evidence of progress → streak and preference reset — and only then
+	// does the round proceed to a2's batch, which is stale again. The
+	// streak restarts at 1, NOT 2: no false DEGRADED across real progress.
+	staleRound(t, s, st)
+	require.Equal(t, 1, s.staleRotations, "durable progress must break the streak")
+	require.Empty(t, s.unackedAccounts, "reconciliation is one-shot")
+	require.Zero(t, countAllStale(warnings),
+		"a stale streak must never span reconciled durable progress")
+
+	// A genuine second consecutive stale round — no intervening progress —
+	// still completes a full cycle and fires.
+	staleRound(t, s, st)
+	require.Equal(t, 1, countAllStale(warnings))
+}
+
+// TestFailedApplyWithoutDurableEvidenceKeepsStreak: the reconciliation probe
+// must not mistake a genuinely-failed apply for progress. The apply is
+// refused BEFORE commit (nothing landed), so the probe finds no generation
+// stamp: the remembered set clears with NO reset, the streak carries, and
+// the next stale round completes a genuine full cycle.
+func TestFailedApplyWithoutDurableEvidenceKeepsStreak(t *testing.T) {
+	warnings := captureWarnings(t)
+	respond := uniformResponder(t, 42, nil)
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore([][]byte{acct(1)}, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	staleRound(t, s, st)                           // streak 1 of 2
+	st.applyErr = errors.New("db connection lost") // refused pre-commit: nothing landed
+	_, err := s.Step(context.Background())
+	require.ErrorContains(t, err, "db connection lost")
+	require.NotEmpty(t, s.unackedAccounts, "any errored apply is remembered — indeterminacy is the default")
+	require.Empty(t, st.rows)
+
+	staleRound(t, s, st)
+	require.Empty(t, s.unackedAccounts, "the probe clears the set evidence or not")
+	require.Equal(t, 2, s.staleRotations, "no durable evidence: the streak must carry")
+	require.Equal(t, 1, countAllStale(warnings), "a genuine full stale cycle still fires")
+}
+
+// TestReconcileProbeErrorKeepsRememberedSet: an errored reconciliation read
+// is a Step error and must NOT consume the remembered set — the following
+// Step retries the probe and still detects the landed batch as progress.
+func TestReconcileProbeErrorKeepsRememberedSet(t *testing.T) {
+	warnings := captureWarnings(t)
+	a1, a2 := acct(1), acct(2)
+	respond := uniformResponder(t, 42, nil)
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore([][]byte{a1, a2}, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 1)
+
+	staleRound(t, s, st) // streak 1 of 2
+	st.applyCommitErr = errors.New("connection reset during commit ack")
+	_, err := s.Step(context.Background())
+	require.ErrorContains(t, err, "connection reset")
+
+	// The probe itself fails: Step errors, the set survives for the next
+	// round, the streak is untouched.
+	st.sweepGensErr = errors.New("db read timeout")
+	_, err = s.Step(context.Background())
+	require.ErrorContains(t, err, "db read timeout")
+	require.NotEmpty(t, s.unackedAccounts, "an errored probe must not consume the evidence set")
+	require.Equal(t, 1, s.staleRotations)
+
+	// The retried probe succeeds and finds the landed batch: progress, so
+	// the following stale round restarts the streak instead of completing a
+	// false cycle.
+	staleRound(t, s, st)
+	require.Empty(t, s.unackedAccounts)
+	require.Equal(t, 1, s.staleRotations)
+	require.Zero(t, countAllStale(warnings))
 }
