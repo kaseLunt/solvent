@@ -1,0 +1,36 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 24934244, tx 0xee4a4b949cab300cbe5b197fb032f513c8b03b45079663aef432315d516e8096. Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: reserve=topics[1]=weETH, user=topics[2], to=topics[3] (equal), amount=data word0=1000002131081530318 (hex 0de0b8a3d5bf8bce, ~1.0000021 weETH 18-dec).",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 24934244,
+    "blockHash": "0xeb93da3b22c9b5f0d9b4792ecc4d7491a4e0684eb0ed4fa4b2629b6d0e73e336",
+    "txHash": "0xee4a4b949cab300cbe5b197fb032f513c8b03b45079663aef432315d516e8096",
+    "logIndex": 985,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x3115d1449a7b732c986cba18244e897a450f61e1bb8d589cd2e69e6c8924f9f7",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x00000000000000000000000053d17859ecbbaa9707ed738cb5a1790419aa1cdc",
+      "0x00000000000000000000000053d17859ecbbaa9707ed738cb5a1790419aa1cdc"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000de0b8a3d5bf8bce"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 24921388, tx 0x0bba99d24725d7c385628cabe6b8034fd941992bcbb1481816d8097d9f8e3d64. Fetched the same way, 2026-07-22.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 24921388,
+    "blockHash": "0x4acbe82f3d39448cc5a0975c69f236f34fd230aef0910c3e65766cb05f5ca4a7",
+    "txHash": "0x0bba99d24725d7c385628cabe6b8034fd941992bcbb1481816d8097d9f8e3d64",
+    "logIndex": 492,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x3115d1449a7b732c986cba18244e897a450f61e1bb8d589cd2e69e6c8924f9f7",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x000000000000000000000000bd0c6f59ee76560b26f07d8a1187d12530359cc1",
+      "0x000000000000000000000000bd0c6f59ee76560b26f07d8a1187d12530359cc1"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000c55253ca3fa7fe5"
+  }
+]

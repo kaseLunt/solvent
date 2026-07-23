@@ -1,0 +1,30 @@
+[
+  {
+    "provenance": "SYNTHETIC: constructed from the BorrowTokenRemoved ABI (token, non-indexed) -- NO real occurrence found across the full-history sweep (same search as CollateralTokenRemoved, 2026-07-22); no borrow token has ever been unsupported on this deployment to date. token=frxUSD (real registry address).",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000600,
+    "blockHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "txHash": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x4b8ac63c38f57c8602118d0c39a3bb0a9607e924c7bf802d8f6be9a850f81db5"
+    ],
+    "data": "0x00000000000000000000000080eede496655fb9047dd39d9f418d5483ed600df"
+  },
+  {
+    "provenance": "SYNTHETIC: second constructed BorrowTokenRemoved log (see fixture 1). token=EURC (real registry address), distinct from fixture 1.",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000700,
+    "blockHash": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "txHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x4b8ac63c38f57c8602118d0c39a3bb0a9607e924c7bf802d8f6be9a850f81db5"
+    ],
+    "data": "0x000000000000000000000000dcb612005417dc906ff72c87df732e5a90d49e11"
+  }
+]

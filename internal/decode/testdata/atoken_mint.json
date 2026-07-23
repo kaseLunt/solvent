@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 23357693, tx 0x1d5165d743631adca230af5fb45f7d8acb6b9a0e4579410c5ffdb3aa65ef54be, aEthEtherFiweETH. Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: caller=topics[1], onBehalfOf=topics[2], value=data word0, balanceIncrease=data word1, index=data word2 (ray).",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 23357693,
+    "blockHash": "0xe46982432e60213903483773936712848c509c62914650c4021412ccff4f1250",
+    "txHash": "0x1d5165d743631adca230af5fb45f7d8acb6b9a0e4579410c5ffdb3aa65ef54be",
+    "logIndex": 85,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0x458f5fa412d0f69b08dd84872b0215675cc67bc1d5b6fd93300a1c3878b86196",
+      "0x000000000000000000000000a1940ea3f615559255c59da5b16d6da1d1d60e60",
+      "0x000000000000000000000000a1940ea3f615559255c59da5b16d6da1d1d60e60"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000017d112bae000000000000000000000000000000000000000000000000000000017d112bae0000000000000000000000000000000000000000033b2eb02683011be5b492d0"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 22839768, tx 0x2cbb5618eeeb6bddd04d0e088d09ad27db38bea8f2f6314090c717c223827c1c, aEthEtherFiweETH. Fetched the same way, 2026-07-22. caller=Pool address itself (interest-accrual mint to the treasury path), onBehalfOf differs from caller.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 22839768,
+    "blockHash": "0x214aa9f317c53ededdb938333ab31c055d5a281a7680c2156938e721cd9f5ac2",
+    "txHash": "0x2cbb5618eeeb6bddd04d0e088d09ad27db38bea8f2f6314090c717c223827c1c",
+    "logIndex": 385,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0x458f5fa412d0f69b08dd84872b0215675cc67bc1d5b6fd93300a1c3878b86196",
+      "0x0000000000000000000000000aa97c284e98396202b6a04024f5e2c65026f3c0",
+      "0x000000000000000000000000464c71f6c2f760dda6093dcb91c24c39e5d6e18c"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000008d755d6396000000000000000000000000000000000000000000000000000000875339b7430000000000000000000000000000000000000000033b2eb02683011be5b492d0"
+  }
+]

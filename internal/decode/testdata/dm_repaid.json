@@ -1,0 +1,36 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 154585081, tx 0x4dba05ee3a6c868b5569b399ef06b01a5aa957601837c79d5eb30b397b6f645a, logIndex 98. Fetched via eth_getLogs (optimism.drpc.org), 2026-07-22. Hand-verified: user=topics[1], payer=topics[2], token=topics[3]=USDC, usdAmount=data word0 (USD 6-dec per recon 'Repaid' semantics).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 154585081,
+    "blockHash": "0x7aaf43f4a5b7438b115c8670560a18f1f54ffb73a8ec07feae788c40821a5a5d",
+    "txHash": "0x4dba05ee3a6c868b5569b399ef06b01a5aa957601837c79d5eb30b397b6f645a",
+    "logIndex": 98,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x861660e9b7ead7183d53fe928b5638c7b57a7bcf16a89d7fdb04db65ce3ad6d5",
+      "0x00000000000000000000000057e6d3f754c45c94418cdb11ea8433854c87ab09",
+      "0x00000000000000000000000057e6d3f754c45c94418cdb11ea8433854c87ab09",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000000026af84"
+  },
+  {
+    "provenance": "REAL: OP mainnet block 154585091, tx 0xfb10ed8e86ce6f144be3475a7a7de21dbc1c24927818b114241cf5516d44abe1, logIndex 72. Fetched via eth_getLogs (optimism.drpc.org), 2026-07-22. Hand-verified: user=topics[1], payer=topics[2], token=topics[3]=USDC, usdAmount=data word0 (USD 6-dec per recon 'Repaid' semantics).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 154585091,
+    "blockHash": "0x05a3d462510eba4ca3fd306f100aa371ddb9ffdc9ae12c397f532e68fac1de35",
+    "txHash": "0xfb10ed8e86ce6f144be3475a7a7de21dbc1c24927818b114241cf5516d44abe1",
+    "logIndex": 72,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x861660e9b7ead7183d53fe928b5638c7b57a7bcf16a89d7fdb04db65ce3ad6d5",
+      "0x00000000000000000000000057e6d3f754c45c94418cdb11ea8433854c87ab09",
+      "0x00000000000000000000000039161a44588ec2327a18d4707ea5216c721ba539",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000004e2d5e0"
+  }
+]

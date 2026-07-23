@@ -1,0 +1,36 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 154583517, tx 0x9f4d1631a562395a148c8d59a6a3e47e2b1d5c4e4a24c1a44a27177c805a21de, logIndex 216. Fetched via eth_getLogs (optimism.drpc.org), 2026-07-22, after sweeping ~350k blocks across the full DM history for this genuinely rare event (Supplied core-flow calls are sparse). Hand-verified: sender=user=topics[1]=topics[2] (self-supply), token=topics[3]=USDC, amount=300000000000 (300,000 USDC, 6-dec).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 154583517,
+    "blockHash": "0x90ed8b1ea198188b95adfd17d117b846bf9108f6b254ea71da58ab23c58c5168",
+    "txHash": "0x9f4d1631a562395a148c8d59a6a3e47e2b1d5c4e4a24c1a44a27177c805a21de",
+    "logIndex": 216,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x50413727b37795d672f09d0997645a955fa227befaefdd4adb611542dea3fd80",
+      "0x000000000000000000000000f40bcc0845528873784f36e5c105e62a93ff7021",
+      "0x000000000000000000000000f40bcc0845528873784f36e5c105e62a93ff7021",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x00000000000000000000000000000000000000000000000000000045d964b800"
+  },
+  {
+    "provenance": "SYNTHETIC: constructed from the Supplied ABI (sender indexed, user indexed, token indexed, amount) since a second REAL occurrence could not be found despite sweeping the full DM history (149,521,228-154,591,790) in ~35 windows of 10,000 blocks for this rare flow event; only 1 real Supplied log was located (see the other fixture in this file). Values are placeholders: sender != user (a third-party supply-on-behalf), token=USDC (real registry address), amount=50,000,000 (50 USDC).",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000000,
+    "blockHash": "0xabababababababababababababababababababababababababababababababab",
+    "txHash": "0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x50413727b37795d672f09d0997645a955fa227befaefdd4adb611542dea3fd80",
+      "0x0000000000000000000000001111111111111111111111111111111111111111",
+      "0x0000000000000000000000002222222222222222222222222222222222222222",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000002faf080"
+  }
+]

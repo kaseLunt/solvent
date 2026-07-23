@@ -1,0 +1,30 @@
+[
+  {
+    "provenance": "SYNTHETIC: constructed from the CollateralTokenRemoved ABI (token, non-indexed) -- NO real occurrence found across the full-history sweep (149,521,228-154,591,790, ~35 windows of 10,000 blocks plus 3 targeted config-event hit clusters, 2026-07-22); no collateral token has ever been unsupported on this deployment to date. token=weETH (real registry address).",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000400,
+    "blockHash": "0x7777777777777777777777777777777777777777777777777777777777777777",
+    "txHash": "0x8888888888888888888888888888888888888888888888888888888888888888",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x066186f1dd144b0baa72e90264076813d8f2dfce7c39704ea68d159cee4305b7"
+    ],
+    "data": "0x0000000000000000000000005a7facb970d094b6c7ff1df0ea68d99e6e73cbff"
+  },
+  {
+    "provenance": "SYNTHETIC: second constructed CollateralTokenRemoved log (see fixture 1 for the exhaustive-search provenance note). token=liquidBTC (real registry address), distinct from fixture 1.",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000500,
+    "blockHash": "0x9999999999999999999999999999999999999999999999999999999999999999",
+    "txHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x066186f1dd144b0baa72e90264076813d8f2dfce7c39704ea68d159cee4305b7"
+    ],
+    "data": "0x0000000000000000000000005f46d540b6ed704c3c8789105f30e075aa900726"
+  }
+]

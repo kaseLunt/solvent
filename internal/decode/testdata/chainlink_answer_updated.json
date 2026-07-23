@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 25586938, tx 0x7ff24183e84dac5da5fca1812c455ffbb05cd5bb0f98be703a601f9f89bf537d, on the raw USDC/USD aggregator 0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7 (behind Aave price-cap adapter 0xB6557F02F0a5dA7b9D3C2d979cc19e00e756F6dA per recon/feeds.json). Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: current=topics[1]=99986785 (0x5f5ad61, 8-dec -> $0.99986785), roundId=topics[2]=1084 (0x43c), updatedAt=data word0=1784707211 (0x6a60788b, unix ts, matches the tx's blockTimestamp).",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25586938,
+    "blockHash": "0x6557304279c6a0ae2b89e6b22f24f93c305d799ae65454c805de4dd3c10dd213",
+    "txHash": "0x7ff24183e84dac5da5fca1812c455ffbb05cd5bb0f98be703a601f9f89bf537d",
+    "logIndex": 205,
+    "address": "0xc9e1a09622afdb659913fefe800feae5dbbfe9d7",
+    "topics": [
+      "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+      "0x0000000000000000000000000000000000000000000000000000000005f5ad61",
+      "0x000000000000000000000000000000000000000000000000000000000000043c"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000006a60788b"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 25586642, tx 0x9c40430f0fdd06f96fc663cfe50dd6cc2753ae55c06f7cf636f5408d96564ce5, same aggregator. Fetched the same way, 2026-07-22.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25586642,
+    "blockHash": "0x5908b8c0a414eee35bd34cba9f5fbe1ba2945f816a1a1261edc465b0bfdfd46f",
+    "txHash": "0x9c40430f0fdd06f96fc663cfe50dd6cc2753ae55c06f7cf636f5408d96564ce5",
+    "logIndex": 128,
+    "address": "0xc9e1a09622afdb659913fefe800feae5dbbfe9d7",
+    "topics": [
+      "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+      "0x0000000000000000000000000000000000000000000000000000000005f5b729",
+      "0x000000000000000000000000000000000000000000000000000000000000043b"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000006a606a93"
+  }
+]

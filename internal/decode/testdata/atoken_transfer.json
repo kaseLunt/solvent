@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d, on aEthEtherFiweETH 0xbe1F842e7e0afd2c2322aae5d34bA899544b29db (discovered via Pool.getReserveData(weETH).aTokenAddress, code-verified 2026-07-22; same liquidation tx as the Aave fixtures above). Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: from=topics[1], to=topics[2], value=data word0.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 236,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      "0x0000000000000000000000002ec19e982172ead28b312a07faf25105fb3747d8",
+      "0x000000000000000000000000464c71f6c2f760dda6093dcb91c24c39e5d6e18c"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000002710696f467"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d, aEthEtherFiweETH. Fetched the same way, 2026-07-22. to=0x0 (a burn-side Transfer emitted alongside the Burn event).",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 233,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+      "0x0000000000000000000000002ec19e982172ead28b312a07faf25105fb3747d8",
+      "0x0000000000000000000000000000000000000000000000000000000000000000"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000001ace43040601d"
+  }
+]

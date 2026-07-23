@@ -1,0 +1,166 @@
+{
+  "_provenance": "Chainlink raw aggregator ABI (AccessControlledOCR2Aggregator), trimmed to the AnswerUpdated/NewRound events + a few read functions. Fetched from Blockscout (eth.blockscout.com) API v2 smart-contracts endpoint for 0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7 (the raw USDC/USD aggregator behind Aave price-cap adapter 0xB6557F02F0a5dA7b9D3C2d979cc19e00e756F6dA per recon/feeds.json). AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt), topic0 0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f, is the shared event signature emitted by all four ether.fi-market aggregators in recon/feeds.json (2026-07-22).",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "int256",
+          "name": "current",
+          "type": "int256"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "roundId",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "updatedAt",
+          "type": "uint256"
+        }
+      ],
+      "name": "AnswerUpdated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "roundId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "startedBy",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "startedAt",
+          "type": "uint256"
+        }
+      ],
+      "name": "NewRound",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "decimals",
+      "outputs": [
+        {
+          "internalType": "uint8",
+          "name": "",
+          "type": "uint8"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "description",
+      "outputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint80",
+          "name": "_roundId",
+          "type": "uint80"
+        }
+      ],
+      "name": "getRoundData",
+      "outputs": [
+        {
+          "internalType": "uint80",
+          "name": "roundId",
+          "type": "uint80"
+        },
+        {
+          "internalType": "int256",
+          "name": "answer",
+          "type": "int256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "startedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "updatedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint80",
+          "name": "answeredInRound",
+          "type": "uint80"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "latestRoundData",
+      "outputs": [
+        {
+          "internalType": "uint80",
+          "name": "roundId",
+          "type": "uint80"
+        },
+        {
+          "internalType": "int256",
+          "name": "answer",
+          "type": "int256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "startedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "updatedAt",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint80",
+          "name": "answeredInRound",
+          "type": "uint80"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "version",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ]
+}

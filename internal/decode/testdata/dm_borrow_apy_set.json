@@ -1,0 +1,32 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 149965520, tx 0x42bfe5763ab18c793c34e0bfccd327a77a5fdda499104e7daf49de95723dede8, logIndex 286. Fetched via eth_getLogs, 2026-07-22, after sweeping the full DM history (this admin-tuning event is rare -- only 1 real occurrence found). Hand-verified: token=topics[1]=USDC, oldApy=data word0=126839167935, newApy=data word1=1.",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 149965520,
+    "blockHash": "0xf34ef97b89d951b2d2ba784caef8ecef56d1b43b32d99e607835487dd65bf042",
+    "txHash": "0x42bfe5763ab18c793c34e0bfccd327a77a5fdda499104e7daf49de95723dede8",
+    "logIndex": 286,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x0a79a2c3945fa1460b7ce0aa563cc1cd6424a51a3f0d888754e797ebb54baf66",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000001d88341bbf0000000000000000000000000000000000000000000000000000000000000001"
+  },
+  {
+    "provenance": "SYNTHETIC: constructed from the BorrowApySet ABI (token indexed, oldApy, newApy) to provide a second, distinctly-valued fixture -- only 1 real BorrowApySet occurrence was found across the exhaustive full-history sweep (see the other fixture). token=USDT (real registry address), oldApy=50000000000 (5% at 1e12 scale), newApy=75000000000 (7.5%).",
+    "synthetic": true,
+    "chainId": 10,
+    "blockNumber": 154000300,
+    "blockHash": "0x5555555555555555555555555555555555555555555555555555555555555555",
+    "txHash": "0x6666666666666666666666666666666666666666666666666666666666666666",
+    "logIndex": 0,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x0a79a2c3945fa1460b7ce0aa563cc1cd6424a51a3f0d888754e797ebb54baf66",
+      "0x00000000000000000000000094b008aa00579c1307b0ef2c499ad98a8ce58e58"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000ba43b74000000000000000000000000000000000000000000000000000000001176592e00"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d, logIndex 232 (from the same liquidation tx as aave_liquidation_call.json fixture 1 -- weETH reserve's post-liquidation index update). Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: reserve=topics[1]=weETH, liquidityRate/stableBorrowRate/variableBorrowRate/liquidityIndex/variableBorrowIndex = data words 0-4 in that ABI order (stableBorrowRate at word1 is decoded and DISCARDED per the brief's exact AaveReserveDataUpdated field set, which omits it since this v3.3 deployment has no stable-rate borrowing).",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 232,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x804c9b842b2748a22bb64b345453a3de7ca54a6ca45ce00d415894979e22897a",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000033b2eb02683011be5b492d00000000000000000000000000000000000000000033b2e3c9fd0803ce8000000"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d, logIndex 231 (FRAX reserve, same liquidation tx). Fetched the same way, 2026-07-22.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 231,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x804c9b842b2748a22bb64b345453a3de7ca54a6ca45ce00d415894979e22897a",
+      "0x000000000000000000000000853d955acef822db058eb8505911ed77f175b99e"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000002f563d6f65921ad8bab000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000dac51632be9c960a190d000000000000000000000000000000000000000003499f3bcd47716123da5d33000000000000000000000000000000000000000003591e60b9da07a8c2c6daa2"
+  }
+]

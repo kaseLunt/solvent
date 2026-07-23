@@ -1,0 +1,30 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 149965263, tx 0x21a86c2af4a7cfeabe89656b161bd2c1c3640ed6c7f36f557d48af788bb549b0, logIndex 242 (bulk collateral-token onboarding tx). Fetched via eth_getLogs, 2026-07-22. Hand-verified: token=data word0 (non-indexed address).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 149965263,
+    "blockHash": "0x97422d87881643a5106a3e09efcd0cce86969927ca16e12ff8a836a3a10a4aaa",
+    "txHash": "0x21a86c2af4a7cfeabe89656b161bd2c1c3640ed6c7f36f557d48af788bb549b0",
+    "logIndex": 242,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0xd61bc477a25fa080e2c32ed9e4417ba4861d11b873216136586ddedadcff2f02"
+    ],
+    "data": "0x000000000000000000000000dcb612005417dc906ff72c87df732e5a90d49e11"
+  },
+  {
+    "provenance": "REAL: OP mainnet block 149965263, tx 0x21a86c2af4a7cfeabe89656b161bd2c1c3640ed6c7f36f557d48af788bb549b0, logIndex 244 (bulk collateral-token onboarding tx). Fetched via eth_getLogs, 2026-07-22. Hand-verified: token=data word0 (non-indexed address).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 149965263,
+    "blockHash": "0x97422d87881643a5106a3e09efcd0cce86969927ca16e12ff8a836a3a10a4aaa",
+    "txHash": "0x21a86c2af4a7cfeabe89656b161bd2c1c3640ed6c7f36f557d48af788bb549b0",
+    "logIndex": 244,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0xd61bc477a25fa080e2c32ed9e4417ba4861d11b873216136586ddedadcff2f02"
+    ],
+    "data": "0x000000000000000000000000d83e3d560ba6f05094d9d8b3eb8aaea571d1864e"
+  }
+]

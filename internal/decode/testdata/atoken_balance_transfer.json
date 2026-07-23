@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d, aEthEtherFiweETH (same liquidation tx). Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: from=topics[1], to=topics[2], value=data word0, index=data word1 (ray). NOTE: BalanceTransfer is not in Task 4's minimum event roster but IS required by the Phase 2 plan's Task 6 Aave-deriver semantics ('Transfer/BalanceTransfer -> scaled moves between accounts'); added here as a beyond-brief addition documented in the task report.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 237,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0x4beccb90f994c31aced7a23b5611020728a23d8ec5cddd1a3e9d97b96fda8666",
+      "0x0000000000000000000000002ec19e982172ead28b312a07faf25105fb3747d8",
+      "0x000000000000000000000000464c71f6c2f760dda6093dcb91c24c39e5d6e18c"
+    ],
+    "data": "0x00000000000000000000000000000000000000000000000000000271063fa9860000000000000000000000000000000000000000033b2eb02683011be5b492d0"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 25220630, tx 0x67457208396c157f3f38bbcbe8980979846d5237b2e486b29da2f7755068131d, aEthEtherFiweETH. Fetched the same way, 2026-07-22.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25220630,
+    "blockHash": "0xc6079c118350fcbfe998eb5cfc85794d8cd1063147c77e9f7fb1e2853cc6de66",
+    "txHash": "0x67457208396c157f3f38bbcbe8980979846d5237b2e486b29da2f7755068131d",
+    "logIndex": 197,
+    "address": "0xbe1f842e7e0afd2c2322aae5d34ba899544b29db",
+    "topics": [
+      "0x4beccb90f994c31aced7a23b5611020728a23d8ec5cddd1a3e9d97b96fda8666",
+      "0x000000000000000000000000ccaf0e1b0f70157d69dbe771dd2559dd70e78367",
+      "0x000000000000000000000000464c71f6c2f760dda6093dcb91c24c39e5d6e18c"
+    ],
+    "data": "0x000000000000000000000000000000000000000000000000000000018785b4130000000000000000000000000000000000000000033b2eb02683011be5b492d0"
+  }
+]

@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL: ETH mainnet block 25334454, tx 0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d (same tx as aave_liquidation_call.json fixture 1 -- the liquidation left bad debt). Fetched via Blockscout then re-verified via eth_getTransactionReceipt, 2026-07-22. Hand-verified: user=topics[1], debtAsset=topics[2]=FRAX, amountCreated=data word0.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25334454,
+    "blockHash": "0x890a59dc74f9422fc34dd0655e744b4ac6aa97b508a7d8eece5cf26574f29330",
+    "txHash": "0x7714dcf79e5fd1a513df817963af61db0c3e02133c355cbfb2b36c3dbc7dc09d",
+    "logIndex": 230,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x2bccfb3fad376d59d7accf970515eb77b2f27b082c90ed0fb15583dd5a942699",
+      "0x0000000000000000000000002ec19e982172ead28b312a07faf25105fb3747d8",
+      "0x000000000000000000000000853d955acef822db058eb8505911ed77f175b99e"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000c032f361d94b5be"
+  },
+  {
+    "provenance": "REAL: ETH mainnet block 25220630, tx 0x67457208396c157f3f38bbcbe8980979846d5237b2e486b29da2f7755068131d. Fetched the same way, 2026-07-22. debtAsset=USDC.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 25220630,
+    "blockHash": "0xc6079c118350fcbfe998eb5cfc85794d8cd1063147c77e9f7fb1e2853cc6de66",
+    "txHash": "0x67457208396c157f3f38bbcbe8980979846d5237b2e486b29da2f7755068131d",
+    "logIndex": 190,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x2bccfb3fad376d59d7accf970515eb77b2f27b082c90ed0fb15583dd5a942699",
+      "0x000000000000000000000000ccaf0e1b0f70157d69dbe771dd2559dd70e78367",
+      "0x000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+    ],
+    "data": "0x00000000000000000000000000000000000000000000000000000000000001cf"
+  }
+]

@@ -1,0 +1,32 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 149985513, tx 0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454, logIndex 125. Fetched via eth_getTransactionReceipt (mainnet.optimism.io), 2026-07-22. This is the FIRST MigrationBorrowerPositionsSet ever emitted (recon derivation-notes.md 'Migration finding': 80 batches, blocks 149,985,513-149,986,254). Hand-verified: token=topics[1]=USDC 0x0b2c639c..., count=data word0=1. The seed tx's calldata is separately fixtured in migration_calldata_execute302.json (selector 0xcfc32570) and decodes to exactly 1 (borrower,amount) pair matching this count.",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 149985513,
+    "blockHash": "0xd924168aeaf14a74648ba4cfb3bbab73903f889518e0403d94eb6228dba0c1d7",
+    "txHash": "0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454",
+    "logIndex": 125,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x3f1c4431cbe26a58837755d2461e40a6561ee3edd0e31ca91edb845637acda8b",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000000000001"
+  },
+  {
+    "provenance": "REAL: OP mainnet block 149985787, tx 0x03f41623acdf48db4f51b1f0dcf87a0e89c0d66e42b8e23cd0b4f04fc99bb86f, logIndex 184. Fetched via eth_getTransactionReceipt (mainnet.optimism.io), 2026-07-22. Hand-verified: token=topics[1]=USDC, count=data word0=50. The seed tx's calldata is separately fixtured in migration_calldata_commit_and_execute.json (selector 0xdcfdeb60) and decodes to exactly 50 (borrower,amount) pairs matching this count -- including Safe 0xac5f3ce95f602e31b672cc38cddf7a3ea9ae5fcc at normalized amount 30578521, the exact Safe recon's 'Migration finding' identifies as having zero Borrowed events but 3 Liquidated events (its debt genesis is this migration).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 149985787,
+    "blockHash": "0xccf1fe9e2900161adb2fc2f5c604210fc6851407ddc55a60902e4cff142407d5",
+    "txHash": "0x03f41623acdf48db4f51b1f0dcf87a0e89c0d66e42b8e23cd0b4f04fc99bb86f",
+    "logIndex": 184,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0x3f1c4431cbe26a58837755d2461e40a6561ee3edd0e31ca91edb845637acda8b",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000000000000000032"
+  }
+]

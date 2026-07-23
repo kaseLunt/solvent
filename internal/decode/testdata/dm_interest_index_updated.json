@@ -1,0 +1,32 @@
+[
+  {
+    "provenance": "REAL: OP mainnet block 154585004, tx 0x09693f92285cc003881debfe5ed97a2189034e0525cc5b53ea6ff9eb85186db2, logIndex 144. Fetched via eth_getLogs (optimism.drpc.org), 2026-07-22. Hand-verified: token=topics[1], oldIndex=data word0, newIndex=data word1 (1e18 fixed-point).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 154585004,
+    "blockHash": "0x09f1f708ba64043abf2b16e3bb0c257dd939767af1ac4ebae70a23cc48f9d4a9",
+    "txHash": "0x09693f92285cc003881debfe5ed97a2189034e0525cc5b53ea6ff9eb85186db2",
+    "logIndex": 144,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0xc6ecd996cf998cfeedb2b1379b047e8579d888439dacbc60641c6dfd07f1f802",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000e7ca864b08c18b40000000000000000000000000000000000000000000000000e7ca8772fc7925d"
+  },
+  {
+    "provenance": "REAL: OP mainnet block 154585030, tx 0x0db8bab47d333828043d64c3882bd84482d4f2404a3cbb2e1bb7e4b1e53c6ddf, logIndex 180. Fetched via eth_getLogs (optimism.drpc.org), 2026-07-22. Hand-verified: token=topics[1], oldIndex=data word0, newIndex=data word1 (1e18 fixed-point).",
+    "synthetic": false,
+    "chainId": 10,
+    "blockNumber": 154585030,
+    "blockHash": "0x467e8733b9555fa130d544483cba4694ae8e3f7b2636cf6660edc05507a11a51",
+    "txHash": "0x0db8bab47d333828043d64c3882bd84482d4f2404a3cbb2e1bb7e4b1e53c6ddf",
+    "logIndex": 180,
+    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+    "topics": [
+      "0xc6ecd996cf998cfeedb2b1379b047e8579d888439dacbc60641c6dfd07f1f802",
+      "0x0000000000000000000000000b2c639c533813f4aa9d7837caf62653d097ff85"
+    ],
+    "data": "0x0000000000000000000000000000000000000000000000000e7ca8772fc7925d0000000000000000000000000000000000000000000000000e7ca88737a5dd12"
+  }
+]
