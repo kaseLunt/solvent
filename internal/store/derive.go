@@ -566,6 +566,169 @@ func (s *Store) SaveRateIndex(ctx context.Context, engine string, asset []byte, 
 	return nil
 }
 
+// DeleteRateIndexesAbove removes engine's rate observations above block —
+// the runner's post-rewind hygiene companion to RewindDerived. rate_indexes
+// rows above a reorg's rewind target may describe replaced blocks, and a
+// post-reorg re-derivation can observe a DIFFERENT value at the same
+// (engine, asset, block, kind) key — which SaveRateIndex refuses as
+// divergence, permanently wedging derivation. Deleting above the effective
+// rewind target lets re-derivation re-record the canonical values cleanly.
+// Additive write for Task 7's derivation runner.
+func (s *Store) DeleteRateIndexesAbove(ctx context.Context, engine string, block uint64) error {
+	if _, err := s.pool.Exec(ctx,
+		`DELETE FROM rate_indexes WHERE engine = $1 AND block_number > $2`, engine, block); err != nil {
+		return fmt.Errorf("delete rate indexes for %q above %d: %w", engine, block, err)
+	}
+	return nil
+}
+
+// RawLogsInRange returns chainID's stored raw logs whose emitting address is
+// in addresses and whose block is within [fromBlock, toBlock], ordered by
+// (block_number, log_index) — the serial order the derive engines require
+// (log_index is block-unique on EVM chains, so the pair is a total order).
+// Additive read for Task 7's derivation runner: one engine's feed is the
+// per-chain window filtered to the engine's full address set (e.g. the Aave
+// engine's Pool + four aTokens merged into one ordered stream).
+func (s *Store) RawLogsInRange(ctx context.Context, chainID uint64, addresses [][]byte, fromBlock, toBlock uint64) ([]RawLog, error) {
+	rows, err := s.pool.Query(ctx, `SELECT chain_id, block_number, block_hash, tx_hash, log_index, address, topics, data
+		FROM raw_logs
+		WHERE chain_id = $1 AND address = ANY($2) AND block_number BETWEEN $3 AND $4
+		ORDER BY block_number, log_index`,
+		chainID, addresses, fromBlock, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("query raw logs [%d,%d] (chain %d): %w", fromBlock, toBlock, chainID, err)
+	}
+	defer rows.Close()
+
+	var out []RawLog
+	for rows.Next() {
+		var l RawLog
+		var logIndex int32
+		if err := rows.Scan(&l.ChainID, &l.BlockNumber, &l.BlockHash, &l.TxHash,
+			&logIndex, &l.Address, &l.Topics, &l.Data); err != nil {
+			return nil, fmt.Errorf("scan raw log row: %w", err)
+		}
+		l.LogIndex = uint32(logIndex)
+		out = append(out, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate raw logs [%d,%d] (chain %d): %w", fromBlock, toBlock, chainID, err)
+	}
+	return out, nil
+}
+
+// HasUnackedReorg reports whether chainID carries a reorg epoch engine has
+// not acknowledged — the runner's proactive pre-derivation check, mirroring
+// ApplyDerived's refusal gate (including the no-cursor bootstrap case: a new
+// engine on a chain that already carries epochs must bootstrap through
+// RewindDerived). Two statements with no transaction: their mutual
+// consistency rests on the enforced single-writer contract (D-004), exactly
+// like the gate reads inside ApplyDerived. Additive read for Task 7.
+func (s *Store) HasUnackedReorg(ctx context.Context, engine string, chainID uint64) (bool, error) {
+	var maxEpoch int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT COALESCE(MAX(epoch), 0) FROM reorg_epochs WHERE chain_id = $1`, chainID).Scan(&maxEpoch); err != nil {
+		return false, fmt.Errorf("read max reorg epoch for chain %d: %w", chainID, err)
+	}
+	if maxEpoch == 0 {
+		return false, nil // the chain has never been rewound
+	}
+	var acked int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT acked_epoch FROM derive_cursors WHERE engine = $1`, engine).Scan(&acked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true, nil // bootstrap on an epoch-carrying chain: unacked by definition
+	}
+	if err != nil {
+		return false, fmt.Errorf("read derive cursor ack for %q: %w", engine, err)
+	}
+	return acked < maxEpoch, nil
+}
+
+// PruneAckedReorgEpochs deletes every reorg epoch that all engines bound to
+// its chain (all derive_cursors rows with that chain_id) have acknowledged,
+// returning the number of rows removed. Epochs on chains with NO derive
+// cursor are kept (the MIN over an empty set is NULL, so the comparison never
+// admits them) — harmless retention that also keeps the bootstrap gate
+// visible until a first engine appears. Pruning acked epochs does not reopen
+// the new-engine bootstrap hole: a no-cursor engine has no derived state a
+// pre-prune rewind could have invalidated (position_events rows only ever
+// exist alongside a cursor). Additive write for Task 7's periodic pruning.
+func (s *Store) PruneAckedReorgEpochs(ctx context.Context) (int64, error) {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM reorg_epochs e
+		WHERE e.epoch <= (SELECT MIN(acked_epoch) FROM derive_cursors d WHERE d.chain_id = e.chain_id)`)
+	if err != nil {
+		return 0, fmt.Errorf("prune acked reorg epochs: %w", err)
+	}
+	return ct.RowsAffected(), nil
+}
+
+// SnapshotAccounts returns the distinct debt-side accounts engine has ever
+// derived a position event for — the snapshotter's Safe registry (plan Task
+// 7: "distinct debt-side accounts from position_events"). Ordering is
+// nonzero-debt-first (accounts holding a nonzero event-sourced debt balance
+// lead — they are the ones a liquidation engine cares about), then bytewise
+// ascending for determinism. Additive read for the Task 7 snapshotter.
+func (s *Store) SnapshotAccounts(ctx context.Context, engine string) ([][]byte, error) {
+	rows, err := s.pool.Query(ctx, `SELECT e.account
+		FROM (SELECT DISTINCT account FROM position_events WHERE engine = $1 AND side = 'debt') e
+		LEFT JOIN (
+			SELECT account, bool_or(amount <> 0) AS has_debt
+			FROM position_balances
+			WHERE engine = $1 AND side = 'debt' AND source = 'event'
+			GROUP BY account
+		) b ON b.account = e.account
+		ORDER BY COALESCE(b.has_debt, false) DESC, e.account`, engine)
+	if err != nil {
+		return nil, fmt.Errorf("query snapshot accounts for %q: %w", engine, err)
+	}
+	defer rows.Close()
+
+	var out [][]byte
+	for rows.Next() {
+		var account []byte
+		if err := rows.Scan(&account); err != nil {
+			return nil, fmt.Errorf("scan snapshot account: %w", err)
+		}
+		out = append(out, account)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate snapshot accounts for %q: %w", engine, err)
+	}
+	return out, nil
+}
+
+// SaveSnapshot writes one snapshots-table row: engine's full balance view for
+// account at block, as JSONB {asset-hex: {side: decimal-string}} (the
+// BalancesFor shape with amounts stringified — JSON numbers cannot carry
+// uint256 exactly). Re-saving the same (engine, account, block) key replaces
+// the row wholesale: the runner writes these after ApplyDerived commits, and
+// a replayed round must converge on committed truth, not error. Additive
+// write for Task 7's per-round touched-account snapshots.
+func (s *Store) SaveSnapshot(ctx context.Context, engine string, account []byte, block uint64, balances map[string]map[string]*big.Int) error {
+	doc := make(map[string]map[string]string, len(balances))
+	for assetHex, sides := range balances {
+		if _, err := hex.DecodeString(assetHex); err != nil {
+			return fmt.Errorf("snapshot asset key %q: %w", assetHex, err)
+		}
+		doc[assetHex] = make(map[string]string, len(sides))
+		for side, amount := range sides {
+			if amount == nil {
+				return fmt.Errorf("snapshot balance %s/%s: nil amount", assetHex, side)
+			}
+			doc[assetHex][side] = amount.String()
+		}
+	}
+	if _, err := s.pool.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
+		VALUES ($1,$2,$3,$4,now())
+		ON CONFLICT (engine, account, block_number) DO UPDATE
+		SET balances = EXCLUDED.balances, taken_at = now()`,
+		engine, account, block, doc); err != nil {
+		return fmt.Errorf("save snapshot for %q account %x at %d: %w", engine, account, block, err)
+	}
+	return nil
+}
+
 // LatestRateIndex returns engine's most recent rate observation for asset of
 // the given kind at or below atOrBelow, plus the block it was observed at.
 // found is false when no observation exists in range.

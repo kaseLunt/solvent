@@ -71,6 +71,39 @@ func (s *Store) AcquireWriterLock(ctx context.Context) error {
 	return nil
 }
 
+// CheckWriterLock verifies the writer advisory lock is still held by this
+// Store's pinned session — the daemon's per-round liveness re-check (Phase 1
+// deferral landed in Task 7). It queries pg_locks ON THE LOCK'S OWN
+// CONNECTION: if that session died (server restart, connection kill), the
+// query itself fails; if the session is alive but the lock is gone, the
+// granted-advisory-row check fails. Either way the caller must treat any
+// error as FATAL and exit — a lost lock means another indexer process may
+// already be writing, and continuing would violate the single-writer
+// contract every store gate read relies on (D-004).
+//
+// pg_locks encodes a bigint advisory key as classid = high 32 bits, objid =
+// low 32 bits, objsubid = 1 (the bigint-form marker).
+func (s *Store) CheckWriterLock(ctx context.Context) error {
+	if s.writerConn == nil {
+		return fmt.Errorf("writer lock liveness: no pinned lock session (AcquireWriterLock has not succeeded)")
+	}
+	classid := uint32(uint64(writerLockKey) >> 32)
+	objid := uint32(uint64(writerLockKey))
+	var held bool
+	if err := s.writerConn.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM pg_locks
+			WHERE locktype = 'advisory' AND granted
+			  AND pid = pg_backend_pid()
+			  AND classid = $1::oid AND objid = $2::oid AND objsubid = 1
+		)`, classid, objid).Scan(&held); err != nil {
+		return fmt.Errorf("writer lock liveness check failed (session presumed lost): %w", err)
+	}
+	if !held {
+		return fmt.Errorf("writer lock lost: advisory lock %d is no longer held by this session", writerLockKey)
+	}
+	return nil
+}
+
 func (s *Store) Close() {
 	if s.writerConn != nil {
 		s.writerConn.Release()
