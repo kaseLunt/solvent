@@ -24,6 +24,7 @@ type rpcClient interface {
 	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 	ChainID(ctx context.Context) (*big.Int, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 }
 
 type Failover struct {
@@ -148,6 +149,24 @@ func (f *Failover) TxCalldata(ctx context.Context, txHash common.Hash) ([]byte, 
 			return fmt.Errorf("transaction %s not found", txHash)
 		}
 		out = tx.Data()
+		return nil
+	})
+	return out, err
+}
+
+// Call executes a read-only eth_call against `to` with calldata data at the
+// LATEST block, under failover rotation. Additive method for the Phase 2
+// snapshotter (Task 7): batched multicall3 reads of Debt Manager
+// collateralOf views — OP collateral is not event-derivable (recon caveat 4),
+// so its only honest source is a live view sweep.
+func (f *Failover) Call(ctx context.Context, to common.Address, data []byte) ([]byte, error) {
+	var out []byte
+	err := f.do(ctx, "call", func(ctx context.Context, c rpcClient) error {
+		res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, nil)
+		if err != nil {
+			return err
+		}
+		out = res
 		return nil
 	})
 	return out, err

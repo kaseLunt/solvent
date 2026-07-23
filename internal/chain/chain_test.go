@@ -14,13 +14,14 @@ import (
 )
 
 type fakeRPC struct {
-	name     string
-	fail     bool
-	hang     bool // block on ctx.Done() to simulate a hung endpoint
-	calls    int
-	blockNum uint64
-	chainID  uint64
-	txData   []byte
+	name       string
+	fail       bool
+	hang       bool // block on ctx.Done() to simulate a hung endpoint
+	calls      int
+	blockNum   uint64
+	chainID    uint64
+	txData     []byte
+	callResult []byte
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -65,6 +66,14 @@ func (f *fakeRPC) TransactionByHash(ctx context.Context, hash common.Hash) (*typ
 		return nil, false, errors.New(f.name + " down")
 	}
 	return types.NewTx(&types.LegacyTx{Data: f.txData}), false, nil
+}
+
+func (f *fakeRPC) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	f.calls++
+	if f.fail {
+		return nil, errors.New(f.name + " down")
+	}
+	return f.callResult, nil
 }
 
 func TestFailoverRotatesOnError(t *testing.T) {
@@ -133,6 +142,22 @@ func TestTxCalldataReturnsInputWithFailover(t *testing.T) {
 	got, err := f.TxCalldata(context.Background(), common.HexToHash("0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454"))
 	require.NoError(t, err)
 	require.Equal(t, input, got)
+	require.Equal(t, 1, a.calls)
+	require.Equal(t, 1, b.calls)
+}
+
+// Call returns the eth_call result and participates in normal failover
+// rotation like every other read.
+func TestCallReturnsResultWithFailover(t *testing.T) {
+	result := []byte{0xde, 0xad, 0xbe, 0xef}
+	a := &fakeRPC{name: "a", fail: true}
+	b := &fakeRPC{name: "b", callResult: result}
+	f := newFailover([]rpcClient{a, b})
+
+	got, err := f.Call(context.Background(),
+		common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553"), []byte{0x01})
+	require.NoError(t, err)
+	require.Equal(t, result, got)
 	require.Equal(t, 1, a.calls)
 	require.Equal(t, 1, b.calls)
 }
