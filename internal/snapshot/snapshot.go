@@ -36,7 +36,15 @@
 // is refused by the store's monotonic guard — per-account skips leave those
 // accounts lagging for retry, and an ALL-stale batch surfaces as
 // store.ErrStaleSweepBatch, logged here as a DEGRADED round rather than
-// treated as applied. An individual collateralOf revert
+// treated as applied. A RESPONSIVE endpoint frozen on old chain state passes
+// do's error-driven rotation every time (the eth_call succeeds), so Step also
+// calls RotateActive on this path: the next Step's multicall starts from a
+// different endpoint instead of re-serving the identical stale batch forever.
+// Step tracks consecutive stale-rotations and, once it has cycled through
+// every configured endpoint without landing a batch, logs an explicit
+// "all endpoints stale" DEGRADED warning — the existing DEGRADED posture
+// still stands (nothing wedges), but the operator learns rotation alone
+// cannot save this round. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -109,8 +117,21 @@ type Store interface {
 var _ Store = (*store.Store)(nil)
 
 // Chain is the snapshotter's chain surface (*chain.Failover satisfies it).
+// RotateActive and EndpointCount back the semantic-staleness rotation escape
+// hatch: a batch response that is well-formed at the RPC layer but stale per
+// the store's monotonic guard is invisible to the failover client's own
+// error-driven rotation (the eth_call succeeded), so Step rotates explicitly
+// and bounds how many times it does so against how many endpoints exist.
 type Chain interface {
 	Call(ctx context.Context, to common.Address, data []byte) ([]byte, error)
+	// RotateActive advances the failover client's sticky active endpoint by
+	// one, for a call that succeeded at the RPC layer but was semantically
+	// unusable (e.g. an endpoint serving stale chain state).
+	RotateActive()
+	// EndpointCount reports how many RPC endpoints the failover client
+	// rotates across, bounding the "cycled through every endpoint without
+	// progress" check after repeated stale-sweep rotations.
+	EndpointCount() int
 }
 
 var _ Chain = (*chain.Failover)(nil)
@@ -198,6 +219,12 @@ type Snapshotter struct {
 	// flag — RewindDerived already opened the new generation in its own
 	// transaction, and Step reads that state every round.
 	resweep bool
+
+	// staleRotations counts consecutive ErrStaleSweepBatch rounds since the
+	// last landed batch — the "how many endpoints have we cycled through
+	// without progress" measure feeding the all-endpoints-stale DEGRADED
+	// log. Reset to zero whenever a batch actually applies.
+	staleRotations int
 }
 
 // New builds a Snapshotter. Engine, target and a positive interval are
@@ -301,12 +328,30 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			// re-pull next round, most likely against a caught-up endpoint.
 			slog.Warn("collateral snapshot sweep round DEGRADED: stale sweep block — endpoint behind; nothing applied, retrying next round",
 				"engine", s.cfg.Engine, "generation", gen, "execBlock", block, "accounts", len(batch))
+
+			// The eth_call SUCCEEDED (this is semantic staleness, not an RPC
+			// error), so chain.Failover's own error-driven rotation never saw
+			// a problem and would keep re-serving this identical responsive-
+			// but-frozen endpoint forever. Rotate explicitly: the next Step's
+			// multicall starts from the next endpoint.
+			s.chain.RotateActive()
+			s.staleRotations++
+			slog.Warn("rotating rpc endpoint after stale sweep batch",
+				"engine", s.cfg.Engine, "generation", gen, "execBlock", block)
+
+			if n := s.chain.EndpointCount(); n > 0 && s.staleRotations >= n {
+				slog.Warn("collateral snapshot sweep DEGRADED: all endpoints stale — cycled through every rpc endpoint without landing a batch",
+					"engine", s.cfg.Engine, "generation", gen, "endpoints", n, "staleRotations", s.staleRotations)
+			}
 			return false, nil
 		}
 		// Durable queue untouched: the batch re-pulls and re-applies next
 		// round (ApplySweepBatch is idempotent under replay).
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)
 	}
+	// Progress: reset the stale-rotation streak so a later isolated stale
+	// round doesn't inherit an earlier cycle's count.
+	s.staleRotations = 0
 	return true, nil
 }
 

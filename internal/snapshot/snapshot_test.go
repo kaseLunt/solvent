@@ -47,12 +47,48 @@ type capturedCall struct {
 type fakeChain struct {
 	calls   []capturedCall
 	respond func(to common.Address, data []byte) ([]byte, error)
+
+	// rotateCalls / endpointCount back the semantic-staleness rotation
+	// tests below; unused (zero-value) fakeChain instances behave exactly
+	// as before — EndpointCount()==0 means Step's all-endpoints-stale check
+	// never fires.
+	rotateCalls   int
+	endpointCount int
 }
 
 func (c *fakeChain) Call(_ context.Context, to common.Address, data []byte) ([]byte, error) {
 	c.calls = append(c.calls, capturedCall{to: to, data: data})
 	return c.respond(to, data)
 }
+
+func (c *fakeChain) RotateActive() { c.rotateCalls++ }
+
+func (c *fakeChain) EndpointCount() int { return c.endpointCount }
+
+// fakeMultiEndpointChain models chain.Failover's semantic-rotation contract
+// for the production-style regression below: Call always serves from the
+// sticky active responder (exactly like Failover.do, which never rotates on
+// its own for a call that succeeds), and RotateActive is the ONLY thing that
+// advances it — proving Step, not the fake, drives the endpoint switch.
+type fakeMultiEndpointChain struct {
+	responders []func(common.Address, []byte) ([]byte, error)
+	active     int
+	calls      []capturedCall
+
+	rotateCalls int
+}
+
+func (c *fakeMultiEndpointChain) Call(_ context.Context, to common.Address, data []byte) ([]byte, error) {
+	c.calls = append(c.calls, capturedCall{to: to, data: data})
+	return c.responders[c.active](to, data)
+}
+
+func (c *fakeMultiEndpointChain) RotateActive() {
+	c.rotateCalls++
+	c.active = (c.active + 1) % len(c.responders)
+}
+
+func (c *fakeMultiEndpointChain) EndpointCount() int { return len(c.responders) }
 
 // sweepRow mirrors one durable snapshot_sweeps row.
 type sweepRow struct {
@@ -339,8 +375,10 @@ func harness(t *testing.T, registry [][]byte, respond func(common.Address, []byt
 }
 
 // freshSnapshotter models a PROCESS RESTART: a brand-new Snapshotter (no
-// memory) over the surviving durable store.
-func freshSnapshotter(t *testing.T, st *fakeSnapStore, ch *fakeChain, clock *time.Time, batchSize int) *Snapshotter {
+// memory) over the surviving durable store. ch takes the Chain interface
+// (not the concrete *fakeChain) so restart-loop tests and the multi-endpoint
+// rotation regression below can share this constructor.
+func freshSnapshotter(t *testing.T, st *fakeSnapStore, ch Chain, clock *time.Time, batchSize int) *Snapshotter {
 	t.Helper()
 	s, err := New(st, ch, Config{
 		Engine: "debt_manager", Target: testTarget,
@@ -895,4 +933,101 @@ func TestStaleSweepBatchIsDegradedRoundNotError(t *testing.T) {
 	require.True(t, advanced)
 	require.Equal(t, ch.calls[0].data, ch.calls[1].data, "the identical batch retries against the durable queue")
 	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
+}
+
+// TestStaleSweepBatchRotatesToHealthyEndpoint is the Codex-specified
+// production-style regression: endpoint A is RESPONSIVE but frozen at
+// execBlock 150 forever (valid, well-formed eth_call responses — never an
+// RPC error, so chain.Failover's own error-driven rotation would keep
+// re-serving it forever), endpoint B is caught up at 201. The first sweep is
+// rejected (stale) and the rotation is logged; the SAME durable batch retries
+// on the second sweep, but this time the multicall actually lands on B — not
+// forced by the test, but because Step called RotateActive — and the
+// generation is stamped for real.
+func TestStaleSweepBatchRotatesToHealthyEndpoint(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	tokens := []tokenData{{Token: tokenUSDC, Amount: big.NewInt(999)}}
+
+	frozenA := uniformResponder(t, 150, tokens)
+	healthyB := uniformResponder(t, 201, tokens)
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){frozenA, healthyB}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	// The fake store (unlike the real one) doesn't itself compare execBlock
+	// against a recorded per-account high-water mark, so the store's
+	// monotonic-guard rejection of endpoint A's frozen 150 is modeled the
+	// same one-shot way TestStaleSweepBatchIsDegradedRoundNotError models
+	// it: injected on the round that must be refused.
+	st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	// Sweep once: the multicall hits endpoint A (frozen@150), the store
+	// refuses it as stale, and Step rotates the failover's active endpoint
+	// instead of leaving it sticky on the responsive-but-frozen A.
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err, "a stale batch is a degraded round, never a step error")
+	require.False(t, advanced, "nothing applied: the round is not progress")
+	require.Empty(t, st.rows, "the store's typed refusal applied nothing")
+	require.Equal(t, 1, ch.rotateCalls)
+	require.Equal(t, 1, ch.active, "rotation must advance past the frozen endpoint")
+
+	rotated, allStale := false, false
+	for _, m := range *warnings {
+		if strings.Contains(m, "rotating rpc endpoint after stale sweep batch") {
+			rotated = true
+		}
+		if strings.Contains(m, "all endpoints stale") {
+			allStale = true
+		}
+	}
+	require.True(t, rotated, "the rotation must be logged, got %v", *warnings)
+	require.False(t, allStale, "only one of two endpoints has been tried — not yet a full cycle")
+
+	// Sweep again: the SAME durable batch re-pulls (the queue was untouched),
+	// but the multicall now reaches endpoint B — healthy, at 201 — and the
+	// store lands it for real: balances recorded, generation stamped.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, ch.calls, 2)
+	rec := st.applied[len(st.applied)-1]
+	require.Equal(t, uint64(201), rec.block)
+	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
+	require.Equal(t, map[string]map[string]*big.Int{
+		hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(999)},
+	}, st.balances[hex.EncodeToString(acct(1))])
+}
+
+// TestAllEndpointsStaleLogsDegradedAfterFullCycle: when every configured
+// endpoint serves a stale batch in turn — a full cycle of rotations without
+// landing a single batch — Step logs the explicit "all endpoints stale"
+// DEGRADED warning on top of the existing per-round DEGRADED posture; the
+// durable queue still never wedges (each round returns advanced=false, nil).
+func TestAllEndpointsStaleLogsDegradedAfterFullCycle(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil) // every endpoint equally frozen
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	for i := 0; i < ch.EndpointCount(); i++ {
+		st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
+		advanced, err := s.Step(context.Background())
+		require.NoError(t, err)
+		require.False(t, advanced)
+	}
+	require.Equal(t, ch.EndpointCount(), ch.rotateCalls, "one rotation per stale round")
+
+	allStale := false
+	for _, m := range *warnings {
+		if strings.Contains(m, "all endpoints stale") {
+			allStale = true
+		}
+	}
+	require.True(t, allStale, "cycling through every endpoint without progress must log the all-stale DEGRADED warning, got %v", *warnings)
 }

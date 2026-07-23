@@ -33,7 +33,11 @@ type Failover struct {
 	// active is a routing hint, not a health registry: it always names the
 	// endpoint that most recently succeeded. Under concurrent callers the
 	// last writer wins, which is safe — every candidate value refers to an
-	// endpoint that just served a successful call.
+	// endpoint that just served a successful call. The one deliberate
+	// exception is RotateActive: a caller that discovers a "successful"
+	// response was semantically unusable (e.g. an endpoint frozen on stale
+	// chain state, which never fails at the RPC layer and so never trips
+	// do's own error-driven rotation) can force active past that endpoint.
 	active int
 	// attemptTimeout bounds each per-endpoint attempt inside do.
 	attemptTimeout time.Duration
@@ -86,6 +90,25 @@ func (f *Failover) do(ctx context.Context, op string, fn func(ctx context.Contex
 		return nil
 	}
 	return fmt.Errorf("all rpc endpoints failed (%s): %w", op, lastErr)
+}
+
+// RotateActive advances the sticky active endpoint index by one (mod the
+// endpoint count), under the mutex. It is for SEMANTIC failures — a response
+// that is well-formed at the RPC layer but unusable by the caller (e.g. an
+// endpoint serving stale chain state) — where the eth_call itself succeeded,
+// so do's error-driven rotation never sees a problem and would keep re-
+// serving the same endpoint forever. The next call through do starts from
+// the rotated endpoint. Complements error-driven rotation, which cannot see
+// semantic staleness — only the caller who interpreted the response can.
+func (f *Failover) RotateActive() {
+	f.mu.Lock()
+	f.active = (f.active + 1) % len(f.clients)
+	f.mu.Unlock()
+}
+
+// EndpointCount reports how many RPC endpoints this Failover rotates across.
+func (f *Failover) EndpointCount() int {
+	return len(f.clients)
 }
 
 // VerifyChainID queries every endpoint and errors unless all report want.

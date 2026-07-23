@@ -162,6 +162,33 @@ func TestCallReturnsResultWithFailover(t *testing.T) {
 	require.Equal(t, 1, b.calls)
 }
 
+// RotateActive is the semantic-staleness escape hatch: a caller that
+// discovers a successful-looking response was actually unusable (stale
+// chain state) can force the sticky active endpoint forward without an RPC
+// error ever occurring.
+func TestRotateActiveAdvancesStickyEndpoint(t *testing.T) {
+	a := &fakeRPC{name: "a", blockNum: 1}
+	b := &fakeRPC{name: "b", blockNum: 2}
+	f := newFailover([]rpcClient{a, b})
+	require.Equal(t, 2, f.EndpointCount())
+
+	n, err := f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), n)
+	require.Equal(t, 1, a.calls)
+	require.Equal(t, 0, b.calls)
+
+	// The call above "succeeded" but the caller judges its response stale
+	// and rotates explicitly — do never saw an error.
+	f.RotateActive()
+
+	n, err = f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), n)
+	require.Equal(t, 1, a.calls, "a is not retried: rotation moved past it without an error")
+	require.Equal(t, 1, b.calls, "the next call starts at the rotated endpoint")
+}
+
 func TestVerifyChainIDAcceptsMatching(t *testing.T) {
 	a := &fakeRPC{name: "a", chainID: 10}
 	b := &fakeRPC{name: "b", chainID: 10}
