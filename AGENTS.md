@@ -38,3 +38,12 @@ accurately. Default to one repository writer unless the project has explicitly a
 verified a concurrent-writer contract.
 
 <!-- END control-plane session protocol -->
+
+<!-- project-owned section below; the managed block above is installer-owned -->
+
+## Project Review Policy (owner-ratified)
+
+- **Codex is the standing senior reviewer** — see `roadmap/decisions/D-005-codex-senior-reviewer.md`
+  for the binding cadence: adversarial pass on every correctness-critical component, whole-branch
+  review at phase close, verification of fix waves. Dispatch via the `codex-reviewer` agent type.
+- Standard per-task reviews still run for everything; Codex is additive, not a replacement.
