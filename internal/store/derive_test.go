@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testDeriveStore mirrors testStore but also truncates the seven derivation
+// testDeriveStore mirrors testStore but also truncates the eight derivation
 // tables (position_events, position_balances, derive_cursors, prices,
-// snapshots, rate_indexes, reorg_epochs) alongside the Task-2 ingestion
+// snapshots, snapshot_sweeps, rate_indexes, reorg_epochs) alongside the Task-2 ingestion
 // tables, so derivation tests never see state left over from a prior test or
 // the ingestion suite. reorg_epochs' BIGSERIAL sequence is deliberately NOT
 // restarted: every epoch comparison in the store is relative (acked vs chain
@@ -29,7 +29,7 @@ func testDeriveStore(t *testing.T) *Store {
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	_, err = s.pool.Exec(context.Background(),
-		"TRUNCATE position_events, position_balances, derive_cursors, prices, snapshots, rate_indexes, reorg_epochs, raw_logs, ingest_cursors")
+		"TRUNCATE position_events, position_balances, derive_cursors, prices, snapshots, snapshot_sweeps, rate_indexes, reorg_epochs, raw_logs, ingest_cursors")
 	require.NoError(t, err)
 	return s
 }

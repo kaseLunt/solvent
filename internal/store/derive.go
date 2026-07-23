@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/big"
 	"reflect"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,6 +64,18 @@ type PositionEvent struct {
 	Side        string
 	Delta       *big.Int
 	Payload     map[string]string
+}
+
+// RateObservation is one rate-index observation persisted ATOMICALLY with its
+// derivation window by ApplyDerivedWithRates: the (asset, block, kind, value)
+// tuple the runner extracted from the window's decoded events. Kind uses the
+// rate_indexes vocabulary ("borrow_index", "variable_borrow_index",
+// "liquidity_index", "borrow_apy").
+type RateObservation struct {
+	Asset []byte
+	Block uint64
+	Kind  string
+	Value *big.Int
 }
 
 // NUMERIC round-trip: position_events.delta and position_balances.amount are
@@ -130,7 +143,29 @@ func (s *Store) DeriveCursor(ctx context.Context, engine string) (block uint64, 
 //     causes are disambiguated by reading the cursor back — a cross-chain
 //     batch gets a distinct "derive cursor chain mismatch" error, a height
 //     regression keeps "derive cursor regression".
+//
+// ApplyDerived persists NO rate observations; it is ApplyDerivedWithRates
+// with an empty rate set, retained for callers (and tests) that derive
+// windows without rate extraction.
 func (s *Store) ApplyDerived(ctx context.Context, engine string, chainID uint64, events []PositionEvent, throughBlock uint64) error {
+	return s.ApplyDerivedWithRates(ctx, engine, chainID, events, nil, throughBlock)
+}
+
+// ApplyDerivedWithRates is ApplyDerived plus the window's rate observations,
+// in the SAME transaction: a window either lands with every rate value its
+// events carried, or not at all. This closes the crash hole of the old
+// persist-rates-then-apply sequence — a crash between the two could strand
+// rate rows for a window whose events never committed (or, worse ordering,
+// lose observations for a committed window forever once the cursor advanced).
+//
+// Rate semantics inside the transaction mirror SaveRateIndex exactly: an
+// identical replay of an existing (engine, asset, block, kind) key is a
+// no-op; a DIVERGENT value under an existing key aborts the WHOLE batch
+// (events, balances, cursor and rates all roll back). The caller is expected
+// to have last-wins-deduped same-key observations within the batch (the
+// runner's rateSet does); intra-batch duplicates that survive to this call
+// hit the same divergence check via same-transaction visibility.
+func (s *Store) ApplyDerivedWithRates(ctx context.Context, engine string, chainID uint64, events []PositionEvent, rates []RateObservation, throughBlock uint64) error {
 	for _, ev := range events {
 		if ev.ChainID != chainID {
 			return fmt.Errorf("event %x/%d/%d: chain id %d does not match batch chain id %d",
@@ -139,6 +174,11 @@ func (s *Store) ApplyDerived(ctx context.Context, engine string, chainID uint64,
 		if ev.Engine != engine {
 			return fmt.Errorf("event %x/%d/%d: engine %q does not match batch engine %q",
 				ev.TxHash, ev.LogIndex, ev.Seq, ev.Engine, engine)
+		}
+	}
+	for _, o := range rates {
+		if o.Value == nil {
+			return fmt.Errorf("rate observation %s/%x@%d: nil value", o.Kind, o.Asset, o.Block)
 		}
 	}
 
@@ -180,6 +220,37 @@ func (s *Store) ApplyDerived(ctx context.Context, engine string, chainID uint64,
 		// already carries epochs — RewindDerived is the bootstrap entry point.
 		return fmt.Errorf("engine %q has no derive cursor and chain %d carries %w %d: bootstrap via RewindDerived before applying",
 			engine, chainID, ErrUnackedReorgEpoch, maxEpoch)
+	}
+
+	// Rate observations, atomic with the window (SaveRateIndex semantics
+	// inside this transaction: identical replay no-op, divergence aborts).
+	for _, o := range rates {
+		ct, err := tx.Exec(ctx, `INSERT INTO rate_indexes (engine, asset, block_number, kind, value)
+			VALUES ($1,$2,$3,$4,$5)
+			ON CONFLICT (engine, asset, block_number, kind) DO NOTHING`,
+			engine, o.Asset, o.Block, o.Kind, pgtype.Numeric{Int: o.Value, Exp: 0, Valid: true})
+		if err != nil {
+			return fmt.Errorf("save rate index %s/%x@%d: %w", o.Kind, o.Asset, o.Block, err)
+		}
+		if ct.RowsAffected() > 0 {
+			continue // fresh insert
+		}
+		// Conflicted with an existing row: idempotent only if the value
+		// matches; a divergent value rolls the whole window back.
+		var existingText string
+		if err := tx.QueryRow(ctx,
+			`SELECT value::text FROM rate_indexes WHERE engine = $1 AND asset = $2 AND block_number = $3 AND kind = $4`,
+			engine, o.Asset, o.Block, o.Kind).Scan(&existingText); err != nil {
+			return fmt.Errorf("read conflicting rate index %s/%x@%d: %w", o.Kind, o.Asset, o.Block, err)
+		}
+		existing, ok := new(big.Int).SetString(existingText, 10)
+		if !ok {
+			return fmt.Errorf("parse rate index %q: not an integer", existingText)
+		}
+		if existing.Cmp(o.Value) != 0 {
+			return fmt.Errorf("rate index divergence: %s/%x@%d already holds %s, refusing %s — aborting batch",
+				o.Kind, o.Asset, o.Block, existing, o.Value)
+		}
 	}
 
 	for _, ev := range events {
@@ -348,6 +419,13 @@ func normalizePayload(p map[string]string) map[string]string {
 // alone would not guarantee that). Any epoch committed after this
 // transaction gates the next ApplyDerived again.
 //
+// Rate-index hygiene is part of this SAME transaction: the engine's
+// rate_indexes rows above the effective target are deleted here, atomically
+// with the event deletion and the cursor ack — never as a separate follow-up
+// call a crash could skip. A post-reorg re-derivation may observe a DIFFERENT
+// value at the same (engine, asset, block, kind) key, which the divergence
+// refusal would otherwise wedge on forever.
+//
 // This is also the BOOTSTRAP entry point for a new engine on a chain that
 // already carries reorg epochs: ApplyDerived refuses a no-cursor engine on
 // such a chain until this call has created its cursor and acked. If a cursor
@@ -356,7 +434,10 @@ func normalizePayload(p map[string]string) map[string]string {
 // cursor upsert's conflict arm deliberately never rebinds chain_id.
 //
 // Snapshot-sourced balance rows are deliberately untouched: they are owned
-// by the snapshotter, which the runner re-triggers after any rewind.
+// by the snapshotter, whose re-sweep after a rewind is crash-safe by
+// construction — the runner's onRewind hook covers the live process, and a
+// restarted process always performs a full startup sweep (see
+// internal/snapshot), so no durable post-rewind marker is needed here.
 func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64, toBlock uint64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -408,6 +489,15 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM position_balances WHERE engine = $1 AND source = 'event'`, engine); err != nil {
 		return fmt.Errorf("clear position balances: %w", err)
+	}
+
+	// Rate hygiene, atomic with the rewind (see the doc comment): observations
+	// above the effective target may describe replaced blocks, and leaving
+	// them would wedge re-derivation on the divergence refusal.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM rate_indexes WHERE engine = $1 AND block_number > $2`,
+		engine, effectiveTarget); err != nil {
+		return fmt.Errorf("delete rate indexes above %d: %w", effectiveTarget, err)
 	}
 
 	// No HAVING SUM(delta) <> 0 filter: zero-net groups keep their row, so a
@@ -698,13 +788,20 @@ func (s *Store) SnapshotAccounts(ctx context.Context, engine string) ([][]byte, 
 	return out, nil
 }
 
-// SaveSnapshot writes one snapshots-table row: engine's full balance view for
-// account at block, as JSONB {asset-hex: {side: decimal-string}} (the
-// BalancesFor shape with amounts stringified — JSON numbers cannot carry
-// uint256 exactly). Re-saving the same (engine, account, block) key replaces
-// the row wholesale: the runner writes these after ApplyDerived commits, and
-// a replayed round must converge on committed truth, not error. Additive
-// write for Task 7's per-round touched-account snapshots.
+// SaveSnapshot writes one snapshots-table row: a balance view for account at
+// block, as JSONB {asset-hex: {side: decimal-string}} (the BalancesFor shape
+// with amounts stringified — JSON numbers cannot carry uint256 exactly).
+// Re-saving the same (engine, account, block) key replaces the row wholesale.
+//
+// AS-OF DISCIPLINE (fix wave): a snapshots row claims its whole document was
+// observed at block — so callers must never mix sides observed at different
+// blocks into one document (debt_manager debt is event-derived truth at the
+// derive through-block, while its collateral is a multicall read at some
+// OTHER block; combining them here would lie about as-of semantics).
+// Cross-side composition is a READ-TIME concern (P3), not a storage-time
+// merge. The runner writes side-scoped documents via SaveSnapshots (the bulk
+// form, whose SnapshotDoc shape carries an explicit "side" marker); this
+// per-row form predates it and is retained for compatibility.
 func (s *Store) SaveSnapshot(ctx context.Context, engine string, account []byte, block uint64, balances map[string]map[string]*big.Int) error {
 	doc := make(map[string]map[string]string, len(balances))
 	for assetHex, sides := range balances {
@@ -727,6 +824,141 @@ func (s *Store) SaveSnapshot(ctx context.Context, engine string, account []byte,
 		return fmt.Errorf("save snapshot for %q account %x at %d: %w", engine, account, block, err)
 	}
 	return nil
+}
+
+// SnapshotDoc is one account's SIDE-SCOPED snapshots-table document: every
+// balance in it was observed on the SAME side at the SAME block, which is
+// what makes the row's as-of claim honest (see SaveSnapshot's discipline
+// note). Balances is keyed by lowercase asset-hex (no "0x").
+type SnapshotDoc struct {
+	Side     string              // "debt" or "collateral" — never mixed
+	Balances map[string]*big.Int // lowercase asset-hex → amount
+}
+
+// SaveSnapshots writes one side-scoped snapshots-table row per docs entry
+// (keyed by lowercase account-hex) at block, as ONE transaction batching all
+// inserts — the runner's bulk per-round history write, replacing a
+// per-account statement loop. The JSONB shape is
+// {"side": s, "balances": {asset-hex: decimal-string}}. Re-saving an
+// (engine, account, block) key replaces the row wholesale (replayed rounds
+// converge). Atomic: a failure (including context cancellation mid-batch)
+// leaves NO partial rows. Additive write for the fix wave's bounded bulk
+// snapshotting.
+func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, docs map[string]SnapshotDoc) error {
+	if len(docs) == 0 {
+		return nil
+	}
+	accountsHex := make([]string, 0, len(docs))
+	for accountHex := range docs {
+		accountsHex = append(accountsHex, accountHex)
+	}
+	sort.Strings(accountsHex) // deterministic batch order
+
+	b := &pgx.Batch{}
+	for _, accountHex := range accountsHex {
+		account, err := hex.DecodeString(accountHex)
+		if err != nil {
+			return fmt.Errorf("snapshot account key %q: %w", accountHex, err)
+		}
+		d := docs[accountHex]
+		if d.Side == "" {
+			return fmt.Errorf("snapshot for account %s: empty side — documents must be side-scoped", accountHex)
+		}
+		balances := make(map[string]string, len(d.Balances))
+		for assetHex, amount := range d.Balances {
+			if _, err := hex.DecodeString(assetHex); err != nil {
+				return fmt.Errorf("snapshot asset key %q (account %s): %w", assetHex, accountHex, err)
+			}
+			if amount == nil {
+				return fmt.Errorf("snapshot balance %s/%s (account %s): nil amount", assetHex, d.Side, accountHex)
+			}
+			balances[assetHex] = amount.String()
+		}
+		doc := map[string]any{"side": d.Side, "balances": balances}
+		b.Queue(`INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
+			VALUES ($1,$2,$3,$4,now())
+			ON CONFLICT (engine, account, block_number) DO UPDATE
+			SET balances = EXCLUDED.balances, taken_at = now()`,
+			engine, account, block, doc)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	br := tx.SendBatch(ctx, b)
+	for range accountsHex {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return fmt.Errorf("save snapshots for %q at %d: %w", engine, block, err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("close snapshot batch for %q at %d: %w", engine, block, err)
+	}
+	return tx.Commit(ctx)
+}
+
+// SweepOutcome is one account's result from a snapshotter multicall batch,
+// recorded by RecordSnapshotSweep.
+type SweepOutcome struct {
+	Account []byte
+	Success bool
+}
+
+// RecordSnapshotSweep bulk-upserts the snapshotter's per-account sweep status
+// rows at the multicall execution block, in one transaction. A success stamps
+// both last_attempt_block and last_success_block and sets status='success'; a
+// failure stamps last_attempt_block only (last_success_block keeps the most
+// recent success, 0 if none ever) and sets status='failed'. status is always
+// the LAST attempt's outcome, so a retried account flips to 'success' the
+// moment a retry lands. Together with the balances rows this disambiguates
+// zero-collateral success (success row + empty balances) from never-swept
+// (no row) and failed (status='failed'). Additive write for the fix wave's
+// sweep status tracking.
+func (s *Store) RecordSnapshotSweep(ctx context.Context, engine string, block uint64, outcomes []SweepOutcome) error {
+	if len(outcomes) == 0 {
+		return nil
+	}
+	b := &pgx.Batch{}
+	for _, o := range outcomes {
+		if len(o.Account) == 0 {
+			return fmt.Errorf("sweep outcome with empty account")
+		}
+		if o.Success {
+			b.Queue(`INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status, updated_at)
+				VALUES ($1,$2,$3,$3,'success',now())
+				ON CONFLICT (engine, account) DO UPDATE
+				SET last_attempt_block = EXCLUDED.last_attempt_block,
+				    last_success_block = EXCLUDED.last_attempt_block,
+				    status = 'success', updated_at = now()`,
+				engine, o.Account, block)
+		} else {
+			b.Queue(`INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status, updated_at)
+				VALUES ($1,$2,$3,0,'failed',now())
+				ON CONFLICT (engine, account) DO UPDATE
+				SET last_attempt_block = EXCLUDED.last_attempt_block,
+				    status = 'failed', updated_at = now()`,
+				engine, o.Account, block)
+		}
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	br := tx.SendBatch(ctx, b)
+	for range outcomes {
+		if _, err := br.Exec(); err != nil {
+			br.Close()
+			return fmt.Errorf("record sweep outcomes for %q at %d: %w", engine, block, err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		return fmt.Errorf("close sweep batch for %q at %d: %w", engine, block, err)
+	}
+	return tx.Commit(ctx)
 }
 
 // LatestRateIndex returns engine's most recent rate observation for asset of
