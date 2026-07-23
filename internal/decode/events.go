@@ -267,6 +267,9 @@ func (AaveDeficitCreated) Name() string { return "AaveDeficitCreated" }
 
 // ATokenTransfer corresponds to the standard ERC20 Transfer(address indexed
 // from, address indexed to, uint256 value).
+//
+// RECORD-ONLY: nominal units, always an overlapping view of a Mint/Burn/
+// BalanceTransfer in the same tx; never fold.
 type ATokenTransfer struct {
 	From, To common.Address
 	Value    *big.Int
@@ -277,6 +280,11 @@ func (ATokenTransfer) Name() string { return "ATokenTransfer" }
 // ATokenMint corresponds to Mint(address caller, address indexed onBehalfOf,
 // uint256 value, uint256 balanceIncrease, uint256 index) -- Index is the
 // liquidity index (ray) at mint time.
+//
+// Value is NOT the action principal: it includes/nets BalanceIncrease
+// (interest accrual); scaled deltas must be derived from the deployed
+// implementation's source (see plan Task 6); Value==BalanceIncrease means
+// pure interest, zero principal.
 type ATokenMint struct {
 	Caller, OnBehalfOf            common.Address
 	Value, BalanceIncrease, Index *big.Int
@@ -286,6 +294,11 @@ func (ATokenMint) Name() string { return "ATokenMint" }
 
 // ATokenBurn corresponds to Burn(address indexed from, address indexed
 // target, uint256 value, uint256 balanceIncrease, uint256 index).
+//
+// Value is NOT the action principal: it includes/nets BalanceIncrease
+// (interest accrual); scaled deltas must be derived from the deployed
+// implementation's source (see plan Task 6); Value==BalanceIncrease means
+// pure interest, zero principal.
 type ATokenBurn struct {
 	From, Target                  common.Address
 	Value, BalanceIncrease, Index *big.Int
@@ -300,6 +313,8 @@ func (ATokenBurn) Name() string { return "ATokenBurn" }
 // Aave-deriver semantics ("Transfer/BalanceTransfer -> scaled moves between
 // accounts"); added here as a documented beyond-brief addition (see task
 // report).
+//
+// Value is ALREADY SCALED; apply exactly once per peer transfer.
 type ATokenBalanceTransfer struct {
 	From, To     common.Address
 	Value, Index *big.Int

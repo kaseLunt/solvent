@@ -209,6 +209,135 @@ func TestDecodeMigrationCalldataMalformedArgsErrors(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Fix 1: unpackAddressUint256Arrays strict-parser adversarial fixtures
+// (synthetic, hand-constructed to exercise rejection paths that real
+// migration calldata -- itself always a genuine abi.encode output -- would
+// never hit). Each fixture targets exactly one of the five distinct error
+// texts the strict parser is required to produce.
+// ---------------------------------------------------------------------------
+
+// word32 encodes v as a canonical big-endian 32-byte ABI word.
+func word32(t *testing.T, v *big.Int) []byte {
+	t.Helper()
+	b := make([]byte, 32)
+	v.FillBytes(b)
+	return b
+}
+
+// validMigrationMessage builds a canonical, synthetic
+// abi.encode(address[] borrowers, uint256[] amounts) message via the same
+// abi.Arguments the parser's canonicality backstop uses internally -- a
+// known-good baseline for the mutation-based adversarial tests below.
+func validMigrationMessage(t *testing.T, addrs []common.Address, amounts []*big.Int) []byte {
+	t.Helper()
+	got, err := migrationMessageArgs.Pack(addrs, amounts)
+	require.NoError(t, err)
+	return got
+}
+
+func TestUnpackAddressUint256ArraysTrailingGarbageErrors(t *testing.T) {
+	msg := validMigrationMessage(t,
+		[]common.Address{common.HexToAddress("0x1111111111111111111111111111111111111111")},
+		[]*big.Int{big.NewInt(42)},
+	)
+	msg = append(msg, make([]byte, 32)...) // one extra garbage word appended
+	addrs, amounts, err := unpackAddressUint256Arrays(msg)
+	require.Error(t, err)
+	require.Nil(t, addrs)
+	require.Nil(t, amounts)
+	require.Contains(t, err.Error(), "trailing bytes")
+}
+
+func TestUnpackAddressUint256ArraysDirtyAddressPaddingErrors(t *testing.T) {
+	msg := validMigrationMessage(t,
+		[]common.Address{common.HexToAddress("0x2222222222222222222222222222222222222222")},
+		[]*big.Int{big.NewInt(7)},
+	)
+	// The sole address word starts right after the two head words (64) and
+	// the array1 length word (32): byte offset 96. Dirty its upper pad.
+	require.GreaterOrEqual(t, len(msg), 96+32)
+	msg[96] = 0xff
+	addrs, amounts, err := unpackAddressUint256Arrays(msg)
+	require.Error(t, err)
+	require.Nil(t, addrs)
+	require.Nil(t, amounts)
+	require.Contains(t, err.Error(), "dirty address padding")
+}
+
+func TestUnpackAddressUint256ArraysLengthMismatchErrors(t *testing.T) {
+	// Two addresses, three amounts: each array is individually a canonical
+	// ABI encoding of its own declared length (go-ethereum's Pack computes
+	// correct per-array offsets regardless of cross-array length parity);
+	// only the borrower/amount parallel-array invariant is violated.
+	addrs := []common.Address{
+		common.HexToAddress("0x3333333333333333333333333333333333333333"),
+		common.HexToAddress("0x4444444444444444444444444444444444444444"),
+	}
+	amounts := []*big.Int{big.NewInt(1), big.NewInt(2), big.NewInt(3)}
+	msg := validMigrationMessage(t, addrs, amounts)
+	got, amts, err := unpackAddressUint256Arrays(msg)
+	require.Error(t, err)
+	require.Nil(t, got)
+	require.Nil(t, amts)
+	require.Contains(t, err.Error(), "array length mismatch")
+}
+
+func TestUnpackAddressUint256ArraysOversizedLengthErrors(t *testing.T) {
+	// Hand-crafted, 96 bytes total: offsetA=64 (canonical); offsetB=999 is a
+	// dummy value that must never even be examined, because the array1
+	// length bound has to reject lenA=2^40 first -- BEFORE any allocation.
+	// If this function ever attempted make() for 2^40 elements it would
+	// hang or OOM; instead it must error immediately, which is what makes
+	// this test timeout-free by construction (no explicit test-level
+	// timeout needed -- the fast, small input proves the ordering).
+	var msg []byte
+	msg = append(msg, word32(t, big.NewInt(64))...)
+	msg = append(msg, word32(t, big.NewInt(999))...)
+	msg = append(msg, word32(t, new(big.Int).Lsh(big.NewInt(1), 40))...)
+	require.Len(t, msg, 96)
+
+	addrs, amounts, err := unpackAddressUint256Arrays(msg)
+	require.Error(t, err)
+	require.Nil(t, addrs)
+	require.Nil(t, amounts)
+	require.Contains(t, err.Error(), "fan-out exceeds")
+}
+
+func TestUnpackAddressUint256ArraysOffsetIntoHeadErrors(t *testing.T) {
+	// offsetA=32 -- pointing back into the head's own second word (where
+	// offsetB lives) instead of the only legal value, 64.
+	var msg []byte
+	msg = append(msg, word32(t, big.NewInt(32))...)
+	msg = append(msg, word32(t, big.NewInt(64))...)
+	msg = append(msg, word32(t, big.NewInt(0))...) // lenA=0, if ever read
+	addrs, amounts, err := unpackAddressUint256Arrays(msg)
+	require.Error(t, err)
+	require.Nil(t, addrs)
+	require.Nil(t, amounts)
+	require.Contains(t, err.Error(), "non-canonical offset")
+}
+
+// TestUnpackAddressUint256ArraysCanonicalRoundTrips is the mutation tests'
+// control: a canonical, synthetic message with several entries must still
+// decode cleanly (no adversarial mutation applied).
+func TestUnpackAddressUint256ArraysCanonicalRoundTrips(t *testing.T) {
+	addrs := []common.Address{
+		common.HexToAddress("0x5555555555555555555555555555555555555555"),
+		common.HexToAddress("0x6666666666666666666666666666666666666666"),
+		common.HexToAddress("0x0000000000000000000000000000000000000000"),
+	}
+	amounts := []*big.Int{big.NewInt(100), big.NewInt(0), bi("340282366920938463463374607431768211455")}
+	msg := validMigrationMessage(t, addrs, amounts)
+	gotAddrs, gotAmounts, err := unpackAddressUint256Arrays(msg)
+	require.NoError(t, err)
+	require.Equal(t, addrs, gotAddrs)
+	require.Len(t, gotAmounts, len(amounts))
+	for i := range amounts {
+		require.Equal(t, 0, amounts[i].Cmp(gotAmounts[i]))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Sanity: the migration ABI's computed topic0 matches recon's cited hash
 // exactly (0x3f1c4431cbe26a58837755d2461e40a6561ee3edd0e31ca91edb845637acda8b,
 // per recon/derivation-notes.md "Migration finding", cross-checked against

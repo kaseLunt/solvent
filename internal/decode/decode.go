@@ -206,6 +206,18 @@ func NewRegistry() *Registry { return &Registry{} }
 
 // Decode looks up l's topic0 in engine's allowlist and decodes it.
 //
+// Note on address-blind keying: dispatch below keys purely on (engine,
+// topic0) -- l.Address is never consulted. This is safe only because every
+// stream in config/contracts.json filters ingestion to a single, pinned
+// contract address per stream (each stream's `addresses` array is a
+// singleton); e.g. the aave_v3_etherfi engine's shared aTokenTopics table
+// means an ERC20 Transfer topic0 can only ever have been ingested from one
+// of the four pinned aToken addresses (eth:atoken-<sym> streams), never from
+// an arbitrary ERC20. If a future stream ever adds a second address or a
+// wildcard/discovery mode to any engine, this address-blind assumption no
+// longer holds and this dispatch must be revisited (e.g. by threading
+// l.Address through to the decode functions and validating it there).
+//
 //   - Unknown engine, or a topic0 outside engine's allowlist: (nil, false, nil)
 //     -- a deliberate skip, never an error (unallowlisted logs are routine,
 //     e.g. an ERC20 Approval alongside a Transfer we do care about).
@@ -822,31 +834,143 @@ func extractExecute302Message(data []byte) (message []byte, err error) {
 	return msg, nil
 }
 
-func unpackAddressUint256Arrays(message []byte) ([]common.Address, []*big.Int, error) {
+// migrationMessageArgs is the (address[], uint256[]) ABI-arguments pair used
+// solely by unpackAddressUint256Arrays's final canonicality backstop: an
+// independent re-encode of the values this package just parsed, byte-
+// compared against the original payload. It is NOT used to parse untrusted
+// input (see unpackAddressUint256Arrays for why go-ethereum's generic
+// abi.Arguments.Unpack is deliberately not trusted for that).
+var migrationMessageArgs = func() abi.Arguments {
 	addrArrType, err := abi.NewType("address[]", "", nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build address[] type: %w", err)
+		panic(fmt.Sprintf("decode: build address[] type: %v", err))
 	}
 	uintArrType, err := abi.NewType("uint256[]", "", nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build uint256[] type: %w", err)
+		panic(fmt.Sprintf("decode: build uint256[] type: %v", err))
 	}
-	args := abi.Arguments{{Type: addrArrType}, {Type: uintArrType}}
-	vals, err := args.Unpack(message)
+	return abi.Arguments{{Type: addrArrType}, {Type: uintArrType}}
+}()
+
+var zero12Pad [12]byte
+
+// unpackAddressUint256Arrays performs a strict, allocation-safe manual parse
+// of `message` as the canonical ABI encoding of (address[] borrowers,
+// uint256[] amounts) -- two parallel dynamic arrays, back to back, with
+// nothing else in the buffer.
+//
+// These bytes seed the majority of migrated borrowers' debt genesis (recon
+// "Migration finding"), so this package cannot trust go-ethereum's generic
+// abi.Arguments.Unpack the way the original implementation did: that decoder
+// tolerates trailing garbage after the declared arrays, dirty (non-zero)
+// upper-12-byte padding on an address word, and only checks an oversized
+// declared array length AFTER allocating storage for it. All three are
+// silent-acceptance footguns for a parser whose job is to recover real money
+// amounts from calldata nobody but the sender controls. Solidity's own
+// abi.encode/abi.decode never produces any of these three shapes, so
+// rejecting them costs nothing against genuine calldata while closing off a
+// class of parser-differential attack.
+//
+// Canonical wire layout (head, then two tails, nothing else):
+//
+//	[0:32)                 offsetA -- must be exactly 64 (two head words)
+//	[32:64)                offsetB -- must be exactly 64+32+32*lenA
+//	[64:96)                lenA (array1 length; bounds-checked BEFORE any
+//	                        allocation)
+//	[96:96+32*lenA)        lenA address words (upper 12 bytes must be zero)
+//	[offsetB:offsetB+32)   lenB (array2 length; bounds-checked BEFORE any
+//	                        allocation; must equal lenA)
+//	[offsetB+32:offsetB+32+32*lenB) lenB amount words
+//
+// len(message) must equal offsetB+32+32*lenB exactly: anything else is
+// trailing (or missing) bytes.
+func unpackAddressUint256Arrays(message []byte) ([]common.Address, []*big.Int, error) {
+	const headSize = 64 // two head words: offsetA, offsetB
+
+	if len(message) < headSize {
+		return nil, nil, fmt.Errorf("message too short for head (%d bytes, need >= %d)", len(message), headSize)
+	}
+
+	offsetA := new(big.Int).SetBytes(message[0:32])
+	if offsetA.Cmp(big.NewInt(headSize)) != 0 {
+		return nil, nil, fmt.Errorf("non-canonical offset: array1 offset must be exactly %d, got %s", headSize, offsetA)
+	}
+
+	lenAWordStart := headSize
+	if len(message) < lenAWordStart+32 {
+		return nil, nil, fmt.Errorf("message too short for array1 length word")
+	}
+	// Length read (and bounds-checked against the same uint16-seq-column
+	// bound `buildMigrationSeeds` enforces, maxMigrationSeeds) BEFORE any
+	// allocation: an attacker-supplied astronomical length word must fail
+	// here, not after this package tries to make() storage for it.
+	lenABig := new(big.Int).SetBytes(message[lenAWordStart : lenAWordStart+32])
+	if lenABig.Cmp(big.NewInt(maxMigrationSeeds)) > 0 {
+		return nil, nil, fmt.Errorf("fan-out exceeds: array1 length %s exceeds max %d", lenABig, maxMigrationSeeds)
+	}
+	lenA := int(lenABig.Int64()) // safe: bounded above by maxMigrationSeeds
+
+	tailAStart := lenAWordStart + 32
+	tailASize := lenA * 32
+	offsetBWant := int64(headSize) + 32 + int64(tailASize)
+
+	offsetBGot := new(big.Int).SetBytes(message[32:64])
+	if !offsetBGot.IsInt64() || offsetBGot.Int64() != offsetBWant {
+		return nil, nil, fmt.Errorf("non-canonical offset: array2 offset must be exactly %d (64 + 32 + 32*lenA), got %s", offsetBWant, offsetBGot)
+	}
+	offsetB := int(offsetBWant)
+
+	if len(message) < offsetB+32 {
+		return nil, nil, fmt.Errorf("message too short for array2 length word")
+	}
+	lenBBig := new(big.Int).SetBytes(message[offsetB : offsetB+32])
+	if lenBBig.Cmp(big.NewInt(maxMigrationSeeds)) > 0 {
+		return nil, nil, fmt.Errorf("fan-out exceeds: array2 length %s exceeds max %d", lenBBig, maxMigrationSeeds)
+	}
+	lenB := int(lenBBig.Int64())
+
+	if lenA != lenB {
+		return nil, nil, fmt.Errorf("array length mismatch: array1 len %d != array2 len %d", lenA, lenB)
+	}
+
+	tailBStart := offsetB + 32
+	tailBSize := lenB * 32
+	wantTotalLen := tailBStart + tailBSize
+	if len(message) < wantTotalLen {
+		return nil, nil, fmt.Errorf("message too short for array2 tail (%d bytes, need %d)", len(message), wantTotalLen)
+	}
+	if len(message) > wantTotalLen {
+		return nil, nil, fmt.Errorf("trailing bytes: message is %d bytes, expected exactly %d (arrays fully consumed at that point)", len(message), wantTotalLen)
+	}
+
+	addrs := make([]common.Address, lenA)
+	for i := 0; i < lenA; i++ {
+		word := message[tailAStart+i*32 : tailAStart+i*32+32]
+		if !bytes.Equal(word[:12], zero12Pad[:]) {
+			return nil, nil, fmt.Errorf("dirty address padding: array1[%d] has a non-zero upper-12-byte pad", i)
+		}
+		addrs[i] = common.BytesToAddress(word)
+	}
+
+	amounts := make([]*big.Int, lenB)
+	for i := 0; i < lenB; i++ {
+		word := message[tailBStart+i*32 : tailBStart+i*32+32]
+		amounts[i] = new(big.Int).SetBytes(word)
+	}
+
+	// Final canonicality backstop: independently re-encode the parsed values
+	// via the abi package and byte-compare against the original payload.
+	// Given every check above, this should always match for a well-formed
+	// input; it exists as defense-in-depth against a bug in this function
+	// itself, not as the primary validation.
+	reEncoded, err := migrationMessageArgs.Pack(addrs, amounts)
 	if err != nil {
-		return nil, nil, fmt.Errorf("unpack (address[],uint256[]) message: %w", err)
+		return nil, nil, fmt.Errorf("canonicality backstop: re-encode failed: %w", err)
 	}
-	if len(vals) != 2 {
-		return nil, nil, fmt.Errorf("unpack message: expected 2 values, got %d", len(vals))
+	if !bytes.Equal(reEncoded, message) {
+		return nil, nil, fmt.Errorf("canonicality backstop: re-encoded bytes do not match payload")
 	}
-	addrs, ok := vals[0].([]common.Address)
-	if !ok {
-		return nil, nil, fmt.Errorf("message field 0 is not address[]")
-	}
-	amounts, ok := vals[1].([]*big.Int)
-	if !ok {
-		return nil, nil, fmt.Errorf("message field 1 is not uint256[]")
-	}
+
 	return addrs, amounts, nil
 }
 
