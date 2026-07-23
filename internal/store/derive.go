@@ -34,6 +34,12 @@ var (
 	// ErrBalanceSourceConflict: one (asset, side) carries both an event- and
 	// a snapshot-sourced balance row, violating source exclusivity.
 	ErrBalanceSourceConflict = errors.New("event/snapshot balance conflict")
+	// ErrStaleSweepBatch: EVERY result in an ApplySweepBatch call was a
+	// success observed at an execution block BEHIND its account's recorded
+	// last_success_block — a failed-over RPC endpoint lagging the one that
+	// served earlier sweeps. Nothing was applied; the snapshotter logs the
+	// round DEGRADED and retries, most likely against a caught-up endpoint.
+	ErrStaleSweepBatch = errors.New("stale sweep batch: endpoint behind")
 )
 
 // PositionEvent is a single derived state-transition record: one raw log,
@@ -434,12 +440,16 @@ func normalizePayload(p map[string]string) map[string]string {
 // ErrDeriveCursorChainMismatch before anything is deleted or acked; the
 // cursor upsert's conflict arm deliberately never rebinds chain_id.
 //
-// Snapshot invalidation is part of this SAME transaction: snapshot-sourced
-// position_balances rows and snapshot_sweeps status rows are deleted for
-// accounts of this engine left with NO surviving debt-side position_events
-// (their registry membership was reorged away — keeping their rows would
-// present collateral, or sweep history, for accounts that no longer exist),
-// and the engine's sweep_generations.current_generation is bumped. The bump
+// Snapshot invalidation is part of this SAME transaction: the engine's
+// snapshots HISTORY rows above the effective target are deleted (all sides —
+// a history row stamped with a replaced block describes a chain that no
+// longer exists, debt and collateral alike); then snapshot-sourced
+// position_balances rows, snapshot_sweeps status rows AND all remaining
+// snapshots history rows are deleted for accounts of this engine left with
+// NO surviving debt-side position_events (their registry membership was
+// reorged away — keeping their rows would present collateral, sweep status,
+// or history for accounts that no longer exist), and the engine's
+// sweep_generations.current_generation is bumped. The bump
 // durably OPENS the post-rewind re-sweep in the same commit as the epoch ack:
 // every surviving account's sweep row now lags the new generation, so a crash
 // anywhere after this call still leaves the re-sweep owed and resumable. The
@@ -519,10 +529,21 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 		return fmt.Errorf("rebuild position balances: %w", err)
 	}
 
+	// History hygiene above the effective target (see the doc comment): every
+	// snapshots row of this engine stamped with a replaced block — BOTH sides
+	// — is deleted with the same commit that acks. Surviving accounts' rows
+	// at/below the target are exactly the history the canonical chain still
+	// supports; the generation bump below re-observes collateral fresh.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM snapshots WHERE engine = $1 AND block_number > $2`,
+		engine, effectiveTarget); err != nil {
+		return fmt.Errorf("delete snapshot history above %d: %w", effectiveTarget, err)
+	}
+
 	// Reorg-orphaned snapshot invalidation (see the doc comment): an account
 	// with no surviving debt-side event was never — as far as canonical
 	// history is concerned — in the Safe registry, so its snapshot-observed
-	// collateral rows and sweep status rows describe a phantom.
+	// collateral rows, sweep status rows and history rows describe a phantom.
 	if _, err := tx.Exec(ctx, `DELETE FROM position_balances pb
 		WHERE pb.engine = $1 AND pb.source = 'snapshot'
 		  AND NOT EXISTS (
@@ -538,6 +559,14 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 			WHERE e.engine = $1 AND e.chain_id = $2 AND e.side = 'debt' AND e.account = sw.account
 		  )`, engine, chainID); err != nil {
 		return fmt.Errorf("delete orphaned sweep status rows: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM snapshots sn
+		WHERE sn.engine = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM position_events e
+			WHERE e.engine = $1 AND e.chain_id = $2 AND e.side = 'debt' AND e.account = sn.account
+		  )`, engine, chainID); err != nil {
+		return fmt.Errorf("delete orphaned snapshot history rows: %w", err)
 	}
 	// Durably OPEN the post-rewind re-sweep, atomic with the ack: bump the
 	// engine's sweep generation so every surviving account lags it. The same
@@ -1115,6 +1144,20 @@ type SweepResult struct {
 // bookkeeping) converges to the same balances/status end state — only
 // attempts overcounts, which NARROWS the retry budget, never widens it.
 //
+// MONOTONIC SWEEP BLOCKS (stale-failover guard): per successful account, the
+// existing sweep row's last_success_block is read FOR UPDATE inside the
+// transaction; if execBlock is BEHIND it (a failover to a lagging RPC
+// endpoint — the multicall observed an older chain state than one already
+// applied), that account's balances, history and status are NOT applied and
+// its generation is NOT advanced: it stays lagging and re-pulls next batch,
+// most likely against a caught-up endpoint. Stale skips are counted and
+// WARNed; a batch whose EVERY result is stale returns ErrStaleSweepBatch so
+// the snapshotter logs DEGRADED instead of silently completing. Replays at
+// the SAME block remain admitted (execBlock == last_success_block), keeping
+// the crash-replay idempotence above intact. Failed results are always
+// recorded — an attempt happened, whatever block served it, and last_success
+// _block is untouched by failures.
+//
 // Validation is deliberately PER RESULT, inline with the writes (no
 // pre-validation pass, no statement batching): a malformed element aborts the
 // whole transaction AFTER earlier elements' statements executed, and the
@@ -1130,6 +1173,7 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 	}
 	defer tx.Rollback(ctx)
 
+	stale := 0
 	for _, res := range results {
 		if len(res.Account) == 0 {
 			return fmt.Errorf("sweep result with empty account")
@@ -1147,6 +1191,23 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 				engine, res.Account, generation, execBlock); err != nil {
 				return fmt.Errorf("record failed sweep for %x: %w", res.Account, err)
 			}
+			continue
+		}
+
+		// Stale-failover guard (see the doc comment): a success observed
+		// BEHIND the account's recorded last success is skipped wholesale —
+		// no balance, history or status write, no generation advance. The
+		// FOR UPDATE read pins the row against the (contract-forbidden)
+		// concurrent writer for the rest of this transaction.
+		var lastSuccess uint64
+		err := tx.QueryRow(ctx,
+			`SELECT last_success_block FROM snapshot_sweeps WHERE engine = $1 AND account = $2 FOR UPDATE`,
+			engine, res.Account).Scan(&lastSuccess)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read sweep row for %x: %w", res.Account, err)
+		}
+		if err == nil && execBlock < lastSuccess {
+			stale++
 			continue
 		}
 
@@ -1210,6 +1271,18 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 			engine, res.Account, generation, execBlock); err != nil {
 			return fmt.Errorf("record successful sweep for %x: %w", res.Account, err)
 		}
+	}
+	if stale > 0 {
+		slog.Warn("stale sweep block: endpoint behind — skipped successes observed before their accounts' recorded last success; skipped accounts stay lagging and retry",
+			"engine", engine, "generation", generation, "execBlock", execBlock,
+			"staleAccounts", stale, "batch", len(results))
+	}
+	if stale == len(results) {
+		// Nothing in this transaction landed (every result was a stale
+		// success); the typed refusal lets the snapshotter log DEGRADED
+		// instead of treating the round as applied.
+		return fmt.Errorf("%w: all %d results at execution block %d predate their accounts' last successes (engine %q, generation %d)",
+			ErrStaleSweepBatch, len(results), execBlock, engine, generation)
 	}
 	return tx.Commit(ctx)
 }

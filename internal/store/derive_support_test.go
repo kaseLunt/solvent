@@ -719,10 +719,13 @@ func TestApplySweepBatchMidTxFailureRollsBackEverything(t *testing.T) {
 // TestRewindDerivedInvalidatesOrphanedSnapshots pins reorg-orphaned snapshot
 // invalidation INSIDE RewindDerived's transaction: an account whose ONLY
 // debt-side event sits above the rewind target loses its snapshot balance
-// rows AND its sweep status row (its registry membership was reorged away),
-// the engine's sweep generation is bumped (the post-rewind re-sweep is
-// durably opened, atomic with the epoch ack), and surviving accounts keep
-// their rows but LAG the new generation.
+// rows, its sweep status row AND its entire snapshots HISTORY (its registry
+// membership was reorged away); every engine history row above the effective
+// target is deleted for ALL sides and ALL accounts (those rows describe
+// replaced blocks); the engine's sweep generation is bumped (the post-rewind
+// re-sweep is durably opened, atomic with the epoch ack); and surviving
+// accounts keep their rows — including at/below-target history — but LAG the
+// new generation.
 func TestRewindDerivedInvalidatesOrphanedSnapshots(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -736,7 +739,19 @@ func TestRewindDerivedInvalidatesOrphanedSnapshots(t *testing.T) {
 		pe(50, 2, 0xA2, 0xBB, "debt", 10),
 	}, 100))
 
-	// Both were swept: snapshot balances + generation-1 status rows.
+	// Debt-side history below the target for BOTH accounts (the survivor's
+	// must outlive the rewind; the orphan's must not — the anti-join takes an
+	// orphan's WHOLE history), plus a survivor debt row above the target.
+	require.NoError(t, s.SaveSnapshots(ctx, engine, 80, map[string]SnapshotDoc{
+		"a1": {Side: "debt", Balances: map[string]*big.Int{"bb": big.NewInt(40)}},
+		"a2": {Side: "debt", Balances: map[string]*big.Int{"bb": big.NewInt(10)}},
+	}))
+	require.NoError(t, s.SaveSnapshots(ctx, engine, 100, map[string]SnapshotDoc{
+		"a2": {Side: "debt", Balances: map[string]*big.Int{"bb": big.NewInt(10)}},
+	}))
+
+	// Both were swept: snapshot balances + collateral history rows at the
+	// multicall block (above the target) + generation-1 status rows.
 	gen, err := s.OpenSweepGeneration(ctx, engine)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), gen)
@@ -747,18 +762,50 @@ func TestRewindDerivedInvalidatesOrphanedSnapshots(t *testing.T) {
 	_, _, err = s.CompleteSweepGeneration(ctx, engine, gen)
 	require.NoError(t, err)
 
+	// Another engine's history row above the target must survive the rewind
+	// (per-engine hygiene).
+	require.NoError(t, s.SaveSnapshots(ctx, "aave_v3_etherfi", 100, map[string]SnapshotDoc{
+		"a9": {Side: "debt", Balances: map[string]*big.Int{"cc": big.NewInt(3)}},
+	}))
+
 	// The reorg: raw truth rewinds to 90, the derived ack follows.
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 90, []byte{0x90}))
 	require.NoError(t, s.RewindDerived(ctx, engine, 10, 90))
 
-	// Orphan: no snapshot rows, no sweep row — its registry membership never
-	// existed on the canonical chain.
+	// Orphan: no snapshot balance rows, no sweep row, and NO history rows at
+	// all — not even the block-80 one below the target: its registry
+	// membership never existed on the canonical chain.
 	require.Empty(t, balanceRows(t, s, engine, orphan, "snapshot"))
 	var n int
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT count(*) FROM snapshot_sweeps WHERE engine = $1 AND account = $2`,
 		engine, orphan).Scan(&n))
 	require.Zero(t, n)
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshots WHERE engine = $1 AND account = $2`,
+		engine, orphan).Scan(&n))
+	require.Zero(t, n, "an orphaned account loses its ENTIRE history, below-target rows included")
+
+	// Engine-wide: nothing above the effective target survives, any side, any
+	// account — the survivor's block-100 debt AND collateral rows are gone.
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshots WHERE engine = $1 AND block_number > 90`,
+		engine).Scan(&n))
+	require.Zero(t, n, "history above the effective target describes replaced blocks")
+
+	// The survivor's at/below-target history survives, exactly.
+	var block uint64
+	var side string
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT block_number, side FROM snapshots WHERE engine = $1 AND account = $2`,
+		engine, survivor).Scan(&block, &side))
+	require.Equal(t, uint64(80), block)
+	require.Equal(t, "debt", side)
+
+	// The other engine's above-target row is untouched.
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshots WHERE engine = 'aave_v3_etherfi' AND block_number = 100`).Scan(&n))
+	require.Equal(t, 1, n, "rewind history hygiene is per-engine")
 
 	// Survivor: keeps balances and status row...
 	require.Equal(t, map[string]string{"bb/collateral": "7@100"},
@@ -834,6 +881,99 @@ func TestSnapshotHistorySidesCoexistAtSameBlock(t *testing.T) {
 		"debt":       {"side": "debt", "balances": map[string]any{"bb": "41"}},
 		"collateral": {"side": "collateral", "balances": map[string]any{"cc": "9"}},
 	}, readSides())
+}
+
+// TestApplySweepBatchRejectsStaleExecutionBlocks is the monotonic
+// stale-failover regression: after a sweep succeeds at block 200, a batch
+// served by a lagging failed-over endpoint at block 150 is refused — an
+// ALL-stale batch returns ErrStaleSweepBatch and applies NOTHING; a mixed
+// batch commits its fresh results and skips the stale account WITHOUT
+// advancing its generation (it stays lagging and re-pulls); a later batch at
+// 201 lands normally; a SAME-block replay stays admitted (crash-replay
+// idempotence); and failed results are always recorded, whatever block
+// served them.
+func TestApplySweepBatchRejectsStaleExecutionBlocks(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	a1, a2 := []byte{0xA1}, []byte{0xA2}
+
+	require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{
+		pe(100, 1, 0xA1, 0xBB, "debt", 40),
+		pe(100, 2, 0xA2, 0xBB, "debt", 10),
+	}, 100))
+
+	readRow := func(account []byte) (gen, attempts, attempt, success uint64, status string) {
+		require.NoError(t, s.pool.QueryRow(ctx,
+			`SELECT generation, attempts, last_attempt_block, last_success_block, status
+			 FROM snapshot_sweeps WHERE engine = $1 AND account = $2`, engine, account).
+			Scan(&gen, &attempts, &attempt, &success, &status))
+		return
+	}
+	ok := func(account []byte, amount int64) SweepResult {
+		return SweepResult{Account: account, OK: true, Balances: map[string]map[string]*big.Int{
+			"bb": {"collateral": big.NewInt(amount)},
+		}}
+	}
+
+	// Generation 1: a1 sweeps successfully at block 200.
+	gen1, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen1, 200, []SweepResult{ok(a1, 555)}))
+	_, _, err = s.CompleteSweepGeneration(ctx, engine, gen1)
+	require.NoError(t, err)
+
+	// Generation 2 opens; a failed-over endpoint serves block 150. The whole
+	// batch is stale: typed refusal, NOTHING applied — balances keep 555@200,
+	// the status row keeps its generation-1 stamp (a1 still LAGS gen2 and
+	// re-pulls next batch), and no block-150 history row exists.
+	gen2, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	err = s.ApplySweepBatch(ctx, engine, gen2, 150, []SweepResult{ok(a1, 111)})
+	require.ErrorIs(t, err, ErrStaleSweepBatch)
+	require.Equal(t, map[string]string{"bb/collateral": "555@200"}, balanceRows(t, s, engine, a1, "snapshot"))
+	g, at, attempt, success, status := readRow(a1)
+	require.Equal(t, []uint64{gen1, 1, 200, 200}, []uint64{g, at, attempt, success},
+		"a stale success must not touch the status row or advance its generation")
+	require.Equal(t, "success", status)
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshots WHERE block_number = 150`).Scan(&n))
+	require.Zero(t, n, "a stale success writes no history row")
+	work, err := s.SweepWorkBatch(ctx, engine, gen2, 4, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA2}, {0xA1}}, work, "the stale-skipped account still lags and re-pulls")
+
+	// MIXED batch at 150: a1 is stale again (skipped, still lagging), but a2
+	// has never succeeded — the guard admits it, the batch commits.
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 150, []SweepResult{ok(a1, 111), ok(a2, 7)}))
+	require.Equal(t, map[string]string{"bb/collateral": "555@200"}, balanceRows(t, s, engine, a1, "snapshot"))
+	require.Equal(t, map[string]string{"bb/collateral": "7@150"}, balanceRows(t, s, engine, a2, "snapshot"))
+	work, err = s.SweepWorkBatch(ctx, engine, gen2, 4, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA1}}, work, "the fresh result advanced; the stale one still owes work")
+
+	// The caught-up endpoint at 201 lands normally...
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 201, []SweepResult{ok(a1, 999)}))
+	require.Equal(t, map[string]string{"bb/collateral": "999@201"}, balanceRows(t, s, engine, a1, "snapshot"))
+	g, at, attempt, success, status = readRow(a1)
+	require.Equal(t, []uint64{gen2, 1, 201, 201}, []uint64{g, at, attempt, success})
+	require.Equal(t, "success", status)
+
+	// ...a SAME-block replay stays admitted (the crash-replay idempotence
+	// contract: only attempts overcounts)...
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 201, []SweepResult{ok(a1, 999)}))
+	g, at, _, success, _ = readRow(a1)
+	require.Equal(t, []uint64{gen2, 2, 201}, []uint64{g, at, success})
+
+	// ...and a FAILED result bypasses the guard entirely: the attempt is
+	// recorded at whatever block served it, last_success_block untouched.
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 150, []SweepResult{{Account: a1, OK: false}}))
+	g, at, attempt, success, status = readRow(a1)
+	require.Equal(t, []uint64{gen2, 3, 150, 201}, []uint64{g, at, attempt, success})
+	require.Equal(t, "failed", status)
+	require.Equal(t, map[string]string{"bb/collateral": "999@201"}, balanceRows(t, s, engine, a1, "snapshot"),
+		"a failed attempt keeps the previous snapshot")
 }
 
 // TestCheckWriterLockLivenessAndLoss: before acquisition the check refuses;

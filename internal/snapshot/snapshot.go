@@ -31,7 +31,12 @@
 //
 // FAILURE POSTURE: a failed multicall (transport) or a malformed/undecodable
 // response is a batch-level error — the durable queue is untouched and the
-// same batch retries next round. An individual collateralOf revert
+// same batch retries next round. A batch served at an execution block BEHIND
+// its accounts' recorded successes (stale failover: a lagging RPC endpoint)
+// is refused by the store's monotonic guard — per-account skips leave those
+// accounts lagging for retry, and an ALL-stale batch surfaces as
+// store.ErrStaleSweepBatch, logged here as a DEGRADED round rather than
+// treated as applied. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -51,6 +56,7 @@ package snapshot
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -287,6 +293,16 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if err := s.store.ApplySweepBatch(ctx, s.cfg.Engine, gen, block, results); err != nil {
+		if errors.Is(err, store.ErrStaleSweepBatch) {
+			// DEGRADED round, not a completion: the whole batch was served at
+			// an execution block behind its accounts' recorded successes (a
+			// failed-over endpoint lagging the chain). The store applied
+			// nothing and the durable queue is untouched — the same accounts
+			// re-pull next round, most likely against a caught-up endpoint.
+			slog.Warn("collateral snapshot sweep round DEGRADED: stale sweep block — endpoint behind; nothing applied, retrying next round",
+				"engine", s.cfg.Engine, "generation", gen, "execBlock", block, "accounts", len(batch))
+			return false, nil
+		}
 		// Durable queue untouched: the batch re-pulls and re-applies next
 		// round (ApplySweepBatch is idempotent under replay).
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)

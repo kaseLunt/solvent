@@ -14,10 +14,12 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -862,4 +864,35 @@ func TestEmptyRegistryCompletesGeneration(t *testing.T) {
 	_, err = s.Step(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, 2, st.opens, "the cadence re-arms from the durable completion stamp")
+}
+
+// TestStaleSweepBatchIsDegradedRoundNotError: a wholesale-stale batch — the
+// store's monotonic guard refused every result with ErrStaleSweepBatch
+// (multicall served by a failed-over endpoint BEHIND the accounts' recorded
+// successes) — is a DEGRADED round, not a step error and not progress: Step
+// logs the WARN and returns (false, nil), the durable queue is untouched, and
+// the identical batch retries next round (landing once an endpoint catches
+// up).
+func TestStaleSweepBatchIsDegradedRoundNotError(t *testing.T) {
+	s, st, ch, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 42, nil), 10)
+	warnings := captureWarnings(t)
+	st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
+
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err, "an all-stale batch is a degraded round, never a step error")
+	require.False(t, advanced, "nothing was applied: the round is not progress")
+	require.Empty(t, st.rows, "the store's typed refusal applied nothing")
+	degraded := false
+	for _, m := range *warnings {
+		if strings.Contains(m, "DEGRADED") {
+			degraded = true
+		}
+	}
+	require.True(t, degraded, "the degraded round must be logged, got %v", *warnings)
+
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, ch.calls[0].data, ch.calls[1].data, "the identical batch retries against the durable queue")
+	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
 }
