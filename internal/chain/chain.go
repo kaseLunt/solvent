@@ -23,6 +23,7 @@ type rpcClient interface {
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
 	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 	ChainID(ctx context.Context) (*big.Int, error)
+	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
 }
 
 type Failover struct {
@@ -126,6 +127,27 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 			return fmt.Errorf("header %d not found", n)
 		}
 		out = h.Hash()
+		return nil
+	})
+	return out, err
+}
+
+// TxCalldata returns the raw input data (selector included) of the
+// transaction with hash txHash. Additive method for the debt_manager
+// deriver's migration-genesis path (Phase 2 Task 5): the 7,337 migrated
+// borrower seeds live in the 80 migration txs' calldata, not in any log
+// (recon/derivation-notes.md "Migration finding").
+func (f *Failover) TxCalldata(ctx context.Context, txHash common.Hash) ([]byte, error) {
+	var out []byte
+	err := f.do(ctx, "txCalldata", func(ctx context.Context, c rpcClient) error {
+		tx, _, err := c.TransactionByHash(ctx, txHash)
+		if err != nil {
+			return err
+		}
+		if tx == nil {
+			return fmt.Errorf("transaction %s not found", txHash)
+		}
+		out = tx.Data()
 		return nil
 	})
 	return out, err

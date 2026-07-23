@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 )
@@ -19,6 +20,7 @@ type fakeRPC struct {
 	calls    int
 	blockNum uint64
 	chainID  uint64
+	txData   []byte
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -55,6 +57,14 @@ func (f *fakeRPC) ChainID(ctx context.Context) (*big.Int, error) {
 		return nil, errors.New(f.name + " down")
 	}
 	return new(big.Int).SetUint64(f.chainID), nil
+}
+
+func (f *fakeRPC) TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error) {
+	f.calls++
+	if f.fail {
+		return nil, false, errors.New(f.name + " down")
+	}
+	return types.NewTx(&types.LegacyTx{Data: f.txData}), false, nil
 }
 
 func TestFailoverRotatesOnError(t *testing.T) {
@@ -108,6 +118,21 @@ func TestSlowEndpointRotatesAfterTimeout(t *testing.T) {
 	n, err := f.BlockNumber(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, uint64(42), n)
+	require.Equal(t, 1, a.calls)
+	require.Equal(t, 1, b.calls)
+}
+
+// TxCalldata returns the tx's raw input and participates in normal failover
+// rotation like every other read.
+func TestTxCalldataReturnsInputWithFailover(t *testing.T) {
+	input := []byte{0xcf, 0xc3, 0x25, 0x70, 0x01, 0x02}
+	a := &fakeRPC{name: "a", fail: true}
+	b := &fakeRPC{name: "b", txData: input}
+	f := newFailover([]rpcClient{a, b})
+
+	got, err := f.TxCalldata(context.Background(), common.HexToHash("0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454"))
+	require.NoError(t, err)
+	require.Equal(t, input, got)
 	require.Equal(t, 1, a.calls)
 	require.Equal(t, 1, b.calls)
 }
