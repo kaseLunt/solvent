@@ -19,7 +19,13 @@
 //
 // The two v3.5-line token implementations are BYTE-IDENTICAL in
 // ScaledBalanceTokenBase.sol and TokenMath.sol (diffed during authoring), so
-// there are exactly TWO fold regimes, switching at block 23088584:
+// there are exactly TWO fold regimes. The switch is tx/log-order-aware:
+// regime B applies from block 23088584 log 542 onward — the weETH aToken's
+// Upgraded log in the governance tx 0xa17567fa...97dc (bound to the committed
+// fixture by a regression test). The upgrade tx carries no fold events, so
+// any cut inside it is exact; pinning the cut at the Upgraded log closes the
+// exactness gap for un-fixtured streams whose block-23088584 logs could
+// otherwise straddle the upgrade:
 //
 // # Regime A (blocks < 23088584): half-up rayDiv/rayMul inside the token
 //
@@ -84,8 +90,15 @@
 //     exact in both regimes and independent of any index.
 //     (Regime A's v3.3/v3.4 deficit burn is the half-up round-trip
 //     rayDivHalfUp(rayMulHalfUp(s, i), i) == s, i >= RAY — same conclusion.)
-//     The regime-A deficit at block 22014623 (era Pool 0x56401d66...) and the
-//     three regime-B deficits are all covered by the golden replay.
+//     The pairing is NOT order-independent: it is exact only in the DEPLOYED
+//     emission order, deficit-first (:560-563 fires before the tx-final
+//     LiquidationCall :425-434). The deriver ENFORCES deficit-first — a
+//     same-tx LiquidationCall followed by a DeficitCreated for the same
+//     (user, debtAsset) is a loud error, never a silent double-count. All
+//     four historical deficits are same-tx deficit-first in the committed
+//     fixture; the regime-A deficit at block 22014623 (era Pool
+//     0x56401d66...) and the three regime-B deficits are all covered by the
+//     golden replay.
 //
 // Collateral (the events carry BALANCE-DERIVED nominal values; the scaled
 // delta is NOT computable from the event alone — it must be inverted against
@@ -119,9 +132,13 @@
 // Its fold-relevant semantics are pinned by (a) the verified Pool impls
 // sandwiching it (0x999c94f2 before, 0x0f3bceb6 after) having IDENTICAL
 // fold-relevant call sites, (b) its paired era-4 vToken 0x1d5e86f5... being
-// verified and requiring TokenMath-scaled inputs, and (c) the golden replay
+// verified and requiring TokenMath-scaled inputs, (c) the golden replay
 // covering the era's action events (3 repays + 1 deficit/liquidation pair)
-// bit-exactly.
+// bit-exactly, and (d) ARCHIVE WINDOW PINNING: vToken scaledBalanceOf
+// captured immediately before/after every one of the window's action events
+// (cast via eth.drpc.org archive, 2026-07-23) matches the derived tracked
+// debt exactly — see TestAaveWindowPinnedArchiveScaledDebt for the eight
+// pinned values (users 0xe17b347b.../0xbd0c6f59.../0x5280be3a...).
 //
 // # Index sourcing (debt folds)
 //
@@ -130,11 +147,17 @@
 // BEFORE the action event in the same tx (e.g. BorrowLogic.sol 0x999c94f2:
 // mint :77 -> updateInterestRates -> emit Borrow; LiquidationLogic.sol :573
 // -> emit LiquidationCall :425-434), carrying exactly the
-// nextVariableBorrowIndex the action used. The deriver caches the latest
-// ReserveDataUpdated per reserve and errors loudly if an action arrives with
-// no cached index. (DeficitCreated is the one action emitted before its
-// reserve's ReserveDataUpdated — LiquidationLogic.sol :563 vs :573 — and
-// deliberately needs NO index under the zero-out fold above.)
+// nextVariableBorrowIndex the action used. The deriver caches each reserve's
+// latest ReserveDataUpdated WITH its (block, txHash, logIndex) and REQUIRES,
+// for every indexed action (Borrow/Repay/LiquidationCall, paired or not),
+// that the cached update shares the action's OWN transaction hash and
+// precedes it in log order — anything else (no cache, an older tx's index, a
+// same-tx update sitting after the action) is a loud ErrMissingSameTxIndex,
+// never a stale-index fold. Verified against the committed fixture: all 266
+// action events carry a same-tx preceding update. (DeficitCreated is the one
+// action emitted BEFORE its reserve's ReserveDataUpdated —
+// LiquidationLogic.sol :563 vs :573, all four historical deficits confirm —
+// and is deliberately EXEMPT: the zero-out fold above needs no index.)
 //
 // # PositionEvent conventions
 //
@@ -159,6 +182,7 @@ package derive
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -172,13 +196,29 @@ import (
 // and the decode registry.
 const AaveEngineName = "aave_v3_etherfi"
 
-// aaveTokenMathFromBlock is the first block of fold regime B: the governance
-// tx 0xa17567fa201a78b66c43e6ab178559f8c1d5d308fe944c0bd2c39b5e585097dc at
-// block 23088584 upgraded the Pool and every aToken/vToken implementation to
-// the v3.5 TokenMath (floor/ceil) line in one transaction. The upgrade txs
-// carry no Mint/Burn/Transfer/BalanceTransfer or Pool action logs (verified
-// against the committed fixtures), so a block-level switch is exact.
-const aaveTokenMathFromBlock = 23088584
+// aaveTokenMathFromBlock / aaveTokenMathBoundaryLogIndex pin the start of
+// fold regime B: the governance tx
+// 0xa17567fa201a78b66c43e6ab178559f8c1d5d308fe944c0bd2c39b5e585097dc at block
+// 23088584 upgraded the Pool and every aToken/vToken implementation to the
+// v3.5 TokenMath (floor/ceil) line in one transaction. The upgrade tx carries
+// no Mint/Burn/Transfer/BalanceTransfer or Pool action logs (verified against
+// the committed fixtures), so any cut inside it is exact; the boundary is
+// pinned tx/log-order-aware at the weETH aToken's Upgraded log — logIndex 542
+// of that block — so that a block-23088584 fold event BEFORE the upgrade
+// (none exist in the fixtures, but an un-fixtured stream cannot rely on that)
+// would still fold under regime A. Both constants are bound to the committed
+// fixture by TestAaveRegimeBoundaryBoundToFixture.
+const (
+	aaveTokenMathFromBlock        = 23088584
+	aaveTokenMathBoundaryLogIndex = 542
+)
+
+// ErrMissingSameTxIndex: an indexed action (Borrow/Repay/LiquidationCall)
+// was not preceded, within ITS OWN transaction, by its reserve's
+// ReserveDataUpdated. The deployed Pools emit the reserve's index update
+// before the action event in the same tx (see the package comment); folding
+// with anything else would price the action with a stale index.
+var ErrMissingSameTxIndex = errors.New("aave: indexed action lacks a same-transaction preceding ReserveDataUpdated")
 
 // rayUnit is WadRayMath.RAY = 1e27 (WadRayMath.sol :23).
 var rayUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(27), nil)
@@ -251,13 +291,16 @@ func rayMulCeil(a, b *big.Int) *big.Int {
 // ---------------------------------------------------------------------------
 
 // aaveReserveRates is the cached payload of the latest ReserveDataUpdated
-// seen for a reserve. Entries are immutable once stored (updates replace the
-// whole pointer), which is what makes the shallow per-batch copy of the rates
-// map sound.
+// seen for a reserve, with the emitting log's identity so indexed actions
+// can enforce the same-tx requirement. Entries are immutable once stored
+// (updates replace the whole pointer), which is what makes the shallow
+// per-batch copy of the rates map sound.
 type aaveReserveRates struct {
 	variableBorrowIndex *big.Int
 	liquidityIndex      *big.Int
 	block               uint64
+	txHash              string // lowercase hex of the emitting tx
+	logIndex            uint32
 }
 
 // aaveAccountState is one account's tracked scaled balances, keyed by
@@ -293,17 +336,25 @@ func (s *aaveAccountState) bySide(side string) map[common.Address]*big.Int {
 	return s.collateral
 }
 
-// aaveTxMarkers is the same-tx bookkeeping (deficit pairing), batch-scoped
-// like all other engine state.
+// aaveTxMarkers is the same-tx bookkeeping (deficit pairing + deficit-first
+// order enforcement), batch-scoped like all other engine state.
 type aaveTxMarkers struct {
 	curTx    string          // lowercase hex of the tx the markers belong to
 	deficits map[string]bool // "user|debtAsset" DeficitCreated seen in curTx
+	liqCalls map[string]bool // "user|debtAsset" LiquidationCall folded in curTx
 }
 
 func (m aaveTxMarkers) clone() aaveTxMarkers {
-	c := aaveTxMarkers{curTx: m.curTx, deficits: make(map[string]bool, len(m.deficits))}
+	c := aaveTxMarkers{
+		curTx:    m.curTx,
+		deficits: make(map[string]bool, len(m.deficits)),
+		liqCalls: make(map[string]bool, len(m.liqCalls)),
+	}
 	for k, v := range m.deficits {
 		c.deficits[k] = v
+	}
+	for k, v := range m.liqCalls {
+		c.liqCalls[k] = v
 	}
 	return c
 }
@@ -537,19 +588,37 @@ func aaveEvent(l store.RawLog, seq uint16, eventType string, account, asset comm
 	}
 }
 
-// tokenMathRegime reports whether block folds under regime B (v3.5 TokenMath
-// floor/ceil) rather than regime A (half-up in-token rayDiv/rayMul).
-func tokenMathRegime(block uint64) bool { return block >= aaveTokenMathFromBlock }
+// tokenMathRegime reports whether (block, logIndex) folds under regime B
+// (v3.5 TokenMath floor/ceil) rather than regime A (half-up in-token
+// rayDiv/rayMul). The boundary is tx/log-order-aware: at the upgrade block
+// itself, regime B applies only from the Upgraded log (logIndex 542) onward.
+func tokenMathRegime(block uint64, logIndex uint32) bool {
+	if block != aaveTokenMathFromBlock {
+		return block > aaveTokenMathFromBlock
+	}
+	return logIndex >= aaveTokenMathBoundaryLogIndex
+}
 
-// requireIndex returns the cached variableBorrowIndex for reserve, erroring
-// loudly when no ReserveDataUpdated has been seen — every debt action's own
-// tx emits one first (see package comment), so a miss means the stream is
-// incomplete or out of order.
+// requireIndex returns the cached variableBorrowIndex for reserve, enforcing
+// the SAME-TRANSACTION requirement: the cached ReserveDataUpdated must share
+// the action's own tx hash AND precede it in log order (every deployed Pool
+// emits the reserve's index update before the action event in the same tx —
+// see the package comment). Anything else — no cache at all, an older tx's
+// index, or a same-tx update sitting after the action — wraps
+// ErrMissingSameTxIndex.
 func (e *AaveEngine) requireIndex(reserve common.Address, l store.RawLog, action string) (*big.Int, error) {
 	r, ok := e.workingRates[reserve]
 	if !ok {
-		return nil, fmt.Errorf("aave: %s at block %d log %d (tx %x): no cached ReserveDataUpdated for reserve %s — action events are always preceded by their reserve's index update in the same tx; refusing to fold without it",
-			action, l.BlockNumber, l.LogIndex, l.TxHash, reserve.Hex())
+		return nil, fmt.Errorf("%w: %s at block %d log %d (tx %x): no cached ReserveDataUpdated for reserve %s at all — the stream is incomplete or misordered",
+			ErrMissingSameTxIndex, action, l.BlockNumber, l.LogIndex, l.TxHash, reserve.Hex())
+	}
+	if tx := hex.EncodeToString(l.TxHash); r.txHash != tx {
+		return nil, fmt.Errorf("%w: %s at block %d log %d (tx %x): cached index for reserve %s is from tx %s (block %d log %d), not the action's own transaction — refusing to fold with a foreign index",
+			ErrMissingSameTxIndex, action, l.BlockNumber, l.LogIndex, l.TxHash, reserve.Hex(), r.txHash, r.block, r.logIndex)
+	}
+	if r.logIndex >= l.LogIndex {
+		return nil, fmt.Errorf("%w: %s at block %d log %d (tx %x): reserve %s's ReserveDataUpdated sits at log %d, AFTER the action — the stream is misordered",
+			ErrMissingSameTxIndex, action, l.BlockNumber, l.LogIndex, l.TxHash, reserve.Hex(), r.logIndex)
 	}
 	return r.variableBorrowIndex, nil
 }
@@ -594,7 +663,7 @@ func (e *AaveEngine) Process(l store.RawLog, d decode.Event) ([]store.PositionEv
 	// transaction's log run (a tx's logs are contiguous in (block, logIndex)
 	// order).
 	if tx := hex.EncodeToString(l.TxHash); tx != e.workingTx.curTx {
-		e.workingTx = aaveTxMarkers{curTx: tx, deficits: make(map[string]bool)}
+		e.workingTx = aaveTxMarkers{curTx: tx, deficits: make(map[string]bool), liqCalls: make(map[string]bool)}
 	}
 
 	switch ev := d.(type) {
@@ -659,6 +728,8 @@ func (e *AaveEngine) processReserveDataUpdated(l store.RawLog, ev decode.AaveRes
 		variableBorrowIndex: new(big.Int).Set(ev.VariableBorrowIndex),
 		liquidityIndex:      new(big.Int).Set(ev.LiquidityIndex),
 		block:               l.BlockNumber,
+		txHash:              hex.EncodeToString(l.TxHash),
+		logIndex:            l.LogIndex,
 	}
 	// Record-only event; Payload keys "variable_borrow_index" and
 	// "liquidity_index" are the store.SaveRateIndex kind strings the runner
@@ -685,7 +756,7 @@ func (e *AaveEngine) processBorrow(l store.RawLog, ev decode.AaveBorrow) ([]stor
 	// VariableDebtToken.mint). Regime B: +rayDivCeil(amount, vbIndex)
 	// (BorrowLogic.sol :55, TokenMath.getVTokenMintScaledAmount :80-85).
 	var delta *big.Int
-	if tokenMathRegime(l.BlockNumber) {
+	if tokenMathRegime(l.BlockNumber, l.LogIndex) {
 		delta = rayDivCeil(ev.Amount, idx)
 	} else {
 		delta = rayDivHalfUp(ev.Amount, idx)
@@ -713,7 +784,7 @@ func (e *AaveEngine) processRepay(l store.RawLog, ev decode.AaveRepay) ([]store.
 	// -rayDivFloor(amount, vbIndex) (BorrowLogic.sol :181-183,
 	// TokenMath.getVTokenBurnScaledAmount :94-99).
 	var burned *big.Int
-	if tokenMathRegime(l.BlockNumber) {
+	if tokenMathRegime(l.BlockNumber, l.LogIndex) {
 		burned = rayDivFloor(ev.Amount, idx)
 	} else {
 		burned = rayDivHalfUp(ev.Amount, idx)
@@ -746,19 +817,26 @@ func (e *AaveEngine) processLiquidationCall(l store.RawLog, ev decode.AaveLiquid
 		"liquidator":                   ev.Liquidator.Hex(),
 		"receive_atoken":               fmt.Sprintf("%t", ev.ReceiveAToken),
 	}
+	// Same-tx index requirement holds for EVERY LiquidationCall, paired or
+	// not: updateInterestRates on the debt reserve (LiquidationLogic.sol
+	// :573, emitting ReserveDataUpdated) always runs before the tx-final
+	// LiquidationCall event (:425-434) — enforced even on the paired path,
+	// where the index value itself is not consulted.
+	idx, err := e.requireIndex(ev.DebtAsset, l, "LiquidationCall")
+	if err != nil {
+		return nil, err
+	}
+	pairKey := ev.User.Hex() + "|" + ev.DebtAsset.Hex()
+	e.workingTx.liqCalls[pairKey] = true
 	// Deficit pairing: a same-tx DeficitCreated for this (user, debtAsset)
 	// means the contract burned the user's ENTIRE scaled debt in one op
 	// (LiquidationLogic.sol :546 burnAmount = borrowerReserveDebt) and the
 	// zero-out already happened at the DeficitCreated fold — this event's
 	// debt movement is already fully accounted. Delta 0 keeps the event
 	// recorded without double-applying.
-	if e.workingTx.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] {
+	if e.workingTx.deficits[pairKey] {
 		payload["deficit_paired"] = "true"
 		return []store.PositionEvent{aaveEvent(l, 0, "aave_liquidation_call", ev.User, ev.DebtAsset, "debt", big.NewInt(0), payload)}, nil
-	}
-	idx, err := e.requireIndex(ev.DebtAsset, l, "LiquidationCall")
-	if err != nil {
-		return nil, err
 	}
 	// Regime A: -rayDivHalfUp(debtToCover, vbIndex) (genesis Pool
 	// LiquidationLogic.sol :327-334; v3.4 :520-524 — vToken SBTB half-up).
@@ -768,7 +846,7 @@ func (e *AaveEngine) processLiquidationCall(l store.RawLog, ev decode.AaveLiquid
 	// the full nominal balance and the burn round-trips to the whole scaled
 	// amount in both regimes (see package comment).
 	var burned *big.Int
-	if tokenMathRegime(l.BlockNumber) {
+	if tokenMathRegime(l.BlockNumber, l.LogIndex) {
 		burned = rayDivFloor(ev.DebtToCover, idx)
 	} else {
 		burned = rayDivHalfUp(ev.DebtToCover, idx)
@@ -795,7 +873,20 @@ func (e *AaveEngine) processDeficitCreated(l store.RawLog, ev decode.AaveDeficit
 	// :546/:560-563 and the bad-debt loop :671-709; the full-balance burn
 	// round-trips exactly in both regimes). Fold: zero out the tracked
 	// scaled debt. Needs no index (deliberately — DeficitCreated precedes
-	// its reserve's same-tx ReserveDataUpdated).
+	// its reserve's same-tx ReserveDataUpdated, so it is EXEMPT from the
+	// same-tx index requirement).
+	//
+	// The zero-out is exact only in the DEPLOYED emission order,
+	// deficit-first: a same-tx LiquidationCall that already folded for this
+	// (user, debtAsset) would have burned rayDivFloor(debtToCover, i) BEFORE
+	// this zero-out — a double count. That order never occurs on-chain
+	// (LiquidationLogic.sol :560-563 fires before :425-434; all four
+	// historical deficits confirm), so seeing it is a loud error.
+	pairKey := ev.User.Hex() + "|" + ev.DebtAsset.Hex()
+	if e.workingTx.liqCalls[pairKey] {
+		return nil, fmt.Errorf("aave: DeficitCreated at block %d log %d (tx %x): a LiquidationCall for %s/%s already folded in this tx — deployed emission order is deficit-first (LiquidationLogic.sol :560-563 before :425-434); reversed order would double-count and is refused",
+			l.BlockNumber, l.LogIndex, l.TxHash, ev.User.Hex(), ev.DebtAsset.Hex())
+	}
 	cur, err := e.balanceFor("debt", ev.DebtAsset, ev.User)
 	if err != nil {
 		return nil, err
@@ -807,10 +898,25 @@ func (e *AaveEngine) processDeficitCreated(l store.RawLog, ev decode.AaveDeficit
 	if err := e.setBalance("debt", ev.DebtAsset, ev.User, new(big.Int)); err != nil {
 		return nil, err
 	}
-	e.workingTx.deficits[ev.User.Hex()+"|"+ev.DebtAsset.Hex()] = true
+	e.workingTx.deficits[pairKey] = true
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_deficit_created", ev.User, ev.DebtAsset, "debt", new(big.Int).Neg(cur), map[string]string{
 		"amount_created": ev.AmountCreated.String(),
 	})}, nil
+}
+
+// requireAccruableState is the warm-start impossible-state detector
+// (defense-in-depth under the hydration lifecycle): a Mint/Burn carrying
+// BalanceIncrease > 0 against a ZERO tracked scaled balance is impossible
+// on-chain — interest cannot accrue on nothing (BalanceIncrease =
+// bal(s, i) - bal(s, p) = 0 whenever s = 0) — so it proves the tracked
+// state is incomplete (bad hydration or a truncated stream), never a
+// foldable event.
+func requireAccruableState(s, balanceIncrease *big.Int, l store.RawLog, what string, account, reserve common.Address) error {
+	if s.Sign() == 0 && balanceIncrease.Sign() > 0 {
+		return fmt.Errorf("aave: %s at block %d log %d (tx %x): BalanceIncrease %s on a ZERO tracked scaled balance for %s/%s — interest cannot accrue on nothing; tracked state is incomplete (impossible-state detector)",
+			what, l.BlockNumber, l.LogIndex, l.TxHash, balanceIncrease, account.Hex(), reserve.Hex())
+	}
+	return nil
 }
 
 // aTokenReserve resolves the emitting aToken (l.Address) to its underlying
@@ -836,8 +942,11 @@ func (e *AaveEngine) processATokenMint(l store.RawLog, ev decode.ATokenMint) ([]
 	if err != nil {
 		return nil, err
 	}
+	if err := requireAccruableState(s, ev.BalanceIncrease, l, "ATokenMint", ev.OnBehalfOf, reserve); err != nil {
+		return nil, err
+	}
 	var next *big.Int
-	if tokenMathRegime(l.BlockNumber) {
+	if tokenMathRegime(l.BlockNumber, l.LogIndex) {
 		// Regime B inversion: bal(s', i) = rayMulFloor(s, i) + Value -
 		// BalanceIncrease covers all three Mint emission paths — supply
 		// (_mintScaled, SBTB :79/:87-89), withdrawal-with-interest-exceeding
@@ -893,8 +1002,11 @@ func (e *AaveEngine) processATokenBurn(l store.RawLog, ev decode.ATokenBurn) ([]
 	if err != nil {
 		return nil, err
 	}
+	if err := requireAccruableState(s, ev.BalanceIncrease, l, "ATokenBurn", ev.From, reserve); err != nil {
+		return nil, err
+	}
 	var next *big.Int
-	if tokenMathRegime(l.BlockNumber) {
+	if tokenMathRegime(l.BlockNumber, l.LogIndex) {
 		// Regime B inversion: Burn.Value = previousBalance - nextBalance
 		// (SBTB :127-130) => bal(s', i) = rayMulFloor(s, i) - Value -
 		// BalanceIncrease.
@@ -959,14 +1071,19 @@ func (e *AaveEngine) processATokenBalanceTransfer(l store.RawLog, ev decode.ATok
 	if err := e.setBalance("collateral", reserve, ev.To, new(big.Int).Add(to, ev.Value)); err != nil {
 		return nil, err
 	}
-	payload := map[string]string{
-		"value": ev.Value.String(),
-		"index": ev.Index.String(),
-		"from":  ev.From.Hex(),
-		"to":    ev.To.Hex(),
+	// Each fanned-out event gets its OWN payload map: a shared pointer would
+	// let a mutation through one event alias into its sibling (and into
+	// whatever the store layer later does with either).
+	mkPayload := func() map[string]string {
+		return map[string]string{
+			"value": ev.Value.String(),
+			"index": ev.Index.String(),
+			"from":  ev.From.Hex(),
+			"to":    ev.To.Hex(),
+		}
 	}
 	return []store.PositionEvent{
-		aaveEvent(l, 0, "atoken_balance_transfer", ev.From, reserve, "collateral", new(big.Int).Neg(ev.Value), payload),
-		aaveEvent(l, 1, "atoken_balance_transfer", ev.To, reserve, "collateral", new(big.Int).Set(ev.Value), payload),
+		aaveEvent(l, 0, "atoken_balance_transfer", ev.From, reserve, "collateral", new(big.Int).Neg(ev.Value), mkPayload()),
+		aaveEvent(l, 1, "atoken_balance_transfer", ev.To, reserve, "collateral", new(big.Int).Set(ev.Value), mkPayload()),
 	}, nil
 }

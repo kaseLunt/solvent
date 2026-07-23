@@ -1,12 +1,14 @@
 package derive
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -105,6 +107,7 @@ var (
 	aaveUSDC   = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 	aavePYUSD  = common.HexToAddress("0x6c3ea9036406852006290770BEdFcAbA0e23A0e8")
 	aaveWEETH  = common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee")
+	aaveFRAX   = common.HexToAddress("0x853d955aCEf822Db058eb8505911ED77F175b99e")
 	aaveAWEETH = common.HexToAddress("0xbe1F842e7e0afd2c2322aae5d34bA899544b29db")
 	aavePool   = common.HexToAddress("0x0AA97c284e98396202b6A04024F5E2c65026F3c0")
 	aaveUserA  = common.HexToAddress("0x1111111111111111111111111111111111111101")
@@ -264,14 +267,15 @@ func TestAaveBorrowNonVariableModeError(t *testing.T) {
 
 // TestAaveBorrowRegimeRounding: amount 9, index 4*RAY => 2.25 scaled. Regime
 // A rounds half-up to 2 (vToken SBTB _mintScaled rayDiv); regime B rounds
-// CEIL to 3 (BorrowLogic getVTokenMintScaledAmount). The block one before
-// the switch folds A; the switch block folds B.
+// CEIL to 3 (BorrowLogic getVTokenMintScaledAmount). The boundary is
+// tx/log-order-aware: at the upgrade block itself, logs BEFORE the Upgraded
+// log (logIndex 542) still fold regime A; logs at/after it fold regime B.
 func TestAaveBorrowRegimeRounding(t *testing.T) {
-	borrow := func(block uint64) *big.Int {
+	borrow := func(block uint64, rduLog, actionLog uint32) *big.Int {
 		e := NewAaveEngine()
 		beginBatch(t, e, nil)
-		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
-		evs, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
+		aaveFeedRDU(t, e, block, rduLog, 1, aaveUSDC, aaveRayTimes(4))
+		evs, err := e.Process(aaveSynthLog(block, actionLog, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserB, // delegated: debt lands on OnBehalfOf
 			Amount: big.NewInt(9), InterestRateMode: 2, BorrowRate: big.NewInt(0),
 		})
@@ -284,23 +288,25 @@ func TestAaveBorrowRegimeRounding(t *testing.T) {
 		require.Equal(t, uint16(0), evs[0].Seq)
 		return evs[0].Delta
 	}
-	require.Equal(t, "2", borrow(aaveTokenMathFromBlock-1).String(), "regime A half-up: 2.25 -> 2")
-	require.Equal(t, "3", borrow(aaveTokenMathFromBlock).String(), "regime B ceil: 2.25 -> 3")
+	require.Equal(t, "2", borrow(aaveTokenMathFromBlock-1, 1, 2).String(), "regime A half-up: 2.25 -> 2")
+	require.Equal(t, "2", borrow(aaveTokenMathFromBlock, 1, 2).String(), "upgrade block BEFORE log 542: still regime A")
+	require.Equal(t, "3", borrow(aaveTokenMathFromBlock, 600, 601).String(), "upgrade block AT/AFTER log 542: regime B ceil: 2.25 -> 3")
+	require.Equal(t, "3", borrow(aaveTokenMathFromBlock+1, 1, 2).String(), "past the upgrade block: regime B")
 }
 
 // TestAaveRepayRegimeRounding: amount 11, index 4*RAY => 2.75 scaled. Regime
 // A half-up burns 3; regime B FLOOR burns 2 (getVTokenBurnScaledAmount).
 func TestAaveRepayRegimeRounding(t *testing.T) {
-	repay := func(block uint64) *big.Int {
+	repay := func(block uint64, baseLog uint32) *big.Int {
 		e := NewAaveEngine()
 		beginBatch(t, e, nil)
-		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
-		_, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
+		aaveFeedRDU(t, e, block, baseLog, 1, aaveUSDC, aaveRayTimes(4))
+		_, err := e.Process(aaveSynthLog(block, baseLog+1, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
 			Amount: big.NewInt(100), InterestRateMode: 2, BorrowRate: big.NewInt(0),
 		})
 		require.NoError(t, err)
-		evs, err := e.Process(aaveSynthLog(block, 3, 1, aavePool), decode.AaveRepay{
+		evs, err := e.Process(aaveSynthLog(block, baseLog+2, 1, aavePool), decode.AaveRepay{
 			Reserve: aaveUSDC, User: aaveUserA, Repayer: aaveUserA,
 			Amount: big.NewInt(11), UseATokens: false,
 		})
@@ -310,8 +316,9 @@ func TestAaveRepayRegimeRounding(t *testing.T) {
 		require.Equal(t, "debt", evs[0].Side)
 		return evs[0].Delta
 	}
-	require.Equal(t, "-3", repay(aaveTokenMathFromBlock-1).String(), "regime A half-up: 2.75 -> 3")
-	require.Equal(t, "-2", repay(aaveTokenMathFromBlock).String(), "regime B floor: 2.75 -> 2")
+	require.Equal(t, "-3", repay(aaveTokenMathFromBlock-1, 1).String(), "regime A half-up: 2.75 -> 3")
+	require.Equal(t, "-3", repay(aaveTokenMathFromBlock, 1).String(), "upgrade block BEFORE log 542: still regime A")
+	require.Equal(t, "-2", repay(aaveTokenMathFromBlock, 600).String(), "upgrade block AT/AFTER log 542: regime B floor: 2.75 -> 2")
 }
 
 func TestAaveRepayOverdrawnError(t *testing.T) {
@@ -328,17 +335,17 @@ func TestAaveRepayOverdrawnError(t *testing.T) {
 // TestAaveLiquidationCallRegimeRounding: unpaired liquidation burns
 // debtToCover with half-up (regime A) vs floor (regime B).
 func TestAaveLiquidationCallRegimeRounding(t *testing.T) {
-	liq := func(block uint64) *big.Int {
+	liq := func(block uint64, baseLog uint32) *big.Int {
 		e := NewAaveEngine()
 		beginBatch(t, e, nil)
-		aaveFeedRDU(t, e, block, 1, 1, aaveUSDC, aaveRayTimes(4))
-		_, err := e.Process(aaveSynthLog(block, 2, 1, aavePool), decode.AaveBorrow{
+		aaveFeedRDU(t, e, block, baseLog, 1, aaveUSDC, aaveRayTimes(4))
+		_, err := e.Process(aaveSynthLog(block, baseLog+1, 1, aavePool), decode.AaveBorrow{
 			Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
 			Amount: big.NewInt(100), InterestRateMode: 2, BorrowRate: big.NewInt(0),
 		})
 		require.NoError(t, err)
-		aaveFeedRDU(t, e, block, 3, 2, aaveUSDC, aaveRayTimes(4))
-		evs, err := e.Process(aaveSynthLog(block, 4, 2, aavePool), decode.AaveLiquidationCall{
+		aaveFeedRDU(t, e, block, baseLog+2, 2, aaveUSDC, aaveRayTimes(4))
+		evs, err := e.Process(aaveSynthLog(block, baseLog+3, 2, aavePool), decode.AaveLiquidationCall{
 			CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
 			DebtToCover: big.NewInt(11), LiquidatedCollateralAmount: big.NewInt(1),
 			Liquidator: aaveUserB, ReceiveAToken: false,
@@ -349,8 +356,9 @@ func TestAaveLiquidationCallRegimeRounding(t *testing.T) {
 		require.NotContains(t, evs[0].Payload, "deficit_paired")
 		return evs[0].Delta
 	}
-	require.Equal(t, "-3", liq(aaveTokenMathFromBlock-1).String(), "regime A half-up: 2.75 -> 3")
-	require.Equal(t, "-2", liq(aaveTokenMathFromBlock).String(), "regime B floor: 2.75 -> 2")
+	require.Equal(t, "-3", liq(aaveTokenMathFromBlock-1, 1).String(), "regime A half-up: 2.75 -> 3")
+	require.Equal(t, "-3", liq(aaveTokenMathFromBlock, 1).String(), "upgrade block BEFORE log 542: still regime A")
+	require.Equal(t, "-2", liq(aaveTokenMathFromBlock, 600).String(), "upgrade block AT/AFTER log 542: regime B floor: 2.75 -> 2")
 }
 
 // TestAaveDeficitZeroOutAndPairing follows the deployed emission order
@@ -736,4 +744,221 @@ func TestAaveGoldenReplayDeterminism(t *testing.T) {
 		return string(sb)
 	}
 	require.Equal(t, run(), run())
+}
+
+// ---------------------------------------------------------------------------
+// Same-tx index requirement, regime boundary, deficit ordering, sweep items.
+// ---------------------------------------------------------------------------
+
+// TestAaveRegimeBoundaryBoundToFixture binds the regime-B boundary constants
+// to the committed capture: the weETH aToken's Upgraded log to the v3.5 impl
+// 0xaa7448de... sits at exactly (block 23088584, logIndex 542) on the aToken
+// proxy. If either constant ever drifts from the fixture bytes, this fails.
+func TestAaveRegimeBoundaryBoundToFixture(t *testing.T) {
+	doc := aaveLoadDoc(t, "aave_atoken_weeth_logs.json")
+	const upgradedTopic = "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+	const v35ImplTopic = "0x000000000000000000000000aa7448de2be3ebdf9b5b0fa614accd119b3898bc"
+	var found []aaveFixtureLog
+	for _, l := range doc.Logs {
+		if len(l.Topics) >= 2 && strings.EqualFold(l.Topics[0], upgradedTopic) && strings.EqualFold(l.Topics[1], v35ImplTopic) {
+			found = append(found, l)
+		}
+	}
+	require.Len(t, found, 1, "exactly one Upgraded-to-v3.5 log in the committed aToken stream")
+	require.Equal(t, uint64(aaveTokenMathFromBlock), found[0].BlockNumber)
+	require.Equal(t, uint32(aaveTokenMathBoundaryLogIndex), found[0].LogIndex)
+	require.Equal(t, aaveAWEETH, common.HexToAddress(found[0].Address))
+	require.Equal(t, "0xa17567fa201a78b66c43e6ab178559f8c1d5d308fe944c0bd2c39b5e585097dc", strings.ToLower(found[0].TxHash))
+}
+
+// TestAaveIndexedActionRequiresSameTxRDU: every indexed action must be
+// preceded, within its own transaction, by its reserve's ReserveDataUpdated
+// — the two mandated negative shapes are typed ErrMissingSameTxIndex.
+func TestAaveIndexedActionRequiresSameTxRDU(t *testing.T) {
+	borrowEv := decode.AaveBorrow{
+		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
+		Amount: big.NewInt(5), InterestRateMode: 2, BorrowRate: big.NewInt(0),
+	}
+
+	t.Run("older-tx RDU present, own-tx RDU absent", func(t *testing.T) {
+		e := NewAaveEngine()
+		beginBatch(t, e, nil)
+		aaveFeedRDU(t, e, 25000000, 1, 1, aaveUSDC, new(big.Int).Set(rayUnit)) // tx 1
+		_, err := e.Process(aaveSynthLog(25000001, 2, 2, aavePool), borrowEv)  // tx 2: no own RDU
+		require.ErrorIs(t, err, ErrMissingSameTxIndex)
+		require.ErrorContains(t, err, "foreign index")
+	})
+
+	t.Run("RDU after the action in the same tx", func(t *testing.T) {
+		e := NewAaveEngine()
+		beginBatch(t, e, nil)
+		aaveFeedRDU(t, e, 25000000, 10, 1, aaveUSDC, new(big.Int).Set(rayUnit)) // tx 1 log 10
+		_, err := e.Process(aaveSynthLog(25000000, 5, 1, aavePool), borrowEv)   // tx 1 log 5 < 10
+		require.ErrorIs(t, err, ErrMissingSameTxIndex)
+		require.ErrorContains(t, err, "AFTER the action")
+	})
+
+	t.Run("no RDU at all", func(t *testing.T) {
+		e := NewAaveEngine()
+		beginBatch(t, e, nil)
+		_, err := e.Process(aaveSynthLog(25000000, 5, 1, aavePool), borrowEv)
+		require.ErrorIs(t, err, ErrMissingSameTxIndex)
+		require.ErrorContains(t, err, "no cached ReserveDataUpdated")
+	})
+
+	t.Run("repay and liquidation are gated too", func(t *testing.T) {
+		e := NewAaveEngine()
+		beginBatch(t, e, nil)
+		aaveFeedRDU(t, e, 25000000, 1, 1, aaveUSDC, new(big.Int).Set(rayUnit))
+		_, err := e.Process(aaveSynthLog(25000000, 2, 1, aavePool), borrowEv)
+		require.NoError(t, err)
+		_, err = e.Process(aaveSynthLog(25000001, 2, 2, aavePool), decode.AaveRepay{
+			Reserve: aaveUSDC, User: aaveUserA, Repayer: aaveUserA, Amount: big.NewInt(1),
+		})
+		require.ErrorIs(t, err, ErrMissingSameTxIndex)
+		_, err = e.Process(aaveSynthLog(25000001, 3, 2, aavePool), decode.AaveLiquidationCall{
+			CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
+			DebtToCover: big.NewInt(1), LiquidatedCollateralAmount: big.NewInt(1),
+			Liquidator: aaveUserB, ReceiveAToken: false,
+		})
+		require.ErrorIs(t, err, ErrMissingSameTxIndex)
+	})
+}
+
+// TestAaveDeficitAfterLiquidationCallSameTxErrors: the deficit zero-out is
+// exact only in the DEPLOYED deficit-first emission order; a reversed same-tx
+// order (LiquidationCall folding before DeficitCreated for the same pair)
+// would double-count and must be a loud error.
+func TestAaveDeficitAfterLiquidationCallSameTxErrors(t *testing.T) {
+	e := NewAaveEngine()
+	beginBatch(t, e, nil)
+	aaveFeedRDU(t, e, 25000000, 1, 1, aaveUSDC, new(big.Int).Set(rayUnit))
+	_, err := e.Process(aaveSynthLog(25000000, 2, 1, aavePool), decode.AaveBorrow{
+		Reserve: aaveUSDC, User: aaveUserA, OnBehalfOf: aaveUserA,
+		Amount: big.NewInt(1000), InterestRateMode: 2, BorrowRate: big.NewInt(0),
+	})
+	require.NoError(t, err)
+
+	// Reversed order inside tx 2: LiquidationCall folds first...
+	aaveFeedRDU(t, e, 25000100, 5, 2, aaveUSDC, new(big.Int).Set(rayUnit))
+	_, err = e.Process(aaveSynthLog(25000100, 6, 2, aavePool), decode.AaveLiquidationCall{
+		CollateralAsset: aaveWEETH, DebtAsset: aaveUSDC, User: aaveUserA,
+		DebtToCover: big.NewInt(600), LiquidatedCollateralAmount: big.NewInt(1),
+		Liquidator: aaveUserB, ReceiveAToken: false,
+	})
+	require.NoError(t, err)
+	// ...then a same-tx DeficitCreated for the same (user, debtAsset): refused.
+	_, err = e.Process(aaveSynthLog(25000100, 7, 2, aavePool), decode.AaveDeficitCreated{
+		User: aaveUserA, DebtAsset: aaveUSDC, AmountCreated: big.NewInt(400),
+	})
+	require.ErrorContains(t, err, "deficit-first")
+	require.ErrorContains(t, err, "double-count")
+}
+
+// TestAaveImpossibleStateDetector: BalanceIncrease > 0 against a ZERO tracked
+// scaled balance is impossible on-chain (interest cannot accrue on nothing) —
+// under the hydration lifecycle it proves incomplete committed state and must
+// error loudly in BOTH regimes, for Mint and Burn alike.
+func TestAaveImpossibleStateDetector(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block uint64
+	}{
+		{"regime A", aaveTokenMathFromBlock - 100},
+		{"regime B", aaveTokenMathFromBlock + 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewAaveEngine()
+			beginBatch(t, e, nil) // empty committed state: tracked s == 0
+			_, err := e.Process(aaveSynthLog(tc.block, 1, 1, aaveAWEETH), decode.ATokenMint{
+				Caller: aaveUserA, OnBehalfOf: aaveUserA,
+				Value: big.NewInt(10), BalanceIncrease: big.NewInt(3), Index: new(big.Int).Set(rayUnit),
+			})
+			require.ErrorContains(t, err, "impossible-state detector")
+
+			_, err = e.Process(aaveSynthLog(tc.block, 2, 1, aaveAWEETH), decode.ATokenBurn{
+				From: aaveUserA, Target: aaveUserA,
+				Value: big.NewInt(10), BalanceIncrease: big.NewInt(3), Index: new(big.Int).Set(rayUnit),
+			})
+			require.ErrorContains(t, err, "impossible-state detector")
+		})
+	}
+}
+
+// TestAaveBalanceTransferPayloadNotShared: the BalanceTransfer fan-out must
+// give each of its two events its OWN payload map — mutating one must never
+// alias into the other.
+func TestAaveBalanceTransferPayloadNotShared(t *testing.T) {
+	e := NewAaveEngine()
+	beginBatch(t, e, newFakeReader().seed(aaveUserA, aaveWEETH, "collateral", big.NewInt(5)))
+	evs, err := e.Process(aaveSynthLog(25000000, 1, 1, aaveAWEETH), decode.ATokenBalanceTransfer{
+		From: aaveUserA, To: aaveUserB, Value: big.NewInt(5), Index: new(big.Int).Set(rayUnit),
+	})
+	require.NoError(t, err)
+	require.Len(t, evs, 2)
+	require.Equal(t, evs[0].Payload, evs[1].Payload, "same content")
+	evs[0].Payload["mutated"] = "yes"
+	require.NotContains(t, evs[1].Payload, "mutated", "payload maps must not share storage")
+}
+
+// TestAaveWindowPinnedArchiveScaledDebt pins the unverified-Pool window
+// (blocks 24196552..24920566, impl 0xbe82113a...) to ARCHIVE TRUTH: for every
+// action event inside the window — the three repays and the deficit pair —
+// the derived tracked scaled debt immediately before and after the action
+// block must equal vToken scaledBalanceOf captured from archive state:
+//
+//	vUSDC 0x9355032d747f1e08F8720CD01950E652eE15cdB7, vFRAX
+//	0xfd3aDA5AAbdc6531C7C2AC46c00eBf870f5a0E6B (data provider
+//	getReserveTokensAddresses); captured with cast call
+//	"scaledBalanceOf(address)" via https://eth.drpc.org (archive), 2026-07-23:
+//
+//	0xe17b347b... vUSDC @24371584 = 474724123          -> @24371585 = 0 (full repay, tx 0xb36a650b..., log 324)
+//	0xe17b347b... vFRAX @24371594 = 9991129357032481316289 -> @24371595 = 0 (full repay, tx 0x5e45ec96..., log 534)
+//	0xbd0c6f59... vUSDC @24788837 = 998962552          -> @24788838 = 530542774 (partial repay, tx 0x53a07dae..., log 1020)
+//	0x5280be3a... vUSDC @24466430 = 2302612            -> @24466431 = 0 (deficit+liquidation pair, tx 0xe8348806..., logs 587/596)
+//
+// A scaled balance only moves on fold events, so "state at end of block B"
+// equals the sum of the account's debt deltas over all events with
+// BlockNumber <= B. This closes the window's last gap: the sandwich argument
+// plus these assertions make the era's semantics archive-pinned, not merely
+// inferred.
+func TestAaveWindowPinnedArchiveScaledDebt(t *testing.T) {
+	steps := aaveGoldenSteps(t)
+	e := NewAaveEngine()
+	beginBatch(t, e, nil)
+	events := processAll(t, e, steps)
+
+	sumThrough := func(user, reserve common.Address, block uint64) string {
+		net := new(big.Int)
+		for _, ev := range events {
+			if ev.BlockNumber <= block && ev.Side == "debt" && ev.Delta != nil &&
+				bytes.Equal(ev.Account, user.Bytes()) && bytes.Equal(ev.Asset, reserve.Bytes()) {
+				net.Add(net, ev.Delta)
+			}
+		}
+		return net.String()
+	}
+
+	userE17 := common.HexToAddress("0xe17b347be07a423e3eb0ded3c3db82e138a48f51")
+	userBD0 := common.HexToAddress("0xbd0c6f59ee76560b26f07d8a1187d12530359cc1")
+	user528 := common.HexToAddress("0x5280be3a25a731e2ce0793fe4928f2ebf74c330d")
+	for _, c := range []struct {
+		name    string
+		user    common.Address
+		reserve common.Address
+		block   uint64
+		want    string
+	}{
+		{"e17b USDC before repay", userE17, aaveUSDC, 24371584, "474724123"},
+		{"e17b USDC after repay", userE17, aaveUSDC, 24371585, "0"},
+		{"e17b FRAX before repay", userE17, aaveFRAX, 24371594, "9991129357032481316289"},
+		{"e17b FRAX after repay", userE17, aaveFRAX, 24371595, "0"},
+		{"bd0c USDC before repay", userBD0, aaveUSDC, 24788837, "998962552"},
+		{"bd0c USDC after repay", userBD0, aaveUSDC, 24788838, "530542774"},
+		{"5280 USDC before deficit pair", user528, aaveUSDC, 24466430, "2302612"},
+		{"5280 USDC after deficit pair", user528, aaveUSDC, 24466431, "0"},
+	} {
+		require.Equal(t, c.want, sumThrough(c.user, c.reserve, c.block),
+			"%s: derived scaled debt at end of block %d must equal archive scaledBalanceOf", c.name, c.block)
+	}
 }
