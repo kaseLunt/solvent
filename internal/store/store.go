@@ -261,6 +261,18 @@ func (s *Store) Rewind(ctx context.Context, stream string, chainID uint64, toBlo
 		`DELETE FROM raw_logs WHERE chain_id = $1 AND block_number > $2`, chainID, toBlock); err != nil {
 		return fmt.Errorf("delete logs: %w", err)
 	}
+	// Durable reorg coordination: record a reorg epoch INSIDE this same
+	// transaction, so the invalidation marker is atomic with the raw-log
+	// deletion — a crash after commit leaves derived state provably stale
+	// (ApplyDerived refuses to advance any engine on this chain until it
+	// re-acks via RewindDerived). Scope is deliberately CHAIN-WIDE, not
+	// per-engine/stream: every engine deriving from this chain's logs is
+	// invalidated by the rewind, whichever stream detected it.
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO reorg_epochs (chain_id, rewound_to) VALUES ($1, $2)`,
+		chainID, toBlock); err != nil {
+		return fmt.Errorf("record reorg epoch: %w", err)
+	}
 	if _, err := tx.Exec(ctx,
 		`UPDATE ingest_cursors SET last_block = $2, last_block_hash = $3, updated_at = now()
 		 WHERE chain_id = $1 AND last_block > $2`,
