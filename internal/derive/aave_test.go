@@ -626,8 +626,11 @@ func TestAaveBalanceTransferOverdrawnError(t *testing.T) {
 //
 // The replay spans both fold regimes (all 138 borrows and most repays are
 // regime A; 9 repays, 3 liquidations and 3 deficits are regime B, including
-// the unverified-Pool-impl window 24196552..24920566) — bit-exact agreement
-// here is the empirical proof of the era-dependent fold semantics.
+// the unverified-Pool-impl window 24196552..24920566). Bit-exact agreement
+// OUTCOME-PINS every observed action; it does NOT discriminate the window's
+// rounding rule (every observed window repay is identical under floor and
+// half-up — see the package comment), whose assumption remains inherited
+// through the verified-implementation sandwich.
 func TestAaveGoldenFullHistoryReplay(t *testing.T) {
 	pool := aaveLoadDoc(t, "aave_pool_logs.json")
 	atoken := aaveLoadDoc(t, "aave_atoken_weeth_logs.json")
