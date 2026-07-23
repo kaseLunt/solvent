@@ -13,6 +13,7 @@ allowed_paths:
   - docs/plans/**
   - recon/derivation-notes.md
   - recon/feeds.json
+  - .gitignore
   - internal/**
   - cmd/**
   - config/**
