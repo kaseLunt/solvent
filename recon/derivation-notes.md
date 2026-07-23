@@ -148,8 +148,10 @@ was validated per-event on migrated Safe `0xac5f3ce95f602e31b672cc38cddf7a3ea9ae
 151,731,530, idx = 1036365345262130760): view `borrowingOf` at block−1 = 31,690,519 = event
 `beforeDebtAmount`; event `debtAmountLiquidated` = 15,845,260; naive subtraction gives 15,845,259
 but the view at the liq block returns **15,845,260** — and the normalized replay reproduces it:
-`floor(15845260·1e18/idx) = 15,289,230` removed, `floor((norm_before−15,289,230)·idx/1e18) =
-15,845,260`. Exactly the ±1-wei class of error the normalized model avoids.
+`floor(15845260·1e18/idx) = 15,289,260` removed, `floor((norm_before−15,289,260)·idx/1e18) =
+15,845,260` [ERRATUM 2026-07-23: originally recorded 15,289,230 — digit typo; 15,289,260 proven by
+exact arithmetic against this section's own beforeDebt/view figures during Task 5 review]. Exactly
+the ±1-wei class of error the normalized model avoids.
 
 ### Migration finding (event-invisible debt genesis)
 

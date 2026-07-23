@@ -312,6 +312,15 @@ func (ATokenMint) Name() string { return "ATokenMint" }
 // implementation's source (see plan Task 6). Value==BalanceIncrease therefore
 // means actionAmount == 2*BalanceIncrease -- NOT zero principal (that reading
 // only holds for Mint, where the sign is reversed).
+//
+// TWO-REGIME NOTE: the formula above is the REGIME-A emission as written
+// (implementations deployed before block 23088584). Under regime B (the v3.5
+// TokenMath line, block 23088584 log 542 onward) the Value semantics differ:
+// Burn.Value = previousBalance - nextBalance, a balance-derived NOMINAL
+// figure from which the scaled delta is NOT computable without the account's
+// tracked scaled balance -- see the deployed-source citations and the
+// inversion identity in internal/derive/aave.go (regime boundary and
+// per-regime Burn folds).
 type ATokenBurn struct {
 	From, Target                  common.Address
 	Value, BalanceIncrease, Index *big.Int

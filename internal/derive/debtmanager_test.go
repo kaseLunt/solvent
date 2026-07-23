@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -27,6 +28,11 @@ var (
 	tWeETH = common.HexToAddress("0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF")
 	tUSDC  = common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
 	tUSDT  = common.HexToAddress("0x94b008aA00579c1307B0EF2c499aD98a8ce58e58")
+	// frxUSD (18-dec stable) and the genuinely non-stable borrow tokens
+	// (recon "Asset registry" + caveat 1).
+	tFrxUSD    = common.HexToAddress("0x80Eede496655FB9047dd39d9f418d5483ED600df")
+	tEURC      = common.HexToAddress("0xDCB612005417Dc906fF72c87DF732e5a90D49e11")
+	tLiquidUSD = common.HexToAddress("0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C")
 )
 
 func num(s string) *big.Int {
@@ -176,15 +182,65 @@ func TestBorrowCeilRounding(t *testing.T) {
 	require.Equal(t, 0, big.NewInt(2).Cmp(evs[0].Delta), "exact division must not be bumped by ceil, got %s", evs[0].Delta)
 }
 
-func TestBorrowNonUSDCErrors(t *testing.T) {
+// TestBorrowUSDTFoldsAsConfiguredStable: USDT is a configured 6-dec stable
+// (isStableToken snaps to exactly 1e6 USD per whole token), so usd == amount
+// and the borrow folds exactly like USDC.
+func TestBorrowUSDTFoldsAsConfiguredStable(t *testing.T) {
 	dm := newDM(t, nil, nil)
-	feedIndex(t, dm, 100, tUSDT, num("1000000000000000000"))
+	feedIndex(t, dm, 100, tUSDT, num("2000000000000000000")) // idx = 2e18
 
 	evs, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tUSDT, Amount: big.NewInt(5)})
+	require.NoError(t, err)
+	require.Len(t, evs, 1)
+	require.Equal(t, "borrow", evs[0].EventType)
+	require.Equal(t, tUSDT.Bytes(), evs[0].Asset)
+	require.Equal(t, 0, big.NewInt(3).Cmp(evs[0].Delta), "ceil(5*1e18/2e18) = 3")
+	require.Equal(t, "5", evs[0].Payload["usd"], "6-dec stable: usd == amount")
+
+	// The fold lands on the running cache: repaying exactly it succeeds.
+	evs, err = dm.Process(tLog(100, 0x02, 7), decode.DMRepaid{User: tUser, Payer: tPayer, Token: tUSDT, UsdAmount: big.NewInt(6)})
+	require.NoError(t, err)
+	require.Equal(t, 0, big.NewInt(-3).Cmp(evs[0].Delta))
+}
+
+// TestBorrowFrxUSD18DecExactConversion: frxUSD is a configured 18-dec stable;
+// usd = amount/1e12 with a MANDATORY exactness check — a remainder means a
+// non-integral 6-dec USD value the stable-snap model cannot represent.
+func TestBorrowFrxUSD18DecExactConversion(t *testing.T) {
+	dm := newDM(t, nil, nil)
+	feedIndex(t, dm, 100, tFrxUSD, num("1000000000000000000")) // idx = 1e18
+
+	// 5 whole frxUSD = 5e18 token units -> exactly 5,000,000 USD 6-dec.
+	evs, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: tFrxUSD, Amount: num("5000000000000000000")})
+	require.NoError(t, err)
+	require.Len(t, evs, 1)
+	require.Equal(t, "5000000", evs[0].Payload["usd"], "18-dec stable: usd = amount/1e12, exact")
+	require.Equal(t, "5000000000000000000", evs[0].Payload["token_amount"])
+	require.Equal(t, 0, num("5000000").Cmp(evs[0].Delta), "ceil(5e6*1e18/1e18) = 5e6")
+
+	// One wei over an integral USD amount: the division has remainder 1 ->
+	// loud exactness error, never a silent floor.
+	_, err = dm.Process(tLog(100, 0x02, 7), decode.DMBorrowed{User: tUser, Token: tFrxUSD, Amount: num("5000000000000000001")})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "requires oracle-priced derivation - not yet supported")
-	require.Contains(t, err.Error(), "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58")
-	require.Empty(t, evs)
+	require.Contains(t, err.Error(), "not an integral 6-dec USD amount")
+	require.NotErrorIs(t, err, ErrUnsupportedBorrowToken, "exactness violation is a data error, not a capability error")
+}
+
+// TestBorrowUnsupportedTokenIsTerminal: genuinely non-stable borrow tokens
+// (liquidUSD, EURC, weEUR, liquidRESERVE x2) need emit-time oracle pricing —
+// the deriver wraps ErrUnsupportedBorrowToken, the errors.Is-matchable
+// TERMINAL capability error the runner uses to mark the engine unhealthy
+// instead of retrying.
+func TestBorrowUnsupportedTokenIsTerminal(t *testing.T) {
+	for _, token := range []common.Address{tEURC, tLiquidUSD} {
+		dm := newDM(t, nil, nil)
+		// No index fed on purpose: the capability gate must fire first.
+		evs, err := dm.Process(tLog(100, 0x01, 5), decode.DMBorrowed{User: tUser, Token: token, Amount: big.NewInt(5)})
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrUnsupportedBorrowToken)
+		require.Contains(t, err.Error(), strings.ToLower(token.Hex()))
+		require.Empty(t, evs)
+	}
 }
 
 func TestBorrowMissingSameBlockIndexErrors(t *testing.T) {

@@ -3,6 +3,7 @@ package derive
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -121,15 +122,66 @@ type DMChainReads interface {
 	TxCalldata(ctx context.Context, txHash common.Hash) ([]byte, error)
 }
 
-// usdcOP is USDC on OP -- the only borrow token with any borrow history
-// (100% of the 305,045 historical Borrowed events; recon caveat 1). The
-// PriceProviderV2 stable-snaps it to exactly 1e6 inside a ±1% band
-// (archive spot-checks held across the full range), and USDC is 6-dec, so
-// usd == amount exactly. Any other borrow token needs emit-time oracle
-// pricing, which this deriver refuses loudly rather than approximating.
-var usdcOP = common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
+// dmStableBorrowDecimals lists the CONFIGURED STABLE borrow tokens (recon
+// "Asset registry" roles + caveat 1) with their decimals. For these,
+// PriceProviderV2.isStableToken snaps the price to exactly 1e6 USD (6-dec)
+// per whole token inside a ±1% band (archive spot-checks held across the
+// full range), so Borrowed's token amount converts to USD by an EXACT
+// decimal rescaling:
+//
+//	6-dec  (USDC, USDT): usd = amount
+//	18-dec (frxUSD):     usd = amount / 1e12, exact division REQUIRED — a
+//	  remainder means a non-integral 6-dec USD value, which the stable-snap
+//	  model cannot represent; refuse loudly rather than round.
+//
+// 100% of the 305,045 historical Borrowed events are USDC; USDT and frxUSD
+// have zero borrow history but are configured borrow tokens whose stable
+// snap makes event-only derivation exact.
+var dmStableBorrowDecimals = map[common.Address]uint{
+	common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"): 6,  // USDC
+	common.HexToAddress("0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"): 6,  // USDT
+	common.HexToAddress("0x80Eede496655FB9047dd39d9f418d5483ED600df"): 18, // frxUSD
+}
 
-var oneE18 = big.NewInt(1_000_000_000_000_000_000)
+// ErrUnsupportedBorrowToken is a TERMINAL capability error, not a transient
+// one: the borrow token is not a configured stable (recon caveat 1 names the
+// genuinely non-stable borrow tokens — liquidUSD, EURC, weEUR, and the two
+// liquidRESERVE contracts), so exact USD reconstruction from events alone is
+// impossible; it needs the emit-time oracle price. The runner must branch on
+// errors.Is and mark the engine UNHEALTHY rather than retry — no replay can
+// succeed until the deriver grows oracle-priced derivation.
+var ErrUnsupportedBorrowToken = errors.New("debt_manager: unsupported borrow token: exact USD reconstruction requires emit-time oracle pricing")
+
+var (
+	oneE18 = big.NewInt(1_000_000_000_000_000_000)
+	oneE12 = big.NewInt(1_000_000_000_000)
+)
+
+// borrowUsd converts a Borrowed token amount into the USD 6-dec figure the
+// contract priced it at, under the stable-snap model documented on
+// dmStableBorrowDecimals. Non-stable borrow tokens wrap
+// ErrUnsupportedBorrowToken (terminal); a non-integral 18-dec conversion is
+// a loud exactness error.
+func borrowUsd(token common.Address, amount *big.Int, l store.RawLog) (*big.Int, error) {
+	decimals, ok := dmStableBorrowDecimals[token]
+	if !ok {
+		return nil, fmt.Errorf("%w: token %s (block %d, tx %x)",
+			ErrUnsupportedBorrowToken, hexAddr(token), l.BlockNumber, l.TxHash)
+	}
+	switch decimals {
+	case 6:
+		return new(big.Int).Set(amount), nil
+	case 18:
+		q, r := new(big.Int).QuoRem(amount, oneE12, new(big.Int))
+		if r.Sign() != 0 {
+			return nil, fmt.Errorf("debt_manager: Borrowed %s of 18-dec stable %s at block %d (tx %x) is not an integral 6-dec USD amount (remainder %s of 1e12) -- the stable-snap conversion must be exact; refusing to round",
+				amount, hexAddr(token), l.BlockNumber, l.TxHash, r)
+		}
+		return q, nil
+	default:
+		return nil, fmt.Errorf("debt_manager: stable borrow token %s configured with unhandled decimals %d -- config bug", hexAddr(token), decimals)
+	}
+}
 
 // Event type taxonomy persisted into position_events.event_type.
 const (
@@ -383,17 +435,16 @@ func (dm *DebtManager) processIndexUpdated(l store.RawLog, ev decode.DMInterestI
 }
 
 func (dm *DebtManager) processBorrowed(l store.RawLog, ev decode.DMBorrowed) ([]store.PositionEvent, error) {
-	if ev.Token != usdcOP {
-		// 100% of historical borrows are USDC (stable-snapped 1:1 to USD).
-		// Anything else cannot be derived from events alone (recon caveat 1).
-		return nil, fmt.Errorf("debt_manager: non-stable borrow token %s requires oracle-priced derivation - not yet supported (block %d, tx %x)",
-			hexAddr(ev.Token), l.BlockNumber, l.TxHash)
+	// Capability gate first: a non-stable borrow token is terminal
+	// (ErrUnsupportedBorrowToken) regardless of index state.
+	usd, err := borrowUsd(ev.Token, ev.Amount, l)
+	if err != nil {
+		return nil, err
 	}
 	idx, err := dm.sameBlockIndex(ev.Token, l.BlockNumber)
 	if err != nil {
 		return nil, err
 	}
-	usd := ev.Amount // USDC is 6-dec and snapped to exactly 1e6: usd == amount.
 	delta := mulDivCeil(usd, oneE18, idx)
 	if err := dm.credit(ev.User, ev.Token, delta); err != nil {
 		return nil, err

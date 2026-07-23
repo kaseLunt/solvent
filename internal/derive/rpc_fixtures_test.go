@@ -587,7 +587,7 @@ func TestGenGoldenFixtures(t *testing.T) {
 	net := replayCheck(t, all, liqVectorSafe, seedAmount)
 	liqIdx := big.NewInt(1_036_365_345_262_130_760)
 	view := new(big.Int).Quo(new(big.Int).Mul(net, liqIdx), big.NewInt(1_000_000_000_000_000_000))
-	t.Logf("liq vector: net normalized after block %d = %s, view = %s (recon: removed 15,289,230; view 15,845,260)",
+	t.Logf("liq vector: net normalized after block %d = %s, view = %s (recon erratum-corrected: removed 15,289,260; view 15,845,260)",
 		liqVectorBlock, net, view)
 	require.Equal(t, "15845260", view.String(), "liq vector view mismatch -- DO NOT COMMIT")
 
@@ -596,7 +596,7 @@ func TestGenGoldenFixtures(t *testing.T) {
 		fls[j] = toFixtureLog(l)
 	}
 	writeFixture(t, "dm_golden_liq_ac5f3ce9.json", goldenFixture{
-		Provenance: fmt.Sprintf("REAL: migrated Safe %s (recon 'Migration finding': zero Borrowed events; debt genesis = MigrationBorrowerPositionsSet batch tx %s @ block %d, seed normalized %s from decoded calldata). History (Repaid topic1 / Liquidated topic2 + same-block InterestIndexUpdated(USDC) joins) fetched over OP blocks %d-%d via eth_getLogs (%s), %s. migrationCalldata carries the batch tx's full raw input for the golden test's fake DMChainReads. Golden expectations (recon 'Debt identity validation', liquidation spot check): the Liquidated at block %d with idx 1036365345262130760 removes normalized 15,289,230 and leaves floor(net*idx/1e18) = 15,845,260. Local normalized replay verified before commit.",
+		Provenance: fmt.Sprintf("REAL: migrated Safe %s (recon 'Migration finding': zero Borrowed events; debt genesis = MigrationBorrowerPositionsSet batch tx %s @ block %d, seed normalized %s from decoded calldata). History (Repaid topic1 / Liquidated topic2 + same-block InterestIndexUpdated(USDC) joins) fetched over OP blocks %d-%d via eth_getLogs (%s), %s. migrationCalldata carries the batch tx's full raw input for the golden test's fake DMChainReads. Golden expectations (recon 'Debt identity validation', liquidation spot check): the Liquidated at block %d with idx 1036365345262130760 removes normalized 15,289,260 and leaves floor(net*idx/1e18) = 15,845,260. Local normalized replay verified before commit.",
 			strings.ToLower(liqVectorSafe.Hex()), migLog.TxHash, migLog.BlockNumber, seedAmount,
 			migLog.BlockNumber, liqVectorBlock, rpcPrimary, fetchedAt, liqVectorBlock),
 		ChainID:  10,
