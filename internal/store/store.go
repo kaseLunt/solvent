@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,8 +23,8 @@ import (
 // Replay semantics: inserts are idempotent on (chain_id, tx_hash, log_index)
 // via ON CONFLICT DO NOTHING. Divergent payloads under the same key are
 // prevented by the reorg protocol (the walker rewinds and deletes above the
-// fork point before re-ingesting), not by this layer; payload
-// verify-on-conflict is planned alongside the batched-insert rework.
+// fork point before re-ingesting), not by this layer; divergent payloads
+// under a replayed identity abort the batch (verify-on-conflict).
 type Store struct {
 	pool *pgxpool.Pool
 	// writerConn pins the session holding the writer advisory lock; nil until
@@ -141,25 +142,50 @@ func (s *Store) SaveBatch(ctx context.Context, stream string, chainID uint64, lo
 	}
 	defer tx.Rollback(ctx)
 
-	for _, l := range logs {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO raw_logs (chain_id, block_number, block_hash, tx_hash, log_index, address, topics, data)
-			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-			 ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING`,
-			l.ChainID, l.BlockNumber, l.BlockHash, l.TxHash, int32(l.LogIndex), l.Address, l.Topics, l.Data)
-		if err != nil {
-			return fmt.Errorf("insert log: %w", err)
+	if _, err := tx.Exec(ctx, `CREATE TEMPORARY TABLE batch_logs
+		(LIKE raw_logs INCLUDING DEFAULTS) ON COMMIT DROP`); err != nil {
+		return fmt.Errorf("temp table: %w", err)
+	}
+	if len(logs) > 0 {
+		rows := make([][]any, len(logs))
+		for i, l := range logs {
+			rows[i] = []any{l.ChainID, l.BlockNumber, l.BlockHash, l.TxHash,
+				int32(l.LogIndex), l.Address, l.Topics, l.Data, time.Now().UTC()}
+		}
+		if _, err := tx.CopyFrom(ctx, pgx.Identifier{"batch_logs"},
+			[]string{"chain_id", "block_number", "block_hash", "tx_hash",
+				"log_index", "address", "topics", "data", "ingested_at"}, pgx.CopyFromRows(rows)); err != nil {
+			return fmt.Errorf("copy batch: %w", err)
+		}
+		var divergent int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM batch_logs b
+			JOIN raw_logs r USING (chain_id, tx_hash, log_index)
+			WHERE r.block_number <> b.block_number OR r.block_hash <> b.block_hash
+			   OR r.address <> b.address OR r.topics <> b.topics OR r.data <> b.data`).Scan(&divergent); err != nil {
+			return fmt.Errorf("verify conflicts: %w", err)
+		}
+		if divergent > 0 {
+			return fmt.Errorf("%d replayed log(s) with divergent payload — refusing batch", divergent)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO raw_logs
+			SELECT * FROM batch_logs ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING`); err != nil {
+			return fmt.Errorf("insert batch: %w", err)
 		}
 	}
 
-	_, err = tx.Exec(ctx,
+	ct, err := tx.Exec(ctx,
 		`INSERT INTO ingest_cursors (stream, chain_id, last_block, last_block_hash, updated_at)
 		 VALUES ($1,$2,$3,$4,now())
 		 ON CONFLICT (stream) DO UPDATE
-		 SET chain_id = EXCLUDED.chain_id, last_block = EXCLUDED.last_block, last_block_hash = EXCLUDED.last_block_hash, updated_at = now()`,
+		 SET chain_id = EXCLUDED.chain_id, last_block = EXCLUDED.last_block,
+		     last_block_hash = EXCLUDED.last_block_hash, updated_at = now()
+		 WHERE ingest_cursors.last_block <= EXCLUDED.last_block`,
 		stream, chainID, tipBlock, tipHash)
 	if err != nil {
 		return fmt.Errorf("upsert cursor: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return fmt.Errorf("cursor regression: stream %q refused move to %d", stream, tipBlock)
 	}
 	return tx.Commit(ctx)
 }

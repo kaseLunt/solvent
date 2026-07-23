@@ -190,3 +190,67 @@ func TestSaveBatchRejectsMismatchedChainID(t *testing.T) {
 	require.NoError(t, cerr)
 	require.Nil(t, cur) // nothing persisted
 }
+
+func TestSaveBatchRejectsDivergentReplayPayload(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	logs := sampleLogs(2, 100)
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, logs, 101, []byte{0x01}))
+
+	mutated := sampleLogs(2, 100)
+	mutated[1].Data = []byte{0xEE} // same identity, different payload
+	err := s.SaveBatch(ctx, "op:test", 10, mutated, 101, []byte{0x01})
+	require.ErrorContains(t, err, "divergent payload")
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM raw_logs WHERE data = '\\xEE'").Scan(&n))
+	require.Equal(t, 0, n) // aborted tx persisted nothing
+}
+
+func TestSaveBatchAcceptsIdenticalReplay(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	logs := sampleLogs(3, 100)
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, logs, 102, []byte{0x02}))
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, logs, 102, []byte{0x02}))
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM raw_logs").Scan(&n))
+	require.Equal(t, 3, n)
+}
+
+func TestSaveBatchRejectsCursorRegression(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, nil, 200, []byte{0x02}))
+	err := s.SaveBatch(ctx, "op:test", 10, nil, 150, []byte{0x01})
+	require.ErrorContains(t, err, "cursor regression")
+
+	cur, cerr := s.Cursor(ctx, "op:test")
+	require.NoError(t, cerr)
+	require.Equal(t, uint64(200), cur.Block)
+}
+
+func TestRewindStillMovesCursorBackward(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, sampleLogs(3, 100), 200, []byte{0x02}))
+	require.NoError(t, s.Rewind(ctx, "op:test", 10, 101, []byte{0x01})) // monotonicity guard must NOT apply here
+	cur, err := s.Cursor(ctx, "op:test")
+	require.NoError(t, err)
+	require.Equal(t, uint64(101), cur.Block)
+}
+
+func TestSaveBatchRollsBackOnMidTxFailure(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	logs := sampleLogs(2, 100)
+	logs[1].Topics = nil // NOT NULL violation on topics → mid-tx failure
+	err := s.SaveBatch(ctx, "op:test", 10, logs, 101, []byte{0x01})
+	require.Error(t, err)
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM raw_logs").Scan(&n))
+	require.Equal(t, 0, n)
+	cur, cerr := s.Cursor(ctx, "op:test")
+	require.NoError(t, cerr)
+	require.Nil(t, cur)
+}

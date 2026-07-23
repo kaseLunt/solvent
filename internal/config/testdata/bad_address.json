@@ -1,0 +1,16 @@
+{
+  "chains": {
+    "op": { "chainId": 10, "rpcEnv": "SOLVENT_RPC_OP" }
+  },
+  "streams": [
+    {
+      "name": "op:test",
+      "chain": "op",
+      "engine": "aave_v3_etherfi",
+      "addresses": ["0xNOTANADDRESS"],
+      "startBlock": 100,
+      "window": 2000,
+      "confirmations": 5
+    }
+  ]
+}

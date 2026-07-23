@@ -65,3 +65,48 @@ func TestLoadFailsOnDuplicateStreamName(t *testing.T) {
 	_, err := Load("testdata/dup_stream.json")
 	require.ErrorContains(t, err, `duplicate stream name "op:test"`)
 }
+
+func TestLoadTrimsWhitespaceInRPCURLs(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", " https://a.example , https://b.example ")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	cfg, err := Load("testdata/contracts.json")
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://a.example", "https://b.example"}, cfg.Chains["op"].RPCURLs)
+}
+
+func TestLoadFailsOnEmptyStreamName(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/empty_name.json")
+	require.ErrorContains(t, err, "name must not be empty")
+}
+
+func TestLoadFailsOnUnknownEngine(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/bad_engine.json")
+	require.ErrorContains(t, err, "unknown engine")
+}
+
+func TestLoadFailsOnInvalidAddress(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/bad_address.json")
+	require.ErrorContains(t, err, "invalid address")
+}
+
+func TestLoadFailsOnZeroWindow(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	_, err := Load("testdata/zero_window.json")
+	require.ErrorContains(t, err, "window and confirmations")
+}
+
+func TestProductionContractsJSONParses(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_RPC_ETH", "https://b.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	cfg, err := Load("../../config/contracts.json")
+	require.NoError(t, err)
+	require.NotEmpty(t, cfg.Streams)
+}

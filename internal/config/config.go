@@ -10,6 +10,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+var KnownEngines = map[string]bool{
+	"debt_manager":    true,
+	"aave_v3_etherfi": true,
+	"chainlink_feed":  true,
+}
+
 type Chain struct {
 	ChainID uint64
 	RPCURLs []string
@@ -81,13 +87,26 @@ func Load(path string) (*Config, error) {
 		if urls == "" {
 			return nil, fmt.Errorf("rpc env %s (chain %q) is not set", fc.RPCEnv, name)
 		}
-		cfg.Chains[name] = Chain{ChainID: fc.ChainID, RPCURLs: strings.Split(urls, ",")}
+		var trimmedURLs []string
+		for _, url := range strings.Split(urls, ",") {
+			url = strings.TrimSpace(url)
+			if url != "" {
+				trimmedURLs = append(trimmedURLs, url)
+			}
+		}
+		if len(trimmedURLs) == 0 {
+			return nil, fmt.Errorf("rpc env %s (chain %q) contains no urls", fc.RPCEnv, name)
+		}
+		cfg.Chains[name] = Chain{ChainID: fc.ChainID, RPCURLs: trimmedURLs}
 	}
 
 	seenStreams := make(map[string]struct{}, len(root.Streams))
 	for _, fs := range root.Streams {
 		if fs.Name == "" {
 			return nil, fmt.Errorf("stream name must not be empty")
+		}
+		if !KnownEngines[fs.Engine] {
+			return nil, fmt.Errorf("stream %q: unknown engine %q", fs.Name, fs.Engine)
 		}
 		// The cursor table is keyed by stream name: two streams sharing a
 		// name would silently clobber each other's cursor.
