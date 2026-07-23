@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,11 +31,15 @@ func sampleLogs(n int, fromBlock uint64) []RawLog {
 			ChainID:     10,
 			BlockNumber: fromBlock + uint64(i),
 			BlockHash:   []byte{0xbb, byte(i)},
-			TxHash:      []byte{0x77, byte(i)},
-			LogIndex:    0,
-			Address:     []byte{0xaa},
-			Topics:      [][]byte{{0x01}},
-			Data:        []byte{0x02},
+			// TxHash encodes fromBlock so batches at different heights never
+			// collide on (chain_id, tx_hash, log_index) identity; repeated
+			// calls with the same fromBlock (replay tests) still produce
+			// byte-identical hashes.
+			TxHash:   []byte{0x77, byte(fromBlock >> 8), byte(fromBlock), byte(i)},
+			LogIndex: 0,
+			Address:  []byte{0xaa},
+			Topics:   [][]byte{{0x01}},
+			Data:     []byte{0x02},
 		}
 	}
 	return logs
@@ -253,4 +258,57 @@ func TestSaveBatchRollsBackOnMidTxFailure(t *testing.T) {
 	cur, cerr := s.Cursor(ctx, "op:test")
 	require.NoError(t, cerr)
 	require.Nil(t, cur)
+}
+
+func TestSaveBatchRejectsSameHeightDifferentHashCursor(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	require.NoError(t, s.SaveBatch(ctx, "op:test", 10, nil, 200, []byte{0xAA}))
+	err := s.SaveBatch(ctx, "op:test", 10, nil, 200, []byte{0xBB}) // same height, different hash
+	require.ErrorContains(t, err, "cursor regression")
+	cur, cerr := s.Cursor(ctx, "op:test")
+	require.NoError(t, cerr)
+	require.Equal(t, []byte{0xAA}, cur.Hash) // original anchor survives
+}
+
+func TestSaveBatchRejectsDivergentDuplicateWithinBatch(t *testing.T) {
+	s := testStore(t)
+	logs := sampleLogs(2, 100)
+	logs[1] = logs[0]
+	logs[1].Data = []byte{0xEE} // same identity, different payload, fresh identity in db
+	err := s.SaveBatch(context.Background(), "op:test", 10, logs, 101, []byte{0x01})
+	require.ErrorContains(t, err, "divergent duplicate log in batch")
+	var n int
+	require.NoError(t, s.pool.QueryRow(context.Background(), "SELECT count(*) FROM raw_logs").Scan(&n))
+	require.Equal(t, 0, n)
+}
+
+func TestSaveBatchCoalescesIdenticalDuplicateWithinBatch(t *testing.T) {
+	s := testStore(t)
+	logs := sampleLogs(2, 100)
+	logs[1] = logs[0] // byte-identical duplicate
+	require.NoError(t, s.SaveBatch(context.Background(), "op:test", 10, logs, 101, []byte{0x01}))
+	var n int
+	require.NoError(t, s.pool.QueryRow(context.Background(), "SELECT count(*) FROM raw_logs").Scan(&n))
+	require.Equal(t, 1, n)
+}
+
+func TestSaveBatchTempTableReuseOnSingleConnection(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set")
+	}
+	require.NoError(t, Migrate(context.Background(), dsn))
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	s, err := Open(context.Background(), dsn+sep+"pool_max_conns=1")
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	_, err = s.pool.Exec(context.Background(), "TRUNCATE raw_logs, ingest_cursors")
+	require.NoError(t, err)
+	// two sequential batches MUST hit the same backend session; ON COMMIT DROP must clean up
+	require.NoError(t, s.SaveBatch(context.Background(), "op:test", 10, sampleLogs(2, 100), 101, []byte{0x01}))
+	require.NoError(t, s.SaveBatch(context.Background(), "op:test", 10, sampleLogs(2, 200), 201, []byte{0x02}))
 }
