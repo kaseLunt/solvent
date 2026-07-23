@@ -163,7 +163,11 @@ func run(ctx context.Context, configPath string) error {
 	registry := decode.NewRegistry()
 
 	// Snapshotter first: the debt_manager runner's post-rewind hook targets
-	// it (a rewind may change the Safe registry, so it re-sweeps).
+	// it (a rewind may change the Safe registry, so it re-sweeps). The hook
+	// is only the LIVE fast path — sweeps run on durable generations
+	// (sweep_generations/snapshot_sweeps), RewindDerived bumps the generation
+	// in its own transaction, and a restarted process resumes the open
+	// generation's lagging set on its first Step.
 	var snap *snapshot.Snapshotter
 	for _, spec := range specs {
 		if spec.Engine != "debt_manager" {
@@ -286,7 +290,8 @@ func run(ctx context.Context, configPath string) error {
 			}
 
 			// Snapshot pass: at most one multicall batch per round; a due
-			// sweep keeps the loop hot until it completes.
+			// sweep keeps the loop hot until its generation completes. The
+			// queue is durable — an error leaves it untouched for retry.
 			if snap != nil {
 				advanced, err := snap.Step(ctx)
 				if err != nil {

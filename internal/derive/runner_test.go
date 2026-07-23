@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"testing"
 
@@ -791,6 +792,105 @@ func TestRunnerSnapshotFailureAdvancesAndRetains(t *testing.T) {
 	require.Equal(t, []string{"SaveSnapshots(1@100)"}, filterCalls(h.log.since(mark), "SaveSnapshots"))
 	require.Len(t, h.st.snapDocs, 1)
 }
+
+// TestRunnerSnapshotCarryOverBoundedFIFO is the sustained-arrival injection
+// for the bounded snapshot FIFO: continuous new touches across windows must
+// (1) never grow the queue past its hard cap — overflow drops the NEWEST
+// touches with a WARN and counts them, (2) drain OLDEST-FIRST across
+// windows, and (3) dedupe a re-touched account onto its ORIGINAL position
+// instead of letting it jump (or re-enter) the line.
+func TestRunnerSnapshotCarryOverBoundedFIFO(t *testing.T) {
+	warnings := captureWarnings(t)
+	h := newRunnerHarness(t, testRunnerSpec())
+	h.r.snapCap = 1
+	h.r.pendingMax = 3
+
+	accountByKey := map[string]byte{
+		"100/0": 0xAA, "100/1": 0xBC, "100/2": 0xCD, // window 1: fills the FIFO to cap
+		"101/0": 0xCD, // window 2: re-touch (must keep its original position)
+		"101/1": 0xDE, // fits after window 1's flush freed a slot
+		"101/2": 0xEF, // overflows: dropped-newest
+	}
+	h.eng.processFn = func(l store.RawLog, _ decode.Event) ([]store.PositionEvent, error) {
+		b := accountByKey[fmt.Sprintf("%d/%d", l.BlockNumber, l.LogIndex)]
+		return []store.PositionEvent{{
+			ChainID: l.ChainID, Engine: "debt_manager", BlockNumber: l.BlockNumber,
+			TxHash: l.TxHash, LogIndex: l.LogIndex, EventType: "test",
+			Account: []byte{b}, Asset: []byte{0xBB}, Side: "debt", Delta: big.NewInt(1),
+		}}, nil
+	}
+	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	h.st.logs = []store.RawLog{rlog(100, 0), rlog(100, 1), rlog(100, 2)}
+	for _, k := range []string{"100/0", "100/1", "100/2"} {
+		h.dec.events[k] = stubEvent{name: k}
+	}
+
+	// Window 1: aa, bc, cd queued (exactly at cap — nothing dropped), the
+	// OLDEST (aa) flushes.
+	_, err := h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"SaveSnapshots(1@100)"}, filterCalls(h.log.calls, "SaveSnapshots"))
+	require.Contains(t, h.st.snapDocs[0], "aa", "the oldest entry flushes first")
+	require.Len(t, h.r.pendingOrder, 2)
+	require.Zero(t, h.r.droppedSnapshots)
+	require.Empty(t, *warnings)
+
+	// Window 2 arrives while bc, cd still pend: cd re-touches (dedupe, keeps
+	// its position), de fits, ef overflows and is DROPPED with a WARN. The
+	// flush again takes the oldest: bc.
+	h.st.ingest["s1"] = &store.CursorPos{Block: 101}
+	h.st.logs = append(h.st.logs, rlog(101, 0), rlog(101, 1), rlog(101, 2))
+	for _, k := range []string{"101/0", "101/1", "101/2"} {
+		h.dec.events[k] = stubEvent{name: k}
+	}
+	mark := len(h.log.calls)
+	_, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []string{"SaveSnapshots(1@101)"}, filterCalls(h.log.since(mark), "SaveSnapshots"))
+	require.Contains(t, h.st.snapDocs[1], "bc", "oldest-first across windows — later arrivals cannot starve it")
+	require.LessOrEqual(t, len(h.r.pendingOrder), h.r.pendingMax, "the hard cap bounds memory under sustained arrivals")
+	require.Equal(t, uint64(1), h.r.droppedSnapshots, "the overflowing newest touch is dropped, not queued")
+	require.NotEmpty(t, *warnings, "the drop must be surfaced as a WARN")
+
+	// Caught-up drain: cd flushes BEFORE de — its re-touch kept the original
+	// position — then de; ef never appears (it was dropped).
+	for i, want := range []string{"cd", "de"} {
+		mark = len(h.log.calls)
+		advanced, err := h.r.Step(context.Background())
+		require.NoError(t, err)
+		require.True(t, advanced)
+		require.Contains(t, h.st.snapDocs[2+i], want)
+		require.Len(t, h.st.snapDocs[2+i], 1)
+	}
+	mark = len(h.log.calls)
+	advanced, err := h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced, "the dropped account owes nothing — it regains history on its next touch")
+	require.Empty(t, filterCalls(h.log.since(mark), "SaveSnapshots"))
+}
+
+// captureWarnings routes slog through a collector for the duration of the
+// test, returning the collected Warn+ messages.
+func captureWarnings(t *testing.T) *[]string {
+	t.Helper()
+	var msgs []string
+	prev := slog.Default()
+	slog.SetDefault(slog.New(warnCollector{msgs: &msgs}))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &msgs
+}
+
+type warnCollector struct{ msgs *[]string }
+
+func (w warnCollector) Enabled(context.Context, slog.Level) bool { return true }
+func (w warnCollector) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelWarn {
+		*w.msgs = append(*w.msgs, r.Message)
+	}
+	return nil
+}
+func (w warnCollector) WithAttrs([]slog.Attr) slog.Handler { return w }
+func (w warnCollector) WithGroup(string) slog.Handler      { return w }
 
 func filterCalls(calls []string, prefix string) []string {
 	var out []string

@@ -30,13 +30,13 @@ package derive
 //     Reset → cursor re-read BEFORE any further apply; the store's
 //     ErrUnackedReorgEpoch refusal is handled identically as the reactive
 //     backstop. RewindDerived deletes the engine's rate observations above
-//     the effective target INSIDE its own transaction (divergence hygiene is
-//     atomic with the ack — a crash cannot separate them). Every completed
-//     rewind fires the onRewind hook (the snapshotter's re-sweep trigger);
-//     that hook is process-memory only, and its DURABLE backstop is the
-//     snapshotter's unconditional startup sweep — a process restarted after
-//     a crash between RewindDerived and the hook re-covers the registry on
-//     its first sweep, so nothing is lost.
+//     the effective target, invalidates reorg-orphaned snapshot rows, and
+//     BUMPS the snapshotter's durable sweep generation — all INSIDE its own
+//     transaction, atomic with the ack (a crash cannot separate them).
+//     Every completed rewind fires the onRewind hook (the snapshotter's
+//     re-sweep trigger); that hook is only the LIVE fast path — the durable
+//     backstop is the generation bump itself, which a restarted snapshotter
+//     finds OPEN and resumes on its first Step, so nothing is lost.
 //   - TERMINAL CAPABILITY ERRORS: ErrUnsupportedBorrowToken marks the engine
 //     UNHEALTHY — no retry can succeed until the deriver grows oracle-priced
 //     derivation — and gates DERIVATION ONLY: reorg repair (ack + rewind)
@@ -51,17 +51,22 @@ package derive
 //     every rate value its events carried, or not at all — no crash window
 //     between rate persistence and the batch commit exists anymore.
 //   - SNAPSHOTS (best-effort history): after a committed batch, the batch's
-//     DEBT-side-touched accounts join an in-memory pending set, and each
-//     Step flushes up to snapshotBatchCap of them as ONE bulk side-scoped
-//     store.SaveSnapshots write (documents carry "side":"debt" — only the
-//     event-derived debt side is truly as-of the through-block; collateral
-//     is observed by the snapshotter at its own multicall block, and
-//     cross-side composition is a READ-TIME concern). The remainder carries
-//     over to following Steps (including caught-up Steps, which flush
-//     against the cursor block). Semantics are BEST-EFFORT by design:
-//     position_balances is the authoritative truth and never depends on
-//     these rows; a failed flush keeps the accounts pending and retries; a
-//     process crash drops only the pending set's unwritten history rows.
+//     DEBT-side-touched accounts join an in-memory BOUNDED FIFO
+//     (insertion-ordered; re-touches dedupe onto their ORIGINAL position),
+//     and each Step flushes up to snapshotBatchCap of the OLDEST entries as
+//     ONE bulk side-scoped store.SaveSnapshots write (documents carry
+//     "side":"debt" — only the event-derived debt side is truly as-of the
+//     through-block; collateral is observed by the snapshotter at its own
+//     multicall block, and cross-side composition is a READ-TIME concern).
+//     The remainder carries over to following Steps (including caught-up
+//     Steps, which flush against the cursor block). The FIFO is hard-capped
+//     at pendingCap: under sustained overload the NEWEST touches are dropped
+//     with a WARN — the documented overload posture, chosen over unbounded
+//     memory because these rows are history convenience, never truth.
+//     Semantics are BEST-EFFORT by design: position_balances is the
+//     authoritative truth and never depends on these rows; a failed flush
+//     keeps the accounts pending and retries; a process crash drops only the
+//     pending FIFO's unwritten history rows.
 
 import (
 	"context"
@@ -70,7 +75,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
-	"sort"
 
 	"github.com/kaselunt/solvent/internal/config"
 	"github.com/kaselunt/solvent/internal/decode"
@@ -94,6 +98,14 @@ const (
 // DM migration window's ~7.3k seeded accounts) to ~4 bounded rounds instead
 // of one unbounded per-account statement storm.
 const snapshotBatchCap = 2000
+
+// pendingCap hard-bounds the snapshot carry-over FIFO. 10,000 comfortably
+// covers the biggest known fan-out (~7.3k DM migration seeds) while capping
+// memory under sustained arrival storms; overflow drops the NEWEST touches
+// with a WARN (best-effort history sheds load — position_balances truth is
+// unaffected, and a dropped account regains a history row on its next
+// balance-touching event).
+const pendingCap = 10000
 
 // RunnerStore is the store surface the runner drives. *store.Store satisfies
 // it as-is (compile-checked below); tests pass fakes.
@@ -194,18 +206,27 @@ type Runner struct {
 	spec   RunnerSpec
 	// onRewind fires after every completed derived-state rewind (the
 	// snapshotter's re-sweep trigger); may be nil. Process-memory only — the
-	// durable crash backstop is the snapshotter's startup sweep (see the
-	// package comment's REORG COORDINATION bullet).
+	// durable crash backstop is RewindDerived's own in-transaction sweep-
+	// generation bump (see the package comment's REORG COORDINATION bullet).
 	onRewind func()
 	// unhealthy is set once and never cleared in-process (terminal capability
 	// error — ErrUnsupportedBorrowToken); it gates DERIVATION only, never
 	// reorg repair. Recovery = restart after a capability upgrade.
 	unhealthy error
-	// pending is the carry-over set of debt-side-touched accounts awaiting a
-	// best-effort snapshots-history write, keyed by raw account bytes.
-	pending map[string][]byte
-	// snapCap bounds one flush (snapshotBatchCap; overridable in tests).
-	snapCap int
+	// The carry-over queue of debt-side-touched accounts awaiting a
+	// best-effort snapshots-history write: an insertion-ordered bounded FIFO.
+	// pendingOrder holds arrival order (oldest first — the drain order);
+	// pendingSet is the membership index (keyed by raw account bytes), so a
+	// re-touch dedupes onto its ORIGINAL position instead of jumping the line.
+	pendingOrder [][]byte
+	pendingSet   map[string]bool
+	// snapCap bounds one flush (snapshotBatchCap; overridable in tests);
+	// pendingMax hard-caps the FIFO (pendingCap; overridable in tests).
+	snapCap    int
+	pendingMax int
+	// droppedSnapshots counts accounts shed by FIFO overflow (drop-newest),
+	// for tests and observability alongside the WARN.
+	droppedSnapshots uint64
 }
 
 // NewRunner builds a Runner for spec. engine.Name() must match spec.Engine —
@@ -222,7 +243,7 @@ func NewRunner(st RunnerStore, dec Decoder, engine Engine, spec RunnerSpec, onRe
 	}
 	return &Runner{
 		store: st, dec: dec, engine: engine, spec: spec, onRewind: onRewind,
-		pending: map[string][]byte{}, snapCap: snapshotBatchCap,
+		pendingSet: map[string]bool{}, snapCap: snapshotBatchCap, pendingMax: pendingCap,
 	}, nil
 }
 
@@ -399,11 +420,13 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 // unacknowledged rewound_to — passing the cursor never leaves stale derived
 // state, because nothing exists above it), then Reset, then resume FROM THE
 // CURSOR READ BACK — never the requested target. Rate hygiene (deleting the
-// engine's observations above the effective target) happens INSIDE
+// engine's observations above the effective target), orphaned-snapshot
+// invalidation and the durable sweep-generation bump all happen INSIDE
 // RewindDerived's transaction, atomic with the ack. The onRewind hook (the
 // snapshotter's re-sweep trigger) fires last; it is process-memory only, and
-// a crash before it loses nothing durable — the snapshotter's unconditional
-// startup sweep is the crash-safe re-sweep leg.
+// a crash before it loses nothing durable — the generation bump already
+// opened the re-sweep, and a restarted snapshotter resumes it on its first
+// Step.
 func (r *Runner) rewind(ctx context.Context) error {
 	cursor, found, err := r.store.DeriveCursor(ctx, r.spec.Engine)
 	if err != nil {
@@ -457,44 +480,60 @@ func (r *Runner) ingestFrontier(ctx context.Context) (uint64, bool, error) {
 	return frontier, true, nil
 }
 
-// queueTouched adds the batch's DEBT-side balance-touched accounts to the
-// pending snapshot set. Debt-side only (honest as-of semantics): the debt
+// queueTouched appends the batch's DEBT-side balance-touched accounts to the
+// pending snapshot FIFO. Debt-side only (honest as-of semantics): the debt
 // side is event-derived and therefore truly as-of the derive block, while
 // collateral is the snapshotter's multicall read at its OWN block — a
 // history row must never combine sides observed at different blocks, and
-// cross-side composition is a read-time concern.
+// cross-side composition is a read-time concern. A re-touched account keeps
+// its ORIGINAL queue position (its eventual flush reads current balances, so
+// arrival order only governs fairness, not correctness). At the hard cap the
+// NEWEST touches are dropped with one WARN per batch — the documented
+// overload posture (see the package comment's SNAPSHOTS bullet).
 func (r *Runner) queueTouched(events []store.PositionEvent) {
+	dropped := 0
 	for _, ev := range events {
 		if ev.Side != sideDebt || ev.Delta == nil {
 			continue
 		}
-		r.pending[string(ev.Account)] = ev.Account
+		key := string(ev.Account)
+		if r.pendingSet[key] {
+			continue // already queued: keep the original (older) position
+		}
+		if len(r.pendingOrder) >= r.pendingMax {
+			dropped++
+			continue // drop-newest: the queue keeps its oldest obligations
+		}
+		r.pendingSet[key] = true
+		r.pendingOrder = append(r.pendingOrder, ev.Account)
+	}
+	if dropped > 0 {
+		r.droppedSnapshots += uint64(dropped)
+		slog.Warn("snapshot carry-over queue overflowed; dropping newest touched accounts (best-effort history sheds load; position_balances truth unaffected)",
+			"engine", r.spec.Engine, "dropped", dropped, "cap", r.pendingMax)
 	}
 }
 
-// flushSnapshots writes up to snapCap pending accounts' side-scoped debt
-// documents as ONE bulk SaveSnapshots write at block, removing only the
-// accounts that were actually written from the pending set (a failure keeps
-// everything pending for retry — best-effort, but never silently lossy while
-// the process lives). Accounts are flushed in bytewise order for
-// deterministic batches; carried-over accounts are stamped at the block of
-// the round that flushes them, which their event-derived debt balances are
-// exactly as-of.
+// flushSnapshots writes up to snapCap of the OLDEST pending accounts'
+// side-scoped debt documents as ONE bulk SaveSnapshots write at block,
+// removing only the accounts that were actually written from the FIFO (a
+// failure keeps everything pending, in order, for retry — best-effort, but
+// never silently lossy while the process lives). Draining oldest-first is
+// the FIFO's fairness guarantee: an account touched during a fan-out storm
+// cannot be starved by later arrivals. Carried-over accounts are stamped at
+// the block of the round that flushes them, which their event-derived debt
+// balances are exactly as-of.
 func (r *Runner) flushSnapshots(ctx context.Context, block uint64) (bool, error) {
-	if len(r.pending) == 0 {
+	if len(r.pendingOrder) == 0 {
 		return false, nil
 	}
-	keys := make([]string, 0, len(r.pending))
-	for k := range r.pending {
-		keys = append(keys, k)
+	n := len(r.pendingOrder)
+	if n > r.snapCap {
+		n = r.snapCap
 	}
-	sort.Strings(keys)
-	if len(keys) > r.snapCap {
-		keys = keys[:r.snapCap]
-	}
-	docs := make(map[string]store.SnapshotDoc, len(keys))
-	for _, k := range keys {
-		account := r.pending[k]
+	batch := r.pendingOrder[:n]
+	docs := make(map[string]store.SnapshotDoc, n)
+	for _, account := range batch {
 		bals, err := r.store.BalancesFor(ctx, r.spec.Engine, account)
 		if err != nil {
 			return false, fmt.Errorf("read balances for %x: %w", account, err)
@@ -510,9 +549,12 @@ func (r *Runner) flushSnapshots(ctx context.Context, block uint64) (bool, error)
 	if err := r.store.SaveSnapshots(ctx, r.spec.Engine, block, docs); err != nil {
 		return false, err
 	}
-	for _, k := range keys {
-		delete(r.pending, k)
+	for _, account := range batch {
+		delete(r.pendingSet, string(account))
 	}
+	// Fresh backing array for the remainder: the flushed prefix must not stay
+	// reachable through the old array.
+	r.pendingOrder = append(make([][]byte, 0, len(r.pendingOrder)-n), r.pendingOrder[n:]...)
 	return true, nil
 }
 

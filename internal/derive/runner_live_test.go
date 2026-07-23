@@ -11,9 +11,12 @@ package derive
 // the deletion was a separate post-rewind call, and this exact crash wedged
 // derivation forever on the divergence refusal.
 //
-// The snapshot re-sweep half of the crash window needs no durable marker:
-// a restarted process always performs a full startup sweep (pinned in
-// internal/snapshot's TestStartupSweepCoversRewindCrash).
+// The snapshot re-sweep half of the crash window is durable by construction:
+// RewindDerived bumps the sweep generation inside this same transaction, and
+// a restarted snapshotter resumes the open generation (pinned in
+// internal/snapshot's TestDurableBumpResumesAfterRewindCrash and
+// TestRestartLoopConvergence, and store-side by
+// TestRewindDerivedInvalidatesOrphanedSnapshots).
 //
 // Shares the schema-isolated live harness with lifecycle_live_test.go and
 // the fakes (engine/decoder) with runner_test.go — the store here is REAL.
