@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kaselunt/solvent/internal/chain"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
@@ -56,20 +57,24 @@ type fakeChain struct {
 	endpointCount int
 }
 
-func (c *fakeChain) Call(_ context.Context, to common.Address, data []byte) ([]byte, error) {
+func (c *fakeChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
 	c.calls = append(c.calls, capturedCall{to: to, data: data})
-	return c.respond(to, data)
+	out, err := c.respond(to, data)
+	return out, chain.EndpointToken{Index: 0}, err
 }
 
-func (c *fakeChain) RotateActive() { c.rotateCalls++ }
+func (c *fakeChain) RotateAwayFrom(chain.EndpointToken) { c.rotateCalls++ }
 
 func (c *fakeChain) EndpointCount() int { return c.endpointCount }
 
 // fakeMultiEndpointChain models chain.Failover's semantic-rotation contract
-// for the production-style regression below: Call always serves from the
-// sticky active responder (exactly like Failover.do, which never rotates on
-// its own for a call that succeeds), and RotateActive is the ONLY thing that
-// advances it — proving Step, not the fake, drives the endpoint switch.
+// for the production-style regressions below: CallWithToken always serves
+// from the sticky active responder (exactly like Failover.do, which never
+// rotates on its own for a call that succeeds) and stamps its token with
+// that responder's index, and RotateAwayFrom is the ONLY thing that advances
+// active — endpoint-bound, exactly like the real Failover: only when the
+// rejected token still names the active responder — proving Step, not the
+// fake, drives the endpoint switch.
 type fakeMultiEndpointChain struct {
 	responders []func(common.Address, []byte) ([]byte, error)
 	active     int
@@ -78,14 +83,17 @@ type fakeMultiEndpointChain struct {
 	rotateCalls int
 }
 
-func (c *fakeMultiEndpointChain) Call(_ context.Context, to common.Address, data []byte) ([]byte, error) {
+func (c *fakeMultiEndpointChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
 	c.calls = append(c.calls, capturedCall{to: to, data: data})
-	return c.responders[c.active](to, data)
+	out, err := c.responders[c.active](to, data)
+	return out, chain.EndpointToken{Index: c.active}, err
 }
 
-func (c *fakeMultiEndpointChain) RotateActive() {
+func (c *fakeMultiEndpointChain) RotateAwayFrom(tok chain.EndpointToken) {
 	c.rotateCalls++
-	c.active = (c.active + 1) % len(c.responders)
+	if tok.Index == c.active {
+		c.active = (c.active + 1) % len(c.responders)
+	}
 }
 
 func (c *fakeMultiEndpointChain) EndpointCount() int { return len(c.responders) }
@@ -942,8 +950,8 @@ func TestStaleSweepBatchIsDegradedRoundNotError(t *testing.T) {
 // re-serving it forever), endpoint B is caught up at 201. The first sweep is
 // rejected (stale) and the rotation is logged; the SAME durable batch retries
 // on the second sweep, but this time the multicall actually lands on B — not
-// forced by the test, but because Step called RotateActive — and the
-// generation is stamped for real.
+// forced by the test, but because Step rejected endpoint A by its token
+// (RotateAwayFrom) — and the generation is stamped for real.
 func TestStaleSweepBatchRotatesToHealthyEndpoint(t *testing.T) {
 	warnings := captureWarnings(t)
 	registry := [][]byte{acct(1)}
@@ -1030,4 +1038,103 @@ func TestAllEndpointsStaleLogsDegradedAfterFullCycle(t *testing.T) {
 		}
 	}
 	require.True(t, allStale, "cycling through every endpoint without progress must log the all-stale DEGRADED warning, got %v", *warnings)
+}
+
+// countAllStale tallies "all endpoints stale" DEGRADED warnings collected so
+// far — the streak-reset regressions below assert both its absence across
+// progress transitions and its eventual firing on a genuine fresh cycle.
+func countAllStale(warnings *[]string) int {
+	n := 0
+	for _, m := range *warnings {
+		if strings.Contains(m, "all endpoints stale") {
+			n++
+		}
+	}
+	return n
+}
+
+// staleRound drives one Step that the store refuses wholesale as stale,
+// asserting the degraded-round posture (no error, no progress).
+func staleRound(t *testing.T, s *Snapshotter, st *fakeSnapStore) {
+	t.Helper()
+	st.applyErr = fmt.Errorf("apply sweep batch: %w", store.ErrStaleSweepBatch)
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+}
+
+// TestStaleStreakResetsOnGenerationBump pins the streak-reset regression: a
+// stale round's streak must NOT carry across a generation transition. Two
+// endpoints, both frozen. Round 1 (gen 1) is stale — streak 1. A rewind's
+// durable bump supersedes the generation. Round 2 (gen 2) is stale again —
+// without the reset this would be streak 2 == endpoint count and the
+// "all endpoints stale" DEGRADED warning would fire ACROSS the generation
+// boundary; the observed generation change restarts the streak instead.
+// Only a genuine full endpoint cycle of consecutive stale rounds with no
+// intervening progress (rounds 2+3, both gen 2) fires it.
+func TestStaleStreakResetsOnGenerationBump(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil) // both endpoints equally frozen
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	staleRound(t, s, st) // gen 1: streak 1 of 2
+	require.Zero(t, countAllStale(warnings))
+
+	// The rewind's in-transaction bump supersedes gen 1 mid-streak.
+	st.bumpGeneration()
+
+	staleRound(t, s, st) // gen 2: the transition restarted the streak → 1, not 2
+	require.Zero(t, countAllStale(warnings),
+		"a generation transition is progress: the stale streak must not span it")
+
+	staleRound(t, s, st) // gen 2 again: streak 2 == endpoints — a FRESH full cycle
+	require.Equal(t, 1, countAllStale(warnings),
+		"a genuine full stale cycle within one generation must still fire")
+}
+
+// TestStaleStreakResetsOnGenerationCompletion pins the completion-transition
+// reset: stamping a generation complete is progress, so a stale streak
+// accumulated before it must not leak into later rounds. A stale round in
+// gen 1 (streak 1 of 2); the lone lagging account then leaves the registry,
+// so the next Step finds no work and completes gen 1 — the streak resets
+// (asserted white-box: completion is reachable only with an empty batch, so
+// no later stale round can share its generation). The next generation's
+// first stale round therefore starts a fresh streak, and only its own full
+// cycle fires the DEGRADED warning.
+func TestStaleStreakResetsOnGenerationCompletion(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil) // both endpoints equally frozen
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	staleRound(t, s, st) // gen 1: streak 1 of 2
+	require.Equal(t, 1, s.staleRotations)
+
+	// The lagging account drops out of the registry (e.g. a registry-shrinking
+	// correction): the next round finds an empty batch and completes gen 1.
+	st.registry = nil
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "completing the generation is work")
+	require.False(t, st.open)
+	require.Zero(t, s.staleRotations, "completion stamping must restart the stale streak")
+
+	// Cadence elapses; the registry returns; gen 2 opens and its rounds are
+	// stale in turn. Only gen 2's OWN full cycle fires the warning.
+	clock = clock.Add(2 * time.Hour)
+	st.registry = registry
+	staleRound(t, s, st) // gen 2: streak 1
+	require.Zero(t, countAllStale(warnings),
+		"the pre-completion stale round must not count toward the new generation's cycle")
+	staleRound(t, s, st) // gen 2: streak 2 == endpoints
+	require.Equal(t, 1, countAllStale(warnings))
 }

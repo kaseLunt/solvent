@@ -38,13 +38,18 @@
 // store.ErrStaleSweepBatch, logged here as a DEGRADED round rather than
 // treated as applied. A RESPONSIVE endpoint frozen on old chain state passes
 // do's error-driven rotation every time (the eth_call succeeds), so Step also
-// calls RotateActive on this path: the next Step's multicall starts from a
-// different endpoint instead of re-serving the identical stale batch forever.
-// Step tracks consecutive stale-rotations and, once it has cycled through
-// every configured endpoint without landing a batch, logs an explicit
-// "all endpoints stale" DEGRADED warning — the existing DEGRADED posture
-// still stands (nothing wedges), but the operator learns rotation alone
-// cannot save this round. An individual collateralOf revert
+// calls RotateAwayFrom on this path, handing back the endpoint token the
+// multicall returned: the rejection is bound to EXACTLY the endpoint that
+// served the stale batch (not whatever endpoint is active by then), and the
+// next Step's multicall starts from a different endpoint instead of
+// re-serving the identical stale batch forever. Step tracks consecutive
+// stale rounds since the last progress transition — a landed batch, a
+// completed generation, or any observed generation change (rewind/re-sweep
+// bumps included) — and only once a FRESH streak has cycled through every
+// configured endpoint without progress logs an explicit "all endpoints
+// stale" DEGRADED warning — the existing DEGRADED posture still stands
+// (nothing wedges), but the operator learns rotation alone cannot save this
+// round. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -117,17 +122,24 @@ type Store interface {
 var _ Store = (*store.Store)(nil)
 
 // Chain is the snapshotter's chain surface (*chain.Failover satisfies it).
-// RotateActive and EndpointCount back the semantic-staleness rotation escape
-// hatch: a batch response that is well-formed at the RPC layer but stale per
-// the store's monotonic guard is invisible to the failover client's own
-// error-driven rotation (the eth_call succeeded), so Step rotates explicitly
-// and bounds how many times it does so against how many endpoints exist.
+// CallWithToken, RotateAwayFrom and EndpointCount back the semantic-staleness
+// rotation escape hatch: a batch response that is well-formed at the RPC
+// layer but stale per the store's monotonic guard is invisible to the
+// failover client's own error-driven rotation (the eth_call succeeded), so
+// Step rejects it explicitly — bound by token to the exact endpoint that
+// served it — and bounds how many times it does so against how many
+// endpoints exist.
 type Chain interface {
-	Call(ctx context.Context, to common.Address, data []byte) ([]byte, error)
-	// RotateActive advances the failover client's sticky active endpoint by
-	// one, for a call that succeeded at the RPC layer but was semantically
-	// unusable (e.g. an endpoint serving stale chain state).
-	RotateActive()
+	// CallWithToken executes a read-only eth_call under failover rotation
+	// and returns, alongside the result, a token naming the endpoint that
+	// served it.
+	CallWithToken(ctx context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
+	// RotateAwayFrom advances the failover client's sticky active endpoint
+	// past the token's endpoint, for a call that succeeded at the RPC layer
+	// but was semantically unusable (e.g. an endpoint serving stale chain
+	// state). The rotation is endpoint-bound: if an interleaved success
+	// already moved active elsewhere, active is left alone.
+	RotateAwayFrom(tok chain.EndpointToken)
 	// EndpointCount reports how many RPC endpoints the failover client
 	// rotates across, bounding the "cycled through every endpoint without
 	// progress" check after repeated stale-sweep rotations.
@@ -220,11 +232,21 @@ type Snapshotter struct {
 	// transaction, and Step reads that state every round.
 	resweep bool
 
-	// staleRotations counts consecutive ErrStaleSweepBatch rounds since the
-	// last landed batch — the "how many endpoints have we cycled through
-	// without progress" measure feeding the all-endpoints-stale DEGRADED
-	// log. Reset to zero whenever a batch actually applies.
+	// staleRotations counts consecutive ErrStaleSweepBatch rounds with NO
+	// intervening progress — the "how many endpoints have we cycled through
+	// without landing anything" measure feeding the all-endpoints-stale
+	// DEGRADED log. It resets on EVERY progress transition: a batch actually
+	// applying, a generation completing (stamped or superseded), and any
+	// observed generation change (rewind/re-sweep bumps, cadence opens —
+	// tracked via lastSeenGeneration). The DEGRADED warning therefore
+	// requires a FRESH full endpoint cycle of consecutive stale rounds; a
+	// stale round in an older generation never counts toward it.
 	staleRotations int
+
+	// lastSeenGeneration is the generation the previous working Step ran
+	// against; an observed change is queue-level progress and restarts the
+	// stale streak above.
+	lastSeenGeneration uint64
 }
 
 // New builds a Snapshotter. Engine, target and a positive interval are
@@ -289,6 +311,16 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 	// RewindDerived's own durable bump) IS the immediate sweep.
 	s.resweep = false
 
+	// Any observed generation transition — a cadence open above, a rewind's
+	// durable bump, a superseding re-sweep — is queue-level progress: the
+	// stale streak measures consecutive stale rounds with NO intervening
+	// progress, so it restarts here rather than carrying a count from an
+	// older generation into this one.
+	if gen != s.lastSeenGeneration {
+		s.staleRotations = 0
+		s.lastSeenGeneration = gen
+	}
+
 	batch, err := s.store.SweepWorkBatch(ctx, s.cfg.Engine, gen, maxSweepAttempts, s.cfg.BatchSize)
 	if err != nil {
 		return false, fmt.Errorf("snapshotter %q: read sweep work batch: %w", s.cfg.Engine, err)
@@ -302,6 +334,9 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("snapshotter %q: complete sweep generation %d: %w", s.cfg.Engine, gen, err)
 		}
+		// Completion is progress (a superseded stamp too — the generation
+		// ended either way): restart the stale streak.
+		s.staleRotations = 0
 		switch {
 		case !stamped:
 			// Superseded (or an empty-registry generation already stamped by a
@@ -315,7 +350,7 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		return true, nil
 	}
 
-	block, results, err := s.sweepBatch(ctx, batch)
+	block, results, servedBy, err := s.sweepBatch(ctx, batch)
 	if err != nil {
 		return false, err
 	}
@@ -332,12 +367,14 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			// The eth_call SUCCEEDED (this is semantic staleness, not an RPC
 			// error), so chain.Failover's own error-driven rotation never saw
 			// a problem and would keep re-serving this identical responsive-
-			// but-frozen endpoint forever. Rotate explicitly: the next Step's
-			// multicall starts from the next endpoint.
-			s.chain.RotateActive()
+			// but-frozen endpoint forever. Reject explicitly, bound by token
+			// to the endpoint that actually served this batch: the next
+			// Step's multicall starts from the next endpoint, and an
+			// interleaved success on a different endpoint is never punished.
+			s.chain.RotateAwayFrom(servedBy)
 			s.staleRotations++
 			slog.Warn("rotating rpc endpoint after stale sweep batch",
-				"engine", s.cfg.Engine, "generation", gen, "execBlock", block)
+				"engine", s.cfg.Engine, "generation", gen, "execBlock", block, "endpoint", servedBy.Index)
 
 			if n := s.chain.EndpointCount(); n > 0 && s.staleRotations >= n {
 				slog.Warn("collateral snapshot sweep DEGRADED: all endpoints stale — cycled through every rpc endpoint without landing a batch",
@@ -362,31 +399,34 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 // failure result — never a batch error, whatever fraction of the batch
 // reverted (the durable attempts budget bounds its retries). Batch-level
 // errors are ONLY transport failures and malformed/undecodable responses,
-// which leave the durable queue untouched for a wholesale retry.
-func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) (uint64, []store.SweepResult, error) {
+// which leave the durable queue untouched for a wholesale retry. The
+// returned EndpointToken names the endpoint that served the multicall, so a
+// store-level staleness rejection can be pinned on exactly that endpoint.
+func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) (uint64, []store.SweepResult, chain.EndpointToken, error) {
+	noServer := chain.EndpointToken{Index: -1}
 	calls := make([]multicall3Call, len(accounts))
 	for i, acct := range accounts {
 		if len(acct) != common.AddressLength {
-			return 0, nil, fmt.Errorf("snapshotter %q: registry account %x is not a 20-byte address", s.cfg.Engine, acct)
+			return 0, nil, noServer, fmt.Errorf("snapshotter %q: registry account %x is not a 20-byte address", s.cfg.Engine, acct)
 		}
 		data, err := dmLensABI.Pack("collateralOf", common.BytesToAddress(acct))
 		if err != nil {
-			return 0, nil, fmt.Errorf("snapshotter %q: pack collateralOf(%x): %w", s.cfg.Engine, acct, err)
+			return 0, nil, noServer, fmt.Errorf("snapshotter %q: pack collateralOf(%x): %w", s.cfg.Engine, acct, err)
 		}
 		calls[i] = multicall3Call{Target: s.cfg.Target, CallData: data}
 	}
 	// requireSuccess=false: one broken Safe must not fail its whole batch.
 	input, err := multicall3ABI.Pack("tryBlockAndAggregate", false, calls)
 	if err != nil {
-		return 0, nil, fmt.Errorf("snapshotter %q: pack multicall: %w", s.cfg.Engine, err)
+		return 0, nil, noServer, fmt.Errorf("snapshotter %q: pack multicall: %w", s.cfg.Engine, err)
 	}
-	out, err := s.chain.Call(ctx, Multicall3Address, input)
+	out, servedBy, err := s.chain.CallWithToken(ctx, Multicall3Address, input)
 	if err != nil {
-		return 0, nil, fmt.Errorf("snapshotter %q: multicall (%d safes): %w", s.cfg.Engine, len(accounts), err)
+		return 0, nil, noServer, fmt.Errorf("snapshotter %q: multicall (%d safes): %w", s.cfg.Engine, len(accounts), err)
 	}
 	block, mcResults, err := unpackMulticallResult(out, len(accounts))
 	if err != nil {
-		return 0, nil, fmt.Errorf("snapshotter %q: %w", s.cfg.Engine, err)
+		return 0, nil, servedBy, fmt.Errorf("snapshotter %q: %w", s.cfg.Engine, err)
 	}
 
 	results := make([]store.SweepResult, 0, len(accounts))
@@ -401,7 +441,7 @@ func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) (uint64
 		}
 		balances, err := decodeCollateralOf(res.returnData)
 		if err != nil {
-			return 0, nil, fmt.Errorf("snapshotter %q: decode collateralOf(%x): %w", s.cfg.Engine, accounts[i], err)
+			return 0, nil, servedBy, fmt.Errorf("snapshotter %q: decode collateralOf(%x): %w", s.cfg.Engine, accounts[i], err)
 		}
 		// A successful read always lands — including with an EMPTY balances
 		// map: wholesale replacement is what clears the rows of a Safe whose
@@ -409,7 +449,7 @@ func (s *Snapshotter) sweepBatch(ctx context.Context, accounts [][]byte) (uint64
 		// distinguishes that from a never-swept Safe.
 		results = append(results, store.SweepResult{Account: accounts[i], OK: true, Balances: balances})
 	}
-	return block, results, nil
+	return block, results, servedBy, nil
 }
 
 type multicallResult struct {
