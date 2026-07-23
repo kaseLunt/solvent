@@ -238,7 +238,7 @@ func TestBorrowFrxUSD18DecFloorConversion(t *testing.T) {
 // TestBorrowUnsupportedTokenIsTerminal: genuinely non-stable borrow tokens
 // (liquidUSD, EURC, weEUR, liquidRESERVE x2) need emit-time oracle pricing —
 // the deriver wraps ErrUnsupportedBorrowToken, the errors.Is-matchable
-// TERMINAL capability error the runner uses to mark the engine unhealthy
+// TERMINAL capability error the planned runner will use to mark the engine unhealthy
 // instead of retrying.
 func TestBorrowUnsupportedTokenIsTerminal(t *testing.T) {
 	for _, token := range []common.Address{tEURC, tLiquidUSD} {

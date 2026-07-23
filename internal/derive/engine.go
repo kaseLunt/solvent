@@ -2,6 +2,12 @@
 // engine-specific state-transition layer between decode and the store's
 // derived tables. One Engine per lending engine; derivation ordering and
 // persistence are the runner's job (plan Task 7), not the engines'.
+//
+// TERMINOLOGY: "the runner" throughout this package refers to Task 7's
+// PLANNED runner, which does not exist yet (internal/derive/runner.go is
+// unwritten). Every reference to what "the runner" does, persists, provides,
+// or uses is prospective contract language — obligations the runner must
+// satisfy when built — not a claim that such wiring exists today.
 package derive
 
 import (
@@ -13,7 +19,8 @@ import (
 )
 
 // StateReader is the engines' window onto COMMITTED derived state. Production
-// use passes *store.Store directly (compile-checked below); tests pass fakes.
+// use will pass *store.Store directly (interface satisfaction is
+// compile-checked below today); tests pass fakes.
 type StateReader interface {
 	// NormalizedDebt / ScaledBalance style lookups against COMMITTED state.
 	// A no-row result MEANS ZERO and is trustworthy ONLY because derivation

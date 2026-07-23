@@ -224,7 +224,7 @@ func TestAaveReserveDataUpdatedRecordEvent(t *testing.T) {
 	require.Nil(t, ev.Delta, "record-only")
 	require.Equal(t, aaveUSDC.Bytes(), ev.Asset)
 	require.Equal(t, uint16(0), ev.Seq)
-	// Payload keys are the store.SaveRateIndex kind strings the runner
+	// Payload keys are the store.SaveRateIndex kind strings the planned runner will
 	// persists rate_indexes rows from.
 	require.Equal(t, vb.String(), ev.Payload["variable_borrow_index"])
 	require.Equal(t, li.String(), ev.Payload["liquidity_index"])

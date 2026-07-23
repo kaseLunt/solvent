@@ -66,8 +66,9 @@ import (
 // 1-wei residue zeroing after full liquidation (DebtManagerCore.sol:549-553
 // emits nothing; recon caveat 2) and refuse impossible negative balances.
 //
-// DebtManager is NOT safe for concurrent use; the runner's single-writer
-// contract (D-004) provides serial Process calls in (block, logIndex) order.
+// DebtManager is NOT safe for concurrent use; the planned runner must
+// provide serial Process calls in (block, logIndex) order under the
+// single-writer contract (D-004).
 type DebtManager struct {
 	chain DMChainReads
 
@@ -454,7 +455,7 @@ func (dm *DebtManager) Process(l store.RawLog, d decode.Event) ([]store.Position
 
 // processIndexUpdated snapshots the token's index for same-block joins. It
 // deliberately emits NO position event: rate observations are persisted by
-// the runner via store.SaveRateIndex on this same decoded event, and an
+// the planned runner via store.SaveRateIndex on this same decoded event, and an
 // index move has no per-account balance effect.
 func (dm *DebtManager) processIndexUpdated(l store.RawLog, ev decode.DMInterestIndexUpdated) ([]store.PositionEvent, error) {
 	if ev.NewIndex == nil || ev.NewIndex.Sign() <= 0 {

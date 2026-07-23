@@ -183,7 +183,7 @@
 // rate_indexes: each ReserveDataUpdated yields a record-only PositionEvent
 // with EventType "aave_reserve_data_updated", Asset = reserve, and Payload
 // keys "variable_borrow_index" and "liquidity_index" (decimal strings) —
-// exactly the (asset, block, kind, value) tuples the runner persists via
+// exactly the (asset, block, kind, value) tuples the planned runner will persist via
 // store.SaveRateIndex(engine, asset, blockNumber, kind, value).
 package derive
 
@@ -744,7 +744,7 @@ func (e *AaveEngine) processReserveDataUpdated(l store.RawLog, ev decode.AaveRes
 		logIndex:            l.LogIndex,
 	}
 	// Record-only event; Payload keys "variable_borrow_index" and
-	// "liquidity_index" are the store.SaveRateIndex kind strings the runner
+	// "liquidity_index" are the store.SaveRateIndex kind strings the planned runner will
 	// persists rate_indexes rows from (asset = Asset, block = BlockNumber).
 	return []store.PositionEvent{aaveEvent(l, 0, "aave_reserve_data_updated", common.Address{}, ev.Reserve, "", nil, map[string]string{
 		"variable_borrow_index": ev.VariableBorrowIndex.String(),
