@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"os/signal"
 	"syscall"
@@ -43,19 +44,66 @@ const (
 	// stream deep in backfill yields after this many windows so its siblings
 	// keep making progress (fair round-robin instead of per-worker full drain).
 	stepsPerRound = 5
-	// Per-walker error backoff (Phase 1 deferral): after backoffThreshold
-	// consecutive erroring rounds a walker sits out backoffRounds rounds, so
-	// one broken stream cannot dominate the loop with doomed retries.
-	backoffThreshold = 3
-	backoffRounds    = 5
+	// Per-walker error backoff, TIME-based (fix wave: round counting was
+	// burnable — a busy sibling keeps rounds spinning hot, so "skip N
+	// rounds" could elapse in milliseconds). An erroring round schedules
+	// the walker's next attempt by TIMESTAMP: exponential from
+	// walkerBackoffBase, capped at walkerBackoffCap, with ±walkerBackoffJitter
+	// so parallel broken streams do not retry in lockstep.
+	walkerBackoffBase   = 30 * time.Second
+	walkerBackoffCap    = 10 * time.Minute
+	walkerBackoffJitter = 0.20
 )
+
+// walkerBackoff schedules a walker's retries by next-attempt timestamp.
+// ready() is state-free — a hot loop may poll it arbitrarily often without
+// burning any of the delay — and only failure()/success() move state.
+type walkerBackoff struct {
+	now      func() time.Time // injectable clock (tests)
+	rand     func() float64   // uniform [0,1) jitter source (tests inject)
+	failures int
+	next     time.Time
+}
+
+// ready reports whether the walker may attempt work this round.
+func (b *walkerBackoff) ready() bool { return !b.now().Before(b.next) }
+
+// failure records an erroring round and schedules the next attempt:
+// base·2^(failures-1), capped, jittered ±walkerBackoffJitter. Returns the
+// chosen delay for logging.
+func (b *walkerBackoff) failure() time.Duration {
+	b.failures++
+	d := walkerBackoffCap
+	// Guarded shift: beyond a handful of doublings the cap always wins.
+	if shift := b.failures - 1; shift < 10 {
+		if scaled := walkerBackoffBase << shift; scaled < walkerBackoffCap {
+			d = scaled
+		}
+	}
+	d = time.Duration(float64(d) * (1 + walkerBackoffJitter*(2*b.rand()-1)))
+	b.next = b.now().Add(d)
+	return d
+}
+
+// success resets the schedule after any non-erroring round.
+func (b *walkerBackoff) success() {
+	b.failures = 0
+	b.next = time.Time{}
+}
 
 // walkerState wraps a walker with its backoff bookkeeping.
 type walkerState struct {
-	w               *ingest.Walker
-	consecutiveErrs int
-	skipRounds      int
+	w  *ingest.Walker
+	bo walkerBackoff
 }
+
+// engineHealth is the daemon's package-level health map: engine → the
+// terminal unhealthy reason ((*derive.Runner).Health). Entries only ever
+// appear (no in-process recovery — a restart after a capability upgrade is
+// the documented recovery path, since all state is durable and the restarted
+// process re-derives the refusing window with the upgraded deriver). While
+// non-empty, the daemon logs a DEGRADED summary once per tick round.
+var engineHealth = map[string]string{}
 
 func run(ctx context.Context, configPath string) error {
 	cfg, err := config.Load(configPath)
@@ -92,14 +140,17 @@ func run(ctx context.Context, configPath string) error {
 
 	var walkers []*walkerState
 	for _, s := range cfg.Streams {
-		walkers = append(walkers, &walkerState{w: ingest.NewWalker(clients[s.Chain], st, ingest.WalkerConfig{
-			Stream:        s.Name,
-			ChainID:       cfg.Chains[s.Chain].ChainID,
-			Addresses:     s.Addresses,
-			StartBlock:    s.StartBlock,
-			Window:        s.Window,
-			Confirmations: s.Confirmations,
-		})})
+		walkers = append(walkers, &walkerState{
+			w: ingest.NewWalker(clients[s.Chain], st, ingest.WalkerConfig{
+				Stream:        s.Name,
+				ChainID:       cfg.Chains[s.Chain].ChainID,
+				Addresses:     s.Addresses,
+				StartBlock:    s.StartBlock,
+				Window:        s.Window,
+				Confirmations: s.Confirmations,
+			}),
+			bo: walkerBackoff{now: time.Now, rand: rand.Float64},
+		})
 		slog.Info("stream configured", "stream", s.Name, "start", s.StartBlock)
 	}
 
@@ -171,9 +222,8 @@ func run(ctx context.Context, configPath string) error {
 			// Walker pass: ingestion first, so derivation sees the freshest
 			// raw logs (and any rewind's reorg epoch) in the same round.
 			for _, ws := range walkers {
-				if ws.skipRounds > 0 {
-					ws.skipRounds--
-					continue
+				if !ws.bo.ready() {
+					continue // backing off by timestamp; hot rounds burn nothing
 				}
 				roundErred := false
 				for i := 0; i < stepsPerRound; i++ {
@@ -182,7 +232,7 @@ func run(ctx context.Context, configPath string) error {
 						if errors.Is(err, context.Canceled) {
 							slog.Info("shutting down", "stream", ws.w.Name())
 						} else {
-							slog.Error("step failed; will retry next round", "stream", ws.w.Name(), "err", err)
+							slog.Error("step failed; will retry after backoff", "stream", ws.w.Name(), "err", err)
 							roundErred = true
 						}
 						break
@@ -193,24 +243,27 @@ func run(ctx context.Context, configPath string) error {
 					anyAdvanced = true
 				}
 				if roundErred {
-					ws.consecutiveErrs++
-					if ws.consecutiveErrs >= backoffThreshold {
-						ws.skipRounds = backoffRounds
-						ws.consecutiveErrs = 0
-						slog.Warn("walker backing off after repeated errors",
-							"stream", ws.w.Name(), "rounds", backoffRounds)
-					}
+					delay := ws.bo.failure()
+					slog.Warn("walker backing off after error",
+						"stream", ws.w.Name(), "retryIn", delay, "consecutive", ws.bo.failures)
 				} else {
-					ws.consecutiveErrs = 0
+					ws.bo.success()
 				}
 			}
 
 			// Derivation pass: each runner handles any pending reorg epoch
-			// (RewindDerived before further ApplyDerived) and derives bounded
-			// windows.
+			// (RewindDerived before further apply — mandatory even for an
+			// unhealthy engine) and derives bounded windows.
 			for _, r := range runners {
 				for i := 0; i < stepsPerRound; i++ {
 					advanced, err := r.Step(ctx)
+					if advanced {
+						// COUNT PROGRESS BEFORE ERRORS (M1): a Step can commit
+						// its window and still error on the best-effort
+						// snapshot flush — advanced=true means the cursor
+						// moved and the loop must stay hot.
+						anyAdvanced = true
+					}
 					if err != nil {
 						if errors.Is(err, context.Canceled) {
 							slog.Info("shutting down", "engine", r.Name())
@@ -222,7 +275,13 @@ func run(ctx context.Context, configPath string) error {
 					if !advanced {
 						break
 					}
-					anyAdvanced = true
+				}
+				if healthy, reason := r.Health(); !healthy {
+					if _, seen := engineHealth[r.Name()]; !seen {
+						slog.Error("engine transitioned to UNHEALTHY: derivation gated (reorg repair still runs); restart after a capability upgrade to recover",
+							"engine", r.Name(), "reason", reason)
+					}
+					engineHealth[r.Name()] = reason
 				}
 			}
 
@@ -254,12 +313,18 @@ func run(ctx context.Context, configPath string) error {
 			}
 		}
 
-		// Housekeeping per tick: drop reorg epochs every engine has acked.
+		// Housekeeping per tick: drop reorg epochs every engine has acked,
+		// and surface degraded engine health once per tick round while any
+		// engine is unhealthy (the transition itself was logged at Error).
 		if ctx.Err() == nil {
 			if pruned, err := st.PruneAckedReorgEpochs(ctx); err != nil {
-				slog.Error("prune acked reorg epochs failed; will retry next round", "err", err)
+				slog.Error("prune acked reorg epochs failed; will retry next tick", "err", err)
 			} else if pruned > 0 {
 				slog.Info("pruned fully-acknowledged reorg epochs", "rows", pruned)
+			}
+			if len(engineHealth) > 0 {
+				slog.Warn("daemon DEGRADED: unhealthy engines (derivation gated; restart after a capability upgrade to recover)",
+					"engines", fmt.Sprintf("%v", engineHealth))
 			}
 		}
 
