@@ -35,9 +35,26 @@ var _ StateReader = (*store.Store)(nil)
 // of the Task 5-7 freeze). The new contract, which Task 7's runner compiles
 // against, is the batch lifecycle:
 //
-//	BeginBatch → Process* → store.ApplyDerived → CommitBatch (tx committed)
-//	                                           ↘ DiscardBatch (tx failed)
+//	BeginBatch → Process* → store.ApplyDerived → CommitBatch (nil error)
+//	                     ↘ DiscardBatch (Process error mid-batch:
+//	                       ApplyDerived was provably never called)
+//	store.ApplyDerived error (ANY) → Reset (commit indeterminacy, below)
 //	store.RewindDerived → Reset (then the next BeginBatch re-hydrates)
+//
+// COMMIT INDETERMINACY RULE: ApplyDerived returns its transaction Commit's
+// error verbatim, and Postgres can COMMIT while the acknowledgment is lost
+// to a connection failure — an ApplyDerived error therefore does NOT mean
+// the batch failed to persist; the runner cannot know. The rule is: any
+// ApplyDerived error → Engine.Reset(), NEVER DiscardBatch. Reset drops all
+// layers and the next BeginBatch re-hydrates from committed truth, which is
+// correct whether or not the tx landed; DiscardBatch would keep the
+// pre-batch promoted layer (and hydration marks) while committed truth —
+// and the derive cursor — may have advanced, silently desyncing engine
+// memory from the store. DiscardBatch is reserved for failures the runner
+// KNOWS never reached ApplyDerived (a Process error mid-batch), where
+// committed truth provably did not move. Pinned by
+// TestIndeterminateCommitResetRehydratesExact and
+// TestIndeterminateCommitDiscardDesyncs (live store).
 //
 // Engines keep TWO state layers: a promoted layer mirroring committed truth
 // and a working overlay holding the current attempt's mutations. Absence of
@@ -54,7 +71,10 @@ type Engine interface {
 	BeginBatch(ctx context.Context, reader StateReader) error
 	Process(l store.RawLog, d decode.Event) ([]store.PositionEvent, error)
 	// CommitBatch promotes the working layer after the runner's ApplyDerived
-	// transaction has committed. DiscardBatch drops it (persistence failure).
+	// returned nil. DiscardBatch drops it — ONLY for failures that provably
+	// never reached ApplyDerived (a Process error mid-batch); an ApplyDerived
+	// ERROR must be answered with Reset, never DiscardBatch (commit
+	// indeterminacy — see the lifecycle above).
 	CommitBatch()
 	DiscardBatch()
 	// Reset drops ALL in-memory state (after RewindDerived / reorg): the next

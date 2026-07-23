@@ -129,16 +129,24 @@
 // # Caveat: Pool impl 0xbe82113a... (blocks 24196552..24920566) is unverified
 //
 // That Pool era's source is not verified on Blockscout/Sourcify/Etherscan.
-// Its fold-relevant semantics are pinned by (a) the verified Pool impls
-// sandwiching it (0x999c94f2 before, 0x0f3bceb6 after) having IDENTICAL
-// fold-relevant call sites, (b) its paired era-4 vToken 0x1d5e86f5... being
-// verified and requiring TokenMath-scaled inputs, (c) the golden replay
-// covering the era's action events (3 repays + 1 deficit/liquidation pair)
+// The window is OUTCOME-PINNED, not source-verified: (a) the verified Pool
+// impls sandwiching it (0x999c94f2 before, 0x0f3bceb6 after) have IDENTICAL
+// fold-relevant call sites, (b) its paired era-4 vToken 0x1d5e86f5... is
+// verified and requires TokenMath-scaled inputs, (c) the golden replay
+// covers the era's action events (3 repays + 1 deficit/liquidation pair)
 // bit-exactly, and (d) ARCHIVE WINDOW PINNING: vToken scaledBalanceOf
 // captured immediately before/after every one of the window's action events
 // (cast via eth.drpc.org archive, 2026-07-23) matches the derived tracked
 // debt exactly — see TestAaveWindowPinnedArchiveScaledDebt for the eight
 // pinned values (users 0xe17b347b.../0xbd0c6f59.../0x5280be3a...).
+//
+// What those legs pin is every OBSERVED outcome. They cannot discriminate
+// the window's ROUNDING RULE: all three window repays produce identical
+// results under floor and under half-up division (and the deficit pair is
+// index-free), so the observed events are silent on which rule ran. The
+// regime-B (floor/ceil) assumption for the window is therefore INHERITED
+// from the verified v3.5 successor implementation via the sandwich — an
+// assumption consistent with everything observed, not a discriminated fact.
 //
 // # Index sourcing (debt folds)
 //
@@ -369,10 +377,13 @@ func (m aaveTxMarkers) clone() aaveTxMarkers {
 //     20625519), never from a partial seed. There is no in-memory seed map.
 //   - The WORKING layer is a copy-on-write overlay receiving every Process
 //     mutation. CommitBatch promotes it (call only after store.ApplyDerived
-//     committed); DiscardBatch drops it, leaving promoted state exactly as it
-//     was, so a retry of the same logs reproduces identical events with no
-//     double-mutation.
-//   - Reset drops everything (after store.RewindDerived / a reorg); the next
+//     returned nil); DiscardBatch drops it, leaving promoted state exactly as
+//     it was, so a retry of the same logs reproduces identical events with no
+//     double-mutation — valid ONLY for pre-persistence failures (a Process
+//     error); an ApplyDerived ERROR takes Reset instead, per derive.Engine's
+//     commit-indeterminacy rule.
+//   - Reset drops everything (after store.RewindDerived / a reorg / an
+//     ambiguous ApplyDerived error); the next
 //     BeginBatch re-hydrates from committed truth. The rates cache and same-tx
 //     markers are NOT persisted and need no hydration: every action's own tx
 //     re-emits its reserve's ReserveDataUpdated first, and same-tx log runs
@@ -434,8 +445,7 @@ func (e *AaveEngine) BeginBatch(ctx context.Context, reader StateReader) error {
 }
 
 // CommitBatch implements Engine: promotes the working overlay. Call ONLY
-// after the runner's ApplyDerived transaction committed. No-op outside a
-// batch.
+// after the runner's ApplyDerived returned nil. No-op outside a batch.
 func (e *AaveEngine) CommitBatch() {
 	if !e.inBatch {
 		return
@@ -448,10 +458,12 @@ func (e *AaveEngine) CommitBatch() {
 	e.endBatch()
 }
 
-// DiscardBatch implements Engine: drops the working overlay (persistence
-// failure); promoted state and hydration marks are untouched — hydrated
-// values are committed truth and stay valid across a failed attempt. No-op
-// outside a batch.
+// DiscardBatch implements Engine: drops the working overlay (PRE-persistence
+// failure — the attempt provably never reached ApplyDerived; an ApplyDerived
+// error takes Reset instead, per derive.Engine's commit-indeterminacy rule);
+// promoted state and hydration marks are untouched — hydrated values are
+// committed truth and stay valid across a failed attempt. No-op outside a
+// batch.
 func (e *AaveEngine) DiscardBatch() {
 	if !e.inBatch {
 		return

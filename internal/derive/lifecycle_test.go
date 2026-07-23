@@ -278,7 +278,9 @@ func runRestartScenarios(t *testing.T, mk func() Engine, steps []replayStep, sna
 		batched.CommitBatch()
 	}
 
-	// 3. Discard + retry in the middle (failed persistence of batch 2).
+	// 3. Discard + retry in the middle (a PRE-persistence failure of batch 2:
+	// the attempt never reached ApplyDerived — an ApplyDerived error would
+	// take Reset instead, see TestIndeterminateCommit* in lifecycle_live_test.go).
 	retried := mk()
 	beginBatch(t, retried, nil)
 	kept := processAll(t, retried, steps[:a])

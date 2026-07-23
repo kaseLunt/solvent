@@ -919,9 +919,12 @@ func TestAaveBalanceTransferPayloadNotShared(t *testing.T) {
 //
 // A scaled balance only moves on fold events, so "state at end of block B"
 // equals the sum of the account's debt deltas over all events with
-// BlockNumber <= B. This closes the window's last gap: the sandwich argument
-// plus these assertions make the era's semantics archive-pinned, not merely
-// inferred.
+// BlockNumber <= B. These assertions OUTCOME-PIN every observed window
+// action; they do NOT discriminate the window's rounding rule — all three
+// window repays produce identical results under floor and under half-up
+// division (and the deficit pair is index-free), so the floor/ceil (regime
+// B) assumption is inherited from the verified v3.5 successor impl via the
+// sandwich, not proven by these events.
 func TestAaveWindowPinnedArchiveScaledDebt(t *testing.T) {
 	steps := aaveGoldenSteps(t)
 	e := NewAaveEngine()

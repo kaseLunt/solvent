@@ -50,10 +50,13 @@ import (
 // zero: derivation always starts at genesis (migration seeds + full replay),
 // so there is no seed map and no implicit warm start. The WORKING layer is a
 // copy-on-write overlay taking every Process mutation until CommitBatch
-// promotes it (after the runner's ApplyDerived transaction committed) or
-// DiscardBatch drops it (persistence failure -- a retry of the same logs
-// reproduces identical events with no double-mutation). Reset drops
-// everything (after RewindDerived); the next BeginBatch re-hydrates. The
+// promotes it (after the runner's ApplyDerived returned nil) or DiscardBatch
+// drops it (a PRE-persistence failure -- a Process error that never reached
+// ApplyDerived; a retry of the same logs reproduces identical events with no
+// double-mutation). An ApplyDerived ERROR takes Reset instead, never
+// DiscardBatch: the commit may have landed despite the error (see
+// derive.Engine's commit-indeterminacy rule). Reset drops everything (after
+// RewindDerived or an ambiguous commit); the next BeginBatch re-hydrates. The
 // per-token index snapshots and per-tx liquidation markers are batch-scoped
 // the same way but never hydrated: mutating events REQUIRE a same-block
 // index update (re-emitted in any replayed range) and same-tx log runs never
@@ -126,13 +129,19 @@ type DMChainReads interface {
 // "Asset registry" roles + caveat 1) with their decimals. For these,
 // PriceProviderV2.isStableToken snaps the price to exactly 1e6 USD (6-dec)
 // per whole token inside a ±1% band (archive spot-checks held across the
-// full range), so Borrowed's token amount converts to USD by an EXACT
-// decimal rescaling:
+// full range), so Borrowed's token amount converts to USD by the contract's
+// own decimal rescaling:
 //
 //	6-dec  (USDC, USDT): usd = amount
-//	18-dec (frxUSD):     usd = amount / 1e12, exact division REQUIRED — a
-//	  remainder means a non-integral 6-dec USD value, which the stable-snap
-//	  model cannot represent; refuse loudly rather than round.
+//	18-dec (frxUSD):     usd = floor(amount / 1e12)
+//
+// The floor is the CONTRACT'S arithmetic, not a deriver choice: the deployed
+// borrow path prices the amount via convertCollateralTokenToUsd — usd =
+// amount * price / 10^decimals with Solidity's flooring integer division
+// (recon/cash-v3 DebtManagerCore.sol:378, reached from borrow() at :468) —
+// so with the 1e6 stable snap any sub-1e12 remainder is truncated by the
+// contract itself. Refusing non-divisible amounts would reject events the
+// contract accepted.
 //
 // 100% of the 305,045 historical Borrowed events are USDC; USDT and frxUSD
 // have zero borrow history but are configured borrow tokens whose stable
@@ -159,9 +168,23 @@ var (
 
 // borrowUsd converts a Borrowed token amount into the USD 6-dec figure the
 // contract priced it at, under the stable-snap model documented on
-// dmStableBorrowDecimals. Non-stable borrow tokens wrap
-// ErrUnsupportedBorrowToken (terminal); a non-integral 18-dec conversion is
-// a loud exactness error.
+// dmStableBorrowDecimals (6-dec: usd = amount; 18-dec: floor(amount/1e12) --
+// the contract's own flooring division, DebtManagerCore.sol:378). Non-stable
+// borrow tokens wrap ErrUnsupportedBorrowToken (terminal).
+//
+// STABLE-SNAP INVARIANT (out-of-band depeg risk; adjudicated posture): the
+// 1e6 snap holds only while PriceProviderV2 keeps the token inside its ±1%
+// stable band -- a borrow taken while the oracle price sat OUTSIDE the band
+// would be silently mispriced here, and per-event archive pricing of all
+// 305k historical borrows is infeasible on free RPC. The assumption is
+// therefore (a) RECORDED on every borrow (payload "price_source" =
+// dmPriceSourceStableSnap), (b) EMPIRICALLY ENFORCED by the golden
+// bit-exactness suite plus Task 9's >=25-borrower derived-vs-borrowingOf
+// reconciliation -- any historical out-of-band borrow surfaces there as a
+// derived-vs-view mismatch -- and (c) guarded forward by the runner's
+// standing health reconciliation (plan Task 9). Deliberately NO per-event
+// refusal: it would freeze the deriver on valid in-band events it cannot
+// cheaply prove in-band.
 func borrowUsd(token common.Address, amount *big.Int, l store.RawLog) (*big.Int, error) {
 	decimals, ok := dmStableBorrowDecimals[token]
 	if !ok {
@@ -172,12 +195,10 @@ func borrowUsd(token common.Address, amount *big.Int, l store.RawLog) (*big.Int,
 	case 6:
 		return new(big.Int).Set(amount), nil
 	case 18:
-		q, r := new(big.Int).QuoRem(amount, oneE12, new(big.Int))
-		if r.Sign() != 0 {
-			return nil, fmt.Errorf("debt_manager: Borrowed %s of 18-dec stable %s at block %d (tx %x) is not an integral 6-dec USD amount (remainder %s of 1e12) -- the stable-snap conversion must be exact; refusing to round",
-				amount, hexAddr(token), l.BlockNumber, l.TxHash, r)
-		}
-		return q, nil
+		// floor(amount / 1e12): the contract's usd = amount*price/10^decimals
+		// floors (DebtManagerCore.sol:378), so a sub-1e12 remainder is a
+		// valid event's truncated dust, never an error.
+		return new(big.Int).Quo(amount, oneE12), nil
 	default:
 		return nil, fmt.Errorf("debt_manager: stable borrow token %s configured with unhandled decimals %d -- config bug", hexAddr(token), decimals)
 	}
@@ -201,6 +222,13 @@ const (
 )
 
 const sideDebt = "debt"
+
+// dmPriceSourceStableSnap is stamped into every Borrowed position event's
+// payload ("price_source" key): the USD figure was reconstructed under the
+// stable-snap-1e6 assumption, not read from an emit-time oracle. Recording
+// the provenance per event is leg (a) of the stable-snap invariant posture
+// documented on borrowUsd.
+const dmPriceSourceStableSnap = "stable_snap_1e6"
 
 // dmEngineName is the engine identifier shared with config/contracts.json,
 // the decode registry and the store's derived tables.
@@ -245,8 +273,7 @@ func (dm *DebtManager) BeginBatch(ctx context.Context, reader StateReader) error
 }
 
 // CommitBatch implements Engine: promotes the working overlay. Call ONLY
-// after the runner's ApplyDerived transaction committed. No-op outside a
-// batch.
+// after the runner's ApplyDerived returned nil. No-op outside a batch.
 func (dm *DebtManager) CommitBatch() {
 	if !dm.inBatch {
 		return
@@ -259,10 +286,12 @@ func (dm *DebtManager) CommitBatch() {
 	dm.endBatch()
 }
 
-// DiscardBatch implements Engine: drops the working overlay (persistence
-// failure); promoted state and hydration marks are untouched -- hydrated
-// values are committed truth and stay valid across a failed attempt. No-op
-// outside a batch.
+// DiscardBatch implements Engine: drops the working overlay (PRE-persistence
+// failure -- the attempt provably never reached ApplyDerived; an ApplyDerived
+// error takes Reset instead, per derive.Engine's commit-indeterminacy rule);
+// promoted state and hydration marks are untouched -- hydrated values are
+// committed truth and stay valid across a failed attempt. No-op outside a
+// batch.
 func (dm *DebtManager) DiscardBatch() {
 	if !dm.inBatch {
 		return
@@ -453,6 +482,7 @@ func (dm *DebtManager) processBorrowed(l store.RawLog, ev decode.DMBorrowed) ([]
 		"token_amount": ev.Amount.String(),
 		"usd":          usd.String(),
 		"index":        idx.String(),
+		"price_source": dmPriceSourceStableSnap,
 	})}, nil
 }
 

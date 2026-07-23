@@ -174,6 +174,8 @@ func TestBorrowCeilRounding(t *testing.T) {
 	require.Equal(t, 0, big.NewInt(3).Cmp(ev.Delta), "ceil(2.5) = 3, got %s", ev.Delta)
 	require.Equal(t, "5", ev.Payload["usd"])
 	require.Equal(t, "2000000000000000000", ev.Payload["index"])
+	require.Equal(t, "stable_snap_1e6", ev.Payload["price_source"],
+		"every borrow records its stable-snap pricing provenance (see borrowUsd invariant)")
 
 	// Exact division: 4*1e18/2e18 = 2 exactly -> ceil must NOT bump.
 	evs, err = dm.Process(tLog(100, 0x02, 7), decode.DMBorrowed{User: tUser, Token: tUSDC, Amount: big.NewInt(4)})
@@ -196,6 +198,7 @@ func TestBorrowUSDTFoldsAsConfiguredStable(t *testing.T) {
 	require.Equal(t, tUSDT.Bytes(), evs[0].Asset)
 	require.Equal(t, 0, big.NewInt(3).Cmp(evs[0].Delta), "ceil(5*1e18/2e18) = 3")
 	require.Equal(t, "5", evs[0].Payload["usd"], "6-dec stable: usd == amount")
+	require.Equal(t, "stable_snap_1e6", evs[0].Payload["price_source"])
 
 	// The fold lands on the running cache: repaying exactly it succeeds.
 	evs, err = dm.Process(tLog(100, 0x02, 7), decode.DMRepaid{User: tUser, Payer: tPayer, Token: tUSDT, UsdAmount: big.NewInt(6)})
@@ -203,10 +206,12 @@ func TestBorrowUSDTFoldsAsConfiguredStable(t *testing.T) {
 	require.Equal(t, 0, big.NewInt(-3).Cmp(evs[0].Delta))
 }
 
-// TestBorrowFrxUSD18DecExactConversion: frxUSD is a configured 18-dec stable;
-// usd = amount/1e12 with a MANDATORY exactness check — a remainder means a
-// non-integral 6-dec USD value the stable-snap model cannot represent.
-func TestBorrowFrxUSD18DecExactConversion(t *testing.T) {
+// TestBorrowFrxUSD18DecFloorConversion: frxUSD is a configured 18-dec stable;
+// usd = floor(amount/1e12) — the CONTRACT's own flooring division
+// (DebtManagerCore.sol:378, reached from borrow() :468), so a non-divisible
+// amount is a valid event whose sub-1e12 remainder the contract truncated —
+// it must FOLD, never be refused.
+func TestBorrowFrxUSD18DecFloorConversion(t *testing.T) {
 	dm := newDM(t, nil, nil)
 	feedIndex(t, dm, 100, tFrxUSD, num("1000000000000000000")) // idx = 1e18
 
@@ -216,14 +221,18 @@ func TestBorrowFrxUSD18DecExactConversion(t *testing.T) {
 	require.Len(t, evs, 1)
 	require.Equal(t, "5000000", evs[0].Payload["usd"], "18-dec stable: usd = amount/1e12, exact")
 	require.Equal(t, "5000000000000000000", evs[0].Payload["token_amount"])
+	require.Equal(t, "stable_snap_1e6", evs[0].Payload["price_source"], "stable-snap provenance recorded per borrow")
 	require.Equal(t, 0, num("5000000").Cmp(evs[0].Delta), "ceil(5e6*1e18/1e18) = 5e6")
 
-	// One wei over an integral USD amount: the division has remainder 1 ->
-	// loud exactness error, never a silent floor.
-	_, err = dm.Process(tLog(100, 0x02, 7), decode.DMBorrowed{User: tUser, Token: tFrxUSD, Amount: num("5000000000000000001")})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "not an integral 6-dec USD amount")
-	require.NotErrorIs(t, err, ErrUnsupportedBorrowToken, "exactness violation is a data error, not a capability error")
+	// One wei over an integral USD amount: the contract floors the remainder
+	// away — usd is still 5,000,000 and the fold SUCCEEDS, normalized via
+	// ceil as usual (idx 1e18 -> delta 5,000,000).
+	evs, err = dm.Process(tLog(100, 0x02, 7), decode.DMBorrowed{User: tUser, Token: tFrxUSD, Amount: num("5000000000000000001")})
+	require.NoError(t, err, "non-divisible 18-dec amount is a VALID event (contract-floored), not an error")
+	require.Len(t, evs, 1)
+	require.Equal(t, "5000000", evs[0].Payload["usd"], "floor((5e18+1)/1e12) = 5,000,000 — remainder truncated by the contract's own division")
+	require.Equal(t, "5000000000000000001", evs[0].Payload["token_amount"])
+	require.Equal(t, 0, num("5000000").Cmp(evs[0].Delta))
 }
 
 // TestBorrowUnsupportedTokenIsTerminal: genuinely non-stable borrow tokens
