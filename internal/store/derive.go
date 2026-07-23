@@ -947,66 +947,11 @@ func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, 
 	return tx.Commit(ctx)
 }
 
-// SweepOutcome is one account's result from a snapshotter multicall batch,
-// recorded by RecordSnapshotSweep.
-type SweepOutcome struct {
-	Account []byte
-	Success bool
-}
-
-// RecordSnapshotSweep bulk-upserts the snapshotter's per-account sweep status
-// rows at the multicall execution block, in one transaction. A success stamps
-// both last_attempt_block and last_success_block and sets status='success'; a
-// failure stamps last_attempt_block only (last_success_block keeps the most
-// recent success, 0 if none ever) and sets status='failed'. status is always
-// the LAST attempt's outcome, so a retried account flips to 'success' the
-// moment a retry lands. Together with the balances rows this disambiguates
-// zero-collateral success (success row + empty balances) from never-swept
-// (no row) and failed (status='failed'). Additive write for the fix wave's
-// sweep status tracking.
-func (s *Store) RecordSnapshotSweep(ctx context.Context, engine string, block uint64, outcomes []SweepOutcome) error {
-	if len(outcomes) == 0 {
-		return nil
-	}
-	b := &pgx.Batch{}
-	for _, o := range outcomes {
-		if len(o.Account) == 0 {
-			return fmt.Errorf("sweep outcome with empty account")
-		}
-		if o.Success {
-			b.Queue(`INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status, updated_at)
-				VALUES ($1,$2,$3,$3,'success',now())
-				ON CONFLICT (engine, account) DO UPDATE
-				SET last_attempt_block = EXCLUDED.last_attempt_block,
-				    last_success_block = EXCLUDED.last_attempt_block,
-				    status = 'success', updated_at = now()`,
-				engine, o.Account, block)
-		} else {
-			b.Queue(`INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status, updated_at)
-				VALUES ($1,$2,$3,0,'failed',now())
-				ON CONFLICT (engine, account) DO UPDATE
-				SET last_attempt_block = EXCLUDED.last_attempt_block,
-				    status = 'failed', updated_at = now()`,
-				engine, o.Account, block)
-		}
-	}
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	br := tx.SendBatch(ctx, b)
-	for range outcomes {
-		if _, err := br.Exec(); err != nil {
-			br.Close()
-			return fmt.Errorf("record sweep outcomes for %q at %d: %w", engine, block, err)
-		}
-	}
-	if err := br.Close(); err != nil {
-		return fmt.Errorf("close sweep batch for %q at %d: %w", engine, block, err)
-	}
-	return tx.Commit(ctx)
-}
+// NOTE: RecordSnapshotSweep (the snapshotter's old standalone status write)
+// and its SweepOutcome type were retired in the sweep-durability wave —
+// status rows now land ONLY inside ApplySweepBatch's transaction, atomic
+// with the balances they describe; a separate status write would reopen the
+// balances/status divergence window it existed to record.
 
 // ---------------------------------------------------------------------------
 // Durable sweep generations — the snapshotter's crash-resumable work queue.

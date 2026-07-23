@@ -1,17 +1,23 @@
 package snapshot
 
-// Snapshotter tests with a fake chain and store: request shape (multicall3
-// tryBlockAndAggregate of collateralOf reads, selectors pinned against
-// `cast sig`), rotating batch consumption, cadence gating, post-rewind
-// re-sweep, and the partial/total failure postures. Responses are encoded
-// through the same ABI objects the snapshotter decodes with.
+// Snapshotter tests with a fake chain and a fake DURABLE store: request shape
+// (multicall3 tryBlockAndAggregate of collateralOf reads, selectors pinned
+// against `cast sig`), generation-driven batch consumption, cadence gating,
+// crash-restart convergence (the durable lagging set IS the queue), the
+// post-rewind durable bump + live fast path, and the per-account failure
+// postures. Responses are encoded through the same ABI objects the
+// snapshotter decodes with. The fake store mirrors the real store's
+// generation semantics (lagging-first work batches, durable attempts,
+// guarded completion) so restart scenarios exercise real resume logic.
 
 import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"math/big"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -46,53 +52,158 @@ func (c *fakeChain) Call(_ context.Context, to common.Address, data []byte) ([]b
 	return c.respond(to, data)
 }
 
-type upsertRec struct {
-	account  string
-	block    uint64
-	balances map[string]map[string]*big.Int
+// sweepRow mirrors one durable snapshot_sweeps row.
+type sweepRow struct {
+	generation  uint64
+	attempts    int
+	status      string
+	lastAttempt uint64
+	lastSuccess uint64
 }
 
-// sweepRec is one recorded per-account attempt outcome (account hex, the
-// multicall block it was recorded at, and whether it succeeded).
-type sweepRec struct {
+type applyRec struct {
+	generation uint64
+	block      uint64
+	results    []store.SweepResult
+}
+
+type historyRec struct {
 	account string
 	block   uint64
-	success bool
 }
 
+// fakeSnapStore is an in-memory faithful model of the store's durable sweep
+// machinery. It survives "process crashes" (fresh Snapshotters share it), so
+// restart tests exercise the real resume semantics.
 type fakeSnapStore struct {
-	registry      [][]byte
-	registryCalls int
-	upserts       []upsertRec
-	records       []sweepRec
+	clock *time.Time
+
+	// registry is the priority-ordered Safe registry (the SQL's within-bucket
+	// order); tests mutate it to model rewinds.
+	registry [][]byte
+
+	gen         uint64
+	open        bool
+	completedAt time.Time
+
+	rows     map[string]*sweepRow                      // account-hex → durable status
+	balances map[string]map[string]map[string]*big.Int // account-hex → wholesale snapshot balances
+	history  []historyRec                              // collateral history writes, in order
+
+	genReads, opens, workBatches, completes int
+
+	applyErr error // one-shot ApplySweepBatch failure injection
+	applied  []applyRec
 }
 
-func (s *fakeSnapStore) SnapshotAccounts(context.Context, string) ([][]byte, error) {
-	s.registryCalls++
-	return s.registry, nil
-}
-
-func (s *fakeSnapStore) UpsertSnapshotBalances(_ context.Context, _ string, account []byte, balances map[string]map[string]*big.Int, block uint64) error {
-	s.upserts = append(s.upserts, upsertRec{account: hex.EncodeToString(account), block: block, balances: balances})
-	return nil
-}
-
-func (s *fakeSnapStore) RecordSnapshotSweep(_ context.Context, _ string, block uint64, outcomes []store.SweepOutcome) error {
-	for _, o := range outcomes {
-		s.records = append(s.records, sweepRec{account: hex.EncodeToString(o.Account), block: block, success: o.Success})
+func newFakeSnapStore(registry [][]byte, clock *time.Time) *fakeSnapStore {
+	return &fakeSnapStore{
+		clock: clock, registry: registry,
+		rows:     map[string]*sweepRow{},
+		balances: map[string]map[string]map[string]*big.Int{},
 	}
-	return nil
 }
 
-// recordsFor filters the recorded outcomes for one account.
-func (s *fakeSnapStore) recordsFor(account []byte) []sweepRec {
-	var out []sweepRec
-	for _, r := range s.records {
-		if r.account == hex.EncodeToString(account) {
-			out = append(out, r)
+func (f *fakeSnapStore) SweepGeneration(context.Context, string) (uint64, bool, time.Time, error) {
+	f.genReads++
+	return f.gen, f.open, f.completedAt, nil
+}
+
+func (f *fakeSnapStore) OpenSweepGeneration(context.Context, string) (uint64, error) {
+	f.opens++
+	f.gen++
+	f.open = true
+	f.completedAt = time.Time{}
+	return f.gen, nil
+}
+
+// bumpGeneration models store.RewindDerived's in-transaction generation bump
+// — the DURABLE post-rewind re-sweep open (not routed through
+// OpenSweepGeneration: the real bump happens inside the rewind transaction).
+func (f *fakeSnapStore) bumpGeneration() {
+	f.gen++
+	f.open = true
+	f.completedAt = time.Time{}
+}
+
+func (f *fakeSnapStore) SweepWorkBatch(_ context.Context, _ string, generation uint64, maxAttempts, limit int) ([][]byte, error) {
+	f.workBatches++
+	type lagEntry struct {
+		account []byte
+		stamp   int64
+	}
+	var lagging []lagEntry
+	var retries [][]byte
+	for _, acct := range f.registry {
+		row := f.rows[hex.EncodeToString(acct)]
+		switch {
+		case row == nil:
+			lagging = append(lagging, lagEntry{acct, -1})
+		case row.generation < generation:
+			lagging = append(lagging, lagEntry{acct, int64(row.generation)})
+		case row.generation == generation && row.status == "failed" && row.attempts < maxAttempts:
+			retries = append(retries, acct)
 		}
 	}
-	return out
+	// Oldest stamp first (stable: registry priority order within a bucket),
+	// then current-generation retries — mirroring the SQL's ORDER BY.
+	sort.SliceStable(lagging, func(i, j int) bool { return lagging[i].stamp < lagging[j].stamp })
+	out := make([][]byte, 0, len(lagging)+len(retries))
+	for _, l := range lagging {
+		out = append(out, l.account)
+	}
+	out = append(out, retries...)
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fakeSnapStore) ApplySweepBatch(_ context.Context, _ string, generation, execBlock uint64, results []store.SweepResult) error {
+	if f.applyErr != nil {
+		err := f.applyErr
+		f.applyErr = nil
+		return err
+	}
+	for _, res := range results {
+		key := hex.EncodeToString(res.Account)
+		row := f.rows[key]
+		if row == nil {
+			row = &sweepRow{}
+			f.rows[key] = row
+		}
+		if row.generation != generation {
+			row.generation, row.attempts = generation, 0
+		}
+		row.attempts++
+		row.lastAttempt = execBlock
+		if res.OK {
+			row.status = "success"
+			row.lastSuccess = execBlock
+			f.balances[key] = res.Balances
+			f.history = append(f.history, historyRec{account: key, block: execBlock})
+		} else {
+			row.status = "failed"
+		}
+	}
+	f.applied = append(f.applied, applyRec{generation: generation, block: execBlock, results: results})
+	return nil
+}
+
+func (f *fakeSnapStore) CompleteSweepGeneration(_ context.Context, _ string, generation uint64) (int64, bool, error) {
+	f.completes++
+	var failed int64
+	for _, row := range f.rows {
+		if row.generation == generation && row.status == "failed" {
+			failed++
+		}
+	}
+	if f.open && f.gen == generation {
+		f.open = false
+		f.completedAt = *f.clock
+		return failed, true, nil
+	}
+	return failed, false, nil
 }
 
 type mcResult struct {
@@ -157,6 +268,19 @@ func requestAccounts(t *testing.T, data []byte) [][]byte {
 	return out
 }
 
+// attemptCounts tallies, per account-hex, how many multicall attempts the
+// chain has served — the "was this account reprocessed?" measure.
+func attemptCounts(t *testing.T, ch *fakeChain) map[string]int {
+	t.Helper()
+	counts := map[string]int{}
+	for _, c := range ch.calls {
+		for _, acct := range requestAccounts(t, c.data) {
+			counts[hex.EncodeToString(acct)]++
+		}
+	}
+	return counts
+}
+
 // perAccountResponder answers each requested Safe individually: Safes in
 // failing revert (success=false), the rest succeed with the given tokens.
 func perAccountResponder(t *testing.T, block uint64, failing map[string]bool, tokens []tokenData) func(common.Address, []byte) ([]byte, error) {
@@ -200,20 +324,53 @@ func unpackRequest(t *testing.T, data []byte) (bool, []capturedCall) {
 	return requireSuccess, out
 }
 
-// harness wires a Snapshotter with a controllable clock.
+// harness wires a Snapshotter over a shared durable fake store with a
+// controllable clock.
 func harness(t *testing.T, registry [][]byte, respond func(common.Address, []byte) ([]byte, error), batchSize int) (*Snapshotter, *fakeSnapStore, *fakeChain, *time.Time) {
 	t.Helper()
-	st := &fakeSnapStore{registry: registry}
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	clockPtr := &clock
+	st := newFakeSnapStore(registry, clockPtr)
 	ch := &fakeChain{respond: respond}
+	s := freshSnapshotter(t, st, ch, clockPtr, batchSize)
+	return s, st, ch, clockPtr
+}
+
+// freshSnapshotter models a PROCESS RESTART: a brand-new Snapshotter (no
+// memory) over the surviving durable store.
+func freshSnapshotter(t *testing.T, st *fakeSnapStore, ch *fakeChain, clock *time.Time, batchSize int) *Snapshotter {
+	t.Helper()
 	s, err := New(st, ch, Config{
 		Engine: "debt_manager", Target: testTarget,
 		Interval: time.Hour, BatchSize: batchSize,
 	})
 	require.NoError(t, err)
-	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
-	s.now = func() time.Time { return clock }
-	return s, st, ch, &clock
+	s.now = func() time.Time { return *clock }
+	return s
 }
+
+// captureWarnings routes slog through a collector for the duration of the
+// test, returning the collected Warn+ messages.
+func captureWarnings(t *testing.T) *[]string {
+	t.Helper()
+	var msgs []string
+	prev := slog.Default()
+	slog.SetDefault(slog.New(warnCollector{msgs: &msgs}))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &msgs
+}
+
+type warnCollector struct{ msgs *[]string }
+
+func (w warnCollector) Enabled(context.Context, slog.Level) bool { return true }
+func (w warnCollector) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelWarn {
+		*w.msgs = append(*w.msgs, r.Message)
+	}
+	return nil
+}
+func (w warnCollector) WithAttrs([]slog.Attr) slog.Handler { return w }
+func (w warnCollector) WithGroup(string) slog.Handler      { return w }
 
 func acct(b byte) []byte {
 	a := make([]byte, 20)
@@ -226,7 +383,8 @@ func acct(b byte) []byte {
 // ---------------------------------------------------------------------------
 
 func TestNewValidation(t *testing.T) {
-	st := &fakeSnapStore{}
+	clock := time.Now()
+	st := newFakeSnapStore(nil, &clock)
 	ch := &fakeChain{}
 	_, err := New(nil, ch, Config{Engine: "e", Target: testTarget, Interval: time.Hour})
 	require.ErrorContains(t, err, "required")
@@ -266,9 +424,10 @@ func TestRequestShape(t *testing.T) {
 }
 
 // TestSweepRotatesInBatches: a 5-safe registry with batch size 2 is consumed
-// across three Steps — one multicall each — in registry order (the store's
-// nonzero-debt-first priority order), stamped with the multicall's execution
-// block; a fourth Step inside the cadence window does nothing.
+// across three Steps — one multicall and one atomic ApplySweepBatch each —
+// in registry (priority) order, stamped with the multicall's execution
+// block and the OPEN generation; a fourth Step finds nothing lagging and
+// completes the generation; a fifth inside the cadence window does nothing.
 func TestSweepRotatesInBatches(t *testing.T) {
 	registry := [][]byte{acct(1), acct(2), acct(3), acct(4), acct(5)}
 	tokens := []tokenData{{Token: tokenUSDC, Amount: big.NewInt(777)}}
@@ -280,69 +439,166 @@ func TestSweepRotatesInBatches(t *testing.T) {
 		require.True(t, advanced)
 	}
 	require.Len(t, ch.calls, 3, "5 safes / batch 2 = 3 multicalls")
-	require.Len(t, st.upserts, 5)
-	for i, up := range st.upserts {
-		require.Equal(t, hex.EncodeToString(registry[i]), up.account, "registry order preserved")
-		require.Equal(t, uint64(12345), up.block)
-		require.Equal(t, map[string]map[string]*big.Int{
-			hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(777)},
-		}, up.balances)
+	require.Equal(t, 1, st.opens, "one generation per sweep")
+	require.Len(t, st.applied, 3)
+	var swept []string
+	for _, rec := range st.applied {
+		require.Equal(t, uint64(1), rec.generation)
+		require.Equal(t, uint64(12345), rec.block)
+		for _, res := range rec.results {
+			require.True(t, res.OK)
+			require.Equal(t, map[string]map[string]*big.Int{
+				hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(777)},
+			}, res.Balances)
+			swept = append(swept, hex.EncodeToString(res.Account))
+		}
 	}
-	require.Equal(t, 1, st.registryCalls, "one registry read per sweep")
+	var want []string
+	for _, a := range registry {
+		want = append(want, hex.EncodeToString(a))
+	}
+	require.Equal(t, want, swept, "registry priority order preserved across batches")
 
+	// Fourth Step: nothing lags → the generation completes (that IS work).
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
-	require.False(t, advanced, "sweep complete and cadence not elapsed")
+	require.True(t, advanced)
+	require.Equal(t, 1, st.completes)
+	require.False(t, st.open)
+
+	// Fifth Step: complete and inside the cadence window — idle.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Len(t, ch.calls, 3, "no further multicalls")
 }
 
-// TestCadenceGating: a completed sweep re-arms only after the configured
-// interval elapses.
+// TestCadenceGating: a completed generation re-arms only after the configured
+// interval elapses past its durable completion stamp.
 func TestCadenceGating(t *testing.T) {
 	s, st, _, clock := harness(t, [][]byte{acct(1)}, uniformResponder(t, 10, nil), 10)
 
-	advanced, err := s.Step(context.Background())
+	advanced, err := s.Step(context.Background()) // opens gen 1, sweeps the safe
+	require.NoError(t, err)
+	require.True(t, advanced)
+	advanced, err = s.Step(context.Background()) // completes gen 1
 	require.NoError(t, err)
 	require.True(t, advanced)
 
 	*clock = clock.Add(59 * time.Minute)
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
-	require.False(t, advanced, "inside the interval: no new sweep")
+	require.False(t, advanced, "inside the interval: no new generation")
+	require.Equal(t, 1, st.opens)
 
 	*clock = clock.Add(2 * time.Minute)
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
-	require.True(t, advanced, "interval elapsed: new sweep starts")
-	require.Equal(t, 2, st.registryCalls, "the new sweep re-reads the registry")
+	require.True(t, advanced, "interval elapsed: a new generation opens and sweeps")
+	require.Equal(t, 2, st.opens)
 }
 
-// TestTriggerResweepRestartsImmediately: a mid-sweep trigger (the runner's
-// post-rewind hook) drops the in-flight queue and the next Step re-reads the
-// registry from scratch — a rewind may have changed it.
-func TestTriggerResweepRestartsImmediately(t *testing.T) {
+// TestRestartLoopConvergence is the startup-resweep durability injection: a
+// multi-account registry is swept by a CRASH LOOP — every Step runs on a
+// brand-new Snapshotter (fresh process, zero memory) over the surviving
+// durable store. The sweep must converge (every account stamped with the
+// current generation) WITHOUT ever reprocessing an already-swept prefix:
+// exactly one multicall attempt per account per generation. Repeated for a
+// second generation to prove the loop, not a lucky first pass.
+func TestRestartLoopConvergence(t *testing.T) {
+	registry := [][]byte{acct(1), acct(2), acct(3), acct(4), acct(5)}
+	_, st, ch, clock := harness(t, registry, uniformResponder(t, 100, nil), 2)
+
+	runCrashLoopSweep := func(wantGen uint64) {
+		t.Helper()
+		// 3 batches + 1 completion, each on a FRESH process.
+		for i := 0; i < 4; i++ {
+			s := freshSnapshotter(t, st, ch, clock, 2)
+			advanced, err := s.Step(context.Background())
+			require.NoError(t, err)
+			require.True(t, advanced)
+		}
+		require.False(t, st.open, "the crash loop must still complete the generation")
+		for _, a := range registry {
+			row := st.rows[hex.EncodeToString(a)]
+			require.NotNil(t, row)
+			require.Equal(t, wantGen, row.generation, "every account converges to the current generation")
+			require.Equal(t, "success", row.status)
+		}
+	}
+
+	runCrashLoopSweep(1)
+	require.Equal(t, 1, st.opens, "a restart RESUMES the open generation — it never opens another")
+	for acctHex, n := range attemptCounts(t, ch) {
+		require.Equal(t, 1, n, "account %s was reprocessed after a crash — the durable queue failed", acctHex)
+	}
+
+	// Second generation after the cadence: the same crash loop, attempts
+	// exactly double (one per generation, still none within a generation).
+	*clock = clock.Add(2 * time.Hour)
+	runCrashLoopSweep(2)
+	require.Equal(t, 2, st.opens)
+	for acctHex, n := range attemptCounts(t, ch) {
+		require.Equal(t, 2, n, "account %s: expected exactly one attempt per generation", acctHex)
+	}
+}
+
+// TestDurableBumpResumesAfterRewindCrash pins the durable post-rewind leg:
+// RewindDerived's in-transaction generation bump (modeled by the fake's
+// bumpGeneration) opens the re-sweep with NO process-memory involvement — a
+// crash that loses the TriggerResweep hook loses nothing, because a fresh
+// process finds the generation OPEN, reads the post-rewind registry, and
+// sweeps exactly it (the dropped old registry's accounts are gone).
+func TestDurableBumpResumesAfterRewindCrash(t *testing.T) {
 	registry := [][]byte{acct(1), acct(2), acct(3)}
-	s, st, _, _ := harness(t, registry, uniformResponder(t, 10, nil), 1)
+	s, st, _, clock := harness(t, registry, uniformResponder(t, 10, nil), 1)
 
-	_, err := s.Step(context.Background()) // consumes acct(1); queue = 2,3
+	_, err := s.Step(context.Background()) // gen 1: sweeps acct(1); 2,3 still lag
 	require.NoError(t, err)
-	require.Equal(t, 1, st.registryCalls)
 
-	st.registry = [][]byte{acct(9)} // post-rewind registry differs
-	s.TriggerResweep()
+	// The rewind: registry shrinks, and the REWIND TRANSACTION bumps the
+	// generation durably. The process crashes before TriggerResweep fires.
+	st.registry = [][]byte{acct(9)}
+	st.bumpGeneration()
 
-	advanced, err := s.Step(context.Background())
+	restarted := freshSnapshotter(t, st, &fakeChain{respond: uniformResponder(t, 11, nil)}, clock, 1)
+	advanced, err := restarted.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Equal(t, 2, st.registryCalls, "resweep must re-read the registry")
-	require.Equal(t, hex.EncodeToString(acct(9)), st.upserts[len(st.upserts)-1].account,
-		"the dropped queue's accounts are not swept; the fresh registry is")
+	require.Equal(t, 1, st.opens, "the rewind's own bump IS the open — no extra generation")
+	last := st.applied[len(st.applied)-1]
+	require.Equal(t, uint64(2), last.generation)
+	require.Len(t, last.results, 1)
+	require.Equal(t, hex.EncodeToString(acct(9)), hex.EncodeToString(last.results[0].Account),
+		"the post-rewind registry is swept; the dropped registry's accounts are not")
 }
 
-// TestZeroAmountsOmittedAndEmptyUpsertClears: zero-amount tokens vanish from
-// the balances map, and a Safe whose entire collateral is zero still gets an
-// upsert with an EMPTY map — wholesale replacement is what clears its stale
-// snapshot rows.
-func TestZeroAmountsOmittedAndEmptyUpsertClears(t *testing.T) {
+// TestTriggerResweepFastPathBypassesCadence: the live hook makes the next
+// Step sweep immediately even though the cadence has not elapsed — the fast
+// path over the durable leg's worst-case one-interval wait.
+func TestTriggerResweepFastPathBypassesCadence(t *testing.T) {
+	s, st, _, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 10, nil), 10)
+
+	for i := 0; i < 2; i++ { // sweep + complete generation 1
+		_, err := s.Step(context.Background())
+		require.NoError(t, err)
+	}
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced, "cadence not elapsed: idle without a trigger")
+
+	s.TriggerResweep()
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the trigger defeats the cadence gate")
+	require.Equal(t, 2, st.opens)
+}
+
+// TestZeroAmountsOmittedAndEmptyResultClears: zero-amount tokens vanish from
+// the balances map, and a Safe whose entire collateral is zero still lands an
+// OK result with an EMPTY map — wholesale replacement is what clears its
+// stale snapshot rows.
+func TestZeroAmountsOmittedAndEmptyResultClears(t *testing.T) {
 	respond := func(_ common.Address, data []byte) ([]byte, error) {
 		n := requestCallCount(t, data)
 		require.Equal(t, 2, n)
@@ -360,60 +616,119 @@ func TestZeroAmountsOmittedAndEmptyUpsertClears(t *testing.T) {
 
 	_, err := s.Step(context.Background())
 	require.NoError(t, err)
-	require.Len(t, st.upserts, 2)
+	require.Len(t, st.applied, 1)
+	results := st.applied[0].results
+	require.Len(t, results, 2)
+	require.True(t, results[0].OK)
 	require.Equal(t, map[string]map[string]*big.Int{
 		hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(1000)},
-	}, st.upserts[0].balances)
-	require.Empty(t, st.upserts[1].balances, "all-zero safe upserts an empty map to clear stale rows")
+	}, results[0].Balances)
+	require.True(t, results[1].OK)
+	require.Empty(t, results[1].Balances, "an all-zero safe lands an OK result with an empty map to clear stale rows")
 }
 
-// TestFailedAccountRetriedBoundedThenDegraded pins the full per-account
-// failure lifecycle: a reverted Safe does not fail its batch (the sibling's
-// upsert lands), is recorded status=failed, joins the immediate-retry queue,
-// gets exactly maxAccountRetries further attempts this sweep — an
-// all-reverted RETRY batch is per-account failure, never the fresh-batch
-// target error — and then the sweep COMPLETES (degraded) instead of wedging.
+// TestAllRevertedBatchIsPerAccountFailure pins the reclassification that
+// un-wedges the old posture: a batch where EVERY collateralOf call reverted
+// is N per-account failures — statuses recorded, WARN emitted, the durable
+// queue ADVANCES through the bounded retry budget, and the generation
+// completes DEGRADED instead of erroring forever. (Batch-level errors are
+// only transport/malformed-response; a systemically broken view surfaces as
+// N degraded accounts, which cannot wedge the sweep.)
+func TestAllRevertedBatchIsPerAccountFailure(t *testing.T) {
+	warnings := captureWarnings(t)
+	a1, a2 := acct(1), acct(2)
+	respond := func(_ common.Address, data []byte) ([]byte, error) {
+		return encodeMulticall(t, 42, []mcResult{{Success: false}, {Success: false}}), nil
+	}
+	s, st, ch, _ := harness(t, [][]byte{a1, a2}, respond, 10)
+
+	// First batch: NO error, statuses recorded as failed, WARN per safe.
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err, "an all-reverted batch is per-account failure, never a batch error")
+	require.True(t, advanced)
+	for _, a := range [][]byte{a1, a2} {
+		row := st.rows[hex.EncodeToString(a)]
+		require.NotNil(t, row, "the failed status must be recorded")
+		require.Equal(t, "failed", row.status)
+		require.Equal(t, 1, row.attempts)
+	}
+	require.NotEmpty(t, *warnings, "the reverts must be surfaced as warnings")
+
+	// The durable retry budget drains: maxAccountRetries further batches,
+	// then the generation COMPLETES degraded — the queue advanced.
+	for i := 0; i < maxAccountRetries; i++ {
+		advanced, err = s.Step(context.Background())
+		require.NoError(t, err)
+		require.True(t, advanced)
+	}
+	require.Len(t, ch.calls, 1+maxAccountRetries)
+	advanced, err = s.Step(context.Background()) // completion
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.False(t, st.open, "the generation completes DEGRADED instead of wedging")
+	require.Equal(t, maxSweepAttempts, st.rows[hex.EncodeToString(a1)].attempts)
+	degraded := false
+	for _, msg := range *warnings {
+		if msg == "collateral snapshot sweep completed DEGRADED — some safes stayed failed through the retry budget" {
+			degraded = true
+		}
+	}
+	require.True(t, degraded, "completion with exhausted safes must alarm DEGRADED")
+
+	// Idle afterwards: the failed safes wait for the next generation.
+	advanced, err = s.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+}
+
+// TestFailedAccountRetriedBoundedThenDegraded pins the mixed-batch failure
+// lifecycle: a reverted Safe does not fail its batch (the sibling's result
+// lands atomically beside its failed status), is retried up to
+// maxAccountRetries further times this generation — lagging accounts first,
+// so retries never starve fresh work — then skipped, and the generation
+// completes DEGRADED.
 func TestFailedAccountRetriedBoundedThenDegraded(t *testing.T) {
 	bad, good := acct(1), acct(2)
 	respond := perAccountResponder(t, 42, map[string]bool{hex.EncodeToString(bad): true},
 		[]tokenData{{Token: tokenUSDC, Amount: big.NewInt(5)}})
 	s, st, ch, _ := harness(t, [][]byte{bad, good}, respond, 10)
 
-	// Fresh batch: good upserts + success record; bad records failed and is
-	// requeued for immediate retry — the sweep is NOT complete yet.
+	// Fresh batch: good lands (status success + balances, one transaction);
+	// bad records failed attempt 1.
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Len(t, st.upserts, 1)
-	require.Equal(t, hex.EncodeToString(good), st.upserts[0].account)
-	require.Equal(t, []sweepRec{{account: hex.EncodeToString(good), block: 42, success: true}}, st.recordsFor(good))
-	require.Equal(t, []sweepRec{{account: hex.EncodeToString(bad), block: 42, success: false}}, st.recordsFor(bad))
+	require.Equal(t, "success", st.rows[hex.EncodeToString(good)].status)
+	require.Equal(t, map[string]map[string]*big.Int{
+		hex.EncodeToString(tokenUSDC.Bytes()): {"collateral": big.NewInt(5)},
+	}, st.balances[hex.EncodeToString(good)])
+	require.Equal(t, "failed", st.rows[hex.EncodeToString(bad)].status)
 
-	// Retry batches: one per Step, all reverting, each recorded — until the
-	// budget (maxAccountRetries) is spent and the sweep completes DEGRADED.
+	// Bounded retries, then completion (degraded).
 	for i := 0; i < maxAccountRetries; i++ {
 		advanced, err = s.Step(context.Background())
-		require.NoError(t, err, "an all-reverted RETRY batch must not be a target error")
+		require.NoError(t, err)
 		require.True(t, advanced)
 	}
 	require.Len(t, ch.calls, 1+maxAccountRetries, "1 fresh + bounded retry multicalls")
-	require.Len(t, st.recordsFor(bad), 1+maxAccountRetries, "every attempt recorded")
-	for _, r := range st.recordsFor(bad) {
-		require.False(t, r.success)
-	}
-	require.Len(t, st.upserts, 1, "the reverting safe never upserts")
+	counts := attemptCounts(t, ch)
+	require.Equal(t, maxSweepAttempts, counts[hex.EncodeToString(bad)])
+	require.Equal(t, 1, counts[hex.EncodeToString(good)], "the succeeded sibling is never re-read")
+	require.Nil(t, st.balances[hex.EncodeToString(bad)], "the reverting safe never lands balances")
 
-	// Sweep is over (degraded): inside the interval nothing more happens —
-	// the failed safe waits for the NEXT sweep, status=failed meanwhile.
+	advanced, err = s.Step(context.Background()) // degraded completion
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.False(t, st.open)
+
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
-	require.False(t, advanced)
-	require.Equal(t, 1, st.registryCalls)
+	require.False(t, advanced, "the failed safe waits for the NEXT generation")
 }
 
 // TestFailedAccountRecoversOnRetry: a Safe that reverts once and then
-// succeeds flips to status=success within the same sweep — the retry queue
-// is a recovery path, not just failure accounting.
+// succeeds flips to status=success within the same generation — the durable
+// retry budget is a recovery path, not just failure accounting.
 func TestFailedAccountRecoversOnRetry(t *testing.T) {
 	flaky, good := acct(1), acct(2)
 	failing := map[string]bool{hex.EncodeToString(flaky): true}
@@ -427,13 +742,15 @@ func TestFailedAccountRecoversOnRetry(t *testing.T) {
 	advanced, err := s.Step(context.Background()) // retry batch: flaky succeeds
 	require.NoError(t, err)
 	require.True(t, advanced)
-	recs := st.recordsFor(flaky)
-	require.Len(t, recs, 2)
-	require.False(t, recs[0].success)
-	require.True(t, recs[1].success, "a successful retry must flip the status to success")
-	require.Equal(t, hex.EncodeToString(flaky), st.upserts[len(st.upserts)-1].account)
+	row := st.rows[hex.EncodeToString(flaky)]
+	require.Equal(t, "success", row.status, "a successful retry must flip the status to success")
+	require.Equal(t, 2, row.attempts)
+	require.NotNil(t, st.balances[hex.EncodeToString(flaky)])
 
-	// Recovered and complete: nothing further inside the interval.
+	advanced, err = s.Step(context.Background()) // clean completion
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.False(t, st.open)
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
 	require.False(t, advanced)
@@ -441,9 +758,9 @@ func TestFailedAccountRecoversOnRetry(t *testing.T) {
 
 // TestZeroCollateralSuccessDistinguishableFromNeverSwept pins the three-way
 // disambiguation at the snapshotter level: a swept all-zero Safe produces a
-// SUCCESS record plus an empty wholesale upsert, while a Safe absent from
-// the registry produces NO record at all — so "empty because read" and
-// "empty because never read" are different states.
+// SUCCESS status plus an empty wholesale balance set (and a history row),
+// while a Safe absent from the registry produces NO row at all — so "empty
+// because read" and "empty because never read" are different states.
 func TestZeroCollateralSuccessDistinguishableFromNeverSwept(t *testing.T) {
 	swept, neverSwept := acct(1), acct(9)
 	s, st, _, _ := harness(t, [][]byte{swept}, uniformResponder(t, 77, nil), 10)
@@ -451,56 +768,18 @@ func TestZeroCollateralSuccessDistinguishableFromNeverSwept(t *testing.T) {
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Equal(t, []sweepRec{{account: hex.EncodeToString(swept), block: 77, success: true}},
-		st.recordsFor(swept), "zero collateral is a SUCCESS outcome")
-	require.Len(t, st.upserts, 1)
-	require.Empty(t, st.upserts[0].balances, "the empty upsert clears any stale rows")
-	require.Empty(t, st.recordsFor(neverSwept), "never-swept means no record, not a failed one")
+	row := st.rows[hex.EncodeToString(swept)]
+	require.NotNil(t, row)
+	require.Equal(t, "success", row.status, "zero collateral is a SUCCESS outcome")
+	require.Equal(t, uint64(77), row.lastSuccess)
+	require.Empty(t, st.balances[hex.EncodeToString(swept)], "the empty wholesale set clears any stale rows")
+	require.Equal(t, []historyRec{{account: hex.EncodeToString(swept), block: 77}}, st.history,
+		"a zero-collateral success still writes its history row")
+	require.Nil(t, st.rows[hex.EncodeToString(neverSwept)], "never-swept means no record, not a failed one")
 }
 
-// TestStartupSweepCoversRewindCrash pins the DURABLE half of the post-rewind
-// re-sweep contract: TriggerResweep is process memory, and a crash between
-// the runner's RewindDerived and the hook loses it — recovery needs no
-// durable marker because a FRESH snapshotter (a restarted process) starts
-// its first sweep unconditionally, superseding any lost re-sweep request.
-func TestStartupSweepCoversRewindCrash(t *testing.T) {
-	// A "restarted process": a brand-new Snapshotter that never saw the
-	// pre-crash TriggerResweep. Its very first Step must sweep.
-	s, st, ch, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 10, nil), 10)
-	advanced, err := s.Step(context.Background())
-	require.NoError(t, err)
-	require.True(t, advanced, "the startup sweep must start with no trigger and no elapsed interval")
-	require.Equal(t, 1, st.registryCalls)
-	require.Len(t, ch.calls, 1)
-}
-
-// TestAllFailedBatchErrors: a FRESH batch where EVERY call reverted is a
-// target failure, not per-safe noise — the queue is untouched, the same
-// batch retries next round, and NO status rows are recorded (the target
-// being down says nothing about individual Safes).
-func TestAllFailedBatchErrors(t *testing.T) {
-	respond := func(_ common.Address, data []byte) ([]byte, error) {
-		return encodeMulticall(t, 42, []mcResult{
-			{Success: false}, {Success: false},
-		}), nil
-	}
-	s, st, ch, _ := harness(t, [][]byte{acct(1), acct(2)}, respond, 10)
-
-	_, err := s.Step(context.Background())
-	require.ErrorContains(t, err, "every collateralOf call")
-	require.Empty(t, st.upserts)
-	require.Empty(t, st.records, "a target-broken batch must not smear failed status over its safes")
-
-	// Queue untouched: the next Step retries the same batch.
-	_, err = s.Step(context.Background())
-	require.ErrorContains(t, err, "every collateralOf call")
-	require.Len(t, ch.calls, 2)
-	require.Equal(t, ch.calls[0].data, ch.calls[1].data)
-	require.Equal(t, 1, st.registryCalls, "a retried batch must not restart the sweep")
-}
-
-// TestTransportErrorLeavesQueue: a failed multicall leaves the queue
-// untouched for retry.
+// TestTransportErrorLeavesQueue: a failed multicall is a batch-level error —
+// the durable queue is untouched and the SAME batch retries next round.
 func TestTransportErrorLeavesQueue(t *testing.T) {
 	failing := true
 	respond := func(_ common.Address, data []byte) ([]byte, error) {
@@ -514,20 +793,22 @@ func TestTransportErrorLeavesQueue(t *testing.T) {
 		}
 		return encodeMulticall(t, 42, results), nil
 	}
-	s, st, _, _ := harness(t, [][]byte{acct(1)}, respond, 10)
+	s, st, ch, _ := harness(t, [][]byte{acct(1)}, respond, 10)
 
 	_, err := s.Step(context.Background())
 	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.Empty(t, st.rows, "a transport error records nothing")
 
 	failing = false
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Len(t, st.upserts, 1)
+	require.Equal(t, ch.calls[0].data, ch.calls[1].data, "the identical batch retries")
+	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
 }
 
-// TestMalformedResponseErrors: garbage bytes from the provider are an error,
-// never a panic and never a partial upsert.
+// TestMalformedResponseErrors: garbage bytes from the provider are a
+// batch-level error — never a panic, never a partial apply.
 func TestMalformedResponseErrors(t *testing.T) {
 	respond := func(common.Address, []byte) ([]byte, error) {
 		return []byte{0x01, 0x02, 0x03}, nil
@@ -536,27 +817,49 @@ func TestMalformedResponseErrors(t *testing.T) {
 
 	_, err := s.Step(context.Background())
 	require.Error(t, err)
-	require.Empty(t, st.upserts)
+	require.Empty(t, st.applied)
+	require.Empty(t, st.rows)
 }
 
-// TestEmptyRegistryCountsAsSweep: an empty registry (early backfill) marks
-// the sweep done so the store is not re-queried every round.
-func TestEmptyRegistryCountsAsSweep(t *testing.T) {
+// TestApplyErrorLeavesDurableQueue: a failed ApplySweepBatch (the store
+// refused the transaction) leaves the durable queue untouched — the same
+// batch re-pulls and re-applies next round, and the atomic batch write means
+// no partial state exists to reconcile.
+func TestApplyErrorLeavesDurableQueue(t *testing.T) {
+	s, st, ch, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 42, nil), 10)
+	st.applyErr = errors.New("db connection lost")
+
+	_, err := s.Step(context.Background())
+	require.ErrorContains(t, err, "db connection lost")
+	require.Empty(t, st.rows, "the refused transaction wrote nothing")
+
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, ch.calls[0].data, ch.calls[1].data, "the identical batch retries")
+	require.Equal(t, "success", st.rows[hex.EncodeToString(acct(1))].status)
+}
+
+// TestEmptyRegistryCompletesGeneration: an empty registry (early backfill)
+// opens and immediately completes its generation, then idles on the cadence —
+// the store is not hammered with work-batch reads every round.
+func TestEmptyRegistryCompletesGeneration(t *testing.T) {
 	s, st, ch, clock := harness(t, nil, uniformResponder(t, 1, nil), 10)
 
 	advanced, err := s.Step(context.Background())
 	require.NoError(t, err)
-	require.False(t, advanced)
+	require.True(t, advanced, "opening + completing the empty generation is work")
 	require.Empty(t, ch.calls)
-	require.Equal(t, 1, st.registryCalls)
+	require.Equal(t, 1, st.opens)
+	require.False(t, st.open)
 
 	advanced, err = s.Step(context.Background())
 	require.NoError(t, err)
 	require.False(t, advanced)
-	require.Equal(t, 1, st.registryCalls, "inside the interval the registry is not re-read")
+	require.Equal(t, 1, st.workBatches, "an idle round reads only the generation row, never the work batch")
 
 	*clock = clock.Add(2 * time.Hour)
 	_, err = s.Step(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 2, st.registryCalls)
+	require.Equal(t, 2, st.opens, "the cadence re-arms from the durable completion stamp")
 }

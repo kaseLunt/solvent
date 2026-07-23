@@ -427,60 +427,9 @@ func TestSaveSnapshotsCancelLeavesNoPartialRows(t *testing.T) {
 	require.Zero(t, n, "a canceled bulk write must be all-or-nothing")
 }
 
-// TestRecordSnapshotSweepStates pins the three-way disambiguation: success
-// stamps attempt+success blocks, failure stamps attempt only (retaining the
-// last success block), status always reflects the LAST attempt, and an
-// account never attempted has no row at all.
-func TestRecordSnapshotSweepStates(t *testing.T) {
-	s := testDeriveStore(t)
-	ctx := context.Background()
-	engine := "debt_manager"
-	a1, a2 := []byte{0xA1}, []byte{0xA2}
-
-	readRow := func(account []byte) (attempt, success uint64, status string, found bool) {
-		err := s.pool.QueryRow(ctx,
-			`SELECT last_attempt_block, last_success_block, status FROM snapshot_sweeps
-			 WHERE engine = $1 AND account = $2`, engine, account).Scan(&attempt, &success, &status)
-		if err != nil {
-			return 0, 0, "", false
-		}
-		return attempt, success, status, true
-	}
-
-	// Batch 1 at block 100: a1 fails (never succeeded), a2 succeeds with
-	// ZERO collateral — its success row is what distinguishes "swept and
-	// empty" from "never swept".
-	require.NoError(t, s.RecordSnapshotSweep(ctx, engine, 100, []SweepOutcome{
-		{Account: a1, Success: false},
-		{Account: a2, Success: true},
-	}))
-	attempt, success, status, found := readRow(a1)
-	require.True(t, found)
-	require.Equal(t, [3]any{uint64(100), uint64(0), "failed"}, [3]any{attempt, success, status})
-	attempt, success, status, found = readRow(a2)
-	require.True(t, found)
-	require.Equal(t, [3]any{uint64(100), uint64(100), "success"}, [3]any{attempt, success, status})
-
-	// Batch 2 at block 200: a1 recovers, a2 now fails — its last success
-	// block survives so staleness is measurable.
-	require.NoError(t, s.RecordSnapshotSweep(ctx, engine, 200, []SweepOutcome{
-		{Account: a1, Success: true},
-		{Account: a2, Success: false},
-	}))
-	attempt, success, status, _ = readRow(a1)
-	require.Equal(t, [3]any{uint64(200), uint64(200), "success"}, [3]any{attempt, success, status})
-	attempt, success, status, _ = readRow(a2)
-	require.Equal(t, [3]any{uint64(200), uint64(100), "failed"}, [3]any{attempt, success, status})
-
-	// Never-attempted account: no row.
-	_, _, _, found = readRow([]byte{0xA9})
-	require.False(t, found, "never-swept means NO row, not a zero row")
-
-	// Empty outcome set and empty account are refused/no-ops.
-	require.NoError(t, s.RecordSnapshotSweep(ctx, engine, 300, nil))
-	require.ErrorContains(t, s.RecordSnapshotSweep(ctx, engine, 300,
-		[]SweepOutcome{{Account: nil, Success: true}}), "empty account")
-}
+// NOTE: TestRecordSnapshotSweepStates was retired with RecordSnapshotSweep —
+// the block-stamp/status/staleness transitions it pinned are covered (at the
+// atomic ApplySweepBatch API that replaced it) by TestApplySweepBatchLifecycle.
 
 // TestSweepGenerationLifecycle pins the durable generation state machine:
 // never-opened → open (increment, completed_at cleared) → guarded completion
