@@ -60,6 +60,6 @@ changes; CI green on GitHub for every push.
 
 ## Review record
 
-- status: draft
-- owner ratification: pending
+- status: ratified
+- owner ratification: Kase Lunt, 2026-07-22
 - next review: P2 exit (Positions & prices complete)

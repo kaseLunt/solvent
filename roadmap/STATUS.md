@@ -1,6 +1,6 @@
 ---
 active_phase: P2
-active_task: none
+active_task: W1
 project_state: active
 writer_mode: serial
 parallel_readers: allowed
@@ -26,13 +26,11 @@ drift without changing authority.
 
 ## Current integration task
 
-Read `active_task` above. When it is `none`, the next transition is owner activation of W1
-(Phase 2: positions & prices) — set `active_task: W1` and W1's `status: active` in one coherent
-transition, after ratifying the seed decisions.
+Read `active_task` above. Its work object under `roadmap/work/` defines scope, acceptance, and
+handoff; the Phase 2 implementation plan is that work's first deliverable.
 
 ## Blockers
 
-- Owner ratification pending: D-001/D-002 (control plane + commit policy seeds), VISION.md, H0.
 - External: Aave V4 whitelabel AIP not yet executed (governance ARFC 2026-07-14) — gates the
   Observatory's second OP stream, not current work.
 - Remote CI is present and green but not branch-protection-required; enforcement posture remains
@@ -40,4 +38,4 @@ transition, after ratifying the seed decisions.
 
 ## Next owner transition
 
-Ratify D-001/D-002 + VISION/H0, then activate W1 and author the Phase 2 plan before any code.
+W1 achievement review at P2 exit: receipts stamped, evidence cross-checked, then P3 entry.

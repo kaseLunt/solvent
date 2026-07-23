@@ -26,7 +26,7 @@ claim the gate is automated unless a validator actually enforces it.
 
 | ID | Work item | Phase | Depends on | Evidence target | Status |
 | --- | --- | --- | --- | --- | --- |
-| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | candidate |
+| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | active |
 
 The row above projects `work/W1-phase2-positions-prices.md`. A work object may not appear here
 before its file exists, and a hand-maintained status mismatch is an error.

@@ -2,7 +2,8 @@
 id: D-001
 type: decision
 title: Proposed repo-native project control plane
-status: proposed
+status: accepted
+approved_by: Kase Lunt (ratified 2026-07-22)
 date: 2026-07-22
 supersedes: []
 updated: 2026-07-22
@@ -21,11 +22,11 @@ Adopt `roadmap/` as the durable governance layer described by `SYSTEM.md` and `R
 serial-writer mode: one repository writer/integrator, with parallel readers allowed. Keep external
 scheduling separate from repository authority.
 
-## Ratification required
+## Ratification
 
-This seed record is not acceptance. The owner must replace project placeholders, review the
-authority and writer-mode contract, and change `status` to `accepted` explicitly. Until then the
-control plane remains bootstrap/unverified.
+Ratified by the owner 2026-07-22 after placeholders were replaced with project content (VISION,
+ROADMAP, STATUS, H0, W1) and the serial-writer contract was reviewed. Serial-writer mode mirrors
+the runtime model already accepted in D-004.
 
 ## Consequences if accepted
 

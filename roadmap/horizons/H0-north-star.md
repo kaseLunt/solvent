@@ -2,7 +2,7 @@
 id: H0
 type: goal
 title: The live, correct risk companion ether.fi never shipped
-status: candidate
+status: committed
 review_by: 2026-08-31
 informs: []
 updated: 2026-07-22
