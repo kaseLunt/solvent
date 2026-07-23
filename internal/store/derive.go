@@ -1287,43 +1287,6 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 	return tx.Commit(ctx)
 }
 
-// SweepGenerations reads the generation stamps of the given accounts'
-// snapshot_sweeps rows for engine, keyed by lowercase account-hex; accounts
-// with no sweep row are absent from the map (success and failed rows both
-// carry a stamp). Additive read for the snapshotter's durable-progress
-// reconciliation (fix wave 6): ApplySweepBatch returns its transaction
-// Commit's error, so an ERRORED apply may nonetheless have COMMITTED (the
-// ack was lost — the same commit indeterminacy the derive lifecycle
-// documents); probing the errored batch's accounts against the generation it
-// was applied under yields durable evidence either way, so real progress can
-// reset the snapshotter's stale-round streak instead of feeding a false
-// all-endpoints-stale DEGRADED.
-func (s *Store) SweepGenerations(ctx context.Context, engine string, accounts [][]byte) (map[string]uint64, error) {
-	out := make(map[string]uint64, len(accounts))
-	if len(accounts) == 0 {
-		return out, nil
-	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT account, generation FROM snapshot_sweeps WHERE engine = $1 AND account = ANY($2)`,
-		engine, accounts)
-	if err != nil {
-		return nil, fmt.Errorf("query sweep generations for %q (%d accounts): %w", engine, len(accounts), err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var account []byte
-		var gen uint64
-		if err := rows.Scan(&account, &gen); err != nil {
-			return nil, fmt.Errorf("scan sweep generation row: %w", err)
-		}
-		out[hex.EncodeToString(account)] = gen
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate sweep generations for %q: %w", engine, err)
-	}
-	return out, nil
-}
-
 // LatestRateIndex returns engine's most recent rate observation for asset of
 // the given kind at or below atOrBelow, plus the block it was observed at.
 // found is false when no observation exists in range.

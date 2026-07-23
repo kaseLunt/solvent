@@ -164,17 +164,17 @@ type fakeSnapStore struct {
 	balances map[string]map[string]map[string]*big.Int // account-hex → wholesale snapshot balances
 	history  []historyRec                              // collateral history writes, in order
 
-	genReads, opens, workBatches, completes, stampReads int
+	genReads, opens, workBatches, completes int
 
 	applyErr error // one-shot ApplySweepBatch failure injection (pre-commit)
 	// applyCommitErr is the one-shot COMMIT-then-lost-ack injection: the
 	// batch persists durably and ONLY the returned ack is an error — the
 	// store's commit indeterminacy (ApplySweepBatch returns its Commit's
-	// error), which the snapshotter's reconciliation exists to resolve.
+	// error). Since fix wave 7, Step treats this identically to any other
+	// non-stale apply error: an immediate, conservative telemetry reset —
+	// there is no reconciliation probe to resolve it against.
 	applyCommitErr error
-	// sweepGensErr is a one-shot SweepGenerations failure injection.
-	sweepGensErr error
-	applied      []applyRec
+	applied        []applyRec
 }
 
 func newFakeSnapStore(registry [][]byte, clock *time.Time) *fakeSnapStore {
@@ -276,22 +276,6 @@ func (f *fakeSnapStore) ApplySweepBatch(_ context.Context, _ string, generation,
 		return err
 	}
 	return nil
-}
-
-func (f *fakeSnapStore) SweepGenerations(_ context.Context, _ string, accounts [][]byte) (map[string]uint64, error) {
-	f.stampReads++
-	if f.sweepGensErr != nil {
-		err := f.sweepGensErr
-		f.sweepGensErr = nil
-		return nil, err
-	}
-	out := map[string]uint64{}
-	for _, acct := range accounts {
-		if row := f.rows[hex.EncodeToString(acct)]; row != nil {
-			out[hex.EncodeToString(acct)] = row.generation
-		}
-	}
-	return out, nil
 }
 
 func (f *fakeSnapStore) CompleteSweepGeneration(_ context.Context, _ string, generation uint64) (int64, bool, error) {
@@ -1262,113 +1246,74 @@ func TestStaleStreakResetsOnGenerationCompletion(t *testing.T) {
 	require.Equal(t, 1, countAllStale(warnings))
 }
 
-// TestLostAckApplyReconcilesAsDurableProgress is the Codex counter-schedule
-// regression for the stale streak: a stale round (streak 1 of 2) is followed
-// by an ApplySweepBatch that COMMITS but returns an error — commit
-// indeterminacy: the durable rows advanced, only the ack was lost. Without
-// reconciliation the streak would survive that REAL progress and the next
-// stale round would fire the "all endpoints stale" DEGRADED warning across
-// it. Step remembers the errored batch and, at its next round BEFORE any
-// processing, finds its accounts stamped with the applied generation —
-// durable evidence the batch landed — and resets the streak (and the
-// endpoint preference) so the false DEGRADED never fires; a genuine fresh
-// full cycle afterwards still does.
-func TestLostAckApplyReconcilesAsDurableProgress(t *testing.T) {
-	warnings := captureWarnings(t)
-	a1, a2 := acct(1), acct(2)
-	respond := uniformResponder(t, 42, nil)
+// TestIndeterminateApplyErrorResetsStreakImmediately is fix wave 7's
+// replacement for the retired reconciliation probe (Codex finding
+// 019f8fb5-d6d9-7ef0-89c2-8d75cc54bc9c: the one-shot negative
+// SweepGenerations probe could race late commit visibility — pgx may return
+// a COMMIT error while the server is still resolving it, MVCC serves the old
+// stamp to the probe, remembered evidence clears, and a real commit later
+// lands with no reset). The fix deletes the probe outright: the stale streak
+// and its DEGRADED warning are TELEMETRY bounds, not a correctness
+// mechanism — durable sweep generations, not this counter, gate the work —
+// so ANY non-stale ApplySweepBatch error is now conservatively treated as
+// progress IMMEDIATELY, in the very round that saw it. There is no
+// remembered state and nothing to probe next round; store.SweepGenerations
+// no longer exists (removed with its only caller), so there is nothing left
+// to call.
+func TestIndeterminateApplyErrorResetsStreakImmediately(t *testing.T) {
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil)
 	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
 
 	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
-	st := newFakeSnapStore([][]byte{a1, a2}, &clock)
-	s := freshSnapshotter(t, st, ch, &clock, 1) // batch size 1: a1's batch, then a2's
-
-	staleRound(t, s, st) // gen 1, batch [a1]: streak 1 of 2
-	require.Equal(t, 1, s.staleRotations)
-
-	// The retry's apply COMMITS (a1's rows land durably) but the ack is
-	// lost: Step reports the error and remembers the batch.
-	st.applyCommitErr = errors.New("connection reset during commit ack")
-	_, err := s.Step(context.Background())
-	require.ErrorContains(t, err, "connection reset")
-	require.Equal(t, uint64(1), st.rows[hex.EncodeToString(a1)].generation, "the batch durably landed")
-	require.Equal(t, 1, s.staleRotations, "the lost ack alone reveals nothing — the streak stands until reconciled")
-	require.NotEmpty(t, s.unackedAccounts)
-
-	// The next Step reconciles FIRST: a1's generation stamp is durable
-	// evidence of progress → streak and preference reset — and only then
-	// does the round proceed to a2's batch, which is stale again. The
-	// streak restarts at 1, NOT 2: no false DEGRADED across real progress.
-	staleRound(t, s, st)
-	require.Equal(t, 1, s.staleRotations, "durable progress must break the streak")
-	require.Empty(t, s.unackedAccounts, "reconciliation is one-shot")
-	require.Zero(t, countAllStale(warnings),
-		"a stale streak must never span reconciled durable progress")
-
-	// A genuine second consecutive stale round — no intervening progress —
-	// still completes a full cycle and fires.
-	staleRound(t, s, st)
-	require.Equal(t, 1, countAllStale(warnings))
-}
-
-// TestFailedApplyWithoutDurableEvidenceKeepsStreak: the reconciliation probe
-// must not mistake a genuinely-failed apply for progress. The apply is
-// refused BEFORE commit (nothing landed), so the probe finds no generation
-// stamp: the remembered set clears with NO reset, the streak carries, and
-// the next stale round completes a genuine full cycle.
-func TestFailedApplyWithoutDurableEvidenceKeepsStreak(t *testing.T) {
-	warnings := captureWarnings(t)
-	respond := uniformResponder(t, 42, nil)
-	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
-
-	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
-	st := newFakeSnapStore([][]byte{acct(1)}, &clock)
+	st := newFakeSnapStore(registry, &clock)
 	s := freshSnapshotter(t, st, ch, &clock, 10)
 
-	staleRound(t, s, st)                           // streak 1 of 2
-	st.applyErr = errors.New("db connection lost") // refused pre-commit: nothing landed
-	_, err := s.Step(context.Background())
-	require.ErrorContains(t, err, "db connection lost")
-	require.NotEmpty(t, s.unackedAccounts, "any errored apply is remembered — indeterminacy is the default")
-	require.Empty(t, st.rows)
-
-	staleRound(t, s, st)
-	require.Empty(t, s.unackedAccounts, "the probe clears the set evidence or not")
-	require.Equal(t, 2, s.staleRotations, "no durable evidence: the streak must carry")
-	require.Equal(t, 1, countAllStale(warnings), "a genuine full stale cycle still fires")
-}
-
-// TestReconcileProbeErrorKeepsRememberedSet: an errored reconciliation read
-// is a Step error and must NOT consume the remembered set — the following
-// Step retries the probe and still detects the landed batch as progress.
-func TestReconcileProbeErrorKeepsRememberedSet(t *testing.T) {
-	warnings := captureWarnings(t)
-	a1, a2 := acct(1), acct(2)
-	respond := uniformResponder(t, 42, nil)
-	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
-
-	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
-	st := newFakeSnapStore([][]byte{a1, a2}, &clock)
-	s := freshSnapshotter(t, st, ch, &clock, 1)
-
 	staleRound(t, s, st) // streak 1 of 2
+	require.Equal(t, 1, s.staleRotations)
+	require.NotEqual(t, -1, s.preferredStart, "the stale round pinned an endpoint preference")
+
+	// An ambiguous (non-stale) apply error — modeling either a pre-commit
+	// refusal or a lost commit ack, Step no longer distinguishes them.
 	st.applyCommitErr = errors.New("connection reset during commit ack")
 	_, err := s.Step(context.Background())
 	require.ErrorContains(t, err, "connection reset")
+	require.Zero(t, s.staleRotations, "an indeterminate commit error resets the streak immediately, not next round")
+	require.Equal(t, -1, s.preferredStart, "and releases the endpoint preference immediately")
+}
 
-	// The probe itself fails: Step errors, the set survives for the next
-	// round, the streak is untouched.
-	st.sweepGensErr = errors.New("db read timeout")
-	_, err = s.Step(context.Background())
-	require.ErrorContains(t, err, "db read timeout")
-	require.NotEmpty(t, s.unackedAccounts, "an errored probe must not consume the evidence set")
+// TestIndeterminateApplyBreaksStaleStreakAcrossRounds is the Codex
+// counter-schedule regression, now benign under the conservative-reset fix:
+// a stale round (streak 1 of 2) is followed by an ambiguous ApplySweepBatch
+// error, which resets the streak on the spot. A following stale round is
+// streak 1 again, NOT 2 — no false "all endpoints stale" DEGRADED spans the
+// ambiguous commit. Only a genuine THIRD stale round, with no intervening
+// apply error, completes a real full cycle and fires.
+func TestIndeterminateApplyBreaksStaleStreakAcrossRounds(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil)
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	staleRound(t, s, st) // streak 1 of 2
 	require.Equal(t, 1, s.staleRotations)
 
-	// The retried probe succeeds and finds the landed batch: progress, so
-	// the following stale round restarts the streak instead of completing a
-	// false cycle.
+	st.applyErr = errors.New("db connection lost")
+	_, err := s.Step(context.Background())
+	require.ErrorContains(t, err, "db connection lost")
+	require.Zero(t, s.staleRotations, "the ambiguous apply error resets the streak on the spot")
+
+	staleRound(t, s, st) // streak 1 again, NOT 2 — no false DEGRADED
+	require.Equal(t, 1, s.staleRotations)
+	require.Zero(t, countAllStale(warnings), "a stale streak must never span an ambiguous apply error")
+
+	// A genuine second consecutive stale round — no intervening apply error —
+	// still completes a real full cycle and fires. (TestAllEndpointsStaleLogsDegradedAfterFullCycle
+	// covers the same "no intervening applies" DEGRADED shape independently.)
 	staleRound(t, s, st)
-	require.Empty(t, s.unackedAccounts)
-	require.Equal(t, 1, s.staleRotations)
-	require.Zero(t, countAllStale(warnings))
+	require.Equal(t, 1, countAllStale(warnings), "a genuine full stale cycle still fires")
 }

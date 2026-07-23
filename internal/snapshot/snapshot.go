@@ -56,12 +56,15 @@
 // stands (nothing wedges), but the operator learns rotation alone cannot
 // save this round. An ERRORED ApplySweepBatch may nonetheless have COMMITTED
 // (it returns its transaction Commit's error — commit indeterminacy, a lost
-// ack): Step remembers that batch's accounts and generation and, at its next
-// round BEFORE any processing, probes their durable generation stamps
-// (store.SweepGenerations) — a stamp matching the applied generation is
-// durable evidence the batch landed, which counts as progress (streak and
-// preference reset), so a false all-endpoints-stale DEGRADED can never span
-// real durable progress. An individual collateralOf revert
+// ack, or even a race where pgx surfaces a commit error while the server is
+// still resolving it and a later real commit lands): the stale streak and
+// its DEGRADED warning are TELEMETRY bounds, not a correctness mechanism —
+// correctness lives in the durable generation model, not this counter — so
+// Step conservatively treats ANY non-stale apply error as progress,
+// resetting the streak and releasing the endpoint preference immediately
+// (no next-round probe, no remembered state). This errs toward suppressing
+// a false all-endpoints-stale diagnosis; at worst a genuine DEGRADED fires
+// one full cycle later than it otherwise would. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -129,11 +132,6 @@ type Store interface {
 	SweepWorkBatch(ctx context.Context, engine string, generation uint64, maxAttempts, limit int) ([][]byte, error)
 	ApplySweepBatch(ctx context.Context, engine string, generation, execBlock uint64, results []store.SweepResult) error
 	CompleteSweepGeneration(ctx context.Context, engine string, generation uint64) (failed int64, stamped bool, err error)
-	// SweepGenerations reads the given accounts' durable generation stamps
-	// (lowercase account-hex → generation; rowless accounts absent) — the
-	// reconciliation probe resolving an errored ApplySweepBatch's commit
-	// indeterminacy at the next Step.
-	SweepGenerations(ctx context.Context, engine string, accounts [][]byte) (map[string]uint64, error)
 }
 
 var _ Store = (*store.Store)(nil)
@@ -256,11 +254,12 @@ type Snapshotter struct {
 	// DEGRADED log. It resets on EVERY progress transition: a batch actually
 	// applying, a generation completing (stamped or superseded), any
 	// observed generation change (rewind/re-sweep bumps, cadence opens —
-	// tracked via lastSeenGeneration), and reconciled durable progress from
-	// an errored-but-committed apply (unackedAccounts below). The DEGRADED
-	// warning therefore requires a FRESH full endpoint cycle of consecutive
-	// stale rounds; a stale round in an older generation never counts
-	// toward it.
+	// tracked via lastSeenGeneration), and ANY non-stale ApplySweepBatch
+	// error (see Step: an ambiguous/indeterminate commit is conservatively
+	// treated as progress, immediately, with no reconciliation probe). The
+	// DEGRADED warning therefore requires a FRESH full endpoint cycle of
+	// consecutive stale rounds; a stale round in an older generation never
+	// counts toward it.
 	staleRotations int
 
 	// lastSeenGeneration is the generation the previous working Step ran
@@ -280,22 +279,6 @@ type Snapshotter struct {
 	// shared-hint-routed sweep would bounce back to the stale endpoint
 	// forever.
 	preferredStart int
-
-	// unackedAccounts/unackedGeneration remember the account set and
-	// generation of the last ERRORED ApplySweepBatch: that error may be a
-	// lost ack on a transaction that actually COMMITTED (ApplySweepBatch
-	// returns its Commit's error — commit indeterminacy). The next Step
-	// reconciles BEFORE any processing: any of those accounts stamped with
-	// that generation is durable evidence the batch landed — progress,
-	// resetting the stale streak and the endpoint preference. One-shot: the
-	// set clears after any successful reconciliation read, evidence or not
-	// (an errored read keeps it for the following Step). The evidence probe
-	// is deliberately conservative-positive: a retried failed account
-	// already carries the generation stamp from its recorded failure, which
-	// can read as progress — acceptable for what is a telemetry-streak
-	// reset, never a correctness input.
-	unackedAccounts   [][]byte
-	unackedGeneration uint64
 }
 
 // New builds a Snapshotter. Engine, target and a positive interval are
@@ -330,40 +313,6 @@ func (s *Snapshotter) recordProgress() {
 	s.preferredStart = -1
 }
 
-// reconcileUnacked resolves the commit indeterminacy of the last ERRORED
-// ApplySweepBatch (see unackedAccounts): if any remembered account's durable
-// sweep row is stamped with the generation that batch was applied under, the
-// batch COMMITTED and only the ack was lost — real progress, so the stale
-// streak and the endpoint preference reset instead of accumulating across it
-// toward a false all-endpoints-stale DEGRADED. One-shot: a successful probe
-// clears the remembered set whatever it finds (no evidence = the apply
-// genuinely failed and the batch re-pulls as before); an ERRORED probe keeps
-// the set and surfaces as a Step error so the next round retries it.
-func (s *Snapshotter) reconcileUnacked(ctx context.Context) error {
-	if len(s.unackedAccounts) == 0 {
-		return nil
-	}
-	stamps, err := s.store.SweepGenerations(ctx, s.cfg.Engine, s.unackedAccounts)
-	if err != nil {
-		return fmt.Errorf("snapshotter %q: reconcile unacked sweep batch (generation %d): %w",
-			s.cfg.Engine, s.unackedGeneration, err)
-	}
-	landed := false
-	for _, acct := range s.unackedAccounts {
-		if stamps[hex.EncodeToString(acct)] == s.unackedGeneration {
-			landed = true
-			break
-		}
-	}
-	if landed {
-		slog.Info("errored sweep batch reconciled as durably applied — the apply committed and only its ack was lost; counting it as progress",
-			"engine", s.cfg.Engine, "generation", s.unackedGeneration, "accounts", len(s.unackedAccounts))
-		s.recordProgress()
-	}
-	s.unackedAccounts, s.unackedGeneration = nil, 0
-	return nil
-}
-
 // TriggerResweep requests an immediate sweep: the next Step bypasses the
 // cadence gate. Wired to the derivation runner's onRewind hook as the LIVE
 // fast path — the durable post-rewind leg is RewindDerived's own
@@ -384,13 +333,6 @@ func (s *Snapshotter) TriggerResweep() {
 // is due. Errors leave the durable queue untouched — the same batch re-pulls
 // next round, and ApplySweepBatch's idempotence makes redo safe.
 func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
-	// BEFORE anything else: resolve a previous round's errored-but-possibly-
-	// committed apply against the durable rows, so real progress breaks the
-	// stale streak before this round can extend it.
-	if err := s.reconcileUnacked(ctx); err != nil {
-		return false, err
-	}
-
 	gen, open, completedAt, err := s.store.SweepGeneration(ctx, s.cfg.Engine)
 	if err != nil {
 		return false, fmt.Errorf("snapshotter %q: read sweep generation: %w", s.cfg.Engine, err)
@@ -491,12 +433,19 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			return false, nil
 		}
 		// Durable queue untouched IF the transaction really failed — but
-		// ApplySweepBatch returns its Commit's error, so this error may be a
-		// lost ack on a batch that durably LANDED. Remember the batch so the
-		// next Step reconciles it against the rows before extending the
-		// stale streak across real progress; the re-pull/re-apply posture is
-		// unaffected either way (ApplySweepBatch is idempotent under replay).
-		s.unackedAccounts, s.unackedGeneration = batch, gen
+		// ApplySweepBatch returns its Commit's error, so this error may be an
+		// AMBIGUOUS commit (a lost ack on a batch that durably landed, or
+		// even a race where pgx surfaces a commit error while the server is
+		// still resolving it and a later real commit lands). The stale
+		// streak and its DEGRADED warning are TELEMETRY bounds, not a
+		// correctness mechanism — durable sweep generations, not this
+		// counter, gate the work — so an ambiguous commit is conservatively
+		// treated as progress RIGHT NOW: reset the streak and release the
+		// endpoint preference. This errs toward suppressing a false
+		// all-endpoints-stale diagnosis; at worst a genuine DEGRADED fires
+		// one full cycle later. The re-pull/re-apply posture is unaffected
+		// either way (ApplySweepBatch is idempotent under replay).
+		s.recordProgress()
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)
 	}
 	// Progress: reset the stale streak and the endpoint preference so a
