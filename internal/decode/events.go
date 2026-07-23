@@ -281,12 +281,19 @@ func (ATokenTransfer) Name() string { return "ATokenTransfer" }
 // uint256 value, uint256 balanceIncrease, uint256 index) -- Index is the
 // liquidity index (ray) at mint time.
 //
-// Value is NOT the action principal: per Aave's ScaledBalanceTokenBase, Value
-// = actionAmount + BalanceIncrease (BalanceIncrease is interest accrued since
-// the account's last index checkpoint, folded into the same mint); scaled
-// deltas must be derived from the deployed implementation's source (see plan
-// Task 6). Value==BalanceIncrease therefore means actionAmount == 0: pure
-// interest capitalization, zero principal minted.
+// Value is NOT the action principal, and a Mint event does NOT imply a mint
+// action. Per Aave's ScaledBalanceTokenBase there are three emission paths:
+//   - _mintScaled (direct supply/deposit): Value = actionAmount + BalanceIncrease;
+//     here Value==BalanceIncrease means actionAmount == 0 (pure interest
+//     capitalization, zero principal minted).
+//   - _burnScaled (withdrawal where accrued interest EXCEEDS the burn action):
+//     a Mint is emitted with Value = BalanceIncrease - actionAmount — the
+//     plus-formula does NOT apply on this path.
+//   - transfers: interest-only Mints may be emitted for either party's accrual.
+// BalanceIncrease is interest accrued since the account's last index
+// checkpoint in every path. Scaled deltas must be derived from the deployed
+// implementation's source, branching on the originating action, never from
+// Value alone (see plan Task 6).
 type ATokenMint struct {
 	Caller, OnBehalfOf            common.Address
 	Value, BalanceIncrease, Index *big.Int
