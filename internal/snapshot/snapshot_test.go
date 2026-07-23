@@ -1256,10 +1256,20 @@ func TestStaleStreakResetsOnGenerationCompletion(t *testing.T) {
 // and its DEGRADED warning are TELEMETRY bounds, not a correctness
 // mechanism — durable sweep generations, not this counter, gate the work —
 // so ANY non-stale ApplySweepBatch error is now conservatively treated as
-// progress IMMEDIATELY, in the very round that saw it. There is no
-// remembered state and nothing to probe next round; store.SweepGenerations
-// no longer exists (removed with its only caller), so there is nothing left
-// to call.
+// progress IMMEDIATELY, in the very round that saw it, FOR THAT TELEMETRY.
+// There is no remembered state and nothing to probe next round;
+// store.SweepGenerations no longer exists (removed with its only caller), so
+// there is nothing left to call.
+//
+// Fix wave 8 (Codex finding 019f8fda-34f9-7b82-9db2-89c6b317bb4a) narrowed
+// this further: the original fix wave 7 code ALSO released the endpoint
+// ROUTING preference on this same ambiguous error, which was wrong — an
+// ambiguous error on the preferred endpoint proves nothing about whether
+// that endpoint is still worth avoiding, and releasing the preference let
+// the very next retry fall back to the shared hint, which could bounce
+// straight back to an endpoint a previous round explicitly rejected as
+// stale. resetStaleTelemetry now resets ONLY staleRotations; the preference
+// survives until GENUINE progress (recordProgress).
 func TestIndeterminateApplyErrorResetsStreakImmediately(t *testing.T) {
 	registry := [][]byte{acct(1)}
 	respond := uniformResponder(t, 150, nil)
@@ -1271,7 +1281,8 @@ func TestIndeterminateApplyErrorResetsStreakImmediately(t *testing.T) {
 
 	staleRound(t, s, st) // streak 1 of 2
 	require.Equal(t, 1, s.staleRotations)
-	require.NotEqual(t, -1, s.preferredStart, "the stale round pinned an endpoint preference")
+	pinnedPreference := s.preferredStart
+	require.NotEqual(t, -1, pinnedPreference, "the stale round pinned an endpoint preference")
 
 	// An ambiguous (non-stale) apply error — modeling either a pre-commit
 	// refusal or a lost commit ack, Step no longer distinguishes them.
@@ -1279,7 +1290,8 @@ func TestIndeterminateApplyErrorResetsStreakImmediately(t *testing.T) {
 	_, err := s.Step(context.Background())
 	require.ErrorContains(t, err, "connection reset")
 	require.Zero(t, s.staleRotations, "an indeterminate commit error resets the streak immediately, not next round")
-	require.Equal(t, -1, s.preferredStart, "and releases the endpoint preference immediately")
+	require.Equal(t, pinnedPreference, s.preferredStart,
+		"the endpoint preference SURVIVES an ambiguous apply error — releasing it here would let the very next retry bounce back to the endpoint a previous round explicitly rejected as stale")
 }
 
 // TestIndeterminateApplyBreaksStaleStreakAcrossRounds is the Codex
@@ -1316,4 +1328,44 @@ func TestIndeterminateApplyBreaksStaleStreakAcrossRounds(t *testing.T) {
 	// covers the same "no intervening applies" DEGRADED shape independently.)
 	staleRound(t, s, st)
 	require.Equal(t, 1, countAllStale(warnings), "a genuine full stale cycle still fires")
+}
+
+// TestRecurrentApplyErrorsDeferAllEndpointsStaleIndefinitely is fix wave 8's
+// counter-schedule test documenting the honest, ACCEPTED bound on the
+// all-endpoints-stale DEGRADED telemetry: because EVERY non-stale
+// ApplySweepBatch error resets the stale-round streak (resetStaleTelemetry),
+// an adversarial alternating schedule of (N-1 stale refusals, then one
+// ambiguous apply error) — repeated without end — never accumulates a full
+// N-round streak, so the warning never fires. This is NOT "at worst one
+// cycle late" (the old, inaccurate claim this fix wave retired): a
+// recurring pattern defers it FOREVER. That is accepted, not a bug to patch
+// with suppression machinery — this exact alternating pattern already
+// floods the operator log with apply errors (the primary signal), and the
+// all-endpoints-stale warning exists for the QUIET failure mode where every
+// endpoint serves stale state without any apply attempt ever erroring.
+// TestAllEndpointsStaleLogsDegradedAfterFullCycle covers that genuine quiet
+// cycle (no intervening apply errors) and must still pass unmodified.
+func TestRecurrentApplyErrorsDeferAllEndpointsStaleIndefinitely(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil) // both endpoints equally frozen
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	n := ch.EndpointCount() // 2: a full cycle needs 2 consecutive stale rounds
+	for cycle := 0; cycle < 3; cycle++ {
+		for i := 0; i < n-1; i++ {
+			staleRound(t, s, st) // N-1 stale refusals: never alone reaches the threshold
+		}
+		st.applyErr = errors.New("apply error resets the streak, over and over")
+		_, err := s.Step(context.Background())
+		require.ErrorContains(t, err, "apply error resets the streak")
+		require.Zero(t, s.staleRotations, "each ambiguous apply error resets the streak — the documented accepted behavior")
+	}
+
+	require.Zero(t, countAllStale(warnings),
+		"an alternating stale/apply-error pattern defers the all-endpoints-stale warning indefinitely — accepted, see Step's DEGRADED log site")
 }

@@ -60,11 +60,23 @@
 // still resolving it and a later real commit lands): the stale streak and
 // its DEGRADED warning are TELEMETRY bounds, not a correctness mechanism —
 // correctness lives in the durable generation model, not this counter — so
-// Step conservatively treats ANY non-stale apply error as progress,
-// resetting the streak and releasing the endpoint preference immediately
-// (no next-round probe, no remembered state). This errs toward suppressing
-// a false all-endpoints-stale diagnosis; at worst a genuine DEGRADED fires
-// one full cycle later than it otherwise would. An individual collateralOf revert
+// Step conservatively treats ANY non-stale apply error as progress for the
+// stale-round TELEMETRY only (resetStaleTelemetry), immediately, with no
+// next-round probe and no remembered state — but retains the endpoint
+// preference: an ambiguous error proves nothing about whether the preferred
+// endpoint is still worth avoiding, and releasing it here would let the very
+// next retry fall back to the shared hint, which may still point at an
+// endpoint a previous round explicitly rejected as stale, bouncing the sweep
+// straight back to it. Only GENUINE progress — a nil ApplySweepBatch return,
+// a generation completion stamping, or an observed generation change — also
+// releases the preference (recordProgress). Because recurrent non-stale
+// apply errors reset the telemetry streak every time, a persistent
+// alternating stale/apply-error pattern defers the all-endpoints-stale
+// DEGRADED warning indefinitely; this is accepted rather than patched with
+// suppression machinery, because that pattern already floods the log with
+// apply errors — the primary operator signal — and the DEGRADED warning
+// exists for the QUIET failure mode where every endpoint serves stale state
+// without any apply attempt ever erroring. An individual collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -254,12 +266,16 @@ type Snapshotter struct {
 	// DEGRADED log. It resets on EVERY progress transition: a batch actually
 	// applying, a generation completing (stamped or superseded), any
 	// observed generation change (rewind/re-sweep bumps, cadence opens —
-	// tracked via lastSeenGeneration), and ANY non-stale ApplySweepBatch
-	// error (see Step: an ambiguous/indeterminate commit is conservatively
-	// treated as progress, immediately, with no reconciliation probe). The
-	// DEGRADED warning therefore requires a FRESH full endpoint cycle of
-	// consecutive stale rounds; a stale round in an older generation never
-	// counts toward it.
+	// tracked via lastSeenGeneration), via recordProgress; and ALSO on any
+	// non-stale ApplySweepBatch error, via resetStaleTelemetry alone (see
+	// Step: an ambiguous/indeterminate commit is conservatively treated as
+	// progress for this counter, immediately, with no reconciliation probe —
+	// but that call does NOT touch preferredStart below). The DEGRADED
+	// warning therefore requires a FRESH full endpoint cycle of consecutive
+	// stale rounds with no intervening apply error either; recurrent
+	// non-stale apply errors reset this counter each time, so a persistent
+	// alternating stale/apply-error pattern defers the warning indefinitely.
+	// Accepted: see the DEGRADED log site in Step for why.
 	staleRotations int
 
 	// lastSeenGeneration is the generation the previous working Step ran
@@ -271,13 +287,21 @@ type Snapshotter struct {
 	// (-1 = none): while set, every multicall starts its endpoint walk at
 	// this index via chain.CallFrom instead of the failover's shared active
 	// hint. Set one past the endpoint that served the last stale batch,
-	// advanced one past each further stale server, and released (-1) on ANY
-	// progress transition. It is deliberately NOT the shared hint: a shared
-	// exclusion cannot stick — another caller's success on the rejected
-	// endpoint (the walker's BlockNumber against an endpoint whose eth_call
-	// state is frozen) legitimately re-pins the shared hint there, and a
-	// shared-hint-routed sweep would bounce back to the stale endpoint
-	// forever.
+	// advanced one past each further stale server, and released (-1) only on
+	// GENUINE progress — a nil ApplySweepBatch return, a generation
+	// completion stamping, or an observed generation change — via
+	// recordProgress. An ambiguous (non-stale) ApplySweepBatch error resets
+	// ONLY the stale-round telemetry (resetStaleTelemetry), never this
+	// field: an ambiguous error proves nothing about whether the preferred
+	// endpoint is still worth avoiding, and releasing the preference there
+	// would let the very next retry fall back to the shared hint — which may
+	// still point at an endpoint a previous round explicitly rejected as
+	// stale, bouncing the sweep straight back to it. It is deliberately NOT
+	// the shared hint itself: a shared exclusion cannot stick — another
+	// caller's success on the rejected endpoint (the walker's BlockNumber
+	// against an endpoint whose eth_call state is frozen) legitimately
+	// re-pins the shared hint there, and a shared-hint-routed sweep would
+	// bounce back to the stale endpoint forever.
 	preferredStart int
 }
 
@@ -305,11 +329,35 @@ func New(st Store, ch Chain, cfg Config) (*Snapshotter, error) {
 	return &Snapshotter{store: st, chain: ch, cfg: cfg, now: time.Now, preferredStart: -1}, nil
 }
 
-// recordProgress resets the caller-scoped failover state on any progress
-// transition: the stale-round streak restarts, and the persistent endpoint
-// preference releases back to the shared routing hint.
-func (s *Snapshotter) recordProgress() {
+// resetStaleTelemetry resets ONLY the stale-round streak — the
+// all-endpoints-stale DEGRADED telemetry — without releasing the
+// caller-scoped endpoint preference. This is the correct call for a
+// non-stale ("ambiguous") ApplySweepBatch error: the commit outcome is
+// indeterminate (see Step), so treating it as progress for the TELEMETRY
+// suppresses a false all-endpoints-stale diagnosis, but the preference is a
+// ROUTING decision, not a telemetry counter — an ambiguous error on the
+// preferred endpoint proves nothing about whether that endpoint is still
+// worth avoiding, so releasing it here would let the very next retry fall
+// back to the shared hint, which may still point at an endpoint a previous
+// round explicitly rejected as stale, bouncing the sweep straight back to
+// it. Recurrent non-stale apply errors reset this counter every time they
+// occur; a persistent alternating stale/apply-error pattern therefore
+// defers the all-endpoints-stale warning indefinitely — accepted, see the
+// DEGRADED log site in Step for why.
+func (s *Snapshotter) resetStaleTelemetry() {
 	s.staleRotations = 0
+}
+
+// recordProgress resets the caller-scoped failover state on GENUINE
+// progress — a nil ApplySweepBatch return, a generation completion
+// stamping, or an observed generation change (rewind/re-sweep bumps,
+// cadence opens): the stale-round streak restarts (via resetStaleTelemetry)
+// AND the persistent endpoint preference releases back to the shared
+// routing hint. Do NOT call this for an ambiguous (non-stale)
+// ApplySweepBatch error — call resetStaleTelemetry alone; see its doc and
+// the Step call site for why the preference must survive that case.
+func (s *Snapshotter) recordProgress() {
+	s.resetStaleTelemetry()
 	s.preferredStart = -1
 }
 
@@ -426,6 +474,17 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 			}
 			s.staleRotations++
 
+			// This threshold is telemetry, not a correctness gate — the
+			// durable generation model already guarantees eventual
+			// convergence (see the package doc). Its bound is honest, not
+			// "at worst one cycle late": recurrent non-stale apply errors
+			// reset this counter each time (resetStaleTelemetry, called on
+			// the ambiguous-error branch below), so a persistent alternating
+			// stale/apply-error pattern defers this warning indefinitely.
+			// Accepted: that pattern already floods the log with apply
+			// errors — the primary operator signal; this warning exists for
+			// the QUIET failure mode where every endpoint serves stale state
+			// without any apply attempt ever erroring.
 			if n := s.chain.EndpointCount(); n > 0 && s.staleRotations >= n {
 				slog.Warn("collateral snapshot sweep DEGRADED: all endpoints stale — cycled through every rpc endpoint without landing a batch",
 					"engine", s.cfg.Engine, "generation", gen, "endpoints", n, "staleRotations", s.staleRotations)
@@ -440,12 +499,30 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		// streak and its DEGRADED warning are TELEMETRY bounds, not a
 		// correctness mechanism — durable sweep generations, not this
 		// counter, gate the work — so an ambiguous commit is conservatively
-		// treated as progress RIGHT NOW: reset the streak and release the
-		// endpoint preference. This errs toward suppressing a false
-		// all-endpoints-stale diagnosis; at worst a genuine DEGRADED fires
-		// one full cycle later. The re-pull/re-apply posture is unaffected
-		// either way (ApplySweepBatch is idempotent under replay).
-		s.recordProgress()
+		// treated as progress for THAT TELEMETRY, right now: resetStaleTelemetry
+		// restarts the streak. Recurrent non-stale apply errors reset this
+		// counter each time; a persistent alternating stale/apply-error
+		// pattern therefore defers the all-endpoints-stale warning
+		// indefinitely. Accepted: that pattern already floods the log with
+		// apply errors — the primary operator signal; this warning exists
+		// for the QUIET failure mode where every endpoint serves stale state
+		// without any apply attempt ever erroring.
+		//
+		// The endpoint PREFERENCE is deliberately NOT released here (unlike
+		// recordProgress on a genuine-progress path): an ambiguous error
+		// proves nothing about whether the preferred endpoint — the one
+		// that just served a batch whose landing we can't confirm — is
+		// still worth avoiding. Releasing it would let the very next retry
+		// fall back to the shared hint, which may still point at an
+		// endpoint a previous round explicitly rejected as stale (Codex
+		// regression 019f8fda-34f9-7b82-9db2-89c6b317bb4a: preference→B,
+		// ambiguous error on B, preference released, next retry bounces
+		// back to rejected A). Only GENUINE progress — a nil
+		// ApplySweepBatch return, a generation completion stamping, or an
+		// observed generation change — releases the preference, via
+		// recordProgress. The re-pull/re-apply posture is unaffected either
+		// way (ApplySweepBatch is idempotent under replay).
+		s.resetStaleTelemetry()
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)
 	}
 	// Progress: reset the stale streak and the endpoint preference so a
