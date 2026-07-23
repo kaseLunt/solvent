@@ -551,8 +551,9 @@ func TestApplyDerivedCrossChainCursorRejection(t *testing.T) {
 // chain-wide reorg epoch; from that instant EVERY engine on the chain is
 // refused further ApplyDerived (even across a process crash — the epoch is a
 // row, not memory) until that engine acknowledges by RewindDerived; engines
-// ack independently; an engine with no cursor yet acks implicitly at first
-// write.
+// ack independently; an engine with no cursor yet on a chain with recorded
+// epochs must bootstrap-ack via RewindDerived (implicit first-write ack
+// exists only on epoch-free chains).
 func TestReorgEpochCrashWindow(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -593,9 +594,13 @@ func TestReorgEpochCrashWindow(t *testing.T) {
 	require.NoError(t, s.RewindDerived(ctx, "debt_manager", 10, 95))
 	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10, []PositionEvent{aNext}, 101))
 
-	// a brand-new engine (no cursor row) acks implicitly at first write
+	// a brand-new engine (no cursor row) on a chain that HAS epochs gets no
+	// implicit ack: it must bootstrap via RewindDerived before first write
 	fresh := pe(100, 9, 0xAA, 0xBB, "collateral", 1)
 	fresh.Engine = "fresh_engine"
+	err = s.ApplyDerived(ctx, "fresh_engine", 10, []PositionEvent{fresh}, 100)
+	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
+	require.NoError(t, s.RewindDerived(ctx, "fresh_engine", 10, 100))
 	require.NoError(t, s.ApplyDerived(ctx, "fresh_engine", 10, []PositionEvent{fresh}, 100))
 
 	// ...and is then gated by the NEXT epoch like everyone else
@@ -605,4 +610,186 @@ func TestReorgEpochCrashWindow(t *testing.T) {
 	fresh2.BlockNumber = 101
 	err = s.ApplyDerived(ctx, "fresh_engine", 10, []PositionEvent{fresh2}, 101)
 	require.ErrorContains(t, err, "unacknowledged reorg epoch")
+}
+
+// TestRewindDerivedUsesDeepestUnackedTarget: acking every epoch obliges the
+// rebuild to reach the DEEPEST unacknowledged rewind target, not merely the
+// caller's toBlock — stacked epochs (rewound to 50, then 80) with a caller
+// passing 80 must still purge events in (50, 80].
+func TestRewindDerivedUsesDeepestUnackedTarget(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	events := []PositionEvent{
+		pe(45, 1, 0xAA, 0xBB, "collateral", 10),
+		pe(60, 2, 0xAA, 0xBB, "collateral", 20),
+		pe(90, 3, 0xAA, 0xBB, "collateral", 40),
+	}
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10, events, 90))
+
+	// stacked raw rewinds: epoch1 rewound_to=50, then epoch2 rewound_to=80
+	require.NoError(t, s.Rewind(ctx, "op:aave", 10, 50, []byte{0x50}))
+	require.NoError(t, s.Rewind(ctx, "op:aave", 10, 80, []byte{0x80}))
+
+	// caller names the shallow target 80; the effective target must be 50
+	require.NoError(t, s.RewindDerived(ctx, "debt_manager", 10, 80))
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM position_events").Scan(&n))
+	require.Equal(t, 1, n) // events at 60 AND 90 deleted; only block-45 survives
+	require.Equal(t, map[string]string{
+		"bb/collateral": "10@45",
+	}, balanceRows(t, s, "debt_manager", []byte{0xAA}, "event"))
+
+	block, found, err := s.DeriveCursor(ctx, "debt_manager")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(50), block) // cursor at the effective target, not the caller's 80
+
+	var acked, maxEpoch int64
+	require.NoError(t, s.pool.QueryRow(ctx,
+		"SELECT acked_epoch FROM derive_cursors WHERE engine = 'debt_manager'").Scan(&acked))
+	require.NoError(t, s.pool.QueryRow(ctx,
+		"SELECT MAX(epoch) FROM reorg_epochs WHERE chain_id = 10").Scan(&maxEpoch))
+	require.Equal(t, maxEpoch, acked) // both epochs acked in the same call
+
+	// the engine may immediately re-derive the purged range
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10,
+		[]PositionEvent{pe(60, 4, 0xAA, 0xBB, "collateral", 20)}, 90))
+	require.Equal(t, "30@60",
+		balanceRows(t, s, "debt_manager", []byte{0xAA}, "event")["bb/collateral"])
+}
+
+// TestRewindDerivedShallowerCallerTargetLowered: even a SINGLE unacked epoch
+// (rewound_to=50) lowers a caller's shallower toBlock=80 to 50 — the ack must
+// never cover blocks the rebuild did not reach.
+func TestRewindDerivedShallowerCallerTargetLowered(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	events := []PositionEvent{
+		pe(45, 1, 0xAA, 0xBB, "collateral", 10),
+		pe(60, 2, 0xAA, 0xBB, "collateral", 20),
+	}
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10, events, 60))
+	require.NoError(t, s.Rewind(ctx, "op:aave", 10, 50, []byte{0x50}))
+
+	require.NoError(t, s.RewindDerived(ctx, "debt_manager", 10, 80))
+
+	block, found, err := s.DeriveCursor(ctx, "debt_manager")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(50), block) // rebuild landed at the epoch's 50, not the caller's 80
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM position_events WHERE block_number > 50").Scan(&n))
+	require.Equal(t, 0, n)
+	require.Equal(t, map[string]string{
+		"bb/collateral": "10@45",
+	}, balanceRows(t, s, "debt_manager", []byte{0xAA}, "event"))
+}
+
+// TestRewindDerivedWrongChainRejected: a RewindDerived naming a chain the
+// engine's cursor is not bound to must refuse with
+// ErrDeriveCursorChainMismatch BEFORE deleting or acking anything.
+func TestRewindDerivedWrongChainRejected(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10,
+		[]PositionEvent{pe(100, 1, 0xAA, 0xBB, "debt", 10)}, 100))
+	require.NoError(t, s.Rewind(ctx, "op:aave", 10, 95, []byte{0x95}))
+
+	err := s.RewindDerived(ctx, "debt_manager", 999, 50)
+	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM position_events").Scan(&n))
+	require.Equal(t, 1, n) // nothing deleted
+	require.Equal(t, map[string]string{
+		"bb/debt": "10@100",
+	}, balanceRows(t, s, "debt_manager", []byte{0xAA}, "event")) // balances untouched
+
+	var lastBlock uint64
+	var acked, maxEpoch int64
+	require.NoError(t, s.pool.QueryRow(ctx,
+		"SELECT last_block, acked_epoch FROM derive_cursors WHERE engine = 'debt_manager'").Scan(&lastBlock, &acked))
+	require.Equal(t, uint64(100), lastBlock) // cursor untouched
+	require.NoError(t, s.pool.QueryRow(ctx,
+		"SELECT MAX(epoch) FROM reorg_epochs WHERE chain_id = 10").Scan(&maxEpoch))
+	require.Less(t, acked, maxEpoch) // chain 10's epoch NOT acked by the refused call
+}
+
+// TestNewEngineRequiresBootstrapAckWhenEpochsExist: on a chain with recorded
+// reorg epochs, an engine with no cursor row gets no implicit first-write ack
+// — ApplyDerived refuses until a RewindDerived bootstrap has acked.
+func TestNewEngineRequiresBootstrapAckWhenEpochsExist(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.Rewind(ctx, "op:aave", 10, 95, []byte{0x95}))
+
+	ev := pe(100, 1, 0xAA, 0xBB, "collateral", 5)
+	err := s.ApplyDerived(ctx, "debt_manager", 10, []PositionEvent{ev}, 100)
+	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, "SELECT count(*) FROM position_events").Scan(&n))
+	require.Equal(t, 0, n) // refused batch persisted nothing
+
+	// bootstrap: RewindDerived creates the cursor and acks every epoch
+	require.NoError(t, s.RewindDerived(ctx, "debt_manager", 10, 100))
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10, []PositionEvent{ev}, 100))
+	require.Equal(t, "5@100",
+		balanceRows(t, s, "debt_manager", []byte{0xAA}, "event")["bb/collateral"])
+}
+
+// TestSentinelErrorsMatchable: refusal errors carry their sentinels through
+// the contextual wrapping, so callers can branch with errors.Is instead of
+// substring matching.
+func TestSentinelErrorsMatchable(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10,
+		[]PositionEvent{pe(100, 1, 0xAA, 0xBB, "debt", 10)}, 100))
+
+	err := s.ApplyDerived(ctx, "debt_manager", 10,
+		[]PositionEvent{pe(90, 2, 0xAA, 0xBB, "debt", 5)}, 90)
+	require.ErrorIs(t, err, ErrDeriveCursorRegression)
+
+	alien := pe(200, 3, 0xAA, 0xBB, "debt", 5)
+	alien.ChainID = 999
+	err = s.ApplyDerived(ctx, "debt_manager", 999, []PositionEvent{alien}, 200)
+	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
+}
+
+// TestBalancesForRejectsDualSourceConflict: an (asset, side) carrying BOTH an
+// event- and a snapshot-sourced row violates source exclusivity — BalancesFor
+// must refuse rather than let scan order nondeterministically pick a winner.
+func TestBalancesForRejectsDualSourceConflict(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+
+	// overlapping sources on account 0xAA: event AND snapshot both claim bb/collateral
+	require.NoError(t, s.ApplyDerived(ctx, engine, 10,
+		[]PositionEvent{pe(100, 1, 0xAA, 0xBB, "collateral", 111)}, 100))
+	require.NoError(t, s.UpsertSnapshotBalances(ctx, engine, []byte{0xAA},
+		map[string]map[string]*big.Int{"bb": {"collateral": big.NewInt(500)}}, 100))
+
+	_, err := s.BalancesFor(ctx, engine, []byte{0xAA})
+	require.ErrorIs(t, err, ErrBalanceSourceConflict)
+
+	// non-overlapping account: event owns bb/collateral, snapshot owns bb/debt
+	require.NoError(t, s.ApplyDerived(ctx, engine, 10,
+		[]PositionEvent{pe(100, 2, 0xAB, 0xBB, "collateral", 7)}, 100))
+	require.NoError(t, s.UpsertSnapshotBalances(ctx, engine, []byte{0xAB},
+		map[string]map[string]*big.Int{"bb": {"debt": big.NewInt(9)}}, 100))
+
+	balances, err := s.BalancesFor(ctx, engine, []byte{0xAB})
+	require.NoError(t, err)
+	assetHex := hex.EncodeToString([]byte{0xBB})
+	require.Equal(t, big.NewInt(7), balances[assetHex]["collateral"])
+	require.Equal(t, big.NewInt(9), balances[assetHex]["debt"])
 }
