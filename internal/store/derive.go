@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -433,11 +434,17 @@ func normalizePayload(p map[string]string) map[string]string {
 // ErrDeriveCursorChainMismatch before anything is deleted or acked; the
 // cursor upsert's conflict arm deliberately never rebinds chain_id.
 //
-// Snapshot-sourced balance rows are deliberately untouched: they are owned
-// by the snapshotter, whose re-sweep after a rewind is crash-safe by
-// construction — the runner's onRewind hook covers the live process, and a
-// restarted process always performs a full startup sweep (see
-// internal/snapshot), so no durable post-rewind marker is needed here.
+// Snapshot invalidation is part of this SAME transaction: snapshot-sourced
+// position_balances rows and snapshot_sweeps status rows are deleted for
+// accounts of this engine left with NO surviving debt-side position_events
+// (their registry membership was reorged away — keeping their rows would
+// present collateral, or sweep history, for accounts that no longer exist),
+// and the engine's sweep_generations.current_generation is bumped. The bump
+// durably OPENS the post-rewind re-sweep in the same commit as the epoch ack:
+// every surviving account's sweep row now lags the new generation, so a crash
+// anywhere after this call still leaves the re-sweep owed and resumable. The
+// runner's onRewind hook remains the LIVE fast path only (see
+// internal/snapshot).
 func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64, toBlock uint64) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -510,6 +517,39 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 		WHERE engine = $1 AND chain_id = $2 AND side <> '' AND delta IS NOT NULL
 		GROUP BY engine, account, asset, side`, engine, chainID); err != nil {
 		return fmt.Errorf("rebuild position balances: %w", err)
+	}
+
+	// Reorg-orphaned snapshot invalidation (see the doc comment): an account
+	// with no surviving debt-side event was never — as far as canonical
+	// history is concerned — in the Safe registry, so its snapshot-observed
+	// collateral rows and sweep status rows describe a phantom.
+	if _, err := tx.Exec(ctx, `DELETE FROM position_balances pb
+		WHERE pb.engine = $1 AND pb.source = 'snapshot'
+		  AND NOT EXISTS (
+			SELECT 1 FROM position_events e
+			WHERE e.engine = $1 AND e.chain_id = $2 AND e.side = 'debt' AND e.account = pb.account
+		  )`, engine, chainID); err != nil {
+		return fmt.Errorf("delete orphaned snapshot balances: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM snapshot_sweeps sw
+		WHERE sw.engine = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM position_events e
+			WHERE e.engine = $1 AND e.chain_id = $2 AND e.side = 'debt' AND e.account = sw.account
+		  )`, engine, chainID); err != nil {
+		return fmt.Errorf("delete orphaned sweep status rows: %w", err)
+	}
+	// Durably OPEN the post-rewind re-sweep, atomic with the ack: bump the
+	// engine's sweep generation so every surviving account lags it. The same
+	// upsert OpenSweepGeneration uses — a crash between this commit and the
+	// snapshotter's next Step loses nothing (the open generation IS the
+	// durable re-sweep request).
+	if _, err := tx.Exec(ctx, `INSERT INTO sweep_generations (engine, current_generation, opened_at, completed_at)
+		VALUES ($1, 1, now(), NULL)
+		ON CONFLICT (engine) DO UPDATE
+		SET current_generation = sweep_generations.current_generation + 1,
+		    opened_at = now(), completed_at = NULL`, engine); err != nil {
+		return fmt.Errorf("open post-rewind sweep generation: %w", err)
 	}
 
 	// The conflict arm never touches chain_id: the binding was verified above
@@ -776,34 +816,53 @@ func (s *Store) SnapshotAccounts(ctx context.Context, engine string) ([][]byte, 
 	return out, nil
 }
 
-// SaveSnapshot writes one snapshots-table row: a balance view for account at
-// block, as JSONB {asset-hex: {side: decimal-string}} (the BalancesFor shape
-// with amounts stringified — JSON numbers cannot carry uint256 exactly).
-// Re-saving the same (engine, account, block) key replaces the row wholesale.
+// SaveSnapshot writes one snapshots-table row: a SIDE-SCOPED balance view for
+// account at block. The input keeps the BalancesFor shape (asset-hex → side →
+// amount) for caller convenience, but the document must be SINGLE-SIDE —
+// every entry naming the same side — and the persisted JSONB is the same
+// side-scoped {"side": s, "balances": {asset-hex: decimal-string}} shape
+// SaveSnapshots writes (decimal strings because JSON numbers cannot carry
+// uint256 exactly). Re-saving the same (engine, account, block) key replaces
+// the row wholesale.
 //
-// AS-OF DISCIPLINE (fix wave): a snapshots row claims its whole document was
-// observed at block — so callers must never mix sides observed at different
-// blocks into one document (debt_manager debt is event-derived truth at the
-// derive through-block, while its collateral is a multicall read at some
-// OTHER block; combining them here would lie about as-of semantics).
-// Cross-side composition is a READ-TIME concern (P3), not a storage-time
-// merge. The runner writes side-scoped documents via SaveSnapshots (the bulk
-// form, whose SnapshotDoc shape carries an explicit "side" marker); this
-// per-row form predates it and is retained for compatibility.
+// AS-OF DISCIPLINE (fix wave, tightened in the sweep-durability wave from a
+// documented convention to an ENFORCED refusal): a snapshots row claims its
+// whole document was observed at block — a MIXED-SIDE document is refused,
+// because the two sides of a debt_manager position are observed at DIFFERENT
+// blocks (debt is event-derived truth at the derive through-block; collateral
+// is a multicall read at its own execution block), and combining them here
+// would lie about as-of semantics. Cross-side composition is a READ-TIME
+// concern (P3), not a storage-time merge. An EMPTY balances map is refused
+// too (no side can be derived from it) — use SaveSnapshots, whose SnapshotDoc
+// carries the side explicitly, for empty zero-position documents.
 func (s *Store) SaveSnapshot(ctx context.Context, engine string, account []byte, block uint64, balances map[string]map[string]*big.Int) error {
-	doc := make(map[string]map[string]string, len(balances))
+	docSide := ""
+	flat := make(map[string]string, len(balances))
 	for assetHex, sides := range balances {
 		if _, err := hex.DecodeString(assetHex); err != nil {
 			return fmt.Errorf("snapshot asset key %q: %w", assetHex, err)
 		}
-		doc[assetHex] = make(map[string]string, len(sides))
 		for side, amount := range sides {
+			if side == "" {
+				return fmt.Errorf("snapshot balance %s: empty side", assetHex)
+			}
+			if docSide == "" {
+				docSide = side
+			}
+			if side != docSide {
+				return fmt.Errorf("snapshot document mixes sides %q and %q: a snapshots row is single-side (as-of honesty; cross-side composition is a read-time concern)",
+					docSide, side)
+			}
 			if amount == nil {
 				return fmt.Errorf("snapshot balance %s/%s: nil amount", assetHex, side)
 			}
-			doc[assetHex][side] = amount.String()
+			flat[assetHex] = amount.String()
 		}
 	}
+	if docSide == "" {
+		return fmt.Errorf("snapshot document for account %x carries no balances: no side can be derived — use SaveSnapshots for explicit-side empty documents", account)
+	}
+	doc := map[string]any{"side": docSide, "balances": flat}
 	if _, err := s.pool.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
 		VALUES ($1,$2,$3,$4,now())
 		ON CONFLICT (engine, account, block_number) DO UPDATE
@@ -945,6 +1004,260 @@ func (s *Store) RecordSnapshotSweep(ctx context.Context, engine string, block ui
 	}
 	if err := br.Close(); err != nil {
 		return fmt.Errorf("close sweep batch for %q at %d: %w", engine, block, err)
+	}
+	return tx.Commit(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// Durable sweep generations — the snapshotter's crash-resumable work queue.
+// (Sweep-durability wave; see migration 00003 for the model.)
+// ---------------------------------------------------------------------------
+
+// SweepGeneration reads engine's durable sweep-generation state
+// (sweep_generations): the current generation number, whether that generation
+// is OPEN (opened but not completed — the restart-resume signal: a fresh
+// process seeing open=true resumes the lagging set instead of opening a new
+// generation), and, when closed, the time it completed (the cadence anchor).
+// generation 0 with open=false means no sweep has ever been opened.
+func (s *Store) SweepGeneration(ctx context.Context, engine string) (generation uint64, open bool, completedAt time.Time, err error) {
+	var completed *time.Time
+	err = s.pool.QueryRow(ctx,
+		`SELECT current_generation, completed_at FROM sweep_generations WHERE engine = $1`,
+		engine).Scan(&generation, &completed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, time.Time{}, nil
+	}
+	if err != nil {
+		return 0, false, time.Time{}, fmt.Errorf("read sweep generation for %q: %w", engine, err)
+	}
+	if completed == nil {
+		return generation, true, time.Time{}, nil
+	}
+	return generation, false, *completed, nil
+}
+
+// OpenSweepGeneration opens a new sweep generation for engine — the ONE
+// durable statement that makes every registry account lag (their
+// snapshot_sweeps rows carry an older generation) and therefore owe work.
+// Increments (or creates at 1), stamps opened_at, clears completed_at;
+// returns the newly-opened generation. RewindDerived performs the identical
+// bump inside its own transaction for the post-rewind re-sweep.
+func (s *Store) OpenSweepGeneration(ctx context.Context, engine string) (uint64, error) {
+	var gen uint64
+	if err := s.pool.QueryRow(ctx, `INSERT INTO sweep_generations (engine, current_generation, opened_at, completed_at)
+		VALUES ($1, 1, now(), NULL)
+		ON CONFLICT (engine) DO UPDATE
+		SET current_generation = sweep_generations.current_generation + 1,
+		    opened_at = now(), completed_at = NULL
+		RETURNING current_generation`, engine).Scan(&gen); err != nil {
+		return 0, fmt.Errorf("open sweep generation for %q: %w", engine, err)
+	}
+	return gen, nil
+}
+
+// SweepWorkBatch returns up to limit accounts of engine's Safe registry (the
+// same distinct-debt-account set SnapshotAccounts serves) that still owe work
+// under generation — the DURABLE queue read:
+//
+//   - LAGGING accounts first: no snapshot_sweeps row at all, or a row stamped
+//     by an OLDER generation, ordered ascending by that stamp — oldest-first
+//     fairness is inherent (the least-recently-swept drain before anything
+//     repeats, and a crash-resumed process continues exactly where the last
+//     one stopped without re-reading already-stamped accounts).
+//   - Then current-generation FAILED accounts still inside the durable retry
+//     budget (attempts < maxAttempts) — bounded immediate retries; an account
+//     that spent the budget is skipped for this generation (it stays
+//     status='failed' until the next one).
+//
+// Within one generation bucket, nonzero-debt accounts lead (the
+// liquidation-relevant set), then bytewise ascending for determinism. An
+// EMPTY result means the generation is COMPLETE (CompleteSweepGeneration
+// stamps it).
+func (s *Store) SweepWorkBatch(ctx context.Context, engine string, generation uint64, maxAttempts, limit int) ([][]byte, error) {
+	rows, err := s.pool.Query(ctx, `SELECT r.account
+		FROM (
+			SELECT e.account, COALESCE(b.has_debt, false) AS has_debt
+			FROM (SELECT DISTINCT account FROM position_events WHERE engine = $1 AND side = 'debt') e
+			LEFT JOIN (
+				SELECT account, bool_or(amount <> 0) AS has_debt
+				FROM position_balances
+				WHERE engine = $1 AND side = 'debt' AND source = 'event'
+				GROUP BY account
+			) b ON b.account = e.account
+		) r
+		LEFT JOIN snapshot_sweeps sw ON sw.engine = $1 AND sw.account = r.account
+		WHERE sw.account IS NULL
+		   OR sw.generation < $2
+		   OR (sw.generation = $2 AND sw.status = 'failed' AND sw.attempts < $3)
+		ORDER BY COALESCE(sw.generation, -1) ASC, r.has_debt DESC, r.account ASC
+		LIMIT $4`,
+		engine, generation, maxAttempts, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query sweep work batch for %q generation %d: %w", engine, generation, err)
+	}
+	defer rows.Close()
+
+	var out [][]byte
+	for rows.Next() {
+		var account []byte
+		if err := rows.Scan(&account); err != nil {
+			return nil, fmt.Errorf("scan sweep work account: %w", err)
+		}
+		out = append(out, account)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sweep work batch for %q: %w", engine, err)
+	}
+	return out, nil
+}
+
+// CompleteSweepGeneration stamps generation complete (completed_at = now())
+// and returns how many of its status rows ended 'failed' — the DEGRADED
+// signal. The stamp is guarded: it lands only while generation is still the
+// engine's CURRENT, OPEN generation. stamped=false means the generation was
+// superseded mid-completion (a rewind's bump opened a newer one) or already
+// stamped — the caller simply resumes the newer generation on its next step;
+// nothing is lost either way. The failed count is advisory (it may include
+// accounts a rewind removed from the registry after their failure).
+func (s *Store) CompleteSweepGeneration(ctx context.Context, engine string, generation uint64) (failed int64, stamped bool, err error) {
+	ct, err := s.pool.Exec(ctx, `UPDATE sweep_generations SET completed_at = now()
+		WHERE engine = $1 AND current_generation = $2 AND completed_at IS NULL`,
+		engine, generation)
+	if err != nil {
+		return 0, false, fmt.Errorf("complete sweep generation %d for %q: %w", generation, engine, err)
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshot_sweeps WHERE engine = $1 AND generation = $2 AND status = 'failed'`,
+		engine, generation).Scan(&failed); err != nil {
+		return 0, false, fmt.Errorf("count failed sweep accounts for %q generation %d: %w", engine, generation, err)
+	}
+	return failed, ct.RowsAffected() > 0, nil
+}
+
+// SweepResult is one account's outcome from a snapshotter multicall batch,
+// applied durably by ApplySweepBatch. OK=false records a per-account failure
+// (generation-stamped, attempts-counted); OK=true carries the account's
+// wholesale collateral balances (lowercase asset-hex → side → amount, side
+// always "collateral") as read at the batch's multicall execution block.
+type SweepResult struct {
+	Account  []byte
+	OK       bool
+	Balances map[string]map[string]*big.Int
+}
+
+// ApplySweepBatch lands one multicall batch's results in ONE transaction. Per
+// successful account: a wholesale snapshot-balance replacement
+// (position_balances source='snapshot' — delete then insert, so vanished
+// assets clear), PLUS a collateral-side history document into snapshots
+// ({"side":"collateral","balances":{asset-hex: decimal-string}}) at the
+// multicall execution block, PLUS a generation-stamped 'success' status row.
+// Per failed account: a generation-stamped 'failed' status row in the SAME
+// transaction. Balances and status therefore can never diverge across a
+// crash — the separate per-account-upsert-then-bulk-status sequence the
+// snapshotter previously ran could persist balances and lose the status rows,
+// or record status for balances that never landed.
+//
+// Status rows carry the durable attempts counter SweepWorkBatch's retry
+// budget reads: an attempt under the SAME generation increments it, a new
+// generation resets it to 1. A success stamps last_success_block; a failure
+// retains the previous success block for staleness measurement. Idempotent
+// under replay: a re-applied batch (crash between commit and the caller's
+// bookkeeping) converges to the same balances/status end state — only
+// attempts overcounts, which NARROWS the retry budget, never widens it.
+//
+// Validation is deliberately PER RESULT, inline with the writes (no
+// pre-validation pass, no statement batching): a malformed element aborts the
+// whole transaction AFTER earlier elements' statements executed, and the
+// all-or-nothing contract is pinned by a failure injection riding exactly
+// this path.
+func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, execBlock uint64, results []SweepResult) error {
+	if len(results) == 0 {
+		return nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, res := range results {
+		if len(res.Account) == 0 {
+			return fmt.Errorf("sweep result with empty account")
+		}
+		if !res.OK {
+			if _, err := tx.Exec(ctx, `INSERT INTO snapshot_sweeps
+				(engine, account, generation, last_attempt_block, last_success_block, status, attempts, updated_at)
+				VALUES ($1,$2,$3,$4,0,'failed',1,now())
+				ON CONFLICT (engine, account) DO UPDATE
+				SET attempts = CASE WHEN snapshot_sweeps.generation = EXCLUDED.generation
+				                    THEN snapshot_sweeps.attempts + 1 ELSE 1 END,
+				    generation = EXCLUDED.generation,
+				    last_attempt_block = EXCLUDED.last_attempt_block,
+				    status = 'failed', updated_at = now()`,
+				engine, res.Account, generation, execBlock); err != nil {
+				return fmt.Errorf("record failed sweep for %x: %w", res.Account, err)
+			}
+			continue
+		}
+
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM position_balances WHERE engine = $1 AND account = $2 AND source = 'snapshot'`,
+			engine, res.Account); err != nil {
+			return fmt.Errorf("clear snapshot balances for %x: %w", res.Account, err)
+		}
+		assetKeys := make([]string, 0, len(res.Balances))
+		for assetHex := range res.Balances {
+			assetKeys = append(assetKeys, assetHex)
+		}
+		sort.Strings(assetKeys) // deterministic statement order
+		doc := make(map[string]string, len(assetKeys))
+		for _, assetHex := range assetKeys {
+			asset, err := hex.DecodeString(assetHex)
+			if err != nil {
+				return fmt.Errorf("sweep asset key %q (account %x): %w", assetHex, res.Account, err)
+			}
+			for side, amount := range res.Balances[assetHex] {
+				if side != "collateral" {
+					return fmt.Errorf("sweep balance %s/%s for %x: snapshotter results are collateral-side only", assetHex, side, res.Account)
+				}
+				if amount == nil {
+					return fmt.Errorf("sweep balance %s/%s for %x: nil amount", assetHex, side, res.Account)
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO position_balances
+					(engine, account, asset, side, source, amount, updated_block)
+					VALUES ($1,$2,$3,$4,'snapshot',$5,$6)`,
+					engine, res.Account, asset, side,
+					pgtype.Numeric{Int: amount, Exp: 0, Valid: true}, execBlock); err != nil {
+					return fmt.Errorf("insert snapshot balance %s for %x: %w", assetHex, res.Account, err)
+				}
+				doc[assetHex] = amount.String()
+			}
+		}
+		// Collateral-side history row at the multicall execution block — the
+		// same side-scoped shape SaveSnapshots writes, closing the "no
+		// collateral history for debt_manager" gap. An empty document is a
+		// valid zero-collateral observation.
+		if _, err := tx.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
+			VALUES ($1,$2,$3,$4,now())
+			ON CONFLICT (engine, account, block_number) DO UPDATE
+			SET balances = EXCLUDED.balances, taken_at = now()`,
+			engine, res.Account, execBlock,
+			map[string]any{"side": "collateral", "balances": doc}); err != nil {
+			return fmt.Errorf("save collateral history for %x at %d: %w", res.Account, execBlock, err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO snapshot_sweeps
+			(engine, account, generation, last_attempt_block, last_success_block, status, attempts, updated_at)
+			VALUES ($1,$2,$3,$4,$4,'success',1,now())
+			ON CONFLICT (engine, account) DO UPDATE
+			SET attempts = CASE WHEN snapshot_sweeps.generation = EXCLUDED.generation
+			                    THEN snapshot_sweeps.attempts + 1 ELSE 1 END,
+			    generation = EXCLUDED.generation,
+			    last_attempt_block = EXCLUDED.last_attempt_block,
+			    last_success_block = EXCLUDED.last_attempt_block,
+			    status = 'success', updated_at = now()`,
+			engine, res.Account, generation, execBlock); err != nil {
+			return fmt.Errorf("record successful sweep for %x: %w", res.Account, err)
+		}
 	}
 	return tx.Commit(ctx)
 }

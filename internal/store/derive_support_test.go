@@ -1,12 +1,15 @@
 package store
 
-// Live-db tests for the Task 7 additive runner/snapshotter support methods
-// and the fix wave's transactional additions: RawLogsInRange,
-// HasUnackedReorg, PruneAckedReorgEpochs, SnapshotAccounts, SaveSnapshot,
-// CheckWriterLock, ApplyDerivedWithRates (window/rate atomicity),
-// RewindDerived's in-transaction rate hygiene, SaveSnapshots (bulk
-// side-scoped documents) and RecordSnapshotSweep (sweep status). Same
-// harness (testDeriveStore) and NUMERIC/BYTEA discipline as derive_test.go.
+// Live-db tests for the Task 7 additive runner/snapshotter support methods,
+// the fix wave's transactional additions, and the sweep-durability wave's
+// durable generation machinery: RawLogsInRange, HasUnackedReorg,
+// PruneAckedReorgEpochs, SnapshotAccounts, SaveSnapshot (single-side
+// enforced), CheckWriterLock, ApplyDerivedWithRates (window/rate atomicity),
+// RewindDerived's in-transaction rate hygiene + orphaned-snapshot
+// invalidation + generation bump, SaveSnapshots (bulk side-scoped documents),
+// and the sweep-generation queue (SweepGeneration/OpenSweepGeneration/
+// SweepWorkBatch/CompleteSweepGeneration/ApplySweepBatch). Same harness
+// (testDeriveStore) and NUMERIC/BYTEA discipline as derive_test.go.
 
 import (
 	"context"
@@ -164,8 +167,12 @@ func TestSnapshotAccountsRegistryAndPriority(t *testing.T) {
 	require.Len(t, got, 3)
 }
 
-// TestSaveSnapshotRoundTripAndReplace: JSONB decimal-string shape, uint256
-// extremes exact, and same-key replacement (a replayed round converges).
+// TestSaveSnapshotRoundTripAndReplace: side-scoped JSONB decimal-string shape
+// (the same {"side": s, "balances": {...}} document SaveSnapshots writes),
+// uint256 extremes exact, same-key replacement (a replayed round converges) —
+// and the sweep-durability wave's ENFORCED single-side rule: a mixed-side
+// document is refused outright (a snapshots row claims one as-of block, and
+// the two sides of a debt_manager position are observed at different blocks).
 func TestSaveSnapshotRoundTripAndReplace(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -176,16 +183,16 @@ func TestSaveSnapshotRoundTripAndReplace(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, s.SaveSnapshot(ctx, engine, account, 100, map[string]map[string]*big.Int{
 		"bb": {"debt": huge},
-		"cc": {"collateral": big.NewInt(-7)},
+		"cc": {"debt": big.NewInt(-7)},
 	}))
 
-	var doc map[string]map[string]string
+	var doc map[string]any
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT balances FROM snapshots WHERE engine = $1 AND account = $2 AND block_number = 100`,
 		engine, account).Scan(&doc))
-	require.Equal(t, map[string]map[string]string{
-		"bb": {"debt": huge.String()},
-		"cc": {"collateral": "-7"},
+	require.Equal(t, map[string]any{
+		"side":     "debt",
+		"balances": map[string]any{"bb": huge.String(), "cc": "-7"},
 	}, doc)
 
 	// Same-key replace.
@@ -195,17 +202,30 @@ func TestSaveSnapshotRoundTripAndReplace(t *testing.T) {
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT balances FROM snapshots WHERE engine = $1 AND account = $2 AND block_number = 100`,
 		engine, account).Scan(&doc))
-	require.Equal(t, map[string]map[string]string{"bb": {"debt": "1"}}, doc)
+	require.Equal(t, map[string]any{"side": "debt", "balances": map[string]any{"bb": "1"}}, doc)
 
 	var n int
 	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM snapshots`).Scan(&n))
 	require.Equal(t, 1, n)
 
-	// Refusals: nil amount, malformed asset key.
+	// MIXED-SIDE REFUSAL (was accepted pre-wave, storing a document that lied
+	// about its as-of block): debt and collateral in one document error, and
+	// nothing is written.
+	require.ErrorContains(t, s.SaveSnapshot(ctx, engine, account, 101, map[string]map[string]*big.Int{
+		"bb": {"debt": big.NewInt(5)},
+		"cc": {"collateral": big.NewInt(9)},
+	}), "mixes sides")
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM snapshots WHERE block_number = 101`).Scan(&n))
+	require.Zero(t, n, "a refused mixed-side document must write nothing")
+
+	// Other refusals: nil amount, malformed asset key, empty document (no
+	// side derivable — SaveSnapshots carries the side explicitly for those).
 	require.ErrorContains(t, s.SaveSnapshot(ctx, engine, account, 101,
 		map[string]map[string]*big.Int{"bb": {"debt": nil}}), "nil amount")
 	require.ErrorContains(t, s.SaveSnapshot(ctx, engine, account, 101,
 		map[string]map[string]*big.Int{"zz": {"debt": big.NewInt(1)}}), "asset key")
+	require.ErrorContains(t, s.SaveSnapshot(ctx, engine, account, 101,
+		map[string]map[string]*big.Int{}), "no side can be derived")
 }
 
 // TestApplyDerivedWithRatesCommitsAtomically: the happy path lands events,
@@ -460,6 +480,356 @@ func TestRecordSnapshotSweepStates(t *testing.T) {
 	require.NoError(t, s.RecordSnapshotSweep(ctx, engine, 300, nil))
 	require.ErrorContains(t, s.RecordSnapshotSweep(ctx, engine, 300,
 		[]SweepOutcome{{Account: nil, Success: true}}), "empty account")
+}
+
+// TestSweepGenerationLifecycle pins the durable generation state machine:
+// never-opened → open (increment, completed_at cleared) → guarded completion
+// (stamps only the CURRENT open generation; a superseded or repeated stamp
+// reports stamped=false) → reopen increments again.
+func TestSweepGenerationLifecycle(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+
+	gen, open, completedAt, err := s.SweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Equal(t, [3]any{uint64(0), false, true}, [3]any{gen, open, completedAt.IsZero()},
+		"never opened: generation 0, closed, no completion time")
+
+	gen, err = s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), gen)
+	gen, open, completedAt, err = s.SweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.True(t, open, "an opened generation reads back OPEN — the restart-resume signal")
+	require.Equal(t, uint64(1), gen)
+	require.True(t, completedAt.IsZero())
+
+	// Guarded completion: the wrong generation number stamps nothing.
+	failed, stamped, err := s.CompleteSweepGeneration(ctx, engine, 99)
+	require.NoError(t, err)
+	require.False(t, stamped, "a non-current generation must not stamp completion")
+	require.Zero(t, failed)
+
+	failed, stamped, err = s.CompleteSweepGeneration(ctx, engine, 1)
+	require.NoError(t, err)
+	require.True(t, stamped)
+	require.Zero(t, failed)
+	gen, open, completedAt, err = s.SweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.False(t, open)
+	require.Equal(t, uint64(1), gen)
+	require.False(t, completedAt.IsZero(), "completion stamps the cadence anchor")
+
+	// A repeated stamp is a no-op (stamped=false), and reopening increments.
+	_, stamped, err = s.CompleteSweepGeneration(ctx, engine, 1)
+	require.NoError(t, err)
+	require.False(t, stamped)
+	gen, err = s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), gen)
+	_, open, completedAt, err = s.SweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.True(t, open)
+	require.True(t, completedAt.IsZero(), "reopening clears the completion stamp")
+}
+
+// TestSweepWorkBatchOrderingAndRetryBudget pins the durable queue read:
+// lagging accounts (no row / older generation) drain oldest-first before
+// current-generation failed retries; nonzero-debt accounts lead within a
+// bucket; stamped-current successes and budget-exhausted failures owe
+// nothing; the limit bounds one batch.
+func TestSweepWorkBatchOrderingAndRetryBudget(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	maxAttempts := 4 // 1 fresh + 3 retries, the snapshotter's budget
+
+	// Registry: a1 (debt repaid to zero), a2/a3 (nonzero debt) — priority
+	// order is a2, a3, a1 (nonzero-debt first, bytewise within groups).
+	require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{
+		pe(100, 1, 0xA1, 0xBB, "debt", 40),
+		pe(101, 2, 0xA1, 0xBB, "debt", -40),
+		pe(100, 3, 0xA3, 0xBB, "debt", 10),
+		pe(100, 4, 0xA2, 0xBB, "debt", 25),
+	}, 101))
+
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+
+	// Fresh generation: every account lags, priority order, limit respected.
+	got, err := s.SweepWorkBatch(ctx, engine, gen, maxAttempts, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA2}, {0xA3}, {0xA1}}, got)
+	got, err = s.SweepWorkBatch(ctx, engine, gen, maxAttempts, 2)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA2}, {0xA3}}, got, "the limit bounds one batch")
+
+	// a2 succeeds, a3 fails: a3 stays in the work list (retry-eligible), a2
+	// owes nothing, and the still-lagging a1 drains BEFORE a3's retry.
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 500, []SweepResult{
+		{Account: []byte{0xA2}, OK: true, Balances: map[string]map[string]*big.Int{}},
+		{Account: []byte{0xA3}, OK: false},
+	}))
+	got, err = s.SweepWorkBatch(ctx, engine, gen, maxAttempts, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA1}, {0xA3}}, got,
+		"lagging accounts drain before current-generation retries — oldest-first fairness")
+
+	// a3 burns the whole budget: after maxAttempts failures it owes nothing
+	// this generation (skipped, stays status=failed).
+	for i := 0; i < maxAttempts-1; i++ {
+		require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 501+uint64(i), []SweepResult{
+			{Account: []byte{0xA3}, OK: false},
+		}))
+	}
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 600, []SweepResult{
+		{Account: []byte{0xA1}, OK: true, Balances: map[string]map[string]*big.Int{}},
+	}))
+	got, err = s.SweepWorkBatch(ctx, engine, gen, maxAttempts, 100)
+	require.NoError(t, err)
+	require.Empty(t, got, "budget-exhausted failures owe nothing: the generation is complete (degraded)")
+	failed, stamped, err := s.CompleteSweepGeneration(ctx, engine, gen)
+	require.NoError(t, err)
+	require.True(t, stamped)
+	require.Equal(t, int64(1), failed, "the exhausted account is the DEGRADED signal")
+
+	// A new generation re-lags everyone — including the exhausted account,
+	// whose budget resets. Ordering now keys off the OLD stamps ascending
+	// (all equal here), then priority.
+	gen2, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	got, err = s.SweepWorkBatch(ctx, engine, gen2, maxAttempts, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{0xA2}, {0xA3}, {0xA1}}, got)
+}
+
+// TestApplySweepBatchLifecycle pins the atomic per-batch write: wholesale
+// snapshot-balance replacement + collateral-side history document at the
+// multicall block + generation-stamped status rows with durable attempt
+// counting; failures retain the last success block for staleness measurement.
+func TestApplySweepBatchLifecycle(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	a1, a2 := []byte{0xA1}, []byte{0xA2}
+
+	readRow := func(account []byte) (gen, attempts, attempt, success uint64, status string) {
+		require.NoError(t, s.pool.QueryRow(ctx,
+			`SELECT generation, attempts, last_attempt_block, last_success_block, status
+			 FROM snapshot_sweeps WHERE engine = $1 AND account = $2`, engine, account).
+			Scan(&gen, &attempts, &attempt, &success, &status))
+		return
+	}
+
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 100, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{
+			"bb": {"collateral": big.NewInt(555)},
+			"cc": {"collateral": big.NewInt(7)},
+		}},
+		{Account: a2, OK: false},
+	}))
+
+	// Balances: wholesale snapshot rows at the multicall block.
+	require.Equal(t, map[string]string{
+		"bb/collateral": "555@100",
+		"cc/collateral": "7@100",
+	}, balanceRows(t, s, engine, a1, "snapshot"))
+	// History: the side-scoped collateral document at the SAME block.
+	var doc map[string]any
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT balances FROM snapshots WHERE engine = $1 AND account = $2 AND block_number = 100`,
+		engine, a1).Scan(&doc))
+	require.Equal(t, map[string]any{
+		"side":     "collateral",
+		"balances": map[string]any{"bb": "555", "cc": "7"},
+	}, doc)
+	// Status: generation-stamped, attempts counted.
+	g, at, attempt, success, status := readRow(a1)
+	require.Equal(t, []uint64{gen, 1, 100, 100}, []uint64{g, at, attempt, success})
+	require.Equal(t, "success", status)
+	g, at, attempt, success, status = readRow(a2)
+	require.Equal(t, []uint64{gen, 1, 100, 0}, []uint64{g, at, attempt, success})
+	require.Equal(t, "failed", status)
+
+	// Second batch: a1 fails (keeps its success block), a2 recovers with an
+	// EMPTY read — the wholesale replacement clears nothing (it had nothing)
+	// but writes the zero-collateral history document, and its status flips.
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 200, []SweepResult{
+		{Account: a1, OK: false},
+		{Account: a2, OK: true, Balances: map[string]map[string]*big.Int{}},
+	}))
+	g, at, attempt, success, status = readRow(a1)
+	require.Equal(t, []uint64{gen, 2, 200, 100}, []uint64{g, at, attempt, success},
+		"a failure under the same generation increments attempts and retains the last success block")
+	require.Equal(t, "failed", status)
+	require.Equal(t, map[string]string{
+		"bb/collateral": "555@100", "cc/collateral": "7@100",
+	}, balanceRows(t, s, engine, a1, "snapshot"), "a failed attempt keeps the previous snapshot")
+	g, at, attempt, success, status = readRow(a2)
+	require.Equal(t, []uint64{gen, 2, 200, 200}, []uint64{g, at, attempt, success})
+	require.Equal(t, "success", status)
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT balances FROM snapshots WHERE engine = $1 AND account = $2 AND block_number = 200`,
+		engine, a2).Scan(&doc))
+	require.Equal(t, map[string]any{"side": "collateral", "balances": map[string]any{}}, doc,
+		"zero-collateral success still writes its history document")
+
+	// A NEW generation resets the attempts counter; a success replaces the
+	// old snapshot wholesale (vanished assets clear).
+	gen2, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 300, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{
+			"dd": {"collateral": big.NewInt(9)},
+		}},
+	}))
+	g, at, attempt, success, status = readRow(a1)
+	require.Equal(t, []uint64{gen2, 1, 300, 300}, []uint64{g, at, attempt, success},
+		"a new generation resets the attempts budget")
+	require.Equal(t, "success", status)
+	require.Equal(t, map[string]string{"dd/collateral": "9@300"},
+		balanceRows(t, s, engine, a1, "snapshot"), "wholesale replacement: bb/cc vanish")
+
+	// Refusals: empty account, non-collateral side, nil amount, empty batch OK.
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen2, 301, nil))
+	require.ErrorContains(t, s.ApplySweepBatch(ctx, engine, gen2, 301,
+		[]SweepResult{{Account: nil, OK: false}}), "empty account")
+	require.ErrorContains(t, s.ApplySweepBatch(ctx, engine, gen2, 301, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{"bb": {"debt": big.NewInt(1)}}},
+	}), "collateral-side only")
+	require.ErrorContains(t, s.ApplySweepBatch(ctx, engine, gen2, 301, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{"bb": {"collateral": nil}}},
+	}), "nil amount")
+}
+
+// TestApplySweepBatchMidTxFailureRollsBackEverything is the sweep-durability
+// wave's REAL-boundary failure injection: the batch's FIRST result executes
+// its full statement run (balance delete+insert, history upsert, status
+// upsert) inside the transaction, then the SECOND result's inline validation
+// aborts — validation is deliberately per-result, in statement order, so this
+// failure genuinely happens MID-TRANSACTION after real writes. All three
+// tables (position_balances, snapshots, snapshot_sweeps) must roll back to
+// their pre-batch state: balances-without-status (or any partial subset) can
+// never be observed, even across a crash at this exact point.
+func TestApplySweepBatchMidTxFailureRollsBackEverything(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	a1, a2 := []byte{0xA1}, []byte{0xA2}
+
+	// Pre-state: a1 already carries an older snapshot + status row, so the
+	// rollback must also restore (not just empty) state.
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 100, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{
+			"bb": {"collateral": big.NewInt(555)},
+		}},
+	}))
+
+	// The injected batch: result[0] (a1) is valid and fully executes — its
+	// delete would remove the 555 row — then result[1] (a2) carries a nil
+	// amount and aborts the transaction mid-flight.
+	err = s.ApplySweepBatch(ctx, engine, gen, 200, []SweepResult{
+		{Account: a1, OK: true, Balances: map[string]map[string]*big.Int{
+			"bb": {"collateral": big.NewInt(777)},
+		}},
+		{Account: a2, OK: true, Balances: map[string]map[string]*big.Int{
+			"bb": {"collateral": nil},
+		}},
+	})
+	require.ErrorContains(t, err, "nil amount")
+
+	// position_balances: a1's PRE-batch snapshot survives verbatim (the
+	// in-tx delete and 777 insert both rolled back); a2 has nothing.
+	require.Equal(t, map[string]string{"bb/collateral": "555@100"},
+		balanceRows(t, s, engine, a1, "snapshot"))
+	require.Empty(t, balanceRows(t, s, engine, a2, "snapshot"))
+
+	// snapshots: no block-200 history row for either account.
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshots WHERE block_number = 200`).Scan(&n))
+	require.Zero(t, n, "the aborted batch's history rows must not survive")
+
+	// snapshot_sweeps: a1's status still shows the block-100 attempt only;
+	// a2 has no row at all.
+	var attempts, attempt uint64
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT attempts, last_attempt_block FROM snapshot_sweeps WHERE engine = $1 AND account = $2`,
+		engine, a1).Scan(&attempts, &attempt))
+	require.Equal(t, []uint64{1, 100}, []uint64{attempts, attempt})
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshot_sweeps WHERE account = $1`, a2).Scan(&n))
+	require.Zero(t, n)
+}
+
+// TestRewindDerivedInvalidatesOrphanedSnapshots pins reorg-orphaned snapshot
+// invalidation INSIDE RewindDerived's transaction: an account whose ONLY
+// debt-side event sits above the rewind target loses its snapshot balance
+// rows AND its sweep status row (its registry membership was reorged away),
+// the engine's sweep generation is bumped (the post-rewind re-sweep is
+// durably opened, atomic with the epoch ack), and surviving accounts keep
+// their rows but LAG the new generation.
+func TestRewindDerivedInvalidatesOrphanedSnapshots(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	orphan, survivor := []byte{0xA1}, []byte{0xA2}
+
+	// orphan's only debt event is at block 100 (above the rewind target);
+	// survivor borrowed at block 50 (below it).
+	require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{
+		pe(100, 1, 0xA1, 0xBB, "debt", 40),
+		pe(50, 2, 0xA2, 0xBB, "debt", 10),
+	}, 100))
+
+	// Both were swept: snapshot balances + generation-1 status rows.
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), gen)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 100, []SweepResult{
+		{Account: orphan, OK: true, Balances: map[string]map[string]*big.Int{"bb": {"collateral": big.NewInt(555)}}},
+		{Account: survivor, OK: true, Balances: map[string]map[string]*big.Int{"bb": {"collateral": big.NewInt(7)}}},
+	}))
+	_, _, err = s.CompleteSweepGeneration(ctx, engine, gen)
+	require.NoError(t, err)
+
+	// The reorg: raw truth rewinds to 90, the derived ack follows.
+	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 90, []byte{0x90}))
+	require.NoError(t, s.RewindDerived(ctx, engine, 10, 90))
+
+	// Orphan: no snapshot rows, no sweep row — its registry membership never
+	// existed on the canonical chain.
+	require.Empty(t, balanceRows(t, s, engine, orphan, "snapshot"))
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshot_sweeps WHERE engine = $1 AND account = $2`,
+		engine, orphan).Scan(&n))
+	require.Zero(t, n)
+
+	// Survivor: keeps balances and status row...
+	require.Equal(t, map[string]string{"bb/collateral": "7@100"},
+		balanceRows(t, s, engine, survivor, "snapshot"))
+	var survivorGen uint64
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT generation FROM snapshot_sweeps WHERE engine = $1 AND account = $2`,
+		engine, survivor).Scan(&survivorGen))
+	require.Equal(t, uint64(1), survivorGen)
+
+	// ...but LAGS the bumped generation: the post-rewind re-sweep is durably
+	// open (completed_at cleared in the same commit as the ack) and the
+	// survivor is exactly its work list.
+	newGen, open, _, err := s.SweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), newGen, "RewindDerived bumps the generation in its own transaction")
+	require.True(t, open, "the post-rewind sweep is durably OPEN — a crash right here loses nothing")
+	work, err := s.SweepWorkBatch(ctx, engine, newGen, 4, 100)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{survivor}, work, "the survivor lags; the orphan is gone from the registry")
 }
 
 // TestCheckWriterLockLivenessAndLoss: before acquisition the check refuses;

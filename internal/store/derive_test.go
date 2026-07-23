@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testDeriveStore mirrors testStore but also truncates the eight derivation
+// testDeriveStore mirrors testStore but also truncates the nine derivation
 // tables (position_events, position_balances, derive_cursors, prices,
-// snapshots, snapshot_sweeps, rate_indexes, reorg_epochs) alongside the Task-2 ingestion
-// tables, so derivation tests never see state left over from a prior test or
-// the ingestion suite. reorg_epochs' BIGSERIAL sequence is deliberately NOT
-// restarted: every epoch comparison in the store is relative (acked vs chain
-// max), so absolute epoch values never matter.
+// snapshots, snapshot_sweeps, sweep_generations, rate_indexes, reorg_epochs)
+// alongside the Task-2 ingestion tables, so derivation tests never see state
+// left over from a prior test or the ingestion suite. reorg_epochs' BIGSERIAL
+// sequence is deliberately NOT restarted: every epoch comparison in the store
+// is relative (acked vs chain max), so absolute epoch values never matter.
 func testDeriveStore(t *testing.T) *Store {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -29,7 +29,7 @@ func testDeriveStore(t *testing.T) *Store {
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	_, err = s.pool.Exec(context.Background(),
-		"TRUNCATE position_events, position_balances, derive_cursors, prices, snapshots, snapshot_sweeps, rate_indexes, reorg_epochs, raw_logs, ingest_cursors")
+		"TRUNCATE position_events, position_balances, derive_cursors, prices, snapshots, snapshot_sweeps, sweep_generations, rate_indexes, reorg_epochs, raw_logs, ingest_cursors")
 	require.NoError(t, err)
 	return s
 }
@@ -492,8 +492,11 @@ func TestRewindDerivedPreservesZeroNetRows(t *testing.T) {
 }
 
 // TestRewindDerivedLeavesSnapshotRowsUntouched: RewindDerived rebuilds ONLY
-// source='event' rows; snapshot rows belong to the snapshotter (re-triggered
-// by the runner after any rewind) and must survive verbatim.
+// source='event' rows; a REGISTRY-SURVIVING account (one that keeps a
+// debt-side event below the target) keeps its snapshot rows verbatim — the
+// event-balance rebuild never clobbers the snapshotter's observations. (An
+// account whose registry membership does NOT survive is the orphan case,
+// pinned separately by TestRewindDerivedInvalidatesOrphanedSnapshots.)
 func TestRewindDerivedLeavesSnapshotRowsUntouched(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -502,6 +505,7 @@ func TestRewindDerivedLeavesSnapshotRowsUntouched(t *testing.T) {
 		map[string]map[string]*big.Int{"bb": {"collateral": big.NewInt(555)}}, 90))
 
 	events := []PositionEvent{
+		pe(95, 3, 0xAA, 0xBB, "debt", 7), // survives the rewind: keeps 0xAA in the registry
 		pe(100, 1, 0xAA, 0xBB, "collateral", 100),
 		pe(110, 2, 0xAA, 0xBB, "collateral", 50),
 	}
@@ -510,6 +514,7 @@ func TestRewindDerivedLeavesSnapshotRowsUntouched(t *testing.T) {
 	require.NoError(t, s.RewindDerived(ctx, "debt_manager", 10, 105))
 
 	require.Equal(t, map[string]string{
+		"bb/debt":       "7@95",
 		"bb/collateral": "100@100",
 	}, balanceRows(t, s, "debt_manager", []byte{0xAA}, "event")) // block-110 effect rewound away
 	require.Equal(t, map[string]string{
