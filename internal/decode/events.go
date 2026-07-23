@@ -290,6 +290,7 @@ func (ATokenTransfer) Name() string { return "ATokenTransfer" }
 //     a Mint is emitted with Value = BalanceIncrease - actionAmount — the
 //     plus-formula does NOT apply on this path.
 //   - transfers: interest-only Mints may be emitted for either party's accrual.
+//
 // BalanceIncrease is interest accrued since the account's last index
 // checkpoint in every path. Scaled deltas must be derived from the deployed
 // implementation's source, branching on the originating action, never from
