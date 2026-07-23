@@ -3,6 +3,7 @@
 /bin/
 coverage.out
 .superpowers/
+.serena/
 recon/cash-v3/
 recon/DefiLlama-Adapters/
 
