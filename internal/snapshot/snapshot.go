@@ -76,7 +76,18 @@
 // suppression machinery, because that pattern already floods the log with
 // apply errors — the primary operator signal — and the DEGRADED warning
 // exists for the QUIET failure mode where every endpoint serves stale state
-// without any apply attempt ever erroring. An individual collateralOf revert
+// without any apply attempt ever erroring. Retaining the preference through
+// ONE ambiguous error is not unbounded, though: consecutiveAmbiguous is a
+// BOUNDED AMBIGUITY LEASE on that retention — once maxConsecutiveAmbiguous
+// (3) CONSECUTIVE ambiguous errors land against the SAME still-pinned
+// preference, Step rotates it one endpoint further and resets the lease,
+// logging "rotating preferred endpoint after repeated ambiguous apply
+// failures" — so a recovered earlier endpoint is eventually reprobed rather
+// than excluded forever. This is a distinct bound from staleRotations: that
+// one gates only a DEGRADED WARNING (telemetry); this one gates ROUTING
+// itself, and is reset by genuine progress or by a stale batch (each of
+// which already owns its own bounded preference machinery). An individual
+// collateralOf revert
 // (success=false under requireSuccess=false) is ALWAYS a per-account failure
 // — recorded status='failed' with a durable attempts counter, retried up to
 // maxAccountRetries further times within the generation (SweepWorkBatch
@@ -130,6 +141,16 @@ const maxAccountRetries = 3
 // maxSweepAttempts is the total per-generation attempt budget SweepWorkBatch
 // enforces: the first attempt plus the retry budget.
 const maxSweepAttempts = 1 + maxAccountRetries
+
+// maxConsecutiveAmbiguous bounds the ambiguity LEASE on the caller-scoped
+// endpoint preference (preferredStart): the number of CONSECUTIVE non-stale
+// ("ambiguous") ApplySweepBatch errors a pinned preference survives before
+// Step rotates it forward instead of retaining it forever. This bounds
+// ROUTING, not telemetry — contrast with staleRotations/the all-endpoints-
+// stale DEGRADED warning, which this constant does not gate at all. See
+// consecutiveAmbiguous's doc and the ambiguous-apply branch in Step for why
+// one (or two) ambiguous errors alone must NOT rotate the preference.
+const maxConsecutiveAmbiguous = 3
 
 const sideCollateral = "collateral"
 
@@ -303,6 +324,24 @@ type Snapshotter struct {
 	// re-pins the shared hint there, and a shared-hint-routed sweep would
 	// bounce back to the stale endpoint forever.
 	preferredStart int
+
+	// consecutiveAmbiguous is the BOUNDED AMBIGUITY LEASE on preferredStart:
+	// it counts CONSECUTIVE non-stale ("ambiguous") ApplySweepBatch errors
+	// seen while a preference is pinned. One ambiguity retains the
+	// preference (the error is likely OURS, not the endpoint's — an
+	// indeterminate commit proves nothing about the endpoint; see
+	// resetStaleTelemetry), but persistent recurrence is different evidence:
+	// once it reaches maxConsecutiveAmbiguous, Step rotates preferredStart
+	// one endpoint further (mod EndpointCount) and resets this counter to
+	// 0 — so a recovered earlier endpoint is eventually reprobed instead of
+	// being excluded forever, which is the gap this field closes. Reset to
+	// 0 on genuine progress and on a stale batch (recordProgress and the
+	// stale branch each already own their own bounded preference machinery)
+	// — so it only ever accumulates across ambiguous errors landing back to
+	// back against the SAME still-pinned preference. Distinct from
+	// staleRotations: that field bounds a TELEMETRY WARNING; this one
+	// bounds ROUTING itself.
+	consecutiveAmbiguous int
 }
 
 // New builds a Snapshotter. Engine, target and a positive interval are
@@ -353,12 +392,16 @@ func (s *Snapshotter) resetStaleTelemetry() {
 // stamping, or an observed generation change (rewind/re-sweep bumps,
 // cadence opens): the stale-round streak restarts (via resetStaleTelemetry)
 // AND the persistent endpoint preference releases back to the shared
-// routing hint. Do NOT call this for an ambiguous (non-stale)
-// ApplySweepBatch error — call resetStaleTelemetry alone; see its doc and
-// the Step call site for why the preference must survive that case.
+// routing hint, along with its ambiguity lease (consecutiveAmbiguous) —
+// releasing the preference without also clearing its lease would let a
+// LATER re-pin inherit an unrelated earlier count. Do NOT call this for an
+// ambiguous (non-stale) ApplySweepBatch error — call resetStaleTelemetry
+// alone; see its doc and the Step call site for why the preference must
+// survive that case (bounded by its own lease instead).
 func (s *Snapshotter) recordProgress() {
 	s.resetStaleTelemetry()
 	s.preferredStart = -1
+	s.consecutiveAmbiguous = 0
 }
 
 // TriggerResweep requests an immediate sweep: the next Step bypasses the
@@ -472,6 +515,12 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 					"engine", s.cfg.Engine, "generation", gen, "execBlock", block,
 					"staleEndpoint", servedBy.Index, "preferredStart", s.preferredStart)
 			}
+			// A stale batch is its OWN bounded preference machinery (the pin
+			// above) — it is not an ambiguity-lease consumption, so the lease
+			// counter restarts here too: only ambiguous errors landing
+			// CONSECUTIVELY against one still-pinned preference count toward
+			// maxConsecutiveAmbiguous.
+			s.consecutiveAmbiguous = 0
 			s.staleRotations++
 
 			// This threshold is telemetry, not a correctness gate — the
@@ -523,10 +572,38 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		// recordProgress. The re-pull/re-apply posture is unaffected either
 		// way (ApplySweepBatch is idempotent under replay).
 		s.resetStaleTelemetry()
+
+		// BOUNDED AMBIGUITY LEASE (Codex finding 019f8ffd-4aca-7201-a374-
+		// bfb5cdce6f06 [medium]): retaining the preference forever under
+		// REPEATED ambiguous errors — as opposed to a single one — is a
+		// different failure shape than the one the paragraph above defends
+		// against. One ambiguous error is likely OURS (an indeterminate
+		// commit outcome), not evidence against the endpoint; but a THIRD
+		// CONSECUTIVE ambiguous error while the SAME preference stays
+		// pinned is bounded evidence that retention itself has stopped
+		// paying off, so Step rotates the preference one endpoint further
+		// instead of pinning it forever — the routing analogue of
+		// staleRotations' all-endpoints-stale WARNING, except this one
+		// bounds ROUTING, not a diagnostic log. Only counts while a
+		// preference is actually pinned (preferredStart >= 0): with none
+		// pinned, multicalls already follow the shared hint and there is no
+		// lease to bound.
+		if s.preferredStart >= 0 {
+			s.consecutiveAmbiguous++
+			if s.consecutiveAmbiguous >= maxConsecutiveAmbiguous {
+				if n := s.chain.EndpointCount(); n > 0 {
+					s.preferredStart = (s.preferredStart + 1) % n
+				}
+				s.consecutiveAmbiguous = 0
+				slog.Warn("rotating preferred endpoint after repeated ambiguous apply failures",
+					"engine", s.cfg.Engine, "generation", gen, "preferredStart", s.preferredStart)
+			}
+		}
 		return false, fmt.Errorf("snapshotter %q: apply sweep batch: %w", s.cfg.Engine, err)
 	}
-	// Progress: reset the stale streak and the endpoint preference so a
-	// later isolated stale round doesn't inherit an earlier cycle's count.
+	// Progress: reset the stale streak, the endpoint preference and its
+	// ambiguity lease so a later isolated stale round doesn't inherit an
+	// earlier cycle's count.
 	s.recordProgress()
 	return true, nil
 }

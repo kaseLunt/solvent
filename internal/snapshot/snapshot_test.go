@@ -1369,3 +1369,91 @@ func TestRecurrentApplyErrorsDeferAllEndpointsStaleIndefinitely(t *testing.T) {
 	require.Zero(t, countAllStale(warnings),
 		"an alternating stale/apply-error pattern defers the all-endpoints-stale warning indefinitely — accepted, see Step's DEGRADED log site")
 }
+
+// TestConsecutiveAmbiguousApplyErrorsRotatePreferredEndpoint pins fix wave
+// 9's bounded ambiguity lease (Codex finding 019f8ffd-4aca-7201-a374-
+// bfb5cdce6f06 [medium]): before this fix, a preference pinned by a stale
+// rejection survived EVERY subsequent ambiguous (non-stale) ApplySweepBatch
+// error forever — no path ever reprobed a recovered earlier endpoint. The
+// exact regression schedule: a stale round pins the preference at endpoint
+// 1; ONE ambiguous apply retains it (still routes to 1 next round); a
+// SECOND consecutive ambiguous apply still retains it; only the THIRD
+// consecutive ambiguous apply — maxConsecutiveAmbiguous — rotates the
+// preference forward (to endpoint 2) and logs the rotation, so a later
+// sweep actually reaches the rotated endpoint.
+func TestConsecutiveAmbiguousApplyErrorsRotatePreferredEndpoint(t *testing.T) {
+	warnings := captureWarnings(t)
+	registry := [][]byte{acct(1)}
+	respond := uniformResponder(t, 150, nil) // every endpoint answers identically; ApplySweepBatch decides the outcome
+	ch := &fakeMultiEndpointChain{responders: []func(common.Address, []byte) ([]byte, error){respond, respond, respond}}
+
+	clock := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	st := newFakeSnapStore(registry, &clock)
+	s := freshSnapshotter(t, st, ch, &clock, 10)
+
+	rotatedLogged := func() bool {
+		for _, m := range *warnings {
+			if strings.Contains(m, "rotating preferred endpoint after repeated ambiguous apply failures") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Round 1: a stale rejection pins the preference one past the served
+	// (shared-hint) endpoint 0 — preferredStart = 1.
+	staleRound(t, s, st)
+	require.Equal(t, 1, s.preferredStart)
+	require.Zero(t, s.consecutiveAmbiguous)
+
+	// Rounds 2..maxConsecutiveAmbiguous-1: consecutive ambiguous apply
+	// errors RETAIN the preference — the lease has not yet expired, and
+	// each round still actually routes through the pinned endpoint 1.
+	for i := 1; i < maxConsecutiveAmbiguous; i++ {
+		st.applyErr = fmt.Errorf("ambiguous commit outcome #%d", i)
+		_, err := s.Step(context.Background())
+		require.Error(t, err)
+		require.Equal(t, 1, s.preferredStart, "the lease has not expired: the preference must still be retained")
+		require.Equal(t, i, s.consecutiveAmbiguous)
+	}
+	require.Equal(t, []int{0, 1, 1}, ch.served, "every retained-preference round actually routed through endpoint 1")
+	require.False(t, rotatedLogged(), "the lease must not expire before its bound")
+
+	// The maxConsecutiveAmbiguous-th CONSECUTIVE ambiguous error expires the
+	// lease: the preference rotates one endpoint further (1 -> 2) and the
+	// counter resets, so a further-recovered endpoint is eventually
+	// reprobed instead of the sweep pinning here forever.
+	st.applyErr = errors.New("ambiguous commit outcome — lease expires")
+	_, err := s.Step(context.Background())
+	require.Error(t, err)
+	require.Equal(t, 2, s.preferredStart, "the bounded lease expired: the preference rotates forward")
+	require.Zero(t, s.consecutiveAmbiguous, "the lease counter resets after rotating")
+	require.Equal(t, []int{0, 1, 1, 1}, ch.served)
+	require.True(t, rotatedLogged(), "the rotation must be logged, got %v", *warnings)
+
+	// The next sweep actually routes through the newly rotated preference
+	// and, landing for real, releases it back to the shared hint.
+	st.applyErr = nil
+	advanced, err := s.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []int{0, 1, 1, 1, 2}, ch.served, "the rotated preference is where the next multicall actually lands")
+	require.Equal(t, -1, s.preferredStart, "genuine progress releases the preference")
+	require.Zero(t, s.consecutiveAmbiguous)
+}
+
+// TestAmbiguousLeaseDoesNotAccumulateWithoutAPreference: with no preference
+// pinned (the shared hint routes every call), consecutive ambiguous apply
+// errors must never accumulate the lease counter or synthesize a
+// preference out of nothing — there is nothing to bound a lease on.
+func TestAmbiguousLeaseDoesNotAccumulateWithoutAPreference(t *testing.T) {
+	s, st, _, _ := harness(t, [][]byte{acct(1)}, uniformResponder(t, 42, nil), 10)
+
+	for i := 0; i < maxConsecutiveAmbiguous+2; i++ {
+		st.applyErr = errors.New("ambiguous, no preference pinned")
+		_, err := s.Step(context.Background())
+		require.Error(t, err)
+		require.Zero(t, s.consecutiveAmbiguous, "no preference is pinned: the lease counter must stay at zero")
+		require.Equal(t, -1, s.preferredStart, "an ambiguous error must never synthesize a preference on its own")
+	}
+}
