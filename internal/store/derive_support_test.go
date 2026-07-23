@@ -781,6 +781,61 @@ func TestRewindDerivedInvalidatesOrphanedSnapshots(t *testing.T) {
 	require.Equal(t, [][]byte{survivor}, work, "the survivor lags; the orphan is gone from the registry")
 }
 
+// TestSnapshotHistorySidesCoexistAtSameBlock pins the side-keyed history PK
+// (migration 00004): the debt writer (the runner's SaveSnapshots at its
+// derive through-block) and the collateral writer (ApplySweepBatch at its
+// multicall execution block) landing on the SAME (engine, account, block)
+// must BOTH stay queryable — the old three-column PK let either wholesale-
+// replace the other whenever the multicall executed at the derive block.
+// Same-side re-saves still replace their own row only.
+func TestSnapshotHistorySidesCoexistAtSameBlock(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+	account := []byte{0xA1}
+
+	require.NoError(t, s.SaveSnapshots(ctx, engine, 100, map[string]SnapshotDoc{
+		"a1": {Side: "debt", Balances: map[string]*big.Int{"bb": big.NewInt(40)}},
+	}))
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 100, []SweepResult{
+		{Account: account, OK: true, Balances: map[string]map[string]*big.Int{"cc": {"collateral": big.NewInt(9)}}},
+	}))
+
+	readSides := func() map[string]map[string]any {
+		rows, err := s.pool.Query(ctx,
+			`SELECT side, balances FROM snapshots WHERE engine = $1 AND account = $2 AND block_number = 100`,
+			engine, account)
+		require.NoError(t, err)
+		defer rows.Close()
+		out := map[string]map[string]any{}
+		for rows.Next() {
+			var side string
+			var doc map[string]any
+			require.NoError(t, rows.Scan(&side, &doc))
+			out[side] = doc
+		}
+		require.NoError(t, rows.Err())
+		return out
+	}
+
+	require.Equal(t, map[string]map[string]any{
+		"debt":       {"side": "debt", "balances": map[string]any{"bb": "40"}},
+		"collateral": {"side": "collateral", "balances": map[string]any{"cc": "9"}},
+	}, readSides(), "both writers' rows coexist at one (engine, account, block)")
+
+	// A same-side replay (SaveSnapshot, the single-row writer) replaces ONLY
+	// its own side's row; the collateral row is untouched.
+	require.NoError(t, s.SaveSnapshot(ctx, engine, account, 100, map[string]map[string]*big.Int{
+		"bb": {"debt": big.NewInt(41)},
+	}))
+	require.Equal(t, map[string]map[string]any{
+		"debt":       {"side": "debt", "balances": map[string]any{"bb": "41"}},
+		"collateral": {"side": "collateral", "balances": map[string]any{"cc": "9"}},
+	}, readSides())
+}
+
 // TestCheckWriterLockLivenessAndLoss: before acquisition the check refuses;
 // while held it passes; after a server-side release on the SAME session it
 // reports the lock lost.

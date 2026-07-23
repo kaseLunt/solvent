@@ -822,8 +822,11 @@ func (s *Store) SnapshotAccounts(ctx context.Context, engine string) ([][]byte, 
 // every entry naming the same side — and the persisted JSONB is the same
 // side-scoped {"side": s, "balances": {asset-hex: decimal-string}} shape
 // SaveSnapshots writes (decimal strings because JSON numbers cannot carry
-// uint256 exactly). Re-saving the same (engine, account, block) key replaces
-// the row wholesale.
+// uint256 exactly). The derived side is also the row's side KEY COLUMN — the
+// history PK is (engine, account, block_number, side), so the debt and
+// collateral writers can never overwrite each other at a shared block.
+// Re-saving the same (engine, account, block, side) key replaces the row
+// wholesale.
 //
 // AS-OF DISCIPLINE (fix wave, tightened in the sweep-durability wave from a
 // documented convention to an ENFORCED refusal): a snapshots row claims its
@@ -863,11 +866,11 @@ func (s *Store) SaveSnapshot(ctx context.Context, engine string, account []byte,
 		return fmt.Errorf("snapshot document for account %x carries no balances: no side can be derived — use SaveSnapshots for explicit-side empty documents", account)
 	}
 	doc := map[string]any{"side": docSide, "balances": flat}
-	if _, err := s.pool.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
-		VALUES ($1,$2,$3,$4,now())
-		ON CONFLICT (engine, account, block_number) DO UPDATE
+	if _, err := s.pool.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, side, balances, taken_at)
+		VALUES ($1,$2,$3,$4,$5,now())
+		ON CONFLICT (engine, account, block_number, side) DO UPDATE
 		SET balances = EXCLUDED.balances, taken_at = now()`,
-		engine, account, block, doc); err != nil {
+		engine, account, block, docSide, doc); err != nil {
 		return fmt.Errorf("save snapshot for %q account %x at %d: %w", engine, account, block, err)
 	}
 	return nil
@@ -886,9 +889,11 @@ type SnapshotDoc struct {
 // (keyed by lowercase account-hex) at block, as ONE transaction batching all
 // inserts — the runner's bulk per-round history write, replacing a
 // per-account statement loop. The JSONB shape is
-// {"side": s, "balances": {asset-hex: decimal-string}}. Re-saving an
-// (engine, account, block) key replaces the row wholesale (replayed rounds
-// converge). Atomic: a failure (including context cancellation mid-batch)
+// {"side": s, "balances": {asset-hex: decimal-string}}, and each document's
+// side is also its row's side KEY COLUMN (the history PK carries side, so
+// same-block debt and collateral rows coexist). Re-saving an
+// (engine, account, block, side) key replaces the row wholesale (replayed
+// rounds converge). Atomic: a failure (including context cancellation mid-batch)
 // leaves NO partial rows. Additive write for the fix wave's bounded bulk
 // snapshotting.
 func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, docs map[string]SnapshotDoc) error {
@@ -922,11 +927,11 @@ func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, 
 			balances[assetHex] = amount.String()
 		}
 		doc := map[string]any{"side": d.Side, "balances": balances}
-		b.Queue(`INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
-			VALUES ($1,$2,$3,$4,now())
-			ON CONFLICT (engine, account, block_number) DO UPDATE
+		b.Queue(`INSERT INTO snapshots (engine, account, block_number, side, balances, taken_at)
+			VALUES ($1,$2,$3,$4,$5,now())
+			ON CONFLICT (engine, account, block_number, side) DO UPDATE
 			SET balances = EXCLUDED.balances, taken_at = now()`,
-			engine, account, block, doc)
+			engine, account, block, d.Side, doc)
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -955,7 +960,7 @@ func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, 
 
 // ---------------------------------------------------------------------------
 // Durable sweep generations — the snapshotter's crash-resumable work queue.
-// (Sweep-durability wave; see migration 00003 for the model.)
+// (Sweep-durability wave; see migration 00004 for the model.)
 // ---------------------------------------------------------------------------
 
 // SweepGeneration reads engine's durable sweep-generation state
@@ -1180,11 +1185,13 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 		}
 		// Collateral-side history row at the multicall execution block — the
 		// same side-scoped shape SaveSnapshots writes, closing the "no
-		// collateral history for debt_manager" gap. An empty document is a
-		// valid zero-collateral observation.
-		if _, err := tx.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, taken_at)
-			VALUES ($1,$2,$3,$4,now())
-			ON CONFLICT (engine, account, block_number) DO UPDATE
+		// collateral history for debt_manager" gap; side is part of the
+		// history PK, so a debt row the runner wrote at this same block
+		// survives untouched. An empty document is a valid zero-collateral
+		// observation.
+		if _, err := tx.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, side, balances, taken_at)
+			VALUES ($1,$2,$3,'collateral',$4,now())
+			ON CONFLICT (engine, account, block_number, side) DO UPDATE
 			SET balances = EXCLUDED.balances, taken_at = now()`,
 			engine, res.Account, execBlock,
 			map[string]any{"side": "collateral", "balances": doc}); err != nil {
