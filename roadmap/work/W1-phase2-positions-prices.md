@@ -11,6 +11,8 @@ blocked_by: []
 informs: [H0]
 allowed_paths:
   - docs/plans/**
+  - recon/derivation-notes.md
+  - recon/feeds.json
   - internal/**
   - cmd/**
   - config/**
