@@ -182,8 +182,8 @@ var (
 // explicit detection limits. Attained today: the golden suite's 3 borrowers,
 // bit-exact. Planned, not yet run: Task 9's stratified >=25-borrower
 // derived-vs-borrowingOf reconciliation. An out-of-band borrow affecting
-// only unsampled borrowers would NOT be detected by either; no recurring
-// full-population reconciliation exists (a standing health check is a
+// only unsampled borrowers would NOT be detected by either. No recurring
+// full-population reconciliation exists yet (a standing health check is a
 // P3/riskd deliverable, not implemented here). Deliberately NO per-event
 // refusal: it would freeze the deriver on valid in-band events it cannot
 // cheaply prove in-band.

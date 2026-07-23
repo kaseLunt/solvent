@@ -32,8 +32,8 @@ var _ StateReader = (*store.Store)(nil)
 // state rebuildable.
 //
 // INTERFACE AMENDED (deriver-lifecycle wave; controller-authorized unfreeze
-// of the Task 5-7 freeze). The new contract, which Task 7's runner compiles
-// against, is the batch lifecycle:
+// of the Task 5-7 freeze). The new contract, which Task 7's planned runner
+// must compile against once it exists, is the batch lifecycle:
 //
 //	BeginBatch → Process* → store.ApplyDerived → CommitBatch (nil error)
 //	                     ↘ DiscardBatch (Process error mid-batch:
