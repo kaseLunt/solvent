@@ -1,10 +1,12 @@
 package store
 
-// Live-db tests for the Task 7 additive runner/snapshotter support methods:
-// RawLogsInRange, HasUnackedReorg, PruneAckedReorgEpochs,
-// DeleteRateIndexesAbove, SnapshotAccounts, SaveSnapshot, CheckWriterLock.
-// Same harness (testDeriveStore) and NUMERIC/BYTEA discipline as
-// derive_test.go.
+// Live-db tests for the Task 7 additive runner/snapshotter support methods
+// and the fix wave's transactional additions: RawLogsInRange,
+// HasUnackedReorg, PruneAckedReorgEpochs, SnapshotAccounts, SaveSnapshot,
+// CheckWriterLock, ApplyDerivedWithRates (window/rate atomicity),
+// RewindDerived's in-transaction rate hygiene, SaveSnapshots (bulk
+// side-scoped documents) and RecordSnapshotSweep (sweep status). Same
+// harness (testDeriveStore) and NUMERIC/BYTEA discipline as derive_test.go.
 
 import (
 	"context"
@@ -127,35 +129,6 @@ func TestPruneAckedReorgEpochs(t *testing.T) {
 	var chain uint64
 	require.NoError(t, s.pool.QueryRow(ctx, `SELECT chain_id FROM reorg_epochs`).Scan(&chain))
 	require.Equal(t, uint64(99), chain)
-}
-
-// TestDeleteRateIndexesAbove: only the named engine's rows above the block
-// go, and the divergence poison the delete exists to prevent is gone after.
-func TestDeleteRateIndexesAbove(t *testing.T) {
-	s := testDeriveStore(t)
-	ctx := context.Background()
-
-	require.NoError(t, s.SaveRateIndex(ctx, "debt_manager", []byte{0xBB}, 100, "borrow_index", big.NewInt(1)))
-	require.NoError(t, s.SaveRateIndex(ctx, "debt_manager", []byte{0xBB}, 101, "borrow_index", big.NewInt(2)))
-	require.NoError(t, s.SaveRateIndex(ctx, "aave_v3_etherfi", []byte{0xCC}, 101, "liquidity_index", big.NewInt(3)))
-
-	require.NoError(t, s.DeleteRateIndexesAbove(ctx, "debt_manager", 100))
-
-	v, block, found, err := s.LatestRateIndex(ctx, "debt_manager", []byte{0xBB}, 200, "borrow_index")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, big.NewInt(1), v)
-	require.Equal(t, uint64(100), block)
-
-	// A post-reorg re-derivation may observe a DIFFERENT value at the same
-	// key; after the delete, re-saving succeeds instead of being refused.
-	require.NoError(t, s.SaveRateIndex(ctx, "debt_manager", []byte{0xBB}, 101, "borrow_index", big.NewInt(9)))
-
-	// The other engine's row above the block is untouched.
-	v, _, found, err = s.LatestRateIndex(ctx, "aave_v3_etherfi", []byte{0xCC}, 200, "liquidity_index")
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, big.NewInt(3), v)
 }
 
 // TestSnapshotAccountsRegistryAndPriority: distinct debt-side accounts from

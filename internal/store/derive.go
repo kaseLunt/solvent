@@ -656,21 +656,9 @@ func (s *Store) SaveRateIndex(ctx context.Context, engine string, asset []byte, 
 	return nil
 }
 
-// DeleteRateIndexesAbove removes engine's rate observations above block —
-// the runner's post-rewind hygiene companion to RewindDerived. rate_indexes
-// rows above a reorg's rewind target may describe replaced blocks, and a
-// post-reorg re-derivation can observe a DIFFERENT value at the same
-// (engine, asset, block, kind) key — which SaveRateIndex refuses as
-// divergence, permanently wedging derivation. Deleting above the effective
-// rewind target lets re-derivation re-record the canonical values cleanly.
-// Additive write for Task 7's derivation runner.
-func (s *Store) DeleteRateIndexesAbove(ctx context.Context, engine string, block uint64) error {
-	if _, err := s.pool.Exec(ctx,
-		`DELETE FROM rate_indexes WHERE engine = $1 AND block_number > $2`, engine, block); err != nil {
-		return fmt.Errorf("delete rate indexes for %q above %d: %w", engine, block, err)
-	}
-	return nil
-}
+// NOTE: DeleteRateIndexesAbove (the runner's old post-rewind hygiene call)
+// was retired in the fix wave — the deletion now lives INSIDE RewindDerived's
+// transaction, atomic with the epoch ack, so a crash can never separate them.
 
 // RawLogsInRange returns chainID's stored raw logs whose emitting address is
 // in addresses and whose block is within [fromBlock, toBlock], ordered by

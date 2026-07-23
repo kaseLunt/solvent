@@ -455,8 +455,9 @@ func (dm *DebtManager) Process(l store.RawLog, d decode.Event) ([]store.Position
 
 // processIndexUpdated snapshots the token's index for same-block joins. It
 // deliberately emits NO position event: rate observations are persisted by
-// the planned runner via store.SaveRateIndex on this same decoded event, and an
-// index move has no per-account balance effect.
+// the runner from this same decoded event, atomically with the window
+// (store.ApplyDerivedWithRates), and an index move has no per-account
+// balance effect.
 func (dm *DebtManager) processIndexUpdated(l store.RawLog, ev decode.DMInterestIndexUpdated) ([]store.PositionEvent, error) {
 	if ev.NewIndex == nil || ev.NewIndex.Sign() <= 0 {
 		return nil, fmt.Errorf("debt_manager: InterestIndexUpdated for %s at block %d carries non-positive newIndex %v",

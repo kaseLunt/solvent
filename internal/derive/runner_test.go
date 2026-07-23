@@ -40,15 +40,24 @@ type fakeRunnerStore struct {
 	logs        []store.RawLog
 	unacked     bool
 
-	// applyErr fails the next ApplyDerived call (one-shot); when
+	// applyErr fails the next ApplyDerivedWithRates call (one-shot); when
 	// applyAdvancesDespiteErr is set the cursor still advances — the
 	// commit-landed-with-lost-ack world.
 	applyErr                error
 	applyAdvancesDespiteErr bool
 
+	// lastRates captures the rate observations handed to the most recent
+	// ApplyDerivedWithRates call (atomicity assertions).
+	lastRates []store.RateObservation
+
 	// rewindDeepTo, when set, lands the cursor at min(requested, rewindDeepTo)
 	// — RewindDerived's deepest-unacked-epoch lowering.
 	rewindDeepTo *uint64
+
+	// snapshotsErr fails the next SaveSnapshots call (one-shot); snapDocs
+	// captures every successful bulk write's documents in call order.
+	snapshotsErr error
+	snapDocs     []map[string]store.SnapshotDoc
 
 	balances map[string]map[string]map[string]*big.Int // account-hex → asset → side → amount
 }
@@ -74,8 +83,9 @@ func (f *fakeRunnerStore) DeriveCursor(context.Context, string) (uint64, bool, e
 	return f.cursor, f.cursorFound, nil
 }
 
-func (f *fakeRunnerStore) ApplyDerived(_ context.Context, _ string, _ uint64, events []store.PositionEvent, throughBlock uint64) error {
-	f.log.add(fmt.Sprintf("ApplyDerived(events=%d,through=%d)", len(events), throughBlock))
+func (f *fakeRunnerStore) ApplyDerivedWithRates(_ context.Context, _ string, _ uint64, events []store.PositionEvent, rates []store.RateObservation, throughBlock uint64) error {
+	f.log.add(fmt.Sprintf("ApplyDerived(events=%d,rates=%d,through=%d)", len(events), len(rates), throughBlock))
+	f.lastRates = rates
 	if f.applyErr != nil {
 		err := f.applyErr
 		f.applyErr = nil
@@ -120,18 +130,14 @@ func (f *fakeRunnerStore) HasUnackedReorg(context.Context, string, uint64) (bool
 	return f.unacked, nil
 }
 
-func (f *fakeRunnerStore) SaveRateIndex(_ context.Context, _ string, asset []byte, block uint64, kind string, value *big.Int) error {
-	f.log.add(fmt.Sprintf("SaveRateIndex(%s,%x@%d=%s)", kind, asset, block, value))
-	return nil
-}
-
-func (f *fakeRunnerStore) DeleteRateIndexesAbove(_ context.Context, _ string, block uint64) error {
-	f.log.add(fmt.Sprintf("DeleteRateIndexesAbove(%d)", block))
-	return nil
-}
-
-func (f *fakeRunnerStore) SaveSnapshot(_ context.Context, _ string, account []byte, block uint64, _ map[string]map[string]*big.Int) error {
-	f.log.add(fmt.Sprintf("SaveSnapshot(%x@%d)", account, block))
+func (f *fakeRunnerStore) SaveSnapshots(_ context.Context, _ string, block uint64, docs map[string]store.SnapshotDoc) error {
+	f.log.add(fmt.Sprintf("SaveSnapshots(%d@%d)", len(docs), block))
+	if f.snapshotsErr != nil {
+		err := f.snapshotsErr
+		f.snapshotsErr = nil
+		return err
+	}
+	f.snapDocs = append(f.snapDocs, docs)
 	return nil
 }
 
@@ -319,8 +325,9 @@ func TestNewRunnerValidation(t *testing.T) {
 
 // TestRunnerHappyPathOrdering pins the full per-window call sequence:
 // reorg check → frontier → cursor → windowed read → BeginBatch → serial
-// Process → ApplyDerived → CommitBatch → per-touched-account snapshots. The
-// window is capped by the ingest frontier, and a caught-up second Step does
+// Process → ApplyDerivedWithRates (one tx) → CommitBatch → ONE bulk
+// side-scoped snapshot flush of the touched accounts. The window is capped
+// by the ingest frontier, and a caught-up second Step (nothing pending) does
 // nothing.
 func TestRunnerHappyPathOrdering(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
@@ -329,7 +336,7 @@ func TestRunnerHappyPathOrdering(t *testing.T) {
 	for _, k := range []string{"100/0", "100/1", "101/0"} {
 		h.dec.events[k] = stubEvent{name: k}
 	}
-	h.eng.processFn = debtEventFn(0xAA, 0xAA, 0xBC) // two touches of AA dedupe into one snapshot
+	h.eng.processFn = debtEventFn(0xAA, 0xAA, 0xBC) // two touches of AA dedupe into one snapshot doc
 
 	advanced, err := h.r.Step(context.Background())
 	require.NoError(t, err)
@@ -343,15 +350,15 @@ func TestRunnerHappyPathOrdering(t *testing.T) {
 		"Process(100/0)",
 		"Process(100/1)",
 		"Process(101/0)",
-		"ApplyDerived(events=3,through=104)",
+		"ApplyDerived(events=3,rates=0,through=104)",
 		"CommitBatch",
 		"BalancesFor(aa)",
-		"SaveSnapshot(aa@104)",
 		"BalancesFor(bc)",
-		"SaveSnapshot(bc@104)",
+		"SaveSnapshots(2@104)",
 	}, h.log.calls)
 
-	// Caught up: cursor == frontier → nothing to do, no batch started.
+	// Caught up: cursor == frontier and nothing pending → nothing to do, no
+	// batch started, no snapshot write.
 	mark := len(h.log.calls)
 	advanced, err = h.r.Step(context.Background())
 	require.NoError(t, err)
@@ -476,7 +483,8 @@ func TestRunnerDecodeErrorDiscards(t *testing.T) {
 
 // TestRunnerUnsupportedBorrowTokenMarksUnhealthy pins the terminal capability
 // error: ErrUnsupportedBorrowToken → engine UNHEALTHY, never retried — every
-// subsequent Step is a complete no-op.
+// subsequent Step performs the MANDATORY reorg check and nothing else
+// (derivation is gated; repair is not), and Health() surfaces the reason.
 func TestRunnerUnsupportedBorrowTokenMarksUnhealthy(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
 	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
@@ -486,24 +494,33 @@ func TestRunnerUnsupportedBorrowTokenMarksUnhealthy(t *testing.T) {
 		return nil, fmt.Errorf("token %x: %w", l.Address, ErrUnsupportedBorrowToken)
 	}
 
+	healthy, reason := h.r.Health()
+	require.True(t, healthy)
+	require.Empty(t, reason)
+
 	_, err := h.r.Step(context.Background())
 	require.ErrorIs(t, err, ErrUnsupportedBorrowToken)
 	require.ErrorIs(t, h.r.Unhealthy(), ErrUnsupportedBorrowToken)
 	require.Contains(t, h.log.calls, "DiscardBatch")
+	healthy, reason = h.r.Health()
+	require.False(t, healthy)
+	require.Contains(t, reason, "unsupported")
 
 	mark := len(h.log.calls)
 	advanced, err := h.r.Step(context.Background())
 	require.NoError(t, err)
 	require.False(t, advanced)
-	require.Empty(t, h.log.since(mark), "an unhealthy engine must not touch the store at all")
+	require.Equal(t, []string{"HasUnackedReorg"}, h.log.since(mark),
+		"an unhealthy engine still runs the reorg check (repair is mandatory) but derives nothing")
 }
 
 // TestRunnerRewindBeforeDerive pins the reorg-coordination ordering: an
 // unacked epoch is answered with RewindDerived → Reset → cursor re-read →
-// rate-index hygiene → re-sweep trigger BEFORE any window read or
-// ApplyDerived — and the store may rewind DEEPER than the requested target
-// (deepest-unacked-epoch lowering), so the next window starts at the read-back
-// cursor, not the requested target.
+// re-sweep trigger BEFORE any window read or apply — rate-index hygiene is
+// INSIDE RewindDerived's transaction now, so no separate delete call may
+// appear — and the store may rewind DEEPER than the requested target
+// (deepest-unacked-epoch lowering), so the next window starts at the
+// read-back cursor, not the requested target.
 func TestRunnerRewindBeforeDerive(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
 	h.st.ingest["s1"] = &store.CursorPos{Block: 200}
@@ -521,8 +538,7 @@ func TestRunnerRewindBeforeDerive(t *testing.T) {
 		"RewindDerived(to=150)",
 		"Reset",
 		"DeriveCursor",
-		"DeleteRateIndexesAbove(120)",
-	}, h.log.calls, "rewind must complete — and hygiene must key off the READ-BACK cursor — before any derivation")
+	}, h.log.calls, "rewind must complete before any derivation; hygiene is transactional inside RewindDerived")
 	require.Equal(t, 1, h.rewinds, "snapshot re-sweep trigger must fire on rewind")
 
 	// Next Step: epoch acked, derivation resumes from the DEEPER cursor.
@@ -545,10 +561,11 @@ func TestRunnerBootstrapRewindOnEpochChain(t *testing.T) {
 }
 
 // TestRunnerEpochRecoveryOnApplyRefusal pins the reactive backstop: the
-// proactive check saw no epoch, but ApplyDerived refused with
+// proactive check saw no epoch, but the apply refused with
 // ErrUnackedReorgEpoch (a rewind raced in) — Reset first (commit
-// indeterminacy applies to EVERY ApplyDerived error), then RewindDerived,
-// cursor re-read, hygiene, re-sweep trigger.
+// indeterminacy applies to EVERY apply error), then RewindDerived (which
+// carries the rate hygiene in its own transaction), cursor re-read, re-sweep
+// trigger.
 func TestRunnerEpochRecoveryOnApplyRefusal(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
 	h.st.ingest["s1"] = &store.CursorPos{Block: 104}
@@ -563,22 +580,22 @@ func TestRunnerEpochRecoveryOnApplyRefusal(t *testing.T) {
 		"DeriveCursor",
 		"RawLogs(100-104)",
 		"BeginBatch",
-		"ApplyDerived(events=0,through=104)",
+		"ApplyDerived(events=0,rates=0,through=104)",
 		"Reset",
 		"DeriveCursor",
 		"RewindDerived(to=99)",
 		"Reset",
 		"DeriveCursor",
-		"DeleteRateIndexesAbove(99)",
 	}, h.log.calls)
 	require.NotContains(t, h.log.calls, "DiscardBatch")
 	require.Equal(t, 1, h.rewinds)
 }
 
-// TestRunnerRateObservations pins what the runner persists and when: DM
+// TestRunnerRateObservations pins what the runner persists and HOW: DM
 // InterestIndexUpdated → borrow_index (last same-key observation wins), Aave
-// ReserveDataUpdated → variable_borrow_index + liquidity_index, all saved
-// BEFORE ApplyDerived.
+// ReserveDataUpdated → variable_borrow_index + liquidity_index, all handed
+// to ApplyDerivedWithRates ATOMICALLY with the window — no separate
+// SaveRateIndex pre-pass exists anymore.
 func TestRunnerRateObservations(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
 	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
@@ -593,45 +610,186 @@ func TestRunnerRateObservations(t *testing.T) {
 
 	_, err := h.r.Step(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{
-		"SaveRateIndex(borrow_index,00000000000000000000000000000000000000bb@100=222)",
-		"SaveRateIndex(variable_borrow_index,00000000000000000000000000000000000000cc@100=333)",
-		"SaveRateIndex(liquidity_index,00000000000000000000000000000000000000cc@100=444)",
-	}, filterCalls(h.log.calls, "SaveRateIndex"))
-
-	// Saved BEFORE ApplyDerived: replay-safe idempotence beats
-	// lost-observation risk.
-	require.Less(t,
-		indexOfPrefix(t, h.log.calls, "SaveRateIndex"),
-		indexOfPrefix(t, h.log.calls, "ApplyDerived"))
+	require.Contains(t, h.log.calls, "ApplyDerived(events=0,rates=3,through=100)",
+		"the deduped observations ride the window's own transaction")
+	require.Equal(t, []store.RateObservation{
+		{Asset: token.Bytes(), Block: 100, Kind: "borrow_index", Value: big.NewInt(222)},
+		{Asset: reserve.Bytes(), Block: 100, Kind: "variable_borrow_index", Value: big.NewInt(333)},
+		{Asset: reserve.Bytes(), Block: 100, Kind: "liquidity_index", Value: big.NewInt(444)},
+	}, h.st.lastRates, "last-wins dedupe per (asset, block, kind), insertion order preserved")
 }
 
-// TestRunnerSnapshotsTouchedAccountsOnly: record-only events (no side / nil
-// delta) touch no balances and get no snapshot row.
-func TestRunnerSnapshotsTouchedAccountsOnly(t *testing.T) {
+// TestRunnerSnapshotsDebtSideTouchedOnly: only DEBT-side balance-touched
+// accounts are snapshotted — record-only events (no side / nil delta) and
+// collateral-side events (observed truth belongs to the snapshotter at its
+// own block) get no history row — and the flushed document is side-scoped:
+// "side":"debt" with ONLY the debt-side balances, even when the account also
+// carries collateral.
+func TestRunnerSnapshotsDebtSideTouchedOnly(t *testing.T) {
 	h := newRunnerHarness(t, testRunnerSpec())
 	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
-	h.st.logs = []store.RawLog{rlog(100, 0), rlog(100, 1)}
-	h.dec.events["100/0"] = stubEvent{name: "a"}
-	h.dec.events["100/1"] = stubEvent{name: "b"}
+	h.st.logs = []store.RawLog{rlog(100, 0), rlog(100, 1), rlog(100, 2)}
+	for _, k := range []string{"100/0", "100/1", "100/2"} {
+		h.dec.events[k] = stubEvent{name: k}
+	}
 	h.eng.processFn = func(l store.RawLog, _ decode.Event) ([]store.PositionEvent, error) {
-		if l.LogIndex == 0 {
+		switch l.LogIndex {
+		case 0:
 			return []store.PositionEvent{{
 				ChainID: 10, Engine: "debt_manager", BlockNumber: l.BlockNumber, TxHash: l.TxHash,
 				LogIndex: l.LogIndex, EventType: "borrow", Account: []byte{0xAA}, Asset: []byte{0xBB},
 				Side: "debt", Delta: big.NewInt(5),
 			}}, nil
+		case 1:
+			return []store.PositionEvent{{ // collateral-side: must not snapshot
+				ChainID: 10, Engine: "debt_manager", BlockNumber: l.BlockNumber, TxHash: l.TxHash,
+				LogIndex: l.LogIndex, EventType: "supply", Account: []byte{0xDD}, Asset: []byte{0xBB},
+				Side: "collateral", Delta: big.NewInt(7),
+			}}, nil
+		default:
+			return []store.PositionEvent{{ // record-only: must not snapshot
+				ChainID: 10, Engine: "debt_manager", BlockNumber: l.BlockNumber, TxHash: l.TxHash,
+				LogIndex: l.LogIndex, EventType: "config", Account: []byte{0xCC}, Asset: []byte{0xBB},
+				Side: "", Delta: nil,
+			}}, nil
 		}
-		return []store.PositionEvent{{ // record-only: must not snapshot
-			ChainID: 10, Engine: "debt_manager", BlockNumber: l.BlockNumber, TxHash: l.TxHash,
-			LogIndex: l.LogIndex, EventType: "config", Account: []byte{0xCC}, Asset: []byte{0xBB},
-			Side: "", Delta: nil,
-		}}, nil
+	}
+	// The touched account holds BOTH sides in committed truth; the flushed
+	// document must carry only the debt side.
+	h.st.balances = map[string]map[string]map[string]*big.Int{
+		"aa": {"bb": {"debt": big.NewInt(5), "collateral": big.NewInt(999)}},
 	}
 
 	_, err := h.r.Step(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, []string{"SaveSnapshot(aa@100)"}, filterCalls(h.log.calls, "SaveSnapshot"))
+	require.Equal(t, []string{"SaveSnapshots(1@100)"}, filterCalls(h.log.calls, "SaveSnapshots"))
+	require.Len(t, h.st.snapDocs, 1)
+	require.Equal(t, map[string]store.SnapshotDoc{
+		"aa": {Side: "debt", Balances: map[string]*big.Int{"bb": big.NewInt(5)}},
+	}, h.st.snapDocs[0], "side-scoped document: debt only, collateral excluded")
+}
+
+// TestRunnerUnhealthyEngineStillRepairsReorgSiblingUnaffected is the named
+// unhealthy+reorg+sibling failure injection: an UNHEALTHY engine must still
+// acknowledge a reorg epoch (RewindDerived + Reset + re-sweep trigger) —
+// repair is mandatory, only DERIVATION is gated — and a healthy sibling
+// runner keeps deriving normally throughout.
+func TestRunnerUnhealthyEngineStillRepairsReorgSiblingUnaffected(t *testing.T) {
+	h := newRunnerHarness(t, testRunnerSpec())
+	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	h.st.logs = []store.RawLog{rlog(100, 0)}
+	h.dec.events["100/0"] = stubEvent{name: "x"}
+	h.eng.processFn = func(l store.RawLog, _ decode.Event) ([]store.PositionEvent, error) {
+		return nil, fmt.Errorf("token %x: %w", l.Address, ErrUnsupportedBorrowToken)
+	}
+	_, err := h.r.Step(context.Background())
+	require.ErrorIs(t, err, ErrUnsupportedBorrowToken)
+
+	// A walker rewind lands a durable epoch while the engine is unhealthy.
+	h.st.unacked = true
+	h.st.cursor, h.st.cursorFound = 80, true
+	mark := len(h.log.calls)
+	advanced, err := h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the rewind is real progress even for an unhealthy engine")
+	require.Equal(t, []string{
+		"HasUnackedReorg",
+		"DeriveCursor",
+		"RewindDerived(to=80)",
+		"Reset",
+		"DeriveCursor",
+	}, h.log.since(mark), "repair must run for an unhealthy engine")
+	require.Equal(t, 1, h.rewinds, "the snapshot re-sweep trigger fires even while unhealthy")
+
+	// Epoch acked: derivation stays gated — the reorg check and nothing else.
+	mark = len(h.log.calls)
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Equal(t, []string{"HasUnackedReorg"}, h.log.since(mark))
+
+	// A healthy sibling (its own engine, same daemon round in production)
+	// derives normally the whole time.
+	sib := newRunnerHarness(t, testRunnerSpec())
+	sib.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	sib.st.logs = []store.RawLog{rlog(100, 0)}
+	sib.dec.events["100/0"] = stubEvent{name: "x"}
+	sib.eng.processFn = debtEventFn(0xAA)
+	advanced, err = sib.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Contains(t, sib.log.calls, "CommitBatch")
+}
+
+// TestRunnerSnapshotFanOutCarryOver is the named fan-out carry-over failure
+// injection: a window touching more debt accounts than the per-round cap
+// flushes exactly cap accounts in ONE bulk write, carries the remainder in
+// memory, and drains it on the next (caught-up) Step — which counts as
+// progress — leaving nothing pending after.
+func TestRunnerSnapshotFanOutCarryOver(t *testing.T) {
+	h := newRunnerHarness(t, testRunnerSpec())
+	h.r.snapCap = 2
+	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	h.st.logs = []store.RawLog{rlog(100, 0), rlog(100, 1), rlog(100, 2)}
+	for _, k := range []string{"100/0", "100/1", "100/2"} {
+		h.dec.events[k] = stubEvent{name: k}
+	}
+	h.eng.processFn = debtEventFn(0xAA, 0xBC, 0xCD)
+
+	// Round 1: window commits, cap-bounded flush writes 2 of 3 accounts
+	// (bytewise order: aa, bc) at the through-block.
+	advanced, err := h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []string{"SaveSnapshots(2@100)"}, filterCalls(h.log.calls, "SaveSnapshots"))
+	require.Len(t, h.st.snapDocs, 1)
+	require.Len(t, h.st.snapDocs[0], 2)
+	require.Contains(t, h.st.snapDocs[0], "aa")
+	require.Contains(t, h.st.snapDocs[0], "bc")
+
+	// Round 2: caught up, but the carried-over account flushes at the cursor
+	// block — and that IS progress (advanced=true keeps the loop hot until
+	// the backlog drains).
+	mark := len(h.log.calls)
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []string{"SaveSnapshots(1@100)"}, filterCalls(h.log.since(mark), "SaveSnapshots"))
+	require.Contains(t, h.st.snapDocs[1], "cd")
+
+	// Round 3: nothing pending, nothing derived — idle.
+	mark = len(h.log.calls)
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, filterCalls(h.log.since(mark), "SaveSnapshots"))
+}
+
+// TestRunnerSnapshotFailureAdvancesAndRetains pins the best-effort contract
+// end to end: a failed bulk flush after a committed window reports
+// advanced=true WITH the error (M1: the cursor moved — callers must count
+// progress), keeps every unwritten account pending, and the next Step
+// retries and drains them.
+func TestRunnerSnapshotFailureAdvancesAndRetains(t *testing.T) {
+	h := newRunnerHarness(t, testRunnerSpec())
+	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	h.st.logs = []store.RawLog{rlog(100, 0)}
+	h.dec.events["100/0"] = stubEvent{name: "x"}
+	h.eng.processFn = debtEventFn(0xAA)
+	h.st.snapshotsErr = errors.New("history write refused")
+
+	advanced, err := h.r.Step(context.Background())
+	require.ErrorContains(t, err, "history write refused")
+	require.True(t, advanced, "the window committed — an errored Step can still be progress (M1)")
+	require.Contains(t, h.log.calls, "CommitBatch")
+
+	// Retry on the next (caught-up) Step: the pending account flushes.
+	mark := len(h.log.calls)
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []string{"SaveSnapshots(1@100)"}, filterCalls(h.log.since(mark), "SaveSnapshots"))
+	require.Len(t, h.st.snapDocs, 1)
 }
 
 func filterCalls(calls []string, prefix string) []string {
@@ -642,15 +800,4 @@ func filterCalls(calls []string, prefix string) []string {
 		}
 	}
 	return out
-}
-
-func indexOfPrefix(t *testing.T, calls []string, prefix string) int {
-	t.Helper()
-	for i, c := range calls {
-		if len(c) >= len(prefix) && c[:len(prefix)] == prefix {
-			return i
-		}
-	}
-	t.Fatalf("no call with prefix %q in %v", prefix, calls)
-	return -1
 }
