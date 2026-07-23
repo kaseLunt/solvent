@@ -1,0 +1,340 @@
+{
+  "assets": [
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "symbol": "USDC",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+      "symbol": "USDT",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+      "symbol": "weETH",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x4200000000000000000000000000000000000006",
+      "symbol": "WETH",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+      "symbol": "frxUSD",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xf0bb20865277aBd641a307eCe5Ee04E79073416C",
+      "symbol": "liquidETH",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+      "symbol": "liquidBTC",
+      "decimals": 8,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+      "symbol": "liquidUSD",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+      "symbol": "eBTC",
+      "decimals": 8,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+      "symbol": "eUSD",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+      "symbol": "EURC",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E",
+      "symbol": "WHYPE",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+      "symbol": "ETHFI",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x86B5780b606940Eb59A062aA85a07959518c0161",
+      "symbol": "sETHFI",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+      "symbol": "beHYPE",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+      "symbol": "liquidRESERVE",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+      "symbol": "liquidRESERVE",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13",
+      "symbol": "weEUR",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+      "symbol": "liquidRWA",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "op",
+      "engine": "debt_manager",
+      "address": "0x4200000000000000000000000000000000000042",
+      "symbol": "OP",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB",
+        "method": "price(address)",
+        "priceDecimals": 6
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "chainlink_stream",
+        "contract": "0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5",
+        "startBlock": 20779893,
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "symbol": "USDC",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "chainlink_stream",
+        "contract": "0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7",
+        "startBlock": 20188117,
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+      "symbol": "PYUSD",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "chainlink_stream",
+        "contract": "0x39E31761911b9aaBAEF5fb81B18Fd1C24a60E884",
+        "startBlock": 19626469,
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0x853d955aCEf822Db058eb8505911ED77F175b99e",
+      "symbol": "FRAX",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "chainlink_stream",
+        "contract": "0x8F73090a7c58B8BDcC9A93cBB6816e5cC4f01E8c",
+        "startBlock": 20191185,
+        "priceDecimals": 8
+      }
+    }
+  ]
+}
