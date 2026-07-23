@@ -178,14 +178,15 @@ var (
 // would be silently mispriced here, and per-event archive pricing of all
 // 305k historical borrows is infeasible on free RPC. The assumption is
 // therefore (a) RECORDED on every borrow (payload "price_source" =
-// dmPriceSourceStableSnap), and (b) checked by SAMPLED evidence with
-// explicit detection limits: the golden suite covers 3 borrowers bit-exactly
-// and Task 9's reconciliation covers a stratified sample of >=25 borrowers —
-// an out-of-band borrow affecting only unsampled borrowers would NOT be
-// detected by either. No recurring full-population reconciliation exists yet
-// (a standing health check is a P3/riskd deliverable, not implemented here).
-// Deliberately NO per-event refusal: it would freeze the deriver on valid
-// in-band events it cannot cheaply prove in-band.
+// dmPriceSourceStableSnap), and (b) checked ONLY by sampled evidence with
+// explicit detection limits. Attained today: the golden suite's 3 borrowers,
+// bit-exact. Planned, not yet run: Task 9's stratified >=25-borrower
+// derived-vs-borrowingOf reconciliation. An out-of-band borrow affecting
+// only unsampled borrowers would NOT be detected by either; no recurring
+// full-population reconciliation exists (a standing health check is a
+// P3/riskd deliverable, not implemented here). Deliberately NO per-event
+// refusal: it would freeze the deriver on valid in-band events it cannot
+// cheaply prove in-band.
 func borrowUsd(token common.Address, amount *big.Int, l store.RawLog) (*big.Int, error) {
 	decimals, ok := dmStableBorrowDecimals[token]
 	if !ok {
