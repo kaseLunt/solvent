@@ -3,7 +3,7 @@ id: W1
 type: work
 title: "Phase 2: positions & prices (plan + execution)"
 phase: P2
-status: active
+status: committed
 evidence_target: Suite green live-db; backfilled positions cross-checked on-chain
 priority: 1
 depends_on: []
@@ -29,7 +29,7 @@ invalidated_by:
   - recon/contracts.json
   - internal/store/migrations/**
 review_when: phase:P2:entry
-updated: 2026-07-23
+updated: 2026-07-24
 ---
 
 # W1 — Phase 2: positions & prices (plan + execution)
