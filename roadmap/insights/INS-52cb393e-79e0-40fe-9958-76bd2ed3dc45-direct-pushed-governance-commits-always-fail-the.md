@@ -36,8 +36,14 @@ replay, because a direct push has no pull-request number to attest against.
 
 Job breakdown of `30134969559`: advisory doctor **success**, advisory selftest **success**, advisory
 scope review **failure**, trusted audit **skipped** (not wired through a hosting ruleset required
-workflow). Product-only pushes (`internal/**`) do not trigger it — every green Control plane run in
-the Task 7 wave series was product-only.
+workflow).
+
+**Confirmed by controlled comparison, not inferred.** Run `30135164815` is the immediately following
+push on the same branch, touching only `roadmap/insights/**` (a routine capture surface, which the
+local gate also accepts without `CONTROL_PLANE_OWNER_REVIEWED=1` per RULES 10). All three advisory
+jobs pass there, **including the scope review that failed one commit earlier**. The only variable
+between the two runs is whether the push touched an owner-review-protected surface. Product-only
+pushes (`internal/**`) likewise never triggered it across the Task 7 wave series.
 
 ## Consequence
 
