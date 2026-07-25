@@ -48,7 +48,7 @@ package prices
 // rewind that cannot prove what is orphaned must not delete anything. The
 // governing invariant is NEVER DELETE OR BLESS A ROW WITHOUT POSITIVE PROOF OF
 // NON-CANONICALITY FOR EVERYTHING ABOVE THE FLOOR, and floorOutcome enumerates
-// every state that invariant has to answer for. Two rules that a "fail closed"
+// every state that invariant has to answer for. Three rules that a "fail closed"
 // slogan does not by itself imply, and whose absence each cost a review round:
 //
 //   - A MATCH IS NOT PROOF ABOUT WHAT IS ABOVE IT. Anchors are probed
@@ -56,14 +56,24 @@ package prices
 //     anchor above it has been successfully probed AND mismatched, and once no row
 //     above the deletion boundary sits at an unanchored height. A failed probe
 //     followed by a lower match refuses and retries.
+//   - A PROOF EXPIRES WHEN THE CHAIN IT DESCRIBES IS REPLACED. Verification is
+//     paged across Steps, so its mismatch proofs are CACHED, and "this anchor is
+//     orphaned" is a statement about one chain state rather than a permanent fact:
+//     a second reorg can make exactly those skipped anchors canonical again. Paging
+//     state is therefore stamped with the chain's reorg GENERATION and with a
+//     LIVE-CHAIN CHECKPOINT (the highest anchor the pass probed, and the hash the
+//     chain gave there); either one changing discards the pass and restarts from the
+//     newest anchor, and the checkpoint is re-read IMMEDIATELY BEFORE any deletion.
+//     Enumerating states was not enough — the missing dimension was time.
 //   - FAIL-CLOSED MUST NOT MEAN FAIL-FOREVER. A refusal no code path can clear is
 //     an outage. Where the evidence is merely UNAVAILABLE (a probe errored, a page
-//     is still to come) repair waits and reports ConditionPollRewindBlocked. Where
-//     it is UNOBTAINABLE — rows at heights whose block hash was never recorded —
-//     waiting is permanent: repair needs an anchor, adoption is refused while an
-//     epoch is pending, and the ack only advances through repair. Those rows are
-//     NEUTRALIZED instead: retained, marked unusable, the epoch acked, ingestion
-//     resumed. Nothing is destroyed and nothing unprovable is trusted.
+//     is still to come, a checkpoint could not be re-read) repair waits and reports
+//     ConditionPollRewindBlocked. Where it is UNOBTAINABLE — rows at heights whose
+//     block hash was never recorded — waiting is permanent: repair needs an anchor,
+//     adoption is refused while an epoch is pending, and the ack only advances
+//     through repair. Those rows are NEUTRALIZED instead: retained, marked unusable,
+//     the epoch acked, ingestion resumed. Nothing is destroyed and nothing
+//     unprovable is trusted.
 //
 // # FAILURE POSTURE, in the order the failures happen
 //
@@ -249,8 +259,30 @@ type Poller struct {
 	// the next page is read at or below probeResumeFrom. probeResumeSet also
 	// distinguishes "we have not started probing" from "we paged to the bottom
 	// and nothing matched".
+	//
+	// THEY CARRY A CACHED PROOF, WHICH MEANS THEY CARRY AN EXPIRY. Lowering the
+	// resume point asserts "every anchor above this height was probed and
+	// MISMATCHED" — a statement about the chain as it stood when those probes ran,
+	// not a timeless fact. The four fields below bind that assertion to the chain
+	// state it was computed against; see verifyFloor's TIME section.
 	probeResumeFrom uint64
 	probeResumeSet  bool
+	// probeGeneration is the chain's reorg generation
+	// (store.PriceRepairExposure.ReorgGeneration) the accumulated proofs were
+	// computed under. A different generation means the walker recorded ANOTHER
+	// reorg since, so those proofs describe a chain that has been replaced again.
+	probeGeneration int64
+	// probeCheckpoint* is the LIVE-CHAIN half of the same binding: the highest
+	// anchor height this verification pass successfully probed, the hash the chain
+	// reported there at that moment, and the endpoint that said so. Because a block
+	// hash commits to its whole ancestry, that one height re-read unchanged entails
+	// that every proof at or below it still holds — and re-read CHANGED it entails
+	// that at least one of them may not. It is revalidated immediately before every
+	// destructive or blessing act (see repair).
+	probeCheckpointSet   bool
+	probeCheckpointBlock uint64
+	probeCheckpointHash  []byte
+	probeCheckpointBy    int
 	// rewindBlocked is the reason repair last REFUSED to ack or delete, empty
 	// when no refusal stands. Reported as ConditionPollRewindBlocked.
 	rewindBlocked string
@@ -776,6 +808,17 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 // POSITIVE PROOF OF NON-CANONICALITY FOR EVERYTHING ABOVE THE FLOOR. "Proof" is
 // only ever an anchor whose recorded hash no longer matches the live chain, or a
 // verified anchor at or above the row (which entails its whole ancestry).
+//
+// AND THE ENUMERATION IS NOT SUFFICIENT BY ITSELF, which is what the FOURTH A1
+// round established. Partitioning the states answers "which state may delete"; it
+// says nothing about a state's truth CHANGING between the Step that established it
+// and the Step that acts on it. Verification is paged across Steps, so a proof is
+// cached, and a proof about a chain is only true of the chain it was computed
+// against: a later reorg can make a mismatched anchor canonical again, at which
+// point acting on the cached mismatch deletes canonical history. Every outcome
+// above is therefore ALSO bound to a reorg generation and a live-chain checkpoint,
+// revalidated immediately before the act — see verifyFloor's "A PROOF HAS A TIME"
+// section and Poller.checkpointStillHolds. Enumerate transitions, not just states.
 type floorOutcome int
 
 const (
@@ -786,14 +829,20 @@ const (
 	// floorVerified: an anchor at or below the requested target re-verified
 	// against the live chain (so it and every ancestor are unchanged), AND every
 	// anchor above it was successfully probed and mismatched, AND no row above the
-	// deletion boundary sits at an unanchored height. All three are required — a
-	// match alone was the A1 hole: a FAILED probe of a newer anchor followed by a
-	// lower match used to return this outcome and delete the newer history.
+	// deletion boundary sits at an unanchored height, AND the checkpoint those
+	// mismatches were established against still holds at the moment of deletion.
+	// All four are required. A match alone was A1's third life (a FAILED probe of a
+	// newer anchor followed by a lower match used to delete the newer history); a
+	// mismatch that has since been overturned by a second reorg was its fifth.
 	floorVerified
 	// floorProvenOrphaned: verification paged through every retained anchor, all
 	// of them mismatched, and every row above the effective target sits at one of
 	// those anchored heights. Each such row is therefore proven to describe a
-	// replaced block, so deleting above the target is justified with no floor.
+	// replaced block, so deleting above the target is justified with no floor —
+	// provided the checkpoint those mismatches were established against still holds
+	// when the deletion runs. This outcome ALWAYS rests on cached, cross-Step
+	// proofs (a single page cannot reach the bottom and conclude), so it is the
+	// outcome the temporal binding matters most for.
 	floorProvenOrphaned
 	// floorUnverifiable: rows above the deletion boundary sit at heights NO
 	// surviving anchor covers — legacy history, or history whose anchors retention
@@ -863,6 +912,26 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("price poller %q: verify poll anchors before rewind: %w", p.engine, err)
 	}
+	// LAST GATE BEFORE ACTING. The three outcomes below either delete rows or bless
+	// rows at or below a floor as still valid, and each rests on proofs this pass may
+	// have accumulated across earlier Steps. The checkpoint re-read happens HERE,
+	// with nothing between it and the store call, so "the proof was true when we
+	// acted on it" is a property of the code path rather than of how long
+	// verification happened to take.
+	//
+	// The two outcomes NOT gated are not oversights. floorNothingAtRisk consumes no
+	// proof — this engine owns nothing above the boundary, so the rewind deletes
+	// nothing whatever it believes — and floorUnprobed acts on nothing at all, so
+	// spending a probe to authorise inaction would only shrink the page budget that
+	// is trying to reach a conclusion.
+	switch outcome {
+	case floorVerified, floorProvenOrphaned, floorUnverifiable:
+		holds, why := p.checkpointStillHolds(ctx)
+		if !holds {
+			p.blockRepairOnCheckpoint(cursor, probes, why)
+			return false, nil
+		}
+	}
 	switch outcome {
 	case floorNothingAtRisk:
 		if err := p.rewindTo(ctx, cursor, 0, probes,
@@ -872,13 +941,13 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 		return true, nil
 	case floorVerified:
 		if err := p.rewindTo(ctx, cursor, floor, probes,
-			fmt.Sprintf("retained everything at or below HASH-VERIFIED poll anchor %d, and every anchor above it was probed and mismatched", floor)); err != nil {
+			fmt.Sprintf("retained everything at or below HASH-VERIFIED poll anchor %d, every anchor above it was probed and mismatched, and the verification checkpoint still held immediately before the deletion", floor)); err != nil {
 			return false, err
 		}
 		return true, nil
 	case floorProvenOrphaned:
 		if err := p.rewindTo(ctx, cursor, 0, probes,
-			"every retained poll anchor was probed and MISMATCHED and every row above the target sits at one of those anchored heights, so each is proven to describe a replaced block"); err != nil {
+			"every retained poll anchor was probed and MISMATCHED, every row above the target sits at one of those anchored heights, and the verification checkpoint still held immediately before the deletion, so each row is proven to describe a replaced block"); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -926,6 +995,40 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 // deeper instead of abandoning verification — the behaviour the old
 // eight-and-give-up bound lacked.
 //
+// # A PROOF HAS A TIME, NOT JUST A HEIGHT
+//
+// This is finding A1's fifth life, and the dimension the earlier fixes were all
+// missing. Enumerating the state space (floorOutcome) settled WHICH states may
+// delete; it said nothing about the truth of a state changing UNDER a paged
+// verification. probeResumeFrom used to carry only a height, and a mismatch
+// established under one chain state stayed trusted afterwards. A SECOND reorg can
+// make exactly those skipped, higher anchors canonical again — and then a lower
+// match is accepted as a floor, or every anchor is declared orphaned, and rows
+// that now describe the canonical chain are deleted. Non-replayable history, lost
+// on a proof that had expired.
+//
+// Two bindings close it, because the two ways the truth can move are visible in
+// two different places:
+//
+//  1. THE REORG GENERATION. Every reorg the walker records increments
+//     store.PriceRepairExposure.ReorgGeneration. Paging state is stamped with the
+//     generation it was computed under, and a change DISCARDS it: verification
+//     restarts from the newest anchor rather than resuming into a range whose
+//     verdicts may have flipped.
+//  2. THE LIVE-CHAIN CHECKPOINT. The generation only moves when the WALKER has
+//     already noticed, which it may not have yet. So the pass also remembers the
+//     highest anchor height it successfully probed and the hash the chain reported
+//     there. Re-reading that one height answers the whole question: a block hash
+//     commits to its entire ancestry, so an unchanged answer entails every lower
+//     proof still holds, and a changed answer entails that at least one may not.
+//     repair revalidates it IMMEDIATELY BEFORE the destructive act — not merely at
+//     the start of the Step — and a failed or changed revalidation deletes nothing.
+//
+// The checkpoint is re-read through the endpoint that ESTABLISHED it. Probes are
+// otherwise spread across endpoints on purpose, but a revalidation asked of a
+// different node conflates "the chain moved" with "these two nodes disagree", and
+// the second would refuse repairs forever on any fleet with one lagging member.
+//
 // Each probe is routed through a DIFFERENT endpoint than the last (HeaderHashFrom
 // with an advancing start index) so one frozen or forked endpoint cannot answer
 // every question with the same wrong history. Anchors above toBlock are excluded
@@ -941,6 +1044,14 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 		// This is the provable transition out of the pending-epoch state and it
 		// covers the case where the walker's target is already above all our rows.
 		return 0, floorNothingAtRisk, 0, nil
+	}
+
+	// TIME BINDING (1): the accumulated proofs were computed under one reorg
+	// generation. A newer generation means the chain moved again, so they are
+	// discarded and paging restarts from the newest anchor.
+	if p.probeGeneration != exp.ReorgGeneration {
+		p.resetVerification(fmt.Sprintf("the chain's reorg generation moved from %d to %d while verification was paging",
+			p.probeGeneration, exp.ReorgGeneration))
 	}
 
 	from := toBlock
@@ -976,6 +1087,9 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 				"engine", p.engine, "anchorBlock", a.BlockNumber, "err", err)
 			continue
 		}
+		// TIME BINDING (2): the highest height this pass has an answer for becomes
+		// the checkpoint every proof at or below it is revalidated against.
+		p.noteCheckpoint(a.BlockNumber, live.Bytes(), servedBy.Index, exp.ReorgGeneration)
 		if bytes.Equal(live.Bytes(), a.BlockHash) {
 			if probeFailed {
 				// GATE 1. A newer anchor above this one could not be checked, so
@@ -1018,6 +1132,84 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 		p.probeResumeFrom, p.probeResumeSet = deepestChecked-1, true
 	}
 	return 0, floorUnprobed, probes, nil
+}
+
+// noteCheckpoint records the highest anchor height this verification pass has a
+// LIVE answer for, together with the hash and the endpoint that answered — the
+// reference every accumulated mismatch proof is revalidated against.
+//
+// It only ever moves UPWARD within a pass, because a hash at H entails the whole
+// ancestry of H: a checkpoint higher than another one strictly covers it, and
+// letting a later, deeper page overwrite it with a lower height would shrink the
+// range the revalidation vouches for. Pages descend, so in practice this records
+// the first successful probe of a pass and then re-records only when a re-probe
+// reaches higher (which happens after a page whose top probe failed).
+func (p *Poller) noteCheckpoint(block uint64, live []byte, endpoint int, generation int64) {
+	if p.probeCheckpointSet && block <= p.probeCheckpointBlock {
+		return
+	}
+	hash := make([]byte, len(live))
+	copy(hash, live)
+	if endpoint < 0 {
+		endpoint = 0
+	}
+	p.probeCheckpointSet, p.probeCheckpointBlock = true, block
+	p.probeCheckpointHash, p.probeCheckpointBy = hash, endpoint
+	p.probeGeneration = generation
+}
+
+// checkpointStillHolds re-reads the verification checkpoint and reports whether
+// the chain still gives the answer this pass's proofs were computed against. It is
+// called IMMEDIATELY BEFORE the destructive (or validity-blessing) act, which is
+// the only moment at which the question has an answer worth having: verification
+// may have spanned many Steps and many minutes.
+//
+// Three outcomes, and only the first authorises anything:
+//
+//   - UNCHANGED — every proof at or below the checkpoint still holds, by hash
+//     ancestry. Proceed.
+//   - CHANGED — the chain moved again, so at least one proof may have flipped
+//     (this is A1: a previously-mismatched anchor can be canonical again). The
+//     accumulated state is DISCARDED and verification restarts from the newest
+//     anchor; nothing is deleted this Step.
+//   - UNREADABLE — the probe failed. That is not evidence either way, so it is
+//     treated exactly like a failed anchor probe: refuse and retry, keeping the
+//     paging state so the next Step continues rather than starting over.
+//
+// A pass with NO checkpoint (nothing was successfully probed, so no cached proof
+// is being relied on) holds trivially.
+func (p *Poller) checkpointStillHolds(ctx context.Context) (bool, string) {
+	if !p.probeCheckpointSet {
+		return true, ""
+	}
+	live, servedBy, err := p.chain.HeaderHashFrom(ctx, p.probeCheckpointBy, p.probeCheckpointBlock)
+	if err != nil {
+		return false, fmt.Sprintf("the verification checkpoint at block %d could not be re-read immediately before the repair (%v), so the anchor proofs at or below it cannot be shown to still hold",
+			p.probeCheckpointBlock, err)
+	}
+	if !bytes.Equal(live.Bytes(), p.probeCheckpointHash) {
+		why := fmt.Sprintf("the live chain now reports %s at the verification checkpoint (block %d) where it reported %x when this pass's anchor proofs were established, via endpoint %d: the chain moved AGAIN, so anchors this pass recorded as orphaned may be canonical once more",
+			live.Hex(), p.probeCheckpointBlock, p.probeCheckpointHash, servedBy.Index)
+		p.resetVerification(why)
+		return false, why
+	}
+	return true, ""
+}
+
+// resetVerification discards the paging state and the checkpoint, so the next Step
+// re-probes from the newest anchor. It is the "restart whenever the chain state the
+// proofs were computed against changes" half of the temporal binding; the proofs
+// themselves are not repaired, they are thrown away.
+func (p *Poller) resetVerification(why string) {
+	if p.probeResumeSet || p.probeCheckpointSet {
+		slog.Warn("poll-anchor verification RESTARTS from the newest anchor: the chain state its accumulated mismatch proofs were computed against no longer holds, so those proofs are discarded rather than acted on",
+			"engine", p.engine, "why", why, "resumeFrom", p.probeResumeFrom,
+			"checkpointBlock", p.probeCheckpointBlock, "checkpointGeneration", p.probeGeneration)
+	}
+	p.probeResumeFrom, p.probeResumeSet = 0, false
+	p.probeCheckpointSet, p.probeCheckpointBlock = false, 0
+	p.probeCheckpointHash, p.probeCheckpointBy = nil, 0
+	p.probeGeneration = 0
 }
 
 // neutralize answers the epoch WITHOUT deleting anything, for the one state where
@@ -1082,12 +1274,32 @@ func (p *Poller) blockRepair(cursor uint64, outcome floorOutcome, probes int) {
 		why = fmt.Sprintf("repair reached an unhandled verification outcome (%d)", outcome)
 		detail = "this is a code defect; nothing was deleted or acked"
 	}
+	p.recordRepairRefusal(cursor, probes, why, detail)
+}
+
+// blockRepairOnCheckpoint records the refusal that closes A1's temporal hole: the
+// verification checkpoint could not be re-read, or no longer holds, at the instant
+// repair was about to act. Both are recoverable — a re-read succeeds later, and a
+// discarded pass simply re-probes from the newest anchor — which is why this is a
+// condition and a retry rather than an error.
+func (p *Poller) blockRepairOnCheckpoint(cursor uint64, probes int, why string) {
+	p.recordRepairRefusal(cursor, probes,
+		"the live-chain checkpoint the anchor proofs were computed against did not hold immediately before the deletion",
+		why+". Nothing was deleted or acked; verification re-runs against the chain as it now stands")
+}
+
+// recordRepairRefusal is the single place a standing repair refusal is composed and
+// reported, so every refusal reaches ConditionPollRewindBlocked in the same shape
+// and none of them can be an error that burns the daemon's retry backoff on a state
+// only an operator or a recovered chain view can change.
+func (p *Poller) recordRepairRefusal(cursor uint64, probes int, why, detail string) {
 	reason := fmt.Sprintf("a reorg epoch on chain %d is pending and repair REFUSED to ack or delete: %s (cursor %d, probes this round %d). %s. Polled prices cannot be re-derived, so no price is applied until this resolves",
 		p.cfg.ChainID, why, cursor, probes, detail)
 	if p.rewindBlocked != reason {
 		slog.Warn("price reorg repair BLOCKED and nothing was deleted: polled history cannot be re-polled, so an unverifiable rewind is refused rather than performed",
 			"engine", p.engine, "chain", p.cfg.ChainID, "cursor", cursor,
-			"why", why, "probesThisRound", probes, "resumeFrom", p.probeResumeFrom)
+			"why", why, "probesThisRound", probes, "resumeFrom", p.probeResumeFrom,
+			"checkpointBlock", p.probeCheckpointBlock)
 	}
 	p.rewindBlocked = reason
 }
@@ -1126,11 +1338,16 @@ func (p *Poller) rewindTo(ctx context.Context, target, floor uint64, probes int,
 	return nil
 }
 
-// clearRepairState drops the verification paging cursor and any standing refusal.
-// Called both when a repair completes and when no epoch is pending at all — in
-// either case the previous refusal no longer describes reality.
+// clearRepairState drops the verification pass — paging cursor, checkpoint and
+// generation stamp — along with any standing refusal. Called both when a repair
+// completes and when no epoch is pending at all; in either case the previous
+// refusal no longer describes reality and the next epoch must be verified from
+// scratch rather than against a checkpoint from the last one.
 func (p *Poller) clearRepairState() {
 	p.probeResumeFrom, p.probeResumeSet = 0, false
+	p.probeCheckpointSet, p.probeCheckpointBlock = false, 0
+	p.probeCheckpointHash, p.probeCheckpointBy = nil, 0
+	p.probeGeneration = 0
 	p.rewindBlocked = ""
 }
 

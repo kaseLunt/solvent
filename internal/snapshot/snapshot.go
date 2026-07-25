@@ -138,9 +138,15 @@ const defaultBatchSize = 100
 // a Safe's spent retries.
 const maxAccountRetries = 3
 
-// maxSweepAttempts is the total per-generation attempt budget SweepWorkBatch
+// MaxSweepAttempts is the total per-generation attempt budget SweepWorkBatch
 // enforces: the first attempt plus the retry budget.
-const maxSweepAttempts = 1 + maxAccountRetries
+//
+// EXPORTED because the daemon's readiness gate has to ask the store the SAME
+// question this package asks it: "which current-generation failures have spent
+// their budget, so nothing in this generation will retry them". The budget is this
+// package's policy, so a second, independently-written copy in cmd/indexer could
+// drift from it and would then classify stuck accounts as still-retrying.
+const MaxSweepAttempts = 1 + maxAccountRetries
 
 // maxConsecutiveAmbiguous bounds the ambiguity LEASE on the caller-scoped
 // endpoint preference (preferredStart): the number of CONSECUTIVE non-stale
@@ -452,7 +458,7 @@ func (s *Snapshotter) Step(ctx context.Context) (bool, error) {
 		s.lastSeenGeneration = gen
 	}
 
-	batch, err := s.store.SweepWorkBatch(ctx, s.cfg.Engine, gen, maxSweepAttempts, s.cfg.BatchSize)
+	batch, err := s.store.SweepWorkBatch(ctx, s.cfg.Engine, gen, MaxSweepAttempts, s.cfg.BatchSize)
 	if err != nil {
 		return false, fmt.Errorf("snapshotter %q: read sweep work batch: %w", s.cfg.Engine, err)
 	}

@@ -363,6 +363,13 @@ func TestPriceRepairExposureReportsTheBoundaryAndWhatIsAboveIt(t *testing.T) {
 	require.Zero(t, exp.Owned, "and it owns nothing, so there is nothing at risk")
 }
 
+// testSweepBudget is the per-generation attempt budget these tests pass to
+// SweepProgress. It matches snapshot.MaxSweepAttempts (1 first attempt + 3 retries),
+// which this package cannot import — internal/snapshot imports internal/store, so the
+// dependency only runs one way. The budget is a PARAMETER of SweepProgress precisely
+// because it is the snapshotter's policy rather than the store's.
+const testSweepBudget = 4
+
 // SweepProgress reports the snapshotter's durable progress, which is the only way
 // the daemon can see a SEMANTIC sweep stall: an all-endpoints-stale sweep refuses
 // every batch, returns no error and advances nothing, and the snapshotter has no
@@ -371,13 +378,13 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	_, found, err := s.SweepProgress(ctx, "debt_manager")
+	_, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget)
 	require.NoError(t, err)
 	require.False(t, found, "an engine that has never opened a generation has not started, not stalled")
 
 	gen, err := s.OpenSweepGeneration(ctx, "debt_manager")
 	require.NoError(t, err)
-	p, found, err := s.SweepProgress(ctx, "debt_manager")
+	p, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, gen, p.Generation)
@@ -393,7 +400,7 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 			"00000000000000000000000000000000000000bb": {"collateral": big.NewInt(1)},
 		}},
 	}))
-	p, _, err = s.SweepProgress(ctx, "debt_manager")
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
 	require.NoError(t, err)
 	require.False(t, p.LastBatchAt.IsZero(), "the timestamp is the database's, so a restart cannot reset it")
 	require.Zero(t, p.Lagging, "the only account is at the current generation")
@@ -401,16 +408,125 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 	// A new generation makes it lag again, and completion closes the window.
 	next, err := s.OpenSweepGeneration(ctx, "debt_manager")
 	require.NoError(t, err)
-	p, _, err = s.SweepProgress(ctx, "debt_manager")
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), p.Lagging)
 	_, stamped, err := s.CompleteSweepGeneration(ctx, "debt_manager", next)
 	require.NoError(t, err)
 	require.True(t, stamped)
-	p, _, err = s.SweepProgress(ctx, "debt_manager")
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
 	require.NoError(t, err)
 	require.False(t, p.Open, "a closed generation is idle by cadence, not stalled")
 	require.False(t, p.CompletedAt.IsZero())
+	require.Zero(t, p.Failed, "nothing failed in that generation")
+	require.False(t, p.LastSuccessAt.IsZero(), "and one account did succeed, in an earlier generation")
+}
+
+// "CLOSED" IS NOT "SUCCEEDED". CompleteSweepGeneration deliberately stamps a
+// generation complete once no account still OWES work, and an account that has
+// spent its retry budget owes none — so a generation closes with status='failed'
+// rows in it, reporting them only through a return value and a WARN. Per-account
+// failures also return nil from ApplySweepBatch, so the daemon's failure
+// bookkeeping stays clear. The readiness gate returned immediately for every
+// closed generation, so /readyz went green while named borrowers had no current
+// collateral snapshot at all until the next generation opened.
+//
+// This drives the whole real transition — attempts accumulate through
+// ApplySweepBatch until SweepWorkBatch stops offering the account, then the
+// generation closes — and pins the counts SweepProgress must report at each stage.
+// Nothing here writes a status row or an attempts counter directly: the durable
+// budget is the point, and a test that set attempts itself would prove nothing
+// about whether the store's own arithmetic reaches the exhausted state.
+func TestSweepProgressReportsExhaustedFailuresThroughGenerationClose(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	engine := "debt_manager"
+
+	good, bad := addr20(0xAA), addr20(0xBB)
+	// Both accounts need a debt position event, or SweepWorkBatch's registry read
+	// does not see them at all.
+	seedSweepRegistry(t, s, engine, good, bad)
+
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+
+	// One account succeeds; the other reverts on every attempt. Drain the queue the
+	// way the snapshotter does, so `attempts` is accumulated by the store.
+	rounds := 0
+	for {
+		batch, err := s.SweepWorkBatch(ctx, engine, gen, testSweepBudget, 10)
+		require.NoError(t, err)
+		if len(batch) == 0 {
+			break
+		}
+		rounds++
+		require.Less(t, rounds, 10, "the durable retry budget must terminate the queue")
+		results := make([]SweepResult, 0, len(batch))
+		for _, acct := range batch {
+			if string(acct) == string(good) {
+				results = append(results, SweepResult{Account: acct, OK: true,
+					Balances: map[string]map[string]*big.Int{
+						"00000000000000000000000000000000000000cc": {"collateral": big.NewInt(7)},
+					}})
+				continue
+			}
+			results = append(results, SweepResult{Account: acct, OK: false})
+		}
+		require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 5_000+uint64(rounds), results),
+			"a per-account revert is NOT a batch error — which is exactly why nothing else reports it")
+
+		p, _, err := s.SweepProgress(ctx, engine, testSweepBudget)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), p.Failed, "the failing account is recorded as failed from its first attempt")
+		if rounds < testSweepBudget {
+			require.Zero(t, p.Exhausted,
+				"round %d: budget remains, so this failure is IN FLIGHT and not yet unresolved", rounds)
+		}
+	}
+	require.Equal(t, testSweepBudget, rounds, "the account was retried exactly to its budget")
+
+	// The queue is empty while an account is still status='failed', and the
+	// generation closes on that.
+	failed, stamped, err := s.CompleteSweepGeneration(ctx, engine, gen)
+	require.NoError(t, err)
+	require.True(t, stamped)
+	require.Equal(t, int64(1), failed, "completion reports the degradation — and only through this value and a WARN")
+
+	p, found, err := s.SweepProgress(ctx, engine, testSweepBudget)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.False(t, p.Open, "the generation is CLOSED")
+	require.Equal(t, int64(1), p.Failed, "and it closed with a failed account in it")
+	require.Equal(t, int64(1), p.Exhausted,
+		"a generation cannot close while an account still has budget, so a closed generation's failures are ALL exhausted")
+	require.False(t, p.LastSuccessAt.IsZero(), "the other account's success is the staleness reference")
+
+	// The NEXT generation grants a fresh budget, so the same row stops being
+	// exhausted the moment work is owed again — the state is recoverable, which is
+	// why it belongs in the recoverable half of the health surface.
+	next, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.Greater(t, next, gen)
+	p, _, err = s.SweepProgress(ctx, engine, testSweepBudget)
+	require.NoError(t, err)
+	require.Zero(t, p.Failed, "the failed row now belongs to an EARLIER generation, so it counts as lagging instead")
+	require.Zero(t, p.Exhausted)
+	require.Equal(t, int64(2), p.Lagging)
+}
+
+// seedSweepRegistry gives each account a debt position event, which is what
+// SweepWorkBatch's registry read (DISTINCT debt-side accounts) selects on. Without
+// it the queue is empty and a sweep test would pass by doing nothing.
+func seedSweepRegistry(t *testing.T, s *Store, engine string, accounts ...[]byte) {
+	t.Helper()
+	ctx := context.Background()
+	for i, acct := range accounts {
+		require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{{
+			ChainID: 10, Engine: engine, Account: acct, Asset: addr20(0xC0),
+			Side: "debt", EventType: "borrow", Delta: big.NewInt(1),
+			BlockNumber: 100 + uint64(i), TxHash: hash32(byte(0xD0 + i)), LogIndex: uint32(i),
+		}}, 200))
+	}
 }
 
 // Both raw-log reads carry raw_logs.ingested_at, which is the durable observation

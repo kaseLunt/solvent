@@ -756,7 +756,7 @@ func TestAllRevertedBatchIsPerAccountFailure(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, advanced)
 	require.False(t, st.open, "the generation completes DEGRADED instead of wedging")
-	require.Equal(t, maxSweepAttempts, st.rows[hex.EncodeToString(a1)].attempts)
+	require.Equal(t, MaxSweepAttempts, st.rows[hex.EncodeToString(a1)].attempts)
 	degraded := false
 	for _, msg := range *warnings {
 		if msg == "collateral snapshot sweep completed DEGRADED — some safes stayed failed through the retry budget" {
@@ -802,7 +802,7 @@ func TestFailedAccountRetriedBoundedThenDegraded(t *testing.T) {
 	}
 	require.Len(t, ch.calls, 1+maxAccountRetries, "1 fresh + bounded retry multicalls")
 	counts := attemptCounts(t, ch)
-	require.Equal(t, maxSweepAttempts, counts[hex.EncodeToString(bad)])
+	require.Equal(t, MaxSweepAttempts, counts[hex.EncodeToString(bad)])
 	require.Equal(t, 1, counts[hex.EncodeToString(good)], "the succeeded sibling is never re-read")
 	require.Nil(t, st.balances[hex.EncodeToString(bad)], "the reverting safe never lands balances")
 

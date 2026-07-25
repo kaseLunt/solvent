@@ -77,6 +77,24 @@ func (w *Walker) HeadLag() (lag uint64, observed bool) {
 	return w.lastHead - w.lastCursor, true
 }
 
+// ObservedHead reports the chain head this stream's most recent Step read, and
+// whether a Step has read one at all.
+//
+// HeadLag already answers "how far is THIS stream behind head", but a CONSUMER of
+// this stream's logs — a derivation runner, the Chainlink feed deriver — needs the
+// head itself: its own distance from head is that head minus its durable derive
+// cursor, and the daemon cannot get there from two separate lags without ADDING
+// them, which is exactly the composition that let two locally-defensible per-hop
+// bounds permit an unbounded total. Same freshness, concurrency and trust posture as
+// HeadLag: a fresh per-Step observation, read from the daemon's single loop
+// goroutine, never safe to call concurrently with Step.
+func (w *Walker) ObservedHead() (block uint64, observed bool) {
+	if !w.headSeen {
+		return 0, false
+	}
+	return w.lastHead, true
+}
+
 func NewWalker(ch Chain, st Store, cfg WalkerConfig) *Walker {
 	set := make(map[common.Address]struct{}, len(cfg.Addresses))
 	for _, a := range cfg.Addresses {

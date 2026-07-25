@@ -85,9 +85,19 @@ const conditionStepError = "step_error"
 // and its all-endpoints-stale path returns neither an error nor an advance).
 const conditionNoProgress = "no_progress"
 
-// conditionHeadLag is the condition key for a raw-log walker whose cursor is more
-// than headLagBound blocks behind the chain head it last observed. A walker can be
-// progressing and still be falling behind; no-progress cannot see that.
+// conditionHeadLag is the condition key for ANY worker whose durable cursor sits
+// more than chainLagBound(chain) blocks behind the chain head — a raw-log walker
+// against the head it read itself, and a raw-log CONSUMER against the head its
+// streams' walkers read. A worker can be progressing and still be falling behind;
+// no-progress cannot see that.
+//
+// ONE KEY FOR BOTH, AND ONE BOUND, because it is one property: distance from chain
+// head. The predecessor of this arrangement gated the walker hop and the consumer
+// hop with two separate 5,000-block constants, which bounded neither the path nor
+// anything an operator cares about — a walker at the limit feeding a consumer at the
+// limit was reported READY about 10,000 blocks (33 hours of Ethereum) behind head.
+// Measuring every worker from the same origin makes the two gates non-additive by
+// construction.
 //
 // It fires during BACKFILL too, which is deliberate: a process that has not caught
 // up to the chain is not ready to be depended on for liquidation-facing data. That
@@ -95,17 +105,31 @@ const conditionNoProgress = "no_progress"
 // condition.
 const conditionHeadLag = "head_lag"
 
-// conditionFrontierLag is the condition key for a raw-log CONSUMER — a derivation
+// conditionFrontierLag is the ATTRIBUTION key for a raw-log CONSUMER — a derivation
 // runner or the Chainlink feed deriver — whose durable cursor sits more than
-// frontierLagBound blocks below the durable frontier of the streams feeding it.
+// chainLagBound(chain) blocks below the durable frontier of the streams feeding it.
 //
-// It is the distance half of what no_progress cannot answer. A worker advancing
-// small backfill windows refreshes its cursor's updated_at every round, so it never
-// trips no_progress however stale it is; head_lag does not cover it either, because
-// a walker can be exactly at the chain head while the runner reading its logs is
-// arbitrarily far behind. Before this key existed /readyz could report 200 through
-// an entire restart backfill with positions and prices describing a state days old.
+// It answers "which component is behind": the raw logs are already in the database
+// and this worker has not consumed them, as distinct from a walker that has not
+// ingested them yet. It is NOT an independent allowance — the frontier is at or
+// below the chain head, so this distance can never exceed the head distance
+// head_lag already gates, and it therefore cannot widen the total. Before the two
+// keys existed at all, /readyz could report 200 through an entire restart backfill
+// with positions and prices describing a state days old.
 const conditionFrontierLag = "frontier_lag"
+
+// conditionSnapshotFailures is the condition key for collateral snapshot accounts
+// whose sweep FAILED and has no retry left in the current generation.
+//
+// It exists because "the generation closed" was being read as "the sweep succeeded".
+// CompleteSweepGeneration deliberately stamps a generation complete once no account
+// still owes work — which includes accounts that exhausted their retry budget and
+// stayed status='failed' — and reports them only through a WARN; per-account
+// failures also return nil from ApplySweepBatch, so no step_error appears either.
+// Readiness therefore went green the moment a degraded sweep closed, while named
+// borrowers had no current collateral snapshot and would not get one until the next
+// generation opened, a wait bounded only by SOLVENT_SNAPSHOT_INTERVAL.
+const conditionSnapshotFailures = "snapshot_failures"
 
 // startupWorker/conditionStartup name the initialisation entry that makes
 // readiness start CLOSED. The key shape matches every other recoverable entry
@@ -162,6 +186,13 @@ type healthState struct {
 	// initialised latches true once markInitialized has accepted a clean round.
 	// Until then the startup condition stands and /readyz is 503.
 	initialised bool
+	// round counts completed daemon rounds (heartbeat advances it), and publishedIn
+	// records the round each worker's entries were last replaced in. Together they
+	// catch the one mistake this surface's replace-per-worker semantics invites: a
+	// SECOND publication of the same worker inside one round, which replaces — and
+	// therefore deletes — what an earlier pass published. See publishRound.
+	round       uint64
+	publishedIn map[string]uint64
 }
 
 // newHealthState builds the surface in its CLOSED state: initialised is false, so
@@ -169,14 +200,16 @@ type healthState struct {
 // instant — before any dependency has been checked.
 //
 // The startup entry lives in its OWN field rather than in the recoverable map
-// because setWorkerConditions REPLACES a worker's entries by name prefix, and
-// worker names come from config (stream names legitimately contain colons). A
-// dedicated field cannot be cleared by a coincidentally-named worker.
+// because publication REPLACES a worker's entries by name prefix, and worker names
+// come from config (stream names legitimately contain colons). A dedicated field
+// cannot be cleared by a coincidentally-named worker.
 func newHealthState(now func() time.Time) *healthState {
 	return &healthState{
 		terminal:    map[string]string{},
 		recoverable: map[string]string{},
+		publishedIn: map[string]uint64{},
 		now:         now,
+		round:       1, // 1-based so a missing publishedIn entry (zero) is never "this round"
 	}
 }
 
@@ -222,29 +255,56 @@ func (h *healthState) setTerminal(key, reason string) (first bool) {
 	return !seen
 }
 
-// setWorkerConditions REPLACES the recoverable entries belonging to one worker.
+// publishRound REPLACES the recoverable entries of every worker named in round.
 // Replacement is what makes recovery visible: a stale feed that resumes, or a
 // step error that stops recurring, disappears from the surface on the next round
 // instead of persisting as a pre-recovery verdict.
-func (h *healthState) setWorkerConditions(worker string, conditions map[string]string) {
-	prefix := worker + "/"
+//
+// IT TAKES THE WHOLE ROUND, not one worker, and that shape is the fix for a real
+// regression. The per-worker entry point it replaces let each daemon pass publish
+// independently, and two passes legitimately own the same worker — the Chainlink
+// feed deriver is both a price worker and a raw-log consumer — so the pass that ran
+// LAST silently deleted the other's conditions. A feed Step failure could vanish
+// from /readyz in the same round it was recorded. With one entry point taking one
+// composed map, the passes compose (see roundConditions) instead of racing to be
+// last.
+//
+// THE ROUND GUARD is the second half. Nothing in the type system stops a future pass
+// from calling this a second time inside one round, so a repeat publication of a
+// worker already published in the CURRENT round is treated as a defect: the entries
+// are MERGED rather than replaced — so no signal is lost even when the mistake is
+// made — and it is logged at Error naming the worker. Replacement resumes on the
+// next round, so recovery stays visible.
+func (h *healthState) publishRound(round map[string]map[string]string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for k := range h.recoverable {
-		if strings.HasPrefix(k, prefix) {
-			delete(h.recoverable, k)
+	for worker, conditions := range round {
+		prefix := worker + "/"
+		if h.publishedIn[worker] == h.round {
+			slog.Error("a worker's health conditions were published TWICE in one daemon round; MERGING instead of replacing so the earlier pass's signal is not deleted — compose into the round's conditions and publish once",
+				"worker", worker, "round", h.round, "entriesNow", len(conditions))
+		} else {
+			for k := range h.recoverable {
+				if strings.HasPrefix(k, prefix) {
+					delete(h.recoverable, k)
+				}
+			}
+			h.publishedIn[worker] = h.round
 		}
-	}
-	for name, reason := range conditions {
-		h.recoverable[prefix+name] = reason
+		for name, reason := range conditions {
+			h.recoverable[prefix+name] = reason
+		}
 	}
 }
 
-// heartbeat marks one completed daemon round, the liveness signal.
+// heartbeat marks one completed daemon round, the liveness signal — and opens the
+// next publication round, so the round guard in publishRound measures against the
+// daemon's actual round boundary rather than against wall time.
 func (h *healthState) heartbeat() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lastLoop = h.now()
+	h.round++
 }
 
 // report snapshots the state. The returned maps are copies: a handler must never
@@ -303,15 +363,19 @@ func (h *healthState) report() healthReport {
 //	               balancer should use. It fails while the daemon is still
 //	               initialising, and thereafter for stale feeds, missing poll
 //	               targets, quarantined answers, a frozen chain view, stalled
-//	               ingestion or derivation, a stalled collateral sweep, a
-//	               derivation or feed cursor too far behind its input frontier,
-//	               persistent Step failures and terminal engine errors.
+//	               ingestion or derivation, a stalled collateral sweep, collateral
+//	               accounts whose snapshot failed with no retry left, any walker or
+//	               consumer too far behind the chain head, persistent Step failures
+//	               and terminal engine errors.
 //
 //	               WHAT IT DOES NOT CLAIM: it is not a statement that every
-//	               cursor is at the chain head. The gates are bounds, each named
-//	               with its own constant (headLagBound, frontierLagBound,
+//	               cursor is at the chain head. The gates are bounds
+//	               (maxDerivedStaleness expressed per chain by chainLagBound,
 //	               noProgressBound, blockAdvanceTTL) — readiness means "inside
-//	               every bound", not "exactly current".
+//	               every bound", not "exactly current". What it DOES now claim is
+//	               that no COMPOSITION of those bounds is looser than the widest
+//	               one: the lag gates all measure distance from chain head, so they
+//	               cannot be added together.
 //	GET /healthz — 200 when Live, else 503. Restart-worthy failures only.
 //	GET /health  — always 200 with the full report, for humans and dashboards
 //	               that want the detail without an HTTP failure.

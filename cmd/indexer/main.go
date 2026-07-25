@@ -116,44 +116,90 @@ func (b *retryBackoff) success() {
 // is stalled. See applySweepProgressCondition.
 const noProgressBound = 15 * time.Minute
 
-// headLagBound is how far a raw-log walker's cursor may sit behind the chain head
-// before readiness fails on it. It is deliberately larger than the walker's own
-// 64-block reorg slack and than one window, so ordinary catch-up jitter does not
-// trip it, and it DOES fire during backfill — a process that has not reached the
-// chain is not ready to be depended on.
-const headLagBound = 5_000
+// maxDerivedStaleness is THE FRESHNESS REQUIREMENT every lag gate in this daemon
+// is derived from. It is stated in TIME, once, because time is the property that
+// matters and block counts are only its per-chain expression.
+//
+// WHAT THE REQUIREMENT IS, AND WHY IT IS THIS. The tables this daemon serves are
+// read to answer "is this position liquidatable at the current price". An answer
+// computed from state T behind chain head is blind to every borrow, repay,
+// collateral movement and liquidation that landed inside T, and it is wrong in the
+// direction that costs money: a position reported healthy may already be
+// liquidatable. So the requirement is an upper bound on T, and the bound has to sit
+// between two things the deployment actually fixes:
+//
+//   - THE FLOOR, from what the pipeline can achieve. Ingestion trails head by its
+//     stream's `confirmations` by design (5 on both configured streams — about 60s
+//     of chain time on Ethereum at 12s blocks, 10s on OP at 2s), and a caught-up
+//     consumer ends each round at its walkers' frontier. So no achievable bound is
+//     tighter than roughly one minute on Ethereum; a requirement below that would be
+//     permanently unsatisfiable and would make /readyz meaningless rather than
+//     strict.
+//   - THE CEILING, from what this process is willing to call "current". The feed
+//     deriver already refuses to judge oracle publication at all once the head block's
+//     own timestamp is more than ten minutes old, reporting rpc_ingest_lag instead
+//     (internal/prices.headFreshnessBound): past that point the daemon declares that
+//     it cannot see the chain. Derived state further behind head than the daemon's own
+//     threshold for "we can see the chain" cannot honestly be served as ready.
+//
+// TEN MINUTES is that ceiling, taken deliberately rather than by coincidence: it is
+// the staleness at which this process already stops trusting its own view of the
+// chain, so it is the loosest value at which /readyz can still mean anything. It
+// leaves an order of magnitude above the achievable floor, so ordinary jitter
+// cannot trip it.
+//
+// WHAT IT REPLACED, and why the replacement is not a re-tuning. Two independent
+// 5,000-block allowances used to gate two HOPS of one path — walker-to-head and
+// consumer-to-frontier — and both permitted equality, so a walker 5,000 blocks
+// behind head feeding a consumer 5,000 blocks behind that walker was reported READY
+// at roughly 10,000 blocks, about 33 hours of Ethereum. Each bound was locally
+// defensible and their composition was not. Bounding two hops separately cannot
+// bound a path; this bounds the path, measured from head, once.
+const maxDerivedStaleness = 10 * time.Minute
 
-// frontierLagBound is how far a CONSUMER of raw logs — a derivation runner or the
-// Chainlink feed deriver — may sit behind its own durable input frontier (the
-// minimum ingest cursor across the streams it reads) before readiness fails on it.
+// chainBlockTime is each configured chain's target block time, the only per-chain
+// input maxDerivedStaleness needs to become a block distance.
 //
-// WHY A DISTANCE GATE AND NOT JUST no_progress. The no-progress check asks only
-// how RECENTLY a cursor moved. A worker grinding through backfill windows refreshes
-// derive_cursors.updated_at on every one of them, so it never trips no_progress
-// however far behind it is: /readyz could report 200 through an arbitrarily long
-// restart backfill while positions and prices described a state days old. Distance,
-// not recency, is the question a consumer has to answer — and it is a different
-// question from the walkers' head_lag, because a walker can be exactly at the chain
-// head while the runner reading its logs is a million blocks behind it.
+// These are the chains' own published cadences (Ethereum: 12-second slots since the
+// Merge; OP mainnet: 2-second blocks), and the same two numbers internal/prices
+// already reasons about when it justifies its absolute TTLs. Adding a chain to
+// config/contracts.json without adding it here is legal but noisy: the daemon logs
+// a WARN at startup naming it, and it falls back below.
+var chainBlockTime = map[uint64]time.Duration{
+	1:  12 * time.Second,
+	10: 2 * time.Second,
+}
+
+// fallbackBlockTime converts maxDerivedStaleness for a chain not named above. It is
+// the SLOWEST configured block time on purpose, which is the fail-closed direction:
+// a larger assumed block time yields a SMALLER block allowance, so an unlisted
+// chain gets the tightest bound rather than the most permissive one. On a chain with
+// faster blocks that is stricter than the stated requirement — the honest cost of
+// not knowing its cadence, and a reason to add it above rather than rely on this.
+const fallbackBlockTime = 12 * time.Second
+
+// chainLagBound is how many blocks behind the chain head a worker on chainID may
+// sit before readiness fails on it — maxDerivedStaleness expressed in that chain's
+// blocks.
 //
-// WHY THIS VALUE. It is deliberately the SAME number as headLagBound: a consumer
-// this far behind its input is as far from current as a walker the daemon already
-// refuses readiness for, so the two gates draw the line in the same place rather
-// than at two independently-invented distances.
+// ONE bound serves BOTH gates (a walker's distance from the head it observed, and a
+// consumer's distance from that same head), which is what makes the two
+// non-additive: they measure two segments of one path against the same origin, so
+// the worst of them IS the end-to-end distance. There is deliberately no second
+// constant for a second hop to be added to.
 //
-// It does not fire from ordinary jitter on a live chain, and here is the argument
-// rather than the assertion. Ingestion runs before derivation within a round and a
-// consumer keeps stepping until it stops advancing, so a caught-up consumer ends
-// each round AT its frontier; the frontier then advances by only the handful of
-// blocks the chain produced before the next round, three orders of magnitude inside
-// this bound on both configured chains. A consumer that cannot reach its frontier
-// because its Step is failing reports step_error, not this. During BACKFILL the frontier can
-// advance by stepsPerRound windows per round, which is above this bound, so a
-// consumer keeping pace with a backfilling walker is reported as behind: that is
-// the intent, not a false positive — a process that has not caught up to the chain
-// is not ready to be depended on, the same posture head_lag and the feed deriver's
-// rpc_ingest_lag already take.
-const frontierLagBound = 5_000
+// It fires during BACKFILL, as its predecessors did, and that is still the intent:
+// a process that has not reached the chain is not ready to be depended on.
+func chainLagBound(chainID uint64) uint64 {
+	bt, ok := chainBlockTime[chainID]
+	if !ok || bt <= 0 {
+		bt = fallbackBlockTime
+	}
+	if n := uint64(maxDerivedStaleness / bt); n > 0 {
+		return n
+	}
+	return 1 // a chain whose block time exceeds the whole allowance: one block is the floor
+}
 
 // ingestWorker / deriveWorker / snapshotWorker are the narrow surfaces the passes
 // below drive (*ingest.Walker, *derive.Runner and *snapshot.Snapshotter satisfy
@@ -165,6 +211,12 @@ type ingestWorker interface {
 	Name() string
 	Step(ctx context.Context) (bool, error)
 	HeadLag() (lag uint64, observed bool)
+	// ObservedHead is the chain head this walker last saw. It is what makes a
+	// CONSUMER's lag measurable end-to-end: a consumer's own durable cursor and its
+	// input frontier are both in the database, but the head those are behind is only
+	// known to the walker that read it, and without it the daemon could only ever
+	// gate the consumer against the frontier — one hop of a two-hop path.
+	ObservedHead() (block uint64, observed bool)
 }
 
 type deriveWorker interface {
@@ -189,6 +241,10 @@ var (
 type walkerState struct {
 	w  ingestWorker
 	bo retryBackoff
+	// chainID is the chain this stream walks, carried here because the lag bound is
+	// CHAIN-SPECIFIC: a block distance only means a staleness once you know the
+	// chain's block time (see chainLagBound).
+	chainID uint64
 	// lastErr is the most recent erroring round's error, and retryIn the backoff
 	// delay chosen for it, both retained so the surface can report an ordinary
 	// Step failure.
@@ -238,8 +294,9 @@ type priceWorkerState struct {
 	retryIn time.Duration
 }
 
-// stepPriceWorkers runs ONE price pass over every price worker and rebuilds each
-// worker's recoverable health entries. Returns whether any worker advanced.
+// stepPriceWorkers runs ONE price pass over every price worker and records each
+// worker's recoverable health entries INTO THE ROUND'S composition. Returns whether
+// any worker advanced.
 //
 // It exists as a separate function because this composition is what the review
 // found untested and, in one respect, wrong: an ordinary Step error was logged
@@ -255,10 +312,21 @@ type priceWorkerState struct {
 //   - conditions are read even while the worker is BACKING OFF — that is
 //     precisely when the signal matters most, and skipping it would leave the
 //     surface showing a pre-failure verdict for the whole backoff window;
-//   - the entry set is REPLACED per worker, so recovery is visible.
-func stepPriceWorkers(ctx context.Context, workers []*priceWorkerState, health *healthState) bool {
+//   - every worker is touched, so a recovered worker's entries clear.
+//
+// IT WRITES TO roundConditions, NOT TO THE SURFACE, and that is a correction rather
+// than a refactor. It used to call setWorkerConditions directly, replacing each
+// price worker's entries outright — and the frontier pass, which registers the FEED
+// deriver as a raw-log consumer, published afterwards and replaced them again. The
+// feed deriver's staleness, timestamp, RPC-lag and step_error conditions were
+// therefore deleted every round by a later pass that knew nothing about them:
+// /readyz could go green, and startup could even clear, immediately after a feed
+// Step failure. Composing into one map per round and publishing once is what makes
+// the two passes additive instead of destructive.
+func stepPriceWorkers(ctx context.Context, workers []*priceWorkerState, rc roundConditions) bool {
 	anyAdvanced := false
 	for _, ps := range workers {
+		rc.touch(ps.w.Name())
 		if ps.bo.ready() {
 			roundErred := false
 			var lastErr error
@@ -291,40 +359,62 @@ func stepPriceWorkers(ctx context.Context, workers []*priceWorkerState, health *
 				ps.lastErr, ps.retryIn = nil, 0
 			}
 		}
-		conditions := map[string]string{}
 		for _, c := range ps.w.Conditions() {
-			conditions[c.Name] = c.Reason
+			rc.set(ps.w.Name(), c.Name, c.Reason)
 		}
 		if ps.lastErr != nil {
-			conditions[conditionStepError] = fmt.Sprintf("Step failed %d consecutive round(s), retrying in %s: %v",
-				ps.bo.failures, ps.retryIn.Truncate(time.Second), ps.lastErr)
+			rc.set(ps.w.Name(), conditionStepError,
+				fmt.Sprintf("Step failed %d consecutive round(s), retrying in %s: %v",
+					ps.bo.failures, ps.retryIn.Truncate(time.Second), ps.lastErr))
 		}
-		health.setWorkerConditions(ps.w.Name(), conditions)
 	}
 	return anyAdvanced
 }
 
-// roundConditions accumulates every non-price worker's conditions for ONE daemon
-// round so each worker's entry set reaches the surface in a single replacement.
+// roundConditions accumulates EVERY worker's conditions for ONE daemon round so
+// each worker's entry set reaches the surface in a single replacement.
 //
-// It exists because setWorkerConditions REPLACES a worker's entries by name: a
-// step error published in one pass and a no-progress verdict published in another
-// would erase each other, and the surviving one would depend on pass order.
-// Composing first makes both visible together.
+// IT IS THE ONLY WAY RECOVERABLE CONDITIONS REACH THE SURFACE, and that is a
+// correctness property, not a style choice. Publication REPLACES a worker's
+// entries — which is what makes recovery visible — so two passes publishing the
+// same worker separately erase each other and the survivor depends on pass order.
+// That is not hypothetical: the frontier pass and the price pass both own the
+// Chainlink feed deriver (it is a raw-log consumer AND a price worker), and while
+// they published independently the later one deleted the earlier one's conditions
+// every round. Composing first makes them additive.
+//
+// Two things keep it that way rather than merely fixing that instance:
+//
+//   - there is no per-worker replace primitive left to misuse. healthState exposes
+//     publishRound, which takes the WHOLE round's composition; a new publisher has
+//     nowhere to write except into a roundConditions someone else may also write to,
+//     and set() merges by condition name.
+//   - a second publication of the same worker inside ONE round is detected by
+//     healthState and MERGED rather than allowed to replace, with an Error log
+//     naming the worker. See healthState.publishRound.
 type roundConditions map[string]map[string]string
 
-// set records one condition for one worker.
+// set records one condition for one worker. Two different conditions on one worker
+// coexist; the same condition name written twice in one round is a NAME COLLISION
+// between publishers, which is reported and resolved first-writer-wins — readiness
+// turns on a condition's presence, so the collision itself is the defect worth
+// surfacing, not which of the two reasons survived.
 func (rc roundConditions) set(worker, name, reason string) {
 	m := rc[worker]
 	if m == nil {
 		m = map[string]string{}
 		rc[worker] = m
 	}
+	if existing, dup := m[name]; dup {
+		slog.Error("two daemon passes published the SAME condition key for the same worker in one round; keeping the first and reporting the collision — condition keys are an operational contract and must identify one publisher",
+			"worker", worker, "condition", name, "kept", existing, "dropped", reason)
+		return
+	}
 	m[name] = reason
 }
 
 // touch registers a worker with (so far) no conditions. Without it a recovered
-// worker would keep its previous round's entries forever, because publish only
+// worker would keep its previous round's entries forever, because publication only
 // replaces the workers it knows about.
 func (rc roundConditions) touch(worker string) {
 	if rc[worker] == nil {
@@ -332,11 +422,9 @@ func (rc roundConditions) touch(worker string) {
 	}
 }
 
-// publish replaces each registered worker's recoverable entries on the surface.
+// publish hands the whole round's composition to the surface in one call.
 func (rc roundConditions) publish(health *healthState) {
-	for worker, conditions := range rc {
-		health.setWorkerConditions(worker, conditions)
-	}
+	health.publishRound(rc)
 }
 
 // stepWalkers runs ONE raw-log ingestion pass and records each walker's failure
@@ -386,10 +474,12 @@ func stepWalkers(ctx context.Context, walkers []*walkerState, rc roundConditions
 				fmt.Sprintf("ingest Step failed %d consecutive round(s), retrying in %s: %v",
 					ws.bo.failures, ws.retryIn.Truncate(time.Second), ws.lastErr))
 		}
-		if lag, observed := ws.w.HeadLag(); observed && lag > headLagBound {
-			rc.set(ws.w.Name(), conditionHeadLag,
-				fmt.Sprintf("the ingest cursor is %d blocks behind the chain head this walker last observed (bound %d): this stream has not reached the chain",
-					lag, headLagBound))
+		if lag, observed := ws.w.HeadLag(); observed {
+			if bound := chainLagBound(ws.chainID); lag > bound {
+				rc.set(ws.w.Name(), conditionHeadLag,
+					fmt.Sprintf("the ingest cursor is %d blocks behind the chain head this walker last observed (bound %d blocks = %s of chain %d block time): this stream has not reached the chain",
+						lag, bound, maxDerivedStaleness, ws.chainID))
+			}
 		}
 	}
 	return anyAdvanced
@@ -486,7 +576,7 @@ func stepSnapshotter(ctx context.Context, snap snapshotWorker, ss *snapshotState
 type progressReader interface {
 	IngestCursorProgress(ctx context.Context) ([]store.CursorProgress, error)
 	DeriveCursorProgress(ctx context.Context) ([]store.CursorProgress, error)
-	SweepProgress(ctx context.Context, engine string) (store.SweepProgress, bool, error)
+	SweepProgress(ctx context.Context, engine string, maxAttempts int) (store.SweepProgress, bool, error)
 }
 
 // frontierWatch binds one raw-log CONSUMER to the ingest streams that feed it, so
@@ -499,6 +589,8 @@ type progressReader interface {
 type frontierWatch struct {
 	worker  string
 	streams []string
+	// chainID is the chain those streams are on, for the chain-specific lag bound.
+	chainID uint64
 }
 
 // progressWatch is the set of workers the durable progress pass judges, gathered
@@ -507,14 +599,20 @@ type progressWatch struct {
 	// walkers and runners are judged on cursor RECENCY (no_progress).
 	walkers []*walkerState
 	runners []*runnerState
-	// consumers are judged on DISTANCE from their input frontier (frontier_lag).
-	// Every derivation runner appears here as well as in runners; the price FEED
-	// deriver appears here only, because it is not a derive.Runner.
+	// consumers are judged on DISTANCE from the chain head their streams' walkers
+	// observed (head_lag), and on distance from their input frontier (frontier_lag)
+	// as the attribution half of the same measurement. Every derivation runner
+	// appears here as well as in runners; the price FEED deriver appears here only,
+	// because it is not a derive.Runner.
 	consumers []frontierWatch
 	// sweepEngine is the snapshotter's engine key, empty when no snapshotter is
 	// configured. It is judged on whether an OPEN sweep generation is still landing
-	// batches.
+	// batches, and on whether any account's snapshot is UNRESOLVED-failed.
 	sweepEngine string
+	// sweepMaxAttempts is the snapshotter's per-generation attempt budget
+	// (snapshot.MaxSweepAttempts), which the store needs in order to say which
+	// current-generation failures have spent it.
+	sweepMaxAttempts int
 }
 
 // applyProgressConditions adds a no_progress condition for every watched walker
@@ -539,17 +637,30 @@ type progressWatch struct {
 //
 // It performs three checks, all from durable timestamps and heights:
 //
-//	no_progress   walker/runner cursor recency, and an OPEN sweep generation that
-//	              has stopped landing batches (the snapshotter's semantic stall);
-//	frontier_lag  how far each raw-log CONSUMER is behind its input frontier.
+//	no_progress        walker/runner cursor recency, and an OPEN sweep generation
+//	                   that has stopped landing batches (the snapshotter's semantic
+//	                   stall);
+//	head_lag           how far each raw-log CONSUMER is behind the CHAIN HEAD its
+//	                   streams' walkers observed — the end-to-end gate;
+//	frontier_lag       how far each consumer is behind its input frontier, the
+//	                   attribution half of that same distance;
+//	snapshot_failures  accounts whose collateral snapshot failed and has no retry
+//	                   left in this generation.
 func applyProgressConditions(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, w progressWatch) {
 	// Registering every watched worker makes this pass self-sufficient: publish
 	// only replaces workers it knows about, so a worker whose stall CLEARS must
 	// still be named here or its stale entry would survive the round.
 	watchIngest := make(map[string]bool, len(w.walkers))
+	// streamHead is what each stream's walker last saw as the chain head. It is the
+	// ORIGIN the consumer gate measures from, and it can only come from the walkers
+	// (the database knows cursors, not heads).
+	streamHead := make(map[string]uint64, len(w.walkers))
 	for _, ws := range w.walkers {
 		watchIngest[ws.w.Name()] = true
 		rc.touch(ws.w.Name())
+		if head, observed := ws.w.ObservedHead(); observed {
+			streamHead[ws.w.Name()] = head
+		}
 	}
 	watchDerive := make(map[string]bool, len(w.runners))
 	for _, rs := range w.runners {
@@ -589,21 +700,41 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 		check(deriveRows, watchDerive, "derive")
 	}
 	if ingestErr == nil && deriveErr == nil {
-		applyFrontierConditions(ingestRows, deriveRows, w.consumers, rc)
+		applyFrontierConditions(ingestRows, deriveRows, streamHead, w.consumers, rc)
 	}
 	if w.sweepEngine != "" {
-		applySweepProgressCondition(ctx, pr, now, rc, w.sweepEngine)
+		applySweepProgressCondition(ctx, pr, now, rc, w.sweepEngine, w.sweepMaxAttempts)
 	}
 }
 
-// applyFrontierConditions reports frontier_lag for every raw-log consumer whose
-// durable cursor sits more than frontierLagBound blocks below the durable frontier
-// of the streams that feed it.
+// applyFrontierConditions judges every raw-log consumer's staleness, against ONE
+// bound, on TWO measurements of the same path:
 //
-// It is a pure function of the two cursor listings the caller already read, so the
-// gate costs no additional query.
+//	head_lag      the consumer's durable cursor versus the CHAIN HEAD its streams'
+//	              walkers observed. This is the readiness gate, and it is the whole
+//	              path — walker-to-head plus consumer-to-walker in one subtraction.
+//	frontier_lag  the same cursor versus the durable input frontier. Pure
+//	              ATTRIBUTION: the frontier is at or below the head, so this can
+//	              never exceed the head distance and can therefore never be a looser
+//	              gate. It answers "is the consumer behind, or is its input behind".
 //
-// TWO CASES ARE DELIBERATELY NOT JUDGED, and both are covered elsewhere:
+// WHY THE HEAD GATE HAD TO EXIST. Bounding two hops separately does not bound their
+// sum. The previous shape gated walker-to-head at 5,000 blocks and
+// consumer-to-frontier at 5,000 blocks, both permitting equality, so a walker 5,000
+// behind head feeding a consumer 5,000 behind that walker was READY at ~10,000
+// blocks — about 33 hours of Ethereum. Measuring both segments from the same origin
+// removes the addition entirely: there is no arrangement of the two in which the
+// end-to-end distance exceeds the bound and neither condition fires.
+//
+// WHY A DISTANCE GATE AND NOT JUST no_progress. The no-progress check asks only how
+// RECENTLY a cursor moved. A worker grinding through backfill windows refreshes
+// derive_cursors.updated_at on every one of them, so it never trips no_progress
+// however far behind it is.
+//
+// It is a pure function of the listings and heads the caller already has, so both
+// gates cost no additional query.
+//
+// THREE CASES ARE DELIBERATELY NOT JUDGED, and all are covered elsewhere:
 //
 //   - a consumer one of whose streams has NO ingest cursor yet. There is no
 //     frontier to be behind; the consumer itself returns early in that state.
@@ -611,12 +742,16 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 //     there is no height to compare. Its first Step either creates the cursor or
 //     reports step_error, and until one full round has completed the daemon's own
 //     startup condition already holds readiness closed.
+//   - a consumer NONE of whose streams has observed a head yet. Nothing has read the
+//     chain, so there is no origin to measure from; the walkers' own step errors are
+//     the signal. This is a first-round-only state in practice — the walker pass runs
+//     before this one — and frontier_lag still applies meanwhile.
 //
 // PRICE POLLERS ARE ABSENT BY CONSTRUCTION, not by exclusion: a poller has no
 // raw-log input at all (it reads `latest` through eth_call), so it has no frontier
 // to be measured against. Its analogous gate is whether a NEW poll anchor row came
 // into existence (prices.ConditionPollBlockAdvance).
-func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, consumers []frontierWatch, rc roundConditions) {
+func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, streamHead map[string]uint64, consumers []frontierWatch, rc roundConditions) {
 	if len(consumers) == 0 {
 		return
 	}
@@ -631,7 +766,15 @@ func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, cons
 	for _, c := range consumers {
 		var input uint64
 		complete := len(c.streams) > 0
+		// The head a consumer is measured against is the HIGHEST any of its streams
+		// has seen: the freshest evidence of where the chain actually is, so a walker
+		// that has fallen behind cannot lower the bar for the consumer reading it.
+		var head uint64
+		headKnown := false
 		for i, s := range c.streams {
+			if h, ok := streamHead[s]; ok && (!headKnown || h > head) {
+				head, headKnown = h, true
+			}
 			b, ok := frontier[s]
 			if !ok {
 				complete = false
@@ -648,15 +791,34 @@ func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, cons
 		if !started {
 			continue
 		}
+		bound := chainLagBound(c.chainID)
+		if headKnown && head > cur {
+			if lag := head - cur; lag > bound {
+				rc.set(c.worker, conditionHeadLag,
+					fmt.Sprintf("this worker's cursor is at block %d, %d blocks behind the chain head %d its %d stream(s) last observed (bound %d blocks = %s of chain %d block time); its durable input frontier is %d, so %d of that gap is ingestion and %d is derivation: the state it serves is not current",
+						cur, lag, head, len(c.streams), bound, maxDerivedStaleness, c.chainID,
+						input, gapOrZero(head, input), gapOrZero(input, cur)))
+			}
+		}
 		if input <= cur {
 			continue
 		}
-		if lag := input - cur; lag > frontierLagBound {
+		if lag := input - cur; lag > bound {
 			rc.set(c.worker, conditionFrontierLag,
-				fmt.Sprintf("this worker's cursor is at block %d, %d blocks behind the durable input frontier %d its %d stream(s) have reached (bound %d): the state it has derived is not current",
-					cur, lag, input, len(c.streams), frontierLagBound))
+				fmt.Sprintf("this worker's cursor is at block %d, %d blocks behind the durable input frontier %d its %d stream(s) have reached (bound %d blocks = %s of chain %d block time): the raw logs are available and this worker has not consumed them",
+					cur, lag, input, len(c.streams), bound, maxDerivedStaleness, c.chainID))
 		}
 	}
+}
+
+// gapOrZero is a - b clamped at zero, for the attribution arithmetic in a lag
+// message: an input frontier can legitimately sit above a head an older Step
+// observed, and an unsigned message must not underflow into a nonsense number.
+func gapOrZero(a, b uint64) uint64 {
+	if a <= b {
+		return 0
+	}
+	return a - b
 }
 
 // applySweepProgressCondition reports no_progress for the collateral snapshotter
@@ -676,17 +838,52 @@ func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, cons
 // cannot grant a wedged sweep a fresh window. A generation that has never landed
 // anything is measured from its own opened_at.
 //
-// A CLOSED generation is deliberately not judged: between generations the
+// A CLOSED generation is not judged for no_progress: between generations the
 // snapshotter is idle by cadence (SOLVENT_SNAPSHOT_INTERVAL can legitimately exceed
 // noProgressBound), and an idle-by-design worker is not a stalled one.
-func applySweepProgressCondition(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, engine string) {
-	p, found, err := pr.SweepProgress(ctx, engine)
+//
+// IT IS STILL JUDGED FOR FAILURES, and that is the second verdict here. "Closed"
+// does not mean "succeeded": CompleteSweepGeneration stamps a generation complete
+// once nothing still owes work, which includes accounts that burned their retry
+// budget and stayed status='failed', and it reports them only through a WARN.
+// Per-account failures also return nil from ApplySweepBatch, so the daemon's
+// failure bookkeeping never sees them either. The earlier version returned
+// immediately for every closed generation, so readiness went green the moment a
+// degraded sweep closed — with named accounts holding no current collateral
+// snapshot at all until the next generation opened, a wait bounded only by the
+// snapshot interval. snapshot_failures is that state, and it is deliberately keyed
+// on EXHAUSTED failures rather than on any failure: a failure with retry budget
+// left is in flight within this generation, one without it is stuck until the next.
+// (In a closed generation the two counts coincide by construction — a generation
+// cannot close while an account still has budget — so one gate covers both the
+// open-but-stuck and the closed-degraded cases, and it fires as soon as an account
+// burns its budget rather than waiting for the close.)
+func applySweepProgressCondition(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, engine string, maxAttempts int) {
+	p, found, err := pr.SweepProgress(ctx, engine, maxAttempts)
 	if err != nil {
-		slog.Warn("could not read sweep progress; no snapshot no_progress verdict is issued this round",
+		slog.Warn("could not read sweep progress; no snapshot no_progress or snapshot_failures verdict is issued this round",
 			"engine", engine, "err", err)
 		return
 	}
-	if !found || !p.Open {
+	if !found {
+		return
+	}
+	if p.Exhausted > 0 {
+		lastSuccess := "no account has ever been swept successfully"
+		if !p.LastSuccessAt.IsZero() {
+			lastSuccess = fmt.Sprintf("the newest successful sweep of any account landed %s ago (%s)",
+				now.Sub(p.LastSuccessAt).Truncate(time.Second), p.LastSuccessAt.Format(time.RFC3339))
+		}
+		state := "and that generation is still OPEN"
+		if !p.Open {
+			state = fmt.Sprintf("and that generation was CLOSED at %s — completion is not success, and nothing retries these accounts until the next generation opens",
+				p.CompletedAt.Format(time.RFC3339))
+		}
+		rc.set(snapshotName, conditionSnapshotFailures,
+			fmt.Sprintf("%d of %d account(s) failed under sweep generation %d have spent the %d-attempt retry budget %s: their collateral snapshot is missing or stale, %s",
+				p.Exhausted, p.Failed, p.Generation, maxAttempts, state, lastSuccess))
+	}
+	if !p.Open {
 		return
 	}
 	ref := p.LastBatchAt
@@ -768,7 +965,17 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		if err := fc.VerifyChainID(ctx, c.ChainID); err != nil {
 			return fmt.Errorf("chain %q: %w", name, err)
 		}
-		slog.Info("chain id verified", "chain", name, "chainId", c.ChainID)
+		// The lag gates convert maxDerivedStaleness into blocks using the chain's
+		// block time, so a chain with no declared block time is judged against the
+		// conservative fallback. That is safe (it is the tightest bound) but it is
+		// not the stated requirement, so say so rather than let it pass silently.
+		if _, known := chainBlockTime[c.ChainID]; !known {
+			slog.Warn("chain has no declared block time, so its staleness bound falls back to the slowest configured cadence: the readiness gate will be TIGHTER than the stated freshness requirement on a faster chain — add the chain to chainBlockTime",
+				"chain", name, "chainId", c.ChainID, "fallbackBlockTime", fallbackBlockTime,
+				"requirement", maxDerivedStaleness, "boundBlocks", chainLagBound(c.ChainID))
+		}
+		slog.Info("chain id verified", "chain", name, "chainId", c.ChainID,
+			"stalenessBoundBlocks", chainLagBound(c.ChainID), "stalenessRequirement", maxDerivedStaleness)
 		clients[name] = fc
 	}
 
@@ -783,9 +990,21 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 				Window:        s.Window,
 				Confirmations: s.Confirmations,
 			}),
-			bo: retryBackoff{now: time.Now, rand: rand.Float64},
+			chainID: cfg.Chains[s.Chain].ChainID,
+			bo:      retryBackoff{now: time.Now, rand: rand.Float64},
 		})
-		slog.Info("stream configured", "stream", s.Name, "start", s.StartBlock)
+		// A walker's cursor tracks head minus `confirmations` by design, so a stream
+		// configured with more confirmations than the staleness bound allows can never
+		// satisfy the gate: readiness would be red forever on a perfectly healthy
+		// pipeline. That is a configuration/requirement conflict, not a stall, and it
+		// must be visible at startup rather than discovered as a permanent 503.
+		if bound := chainLagBound(cfg.Chains[s.Chain].ChainID); s.Confirmations >= bound {
+			slog.Warn("stream reorg CONFIRMATIONS meet or exceed this chain's staleness bound: a caught-up walker sits `confirmations` behind head by design, so readiness can never be satisfied for this stream — lower confirmations or revisit the freshness requirement",
+				"stream", s.Name, "confirmations", s.Confirmations,
+				"boundBlocks", bound, "requirement", maxDerivedStaleness)
+		}
+		slog.Info("stream configured", "stream", s.Name, "start", s.StartBlock,
+			"confirmations", s.Confirmations, "stalenessBoundBlocks", chainLagBound(cfg.Chains[s.Chain].ChainID))
 	}
 
 	// Derivation runners + OP collateral snapshotter (Task 7). The engine
@@ -857,7 +1076,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			return err
 		}
 		runners = append(runners, &runnerState{r: r})
-		consumers = append(consumers, frontierWatch{worker: r.Name(), streams: spec.Streams})
+		consumers = append(consumers, frontierWatch{worker: r.Name(), streams: spec.Streams, chainID: spec.ChainID})
 		slog.Info("derivation runner configured", "engine", spec.Engine, "streams", len(spec.Streams))
 	}
 
@@ -907,7 +1126,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		// AnswerUpdated back out of raw_logs), so it is measured against the same
 		// frontier gate. It is NOT a derive.Runner, which is why it has to be
 		// registered here rather than falling out of the runners list.
-		consumers = append(consumers, frontierWatch{worker: fd.Name(), streams: spec.Streams})
+		consumers = append(consumers, frontierWatch{worker: fd.Name(), streams: spec.Streams, chainID: spec.ChainID})
 		// Staleness thresholds are PER FEED (each stream's own heartbeat + grace
 		// from recon/feeds.json), so the startup log names them individually
 		// rather than reporting one global number that applies to none of them.
@@ -917,17 +1136,26 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 
 	var snapState snapshotState
 	// The durable progress pass judges every worker whose stall would otherwise be
-	// silent: walker and runner cursor recency, consumer distance from the input
-	// frontier, and an open sweep generation that has stopped landing batches.
-	watch := progressWatch{walkers: walkers, runners: runners, consumers: consumers, sweepEngine: sweepEngine}
+	// silent: walker and runner cursor recency, consumer distance from the chain head
+	// (and from its input frontier, for attribution), an open sweep generation that
+	// has stopped landing batches, and collateral accounts whose snapshot failed with
+	// no retry left in the current generation.
+	watch := progressWatch{
+		walkers: walkers, runners: runners, consumers: consumers,
+		sweepEngine: sweepEngine, sweepMaxAttempts: snapshot.MaxSweepAttempts,
+	}
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	for {
 		for {
 			anyAdvanced := false
-			// Every non-price worker's conditions are composed for the WHOLE round
-			// and published once, so a step error and a no-progress verdict on the
-			// same worker coexist instead of erasing each other.
+			// EVERY worker's conditions — price workers included — are composed for the
+			// WHOLE round and published ONCE. Two reasons, and the second one is a
+			// regression this ordering exists to prevent: a step error and a no-progress
+			// verdict on the same worker must coexist rather than erase each other; and
+			// the Chainlink feed deriver is claimed by TWO passes (it is a price worker
+			// and a raw-log consumer), so while the price pass published on its own the
+			// later frontier pass replaced — deleted — everything it had reported.
 			rc := roundConditions{}
 
 			// Walker pass: ingestion first, so derivation sees the freshest
@@ -956,17 +1184,20 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			// feed deriver at most stepsPerRound windows of AnswerUpdated logs.
 			// Extracted into its own function so the composition (step, backoff,
 			// error reporting, condition rebuild) is unit-testable against fake
-			// workers, which it previously was not. Price workers publish their own
-			// conditions: theirs are richer than the generic set above.
-			if stepPriceWorkers(ctx, priceWorkers, health) {
+			// workers, which it previously was not. Its conditions are richer than the
+			// generic set the other passes produce, and they go into the SAME round
+			// composition — the feed deriver is also judged by the frontier pass below,
+			// and separate publications meant the later one won.
+			if stepPriceWorkers(ctx, priceWorkers, rc) {
 				anyAdvanced = true
 			}
 
 			// Silent-stall pass: a worker that neither errors nor advances says
-			// nothing, and used to be invisible. This asks DURABLE storage when
-			// each cursor last moved, how far each raw-log consumer is behind its
-			// input frontier, and whether an open sweep generation has stopped
-			// landing batches.
+			// nothing, and used to be invisible. This asks DURABLE storage when each
+			// cursor last moved, how far each raw-log consumer is behind the chain head
+			// its streams observed, whether an open sweep generation has stopped landing
+			// batches, and whether any collateral account's snapshot has failed out of
+			// its retry budget.
 			applyProgressConditions(ctx, st, time.Now(), rc, watch)
 			rc.publish(health)
 

@@ -773,12 +773,26 @@ type PriceRepairExposure struct {
 	Unanchored int64
 	// AnchoredHeights counts distinct anchored heights above EffectiveTarget.
 	AnchoredHeights int64
+	// ReorgGeneration is the chain's highest recorded reorg epoch at the instant
+	// the fields above were read — the GENERATION the whole exposure describes.
+	//
+	// It exists because a repair decision is not a function of heights alone. A
+	// caller that verifies anchors across several bounded Steps accumulates PROOFS
+	// ("this anchor's recorded hash no longer matches the live chain"), and each
+	// proof is only true of the chain as it stood when the probe ran. A second
+	// reorg landing between two Steps can make a previously-mismatched anchor
+	// canonical again, at which point the cached proof is false and acting on it
+	// deletes canonical history. Every new reorg the walker records increments this
+	// number, so a caller can bind its cached proofs to it and discard them when it
+	// moves. It is 0 on a chain that has never been rewound.
+	ReorgGeneration int64
 }
 
-// PriceRepairExposure reads all four facts in ONE transaction, so the target and
-// the counts describe the same instant. Under the enforced single-writer contract
-// (D-004) nothing else is writing, but reading them together also means a caller
-// cannot accidentally pair a stale target with fresh counts.
+// PriceRepairExposure reads all five facts in ONE transaction, so the target, the
+// counts and the reorg generation describe the same instant. Under the enforced
+// single-writer contract (D-004) nothing else is writing, but reading them
+// together also means a caller cannot accidentally pair a stale target — or a
+// stale generation — with fresh counts.
 func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID, toBlock uint64) (PriceRepairExposure, error) {
 	var exp PriceRepairExposure
 	tx, err := s.pool.Begin(ctx)
@@ -824,6 +838,13 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 		 WHERE engine = $1 AND chain_id = $2 AND block_number > $3`,
 		engine, chainID, exp.EffectiveTarget).Scan(&exp.AnchoredHeights); err != nil {
 		return exp, fmt.Errorf("count poll anchors for %q above %d: %w", engine, exp.EffectiveTarget, err)
+	}
+	// Read inside the SAME transaction as the counts: a generation paired with
+	// counts from a different instant is exactly the stale-proof pairing the field
+	// exists to prevent.
+	exp.ReorgGeneration, err = chainMaxEpoch(ctx, tx, chainID)
+	if err != nil {
+		return exp, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return PriceRepairExposure{}, err

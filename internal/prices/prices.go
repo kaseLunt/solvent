@@ -110,11 +110,17 @@
 //     by a hash-verified anchor at or above it, or because every anchor above it was
 //     probed and mismatched. A bare match is not enough: a FAILED probe of a newer
 //     anchor forbids accepting a lower match, and an unanchored row above the
-//     boundary forbids it too.
+//     boundary forbids it too. Nor is a proof enough once it has EXPIRED: because
+//     verification is paged across Steps, every mismatch is cached, and a second
+//     reorg can make those same anchors canonical again. Paging state is bound to
+//     the chain's reorg GENERATION and to a LIVE-CHAIN CHECKPOINT (the highest
+//     anchor the pass probed, and the hash the chain reported there); either one
+//     changing discards the pass, and the checkpoint is re-read immediately before
+//     the deletion runs.
 //   - RETRY, deleting and acking nothing, while the evidence is merely UNAVAILABLE
-//     (a probe errored, a page is still to walk). ConditionPollRewindBlocked says
-//     what is unproven. A stalled poller with a red /readyz is recoverable; erased
-//     polled history is not.
+//     (a probe errored, a page is still to walk, the checkpoint could not be
+//     re-read). ConditionPollRewindBlocked says what is unproven. A stalled poller
+//     with a red /readyz is recoverable; erased polled history is not.
 //   - NEUTRALIZE where the evidence can never exist: rows at heights whose block
 //     hash was never recorded. Waiting there was permanent — repair needs an anchor,
 //     adoption is refused while an epoch is pending, and the ack only advances
@@ -123,11 +129,13 @@
 //     later repair can verify them), the epoch is acked, and ingestion resumes.
 //
 // WHAT IS ACTUALLY DELETED, EXACTLY: rows above the highest anchor whose hash
-// matches, once a match is found with complete proof above it; or, when every
-// retained anchor mismatched and the anchors cover every row, everything above the
-// walker's target. Both describe blocks the chain replaced. NOTHING ELSE IS DELETED —
-// not on a probe outage, not on legacy unanchored history, not on a reorg deeper than
-// the retained anchor set.
+// matches, once a match is found with complete proof above it AND that proof still
+// holds against the live chain at the instant of deletion; or, under the same
+// condition, when every retained anchor mismatched and the anchors cover every row,
+// everything above the walker's target. Both describe blocks the chain replaced.
+// NOTHING ELSE IS DELETED — not on a probe outage, not on legacy unanchored history,
+// not on a reorg deeper than the retained anchor set, and not on a proof a later
+// reorg has overturned.
 //
 // WHAT IS STILL LOST: the USABILITY of a neutralized row. It stays on disk and stays
 // auditable, but no consumer can read it and there is no un-neutralize, because no

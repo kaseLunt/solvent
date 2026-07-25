@@ -1025,6 +1025,18 @@ func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, 
 // nil error and cleared its state, and no cursor of any kind moved, so /readyz
 // stayed 200 while collateral snapshots stopped advancing entirely.
 //
+// "CLOSED" IS NOT "SUCCEEDED", and that is the second thing this record has to
+// answer. CompleteSweepGeneration deliberately stamps a generation complete once
+// no account still owes work, which INCLUDES accounts that exhausted their retry
+// budget and stayed status='failed' — it reports them only through its return
+// value and a WARN. Per-account failures also return nil from ApplySweepBatch, so
+// nothing in the daemon's failure bookkeeping sees them. A readiness gate that
+// returns early for every closed generation therefore reports green while named
+// accounts have no current collateral snapshot at all, and will not get one until
+// the next generation opens — a wait bounded only by SOLVENT_SNAPSHOT_INTERVAL,
+// which may legitimately be an hour. Failed/Exhausted/LastSuccessAt below are what
+// make that state visible.
+//
 // Every field is a database value, so a restart cannot grant a wedged sweep a
 // fresh window.
 type SweepProgress struct {
@@ -1047,12 +1059,40 @@ type SweepProgress struct {
 	// the operator's benefit and is deliberately NOT what the stall verdict rests
 	// on — that rests on Open plus LastBatchAt, both of which are unambiguous.
 	Lagging int64
+	// Failed counts accounts whose CURRENT-generation sweep row ended
+	// status='failed'. Those accounts' snapshot balances are whatever an earlier
+	// generation last managed to read, or absent entirely.
+	Failed int64
+	// Exhausted counts those of Failed that have also spent the generation's retry
+	// budget (attempts >= the caller's maxAttempts), so nothing in THIS generation
+	// will retry them. It is the count that means "unresolved": a failure with
+	// budget left is in flight, a failure without any is stuck until the next
+	// generation opens.
+	//
+	// A generation only closes once no account owes work, and a failed account with
+	// budget remaining still owes work — so in a CLOSED generation Failed and
+	// Exhausted are necessarily equal. That is why one gate covers both the
+	// still-open-but-stuck case and the closed-degraded case.
+	Exhausted int64
+	// LastSuccessAt is the newest snapshot_sweeps.updated_at among this engine's
+	// status='success' rows — when a sweep last read an account's collateral
+	// successfully, in ANY generation. Zero when none ever has. Reported so a
+	// failure verdict can say how stale the surviving snapshot data is rather than
+	// only that something failed.
+	LastSuccessAt time.Time
 }
 
 // SweepProgress reads engine's durable sweep progress. found=false when the
 // engine has no sweep_generations row at all (no sweep has ever been opened),
 // which is not a stall — it is a snapshotter that has not started.
-func (s *Store) SweepProgress(ctx context.Context, engine string) (SweepProgress, bool, error) {
+//
+// maxAttempts is the caller's per-generation attempt budget — the same value it
+// passes to SweepWorkBatch, and the reason Exhausted can be computed here at all:
+// the budget is the snapshotter's policy, not the store's, so the store must be
+// told it rather than assume one. A non-positive value means "no budget policy",
+// and every current-generation failure then counts as exhausted, which is the
+// fail-closed reading.
+func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts int) (SweepProgress, bool, error) {
 	var p SweepProgress
 	var opened, completed *time.Time
 	err := s.pool.QueryRow(ctx,
@@ -1084,6 +1124,29 @@ func (s *Store) SweepProgress(ctx context.Context, engine string) (SweepProgress
 		`SELECT count(*) FROM snapshot_sweeps WHERE engine = $1 AND generation < $2`,
 		engine, p.Generation).Scan(&p.Lagging); err != nil {
 		return SweepProgress{}, false, fmt.Errorf("count lagging sweep accounts for %q: %w", engine, err)
+	}
+	// Current-generation failures, split by whether the generation's retry budget
+	// can still do anything about them. A non-positive budget makes every failure
+	// exhausted (see the doc comment).
+	budget := maxAttempts
+	if budget <= 0 {
+		budget = 1
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE attempts >= $3)
+		 FROM snapshot_sweeps
+		 WHERE engine = $1 AND generation = $2 AND status = 'failed'`,
+		engine, p.Generation, budget).Scan(&p.Failed, &p.Exhausted); err != nil {
+		return SweepProgress{}, false, fmt.Errorf("count failed sweep accounts for %q generation %d: %w", engine, p.Generation, err)
+	}
+	var lastSuccess *time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT max(updated_at) FROM snapshot_sweeps WHERE engine = $1 AND status = 'success'`,
+		engine).Scan(&lastSuccess); err != nil {
+		return SweepProgress{}, false, fmt.Errorf("read last successful sweep time for %q: %w", engine, err)
+	}
+	if lastSuccess != nil {
+		p.LastSuccessAt = *lastSuccess
 	}
 	return p, true, nil
 }

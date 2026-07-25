@@ -116,6 +116,12 @@ type fakePriceStore struct {
 	cursor      uint64
 	cursorFound bool
 	unacked     bool
+	// maxEpoch is the chain's highest recorded reorg epoch — the GENERATION a
+	// repair's cached anchor proofs are bound to. Tests bump it through
+	// recordReorgEpoch to model a SECOND reorg landing while the first is still
+	// unacknowledged, which is the only way a previously-mismatched anchor can become
+	// canonical again.
+	maxEpoch int64
 
 	// now stamps observed_at, standing in for the database clock. Tests point it
 	// at their testClock.
@@ -210,6 +216,28 @@ func (f *fakePriceStore) DeriveCursor(context.Context, string) (uint64, bool, er
 
 func (f *fakePriceStore) HasUnackedReorg(context.Context, string, uint64) (bool, error) {
 	return f.unacked, nil
+}
+
+// reorgGeneration is the chain's max reorg epoch as the real store would report it.
+//
+// An unacknowledged epoch cannot exist without an epoch ROW, and the real
+// HasUnackedReorg returns false outright when MAX(epoch) is 0 — so `unacked = true`
+// with generation 0 is a state the store cannot be in, and a fake reporting it would
+// let a test pass against an impossible world. Hence the floor of 1.
+func (f *fakePriceStore) reorgGeneration() int64 {
+	if f.unacked && f.maxEpoch < 1 {
+		return 1
+	}
+	return f.maxEpoch
+}
+
+// recordReorgEpoch models the walker recording ANOTHER reorg on this chain: one more
+// row in reorg_epochs, so the chain's generation advances and the epoch is (still)
+// unacknowledged. Every anchor proof a repair computed under the previous generation
+// describes a chain that has since been replaced again.
+func (f *fakePriceStore) recordReorgEpoch() {
+	f.maxEpoch = f.reorgGeneration() + 1
+	f.unacked = true
 }
 
 func (f *fakePriceStore) ApplyPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64) (store.ApplyResult, error) {
@@ -496,7 +524,10 @@ func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _
 	if f.countErr != nil {
 		return store.PriceRepairExposure{}, f.countErr
 	}
-	exp := store.PriceRepairExposure{EffectiveTarget: f.effectiveRewindTarget(toBlock)}
+	exp := store.PriceRepairExposure{
+		EffectiveTarget: f.effectiveRewindTarget(toBlock),
+		ReorgGeneration: f.reorgGeneration(),
+	}
 	anchored := f.anchoredHeights(engine)
 	for _, r := range f.rows {
 		if r.owner != engine || r.block <= exp.EffectiveTarget {
@@ -769,8 +800,16 @@ type fakePollChain struct {
 	// from the chain". The mixed failure-then-match path — the one A1 kept surviving
 	// in — needs exactly that distinction.
 	hashErrAt map[uint64]error
-	hashStart []int // HeaderHashFrom start indices, in order
-	hashCalls []uint64
+	// hashFailAfter fails a height's probe only from the Nth read of that height
+	// onward, so a test can distinguish the ANCHOR PROBE of a height from the
+	// CHECKPOINT RE-READ of the same height later in the repair. Without it the two
+	// cannot be scripted apart, and a test aiming at the revalidation would in fact
+	// be exercising a page containing a failed probe.
+	hashFailAfter map[uint64]int
+	hashStart     []int // HeaderHashFrom start indices, in order
+	hashCalls     []uint64
+	// hashReads counts reads per height, for hashFailAfter.
+	hashReads map[uint64]int
 }
 
 func (c *fakePollChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
@@ -796,6 +835,14 @@ func (c *fakePollChain) HeaderHashFrom(_ context.Context, start int, block uint6
 	}
 	if err, bad := c.hashErrAt[block]; bad {
 		return common.Hash{}, chain.EndpointToken{Index: -1}, err
+	}
+	if c.hashReads == nil {
+		c.hashReads = map[uint64]int{}
+	}
+	c.hashReads[block]++
+	if after, scripted := c.hashFailAfter[block]; scripted && c.hashReads[block] > after {
+		return common.Hash{}, chain.EndpointToken{Index: -1},
+			fmt.Errorf("probe endpoint timed out reading header %d", block)
 	}
 	h, ok := c.hashes[block]
 	if !ok {
