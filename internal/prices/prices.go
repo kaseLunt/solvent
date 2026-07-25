@@ -66,11 +66,18 @@
 // replaces that block leaves the row describing a chain that no longer exists.
 // Both writers therefore own a PSEUDO-ENGINE derive cursor (DeriveCursor is
 // keyed by engine string, and these keys are colon-namespaced so they can never
-// collide with a config engine name) and go through store.ApplyPrices /
-// store.RewindPrices, which are the epoch-gated, source-scoped counterparts of
-// ApplyDerivedWithRates / RewindDerived. A rewind deletes the writer's rows
-// above the effective target INSIDE the same transaction as the epoch ack, so a
-// crash can never leave the ack recorded while orphaned price rows survive.
+// collide with a config engine name) and go through store.ApplyPrices, the
+// epoch-gated, owner-scoped counterpart of ApplyDerivedWithRates.
+//
+// THEY DO NOT SHARE A REPAIR PRIMITIVE, and the split is the subject of D-010.
+// The Chainlink feed deriver rewinds (store.RewindPrices): its rows are decoded
+// from raw_logs, which the walker rewinds and re-ingests, so deletion costs a
+// replay. The poller NEUTRALIZES (store.NeutralizeUnverifiablePrices): its rows
+// are point-in-time contract reads that nothing can reproduce, so it retains
+// every row and marks the ones it cannot place. Either way the writer's rows
+// above the effective target are settled INSIDE the same transaction as the
+// epoch ack, so a crash can never leave the ack recorded while rows that
+// describe a replaced block are still readable.
 //
 // Consequence to know about (review flag M4): store.PruneAckedReorgEpochs
 // deletes an epoch only once EVERY derive cursor on its chain has acked it, so
@@ -79,70 +86,66 @@
 // the derive engines already carry, and the reason the cursors are per-chain
 // rather than global.
 //
-// The poller cannot re-derive what a rewind deleted — it only ever reads
-// `latest` (see store/prices.go's ASYMMETRY note) — so a rewind that lowered its
-// cursor to the WALKER's verified ancestor was unbounded data loss: that ancestor
-// is the deepest block the walker's own SPARSE logs could be hash-verified at,
-// which is unrelated to the blocks where polls happened, and degenerately is a
-// stream's StartBlock-1. A full rewalk could therefore delete every polled row,
-// canonical history included.
+// THE POLLER CANNOT RE-DERIVE ANY ROW IT LOSES — it only ever reads `latest`
+// (see store/prices.go's ASYMMETRY note) — so a rewind that lowered its cursor to
+// the WALKER's verified ancestor was unbounded data loss: that ancestor is the
+// deepest block the walker's own SPARSE logs could be hash-verified at, which is
+// unrelated to the blocks where polls happened, and degenerately is a stream's
+// StartBlock-1. A full rewalk could therefore delete every polled row, canonical
+// history included. That was Codex finding A1.
 //
-// That is fixed with DURABLE POLL ANCHORS rather than with a weaker gate.
-// multicall3's tryBlockAndAggregate already returns the execution block HASH; the
-// decoder now keeps it, and each landed round records (block, hash) in
-// price_poll_anchors atomically with its rows. Reorg repair walks those anchors
-// down from the newest and re-checks each hash against the live chain through an
-// endpoint of its own choosing; the first match ENTAILS that this block and every
-// ancestor are unchanged (blocks are chained by parent hash), so rows at or below
-// it are retained and only the unverified suffix is deleted. That entailment is
-// conditional on the answering endpoint being honest — the same trust every
-// ingested log rests on, no more and no less; it is not a cryptographic proof
-// against a hostile provider. The epoch gate is unchanged — acking while keeping
-// rows above the fork point would leave this table asserting engine-exact prices
-// at replaced heights, which for a liquidation-facing store is the worse failure.
+// TWO THINGS ANSWER IT, and only the second one closed it.
 //
-// AND REPAIR FAILS CLOSED WITHOUT FAILING FOREVER. Verification is retried, and
-// PAGED across bounded Steps rather than abandoned once a probe budget is spent.
-// internal/prices/poller.go's floorOutcome enumerates the whole state space; three
-// behaviours come out of it:
+// DURABLE POLL ANCHORS made repair decidable. multicall3's tryBlockAndAggregate
+// already returns the execution block HASH; the decoder keeps it, and each landed
+// round records (block, hash) in price_poll_anchors atomically with its rows.
+// Repair walks those anchors down from the newest and re-checks each hash against
+// a live endpoint; the first match ENTAILS that this block and every ancestor are
+// unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by parent hash), so rows
+// at or below it keep their validity. That entailment is conditional on the
+// answering endpoint being honest and on one chain view being used throughout —
+// the same trust every ingested log rests on, no more; it is not a cryptographic
+// proof against a hostile provider.
 //
-//   - DELETE only where every row above the floor is PROVEN non-canonical — either
-//     by a hash-verified anchor at or above it, or because every anchor above it was
-//     probed and mismatched. A bare match is not enough: a FAILED probe of a newer
-//     anchor forbids accepting a lower match, and an unanchored row above the
-//     boundary forbids it too. Nor is a proof enough once it has EXPIRED: because
-//     verification is paged across Steps, every mismatch is cached, and a second
-//     reorg can make those same anchors canonical again. Paging state is bound to
-//     the chain's reorg GENERATION and to a LIVE-CHAIN CHECKPOINT (the highest
-//     anchor the pass probed, and the hash the chain reported there); either one
-//     changing discards the pass, and the checkpoint is re-read immediately before
-//     the deletion runs.
-//   - RETRY, deleting and acking nothing, while the evidence is merely UNAVAILABLE
-//     (a probe errored, a page is still to walk, the checkpoint could not be
-//     re-read). ConditionPollRewindBlocked says what is unproven. A stalled poller
-//     with a red /readyz is recoverable; erased polled history is not.
-//   - NEUTRALIZE where the evidence can never exist: rows at heights whose block
-//     hash was never recorded. Waiting there was permanent — repair needs an anchor,
+// REMOVING THE DELETION closed it (D-010). Five review rounds tried to make the
+// anchor proof strong enough to justify destroying rows, and each round found a
+// dimension the previous fix had not modelled — an incomplete case space, a proof
+// that had expired, a proof assembled from several endpoints' forks. The poller
+// now has no deletion path at all: PollStore does not declare one, and every arm
+// of repair calls store.NeutralizeUnverifiablePrices, which RETAINS every row and
+// marks the suffix it cannot place with store.InvalidReasonUnverifiableReorg so no
+// usable-price read can return it and no later repair can "verify" it. The epoch
+// gate is unchanged — acking while leaving rows above the fork point READABLE
+// would have this table asserting engine-exact prices at replaced heights, which
+// for a liquidation-facing store is the worse failure.
+//
+// WHAT REPAIR DOES, EXACTLY, in the three states it can be in:
+//
+//   - MARK the suffix above the highest anchor whose hash matches, once that match
+//     has complete, same-endpoint answers above it AND those answers still hold at
+//     the instant of acting; or, under the same condition, mark everything above
+//     the walker's target when every retained anchor mismatched and the anchors
+//     cover every row. Everything at or below the floor keeps its validity.
+//   - RETRY, marking and acking nothing, while the evidence is merely UNAVAILABLE
+//     (a probe errored and ended the pass, a page is still to walk, the checkpoint
+//     could not be re-read). ConditionPollRewindBlocked says what is unresolved. A
+//     stalled poller with a red /readyz is recoverable.
+//   - MARK where the evidence can never exist: rows at heights whose block hash was
+//     never recorded. Waiting there was permanent — repair needs an anchor,
 //     adoption is refused while an epoch is pending, and the ack only advances
-//     through repair — so those rows are RETAINED and marked
-//     store.InvalidReasonUnverifiableReorg (no usable-price read can return them, no
-//     later repair can verify them), the epoch is acked, and ingestion resumes.
+//     through repair — so those rows are marked, the epoch is acked, and ingestion
+//     resumes.
 //
-// WHAT IS ACTUALLY DELETED, EXACTLY: rows above the highest anchor whose hash
-// matches, once a match is found with complete proof above it AND that proof still
-// holds against the live chain at the instant of deletion; or, under the same
-// condition, when every retained anchor mismatched and the anchors cover every row,
-// everything above the walker's target. Both describe blocks the chain replaced.
-// NOTHING ELSE IS DELETED — not on a probe outage, not on legacy unanchored history,
-// not on a reorg deeper than the retained anchor set, and not on a proof a later
-// reorg has overturned.
-//
-// WHAT IS STILL LOST: the USABILITY of a neutralized row. It stays on disk and stays
-// auditable, but no consumer can read it and there is no un-neutralize, because no
-// fact would justify one. Rows written before this engine anchored its rounds are
-// ADOPTED into anchors on a normal round with no epoch pending
-// (store.AdoptPollAnchor carries the safety argument and its limit), which is what
-// keeps a LATER reorg on the proof-based path instead of the neutralizing one.
+// WHAT IS STILL LOST: the USABILITY of a marked row, and only that. It stays on
+// disk and stays auditable. There is no un-mark on re-interpretation; the one way
+// it becomes readable again is a FRESH observation at the same
+// (chain, asset, source, block) identity, which insertPrice treats as superseding
+// it. Marked rows are never retired, so they accumulate — Poller.NeutralizedBacklog
+// and store.NeutralizedPriceStats exist so that pile is countable rather than
+// merely tolerated. Rows written before this engine anchored its rounds are ADOPTED
+// into anchors on a normal round with no epoch pending (store.AdoptPollAnchor
+// carries the safety argument and its limit), which is what keeps a LATER reorg on
+// the floor-finding path rather than marking the lot.
 //
 // # NOT SAFE FOR CONCURRENT USE
 //
@@ -586,18 +589,30 @@ func conditionsReason(cs []Condition) string {
 //     across a restart, and it reports VALIDITY alongside recency, so a
 //     quarantined answer can advance a cursor without ever refreshing
 //     usable-price health.
+//
+// IT CARRIES NO DELETION PRIMITIVE. RewindPrices lives on FeedStore alone,
+// because deletion is only recoverable where the rows can be rebuilt: the feed
+// deriver's rows are decoded from `raw_logs` and a rewind there costs a replay,
+// while a polled row is a point-in-time contract read that exists nowhere else.
+// D-010 removes the poller's destructive path rather than guarding it, and this
+// split is what makes that structural instead of a rule someone has to remember.
 type PriceStore interface {
 	DeriveCursor(ctx context.Context, engine string) (block uint64, found bool, err error)
 	HasUnackedReorg(ctx context.Context, engine string, chainID uint64) (bool, error)
 	ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64) (store.ApplyResult, error)
-	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, verifiedFloor uint64) error
 	LatestPriceFreshness(ctx context.Context, chainID uint64, ownerEngine string) ([]store.PriceFreshness, error)
 }
 
 var _ PriceStore = (*store.Store)(nil)
 
 // PollStore is the poller's store surface: PriceStore plus the poll-anchor
-// entries that make reorg repair non-destructive and FAIL CLOSED.
+// entries that make reorg repair decidable and FAIL CLOSED.
+//
+// IT DECLARES NO WAY TO DELETE A PRICE ROW, and that omission is the point.
+// D-010 removes the poller's destructive path rather than guarding it, and a
+// guard is only as good as the next person who edits around it; a method the
+// interface does not carry cannot be called at all. Deletion remains available on
+// FeedStore, where the rows can be re-derived from raw_logs.
 //
 //   - ApplyPolledPrices writes the round's (block, hash) anchor in the same
 //     transaction as its rows, and reports whether that anchor was NEW.
@@ -605,10 +620,14 @@ var _ PriceStore = (*store.Store)(nil)
 //   - NewestPollAnchor is both the frontier a cursor regression is classified
 //     against and the durable reference for "when did we last see a new
 //     execution block".
-//   - PriceRepairExposure / CountUnanchoredPricesAbove are what make refusal
-//     possible: repair must know whether a rewind would actually destroy
-//     anything, and whether any of it is unprovable.
-//   - NeutralizeUnverifiablePrices is what makes refusal TERMINATE.
+//   - PriceRepairExposure / CountUnanchoredPricesAbove make the marking decision
+//     decidable: the first reports the height repair will actually act above
+//     (which the caller cannot compute — the store lowers it to the deepest
+//     unacknowledged epoch) plus what lies above it; the second answers "is
+//     anything above this floor unprovable" for a candidate floor.
+//   - NeutralizeUnverifiablePrices is the ONLY way this writer answers an epoch:
+//     ack without deleting, marking the unprovable suffix unusable.
+//   - NeutralizedPriceStats makes the resulting backlog countable.
 //   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
 //     rows written before this engine anchored its rounds.
 type PollStore interface {
@@ -616,16 +635,10 @@ type PollStore interface {
 	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) (store.ApplyResult, error)
 	PollAnchorsBelow(ctx context.Context, engine string, chainID, belowOrAt uint64, limit int) ([]store.StoredPollAnchor, error)
 	NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (store.StoredPollAnchor, bool, error)
-	// PriceRepairExposure and CountUnanchoredPricesAbove are what makes the A1
-	// invariant decidable: the first reports the height the rewind will actually
-	// act above (which the caller cannot compute — the store lowers it to the
-	// deepest unacknowledged epoch) plus what lies above it; the second answers
-	// "is anything above this floor unprovable" for a candidate floor.
 	PriceRepairExposure(ctx context.Context, engine string, chainID, toBlock uint64) (store.PriceRepairExposure, error)
 	CountUnanchoredPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
-	// NeutralizeUnverifiablePrices is the fail-closed-but-terminating transition:
-	// ack without deleting, marking the unprovable rows unusable.
 	NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error)
+	NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (store.NeutralizedPriceStats, error)
 	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
 	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }
@@ -835,8 +848,9 @@ func buildPollTargets(feeds *config.Feeds, chainID uint64) ([]pollTarget, error)
 }
 
 // sourcesOf returns the distinct source strings a target set owns, in first
-// appearance order — the ownership scope handed to store.RewindPrices so a
-// rewind touches only this writer's rows.
+// appearance order. It is descriptive metadata for logs and introspection: repair
+// scopes by OWNER ENGINE, not by this list, precisely so a registry edit cannot
+// orphan rows (see migration 00005).
 func sourcesOf(targets []pollTarget) []string {
 	seen := map[string]bool{}
 	var out []string

@@ -167,8 +167,15 @@ const reResolveInterval = time.Hour
 // FeedStore is the feed deriver's store surface (*store.Store satisfies it):
 // PriceStore plus the reads that bound a derivation window, supply it, and
 // hydrate publication freshness from durable truth.
+//
+// IT IS THE ONLY PRICE-WRITER SURFACE THAT CAN DELETE. D-010 forbids deleting
+// polled prices because they are point-in-time contract reads that exist nowhere
+// else; this deriver's rows are decoded from `raw_logs`, which the walker retains,
+// so a rewind here costs a re-derivation rather than the fact itself. That is why
+// RewindPrices sits here and not on PriceStore — see the note there.
 type FeedStore interface {
 	PriceStore
+	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, verifiedFloor uint64) error
 	Cursor(ctx context.Context, stream string) (*store.CursorPos, error)
 	RawLogsInRange(ctx context.Context, chainID uint64, addresses [][]byte, fromBlock, toBlock uint64) ([]store.RawLog, error)
 	LatestLogsByTopic(ctx context.Context, chainID uint64, addresses [][]byte, topic0 []byte, throughBlock uint64) ([]store.RawLog, error)

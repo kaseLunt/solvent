@@ -146,6 +146,9 @@ type fakePriceStore struct {
 	anchorReadErr error
 	// neutralizeErr fails NeutralizeUnverifiablePrices.
 	neutralizeErr error
+	// neutralizedStatsErr fails the backlog count. It is a read that must NOT be
+	// able to take hydration (and with it the freshness verdict) down with it.
+	neutralizedStatsErr error
 	// neutralized records every NeutralizeUnverifiablePrices call, so a test can
 	// tell "acked without deleting" from "deleted" — the distinction the
 	// pending-epoch legacy state turns on.
@@ -187,9 +190,11 @@ type fakePriceStore struct {
 	// min(requested, rewindDeepTo) — RewindPrices' deepest-unacked-epoch
 	// lowering — BEFORE the verified floor raises it back.
 	rewindDeepTo *uint64
-	// rewindLeavesNoCursor models the store-contract violation the workers
-	// assert against.
-	rewindLeavesNoCursor bool
+	// repairLeavesNoCursor models the store-contract violation the workers assert
+	// against: a reorg-answering call that commits without leaving a cursor. It
+	// applies to BOTH primitives, because both workers read the cursor back and
+	// both must refuse to guess when it is missing.
+	repairLeavesNoCursor bool
 
 	ingest map[string]*store.CursorPos
 	logs   []store.RawLog
@@ -389,7 +394,7 @@ func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID,
 	f.anchors[engine] = keptAnchors
 
 	f.unacked = false // RewindPrices acks every epoch on the chain
-	if f.rewindLeavesNoCursor {
+	if f.repairLeavesNoCursor {
 		f.cursorFound = false
 		return nil
 	}
@@ -569,10 +574,10 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 	var marked int64
 	for i := range f.rows {
 		r := &f.rows[i]
-		if r.owner != engine || r.block <= target {
-			continue
-		}
-		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+		// Mirrors the real predicate exactly: only rows that are still READABLE are
+		// marked, so a row already quarantined for another reason keeps that reason
+		// and is not counted as reorg fallout.
+		if r.owner != engine || r.block <= target || !r.valid {
 			continue
 		}
 		r.valid, r.invalidReason = false, store.InvalidReasonUnverifiableReorg
@@ -587,8 +592,38 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 	}
 	f.anchors[engine] = keptAnchors
 	f.unacked = false // the ack is part of the same transaction
+	if f.repairLeavesNoCursor {
+		f.cursorFound = false
+		return target, marked, nil
+	}
 	f.cursor, f.cursorFound = target, true
 	return target, marked, nil
+}
+
+// NeutralizedPriceStats mirrors the real aggregate over the marker column, so a
+// test can show that the retained-but-unusable backlog (D-010 clause 4) is read
+// from durable rows rather than counted in process memory.
+func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string, _ uint64) (store.NeutralizedPriceStats, error) {
+	if f.neutralizedStatsErr != nil {
+		return store.NeutralizedPriceStats{}, f.neutralizedStatsErr
+	}
+	var out store.NeutralizedPriceStats
+	for _, r := range f.rows {
+		if r.owner != engine || r.invalidReason != store.InvalidReasonUnverifiableReorg {
+			continue
+		}
+		out.Rows++
+		if out.Oldest.IsZero() || r.observedAt.Before(out.Oldest) {
+			out.Oldest = r.observedAt
+		}
+		if r.observedAt.After(out.Newest) {
+			out.Newest = r.observedAt
+		}
+		if r.block > out.HighestBlock {
+			out.HighestBlock = r.block
+		}
+	}
+	return out, nil
 }
 
 func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
@@ -775,11 +810,49 @@ type capturedCall struct {
 	data []byte
 }
 
+// endpointView is ONE rpc endpoint's PRIVATE view of the chain.
+//
+// WHY THIS TYPE EXISTS, and what its absence cost. Until fix wave 6 the fake
+// answered hash probes from a single `map[uint64]common.Hash` keyed by HEIGHT
+// ALONE. Every endpoint therefore agreed about every block by construction, so
+// the fake was structurally incapable of expressing the one thing Codex round 5
+// found: two endpoints DISAGREEING about the same height because they sit on
+// different forks. No amount of test-writing discipline reaches a failure mode
+// the harness cannot represent, which is why D-010 makes the harness a
+// prerequisite rather than a follow-up.
+//
+// An entry written for endpoint 0 says nothing whatever about endpoint 1.
+type endpointView struct {
+	// hashes is this endpoint's chain: block → hash. A block absent from it
+	// answers "not found", the shape a probe above that endpoint's head takes.
+	hashes map[uint64]common.Hash
+	// down, when set, makes this endpoint fail EVERY probe — a node that is
+	// unreachable rather than merely forked.
+	down error
+	// errAt fails this endpoint's probe for SPECIFIC heights, so a test can
+	// express "this one anchor could not be checked HERE" distinctly from "this
+	// height is absent from this endpoint's chain".
+	errAt map[uint64]error
+	// failAfter fails a height's probe on this endpoint only from the Nth read
+	// onward, so a test can script the ANCHOR PROBE of a height apart from the
+	// CHECKPOINT RE-READ of the same height later in the same repair.
+	failAfter map[uint64]int
+	// reads counts this endpoint's reads per height, for failAfter.
+	reads map[uint64]int
+}
+
 // fakePollChain models chain.Failover's routing contract: CallWithToken serves
 // from the SHARED sticky hint, CallFrom serves from the caller-given start
 // WITHOUT touching that hint, and every call stamps its token with the endpoint
 // that served it — so the tests prove the POLLER, not the fake, chooses the
 // endpoint.
+//
+// HeaderHashFrom additionally models FAILOVER, which the previous fake did not:
+// the real client walks endpoints from the requested start and returns the first
+// answer it gets, stamping the token with whichever endpoint actually replied.
+// A caller that ignores that token silently mixes chain views. Reproducing the
+// walk is what lets a test show the difference between "endpoint 0 answered" and
+// "endpoint 0 was down and endpoint 1 answered in its place".
 type fakePollChain struct {
 	endpoints int
 	active    int
@@ -790,26 +863,15 @@ type fakePollChain struct {
 	served []int
 	starts []int // CallFrom start indices, in order
 
-	// hashes is the LIVE canonical chain as this fake reports it: block → hash.
-	// A block absent from it answers "not found", the shape a probe above head
-	// takes. hashErr overrides everything, modelling a probe that cannot run.
-	hashes  map[uint64]common.Hash
-	hashErr error
-	// hashErrAt fails the probe for SPECIFIC heights only, so a test can express
-	// "this one anchor could not be checked" distinctly from "this height is absent
-	// from the chain". The mixed failure-then-match path — the one A1 kept surviving
-	// in — needs exactly that distinction.
-	hashErrAt map[uint64]error
-	// hashFailAfter fails a height's probe only from the Nth read of that height
-	// onward, so a test can distinguish the ANCHOR PROBE of a height from the
-	// CHECKPOINT RE-READ of the same height later in the repair. Without it the two
-	// cannot be scripted apart, and a test aiming at the revalidation would in fact
-	// be exercising a page containing a failed probe.
-	hashFailAfter map[uint64]int
-	hashStart     []int // HeaderHashFrom start indices, in order
-	hashCalls     []uint64
-	// hashReads counts reads per height, for hashFailAfter.
-	hashReads map[uint64]int
+	// views is the live chain PER ENDPOINT, grown lazily by view().
+	views map[int]*endpointView
+
+	hashStart []int    // HeaderHashFrom start indices, in order
+	hashCalls []uint64 // the height each probe asked about, in order
+	// hashServed is the endpoint that ANSWERED each probe (-1 when every
+	// endpoint failed). Paired with hashCalls it is the record of which chain
+	// view each proof came from, which is the whole subject of D-010 clause 2.
+	hashServed []int
 }
 
 func (c *fakePollChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
@@ -827,32 +889,152 @@ func (c *fakePollChain) CallFrom(_ context.Context, start int, to common.Address
 
 func (c *fakePollChain) EndpointCount() int { return c.endpoints }
 
+// view returns endpoint idx's chain view, creating an empty one on first use.
+func (c *fakePollChain) view(idx int) *endpointView {
+	if c.views == nil {
+		c.views = map[int]*endpointView{}
+	}
+	v, ok := c.views[idx]
+	if !ok {
+		v = &endpointView{
+			hashes:    map[uint64]common.Hash{},
+			errAt:     map[uint64]error{},
+			failAfter: map[uint64]int{},
+			reads:     map[uint64]int{},
+		}
+		c.views[idx] = v
+	}
+	return v
+}
+
+// endpointIndexes lists every endpoint this fake routes across.
+func (c *fakePollChain) endpointIndexes() []int {
+	n := c.endpoints
+	if n <= 0 {
+		n = 1
+	}
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}
+
+// setHashOn writes a hash at block into ONE endpoint's view. This is the
+// primitive that expresses endpoint DISAGREEMENT: nothing propagates.
+func (c *fakePollChain) setHashOn(endpoint int, block uint64, h common.Hash) {
+	c.view(endpoint).hashes[block] = h
+}
+
+// setHash writes the same hash into EVERY endpoint's view — the endpoints AGREE
+// about this height. Most tests are not about divergence and want this.
+func (c *fakePollChain) setHash(block uint64, h common.Hash) {
+	for _, i := range c.endpointIndexes() {
+		c.setHashOn(i, block, h)
+	}
+}
+
+// canonicalOn makes ONE endpoint report the standard hash for these blocks.
+func (c *fakePollChain) canonicalOn(endpoint int, blocks ...uint64) {
+	for _, b := range blocks {
+		c.setHashOn(endpoint, b, blockHashAt(b))
+	}
+}
+
+// failAll makes EVERY endpoint fail every probe: a total probe outage, in which
+// failover has nowhere to go.
+func (c *fakePollChain) failAll(err error) {
+	for _, i := range c.endpointIndexes() {
+		c.view(i).down = err
+	}
+}
+
+func (c *fakePollChain) clearFailAll() {
+	for _, i := range c.endpointIndexes() {
+		c.view(i).down = nil
+	}
+}
+
+// failProbeOn fails ONE endpoint's probe of one height. The endpoint stays
+// reachable for every other height, so failover routes around it — which is the
+// silent-failover path D-010 clause 2 is about.
+func (c *fakePollChain) failProbeOn(endpoint int, block uint64, err error) {
+	c.view(endpoint).errAt[block] = err
+}
+
+// failProbe fails one height on EVERY endpoint, so no failover can answer it.
+func (c *fakePollChain) failProbe(block uint64, err error) {
+	for _, i := range c.endpointIndexes() {
+		c.failProbeOn(i, block, err)
+	}
+}
+
+func (c *fakePollChain) clearFailProbe(block uint64) {
+	for _, i := range c.endpointIndexes() {
+		delete(c.view(i).errAt, block)
+	}
+}
+
+// failAfter makes every endpoint answer a height n times and then fail it,
+// which is how a test separates a page's anchor probe from the checkpoint
+// re-read of the same height.
+func (c *fakePollChain) failAfter(block uint64, n int) {
+	for _, i := range c.endpointIndexes() {
+		c.view(i).failAfter[block] = n
+	}
+}
+
+func (c *fakePollChain) clearFailAfter() {
+	for _, i := range c.endpointIndexes() {
+		c.view(i).failAfter = map[uint64]int{}
+	}
+}
+
+// probe is ONE endpoint's answer about one height, with no failover.
+func (c *fakePollChain) probe(idx int, block uint64) (common.Hash, error) {
+	v := c.view(idx)
+	if v.down != nil {
+		return common.Hash{}, v.down
+	}
+	if err, bad := v.errAt[block]; bad {
+		return common.Hash{}, err
+	}
+	v.reads[block]++
+	if after, scripted := v.failAfter[block]; scripted && v.reads[block] > after {
+		return common.Hash{}, fmt.Errorf("endpoint %d timed out reading header %d", idx, block)
+	}
+	h, ok := v.hashes[block]
+	if !ok {
+		return common.Hash{}, fmt.Errorf("header %d not found on endpoint %d", block, idx)
+	}
+	return h, nil
+}
+
+// HeaderHashFrom walks endpoints from start exactly as chain.Failover.doFrom
+// does, returns the FIRST answer, and stamps the token with the endpoint that
+// actually produced it. A caller that requests endpoint 0 and reads a token
+// naming endpoint 1 has been silently failed over onto another chain view.
 func (c *fakePollChain) HeaderHashFrom(_ context.Context, start int, block uint64) (common.Hash, chain.EndpointToken, error) {
 	c.hashStart = append(c.hashStart, start)
 	c.hashCalls = append(c.hashCalls, block)
-	if c.hashErr != nil {
-		return common.Hash{}, chain.EndpointToken{Index: -1}, c.hashErr
+	n := c.endpoints
+	if n <= 0 {
+		n = 1
 	}
-	if err, bad := c.hashErrAt[block]; bad {
-		return common.Hash{}, chain.EndpointToken{Index: -1}, err
+	first := ((start % n) + n) % n
+	var lastErr error
+	for i := 0; i < n; i++ {
+		idx := (first + i) % n
+		h, err := c.probe(idx, block)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		c.hashServed = append(c.hashServed, idx)
+		return h, chain.EndpointToken{Index: idx}, nil
 	}
-	if c.hashReads == nil {
-		c.hashReads = map[uint64]int{}
-	}
-	c.hashReads[block]++
-	if after, scripted := c.hashFailAfter[block]; scripted && c.hashReads[block] > after {
-		return common.Hash{}, chain.EndpointToken{Index: -1},
-			fmt.Errorf("probe endpoint timed out reading header %d", block)
-	}
-	h, ok := c.hashes[block]
-	if !ok {
-		return common.Hash{}, chain.EndpointToken{Index: -1}, fmt.Errorf("header %d not found", block)
-	}
-	idx := start
-	if c.endpoints > 0 {
-		idx = ((start % c.endpoints) + c.endpoints) % c.endpoints
-	}
-	return h, chain.EndpointToken{Index: idx}, nil
+	c.hashServed = append(c.hashServed, -1)
+	return common.Hash{}, chain.EndpointToken{Index: -1}, lastErr
 }
 
 func (c *fakePollChain) serve(idx int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {

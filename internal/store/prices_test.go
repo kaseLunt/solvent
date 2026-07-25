@@ -268,10 +268,14 @@ func TestApplyPricesBootstrapRefusedOnEpochChain(t *testing.T) {
 	_, err := s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
-	require.ErrorContains(t, err, "bootstrap via RewindPrices")
+	require.ErrorContains(t, err, "bootstrap via the engine's repair primitive")
 
-	// Bootstrap at block 0: nothing of this writer's exists to delete.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, 0))
+	// Bootstrap at block 0. Either primitive creates the cursor and acks; the poll
+	// engine uses NeutralizeUnverifiablePrices (D-010 leaves it no other), and with
+	// nothing of this writer's above block 0 both are equally vacuous.
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 0, 0)
+	require.NoError(t, err)
+	require.Zero(t, marked, "a bootstrap has no rows to mark")
 	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
 }

@@ -203,6 +203,54 @@ func TestNeutralizationDropsAnchorsAboveTheBoundary(t *testing.T) {
 	require.Len(t, priceRows(t, s, 10), 2, "the rows themselves are still retained")
 }
 
+// D-010 clause 4, AGAINST POSTGRES: the retained-but-unusable pile is countable,
+// and the count is engine- and marker-scoped rather than "everything invalid".
+//
+// It matters that this is a live test. The claim is about which rows the aggregate
+// selects — a non-positive answer carries a DIFFERENT invalid_reason and must not
+// be counted as reorg fallout, and another engine's rows must not be counted at
+// all — and both are properties of the predicate, not of any model of it.
+func TestNeutralizedPriceStatsCountsOnlyReorgMarkedRowsOfOneEngine(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// Nothing marked yet: an empty backlog reports zero and no timestamps.
+	empty, err := s.NeutralizedPriceStats(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.Zero(t, empty.Rows)
+	require.True(t, empty.Oldest.IsZero())
+	require.Zero(t, empty.HighestBlock)
+
+	// Two poll rows and one NON-POSITIVE answer, which the store quarantines under
+	// its own reason. Only the first two are eligible to be neutralized.
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(4900, 0xAA, testPollSource, 1_000_000, 6),
+		po(5000, 0xBB, testPollSource, 2_000_000, 6),
+		po(5000, 0xCC, testPollSource, 0, 6),
+	}, 5000)))
+	// A different engine's row above the same height, which must never be counted.
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 10, []PriceObservation{
+		po(5000, 0xDD, "chainlink:0xfeed", 3_000_000, 8),
+	}, 5000)))
+
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4800, []byte{0x01}))
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5000, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), marked, "the non-positive row already carried a different reason")
+
+	got, err := s.NeutralizedPriceStats(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), got.Rows,
+		"the zero-answer row is quarantined for a different reason and is not reorg fallout")
+	require.Equal(t, uint64(5000), got.HighestBlock)
+	require.False(t, got.Oldest.IsZero())
+	require.False(t, got.Newest.Before(got.Oldest))
+
+	other, err := s.NeutralizedPriceStats(ctx, testFeedEngine, 10)
+	require.NoError(t, err)
+	require.Zero(t, other.Rows, "the backlog is owner-scoped")
+}
+
 // A neutralized row is never deleted by a LATER rewind either. It was kept once
 // because nothing could place it on a chain; a later rewind has no more evidence
 // than the first one did, so deferring the same unevidenced destruction is not an

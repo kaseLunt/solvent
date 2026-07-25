@@ -8,8 +8,9 @@ package store
 // TWO WRITERS, ONE CONTRACT. Both the engine-exact OP POLLER
 // (PriceProviderV2.price(token) each interval) and the ETH CHAINLINK FEED
 // deriver (AnswerUpdated logs read back out of raw_logs) write through
-// ApplyPrices / ApplyPolledPrices and repair through RewindPrices, under their
-// own PSEUDO-ENGINE derive cursors. Giving the pollers a cursor too — not just
+// ApplyPrices / ApplyPolledPrices and repair under their own PSEUDO-ENGINE derive
+// cursors (through RewindPrices and NeutralizeUnverifiablePrices respectively —
+// see below). Giving the pollers a cursor too — not just
 // the log-derived feed path — is deliberate: a price row is stamped with the
 // block it was observed at, and a reorg that replaces that block leaves the row
 // describing a chain that no longer exists. Routing both writers through the
@@ -17,8 +18,8 @@ package store
 // rewind target, whichever writer produced them.
 //
 // OWNERSHIP IS DURABLE, NOT DERIVED FROM CONFIG. Every row records the
-// pseudo-engine key of the writer that inserted it, and RewindPrices deletes by
-// that key. The earlier design scoped a rewind by the source strings the
+// pseudo-engine key of the writer that inserted it, and both repair primitives
+// scope by that key. The earlier design scoped a rewind by the source strings the
 // CALLER'S CURRENTLY LOADED REGISTRY named, which silently lost rows whenever
 // the registry moved: after a manual Chainlink phase update the feed deriver
 // owns only chainlink:<new-aggregator>, so a deep reorg crossing the phase
@@ -28,35 +29,34 @@ package store
 // key does not move when its registry does, so owner-scoped repair is immune to
 // that class.
 //
-// REORG REPAIR IS NOT UNIFORMLY LOSSY, AND IT FAILS CLOSED. The feed deriver
-// RE-DERIVES the rows a rewind deleted (its input, raw_logs, is rewound and
-// re-ingested by the walker). The poller CANNOT — it only ever reads `latest`. It
-// therefore records a durable (block, hash) ANCHOR per landed round, and repair
-// walks those anchors down from the newest, keeping everything at or below the
-// first one whose hash the caller has re-verified against the live chain and
-// deleting only the unverified suffix. A hash match at height H entails that every
-// block up to H is unchanged (blocks are chained by parent hash), so retaining
-// rows at or below a verified anchor rests on that entailment rather than on
-// optimism — subject to the endpoint that answered the re-check being honest,
-// which is the same trust every ingested log already depends on.
+// THE TWO WRITERS GET DIFFERENT REPAIR PRIMITIVES, BECAUSE THEIR ROWS DIFFER IN
+// RECOVERABILITY. The feed deriver RE-DERIVES the rows a rewind deleted: its input,
+// raw_logs, is rewound and re-ingested by the walker, so RewindPrices costs it a
+// replay. The poller CANNOT — it only ever reads `latest`, and no retained artifact
+// reproduces a past-block contract read. Under D-010 the poller therefore has no
+// deletion primitive at all (its PollStore surface does not declare one) and
+// answers every reorg epoch through NeutralizeUnverifiablePrices: rows above the
+// boundary are RETAINED and marked InvalidReasonUnverifiableReorg so nothing can
+// read them or later "verify" them, the epoch is acked, ingestion resumes.
 //
-// When NO anchor verifies, this layer does not decide what happens: RewindPrices
-// deletes what its caller's floor tells it to, and the CALLER is the one that must
-// refuse. internal/prices.Poller does refuse — it will not call RewindPrices at
-// all while it holds rows above the target that it cannot prove canonical, so a
-// transient probe outage costs a stalled poller instead of unrecoverable history.
-// A floor of 0 from that caller now means "there is nothing above the target to
-// lose", never "we gave up looking".
+// The (block, hash) ANCHOR per landed round survives that change and does more
+// work than before, not less. Repair walks the anchors down from the newest,
+// keeping everything at or below the first one whose hash the caller re-verified
+// against a live endpoint and marking only the suffix above it. A hash match at
+// height H entails that every block up to H is unchanged on THAT endpoint's chain
+// (blocks are chained by parent hash), so a verified floor is what confines the
+// marking — the difference between an asset keeping its prices and losing their
+// readability. A floor of 0 means the caller could place nothing, never that it
+// gave up looking.
 //
-// AND WHEN NO EVIDENCE CAN EVER EXIST, refusing forever is its own failure. Rows
-// at heights no anchor covers can never be proven either way, so a poller holding
-// them under a pending epoch had no path at all: repair needs an anchor, adoption
-// needs the ack, the ack needs repair. NeutralizeUnverifiablePrices is the third
-// answer — retain the rows, mark them InvalidReasonUnverifiableReorg so nothing
-// can read or later "verify" them, ack the epoch, resume. Three behaviours key off
-// that marker: neutralization skips rows that already carry it, RewindPrices never
-// deletes them, and insertPrice lets a fresh observation at the same identity
-// supersede one.
+// This layer still does not decide policy. It marks what its caller's floor tells
+// it to, and the caller is the one that must refuse on incomplete evidence;
+// internal/prices.Poller does refuse, and reports the wait rather than marking
+// while it is unsure. Three behaviours key off the marker: neutralization skips
+// rows that already carry it, RewindPrices (the feed path) never deletes them, and
+// insertPrice lets a fresh observation at the same identity supersede one — which
+// is the only way a marked row becomes readable again, and the reason a wrong
+// marking is recoverable where a wrong deletion is not.
 //
 // NUMERIC round-trip: prices.price is written as pgtype.Numeric{Exp: 0} from a
 // *big.Int and read back through ::text, exactly like position_events.delta and
@@ -385,7 +385,7 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 			engine, ErrUnackedReorgEpoch, maxEpoch, chainID, ackedEpoch)
 	}
 	if !cursorExists && maxEpoch > 0 {
-		return ApplyResult{}, fmt.Errorf("engine %q has no derive cursor and chain %d carries %w %d: bootstrap via RewindPrices before applying",
+		return ApplyResult{}, fmt.Errorf("engine %q has no derive cursor and chain %d carries %w %d: bootstrap via the engine's repair primitive (RewindPrices for event-derived engines, NeutralizeUnverifiablePrices for polled ones) before applying",
 			engine, chainID, ErrUnackedReorgEpoch, maxEpoch)
 	}
 
@@ -852,15 +852,15 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 	return exp, nil
 }
 
-// NeutralizeUnverifiablePrices answers a reorg epoch WITHOUT deleting anything,
-// for the one state where no evidence can ever settle the question.
+// NeutralizeUnverifiablePrices answers a reorg epoch WITHOUT deleting anything.
+// Since D-010 it is the ONLY way the poller answers one.
 //
-// THE STATE IT EXISTS FOR. A poller holds rows above the effective rewind target
-// at heights that no poll anchor covers — legacy history written before this
-// engine anchored its rounds, or history whose anchors retention removed. Those
-// rows cannot be proven canonical (no recorded hash to re-check) and cannot be
-// proven orphaned (same reason), and no future fact changes that: the hash of the
-// block their round executed at was never written down. Anchor adoption cannot
+// THE STATE IT WAS BUILT FOR. A poller holds rows above the effective rewind
+// target at heights that no poll anchor covers — legacy history written before
+// this engine anchored its rounds, or history whose anchors retention removed.
+// Those rows cannot be proven canonical (no recorded hash to re-check) and cannot
+// be proven orphaned (same reason), and no future fact changes that: the hash of
+// the block their round executed at was never written down. Anchor adoption cannot
 // help either, because adoption is itself refused while an epoch is pending — for
 // the sound reason that it would otherwise record a REPLACEMENT block's hash.
 //
@@ -868,10 +868,10 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 //
 //   - DELETE them (the original behaviour): destroys history that was probably
 //     canonical, irreversibly, on no evidence. This is finding A1.
-//   - REFUSE forever (the previous behaviour): the epoch gate then blocks every
-//     apply, the poller stops ingesting prices, and nothing any code path can do
-//     clears it — repair needs an anchor, adoption needs the ack, the ack needs
-//     repair. A refusal no path can clear is an outage, not safety.
+//   - REFUSE forever (the behaviour before wave 4): the epoch gate then blocks
+//     every apply, the poller stops ingesting prices, and nothing any code path
+//     can do clears it — repair needs an anchor, adoption needs the ack, the ack
+//     needs repair. A refusal no path can clear is an outage, not safety.
 //   - NEUTRALIZE (this): the rows are RETAINED and marked
 //     InvalidReasonUnverifiableReorg, so no usable-price read can return them and
 //     no later repair can "verify" them; the anchors above the target are dropped
@@ -879,10 +879,19 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 //     is acked, in ONE transaction. Nothing is destroyed, nothing unverifiable can
 //     be read, and ingestion resumes.
 //
-// WHAT IT DOES NOT CLAIM. It does not prove the rows are non-canonical, and it is
-// not a substitute for the anchored path: a caller must reach for it only after
-// verification has established that the answer is unobtainable, never merely
-// unavailable (a failed probe RETRIES — see internal/prices.Poller.repair).
+// WHY IT IS NOW THE WHOLE ANSWER AND NOT THE LAST RESORT. Wave 4 reached here only
+// when the evidence was UNOBTAINABLE, and deleted when it was merely strong. Five
+// review rounds each found a new way for "strong" to be wrong — an incomplete case
+// space, an expired proof, a proof assembled from several endpoints' forks — and
+// each fix existed solely to justify destroying rows that cannot be re-read from
+// anywhere. D-010 removes the destructive arm instead: a wrong marking is undone
+// by the supersede rule below, a wrong deletion is not undone at all.
+//
+// WHAT IT DOES NOT CLAIM. It does not prove the rows are non-canonical. Marking a
+// canonical row costs the availability of that asset's price at those heights
+// until a fresh observation supersedes it, which is why the caller still has to
+// reach a conclusion on complete evidence from one chain view rather than marking
+// whenever it is unsure (D-010 clause 2, internal/prices.Poller.verifyFloor).
 //
 // There is no un-neutralize on re-interpretation: nothing anywhere flips the marker
 // back on the strength of a later opinion about the same recorded value. The ONE way
@@ -936,9 +945,17 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 		effectiveTarget = verifiedFloor
 	}
 
+	// ONLY ROWS THAT ARE STILL READABLE ARE MARKED. The predicate is `valid`, not
+	// "does not already carry this marker", and the difference is not cosmetic: a
+	// row quarantined for a DIFFERENT reason (a non-positive oracle answer) is
+	// already unreadable, so re-marking it changes nothing a consumer can observe
+	// and overwrites the true reason it is unusable. It would also inflate the
+	// backlog NeutralizedPriceStats reports with rows that were never reorg fallout,
+	// which is the number D-010 clause 4 exists to make trustworthy. RowsAffected is
+	// then exactly "rows this call made unreadable".
 	ct, err := tx.Exec(ctx, `UPDATE prices
 		SET valid = FALSE, invalid_reason = $4
-		WHERE chain_id = $1 AND owner_engine = $2 AND block_number > $3 AND invalid_reason <> $4`,
+		WHERE chain_id = $1 AND owner_engine = $2 AND block_number > $3 AND valid`,
 		chainID, engine, effectiveTarget, InvalidReasonUnverifiableReorg)
 	if err != nil {
 		return 0, 0, fmt.Errorf("neutralize prices owned by %q above %d: %w", engine, effectiveTarget, err)
@@ -972,6 +989,54 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 		"verifiedFloor", verifiedFloor, "boundary", effectiveTarget,
 		"rowsNeutralized", quarantined, "ackedEpoch", maxEpoch, "marker", InvalidReasonUnverifiableReorg)
 	return effectiveTarget, quarantined, nil
+}
+
+// NeutralizedPriceStats is the size and age of one engine's retained-but-unusable
+// backlog: rows NeutralizeUnverifiablePrices marked rather than deleted.
+//
+// It exists because the policy that keeps those rows has an accepted cost and the
+// cost has to be countable (D-010 clause 4). Nothing retires them today — a
+// reconciliation that re-verified or dropped them is explicitly a later concern —
+// so the pile only grows, at a rate set by poll cadence and reorg frequency. An
+// operator who cannot see it cannot tell a handful of rows from a runaway.
+//
+// Oldest/Newest are zero when Rows is 0.
+type NeutralizedPriceStats struct {
+	Rows         int64
+	Oldest       time.Time
+	Newest       time.Time
+	HighestBlock uint64
+}
+
+// NeutralizedPriceStats counts the rows engine owns on chainID that carry the
+// InvalidReasonUnverifiableReorg marker, with the observation times of the oldest
+// and newest and the highest block among them.
+//
+// It is a plain read: it decides nothing and gates nothing. The marker is exact
+// (insertPrice's supersede arm is the only thing that clears it, by replacing the
+// row with a fresh observation at the same identity), so this counts marked rows
+// rather than estimating them.
+func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (NeutralizedPriceStats, error) {
+	var out NeutralizedPriceStats
+	var oldest, newest *time.Time
+	var highest *int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*), min(observed_at), max(observed_at), max(block_number)
+		   FROM prices
+		  WHERE chain_id = $1 AND owner_engine = $2 AND invalid_reason = $3`,
+		chainID, engine, InvalidReasonUnverifiableReorg).Scan(&out.Rows, &oldest, &newest, &highest); err != nil {
+		return NeutralizedPriceStats{}, fmt.Errorf("count neutralized prices owned by %q on chain %d: %w", engine, chainID, err)
+	}
+	if oldest != nil {
+		out.Oldest = *oldest
+	}
+	if newest != nil {
+		out.Newest = *newest
+	}
+	if highest != nil && *highest > 0 {
+		out.HighestBlock = uint64(*highest)
+	}
+	return out, nil
 }
 
 // UnanchoredPriceBlocks returns the distinct blocks where engine owns price rows

@@ -562,7 +562,7 @@ func TestFeedDeriverRewindMissingCursorIsAnError(t *testing.T) {
 	st := newFakePriceStore()
 	st.unacked = true
 	st.cursor, st.cursorFound = testFeedFrontier, true
-	st.rewindLeavesNoCursor = true
+	st.repairLeavesNoCursor = true
 	ch := &fakeFeedChain{head: testFeedHead}
 	f, _ := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
