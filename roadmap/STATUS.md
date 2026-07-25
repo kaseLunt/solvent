@@ -6,7 +6,7 @@ writer_mode: serial
 parallel_readers: allowed
 enforcement: bootstrap
 enforcement_evidence: []
-updated: 2026-07-24
+updated: 2026-07-25
 ---
 
 # STATUS — integration pointer
@@ -33,8 +33,16 @@ handoff; the Phase 2 implementation plan is that work's first deliverable.
 
 - External: Aave V4 whitelabel AIP not yet executed (governance ARFC 2026-07-14) — gates the
   Observatory's second OP stream, not current work.
-- Remote CI is present and green but not branch-protection-required; enforcement posture remains
-  advisory (local hooks + candidate CI).
+- Enforcement is the **local pre-commit gate** (doctor + scope gate), which is the only path every
+  commit actually traverses. Development is local-only and single-writer.
+- Remote CI is informational and **not** uniformly green: `ci.yml` (build/vet/test) passes, but the
+  control-plane workflow's candidate scope-review job fails by construction on any push touching an
+  owner-review-protected surface — it requires a server-side approval token tied to a pull-request
+  number, which a direct push cannot supply. Diagnosed with a controlled comparison and recorded in
+  `roadmap/insights/INS-52cb393e-…`. Not fixable by upgrade; a genuinely green remote gate would need
+  a hosting ruleset required-workflow plus server-side token, i.e. authority this project does not
+  currently claim. Posture is therefore at most `ci-unprotected` per RULES 22 — do not describe it as
+  verified enforcement.
 
 ## Next owner transition
 
