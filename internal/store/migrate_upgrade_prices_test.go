@@ -153,12 +153,12 @@ func TestMigrateUpgradesV4PriceBaselineWithoutDataLoss(t *testing.T) {
 	// inserted directly, so neither engine has a derive cursor; ApplyPrices'
 	// implicit first-write ack admits them (these chains carry no epochs).
 	anchorHash := bytes.Repeat([]byte{0x20}, 32)
-	require.NoError(t, s.ApplyPolledPrices(ctx, pollEngine, 10,
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, pollEngine, 10,
 		[]PriceObservation{po(200, 0xAA, pollSource, 1_000_100, 6)}, 200,
-		PollAnchor{BlockNumber: 200, BlockHash: anchorHash}))
-	anchors, err := s.PollAnchorsAbove(ctx, pollEngine, 10, 0, 8)
+		PollAnchor{BlockNumber: 200, BlockHash: anchorHash})))
+	anchors, err := s.PollAnchorsBelow(ctx, pollEngine, 10, 200, 8)
 	require.NoError(t, err)
-	require.Equal(t, []PollAnchor{{BlockNumber: 200, BlockHash: anchorHash}}, anchors)
+	require.Equal(t, []PollAnchor{{BlockNumber: 200, BlockHash: anchorHash}}, plainAnchors(anchors))
 
 	usable, found, err := s.LatestUsablePrice(ctx, 10, addr20(0xAA), pollSource)
 	require.NoError(t, err)
@@ -181,8 +181,8 @@ func TestMigrateUpgradesV4PriceBaselineWithoutDataLoss(t *testing.T) {
 	// the retired phase's row above the target is deleted even though no currently
 	// loaded registry names its source — while the poller's row on the same chain
 	// survives.
-	require.NoError(t, s.ApplyPrices(ctx, feedEngine, 1,
-		[]PriceObservation{po(160, 0xAA, newAggSource, 100_000_000, 8)}, 160))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, feedEngine, 1,
+		[]PriceObservation{po(160, 0xAA, newAggSource, 100_000_000, 8)}, 160)))
 	require.NoError(t, s.RewindPrices(ctx, feedEngine, 1, 80, 0))
 	rows, err := s.pool.Query(ctx,
 		`SELECT source || '@' || block_number::text FROM prices WHERE chain_id = 1 ORDER BY 1`)

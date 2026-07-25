@@ -140,8 +140,9 @@ func TestPollerRoundPersistsHashAnchor(t *testing.T) {
 	require.Equal(t, uint64(5000), batch.anchor.BlockNumber, "the anchor is the round's execution block")
 	require.Equal(t, blockHashAt(5000).Bytes(), batch.anchor.BlockHash,
 		"the anchor carries the hash multicall3 returned, which the decoder used to discard")
-	require.Equal(t, []store.PollAnchor{{BlockNumber: 5000, BlockHash: blockHashAt(5000).Bytes()}},
-		st.anchors[PollCursorEngine(10)])
+	require.Len(t, st.anchors[PollCursorEngine(10)], 1)
+	require.Equal(t, store.PollAnchor{BlockNumber: 5000, BlockHash: blockHashAt(5000).Bytes()},
+		st.anchors[PollCursorEngine(10)][0].PollAnchor)
 }
 
 // The ETH poller's only obligation is the weETH getRate() ratio — recorded as
@@ -352,7 +353,7 @@ func TestPollerUnhydratedFreshnessFailsClosed(t *testing.T) {
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
-	require.ErrorContains(t, err, "hydrate per-asset freshness")
+	require.ErrorContains(t, err, "hydrate durable price state")
 
 	healthy, _ := p.Health()
 	require.True(t, healthy, "inside the grace window an unhydrated poller is just starting up")
@@ -498,9 +499,17 @@ func TestPollerRewindRetainsRowsBelowVerifiedAnchor(t *testing.T) {
 	require.Equal(t, []uint64{5000, 4900}, ch.hashCalls)
 }
 
-// A1 FALLBACK, stated honestly: when NO anchor can be verified, there is no floor,
-// the walker's target stands, and the loss is real. The WARN says so.
-func TestPollerRewindWithoutVerifiableAnchorFallsBackToWalkerTarget(t *testing.T) {
+// A1, THE CORE FAIL-CLOSED PROPERTY. When anchor verification is UNAVAILABLE —
+// here a transient hash-probe outage — repair must not ack the epoch and must not
+// delete a row.
+//
+// This test replaces one that asserted the opposite. Wave 1 committed a test
+// confirming that a transient probe outage left polled history EMPTY, documenting
+// irreversible data loss as expected behaviour. Polled prices cannot be re-polled
+// (this path only reads `latest`), so a stalled poller is recoverable and erased
+// canonical history is not: the refusal is the correct outcome, and the previous
+// assertion was encoding the bug.
+func TestPollerRewindRefusesWhenAnchorVerificationIsUnavailable(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1}
@@ -516,37 +525,188 @@ func TestPollerRewindWithoutVerifiableAnchorFallsBackToWalkerTarget(t *testing.T
 	p.lastAttempt = clk.now()
 	msgs := captureWarnings(t)
 
-	_, err := p.Step(context.Background())
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "a refusal is a health condition, not a Step error to back off on")
+	require.False(t, advanced, "nothing was acked and nothing was deleted")
+
+	require.Empty(t, st.rewinds, "RewindPrices was never called: the deletion was refused, not performed")
+	require.Equal(t, uint64(5000), st.cursor, "the cursor is untouched")
+	require.Len(t, st.rows, 1, "the unrecoverable polled row survives an unverifiable rewind")
+	require.True(t, st.unacked, "the epoch stays unacknowledged, so no price can be applied meanwhile")
+
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollRewindBlocked)
+	require.Contains(t, got[ConditionPollRewindBlocked], "REFUSED to ack or delete")
+	healthy, _ := p.Health()
+	require.False(t, healthy, "/readyz must go red: the poller is stalled and an operator has to know")
+	require.True(t, containsSubstring(*msgs, "repair BLOCKED and nothing was deleted"))
+
+	// RETRY, which is the other half of Codex's recommendation: once the probe
+	// endpoint recovers, the same verification succeeds and repair proceeds.
+	ch.hashErr = nil
+	canonicalAt(ch, 5000)
+	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, uint64(0), st.rewinds[0].verifiedFloor, "nothing was proven canonical")
-	require.Equal(t, uint64(100), st.cursor, "the walker's deep target stands")
-	require.Empty(t, st.rows, "and the polled history is gone — this loss is real")
-	require.True(t, containsSubstring(*msgs, "NO hash-verified poll anchor available"))
-	require.True(t, containsSubstring(*msgs, "CANNOT be re-polled"))
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(5000), st.rewinds[0].verifiedFloor, "the recovered probe proved 5000 canonical")
+	require.Len(t, st.rows, 1, "and the row was retained throughout")
+	require.Empty(t, pollConditions(p)[ConditionPollRewindBlocked])
 }
 
-// The anchor probe walk is BOUNDED: at most maxAnchorProbes anchors are checked,
-// so a rewind cannot turn into an unbounded RPC sweep.
-func TestPollerRewindAnchorProbesAreBounded(t *testing.T) {
+// A1 (DEEP REORG, PAGINATION): verification is bounded PER STEP but not abandoned.
+// The old code probed eight anchors and then degraded to the destructive walker
+// target; it now pages deeper on each Step, and never deletes while the answer is
+// still unknown.
+func TestPollerRewindPagesAnchorProbesAcrossStepsWithoutDeleting(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, hashes: map[uint64]common.Hash{}}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	// Twice the probe bound of anchors, ALL orphaned.
-	for i := 0; i < 2*maxAnchorProbes; i++ {
+	// Two pages' worth of anchored rounds. Everything above 4050 was replaced;
+	// 4050 itself is still canonical, and it sits in the SECOND page.
+	var blocks []uint64
+	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
+		blocks = append(blocks, b)
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
 		st.seedAnchor(engine, b, blockHashAt(b))
-		ch.hashes[b] = common.HexToHash("0xbeef") // every one replaced
+		ch.hashes[b] = common.HexToHash("0xbeef") // replaced
 	}
-	st.cursor, st.cursorFound = 4000+10*uint64(2*maxAnchorProbes), true
+	ch.hashes[4050] = blockHashAt(4050) // the deepest surviving canonical anchor
+	st.cursor, st.cursorFound = blocks[len(blocks)-1], true
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
 	st.unacked = true
 	p.lastAttempt = clk.now()
 
-	_, err := p.Step(context.Background())
+	// FIRST Step: one page of probes, no conclusion, NOTHING deleted.
+	advanced, err := p.Step(context.Background())
 	require.NoError(t, err)
-	require.Len(t, ch.hashCalls, maxAnchorProbes, "the walk stops at the probe bound")
-	require.Equal(t, uint64(0), st.rewinds[0].verifiedFloor)
+	require.False(t, advanced)
+	require.Len(t, ch.hashCalls, anchorProbePage, "a Step spends exactly one page of probes")
+	require.Empty(t, st.rewinds, "an inconclusive page must not delete anything")
+	require.Len(t, st.rows, 2*anchorProbePage)
+	require.Contains(t, pollConditions(p), ConditionPollRewindBlocked)
+
+	// SECOND Step: it RESUMES below the page it already checked rather than
+	// re-probing the top, and finds the surviving anchor.
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Greater(t, len(ch.hashCalls), anchorProbePage, "verification continued instead of giving up")
+	require.Less(t, ch.hashCalls[anchorProbePage], blocks[len(blocks)-1],
+		"the second page starts BELOW the anchors already checked")
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(4050), st.rewinds[0].verifiedFloor)
+	require.Equal(t, uint64(4050), st.cursor, "not the walker's 100")
+
+	var kept []uint64
+	for _, r := range st.rows {
+		kept = append(kept, r.block)
+	}
+	require.ElementsMatch(t, []uint64{4000, 4010, 4020, 4030, 4040, 4050}, kept,
+		"everything at or below the verified anchor survives; only the orphaned suffix goes")
+}
+
+// A1 (EVERY RETAINED ANCHOR ORPHANED): a reorg deeper than the entire retained
+// anchor history is not repaired automatically. Paging reaches the bottom, proves
+// nothing survives, and STILL refuses — deleting the whole history on that
+// evidence is an operator decision, not an automatic one.
+func TestPollerRewindRefusesWhenEveryRetainedAnchorIsOrphaned(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, hashes: map[uint64]common.Hash{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	for i := 0; i < anchorProbePage; i++ {
+		b := uint64(4000 + 10*i)
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+		ch.hashes[b] = common.HexToHash("0xbeef")
+	}
+	st.cursor, st.cursorFound = 4000+10*uint64(anchorProbePage-1), true
+	st.unacked = true
+	p.lastAttempt = clk.now()
+
+	// First Step consumes the only page; the second reaches the bottom.
+	for i := 0; i < 2; i++ {
+		advanced, err := p.Step(context.Background())
+		require.NoError(t, err)
+		require.False(t, advanced, "step %d", i)
+	}
+	require.Empty(t, st.rewinds, "nothing was deleted on the strength of a total orphaning")
+	require.Len(t, st.rows, anchorProbePage)
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollRewindBlocked)
+	require.Contains(t, got[ConditionPollRewindBlocked], "every retained poll anchor is orphaned")
+	require.Contains(t, got[ConditionPollRewindBlocked], "operator decision")
+}
+
+// A1 (UPGRADE / LEGACY UNANCHORED HISTORY): rows written before this engine
+// anchored its rounds cannot be verified, so repair refuses them — and the poller
+// ADOPTS anchors for them on a normal round instead, which is the explicit one-time
+// policy. Adoption runs only with NO epoch pending, so it can never take the hash
+// of a replacement block.
+func TestPollerAdoptsAnchorsForLegacyUnanchoredRowsThenCanRepair(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Post-upgrade state: polled rows exist at 5000, with NO anchor anywhere.
+	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
+	st.cursor, st.cursorFound = 5000, true
+	canonicalAt(ch, 5000, 5100)
+
+	// A reorg arriving BEFORE adoption is refused, not guessed at.
+	st.unacked = true
+	p.lastAttempt = clk.now()
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.rewinds, "unanchored history is never deleted on faith")
+	require.Contains(t, pollConditions(p)[ConditionPollRewindBlocked], "no poll anchor covers")
+
+	// With the epoch cleared, the next due round adopts the missing anchor.
+	st.unacked = false
+	p.lastAttempt = time.Time{}
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Equal(t, []uint64{5000}, st.adopted, "the legacy block was anchored from the live chain")
+
+	// And now a reorg IS repairable, retaining the adopted history.
+	st.unacked = true
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(5100), st.rewinds[0].verifiedFloor,
+		"the newest verified anchor — the round that just landed — is the floor")
+	require.NotEmpty(t, st.rows, "adopted legacy history survived the rewind")
+}
+
+// A1: adoption is REFUSED while a reorg epoch is pending, at the store as well as
+// by the call site. Adopting then could record a replacement block's hash and let
+// a later probe "verify" rows describing the block the chain discarded.
+func TestPollerAnchorAdoptionRefusedWhileEpochPending(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
+	st.cursor, st.cursorFound = 5000, true
+	canonicalAt(ch, 5000)
+	st.unacked = true
+
+	// Call adoption directly on the pending-epoch state: the store refuses it.
+	p.adoptLegacyAnchors(context.Background())
+	require.Empty(t, st.adopted, "no anchor may be adopted while the chain may have moved under that height")
 }
 
 // The rewind resumes from the CURSOR READ BACK, never from the requested target:
@@ -858,7 +1018,7 @@ func TestPollerRehydratesFreshnessAfterAmbiguousApply(t *testing.T) {
 	require.Error(t, err, "the caller still sees the indeterminate error")
 	require.Equal(t, 2, st.freshnessCalls, "hydrate at Step, then re-hydrate after the uncertain apply")
 	require.True(t, p.hydrated)
-	require.Len(t, p.lastPriced, 20, "the rows that DID land are reflected in freshness")
+	require.Len(t, p.lastUsable, 20, "the rows that DID land are reflected in freshness")
 
 	clk.advance(time.Duration(pollHealthGrace)*time.Minute - time.Second)
 	healthy, reason := p.Health()
@@ -882,7 +1042,7 @@ func TestPollerFailedRehydrationMarksVerdictUntrusted(t *testing.T) {
 	_, err := p.Step(context.Background())
 	require.Error(t, err)
 	require.False(t, p.hydrated)
-	require.True(t, containsSubstring(*msgs, "could not re-hydrate per-asset price freshness"))
+	require.True(t, containsSubstring(*msgs, "could not re-hydrate durable price state"))
 
 	clk.advance(time.Duration(pollHealthGrace)*time.Minute + time.Second)
 	healthy, _ := p.Health()
@@ -907,7 +1067,7 @@ func TestPollerHealthIsRecoverable(t *testing.T) {
 	clk.advance(time.Duration(pollHealthGrace)*time.Minute + time.Second)
 	healthy, reason := p.Health()
 	require.False(t, healthy)
-	require.Contains(t, reason, "no poll round carrying a price has landed")
+	require.Contains(t, reason, "no poll round has durably recorded a usable price")
 
 	ch.respond = okRound(t, 5100, 20, 1_000_001)
 	_, err = p.Step(context.Background())
@@ -955,4 +1115,273 @@ func TestNewPollerRefusesOversizedRegistry(t *testing.T) {
 	_, err := NewPoller(newFakePriceStore(), &fakePollChain{endpoints: 1},
 		&config.Feeds{Assets: assets}, PollerConfig{ChainID: 10, Interval: time.Minute})
 	require.ErrorContains(t, err, "exceed the 100-per-round bound")
+}
+
+// ---------------------------------------------------------------------------
+// Principle 1: only a durable, newly-observed fact may refresh health.
+// ---------------------------------------------------------------------------
+
+// B-FROZEN: an rpc endpoint frozen EXACTLY at the cursor is the one semantic
+// failure that never surfaces as an RPC error. Every eth_call succeeds, the store
+// accepts the equal-height replay as idempotent success, no cursor regression
+// fires, and nothing new is inserted. The previous version stamped every returned
+// target with process time on that nil error, so health stayed green forever.
+//
+// The fix is structural: freshness can only move from the rows the apply reports
+// having inserted, and a replay reports none.
+func TestPollerFrozenEndpointAtCursorRefreshesNothing(t *testing.T) {
+	st := newFakePriceStore()
+	st.enforceCursorMonotonic = true
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	// One healthy round establishes the cursor, the rows and the anchor.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rows, 20)
+	healthy, _ := p.Health()
+	require.True(t, healthy)
+
+	// The endpoint now freezes at that exact height and answers identically
+	// forever.
+	for i := 0; i < 6; i++ {
+		clk.advance(time.Minute)
+		advanced, err = p.Step(context.Background())
+		require.NoError(t, err, "round %d: the RPC call and the apply both succeed", i)
+		require.True(t, advanced, "round %d: the store accepts an equal-height replay", i)
+	}
+	require.Len(t, st.rows, 20, "six further rounds inserted NOTHING")
+	require.Len(t, st.anchors[PollCursorEngine(10)], 1, "and anchored no new execution block")
+
+	healthy, reason := p.Health()
+	require.False(t, healthy, "a stalled oracle path must not read as healthy: %q", reason)
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollRound, "no round durably recorded a usable price")
+	require.Contains(t, got, ConditionPollTargetFreshness, "and every asset's usable price has aged out")
+	require.Contains(t, got, ConditionPollBlockAdvance,
+		"and the execution block has not advanced within its bounded TTL")
+	require.Contains(t, got[ConditionPollBlockAdvance], "no NEW execution block")
+	require.Contains(t, got[ConditionPollBlockAdvance], "5000")
+	require.True(t, containsSubstring(*msgs, "recorded NOTHING NEW"),
+		"the operator log names the replay explicitly")
+}
+
+// The block-advance clock is hydrated from the newest ANCHOR ROW's own database
+// timestamp, so a restart cannot grant a frozen chain view a fresh window — the
+// restart-reset defect, applied to the block-advance signal.
+func TestPollerHydratesBlockAdvanceClockFromDurableAnchor(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Durable history a previous process left: every asset priced a moment ago, but
+	// the newest anchor is HOURS old — the chain view froze long before this
+	// process started.
+	for _, a := range realFeeds(t).PollAssets(10) {
+		st.seedRow(engine, a.Address.Bytes(), SourcePriceProviderV2, 5000, clk.now())
+	}
+	st.seedAnchorAt(engine, 5000, blockHashAt(5000), clk.now().Add(-3*time.Hour))
+	st.cursor, st.cursorFound = 5000, true
+	p.lastAttempt = clk.now() // not due: isolate hydration
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollBlockAdvance)
+	require.Contains(t, got[ConditionPollBlockAdvance], "5000")
+	require.NotContains(t, got, ConditionPollTargetFreshness,
+		"the recorded prices themselves are current: this condition is about the CHAIN not moving")
+	require.NotContains(t, got, ConditionPollRound)
+}
+
+// B-INVALID (POLL SIDE): a quarantined non-positive answer is a real observation —
+// it proves the oracle was reached, which is why the cursor may advance on it — but
+// it is not a usable price. It must never refresh usable-price freshness, and it is
+// reported as its own condition so "no data" and "poisoned data" stay
+// distinguishable.
+func TestPollerQuarantinedAnswerDoesNotRefreshUsableFreshness(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1}
+	block := uint64(5000)
+	zeroed := false
+	ch.respond = func(int, common.Address, []byte) ([]byte, error) {
+		rets := make([]mcRet, 20)
+		for i := range rets {
+			rets[i] = mcRet{Success: true, ReturnData: encodeUint256(t, big.NewInt(1_000_000))}
+		}
+		if zeroed {
+			rets[2] = mcRet{Success: true, ReturnData: encodeUint256(t, big.NewInt(0))}
+		}
+		return encodeMulticall(t, block, rets), nil
+	}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// One good round, then four rounds in which one oracle answers ZERO while the
+	// rest stay healthy. Rounds keep landing and the block keeps advancing.
+	_, err := p.Step(context.Background())
+	require.NoError(t, err)
+	zeroed = true
+	for i := 0; i < 4; i++ {
+		block += 100
+		clk.advance(time.Minute)
+		_, err = p.Step(context.Background())
+		require.NoError(t, err)
+	}
+
+	healthy, reason := p.Health()
+	require.False(t, healthy, "an oracle answering zero every interval is not healthy")
+	got := pollConditions(p)
+	require.NotContains(t, got, ConditionPollRound, "other assets ARE landing usable prices")
+	require.Contains(t, got, ConditionPollInvalidAnswer)
+	require.Contains(t, got, ConditionPollTargetFreshness,
+		"usable freshness for that asset aged out exactly as if the oracle had answered nothing")
+
+	broken := realFeeds(t).PollAssets(10)[2]
+	require.Contains(t, got[ConditionPollInvalidAnswer], broken.Symbol)
+	require.Contains(t, got[ConditionPollInvalidAnswer], "non-positive oracle answer")
+	require.Contains(t, got[ConditionPollTargetFreshness], "1 of 20 registry assets")
+	require.Contains(t, reason, broken.Symbol)
+
+	// A usable answer clears both: this class is recoverable.
+	zeroed = false
+	block += 100
+	clk.advance(time.Minute)
+	_, err = p.Step(context.Background())
+	require.NoError(t, err)
+	got = pollConditions(p)
+	require.NotContains(t, got, ConditionPollInvalidAnswer)
+	require.NotContains(t, got, ConditionPollTargetFreshness)
+}
+
+// The quarantine marker is HYDRATED from durable rows, so a restart cannot hide an
+// oracle whose newest recorded answer is unusable.
+func TestPollerHydratesQuarantineMarkerAcrossRestart(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	assets := realFeeds(t).PollAssets(10)
+	for i, a := range assets {
+		st.seedRow(engine, a.Address.Bytes(), SourcePriceProviderV2, 4900, clk.now())
+		if i == 4 {
+			// A newer, QUARANTINED row on top of the good one.
+			st.seedInvalidRow(engine, a.Address.Bytes(), SourcePriceProviderV2, 5000, clk.now())
+		}
+	}
+	st.seedAnchor(engine, 5000, blockHashAt(5000))
+	st.cursor, st.cursorFound = 5000, true
+	p.lastAttempt = clk.now()
+
+	_, err := p.Step(context.Background())
+	require.NoError(t, err)
+
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollInvalidAnswer)
+	require.Contains(t, got[ConditionPollInvalidAnswer], assets[4].Symbol)
+	require.NotContains(t, got, ConditionPollTargetFreshness,
+		"the underlying good answer is still recent, so only the validity condition fires")
+}
+
+// ---------------------------------------------------------------------------
+// D3: diagnosis and recovery are separate.
+// ---------------------------------------------------------------------------
+
+// D3-STALL: with the shared endpoint frozen BELOW the cursor and no anchor to
+// classify against, wave 1's behaviour was an indefinite stall — every eth_call
+// succeeded so error-driven failover never fired, every apply regressed, and no
+// round could ever land the anchor that would make classification decidable.
+//
+// Attribution is still withheld (nothing is provable), but the next round is routed
+// to a DIFFERENT endpoint as bounded exploration, which is what ends the stall.
+func TestPollerRepeatedCauseUnknownExploresAlternateEndpointsUntilProgress(t *testing.T) {
+	st := newFakePriceStore()
+	st.enforceCursorMonotonic = true
+	st.cursor, st.cursorFound = 5000, true // a cursor but NO anchor: undiagnosable
+	ch := &fakePollChain{endpoints: 3, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 2 {
+			return okRound(t, 5100, 20, 1_000_000)(idx, to, data) // the healthy node
+		}
+		return okRound(t, 4000, 20, 1_000_000)(idx, to, data) // frozen below the cursor
+	}
+	p, clk := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	for i := 0; i < 3; i++ {
+		_, err := p.Step(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, -1, p.preferredStart, "round %d: nothing may be ATTRIBUTED on undetermined evidence", i)
+		require.Zero(t, p.staleRotations, "round %d: no all-behind streak may accrue", i)
+		clk.advance(time.Minute)
+	}
+
+	require.Equal(t, []int{1, 2}, ch.starts,
+		"exploration moved one endpoint further each undiagnosable round, and stopped once a round landed")
+	require.Equal(t, uint64(5100), st.cursor, "the healthy endpoint ended the stall")
+	require.Len(t, st.rows, 20)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+	require.True(t, containsSubstring(*msgs, "bounded exploration"))
+	require.False(t, containsSubstring(*msgs, "stale rpc endpoint"),
+		"no endpoint was ever accused")
+	require.False(t, containsSubstring(*msgs, "all endpoints behind"))
+}
+
+// With a SINGLE endpoint there is nothing to explore towards, and the code says so
+// rather than pretending otherwise.
+func TestPollerCauseUnknownWithOneEndpointCannotExplore(t *testing.T) {
+	st := newFakePriceStore()
+	st.enforceCursorMonotonic = true
+	st.cursor, st.cursorFound = 5000, true
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 4000, 20, 1_000_000)}
+	p, _ := newTestPoller(t, st, ch, 10)
+
+	_, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, -1, p.exploreStart, "one endpoint: exploration is unavailable, not faked")
+	require.Equal(t, -1, p.preferredStart)
+	require.Empty(t, ch.starts, "no CallFrom was issued")
+}
+
+// D3-BOUND: an anchor BELOW the cursor cannot cover the heights a regression is
+// about, so verifying it proves nothing and attribution would be guesswork.
+//
+// Wave 1 attributed those rounds to the endpoint anyway and documented the cost as
+// "one misattributed pin released by the next round's progress". Progress is not
+// guaranteed: with the canonical head below the cursor every healthy endpoint
+// regresses, the same lower anchor keeps verifying, and each round accuses another
+// node — cycling all of them and emitting a false all-endpoints-behind diagnosis
+// for the whole walker backoff window. This is now cause-unknown.
+func TestPollerRegressionWithFrontierBelowCursorIsCauseUnknown(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	st.enforceCursorMonotonic = true
+	st.cursor, st.cursorFound = 5000, true
+	st.seedAnchor(engine, 4000, blockHashAt(4000)) // the anchor does NOT reach the cursor
+	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4500, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+	canonicalAt(ch, 4000) // it still verifies — and that is exactly the trap
+	msgs := captureWarnings(t)
+
+	for i := 0; i < 4; i++ {
+		_, err := p.Step(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, -1, p.preferredStart,
+			"round %d: ancestry that stops below the cursor cannot implicate an endpoint", i)
+		require.Zero(t, p.staleRotations, "round %d", i)
+		clk.advance(time.Minute)
+	}
+
+	require.Empty(t, ch.hashCalls,
+		"the probe is not even issued: an anchor below the cursor cannot answer the question")
+	require.True(t, containsSubstring(*msgs, "UNDETERMINED cause"))
+	require.True(t, containsSubstring(*msgs, "but the cursor is at"))
+	require.False(t, containsSubstring(*msgs, "stale rpc endpoint"))
+	require.False(t, containsSubstring(*msgs, "all endpoints behind"),
+		"the false all-endpoints-behind diagnosis is exactly what this branch prevents")
 }

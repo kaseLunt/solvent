@@ -45,6 +45,36 @@ type Walker struct {
 	// and rejected by config validation, so an empty set here would silently
 	// fail every batch on the address check.
 	addrSet map[common.Address]struct{}
+
+	// lastHead / lastCursor / headSeen record what the most recent Step observed:
+	// the chain head it read and where this stream's durable cursor stood. They
+	// exist ONLY so the daemon can report ingest HEAD LAG on its readiness
+	// surface — a walker can advance every round and still fall further behind,
+	// which a no-progress check cannot see.
+	//
+	// They are a fresh observation per Step, not accumulated state, and nothing in
+	// this file reads them. Written and read from the daemon's single loop
+	// goroutine under the same single-writer contract every other worker field
+	// here relies on; HeadLag is not safe to call concurrently with Step.
+	lastHead   uint64
+	lastCursor uint64
+	headSeen   bool
+}
+
+// HeadLag reports how far this stream's durable cursor was behind the chain head
+// at its most recent Step, and whether a Step has observed a head at all.
+//
+// It is the walker's contribution to the daemon's readiness surface. observed is
+// false before the first successful head read, and stays false while head reads
+// keep failing — in which case the Step error is the signal, not this.
+func (w *Walker) HeadLag() (lag uint64, observed bool) {
+	if !w.headSeen {
+		return 0, false
+	}
+	if w.lastHead <= w.lastCursor {
+		return 0, true
+	}
+	return w.lastHead - w.lastCursor, true
 }
 
 func NewWalker(ch Chain, st Store, cfg WalkerConfig) *Walker {
@@ -85,6 +115,14 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 	cur, err := w.store.Cursor(ctx, w.cfg.Stream)
 	if err != nil {
 		return false, fmt.Errorf("cursor: %w", err)
+	}
+	// Record the freshly observed (head, cursor) pair for the daemon's head-lag
+	// readiness condition. A stream with no cursor yet is reported as lagging by
+	// the whole head, which is the honest reading: nothing has been ingested.
+	w.lastHead, w.headSeen = head, true
+	w.lastCursor = 0
+	if cur != nil {
+		w.lastCursor = cur.Block
 	}
 
 	var next uint64 // first block of the next window

@@ -76,7 +76,7 @@ func TestApplyPricesRoundTrip(t *testing.T) {
 		po(100, 0xAA, testPollSource, 1_000_000, 6),
 		po(100, 0xBB, testPollSource, 3_412_550_000, 6),
 	}
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, obs, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, obs, 100)))
 
 	require.Equal(t, map[string]string{
 		"00000000000000000000000000000000000000aa/priceproviderv2@100": "1000000:6",
@@ -100,7 +100,7 @@ func TestApplyPricesRecordsOracleValueVerbatim(t *testing.T) {
 		po(200, 0xBB, testPollSource, 0, 6),         // zero: recorded + WARNed, never refused
 		po(200, 0xCC, testPollSource, -5, 6),        // negative int256 answer: same posture
 	}
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, obs, 200))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, obs, 200)))
 	rows := priceRows(t, s, 10)
 	require.Equal(t, "1000000:6", rows["00000000000000000000000000000000000000aa/priceproviderv2@200"])
 	require.Equal(t, "0:6", rows["00000000000000000000000000000000000000bb/priceproviderv2@200"])
@@ -113,8 +113,8 @@ func TestApplyPricesIdempotentReplay(t *testing.T) {
 	ctx := context.Background()
 
 	obs := []PriceObservation{po(100, 0xAA, testPollSource, 999_999, 6)}
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, obs, 100))
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, obs, 100), "identical replay is idempotent")
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, obs, 100)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, obs, 100)), "identical replay is idempotent")
 
 	var count int
 	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM prices`).Scan(&count))
@@ -127,10 +127,10 @@ func TestApplyPricesDivergentValueAbortsWholeBatch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1_000_000, 6)}, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1_000_000, 6)}, 100)))
 
-	err := s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+	_, err := s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(150, 0xBB, testPollSource, 5, 6),         // fresh row, must NOT land
 		po(100, 0xAA, testPollSource, 1_000_001, 6), // divergent replay
 	}, 150)
@@ -149,9 +149,9 @@ func TestApplyPricesDivergentDecimalsAborts(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1_000_000, 6)}, 100))
-	err := s.ApplyPrices(ctx, testPollEngine, 10,
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1_000_000, 6)}, 100)))
+	_, err := s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1_000_000, 8)}, 100)
 	require.ErrorContains(t, err, "price divergence")
 	require.ErrorContains(t, err, "(6 dec)")
@@ -161,7 +161,7 @@ func TestApplyPricesDivergentDecimalsAborts(t *testing.T) {
 // coverage and survive a rewind that targets the cursor.
 func TestApplyPricesRefusesObservationAboveThroughBlock(t *testing.T) {
 	s := testDeriveStore(t)
-	err := s.ApplyPrices(context.Background(), testPollEngine, 10,
+	_, err := s.ApplyPrices(context.Background(), testPollEngine, 10,
 		[]PriceObservation{po(101, 0xAA, testPollSource, 1, 6)}, 100)
 	require.ErrorContains(t, err, "above the batch through-block")
 }
@@ -172,19 +172,19 @@ func TestApplyPricesValidation(t *testing.T) {
 
 	nilPrice := po(100, 0xAA, testPollSource, 1, 6)
 	nilPrice.Price = nil
-	require.ErrorContains(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{nilPrice}, 100), "nil price")
+	require.ErrorContains(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{nilPrice}, 100)), "nil price")
 
 	noSource := po(100, 0xAA, "", 1, 6)
-	require.ErrorContains(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{noSource}, 100), "empty source")
+	require.ErrorContains(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{noSource}, 100)), "empty source")
 
 	shortAsset := po(100, 0xAA, testPollSource, 1, 6)
 	shortAsset.Asset = []byte{0xAA}
-	require.ErrorContains(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{shortAsset}, 100), "want a 20-byte address")
+	require.ErrorContains(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{shortAsset}, 100)), "want a 20-byte address")
 
-	require.ErrorContains(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, -1)}, 100), "price decimals")
-	require.ErrorContains(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 99)}, 100), "price decimals")
+	require.ErrorContains(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, -1)}, 100)), "price decimals")
+	require.ErrorContains(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 99)}, 100)), "price decimals")
 
 	var count int
 	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM prices`).Scan(&count))
@@ -196,7 +196,7 @@ func TestApplyPricesValidation(t *testing.T) {
 func TestApplyPricesEmptyBatchAdvancesCursor(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, nil, 500))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, nil, 500)))
 	_, last, _ := cursorState(t, s, testPollEngine)
 	require.Equal(t, uint64(500), last)
 }
@@ -207,10 +207,10 @@ func TestApplyPricesEmptyBatchAdvancesCursor(t *testing.T) {
 func TestApplyPricesCursorRegression(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500)))
 
-	err := s.ApplyPrices(ctx, testPollEngine, 10,
+	_, err := s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(400, 0xAA, testPollSource, 2, 6)}, 400)
 	require.ErrorIs(t, err, ErrDeriveCursorRegression)
 	require.Equal(t, 1, len(priceRows(t, s, 10)), "the stale round's row rolled back with the cursor refusal")
@@ -220,18 +220,18 @@ func TestApplyPricesCursorRegression(t *testing.T) {
 func TestApplyPricesSameBlockReadmitted(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500))
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500)))
 }
 
 func TestApplyPricesChainMismatch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
-	err := s.ApplyPrices(ctx, testPollEngine, 1,
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
+	_, err := s.ApplyPrices(ctx, testPollEngine, 1,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)
 	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
 }
@@ -242,19 +242,19 @@ func TestApplyPricesEpochGate(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
 	// A walker rewind records a chain-wide epoch.
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 95, []byte{0x95}))
 
-	err := s.ApplyPrices(ctx, testPollEngine, 10,
+	_, err := s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(120, 0xAA, testPollSource, 2, 6)}, 120)
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
 	require.ErrorContains(t, err, "rewind prices before applying")
 
 	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, 0))
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(120, 0xAA, testPollSource, 2, 6)}, 120), "admitted after the ack")
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(120, 0xAA, testPollSource, 2, 6)}, 120)), "admitted after the ack")
 }
 
 // A price writer with NO cursor on a chain that already carries epochs must
@@ -265,15 +265,15 @@ func TestApplyPricesBootstrapRefusedOnEpochChain(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 95, []byte{0x95}))
 
-	err := s.ApplyPrices(ctx, testPollEngine, 10,
+	_, err := s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
 	require.ErrorContains(t, err, "bootstrap via RewindPrices")
 
 	// Bootstrap at block 0: nothing of this writer's exists to delete.
 	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, 0))
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
 }
 
 // RewindPrices deletes ONLY the caller's own sources above the target, in the
@@ -283,14 +283,14 @@ func TestRewindPricesDeletesOnlyOwnSources(t *testing.T) {
 	ctx := context.Background()
 
 	// Two writers on chain 1: the feed deriver and the ETH ratio poller.
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
 		po(100, 0xAA, testFeedSource, 99_990_000, 8),
 		po(150, 0xAA, testFeedSource, 100_010_000, 8),
-	}, 150))
-	require.NoError(t, s.ApplyPrices(ctx, "prices:poll:1", 1, []PriceObservation{
+	}, 150)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, "prices:poll:1", 1, []PriceObservation{
 		po(120, 0xBB, testRatioSrc, 1_060_000_000_000_000_000, 18),
 		po(160, 0xBB, testRatioSrc, 1_060_100_000_000_000_000, 18),
-	}, 160))
+	}, 160)))
 
 	require.NoError(t, s.RewindPrices(ctx, testFeedEngine, 1, 120, 0))
 
@@ -314,11 +314,11 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(60, 0xAA, testPollSource, 1, 6),
 		po(70, 0xAA, testPollSource, 2, 6),
 		po(90, 0xAA, testPollSource, 3, 6),
-	}, 90))
+	}, 90)))
 	// Stacked epochs: rewound to 50, then to 80.
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 50, []byte{0x50}))
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 80, []byte{0x80}))
@@ -339,8 +339,8 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 func TestRewindPricesChainMismatch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
 	err := s.RewindPrices(ctx, testPollEngine, 1, 100, 0)
 	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
 	require.Equal(t, 1, len(priceRows(t, s, 10)), "nothing was deleted before the refusal")
@@ -368,8 +368,8 @@ func TestPruneAckedReorgEpochsWaitsForPriceCursor(t *testing.T) {
 	// A derive engine and a price writer, both bound to chain 10.
 	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10,
 		[]PositionEvent{pe(100, 1, 0xAA, 0xBB, "debt", 10)}, 100))
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
 
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 95, []byte{0x95}))
 
@@ -396,10 +396,10 @@ func TestPriceCursorsAreIndependentPerWriter(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1,
-		[]PriceObservation{po(100, 0xAA, testFeedSource, 1, 8)}, 100))
-	require.NoError(t, s.ApplyPrices(ctx, "prices:poll:1", 1,
-		[]PriceObservation{po(200, 0xBB, testRatioSrc, 1, 18)}, 200))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1,
+		[]PriceObservation{po(100, 0xAA, testFeedSource, 1, 8)}, 100)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, "prices:poll:1", 1,
+		[]PriceObservation{po(200, 0xBB, testRatioSrc, 1, 18)}, 200)))
 
 	_, feedLast, _ := cursorState(t, s, testFeedEngine)
 	_, pollLast, _ := cursorState(t, s, "prices:poll:1")

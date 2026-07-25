@@ -101,13 +101,25 @@
 // rows above the fork point would leave this table asserting engine-exact prices
 // at replaced heights, which for a liquidation-facing store is the worse failure.
 //
-// WHAT IS STILL LOST, EXACTLY: rows above the highest anchor whose hash matches.
-// If no anchor matches within the probe bound, or the relevant anchors have aged
-// out of retention, repair falls back to the walker's target and the old
-// unbounded loss applies for that rewind. Both cases are WARNed with the numbers,
-// and the next round re-establishes a price at the new head within one cadence
-// interval. No claim is made that history is always recoverable — only that it is
-// no longer discarded when it can be proven canonical.
+// AND REPAIR FAILS CLOSED. Verification is retried, and PAGED across bounded Steps
+// rather than abandoned once a probe budget is spent. When it cannot conclude — a
+// probe outage, no anchor covering the rows, or every retained anchor proven
+// orphaned — the poller ACKS NOTHING AND DELETES NOTHING, reports
+// ConditionPollRewindBlocked, and retries. A stalled poller with a red /readyz is
+// recoverable; erased polled history is not. An earlier version collapsed all of
+// those cases into "no floor", let the walker's target stand, and deleted
+// everything above it; a transient hash-probe outage was therefore sufficient to
+// destroy unrecoverable canonical history.
+//
+// WHAT IS STILL LOST, EXACTLY: rows above the highest anchor whose hash matches,
+// once a match is found. That deletion is justified — those rows describe blocks
+// the chain replaced. Nothing else is deleted. Rows written before this engine
+// anchored its rounds are unverifiable, so the poller ADOPTS anchors for them from
+// the live chain on a normal round with no epoch pending (store.AdoptPollAnchor
+// carries the safety argument and its limit), and refuses to delete them until it
+// can. A reorg deeper than the entire retained anchor set is reported and left for
+// an operator. No claim is made that history is always recoverable — only that it
+// is never discarded on missing information.
 //
 // # NOT SAFE FOR CONCURRENT USE
 //
@@ -472,19 +484,49 @@ const (
 	// means the poller is not writing AT ALL (transport, gate, or every oracle
 	// failing), not that individual assets are missing.
 	ConditionPollRound = "poll_round"
-	// ConditionPollTargetFreshness: named registry assets whose NEWEST DURABLE
-	// price is older than the cadence grace window, while other assets are
+	// ConditionPollTargetFreshness: named registry assets whose newest durable
+	// USABLE price is older than the cadence grace window, while other assets are
 	// current. This is the partial-failure signal a round-level anchor cannot
-	// see.
+	// see. It is measured against the newest VALID row, so an oracle answering
+	// zero every interval ages here exactly like one answering nothing.
 	ConditionPollTargetFreshness = "poll_target_freshness"
+	// ConditionPollInvalidAnswer: named registry assets whose NEWEST durable
+	// observation is quarantined (today: a non-positive answer). Separate from
+	// freshness because the remedy differs — the oracle is reachable and
+	// answering, and what it answers is unusable — and because an operator
+	// needs to tell "no data" from "poisoned data".
+	ConditionPollInvalidAnswer = "poll_invalid_answer"
 	// ConditionPollFreshnessUnhydrated: per-asset freshness has not been read
 	// back from durable storage yet, so no freshness verdict can be trusted.
 	// Fail-closed after the grace window rather than reporting green on unknown
 	// state.
 	ConditionPollFreshnessUnhydrated = "poll_freshness_unhydrated"
-	// ConditionFeedPublication: named Chainlink streams whose newest DURABLE
-	// AnswerUpdated is older than that feed's own heartbeat-plus-grace.
+	// ConditionPollBlockAdvance: no NEW poll anchor row has come into existence
+	// within the block-advance TTL, i.e. every round this poller has managed for
+	// that long executed at a block it had already anchored. That is the
+	// signature of an RPC path frozen exactly at the cursor, which returns
+	// success on every eth_call and therefore never triggers error-driven
+	// failover. The signal rests on a row's existence, so no replay can refresh
+	// it and no restart can reset it.
+	ConditionPollBlockAdvance = "poll_block_advance"
+	// ConditionPollRewindBlocked: a reorg epoch is pending and repair REFUSED to
+	// proceed, because it cannot prove which of this poller's rows are still
+	// canonical and polled history cannot be re-derived. The poller applies
+	// nothing until verification succeeds or an operator intervenes. This is the
+	// fail-closed replacement for silently deleting unverifiable history.
+	ConditionPollRewindBlocked = "poll_rewind_blocked"
+	// ConditionFeedPublication: named Chainlink streams with no durable USABLE
+	// AnswerUpdated within that feed's own heartbeat-plus-grace.
 	ConditionFeedPublication = "feed_publication"
+	// ConditionFeedInvalidAnswer: named Chainlink streams whose newest durable
+	// AnswerUpdated carries a non-positive answer. The stream is publishing; what
+	// it publishes cannot be used.
+	ConditionFeedInvalidAnswer = "feed_invalid_answer"
+	// ConditionFeedTimestamp: named Chainlink streams whose newest durable
+	// AnswerUpdated carries an unusable updatedAt (out of int64 range, or
+	// implausibly far in the future). Such an answer cannot establish freshness
+	// at all, so it is reported rather than substituted with a process clock.
+	ConditionFeedTimestamp = "feed_timestamp"
 	// ConditionFeedFreshnessUnhydrated: per-aggregator publication freshness has
 	// not been hydrated from raw_logs yet.
 	ConditionFeedFreshnessUnhydrated = "feed_freshness_unhydrated"
@@ -509,28 +551,49 @@ func conditionsReason(cs []Condition) string {
 // PriceStore is the store surface both price writers drive (*store.Store
 // satisfies it; tests pass fakes).
 //
-// LatestPriceFreshness is the DURABLE hydration read that keeps health honest
-// across a restart: a worker that derived freshness from process memory alone
-// reported an already-dead oracle as healthy for a fresh grace window every time
-// the process came up.
+// TWO CONTRACTS CARRY THE DURABLE-FACT INVARIANT here, and both are structural:
+//
+//   - ApplyPrices returns a store.ApplyResult naming the rows it ACTUALLY
+//     INSERTED with their database timestamps. A worker has no other way to learn
+//     that anything landed, so a call that inserted nothing — an idempotent
+//     replay, which is what a frozen endpoint produces every interval — cannot
+//     make any freshness look newer. The old signature returned only an error,
+//     and a nil error was mistaken for "a price was recorded".
+//   - LatestPriceFreshness is the DURABLE hydration read that keeps health honest
+//     across a restart, and it reports VALIDITY alongside recency, so a
+//     quarantined answer can advance a cursor without ever refreshing
+//     usable-price health.
 type PriceStore interface {
 	DeriveCursor(ctx context.Context, engine string) (block uint64, found bool, err error)
 	HasUnackedReorg(ctx context.Context, engine string, chainID uint64) (bool, error)
-	ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64) error
+	ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64) (store.ApplyResult, error)
 	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, verifiedFloor uint64) error
 	LatestPriceFreshness(ctx context.Context, chainID uint64, ownerEngine string) ([]store.PriceFreshness, error)
 }
 
 var _ PriceStore = (*store.Store)(nil)
 
-// PollStore is the poller's store surface: PriceStore plus the two poll-anchor
-// entries that make reorg repair non-destructive (ApplyPolledPrices writes the
-// round's (block, hash) anchor in the same transaction as its rows;
-// PollAnchorsAbove reads the candidates repair re-verifies).
+// PollStore is the poller's store surface: PriceStore plus the poll-anchor
+// entries that make reorg repair non-destructive and FAIL CLOSED.
+//
+//   - ApplyPolledPrices writes the round's (block, hash) anchor in the same
+//     transaction as its rows, and reports whether that anchor was NEW.
+//   - PollAnchorsBelow reads, in pages, the candidates repair re-verifies.
+//   - NewestPollAnchor is both the frontier a cursor regression is classified
+//     against and the durable reference for "when did we last see a new
+//     execution block".
+//   - CountOwnedPricesAbove is what makes refusal possible: repair must know
+//     whether an unverifiable rewind would actually destroy anything.
+//   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
+//     rows written before this engine anchored its rounds.
 type PollStore interface {
 	PriceStore
-	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) error
-	PollAnchorsAbove(ctx context.Context, engine string, chainID, aboveBlock uint64, limit int) ([]store.PollAnchor, error)
+	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) (store.ApplyResult, error)
+	PollAnchorsBelow(ctx context.Context, engine string, chainID, belowOrAt uint64, limit int) ([]store.StoredPollAnchor, error)
+	NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (store.StoredPollAnchor, bool, error)
+	CountOwnedPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
+	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
+	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }
 
 var _ PollStore = (*store.Store)(nil)
@@ -578,6 +641,18 @@ type FeedChain interface {
 }
 
 var _ FeedChain = (*chain.Failover)(nil)
+
+// usableAnswer reports whether an oracle answer can serve as a usable price.
+//
+// THE STORE IS THE AUTHORITY, not this function: store.insertPrice derives the
+// row's `valid` column from exactly this rule, and migration 00005's
+// `prices_valid_is_positive` CHECK enforces it at the storage layer, so no writer
+// can mark a non-positive answer usable. This copy exists because the workers
+// must judge freshness from raw_logs (which carries the oracle's own updatedAt
+// and which hydration reads) as well as from an apply's returned inserts, and
+// hydration never touches the prices table. If the store's rule ever changes,
+// this must change with it — the duplication is disclosed rather than hidden.
+func usableAnswer(v *big.Int) bool { return v != nil && v.Sign() > 0 }
 
 // ---------------------------------------------------------------------------
 // Batch de-duplication.

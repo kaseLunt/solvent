@@ -144,6 +144,61 @@ func (s *Store) Cursor(ctx context.Context, stream string) (*CursorPos, error) {
 	return &c, nil
 }
 
+// CursorProgress is one worker's DURABLE progress record: the height its cursor
+// reached and the database timestamp of the last write that moved it.
+//
+// It exists so the daemon's readiness surface can fail on a SILENT stall — a
+// worker that neither errors nor advances. The timestamp is the database's, not
+// the daemon's, so a restart cannot grant a wedged worker a fresh window; that
+// was the whole class of defect the health work is closing.
+//
+// HONEST LIMIT, because this timestamp is an upsert time and not a "progressed"
+// time: any write that touches the row refreshes UpdatedAt, including an
+// idempotent same-height replay. Neither the raw-log walkers nor the derivation
+// runners can produce one (both return early when caught up and only write a
+// window they are about to advance past), so for those two it is a faithful
+// progress signal. The oracle POLLER can — a frozen endpoint re-applies the same
+// execution block every interval — which is exactly why the poller is NOT judged
+// by this signal but by whether a NEW poll anchor row came into existence. See
+// internal/prices.Poller's block-advance condition.
+type CursorProgress struct {
+	// Name is the ingest stream name or the derive engine key.
+	Name      string
+	Block     uint64
+	UpdatedAt time.Time
+}
+
+// IngestCursorProgress returns every raw-log stream's durable progress record.
+func (s *Store) IngestCursorProgress(ctx context.Context) ([]CursorProgress, error) {
+	return s.cursorProgress(ctx, `SELECT stream, last_block, updated_at FROM ingest_cursors ORDER BY stream`, "ingest")
+}
+
+// DeriveCursorProgress returns every derive (and pseudo-engine) cursor's durable
+// progress record.
+func (s *Store) DeriveCursorProgress(ctx context.Context) ([]CursorProgress, error) {
+	return s.cursorProgress(ctx, `SELECT engine, last_block, updated_at FROM derive_cursors ORDER BY engine`, "derive")
+}
+
+func (s *Store) cursorProgress(ctx context.Context, query, kind string) ([]CursorProgress, error) {
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("read %s cursor progress: %w", kind, err)
+	}
+	defer rows.Close()
+	var out []CursorProgress
+	for rows.Next() {
+		var p CursorProgress
+		if err := rows.Scan(&p.Name, &p.Block, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan %s cursor progress row: %w", kind, err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s cursor progress: %w", kind, err)
+	}
+	return out, nil
+}
+
 // HighestLogAtOrBelow returns the block number and block hash of the most
 // recently stored log for chainID at or below height. found is false when
 // no such log exists.

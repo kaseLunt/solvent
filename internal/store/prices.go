@@ -28,19 +28,25 @@ package store
 // key does not move when its registry does, so owner-scoped repair is immune to
 // that class.
 //
-// REORG REPAIR IS NOT UNIFORMLY LOSSY. The feed deriver RE-DERIVES the rows a
-// rewind deleted (its input, raw_logs, is rewound and re-ingested by the
-// walker). The poller CANNOT — it only ever reads `latest`. It therefore records
-// a durable (block, hash) ANCHOR per landed round, and repair walks those
-// anchors down from the newest, keeping everything at or below the first one
-// whose hash the caller has re-verified against the live chain and deleting only
-// the unverified suffix. A hash match at height H entails that every block up to H
-// is unchanged (blocks are chained by parent hash), so retaining rows at or below
-// a verified anchor rests on that entailment rather than on optimism — subject to
-// the endpoint that answered the re-check being honest, which is the same trust
-// every ingested log already depends on. When NO anchor verifies — or none
-// survives retention — repair falls back to the walker's target and the loss is
-// real and WARNed; see RewindPrices.
+// REORG REPAIR IS NOT UNIFORMLY LOSSY, AND IT FAILS CLOSED. The feed deriver
+// RE-DERIVES the rows a rewind deleted (its input, raw_logs, is rewound and
+// re-ingested by the walker). The poller CANNOT — it only ever reads `latest`. It
+// therefore records a durable (block, hash) ANCHOR per landed round, and repair
+// walks those anchors down from the newest, keeping everything at or below the
+// first one whose hash the caller has re-verified against the live chain and
+// deleting only the unverified suffix. A hash match at height H entails that every
+// block up to H is unchanged (blocks are chained by parent hash), so retaining
+// rows at or below a verified anchor rests on that entailment rather than on
+// optimism — subject to the endpoint that answered the re-check being honest,
+// which is the same trust every ingested log already depends on.
+//
+// When NO anchor verifies, this layer does not decide what happens: RewindPrices
+// deletes what its caller's floor tells it to, and the CALLER is the one that must
+// refuse. internal/prices.Poller does refuse — it will not call RewindPrices at
+// all while it holds rows above the target that it cannot prove canonical, so a
+// transient probe outage costs a stalled poller instead of unrecoverable history.
+// A floor of 0 from that caller now means "there is nothing above the target to
+// lose", never "we gave up looking".
 //
 // NUMERIC round-trip: prices.price is written as pgtype.Numeric{Exp: 0} from a
 // *big.Int and read back through ::text, exactly like position_events.delta and
@@ -113,6 +119,58 @@ type PriceObservation struct {
 	BlockNumber uint64
 }
 
+// PriceInsert is one row an apply ACTUALLY INSERTED, carrying the timestamp the
+// DATABASE stamped on it.
+//
+// It exists because "the apply returned nil" is not evidence that anything was
+// recorded. Replaying an already-persisted (chain_id, asset, source,
+// block_number) identity with the same value is a deliberate no-op — precisely
+// the path an RPC endpoint frozen exactly at the cursor takes every interval —
+// so a caller that stamped freshness on every observation it SUBMITTED kept a
+// stalled oracle green forever with no new durable fact anywhere. Only the rows
+// named here are new durable facts, and ObservedAt is the value the database
+// wrote, never a process clock.
+type PriceInsert struct {
+	Asset       []byte
+	Source      string
+	BlockNumber uint64
+	// ObservedAt is prices.observed_at exactly as the database assigned it.
+	ObservedAt time.Time
+	// Valid mirrors the row's validity gate: false for a quarantined
+	// non-positive answer. An invalid insert IS a new observation — it proves
+	// the writer reached the oracle and is why the cursor may advance — but it
+	// is not a usable price, so a caller must never let it refresh
+	// usable-price freshness or readiness.
+	Valid bool
+	// InvalidReason is the quarantine reason, empty exactly when Valid.
+	InvalidReason string
+}
+
+// ApplyResult reports what an apply DURABLY DID, as opposed to what it was
+// asked to do. It is the structural half of the rule "health may be refreshed
+// only by a durable, newly-observed fact": a caller cannot refresh anything
+// without reading a row out of Inserted, and a call that inserted nothing
+// yields an empty Inserted, so no code path exists by which a no-op apply makes
+// anything look fresher. That property is enforced by the shape of this type
+// rather than by a check a later reader could forget.
+type ApplyResult struct {
+	// Inserted holds one entry per row this call newly created, in submission
+	// order. An idempotent replay contributes NOTHING.
+	Inserted []PriceInsert
+	// AnchorInserted is true only when this call created a NEW poll-anchor row,
+	// i.e. when the round executed at a block this engine had not anchored
+	// before. A frozen endpoint re-reporting the same execution block replays
+	// the same (block, hash) anchor, which conflicts and leaves this false —
+	// which is what lets a caller detect "the chain we can see is not moving"
+	// from a durable fact instead of from process memory.
+	AnchorInserted bool
+	// AnchorBlock is the anchored execution block (0 when no anchor was passed).
+	AnchorBlock uint64
+	// AnchorObservedAt is price_poll_anchors.observed_at as the database
+	// assigned it, set only when AnchorInserted.
+	AnchorObservedAt time.Time
+}
+
 // PollAnchor is one poll round's durable proof of where it executed: the
 // multicall's execution block and the block hash multicall3 returned alongside
 // it. Anchors exist so reorg repair can distinguish "this round ran on a block
@@ -124,17 +182,46 @@ type PollAnchor struct {
 	BlockHash   []byte
 }
 
-// PriceFreshness is the newest durable observation under one (asset, source)
-// key: the block it describes and the wall-clock time the row was written.
-// ObservedAt is the insertion time, which is the right clock for "did this
-// writer land a price for this asset recently" — the question a poller's health
-// asks. It is NOT the oracle's own updatedAt, which the prices table does not
-// carry.
+// StoredPollAnchor is an anchor READ BACK, so it also carries the database
+// timestamp of the row's insertion. That timestamp is the durable answer to
+// "when did this engine last observe a NEW execution block", which no process
+// clock can fake and no replay can refresh.
+type StoredPollAnchor struct {
+	PollAnchor
+	ObservedAt time.Time
+}
+
+// PriceFreshness is what one (asset, source) key's durable history says about
+// both of the questions a health verdict has to separate:
+//
+//   - "did this writer REACH the oracle recently" — answered by the newest row
+//     of ANY validity (BlockNumber/ObservedAt/Valid). A quarantined answer still
+//     proves the read happened, which is why the cursor may advance on it.
+//   - "is there a USABLE price for this key, and how recent is it" — answered by
+//     ValidBlockNumber/ValidObservedAt, present only when HasValid.
+//
+// The two were previously conflated into one timestamp that deliberately
+// included invalid rows, so an oracle returning zero every interval stayed
+// "fresh" and readiness stayed green while no usable price existed at all.
+// Quarantining kept the bad number out of consumers' hands; it did not make the
+// health signal honest. Both fields are needed, so both are reported.
+//
+// ObservedAt/ValidObservedAt are DATABASE insertion times, which is the right
+// clock for "did this writer land a price recently". Neither is the oracle's own
+// updatedAt, which the prices table does not carry.
 type PriceFreshness struct {
 	Asset       []byte
 	Source      string
 	BlockNumber uint64
 	ObservedAt  time.Time
+	// Valid is the newest row's own validity.
+	Valid bool
+	// InvalidReason is that row's quarantine reason, empty exactly when Valid.
+	InvalidReason string
+	// HasValid reports whether ANY valid row exists for this key.
+	HasValid         bool
+	ValidBlockNumber uint64
+	ValidObservedAt  time.Time
 }
 
 // UsablePrice is the result of a latest-USABLE-price read: a price that has
@@ -186,14 +273,19 @@ type UsablePrice struct {
 // An EMPTY obs set is legitimate and still advances the cursor: a poll round
 // where every oracle reverted, or a derivation window containing no
 // AnswerUpdated, both leave the cursor obliged to move so the epoch ack stays
-// current. Advancing the cursor is NOT a claim that prices were recorded —
-// callers derive health from per-asset freshness, never from "a round
-// committed".
+// current. Advancing the cursor is NOT a claim that prices were recorded.
+//
+// WHAT LANDED IS RETURNED, NOT INFERRED. The ApplyResult names the rows this
+// call actually inserted with their database timestamps. That is the whole
+// contract callers derive health from: a nil error says the transaction
+// committed, and only ApplyResult says whether anything new exists. An
+// idempotent replay commits and returns an EMPTY result, so a writer whose input
+// has stopped changing cannot make its own freshness look newer.
 //
 // throughBlock is a HARD upper bound on the batch: an observation above it
 // would live outside the cursor's coverage and survive a rewind that targets
 // the cursor, so it is refused.
-func (s *Store) ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64) error {
+func (s *Store) ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64) (ApplyResult, error) {
 	return s.applyPrices(ctx, engine, chainID, obs, throughBlock, nil)
 }
 
@@ -204,38 +296,40 @@ func (s *Store) ApplyPrices(ctx context.Context, engine string, chainID uint64, 
 // to that same block, so an anchor at any other height would not describe the
 // round it claims to.
 //
-// A replayed anchor at the same height with the same hash is idempotent. A
-// replayed anchor with a DIFFERENT hash aborts the batch with
+// A replayed anchor at the same height with the same hash is idempotent — and
+// the returned ApplyResult reports AnchorInserted=false, which is how a caller
+// learns that the execution block it just read is one it had already anchored.
+// A replayed anchor with a DIFFERENT hash aborts the batch with
 // ErrPollAnchorDivergence — the chain at that height changed, which is a reorg
 // the walker has not recorded yet.
-func (s *Store) ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64, anchor PollAnchor) error {
+func (s *Store) ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64, anchor PollAnchor) (ApplyResult, error) {
 	if len(anchor.BlockHash) != 32 {
-		return fmt.Errorf("poll anchor for %q: block hash is %d bytes, want 32", engine, len(anchor.BlockHash))
+		return ApplyResult{}, fmt.Errorf("poll anchor for %q: block hash is %d bytes, want 32", engine, len(anchor.BlockHash))
 	}
 	if anchor.BlockNumber != throughBlock {
-		return fmt.Errorf("poll anchor for %q: anchor block %d must equal the batch through-block %d",
+		return ApplyResult{}, fmt.Errorf("poll anchor for %q: anchor block %d must equal the batch through-block %d",
 			engine, anchor.BlockNumber, throughBlock)
 	}
 	return s.applyPrices(ctx, engine, chainID, obs, throughBlock, &anchor)
 }
 
-func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64, anchor *PollAnchor) error {
+func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, obs []PriceObservation, throughBlock uint64, anchor *PollAnchor) (ApplyResult, error) {
 	if engine == "" {
-		return fmt.Errorf("price batch: engine is required (it is the durable owner of every row)")
+		return ApplyResult{}, fmt.Errorf("price batch: engine is required (it is the durable owner of every row)")
 	}
 	for i, o := range obs {
 		if err := validatePriceObservation(o); err != nil {
-			return fmt.Errorf("price observation %d: %w", i, err)
+			return ApplyResult{}, fmt.Errorf("price observation %d: %w", i, err)
 		}
 		if o.BlockNumber > throughBlock {
-			return fmt.Errorf("price observation %d (%s/%x): block %d is above the batch through-block %d",
+			return ApplyResult{}, fmt.Errorf("price observation %d (%s/%x): block %d is above the batch through-block %d",
 				i, o.Source, o.Asset, o.BlockNumber, throughBlock)
 		}
 	}
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin: %w", err)
+		return ApplyResult{}, fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -249,34 +343,42 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 	if errors.Is(err, pgx.ErrNoRows) {
 		cursorExists = false
 	} else if err != nil {
-		return fmt.Errorf("read derive cursor for %q: %w", engine, err)
+		return ApplyResult{}, fmt.Errorf("read derive cursor for %q: %w", engine, err)
 	}
 	if cursorExists && storedChain != chainID {
-		return fmt.Errorf("%w: engine %q is bound to chain %d, refusing price batch for chain %d",
+		return ApplyResult{}, fmt.Errorf("%w: engine %q is bound to chain %d, refusing price batch for chain %d",
 			ErrDeriveCursorChainMismatch, engine, storedChain, chainID)
 	}
 	maxEpoch, err := chainMaxEpoch(ctx, tx, chainID)
 	if err != nil {
-		return err
+		return ApplyResult{}, err
 	}
 	if cursorExists && ackedEpoch < maxEpoch {
-		return fmt.Errorf("engine %q has %w %d on chain %d (acked %d): rewind prices before applying",
+		return ApplyResult{}, fmt.Errorf("engine %q has %w %d on chain %d (acked %d): rewind prices before applying",
 			engine, ErrUnackedReorgEpoch, maxEpoch, chainID, ackedEpoch)
 	}
 	if !cursorExists && maxEpoch > 0 {
-		return fmt.Errorf("engine %q has no derive cursor and chain %d carries %w %d: bootstrap via RewindPrices before applying",
+		return ApplyResult{}, fmt.Errorf("engine %q has no derive cursor and chain %d carries %w %d: bootstrap via RewindPrices before applying",
 			engine, chainID, ErrUnackedReorgEpoch, maxEpoch)
 	}
 
+	var result ApplyResult
 	for _, o := range obs {
-		if err := insertPrice(ctx, tx, chainID, engine, o); err != nil {
-			return err
+		ins, inserted, err := insertPrice(ctx, tx, chainID, engine, o)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		if inserted {
+			result.Inserted = append(result.Inserted, ins)
 		}
 	}
 	if anchor != nil {
-		if err := insertPollAnchor(ctx, tx, chainID, engine, *anchor); err != nil {
-			return err
+		result.AnchorBlock = anchor.BlockNumber
+		at, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, *anchor)
+		if err != nil {
+			return ApplyResult{}, err
 		}
+		result.AnchorInserted, result.AnchorObservedAt = inserted, at
 	}
 
 	// acked_epoch is only ever SET on the insert arm (implicit first-write
@@ -290,7 +392,7 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 		  AND derive_cursors.last_block <= EXCLUDED.last_block`,
 		engine, chainID, throughBlock, maxEpoch)
 	if err != nil {
-		return fmt.Errorf("upsert price cursor: %w", err)
+		return ApplyResult{}, fmt.Errorf("upsert price cursor: %w", err)
 	}
 	if ct.RowsAffected() == 0 {
 		// The guarded upsert refused; the row must exist. Chain binding was
@@ -300,23 +402,29 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 		var refusedChain, storedBlock uint64
 		if err := tx.QueryRow(ctx,
 			`SELECT chain_id, last_block FROM derive_cursors WHERE engine = $1`, engine).Scan(&refusedChain, &storedBlock); err != nil {
-			return fmt.Errorf("price cursor refused move for %q, and read-back failed: %w", engine, err)
+			return ApplyResult{}, fmt.Errorf("price cursor refused move for %q, and read-back failed: %w", engine, err)
 		}
 		if refusedChain != chainID {
-			return fmt.Errorf("%w: engine %q is bound to chain %d, refusing price batch for chain %d",
+			return ApplyResult{}, fmt.Errorf("%w: engine %q is bound to chain %d, refusing price batch for chain %d",
 				ErrDeriveCursorChainMismatch, engine, refusedChain, chainID)
 		}
-		return fmt.Errorf("%w: engine %q refused move to %d (cursor at %d)",
+		return ApplyResult{}, fmt.Errorf("%w: engine %q refused move to %d (cursor at %d)",
 			ErrDeriveCursorRegression, engine, throughBlock, storedBlock)
 	}
 
 	if anchor != nil {
 		if err := pruneOldPollAnchors(ctx, tx, engine); err != nil {
-			return err
+			return ApplyResult{}, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		// The commit's error does NOT prove the batch failed to persist, so the
+		// result is discarded: a caller must not treat rows it cannot confirm as
+		// durable facts. Recovering the truth is the caller's re-hydration job.
+		return ApplyResult{}, err
+	}
+	return result, nil
 }
 
 // validatePriceObservation rejects the malformed shapes that would otherwise
@@ -346,6 +454,12 @@ func validatePriceObservation(o PriceObservation) error {
 // idempotent-replay / divergence-abort semantics (SaveRateIndex's contract,
 // extended to cover the SCALE and the OWNER as well as the value).
 //
+// It returns inserted=false for an idempotent replay, and on a fresh insert
+// returns the row's DATABASE observed_at through the INSERT's own RETURNING
+// clause. There is deliberately no path that reports a time for a row this call
+// did not create: that is what makes "only a new durable row may refresh health"
+// a property of the code's shape rather than a rule to remember.
+//
 // NON-POSITIVE ANSWERS ARE QUARANTINED, NOT REFUSED. Refusing the row would
 // wedge a feed deriver forever on a log that already exists in raw_logs, and
 // stalling its cursor would wedge the epoch gate; but recording a zero or
@@ -357,51 +471,61 @@ func validatePriceObservation(o PriceObservation) error {
 // than accepted from the caller, so no writer can mark a non-positive answer
 // usable; migration 00005's CHECK enforces the same thing at the storage layer.
 // The check lives here so BOTH price writers get it.
-func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine string, o PriceObservation) error {
+func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine string, o PriceObservation) (PriceInsert, bool, error) {
 	valid := o.Price.Sign() > 0
 	reason := ""
 	if !valid {
 		reason = invalidReasonNonPositive
-		slog.Warn("oracle reported a NON-POSITIVE price; recording the raw fact but QUARANTINING it (valid=false) — no usable-price read can return it; treat the feed as broken",
+		slog.Warn("oracle reported a NON-POSITIVE price; recording the raw fact but QUARANTINING it (valid=false) — no usable-price read can return it, and it does not refresh usable-price health; treat the feed as broken",
 			"chain", chainID, "owner", ownerEngine, "asset", fmt.Sprintf("%x", o.Asset), "source", o.Source,
 			"block", o.BlockNumber, "price", o.Price.String(), "priceDecimals", o.Decimals)
 	}
-	ct, err := tx.Exec(ctx, `INSERT INTO prices
+	var observedAt time.Time
+	err := tx.QueryRow(ctx, `INSERT INTO prices
 		(chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, invalid_reason)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (chain_id, asset, source, block_number) DO NOTHING`,
+		ON CONFLICT (chain_id, asset, source, block_number) DO NOTHING
+		RETURNING observed_at`,
 		chainID, o.Asset, o.Source, pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals,
-		o.BlockNumber, ownerEngine, valid, reason)
-	if err != nil {
-		return fmt.Errorf("save price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
+		o.BlockNumber, ownerEngine, valid, reason).Scan(&observedAt)
+	if err == nil {
+		// Fresh insert. The asset is copied so the returned fact cannot alias a
+		// caller's buffer that may be reused after the apply.
+		asset := make([]byte, len(o.Asset))
+		copy(asset, o.Asset)
+		return PriceInsert{
+			Asset: asset, Source: o.Source, BlockNumber: o.BlockNumber,
+			ObservedAt: observedAt, Valid: valid, InvalidReason: reason,
+		}, true, nil
 	}
-	if ct.RowsAffected() > 0 {
-		return nil // fresh insert
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return PriceInsert{}, false, fmt.Errorf("save price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
 	}
-	// Conflicted with an existing row: idempotent only if the value, the scale
-	// AND the owner all match; anything else aborts the batch rather than
-	// overwriting a recorded fact or silently re-attributing its provenance.
+	// ON CONFLICT DO NOTHING suppressed the insert, so RETURNING yielded no row:
+	// this key already exists. Idempotent only if the value, the scale AND the
+	// owner all match; anything else aborts the batch rather than overwriting a
+	// recorded fact or silently re-attributing its provenance.
 	var existingText, existingOwner string
 	var existingDecimals int32
 	if err := tx.QueryRow(ctx,
 		`SELECT price::text, price_decimals, owner_engine FROM prices
 		 WHERE chain_id = $1 AND asset = $2 AND source = $3 AND block_number = $4`,
 		chainID, o.Asset, o.Source, o.BlockNumber).Scan(&existingText, &existingDecimals, &existingOwner); err != nil {
-		return fmt.Errorf("read conflicting price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
+		return PriceInsert{}, false, fmt.Errorf("read conflicting price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
 	}
 	existing, ok := new(big.Int).SetString(existingText, 10)
 	if !ok {
-		return fmt.Errorf("parse price %q: not an integer", existingText)
+		return PriceInsert{}, false, fmt.Errorf("parse price %q: not an integer", existingText)
 	}
 	if existing.Cmp(o.Price) != 0 || existingDecimals != o.Decimals {
-		return fmt.Errorf("price divergence: %s/%x@%d already holds %s (%d dec), refusing %s (%d dec) — aborting batch",
+		return PriceInsert{}, false, fmt.Errorf("price divergence: %s/%x@%d already holds %s (%d dec), refusing %s (%d dec) — aborting batch",
 			o.Source, o.Asset, o.BlockNumber, existing, existingDecimals, o.Price, o.Decimals)
 	}
 	if existingOwner != ownerEngine {
-		return fmt.Errorf("price divergence: %s/%x@%d is owned by %q, refusing a replay from %q — aborting batch",
+		return PriceInsert{}, false, fmt.Errorf("price divergence: %s/%x@%d is owned by %q, refusing a replay from %q — aborting batch",
 			o.Source, o.Asset, o.BlockNumber, existingOwner, ownerEngine)
 	}
-	return nil
+	return PriceInsert{}, false, nil
 }
 
 // insertPollAnchor records one round's (block, hash) anchor with the same
@@ -409,32 +533,39 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 // at a height this engine already anchored is ErrPollAnchorDivergence: the
 // chain at that height changed, so the honest answer is to roll back and let the
 // reorg protocol run, never to overwrite the anchor.
-func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine string, a PollAnchor) error {
-	ct, err := tx.Exec(ctx, `INSERT INTO price_poll_anchors (engine, chain_id, block_number, block_hash)
-		VALUES ($1,$2,$3,$4) ON CONFLICT (engine, block_number) DO NOTHING`,
-		engine, chainID, a.BlockNumber, a.BlockHash)
-	if err != nil {
-		return fmt.Errorf("record poll anchor %q@%d: %w", engine, a.BlockNumber, err)
+//
+// inserted=false means the anchor already existed with the same hash — the round
+// executed at a block this engine had already anchored. On a fresh insert the
+// row's DATABASE observed_at is returned, which is the only timestamp a caller
+// may use to say "we last saw the chain move at ...".
+func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine string, a PollAnchor) (time.Time, bool, error) {
+	var observedAt time.Time
+	err := tx.QueryRow(ctx, `INSERT INTO price_poll_anchors (engine, chain_id, block_number, block_hash)
+		VALUES ($1,$2,$3,$4) ON CONFLICT (engine, block_number) DO NOTHING
+		RETURNING observed_at`,
+		engine, chainID, a.BlockNumber, a.BlockHash).Scan(&observedAt)
+	if err == nil {
+		return observedAt, true, nil
 	}
-	if ct.RowsAffected() > 0 {
-		return nil
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, fmt.Errorf("record poll anchor %q@%d: %w", engine, a.BlockNumber, err)
 	}
 	var existingHash []byte
 	var existingChain uint64
 	if err := tx.QueryRow(ctx,
 		`SELECT chain_id, block_hash FROM price_poll_anchors WHERE engine = $1 AND block_number = $2`,
 		engine, a.BlockNumber).Scan(&existingChain, &existingHash); err != nil {
-		return fmt.Errorf("read conflicting poll anchor %q@%d: %w", engine, a.BlockNumber, err)
+		return time.Time{}, false, fmt.Errorf("read conflicting poll anchor %q@%d: %w", engine, a.BlockNumber, err)
 	}
 	if existingChain != chainID {
-		return fmt.Errorf("%w: engine %q anchor at %d is recorded on chain %d, refusing chain %d",
+		return time.Time{}, false, fmt.Errorf("%w: engine %q anchor at %d is recorded on chain %d, refusing chain %d",
 			ErrDeriveCursorChainMismatch, engine, a.BlockNumber, existingChain, chainID)
 	}
 	if string(existingHash) != string(a.BlockHash) {
-		return fmt.Errorf("%w: engine %q at block %d holds %x, round reported %x — the chain at that height changed; aborting batch",
+		return time.Time{}, false, fmt.Errorf("%w: engine %q at block %d holds %x, round reported %x — the chain at that height changed; aborting batch",
 			ErrPollAnchorDivergence, engine, a.BlockNumber, existingHash, a.BlockHash)
 	}
-	return nil
+	return time.Time{}, false, nil
 }
 
 // pruneOldPollAnchors keeps only the pollAnchorRetention newest anchors for
@@ -454,29 +585,34 @@ func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
 	return nil
 }
 
-// PollAnchorsAbove returns engine's poll anchors strictly above aboveBlock, in
-// DESCENDING block order, capped at limit rows. The poller walks this list from
-// the newest downward during reorg repair, verifying each anchor's hash against
-// the live chain and stopping at the first match: that block is provably still
-// canonical, so every price row at or below it is still describing the chain
-// that exists.
-func (s *Store) PollAnchorsAbove(ctx context.Context, engine string, chainID, aboveBlock uint64, limit int) ([]PollAnchor, error) {
+// PollAnchorsBelow returns engine's poll anchors at or below belowOrAt, in
+// DESCENDING block order, capped at limit rows. Reorg repair PAGES down through
+// this list across bounded Steps, verifying each anchor's hash against the live
+// chain and stopping at the first match: that block is provably still canonical,
+// so every price row at or below it is still describing the chain that exists.
+//
+// It is bounded-and-resumable rather than one-shot on purpose. A single Step may
+// only spend a small probe budget, but abandoning verification once that budget
+// is spent is what previously degraded repair to the destructive walker target;
+// the caller instead lowers belowOrAt to the deepest anchor it has already
+// probed and continues on its next Step.
+func (s *Store) PollAnchorsBelow(ctx context.Context, engine string, chainID, belowOrAt uint64, limit int) ([]StoredPollAnchor, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT block_number, block_hash FROM price_poll_anchors
-		 WHERE engine = $1 AND chain_id = $2 AND block_number > $3
+		`SELECT block_number, block_hash, observed_at FROM price_poll_anchors
+		 WHERE engine = $1 AND chain_id = $2 AND block_number <= $3
 		 ORDER BY block_number DESC LIMIT $4`,
-		engine, chainID, aboveBlock, limit)
+		engine, chainID, belowOrAt, limit)
 	if err != nil {
-		return nil, fmt.Errorf("read poll anchors for %q above %d: %w", engine, aboveBlock, err)
+		return nil, fmt.Errorf("read poll anchors for %q at or below %d: %w", engine, belowOrAt, err)
 	}
 	defer rows.Close()
-	var out []PollAnchor
+	var out []StoredPollAnchor
 	for rows.Next() {
-		var a PollAnchor
-		if err := rows.Scan(&a.BlockNumber, &a.BlockHash); err != nil {
+		var a StoredPollAnchor
+		if err := rows.Scan(&a.BlockNumber, &a.BlockHash, &a.ObservedAt); err != nil {
 			return nil, fmt.Errorf("scan poll anchor row: %w", err)
 		}
 		out = append(out, a)
@@ -487,17 +623,201 @@ func (s *Store) PollAnchorsAbove(ctx context.Context, engine string, chainID, ab
 	return out, nil
 }
 
+// NewestPollAnchor returns engine's highest recorded anchor, with the database
+// timestamp of the row's insertion. found=false when the engine has never
+// anchored a round (or retention has removed every anchor).
+//
+// The timestamp is the DURABLE reference for "when did this engine last observe
+// a NEW execution block". A poller hydrates its block-advance clock from it at
+// startup, so a restart cannot grant a frozen RPC path a fresh window.
+func (s *Store) NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (StoredPollAnchor, bool, error) {
+	var a StoredPollAnchor
+	err := s.pool.QueryRow(ctx,
+		`SELECT block_number, block_hash, observed_at FROM price_poll_anchors
+		 WHERE engine = $1 AND chain_id = $2 ORDER BY block_number DESC LIMIT 1`,
+		engine, chainID).Scan(&a.BlockNumber, &a.BlockHash, &a.ObservedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return StoredPollAnchor{}, false, nil
+	}
+	if err != nil {
+		return StoredPollAnchor{}, false, fmt.Errorf("read newest poll anchor for %q: %w", engine, err)
+	}
+	return a, true, nil
+}
+
+// CountOwnedPricesAbove counts the rows engine owns strictly above aboveBlock on
+// chainID — exactly the rows a RewindPrices to that target would DELETE.
+//
+// Reorg repair asks this before it destroys anything, because the two situations
+// "no anchor verified, and there is history to lose" and "no anchor verified, and
+// there is nothing of ours above the target anyway" have opposite correct
+// answers: the first must refuse, the second may proceed. Inferring one from the
+// other was how a transient probe outage came to erase unrecoverable history.
+func (s *Store) CountOwnedPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error) {
+	var n int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND block_number > $3`,
+		chainID, engine, aboveBlock).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count prices owned by %q above %d: %w", engine, aboveBlock, err)
+	}
+	return n, nil
+}
+
+// UnanchoredPriceBlocks returns the distinct blocks where engine owns price rows
+// but has NO poll anchor, newest first, capped at limit.
+//
+// These are LEGACY rows: history written before this engine anchored its rounds
+// (or before the anchor table existed). They are unverifiable, so reorg repair
+// can neither prove them canonical nor safely delete them — which is why the
+// poller adopts anchors for them proactively, while no reorg is pending. See
+// AdoptPollAnchor for why the timing matters.
+func (s *Store) UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT p.block_number FROM prices p
+		 WHERE p.chain_id = $1 AND p.owner_engine = $2
+		   AND NOT EXISTS (
+		     SELECT 1 FROM price_poll_anchors a
+		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.block_number)
+		 ORDER BY p.block_number DESC LIMIT $3`,
+		chainID, engine, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read unanchored price blocks for %q: %w", engine, err)
+	}
+	defer rows.Close()
+	var out []uint64
+	for rows.Next() {
+		var b uint64
+		if err := rows.Scan(&b); err != nil {
+			return nil, fmt.Errorf("scan unanchored price block: %w", err)
+		}
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unanchored price blocks for %q: %w", engine, err)
+	}
+	return out, nil
+}
+
+// AdoptPollAnchor records an anchor for a block where engine ALREADY OWNS ROWS
+// but never anchored — the one-time policy that makes legacy unanchored history
+// repairable instead of permanently blocking repair.
+//
+// THE SAFETY ARGUMENT, STATED IN FULL, because this call writes a hash it did not
+// witness at read time:
+//
+//   - It refuses unless engine owns at least one row at that exact block. It can
+//     therefore never fabricate an anchor for history that does not exist, and it
+//     cannot raise a rewind floor above where rows actually are.
+//   - It refuses while ANY reorg epoch on the chain is unacknowledged by engine.
+//     This is the load-bearing gate. Adopting during a pending reorg could take
+//     the hash of a REPLACEMENT block at that height and then "verify" against
+//     it, retaining rows that describe the block the chain discarded — exactly
+//     the failure anchors exist to prevent. With no pending epoch, adopting the
+//     live chain's current hash at a height we already hold rows for rests on the
+//     same RPC trust as anchoring the round would have at the time.
+//   - It never overwrites: a divergent hash at an already-anchored height is
+//     ErrPollAnchorDivergence, as everywhere else.
+//
+// WHAT IT DOES NOT DO: it does not prove the adopted block is the one the rows
+// were read at. It cannot — that fact was never recorded. It establishes an
+// anchor from the chain as it stands now, which is strictly better than having
+// none, and the limitation is why the poller REFUSES to delete unanchored rows
+// rather than adopting during repair.
+func (s *Store) AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, a PollAnchor) (bool, error) {
+	if engine == "" {
+		return false, fmt.Errorf("adopt poll anchor: engine is required")
+	}
+	if len(a.BlockHash) != 32 {
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: block hash is %d bytes, want 32",
+			engine, a.BlockNumber, len(a.BlockHash))
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var storedChain uint64
+	var ackedEpoch int64
+	if err := tx.QueryRow(ctx,
+		`SELECT chain_id, acked_epoch FROM derive_cursors WHERE engine = $1`,
+		engine).Scan(&storedChain, &ackedEpoch); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, fmt.Errorf("adopt poll anchor for %q: no derive cursor, so this engine owns no verifiable history yet", engine)
+		}
+		return false, fmt.Errorf("read derive cursor for %q: %w", engine, err)
+	}
+	if storedChain != chainID {
+		return false, fmt.Errorf("%w: engine %q is bound to chain %d, refusing anchor adoption for chain %d",
+			ErrDeriveCursorChainMismatch, engine, storedChain, chainID)
+	}
+	maxEpoch, err := chainMaxEpoch(ctx, tx, chainID)
+	if err != nil {
+		return false, err
+	}
+	if ackedEpoch < maxEpoch {
+		return false, fmt.Errorf("engine %q has %w %d on chain %d (acked %d): refusing to adopt an anchor while the chain may have moved under this height",
+			engine, ErrUnackedReorgEpoch, maxEpoch, chainID, ackedEpoch)
+	}
+
+	var owned int64
+	if err := tx.QueryRow(ctx,
+		`SELECT count(*) FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND block_number = $3`,
+		chainID, engine, a.BlockNumber).Scan(&owned); err != nil {
+		return false, fmt.Errorf("count owned rows at %d for %q: %w", a.BlockNumber, engine, err)
+	}
+	if owned == 0 {
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there, refusing to anchor history it did not write",
+			engine, a.BlockNumber)
+	}
+
+	_, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, a)
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	if inserted {
+		slog.Warn("ADOPTED a poll anchor for legacy unanchored price rows: the live chain's hash at a height this engine already owns rows at is now recorded, so reorg repair can verify that history instead of refusing to touch it. This does NOT prove the rows were read at this exact block — that fact was never recorded — it establishes the anchor the round should have written",
+			"engine", engine, "chain", chainID, "block", a.BlockNumber,
+			"adoptedHash", fmt.Sprintf("%x", a.BlockHash), "rowsAtBlock", owned)
+	}
+	return inserted, nil
+}
+
 // LatestPriceFreshness returns, for every (asset, source) key ownerEngine has
-// ever written on chainID, the newest row's block and insertion time —
-// regardless of validity, because a quarantined answer still proves the writer
-// reached that oracle. It is the DURABLE source a restarted poller hydrates its
-// per-asset freshness from, so a restart cannot reset an already-dead oracle to
-// "healthy for another grace window".
+// ever written on chainID, BOTH durable answers a health verdict needs: the
+// newest row of any validity, and the newest VALID row.
+//
+// It is the DURABLE source a restarted worker hydrates per-asset freshness from,
+// so a restart cannot reset an already-dead oracle to "healthy for another grace
+// window". Reporting validity alongside is what stops the second variant of the
+// same disease: an earlier version returned one timestamp that deliberately
+// included quarantined rows, so an oracle answering zero every interval kept
+// refreshing "freshness" and /readyz stayed green with no usable price in
+// existence.
 func (s *Store) LatestPriceFreshness(ctx context.Context, chainID uint64, ownerEngine string) ([]PriceFreshness, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT ON (asset, source) asset, source, block_number, observed_at
-		 FROM prices WHERE chain_id = $1 AND owner_engine = $2
-		 ORDER BY asset, source, block_number DESC`,
+		`WITH newest AS (
+		     SELECT DISTINCT ON (asset, source)
+		            asset, source, block_number, observed_at, valid, invalid_reason
+		     FROM prices WHERE chain_id = $1 AND owner_engine = $2
+		     ORDER BY asset, source, block_number DESC
+		 ), newest_valid AS (
+		     SELECT DISTINCT ON (asset, source) asset, source, block_number, observed_at
+		     FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND valid
+		     ORDER BY asset, source, block_number DESC
+		 )
+		 SELECT n.asset, n.source, n.block_number, n.observed_at, n.valid, n.invalid_reason,
+		        v.block_number, v.observed_at
+		 FROM newest n
+		 LEFT JOIN newest_valid v ON v.asset = n.asset AND v.source = n.source
+		 ORDER BY n.asset, n.source`,
 		chainID, ownerEngine)
 	if err != nil {
 		return nil, fmt.Errorf("read price freshness for %q: %w", ownerEngine, err)
@@ -506,8 +826,16 @@ func (s *Store) LatestPriceFreshness(ctx context.Context, chainID uint64, ownerE
 	var out []PriceFreshness
 	for rows.Next() {
 		var f PriceFreshness
-		if err := rows.Scan(&f.Asset, &f.Source, &f.BlockNumber, &f.ObservedAt); err != nil {
+		var validBlock *int64
+		var validAt *time.Time
+		if err := rows.Scan(&f.Asset, &f.Source, &f.BlockNumber, &f.ObservedAt,
+			&f.Valid, &f.InvalidReason, &validBlock, &validAt); err != nil {
 			return nil, fmt.Errorf("scan price freshness row: %w", err)
+		}
+		if validBlock != nil && validAt != nil {
+			f.HasValid = true
+			f.ValidBlockNumber = uint64(*validBlock)
+			f.ValidObservedAt = *validAt
 		}
 		out = append(out, f)
 	}

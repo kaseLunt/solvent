@@ -358,7 +358,7 @@ func TestFeedDeriverRewindRehydratesRatherThanClearingFreshness(t *testing.T) {
 		"a re-derivable writer passes no verified floor: the walker re-ingests its input")
 
 	require.True(t, f.hydrated, "freshness was re-read from durable logs, not cleared")
-	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastSeen[aggUSDC],
+	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
 		"the surviving 30h-old answer is what USDC is measured from")
 	require.False(t, f.lastLive, "the live verdict must be re-earned after a rewind")
 
@@ -449,7 +449,7 @@ func TestFeedDeriverApplyErrorRollbackResetsStagedFreshness(t *testing.T) {
 	require.ErrorContains(t, err, "commit rolled back")
 
 	require.True(t, f.hydrated, "the reset re-hydrated from durable truth")
-	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastSeen[aggUSDC],
+	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
 		"the rolled-back window's fresh answer must NOT be retained in memory")
 	require.Equal(t, []uint64{testFeedStart - 1, testFeedStart - 1}, st.latestLogCalls,
 		"hydration runs at the unmoved durable cursor, before and after the failed apply")
@@ -458,7 +458,7 @@ func TestFeedDeriverApplyErrorRollbackResetsStagedFreshness(t *testing.T) {
 	// the old cursor: the walker's frontier is there too and the chain head is
 	// right above it, so the deriver is caught up AND live, and it must now issue
 	// a verdict. Measured from durable truth, USDC's newest answer is 30h old and
-	// the stream is STALE. With the pre-fix in-memory mutation, lastSeen would
+	// the stream is STALE. With the pre-fix in-memory mutation, lastUsable would
 	// hold the rolled-back window's fresh timestamp and this would report healthy.
 	for _, s := range feedStreams {
 		st.ingest[s] = &store.CursorPos{Block: testFeedStart - 1, Hash: []byte{0x03}}
@@ -492,7 +492,7 @@ func TestFeedDeriverApplyErrorCommittedResetPicksUpWhatLanded(t *testing.T) {
 	require.ErrorContains(t, err, "commit ack lost")
 
 	require.True(t, f.hydrated)
-	require.Equal(t, clk.now().UTC(), f.lastSeen[aggUSDC],
+	require.Equal(t, clk.now().UTC(), f.lastUsable[aggUSDC],
 		"the window DID land, and re-hydration is what discovers that")
 	require.Equal(t, []uint64{testFeedStart - 1, testFeedFrontier}, st.latestLogCalls,
 		"the second hydration reads at the cursor the commit actually left behind")
@@ -901,19 +901,22 @@ func TestFeedDeriverCaughtUpIsNotProgress(t *testing.T) {
 	require.Empty(t, st.applied)
 }
 
-// An oracle-supplied updatedAt is untrusted input to the health signal. A FUTURE
-// timestamp would make the feed look fresh for as long as it is ahead — a
-// year-3000 value would silence it for centuries — and an out-of-int64 value
-// would wrap negative and pin it permanently stale. Both clamp to the
-// OBSERVATION time, so the normal staleness clock still applies.
-func TestFeedDeriverClampsImplausibleUpdatedAt(t *testing.T) {
+// B-clamp: an oracle-supplied updatedAt is untrusted input to the health signal,
+// and an implausible one must NOT be substituted with this process's clock.
+//
+// Clamping to f.now() was the bug: the clamped value is a process timestamp, so
+// the same raw log re-clamps to a NEW process time on every restart, rewind or
+// apply-error hydration — repeated restarts inside the threshold kept a feed with
+// one malformed future timestamp healthy indefinitely. Both implausible shapes now
+// establish NO freshness and are reported as their own unhealthy condition.
+func TestFeedDeriverRefusesImplausibleUpdatedAtInsteadOfClamping(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		updatedAt func(clk *testClock) uint64
 		wantWarn  string
 	}{
-		{"far future", func(clk *testClock) uint64 { return clk.unix(100 * time.Hour) }, "FUTURE updatedAt"},
-		{"out of int64 range", func(*testClock) uint64 { return ^uint64(0) }, "out-of-range updatedAt"},
+		{"far future", func(clk *testClock) uint64 { return clk.unix(100 * time.Hour) }, "implausibly FUTURE updatedAt"},
+		{"out of int64 range", func(*testClock) uint64 { return ^uint64(0) }, "OUT-OF-RANGE updatedAt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := newFakePriceStore()
@@ -928,22 +931,100 @@ func TestFeedDeriverClampsImplausibleUpdatedAt(t *testing.T) {
 			_, err := f.Step(context.Background())
 			require.NoError(t, err)
 			require.True(t, containsSubstring(*msgs, tc.wantWarn))
-			require.Equal(t, clk.now(), f.lastSeen[aggUSDC], "clamped to the observation time")
+			require.NotContains(t, f.lastUsable, aggUSDC,
+				"an unusable timestamp must establish NO freshness — substituting the process clock is what made freshness resettable by restart")
+			require.Contains(t, f.timestampFlawed, aggUSDC)
 
 			_, err = f.Step(context.Background()) // caught up: go live
 			require.NoError(t, err)
-			healthy, _ := f.Health()
-			require.True(t, healthy)
-
-			// Past the threshold, the clamped observation still trips.
-			clk.advance(27 * time.Hour)
-			_, err = f.Step(context.Background())
-			require.NoError(t, err)
 			healthy, reason := f.Health()
-			require.False(t, healthy, "a clamped timestamp must not suppress the verdict")
-			require.Contains(t, reason, "USDC")
+			require.False(t, healthy, "an unusable newest timestamp is an unhealthy DURABLE condition, got %q", reason)
+			require.Contains(t, feedConditions(f), ConditionFeedTimestamp)
+
+			// THE RESTART TEST, which is the whole finding: a fresh process
+			// re-decodes the SAME log at the SAME cursor. Under the clamp it
+			// re-derived a brand-new "observed now" and reported the feed healthy
+			// for another full threshold. The verdict must instead be identical.
+			f2, clk2 := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+			clk2.advance(3 * time.Hour) // a much later process start
+			st.cursor, st.cursorFound = testFeedFrontier, true
+			_, err = f2.Step(context.Background())
+			require.NoError(t, err)
+			require.NotContains(t, f2.lastUsable, aggUSDC,
+				"the restarted process must reach the same conclusion from the same durable log")
+			require.Contains(t, feedConditions(f2), ConditionFeedTimestamp)
+			healthy, _ = f2.Health()
+			require.False(t, healthy, "a restart must not grant a malformed-timestamp feed a fresh window")
+			_ = clk
 		})
 	}
+}
+
+// A future timestamp INSIDE the tolerance is a clock artefact, not a malformed
+// answer: it is taken at face value (durably, from the log) rather than refused.
+func TestFeedDeriverAcceptsSmallClockSkewInUpdatedAt(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
+	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+
+	skew := futureTimestampTolerance / 2
+	st.cursor, st.cursorFound = testFeedStart-1, true
+	st.logs = []store.RawLog{
+		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(100_000_000), 1, clk.unix(skew)),
+	}
+	_, err := f.Step(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, clk.now().Add(skew).UTC(), f.lastUsable[aggUSDC],
+		"the oracle's own timestamp is used verbatim, never replaced by ours")
+	require.NotContains(t, f.timestampFlawed, aggUSDC)
+}
+
+// B-invalid (FEED SIDE): a stream publishing a non-positive answer every heartbeat
+// is publishing, and the store quarantines the row so no consumer can select it —
+// but that protects consumers, not health. The answer must not refresh usable
+// freshness, and the unusable newest answer is reported explicitly.
+func TestFeedDeriverNonPositiveAnswerDoesNotRefreshFreshness(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
+	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+
+	// A good answer 30 hours ago (past USDC's 25h threshold), then zeros right up
+	// to the present. The stream looks perfectly alive.
+	st.cursor, st.cursorFound = testFeedStart-1, true
+	st.logs = []store.RawLog{
+		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(99_990_000), 1, clk.unix(-30*time.Hour)),
+		answerUpdatedLog(testFeedStart+2, 0, aggUSDC, big.NewInt(0), 2, clk.unix(-time.Minute)),
+	}
+	_, err := f.Step(context.Background())
+	require.NoError(t, err)
+	_, err = f.Step(context.Background()) // caught up: go live and evaluate
+	require.NoError(t, err)
+
+	require.Equal(t, clk.now().Add(-30*time.Hour).UTC(), f.lastUsable[aggUSDC],
+		"freshness stands at the last USABLE answer, not at the zero published a minute ago")
+	got := feedConditions(f)
+	require.Contains(t, got, ConditionFeedInvalidAnswer, "the unusable newest answer is named")
+	require.Contains(t, got[ConditionFeedInvalidAnswer], "USDC")
+	require.Contains(t, got, ConditionFeedPublication,
+		"and there has been no usable answer inside this feed's own heartbeat+grace")
+	healthy, _ := f.Health()
+	require.False(t, healthy)
+
+	// A usable answer clears both: this class is recoverable.
+	for _, s := range feedStreams {
+		st.ingest[s] = &store.CursorPos{Block: testFeedFrontier + 10, Hash: []byte{0x02}}
+	}
+	ch.head = testFeedFrontier + 15
+	st.logs = append(st.logs,
+		answerUpdatedLog(testFeedFrontier+5, 0, aggUSDC, big.NewInt(100_000_000), 3, clk.unix(0)))
+	_, err = f.Step(context.Background())
+	require.NoError(t, err)
+	clk.advance(headProbeInterval + time.Second)
+	_, err = f.Step(context.Background())
+	require.NoError(t, err)
+	got = feedConditions(f)
+	require.NotContains(t, got, ConditionFeedInvalidAnswer)
+	require.NotContains(t, got, ConditionFeedPublication)
 }
 
 // Sources() reports the mechanism names this deriver writes: exactly the four

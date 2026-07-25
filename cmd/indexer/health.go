@@ -23,6 +23,17 @@ package main
 //     Entries are REBUILT each round, so a resumed feed or a landed round is
 //     visible as recovery rather than sticking forever.
 //
+// READINESS STARTS CLOSED. newHealthState installs a startup condition, so the
+// very first /readyz answer is 503. The endpoint deliberately comes up before any
+// dependency — a supervisor needs a probe that answers while the daemon is still
+// connecting — and the earlier version paired that with an initial report of
+// Ready=true, so /readyz returned 200 throughout registry loading, the database
+// connection, migrations, chain verification, worker construction and the first
+// daemon round. A hung dependency held that 200 indefinitely while ingestion had
+// never started. Missing information must produce refusal, not permission; the
+// condition clears only through markInitialized, and only once a full daemon round
+// has completed with nothing failing.
+//
 // READINESS vs LIVENESS, and why they differ here:
 //
 //   - /readyz fails for EITHER class. A process serving stale or missing prices
@@ -33,6 +44,9 @@ package main
 //     the SAME binary on a capability error just crash-loops; the operator has to
 //     ship different code. Failing readiness (which drains traffic and alerts)
 //     without failing liveness (which restarts) is the honest encoding of that.
+//   - The startup condition is likewise NOT a liveness failure: a process that
+//     has not finished initialising must not be restarted for not having finished
+//     initialising.
 //
 // CONCURRENCY: the HTTP handlers run on the server's own goroutines while the
 // daemon loop writes. Every field is behind the mutex and report() returns COPIES,
@@ -58,6 +72,36 @@ import (
 // failures were invisible to a supervisor.
 const conditionStepError = "step_error"
 
+// conditionNoProgress is the condition key for a worker whose DURABLE cursor has
+// not moved within noProgressBound. It is the silent-stall detector: a worker that
+// neither errors nor advances reports nothing at all, and before this key existed
+// /readyz stayed 200 through exactly that failure. The measurement is the
+// database's own updated_at, so a restart cannot grant a wedged worker a fresh
+// window.
+const conditionNoProgress = "no_progress"
+
+// conditionHeadLag is the condition key for a raw-log walker whose cursor is more
+// than headLagBound blocks behind the chain head it last observed. A walker can be
+// progressing and still be falling behind; no-progress cannot see that.
+//
+// It fires during BACKFILL too, which is deliberate: a process that has not caught
+// up to the chain is not ready to be depended on for liquidation-facing data. That
+// is the same posture the feed deriver already takes with its rpc_ingest_lag
+// condition.
+const conditionHeadLag = "head_lag"
+
+// startupWorker/conditionStartup name the initialisation entry that makes
+// readiness start CLOSED. The key shape matches every other recoverable entry
+// ("<worker>/<condition>") so alert routing needs no special case.
+const (
+	startupWorker    = "daemon"
+	conditionStartup = "startup"
+)
+
+// startupReason is the text the startup condition carries until initialisation
+// completes. It names what has to happen, so a 503 during boot is self-explaining.
+const startupReason = "the daemon has not completed initialisation: dependency checks, worker construction, freshness hydration and one full daemon round must all succeed before this process claims readiness"
+
 // loopLivenessBound is how long the daemon's inner loop may go without
 // completing a round before liveness reports the process wedged. A round does one
 // bounded unit of work per worker, so under any healthy configuration it
@@ -70,10 +114,12 @@ const loopLivenessBound = 5 * time.Minute
 // name for terminal entries, so an alerting rule can route on the condition
 // without parsing prose.
 type healthReport struct {
-	// Status is the single word a dashboard shows: "healthy", "degraded"
-	// (recoverable conditions only) or "unhealthy" (at least one terminal).
+	// Status is the single word a dashboard shows: "starting" (initialisation has
+	// not completed), "healthy", "degraded" (recoverable conditions only) or
+	// "unhealthy" (at least one terminal, or a wedged loop).
 	Status string `json:"status"`
-	// Ready is false whenever ANY condition is present.
+	// Ready is false whenever ANY condition is present, and false until
+	// initialisation completes.
 	Ready bool `json:"ready"`
 	// Live is false only when the daemon loop has not completed a round within
 	// loopLivenessBound.
@@ -96,14 +142,56 @@ type healthState struct {
 	recoverable map[string]string
 	lastLoop    time.Time
 	now         func() time.Time
+	// initialised latches true once markInitialized has accepted a clean round.
+	// Until then the startup condition stands and /readyz is 503.
+	initialised bool
 }
 
+// newHealthState builds the surface in its CLOSED state: initialised is false, so
+// report() carries the startup condition and /readyz answers 503 from the first
+// instant — before any dependency has been checked.
+//
+// The startup entry lives in its OWN field rather than in the recoverable map
+// because setWorkerConditions REPLACES a worker's entries by name prefix, and
+// worker names come from config (stream names legitimately contain colons). A
+// dedicated field cannot be cleared by a coincidentally-named worker.
 func newHealthState(now func() time.Time) *healthState {
 	return &healthState{
 		terminal:    map[string]string{},
 		recoverable: map[string]string{},
 		now:         now,
 	}
+}
+
+// markInitialized clears the startup condition, but only when the daemon has
+// genuinely finished starting: a full round completed and the surface carries no
+// terminal entry and no worker step error.
+//
+// Deriving the decision FROM THE SURFACE rather than from a caller's boolean is
+// deliberate — the surface already knows which workers failed this round, so the
+// two cannot drift apart, and a caller cannot declare readiness the conditions
+// contradict. Anything still failing simply defers initialisation, which is the
+// fail-closed direction. Once cleared it stays cleared: later failures are
+// reported as themselves, not as "still starting up".
+func (h *healthState) markInitialized() (cleared bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.initialised {
+		return false
+	}
+	if h.lastLoop.IsZero() {
+		return false // no round has completed yet
+	}
+	if len(h.terminal) > 0 {
+		return false
+	}
+	for k := range h.recoverable {
+		if strings.HasSuffix(k, "/"+conditionStepError) {
+			return false // a worker could not complete its round
+		}
+	}
+	h.initialised = true
+	return true
 }
 
 // setTerminal records a terminal (restart-to-recover) condition and reports
@@ -164,10 +252,13 @@ func (h *healthState) report() healthReport {
 			r.Terminal[k] = v
 		}
 	}
-	if len(h.recoverable) > 0 {
-		r.Recoverable = make(map[string]string, len(h.recoverable))
+	if len(h.recoverable) > 0 || !h.initialised {
+		r.Recoverable = make(map[string]string, len(h.recoverable)+1)
 		for k, v := range h.recoverable {
 			r.Recoverable[k] = v
+		}
+		if !h.initialised {
+			r.Recoverable[startupWorker+"/"+conditionStartup] = startupReason
 		}
 	}
 	switch {
@@ -175,6 +266,11 @@ func (h *healthState) report() healthReport {
 		r.Status, r.Ready = "unhealthy", false
 	case len(h.recoverable) > 0:
 		r.Status, r.Ready = "degraded", false
+	}
+	if !h.initialised {
+		// Startup outranks the other summary words: "degraded" would suggest a
+		// process that was ready and regressed. It is NOT a liveness failure.
+		r.Status, r.Ready = "starting", false
 	}
 	if !r.Live {
 		// A wedged loop overrides any nominally-clean condition set: the
@@ -187,8 +283,11 @@ func (h *healthState) report() healthReport {
 // handler serves the surface:
 //
 //	GET /readyz  — 200 when Ready, else 503. The probe a supervisor or load
-//	               balancer should use; fails for stale feeds, missing poll
-//	               targets, persistent apply failures and terminal engine errors.
+//	               balancer should use. It fails while the daemon is still
+//	               initialising, and thereafter for stale feeds, missing poll
+//	               targets, quarantined answers, a frozen chain view, stalled
+//	               ingestion or derivation, persistent Step failures and terminal
+//	               engine errors.
 //	GET /healthz — 200 when Live, else 503. Restart-worthy failures only.
 //	GET /health  — always 200 with the full report, for humans and dashboards
 //	               that want the detail without an HTTP failure.

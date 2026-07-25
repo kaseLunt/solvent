@@ -91,14 +91,23 @@ type rewindRec struct {
 // fakeRow is one durably-recorded price row: what the store would carry, which
 // is what the workers' health now reads back. The fake models this rather than
 // just recording calls, because "health derives from durable truth, not process
-// memory" cannot be tested against a fake that has no durable truth.
+// memory" cannot be tested against a fake that has no durable truth — and in
+// particular because the whole frozen-endpoint finding is about a replay that
+// COMMITS AND INSERTS NOTHING, which only a fake with real row identity can
+// reproduce.
 type fakeRow struct {
-	owner      string
-	asset      []byte
-	source     string
-	block      uint64
-	observedAt time.Time
+	owner         string
+	asset         []byte
+	source        string
+	block         uint64
+	observedAt    time.Time
+	valid         bool
+	invalidReason string
 }
+
+// key is the row's primary-key identity, the same one the real
+// (chain_id, asset, source, block_number) unique index enforces.
+func (r fakeRow) key() string { return fmt.Sprintf("%x/%s/%d", r.asset, r.source, r.block) }
 
 // fakePriceStore models the durable surface both workers drive: a single
 // pseudo-engine cursor, the unacked-epoch flag, owner-scoped price rows with
@@ -117,8 +126,18 @@ type fakePriceStore struct {
 
 	// rows is the durable prices table, owner-scoped.
 	rows []fakeRow
-	// anchors is price_poll_anchors, keyed by engine.
-	anchors map[string][]store.PollAnchor
+	// anchors is price_poll_anchors, keyed by engine, each carrying the database
+	// timestamp of its insertion.
+	anchors map[string][]store.StoredPollAnchor
+	// adopted records every AdoptPollAnchor call that inserted, so a test can
+	// prove the legacy policy ran (and on which blocks).
+	adopted []uint64
+	// adoptErr, when set, fails AdoptPollAnchor.
+	adoptErr error
+	// countErr / anchorReadErr fail the two reads reorg repair must have before it
+	// may delete anything — the paths that must REFUSE rather than degrade.
+	countErr      error
+	anchorReadErr error
 
 	// applyErrs is a FIFO of one-shot ApplyPrices failures. A non-nil entry is
 	// returned instead of applying; applyAdvancesDespiteErr models the
@@ -129,6 +148,13 @@ type fakePriceStore struct {
 	// worker's proactive check and its apply: the flag flips only once the apply
 	// has failed.
 	unackedAfterApply bool
+	// enforceCursorMonotonic models the real store's monotonic cursor guard rather
+	// than scripting the refusal: a batch whose through-block is BELOW the recorded
+	// cursor is refused with ErrDeriveCursorRegression, and an equal-height batch
+	// commits idempotently. Tests about a frozen endpoint need the guard itself,
+	// because scripting the error would presuppose the very classification the
+	// poller is supposed to derive.
+	enforceCursorMonotonic bool
 
 	// freshnessErr, when set, fails LatestPriceFreshness after freshnessErrAfter
 	// successful calls — the "cannot hydrate" path that must degrade to an
@@ -162,7 +188,7 @@ type fakePriceStore struct {
 func newFakePriceStore() *fakePriceStore {
 	return &fakePriceStore{
 		ingest:  map[string]*store.CursorPos{},
-		anchors: map[string][]store.PollAnchor{},
+		anchors: map[string][]store.StoredPollAnchor{},
 		now:     time.Now,
 	}
 }
@@ -175,15 +201,15 @@ func (f *fakePriceStore) HasUnackedReorg(context.Context, string, uint64) (bool,
 	return f.unacked, nil
 }
 
-func (f *fakePriceStore) ApplyPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64) error {
+func (f *fakePriceStore) ApplyPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64) (store.ApplyResult, error) {
 	return f.apply(engine, chainID, obs, through, nil)
 }
 
-func (f *fakePriceStore) ApplyPolledPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor store.PollAnchor) error {
+func (f *fakePriceStore) ApplyPolledPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor store.PollAnchor) (store.ApplyResult, error) {
 	return f.apply(engine, chainID, obs, through, &anchor)
 }
 
-func (f *fakePriceStore) apply(engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) error {
+func (f *fakePriceStore) apply(engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) (store.ApplyResult, error) {
 	f.applied = append(f.applied, appliedBatch{
 		engine: engine, chainID: chainID, obs: obs, through: through, anchor: anchor,
 	})
@@ -197,26 +223,73 @@ func (f *fakePriceStore) apply(engine string, chainID uint64, obs []store.PriceO
 			if f.unackedAfterApply {
 				f.unacked = true
 			}
-			return err
+			// The real store discards the result when Commit errors: a caller must
+			// not treat rows it cannot confirm as durable facts.
+			return store.ApplyResult{}, err
 		}
 	}
-	f.commit(engine, obs, through, anchor)
-	return nil
+	if f.enforceCursorMonotonic && f.cursorFound && through < f.cursor {
+		return store.ApplyResult{}, fmt.Errorf("%w: engine %q refused move to %d (cursor at %d)",
+			store.ErrDeriveCursorRegression, engine, through, f.cursor)
+	}
+	return f.commit(engine, obs, through, anchor), nil
 }
 
-// commit lands a batch durably: rows, anchor, cursor — the same atomic unit the
-// real store commits.
-func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) {
+// commit lands a batch durably — rows, anchor, cursor, the same atomic unit the
+// real store commits — and reports what it ACTUALLY INSERTED.
+//
+// The idempotency is the load-bearing part of this fake. A row whose
+// (asset, source, block) identity already exists is NOT inserted again and does
+// NOT appear in the result, and neither does a replayed (engine, block) anchor.
+// That is exactly what an rpc endpoint frozen at the cursor produces every
+// interval, and a fake that appended blindly could not express it.
+func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) store.ApplyResult {
 	at := f.now()
+	existing := map[string]bool{}
+	for _, r := range f.rows {
+		if r.owner == engine {
+			existing[r.key()] = true
+		}
+	}
+	var res store.ApplyResult
 	for _, o := range obs {
-		f.rows = append(f.rows, fakeRow{
-			owner: engine, asset: o.Asset, source: o.Source, block: o.BlockNumber, observedAt: at,
+		valid := o.Price != nil && o.Price.Sign() > 0
+		reason := ""
+		if !valid {
+			reason = "non-positive oracle answer"
+		}
+		row := fakeRow{
+			owner: engine, asset: o.Asset, source: o.Source, block: o.BlockNumber,
+			observedAt: at, valid: valid, invalidReason: reason,
+		}
+		if existing[row.key()] {
+			continue // idempotent replay: nothing new exists
+		}
+		existing[row.key()] = true
+		f.rows = append(f.rows, row)
+		res.Inserted = append(res.Inserted, store.PriceInsert{
+			Asset: o.Asset, Source: o.Source, BlockNumber: o.BlockNumber,
+			ObservedAt: at, Valid: valid, InvalidReason: reason,
 		})
 	}
 	if anchor != nil {
-		f.anchors[engine] = append(f.anchors[engine], *anchor)
+		res.AnchorBlock = anchor.BlockNumber
+		known := false
+		for _, a := range f.anchors[engine] {
+			if a.BlockNumber == anchor.BlockNumber {
+				known = true
+				break
+			}
+		}
+		if !known {
+			f.anchors[engine] = append(f.anchors[engine], store.StoredPollAnchor{
+				PollAnchor: *anchor, ObservedAt: at,
+			})
+			res.AnchorInserted, res.AnchorObservedAt = true, at
+		}
 	}
 	f.cursor, f.cursorFound = through, true
+	return res
 }
 
 func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) error {
@@ -241,7 +314,7 @@ func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID,
 		kept = append(kept, r)
 	}
 	f.rows = kept
-	var keptAnchors []store.PollAnchor
+	var keptAnchors []store.StoredPollAnchor
 	for _, a := range f.anchors[engine] {
 		if a.BlockNumber > effective {
 			continue
@@ -259,6 +332,9 @@ func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID,
 	return nil
 }
 
+// LatestPriceFreshness mirrors the real query's two answers per key: the newest
+// row of ANY validity, and the newest VALID row. Modelling both is what lets a
+// test show that an oracle answering zero every interval stops being "fresh".
 func (f *fakePriceStore) LatestPriceFreshness(_ context.Context, _ uint64, ownerEngine string) ([]store.PriceFreshness, error) {
 	f.freshnessCalls++
 	if f.freshnessErr != nil && f.freshnessCalls > f.freshnessErrAfter {
@@ -270,12 +346,19 @@ func (f *fakePriceStore) LatestPriceFreshness(_ context.Context, _ uint64, owner
 			continue
 		}
 		k := freshnessKey(r.asset, r.source)
-		if prev, ok := newest[k]; ok && r.block <= prev.BlockNumber {
-			continue
+		cur, seen := newest[k]
+		if !seen {
+			cur = store.PriceFreshness{Asset: r.asset, Source: r.source}
 		}
-		newest[k] = store.PriceFreshness{
-			Asset: r.asset, Source: r.source, BlockNumber: r.block, ObservedAt: r.observedAt,
+		if !seen || r.block > cur.BlockNumber {
+			cur.BlockNumber, cur.ObservedAt = r.block, r.observedAt
+			cur.Valid, cur.InvalidReason = r.valid, r.invalidReason
 		}
+		if r.valid && (!cur.HasValid || r.block > cur.ValidBlockNumber) {
+			cur.HasValid = true
+			cur.ValidBlockNumber, cur.ValidObservedAt = r.block, r.observedAt
+		}
+		newest[k] = cur
 	}
 	out := make([]store.PriceFreshness, 0, len(newest))
 	for _, v := range newest {
@@ -285,10 +368,13 @@ func (f *fakePriceStore) LatestPriceFreshness(_ context.Context, _ uint64, owner
 	return out, nil
 }
 
-func (f *fakePriceStore) PollAnchorsAbove(_ context.Context, engine string, _ uint64, above uint64, limit int) ([]store.PollAnchor, error) {
-	var out []store.PollAnchor
+func (f *fakePriceStore) PollAnchorsBelow(_ context.Context, engine string, _ uint64, belowOrAt uint64, limit int) ([]store.StoredPollAnchor, error) {
+	if f.anchorReadErr != nil {
+		return nil, f.anchorReadErr
+	}
+	var out []store.StoredPollAnchor
 	for _, a := range f.anchors[engine] {
-		if a.BlockNumber > above {
+		if a.BlockNumber <= belowOrAt {
 			out = append(out, a)
 		}
 	}
@@ -297,6 +383,87 @@ func (f *fakePriceStore) PollAnchorsAbove(_ context.Context, engine string, _ ui
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+func (f *fakePriceStore) NewestPollAnchor(_ context.Context, engine string, _ uint64) (store.StoredPollAnchor, bool, error) {
+	if f.anchorReadErr != nil {
+		return store.StoredPollAnchor{}, false, f.anchorReadErr
+	}
+	var best store.StoredPollAnchor
+	found := false
+	for _, a := range f.anchors[engine] {
+		if !found || a.BlockNumber > best.BlockNumber {
+			best, found = a, true
+		}
+	}
+	return best, found, nil
+}
+
+func (f *fakePriceStore) CountOwnedPricesAbove(_ context.Context, engine string, _ uint64, above uint64) (int64, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	var n int64
+	for _, r := range f.rows {
+		if r.owner == engine && r.block > above {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
+	if f.anchorReadErr != nil {
+		return nil, f.anchorReadErr
+	}
+	anchored := map[uint64]bool{}
+	for _, a := range f.anchors[engine] {
+		anchored[a.BlockNumber] = true
+	}
+	seen := map[uint64]bool{}
+	var out []uint64
+	for _, r := range f.rows {
+		if r.owner != engine || anchored[r.block] || seen[r.block] {
+			continue
+		}
+		seen[r.block] = true
+		out = append(out, r.block)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] > out[j] })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// AdoptPollAnchor models the real call's two refusals — no owned row at that
+// block, and a pending reorg epoch — because both are the safety argument for
+// adopting a hash the round never witnessed.
+func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uint64, a store.PollAnchor) (bool, error) {
+	if f.adoptErr != nil {
+		return false, f.adoptErr
+	}
+	if f.unacked {
+		return false, fmt.Errorf("engine %q has an unacknowledged reorg epoch: refusing to adopt an anchor", engine)
+	}
+	owned := false
+	for _, r := range f.rows {
+		if r.owner == engine && r.block == a.BlockNumber {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there", engine, a.BlockNumber)
+	}
+	for _, ex := range f.anchors[engine] {
+		if ex.BlockNumber == a.BlockNumber {
+			return false, nil
+		}
+	}
+	f.anchors[engine] = append(f.anchors[engine], store.StoredPollAnchor{PollAnchor: a, ObservedAt: f.now()})
+	f.adopted = append(f.adopted, a.BlockNumber)
+	return true, nil
 }
 
 // LatestLogsByTopic mirrors the real store's DISTINCT ON (address) newest-first
@@ -338,19 +505,35 @@ func (f *fakePriceStore) Cursor(_ context.Context, stream string) (*store.Cursor
 	return f.ingest[stream], nil
 }
 
-// seedRow inserts a durable row directly, for tests that need pre-existing
+// seedRow inserts a durable VALID row directly, for tests that need pre-existing
 // history without replaying an apply (a RESTART, in other words).
 func (f *fakePriceStore) seedRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
 	f.rows = append(f.rows, fakeRow{
+		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt, valid: true,
+	})
+}
+
+// seedInvalidRow inserts a durable QUARANTINED row — the shape a non-positive
+// oracle answer takes on disk.
+func (f *fakePriceStore) seedInvalidRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
+	f.rows = append(f.rows, fakeRow{
 		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,
+		valid: false, invalidReason: "non-positive oracle answer",
 	})
 }
 
 // seedAnchor inserts a durable poll anchor directly (again: a restart, or
-// history this process did not write).
+// history this process did not write), stamped at the fake's current clock.
 func (f *fakePriceStore) seedAnchor(engine string, block uint64, hash common.Hash) {
-	f.anchors[engine] = append(f.anchors[engine], store.PollAnchor{
-		BlockNumber: block, BlockHash: hash.Bytes(),
+	f.seedAnchorAt(engine, block, hash, f.now())
+}
+
+// seedAnchorAt is seedAnchor with an explicit database timestamp, for tests about
+// how long it has been since a NEW execution block was observed.
+func (f *fakePriceStore) seedAnchorAt(engine string, block uint64, hash common.Hash, at time.Time) {
+	f.anchors[engine] = append(f.anchors[engine], store.StoredPollAnchor{
+		PollAnchor: store.PollAnchor{BlockNumber: block, BlockHash: hash.Bytes()},
+		ObservedAt: at,
 	})
 }
 

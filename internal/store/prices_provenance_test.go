@@ -16,6 +16,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// plainAnchors strips the database timestamps off read-back anchors so a test can
+// compare them by identity.
+func plainAnchors(in []StoredPollAnchor) []PollAnchor {
+	out := make([]PollAnchor, 0, len(in))
+	for _, a := range in {
+		out = append(out, a.PollAnchor)
+	}
+	return out
+}
+
+// applyErr discards an apply's durable ApplyResult and returns only its error,
+// for the many tests whose subject is the refusal (or the plain success) rather
+// than what landed. The tests that ARE about the result read it directly — see
+// TestApplyPricesReportsOnlyRowsItActuallyInserted.
+func applyErr(_ ApplyResult, err error) error { return err }
+
 // hash32 builds a distinct 32-byte block hash from one discriminating byte.
 func hash32(b byte) []byte {
 	h := bytes.Repeat([]byte{0x00}, 32)
@@ -61,10 +77,10 @@ func TestApplyPricesRecordsDurableOwner(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1,
-		[]PriceObservation{po(100, 0xAA, testFeedSource, 99_990_000, 8)}, 100))
-	require.NoError(t, s.ApplyPrices(ctx, "prices:poll:1", 1,
-		[]PriceObservation{po(120, 0xBB, testRatioSrc, 1, 18)}, 120))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1,
+		[]PriceObservation{po(100, 0xAA, testFeedSource, 99_990_000, 8)}, 100)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, "prices:poll:1", 1,
+		[]PriceObservation{po(120, 0xBB, testRatioSrc, 1, 18)}, 120)))
 
 	require.Equal(t, testFeedEngine, ownerOf(t, s, 1, addr20(0xAA), testFeedSource, 100))
 	require.Equal(t, "prices:poll:1", ownerOf(t, s, 1, addr20(0xBB), testRatioSrc, 120))
@@ -77,9 +93,9 @@ func TestApplyPricesRefusesReplayFromAnotherOwner(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1,
-		[]PriceObservation{po(100, 0xAA, testFeedSource, 99_990_000, 8)}, 100))
-	err := s.ApplyPrices(ctx, "prices:poll:1", 1,
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1,
+		[]PriceObservation{po(100, 0xAA, testFeedSource, 99_990_000, 8)}, 100)))
+	_, err := s.ApplyPrices(ctx, "prices:poll:1", 1,
 		[]PriceObservation{po(100, 0xAA, testFeedSource, 99_990_000, 8)}, 100)
 	require.ErrorContains(t, err, "is owned by")
 	require.ErrorContains(t, err, "aborting batch")
@@ -91,7 +107,7 @@ func TestApplyPricesRefusesReplayFromAnotherOwner(t *testing.T) {
 // produce a row no rewind can find.
 func TestApplyPricesRequiresEngine(t *testing.T) {
 	s := testDeriveStore(t)
-	err := s.ApplyPrices(context.Background(), "", 1,
+	_, err := s.ApplyPrices(context.Background(), "", 1,
 		[]PriceObservation{po(100, 0xAA, testFeedSource, 1, 8)}, 100)
 	require.ErrorContains(t, err, "engine is required")
 }
@@ -117,18 +133,18 @@ func TestRewindPricesDeletesRetiredPhaseRowsByOwner(t *testing.T) {
 	)
 
 	// Phase 1: the deriver writes under the OLD aggregator.
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
 		po(100, 0xAA, oldAgg, 99_000_000, 8),
 		po(150, 0xAA, oldAgg, 99_500_000, 8),
-	}, 150))
+	}, 150)))
 	// Phase 2, after the manual registry update: the SAME engine writes under the
 	// NEW aggregator. Nothing in the registry names the old source any more.
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1, []PriceObservation{
 		po(200, 0xAA, newAgg, 100_000_000, 8),
-	}, 200))
+	}, 200)))
 	// Another writer on the same chain, which must be untouched.
-	require.NoError(t, s.ApplyPrices(ctx, "prices:poll:1", 1,
-		[]PriceObservation{po(210, 0xBB, testRatioSrc, 1_060_000_000_000_000_000, 18)}, 210))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, "prices:poll:1", 1,
+		[]PriceObservation{po(210, 0xBB, testRatioSrc, 1_060_000_000_000_000_000, 18)}, 210)))
 
 	// A DEEP reorg crossing the phase boundary, to block 120.
 	require.NoError(t, s.Rewind(ctx, "eth:stream", 1, 120, []byte{0x78}))
@@ -170,11 +186,11 @@ func TestApplyPricesQuarantinesNonPositiveAnswers(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(200, 0xAA, testPollSource, 1_000_000, 6),
 		po(200, 0xBB, testPollSource, 0, 6),
 		po(200, 0xCC, testPollSource, -5, 6),
-	}, 200))
+	}, 200)))
 
 	valid, reason := validityOf(t, s, 10, addr20(0xAA), testPollSource, 200)
 	require.True(t, valid)
@@ -199,11 +215,11 @@ func TestLatestUsablePriceNeverReturnsQuarantinedRows(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(100, 0xAA, testPollSource, 1_000_000, 6), // good
 		po(200, 0xAA, testPollSource, 0, 6),         // NEWEST, and broken
 		po(150, 0xBB, testPollSource, -7, 6),        // only ever broken
-	}, 200))
+	}, 200)))
 
 	// The newest row for 0xAA is the zero; the contract returns the newest USABLE
 	// one instead of a price that would divide by zero downstream.
@@ -247,7 +263,7 @@ func TestLatestUsablePriceIsAlwaysStrictlyPositive(t *testing.T) {
 		}
 		obs = append(obs, po(uint64(100+i), byte(0xA0+i%4), testPollSource, price, 6))
 	}
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, obs, 200))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, obs, 200)))
 
 	for i := 0; i < 4; i++ {
 		got, found, err := s.LatestUsablePrice(ctx, 10, addr20(byte(0xA0+i)), testPollSource)
@@ -286,19 +302,20 @@ func TestApplyPolledPricesAnchorsAtomically(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500)))
-	anchors, err := s.PollAnchorsAbove(ctx, testPollEngine, 10, 0, 8)
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500))))
+	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 500, 8)
 	require.NoError(t, err)
-	require.Equal(t, []PollAnchor{anchorAt(500)}, anchors)
+	require.Equal(t, []PollAnchor{anchorAt(500)}, plainAnchors(anchors))
+	require.False(t, anchors[0].ObservedAt.IsZero(), "a read-back anchor carries its database insertion time")
 
 	// A batch that ROLLS BACK leaves no anchor: the round did not happen.
-	err = s.ApplyPolledPrices(ctx, testPollEngine, 10,
+	_, err = s.ApplyPolledPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(400, 0xAA, testPollSource, 2, 6)}, 400, anchorAt(400))
 	require.ErrorIs(t, err, ErrDeriveCursorRegression)
-	anchors, err = s.PollAnchorsAbove(ctx, testPollEngine, 10, 0, 8)
+	anchors, err = s.PollAnchorsBelow(ctx, testPollEngine, 10, 500, 8)
 	require.NoError(t, err)
-	require.Equal(t, []PollAnchor{anchorAt(500)}, anchors, "the refused round anchored nothing")
+	require.Equal(t, []PollAnchor{anchorAt(500)}, plainAnchors(anchors), "the refused round anchored nothing")
 }
 
 // The anchor must describe the round it claims to: a hash of the wrong length, or
@@ -308,11 +325,11 @@ func TestApplyPolledPricesValidatesAnchor(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	err := s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 500,
+	_, err := s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 500,
 		PollAnchor{BlockNumber: 500, BlockHash: []byte{0x01}})
 	require.ErrorContains(t, err, "block hash is 1 bytes, want 32")
 
-	err = s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 500, anchorAt(499))
+	_, err = s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 500, anchorAt(499))
 	require.ErrorContains(t, err, "must equal the batch through-block")
 
 	var n int
@@ -327,13 +344,13 @@ func TestApplyPolledPricesAnchorDivergenceAbortsBatch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500)))
-	require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500)),
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500))))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500))),
 		"an identical replay is idempotent")
 
-	err := s.ApplyPolledPrices(ctx, testPollEngine, 10,
+	_, err := s.ApplyPolledPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(500, 0xBB, testPollSource, 7, 6)}, 500,
 		PollAnchor{BlockNumber: 500, BlockHash: hash32(0xFF)})
 	require.ErrorIs(t, err, ErrPollAnchorDivergence)
@@ -351,8 +368,8 @@ func TestRewindPricesVerifiedFloorRetainsProvenHistory(t *testing.T) {
 	ctx := context.Background()
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b)))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
 	}
 	// The walker's rewind reached a sparse-log ancestor far below: the degenerate
 	// case that used to delete EVERY polled row.
@@ -376,20 +393,25 @@ func TestRewindPricesVerifiedFloorRetainsProvenHistory(t *testing.T) {
 
 	// The orphaned round's anchor is deleted with its rows: an anchor for history
 	// that no longer exists must not be able to "verify" a later repair.
-	anchors, err := s.PollAnchorsAbove(ctx, testPollEngine, 10, 0, 8)
+	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 5000, 8)
 	require.NoError(t, err)
-	require.Equal(t, []PollAnchor{anchorAt(4900), anchorAt(4800)}, anchors)
+	require.Equal(t, []PollAnchor{anchorAt(4900), anchorAt(4800)}, plainAnchors(anchors))
 }
 
-// Without a floor, the walker's deep target stands and the loss is total — the
-// pre-fix behaviour, retained as the honest fallback when nothing can be verified.
-func TestRewindPricesWithoutFloorStillLosesEverything(t *testing.T) {
+// A floor of 0 means "retain nothing above the walker's target", and this layer
+// obeys it. That is a STORE contract test, not a description of the poller's
+// posture: internal/prices.Poller no longer passes 0 when it merely failed to
+// verify — it refuses to call this at all while it owns rows it cannot prove
+// canonical, and passes 0 only when it owns nothing above the target. The
+// destructive path still has to exist and still has to be exact, which is what
+// this pins.
+func TestRewindPricesWithZeroFloorDeletesEverythingAboveTheTarget(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b)))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
 	}
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 100, []byte{0x64}))
 	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 5000, 0))
@@ -397,7 +419,7 @@ func TestRewindPricesWithoutFloorStillLosesEverything(t *testing.T) {
 	require.Empty(t, priceRows(t, s, 10))
 	_, last, _ := cursorState(t, s, testPollEngine)
 	require.Equal(t, uint64(100), last)
-	anchors, err := s.PollAnchorsAbove(ctx, testPollEngine, 10, 0, 8)
+	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 5000, 8)
 	require.NoError(t, err)
 	require.Empty(t, anchors)
 }
@@ -408,8 +430,8 @@ func TestRewindPricesWithoutFloorStillLosesEverything(t *testing.T) {
 func TestRewindPricesRefusesFloorAboveTarget(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500, anchorAt(500)))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500, anchorAt(500))))
 
 	err := s.RewindPrices(ctx, testPollEngine, 10, 400, 500)
 	require.ErrorContains(t, err, "verified floor 500 is above the requested target 400")
@@ -422,8 +444,8 @@ func TestRewindPricesFloorNeverLowersTheTarget(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 	for _, b := range []uint64{300, 400, 500} {
-		require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(b), 6)}, b, anchorAt(b)))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+			[]PriceObservation{po(b, 0xAA, testPollSource, int64(b), 6)}, b, anchorAt(b))))
 	}
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 450, []byte{0x45}))
 
@@ -446,7 +468,7 @@ func TestPollAnchorRetentionIsBounded(t *testing.T) {
 	// Rounds beyond the retention bound, each anchoring one block.
 	total := pollAnchorRetention + 25
 	for i := 1; i <= total; i++ {
-		require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, uint64(i), anchorAt(uint64(i))))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, uint64(i), anchorAt(uint64(i)))))
 	}
 	var n int
 	require.NoError(t, s.pool.QueryRow(ctx,
@@ -461,28 +483,35 @@ func TestPollAnchorRetentionIsBounded(t *testing.T) {
 	require.Equal(t, uint64(total-pollAnchorRetention+1), oldest)
 }
 
-// PollAnchorsAbove is descending, engine- and chain-scoped, and limit-bounded —
-// the exact shape a repair walk needs.
-func TestPollAnchorsAboveOrderingAndScope(t *testing.T) {
+// PollAnchorsBelow is descending, at-or-below-bounded, engine- and chain-scoped,
+// and limit-bounded — the exact shape a PAGED repair walk needs: the caller lowers
+// belowOrAt to just under the deepest anchor it has already probed and continues.
+func TestPollAnchorsBelowOrderingAndScope(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
 	for _, b := range []uint64{100, 200, 300, 400} {
-		require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, b, anchorAt(b)))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, b, anchorAt(b))))
 	}
 	// A different engine on a different chain must not appear.
-	require.NoError(t, s.ApplyPolledPrices(ctx, "prices:poll:1", 1, nil, 350, anchorAt(350)))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, "prices:poll:1", 1, nil, 350, anchorAt(350))))
 
-	got, err := s.PollAnchorsAbove(ctx, testPollEngine, 10, 150, 2)
+	got, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 400, 2)
 	require.NoError(t, err)
-	require.Equal(t, []PollAnchor{anchorAt(400), anchorAt(300)}, got,
-		"newest first, strictly above the given block, capped at the limit")
+	require.Equal(t, []PollAnchor{anchorAt(400), anchorAt(300)}, plainAnchors(got),
+		"newest first, at or below the given block, capped at the limit")
 
-	got, err = s.PollAnchorsAbove(ctx, testPollEngine, 10, 0, 0)
+	// The paging step: resume just below the deepest anchor already probed.
+	got, err = s.PollAnchorsBelow(ctx, testPollEngine, 10, 299, 2)
+	require.NoError(t, err)
+	require.Equal(t, []PollAnchor{anchorAt(200), anchorAt(100)}, plainAnchors(got),
+		"the next page continues deeper instead of repeating the first")
+
+	got, err = s.PollAnchorsBelow(ctx, testPollEngine, 10, 400, 0)
 	require.NoError(t, err)
 	require.Empty(t, got, "a non-positive limit reads nothing")
 
-	got, err = s.PollAnchorsAbove(ctx, testPollEngine, 1, 0, 8)
+	got, err = s.PollAnchorsBelow(ctx, testPollEngine, 1, 400, 8)
 	require.NoError(t, err)
 	require.Empty(t, got, "the anchor is chain-scoped: this engine has none on chain 1")
 }
@@ -492,19 +521,19 @@ func TestPollAnchorsAboveOrderingAndScope(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // LatestPriceFreshness reports the newest row per (asset, source) for ONE owner,
-// including quarantined rows — reaching the oracle at all is what freshness is
-// about — and never another owner's rows.
+// including quarantined rows — reaching the oracle at all is one of the two things
+// a health verdict needs — and never another owner's rows.
 func TestLatestPriceFreshnessIsPerKeyAndOwnerScoped(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(100, 0xAA, testPollSource, 1_000_000, 6),
 		po(200, 0xAA, testPollSource, 1_000_100, 6), // newer for the same key
 		po(150, 0xBB, testPollSource, 0, 6),         // quarantined, but still an observation
-	}, 200))
-	require.NoError(t, s.ApplyPrices(ctx, testFeedEngine, 1,
-		[]PriceObservation{po(300, 0xCC, testFeedSource, 5, 8)}, 300))
+	}, 200)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1,
+		[]PriceObservation{po(300, 0xCC, testFeedSource, 5, 8)}, 300)))
 
 	got, err := s.LatestPriceFreshness(ctx, 10, testPollEngine)
 	require.NoError(t, err)
@@ -523,16 +552,213 @@ func TestLatestPriceFreshnessIsPerKeyAndOwnerScoped(t *testing.T) {
 	require.Empty(t, other, "the feed engine owns nothing on chain 10")
 }
 
+// B-invalid AT THE STORE: freshness must report the newest row's VALIDITY and,
+// separately, the newest VALID row. One timestamp that deliberately included
+// quarantined rows is what let an oracle answering zero every interval stay
+// "fresh" while no usable price existed.
+func TestLatestPriceFreshnessSeparatesReachedFromUsable(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// 0xAA: a good answer, then zeros. 0xBB: only ever zeros.
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(100, 0xAA, testPollSource, 1_000_000, 6),
+		po(200, 0xAA, testPollSource, 0, 6),
+		po(200, 0xBB, testPollSource, 0, 6),
+	}, 200)))
+
+	byKey := map[string]PriceFreshness{}
+	got, err := s.LatestPriceFreshness(ctx, 10, testPollEngine)
+	require.NoError(t, err)
+	for _, f := range got {
+		byKey[fmt.Sprintf("%x", f.Asset)] = f
+	}
+
+	aa := byKey["00000000000000000000000000000000000000aa"]
+	require.Equal(t, uint64(200), aa.BlockNumber, "the oracle was reached at 200")
+	require.False(t, aa.Valid, "and what it said there is unusable")
+	require.Equal(t, invalidReasonNonPositive, aa.InvalidReason)
+	require.True(t, aa.HasValid)
+	require.Equal(t, uint64(100), aa.ValidBlockNumber,
+		"usable freshness stands at the last GOOD answer, which is what must age")
+	require.True(t, aa.ValidObservedAt.Before(aa.ObservedAt) || aa.ValidObservedAt.Equal(aa.ObservedAt))
+
+	bb := byKey["00000000000000000000000000000000000000bb"]
+	require.Equal(t, uint64(200), bb.BlockNumber)
+	require.False(t, bb.Valid)
+	require.False(t, bb.HasValid, "a key that has NEVER had a usable price says so")
+	require.Zero(t, bb.ValidBlockNumber)
+}
+
+// ---------------------------------------------------------------------------
+// The durable-fact contract: what an apply actually did.
+// ---------------------------------------------------------------------------
+
+// PRINCIPLE 1 AT ITS SOURCE. An apply reports the rows it INSERTED with their
+// database timestamps, and an idempotent replay reports NOTHING — the shape that
+// makes it impossible for a frozen endpoint's same-height replay to refresh a
+// caller's freshness.
+func TestApplyPricesReportsOnlyRowsItActuallyInserted(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	obs := []PriceObservation{
+		po(100, 0xAA, testPollSource, 1_000_000, 6),
+		po(100, 0xBB, testPollSource, 0, 6), // quarantined
+	}
+	res, err := s.ApplyPrices(ctx, testPollEngine, 10, obs, 100)
+	require.NoError(t, err)
+	require.Len(t, res.Inserted, 2, "both rows are new durable facts")
+	require.Equal(t, addr20(0xAA), res.Inserted[0].Asset)
+	require.True(t, res.Inserted[0].Valid)
+	require.Empty(t, res.Inserted[0].InvalidReason)
+	require.False(t, res.Inserted[0].ObservedAt.IsZero(),
+		"the timestamp comes from the database, not from a caller's clock")
+	require.False(t, res.Inserted[1].Valid, "a quarantined insert is reported AS invalid")
+	require.Equal(t, invalidReasonNonPositive, res.Inserted[1].InvalidReason)
+
+	// THE FROZEN-ENDPOINT CASE: the identical batch replayed at the identical
+	// through-block. It commits (the cursor guard permits equal heights) and
+	// inserts nothing.
+	res, err = s.ApplyPrices(ctx, testPollEngine, 10, obs, 100)
+	require.NoError(t, err, "an identical replay is idempotent success")
+	require.Empty(t, res.Inserted,
+		"nothing new exists, so there is nothing a caller could use to refresh health")
+}
+
+// The anchor half of the same contract: a NEW execution block reports
+// AnchorInserted with its database timestamp; replaying the same (block, hash)
+// reports false. That flag is the durable answer to "is the chain we can see
+// moving", which no replay can fabricate.
+func TestApplyPolledPricesReportsAnchorInsertionOnlyOnce(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	res, err := s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500))
+	require.NoError(t, err)
+	require.True(t, res.AnchorInserted)
+	require.Equal(t, uint64(500), res.AnchorBlock)
+	require.False(t, res.AnchorObservedAt.IsZero())
+
+	res, err = s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(500, 0xAA, testPollSource, 1_000_000, 6)}, 500, anchorAt(500))
+	require.NoError(t, err)
+	require.False(t, res.AnchorInserted, "the same execution block is not a new observation")
+	require.True(t, res.AnchorObservedAt.IsZero())
+	require.Empty(t, res.Inserted)
+}
+
+// NewestPollAnchor is the durable reference a restarted poller hydrates its
+// block-advance clock from, so a restart cannot grant a frozen chain view a fresh
+// window.
+func TestNewestPollAnchorCarriesItsDatabaseTimestamp(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	_, found, err := s.NewestPollAnchor(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.False(t, found, "an engine that has never anchored says so")
+
+	for _, b := range []uint64{100, 200} {
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, b, anchorAt(b))))
+	}
+	got, found, err := s.NewestPollAnchor(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, anchorAt(200), got.PollAnchor)
+	require.False(t, got.ObservedAt.IsZero())
+
+	_, found, err = s.NewestPollAnchor(ctx, testPollEngine, 1)
+	require.NoError(t, err)
+	require.False(t, found, "chain-scoped")
+}
+
+// A1: repair must be able to ask whether an unverifiable rewind would actually
+// destroy anything, because "nothing verified and nothing to lose" and "nothing
+// verified and history at stake" have opposite correct answers.
+func TestCountOwnedPricesAboveIsOwnerAndHeightScoped(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	n, err := s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 0)
+	require.NoError(t, err)
+	require.Zero(t, n, "an engine with no rows can be rewound without losing anything")
+
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(100, 0xAA, testPollSource, 1, 6),
+		po(200, 0xAA, testPollSource, 2, 6),
+	}, 200)))
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine, 1,
+		[]PriceObservation{po(300, 0xCC, testFeedSource, 3, 8)}, 300)))
+
+	n, err = s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+	n, err = s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 150)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "strictly above")
+	n, err = s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 200)
+	require.NoError(t, err)
+	require.Zero(t, n, "another owner's rows are not this engine's to lose")
+}
+
+// A1 (LEGACY POLICY): rows written before this engine anchored its rounds are
+// reported as unanchored, and adoption records the anchor the round should have
+// written — refusing a block this engine owns no row at, and refusing entirely
+// while a reorg epoch is pending.
+func TestUnanchoredPriceBlocksAndAnchorAdoption(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// Legacy shape: rows applied WITHOUT an anchor (the pre-anchor code path).
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(100, 0xAA, testPollSource, 1_000_000, 6),
+		po(200, 0xAA, testPollSource, 1_000_100, 6),
+	}, 200)))
+
+	blocks, err := s.UnanchoredPriceBlocks(ctx, testPollEngine, 10, 8)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{200, 100}, blocks, "newest first, so the useful floor is adopted first")
+
+	adopted, err := s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(200))
+	require.NoError(t, err)
+	require.True(t, adopted)
+	adopted, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(200))
+	require.NoError(t, err)
+	require.False(t, adopted, "adoption is idempotent")
+
+	blocks, err = s.UnanchoredPriceBlocks(ctx, testPollEngine, 10, 8)
+	require.NoError(t, err)
+	require.Equal(t, []uint64{100}, blocks)
+
+	// It cannot fabricate an anchor for history this engine does not own.
+	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(150))
+	require.ErrorContains(t, err, "owns no row there")
+
+	// A divergent hash at an already-anchored height is still a divergence.
+	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10,
+		PollAnchor{BlockNumber: 200, BlockHash: hash32(0xFE)})
+	require.ErrorIs(t, err, ErrPollAnchorDivergence)
+
+	// THE LOAD-BEARING REFUSAL: adopting while a reorg epoch is unacknowledged
+	// could record a REPLACEMENT block's hash at that height and let a later probe
+	// "verify" rows describing the block the chain discarded.
+	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 50, []byte{0x32}))
+	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(100))
+	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
+}
+
 // A rewind removes the rows a freshness verdict was built from, so the read must
 // stop reporting them — the reason workers re-hydrate after every rewind.
 func TestLatestPriceFreshnessFollowsRewind(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(100, 0xAA, testPollSource, 1_000_000, 6),
 		po(200, 0xAA, testPollSource, 1_000_100, 6),
-	}, 200, anchorAt(200)))
+	}, 200, anchorAt(200))))
 	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 150, 0))
 
 	got, err := s.LatestPriceFreshness(ctx, 10, testPollEngine)
@@ -604,9 +830,9 @@ func TestLatestUsablePriceNumericRoundTrip(t *testing.T) {
 	big18, ok := new(big.Int).SetString("1069123456789012345678", 10)
 	require.True(t, ok)
 
-	require.NoError(t, s.ApplyPrices(ctx, "prices:poll:1", 1, []PriceObservation{{
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, "prices:poll:1", 1, []PriceObservation{{
 		Asset: addr20(0xAA), Source: testRatioSrc, Price: big18, Decimals: 18, BlockNumber: 100,
-	}}, 100))
+	}}, 100)))
 	got, found, err := s.LatestUsablePrice(ctx, 1, addr20(0xAA), testRatioSrc)
 	require.NoError(t, err)
 	require.True(t, found)

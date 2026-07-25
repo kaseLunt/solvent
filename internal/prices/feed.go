@@ -35,6 +35,22 @@ package prices
 // and reported a feed that had died BEFORE the restart as healthy for another
 // full threshold. Rewind cleared the same state for the same effect.
 //
+// AND NO PROCESS CLOCK MAY BECOME A RECEIPT TIME. An implausible oracle timestamp
+// used to be CLAMPED to f.now() and that derived value used as the observation
+// time. It was not durable: the same raw log re-decodes and re-clamps to the NEW
+// process time on every restart, rewind or apply-error hydration, so repeated
+// restarts inside the threshold kept a feed with one malformed future timestamp
+// healthy indefinitely — the very thing durable freshness was supposed to make
+// impossible. An unusable timestamp is now an unhealthy CONDITION and establishes
+// no freshness at all; see classifyUpdatedAt for the full argument and its limit.
+//
+// PUBLISHING IS NOT THE SAME AS PUBLISHING SOMETHING USABLE. A stream emitting a
+// non-positive answer every heartbeat is emitting; store.insertPrice quarantines
+// the row so no consumer can select it, which protects consumers and says nothing
+// about health. Freshness is therefore measured from the newest USABLE answer, and
+// an unusable newest answer is reported as its own condition — so an aggregator
+// answering zero forever fails readiness instead of looking perfectly fresh.
+//
 // STALENESS IS PER FEED. Each stream carries its own contractual heartbeat and
 // its own declared operator grace in recon/feeds.json, and is judged against
 // heartbeat+grace. One global bound (the retired SOLVENT_FEED_STALENESS, 26h) was
@@ -126,6 +142,18 @@ const headProbeInterval = time.Minute
 // OUR failure well inside the tightest configured heartbeat (3600s).
 const liveVerdictTTL = 5 * headProbeInterval
 
+// futureTimestampTolerance is how far AHEAD of the observation time an
+// oracle-supplied updatedAt may sit and still be taken at face value. Ordinary
+// causes — a node's clock a few seconds off, a block timestamp rounded forward —
+// live well inside it; a value beyond it is not a clock artefact.
+//
+// DISCLOSED COST, precisely: an accepted within-tolerance future timestamp
+// suppresses this feed's staleness verdict by up to this much, because the
+// reference it establishes is that far ahead. Two minutes against the tightest
+// configured threshold (90 minutes) is ~2%, and the alternative — substituting
+// our own clock — is what made freshness resettable by restart.
+const futureTimestampTolerance = 2 * time.Minute
+
 // reResolveInterval rate-limits the proxy aggregator() re-resolution while a
 // stream STAYS stale. The first re-resolution happens on the transition into
 // staleness; after that it repeats at most this often, so an operator who has
@@ -207,10 +235,17 @@ type FeedDeriver struct {
 	// hydratedThrough is the derive cursor the hydration was taken at, so a
 	// moved cursor can be re-hydrated rather than trusted.
 	hydratedThrough uint64
-	// lastSeen holds each aggregator's newest CONFIRMED AnswerUpdated.updatedAt:
-	// hydrated from durable logs, and thereafter advanced only by windows whose
-	// apply COMMITTED (see Step's staging).
-	lastSeen map[common.Address]time.Time
+	// lastUsable holds each aggregator's newest CONFIRMED **usable**
+	// AnswerUpdated.updatedAt — an answer that is both positive and carries a
+	// plausible timestamp. Hydrated from durable logs, and thereafter advanced
+	// only by windows whose apply COMMITTED (see Step's staging). An unusable
+	// answer never lands here, so it can never refresh freshness.
+	lastUsable map[common.Address]time.Time
+	// invalidNewest / timestampFlawed name the aggregators whose NEWEST confirmed
+	// answer cannot be used, and why: a non-positive value, or an updatedAt that
+	// cannot establish a time. Each is reported as its own condition.
+	invalidNewest   map[common.Address]string
+	timestampFlawed map[common.Address]string
 	// stale is the current per-aggregator verdict, and lastResolve records when
 	// each verdict was last announced (rate-limiting the re-resolution).
 	stale       map[common.Address]bool
@@ -263,12 +298,14 @@ func NewFeedDeriver(st FeedStore, dec Decoder, ch FeedChain, feeds *config.Feeds
 
 	f := &FeedDeriver{
 		store: st, dec: dec, chain: ch, cfg: cfg,
-		engine:       FeedCursorEngine(cfg.ChainID),
-		byAggregator: map[common.Address]feedBinding{},
-		now:          time.Now,
-		lastSeen:     map[common.Address]time.Time{},
-		stale:        map[common.Address]bool{},
-		lastResolve:  map[common.Address]time.Time{},
+		engine:          FeedCursorEngine(cfg.ChainID),
+		byAggregator:    map[common.Address]feedBinding{},
+		now:             time.Now,
+		lastUsable:      map[common.Address]time.Time{},
+		invalidNewest:   map[common.Address]string{},
+		timestampFlawed: map[common.Address]string{},
+		stale:           map[common.Address]bool{},
+		lastResolve:     map[common.Address]time.Time{},
 	}
 	for _, a := range feeds.StreamAssets(cfg.ChainID) {
 		agg := a.Oracle.Contract
@@ -341,18 +378,41 @@ func (f *FeedDeriver) Conditions() []Condition {
 		})
 		return out
 	}
-	var stale []string
+	var stale, invalid, flawed []string
 	for _, agg := range f.order {
+		b := f.byAggregator[agg]
 		if f.stale[agg] {
-			b := f.byAggregator[agg]
 			stale = append(stale, fmt.Sprintf("%s(%s) threshold %s", b.Symbol, agg.Hex(), b.Staleness))
+		}
+		if reason, bad := f.invalidNewest[agg]; bad {
+			invalid = append(invalid, fmt.Sprintf("%s(%s) %s", b.Symbol, agg.Hex(), reason))
+		}
+		if reason, bad := f.timestampFlawed[agg]; bad {
+			flawed = append(flawed, fmt.Sprintf("%s(%s) %s", b.Symbol, agg.Hex(), reason))
 		}
 	}
 	if len(stale) > 0 {
 		sort.Strings(stale)
 		out = append(out, Condition{
 			Name:   ConditionFeedPublication,
-			Reason: fmt.Sprintf("chainlink streams past their own heartbeat+grace: %v", stale),
+			Reason: fmt.Sprintf("chainlink streams with no USABLE answer inside their own heartbeat+grace: %v", stale),
+		})
+	}
+	// Validity and timestamp verdicts are facts about durable logs, not about
+	// wall-clock aging, so unlike publication they are reported even in backfill
+	// — where they describe the newest answer at or below the derive cursor.
+	if len(invalid) > 0 {
+		sort.Strings(invalid)
+		out = append(out, Condition{
+			Name:   ConditionFeedInvalidAnswer,
+			Reason: fmt.Sprintf("chainlink streams whose NEWEST published answer is unusable (the stream is publishing; the number cannot be used): %v", invalid),
+		})
+	}
+	if len(flawed) > 0 {
+		sort.Strings(flawed)
+		out = append(out, Condition{
+			Name:   ConditionFeedTimestamp,
+			Reason: fmt.Sprintf("chainlink streams whose NEWEST published answer carries an unusable updatedAt, so it establishes no freshness at all: %v", flawed),
 		})
 	}
 	return out
@@ -436,11 +496,11 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 
 	set := newPriceSet()
 	// STAGED, not applied: this window's freshness effects are held aside until
-	// the commit is confirmed. Mutating f.lastSeen here — as an earlier version
-	// did, inside this loop and before ApplyPrices — left memory describing a
-	// window that may have rolled back, and kept health optimistic while
-	// persisted ingestion was stalled.
-	staged := map[common.Address]time.Time{}
+	// the commit is confirmed. Mutating committed state here — as an earlier
+	// version did, inside this loop and before ApplyPrices — left memory
+	// describing a window that may have rolled back, and kept health optimistic
+	// while persisted ingestion was stalled.
+	staged := map[common.Address]stagedAnswer{}
 	for _, l := range logs {
 		ev, known, err := f.dec.Decode(decodeEngineChainlinkFeed, l)
 		if err != nil {
@@ -471,7 +531,8 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 		// store.insertPrice records as a QUARANTINED (valid=false) row so no
 		// usable-price read can return it. This layer stores what the aggregator
 		// published; judging it is the risk engine's job, and the store makes
-		// sure an unusable fact cannot masquerade as a usable one.
+		// sure an unusable fact cannot masquerade as a usable one. It does NOT
+		// make it fresh, which is what f.stageObservation is careful about.
 		set.add(store.PriceObservation{
 			Asset:       b.Asset.Bytes(),
 			Source:      b.Source,
@@ -479,10 +540,11 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 			Decimals:    b.Decimals,
 			BlockNumber: l.BlockNumber,
 		})
-		f.stageObservation(staged, agg, answer.UpdatedAt)
+		f.stageObservation(staged, agg, answer)
 	}
 
-	if err := f.store.ApplyPrices(ctx, f.engine, f.cfg.ChainID, set.observations(), to); err != nil {
+	res, err := f.store.ApplyPrices(ctx, f.engine, f.cfg.ChainID, set.observations(), to)
+	if err != nil {
 		// THE RESET CONTRACT: the staged freshness is dropped unmerged, and the
 		// confirmed state is re-read from durable truth. This covers both
 		// indeterminate worlds — a rolled-back transaction (memory must not
@@ -505,61 +567,159 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 	}
 
 	// Commit confirmed: the staged window is now durable truth, so merge it.
-	for agg, t := range staged {
-		f.observe(agg, t)
+	for agg, s := range staged {
+		f.mergeObservation(agg, s)
 	}
 	f.hydratedThrough = to
+	if len(set.observations()) > 0 && len(res.Inserted) == 0 {
+		// The window committed and created nothing: every row was an idempotent
+		// replay. Freshness still comes from the durable logs (which is why this
+		// is not an error), but an operator should see that no new price row
+		// exists — the same signal the poller's frozen-endpoint path reports.
+		slog.Warn("feed window committed but inserted NO new price rows: every observation was an idempotent replay of an already-recorded fact",
+			"engine", f.engine, "from", from, "to", to, "observations", len(set.observations()))
+	}
 	return true, nil
 }
 
-// stageObservation records an aggregator's newest AnswerUpdated timestamp for
-// THIS window, into the caller's staging map. It never touches committed state.
-//
-// AnswerUpdated.updatedAt is an ORACLE-SUPPLIED unix second, so it is untrusted
-// input to a health signal. Two implausible shapes are clamped to the
-// observation time instead of being taken at face value:
-//
-//   - a value past int64 range would wrap NEGATIVE and read as a pre-1970
-//     answer, pinning the feed permanently stale;
-//   - a FUTURE value would make now.Sub(ref) negative for as long as it is
-//     ahead, suppressing every real stall until wall-clock catches up — a
-//     single year-3000 timestamp would silence this feed for centuries.
-//
-// Clamping to now is the honest reading of both: we OBSERVED an answer now,
-// whatever the answer claims about itself.
-func (f *FeedDeriver) stageObservation(staged map[common.Address]time.Time, agg common.Address, updatedAt uint64) {
-	t := f.clampUpdatedAt(agg, updatedAt)
-	if prev, ok := staged[agg]; ok && !t.After(prev) {
-		return
-	}
-	staged[agg] = t
+// answerVerdict is what ONE raw answer can honestly support: whether the VALUE is
+// usable, whether the TIMESTAMP is usable, and — only when both are — the
+// timestamp itself.
+type answerVerdict struct {
+	at            time.Time
+	usable        bool
+	invalidReason string
+	timestampFlaw string
 }
 
-// clampUpdatedAt turns an untrusted oracle timestamp into a usable observation
-// time (see stageObservation for the reasoning).
-func (f *FeedDeriver) clampUpdatedAt(agg common.Address, updatedAt uint64) time.Time {
-	now := f.now()
+// stagedAnswer accumulates one aggregator's window, held aside until the commit is
+// confirmed. It keeps TWO things apart on purpose:
+//
+//   - the newest USABLE answer's timestamp, which is what freshness is measured
+//     from. An older good answer in the same window is a real durable observation
+//     and must not be discarded because a later answer in that window was garbage.
+//   - the flaw markers of the window's NEWEST answer in log order, which is what
+//     the invalid/timestamp conditions describe.
+type stagedAnswer struct {
+	usableAt      time.Time
+	hasUsable     bool
+	invalidReason string
+	timestampFlaw string
+}
+
+// stageObservation folds one AnswerUpdated into the caller's staging map. It never
+// touches committed state.
+//
+// THE NEWEST ANSWER IS THE LAST ONE IN LOG ORDER, not the one with the largest
+// reported timestamp. RawLogsInRange returns ascending (block_number, log_index) —
+// the chain's own total order — so the last log for an aggregator is its newest
+// answer. Ranking by reported timestamp instead would let an older block's larger
+// updatedAt outrank the actual latest answer, and would disagree with hydration,
+// which takes the newest LOG per aggregator.
+func (f *FeedDeriver) stageObservation(staged map[common.Address]stagedAnswer, agg common.Address, answer decode.ChainlinkAnswerUpdated) {
+	v := f.classifyAnswer(agg, answer)
+	cur := staged[agg]
+	// The newest answer seen so far owns the flaw markers, whatever its usability.
+	cur.invalidReason, cur.timestampFlaw = v.invalidReason, v.timestampFlaw
+	if v.usable && (!cur.hasUsable || v.at.After(cur.usableAt)) {
+		cur.hasUsable, cur.usableAt = true, v.at
+	}
+	staged[agg] = cur
+}
+
+// classifyAnswer reduces one raw answer to what it can honestly support.
+//
+// Both judgements are derived from the LOG's own contents, so they are functions
+// of durable data and identical on every re-decode — the property the old
+// clamp-to-now behaviour lacked.
+func (f *FeedDeriver) classifyAnswer(agg common.Address, answer decode.ChainlinkAnswerUpdated) answerVerdict {
+	var v answerVerdict
+	if !usableAnswer(answer.Current) {
+		value := "nil"
+		if answer.Current != nil {
+			value = answer.Current.String()
+		}
+		v.invalidReason = fmt.Sprintf("newest answer is %s, which is not a usable price", value)
+		slog.Warn("chainlink answer is NON-POSITIVE: the stream is publishing but the number cannot be used, so it does not refresh this feed's freshness and is reported as its own unhealthy condition",
+			"engine", f.engine, "aggregator", agg.Hex(), "answer", value)
+	}
+	at, flaw := f.classifyUpdatedAt(agg, answer.UpdatedAt)
+	v.timestampFlaw = flaw
+	v.at = at
+	v.usable = v.invalidReason == "" && v.timestampFlaw == ""
+	return v
+}
+
+// classifyUpdatedAt decides whether an oracle-supplied unix second can serve as
+// an observation time at all, and returns a REASON rather than a substitute when
+// it cannot.
+//
+// AnswerUpdated.updatedAt is untrusted input to a health signal, and two shapes
+// cannot be taken at face value:
+//
+//   - a value past int64 range would wrap NEGATIVE and read as a pre-1970 answer;
+//   - a value implausibly far in the FUTURE would make now.Sub(ref) negative for
+//     as long as it is ahead, suppressing every real stall until wall-clock
+//     catches up.
+//
+// The previous answer was to CLAMP both to f.now(). That is what round 2 caught:
+// the clamped value is a process timestamp, and the same raw log re-clamps to a
+// NEW process time on every restart, rewind or apply-error hydration — so
+// repeated restarts inside the threshold kept a feed with one malformed future
+// timestamp healthy forever. A refusal is durable where a substitution is not: the
+// same log always yields the same refusal.
+//
+// LIMIT, STATED PLAINLY, because a refusal is not a free lunch:
+//
+//   - The future test compares against wall clock, so a future timestamp stops
+//     being "future" once wall-clock reaches it, and from that moment the feed is
+//     measured from the time the oracle claimed. That grants one threshold window
+//     starting at the CLAIMED time. It is bounded, deterministic and identical
+//     across restarts — which is the property that matters — but it is not zero.
+//     Until then the feed is UNHEALTHY, so a year-3000 timestamp fails readiness
+//     for centuries instead of silencing the feed for centuries.
+//   - An out-of-range value has no time at all, so such a feed can only ever be
+//     judged from its previous usable answer, or from liveSince if it has none.
+func (f *FeedDeriver) classifyUpdatedAt(agg common.Address, updatedAt uint64) (time.Time, string) {
 	if updatedAt > math.MaxInt64 {
-		slog.Warn("chainlink answer reports an out-of-range updatedAt; treating it as observed now for staleness purposes",
+		slog.Warn("chainlink answer reports an OUT-OF-RANGE updatedAt; it establishes no observation time and is reported as an unhealthy condition rather than substituted with this process's clock",
 			"engine", f.engine, "aggregator", agg.Hex(), "reported", updatedAt)
-		return now
+		return time.Time{}, fmt.Sprintf("updatedAt %d is outside int64 range, so it names no time", updatedAt)
 	}
 	reported := time.Unix(int64(updatedAt), 0).UTC()
-	if reported.After(now) {
-		slog.Warn("chainlink answer reports a FUTURE updatedAt; treating it as observed now for staleness purposes",
-			"engine", f.engine, "aggregator", agg.Hex(), "reported", reported.Format(time.RFC3339))
-		return now
+	if ahead := reported.Sub(f.now()); ahead > futureTimestampTolerance {
+		slog.Warn("chainlink answer reports an implausibly FUTURE updatedAt; it establishes no observation time and is reported as an unhealthy condition rather than clamped to this process's clock (clamping was not durable: the same log re-clamped to a new process time on every restart)",
+			"engine", f.engine, "aggregator", agg.Hex(),
+			"reported", reported.Format(time.RFC3339), "ahead", ahead.Truncate(time.Second),
+			"tolerance", futureTimestampTolerance)
+		return time.Time{}, fmt.Sprintf("updatedAt %s is %s ahead of observation time (tolerance %s)",
+			reported.Format(time.RFC3339), ahead.Truncate(time.Second), futureTimestampTolerance)
 	}
-	return reported
+	return reported, ""
 }
 
-// observe merges one CONFIRMED observation into committed freshness state,
-// keeping the newest per aggregator.
-func (f *FeedDeriver) observe(agg common.Address, t time.Time) {
-	if prev, ok := f.lastSeen[agg]; ok && !t.After(prev) {
+// mergeObservation merges one CONFIRMED window into committed state.
+//
+// Only a USABLE answer moves lastUsable, and it moves it forward only. The flaw
+// markers describe the window's NEWEST answer, so a newest answer that is fine
+// clears them — which is what makes both conditions recoverable.
+func (f *FeedDeriver) mergeObservation(agg common.Address, s stagedAnswer) {
+	if s.hasUsable {
+		if prev, ok := f.lastUsable[agg]; !ok || s.usableAt.After(prev) {
+			f.lastUsable[agg] = s.usableAt
+		}
+	}
+	markOrClear(f.invalidNewest, agg, s.invalidReason)
+	markOrClear(f.timestampFlawed, agg, s.timestampFlaw)
+}
+
+// markOrClear records a non-empty reason for agg and removes the entry otherwise.
+func markOrClear(m map[common.Address]string, agg common.Address, reason string) {
+	if reason != "" {
+		m[agg] = reason
 		return
 	}
-	f.lastSeen[agg] = t
+	delete(m, agg)
 }
 
 // hydrateFreshness reads each aggregator's newest stored AnswerUpdated at or
@@ -573,6 +733,17 @@ func (f *FeedDeriver) observe(agg common.Address, t time.Time) {
 // oracle's own updatedAt lives in the log's data word — the prices table does not
 // carry it. raw_logs is also the artifact the walker rewinds, so a hydrated
 // verdict can never describe an orphaned block.
+//
+// DISCLOSED LIMIT of hydration, precisely. LatestLogsByTopic returns only the
+// NEWEST log per aggregator, so when that newest answer is UNUSABLE, hydration
+// cannot see an older usable one behind it — the aggregator comes back with a flaw
+// marker and no usable reference, and its publication clock therefore restarts from
+// liveSince. That sub-verdict IS resettable by restart. It is not a false-green,
+// because the flaw marker itself is durable (the same log always decodes the same
+// way) and unhealthy, so readiness stays red for as long as the newest answer is
+// unusable — the publication verdict is redundant while that holds. Recovering the
+// older usable timestamp would need a scan back through raw_logs per aggregator,
+// which is deliberately not done here; the limit is stated instead of implied.
 func (f *FeedDeriver) hydrateFreshness(ctx context.Context, cursor uint64, found bool) error {
 	if f.hydrated && f.hydratedThrough == cursor {
 		return nil
@@ -581,7 +752,7 @@ func (f *FeedDeriver) hydrateFreshness(ctx context.Context, cursor uint64, found
 		// No cursor: nothing has been derived, so there is nothing durable to
 		// hydrate from and every feed is legitimately unobserved. This is a
 		// COMPLETE hydration of an empty state, not an absence of one.
-		f.lastSeen = map[common.Address]time.Time{}
+		f.resetObserved()
 		f.hydrated, f.hydratedThrough = true, 0
 		return nil
 	}
@@ -591,7 +762,13 @@ func (f *FeedDeriver) hydrateFreshness(ctx context.Context, cursor uint64, found
 		f.hydrated = false
 		return fmt.Errorf("feed deriver %q: hydrate publication freshness through %d: %w", f.engine, cursor, err)
 	}
-	fresh := make(map[common.Address]time.Time, len(logs))
+	// Hydration REBUILDS committed state from scratch, so an aggregator whose
+	// newest surviving answer is usable loses its flaw markers and vice versa —
+	// exactly the same rule mergeObservation applies, applied to the newest log
+	// per aggregator that the store returned.
+	usable := make(map[common.Address]time.Time, len(logs))
+	invalid := map[common.Address]string{}
+	flawed := map[common.Address]string{}
 	for _, l := range logs {
 		if len(l.Address) != common.AddressLength {
 			return fmt.Errorf("feed deriver %q: stored log %x/%d has a %d-byte address",
@@ -613,18 +790,33 @@ func (f *FeedDeriver) hydrateFreshness(ctx context.Context, cursor uint64, found
 		if !ok {
 			continue
 		}
-		t := f.clampUpdatedAt(agg, answer.UpdatedAt)
-		if prev, seen := fresh[agg]; seen && !t.After(prev) {
+		v := f.classifyAnswer(agg, answer)
+		if v.usable {
+			usable[agg] = v.at
 			continue
 		}
-		fresh[agg] = t
+		if v.invalidReason != "" {
+			invalid[agg] = v.invalidReason
+		}
+		if v.timestampFlaw != "" {
+			flawed[agg] = v.timestampFlaw
+		}
 	}
-	f.lastSeen = fresh
+	f.lastUsable, f.invalidNewest, f.timestampFlawed = usable, invalid, flawed
 	f.hydrated, f.hydratedThrough = true, cursor
 	slog.Info("hydrated chainlink publication freshness from durable raw logs",
-		"engine", f.engine, "throughBlock", cursor, "aggregatorsObserved", len(fresh),
+		"engine", f.engine, "throughBlock", cursor, "aggregatorsUsable", len(usable),
+		"aggregatorsInvalidNewest", len(invalid), "aggregatorsTimestampFlawed", len(flawed),
 		"aggregatorsConfigured", len(f.byAggregator))
 	return nil
+}
+
+// resetObserved empties every committed observation cache. Used only where an
+// EMPTY state is the complete, correct hydration (no derive cursor at all).
+func (f *FeedDeriver) resetObserved() {
+	f.lastUsable = map[common.Address]time.Time{}
+	f.invalidNewest = map[common.Address]string{}
+	f.timestampFlawed = map[common.Address]string{}
 }
 
 // discardAndRehydrate implements the apply-error reset contract: the caller's
@@ -771,15 +963,18 @@ func (f *FeedDeriver) evaluateStaleness(ctx context.Context, frontier, cursor ui
 		if b.StartBlock > cursor {
 			continue // this stream's first answer is above what we have derived
 		}
-		// An OBSERVED feed is measured from its own newest answer — now read back
-		// from durable logs, so a restart cannot reset it. A feed we have never
-		// observed is measured from the moment we went live instead: "unknown"
-		// must not mean "forever fresh", or a feed with no history at all would
-		// never be announced. liveSince is deliberately NOT a floor under an
-		// observed timestamp — a stream whose last answer predates the threshold
-		// is stale precisely because it is old, and clamping it up to liveSince
-		// would suppress every genuine stall a caught-up deriver can see.
-		ref, observed := f.lastSeen[agg]
+		// An OBSERVED feed is measured from its own newest USABLE answer — read
+		// back from durable logs, so a restart cannot reset it, and never from an
+		// unusable one, so a stream answering zero or carrying a broken timestamp
+		// ages here exactly like a stream answering nothing. A feed we have never
+		// usably observed is measured from the moment we went live instead:
+		// "unknown" must not mean "forever fresh", or a feed with no usable
+		// history at all would never be announced. liveSince is deliberately NOT
+		// a floor under an observed timestamp — a stream whose last answer
+		// predates the threshold is stale precisely because it is old, and
+		// clamping it up to liveSince would suppress every genuine stall a
+		// caught-up deriver can see.
+		ref, observed := f.lastUsable[agg]
 		if !observed {
 			ref = f.liveSince
 		}
@@ -879,12 +1074,18 @@ func (f *FeedDeriver) probeHead(ctx context.Context, frontier uint64) {
 	}
 }
 
-// lastSeenLabel renders an aggregator's last observed answer time for logs,
-// distinguishing "no durable answer at or below the derive cursor" from a real
-// timestamp.
+// lastSeenLabel renders an aggregator's last USABLE answer time for logs,
+// distinguishing "no usable durable answer at or below the derive cursor" from a
+// real timestamp, and naming the flaw when the newest answer is the unusable one.
 func (f *FeedDeriver) lastSeenLabel(agg common.Address) string {
-	if t, ok := f.lastSeen[agg]; ok {
+	if t, ok := f.lastUsable[agg]; ok {
 		return t.Format(time.RFC3339)
+	}
+	if reason, bad := f.invalidNewest[agg]; bad {
+		return "no usable AnswerUpdated at or below the derive cursor: " + reason
+	}
+	if reason, bad := f.timestampFlawed[agg]; bad {
+		return "no usable AnswerUpdated at or below the derive cursor: " + reason
 	}
 	return "no stored AnswerUpdated at or below the derive cursor"
 }
