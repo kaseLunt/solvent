@@ -185,6 +185,93 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 	return out, err
 }
 
+// Head is a chain head observation: the height, the header's own TIMESTAMP and
+// its hash. The timestamp is the part that makes a head observation
+// falsifiable — a node frozen on old state still answers eth_blockNumber with a
+// plausible-looking height, but it cannot make that block's header claim to be
+// recent. A caller judging "is this node actually at a live head" must look at
+// Time, not only at Number.
+type Head struct {
+	Number uint64
+	Time   uint64
+	Hash   common.Hash
+}
+
+// HeadFrom reads the latest header with a CALLER-SCOPED starting endpoint, the
+// same routing discipline as CallFrom: the attempt walk starts at startIndex
+// (mod the endpoint count) rather than at the shared sticky hint, and success
+// neither reads nor writes that hint. It exists so a caller can probe the head
+// through an endpoint OTHER than the one ingestion is currently pinned to: a
+// liveness probe that shares its dependency with the pipeline it is supposed to
+// be judging cannot distinguish "the feeds stopped publishing" from "our RPC
+// froze".
+//
+// With a single configured endpoint there is nothing to route around and the
+// probe is NOT independent; callers that rely on independence must say so and
+// carry another guard (see internal/prices' verdict TTL).
+func (f *Failover) HeadFrom(ctx context.Context, startIndex int) (Head, EndpointToken, error) {
+	n := len(f.clients)
+	start := ((startIndex % n) + n) % n // normalize, negatives included
+	var out Head
+	idx, err := f.doFrom(ctx, "head", start, func(ctx context.Context, c rpcClient) error {
+		h, err := c.HeaderByNumber(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			return fmt.Errorf("latest header not found")
+		}
+		if h.Number == nil || !h.Number.IsUint64() {
+			return fmt.Errorf("latest header number %v is not a uint64", h.Number)
+		}
+		out = Head{Number: h.Number.Uint64(), Time: h.Time, Hash: h.Hash()}
+		return nil
+	})
+	if err != nil {
+		return Head{}, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
+// ActiveEndpoint reports the SHARED routing hint's current index — the endpoint
+// that most recently served a shared-path call, which is the one ingestion is
+// effectively pinned to. It is exposed so a semantic caller can deliberately
+// route AROUND it (HeadFrom(active+1)) instead of unknowingly sharing it. It is
+// a hint, not a health verdict: by the time a caller acts on it another call may
+// have moved it, which is harmless — the point is only to prefer a different
+// endpoint, not to guarantee one.
+func (f *Failover) ActiveEndpoint() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.active
+}
+
+// HeaderHashFrom is HeaderHash with a CALLER-SCOPED starting endpoint (see
+// CallFrom for why the shared hint stays out of it) and an EndpointToken naming
+// the endpoint that answered. Callers use it to re-verify a hash they recorded
+// earlier against the live chain — the check that turns "the chain may have
+// reorged under this row" from an assumption into a decidable question.
+func (f *Failover) HeaderHashFrom(ctx context.Context, startIndex int, n uint64) (common.Hash, EndpointToken, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out common.Hash
+	idx, err := f.doFrom(ctx, "headerHash", start, func(ctx context.Context, c rpcClient) error {
+		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			return fmt.Errorf("header %d not found", n)
+		}
+		out = h.Hash()
+		return nil
+	})
+	if err != nil {
+		return common.Hash{}, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
 // TxCalldata returns the raw input data (selector included) of the
 // transaction with hash txHash. Additive method for the debt_manager
 // deriver's migration-genesis path (Phase 2 Task 5): the 7,337 migrated

@@ -67,9 +67,17 @@ func TestLoadRealFeedRegistry(t *testing.T) {
 		require.Empty(t, a.Oracle.Method, "%s: a stream carries no poll method", a.Symbol)
 	}
 
-	// weETH is the one asset that ALSO needs a polled ratio: its Aave cap
-	// adapter is getRate() x ETH/USD, and the stream only carries the ETH/USD
-	// leg. Both rows are recorded; composition is P3's.
+	// weETH is the one asset that ALSO needs a polled ratio: the stream carries
+	// only the ETH/USD leg, so the daily-moving getRate() ratio has to be polled
+	// separately. Both rows are recorded and NEITHER is composed here.
+	//
+	// WHAT THE PAIR IS, EXACTLY: multiplying them yields an UNCAPPED REFERENCE
+	// VALUE, never the Aave adapter's guaranteed output — the deployed weETH
+	// adapter applies a GROWTH CAP to the rate it uses (recon "Oracle wiring" is
+	// normative), so the raw product tracks the adapter only while that cap is
+	// slack, and diverges exactly in the depeg/exploit scenarios where the
+	// difference is most expensive. P3 must implement the growth-cap behaviour or
+	// read the adapter's own output before claiming adapter equivalence.
 	ratios := feeds.RatioAssets(1)
 	require.Len(t, ratios, 1)
 	require.Equal(t, "weETH", ratios[0].Symbol)
@@ -111,6 +119,7 @@ func baseFeedRegistry() map[string]any {
 					"kind": "chainlink_stream", "contract": "0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5",
 					"proxy":      "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
 					"startBlock": 20779893, "priceDecimals": 8,
+					"heartbeatSeconds": 3600, "graceSeconds": 1800,
 				},
 				"ratio": map[string]any{
 					"contract": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
@@ -182,6 +191,29 @@ func TestLoadFeedsRefusals(t *testing.T) {
 		{"stream proxy equals aggregator", func(r map[string]any) {
 			oracle(r, 1)["proxy"] = oracle(r, 1)["contract"]
 		}, "must name the PROXY and the RAW AGGREGATOR separately"},
+		// B3: a stream MUST state its own publication bound. Every way of not
+		// stating one is refused, so no stream can silently inherit a default.
+		{"stream without heartbeat", func(r map[string]any) {
+			delete(oracle(r, 1), "heartbeatSeconds")
+		}, "oracle.heartbeatSeconds must be in [1,604800]"},
+		{"stream with zero heartbeat", func(r map[string]any) {
+			oracle(r, 1)["heartbeatSeconds"] = 0
+		}, "oracle.heartbeatSeconds must be in"},
+		{"stream with absurd heartbeat", func(r map[string]any) {
+			oracle(r, 1)["heartbeatSeconds"] = 864000
+		}, "oracle.heartbeatSeconds must be in"},
+		{"stream without grace", func(r map[string]any) {
+			delete(oracle(r, 1), "graceSeconds")
+		}, "oracle.graceSeconds must be in [1,604800]"},
+		{"stream with absurd grace", func(r map[string]any) {
+			oracle(r, 1)["graceSeconds"] = 864000
+		}, "oracle.graceSeconds must be in"},
+		{"poll with heartbeat", func(r map[string]any) {
+			oracle(r, 0)["heartbeatSeconds"] = 3600
+		}, "heartbeatSeconds/graceSeconds are meaningless"},
+		{"poll with grace", func(r map[string]any) {
+			oracle(r, 0)["graceSeconds"] = 60
+		}, "heartbeatSeconds/graceSeconds are meaningless"},
 		{"ratio without method", func(r map[string]any) {
 			asset(r, 1)["ratio"].(map[string]any)["method"] = ""
 		}, "ratio.method must not be empty"},
@@ -222,6 +254,7 @@ func TestLoadFeedsRefusesSharedAggregator(t *testing.T) {
 			"kind": "chainlink_stream", "contract": "0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5",
 			"proxy":      "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
 			"startBlock": 20188117, "priceDecimals": 8,
+			"heartbeatSeconds": 86400, "graceSeconds": 3600,
 		},
 	}
 	root["assets"] = append(root["assets"].([]any), dup)
@@ -265,25 +298,92 @@ func TestLoadPriceInterval(t *testing.T) {
 	require.ErrorContains(t, err, "must be positive")
 }
 
-// SOLVENT_FEED_STALENESS: default 26h, env-parsed, positive-only.
-func TestLoadFeedStaleness(t *testing.T) {
+// SOLVENT_FEED_STALENESS is RETIRED and REFUSED, not ignored. One global bound
+// could not express per-feed heartbeats, and silently dropping a variable an
+// operator set would leave them believing a threshold they configured is still
+// being applied.
+func TestLoadRefusesRetiredFeedStalenessVariable(t *testing.T) {
 	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
 	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	// Hermetic against an ambient value (make exports .env): empty reads as unset.
+	t.Setenv("SOLVENT_FEED_STALENESS", "")
+
+	_, err := Load("testdata/contracts.json")
+	require.NoError(t, err, "unset is the normal case")
+
+	t.Setenv("SOLVENT_FEED_STALENESS", "26h")
+	_, err = Load("testdata/contracts.json")
+	require.ErrorContains(t, err, "SOLVENT_FEED_STALENESS is retired")
+	require.ErrorContains(t, err, "oracle.heartbeatSeconds")
+}
+
+// SOLVENT_HEALTH_ADDR: loopback by default, overridable, and disabled ONLY by an
+// explicit "off" — there is no accidental path to a daemon with no probe.
+func TestLoadHealthAddr(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	// Hermetic against an ambient value (make exports .env): empty reads as unset.
+	t.Setenv("SOLVENT_HEALTH_ADDR", "")
 
 	cfg, err := Load("testdata/contracts.json")
 	require.NoError(t, err)
-	require.Equal(t, 26*time.Hour, cfg.FeedStaleness, "default is 26h")
+	require.Equal(t, DefaultHealthAddr, cfg.HealthAddr)
+	require.Equal(t, "127.0.0.1:9090", cfg.HealthAddr, "loopback: the surface reports internal failure detail")
 
-	t.Setenv("SOLVENT_FEED_STALENESS", "90m")
+	t.Setenv("SOLVENT_HEALTH_ADDR", "0.0.0.0:8080")
 	cfg, err = Load("testdata/contracts.json")
 	require.NoError(t, err)
-	require.Equal(t, 90*time.Minute, cfg.FeedStaleness)
+	require.Equal(t, "0.0.0.0:8080", cfg.HealthAddr)
 
-	t.Setenv("SOLVENT_FEED_STALENESS", "nope")
-	_, err = Load("testdata/contracts.json")
-	require.ErrorContains(t, err, "SOLVENT_FEED_STALENESS")
+	for _, off := range []string{"off", "OFF", " off "} {
+		t.Setenv("SOLVENT_HEALTH_ADDR", off)
+		cfg, err = Load("testdata/contracts.json")
+		require.NoError(t, err)
+		require.Empty(t, cfg.HealthAddr, "%q disables the surface explicitly", off)
+	}
+}
 
-	t.Setenv("SOLVENT_FEED_STALENESS", "-1h")
-	_, err = Load("testdata/contracts.json")
-	require.ErrorContains(t, err, "must be positive")
+// B3 FIXTURE PIN: every configured stream in the REAL registry declares its own
+// heartbeat and grace, and the resulting threshold is pinned here so a registry
+// edit that loosens a liquidation-facing bound fails in this test rather than in
+// production.
+//
+// PROVENANCE, stated exactly (see recon/derivation-notes.md for the long form):
+// the ETH/USD heartbeat of 3600s is evidence-backed — Codex's round-1 review
+// independently observed deployed code consuming this exact proxy with a
+// 3600-second bound (constructor evidence 0x641169f048ee8de8b3037c9d9c840060fe03e463).
+// The three 86400s values are the PUBLISHED Chainlink mainnet heartbeats for those
+// feeds and were NOT independently verified from bytecode by this wave. The grace
+// values are this repo's operator margin, not contractual quantities.
+func TestRealFeedRegistryStalenessThresholds(t *testing.T) {
+	feeds, err := LoadFeeds(filepath.Join("..", "..", "recon", "feeds.json"), testFeedChains)
+	require.NoError(t, err)
+
+	type bound struct{ heartbeat, grace, threshold time.Duration }
+	want := map[string]bound{
+		"weETH": {3600 * time.Second, 1800 * time.Second, 90 * time.Minute},
+		"USDC":  {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
+		"PYUSD": {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
+		"FRAX":  {86400 * time.Second, 3600 * time.Second, 25 * time.Hour},
+	}
+	streams := feeds.StreamAssets(1)
+	require.Len(t, streams, 4)
+	for _, a := range streams {
+		w, ok := want[a.Symbol]
+		require.True(t, ok, "unexpected stream asset %s", a.Symbol)
+		require.Equal(t, w.heartbeat, a.Oracle.Heartbeat, "%s heartbeat", a.Symbol)
+		require.Equal(t, w.grace, a.Oracle.Grace, "%s grace", a.Symbol)
+		require.Equal(t, w.threshold, a.Oracle.StalenessThreshold(), "%s threshold", a.Symbol)
+		// No feed may be judged more loosely than the retired 26h global bound:
+		// the point of the change was to TIGHTEN, never to relax.
+		require.LessOrEqual(t, a.Oracle.StalenessThreshold(), 26*time.Hour, a.Symbol)
+	}
+
+	// A poll oracle has no publication stream, so it declares no heartbeat and
+	// reports no threshold.
+	for _, a := range feeds.PollAssets(10) {
+		require.Zero(t, a.Oracle.Heartbeat, a.Symbol)
+		require.Zero(t, a.Oracle.Grace, a.Symbol)
+		require.Zero(t, a.Oracle.StalenessThreshold(), a.Symbol)
+	}
 }

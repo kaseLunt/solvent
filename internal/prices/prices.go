@@ -43,9 +43,14 @@
 //
 // weETH gets BOTH rows and NO composition: the ETH/USD stream row (from the
 // aggregator behind the adapter) and a POLLED getRate() ratio row under source
-// "ratio:getrate:<contract>". The P3 risk engine composes them; composing at
-// ingest time would bake one particular pairing of two independently-timed
-// observations into storage and lose the ability to re-time it.
+// "ratio:getrate:<contract>". Multiplying them yields an UNCAPPED REFERENCE
+// VALUE and never the adapter's guaranteed output — the growth cap above applies
+// to the rate the adapter uses, so the product tracks the adapter only while the
+// cap is slack. P3 must implement the growth-cap behaviour, or read the
+// adapter's own output, before claiming adapter equivalence. Composing at ingest
+// time is refused for a second, independent reason: it would bake one particular
+// pairing of two independently-timed observations into storage and lose the
+// ability to re-time it.
 //
 // PHASE CHANGES: a Chainlink PROXY re-points aggregator() on a phase change, so
 // the raw aggregator recorded in the registry covers the CURRENT PHASE ONLY —
@@ -74,24 +79,43 @@
 // the derive engines already carry, and the reason the cursors are per-chain
 // rather than global.
 //
-// ONE HONEST COST of routing the poller through that mechanism: it cannot
-// re-derive what a rewind deleted (it only ever reads `latest`; see
-// store/prices.go's ASYMMETRY note), and the rewind target is the WALKER's
-// verified ancestor, which can sit well below the actual fork point when raw
-// logs are sparse — degenerately, a stream's StartBlock-1. A deep rewind
-// therefore discards polled price history for heights that were in all
-// likelihood canonical, and the worst case discards all of it. The distance is
-// WARNed (see Poller.rewind), and the next round re-establishes a price at the
-// new head within one cadence interval. The alternative — acking the epoch while
-// keeping the rows — would leave this table asserting engine-exact prices at
-// heights the chain may have replaced, which for a liquidation-facing store is
-// the worse failure.
+// The poller cannot re-derive what a rewind deleted — it only ever reads
+// `latest` (see store/prices.go's ASYMMETRY note) — so a rewind that lowered its
+// cursor to the WALKER's verified ancestor was unbounded data loss: that ancestor
+// is the deepest block the walker's own SPARSE logs could be hash-verified at,
+// which is unrelated to the blocks where polls happened, and degenerately is a
+// stream's StartBlock-1. A full rewalk could therefore delete every polled row,
+// canonical history included.
+//
+// That is fixed with DURABLE POLL ANCHORS rather than with a weaker gate.
+// multicall3's tryBlockAndAggregate already returns the execution block HASH; the
+// decoder now keeps it, and each landed round records (block, hash) in
+// price_poll_anchors atomically with its rows. Reorg repair walks those anchors
+// down from the newest and re-checks each hash against the live chain through an
+// endpoint of its own choosing; the first match ENTAILS that this block and every
+// ancestor are unchanged (blocks are chained by parent hash), so rows at or below
+// it are retained and only the unverified suffix is deleted. That entailment is
+// conditional on the answering endpoint being honest — the same trust every
+// ingested log rests on, no more and no less; it is not a cryptographic proof
+// against a hostile provider. The epoch gate is unchanged — acking while keeping
+// rows above the fork point would leave this table asserting engine-exact prices
+// at replaced heights, which for a liquidation-facing store is the worse failure.
+//
+// WHAT IS STILL LOST, EXACTLY: rows above the highest anchor whose hash matches.
+// If no anchor matches within the probe bound, or the relevant anchors have aged
+// out of retention, repair falls back to the walker's target and the old
+// unbounded loss applies for that rewind. Both cases are WARNed with the numbers,
+// and the next round re-establishes a price at the new head within one cadence
+// interval. No claim is made that history is always recoverable — only that it is
+// no longer discarded when it can be proven canonical.
 //
 // # NOT SAFE FOR CONCURRENT USE
 //
 // Poller.Step and FeedDeriver.Step are driven from the daemon's single loop
 // under the single-writer contract (D-004), like every other worker in this
-// codebase.
+// codebase. The Condition surface both expose is read by the daemon's health
+// endpoint from another goroutine; see cmd/indexer's healthState, which takes its
+// own copy under a mutex rather than letting a handler touch worker state.
 package prices
 
 import (
@@ -360,31 +384,51 @@ type multicallResult struct {
 }
 
 // unpackMulticallResult decodes a tryBlockAndAggregate return: the execution
-// block number and one (success, returnData) pair per submitted call. Any panic
-// from malformed provider bytes is converted into an error.
-func unpackMulticallResult(out []byte, wantCalls int) (block uint64, results []multicallResult, err error) {
+// block number, the execution block HASH, and one (success, returnData) pair per
+// submitted call. Any panic from malformed provider bytes is converted into an
+// error.
+//
+// The HASH is the load-bearing addition of the fix wave. An earlier version
+// decoded it and threw it away, which left reorg repair with no way to ask
+// whether a poll round's block still exists on the canonical chain — and
+// therefore no alternative to deleting every polled row above the raw-log
+// walker's deepest verified ancestor. It is returned as raw bytes so the store
+// layer can persist it without importing an address/hash type.
+//
+// A ZERO hash is refused: multicall3 returns blockhash(block.number), which is
+// never zero for the block being executed, so a zero here means the response is
+// malformed or came from a shim that does not implement the call properly — and
+// an anchor with a zero hash would "verify" against nothing.
+func unpackMulticallResult(out []byte, wantCalls int) (block uint64, blockHash []byte, results []multicallResult, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			block, results, err = 0, nil, fmt.Errorf("unpack multicall result: recovered panic: %v", rec)
+			block, blockHash, results, err = 0, nil, nil, fmt.Errorf("unpack multicall result: recovered panic: %v", rec)
 		}
 	}()
 	vals, err := multicall3ABI.Unpack("tryBlockAndAggregate", out)
 	if err != nil {
-		return 0, nil, fmt.Errorf("unpack multicall result: %w", err)
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: %w", err)
 	}
 	if len(vals) != 3 {
-		return 0, nil, fmt.Errorf("unpack multicall result: expected 3 values, got %d", len(vals))
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: expected 3 values, got %d", len(vals))
 	}
 	blockNum, ok := vals[0].(*big.Int)
 	if !ok || !blockNum.IsUint64() {
-		return 0, nil, fmt.Errorf("unpack multicall result: block number %v is not a uint64", vals[0])
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: block number %v is not a uint64", vals[0])
+	}
+	hash, ok := vals[1].([32]byte)
+	if !ok {
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: block hash is %T, not a bytes32", vals[1])
+	}
+	if hash == ([32]byte{}) {
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: block hash at %s is zero — refusing to anchor a round to an unverifiable block", blockNum)
 	}
 	raw := reflect.ValueOf(vals[2])
 	if raw.Kind() != reflect.Slice {
-		return 0, nil, fmt.Errorf("unpack multicall result: returnData is %T, not a slice", vals[2])
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: returnData is %T, not a slice", vals[2])
 	}
 	if raw.Len() != wantCalls {
-		return 0, nil, fmt.Errorf("unpack multicall result: %d results for %d calls", raw.Len(), wantCalls)
+		return 0, nil, nil, fmt.Errorf("unpack multicall result: %d results for %d calls", raw.Len(), wantCalls)
 	}
 	results = make([]multicallResult, raw.Len())
 	for i := 0; i < raw.Len(); i++ {
@@ -394,24 +438,102 @@ func unpackMulticallResult(out []byte, wantCalls int) (block uint64, results []m
 			returnData: el.Field(1).Interface().([]byte),
 		}
 	}
-	return blockNum.Uint64(), results, nil
+	hashBytes := make([]byte, 32)
+	copy(hashBytes, hash[:])
+	return blockNum.Uint64(), hashBytes, results, nil
 }
 
 // ---------------------------------------------------------------------------
 // Store and chain surfaces.
 // ---------------------------------------------------------------------------
 
+// Condition is one NAMED, independently-actionable health condition a price
+// worker reports. Health verdicts are keyed rather than concatenated because the
+// operator response differs per key: "this aggregator stopped publishing" and
+// "our RPC or ingest pipeline is frozen" have the same wall-clock symptom and
+// opposite remedies, and a single blended string sends the operator to the wrong
+// one. An empty slice means healthy.
+type Condition struct {
+	// Name is a stable machine key ("feed_publication", "rpc_ingest_lag",
+	// "poll_round", "poll_target_freshness"), suitable for a health endpoint's
+	// JSON and for alert routing.
+	Name string
+	// Reason is the human-facing explanation, including the numbers that
+	// justify it.
+	Reason string
+}
+
+// Condition names. They are exported because the daemon's health endpoint keys
+// its JSON by them and alerting routes on them, so they are part of the
+// operational contract rather than log text.
+const (
+	// ConditionPollRound: no poll round carrying at least one price has landed
+	// within the cadence grace window. Distinct from the next one on purpose: it
+	// means the poller is not writing AT ALL (transport, gate, or every oracle
+	// failing), not that individual assets are missing.
+	ConditionPollRound = "poll_round"
+	// ConditionPollTargetFreshness: named registry assets whose NEWEST DURABLE
+	// price is older than the cadence grace window, while other assets are
+	// current. This is the partial-failure signal a round-level anchor cannot
+	// see.
+	ConditionPollTargetFreshness = "poll_target_freshness"
+	// ConditionPollFreshnessUnhydrated: per-asset freshness has not been read
+	// back from durable storage yet, so no freshness verdict can be trusted.
+	// Fail-closed after the grace window rather than reporting green on unknown
+	// state.
+	ConditionPollFreshnessUnhydrated = "poll_freshness_unhydrated"
+	// ConditionFeedPublication: named Chainlink streams whose newest DURABLE
+	// AnswerUpdated is older than that feed's own heartbeat-plus-grace.
+	ConditionFeedPublication = "feed_publication"
+	// ConditionFeedFreshnessUnhydrated: per-aggregator publication freshness has
+	// not been hydrated from raw_logs yet.
+	ConditionFeedFreshnessUnhydrated = "feed_freshness_unhydrated"
+	// ConditionRPCIngestLag: the deriver cannot confirm it is at a live head —
+	// the head probe is failing, its verdict has expired, or the head it sees is
+	// itself stale by its own header timestamp. Reported SEPARATELY from
+	// publication staleness because the failing component is ours, not the
+	// oracle's, and conflating them routes the operator to the wrong system.
+	ConditionRPCIngestLag = "rpc_ingest_lag"
+)
+
+// conditionsReason renders a condition slice into the single string the legacy
+// Health() shape returns, in the order the worker reported them.
+func conditionsReason(cs []Condition) string {
+	parts := make([]string, 0, len(cs))
+	for _, c := range cs {
+		parts = append(parts, fmt.Sprintf("%s: %s", c.Name, c.Reason))
+	}
+	return strings.Join(parts, "; ")
+}
+
 // PriceStore is the store surface both price writers drive (*store.Store
-// satisfies it; tests pass fakes). Every method is one of Task 8's additive
-// store entries or an existing Task 7 read — no existing signature moved.
+// satisfies it; tests pass fakes).
+//
+// LatestPriceFreshness is the DURABLE hydration read that keeps health honest
+// across a restart: a worker that derived freshness from process memory alone
+// reported an already-dead oracle as healthy for a fresh grace window every time
+// the process came up.
 type PriceStore interface {
 	DeriveCursor(ctx context.Context, engine string) (block uint64, found bool, err error)
 	HasUnackedReorg(ctx context.Context, engine string, chainID uint64) (bool, error)
 	ApplyPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64) error
-	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, sources []string) error
+	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, verifiedFloor uint64) error
+	LatestPriceFreshness(ctx context.Context, chainID uint64, ownerEngine string) ([]store.PriceFreshness, error)
 }
 
 var _ PriceStore = (*store.Store)(nil)
+
+// PollStore is the poller's store surface: PriceStore plus the two poll-anchor
+// entries that make reorg repair non-destructive (ApplyPolledPrices writes the
+// round's (block, hash) anchor in the same transaction as its rows;
+// PollAnchorsAbove reads the candidates repair re-verifies).
+type PollStore interface {
+	PriceStore
+	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) error
+	PollAnchorsAbove(ctx context.Context, engine string, chainID, aboveBlock uint64, limit int) ([]store.PollAnchor, error)
+}
+
+var _ PollStore = (*store.Store)(nil)
 
 // PollChain is the poller's chain surface (*chain.Failover satisfies it).
 //
@@ -421,20 +543,37 @@ var _ PriceStore = (*store.Store)(nil)
 // never sees a problem — the poller has to route around it itself, with a
 // CALLER-SCOPED preference that leaves the shared routing hint (which other
 // callers' successes legitimately re-pin) alone.
+//
+// HeaderHashFrom is the ANCESTRY check. Two separate findings need it: reorg
+// repair asks "is this stored poll anchor still canonical" before deleting the
+// rows it covers, and a cursor regression asks the same question before blaming
+// the endpoint that served the round — a regression can equally mean a reorg the
+// walker has not recorded yet, and the two diagnoses point operators in opposite
+// directions.
 type PollChain interface {
 	CallWithToken(ctx context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
 	CallFrom(ctx context.Context, startIndex int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
+	HeaderHashFrom(ctx context.Context, startIndex int, block uint64) (common.Hash, chain.EndpointToken, error)
 	EndpointCount() int
 }
 
 var _ PollChain = (*chain.Failover)(nil)
 
 // FeedChain is the feed deriver's chain surface (*chain.Failover satisfies it):
-// a head probe, to tell "caught up to live head" apart from "still in
-// backfill" before judging a stream stale, and a plain call for re-resolving a
-// proxy's aggregator().
+// a head probe that carries the header's own TIMESTAMP and can be routed through
+// a chosen endpoint, and a plain call for re-resolving a proxy's aggregator().
+//
+// HeadFrom replaced a bare BlockNumber for two reasons. A height alone cannot
+// distinguish a live head from a node frozen on old state (both report a
+// plausible number), so the header timestamp is what makes the probe
+// falsifiable; and routing it through an endpoint other than the shared hint
+// ingestion uses is what stops the probe from sharing the very dependency it is
+// meant to be judging. ActiveEndpoint exists only so the deriver can choose that
+// other endpoint.
 type FeedChain interface {
-	BlockNumber(ctx context.Context) (uint64, error)
+	HeadFrom(ctx context.Context, startIndex int) (chain.Head, chain.EndpointToken, error)
+	ActiveEndpoint() int
+	EndpointCount() int
 	Call(ctx context.Context, to common.Address, data []byte) ([]byte, error)
 }
 
@@ -505,6 +644,19 @@ type pollTarget struct {
 	Source   string
 	Decimals int32
 	view     pollView
+}
+
+// key is the target's per-asset freshness identity: (asset, source), the same
+// pair store.PriceFreshness reports, so a durable row hydrates onto exactly the
+// target that would have written it. freshnessKey below builds the same string
+// from raw bytes.
+func (t pollTarget) key() string { return freshnessKey(t.Asset.Bytes(), t.Source) }
+
+// freshnessKey builds a per-asset freshness key from a raw asset address and a
+// mechanism name. One function so the in-memory map and the durable read can
+// never disagree about the encoding.
+func freshnessKey(asset []byte, source string) string {
+	return fmt.Sprintf("%x/%s", asset, source)
 }
 
 // buildPollTargets resolves chainID's poll obligations out of the registry: one

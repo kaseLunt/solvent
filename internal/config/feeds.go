@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -51,16 +52,33 @@ var KnownFeedKinds = map[string]bool{
 // not a storage limit.
 const maxDecimals = 36
 
+// maxHeartbeatSeconds bounds a declared publication heartbeat or grace. A week
+// is far beyond any Chainlink feed's contractual heartbeat, so this is a typo
+// guard (a stray 864000 for 86400), not a policy.
+const maxHeartbeatSeconds = 7 * 24 * 60 * 60
+
 // FeedRatio is an OPTIONAL secondary POLL declared alongside an asset's
 // primary oracle: a pure exchange-RATIO read whose value is recorded as its
 // own prices row, never composed with the primary price at ingest time.
 //
-// The one registry instance is Aave's weETH cap adapter, whose USD price is
-// `getRate() x ETH/USD` (recon "Oracle wiring", Aave side): the AnswerUpdated
-// stream carries only the ETH/USD leg, so the daily-moving weETH getRate()
-// ratio has to be polled separately. The P3 risk engine composes the two rows;
-// ingest records them side by side (plan Task 8: "record BOTH the ETH/USD
-// stream price and a polled getRate() ratio row").
+// The one registry instance is Aave's weETH cap adapter, whose RATIO_PROVIDER
+// this contract is. WHAT THE TWO ROWS COMPOSE, STATED EXACTLY: multiplying the
+// polled `getRate()` ratio by the ETH/USD stream price yields an UNCAPPED
+// REFERENCE VALUE — it is NOT, and must not be presented as, the adapter's
+// guaranteed output. The deployed weETH adapter applies a GROWTH CAP to the
+// rate (recon "Oracle wiring", Aave side, is normative here), so the raw
+// composition equals the adapter's price only while that cap is not binding.
+// Caps bind precisely in depeg and exploit scenarios — the situations a
+// liquidation engine cares most about — so the divergence appears exactly when
+// it is most expensive to be wrong about.
+//
+// CONSEQUENCE FOR P3: before any claim of adapter equivalence, P3 must either
+// implement the growth-cap behaviour itself or read the adapter's own output
+// directly. Until it does, these two rows are a reference input, not engine
+// truth. Ingest deliberately records them side by side and composes nothing
+// (plan Task 8: "record BOTH the ETH/USD stream price and a polled getRate()
+// ratio row"); composing at ingest time would additionally bake one particular
+// pairing of two independently-timed observations into storage.
 type FeedRatio struct {
 	Contract common.Address // contract exposing the ratio view (Aave's RATIO_PROVIDER)
 	Method   string         // ratio view signature, e.g. "getRate()"
@@ -89,6 +107,40 @@ type FeedOracle struct {
 	// the address it finds. Config repair stays MANUAL — auto-repointing is an
 	// explicit deferral, not an omission.
 	Proxy common.Address
+	// Heartbeat is THIS stream's own maximum publication interval — the
+	// contractual bound past which an absent AnswerUpdated means the stream has
+	// stopped, not merely that the price has not moved (streams only).
+	//
+	// It is per-feed because the bound genuinely is: the fix wave replaced a
+	// single global 26h threshold that was PERMISSIVE rather than conservative
+	// for liquidation-facing freshness. The ETH/USD stream behind the weETH
+	// adapter is consumed with a 3600-second heartbeat by deployed code, so a
+	// stopped ETH/USD stream could evade a 26h signal for ~25h beyond its
+	// contractual bound. Per-value provenance — which heartbeats are
+	// bytecode-evidenced and which are the published feed parameters — is
+	// recorded in recon/derivation-notes.md; the loader only enforces that a
+	// value is declared and in range.
+	Heartbeat time.Duration
+	// Grace is the OPERATOR MARGIN added on top of Heartbeat before a stream is
+	// judged stale (streams only). It is declared explicitly, per feed, rather
+	// than derived from a global multiplier, so the total threshold is readable
+	// straight off the registry and a tighter feed cannot inherit a looser
+	// feed's slack. It absorbs ordinary publication jitter and this indexer's
+	// own derive lag; it is a policy choice of this repo, not a contractual
+	// quantity.
+	Grace time.Duration
+}
+
+// StalenessThreshold is how long this oracle may go without publishing before
+// the feed deriver judges it stale: its own contractual heartbeat plus its own
+// declared operator grace. Zero for poll oracles, which have no publication
+// stream to be stale (their failure mode is a reverting or frozen view call,
+// which the poller's per-asset freshness covers instead).
+func (o FeedOracle) StalenessThreshold() time.Duration {
+	if o.Kind != FeedKindChainlinkStream {
+		return 0
+	}
+	return o.Heartbeat + o.Grace
 }
 
 // Feed is one registry asset: the priced token plus its oracle wiring.
@@ -155,12 +207,14 @@ type fileFeedRatio struct {
 }
 
 type fileFeedOracle struct {
-	Kind          string `json:"kind"`
-	Contract      string `json:"contract"`
-	Method        string `json:"method"`
-	PriceDecimals int32  `json:"priceDecimals"`
-	StartBlock    uint64 `json:"startBlock"`
-	Proxy         string `json:"proxy"`
+	Kind             string `json:"kind"`
+	Contract         string `json:"contract"`
+	Method           string `json:"method"`
+	PriceDecimals    int32  `json:"priceDecimals"`
+	StartBlock       uint64 `json:"startBlock"`
+	Proxy            string `json:"proxy"`
+	HeartbeatSeconds int64  `json:"heartbeatSeconds"`
+	GraceSeconds     int64  `json:"graceSeconds"`
 }
 
 type fileFeed struct {
@@ -263,10 +317,10 @@ func LoadFeeds(path string, chains map[string]Chain) (*Feeds, error) {
 		}
 		switch o.Kind {
 		case FeedKindPoll:
-			// A poll is answered by a view call, so it has no log stream and no
-			// proxy to re-resolve. Both are refused rather than ignored: a
-			// registry entry carrying them means its kind and its intent
-			// disagree.
+			// A poll is answered by a view call, so it has no log stream, no
+			// proxy to re-resolve and no publication heartbeat. All are refused
+			// rather than ignored: a registry entry carrying them means its kind
+			// and its intent disagree.
 			if o.Method == "" {
 				return nil, fmt.Errorf("%s: oracle.method is required for kind %q", where, FeedKindPoll)
 			}
@@ -278,6 +332,10 @@ func LoadFeeds(path string, chains map[string]Chain) (*Feeds, error) {
 				return nil, fmt.Errorf("%s: oracle.proxy is meaningless for kind %q (nothing to re-resolve)",
 					where, FeedKindPoll)
 			}
+			if o.HeartbeatSeconds != 0 || o.GraceSeconds != 0 {
+				return nil, fmt.Errorf("%s: oracle.heartbeatSeconds/graceSeconds are meaningless for kind %q (a view call has no publication stream)",
+					where, FeedKindPoll)
+			}
 		case FeedKindChainlinkStream:
 			if o.Method != "" {
 				return nil, fmt.Errorf("%s: oracle.method is meaningless for kind %q (AnswerUpdated logs carry the price)",
@@ -286,6 +344,21 @@ func LoadFeeds(path string, chains map[string]Chain) (*Feeds, error) {
 			if o.StartBlock == 0 {
 				return nil, fmt.Errorf("%s: oracle.startBlock must be > 0 for kind %q", where, FeedKindChainlinkStream)
 			}
+			// Heartbeat AND grace are both REQUIRED, and both must be stated
+			// per feed. A missing heartbeat is what produced the finding this
+			// replaces (one global 26h bound applied to every stream), and an
+			// implicit grace would reintroduce the same silent uniformity one
+			// level down.
+			if o.HeartbeatSeconds <= 0 || o.HeartbeatSeconds > maxHeartbeatSeconds {
+				return nil, fmt.Errorf("%s: oracle.heartbeatSeconds must be in [1,%d] for kind %q — this feed's own contractual publication bound, not a global default",
+					where, maxHeartbeatSeconds, FeedKindChainlinkStream)
+			}
+			if o.GraceSeconds <= 0 || o.GraceSeconds > maxHeartbeatSeconds {
+				return nil, fmt.Errorf("%s: oracle.graceSeconds must be in [1,%d] for kind %q — state the operator margin explicitly",
+					where, maxHeartbeatSeconds, FeedKindChainlinkStream)
+			}
+			oracle.Heartbeat = time.Duration(o.HeartbeatSeconds) * time.Second
+			oracle.Grace = time.Duration(o.GraceSeconds) * time.Second
 			// The proxy is what a staleness check re-resolves aggregator() on
 			// (recon stream caveat ii: proxies re-point on phase changes, and
 			// the recorded raw aggregator covers the current phase only).

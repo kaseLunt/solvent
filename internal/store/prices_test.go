@@ -252,7 +252,7 @@ func TestApplyPricesEpochGate(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
 	require.ErrorContains(t, err, "rewind prices before applying")
 
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, []string{testPollSource}))
+	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, 0))
 	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(120, 0xAA, testPollSource, 2, 6)}, 120), "admitted after the ack")
 }
@@ -271,7 +271,7 @@ func TestApplyPricesBootstrapRefusedOnEpochChain(t *testing.T) {
 	require.ErrorContains(t, err, "bootstrap via RewindPrices")
 
 	// Bootstrap at block 0: nothing of this writer's exists to delete.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, []string{testPollSource}))
+	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, 0))
 	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
 }
@@ -292,14 +292,14 @@ func TestRewindPricesDeletesOnlyOwnSources(t *testing.T) {
 		po(160, 0xBB, testRatioSrc, 1_060_100_000_000_000_000, 18),
 	}, 160))
 
-	require.NoError(t, s.RewindPrices(ctx, testFeedEngine, 1, 120, []string{testFeedSource}))
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine, 1, 120, 0))
 
 	rows := priceRows(t, s, 1)
 	require.Equal(t, map[string]string{
 		"00000000000000000000000000000000000000aa/" + testFeedSource + "@100": "99990000:8",
 		"00000000000000000000000000000000000000bb/" + testRatioSrc + "@120":   "1060000000000000000:18",
 		"00000000000000000000000000000000000000bb/" + testRatioSrc + "@160":   "1060100000000000000:18",
-	}, rows, "only the feed source's row above 120 was deleted")
+	}, rows, "only the feed engine's row above 120 was deleted")
 
 	_, last, _ := cursorState(t, s, testFeedEngine)
 	require.Equal(t, uint64(120), last)
@@ -323,8 +323,9 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 50, []byte{0x50}))
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 80, []byte{0x80}))
 
-	// Caller passes its cursor (90); the store must lower to 50.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 90, []string{testPollSource}))
+	// Caller passes its cursor (90) and no verified floor; the store must lower
+	// the target to 50.
+	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 90, 0))
 	require.Empty(t, priceRows(t, s, 10), "every row above 50 is gone")
 	_, last, acked := cursorState(t, s, testPollEngine)
 	require.Equal(t, uint64(50), last)
@@ -340,18 +341,18 @@ func TestRewindPricesChainMismatch(t *testing.T) {
 	ctx := context.Background()
 	require.NoError(t, s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100))
-	err := s.RewindPrices(ctx, testPollEngine, 1, 100, []string{testPollSource})
+	err := s.RewindPrices(ctx, testPollEngine, 1, 100, 0)
 	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
 	require.Equal(t, 1, len(priceRows(t, s, 10)), "nothing was deleted before the refusal")
 }
 
-// An empty source list acks without deleting: a writer that owns no source has
-// nothing to invalidate, and must still be able to bootstrap.
-func TestRewindPricesEmptySourcesStillAcks(t *testing.T) {
+// A writer that owns no row acks without deleting anything, and must still be
+// able to bootstrap.
+func TestRewindPricesWithNoOwnedRowsStillAcks(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 95, []byte{0x95}))
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, nil))
+	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, 0))
 	_, last, acked := cursorState(t, s, testPollEngine)
 	require.Equal(t, uint64(0), last)
 	require.Greater(t, acked, int64(0))
@@ -383,7 +384,7 @@ func TestPruneAckedReorgEpochsWaitsForPriceCursor(t *testing.T) {
 	require.Equal(t, 1, remaining)
 
 	// Now the price writer acks too.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, []string{testPollSource}))
+	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, 0))
 	pruned, err = s.PruneAckedReorgEpochs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), pruned, "both cursors acked: the epoch is prunable")

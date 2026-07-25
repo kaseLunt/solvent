@@ -42,18 +42,36 @@ type Config struct {
 	// default 60s — plan Task 8). Must be positive: a zero or negative cadence
 	// would hot-loop a multicall of every registry asset's oracle.
 	PriceInterval time.Duration
-	// FeedStaleness is how long a Chainlink stream may go without an
-	// AnswerUpdated before the feed deriver WARNs, fails its health check and
-	// re-resolves the proxy's aggregator() (recon stream caveat ii). Must be
-	// positive. The default is deliberately generous relative to the feeds'
-	// own heartbeats: per-feed heartbeats differ (they are not recorded in
-	// recon/feeds.json), so this ONE global bound is a conservative
-	// simplification — a per-feed threshold is a documented deferral, not a
-	// claim that this value matches any individual feed's heartbeat.
-	FeedStaleness time.Duration
-	Chains        map[string]Chain
-	Streams       []Stream
+	// NOTE: there is deliberately NO global feed-staleness threshold here any
+	// more. It used to be SOLVENT_FEED_STALENESS (default 26h) applied to every
+	// Chainlink stream alike, which was PERMISSIVE rather than conservative for
+	// liquidation-facing freshness — the ETH/USD stream behind the weETH adapter
+	// is consumed with a 3600-second heartbeat by deployed code, so a stopped
+	// stream could evade that signal for roughly 25h beyond its contractual
+	// bound. Each stream now declares its own heartbeat and grace in
+	// recon/feeds.json (config.FeedOracle.StalenessThreshold), so no single
+	// value can be simultaneously right for a 1h feed and a 24h one. Load
+	// REFUSES the retired variable rather than ignoring it, so an operator who
+	// still sets it learns that their bound is no longer being applied.
+	// HealthAddr is where the daemon serves its health/readiness surface
+	// (SOLVENT_HEALTH_ADDR, default 127.0.0.1:9090). Empty means DISABLED, which
+	// only happens when an operator sets the variable to "off" — there is no
+	// accidental path to a daemon with no probe, because a health signal that
+	// exists only as a log line is what the fix wave removed. A bind failure is
+	// fatal at startup for the same reason.
+	HealthAddr string
+	Chains     map[string]Chain
+	Streams    []Stream
 }
+
+// healthAddrOff is the explicit opt-out value for SOLVENT_HEALTH_ADDR.
+const healthAddrOff = "off"
+
+// DefaultHealthAddr is the loopback address the health surface binds when
+// SOLVENT_HEALTH_ADDR is unset. Loopback, not 0.0.0.0: the surface reports
+// internal failure detail and should be reachable by a local supervisor or a
+// sidecar, not by the network at large.
+const DefaultHealthAddr = "127.0.0.1:9090"
 
 type fileChain struct {
 	ChainID uint64 `json:"chainId"`
@@ -117,20 +135,26 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("SOLVENT_PRICE_INTERVAL must be positive, got %q", v)
 		}
 	}
-	feedStaleness := 26 * time.Hour
+	// RETIRED, and refused rather than ignored: a single global staleness bound
+	// cannot express the per-feed heartbeats that liquidation-facing freshness
+	// depends on. Silently ignoring the variable would leave an operator
+	// believing a bound they set is still in force, which is the worse failure.
 	if v := os.Getenv("SOLVENT_FEED_STALENESS"); v != "" {
-		feedStaleness, err = time.ParseDuration(v)
-		if err != nil {
-			return nil, fmt.Errorf("SOLVENT_FEED_STALENESS: %w", err)
-		}
-		if feedStaleness <= 0 {
-			return nil, fmt.Errorf("SOLVENT_FEED_STALENESS must be positive, got %q", v)
+		return nil, fmt.Errorf("SOLVENT_FEED_STALENESS is retired (set to %q): feed staleness is now per-feed, declared as oracle.heartbeatSeconds + oracle.graceSeconds in recon/feeds.json — unset the variable and edit the registry instead", v)
+	}
+
+	healthAddr := DefaultHealthAddr
+	if v := os.Getenv("SOLVENT_HEALTH_ADDR"); v != "" {
+		if strings.EqualFold(strings.TrimSpace(v), healthAddrOff) {
+			healthAddr = "" // explicit opt-out
+		} else {
+			healthAddr = strings.TrimSpace(v)
 		}
 	}
 
 	cfg := &Config{
 		DatabaseURL: dbURL, PollInterval: poll, SnapshotInterval: snapshot,
-		PriceInterval: price, FeedStaleness: feedStaleness, Chains: map[string]Chain{},
+		PriceInterval: price, HealthAddr: healthAddr, Chains: map[string]Chain{},
 	}
 
 	for name, fc := range root.Chains {

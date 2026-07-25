@@ -25,6 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// currentSchemaVersion is the highest embedded migration. Bumping it is part of
+// adding a migration, and the upgrade-path tests below assert against it so a new
+// migration cannot land without its own upgrade proof.
+const currentSchemaVersion = 5
+
 // migrateUpTo applies the embedded migrations through version — the
 // test-only lever that reconstructs a historical schema baseline. Mirrors
 // store.Migrate exactly except for goose.UpToContext in place of UpContext.
@@ -117,7 +122,8 @@ func TestMigrateUpgradesV3BaselineWithoutDataLoss(t *testing.T) {
 	var version int64
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT max(version_id) FROM goose_db_version`).Scan(&version))
-	require.EqualValues(t, 4, version, "00004 must land on top of the v3 baseline")
+	require.EqualValues(t, currentSchemaVersion, version,
+		"every forward migration above the v3 baseline must land, 00004 included")
 
 	// (d) No data loss + backfill semantics: block stamps and status survive;
 	// generation backfills to 0 (lagging ANY opened generation — cold-start)

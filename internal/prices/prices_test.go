@@ -59,6 +59,8 @@ var (
 	usdcETH         = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 	aggWeETH        = common.HexToAddress("0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5")
 	aggUSDC         = common.HexToAddress("0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7")
+	aggPYUSD        = common.HexToAddress("0x39E31761911b9aaBAEF5fb81B18Fd1C24a60E884")
+	aggFRAX         = common.HexToAddress("0x8F73090a7c58B8BDcC9A93cBB6816e5cC4f01E8c")
 	proxyWeETH      = common.HexToAddress("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419")
 	proxyUSDC       = common.HexToAddress("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6")
 )
@@ -76,33 +78,76 @@ type appliedBatch struct {
 	chainID uint64
 	obs     []store.PriceObservation
 	through uint64
+	anchor  *store.PollAnchor
 }
 
 type rewindRec struct {
-	engine  string
-	chainID uint64
-	toBlock uint64
-	sources []string
+	engine        string
+	chainID       uint64
+	toBlock       uint64
+	verifiedFloor uint64
+}
+
+// fakeRow is one durably-recorded price row: what the store would carry, which
+// is what the workers' health now reads back. The fake models this rather than
+// just recording calls, because "health derives from durable truth, not process
+// memory" cannot be tested against a fake that has no durable truth.
+type fakeRow struct {
+	owner      string
+	asset      []byte
+	source     string
+	block      uint64
+	observedAt time.Time
 }
 
 // fakePriceStore models the durable surface both workers drive: a single
-// pseudo-engine cursor, the unacked-epoch flag, and the apply/rewind history.
+// pseudo-engine cursor, the unacked-epoch flag, owner-scoped price rows with
+// their observation times, poll anchors, and the apply/rewind history.
 type fakePriceStore struct {
 	cursor      uint64
 	cursorFound bool
 	unacked     bool
 
+	// now stamps observed_at, standing in for the database clock. Tests point it
+	// at their testClock.
+	now clock
+
 	applied []appliedBatch
 	rewinds []rewindRec
 
+	// rows is the durable prices table, owner-scoped.
+	rows []fakeRow
+	// anchors is price_poll_anchors, keyed by engine.
+	anchors map[string][]store.PollAnchor
+
 	// applyErrs is a FIFO of one-shot ApplyPrices failures. A non-nil entry is
 	// returned instead of applying; applyAdvancesDespiteErr models the
-	// commit-landed-with-lost-ack world.
+	// commit-landed-with-lost-ack world (cursor AND rows land, the ack is lost).
 	applyErrs               []error
 	applyAdvancesDespiteErr bool
+	// unackedAfterApply models a walker rewind recording an epoch BETWEEN the
+	// worker's proactive check and its apply: the flag flips only once the apply
+	// has failed.
+	unackedAfterApply bool
 
-	// rewindDeepTo, when set, lands the cursor at min(requested, rewindDeepTo) —
-	// RewindPrices' deepest-unacked-epoch lowering.
+	// freshnessErr, when set, fails LatestPriceFreshness after freshnessErrAfter
+	// successful calls — the "cannot hydrate" path that must degrade to an
+	// untrusted verdict rather than to green.
+	freshnessErr      error
+	freshnessErrAfter int
+	// latestLogsErr, when set, fails LatestLogsByTopic after latestLogsErrAfter
+	// successful calls.
+	latestLogsErr      error
+	latestLogsErrAfter int
+	// freshnessCalls counts hydration reads.
+	freshnessCalls int
+	// latestLogCalls records the through-block of each publication-freshness
+	// hydration.
+	latestLogCalls []uint64
+
+	// rewindDeepTo, when set, lowers the effective target to
+	// min(requested, rewindDeepTo) — RewindPrices' deepest-unacked-epoch
+	// lowering — BEFORE the verified floor raises it back.
 	rewindDeepTo *uint64
 	// rewindLeavesNoCursor models the store-contract violation the workers
 	// assert against.
@@ -115,7 +160,11 @@ type fakePriceStore struct {
 }
 
 func newFakePriceStore() *fakePriceStore {
-	return &fakePriceStore{ingest: map[string]*store.CursorPos{}}
+	return &fakePriceStore{
+		ingest:  map[string]*store.CursorPos{},
+		anchors: map[string][]store.PollAnchor{},
+		now:     time.Now,
+	}
 }
 
 func (f *fakePriceStore) DeriveCursor(context.Context, string) (uint64, bool, error) {
@@ -127,27 +176,80 @@ func (f *fakePriceStore) HasUnackedReorg(context.Context, string, uint64) (bool,
 }
 
 func (f *fakePriceStore) ApplyPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64) error {
-	f.applied = append(f.applied, appliedBatch{engine: engine, chainID: chainID, obs: obs, through: through})
+	return f.apply(engine, chainID, obs, through, nil)
+}
+
+func (f *fakePriceStore) ApplyPolledPrices(_ context.Context, engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor store.PollAnchor) error {
+	return f.apply(engine, chainID, obs, through, &anchor)
+}
+
+func (f *fakePriceStore) apply(engine string, chainID uint64, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) error {
+	f.applied = append(f.applied, appliedBatch{
+		engine: engine, chainID: chainID, obs: obs, through: through, anchor: anchor,
+	})
 	if len(f.applyErrs) > 0 {
 		err := f.applyErrs[0]
 		f.applyErrs = f.applyErrs[1:]
 		if err != nil {
 			if f.applyAdvancesDespiteErr {
-				f.cursor, f.cursorFound = through, true
+				f.commit(engine, obs, through, anchor)
+			}
+			if f.unackedAfterApply {
+				f.unacked = true
 			}
 			return err
 		}
 	}
-	f.cursor, f.cursorFound = through, true
+	f.commit(engine, obs, through, anchor)
 	return nil
 }
 
-func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID, toBlock uint64, sources []string) error {
-	f.rewinds = append(f.rewinds, rewindRec{engine: engine, chainID: chainID, toBlock: toBlock, sources: sources})
+// commit lands a batch durably: rows, anchor, cursor — the same atomic unit the
+// real store commits.
+func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, through uint64, anchor *store.PollAnchor) {
+	at := f.now()
+	for _, o := range obs {
+		f.rows = append(f.rows, fakeRow{
+			owner: engine, asset: o.Asset, source: o.Source, block: o.BlockNumber, observedAt: at,
+		})
+	}
+	if anchor != nil {
+		f.anchors[engine] = append(f.anchors[engine], *anchor)
+	}
+	f.cursor, f.cursorFound = through, true
+}
+
+func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) error {
+	f.rewinds = append(f.rewinds, rewindRec{
+		engine: engine, chainID: chainID, toBlock: toBlock, verifiedFloor: verifiedFloor,
+	})
 	effective := toBlock
 	if f.rewindDeepTo != nil && *f.rewindDeepTo < effective {
 		effective = *f.rewindDeepTo
 	}
+	// The verified floor RAISES the target back up (never above toBlock, which
+	// the real store refuses outright).
+	if verifiedFloor > effective {
+		effective = verifiedFloor
+	}
+	// Owner-scoped deletion, plus the anchors describing the deleted rounds.
+	var kept []fakeRow
+	for _, r := range f.rows {
+		if r.owner == engine && r.block > effective {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	f.rows = kept
+	var keptAnchors []store.PollAnchor
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber > effective {
+			continue
+		}
+		keptAnchors = append(keptAnchors, a)
+	}
+	f.anchors[engine] = keptAnchors
+
 	f.unacked = false // RewindPrices acks every epoch on the chain
 	if f.rewindLeavesNoCursor {
 		f.cursorFound = false
@@ -157,8 +259,99 @@ func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID,
 	return nil
 }
 
+func (f *fakePriceStore) LatestPriceFreshness(_ context.Context, _ uint64, ownerEngine string) ([]store.PriceFreshness, error) {
+	f.freshnessCalls++
+	if f.freshnessErr != nil && f.freshnessCalls > f.freshnessErrAfter {
+		return nil, f.freshnessErr
+	}
+	newest := map[string]store.PriceFreshness{}
+	for _, r := range f.rows {
+		if r.owner != ownerEngine {
+			continue
+		}
+		k := freshnessKey(r.asset, r.source)
+		if prev, ok := newest[k]; ok && r.block <= prev.BlockNumber {
+			continue
+		}
+		newest[k] = store.PriceFreshness{
+			Asset: r.asset, Source: r.source, BlockNumber: r.block, ObservedAt: r.observedAt,
+		}
+	}
+	out := make([]store.PriceFreshness, 0, len(newest))
+	for _, v := range newest {
+		out = append(out, v)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Source+string(out[i].Asset) < out[j].Source+string(out[j].Asset) })
+	return out, nil
+}
+
+func (f *fakePriceStore) PollAnchorsAbove(_ context.Context, engine string, _ uint64, above uint64, limit int) ([]store.PollAnchor, error) {
+	var out []store.PollAnchor
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber > above {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BlockNumber > out[j].BlockNumber })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// LatestLogsByTopic mirrors the real store's DISTINCT ON (address) newest-first
+// semantics, bounded by throughBlock — the durable read the feed deriver hydrates
+// publication freshness from.
+func (f *fakePriceStore) LatestLogsByTopic(_ context.Context, _ uint64, addresses [][]byte, topic0 []byte, through uint64) ([]store.RawLog, error) {
+	f.latestLogCalls = append(f.latestLogCalls, through)
+	if f.latestLogsErr != nil && len(f.latestLogCalls) > f.latestLogsErrAfter {
+		return nil, f.latestLogsErr
+	}
+	want := map[string]bool{}
+	for _, a := range addresses {
+		want[string(a)] = true
+	}
+	newest := map[string]store.RawLog{}
+	for _, l := range f.logs {
+		if !want[string(l.Address)] || l.BlockNumber > through {
+			continue
+		}
+		if len(l.Topics) == 0 || string(l.Topics[0]) != string(topic0) {
+			continue
+		}
+		prev, ok := newest[string(l.Address)]
+		if ok && (l.BlockNumber < prev.BlockNumber ||
+			(l.BlockNumber == prev.BlockNumber && l.LogIndex <= prev.LogIndex)) {
+			continue
+		}
+		newest[string(l.Address)] = l
+	}
+	out := make([]store.RawLog, 0, len(newest))
+	for _, l := range newest {
+		out = append(out, l)
+	}
+	sort.Slice(out, func(i, j int) bool { return string(out[i].Address) < string(out[j].Address) })
+	return out, nil
+}
+
 func (f *fakePriceStore) Cursor(_ context.Context, stream string) (*store.CursorPos, error) {
 	return f.ingest[stream], nil
+}
+
+// seedRow inserts a durable row directly, for tests that need pre-existing
+// history without replaying an apply (a RESTART, in other words).
+func (f *fakePriceStore) seedRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
+	f.rows = append(f.rows, fakeRow{
+		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,
+	})
+}
+
+// seedAnchor inserts a durable poll anchor directly (again: a restart, or
+// history this process did not write).
+func (f *fakePriceStore) seedAnchor(engine string, block uint64, hash common.Hash) {
+	f.anchors[engine] = append(f.anchors[engine], store.PollAnchor{
+		BlockNumber: block, BlockHash: hash.Bytes(),
+	})
 }
 
 // RawLogsInRange mirrors the real store's ORDERING contract — ascending
@@ -212,6 +405,14 @@ type fakePollChain struct {
 	calls  []capturedCall
 	served []int
 	starts []int // CallFrom start indices, in order
+
+	// hashes is the LIVE canonical chain as this fake reports it: block → hash.
+	// A block absent from it answers "not found", the shape a probe above head
+	// takes. hashErr overrides everything, modelling a probe that cannot run.
+	hashes    map[uint64]common.Hash
+	hashErr   error
+	hashStart []int // HeaderHashFrom start indices, in order
+	hashCalls []uint64
 }
 
 func (c *fakePollChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
@@ -229,6 +430,23 @@ func (c *fakePollChain) CallFrom(_ context.Context, start int, to common.Address
 
 func (c *fakePollChain) EndpointCount() int { return c.endpoints }
 
+func (c *fakePollChain) HeaderHashFrom(_ context.Context, start int, block uint64) (common.Hash, chain.EndpointToken, error) {
+	c.hashStart = append(c.hashStart, start)
+	c.hashCalls = append(c.hashCalls, block)
+	if c.hashErr != nil {
+		return common.Hash{}, chain.EndpointToken{Index: -1}, c.hashErr
+	}
+	h, ok := c.hashes[block]
+	if !ok {
+		return common.Hash{}, chain.EndpointToken{Index: -1}, fmt.Errorf("header %d not found", block)
+	}
+	idx := start
+	if c.endpoints > 0 {
+		idx = ((start % c.endpoints) + c.endpoints) % c.endpoints
+	}
+	return h, chain.EndpointToken{Index: idx}, nil
+}
+
 func (c *fakePollChain) serve(idx int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
 	c.calls = append(c.calls, capturedCall{to: to, data: data})
 	c.served = append(c.served, idx)
@@ -239,20 +457,58 @@ func (c *fakePollChain) serve(idx int, to common.Address, data []byte) ([]byte, 
 	return out, chain.EndpointToken{Index: idx}, nil
 }
 
-// fakeFeedChain models the feed deriver's narrow surface: a head probe and a
-// plain eth_call (for the proxy aggregator() re-resolution).
+// fakeFeedChain models the feed deriver's narrow surface: a head probe carrying
+// the header's own timestamp and routable to a chosen endpoint, plus a plain
+// eth_call (for the proxy aggregator() re-resolution).
 type fakeFeedChain struct {
 	head     uint64
 	headErr  error
 	headHits int
+	// headStarts records the endpoint index each probe was routed from, so a test
+	// can prove the probe avoided the shared hint rather than trusting a comment.
+	headStarts []int
+	// endpoints/active model the failover's routing surface. endpoints defaults
+	// to 1 via EndpointCount, where independent routing is impossible.
+	endpoints int
+	active    int
+	// now supplies the probe's reference clock and headAge ages the returned
+	// header's TIMESTAMP relative to it: headAge=0 is a live head, a large
+	// headAge is a node frozen on old state that still answers.
+	now     clock
+	headAge time.Duration
 
 	callResp func(to common.Address, data []byte) ([]byte, error)
 	calls    []capturedCall
 }
 
-func (c *fakeFeedChain) BlockNumber(context.Context) (uint64, error) {
+func (c *fakeFeedChain) HeadFrom(_ context.Context, start int) (chain.Head, chain.EndpointToken, error) {
 	c.headHits++
-	return c.head, c.headErr
+	c.headStarts = append(c.headStarts, start)
+	if c.headErr != nil {
+		return chain.Head{}, chain.EndpointToken{Index: -1}, c.headErr
+	}
+	ref := time.Now
+	if c.now != nil {
+		ref = c.now
+	}
+	idx := start
+	if c.endpoints > 0 {
+		idx = ((start % c.endpoints) + c.endpoints) % c.endpoints
+	}
+	return chain.Head{
+		Number: c.head,
+		Time:   uint64(ref().Add(-c.headAge).Unix()),
+		Hash:   common.BytesToHash([]byte{byte(c.head)}),
+	}, chain.EndpointToken{Index: idx}, nil
+}
+
+func (c *fakeFeedChain) ActiveEndpoint() int { return c.active }
+
+func (c *fakeFeedChain) EndpointCount() int {
+	if c.endpoints == 0 {
+		return 1
+	}
+	return c.endpoints
 }
 
 func (c *fakeFeedChain) Call(_ context.Context, to common.Address, data []byte) ([]byte, error) {
@@ -273,11 +529,29 @@ type mcRet struct {
 	ReturnData []byte
 }
 
-// encodeMulticall builds a tryBlockAndAggregate return carrying block and rets.
+// blockHashAt is the deterministic stand-in for a block's hash: a distinct,
+// NON-ZERO hash per height, so a test can build a "live chain" the poller's
+// anchor probes agree with. The zero hash is deliberately never produced —
+// unpackMulticallResult refuses it.
+func blockHashAt(block uint64) common.Hash {
+	return common.BigToHash(new(big.Int).SetUint64(block + 1))
+}
+
+// encodeMulticall builds a tryBlockAndAggregate return carrying block, that
+// block's hash and rets.
 func encodeMulticall(t *testing.T, block uint64, rets []mcRet) []byte {
 	t.Helper()
+	return encodeMulticallWithHash(t, block, blockHashAt(block), rets)
+}
+
+// encodeMulticallWithHash is encodeMulticall with an explicit block hash, for the
+// cases where the hash itself is what a test is about.
+func encodeMulticallWithHash(t *testing.T, block uint64, hash common.Hash, rets []mcRet) []byte {
+	t.Helper()
+	var h [32]byte
+	copy(h[:], hash.Bytes())
 	out, err := multicall3ABI.Methods["tryBlockAndAggregate"].Outputs.Pack(
-		new(big.Int).SetUint64(block), [32]byte{}, rets)
+		new(big.Int).SetUint64(block), h, rets)
 	require.NoError(t, err)
 	return out
 }
@@ -510,14 +784,37 @@ func TestUnpackHardening(t *testing.T) {
 	require.Error(t, err)
 	_, err = unpackAddress("aggregator", chainlinkProxyABI, []byte{0x01})
 	require.Error(t, err)
-	_, _, err = unpackMulticallResult([]byte{0xde, 0xad}, 1)
+	_, _, _, err = unpackMulticallResult([]byte{0xde, 0xad}, 1)
 	require.Error(t, err)
 
 	// A well-formed envelope with the WRONG result count is refused: silently
 	// zipping N results onto M targets would mis-attribute prices.
 	out := encodeMulticall(t, 100, []mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
-	_, _, err = unpackMulticallResult(out, 2)
+	_, _, _, err = unpackMulticallResult(out, 2)
 	require.ErrorContains(t, err, "1 results for 2 calls")
+}
+
+// The multicall's EXECUTION BLOCK HASH is decoded, not discarded: it is the whole
+// basis of the durable poll anchor that lets reorg repair keep provably-canonical
+// history instead of deleting all of it.
+func TestUnpackMulticallKeepsBlockHash(t *testing.T) {
+	want := blockHashAt(5000)
+	out := encodeMulticall(t, 5000, []mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
+	block, hash, results, err := unpackMulticallResult(out, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5000), block)
+	require.Equal(t, want.Bytes(), hash, "the execution block hash must survive decoding")
+	require.Len(t, results, 1)
+}
+
+// A ZERO block hash is refused: multicall3 returns blockhash(block.number),
+// which is never zero for the executing block, and an anchor holding a zero hash
+// would "verify" against nothing during reorg repair.
+func TestUnpackMulticallRefusesZeroBlockHash(t *testing.T) {
+	out := encodeMulticallWithHash(t, 5000, common.Hash{},
+		[]mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
+	_, _, _, err := unpackMulticallResult(out, 1)
+	require.ErrorContains(t, err, "block hash at 5000 is zero")
 }
 
 // ---------------------------------------------------------------------------
@@ -548,7 +845,13 @@ func TestMain(m *testing.M) {
 }
 
 // captureWarnings routes slog through a collector for the duration of the test
-// and returns the accumulating WARN/ERROR message slice.
+// and returns the accumulating WARN/ERROR record slice.
+//
+// Each record is rendered as its MESSAGE followed by its ATTRIBUTES, because the
+// operational detail these workers emit (which endpoint, which evidence, which
+// anchor block, why a cause was undetermined) lives in structured attributes.
+// Asserting only on the message would let the detail an operator actually reads
+// drift unchecked.
 func captureWarnings(t *testing.T) *[]string {
 	t.Helper()
 	msgs := []string{}
@@ -562,9 +865,19 @@ type warnCollector struct{ msgs *[]string }
 
 func (w warnCollector) Enabled(context.Context, slog.Level) bool { return true }
 func (w warnCollector) Handle(_ context.Context, r slog.Record) error {
-	if r.Level >= slog.LevelWarn {
-		*w.msgs = append(*w.msgs, r.Message)
+	if r.Level < slog.LevelWarn {
+		return nil
 	}
+	var b strings.Builder
+	b.WriteString(r.Message)
+	r.Attrs(func(a slog.Attr) bool {
+		b.WriteString(" ")
+		b.WriteString(a.Key)
+		b.WriteString("=")
+		b.WriteString(a.Value.String())
+		return true
+	})
+	*w.msgs = append(*w.msgs, b.String())
 	return nil
 }
 func (w warnCollector) WithAttrs([]slog.Attr) slog.Handler { return w }

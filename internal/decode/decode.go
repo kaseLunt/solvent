@@ -197,6 +197,15 @@ var engineTopics = map[string]map[common.Hash]decodeFn{
 	"chainlink_feed":  chainlinkTopics,
 }
 
+// ChainlinkAnswerUpdatedTopic0 is the topic0 of
+// AnswerUpdated(int256,uint256,uint256), derived from the embedded aggregator ABI
+// (never a hand-copied literal). It is exported because a caller that needs to
+// find the NEWEST stored answer per aggregator has to filter raw_logs by topic0
+// in SQL rather than decode every log in a range — internal/prices hydrates its
+// per-feed publication freshness that way, and the alternative would be a second
+// copy of the signature string in another package.
+var ChainlinkAnswerUpdatedTopic0 = chainlinkABI.Events["AnswerUpdated"].ID
+
 // Registry decodes raw logs into typed Events using the embedded ABIs. It is
 // stateless (all lookup tables are package-level) and safe for concurrent use.
 type Registry struct{}

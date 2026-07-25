@@ -22,6 +22,14 @@ type fakeRPC struct {
 	chainID    uint64
 	txData     []byte
 	callResult []byte
+	// headerTime is the Time field of every header this endpoint returns — the
+	// field that makes a head observation falsifiable, since a node frozen on old
+	// state still reports a plausible height but cannot make its header claim to
+	// be recent.
+	headerTime uint64
+	// extraNonce perturbs returned header hashes so two endpoints can disagree
+	// about the block at a height (a fork), not merely about the height.
+	extraNonce uint64
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -41,7 +49,15 @@ func (f *fakeRPC) HeaderByNumber(ctx context.Context, n *big.Int) (*types.Header
 	if f.fail {
 		return nil, errors.New(f.name + " down")
 	}
-	return &types.Header{Number: n}, nil
+	// A nil number means "latest", the shape HeadFrom uses.
+	if n == nil {
+		n = new(big.Int).SetUint64(f.blockNum)
+	}
+	return &types.Header{
+		Number: n,
+		Time:   f.headerTime,
+		Nonce:  types.EncodeNonce(f.extraNonce),
+	}, nil
 }
 
 func (f *fakeRPC) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {

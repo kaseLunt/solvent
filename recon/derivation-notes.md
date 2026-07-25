@@ -291,8 +291,39 @@ Stream caveats for Task 8: (i) the stable adapters return `min(feed, priceCap)` 
 adapter is `getRate × ETH/USD` with a growth-capped rate — the AnswerUpdated stream reproduces the
 *uncapped feed*, not the adapter output; caps bind only in depeg/exploit scenarios, and the weETH
 USD price additionally needs the daily-moving `getRate()` ratio (poll) or the ETH-feed stream ×
-ratio composition. (ii) Chainlink proxies re-point `aggregator()` on phase changes; the recorded
-aggregator covers the current phase only — a walker should re-resolve `aggregator()` on staleness.
+ratio composition. Composing the stream row with the polled ratio row yields an **uncapped
+reference value, never the adapter's guaranteed output** — P3 must implement the growth-cap
+behaviour, or read the adapter's own output, before claiming adapter equivalence. (ii) Chainlink
+proxies re-point `aggregator()` on phase changes; the recorded aggregator covers the current phase
+only — a walker should re-resolve `aggregator()` on staleness.
+
+### Per-feed staleness thresholds — and exactly how well each value is evidenced
+
+`recon/feeds.json` records `oracle.heartbeatSeconds` and `oracle.graceSeconds` per
+`chainlink_stream` entry, and the feed deriver judges each stream against its own
+heartbeat + grace. This replaced a single global 26h bound, which was **permissive, not
+conservative**, for liquidation-facing freshness: a stopped 1h feed could evade it for ~25h beyond
+its contractual bound.
+
+Provenance is deliberately stated per value, because these are not equally well established:
+
+| Stream | proxy | heartbeat | grace | threshold | provenance of the heartbeat |
+|---|---|---|---|---|---|
+| weETH (ETH/USD leg) | `0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419` | 3600s | 1800s | 1h30m | **Evidence-backed.** The Codex round-1 adversarial review independently observed deployed code consuming *this exact proxy* with a 3600-second heartbeat (constructor evidence at `0x641169f048ee8de8b3037c9d9c840060fe03e463`). |
+| USDC | `0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6` | 86400s | 3600s | 25h | **Not verified by this wave.** 86400s is the published Chainlink mainnet heartbeat for this feed; it was **not** independently confirmed from bytecode or from a consumer's constructor here. |
+| PYUSD | `0x8f1dF6D7F2db73eECE86a18b4381F4707b918FB1` | 86400s | 3600s | 25h | as USDC — published value, **not** independently verified by this wave. |
+| FRAX | `0xB9E1E3A9feFf48998E45Fa90847ed4D467E8BcfD` | 86400s | 3600s | 25h | as USDC — published value, **not** independently verified by this wave. |
+
+Two further honest notes:
+
+- **The grace values are policy, not contract.** They are this repo's operator margin, absorbing
+  ordinary publication jitter and the indexer's own derive lag. Nothing on-chain endorses 1800s or
+  3600s.
+- **Every threshold is tighter than the 26h it replaced**, so no feed became more permissive; the
+  three unverified heartbeats are pinned by a fixture test
+  (`TestRealFeedRegistryStalenessThresholds`), which also enforces the ≤26h ceiling, so a future
+  registry edit cannot silently loosen a liquidation-facing bound. Independently confirming those
+  three heartbeats from deployed consumers remains **open work**, not a completed claim.
 
 ## Contradictions with plan scope
 

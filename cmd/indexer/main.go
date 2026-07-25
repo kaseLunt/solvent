@@ -104,12 +104,16 @@ type walkerState struct {
 
 // priceWorker is the daemon's uniform handle on Task 8's two price ingestion
 // workers — the oracle poller (*prices.Poller) and the Chainlink feed deriver
-// (*prices.FeedDeriver). Both expose the same Step/Health/Name shape as the
-// derivation runners, so the loop treats them identically.
+// (*prices.FeedDeriver).
+//
+// Conditions, not Health, is what the loop consumes: a worker reports NAMED
+// conditions, so "this aggregator stopped publishing" and "our RPC/ingest path is
+// frozen" reach the health surface as separate, separately-routable keys instead
+// of being concatenated into one string an operator has to parse.
 type priceWorker interface {
 	Name() string
 	Step(ctx context.Context) (bool, error)
-	Health() (healthy bool, reason string)
+	Conditions() []prices.Condition
 }
 
 // priceWorkerState wraps a price worker with its backoff bookkeeping. The
@@ -118,28 +122,101 @@ type priceWorker interface {
 type priceWorkerState struct {
 	w  priceWorker
 	bo retryBackoff
+	// lastErr is the most recent erroring round's error, retained so the health
+	// surface can report an ordinary Step failure. It used to be logged and
+	// dropped, which meant persistent apply failures were invisible to any
+	// supervisor unless the worker's own health verdict happened to fail too.
+	lastErr error
+	// retryIn is the backoff delay chosen for lastErr, for the same report.
+	retryIn time.Duration
 }
 
-// engineHealth is the daemon's package-level health map: engine → the
-// terminal unhealthy reason ((*derive.Runner).Health). Entries only ever
-// appear (no in-process recovery — a restart after a capability upgrade is
-// the documented recovery path, since all state is durable and the restarted
-// process re-derives the refusing window with the upgraded deriver). While
-// non-empty, the daemon logs a DEGRADED summary once per tick round.
-var engineHealth = map[string]string{}
-
-// priceHealth is the price workers' health view, and is deliberately NOT
-// engineHealth: a stale Chainlink stream or a poller that has missed its
-// cadence grace window is RECOVERABLE — a resumed feed or a landed round clears
-// it — whereas engineHealth records TERMINAL capability errors that only a
-// restart resolves. It is therefore REBUILT from scratch each tick rather than
-// accumulated, so recovery is actually visible in the log.
-var priceHealth = map[string]string{}
+// stepPriceWorkers runs ONE price pass over every price worker and rebuilds each
+// worker's recoverable health entries. Returns whether any worker advanced.
+//
+// It exists as a separate function because this composition is what the review
+// found untested and, in one respect, wrong: an ordinary Step error was logged
+// and dropped, so a worker failing every round looked healthy to a supervisor
+// unless its own condition set happened to fail too. The composition now is:
+//
+//   - step at most stepsPerRound times, stopping at the first error or at the
+//     first non-advancing Step;
+//   - a context cancellation is SHUTDOWN, not a failure: no backoff, no health
+//     entry;
+//   - any other error consumes one backoff unit and is recorded as the
+//     step_error condition, alongside whatever the worker itself reports;
+//   - conditions are read even while the worker is BACKING OFF — that is
+//     precisely when the signal matters most, and skipping it would leave the
+//     surface showing a pre-failure verdict for the whole backoff window;
+//   - the entry set is REPLACED per worker, so recovery is visible.
+func stepPriceWorkers(ctx context.Context, workers []*priceWorkerState, health *healthState) bool {
+	anyAdvanced := false
+	for _, ps := range workers {
+		if ps.bo.ready() {
+			roundErred := false
+			var lastErr error
+			for i := 0; i < stepsPerRound; i++ {
+				advanced, err := ps.w.Step(ctx)
+				if advanced {
+					anyAdvanced = true
+				}
+				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						slog.Info("shutting down", "worker", ps.w.Name())
+					} else {
+						slog.Error("price step failed; will retry after backoff", "worker", ps.w.Name(), "err", err)
+						roundErred = true
+						lastErr = err
+					}
+					break
+				}
+				if !advanced {
+					break
+				}
+			}
+			if roundErred {
+				delay := ps.bo.failure()
+				ps.lastErr, ps.retryIn = lastErr, delay
+				slog.Warn("price worker backing off after error",
+					"worker", ps.w.Name(), "retryIn", delay, "consecutive", ps.bo.failures)
+			} else {
+				ps.bo.success()
+				ps.lastErr, ps.retryIn = nil, 0
+			}
+		}
+		conditions := map[string]string{}
+		for _, c := range ps.w.Conditions() {
+			conditions[c.Name] = c.Reason
+		}
+		if ps.lastErr != nil {
+			conditions[conditionStepError] = fmt.Sprintf("Step failed %d consecutive round(s), retrying in %s: %v",
+				ps.bo.failures, ps.retryIn.Truncate(time.Second), ps.lastErr)
+		}
+		health.setWorkerConditions(ps.w.Name(), conditions)
+	}
+	return anyAdvanced
+}
 
 func run(ctx context.Context, configPath, feedsPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
+	}
+	// The health surface comes up FIRST, before any dependency: a supervisor
+	// needs a probe that answers while the daemon is still connecting, and a
+	// bind failure must be fatal here rather than silently leaving the process
+	// without a readiness signal.
+	health := newHealthState(time.Now)
+	if cfg.HealthAddr == "" {
+		slog.Warn("health endpoint DISABLED by SOLVENT_HEALTH_ADDR=off: this process exposes no readiness or liveness probe, so a supervisor cannot see stale feeds, missing poll targets or persistent apply failures")
+	} else {
+		addr, shutdown, err := serveHealth(ctx, cfg.HealthAddr, health)
+		if err != nil {
+			return err
+		}
+		defer shutdown()
+		slog.Info("health endpoint listening", "addr", addr,
+			"readiness", "GET /readyz", "liveness", "GET /healthz", "detail", "GET /health")
 	}
 	// The oracle feed registry (recon/feeds.json) is loaded against the config's
 	// chains, so a registry chain the config does not define fails fast here
@@ -293,7 +370,6 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		fd, err := prices.NewFeedDeriver(st, registry, clients[spec.Chain], feeds, prices.FeedConfig{
 			ChainID: spec.ChainID, Streams: spec.Streams,
 			Addresses: spec.Addresses, StartBlock: spec.StartBlock, Window: spec.Window,
-			Staleness: cfg.FeedStaleness,
 		})
 		if err != nil {
 			return err
@@ -301,8 +377,11 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		priceWorkers = append(priceWorkers, &priceWorkerState{
 			w: fd, bo: retryBackoff{now: time.Now, rand: rand.Float64},
 		})
+		// Staleness thresholds are PER FEED (each stream's own heartbeat + grace
+		// from recon/feeds.json), so the startup log names them individually
+		// rather than reporting one global number that applies to none of them.
 		slog.Info("chainlink feed deriver configured", "engine", fd.Name(), "chain", spec.Chain,
-			"streams", len(spec.Streams), "staleness", cfg.FeedStaleness)
+			"streams", len(spec.Streams), "perFeedStaleness", fmt.Sprintf("%v", fd.Thresholds()))
 	}
 
 	ticker := time.NewTicker(cfg.PollInterval)
@@ -369,11 +448,10 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 					}
 				}
 				if healthy, reason := r.Health(); !healthy {
-					if _, seen := engineHealth[r.Name()]; !seen {
+					if first := health.setTerminal(r.Name(), reason); first {
 						slog.Error("engine transitioned to UNHEALTHY: derivation gated (reorg repair still runs); restart after a capability upgrade to recover",
 							"engine", r.Name(), "reason", reason)
 					}
-					engineHealth[r.Name()] = reason
 				}
 			}
 
@@ -397,48 +475,14 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			// (RewindPrices before further apply) and then does one bounded unit
 			// of work — the poller at most one cadence-due multicall round, the
 			// feed deriver at most stepsPerRound windows of AnswerUpdated logs.
-			// Health is REBUILT each round, not accumulated: a stale feed that
-			// resumes, or a poller that lands a round, is genuinely healthy again.
-			for _, ps := range priceWorkers {
-				if ps.bo.ready() {
-					roundErred := false
-					for i := 0; i < stepsPerRound; i++ {
-						advanced, err := ps.w.Step(ctx)
-						if advanced {
-							anyAdvanced = true
-						}
-						if err != nil {
-							if errors.Is(err, context.Canceled) {
-								slog.Info("shutting down", "worker", ps.w.Name())
-							} else {
-								slog.Error("price step failed; will retry after backoff", "worker", ps.w.Name(), "err", err)
-								roundErred = true
-							}
-							break
-						}
-						if !advanced {
-							break
-						}
-					}
-					if roundErred {
-						delay := ps.bo.failure()
-						slog.Warn("price worker backing off after error",
-							"worker", ps.w.Name(), "retryIn", delay, "consecutive", ps.bo.failures)
-					} else {
-						ps.bo.success()
-					}
-				}
-				// Health is read even while the worker is BACKING OFF — that is
-				// precisely when the DEGRADED signal matters most, and skipping
-				// it would leave the map showing a pre-failure verdict for as
-				// long as the backoff lasts.
-				if healthy, reason := ps.w.Health(); !healthy {
-					priceHealth[ps.w.Name()] = reason
-				} else {
-					delete(priceHealth, ps.w.Name())
-				}
+			// Extracted into its own function so the composition (step, backoff,
+			// error reporting, condition rebuild) is unit-testable against fake
+			// workers, which it previously was not.
+			if stepPriceWorkers(ctx, priceWorkers, health) {
+				anyAdvanced = true
 			}
 
+			health.heartbeat()
 			if ctx.Err() != nil {
 				break
 			}
@@ -452,24 +496,21 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			}
 		}
 
-		// Housekeeping per tick: drop reorg epochs every engine has acked,
-		// and surface degraded engine health once per tick round while any
-		// engine is unhealthy (the transition itself was logged at Error).
+		// Housekeeping per tick: drop reorg epochs every engine has acked, and
+		// surface the composed health report once per tick round while anything
+		// is wrong (a terminal transition itself was logged at Error). The log is
+		// now a MIRROR of the queryable surface, not the surface itself.
 		if ctx.Err() == nil {
 			if pruned, err := st.PruneAckedReorgEpochs(ctx); err != nil {
 				slog.Error("prune acked reorg epochs failed; will retry next tick", "err", err)
 			} else if pruned > 0 {
 				slog.Info("pruned fully-acknowledged reorg epochs", "rows", pruned)
 			}
-			if len(engineHealth) > 0 {
-				slog.Warn("daemon DEGRADED: unhealthy engines (derivation gated; restart after a capability upgrade to recover)",
-					"engines", fmt.Sprintf("%v", engineHealth))
-			}
-			if len(priceHealth) > 0 {
-				// RECOVERABLE, unlike engineHealth: this warning stops once the
-				// stale stream publishes again or the poller lands a round.
-				slog.Warn("daemon DEGRADED: price ingestion unhealthy (recoverable — clears when the feed resumes or a poll round lands)",
-					"workers", fmt.Sprintf("%v", priceHealth))
+			if report := health.report(); !report.Ready {
+				slog.Warn("daemon NOT READY (/readyz is failing): terminal entries need a restart at upgraded code; recoverable entries clear when the feed resumes, a round lands, or the dependency recovers",
+					"status", report.Status, "live", report.Live, "loopAge", report.LoopAge,
+					"terminal", fmt.Sprintf("%v", report.Terminal),
+					"recoverable", fmt.Sprintf("%v", report.Recoverable))
 			}
 		}
 
