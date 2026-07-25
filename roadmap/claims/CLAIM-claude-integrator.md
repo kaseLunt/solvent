@@ -3,7 +3,7 @@ claim_id: 8276eee4-d751-4d49-b566-2921fff60ad9
 generation: 6
 agent: claude-integrator
 task: W1
-status: active
+status: released
 integrator: true
 branch: main
 worktree_id: 391b6a12-eb13-597c-bc9a-37240d9dfd29
@@ -23,7 +23,7 @@ allowed_paths:
 scope_hash: sha256:d11fe7a57352870b8e50d1dc1d3d5927185d09275c222fb3282e623f93c9a239
 issued_at: 2026-07-25T03:34:45Z
 lease_expires: 2026-07-25T11:34:45Z
-updated_at: 2026-07-25T03:34:45Z
+updated_at: 2026-07-25T22:24:00Z
 ---
 
 # Claim: claude-integrator -> W1
