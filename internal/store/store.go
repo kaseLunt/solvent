@@ -128,6 +128,21 @@ type RawLog struct {
 	Address     []byte
 	Topics      [][]byte
 	Data        []byte
+	// IngestedAt is raw_logs.ingested_at — the DATABASE time at which this log
+	// first became durable. It is populated on READS (RawLogsInRange,
+	// LatestLogsByTopic) and IGNORED on writes, where the column's own default
+	// assigns it.
+	//
+	// It exists because it is the only durable OBSERVATION CONTEXT a stored log
+	// carries. A consumer judging an oracle-supplied timestamp inside the log's
+	// data — "is this updatedAt plausible?" — has to compare it against something,
+	// and comparing against the reader's wall clock makes the verdict a function of
+	// WHEN the log is read: the same persisted log was rejected as implausibly
+	// future before a restart and accepted after one, once the clock had caught up
+	// to the claimed time. Compared against this column instead, the verdict is a
+	// function of two durable facts and is therefore identical on every re-read,
+	// restart and rehydration. See internal/prices.FeedDeriver.classifyUpdatedAt.
+	IngestedAt time.Time
 }
 
 func (s *Store) Cursor(ctx context.Context, stream string) (*CursorPos, error) {

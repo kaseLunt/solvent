@@ -101,25 +101,40 @@
 // rows above the fork point would leave this table asserting engine-exact prices
 // at replaced heights, which for a liquidation-facing store is the worse failure.
 //
-// AND REPAIR FAILS CLOSED. Verification is retried, and PAGED across bounded Steps
-// rather than abandoned once a probe budget is spent. When it cannot conclude — a
-// probe outage, no anchor covering the rows, or every retained anchor proven
-// orphaned — the poller ACKS NOTHING AND DELETES NOTHING, reports
-// ConditionPollRewindBlocked, and retries. A stalled poller with a red /readyz is
-// recoverable; erased polled history is not. An earlier version collapsed all of
-// those cases into "no floor", let the walker's target stand, and deleted
-// everything above it; a transient hash-probe outage was therefore sufficient to
-// destroy unrecoverable canonical history.
+// AND REPAIR FAILS CLOSED WITHOUT FAILING FOREVER. Verification is retried, and
+// PAGED across bounded Steps rather than abandoned once a probe budget is spent.
+// internal/prices/poller.go's floorOutcome enumerates the whole state space; three
+// behaviours come out of it:
 //
-// WHAT IS STILL LOST, EXACTLY: rows above the highest anchor whose hash matches,
-// once a match is found. That deletion is justified — those rows describe blocks
-// the chain replaced. Nothing else is deleted. Rows written before this engine
-// anchored its rounds are unverifiable, so the poller ADOPTS anchors for them from
-// the live chain on a normal round with no epoch pending (store.AdoptPollAnchor
-// carries the safety argument and its limit), and refuses to delete them until it
-// can. A reorg deeper than the entire retained anchor set is reported and left for
-// an operator. No claim is made that history is always recoverable — only that it
-// is never discarded on missing information.
+//   - DELETE only where every row above the floor is PROVEN non-canonical — either
+//     by a hash-verified anchor at or above it, or because every anchor above it was
+//     probed and mismatched. A bare match is not enough: a FAILED probe of a newer
+//     anchor forbids accepting a lower match, and an unanchored row above the
+//     boundary forbids it too.
+//   - RETRY, deleting and acking nothing, while the evidence is merely UNAVAILABLE
+//     (a probe errored, a page is still to walk). ConditionPollRewindBlocked says
+//     what is unproven. A stalled poller with a red /readyz is recoverable; erased
+//     polled history is not.
+//   - NEUTRALIZE where the evidence can never exist: rows at heights whose block
+//     hash was never recorded. Waiting there was permanent — repair needs an anchor,
+//     adoption is refused while an epoch is pending, and the ack only advances
+//     through repair — so those rows are RETAINED and marked
+//     store.InvalidReasonUnverifiableReorg (no usable-price read can return them, no
+//     later repair can verify them), the epoch is acked, and ingestion resumes.
+//
+// WHAT IS ACTUALLY DELETED, EXACTLY: rows above the highest anchor whose hash
+// matches, once a match is found with complete proof above it; or, when every
+// retained anchor mismatched and the anchors cover every row, everything above the
+// walker's target. Both describe blocks the chain replaced. NOTHING ELSE IS DELETED —
+// not on a probe outage, not on legacy unanchored history, not on a reorg deeper than
+// the retained anchor set.
+//
+// WHAT IS STILL LOST: the USABILITY of a neutralized row. It stays on disk and stays
+// auditable, but no consumer can read it and there is no un-neutralize, because no
+// fact would justify one. Rows written before this engine anchored its rounds are
+// ADOPTED into anchors on a normal round with no epoch pending
+// (store.AdoptPollAnchor carries the safety argument and its limit), which is what
+// keeps a LATER reorg on the proof-based path instead of the neutralizing one.
 //
 // # NOT SAFE FOR CONCURRENT USE
 //
@@ -582,8 +597,10 @@ var _ PriceStore = (*store.Store)(nil)
 //   - NewestPollAnchor is both the frontier a cursor regression is classified
 //     against and the durable reference for "when did we last see a new
 //     execution block".
-//   - CountOwnedPricesAbove is what makes refusal possible: repair must know
-//     whether an unverifiable rewind would actually destroy anything.
+//   - PriceRepairExposure / CountUnanchoredPricesAbove are what make refusal
+//     possible: repair must know whether a rewind would actually destroy
+//     anything, and whether any of it is unprovable.
+//   - NeutralizeUnverifiablePrices is what makes refusal TERMINATE.
 //   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
 //     rows written before this engine anchored its rounds.
 type PollStore interface {
@@ -591,7 +608,16 @@ type PollStore interface {
 	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) (store.ApplyResult, error)
 	PollAnchorsBelow(ctx context.Context, engine string, chainID, belowOrAt uint64, limit int) ([]store.StoredPollAnchor, error)
 	NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (store.StoredPollAnchor, bool, error)
-	CountOwnedPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
+	// PriceRepairExposure and CountUnanchoredPricesAbove are what makes the A1
+	// invariant decidable: the first reports the height the rewind will actually
+	// act above (which the caller cannot compute — the store lowers it to the
+	// deepest unacknowledged epoch) plus what lies above it; the second answers
+	// "is anything above this floor unprovable" for a candidate floor.
+	PriceRepairExposure(ctx context.Context, engine string, chainID, toBlock uint64) (store.PriceRepairExposure, error)
+	CountUnanchoredPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
+	// NeutralizeUnverifiablePrices is the fail-closed-but-terminating transition:
+	// ack without deleting, marking the unprovable rows unusable.
+	NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error)
 	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
 	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }

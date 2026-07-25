@@ -35,14 +35,15 @@ package prices
 // and reported a feed that had died BEFORE the restart as healthy for another
 // full threshold. Rewind cleared the same state for the same effect.
 //
-// AND NO PROCESS CLOCK MAY BECOME A RECEIPT TIME. An implausible oracle timestamp
-// used to be CLAMPED to f.now() and that derived value used as the observation
-// time. It was not durable: the same raw log re-decodes and re-clamps to the NEW
-// process time on every restart, rewind or apply-error hydration, so repeated
-// restarts inside the threshold kept a feed with one malformed future timestamp
-// healthy indefinitely — the very thing durable freshness was supposed to make
-// impossible. An unusable timestamp is now an unhealthy CONDITION and establishes
-// no freshness at all; see classifyUpdatedAt for the full argument and its limit.
+// AND NO PROCESS CLOCK MAY TOUCH A TIMESTAMP VERDICT AT ALL. An implausible oracle
+// timestamp was first CLAMPED to f.now() (so the same log re-clamped to a new
+// process time on every hydration), then REFUSED against f.now() — which was
+// durable only while wall-clock stayed behind the claimed time: the same persisted
+// log was rejected before a restart and accepted after a later one, with no new
+// durable fact anywhere. Both are gone. An oracle timestamp is now judged against
+// the log's OWN raw_logs.ingested_at, so the verdict is a function of two persisted
+// facts, and an accepted answer's freshness is capped at that ingestion time. See
+// classifyUpdatedAt for the full argument and its one stated limit.
 //
 // PUBLISHING IS NOT THE SAME AS PUBLISHING SOMETHING USABLE. A stream emitting a
 // non-positive answer every heartbeat is emitting; store.insertPrice quarantines
@@ -142,16 +143,18 @@ const headProbeInterval = time.Minute
 // OUR failure well inside the tightest configured heartbeat (3600s).
 const liveVerdictTTL = 5 * headProbeInterval
 
-// futureTimestampTolerance is how far AHEAD of the observation time an
-// oracle-supplied updatedAt may sit and still be taken at face value. Ordinary
-// causes — a node's clock a few seconds off, a block timestamp rounded forward —
-// live well inside it; a value beyond it is not a clock artefact.
+// futureTimestampTolerance is how far AHEAD of the log's OWN DURABLE INGESTION
+// TIME (raw_logs.ingested_at) an oracle-supplied updatedAt may sit and still be
+// taken at face value. Ordinary causes — a node's clock a few seconds off, a block
+// timestamp rounded forward — live well inside it; a value beyond it is not a
+// clock artefact.
 //
-// DISCLOSED COST, precisely: an accepted within-tolerance future timestamp
-// suppresses this feed's staleness verdict by up to this much, because the
-// reference it establishes is that far ahead. Two minutes against the tightest
-// configured threshold (90 minutes) is ~2%, and the alternative — substituting
-// our own clock — is what made freshness resettable by restart.
+// It costs no freshness slack. An accepted answer's usable time is
+// min(reported, ingested_at), so a within-tolerance future timestamp is capped at
+// the durable observation rather than establishing a reference ahead of it. The
+// earlier version compared against the process clock and accepted the reported
+// time verbatim, which both suppressed staleness by up to this much AND changed
+// its verdict across restarts as the clock approached the claimed time.
 const futureTimestampTolerance = 2 * time.Minute
 
 // reResolveInterval rate-limits the proxy aggregator() re-resolution while a
@@ -540,7 +543,7 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 			Decimals:    b.Decimals,
 			BlockNumber: l.BlockNumber,
 		})
-		f.stageObservation(staged, agg, answer)
+		f.stageObservation(staged, agg, answer, l.IngestedAt)
 	}
 
 	res, err := f.store.ApplyPrices(ctx, f.engine, f.cfg.ChainID, set.observations(), to)
@@ -616,8 +619,8 @@ type stagedAnswer struct {
 // answer. Ranking by reported timestamp instead would let an older block's larger
 // updatedAt outrank the actual latest answer, and would disagree with hydration,
 // which takes the newest LOG per aggregator.
-func (f *FeedDeriver) stageObservation(staged map[common.Address]stagedAnswer, agg common.Address, answer decode.ChainlinkAnswerUpdated) {
-	v := f.classifyAnswer(agg, answer)
+func (f *FeedDeriver) stageObservation(staged map[common.Address]stagedAnswer, agg common.Address, answer decode.ChainlinkAnswerUpdated, observedAt time.Time) {
+	v := f.classifyAnswer(agg, answer, observedAt)
 	cur := staged[agg]
 	// The newest answer seen so far owns the flaw markers, whatever its usability.
 	cur.invalidReason, cur.timestampFlaw = v.invalidReason, v.timestampFlaw
@@ -629,10 +632,11 @@ func (f *FeedDeriver) stageObservation(staged map[common.Address]stagedAnswer, a
 
 // classifyAnswer reduces one raw answer to what it can honestly support.
 //
-// Both judgements are derived from the LOG's own contents, so they are functions
-// of durable data and identical on every re-decode — the property the old
-// clamp-to-now behaviour lacked.
-func (f *FeedDeriver) classifyAnswer(agg common.Address, answer decode.ChainlinkAnswerUpdated) answerVerdict {
+// Both judgements are functions of DURABLE data only — the log's contents and the
+// log's own raw_logs.ingested_at — so they are identical on every re-decode,
+// restart and rehydration. Neither the clamp-to-now version nor the
+// refuse-against-wall-clock version had that property.
+func (f *FeedDeriver) classifyAnswer(agg common.Address, answer decode.ChainlinkAnswerUpdated, observedAt time.Time) answerVerdict {
 	var v answerVerdict
 	if !usableAnswer(answer.Current) {
 		value := "nil"
@@ -643,7 +647,7 @@ func (f *FeedDeriver) classifyAnswer(agg common.Address, answer decode.Chainlink
 		slog.Warn("chainlink answer is NON-POSITIVE: the stream is publishing but the number cannot be used, so it does not refresh this feed's freshness and is reported as its own unhealthy condition",
 			"engine", f.engine, "aggregator", agg.Hex(), "answer", value)
 	}
-	at, flaw := f.classifyUpdatedAt(agg, answer.UpdatedAt)
+	at, flaw := f.classifyUpdatedAt(agg, answer.UpdatedAt, observedAt)
 	v.timestampFlaw = flaw
 	v.at = at
 	v.usable = v.invalidReason == "" && v.timestampFlaw == ""
@@ -662,38 +666,79 @@ func (f *FeedDeriver) classifyAnswer(agg common.Address, answer decode.Chainlink
 //     as long as it is ahead, suppressing every real stall until wall-clock
 //     catches up.
 //
-// The previous answer was to CLAMP both to f.now(). That is what round 2 caught:
-// the clamped value is a process timestamp, and the same raw log re-clamps to a
-// NEW process time on every restart, rewind or apply-error hydration — so
-// repeated restarts inside the threshold kept a feed with one malformed future
-// timestamp healthy forever. A refusal is durable where a substitution is not: the
-// same log always yields the same refusal.
+// THE COMPARISON IS AGAINST THE LOG'S OWN DURABLE OBSERVATION TIME, not a clock.
+// observedAt is raw_logs.ingested_at — the database time at which this exact log
+// became durable — so the verdict is a function of two persisted facts: the same
+// stored row yields the same verdict on every re-decode, restart and rehydration,
+// whatever the wall clock says.
 //
-// LIMIT, STATED PLAINLY, because a refusal is not a free lunch:
+// THE ONE THING THAT CHANGES IT, stated because "durable" is not "immutable": a
+// REWIND deletes the log and the walker re-ingests it, which assigns a new
+// ingested_at. A previously implausible answer can therefore become acceptable
+// after a rewind — but that is a genuinely NEW durable observation, not a clock
+// drifting, and the cap below means acceptance still cannot place freshness ahead
+// of that new observation. Replaying an already-stored log does NOT change it:
+// SaveBatch inserts ON CONFLICT DO NOTHING, so the original stamp survives.
 //
-//   - The future test compares against wall clock, so a future timestamp stops
-//     being "future" once wall-clock reaches it, and from that moment the feed is
-//     measured from the time the oracle claimed. That grants one threshold window
-//     starting at the CLAIMED time. It is bounded, deterministic and identical
-//     across restarts — which is the property that matters — but it is not zero.
-//     Until then the feed is UNHEALTHY, so a year-3000 timestamp fails readiness
-//     for centuries instead of silencing the feed for centuries.
-//   - An out-of-range value has no time at all, so such a feed can only ever be
-//     judged from its previous usable answer, or from liveSince if it has none.
-func (f *FeedDeriver) classifyUpdatedAt(agg common.Address, updatedAt uint64) (time.Time, string) {
+// Two earlier versions each failed a different half of that:
+//
+//   - CLAMPING the value to f.now() produced a process timestamp, so the same log
+//     re-clamped to a new time on every hydration and repeated restarts kept a
+//     malformed feed healthy indefinitely (round 2).
+//   - REFUSING it against f.now() was durable only for as long as wall-clock
+//     stayed behind the claimed time. The same persisted log was rejected before a
+//     restart and ACCEPTED after a later one, once the clock had approached the
+//     claimed timestamp — and acceptance then moved freshness to a future time,
+//     greening readiness for the tolerance plus a full threshold window with no new
+//     publication (round 3). No new durable fact had appeared; only the clock had
+//     moved. Wave 3's claim that the same log always yields the same refusal was
+//     false as implemented, and this is what makes it true.
+//
+// WHAT ACCEPTANCE YIELDS. An accepted answer's usable time is
+// min(reported, observedAt): a publication legitimately precedes its ingestion, so
+// the reported time normally wins, and where clock skew puts it slightly ahead the
+// DURABLE observation time caps it. Freshness therefore can never run ahead of the
+// moment the log became durable, which removes the future-suppression window
+// entirely rather than bounding it.
+//
+// LIMIT, STATED PLAINLY: observedAt is when WE first stored the log, not when the
+// block was mined. A log ingested long after its block (a deep backfill) carries a
+// late observation time, so an updatedAt that is genuinely implausible relative to
+// its BLOCK can still be plausible relative to its ingestion. That direction is
+// safe for freshness — min() means such an answer is measured from the earlier
+// reported time — and the reverse (rejecting a good answer) cannot happen, because
+// ingestion never precedes publication by more than the tolerance unless a clock is
+// wrong. Binding to the block's own timestamp would need a new durable column and
+// a walker change to populate it; this uses a column migration 00001 already has.
+func (f *FeedDeriver) classifyUpdatedAt(agg common.Address, updatedAt uint64, observedAt time.Time) (time.Time, string) {
 	if updatedAt > math.MaxInt64 {
 		slog.Warn("chainlink answer reports an OUT-OF-RANGE updatedAt; it establishes no observation time and is reported as an unhealthy condition rather than substituted with this process's clock",
 			"engine", f.engine, "aggregator", agg.Hex(), "reported", updatedAt)
 		return time.Time{}, fmt.Sprintf("updatedAt %d is outside int64 range, so it names no time", updatedAt)
 	}
 	reported := time.Unix(int64(updatedAt), 0).UTC()
-	if ahead := reported.Sub(f.now()); ahead > futureTimestampTolerance {
-		slog.Warn("chainlink answer reports an implausibly FUTURE updatedAt; it establishes no observation time and is reported as an unhealthy condition rather than clamped to this process's clock (clamping was not durable: the same log re-clamped to a new process time on every restart)",
+	if observedAt.IsZero() {
+		// A log with no durable ingestion time cannot be judged against one. The
+		// column is NOT NULL with a default, so this means the log did not come from
+		// storage; refusing is the only honest answer, and substituting a clock is
+		// the defect this whole path exists to remove.
+		slog.Warn("chainlink answer carries no durable ingestion time, so its updatedAt cannot be judged against a persisted observation; it establishes no observation time",
+			"engine", f.engine, "aggregator", agg.Hex(), "reported", reported.Format(time.RFC3339))
+		return time.Time{}, fmt.Sprintf("updatedAt %s cannot be judged: this log carries no durable ingestion time",
+			reported.Format(time.RFC3339))
+	}
+	if ahead := reported.Sub(observedAt); ahead > futureTimestampTolerance {
+		slog.Warn("chainlink answer reports an updatedAt implausibly far AHEAD OF ITS OWN DURABLE INGESTION TIME; it establishes no observation time. The comparison is against raw_logs.ingested_at rather than a clock, so this verdict does not change across restarts",
 			"engine", f.engine, "aggregator", agg.Hex(),
-			"reported", reported.Format(time.RFC3339), "ahead", ahead.Truncate(time.Second),
-			"tolerance", futureTimestampTolerance)
-		return time.Time{}, fmt.Sprintf("updatedAt %s is %s ahead of observation time (tolerance %s)",
-			reported.Format(time.RFC3339), ahead.Truncate(time.Second), futureTimestampTolerance)
+			"reported", reported.Format(time.RFC3339), "ingestedAt", observedAt.Format(time.RFC3339),
+			"ahead", ahead.Truncate(time.Second), "tolerance", futureTimestampTolerance)
+		return time.Time{}, fmt.Sprintf("updatedAt %s is %s ahead of this log's durable ingestion time %s (tolerance %s)",
+			reported.Format(time.RFC3339), ahead.Truncate(time.Second),
+			observedAt.Format(time.RFC3339), futureTimestampTolerance)
+	}
+	if reported.After(observedAt) {
+		// Within tolerance but still ahead: cap freshness at the durable fact.
+		return observedAt.UTC(), ""
 	}
 	return reported, ""
 }
@@ -790,7 +835,7 @@ func (f *FeedDeriver) hydrateFreshness(ctx context.Context, cursor uint64, found
 		if !ok {
 			continue
 		}
-		v := f.classifyAnswer(agg, answer)
+		v := f.classifyAnswer(agg, answer, l.IngestedAt)
 		if v.usable {
 			usable[agg] = v.at
 			continue

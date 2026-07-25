@@ -72,12 +72,17 @@ import (
 // failures were invisible to a supervisor.
 const conditionStepError = "step_error"
 
-// conditionNoProgress is the condition key for a worker whose DURABLE cursor has
-// not moved within noProgressBound. It is the silent-stall detector: a worker that
+// conditionNoProgress is the condition key for a worker that has made no DURABLE
+// progress within noProgressBound. It is the silent-stall detector: a worker that
 // neither errors nor advances reports nothing at all, and before this key existed
-// /readyz stayed 200 through exactly that failure. The measurement is the
-// database's own updated_at, so a restart cannot grant a wedged worker a fresh
-// window.
+// /readyz stayed 200 through exactly that failure. Every measurement behind it is a
+// database timestamp, so a restart cannot grant a wedged worker a fresh window.
+//
+// It covers two shapes of "no progress", because the workers differ in what durable
+// evidence they leave: a walker's or runner's CURSOR standing still
+// (ingest_cursors/derive_cursors.updated_at), and an OPEN sweep generation that has
+// stopped stamping sweep statuses (the collateral snapshotter has no cursor at all,
+// and its all-endpoints-stale path returns neither an error nor an advance).
 const conditionNoProgress = "no_progress"
 
 // conditionHeadLag is the condition key for a raw-log walker whose cursor is more
@@ -89,6 +94,18 @@ const conditionNoProgress = "no_progress"
 // is the same posture the feed deriver already takes with its rpc_ingest_lag
 // condition.
 const conditionHeadLag = "head_lag"
+
+// conditionFrontierLag is the condition key for a raw-log CONSUMER — a derivation
+// runner or the Chainlink feed deriver — whose durable cursor sits more than
+// frontierLagBound blocks below the durable frontier of the streams feeding it.
+//
+// It is the distance half of what no_progress cannot answer. A worker advancing
+// small backfill windows refreshes its cursor's updated_at every round, so it never
+// trips no_progress however stale it is; head_lag does not cover it either, because
+// a walker can be exactly at the chain head while the runner reading its logs is
+// arbitrarily far behind. Before this key existed /readyz could report 200 through
+// an entire restart backfill with positions and prices describing a state days old.
+const conditionFrontierLag = "frontier_lag"
 
 // startupWorker/conditionStartup name the initialisation entry that makes
 // readiness start CLOSED. The key shape matches every other recoverable entry
@@ -286,8 +303,15 @@ func (h *healthState) report() healthReport {
 //	               balancer should use. It fails while the daemon is still
 //	               initialising, and thereafter for stale feeds, missing poll
 //	               targets, quarantined answers, a frozen chain view, stalled
-//	               ingestion or derivation, persistent Step failures and terminal
-//	               engine errors.
+//	               ingestion or derivation, a stalled collateral sweep, a
+//	               derivation or feed cursor too far behind its input frontier,
+//	               persistent Step failures and terminal engine errors.
+//
+//	               WHAT IT DOES NOT CLAIM: it is not a statement that every
+//	               cursor is at the chain head. The gates are bounds, each named
+//	               with its own constant (headLagBound, frontierLagBound,
+//	               noProgressBound, blockAdvanceTTL) — readiness means "inside
+//	               every bound", not "exactly current".
 //	GET /healthz — 200 when Live, else 503. Restart-worthy failures only.
 //	GET /health  — always 200 with the full report, for humans and dashboards
 //	               that want the detail without an HTTP failure.

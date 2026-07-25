@@ -542,12 +542,18 @@ func (f *fakeSnapshotWorker) script(advanced bool, err error) *fakeSnapshotWorke
 	return f
 }
 
-// fakeProgress serves durable cursor progress.
+// fakeProgress serves durable cursor and sweep progress.
 type fakeProgress struct {
 	ingest    []store.CursorProgress
 	derive    []store.CursorProgress
 	ingestErr error
 	deriveErr error
+	// sweep is the snapshotter's durable generation state; sweepFound=false models
+	// an engine that has never opened a generation.
+	sweep      store.SweepProgress
+	sweepFound bool
+	sweepErr   error
+	sweepCalls []string
 }
 
 func (f *fakeProgress) IngestCursorProgress(context.Context) ([]store.CursorProgress, error) {
@@ -556,6 +562,11 @@ func (f *fakeProgress) IngestCursorProgress(context.Context) ([]store.CursorProg
 
 func (f *fakeProgress) DeriveCursorProgress(context.Context) ([]store.CursorProgress, error) {
 	return f.derive, f.deriveErr
+}
+
+func (f *fakeProgress) SweepProgress(_ context.Context, engine string) (store.SweepProgress, bool, error) {
+	f.sweepCalls = append(f.sweepCalls, engine)
+	return f.sweep, f.sweepFound, f.sweepErr
 }
 
 // B-WORKERS (INGESTION): a walker error used to reach a log line and a local
@@ -721,7 +732,7 @@ func TestApplyProgressConditionsFailsReadinessOnASilentStall(t *testing.T) {
 	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, walkers, runners)
+	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers, runners: runners})
 	rc.publish(h)
 
 	rep := h.report()
@@ -740,7 +751,7 @@ func TestApplyProgressConditionsFailsReadinessOnASilentStall(t *testing.T) {
 	// Once the cursor moves, it clears.
 	pr.ingest[0].UpdatedAt = now
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, walkers, runners)
+	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers, runners: runners})
 	rc.publish(h)
 	require.NotContains(t, h.report().Recoverable, key)
 }
@@ -759,7 +770,7 @@ func TestRoundConditionsComposeStepErrorAndNoProgressTogether(t *testing.T) {
 
 	rc := roundConditions{}
 	stepWalkers(context.Background(), walkers, rc)
-	applyProgressConditions(context.Background(), pr, now, rc, walkers, nil)
+	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers})
 	rc.publish(h)
 
 	rep := h.report()
@@ -773,12 +784,230 @@ func TestRoundConditionsComposeStepErrorAndNoProgressTogether(t *testing.T) {
 func TestApplyProgressConditionsIssuesNoVerdictOnReadFailure(t *testing.T) {
 	h, clk := newTestHealth()
 	walkers := []*walkerState{{w: &fakeIngestWorker{name: "op:debt-manager"}}}
-	pr := &fakeProgress{ingestErr: errors.New("database unreachable"), deriveErr: errors.New("database unreachable")}
+	pr := &fakeProgress{
+		ingestErr: errors.New("database unreachable"),
+		deriveErr: errors.New("database unreachable"),
+		sweepErr:  errors.New("database unreachable"),
+	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, walkers, nil)
+	applyProgressConditions(context.Background(), pr, clk.now(), rc,
+		progressWatch{walkers: walkers, sweepEngine: "debt_manager"})
 	rc.publish(h)
 	require.Empty(t, h.report().Recoverable)
+}
+
+// SNAPSHOT: the SEMANTIC stall. When every RPC endpoint serves sweep batches at an
+// execution block behind the accounts' recorded successes, the store refuses each
+// one, Step returns (false, nil) — no error, no advance — and it can do that
+// forever. The wrapper's failure bookkeeping treats every nil error as recovery, the
+// snapshotter has no ingest or derive cursor for the generic pass to watch, and the
+// only signal was a warning log: /readyz answered 200 indefinitely while collateral
+// snapshots stopped advancing.
+//
+// This drives Codex's exact scenario — every endpoint repeatedly produces stale
+// sweep batches returning (false, nil) — and asserts readiness goes red.
+func TestSnapshotSemanticStallFailsReadiness(t *testing.T) {
+	h, clk := newTestHealth()
+	now := clk.now()
+	opened := now.Add(-noProgressBound - 5*time.Minute)
+
+	// Every round: the batch is refused as stale, so Step reports neither an error
+	// nor an advance. The wrapper therefore records NOTHING.
+	snap := &fakeSnapshotWorker{}
+	var ss snapshotState
+	rc := roundConditions{}
+	for i := 0; i < 6; i++ {
+		require.False(t, stepSnapshotter(context.Background(), snap, &ss, rc),
+			"a wholesale-stale batch advances nothing, round %d", i)
+	}
+	require.Nil(t, ss.lastErr, "and it is not an error either — which is exactly why nothing was reported")
+	require.NotContains(t, rc[snapshotName], conditionStepError)
+
+	// The DURABLE state is what catches it: the generation is still OPEN and the
+	// newest sweep status predates it.
+	pr := &fakeProgress{
+		sweepFound: true,
+		sweep: store.SweepProgress{
+			Generation: 7, Open: true, OpenedAt: opened,
+			LastBatchAt: opened.Add(-time.Hour), Lagging: 3,
+		},
+	}
+	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+	rc.publish(h)
+
+	rep := h.report()
+	key := snapshotName + "/" + conditionNoProgress
+	require.Contains(t, rep.Recoverable, key)
+	require.Contains(t, rep.Recoverable[key], "generation 7 has been OPEN")
+	require.Contains(t, rep.Recoverable[key], "without landing a batch")
+	require.False(t, rep.Ready, "/readyz must fail while collateral snapshot ingestion is stalled")
+	require.Equal(t, []string{"debt_manager"}, pr.sweepCalls)
+
+	// A landed batch clears it: this class is recoverable.
+	pr.sweep.LastBatchAt = now.Add(-time.Minute)
+	rc = roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+	rc.publish(h)
+	require.NotContains(t, h.report().Recoverable, key)
+}
+
+// SNAPSHOT: a CLOSED generation is idle by cadence, not stalled — the snapshot
+// interval can legitimately exceed noProgressBound — and an engine that has never
+// opened a generation has not started rather than stopped. Neither may fire, or the
+// gate would be red on every healthy deployment between sweeps.
+func TestSnapshotProgressDoesNotFireBetweenGenerations(t *testing.T) {
+	h, clk := newTestHealth()
+	now := clk.now()
+
+	for _, tc := range []struct {
+		name  string
+		found bool
+		sweep store.SweepProgress
+	}{
+		{"closed generation waiting on the cadence", true, store.SweepProgress{
+			Generation: 4, Open: false,
+			OpenedAt: now.Add(-48 * time.Hour), CompletedAt: now.Add(-24 * time.Hour),
+			LastBatchAt: now.Add(-24 * time.Hour),
+		}},
+		{"no generation ever opened", false, store.SweepProgress{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pr := &fakeProgress{sweepFound: tc.found, sweep: tc.sweep}
+			rc := roundConditions{}
+			applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+			rc.publish(h)
+			require.NotContains(t, h.report().Recoverable, snapshotName+"/"+conditionNoProgress)
+		})
+	}
+}
+
+// FRONTIER: readiness must require a raw-log CONSUMER to have caught up to its own
+// input frontier, not merely to have moved recently.
+//
+// A worker advancing small backfill windows refreshes derive_cursors.updated_at
+// every round, so no_progress never fires however stale it is; head_lag does not
+// cover it either, because the walker feeding it can be exactly at the chain head.
+// Wave 3's report claimed not-ready-until-chain-head behaviour and that was FALSE as
+// implemented — the progress check only looked at recency. This is the gate that
+// makes it true for consumers, and it names precisely what it measures: distance
+// from the durable minimum ingest cursor of the streams that feed the worker.
+func TestFrontierLagFailsReadinessWhenDerivationIsBehindItsInput(t *testing.T) {
+	h, clk := newTestHealth()
+	now := clk.now()
+
+	// Raw logs are AT HEAD and the runner's cursor moved a second ago — so both
+	// head_lag and no_progress are silent — but derivation is 900k blocks behind.
+	pr := &fakeProgress{
+		ingest: []store.CursorProgress{
+			{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now},
+			{Name: "eth:atoken-weeth", Block: 20_999_000, UpdatedAt: now},
+		},
+		derive: []store.CursorProgress{
+			{Name: "aave_v3_etherfi", Block: 20_100_000, UpdatedAt: now.Add(-time.Second)},
+		},
+	}
+	watch := progressWatch{
+		runners: []*runnerState{{r: &fakeDeriveWorker{name: "aave_v3_etherfi"}}},
+		consumers: []frontierWatch{
+			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi", "eth:atoken-weeth"}},
+		},
+	}
+
+	rc := roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	rc.publish(h)
+
+	rep := h.report()
+	key := "aave_v3_etherfi/" + conditionFrontierLag
+	require.Contains(t, rep.Recoverable, key)
+	require.Contains(t, rep.Recoverable[key], "899000 blocks behind")
+	require.Contains(t, rep.Recoverable[key], "20999000",
+		"the frontier is the MINIMUM stream cursor: above it some stream's logs may be missing")
+	require.False(t, rep.Ready, "a process whose derived state is not current is not ready")
+	require.NotContains(t, rep.Recoverable, "aave_v3_etherfi/"+conditionNoProgress,
+		"and no_progress is silent, which is exactly why this gate had to exist")
+
+	// Caught up to within the bound: it clears.
+	pr.derive[0].Block = 20_999_000 - frontierLagBound
+	rc = roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	rc.publish(h)
+	require.NotContains(t, h.report().Recoverable, key)
+	require.True(t, h.report().Ready)
+}
+
+// FRONTIER: the price FEED deriver is a raw-log consumer too — it reads
+// AnswerUpdated back out of raw_logs — and it is NOT a derive.Runner, so it has to
+// be registered explicitly or it would be missed. Codex's finding named price
+// workers as excluded outright.
+func TestFrontierLagCoversTheFeedDeriver(t *testing.T) {
+	h, clk := newTestHealth()
+	now := clk.now()
+	pr := &fakeProgress{
+		ingest: []store.CursorProgress{{Name: "eth:feed-usdc", Block: 21_000_000, UpdatedAt: now}},
+		derive: []store.CursorProgress{{Name: "prices:chainlink_feed:1", Block: 20_000_000, UpdatedAt: now}},
+	}
+	watch := progressWatch{consumers: []frontierWatch{
+		{worker: "prices:chainlink_feed:1", streams: []string{"eth:feed-usdc"}},
+	}}
+
+	rc := roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	rc.publish(h)
+	require.Contains(t, h.report().Recoverable, "prices:chainlink_feed:1/"+conditionFrontierLag)
+	require.False(t, h.report().Ready)
+}
+
+// FRONTIER: the two states the gate deliberately does not judge, because judging
+// them would mean inventing a distance. A stream with no ingest cursor has no
+// frontier to be behind, and a consumer with no derive cursor has no height to
+// compare — its first Step either creates one or reports step_error, and the
+// daemon's startup condition holds readiness closed until a full round completes.
+//
+// The POLLER is absent by construction rather than by exclusion: it reads `latest`
+// through eth_call and has no raw-log input at all, so there is no frontier for it.
+func TestFrontierLagIssuesNoVerdictWithoutBothCursors(t *testing.T) {
+	h, clk := newTestHealth()
+	now := clk.now()
+
+	t.Run("a feeding stream has never ingested", func(t *testing.T) {
+		pr := &fakeProgress{
+			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now}},
+			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 1, UpdatedAt: now}},
+		}
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
+			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi", "eth:atoken-weeth"}},
+		}})
+		rc.publish(h)
+		require.NotContains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionFrontierLag)
+	})
+
+	t.Run("the consumer has no cursor yet", func(t *testing.T) {
+		pr := &fakeProgress{
+			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now}},
+		}
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
+			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}},
+		}})
+		rc.publish(h)
+		require.NotContains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionFrontierLag)
+	})
+
+	t.Run("a price poller is never registered as a consumer", func(t *testing.T) {
+		pr := &fakeProgress{
+			ingest: []store.CursorProgress{{Name: "op:debt-manager", Block: 150_000_000, UpdatedAt: now}},
+			derive: []store.CursorProgress{{Name: "prices:poll:10", Block: 1, UpdatedAt: now}},
+		}
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
+			{worker: "aave_v3_etherfi", streams: []string{"op:debt-manager"}},
+		}})
+		rc.publish(h)
+		require.NotContains(t, h.report().Recoverable, "prices:poll:10/"+conditionFrontierLag)
+	})
 }
 
 // ---------------------------------------------------------------------------

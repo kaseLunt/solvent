@@ -610,11 +610,118 @@ func TestPollerRewindPagesAnchorProbesAcrossStepsWithoutDeleting(t *testing.T) {
 		"everything at or below the verified anchor survives; only the orphaned suffix goes")
 }
 
-// A1 (EVERY RETAINED ANCHOR ORPHANED): a reorg deeper than the entire retained
-// anchor history is not repaired automatically. Paging reaches the bottom, proves
-// nothing survives, and STILL refuses — deleting the whole history on that
-// evidence is an operator decision, not an automatic one.
-func TestPollerRewindRefusesWhenEveryRetainedAnchorIsOrphaned(t *testing.T) {
+// A1 CASE: SOME PROBES FAIL, THEN A LOWER ANCHOR MATCHES.
+//
+// THIS IS THE FINDING A1 SURVIVED THREE FIX WAVES IN. Anchors are probed
+// newest-first. Wave 3 set a probeFailed flag on an errored probe and then returned
+// the NEXT anchor that matched as a verified floor anyway — so a transient outage
+// while probing a newer canonical anchor caused a rewind to the lower floor,
+// deleting every poll-owned row above it and acking the epoch. The newer history
+// was never shown to be non-canonical; it was deleted because a probe timed out.
+//
+// Wave 3's replacement test exercised only TOTAL probe failure, which is why it
+// passed while this path still lost data.
+//
+// The correct outcome: refuse, delete nothing, ack nothing, retry — and once the
+// failed probe recovers, verify the NEWER anchor and retain everything.
+func TestPollerRewindRefusesWhenANewerProbeFailedAndALowerAnchorMatches(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 2, hashes: map[uint64]common.Hash{}, hashErrAt: map[uint64]error{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Three anchored rounds. 5000 is the newest and is STILL CANONICAL; 4900 is
+	// canonical too. Only the probe of 5000 fails.
+	for _, b := range []uint64{4800, 4900, 5000} {
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+	}
+	canonicalAt(ch, 4800, 4900, 5000)
+	ch.hashErrAt[5000] = errors.New("probe endpoint timed out")
+	st.cursor, st.cursorFound = 5000, true
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
+	st.unacked = true
+	p.lastAttempt = clk.now()
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "a refusal is a health condition, not a Step error")
+	require.False(t, advanced)
+
+	require.Empty(t, st.rewinds,
+		"a match at 4900 must NOT authorise deleting 5000: the probe that would have proven 5000 orphaned FAILED")
+	require.Equal(t, uint64(5000), st.cursor, "the cursor is untouched")
+	require.True(t, st.unacked, "the epoch stays unacknowledged")
+	require.Empty(t, st.neutralized, "the evidence is UNAVAILABLE, not unobtainable: this must retry, not neutralize")
+	var blocks []uint64
+	for _, r := range st.rows {
+		blocks = append(blocks, r.block)
+	}
+	require.ElementsMatch(t, []uint64{4800, 4900, 5000}, blocks,
+		"every row survives, including the one a failed probe could not vouch for")
+	require.Contains(t, pollConditions(p), ConditionPollRewindBlocked)
+	require.True(t, containsSubstring(*msgs, "a NEWER anchor above it could not be probed"))
+
+	// The resume point must NOT have been lowered past the unprobed anchor: the next
+	// Step re-probes from the top rather than skipping it.
+	require.False(t, p.probeResumeSet,
+		"a page containing a failed probe may not lower the paging resume point")
+
+	// RECOVERY: the probe succeeds and 5000 verifies, so nothing is deleted at all.
+	delete(ch.hashErrAt, 5000)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(5000), st.rewinds[0].verifiedFloor,
+		"the recovered probe proved the NEWEST anchor canonical, so the floor is 5000")
+	require.Len(t, st.rows, 3, "and all three rows were retained throughout")
+}
+
+// A1 CASE: SOME PROBES FAIL AND NOTHING MATCHES. The partial-failure sibling of the
+// case above: two of three probes error, the third mismatches, so the page has
+// neither a match nor complete negative proof. Refusal must not be mistaken for the
+// paged-to-the-bottom case, and the resume point must stay put so the unprobed
+// anchors are re-probed rather than skipped.
+func TestPollerRewindRefusesWhenSomeProbesFailWithoutAMatch(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 2, hashes: map[uint64]common.Hash{}, hashErrAt: map[uint64]error{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	for _, b := range []uint64{4800, 4900, 5000} {
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+	}
+	ch.hashes[4800] = common.HexToHash("0xbeef") // probed, MISMATCH
+	ch.hashErrAt[5000] = errors.New("probe endpoint timed out")
+	ch.hashErrAt[4900] = errors.New("probe endpoint timed out")
+	st.cursor, st.cursorFound = 5000, true
+	deep := uint64(100)
+	st.rewindDeepTo = &deep // the walker's target is below every row: history IS at risk
+	st.unacked = true
+	p.lastAttempt = clk.now()
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.rewinds)
+	require.Empty(t, st.neutralized)
+	require.Len(t, st.rows, 3)
+	require.False(t, p.probeResumeSet,
+		"two anchors are still unproven, so paging must not advance past them")
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollRewindBlocked)
+	require.Contains(t, got[ConditionPollRewindBlocked], "a probe FAILED and will be retried")
+}
+
+// A1 CASE: EVERY RETAINED ANCHOR IS PROBED AND MISMATCHED, AND THE ANCHORS COVER
+// EVERY ROW. Then every row above the target IS proven to describe a replaced
+// block, so deleting them is justified by positive evidence and the epoch may be
+// acked. Wave 3 refused here and called it an operator decision; that was a second
+// unclearable stall, and it was refusing in the face of proof it already had.
+func TestPollerRewindDeletesWhenEveryAnchorIsProvenOrphaned(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, hashes: map[uint64]common.Hash{}}
@@ -624,60 +731,185 @@ func TestPollerRewindRefusesWhenEveryRetainedAnchorIsOrphaned(t *testing.T) {
 		b := uint64(4000 + 10*i)
 		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
 		st.seedAnchor(engine, b, blockHashAt(b))
-		ch.hashes[b] = common.HexToHash("0xbeef")
+		ch.hashes[b] = common.HexToHash("0xbeef") // every one replaced
 	}
 	st.cursor, st.cursorFound = 4000+10*uint64(anchorProbePage-1), true
+	deep := uint64(3900)
+	st.rewindDeepTo = &deep
 	st.unacked = true
 	p.lastAttempt = clk.now()
+	msgs := captureWarnings(t)
 
-	// First Step consumes the only page; the second reaches the bottom.
-	for i := 0; i < 2; i++ {
-		advanced, err := p.Step(context.Background())
-		require.NoError(t, err)
-		require.False(t, advanced, "step %d", i)
-	}
-	require.Empty(t, st.rewinds, "nothing was deleted on the strength of a total orphaning")
+	// First Step spends the page and concludes nothing yet; the second reaches the
+	// bottom of the retained set and can then conclude.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.rewinds, "an inconclusive page must not delete anything")
 	require.Len(t, st.rows, anchorProbePage)
-	got := pollConditions(p)
-	require.Contains(t, got, ConditionPollRewindBlocked)
-	require.Contains(t, got[ConditionPollRewindBlocked], "every retained poll anchor is orphaned")
-	require.Contains(t, got[ConditionPollRewindBlocked], "operator decision")
+
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(0), st.rewinds[0].verifiedFloor,
+		"no anchor survived, so there is no floor to raise the walker's target with")
+	require.Equal(t, uint64(3900), st.cursor)
+	require.Empty(t, st.rows, "every row was PROVEN to describe a replaced block before it was deleted")
+	require.Empty(t, st.neutralized, "proof existed, so this is a deletion and not a neutralization")
+	require.True(t, containsSubstring(*msgs, "probed and MISMATCHED"))
+	require.False(t, st.unacked)
 }
 
-// A1 (UPGRADE / LEGACY UNANCHORED HISTORY): rows written before this engine
-// anchored its rounds cannot be verified, so repair refuses them — and the poller
-// ADOPTS anchors for them on a normal round instead, which is the explicit one-time
-// policy. Adoption runs only with NO epoch pending, so it can never take the hash
-// of a replacement block.
+// A1 CASE: THE ANCHORS ARE COMPLETE AND ONE VERIFIES, BUT A ROW ABOVE THE DELETION
+// BOUNDARY SITS AT AN UNANCHORED HEIGHT. A match at 4900 says nothing about a row
+// at 4950 that no anchor covers, so the rewind must not delete it — and no future
+// probe can ever settle it either, so the answer is NEUTRALIZE rather than an
+// indefinite refusal.
+//
+// This is the mixed legacy-and-anchored shape: exactly the state that a "the
+// anchors all check out" test would miss.
+func TestPollerRewindNeutralizesWhenAVerifiedFloorLeavesUnanchoredRowsAbove(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, hashes: map[uint64]common.Hash{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Anchored, canonical history at 4900; an UNANCHORED legacy row at 4950 above it.
+	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4900, clk.now())
+	st.seedAnchor(engine, 4900, blockHashAt(4900))
+	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4950, clk.now())
+	canonicalAt(ch, 4900)
+	st.cursor, st.cursorFound = 4950, true
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
+	st.unacked = true
+	p.lastAttempt = clk.now()
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the epoch is answered — by neutralization, not by deletion")
+	require.Empty(t, st.rewinds, "RewindPrices was never called: nothing was deleted")
+	require.Len(t, st.neutralized, 1)
+	require.Len(t, st.rows, 2, "both rows are RETAINED")
+	require.True(t, containsSubstring(*msgs, "rows above the deletion boundary sit at heights NO anchor covers"))
+
+	// The unprovable row is retained but marked, so no usable-price read can return
+	// it; the provable one below the target is untouched.
+	byBlock := map[uint64]fakeRow{}
+	for _, r := range st.rows {
+		byBlock[r.block] = r
+	}
+	require.False(t, byBlock[4950].valid, "the unprovable row is quarantined, not trusted")
+	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[4950].invalidReason)
+	require.True(t, byBlock[4900].valid,
+		"history at or below the HASH-VERIFIED floor keeps its validity: it was proven canonical, so neutralization must not touch it")
+	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor,
+		"the verified floor is passed through, which is what confines the marking to the unprovable suffix")
+	require.Equal(t, uint64(4900), st.cursor, "and the cursor stands at the verified floor, not at the walker's 100")
+	require.False(t, st.unacked, "the epoch is acknowledged, so poll ingestion is not wedged")
+}
+
+// A1 CASE + THE DEADLOCK: A PENDING EPOCH WITH LEGACY UNANCHORED ROWS.
+//
+// Wave 3 refused here forever. Repair needed an anchor; anchor ADOPTION is refused
+// while an epoch is pending (it would otherwise record a replacement block's hash);
+// and the poller's ack only ever advanced through repair. No code path could clear
+// it, so poll-price ingestion stopped permanently after an upgrade-time reorg. Wave
+// 3's test hid that by assigning st.unacked = false directly — a transition the real
+// store cannot perform. NOTHING IN THIS TEST TOUCHES st.unacked: every transition is
+// one the store itself makes.
+//
+// The state now terminates: the rows are neutralized (retained, marked unusable),
+// the epoch is acked, the next round polls normally, and adoption then anchors what
+// survived so a LATER reorg is repairable by proof.
+func TestPollerPendingEpochWithLegacyUnanchoredRowsTerminates(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000), hashes: map[uint64]common.Hash{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Post-upgrade state: polled rows at 5000, NO anchor anywhere, and a reorg epoch
+	// whose walker target sits below them. The asset is a REAL registry poll asset so
+	// the health surface actually reports on it — a fixture asset the registry does
+	// not name would leave every condition silent for reasons unrelated to the code.
+	asset := realFeeds(t).PollAssets(10)[0].Address
+	st.seedRow(engine, asset.Bytes(), SourcePriceProviderV2, 5000, clk.now())
+	st.cursor, st.cursorFound = 5000, true
+	deep := uint64(4900)
+	st.rewindDeepTo = &deep
+	canonicalAt(ch, 4900, 5000, 5100)
+	st.unacked = true
+	p.lastAttempt = clk.now() // not due: isolate the repair leg
+
+	// STEP 1: the epoch is answered without deleting anything.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Empty(t, st.rewinds, "unanchored history is never deleted on faith")
+	require.Len(t, st.neutralized, 1)
+	require.Len(t, st.rows, 1, "the legacy row is RETAINED")
+	require.False(t, st.rows[0].valid)
+	require.Equal(t, store.InvalidReasonUnverifiableReorg, st.rows[0].invalidReason)
+	require.Equal(t, uint64(4900), st.cursor, "the cursor is reset to the effective epoch target")
+	require.False(t, st.unacked, "the STORE cleared the epoch as part of that transaction")
+
+	// AND IT IS NOT SILENT. The retained-but-unusable rows are the newest durable
+	// observation for their key, so the poller reports a quarantined newest answer
+	// and /readyz stays red — the honest cost of the state, stated where an operator
+	// sees it rather than only in a log line.
+	got := pollConditions(p)
+	require.Contains(t, got, ConditionPollInvalidAnswer)
+	require.Contains(t, got[ConditionPollInvalidAnswer], "unverifiable after a reorg")
+	require.Empty(t, got[ConditionPollRewindBlocked], "the refusal is over: it was answered, not deferred")
+	healthy, _ := p.Health()
+	require.False(t, healthy)
+
+	// STEP 2: ingestion resumes on the very next due round — the property the
+	// deadlock denied. Adoption also runs now that no epoch is pending.
+	p.lastAttempt = time.Time{}
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "poll ingestion resumed rather than stalling forever")
+	require.Equal(t, uint64(5100), st.cursor)
+	require.NotEmpty(t, st.applied, "a round actually landed")
+	require.NotContains(t, pollConditions(p), ConditionPollInvalidAnswer,
+		"a valid observation ABOVE the neutralized height is the newest again, so the quarantine marker clears")
+
+	// STEP 3: a LATER reorg is now repairable by proof, because the round that just
+	// landed anchored itself.
+	st.unacked = true
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(5100), st.rewinds[0].verifiedFloor,
+		"the anchored round is a verified floor, so this repair deletes nothing either")
+}
+
+// A1 CASE: LEGACY UNANCHORED ROWS WITH NO EPOCH PENDING are ADOPTED, which is the
+// explicit one-time policy that makes a LATER reorg repairable by proof rather than
+// by neutralization. Adoption runs only from the no-pending-epoch path, so it can
+// never record the hash of a replacement block.
 func TestPollerAdoptsAnchorsForLegacyUnanchoredRowsThenCanRepair(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	// Post-upgrade state: polled rows exist at 5000, with NO anchor anywhere.
+	// Post-upgrade state with NO epoch pending: rows at 5000, no anchor anywhere.
 	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
 	st.cursor, st.cursorFound = 5000, true
 	canonicalAt(ch, 5000, 5100)
 
-	// A reorg arriving BEFORE adoption is refused, not guessed at.
-	st.unacked = true
-	p.lastAttempt = clk.now()
 	advanced, err := p.Step(context.Background())
-	require.NoError(t, err)
-	require.False(t, advanced)
-	require.Empty(t, st.rewinds, "unanchored history is never deleted on faith")
-	require.Contains(t, pollConditions(p)[ConditionPollRewindBlocked], "no poll anchor covers")
-
-	// With the epoch cleared, the next due round adopts the missing anchor.
-	st.unacked = false
-	p.lastAttempt = time.Time{}
-	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
 	require.Equal(t, []uint64{5000}, st.adopted, "the legacy block was anchored from the live chain")
 
-	// And now a reorg IS repairable, retaining the adopted history.
+	// A reorg arriving now is repairable BY PROOF, retaining the adopted history and
+	// never reaching the neutralization path.
 	st.unacked = true
 	deep := uint64(100)
 	st.rewindDeepTo = &deep
@@ -687,7 +919,66 @@ func TestPollerAdoptsAnchorsForLegacyUnanchoredRowsThenCanRepair(t *testing.T) {
 	require.Len(t, st.rewinds, 1)
 	require.Equal(t, uint64(5100), st.rewinds[0].verifiedFloor,
 		"the newest verified anchor — the round that just landed — is the floor")
+	require.Empty(t, st.neutralized, "adoption made proof available, so nothing had to be neutralized")
 	require.NotEmpty(t, st.rows, "adopted legacy history survived the rewind")
+	for _, r := range st.rows {
+		require.True(t, r.valid, "and it survived as USABLE history, not as a quarantined artifact")
+	}
+}
+
+// A1 CASE: A DEEPER EPOCH ARRIVES WHILE VERIFICATION IS STILL PAGING. The walker
+// records a second, deeper rewind between two verification Steps, which lowers the
+// effective target under the poller's feet. The paging state describes anchors that
+// were probed and mismatched, which stays true; what must NOT happen is a deletion
+// justified by the old boundary.
+func TestPollerRewindHandlesADeeperEpochArrivingMidVerification(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, hashes: map[uint64]common.Hash{}}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Two pages of anchored rounds; 4050 survives and sits in the second page.
+	var blocks []uint64
+	for i := 0; i < 2*anchorProbePage; i++ {
+		b := uint64(4000 + 10*i)
+		blocks = append(blocks, b)
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+		ch.hashes[b] = common.HexToHash("0xbeef")
+	}
+	ch.hashes[4050] = blockHashAt(4050)
+	st.cursor, st.cursorFound = blocks[len(blocks)-1], true
+	shallow := uint64(4100)
+	st.rewindDeepTo = &shallow
+	st.unacked = true
+	p.lastAttempt = clk.now()
+
+	// Page 1: inconclusive, nothing deleted.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.rewinds)
+
+	// THE WALKER RECORDS A DEEPER REWIND between Steps: the effective target drops
+	// from 4100 to 4020, below the anchor that is about to verify.
+	deeper := uint64(4020)
+	st.rewindDeepTo = &deeper
+
+	// Page 2 finds 4050 and it is still canonical, so it becomes the floor — and now
+	// it RAISES the deeper target rather than being ignored by it.
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.rewinds, 1)
+	require.Equal(t, uint64(4050), st.rewinds[0].verifiedFloor)
+	require.Equal(t, uint64(4050), st.cursor,
+		"the verified floor stands against the DEEPER target the walker recorded mid-verification")
+	var kept []uint64
+	for _, r := range st.rows {
+		kept = append(kept, r.block)
+	}
+	require.ElementsMatch(t, []uint64{4000, 4010, 4020, 4030, 4040, 4050}, kept,
+		"nothing at or below the verified anchor was lost to the deeper epoch")
 }
 
 // A1: adoption is REFUSED while a reorg epoch is pending, at the store as well as

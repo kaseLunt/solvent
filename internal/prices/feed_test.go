@@ -901,21 +901,22 @@ func TestFeedDeriverCaughtUpIsNotProgress(t *testing.T) {
 	require.Empty(t, st.applied)
 }
 
-// B-clamp: an oracle-supplied updatedAt is untrusted input to the health signal,
-// and an implausible one must NOT be substituted with this process's clock.
+// TIMESTAMP: an oracle-supplied updatedAt is untrusted input to the health signal.
+// An implausible one must establish no freshness, and the verdict must be a
+// function of DURABLE facts only.
 //
-// Clamping to f.now() was the bug: the clamped value is a process timestamp, so
-// the same raw log re-clamps to a NEW process time on every restart, rewind or
-// apply-error hydration — repeated restarts inside the threshold kept a feed with
-// one malformed future timestamp healthy indefinitely. Both implausible shapes now
-// establish NO freshness and are reported as their own unhealthy condition.
+// Two earlier versions each failed half of that. Clamping to f.now() made the
+// observation time a process timestamp, so the same log re-clamped on every
+// hydration. Refusing against f.now() was durable only while wall-clock stayed
+// behind the claimed time — the round-3 finding. The comparison is now against the
+// log's own raw_logs.ingested_at, so it cannot move at all.
 func TestFeedDeriverRefusesImplausibleUpdatedAtInsteadOfClamping(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		updatedAt func(clk *testClock) uint64
 		wantWarn  string
 	}{
-		{"far future", func(clk *testClock) uint64 { return clk.unix(100 * time.Hour) }, "implausibly FUTURE updatedAt"},
+		{"far future", func(clk *testClock) uint64 { return clk.unix(100 * time.Hour) }, "implausibly far AHEAD OF ITS OWN DURABLE INGESTION TIME"},
 		{"out of int64 range", func(*testClock) uint64 { return ^uint64(0) }, "OUT-OF-RANGE updatedAt"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -941,10 +942,9 @@ func TestFeedDeriverRefusesImplausibleUpdatedAtInsteadOfClamping(t *testing.T) {
 			require.False(t, healthy, "an unusable newest timestamp is an unhealthy DURABLE condition, got %q", reason)
 			require.Contains(t, feedConditions(f), ConditionFeedTimestamp)
 
-			// THE RESTART TEST, which is the whole finding: a fresh process
-			// re-decodes the SAME log at the SAME cursor. Under the clamp it
-			// re-derived a brand-new "observed now" and reported the feed healthy
-			// for another full threshold. The verdict must instead be identical.
+			// THE RESTART TEST: a fresh process re-decodes the SAME log at the SAME
+			// cursor. Under the clamp it re-derived a brand-new "observed now" and
+			// reported the feed healthy for another full threshold.
 			f2, clk2 := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 			clk2.advance(3 * time.Hour) // a much later process start
 			st.cursor, st.cursorFound = testFeedFrontier, true
@@ -955,28 +955,116 @@ func TestFeedDeriverRefusesImplausibleUpdatedAtInsteadOfClamping(t *testing.T) {
 			require.Contains(t, feedConditions(f2), ConditionFeedTimestamp)
 			healthy, _ = f2.Health()
 			require.False(t, healthy, "a restart must not grant a malformed-timestamp feed a fresh window")
-			_ = clk
 		})
 	}
 }
 
+// TIMESTAMP, THE ROUND-3 FINDING ITSELF: the refusal must not dissolve when
+// wall-clock catches up to the claimed time.
+//
+// The previous implementation compared updatedAt against the process clock. The
+// same persisted log was therefore rejected while the clock was more than the
+// tolerance behind the claimed timestamp and ACCEPTED after a later restart once
+// the clock had approached it — with no new durable fact anywhere. Acceptance then
+// moved lastUsable to that future time, greening readiness for the tolerance plus
+// a full heartbeat-and-grace window without a single new publication.
+//
+// This drives the exact crossover: one log, one ingestion time, and a restart on
+// the far side of the two-minute boundary. The verdict must be identical.
+func TestFeedDeriverFutureTimestampRefusalSurvivesTheWallClockCrossover(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
+	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+
+	// The log is ingested NOW and claims a timestamp 30 minutes ahead of that —
+	// far outside the two-minute tolerance.
+	ingestedAt := clk.now()
+	claimed := ingestedAt.Add(30 * time.Minute)
+	log := answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(100_000_000), 1, uint64(claimed.Unix()))
+	log.IngestedAt = ingestedAt
+	st.cursor, st.cursorFound = testFeedStart-1, true
+	st.logs = []store.RawLog{log}
+
+	_, err := f.Step(context.Background())
+	require.NoError(t, err)
+	_, err = f.Step(context.Background())
+	require.NoError(t, err)
+	require.Contains(t, feedConditions(f), ConditionFeedTimestamp, "rejected on first observation")
+	require.NotContains(t, f.lastUsable, aggUSDC)
+
+	// A LATER PROCESS, started an hour after the claimed timestamp: wall-clock is
+	// now well PAST the time the log claimed, which is exactly the state in which
+	// the old code accepted it. The durable ingestion time has not changed, so the
+	// verdict must not either.
+	f2, clk2 := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+	clk2.advance(90 * time.Minute)
+	require.True(t, clk2.now().After(claimed), "the restarted process's clock is past the claimed timestamp")
+	st.cursor, st.cursorFound = testFeedFrontier, true
+
+	_, err = f2.Step(context.Background())
+	require.NoError(t, err)
+	require.NotContains(t, f2.lastUsable, aggUSDC,
+		"the clock moving is not a new durable fact: a previously implausible log must not become usable")
+	require.Contains(t, feedConditions(f2), ConditionFeedTimestamp)
+	require.Contains(t, feedConditions(f2)[ConditionFeedTimestamp], "durable ingestion time",
+		"the reason names the durable fact the verdict rests on, not a clock")
+	healthy, _ := f2.Health()
+	require.False(t, healthy)
+}
+
 // A future timestamp INSIDE the tolerance is a clock artefact, not a malformed
-// answer: it is taken at face value (durably, from the log) rather than refused.
-func TestFeedDeriverAcceptsSmallClockSkewInUpdatedAt(t *testing.T) {
+// answer: it is accepted — and CAPPED at the log's durable ingestion time, so
+// freshness can never run ahead of the moment the log became durable.
+//
+// The earlier version took such a timestamp verbatim, which suppressed staleness by
+// up to the tolerance. Capping removes that window rather than bounding it.
+func TestFeedDeriverAcceptsSmallClockSkewButCapsFreshnessAtIngestion(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
 	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
 
 	skew := futureTimestampTolerance / 2
+	ingestedAt := clk.now()
+	// One aggregator's answer leans into the future inside the tolerance; another's
+	// is an ordinary past publication. Both are ingested at the same instant, so the
+	// two together show that the cap only ever LOWERS.
+	skewed := answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(100_000_000), 1, clk.unix(skew))
+	skewed.IngestedAt = ingestedAt
+	past := clk.now().Add(-time.Hour)
+	ordinary := answerUpdatedLog(testFeedStart+2, 0, aggWeETH, big.NewInt(300_000_000_000), 1, uint64(past.Unix()))
+	ordinary.IngestedAt = ingestedAt
+	st.cursor, st.cursorFound = testFeedStart-1, true
+	st.logs = []store.RawLog{skewed, ordinary}
+
+	_, err := f.Step(context.Background())
+	require.NoError(t, err)
+	require.NotContains(t, f.timestampFlawed, aggUSDC, "a within-tolerance skew is accepted, not refused")
+	require.Equal(t, ingestedAt.UTC(), f.lastUsable[aggUSDC],
+		"freshness is capped at the DURABLE observation time, so a future-leaning oracle clock cannot buy a fresher verdict")
+	require.Equal(t, past.UTC(), f.lastUsable[aggWeETH],
+		"a publication legitimately precedes its ingestion, and that time stands unchanged")
+}
+
+// A log carrying NO durable ingestion time cannot have its timestamp judged, so it
+// establishes no freshness rather than falling back to a clock. raw_logs.ingested_at
+// is NOT NULL, so this row is impossible in production — the test exists to prove
+// the guard is there rather than assumed away.
+func TestFeedDeriverRefusesAnswerWithNoDurableIngestionTime(t *testing.T) {
+	st := newFakePriceStore()
+	st.logsWithoutIngestionTime = true
+	ch := &fakeFeedChain{head: testFeedHead, callResp: proxyResponder(t, identityProxies(t))}
+	f, clk := newTestFeed(t, st, ch, testFeedStart, testFeedFrontier)
+	msgs := captureWarnings(t)
+
 	st.cursor, st.cursorFound = testFeedStart-1, true
 	st.logs = []store.RawLog{
-		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(100_000_000), 1, clk.unix(skew)),
+		answerUpdatedLog(testFeedStart+1, 0, aggUSDC, big.NewInt(100_000_000), 1, clk.unix(-time.Minute)),
 	}
 	_, err := f.Step(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, clk.now().Add(skew).UTC(), f.lastUsable[aggUSDC],
-		"the oracle's own timestamp is used verbatim, never replaced by ours")
-	require.NotContains(t, f.timestampFlawed, aggUSDC)
+	require.True(t, containsSubstring(*msgs, "carries no durable ingestion time"))
+	require.NotContains(t, f.lastUsable, aggUSDC)
+	require.Contains(t, f.timestampFlawed, aggUSDC)
 }
 
 // B-invalid (FEED SIDE): a stream publishing a non-positive answer every heartbeat

@@ -759,7 +759,7 @@ func (s *Store) SaveRateIndex(ctx context.Context, engine string, asset []byte, 
 // per-chain window filtered to the engine's full address set (e.g. the Aave
 // engine's Pool + four aTokens merged into one ordered stream).
 func (s *Store) RawLogsInRange(ctx context.Context, chainID uint64, addresses [][]byte, fromBlock, toBlock uint64) ([]RawLog, error) {
-	rows, err := s.pool.Query(ctx, `SELECT chain_id, block_number, block_hash, tx_hash, log_index, address, topics, data
+	rows, err := s.pool.Query(ctx, `SELECT chain_id, block_number, block_hash, tx_hash, log_index, address, topics, data, ingested_at
 		FROM raw_logs
 		WHERE chain_id = $1 AND address = ANY($2) AND block_number BETWEEN $3 AND $4
 		ORDER BY block_number, log_index`,
@@ -774,7 +774,7 @@ func (s *Store) RawLogsInRange(ctx context.Context, chainID uint64, addresses []
 		var l RawLog
 		var logIndex int32
 		if err := rows.Scan(&l.ChainID, &l.BlockNumber, &l.BlockHash, &l.TxHash,
-			&logIndex, &l.Address, &l.Topics, &l.Data); err != nil {
+			&logIndex, &l.Address, &l.Topics, &l.Data, &l.IngestedAt); err != nil {
 			return nil, fmt.Errorf("scan raw log row: %w", err)
 		}
 		l.LogIndex = uint32(logIndex)
@@ -1013,6 +1013,80 @@ func (s *Store) SaveSnapshots(ctx context.Context, engine string, block uint64, 
 // Durable sweep generations — the snapshotter's crash-resumable work queue.
 // (Sweep-durability wave; see migration 00004 for the model.)
 // ---------------------------------------------------------------------------
+
+// SweepProgress is the snapshotter's DURABLE progress record — the answer to
+// "is collateral snapshot ingestion still landing anything", which the
+// snapshotter's own return values cannot give.
+//
+// It exists because the snapshotter has a SEMANTIC stall: when every RPC endpoint
+// serves sweep batches at an execution block behind the accounts' recorded
+// successes, the store refuses each batch, Step returns (false, nil) — no error,
+// no advance — and it can do that forever. The daemon's failure bookkeeping saw a
+// nil error and cleared its state, and no cursor of any kind moved, so /readyz
+// stayed 200 while collateral snapshots stopped advancing entirely.
+//
+// Every field is a database value, so a restart cannot grant a wedged sweep a
+// fresh window.
+type SweepProgress struct {
+	// Generation is the current (open or most recently completed) generation, 0
+	// when no sweep has ever been opened.
+	Generation uint64
+	// Open reports whether that generation still owes work.
+	Open bool
+	// OpenedAt / CompletedAt are the generation's own timestamps. CompletedAt is
+	// zero while Open.
+	OpenedAt    time.Time
+	CompletedAt time.Time
+	// LastBatchAt is the newest snapshot_sweeps.updated_at for this engine — the
+	// last time ANY account's sweep status landed durably. Zero when the engine
+	// has never swept an account.
+	LastBatchAt time.Time
+	// Lagging counts accounts carrying a sweep row from an EARLIER generation.
+	// It is a LOWER BOUND on work owed, not a total: an account that has never
+	// been swept has no row at all and is not counted here. It is reported for
+	// the operator's benefit and is deliberately NOT what the stall verdict rests
+	// on — that rests on Open plus LastBatchAt, both of which are unambiguous.
+	Lagging int64
+}
+
+// SweepProgress reads engine's durable sweep progress. found=false when the
+// engine has no sweep_generations row at all (no sweep has ever been opened),
+// which is not a stall — it is a snapshotter that has not started.
+func (s *Store) SweepProgress(ctx context.Context, engine string) (SweepProgress, bool, error) {
+	var p SweepProgress
+	var opened, completed *time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT current_generation, opened_at, completed_at FROM sweep_generations WHERE engine = $1`,
+		engine).Scan(&p.Generation, &opened, &completed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SweepProgress{}, false, nil
+	}
+	if err != nil {
+		return SweepProgress{}, false, fmt.Errorf("read sweep progress for %q: %w", engine, err)
+	}
+	if opened != nil {
+		p.OpenedAt = *opened
+	}
+	if completed != nil {
+		p.CompletedAt = *completed
+	} else {
+		p.Open = true
+	}
+	var lastBatch *time.Time
+	if err := s.pool.QueryRow(ctx,
+		`SELECT max(updated_at) FROM snapshot_sweeps WHERE engine = $1`, engine).Scan(&lastBatch); err != nil {
+		return SweepProgress{}, false, fmt.Errorf("read last sweep batch time for %q: %w", engine, err)
+	}
+	if lastBatch != nil {
+		p.LastBatchAt = *lastBatch
+	}
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM snapshot_sweeps WHERE engine = $1 AND generation < $2`,
+		engine, p.Generation).Scan(&p.Lagging); err != nil {
+		return SweepProgress{}, false, fmt.Errorf("count lagging sweep accounts for %q: %w", engine, err)
+	}
+	return p, true, nil
+}
 
 // SweepGeneration reads engine's durable sweep-generation state
 // (sweep_generations): the current generation number, whether that generation

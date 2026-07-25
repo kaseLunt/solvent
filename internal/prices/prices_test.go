@@ -138,6 +138,12 @@ type fakePriceStore struct {
 	// may delete anything — the paths that must REFUSE rather than degrade.
 	countErr      error
 	anchorReadErr error
+	// neutralizeErr fails NeutralizeUnverifiablePrices.
+	neutralizeErr error
+	// neutralized records every NeutralizeUnverifiablePrices call, so a test can
+	// tell "acked without deleting" from "deleted" — the distinction the
+	// pending-epoch legacy state turns on.
+	neutralized []rewindRec
 
 	// applyErrs is a FIFO of one-shot ApplyPrices failures. A non-nil entry is
 	// returned instead of applying; applyAdvancesDespiteErr models the
@@ -181,6 +187,11 @@ type fakePriceStore struct {
 
 	ingest map[string]*store.CursorPos
 	logs   []store.RawLog
+	// logsWithoutIngestionTime suppresses the ingested_at stamp storedLogs applies,
+	// so a test can exercise the refusal path for a log carrying no durable
+	// observation time. The real column is NOT NULL, so this is a deliberately
+	// impossible row used to prove the guard exists.
+	logsWithoutIngestionTime bool
 
 	rawLogsCalls [][2]uint64
 }
@@ -263,7 +274,33 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 			observedAt: at, valid: valid, invalidReason: reason,
 		}
 		if existing[row.key()] {
-			continue // idempotent replay: nothing new exists
+			// A NEUTRALIZED row is SUPERSEDED by a fresh observation at the same
+			// identity rather than treated as an idempotent replay: the recorded
+			// value was already declared unplaceable, so the new one is
+			// authoritative. Modelled here because the real store does it, and a
+			// fake that treated it as a replay would hide the divergence wedge that
+			// arm exists to prevent.
+			superseded := false
+			for i := range f.rows {
+				ex := &f.rows[i]
+				if ex.owner != engine || ex.key() != row.key() {
+					continue
+				}
+				if ex.invalidReason != store.InvalidReasonUnverifiableReorg {
+					break
+				}
+				ex.valid, ex.invalidReason, ex.observedAt = valid, reason, at
+				superseded = true
+				break
+			}
+			if !superseded {
+				continue // idempotent replay: nothing new exists
+			}
+			res.Inserted = append(res.Inserted, store.PriceInsert{
+				Asset: o.Asset, Source: o.Source, BlockNumber: o.BlockNumber,
+				ObservedAt: at, Valid: valid, InvalidReason: reason,
+			})
+			continue
 		}
 		existing[row.key()] = true
 		f.rows = append(f.rows, row)
@@ -296,19 +333,19 @@ func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID,
 	f.rewinds = append(f.rewinds, rewindRec{
 		engine: engine, chainID: chainID, toBlock: toBlock, verifiedFloor: verifiedFloor,
 	})
-	effective := toBlock
-	if f.rewindDeepTo != nil && *f.rewindDeepTo < effective {
-		effective = *f.rewindDeepTo
-	}
+	effective := f.effectiveRewindTarget(toBlock)
 	// The verified floor RAISES the target back up (never above toBlock, which
 	// the real store refuses outright).
 	if verifiedFloor > effective {
 		effective = verifiedFloor
 	}
-	// Owner-scoped deletion, plus the anchors describing the deleted rounds.
+	// Owner-scoped deletion, plus the anchors describing the deleted rounds. A row
+	// already marked unverifiable-after-reorg is RETAINED, exactly as the real
+	// DELETE's predicate does: it was kept once because nothing could place it on a
+	// chain, and a later rewind has no more evidence than the first one did.
 	var kept []fakeRow
 	for _, r := range f.rows {
-		if r.owner == engine && r.block > effective {
+		if r.owner == engine && r.block > effective && r.invalidReason != store.InvalidReasonUnverifiableReorg {
 			continue
 		}
 		kept = append(kept, r)
@@ -405,11 +442,122 @@ func (f *fakePriceStore) CountOwnedPricesAbove(_ context.Context, engine string,
 	}
 	var n int64
 	for _, r := range f.rows {
-		if r.owner == engine && r.block > above {
+		if r.owner == engine && r.block > above && r.invalidReason != store.InvalidReasonUnverifiableReorg {
 			n++
 		}
 	}
 	return n, nil
+}
+
+// effectiveRewindTarget mirrors the store's own lowering of a caller's target to
+// the deepest unacknowledged rewound_to (modelled by rewindDeepTo). Every fake path
+// that acts "above the target" goes through this, so RewindPrices,
+// NeutralizeUnverifiablePrices and PriceRepairExposure cannot disagree about where
+// the boundary is — which is precisely the disagreement that made the pending-epoch
+// legacy state undecidable in the real code.
+func (f *fakePriceStore) effectiveRewindTarget(toBlock uint64) uint64 {
+	if f.rewindDeepTo != nil && *f.rewindDeepTo < toBlock {
+		return *f.rewindDeepTo
+	}
+	return toBlock
+}
+
+func (f *fakePriceStore) anchoredHeights(engine string) map[uint64]bool {
+	out := map[uint64]bool{}
+	for _, a := range f.anchors[engine] {
+		out[a.BlockNumber] = true
+	}
+	return out
+}
+
+// CountUnanchoredPricesAbove mirrors the real read: owned rows above the boundary
+// at heights no surviving anchor covers, excluding rows already neutralized.
+func (f *fakePriceStore) CountUnanchoredPricesAbove(_ context.Context, engine string, _ uint64, above uint64) (int64, error) {
+	if f.countErr != nil {
+		return 0, f.countErr
+	}
+	anchored := f.anchoredHeights(engine)
+	var n int64
+	for _, r := range f.rows {
+		if r.owner != engine || r.block <= above || anchored[r.block] {
+			continue
+		}
+		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			continue
+		}
+		n++
+	}
+	return n, nil
+}
+
+// PriceRepairExposure reports the boundary a rewind would act above together with
+// what lies above it — the four facts repair needs in one instant.
+func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _ uint64, toBlock uint64) (store.PriceRepairExposure, error) {
+	if f.countErr != nil {
+		return store.PriceRepairExposure{}, f.countErr
+	}
+	exp := store.PriceRepairExposure{EffectiveTarget: f.effectiveRewindTarget(toBlock)}
+	anchored := f.anchoredHeights(engine)
+	for _, r := range f.rows {
+		if r.owner != engine || r.block <= exp.EffectiveTarget {
+			continue
+		}
+		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			continue
+		}
+		exp.Owned++
+		if !anchored[r.block] {
+			exp.Unanchored++
+		}
+	}
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber > exp.EffectiveTarget {
+			exp.AnchoredHeights++
+		}
+	}
+	return exp, nil
+}
+
+// NeutralizeUnverifiablePrices models the real transaction: RETAIN every row above
+// the effective target and mark it, drop the anchors above it, reset the cursor and
+// ack. Nothing is deleted — a fake that deleted here could not distinguish this
+// path from a rewind, which is the whole point of the distinction.
+func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error) {
+	if f.neutralizeErr != nil {
+		return 0, 0, f.neutralizeErr
+	}
+	target := f.effectiveRewindTarget(toBlock)
+	// The verified floor RAISES the boundary, exactly as in RewindPrices: history
+	// proven canonical keeps its validity and only the unprovable suffix is marked.
+	if verifiedFloor > target {
+		target = verifiedFloor
+	}
+	f.neutralized = append(f.neutralized, rewindRec{
+		engine: engine, chainID: chainID, toBlock: toBlock, verifiedFloor: verifiedFloor,
+	})
+	var marked int64
+	for i := range f.rows {
+		r := &f.rows[i]
+		if r.owner != engine || r.block <= target {
+			continue
+		}
+		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			continue
+		}
+		r.valid, r.invalidReason = false, store.InvalidReasonUnverifiableReorg
+		marked++
+	}
+	var keptAnchors []store.StoredPollAnchor
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber > target {
+			continue
+		}
+		keptAnchors = append(keptAnchors, a)
+	}
+	f.anchors[engine] = keptAnchors
+	f.unacked = false // the ack is part of the same transaction
+	f.cursor, f.cursorFound = target, true
+	return target, marked, nil
 }
 
 func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
@@ -479,7 +627,7 @@ func (f *fakePriceStore) LatestLogsByTopic(_ context.Context, _ uint64, addresse
 		want[string(a)] = true
 	}
 	newest := map[string]store.RawLog{}
-	for _, l := range f.logs {
+	for _, l := range f.storedLogs() {
 		if !want[string(l.Address)] || l.BlockNumber > through {
 			continue
 		}
@@ -541,10 +689,32 @@ func (f *fakePriceStore) seedAnchorAt(engine string, block uint64, hash common.H
 // (block_number, log_index), the total order the derivation layer requires — so
 // a test cannot pass merely because the fake handed logs back in insertion
 // order.
+// storedLogs returns the durable log set with every row's ingestion time settled.
+//
+// raw_logs.ingested_at is NOT NULL DEFAULT now(), so a stored log ALWAYS has one; a
+// fake returning the zero time would be modelling a row the database cannot hold.
+// The stamp is written back into f.logs, so the value is assigned ONCE and every
+// later read of the same log sees the same instant — which is the property the
+// timestamp verdict now depends on. A test that wants a specific ingestion time
+// sets it on the seeded log and this leaves it alone; a test that wants the
+// "no durable ingestion time" refusal sets logsWithoutIngestionTime.
+func (f *fakePriceStore) storedLogs() []store.RawLog {
+	if f.logsWithoutIngestionTime {
+		return f.logs
+	}
+	at := f.now()
+	for i := range f.logs {
+		if f.logs[i].IngestedAt.IsZero() {
+			f.logs[i].IngestedAt = at
+		}
+	}
+	return f.logs
+}
+
 func (f *fakePriceStore) RawLogsInRange(_ context.Context, _ uint64, _ [][]byte, from, to uint64) ([]store.RawLog, error) {
 	f.rawLogsCalls = append(f.rawLogsCalls, [2]uint64{from, to})
 	var out []store.RawLog
-	for _, l := range f.logs {
+	for _, l := range f.storedLogs() {
 		if l.BlockNumber >= from && l.BlockNumber <= to {
 			out = append(out, l)
 		}
@@ -592,8 +762,13 @@ type fakePollChain struct {
 	// hashes is the LIVE canonical chain as this fake reports it: block → hash.
 	// A block absent from it answers "not found", the shape a probe above head
 	// takes. hashErr overrides everything, modelling a probe that cannot run.
-	hashes    map[uint64]common.Hash
-	hashErr   error
+	hashes  map[uint64]common.Hash
+	hashErr error
+	// hashErrAt fails the probe for SPECIFIC heights only, so a test can express
+	// "this one anchor could not be checked" distinctly from "this height is absent
+	// from the chain". The mixed failure-then-match path — the one A1 kept surviving
+	// in — needs exactly that distinction.
+	hashErrAt map[uint64]error
 	hashStart []int // HeaderHashFrom start indices, in order
 	hashCalls []uint64
 }
@@ -618,6 +793,9 @@ func (c *fakePollChain) HeaderHashFrom(_ context.Context, start int, block uint6
 	c.hashCalls = append(c.hashCalls, block)
 	if c.hashErr != nil {
 		return common.Hash{}, chain.EndpointToken{Index: -1}, c.hashErr
+	}
+	if err, bad := c.hashErrAt[block]; bad {
+		return common.Hash{}, chain.EndpointToken{Index: -1}, err
 	}
 	h, ok := c.hashes[block]
 	if !ok {

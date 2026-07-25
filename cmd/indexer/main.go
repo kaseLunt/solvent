@@ -109,6 +109,11 @@ func (b *retryBackoff) success() {
 // more often; the bound exists to distinguish "stalled" from "slow", not to police
 // throughput. It is also comfortably above the walkers' ten-minute capped retry
 // backoff, so a worker in deep backoff is reported by its step error first.
+//
+// The same bound also measures the COLLATERAL SNAPSHOTTER, which has no cursor of
+// its own: while a sweep generation is OPEN, work is owed and batches should be
+// landing every round, so a generation that has not stamped a sweep status this long
+// is stalled. See applySweepProgressCondition.
 const noProgressBound = 15 * time.Minute
 
 // headLagBound is how far a raw-log walker's cursor may sit behind the chain head
@@ -117,6 +122,38 @@ const noProgressBound = 15 * time.Minute
 // trip it, and it DOES fire during backfill — a process that has not reached the
 // chain is not ready to be depended on.
 const headLagBound = 5_000
+
+// frontierLagBound is how far a CONSUMER of raw logs — a derivation runner or the
+// Chainlink feed deriver — may sit behind its own durable input frontier (the
+// minimum ingest cursor across the streams it reads) before readiness fails on it.
+//
+// WHY A DISTANCE GATE AND NOT JUST no_progress. The no-progress check asks only
+// how RECENTLY a cursor moved. A worker grinding through backfill windows refreshes
+// derive_cursors.updated_at on every one of them, so it never trips no_progress
+// however far behind it is: /readyz could report 200 through an arbitrarily long
+// restart backfill while positions and prices described a state days old. Distance,
+// not recency, is the question a consumer has to answer — and it is a different
+// question from the walkers' head_lag, because a walker can be exactly at the chain
+// head while the runner reading its logs is a million blocks behind it.
+//
+// WHY THIS VALUE. It is deliberately the SAME number as headLagBound: a consumer
+// this far behind its input is as far from current as a walker the daemon already
+// refuses readiness for, so the two gates draw the line in the same place rather
+// than at two independently-invented distances.
+//
+// It does not fire from ordinary jitter on a live chain, and here is the argument
+// rather than the assertion. Ingestion runs before derivation within a round and a
+// consumer keeps stepping until it stops advancing, so a caught-up consumer ends
+// each round AT its frontier; the frontier then advances by only the handful of
+// blocks the chain produced before the next round, three orders of magnitude inside
+// this bound on both configured chains. A consumer that cannot reach its frontier
+// because its Step is failing reports step_error, not this. During BACKFILL the frontier can
+// advance by stepsPerRound windows per round, which is above this bound, so a
+// consumer keeping pace with a backfilling walker is reported as behind: that is
+// the intent, not a false positive — a process that has not caught up to the chain
+// is not ready to be depended on, the same posture head_lag and the feed deriver's
+// rpc_ingest_lag already take.
+const frontierLagBound = 5_000
 
 // ingestWorker / deriveWorker / snapshotWorker are the narrow surfaces the passes
 // below drive (*ingest.Walker, *derive.Runner and *snapshot.Snapshotter satisfy
@@ -444,11 +481,40 @@ func stepSnapshotter(ctx context.Context, snap snapshotWorker, ss *snapshotState
 	return err == nil && advanced
 }
 
-// progressReader is the store surface the no-progress check needs (*store.Store
+// progressReader is the store surface the progress checks need (*store.Store
 // satisfies it; tests pass a fake).
 type progressReader interface {
 	IngestCursorProgress(ctx context.Context) ([]store.CursorProgress, error)
 	DeriveCursorProgress(ctx context.Context) ([]store.CursorProgress, error)
+	SweepProgress(ctx context.Context, engine string) (store.SweepProgress, bool, error)
+}
+
+// frontierWatch binds one raw-log CONSUMER to the ingest streams that feed it, so
+// its cursor can be compared against the frontier those streams have reached.
+//
+// The frontier is the MINIMUM cursor across the streams, matching what both
+// consumers use internally: above the lowest stream cursor some stream's logs may
+// still be missing, so a window there would be derived from an incomplete address
+// set.
+type frontierWatch struct {
+	worker  string
+	streams []string
+}
+
+// progressWatch is the set of workers the durable progress pass judges, gathered
+// into one value so the pass keeps a readable signature as its checks grow.
+type progressWatch struct {
+	// walkers and runners are judged on cursor RECENCY (no_progress).
+	walkers []*walkerState
+	runners []*runnerState
+	// consumers are judged on DISTANCE from their input frontier (frontier_lag).
+	// Every derivation runner appears here as well as in runners; the price FEED
+	// deriver appears here only, because it is not a derive.Runner.
+	consumers []frontierWatch
+	// sweepEngine is the snapshotter's engine key, empty when no snapshotter is
+	// configured. It is judged on whether an OPEN sweep generation is still landing
+	// batches.
+	sweepEngine string
 }
 
 // applyProgressConditions adds a no_progress condition for every watched walker
@@ -470,20 +536,31 @@ type progressReader interface {
 // A read failure is logged and adds no condition: inventing a stall from a failed
 // query would be a fabricated signal, and the workers' own step errors already
 // cover a database that is not answering.
-func applyProgressConditions(ctx context.Context, pr progressReader, now time.Time, rc roundConditions,
-	walkers []*walkerState, runners []*runnerState) {
+//
+// It performs three checks, all from durable timestamps and heights:
+//
+//	no_progress   walker/runner cursor recency, and an OPEN sweep generation that
+//	              has stopped landing batches (the snapshotter's semantic stall);
+//	frontier_lag  how far each raw-log CONSUMER is behind its input frontier.
+func applyProgressConditions(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, w progressWatch) {
 	// Registering every watched worker makes this pass self-sufficient: publish
 	// only replaces workers it knows about, so a worker whose stall CLEARS must
 	// still be named here or its stale entry would survive the round.
-	watchIngest := make(map[string]bool, len(walkers))
-	for _, ws := range walkers {
+	watchIngest := make(map[string]bool, len(w.walkers))
+	for _, ws := range w.walkers {
 		watchIngest[ws.w.Name()] = true
 		rc.touch(ws.w.Name())
 	}
-	watchDerive := make(map[string]bool, len(runners))
-	for _, rs := range runners {
+	watchDerive := make(map[string]bool, len(w.runners))
+	for _, rs := range w.runners {
 		watchDerive[rs.r.Name()] = true
 		rc.touch(rs.r.Name())
+	}
+	for _, c := range w.consumers {
+		rc.touch(c.worker)
+	}
+	if w.sweepEngine != "" {
+		rc.touch(snapshotName)
 	}
 
 	check := func(rows []store.CursorProgress, watched map[string]bool, kind string) {
@@ -499,15 +576,134 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 		}
 	}
 
-	if rows, err := pr.IngestCursorProgress(ctx); err != nil {
-		slog.Warn("could not read ingest cursor progress; no no_progress verdict is issued this round", "err", err)
+	ingestRows, ingestErr := pr.IngestCursorProgress(ctx)
+	if ingestErr != nil {
+		slog.Warn("could not read ingest cursor progress; no no_progress or frontier_lag verdict is issued this round", "err", ingestErr)
 	} else {
-		check(rows, watchIngest, "ingest")
+		check(ingestRows, watchIngest, "ingest")
 	}
-	if rows, err := pr.DeriveCursorProgress(ctx); err != nil {
-		slog.Warn("could not read derive cursor progress; no no_progress verdict is issued this round", "err", err)
+	deriveRows, deriveErr := pr.DeriveCursorProgress(ctx)
+	if deriveErr != nil {
+		slog.Warn("could not read derive cursor progress; no no_progress or frontier_lag verdict is issued this round", "err", deriveErr)
 	} else {
-		check(rows, watchDerive, "derive")
+		check(deriveRows, watchDerive, "derive")
+	}
+	if ingestErr == nil && deriveErr == nil {
+		applyFrontierConditions(ingestRows, deriveRows, w.consumers, rc)
+	}
+	if w.sweepEngine != "" {
+		applySweepProgressCondition(ctx, pr, now, rc, w.sweepEngine)
+	}
+}
+
+// applyFrontierConditions reports frontier_lag for every raw-log consumer whose
+// durable cursor sits more than frontierLagBound blocks below the durable frontier
+// of the streams that feed it.
+//
+// It is a pure function of the two cursor listings the caller already read, so the
+// gate costs no additional query.
+//
+// TWO CASES ARE DELIBERATELY NOT JUDGED, and both are covered elsewhere:
+//
+//   - a consumer one of whose streams has NO ingest cursor yet. There is no
+//     frontier to be behind; the consumer itself returns early in that state.
+//   - a consumer with NO derive cursor yet. It has not completed a window, so
+//     there is no height to compare. Its first Step either creates the cursor or
+//     reports step_error, and until one full round has completed the daemon's own
+//     startup condition already holds readiness closed.
+//
+// PRICE POLLERS ARE ABSENT BY CONSTRUCTION, not by exclusion: a poller has no
+// raw-log input at all (it reads `latest` through eth_call), so it has no frontier
+// to be measured against. Its analogous gate is whether a NEW poll anchor row came
+// into existence (prices.ConditionPollBlockAdvance).
+func applyFrontierConditions(ingestRows, deriveRows []store.CursorProgress, consumers []frontierWatch, rc roundConditions) {
+	if len(consumers) == 0 {
+		return
+	}
+	frontier := make(map[string]uint64, len(ingestRows))
+	for _, p := range ingestRows {
+		frontier[p.Name] = p.Block
+	}
+	cursor := make(map[string]uint64, len(deriveRows))
+	for _, p := range deriveRows {
+		cursor[p.Name] = p.Block
+	}
+	for _, c := range consumers {
+		var input uint64
+		complete := len(c.streams) > 0
+		for i, s := range c.streams {
+			b, ok := frontier[s]
+			if !ok {
+				complete = false
+				break
+			}
+			if i == 0 || b < input {
+				input = b
+			}
+		}
+		if !complete {
+			continue
+		}
+		cur, started := cursor[c.worker]
+		if !started {
+			continue
+		}
+		if input <= cur {
+			continue
+		}
+		if lag := input - cur; lag > frontierLagBound {
+			rc.set(c.worker, conditionFrontierLag,
+				fmt.Sprintf("this worker's cursor is at block %d, %d blocks behind the durable input frontier %d its %d stream(s) have reached (bound %d): the state it has derived is not current",
+					cur, lag, input, len(c.streams), frontierLagBound))
+		}
+	}
+}
+
+// applySweepProgressCondition reports no_progress for the collateral snapshotter
+// when an OPEN sweep generation has stopped landing batches.
+//
+// THIS IS THE SNAPSHOTTER'S SEMANTIC STALL, and it was invisible. When every RPC
+// endpoint serves sweep batches at an execution block behind the accounts' recorded
+// successes, the store refuses each batch and Step returns (false, nil) — no error
+// for the wrapper's failure bookkeeping to record, no advance for the loop to
+// notice — and it can do that forever. The snapshotter also has no cursor in
+// ingest_cursors or derive_cursors, so the generic passes above could not see it
+// either: /readyz answered 200 indefinitely while collateral snapshots stopped.
+//
+// The verdict rests on two durable facts: the generation is OPEN (work is owed, so
+// batches SHOULD be landing) and the newest snapshot_sweeps.updated_at for this
+// engine is older than noProgressBound. Both are database values, so a restart
+// cannot grant a wedged sweep a fresh window. A generation that has never landed
+// anything is measured from its own opened_at.
+//
+// A CLOSED generation is deliberately not judged: between generations the
+// snapshotter is idle by cadence (SOLVENT_SNAPSHOT_INTERVAL can legitimately exceed
+// noProgressBound), and an idle-by-design worker is not a stalled one.
+func applySweepProgressCondition(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, engine string) {
+	p, found, err := pr.SweepProgress(ctx, engine)
+	if err != nil {
+		slog.Warn("could not read sweep progress; no snapshot no_progress verdict is issued this round",
+			"engine", engine, "err", err)
+		return
+	}
+	if !found || !p.Open {
+		return
+	}
+	ref := p.LastBatchAt
+	landed := "the newest sweep status landed at " + ref.Format(time.RFC3339)
+	if ref.Before(p.OpenedAt) {
+		// Either nothing has ever landed for this engine, or everything that has
+		// predates this generation: measure from when the generation opened.
+		ref = p.OpenedAt
+		landed = "no sweep status has landed since this generation opened"
+	}
+	if ref.IsZero() {
+		return // an open generation with no opened_at cannot happen; do not invent a verdict
+	}
+	if since := now.Sub(ref); since > noProgressBound {
+		rc.set(snapshotName, conditionNoProgress,
+			fmt.Sprintf("sweep generation %d has been OPEN for %s without landing a batch (bound %s, at least %d account(s) still owe work): %s. An all-endpoints-stale sweep refuses every batch and returns no error, so this is the signal that catches it",
+				p.Generation, since.Truncate(time.Second), noProgressBound, p.Lagging, landed))
 	}
 }
 
@@ -606,6 +802,12 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	// (sweep_generations/snapshot_sweeps), RewindDerived bumps the generation
 	// in its own transaction, and a restarted process resumes the open
 	// generation's lagging set on its first Step.
+	// consumers accumulates every raw-log CONSUMER with the streams that feed it,
+	// so the durable progress pass can measure each one against its own input
+	// frontier. sweepEngine names the snapshotter's engine for the same pass.
+	var consumers []frontierWatch
+	var sweepEngine string
+
 	var snap *snapshot.Snapshotter
 	for _, spec := range specs {
 		if spec.Engine != "debt_manager" {
@@ -623,6 +825,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		if err != nil {
 			return err
 		}
+		sweepEngine = spec.Engine
 		slog.Info("collateral snapshotter configured", "engine", spec.Engine, "interval", cfg.SnapshotInterval)
 	}
 
@@ -654,6 +857,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			return err
 		}
 		runners = append(runners, &runnerState{r: r})
+		consumers = append(consumers, frontierWatch{worker: r.Name(), streams: spec.Streams})
 		slog.Info("derivation runner configured", "engine", spec.Engine, "streams", len(spec.Streams))
 	}
 
@@ -699,6 +903,11 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		priceWorkers = append(priceWorkers, &priceWorkerState{
 			w: fd, bo: retryBackoff{now: time.Now, rand: rand.Float64},
 		})
+		// The feed deriver is a raw-log consumer like a derivation runner (it reads
+		// AnswerUpdated back out of raw_logs), so it is measured against the same
+		// frontier gate. It is NOT a derive.Runner, which is why it has to be
+		// registered here rather than falling out of the runners list.
+		consumers = append(consumers, frontierWatch{worker: fd.Name(), streams: spec.Streams})
 		// Staleness thresholds are PER FEED (each stream's own heartbeat + grace
 		// from recon/feeds.json), so the startup log names them individually
 		// rather than reporting one global number that applies to none of them.
@@ -707,6 +916,10 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	}
 
 	var snapState snapshotState
+	// The durable progress pass judges every worker whose stall would otherwise be
+	// silent: walker and runner cursor recency, consumer distance from the input
+	// frontier, and an open sweep generation that has stopped landing batches.
+	watch := progressWatch{walkers: walkers, runners: runners, consumers: consumers, sweepEngine: sweepEngine}
 	ticker := time.NewTicker(cfg.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -751,8 +964,10 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 
 			// Silent-stall pass: a worker that neither errors nor advances says
 			// nothing, and used to be invisible. This asks DURABLE storage when
-			// each cursor last moved.
-			applyProgressConditions(ctx, st, time.Now(), rc, walkers, runners)
+			// each cursor last moved, how far each raw-log consumer is behind its
+			// input frontier, and whether an open sweep generation has stopped
+			// landing batches.
+			applyProgressConditions(ctx, st, time.Now(), rc, watch)
 			rc.publish(health)
 
 			health.heartbeat()

@@ -42,14 +42,28 @@ package prices
 // success, inserts nothing, touches no observed_at — and the poller called itself
 // healthy every interval, forever. That is the defect the invariant above closes.
 //
-// # DESTRUCTIVE REPAIR FAILS CLOSED
+// # DESTRUCTIVE REPAIR FAILS CLOSED — AND STILL TERMINATES
 //
 // Polled history cannot be re-derived (this path only ever reads `latest`), so a
-// rewind that cannot prove what is orphaned must not delete anything. See repair:
-// verification is retried and PAGED across Steps, and when it cannot conclude,
-// the poller refuses to ack the epoch or delete a row and reports
-// ConditionPollRewindBlocked. A stalled poller is recoverable; erased canonical
-// history is not.
+// rewind that cannot prove what is orphaned must not delete anything. The
+// governing invariant is NEVER DELETE OR BLESS A ROW WITHOUT POSITIVE PROOF OF
+// NON-CANONICALITY FOR EVERYTHING ABOVE THE FLOOR, and floorOutcome enumerates
+// every state that invariant has to answer for. Two rules that a "fail closed"
+// slogan does not by itself imply, and whose absence each cost a review round:
+//
+//   - A MATCH IS NOT PROOF ABOUT WHAT IS ABOVE IT. Anchors are probed
+//     newest-first; a lower anchor that matches may only become a floor once every
+//     anchor above it has been successfully probed AND mismatched, and once no row
+//     above the deletion boundary sits at an unanchored height. A failed probe
+//     followed by a lower match refuses and retries.
+//   - FAIL-CLOSED MUST NOT MEAN FAIL-FOREVER. A refusal no code path can clear is
+//     an outage. Where the evidence is merely UNAVAILABLE (a probe errored, a page
+//     is still to come) repair waits and reports ConditionPollRewindBlocked. Where
+//     it is UNOBTAINABLE — rows at heights whose block hash was never recorded —
+//     waiting is permanent: repair needs an anchor, adoption is refused while an
+//     epoch is pending, and the ack only advances through repair. Those rows are
+//     NEUTRALIZED instead: retained, marked unusable, the epoch acked, ingestion
+//     resumed. Nothing is destroyed and nothing unprovable is trusted.
 //
 // # FAILURE POSTURE, in the order the failures happen
 //
@@ -745,24 +759,51 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 // ---------------------------------------------------------------------------
 
 // floorOutcome is what verification concluded about this poller's own history.
+//
+// THE STATE SPACE IS ENUMERATED HERE ON PURPOSE. A1 survived three fix attempts
+// because each one handled the cases its author had in mind and returned a
+// permissive answer for the rest. These five values partition every possible
+// state, and exactly three of them may touch a row:
+//
+//	                                         may delete?  may ack?
+//	floorNothingAtRisk  nothing above target      n/a        yes
+//	floorVerified       proof for everything      yes        yes
+//	floorProvenOrphaned proof for everything      yes        yes
+//	floorUnverifiable   proof impossible          NO         yes (neutralize)
+//	floorUnprobed       proof not yet in hand     NO         NO  (retry)
+//
+// The invariant every one of them serves: NEVER DELETE OR BLESS A ROW WITHOUT
+// POSITIVE PROOF OF NON-CANONICALITY FOR EVERYTHING ABOVE THE FLOOR. "Proof" is
+// only ever an anchor whose recorded hash no longer matches the live chain, or a
+// verified anchor at or above the row (which entails its whole ancestry).
 type floorOutcome int
 
 const (
-	// floorNothingAtRisk: this engine owns no price rows at all, so a rewind
-	// deletes nothing whatever target it uses. Proceeding is vacuous, not lossy.
+	// floorNothingAtRisk: this engine owns nothing above the effective rewind
+	// target, so the rewind deletes nothing whatever floor it uses. Proceeding is
+	// vacuous, not lossy.
 	floorNothingAtRisk floorOutcome = iota
 	// floorVerified: an anchor at or below the requested target re-verified
-	// against the live chain, so it and every ancestor are unchanged.
+	// against the live chain (so it and every ancestor are unchanged), AND every
+	// anchor above it was successfully probed and mismatched, AND no row above the
+	// deletion boundary sits at an unanchored height. All three are required — a
+	// match alone was the A1 hole: a FAILED probe of a newer anchor followed by a
+	// lower match used to return this outcome and delete the newer history.
 	floorVerified
-	// floorAllOrphaned: verification PAGED all the way through this engine's
-	// retained anchors and every one of them mismatched. A reorg deeper than the
-	// whole retained anchor set is not something this poller repairs on its own.
-	floorAllOrphaned
-	// floorNoAnchors: rows exist but no anchor covers them — legacy history, or
-	// history whose anchors retention removed. Unverifiable either way.
-	floorNoAnchors
-	// floorUnprobed: verification did not conclude this Step — a probe failed, or
-	// the page budget was spent with anchors still to check. It RESUMES next Step.
+	// floorProvenOrphaned: verification paged through every retained anchor, all
+	// of them mismatched, and every row above the effective target sits at one of
+	// those anchored heights. Each such row is therefore proven to describe a
+	// replaced block, so deleting above the target is justified with no floor.
+	floorProvenOrphaned
+	// floorUnverifiable: rows above the deletion boundary sit at heights NO
+	// surviving anchor covers — legacy history, or history whose anchors retention
+	// removed. No future fact can settle them (the hash of the block their round
+	// ran at was never recorded), so neither deletion nor retention-as-usable is
+	// defensible: they are NEUTRALIZED. See Poller.neutralize.
+	floorUnverifiable
+	// floorUnprobed: verification did not conclude this Step — a probe FAILED, or
+	// the page budget was spent with anchors still to check. The answer may still
+	// arrive, so nothing is deleted and nothing is acked; it RESUMES next Step.
 	floorUnprobed
 )
 
@@ -791,13 +832,16 @@ const (
 // so lowering its cursor to that block deleted polled rows for heights that were
 // almost certainly canonical, and in the full-rewalk case all of them.
 //
-// WHEN IT CANNOT PROCEED IT DOES NOTHING. No ack, no deletion, no cursor move. The
-// four unverifiable outcomes — probes still in progress, probes failing, no anchor
-// covering the rows, and every retained anchor orphaned — all refuse, set
-// ConditionPollRewindBlocked, and retry on the next Step. The cost is a stalled
-// poller whose /readyz is red and whose WARN says exactly what is unproven; the
-// alternative, which this replaces, was deleting unrecoverable canonical history
-// on a transient probe outage.
+// WHEN THE EVIDENCE IS MERELY UNAVAILABLE IT DOES NOTHING. No ack, no deletion, no
+// cursor move: floorUnprobed — a probe errored, or a page is still to be walked —
+// sets ConditionPollRewindBlocked and retries on the next Step. The cost is a
+// stalled poller whose /readyz is red and whose WARN says exactly what is unproven;
+// the alternative, which this replaces, was deleting unrecoverable canonical
+// history on a transient probe outage.
+//
+// WHEN THE EVIDENCE CANNOT EXIST IT NEUTRALIZES. floorUnverifiable — rows above the
+// deletion boundary at heights no anchor covers — has no future in which retrying
+// helps, so waiting there is a permanent stall rather than caution. See neutralize.
 //
 // Bootstrap (no cursor yet on a chain that already carries epochs) targets block 0
 // with no floor: there is nothing of this poller's to delete, and the call exists
@@ -822,13 +866,24 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	switch outcome {
 	case floorNothingAtRisk:
 		if err := p.rewindTo(ctx, cursor, 0, probes,
-			"this engine owns no price rows, so the rewind deletes nothing"); err != nil {
+			"this engine owns nothing above the effective rewind target, so the rewind deletes nothing"); err != nil {
 			return false, err
 		}
 		return true, nil
 	case floorVerified:
 		if err := p.rewindTo(ctx, cursor, floor, probes,
-			fmt.Sprintf("retained everything at or below HASH-VERIFIED poll anchor %d", floor)); err != nil {
+			fmt.Sprintf("retained everything at or below HASH-VERIFIED poll anchor %d, and every anchor above it was probed and mismatched", floor)); err != nil {
+			return false, err
+		}
+		return true, nil
+	case floorProvenOrphaned:
+		if err := p.rewindTo(ctx, cursor, 0, probes,
+			"every retained poll anchor was probed and MISMATCHED and every row above the target sits at one of those anchored heights, so each is proven to describe a replaced block"); err != nil {
+			return false, err
+		}
+		return true, nil
+	case floorUnverifiable:
+		if err := p.neutralize(ctx, cursor, floor, probes); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -839,14 +894,37 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 }
 
 // verifyFloor pages this engine's poll anchors downward from toBlock, verifying
-// each against the live chain, and returns the first match as a rewind floor.
+// each against the live chain, and decides which of the five floorOutcomes holds.
+//
+// WHAT MAKES A MATCH ACCEPTABLE, and why a bare match is not. Anchors are probed
+// newest-first. A match at height H entails that H and every ancestor are
+// unchanged, so rows at or below H are safe to keep — but it says NOTHING about
+// the heights ABOVE H, and those are exactly the rows a rewind to a floor of H
+// deletes. Two independent things therefore have to hold before a match may be
+// accepted as a floor:
+//
+//  1. EVERY ANCHOR ABOVE H WAS SUCCESSFULLY PROBED AND MISMATCHED. A probe that
+//     ERRORED proves nothing, so a match below it is not a licence to delete what
+//     the failed probe was asking about. This is finding A1's third life: the
+//     previous code set probeFailed and then returned the next match anyway, so a
+//     transient outage on a newer canonical anchor erased that canonical history.
+//     Across pages the same property is carried by probeResumeFrom, which is only
+//     ever lowered by a page in which every probe SUCCEEDED and mismatched.
+//  2. NO ROW ABOVE THE DELETION BOUNDARY SITS AT AN UNANCHORED HEIGHT. An anchor
+//     set can be complete for the anchors it has and still leave rows uncovered —
+//     mixed legacy-and-anchored history does exactly that — and an uncovered row
+//     has no proof available in either direction. Those states are
+//     floorUnverifiable, never floorVerified.
+//
+// The deletion boundary is max(floor, effective target), because RewindPrices
+// lowers a caller's target to the deepest unacknowledged rewound_to and the floor
+// then raises it back: a floor BELOW the effective target does not move the
+// boundary at all.
 //
 // Each Step spends at most anchorProbePage probes. A page that finds no match
 // lowers the resume point and returns floorUnprobed, so the NEXT Step continues
 // deeper instead of abandoning verification — the behaviour the old
-// eight-and-give-up bound lacked. A page in which any probe ERRORED does not
-// lower the resume point at all, so a transient outage re-probes the same anchors
-// rather than skipping past them unverified.
+// eight-and-give-up bound lacked.
 //
 // Each probe is routed through a DIFFERENT endpoint than the last (HeaderHashFrom
 // with an advancing start index) so one frozen or forked endpoint cannot answer
@@ -854,11 +932,14 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 // by the query: a floor above the requested target would bless rows outside the
 // cursor's coverage, and RewindPrices refuses it outright.
 func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floorOutcome, int, error) {
-	owned, err := p.store.CountOwnedPricesAbove(ctx, p.engine, p.cfg.ChainID, 0)
+	exp, err := p.store.PriceRepairExposure(ctx, p.engine, p.cfg.ChainID, toBlock)
 	if err != nil {
 		return 0, floorUnprobed, 0, err
 	}
-	if owned == 0 {
+	if exp.Owned == 0 {
+		// Nothing this engine owns lies above the height the rewind will act on.
+		// This is the provable transition out of the pending-epoch state and it
+		// covers the case where the walker's target is already above all our rows.
 		return 0, floorNothingAtRisk, 0, nil
 	}
 
@@ -871,12 +952,17 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 		return 0, floorUnprobed, 0, err
 	}
 	if len(anchors) == 0 {
-		if p.probeResumeSet {
-			// We paged from the cursor to below the oldest retained anchor and
-			// nothing matched: every anchor this engine still holds is orphaned.
-			return 0, floorAllOrphaned, 0, nil
+		// Either there was never an anchor at or below the cursor (legacy history),
+		// or we have paged past the oldest retained one. Both are terminal for
+		// PROBING; which outcome they are depends on whether the anchors we did
+		// probe cover every row above the target.
+		if p.probeResumeSet && exp.Unanchored == 0 {
+			// Every anchor ≤ cursor was probed and mismatched, and every row above
+			// the target sits at one of those anchored heights: each is proven to
+			// describe a replaced block.
+			return 0, floorProvenOrphaned, 0, nil
 		}
-		return 0, floorNoAnchors, 0, nil
+		return 0, floorUnverifiable, 0, nil
 	}
 
 	probes, probeFailed := 0, false
@@ -886,11 +972,37 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 		probes++
 		if err != nil {
 			probeFailed = true
-			slog.Warn("poll anchor hash probe failed; this anchor cannot be verified and will be re-probed rather than skipped",
+			slog.Warn("poll anchor hash probe failed; this anchor cannot be verified, so no lower match may be accepted as a floor this Step and it will be re-probed rather than skipped",
 				"engine", p.engine, "anchorBlock", a.BlockNumber, "err", err)
 			continue
 		}
 		if bytes.Equal(live.Bytes(), a.BlockHash) {
+			if probeFailed {
+				// GATE 1. A newer anchor above this one could not be checked, so
+				// deleting the history it covers would be deletion without proof.
+				// Refuse the whole repair and retry; the resume point is
+				// deliberately NOT lowered, so the next Step re-probes from the top
+				// of this page.
+				slog.Warn("poll anchor at this height MATCHES the live chain, but a NEWER anchor above it could not be probed, so it is NOT accepted as a rewind floor: deleting the unproven history above it is what finding A1 is about",
+					"engine", p.engine, "matchedBlock", a.BlockNumber, "probesThisRound", probes)
+				return 0, floorUnprobed, probes, nil
+			}
+			boundary := max(a.BlockNumber, exp.EffectiveTarget)
+			unanchored, err := p.store.CountUnanchoredPricesAbove(ctx, p.engine, p.cfg.ChainID, boundary)
+			if err != nil {
+				return 0, floorUnprobed, probes, err
+			}
+			if unanchored > 0 {
+				// GATE 2. The anchors are complete and this one is canonical, but
+				// rows above the boundary sit at heights no anchor covers, so they
+				// can never be proven either way. The verified floor is still
+				// RETURNED: everything at or below it is provably canonical and must
+				// keep its validity when the suffix above is neutralized.
+				slog.Warn("poll anchor at this height matches the live chain, but rows above the deletion boundary sit at heights NO anchor covers, so a rewind to it would delete unprovable history; neutralizing the suffix above it instead",
+					"engine", p.engine, "matchedBlock", a.BlockNumber, "boundary", boundary,
+					"unanchoredRowsAbove", unanchored)
+				return a.BlockNumber, floorUnverifiable, probes, nil
+			}
 			return a.BlockNumber, floorVerified, probes, nil
 		}
 		slog.Warn("poll anchor is ORPHANED: the live chain reports a different hash at that height, so this round's rows describe a replaced block",
@@ -900,10 +1012,57 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 	}
 	if !probeFailed && deepestChecked > 0 {
 		// Every anchor in this page was checked and orphaned: it is safe to
-		// continue BELOW them next Step.
+		// continue BELOW them next Step. A page containing ANY failed probe leaves
+		// the resume point alone, so the failed anchors are re-probed instead of
+		// being skipped past unverified.
 		p.probeResumeFrom, p.probeResumeSet = deepestChecked-1, true
 	}
 	return 0, floorUnprobed, probes, nil
+}
+
+// neutralize answers the epoch WITHOUT deleting anything, for the one state where
+// no evidence can ever settle whether the rows above the target are canonical.
+//
+// It is reached only from floorUnverifiable — that is, only after verification has
+// established that the answer is UNOBTAINABLE rather than merely unavailable. A
+// failed probe is the latter and retries; a row at a height whose block hash was
+// never recorded is the former, and retrying it forever is the deadlock this
+// closes: repair needed an anchor, adoption is refused while an epoch is pending
+// (it would otherwise record a replacement block's hash), and the ack only ever
+// advanced through repair. Nothing in the process could break that cycle, so poll
+// ingestion stopped permanently after an upgrade-time reorg.
+//
+// store.NeutralizeUnverifiablePrices retains every row, marks the ones above the
+// boundary so no usable-price read can return them and no later repair can verify
+// them, drops the anchors above that boundary, resets the cursor and acks — in one
+// transaction. A verified floor is honoured exactly as in a rewind: history proven
+// canonical keeps its validity, and only the unprovable suffix is marked.
+//
+// WHAT THIS IS NOT: it is not a proof, and it is not free. The rows stay in the
+// table as unusable artifacts, the affected assets have no usable price at those
+// heights, and the poller's own invalid-answer condition keeps /readyz red until a
+// valid observation lands at or above the highest neutralized height. That is the
+// honest cost of the state, and it is paid once per epoch rather than forever.
+func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes int) error {
+	boundary, quarantined, err := p.store.NeutralizeUnverifiablePrices(ctx, p.engine, p.cfg.ChainID, cursor, floor)
+	if err != nil {
+		return fmt.Errorf("price poller %q: neutralize unverifiable prices above %d (verified floor %d): %w", p.engine, cursor, floor, err)
+	}
+	newCursor, found, err := p.store.DeriveCursor(ctx, p.engine)
+	if err != nil {
+		return fmt.Errorf("price poller %q: read cursor after neutralization: %w", p.engine, err)
+	}
+	if !found {
+		return fmt.Errorf("price poller %q: cursor missing after NeutralizeUnverifiablePrices — store contract violated", p.engine)
+	}
+	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: rows above the boundary sit at heights no poll anchor covers, so they can be neither proven canonical nor proven orphaned. Nothing was deleted; those rows are retained and marked unusable, everything at or below a verified floor keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head",
+		"engine", p.engine, "requestedTarget", cursor, "verifiedFloor", floor,
+		"boundary", boundary, "cursor", newCursor, "rowsNeutralized", quarantined,
+		"anchorProbes", probes)
+
+	p.clearRepairState()
+	p.rehydrateAfterUncertainty(ctx, "neutralization")
+	return nil
 }
 
 // blockRepair records a refusal to repair destructively, with the evidence that
@@ -911,17 +1070,17 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 // the daemon's retry backoff on a state that only an operator or a recovered
 // endpoint can change, and the condition surface is where this belongs.
 func (p *Poller) blockRepair(cursor uint64, outcome floorOutcome, probes int) {
-	var why, detail string
-	switch outcome {
-	case floorAllOrphaned:
-		why = "every retained poll anchor is orphaned"
-		detail = "the reorg is deeper than this engine's entire retained anchor history, so no surviving row can be proven canonical; this needs an operator decision, not an automatic delete"
-	case floorNoAnchors:
-		why = "this engine owns price rows that no poll anchor covers"
-		detail = "legacy or retention-aged history cannot be verified; the poller adopts anchors for such rows on its next round with no epoch pending, and refuses to delete them meanwhile"
-	default:
-		why = "poll-anchor verification has not concluded"
-		detail = "probes are still paging down through the retained anchors, or a probe failed and will be retried; nothing is deleted until a hash match or a definite negative"
+	// Only floorUnprobed reaches here: it is the one outcome where the answer may
+	// still arrive, so it is the one outcome worth waiting for. The states where no
+	// answer can ever arrive are NEUTRALIZED instead of refused — a refusal nothing
+	// can clear would be an outage rather than safety.
+	why := "poll-anchor verification has not concluded"
+	detail := "probes are still paging down through the retained anchors, or a probe FAILED and will be retried — and while any probe above a candidate floor is unproven, no lower match may authorise a deletion; nothing is deleted or acked until a hash match with complete proof above it, or a definite negative"
+	if outcome != floorUnprobed {
+		// Defensive: a future outcome added without a repair arm must not read as
+		// "still probing".
+		why = fmt.Sprintf("repair reached an unhandled verification outcome (%d)", outcome)
+		detail = "this is a code defect; nothing was deleted or acked"
 	}
 	reason := fmt.Sprintf("a reorg epoch on chain %d is pending and repair REFUSED to ack or delete: %s (cursor %d, probes this round %d). %s. Polled prices cannot be re-derived, so no price is applied until this resolves",
 		p.cfg.ChainID, why, cursor, probes, detail)

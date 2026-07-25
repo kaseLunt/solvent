@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -49,6 +50,14 @@ func TestRawLogsInRangeFiltersAndOrders(t *testing.T) {
 
 	got, err := s.RawLogsInRange(ctx, 10, [][]byte{{0xA1}, {0xA2}}, 100, 101)
 	require.NoError(t, err)
+	// IngestedAt is assigned by the WRITE and is not part of the fixture, so it is
+	// compared separately (it must be present — see
+	// TestRawLogReadsCarryTheDurableIngestionTime) and then zeroed for the identity
+	// comparison of everything else.
+	for i := range got {
+		require.False(t, got[i].IngestedAt.IsZero(), "log %d carries its durable ingestion time", i)
+		got[i].IngestedAt = time.Time{}
+	}
 	require.Equal(t, []RawLog{logs[1], logs[0], logs[2]}, got)
 
 	// Empty range: no rows, no error.
