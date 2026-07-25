@@ -2,7 +2,8 @@
 *.exe
 /bin/
 coverage.out
-.superpowers/
+.superpowers/*
+!.superpowers/sdd/
 .serena/
 recon/cash-v3/
 recon/DefiLlama-Adapters/
