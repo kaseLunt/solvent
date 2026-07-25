@@ -290,8 +290,14 @@
       "oracle": {
         "kind": "chainlink_stream",
         "contract": "0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5",
+        "proxy": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
         "startBlock": 20779893,
         "priceDecimals": 8
+      },
+      "ratio": {
+        "contract": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "method": "getRate()",
+        "decimals": 18
       }
     },
     {
@@ -304,6 +310,7 @@
       "oracle": {
         "kind": "chainlink_stream",
         "contract": "0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7",
+        "proxy": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
         "startBlock": 20188117,
         "priceDecimals": 8
       }
@@ -318,6 +325,7 @@
       "oracle": {
         "kind": "chainlink_stream",
         "contract": "0x39E31761911b9aaBAEF5fb81B18Fd1C24a60E884",
+        "proxy": "0x8f1dF6D7F2db73eECE86a18b4381F4707b918FB1",
         "startBlock": 19626469,
         "priceDecimals": 8
       }
@@ -332,6 +340,7 @@
       "oracle": {
         "kind": "chainlink_stream",
         "contract": "0x8F73090a7c58B8BDcC9A93cBB6816e5cC4f01E8c",
+        "proxy": "0xB9E1E3A9feFf48998E45Fa90847ed4D467E8BcfD",
         "startBlock": 20191185,
         "priceDecimals": 8
       }

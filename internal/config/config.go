@@ -38,8 +38,21 @@ type Config struct {
 	// (SOLVENT_SNAPSHOT_INTERVAL, default 1h). Must be positive: a zero or
 	// negative cadence would hot-loop full registry sweeps.
 	SnapshotInterval time.Duration
-	Chains           map[string]Chain
-	Streams          []Stream
+	// PriceInterval is the oracle POLL cadence (SOLVENT_PRICE_INTERVAL,
+	// default 60s — plan Task 8). Must be positive: a zero or negative cadence
+	// would hot-loop a multicall of every registry asset's oracle.
+	PriceInterval time.Duration
+	// FeedStaleness is how long a Chainlink stream may go without an
+	// AnswerUpdated before the feed deriver WARNs, fails its health check and
+	// re-resolves the proxy's aggregator() (recon stream caveat ii). Must be
+	// positive. The default is deliberately generous relative to the feeds'
+	// own heartbeats: per-feed heartbeats differ (they are not recorded in
+	// recon/feeds.json), so this ONE global bound is a conservative
+	// simplification — a per-feed threshold is a documented deferral, not a
+	// claim that this value matches any individual feed's heartbeat.
+	FeedStaleness time.Duration
+	Chains        map[string]Chain
+	Streams       []Stream
 }
 
 type fileChain struct {
@@ -94,7 +107,31 @@ func Load(path string) (*Config, error) {
 		}
 	}
 
-	cfg := &Config{DatabaseURL: dbURL, PollInterval: poll, SnapshotInterval: snapshot, Chains: map[string]Chain{}}
+	price := time.Minute
+	if v := os.Getenv("SOLVENT_PRICE_INTERVAL"); v != "" {
+		price, err = time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("SOLVENT_PRICE_INTERVAL: %w", err)
+		}
+		if price <= 0 {
+			return nil, fmt.Errorf("SOLVENT_PRICE_INTERVAL must be positive, got %q", v)
+		}
+	}
+	feedStaleness := 26 * time.Hour
+	if v := os.Getenv("SOLVENT_FEED_STALENESS"); v != "" {
+		feedStaleness, err = time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("SOLVENT_FEED_STALENESS: %w", err)
+		}
+		if feedStaleness <= 0 {
+			return nil, fmt.Errorf("SOLVENT_FEED_STALENESS must be positive, got %q", v)
+		}
+	}
+
+	cfg := &Config{
+		DatabaseURL: dbURL, PollInterval: poll, SnapshotInterval: snapshot,
+		PriceInterval: price, FeedStaleness: feedStaleness, Chains: map[string]Chain{},
+	}
 
 	for name, fc := range root.Chains {
 		urls := os.Getenv(fc.RPCEnv)

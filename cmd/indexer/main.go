@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
@@ -19,12 +20,14 @@ import (
 	"github.com/kaselunt/solvent/internal/decode"
 	"github.com/kaselunt/solvent/internal/derive"
 	"github.com/kaselunt/solvent/internal/ingest"
+	"github.com/kaselunt/solvent/internal/prices"
 	"github.com/kaselunt/solvent/internal/snapshot"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
 func main() {
 	configPath := flag.String("config", "config/contracts.json", "path to contracts config")
+	feedsPath := flag.String("feeds", "recon/feeds.json", "path to the oracle feed registry")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -33,7 +36,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, *configPath); err != nil {
+	if err := run(ctx, *configPath, *feedsPath); err != nil {
 		log.Error("indexer exited with error", "err", err)
 		os.Exit(1)
 	}
@@ -44,49 +47,51 @@ const (
 	// stream deep in backfill yields after this many windows so its siblings
 	// keep making progress (fair round-robin instead of per-worker full drain).
 	stepsPerRound = 5
-	// Per-walker error backoff, TIME-based (fix wave: round counting was
+	// Per-WORKER error backoff, TIME-based (fix wave: round counting was
 	// burnable — a busy sibling keeps rounds spinning hot, so "skip N
 	// rounds" could elapse in milliseconds). An erroring round schedules
-	// the walker's next attempt by TIMESTAMP: exponential from
-	// walkerBackoffBase, capped at walkerBackoffCap, with ±walkerBackoffJitter
-	// so parallel broken streams do not retry in lockstep.
-	walkerBackoffBase   = 30 * time.Second
-	walkerBackoffCap    = 10 * time.Minute
-	walkerBackoffJitter = 0.20
+	// the worker's next attempt by TIMESTAMP: exponential from
+	// retryBackoffBase, capped at retryBackoffCap, with ±retryBackoffJitter
+	// so parallel broken workers do not retry in lockstep. Shared by the
+	// walkers and by Task 8's price workers (renamed from walkerBackoff when
+	// the second user arrived — one implementation, not two).
+	retryBackoffBase   = 30 * time.Second
+	retryBackoffCap    = 10 * time.Minute
+	retryBackoffJitter = 0.20
 )
 
-// walkerBackoff schedules a walker's retries by next-attempt timestamp.
+// retryBackoff schedules a worker's retries by next-attempt timestamp.
 // ready() is state-free — a hot loop may poll it arbitrarily often without
 // burning any of the delay — and only failure()/success() move state.
-type walkerBackoff struct {
+type retryBackoff struct {
 	now      func() time.Time // injectable clock (tests)
 	rand     func() float64   // uniform [0,1) jitter source (tests inject)
 	failures int
 	next     time.Time
 }
 
-// ready reports whether the walker may attempt work this round.
-func (b *walkerBackoff) ready() bool { return !b.now().Before(b.next) }
+// ready reports whether the worker may attempt work this round.
+func (b *retryBackoff) ready() bool { return !b.now().Before(b.next) }
 
 // failure records an erroring round and schedules the next attempt:
-// base·2^(failures-1), capped, jittered ±walkerBackoffJitter. Returns the
+// base·2^(failures-1), capped, jittered ±retryBackoffJitter. Returns the
 // chosen delay for logging.
-func (b *walkerBackoff) failure() time.Duration {
+func (b *retryBackoff) failure() time.Duration {
 	b.failures++
-	d := walkerBackoffCap
+	d := retryBackoffCap
 	// Guarded shift: beyond a handful of doublings the cap always wins.
 	if shift := b.failures - 1; shift < 10 {
-		if scaled := walkerBackoffBase << shift; scaled < walkerBackoffCap {
+		if scaled := retryBackoffBase << shift; scaled < retryBackoffCap {
 			d = scaled
 		}
 	}
-	d = time.Duration(float64(d) * (1 + walkerBackoffJitter*(2*b.rand()-1)))
+	d = time.Duration(float64(d) * (1 + retryBackoffJitter*(2*b.rand()-1)))
 	b.next = b.now().Add(d)
 	return d
 }
 
 // success resets the schedule after any non-erroring round.
-func (b *walkerBackoff) success() {
+func (b *retryBackoff) success() {
 	b.failures = 0
 	b.next = time.Time{}
 }
@@ -94,7 +99,25 @@ func (b *walkerBackoff) success() {
 // walkerState wraps a walker with its backoff bookkeeping.
 type walkerState struct {
 	w  *ingest.Walker
-	bo walkerBackoff
+	bo retryBackoff
+}
+
+// priceWorker is the daemon's uniform handle on Task 8's two price ingestion
+// workers — the oracle poller (*prices.Poller) and the Chainlink feed deriver
+// (*prices.FeedDeriver). Both expose the same Step/Health/Name shape as the
+// derivation runners, so the loop treats them identically.
+type priceWorker interface {
+	Name() string
+	Step(ctx context.Context) (bool, error)
+	Health() (healthy bool, reason string)
+}
+
+// priceWorkerState wraps a price worker with its backoff bookkeeping. The
+// poller additionally rate-limits itself by its own cadence; this backoff is
+// the error-storm bound on top of that.
+type priceWorkerState struct {
+	w  priceWorker
+	bo retryBackoff
 }
 
 // engineHealth is the daemon's package-level health map: engine → the
@@ -105,11 +128,27 @@ type walkerState struct {
 // non-empty, the daemon logs a DEGRADED summary once per tick round.
 var engineHealth = map[string]string{}
 
-func run(ctx context.Context, configPath string) error {
+// priceHealth is the price workers' health view, and is deliberately NOT
+// engineHealth: a stale Chainlink stream or a poller that has missed its
+// cadence grace window is RECOVERABLE — a resumed feed or a landed round clears
+// it — whereas engineHealth records TERMINAL capability errors that only a
+// restart resolves. It is therefore REBUILT from scratch each tick rather than
+// accumulated, so recovery is actually visible in the log.
+var priceHealth = map[string]string{}
+
+func run(ctx context.Context, configPath, feedsPath string) error {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return err
 	}
+	// The oracle feed registry (recon/feeds.json) is loaded against the config's
+	// chains, so a registry chain the config does not define fails fast here
+	// rather than silently dropping that chain's prices.
+	feeds, err := config.LoadFeeds(feedsPath, cfg.Chains)
+	if err != nil {
+		return err
+	}
+	slog.Info("feed registry loaded", "path", feedsPath, "assets", len(feeds.Assets))
 	st, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -149,7 +188,7 @@ func run(ctx context.Context, configPath string) error {
 				Window:        s.Window,
 				Confirmations: s.Confirmations,
 			}),
-			bo: walkerBackoff{now: time.Now, rand: rand.Float64},
+			bo: retryBackoff{now: time.Now, rand: rand.Float64},
 		})
 		slog.Info("stream configured", "stream", s.Name, "start", s.StartBlock)
 	}
@@ -203,8 +242,10 @@ func run(ctx context.Context, configPath string) error {
 		case "aave_v3_etherfi":
 			eng = derive.NewAaveEngine()
 		case "chainlink_feed":
-			// Price feeds are ingested raw; price derivation is Task 8's
-			// poller, not a derive.Engine. Deliberate skip.
+			// Price feeds are ingested raw; their derivation is Task 8's
+			// prices.FeedDeriver, built below — it writes prices rows under its
+			// own pseudo-engine cursor and holds no per-account state, so it is
+			// deliberately not a derive.Engine. Skipped here on purpose.
 			continue
 		default:
 			return fmt.Errorf("no deriver wired for engine %q", spec.Engine)
@@ -215,6 +256,53 @@ func run(ctx context.Context, configPath string) error {
 		}
 		runners = append(runners, r)
 		slog.Info("derivation runner configured", "engine", spec.Engine, "streams", len(spec.Streams))
+	}
+
+	// Price ingestion (Task 8): one POLLER per chain carrying registry poll
+	// obligations (the engine-exact OP PriceProviderV2 assets, plus the ETH
+	// weETH getRate() ratio), and one FEED DERIVER per chainlink_feed spec.
+	// Chain keys are sorted so construction and log order are deterministic
+	// across runs (Go map iteration is not).
+	var priceWorkers []*priceWorkerState
+	chainKeys := make([]string, 0, len(cfg.Chains))
+	for name := range cfg.Chains {
+		chainKeys = append(chainKeys, name)
+	}
+	sort.Strings(chainKeys)
+	for _, name := range chainKeys {
+		chainID := cfg.Chains[name].ChainID
+		if len(feeds.PollAssets(chainID)) == 0 && len(feeds.RatioAssets(chainID)) == 0 {
+			continue // nothing to poll on this chain
+		}
+		p, err := prices.NewPoller(st, clients[name], feeds, prices.PollerConfig{
+			ChainID: chainID, Interval: cfg.PriceInterval,
+		})
+		if err != nil {
+			return err
+		}
+		priceWorkers = append(priceWorkers, &priceWorkerState{
+			w: p, bo: retryBackoff{now: time.Now, rand: rand.Float64},
+		})
+		slog.Info("oracle poller configured", "engine", p.Name(), "chain", name,
+			"interval", cfg.PriceInterval, "sources", len(p.Sources()))
+	}
+	for _, spec := range specs {
+		if spec.Engine != "chainlink_feed" {
+			continue
+		}
+		fd, err := prices.NewFeedDeriver(st, registry, clients[spec.Chain], feeds, prices.FeedConfig{
+			ChainID: spec.ChainID, Streams: spec.Streams,
+			Addresses: spec.Addresses, StartBlock: spec.StartBlock, Window: spec.Window,
+			Staleness: cfg.FeedStaleness,
+		})
+		if err != nil {
+			return err
+		}
+		priceWorkers = append(priceWorkers, &priceWorkerState{
+			w: fd, bo: retryBackoff{now: time.Now, rand: rand.Float64},
+		})
+		slog.Info("chainlink feed deriver configured", "engine", fd.Name(), "chain", spec.Chain,
+			"streams", len(spec.Streams), "staleness", cfg.FeedStaleness)
 	}
 
 	ticker := time.NewTicker(cfg.PollInterval)
@@ -305,6 +393,52 @@ func run(ctx context.Context, configPath string) error {
 				}
 			}
 
+			// Price pass: each price worker answers any pending reorg epoch
+			// (RewindPrices before further apply) and then does one bounded unit
+			// of work — the poller at most one cadence-due multicall round, the
+			// feed deriver at most stepsPerRound windows of AnswerUpdated logs.
+			// Health is REBUILT each round, not accumulated: a stale feed that
+			// resumes, or a poller that lands a round, is genuinely healthy again.
+			for _, ps := range priceWorkers {
+				if ps.bo.ready() {
+					roundErred := false
+					for i := 0; i < stepsPerRound; i++ {
+						advanced, err := ps.w.Step(ctx)
+						if advanced {
+							anyAdvanced = true
+						}
+						if err != nil {
+							if errors.Is(err, context.Canceled) {
+								slog.Info("shutting down", "worker", ps.w.Name())
+							} else {
+								slog.Error("price step failed; will retry after backoff", "worker", ps.w.Name(), "err", err)
+								roundErred = true
+							}
+							break
+						}
+						if !advanced {
+							break
+						}
+					}
+					if roundErred {
+						delay := ps.bo.failure()
+						slog.Warn("price worker backing off after error",
+							"worker", ps.w.Name(), "retryIn", delay, "consecutive", ps.bo.failures)
+					} else {
+						ps.bo.success()
+					}
+				}
+				// Health is read even while the worker is BACKING OFF — that is
+				// precisely when the DEGRADED signal matters most, and skipping
+				// it would leave the map showing a pre-failure verdict for as
+				// long as the backoff lasts.
+				if healthy, reason := ps.w.Health(); !healthy {
+					priceHealth[ps.w.Name()] = reason
+				} else {
+					delete(priceHealth, ps.w.Name())
+				}
+			}
+
 			if ctx.Err() != nil {
 				break
 			}
@@ -330,6 +464,12 @@ func run(ctx context.Context, configPath string) error {
 			if len(engineHealth) > 0 {
 				slog.Warn("daemon DEGRADED: unhealthy engines (derivation gated; restart after a capability upgrade to recover)",
 					"engines", fmt.Sprintf("%v", engineHealth))
+			}
+			if len(priceHealth) > 0 {
+				// RECOVERABLE, unlike engineHealth: this warning stops once the
+				// stale stream publishes again or the poller lands a round.
+				slog.Warn("daemon DEGRADED: price ingestion unhealthy (recoverable — clears when the feed resumes or a poll round lands)",
+					"workers", fmt.Sprintf("%v", priceHealth))
 			}
 		}
 

@@ -348,6 +348,39 @@ func chainMaxEpoch(ctx context.Context, tx pgx.Tx, chainID uint64) (int64, error
 	return max, nil
 }
 
+// rewindTarget computes the EFFECTIVE rewind target for engine on chainID —
+// min(toBlock, deepest rewound_to among epochs above ackedEpoch) — and returns
+// the chain's max epoch alongside it, both read inside the caller's
+// transaction. When the target is lowered, one WARN names both numbers.
+//
+// Shared by every rewind-and-ack path (RewindDerived for derived position
+// state, RewindPrices for the price writers' cursors) so the epoch arithmetic
+// that decides how deep an ack must reach has exactly ONE implementation: an
+// ack that reached less deep than the deepest unacknowledged rewind would
+// bless rows belonging to blocks the raw rewind already deleted.
+//
+// Epoch reads rely on the enforced single-writer contract (D-004): under READ
+// COMMITTED each statement sees its own snapshot, so it is the absence of
+// concurrent writers, not isolation, that makes the pair consistent.
+func rewindTarget(ctx context.Context, tx pgx.Tx, engine string, chainID uint64, ackedEpoch int64, toBlock uint64) (effectiveTarget uint64, maxEpoch int64, err error) {
+	maxEpoch, err = chainMaxEpoch(ctx, tx, chainID)
+	if err != nil {
+		return 0, 0, err
+	}
+	var deepestUnacked uint64
+	if err := tx.QueryRow(ctx,
+		`SELECT COALESCE(MIN(rewound_to), $3) FROM reorg_epochs WHERE chain_id = $1 AND epoch > $2`,
+		chainID, ackedEpoch, toBlock).Scan(&deepestUnacked); err != nil {
+		return 0, 0, fmt.Errorf("read deepest unacked rewind target for chain %d: %w", chainID, err)
+	}
+	effectiveTarget = min(toBlock, deepestUnacked)
+	if effectiveTarget < toBlock {
+		slog.Warn("derived rewind target lowered to deepest unacknowledged reorg epoch",
+			"engine", engine, "chain", chainID, "callerTarget", toBlock, "effectiveTarget", effectiveTarget)
+	}
+	return effectiveTarget, maxEpoch, nil
+}
+
 // loadPositionEvent fetches the existing position_events row identified by
 // (chainID, txHash, logIndex, seq), if any, for divergence comparison.
 func loadPositionEvent(ctx context.Context, tx pgx.Tx, chainID uint64, txHash []byte, logIndex uint32, seq uint16) (PositionEvent, bool, error) {
@@ -481,20 +514,9 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 
 	// Epoch reads rely on the single-writer contract (D-004) — see the doc
 	// comment; READ COMMITTED gives no cross-statement snapshot here.
-	maxEpoch, err := chainMaxEpoch(ctx, tx, chainID)
+	effectiveTarget, maxEpoch, err := rewindTarget(ctx, tx, engine, chainID, ackedEpoch, toBlock)
 	if err != nil {
 		return err
-	}
-	var deepestUnacked uint64
-	if err := tx.QueryRow(ctx,
-		`SELECT COALESCE(MIN(rewound_to), $3) FROM reorg_epochs WHERE chain_id = $1 AND epoch > $2`,
-		chainID, ackedEpoch, toBlock).Scan(&deepestUnacked); err != nil {
-		return fmt.Errorf("read deepest unacked rewind target for chain %d: %w", chainID, err)
-	}
-	effectiveTarget := min(toBlock, deepestUnacked)
-	if effectiveTarget < toBlock {
-		slog.Warn("derived rewind target lowered to deepest unacknowledged reorg epoch",
-			"engine", engine, "chain", chainID, "callerTarget", toBlock, "effectiveTarget", effectiveTarget)
 	}
 
 	if _, err := tx.Exec(ctx,

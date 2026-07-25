@@ -18,8 +18,8 @@ type fakeClock struct{ t time.Time }
 
 func (c *fakeClock) now() time.Time          { return c.t }
 func (c *fakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
-func newBackoff(c *fakeClock, r float64) *walkerBackoff {
-	return &walkerBackoff{now: c.now, rand: func() float64 { return r }}
+func newBackoff(c *fakeClock, r float64) *retryBackoff {
+	return &retryBackoff{now: c.now, rand: func() float64 { return r }}
 }
 
 // TestWalkerBackoffHotLoopDoesNotBurn is the named hot-loop backoff failure
@@ -33,7 +33,7 @@ func TestWalkerBackoffHotLoopDoesNotBurn(t *testing.T) {
 
 	require.True(t, b.ready(), "a fresh walker is ready")
 	delay := b.failure()
-	require.Equal(t, walkerBackoffBase, delay)
+	require.Equal(t, retryBackoffBase, delay)
 
 	// The sibling's hot loop: 10k rounds burn through in ~10ms of wall time.
 	for i := 0; i < 10_000; i++ {
@@ -42,7 +42,7 @@ func TestWalkerBackoffHotLoopDoesNotBurn(t *testing.T) {
 	}
 	require.Equal(t, 1, b.failures, "polling ready() must not touch state")
 
-	clock.advance(walkerBackoffBase) // past the deadline
+	clock.advance(retryBackoffBase) // past the deadline
 	require.True(t, b.ready(), "the walker re-arms when the timestamp passes, not after N rounds")
 }
 
@@ -66,7 +66,7 @@ func TestWalkerBackoffExponentialToCap(t *testing.T) {
 	}
 	// Deep failure counts (shift guard territory) still yield the cap.
 	b.failures = 40
-	require.Equal(t, walkerBackoffCap, b.failure())
+	require.Equal(t, retryBackoffCap, b.failure())
 }
 
 // TestWalkerBackoffJitterBounds: the jitter multiplies the delay by a factor
@@ -75,13 +75,13 @@ func TestWalkerBackoffJitterBounds(t *testing.T) {
 	clock := &fakeClock{t: time.Unix(1_000_000, 0)}
 
 	low := newBackoff(clock, 0)
-	require.Equal(t, time.Duration(float64(walkerBackoffBase)*(1-walkerBackoffJitter)), low.failure(),
+	require.Equal(t, time.Duration(float64(retryBackoffBase)*(1-retryBackoffJitter)), low.failure(),
 		"rand=0 → -20 percent")
 
 	high := newBackoff(clock, 0.999999)
 	got := high.failure()
-	require.Greater(t, got, walkerBackoffBase, "rand→1 jitters upward")
-	require.LessOrEqual(t, got, time.Duration(float64(walkerBackoffBase)*(1+walkerBackoffJitter)))
+	require.Greater(t, got, retryBackoffBase, "rand→1 jitters upward")
+	require.LessOrEqual(t, got, time.Duration(float64(retryBackoffBase)*(1+retryBackoffJitter)))
 }
 
 // TestWalkerBackoffSuccessResets: one clean round fully re-arms the walker —
@@ -97,5 +97,5 @@ func TestWalkerBackoffSuccessResets(t *testing.T) {
 
 	b.success()
 	require.True(t, b.ready(), "success clears any scheduled delay")
-	require.Equal(t, walkerBackoffBase, b.failure(), "the exponent restarts from the base")
+	require.Equal(t, retryBackoffBase, b.failure(), "the exponent restarts from the base")
 }
