@@ -18,9 +18,10 @@ package store
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
+	"reflect"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -194,22 +195,23 @@ func TestNeutralizationHonoursAVerifiedFloor(t *testing.T) {
 	require.ErrorContains(t, err, "verified floor 5000 is above the requested target 4950")
 }
 
-// D-011 CLAUSE 5, AGAINST POSTGRES: NEUTRALIZATION RETAINS THE ANCHORS ABOVE THE
-// BOUNDARY.
+// D-012 CLAUSE 2, AGAINST POSTGRES: NEUTRALIZATION MUST NOT DELETE THE ANCHORS ABOVE
+// THE BOUNDARY, and D-012 CLAUSE 3: what it does to the rows is PERMANENT.
 //
-// This test asserted the exact opposite one wave ago, and the inversion is the whole
-// point. Wave 6 deleted those anchors, reasoning that an anchor outliving its round's
-// usability would let a later repair "verify" a height the call had declared
-// unplaceable. That inverted the anchor's role: it is not a blessing, it is the
-// PROVENANCE — the hash of the block the round actually ran at — and it is the only
-// thing "was that block canonical after all?" can ever be answered from. D-010
-// preferred marking to deleting BECAUSE marking is recoverable; deleting the
-// provenance is precisely what removed the recovery, so the letter of D-010 was kept
-// while its intent was lost.
+// Clause 2 — "neutralization never deletes anchors, and no retention bound, prune, or
+// rewind may expire an anchor belonging to a neutralized height, on any store path."
+// Wave 6 deleted them here, reasoning that an anchor outliving its round's usability
+// would let a later repair "verify" a height the call had declared unplaceable. That
+// inverted the anchor's role: it is not a blessing, it is the PROVENANCE — the hash of
+// the block the round actually ran at — and it is the only thing from which "was that
+// block canonical after all?" could ever be answered, by any future offline tool.
 //
-// The pairing at the end is what makes this more than a changed expectation: the
-// retained anchor is immediately shown to be sufficient to restore the marked row.
-func TestNeutralizationRetainsAnchorsAboveTheBoundaryForRevalidation(t *testing.T) {
+// Clause 3 — nothing in the running system reverses the marking. That is asserted here
+// STRUCTURALLY rather than by exhausting call shapes: this store carries no online
+// revalidation primitive at all (TestStoreHasNoOnlineRevalidationPrimitive), so the
+// only thing that can clear the marker is a fresh observation at the row's own
+// identity, which TestFreshObservationSupersedesANeutralizedRow pins.
+func TestNeutralizationRetainsAnchorsAboveTheBoundary(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
@@ -228,32 +230,164 @@ func TestNeutralizationRetainsAnchorsAboveTheBoundaryForRevalidation(t *testing.
 	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 6000, 10)
 	require.NoError(t, err)
 	require.Equal(t, []PollAnchor{{BlockNumber: 5000, BlockHash: hash32(0x50)}}, plainAnchors(anchors),
-		"the anchor above the boundary SURVIVES: it is the provenance a revalidation checks against")
+		"the anchor above the boundary SURVIVES: it is provenance, retained forever (D-012 clause 2)")
 	require.Len(t, priceRows(t, s, 10), 2, "and the rows themselves are still retained")
 
 	// The frontier read is a different question from the provenance read, and only the
-	// first one is supposed to skip a neutralized height. Before clause 5 the two were
-	// conflated by the deletion; now the distinction has to be enforced explicitly, or
-	// a deep reorg leaves the block-advance clock stuck on an orphaned round forever.
+	// first one is supposed to skip a neutralized height. While neutralization deleted
+	// these anchors the distinction was implicit; retaining them makes it explicit, or a
+	// deep reorg leaves the block-advance clock stuck on an orphaned round forever.
 	_, found, err := s.NewestPollAnchor(ctx, testPollEngine, 10)
 	require.NoError(t, err)
 	require.False(t, found,
 		"the only surviving anchor sits at a neutralized height, so this engine has no USABLE frontier")
 
-	// And the retained anchor is sufficient: the marked row at 5000 comes back on the
-	// strength of it alone, with no fresh observation anywhere.
-	restored, err := s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5000, hash32(0x50))
+	// D-012 CLAUSE 3, ON BOTH ROWS: the classification stands. Repeating the call
+	// changes nothing, and there is no store path that would put either row back.
+	_, again, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5010, 0)
 	require.NoError(t, err)
-	require.Equal(t, int64(1), restored)
-	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
-	require.True(t, valid)
-	require.Empty(t, reason)
+	require.Zero(t, again, "already-marked rows are not re-marked")
+	for _, c := range []struct {
+		asset byte
+		block uint64
+		why   string
+	}{
+		{0xAA, 5000, "anchored: its provenance survives, but nothing ONLINE consumes it"},
+		{0xBB, 5010, "unanchored legacy: nothing anywhere can ever place it (clause 5)"},
+	} {
+		valid, reason := invalidReasonAt(t, s, 10, c.asset, testPollSource, c.block)
+		require.False(t, valid, c.why)
+		require.Equal(t, InvalidReasonUnverifiableReorg, reason, c.why)
+	}
+}
 
-	// 5010 was never anchored — legacy history — so nothing can ever place it, and it
-	// stays marked. That is the residue D-010 accepted, not a failure of clause 6.
-	valid, reason = invalidReasonAt(t, s, 10, 0xBB, testPollSource, 5010)
-	require.False(t, valid)
-	require.Equal(t, InvalidReasonUnverifiableReorg, reason)
+// D-012 CLAUSE 7, AGAINST POSTGRES: the operator-facing report of a classification
+// separates the ANCHORED rows from the UNANCHORED ones, and the split describes
+// exactly the rows THIS call marked.
+//
+// The clause: "operator-facing text must match this decision: anchored and unanchored
+// classifications reported distinctly". Round 7's [low] was that one WARN asserted the
+// unanchored story ("no poll anchor covers this observation... no later repair can
+// verify them") for a call that is also used on anchored suffixes, in the most
+// correctness-critical path the poller has. The two now travel separately because an
+// operator's next step differs: an anchored row still has the block hash its round ran
+// against on disk, so an offline reconciliation could settle it; an unanchored one
+// never had a hash recorded, so nothing ever can.
+//
+// This asserts the attributes rather than the prose because the counts are the part a
+// responder acts on, and it is a LIVE test because the split is computed by the same
+// UPDATE that does the marking — a model of it would be asserting itself.
+func TestNeutralizationReportsAnchoredAndUnanchoredMarkingsDistinctly(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// Two ANCHORED rounds and one UNANCHORED legacy row, all above the boundary.
+	for _, b := range []uint64{4900, 5000} {
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
+	}
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(5050, 0xBB, testPollSource, 2_000_000, 6),
+	}, 5050)))
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4800, []byte{0x01}))
+
+	rec := captureWarnAttrs(t)
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5050, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), marked)
+
+	got := rec.find("rowsNeutralized")
+	require.NotNil(t, got, "the classification is reported to the operator at all")
+	require.Equal(t, int64(3), got["rowsNeutralized"])
+	require.Equal(t, int64(2), got["rowsAnchored"],
+		"the two rounds whose block hash this engine recorded are reported as anchored")
+	require.Equal(t, int64(1), got["rowsUnanchored"],
+		"the legacy row, whose hash was never recorded, is reported separately")
+	require.Contains(t, got["msg"], "PERMANENT",
+		"D-012 clause 3: the text must not describe this as a pending repair")
+	require.Contains(t, got["msg"], "offline",
+		"D-012 clause 2/7: it names the retained-provenance option, without promising a tool")
+	require.NotContains(t, got["msg"], "no later repair can verify them",
+		"the round-7 [low]: the unanchored claim must not be asserted for a mixed call")
+
+	// A SECOND call over an all-anchored suffix reports zero unanchored, so the split
+	// tracks what each call actually did rather than the standing pile.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(5200, 0xCC, testPollSource, 3_000_000, 6)}, 5200, anchorAt(5200))))
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 5100, []byte{0x02}))
+	rec2 := captureWarnAttrs(t)
+	_, marked, err = s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5200, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked)
+	got = rec2.find("rowsNeutralized")
+	require.NotNil(t, got)
+	require.Equal(t, int64(1), got["rowsAnchored"])
+	require.Equal(t, int64(0), got["rowsUnanchored"],
+		"the three rows the FIRST call marked are not re-counted into this one's report")
+}
+
+// captureWarnAttrs routes slog through a collector that keeps each Warn record's
+// ATTRIBUTES as well as its message, for the operator-facing surfaces whose contract
+// is the numbers they carry rather than their prose.
+func captureWarnAttrs(t *testing.T) *warnAttrRecorder {
+	t.Helper()
+	rec := &warnAttrRecorder{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return rec
+}
+
+type warnAttrRecorder struct{ records []map[string]any }
+
+func (w *warnAttrRecorder) Enabled(context.Context, slog.Level) bool { return true }
+
+func (w *warnAttrRecorder) Handle(_ context.Context, r slog.Record) error {
+	if r.Level < slog.LevelWarn {
+		return nil
+	}
+	m := map[string]any{"msg": r.Message}
+	r.Attrs(func(a slog.Attr) bool {
+		m[a.Key] = a.Value.Any()
+		return true
+	})
+	w.records = append(w.records, m)
+	return nil
+}
+
+func (w *warnAttrRecorder) WithAttrs([]slog.Attr) slog.Handler { return w }
+func (w *warnAttrRecorder) WithGroup(string) slog.Handler      { return w }
+
+// find returns the first recorded WARN carrying key, or nil.
+func (w *warnAttrRecorder) find(key string) map[string]any {
+	for _, r := range w.records {
+		if _, ok := r[key]; ok {
+			return r
+		}
+	}
+	return nil
+}
+
+// D-012 CLAUSE 3, STRUCTURALLY: there is no online revalidation primitive on the
+// store at all.
+//
+// The clause says "online revalidation is removed. Neutralization is a permanent
+// classification in the running system." This is the same kind of assertion as
+// internal/prices' TestPollStoreHasNoDeletionPrimitive, and for the same reason: a
+// behaviour that is enforced by the ABSENCE of a method cannot be re-introduced by
+// someone editing around a guard. The two methods D-011 added and D-012 removes are
+// named explicitly, so a future re-introduction under either name fails here rather
+// than silently restoring the machinery that carried both of round 7's criticals.
+func TestStoreHasNoOnlineRevalidationPrimitive(t *testing.T) {
+	st := reflect.TypeOf((*Store)(nil))
+	for _, gone := range []string{"RevalidateNeutralizedPrices", "NeutralizedPriceAnchors"} {
+		_, ok := st.MethodByName(gone)
+		require.False(t, ok,
+			"%s is the online revalidation subsystem D-012 clause 3 removes; re-adding it needs a new decision, not a new method", gone)
+	}
+	// And the classification is still COUNTABLE, which is the part clause 6 keeps.
+	_, ok := st.MethodByName("NeutralizedPriceStats")
+	require.True(t, ok, "clause 6 keeps the gap visible even though clause 3 removes the repair")
 }
 
 // D-010 clause 4, AGAINST POSTGRES: the retained-but-unusable pile is countable,
@@ -304,11 +438,21 @@ func TestNeutralizedPriceStatsCountsOnlyReorgMarkedRowsOfOneEngine(t *testing.T)
 	require.Zero(t, other.Rows, "the backlog is owner-scoped")
 }
 
-// A neutralized row is never deleted by a LATER rewind either. It was kept once
-// because nothing could place it on a chain; a later rewind has no more evidence
-// than the first one did, so deferring the same unevidenced destruction is not an
-// improvement. Its ordinary siblings above the target still go.
-func TestRewindRetainsNeutralizedRowsAndDeletesTheRest(t *testing.T) {
+// A LATER REORG CANNOT REACH A NEUTRALIZED ROW EITHER, because a poll-owned engine
+// has no path into RewindPrices at all (D-012 clause 1).
+//
+// This test used to drive s.RewindPrices with the poll engine and assert that the
+// DELETE's predicate spared the marked row. That call was itself the [medium] Codex
+// round 7 found: it deletes every anchor above the target with no neutralized-height
+// exemption, so each invocation destroyed exactly the provenance clause 2 retains
+// forever. The predicate is still there as defence in depth, but the reachable
+// property is now the refusal — asserted in
+// TestRewindPricesRefusesAPollOwnedEngineAndChangesNothing.
+//
+// What this test keeps is the half that is still reachable and still load-bearing:
+// after the classification, the retained row is invisible to the exposure reads, so
+// its permanent presence cannot veto a later PROVEN repair of genuinely new history.
+func TestNeutralizedRowsAreNotHistoryAtRiskForALaterRepair(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
@@ -320,27 +464,30 @@ func TestRewindRetainsNeutralizedRowsAndDeletesTheRest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), marked)
 
-	// A fresh, ordinary round lands above the neutralized row, then a second reorg
-	// rewinds below both.
+	// A fresh, ordinary round lands above the marked row, then a second reorg.
 	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
 		po(5100, 0xBB, testPollSource, 3_000_000, 6),
 	}, 5100, PollAnchor{BlockNumber: 5100, BlockHash: hash32(0x51)})))
 	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4500, []byte{0x02}))
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 5100, 0))
 
-	rows := priceRows(t, s, 10)
-	require.Len(t, rows, 1, "the ordinary row above the target is deleted; the neutralized one is not")
-	require.Contains(t, rows, "00000000000000000000000000000000000000aa/"+testPollSource+"@5000")
-
-	// And the exposure read does not count it, so its permanent presence cannot veto
-	// a later PROVEN deletion.
-	exp, err := s.PriceRepairExposure(ctx, testPollEngine, 10, 4000)
+	// The exposure read sees ONE row at risk — the new one — and not the retained
+	// artifact, which was already accounted for once and is never deleted.
+	exp, err := s.PriceRepairExposure(ctx, testPollEngine, 10, 5100)
 	require.NoError(t, err)
-	require.Zero(t, exp.Owned, "a retained artifact is not history at risk")
+	require.Equal(t, int64(1), exp.Owned, "only the genuinely new row above the boundary is at risk")
+	n, err := s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 4000)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "a retained artifact is not history at risk")
+
+	// And once the second epoch is answered the same way, both rows are still on disk.
+	_, marked, err = s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5100, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked, "the already-marked row is not counted twice")
+	require.Len(t, priceRows(t, s, 10), 2, "nothing was ever deleted (D-010 clause 1)")
+	exp, err = s.PriceRepairExposure(ctx, testPollEngine, 10, 4000)
+	require.NoError(t, err)
+	require.Zero(t, exp.Owned)
 	require.Zero(t, exp.Unanchored)
-	n, err := s.CountOwnedPricesAbove(ctx, testPollEngine, 10, 0)
-	require.NoError(t, err)
-	require.Zero(t, n)
 }
 
 // A fresh observation at the identity of a neutralized row SUPERSEDES it rather
@@ -370,6 +517,12 @@ func TestFreshObservationSupersedesANeutralizedRow(t *testing.T) {
 	require.NoError(t, err, "a neutralized row must not wedge the writer on a divergence it cannot resolve")
 	require.Len(t, res.Inserted, 1, "the supersede is reported as a new durable observation")
 	require.True(t, res.Inserted[0].Valid)
+	// D-012 CLAUSE 6: the supersede is reported SEPARATELY from the insert, because it
+	// is the only landed-round event that can lower the neutralized backlog and the
+	// clause forbids paying for that aggregate on a cadence. The caller therefore has a
+	// durable fact to key the recount on rather than a guess.
+	require.Equal(t, int64(1), res.Superseded,
+		"the store reports that this insert REPLACED a classified row, not merely that a row landed")
 
 	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
 	require.True(t, valid, "the row is usable again because it was RE-OBSERVED, not because anything was assumed")
@@ -379,187 +532,38 @@ func TestFreshObservationSupersedesANeutralizedRow(t *testing.T) {
 	require.True(t, found)
 	require.Equal(t, "1234567", got.Price.String())
 
+	// An ORDINARY replay after the supersede is not a second supersede: the marker is
+	// gone, so this is the plain idempotent path and the count stays at zero.
+	res, err = s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(5000, 0xAA, testPollSource, 1_234_567, 6),
+	}, 5000, PollAnchor{BlockNumber: 5000, BlockHash: hash32(0x50)})
+	require.NoError(t, err)
+	require.Empty(t, res.Inserted)
+	require.Zero(t, res.Superseded,
+		"a replay of an already-restored row changes no classification, so it must not trigger a recount")
+
 	// A DIFFERENT owner on the SAME chain may not take it over: the supersede arm is
 	// owner-scoped, so the ordinary provenance abort still stands. (The foreign engine
-	// bootstraps its own cursor first, because the chain carries epochs.)
-	require.NoError(t, s.RewindPrices(ctx, "prices:chainlink_feed:10", 10, 4000, 0))
-	_, err = s.ApplyPrices(ctx, "prices:chainlink_feed:10", 10, []PriceObservation{
+	// bootstraps its own cursor first, because the chain carries epochs — and it is an
+	// event-derived identity, because D-012 clause 1 leaves a poll-owned one no rewind.)
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 4000, 0))
+	_, err = s.ApplyPrices(ctx, testFeedEngine10, 10, []PriceObservation{
 		po(5000, 0xAA, testPollSource, 1_234_567, 6), // same value, so the OWNER check is what refuses
 	}, 5000)
 	require.ErrorContains(t, err, "refusing a replay from",
 		"a foreign engine cannot claim another owner's row, neutralized or not")
 }
 
-// D-011 CLAUSE 6, AGAINST POSTGRES: THE UNDO THAT WORKS FOR PAST HEIGHTS.
+// D-012 CLAUSE 2 SURVIVES RETENTION. The clause is explicit that "no retention
+// bound, prune, or rewind may expire an anchor belonging to a neutralized height, on
+// any store path" — so anchors age out beyond pollAnchorRetention, and one at a
+// NEUTRALIZED height is exempt.
 //
-// This is the half D-010 asserted and did not build. Its recovery was insertPrice's
-// supersede arm (the test above), which needs a fresh observation at the row's exact
-// identity — and the poller reads `latest` only, so for a height the head has passed
-// it can never fire. This one asks a question that stays answerable forever: is the
-// block our round recorded still the block at that height?
-//
-// Every arm of the predicate is exercised here because each is what stops the recovery
-// from becoming a way to bless anything the caller likes.
-func TestRevalidationRestoresOnlyOnTheRecordedAnchorHash(t *testing.T) {
-	s := testDeriveStore(t)
-	ctx := context.Background()
-
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(5000, 0xAA, testPollSource, 1_000_000, 6),
-		po(5000, 0xCC, testPollSource, 0, 6), // quarantined for a DIFFERENT reason
-	}, 5000, PollAnchor{BlockNumber: 5000, BlockHash: hash32(0x50)})))
-	var observedAt time.Time
-	require.NoError(t, s.pool.QueryRow(ctx,
-		`SELECT observed_at FROM prices WHERE chain_id=10 AND asset=$1 AND source=$2 AND block_number=5000`,
-		addr20(0xAA), testPollSource).Scan(&observedAt))
-
-	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4000, []byte{0x01}))
-	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5000, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), marked, "only the readable row is marked; the zero answer already had its own reason")
-
-	// A HASH THE CALLER MADE UP RESTORES NOTHING. The proof is checked against the
-	// recorded anchor inside the transaction, so a poller that probed the wrong height,
-	// misread a token, or simply guessed cannot un-mark a row.
-	restored, err := s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5000, hash32(0x99))
-	require.NoError(t, err, "a mismatch is 'nothing to restore', not an error: a page of candidates must not fail on one")
-	require.Zero(t, restored)
-	valid, _ := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
-	require.False(t, valid)
-
-	// A HEIGHT WITH NO ANCHOR RESTORES NOTHING EITHER — the EXISTS arm has no
-	// satisfying row, which is precisely why D-011 clause 5 forbids deleting anchors.
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(5010, 0xBB, testPollSource, 2_000_000, 6),
-	}, 5010)))
-	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4000, []byte{0x02}))
-	_, _, err = s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5010, 0)
-	require.NoError(t, err)
-	restored, err = s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5010, hash32(0x51))
-	require.NoError(t, err)
-	require.Zero(t, restored, "no provenance, no recovery — the anchor is the whole basis of the proof")
-
-	// THE RECORDED HASH RESTORES, and only the reorg-marked row.
-	restored, err = s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5000, hash32(0x50))
-	require.NoError(t, err)
-	require.Equal(t, int64(1), restored)
-
-	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
-	require.True(t, valid)
-	require.Empty(t, reason, "the CHECK constraint forbids a valid row carrying a reason, so this is Postgres agreeing")
-	valid, reason = invalidReasonAt(t, s, 10, 0xCC, testPollSource, 5000)
-	require.False(t, valid, "a NON-POSITIVE answer is not reorg fallout and is not restored by a canonical block")
-	require.Equal(t, invalidReasonNonPositive, reason)
-
-	// THE OBSERVATION TIME IS UNTOUCHED. A supersede re-stamps it because it really is
-	// a new read; this is a new PROOF about an old read, and re-stamping would falsify
-	// the row's freshness and the backlog age D-011 clause 8 reports.
-	var after time.Time
-	require.NoError(t, s.pool.QueryRow(ctx,
-		`SELECT observed_at FROM prices WHERE chain_id=10 AND asset=$1 AND source=$2 AND block_number=5000`,
-		addr20(0xAA), testPollSource).Scan(&after))
-	require.Equal(t, observedAt, after)
-
-	// AND THE ROW IS READABLE AGAIN — the property the whole clause exists for,
-	// asserted through the consumer-facing read rather than through the column.
-	got, found, err := s.LatestUsablePrice(ctx, 10, addr20(0xAA), testPollSource)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, "1000000", got.Price.String())
-
-	// Re-running is idempotent: the marker is gone, so there is nothing left to match.
-	restored, err = s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5000, hash32(0x50))
-	require.NoError(t, err)
-	require.Zero(t, restored)
-
-	// A FOREIGN ENGINE CANNOT RESTORE THIS OWNER'S ROWS.
-	_, err = s.RevalidateNeutralizedPrices(ctx, testFeedEngine, 10, 5010, hash32(0x51))
-	require.ErrorContains(t, err, "no derive cursor")
-	// Nor may an engine bound to another chain be used to reach these rows.
-	_, err = s.RevalidateNeutralizedPrices(ctx, testPollEngine, 999, 5000, hash32(0x50))
-	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
-	// And a malformed proof is refused outright rather than silently matching nothing.
-	_, err = s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 5000, []byte{0x01})
-	require.ErrorContains(t, err, "want 32")
-}
-
-// NeutralizedPriceAnchors is the candidate list, and its JOIN is what makes clause 6
-// implementable at all: a marked height is only workable if its provenance survived.
-//
-// Ordering is part of the contract rather than an accident. Oldest first means a
-// bounded per-Step budget drains the rows the backlog's reported AGE is measuring, so
-// that number is a true measure of progress; newest-first would leave it pinned to a
-// row nothing ever reaches.
-func TestNeutralizedPriceAnchorsJoinMarkedRowsToSurvivingProvenance(t *testing.T) {
-	s := testDeriveStore(t)
-	ctx := context.Background()
-
-	// Three anchored rounds and one unanchored legacy row between them.
-	for _, b := range []uint64{4800, 4900, 5000} {
-		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
-			po(b, 0xAA, testPollSource, 1_000_000, 6),
-		}, b, anchorAt(b))))
-	}
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(5050, 0xBB, testPollSource, 2_000_000, 6),
-	}, 5050)))
-	// Another engine's marked history must not appear in this engine's candidates.
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine, 10, []PriceObservation{
-		po(4850, 0xDD, testFeedSource, 3_000_000, 6),
-	}, 4850, PollAnchor{BlockNumber: 4850, BlockHash: hash32(0x48)})))
-
-	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4000, []byte{0x01}))
-	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5050, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(4), marked)
-	_, _, err = s.NeutralizeUnverifiablePrices(ctx, testFeedEngine, 10, 4850, 0)
-	require.NoError(t, err)
-
-	got, err := s.NeutralizedPriceAnchors(ctx, testPollEngine, 10, 10)
-	require.NoError(t, err)
-	var heights []uint64
-	for _, c := range got {
-		heights = append(heights, c.BlockNumber)
-		require.Equal(t, int64(1), c.Rows)
-		require.Equal(t, hash32(byte(c.BlockNumber)), c.BlockHash, "the RECORDED hash, not the live one")
-	}
-	require.Equal(t, []uint64{4800, 4900, 5000}, heights,
-		"oldest first, and 5050 is absent: a marked height with no anchor is not a candidate")
-
-	// The limit is a per-Step probe budget, applied to the oldest end.
-	got, err = s.NeutralizedPriceAnchors(ctx, testPollEngine, 10, 2)
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	require.Equal(t, uint64(4800), got[0].BlockNumber)
-	require.Equal(t, uint64(4900), got[1].BlockNumber)
-
-	// Restoring one removes it from the list without touching the others.
-	restored, err := s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 4800, anchorAt(4800).BlockHash)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), restored)
-	got, err = s.NeutralizedPriceAnchors(ctx, testPollEngine, 10, 10)
-	require.NoError(t, err)
-	heights = nil
-	for _, c := range got {
-		heights = append(heights, c.BlockNumber)
-	}
-	require.Equal(t, []uint64{4900, 5000}, heights)
-
-	// And the other engine's marked row is its own to recover.
-	other, err := s.NeutralizedPriceAnchors(ctx, testFeedEngine, 10, 10)
-	require.NoError(t, err)
-	require.Len(t, other, 1)
-	require.Equal(t, uint64(4850), other[0].BlockNumber)
-}
-
-// D-011 CLAUSE 5 SURVIVES RETENTION. Anchors are aged out beyond
-// pollAnchorRetention, and an anchor at a NEUTRALIZED height is exempt: it is not
-// stale provenance, it is the only evidence that height can ever be recovered from,
-// and the poller reads `latest` so no fresh observation will arrive there instead.
-//
-// A retention bound that expired the recovery path would be a slow version of the
-// deletion clause 5 forbids — the marking would be reversible for a while and then
-// quietly permanent, which is the failure mode this whole decision exists to close.
+// The clause forbids it because the anchor is the whole input an OFFLINE
+// reconciliation would need, and clause 2 keeps that option open at zero ongoing
+// cost. A retention bound that aged it out would foreclose the option quietly, some
+// days after the classification, which is strictly worse than never having kept it:
+// the operator would have no way to know when the door closed.
 func TestPollAnchorRetentionExemptsNeutralizedHeights(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -585,28 +589,55 @@ func TestPollAnchorRetentionExemptsNeutralizedHeights(t *testing.T) {
 	require.Equal(t, uint64(1), oldest,
 		"the neutralized height's anchor outlives the retention bound: it is the recovery path, not history")
 
-	// The exemption is SELF-LIMITING. Recover the row and the anchor rejoins the
-	// ordinary bound on the next prune, so this cannot become unbounded growth.
-	restored, err := s.RevalidateNeutralizedPrices(ctx, testPollEngine, 10, 1, hash32(0x01))
-	require.NoError(t, err)
-	require.Equal(t, int64(1), restored)
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, total+1, anchorAt(total+1))))
-
-	require.NoError(t, s.pool.QueryRow(ctx,
-		`SELECT min(block_number) FROM price_poll_anchors WHERE engine = $1`, testPollEngine).Scan(&oldest))
-	require.Greater(t, oldest, uint64(1), "with nothing left to recover there, retention takes it")
+	// THE COST OF THE EXEMPTION IS EXACTLY ONE ANCHOR ROW PER CLASSIFIED HEIGHT, which
+	// is the accepted cost clause 2 names — not a leak that grows with the run.
 	var n int
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT count(*) FROM price_poll_anchors WHERE engine = $1`, testPollEngine).Scan(&n))
-	require.Equal(t, pollAnchorRetention, n)
+	require.Equal(t, pollAnchorRetention+1, n,
+		"the ordinary bound still holds for every unclassified height; the exemption adds one row")
+
+	// AND THE EXEMPTION IS PERMANENT HERE, WHICH IS THE POINT RATHER THAN A GAP.
+	//
+	// Wave 7 argued the exemption was SELF-LIMITING because a revalidation (or a fresh
+	// observation) would clear the marker and hand the anchor back. D-012 clause 3
+	// removed the revalidation, and the store itself shows why the remaining mechanism
+	// cannot reach a height retention has already aged past: the ONLY thing that clears
+	// a marker is a poll landing at that identity, and the cursor's monotonic guard
+	// refuses a batch below the cursor. So for any height the head has passed, the
+	// classification — and the anchor clause 2 keeps with it — is permanent by
+	// construction.
+	//
+	// Asserted rather than reasoned, because this is precisely the claim wave 7 got
+	// wrong by asserting the reachable case and generalising it.
+	_, err = s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(1, 0xAA, testPollSource, 1_000_000, 6),
+	}, 1, anchorAt(1))
+	require.ErrorIs(t, err, ErrDeriveCursorRegression,
+		"a poll cannot land at a past height, so the supersede arm cannot reach this row: D-012 clause 3's permanence is a property of the cursor guard, not a policy")
+
+	// The release path IS reachable while the head is still at the classified height —
+	// the shallow-reorg shape — and that is where the exemption gives the anchor back.
+	// TestFreshObservationSupersedesANeutralizedRow pins the supersede itself; here it
+	// is enough that the exemption is keyed on the ROW's marker, so nothing about the
+	// anchor makes it sticky.
+	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 1)
+	require.False(t, valid)
+	require.Equal(t, InvalidReasonUnverifiableReorg, reason,
+		"the row is still classified, which is what holds its anchor exempt")
 }
 
-// The circularity gate, on the QUERY side. UnanchoredPriceBlocks proposes adoption
-// candidates, and a neutralized height must never be proposed: adopting the chain's
-// current hash there manufactures the provenance revalidation is supposed to check
-// against. AdoptPollAnchor refuses it too (see the deadlock test), so the property
-// does not depend on this query — but a poller that spent a probe learning that would
-// be paying for an answer it must discard.
+// The circularity gate, on the QUERY side (D-012 clause 2). UnanchoredPriceBlocks
+// proposes adoption candidates, and a neutralized height must never be proposed:
+// adopting the chain's CURRENT hash there writes provenance the round never
+// witnessed, at a height whose anchor clause 2 then retains forever as the input an
+// offline reconciliation would trust. AdoptPollAnchor refuses it too (see the deadlock
+// test), so the property does not depend on this query — but a poller that spent a
+// probe learning that would be paying for an answer it must discard.
+//
+// The gate arrived with D-011's online revalidation pass and OUTLIVES it: the hazard
+// is in the fabricated anchor, which is permanent, not in the consumer that was
+// removed.
 func TestUnanchoredPriceBlocksSkipsNeutralizedHeights(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()

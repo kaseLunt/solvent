@@ -111,13 +111,39 @@
 // anchor proof strong enough to justify destroying rows, and each round found a
 // dimension the previous fix had not modelled — an incomplete case space, a proof
 // that had expired, a proof assembled from several endpoints' forks. The poller
-// now has no deletion path at all: PollStore does not declare one, and every arm
-// of repair calls store.NeutralizeUnverifiablePrices, which RETAINS every row and
-// marks the suffix it cannot place with store.InvalidReasonUnverifiableReorg so no
-// usable-price read can return it and no later repair can "verify" it. The epoch
-// gate is unchanged — acking while leaving rows above the fork point READABLE
-// would have this table asserting engine-exact prices at replaced heights, which
-// for a liquidation-facing store is the worse failure.
+// now has no deletion path at all: PollStore does not declare one, store.RewindPrices
+// refuses poll-owned engines outright (D-012 clause 1), and every arm of repair calls
+// store.NeutralizeUnverifiablePrices, which RETAINS every row and marks the suffix it
+// cannot place with store.InvalidReasonUnverifiableReorg so no usable-price read can
+// return it. The epoch gate is unchanged — acking while leaving rows above the fork
+// point READABLE would have this table asserting engine-exact prices at replaced
+// heights, which for a liquidation-facing store is the worse failure.
+//
+// # WHAT A MARKING MEANS (D-012)
+//
+// POLLED PRICES ARE SAMPLES, NOT A LEDGER. They are 60-second point-in-time reads,
+// and the sampling already has holes — RPC outages, oracle reverts, restarts — that
+// nothing has ever made up, because every consumer (LatestUsablePrice, P3 risk reads,
+// reconciliation) simply skips an absent sample. A wrongly-marked row is
+// observationally identical to one of those holes and differs only by carrying MORE
+// information: the value and the block hash its round ran against both survive.
+//
+// So a marking is a PERMANENT CLASSIFICATION in the running system (clause 3), not a
+// pending repair. D-011 mandated an online revalidation pass and wave 7 built one;
+// it carried both of Codex round 7's critical findings — circular provenance and a
+// permanently starving queue — in the most correctness-critical path this package
+// has. Clause 3 removes it. What remains:
+//
+//   - PREVENTION, strengthened: with two or more endpoints CONFIGURED, marking
+//     requires cross-endpoint agreement and fails closed without it (clause 4).
+//   - PROVENANCE, retained forever on every store path (clause 2), so an OFFLINE
+//     reconciliation stays possible at any future time. None is built.
+//   - VISIBILITY, so the accumulated classification is countable (clause 6).
+//
+// The one thing that still un-marks a row online is insertPrice's supersede arm: a
+// CURRENT poll landing at a marked height is a genuinely new observation. Because
+// this poller reads `latest` only, that reaches shallow-reorg shapes and never a
+// height the head has passed.
 //
 // WHAT REPAIR DOES, EXACTLY, in the three states it can be in:
 //
@@ -140,9 +166,9 @@
 // disk and stays auditable. There is no un-mark on re-interpretation; the one way
 // it becomes readable again is a FRESH observation at the same
 // (chain, asset, source, block) identity, which insertPrice treats as superseding
-// it. Marked rows are never retired, so they accumulate — Poller.NeutralizedBacklog
-// and store.NeutralizedPriceStats exist so that pile is countable rather than
-// merely tolerated. Rows written before this engine anchored its rounds are ADOPTED
+// it. Marked rows are otherwise never retired, so they accumulate —
+// Poller.NeutralizedBacklog and store.NeutralizedPriceStats exist so that pile is
+// countable rather than merely tolerated. Rows written before this engine anchored its rounds are ADOPTED
 // into anchors on a normal round with no epoch pending (store.AdoptPollAnchor
 // carries the safety argument and its limit), which is what keeps a LATER reorg on
 // the floor-finding path rather than marking the lot.
@@ -187,8 +213,15 @@ import (
 //     cursor is chain-bound to ONE chain and the poller spans two (the
 //     PriceProviderV2 assets on OP and the weETH getRate() ratio on ETH),
 //     while chain ids are immutable facts and config keys are renameable.
+//
+// THE POLL PREFIX IS THE STORE'S CONSTANT, NOT A COPY OF IT (D-012 clause 1).
+// store.RewindPrices refuses any engine in that namespace, and a refusal keyed on a
+// string this package happened to keep in step would be a convention. Deriving the
+// key from store.PollOwnedEnginePrefix makes "the key the poller writes rows under"
+// and "the key the store refuses to rewind" the same string by construction. The
+// feed prefix stays local: nothing in the store discriminates on it.
 const (
-	cursorPrefixPoll = "prices:poll:"
+	cursorPrefixPoll = store.PollOwnedEnginePrefix
 	cursorPrefixFeed = "prices:chainlink_feed:"
 )
 
@@ -596,6 +629,12 @@ func conditionsReason(cs []Condition) string {
 // while a polled row is a point-in-time contract read that exists nowhere else.
 // D-010 removes the poller's destructive path rather than guarding it, and this
 // split is what makes that structural instead of a rule someone has to remember.
+//
+// THE INTERFACE SPLIT BOUNDS THIS PACKAGE AND NOTHING ELSE, which is why D-012
+// clause 1 adds a second, independent enforcement: store.RewindPrices REFUSES any
+// engine in store.PollOwnedEnginePrefix outright. An omission from an interface
+// stops the code that holds the interface; it does not stop the code that holds
+// *store.Store, and Codex round 7 found repository tests doing exactly that.
 type PriceStore interface {
 	DeriveCursor(ctx context.Context, engine string) (block uint64, found bool, err error)
 	HasUnackedReorg(ctx context.Context, engine string, chainID uint64) (bool, error)
@@ -626,17 +665,11 @@ var _ PriceStore = (*store.Store)(nil)
 //     unacknowledged epoch) plus what lies above it; the second answers "is
 //     anything above this floor unprovable" for a candidate floor.
 //   - NeutralizeUnverifiablePrices is the ONLY way this writer answers an epoch:
-//     ack without deleting, marking the unprovable suffix unusable — and, since
-//     D-011 clause 5, RETAINING the anchors that make the marking reversible.
-//   - NeutralizedPriceAnchors / RevalidateNeutralizedPrices are that reversal
-//     (D-011 clause 6). The first proposes heights whose rows are marked and whose
-//     provenance survives; the second restores them on proof that the recorded
-//     block is still canonical. They exist because the poller reads only `latest`:
-//     no fresh observation can ever land at a height the head has passed, so
-//     without them every wrongly-marked PAST height stayed marked forever, which
-//     is the false premise D-011 corrects in D-010.
+//     ack without deleting, marking the unplaceable suffix unusable — and RETAINING
+//     the anchors, forever, as provenance (D-012 clause 2).
 //   - NeutralizedPriceStats makes the resulting backlog countable, and keeps
-//     reporting it after newer polls have cleared the acute condition (clause 8).
+//     reporting it after newer polls have cleared the acute condition (D-012
+//     clause 6).
 //   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
 //     rows written before this engine anchored its rounds.
 type PollStore interface {
@@ -648,8 +681,6 @@ type PollStore interface {
 	CountUnanchoredPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
 	NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error)
 	NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (store.NeutralizedPriceStats, error)
-	NeutralizedPriceAnchors(ctx context.Context, engine string, chainID uint64, limit int) ([]store.NeutralizedPriceAnchor, error)
-	RevalidateNeutralizedPrices(ctx context.Context, engine string, chainID, block uint64, provenHash []byte) (int64, error)
 	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
 	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }

@@ -4,6 +4,16 @@ package store
 // gates and idempotence/divergence contract, RewindPrices' source-scoped
 // atomic delete-and-ack, and the M4 consequence that PruneAckedReorgEpochs now
 // waits for the price cursors too.
+//
+// NOTE ON ENGINE IDENTITIES, since D-012 clause 1. RewindPrices REFUSES any engine
+// in store.PollOwnedEnginePrefix outright, so every test whose subject is the
+// rewind's own arithmetic (target lowering, floors, ownership scoping, the ack)
+// drives it with an EVENT-DERIVED identity — testFeedEngine on chain 1,
+// testFeedEngine10 on chain 10. Tests that previously used testPollEngine there
+// were themselves an instance of the [medium] Codex round 7 found: a caller reaching
+// past the poller's interface and deleting a poll engine's anchors. Where a poll
+// engine must answer an epoch, these tests now call NeutralizeUnverifiablePrices,
+// which is the only primitive that identity has.
 
 import (
 	"context"
@@ -16,9 +26,14 @@ import (
 const (
 	testPollEngine = "prices:poll:10"
 	testFeedEngine = "prices:chainlink_feed:1"
-	testPollSource = "priceproviderv2"
-	testFeedSource = "chainlink:0xc9e1a09622afdb659913fefe800feae5dbbfe9d7"
-	testRatioSrc   = "ratio:getrate:0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee"
+	// testFeedEngine10 is an EVENT-DERIVED price identity on chain 10, where most of
+	// this package's repair fixtures live. It exists because D-012 clause 1 makes
+	// RewindPrices unreachable for a poll-owned engine, so the rewind's own contract
+	// has to be exercised through an identity that may legitimately delete.
+	testFeedEngine10 = "prices:chainlink_feed:10"
+	testPollSource   = "priceproviderv2"
+	testFeedSource   = "chainlink:0xc9e1a09622afdb659913fefe800feae5dbbfe9d7"
+	testRatioSrc     = "ratio:getrate:0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee"
 )
 
 // addr20 builds a distinct 20-byte address from one discriminating byte —
@@ -236,8 +251,10 @@ func TestApplyPricesChainMismatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
 }
 
-// The epoch gate: an unacknowledged reorg epoch refuses every price batch until
-// RewindPrices acks it.
+// The epoch gate: an unacknowledged reorg epoch refuses every price batch until the
+// engine's own repair primitive acks it. For a poll-owned engine that is
+// NeutralizeUnverifiablePrices and nothing else (D-012 clause 1 — RewindPrices
+// refuses this identity, so the ack cannot come from there).
 func TestApplyPricesEpochGate(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -252,14 +269,15 @@ func TestApplyPricesEpochGate(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
 	require.ErrorContains(t, err, "rewind prices before applying")
 
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, 0))
+	_, _, err = s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 100, 0)
+	require.NoError(t, err)
 	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
 		[]PriceObservation{po(120, 0xAA, testPollSource, 2, 6)}, 120)), "admitted after the ack")
 }
 
 // A price writer with NO cursor on a chain that already carries epochs must
-// bootstrap through RewindPrices — the same hole ApplyDerived closes for a new
-// derive engine.
+// bootstrap through its own repair primitive — the same hole ApplyDerived closes for
+// a new derive engine.
 func TestApplyPricesBootstrapRefusedOnEpochChain(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -270,9 +288,9 @@ func TestApplyPricesBootstrapRefusedOnEpochChain(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
 	require.ErrorContains(t, err, "bootstrap via the engine's repair primitive")
 
-	// Bootstrap at block 0. Either primitive creates the cursor and acks; the poll
-	// engine uses NeutralizeUnverifiablePrices (D-010 leaves it no other), and with
-	// nothing of this writer's above block 0 both are equally vacuous.
+	// Bootstrap at block 0. The poll engine uses NeutralizeUnverifiablePrices — D-010
+	// left it no other, and D-012 clause 1 now makes that structural rather than
+	// conventional — and with nothing of this writer's above block 0 it is vacuous.
 	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 0, 0)
 	require.NoError(t, err)
 	require.Zero(t, marked, "a bootstrap has no rows to mark")
@@ -318,10 +336,10 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(60, 0xAA, testPollSource, 1, 6),
-		po(70, 0xAA, testPollSource, 2, 6),
-		po(90, 0xAA, testPollSource, 3, 6),
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine10, 10, []PriceObservation{
+		po(60, 0xAA, testFeedSource, 1, 8),
+		po(70, 0xAA, testFeedSource, 2, 8),
+		po(90, 0xAA, testFeedSource, 3, 8),
 	}, 90)))
 	// Stacked epochs: rewound to 50, then to 80.
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 50, []byte{0x50}))
@@ -329,9 +347,9 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 
 	// Caller passes its cursor (90) and no verified floor; the store must lower
 	// the target to 50.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 90, 0))
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 90, 0))
 	require.Empty(t, priceRows(t, s, 10), "every row above 50 is gone")
-	_, last, acked := cursorState(t, s, testPollEngine)
+	_, last, acked := cursorState(t, s, testFeedEngine10)
 	require.Equal(t, uint64(50), last)
 
 	var maxEpoch int64
@@ -343,9 +361,9 @@ func TestRewindPricesLowersToDeepestUnackedEpoch(t *testing.T) {
 func TestRewindPricesChainMismatch(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(100, 0xAA, testPollSource, 1, 6)}, 100)))
-	err := s.RewindPrices(ctx, testPollEngine, 1, 100, 0)
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine10, 10,
+		[]PriceObservation{po(100, 0xAA, testFeedSource, 1, 8)}, 100)))
+	err := s.RewindPrices(ctx, testFeedEngine10, 1, 100, 0)
 	require.ErrorIs(t, err, ErrDeriveCursorChainMismatch)
 	require.Equal(t, 1, len(priceRows(t, s, 10)), "nothing was deleted before the refusal")
 }
@@ -356,8 +374,8 @@ func TestRewindPricesWithNoOwnedRowsStillAcks(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 95, []byte{0x95}))
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 0, 0))
-	_, last, acked := cursorState(t, s, testPollEngine)
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 0, 0))
+	_, last, acked := cursorState(t, s, testFeedEngine10)
 	require.Equal(t, uint64(0), last)
 	require.Greater(t, acked, int64(0))
 }
@@ -387,8 +405,10 @@ func TestPruneAckedReorgEpochsWaitsForPriceCursor(t *testing.T) {
 	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM reorg_epochs`).Scan(&remaining))
 	require.Equal(t, 1, remaining)
 
-	// Now the price writer acks too.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 100, 0))
+	// Now the price writer acks too — through the ONLY primitive its identity has
+	// (D-012 clause 1).
+	_, _, nerr := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 100, 0)
+	require.NoError(t, nerr)
 	pruned, err = s.PruneAckedReorgEpochs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), pruned, "both cursors acked: the epoch is prunable")

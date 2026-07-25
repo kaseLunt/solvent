@@ -149,15 +149,11 @@ type fakePriceStore struct {
 	// neutralizedStatsErr fails the backlog count. It is a read that must NOT be
 	// able to take hydration (and with it the freshness verdict) down with it.
 	neutralizedStatsErr error
-	// neutralizedAnchorsErr / revalidateErr fail the two halves of the D-011
-	// clause-6 recovery path. Neither may break a round: revalidation is an
-	// improvement to already-marked rows, never a precondition for polling.
-	neutralizedAnchorsErr error
-	revalidateErr         error
-	// revalidated records every RevalidateNeutralizedPrices call that actually
-	// restored rows, by block, so a test can prove WHICH past heights were recovered
-	// rather than only that the count moved.
-	revalidated []uint64
+	// neutralizedStatsCalls counts NeutralizedPriceStats reads. D-012 clause 6 bounds
+	// the COST of gap visibility as well as requiring it — the aggregate scans an
+	// ever-growing table — so "how often was this called" is itself a contract a test
+	// has to be able to assert, not incidental bookkeeping.
+	neutralizedStatsCalls int
 	// neutralized records every NeutralizeUnverifiablePrices call, so a test can
 	// tell "acked without deleting" from "deleted" — the distinction the
 	// pending-epoch legacy state turns on.
@@ -338,6 +334,13 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 			if !superseded {
 				continue // idempotent replay: nothing new exists
 			}
+			// D-012 clause 6: the store reports a supersede SEPARATELY from the insert,
+			// because it is the only landed-round event that can lower the neutralized
+			// backlog and therefore the only one that may trigger a recount. Modelled
+			// here because the real ApplyResult carries it; a fake that left it zero
+			// would make the poller's recount rule untestable in the direction that
+			// matters (it would look correctly frugal while never recounting at all).
+			res.Superseded++
 			res.Inserted = append(res.Inserted, store.PriceInsert{
 				Asset: o.Asset, Source: o.Source, BlockNumber: o.BlockNumber,
 				ObservedAt: at, Valid: valid, InvalidReason: reason,
@@ -371,7 +374,18 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 	return res
 }
 
+// RewindPrices mirrors the real call, INCLUDING D-012 clause 1's refusal of a
+// poll-owned engine.
+//
+// The refusal has to be modelled even though PollStore does not declare this method,
+// because the fake is shared with the feed deriver's tests and with any future caller
+// holding the wider surface. A fake that happily rewound a poll engine would let a
+// test certify the exact call the real store now rejects — which is how round 7's
+// [medium] survived six rounds inside this repository's own tests.
 func (f *fakePriceStore) RewindPrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) error {
+	if store.IsPollOwnedEngine(engine) {
+		return fmt.Errorf("%w: engine %q", store.ErrPollOwnedRewindRefused, engine)
+	}
 	f.rewinds = append(f.rewinds, rewindRec{
 		engine: engine, chainID: chainID, toBlock: toBlock, verifiedFloor: verifiedFloor,
 	})
@@ -594,12 +608,11 @@ func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _
 // and ack. Nothing is deleted — a fake that deleted here could not distinguish this
 // path from a rewind, which is the whole point of the distinction.
 //
-// D-011 CLAUSE 5 IS MODELLED BY THE ABSENCE OF AN ANCHOR SWEEP. Wave 6's version
-// dropped the anchors above the boundary, mirroring the store as it then was. That
-// deletion is what made the marking permanent — a revalidation has nothing to check a
-// row against once its round's block hash is gone — so a fake that still dropped them
-// would make the clause-6 recovery untestable and, worse, would let it look correct
-// while never being reachable in production.
+// D-012 CLAUSE 2 IS MODELLED BY THE ABSENCE OF AN ANCHOR SWEEP. Wave 6's version
+// dropped the anchors above the boundary, mirroring the store as it then was. Clause
+// 2 forbids that on every store path: the anchor is the provenance an offline
+// reconciliation would need, and it is retained forever. A fake that still dropped
+// them would let a test certify the destruction the clause exists to prevent.
 func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error) {
 	if f.neutralizeErr != nil {
 		return 0, 0, f.neutralizeErr
@@ -635,9 +648,15 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 }
 
 // NeutralizedPriceStats mirrors the real aggregate over the marker column, so a
-// test can show that the retained-but-unusable backlog (D-010 clause 4) is read
-// from durable rows rather than counted in process memory.
+// test can show that the retained-but-unusable backlog (D-010 clause 4, carried by
+// D-012 clause 6) is read from durable rows rather than counted in process memory.
+//
+// It also COUNTS ITS CALLS, because clause 6 bounds the cost of that visibility: the
+// real aggregate scans this engine's whole price history with no index on its
+// predicate, so "called only when the number can have changed" is part of the
+// contract and not an optimisation.
 func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string, _ uint64) (store.NeutralizedPriceStats, error) {
+	f.neutralizedStatsCalls++
 	if f.neutralizedStatsErr != nil {
 		return store.NeutralizedPriceStats{}, f.neutralizedStatsErr
 	}
@@ -660,87 +679,12 @@ func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string,
 	return out, nil
 }
 
-// NeutralizedPriceAnchors mirrors the real join: heights where this engine holds
-// marked rows AND still holds the anchor recording the block that round ran at,
-// OLDEST FIRST.
-//
-// The join is the load-bearing part. A marked height whose anchor is missing must not
-// appear — there is nothing to check it against — and modelling that is what makes a
-// test able to show the difference between "clause 5 retained the provenance" and
-// "clause 5 was skipped and recovery silently does nothing".
-func (f *fakePriceStore) NeutralizedPriceAnchors(_ context.Context, engine string, _ uint64, limit int) ([]store.NeutralizedPriceAnchor, error) {
-	if f.neutralizedAnchorsErr != nil {
-		return nil, f.neutralizedAnchorsErr
-	}
-	if limit <= 0 {
-		return nil, nil
-	}
-	rowsAt := map[uint64]int64{}
-	for _, r := range f.rows {
-		if r.owner == engine && r.invalidReason == store.InvalidReasonUnverifiableReorg {
-			rowsAt[r.block]++
-		}
-	}
-	var out []store.NeutralizedPriceAnchor
-	for _, a := range f.anchors[engine] {
-		n, marked := rowsAt[a.BlockNumber]
-		if !marked {
-			continue
-		}
-		out = append(out, store.NeutralizedPriceAnchor{
-			BlockNumber: a.BlockNumber, BlockHash: a.BlockHash, Rows: n,
-		})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].BlockNumber < out[j].BlockNumber })
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-// RevalidateNeutralizedPrices mirrors the real UPDATE's predicate, including the arm
-// that makes the caller's proof non-negotiable: rows are restored only where the
-// supplied hash EQUALS THE RECORDED ANCHOR at that height. A fake that took the
-// caller's word would let a poller bug that revalidated on the wrong hash — or with no
-// surviving anchor at all — pass as correct recovery.
-//
-// observed_at is deliberately NOT re-stamped, exactly as in the store: this is a new
-// proof about an old observation, not a new observation, and re-stamping would
-// falsify both the row's freshness and the backlog age D-011 clause 8 reports.
-func (f *fakePriceStore) RevalidateNeutralizedPrices(_ context.Context, engine string, _ uint64, block uint64, provenHash []byte) (int64, error) {
-	if f.revalidateErr != nil {
-		return 0, f.revalidateErr
-	}
-	anchored := false
-	for _, a := range f.anchors[engine] {
-		if a.BlockNumber == block && string(a.BlockHash) == string(provenHash) {
-			anchored = true
-			break
-		}
-	}
-	if !anchored {
-		return 0, nil
-	}
-	var restored int64
-	for i := range f.rows {
-		r := &f.rows[i]
-		if r.owner != engine || r.block != block || r.invalidReason != store.InvalidReasonUnverifiableReorg {
-			continue
-		}
-		r.valid, r.invalidReason = true, ""
-		restored++
-	}
-	if restored > 0 {
-		f.revalidated = append(f.revalidated, block)
-	}
-	return restored, nil
-}
-
 // UnanchoredPriceBlocks mirrors the real read, INCLUDING its exclusion of heights
-// that carry neutralized rows. Adopting an anchor there would record the chain's
-// current hash and let revalidation "prove" the height by comparing the chain with a
-// copy of itself; the fake has to model the exclusion or a test would certify that
-// circular restore as working recovery.
+// that carry neutralized rows. Adopting an anchor there would write provenance the
+// round never witnessed at a height whose anchor D-012 clause 2 then retains forever,
+// so a future offline reconciliation would be checking the chain against a hash
+// copied from itself; the fake has to model the exclusion or a test would certify
+// that fabrication as sound provenance.
 func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
 	if f.anchorReadErr != nil {
 		return nil, f.anchorReadErr
@@ -769,9 +713,10 @@ func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string,
 // AdoptPollAnchor models the real call's THREE refusals — no owned row at that
 // block, a pending reorg epoch, and a height carrying neutralized rows — because
 // each one is a separate half of the safety argument for adopting a hash the round
-// never witnessed. The third is the D-011 clause-6 circularity gate: without it,
-// adoption manufactures the very provenance revalidation is supposed to check
-// against.
+// never witnessed. The third is the circularity gate: without it, adoption
+// manufactures provenance at a height whose anchor D-012 clause 2 retains forever as
+// a TRUE input for an offline check. The gate arrived with D-011's online pass and
+// outlives it, because the hazard is in the fabricated anchor, not in the consumer.
 func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uint64, a store.PollAnchor) (bool, error) {
 	if f.adoptErr != nil {
 		return false, f.adoptErr
@@ -793,7 +738,7 @@ func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uin
 		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there", engine, a.BlockNumber)
 	}
 	if neutralized {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: rows there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would let revalidation check the chain against a copy of itself", engine, a.BlockNumber)
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: rows there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would record provenance this engine never witnessed", engine, a.BlockNumber)
 	}
 	for _, ex := range f.anchors[engine] {
 		if ex.BlockNumber == a.BlockNumber {
@@ -863,9 +808,9 @@ func (f *fakePriceStore) seedInvalidRow(owner string, asset []byte, source strin
 
 // seedNeutralizedRow inserts a row a PREVIOUS reorg repair marked: retained,
 // unreadable, carrying InvalidReasonUnverifiableReorg. It is the durable shape
-// D-011 clause 6's recovery acts on and clause 8's count reports, and it is
-// deliberately distinct from seedInvalidRow's non-positive quarantine — the two
-// reasons are treated differently by every predicate that matters.
+// D-012 clause 6's count reports, and it is deliberately distinct from
+// seedInvalidRow's non-positive quarantine — the two reasons are treated differently
+// by every predicate that matters.
 func (f *fakePriceStore) seedNeutralizedRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
 	f.rows = append(f.rows, fakeRow{
 		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,

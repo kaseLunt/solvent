@@ -74,15 +74,18 @@ package prices
 //     epoch is pending, and the ack only advances through repair. Those rows are
 //     NEUTRALIZED instead: retained, marked unusable, the epoch acked, ingestion
 //     resumed. Nothing is destroyed and nothing unprovable is trusted.
-//   - A MARKING MUST BE UNDOABLE, AND THE UNDO MUST FIT THE CASES MARKING CREATES.
-//     Neutralizing is only preferable to deleting because it can be reversed; an
-//     undo that cannot fire for the situations the marker is actually applied to is
-//     a permanent loss wearing a recoverable disguise. This poller reads `latest`
-//     ONLY, so no fresh observation will ever land at a height the head has passed,
-//     and the reversal has to work on PAST heights with no new poll there. It does:
-//     the round's own (block, hash) anchor is retained through neutralization and
-//     re-checked against the live chain later — see revalidateNeutralized. That is
-//     D-011, and it corrects a premise in D-010 rather than an implementation of it.
+//   - A MARKING IS PERMANENT, SO PREVENTION IS WHERE THE EFFORT GOES (D-012). D-010
+//     justified marking over deleting by calling it reversible; D-011 then required
+//     an online reversal, and the subsystem wave 7 built to provide one carried both
+//     of Codex round 7's criticals. D-012 reclassifies the data instead: polled
+//     prices are 60-second SAMPLES, a wrongly-marked row is observationally a missed
+//     poll, and the system already tolerates missed polls with no makeup mechanism.
+//     So the online reversal is removed (clause 3), and what stands in its place is
+//     (a) a stronger gate before marking — cross-endpoint agreement whenever two or
+//     more endpoints are CONFIGURED, fail-closed otherwise (clause 4,
+//     checkpointCorroborated); (b) provenance retained forever so an offline
+//     reconciliation stays possible (clause 2); and (c) the classification's size
+//     and age kept visible (clause 6, refreshNeutralizedBacklog).
 //
 // # FAILURE POSTURE, in the order the failures happen
 //
@@ -183,18 +186,6 @@ const anchorProbePage = 8
 // unanchored blocks one Step may adopt an anchor for. Each costs one
 // eth_getBlockByNumber. See adoptLegacyAnchors.
 const anchorAdoptionPerStep = 8
-
-// revalidationPerStep bounds the neutralized-backlog revalidation pass: how many
-// previously-marked heights one Step re-probes against the live chain. Each costs up
-// to two eth_getBlockByNumber calls (the probe, then the cross-endpoint
-// corroboration D-011 clause 7 requires before any row's usability changes).
-//
-// Unlike adoption this pass does NOT latch off: the backlog can grow again with the
-// next reorg, so it re-runs whenever the durable count is non-zero and stops costing
-// anything the moment it reaches zero. Draining a backlog of N heights therefore
-// takes ceil(N/8) poll intervals, which is the disclosed bound on how long a wrongly
-// marked stretch of history stays unreadable after the chain proves it canonical.
-const revalidationPerStep = 8
 
 // blockAdvanceTTL bounds how long this poller may go without observing a NEW
 // execution block before that is itself an unhealthy condition. "New" means a
@@ -552,19 +543,6 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	// a replacement block's. See adoptLegacyAnchors.
 	p.adoptLegacyAnchors(ctx)
 
-	// D-011 clause 6, and the reason marking is an acceptable answer at all: heights
-	// an earlier repair marked unusable get re-probed against the live chain, and the
-	// ones whose recorded block is still there become readable again. It runs BEFORE
-	// the round because it is cheap when there is nothing to do and its evidence is
-	// independent of anything the round is about to observe.
-	//
-	// Placed on the no-pending-epoch path for a state-machine reason and not a safety
-	// one: repair returns early from Step, so this is simply the branch that reaches
-	// the rest of a Step's work. The proof it acts on — the live chain matching
-	// provenance this engine recorded itself — is a positive statement about one
-	// height that no pending epoch weakens (see RevalidateNeutralizedPrices).
-	p.revalidateNeutralized(ctx)
-
 	block, blockHash, obs, servedBy, err := p.readRound(ctx)
 	if err != nil {
 		return false, err
@@ -624,21 +602,27 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	p.logRoundOutcome(block, obs, res)
 	p.recordProgress()
 
-	// D-011 CLAUSE 8: A CLEARED ACUTE SIGNAL MUST NOT HIDE A HISTORICAL GAP. This is
-	// the exact moment the acute conditions go quiet — a landed valid row clears
-	// ConditionPollInvalidAnswer for every asset this round priced, and the round and
-	// block-advance conditions with it — so it is the moment the historical backlog
-	// must NOT be allowed to go stale behind them. Health may truthfully say the
-	// current path is fine; the count of rows that are still unreadable at lower
-	// heights is a separate fact and stays current.
+	// D-012 CLAUSE 6, AND ITS COST BOUND. A cleared acute signal must not hide the
+	// historical classification — this is the exact moment the acute conditions go
+	// quiet, since a landed valid row clears ConditionPollInvalidAnswer for every
+	// asset this round priced — but the visibility may not cost an aggregate every
+	// cadence interval either.
 	//
-	// Re-read only when there IS a backlog, or when the count is unknown. A known-empty
-	// one cannot have changed: the only two things that move it are neutralization,
-	// which refreshes on its own, and a supersede, which needs a marked row to
-	// supersede. So this costs one aggregate per interval exactly while it is telling
-	// an operator something, and nothing at all otherwise.
-	if !p.neutralizedKnown || p.neutralizedStats.Rows > 0 {
-		p.refreshNeutralizedBacklog(ctx, "after a landed round")
+	// The two are reconciled by recomputing ON THE TRANSITION rather than on a
+	// schedule. With the online revalidation pass gone (clause 3), exactly two things
+	// can move the backlog: neutralization, which refreshes on its own arm, and a
+	// round that SUPERSEDED a marked row. The store reports the second as a durable
+	// fact (store.ApplyResult.Superseded, set by insertPrice's supersede arm), so this
+	// asks "did the database just change the number?" instead of "might it have?".
+	//
+	// Wave 7 re-read it after every landed round while a backlog existed. That is the
+	// shape round 7's [medium] named: NeutralizedPriceStats has no index carrying its
+	// predicate, polled rows are never deleted, and so one permanent row bought a
+	// full-history scan every 60 seconds forever. An unknown count is still retried —
+	// "unknown" means an earlier read ERRORED, and guessing zero there would hide the
+	// pile permanently.
+	if res.Superseded > 0 || !p.neutralizedKnown {
+		p.refreshNeutralizedBacklog(ctx, "a landed round superseded neutralized rows, or the count was unknown")
 	}
 	return true, nil
 }
@@ -959,20 +943,30 @@ const (
 // forks while the checkpoint vouched for only one, A1's fifth round. Wave 6 pinned a
 // pass to ONE endpoint, which restored coherence and left canonicality unproven, and
 // wrote that the acceptable consequence was a recoverable marking. THE RECOVERY IT
-// NAMED DID NOT EXIST for a past height (see revalidateNeutralized), so the gap was
-// load-bearing. What the code now enforces:
+// NAMED DID NOT EXIST for a past height, so the gap was load-bearing. D-011 answered
+// that by requiring an online recovery; D-012 answers it by declaring the marking a
+// permanent classification of SAMPLED data and putting the weight on prevention.
+// What the code now enforces:
 //
 //   - COHERENCE — every proof in a pass comes from one endpoint (pinProbeEndpoint,
 //     probeAnchor), so the proofs compose;
 //   - AGREEMENT — a second endpoint must report the same hash at the pass's
-//     checkpoint before anything is marked (checkpointCorroborated, D-011 clause 7),
-//     so one node's coherent story is not enough on its own;
-//   - REVERSIBILITY — a marking that gets through anyway is undone the moment the
-//     chain shows the height was canonical (revalidateNeutralized, clause 6).
+//     checkpoint before anything is marked, whenever two or more endpoints are
+//     CONFIGURED (checkpointCorroborated, D-012 clause 4). Unobtainable agreement on
+//     a fleet of exactly one is a ratified exception; agreement merely UNAVAILABLE
+//     on a larger fleet fails closed.
+//
+// There is no third bullet any more, and that is the point of D-012: the marking is
+// PERMANENT (clause 3), and what bounds the damage is the classification of the data
+// rather than a repair path — a wrongly-marked row is a sample gap, indistinguishable
+// to every consumer from the missed polls this system already produces. Its
+// provenance survives forever (clause 2) so an offline reconciliation could settle
+// it; none exists.
 //
 // It is still not a cryptographic proof against a hostile provider and does not claim
-// to be: two colluding endpoints defeat the agreement rule. It is a majority-of-what-
-// we-can-reach argument whose failure mode is bounded by the third bullet.
+// to be: two colluding endpoints defeat the agreement rule. It is a
+// majority-of-what-we-can-reach argument, and the residual failure is a permanent
+// sample gap that clause 6 keeps countable.
 //
 // WHY A FLOOR IS NEEDED AT ALL: the walker rewinds to ITS verified ancestor — the
 // highest stored LOG whose hash still matches — which can sit far below the actual
@@ -1007,7 +1001,7 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 		// primitive as every other arm rather than a special-cased one, so a row
 		// that somehow existed without a cursor would be retained rather than
 		// silently removed by the bootstrap path.
-		return true, p.neutralize(ctx, 0, 0, 0, "bootstrap: this engine has no cursor, so it owns no scoped history yet")
+		return true, p.neutralize(ctx, 0, 0, 0, false, "bootstrap: this engine has no cursor, so it owns no scoped history yet")
 	}
 
 	floor, outcome, probes, err := p.verifyFloor(ctx, cursor)
@@ -1022,11 +1016,13 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	// of how long verification happened to take.
 	//
 	//  1. DOES IT STILL HOLD ON THE VIEW IT CAME FROM? (time — A1's fourth life.)
-	//  2. DOES ANY OTHER VIEW AGREE? (D-011 clause 7 — A1's sixth.) Coherence proved
+	//  2. DOES ANY OTHER VIEW AGREE? (D-012 clause 4 — A1's sixth.) Coherence proved
 	//     the pass self-consistent; it never proved the pass canonical, and a pinned
 	//     endpoint alone on a minority fork satisfies (1) perfectly while marking
 	//     canonical history unusable. Disagreement RETAINS the data unmarked: that
-	//     costs availability, never correctness.
+	//     costs availability, never correctness. The one ratified exception is a fleet
+	//     with exactly ONE endpoint configured, where agreement is unobtainable rather
+	//     than absent; singleView carries that fact to the disclosure.
 	//
 	// Order matters. (1) is asked on the pass's own endpoint and is the cheaper
 	// falsifier; asking a second endpoint to corroborate a checkpoint that has already
@@ -1037,6 +1033,7 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	// whatever it believes — and floorUnprobed acts on nothing at all, so spending
 	// probes to authorise inaction would only shrink the page budget that is trying
 	// to reach a conclusion.
+	singleView := false
 	switch outcome {
 	case floorVerified, floorProvenOrphaned, floorUnverifiable:
 		holds, why := p.checkpointStillHolds(ctx)
@@ -1044,11 +1041,12 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 			p.blockRepairOnCheckpoint(cursor, probes, why)
 			return false, nil
 		}
-		agreed, why := p.checkpointCorroborated(ctx)
+		agreed, single, why := p.checkpointCorroborated(ctx)
 		if !agreed {
 			p.blockRepairOnAgreement(cursor, probes, why)
 			return false, nil
 		}
+		singleView = single
 	}
 	// EVERY ARM THAT ACTS NEUTRALIZES. There is no deletion arm to choose between,
 	// which is the whole of D-010 clause 1: the outcomes differ only in the FLOOR
@@ -1058,16 +1056,16 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	// about how much of the suffix has to be marked.
 	switch outcome {
 	case floorNothingAtRisk:
-		return true, p.neutralize(ctx, cursor, 0, probes,
+		return true, p.neutralize(ctx, cursor, 0, probes, singleView,
 			"this engine owns nothing above the effective repair target, so nothing is marked")
 	case floorVerified:
-		return true, p.neutralize(ctx, cursor, floor, probes,
+		return true, p.neutralize(ctx, cursor, floor, probes, singleView,
 			fmt.Sprintf("everything at or below HASH-VERIFIED poll anchor %d keeps its validity; every anchor above it was probed on the same endpoint and MISMATCHED, and the verification checkpoint still held immediately before the act", floor))
 	case floorProvenOrphaned:
-		return true, p.neutralize(ctx, cursor, 0, probes,
+		return true, p.neutralize(ctx, cursor, 0, probes, singleView,
 			"every retained poll anchor was probed on one endpoint and MISMATCHED, and every row above the target sits at one of those anchored heights, so each describes a block that endpoint no longer carries")
 	case floorUnverifiable:
-		return true, p.neutralize(ctx, cursor, floor, probes,
+		return true, p.neutralize(ctx, cursor, floor, probes, singleView,
 			"rows above the boundary sit at heights no poll anchor covers, so they can be neither proven canonical nor proven orphaned")
 	}
 
@@ -1264,15 +1262,18 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 //
 // D-010 stopped there, on the argument that the consequence — canonical rows marked
 // unusable — was recoverable. Codex round 6 showed the recovery it named could not
-// fire for a past height, so the gap was load-bearing after all. TWO things now close
-// it, and neither replaces this pin:
+// fire for a past height, so the gap was load-bearing after all. What closes it now
+// does not replace this pin:
 //
 //   - checkpointCorroborated requires a SECOND endpoint to agree with this pass's
-//     chain view before anything is marked (D-011 clause 7). Coherence is still what
-//     makes a pass's proofs compose; agreement is what gives a reason to think the
-//     view is shared. Disagreement retains the data unmarked.
-//   - revalidateNeutralized undoes a marking that got through anyway, by re-proving
-//     the height against its own recorded anchor (clause 6).
+//     chain view before anything is marked, on every fleet with two or more endpoints
+//     CONFIGURED (D-012 clause 4). Coherence is still what makes a pass's proofs
+//     compose; agreement is what gives a reason to think the view is shared.
+//     Disagreement — or an unreachable peer — retains the data unmarked.
+//
+// A marking that gets through anyway is PERMANENT (clause 3): D-012 accepts it as a
+// sample gap rather than building the online undo whose machinery carried both of
+// round 7's criticals.
 func (p *Poller) pinProbeEndpoint() int {
 	if p.probeEndpointSet {
 		return p.probeEndpoint
@@ -1310,8 +1311,11 @@ func (p *Poller) probeAnchor(ctx context.Context, endpoint int, block uint64) (c
 type endpointAgreement int
 
 const (
-	// agreementUnobtainable — this fleet has one endpoint, so there is no second
-	// view to ask. Not a failure; a permanent property of the deployment.
+	// agreementUnobtainable — this fleet has exactly ONE CONFIGURED endpoint, so
+	// there is no second view to ask and no amount of waiting produces one. Not a
+	// failure; a permanent, operator-chosen property of the deployment. D-012
+	// clause 4 ratifies acting on it; agreementUnavailable, which is what an
+	// unreachable peer produces, does not.
 	agreementUnobtainable endpointAgreement = iota
 	// agreementUnavailable — no OTHER endpoint answered. Evidence is missing, not
 	// contrary: retry later.
@@ -1327,7 +1331,7 @@ const (
 // corroborate asks an endpoint OTHER THAN primary what it reports at one height, and
 // compares it with want.
 //
-// THIS IS D-011 CLAUSE 7. Wave 6 pinned a whole verification pass to one endpoint,
+// THIS IS D-012 CLAUSE 4. Wave 6 pinned a whole verification pass to one endpoint,
 // which bought COHERENCE — every proof drawn from one chain — and was correctly
 // described in the code as not establishing CANONICALITY. Codex round 6 showed what
 // that gap costs once the pass is allowed to act: a pinned endpoint alone on a
@@ -1344,10 +1348,25 @@ const (
 // walk wrapping all the way back to primary: an answer from the very endpoint being
 // corroborated is not a second opinion, and accepting the token without checking it is
 // the same silent-failover mistake probeAnchor exists to refuse.
+// THE COUNT IT BRANCHES ON IS THE CONFIGURED ONE (D-012 clause 4). EndpointCount is
+// len(clients) — how many endpoints the operator wrote down, not how many answered
+// just now. That distinction is the whole of round 7's [high] #4: a configured fleet
+// of one is a stable, visible choice, whereas "two configured, one reachable" is a
+// FAULT, and treating a fault as permission would mean one timeout is all it takes to
+// classify canonical history on a single node's word. A fault therefore yields
+// agreementUnavailable below (retry, fail closed); only a configured count of exactly
+// one yields agreementUnobtainable.
 func (p *Poller) corroborate(ctx context.Context, primary int, block uint64, want []byte) (endpointAgreement, string) {
 	c := p.chain.EndpointCount()
-	if c <= 1 {
-		return agreementUnobtainable, fmt.Sprintf("this fleet has %d endpoint(s), so no second chain view exists to corroborate block %d", c, block)
+	if c == 1 {
+		return agreementUnobtainable, fmt.Sprintf("this fleet has exactly 1 CONFIGURED endpoint, so no second chain view exists to corroborate block %d", block)
+	}
+	if c < 1 {
+		// A fleet with no endpoints at all is a misconfiguration, not a ratified
+		// one-endpoint deployment. Clause 4 permits single-view marking for a fleet of
+		// ONE; there is no view here to be single. Report it as missing evidence, which
+		// fails closed.
+		return agreementUnavailable, fmt.Sprintf("this fleet has %d configured endpoints, so nothing can corroborate block %d — check the rpc configuration", c, block)
 	}
 	start := ((primary+1)%c + c) % c
 	live, servedBy, err := p.chain.HeaderHashFrom(ctx, start, block)
@@ -1385,39 +1404,56 @@ func (p *Poller) corroborate(ctx context.Context, primary int, block uint64, wan
 // corroboration of a claim nobody made, and since no anchor will ever appear for those
 // heights (adoption is refused while the epoch stands) the refusal could never clear:
 // a fail-forever stall, which this package refuses elsewhere for the same reason.
-func (p *Poller) checkpointCorroborated(ctx context.Context) (bool, string) {
+//
+// It returns (agreed, singleView, why). singleView is true only on the ratified
+// one-endpoint arm, and the caller carries it to the marking so the disclosure can
+// name the height range (D-012 clause 4).
+func (p *Poller) checkpointCorroborated(ctx context.Context) (agreed bool, singleView bool, why string) {
 	if !p.probeCheckpointSet {
-		return true, ""
+		return true, false, ""
 	}
 	agreement, why := p.corroborate(ctx, p.probeEndpoint, p.probeCheckpointBlock, p.probeCheckpointHash)
 	switch agreement {
 	case agreementConfirmed:
-		return true, ""
+		return true, false, ""
 	case agreementUnobtainable:
-		// DISCLOSED, LOUDLY, EVERY TIME. On a single-endpoint fleet clause 7's
-		// agreement cannot be obtained by any amount of waiting, and refusing forever
-		// would wedge price ingestion on the first reorg. What makes proceeding
-		// defensible is clause 6 rather than any strength in the evidence: if this one
-		// view is wrong, RevalidateNeutralizedPrices restores the rows as soon as the
-		// endpoint reports the canonical chain at those heights. The marking is
-		// recoverable — the property D-010 assumed and D-011 requires be built — so a
-		// single view may act, where before the act could not be undone.
-		slog.Warn("marking polled prices unusable on ONE endpoint's word: cross-endpoint agreement (D-011 clause 7) cannot be obtained on this fleet, so the safety of this act rests entirely on revalidation being able to undo it (clause 6). Configure more than one rpc endpoint if that is not acceptable",
-			"engine", p.engine, "chain", p.cfg.ChainID, "endpoint", p.probeEndpoint,
-			"checkpointBlock", p.probeCheckpointBlock, "why", why)
-		return true, ""
+		// D-012 CLAUSE 4's RATIFIED TRADE, AND THE ONLY ARM THAT MAY TAKE IT. With
+		// exactly one endpoint CONFIGURED, agreement is unobtainable rather than
+		// unavailable: refusing would stall price ingestion permanently on the first
+		// reorg, and configuration is not a fault. The clause accepts the risk — a
+		// wrongly-created sample gap, whose provenance is retained (clause 2) — in
+		// exchange for not wedging the pipeline forever. This replaces the
+		// implementation-only carve-out Codex round 7 correctly rejected: it is now the
+		// governing decision's own choice, scoped to the configured count.
+		//
+		// THE COUNT IS RE-CHECKED HERE, not inferred from the enum. corroborate is the
+		// only producer of agreementUnobtainable and only produces it for a configured
+		// count of exactly one — so this test is redundant today, and it is exactly the
+		// redundancy that makes "≥2 configured can never reach the marking arm" a
+		// property of this decision site rather than of a function two calls away.
+		if p.chain.EndpointCount() != 1 {
+			why = fmt.Sprintf("agreement was reported unobtainable with %d endpoints configured, which is a code defect: D-012 clause 4 permits single-view marking only on a fleet of exactly one. Failing closed (%s)",
+				p.chain.EndpointCount(), why)
+			return false, false, why
+		}
+		// The loud, range-naming disclosure is emitted at the marking (Poller.neutralize),
+		// which is the first point that knows WHAT was classified.
+		return true, true, ""
 	case agreementContradicted:
 		// The pinned endpoint may be the minority one and nothing here can tell. The
 		// pass is discarded AND the pin rotates, so the next pass reads a different
 		// view: over successive Steps that is how a poller pinned to a fork gets off
 		// it, since a pass whose view is shared corroborates and proceeds.
 		p.abandonPass(why)
-		return false, why
+		return false, false, why
 	default:
 		// agreementUnavailable. Missing evidence, not contrary evidence — the same
 		// event as a failed probe, and it KEEPS the pass rather than discarding proofs
-		// that a reachable endpoint may still corroborate next Step.
-		return false, why
+		// that a reachable endpoint may still corroborate next Step. THIS is where a
+		// multi-endpoint fleet with only one reachable node lands (D-012 clause 4:
+		// "the distinction is configured count, not reachable count"), and failing
+		// closed here is the whole of round 7's [high] #4.
+		return false, false, why
 	}
 }
 
@@ -1546,34 +1582,46 @@ func (p *Poller) resetVerification(why string) {
 //
 // It replaced a rewind arm, and the reason is an asymmetry rather than a
 // preference (D-010). Both operations act on a judgement that can be wrong. A
-// wrong DELETION of a polled row is permanent: the row is a point-in-time
-// PriceProviderV2 read, this path only ever reads `latest`, and nothing in
-// raw_logs can reproduce it. A wrong MARKING costs availability — the asset has no
-// usable price at those heights and the poller's invalid-answer condition says so —
-// and is UNDONE, which is the whole reason the asymmetry decides anything.
+// wrong DELETION of a polled row destroys a point-in-time PriceProviderV2 read that
+// nothing anywhere can reproduce. A wrong MARKING leaves the row, its value and its
+// recorded block hash all on disk, and costs the availability of that asset's price
+// at those heights.
 //
-// THAT SECOND HALF WAS ONCE ASSERTED RATHER THAN BUILT, and D-011 exists because it
-// was false as implemented. The undo D-010 named was insertPrice's supersede arm,
-// which needs a fresh observation at the same height; readRound polls `latest`, so
-// for any height the head has already passed there will never be one. The real undo
-// is revalidateNeutralized, which re-proves a PAST height against the anchor this
-// engine recorded there — a question that stays answerable forever. Read the two
-// together: the marking is confined by a floor, and everything it marks stays
-// recoverable for as long as its provenance survives.
+// D-012 RESTATES WHY THAT ASYMMETRY IS DECISIVE, because the previous statement of it
+// was wrong and cost two review rounds. D-010 said marking is preferable because it
+// is REVERSIBLE, and named insertPrice's supersede arm as the reversal; that arm
+// needs a fresh observation at the same height, and readRound polls `latest`, so for
+// a height the head has passed it can never fire. D-011 therefore demanded an online
+// reversal be built, and the one wave 7 built carried both of Codex round 7's
+// criticals. D-012 fixes the classification instead of the machinery: polled prices
+// are SAMPLES, so the cost of a wrong marking is a sample gap — the same outcome an
+// RPC outage produces, which this system tolerates daily with no makeup mechanism —
+// while the cost of a wrong deletion is a fact that existed and no longer does. The
+// asymmetry survives without needing reversibility at all.
+//
+// So this is a PERMANENT CLASSIFICATION (clause 3), and the weight moves to the
+// gates in front of it: repair only reaches here on a complete, coherent pass, and —
+// where more than one endpoint is CONFIGURED — only on a corroborated one
+// (checkpointCorroborated, clause 4).
 //
 // store.NeutralizeUnverifiablePrices retains every row, marks the ones above the
 // boundary so no usable-price read can return them, RETAINS THE ANCHORS above that
-// boundary (D-011 clause 5 — they are the provenance the undo needs), resets the
-// cursor and acks — in one transaction. A verified floor confines the marking:
-// history the pass proved canonical keeps its validity, and only the suffix above it
-// is marked.
+// boundary (clause 2 — permanent provenance, so an offline reconciliation stays
+// possible), resets the cursor and acks — in one transaction. A verified floor
+// confines the marking: history the pass proved canonical keeps its validity, and
+// only the suffix above it is marked.
 //
 // WHAT THIS IS NOT: it is not a proof, and it is not free. The marked rows stay in
-// the table as unusable artifacts; refreshNeutralizedBacklog is what makes the pile
-// visible, and revalidateNeutralized is what drains the part of it that was marked
-// wrongly. What that pass cannot retire — rounds whose block the chain genuinely
-// discarded — is the standing cost D-010 accepted.
-func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes int, justification string) error {
+// the table as permanently unusable artifacts, and refreshNeutralizedBacklog is what
+// makes the pile visible (clause 6). Nothing drains it but a current poll landing at
+// a marked height.
+//
+// singleView says this marking was authorised WITHOUT cross-endpoint agreement,
+// which clause 4 permits only on a fleet with exactly one endpoint configured. It is
+// carried down here rather than logged at the gate because this is the first point
+// at which the affected HEIGHT RANGE is known, and a disclosure that cannot name
+// what it classified is not much of a disclosure.
+func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes int, singleView bool, justification string) error {
 	boundary, quarantined, err := p.store.NeutralizeUnverifiablePrices(ctx, p.engine, p.cfg.ChainID, cursor, floor)
 	if err != nil {
 		return fmt.Errorf("price poller %q: neutralize prices above %d (verified floor %d): %w", p.engine, cursor, floor, err)
@@ -1585,10 +1633,25 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 	if !found {
 		return fmt.Errorf("price poller %q: cursor missing after NeutralizeUnverifiablePrices — store contract violated", p.engine)
 	}
-	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the boundary are retained and marked unusable, everything at or below the verified floor keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head",
+	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the boundary are retained and marked unusable PERMANENTLY (D-012 clause 3 — nothing in the running system un-marks them; only a current poll landing at the same height can, and this poller reads `latest`), everything at or below the verified floor keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head. Their provenance is retained forever (clause 2), so an offline reconciliation stays possible",
 		"engine", p.engine, "requestedTarget", cursor, "verifiedFloor", floor,
 		"boundary", boundary, "cursor", newCursor, "rowsNeutralized", quarantined,
 		"anchorProbes", probes, "justification", justification)
+
+	// D-012 CLAUSE 4's DISCLOSURE, EMITTED WHERE THE RANGE IS KNOWN. On a fleet with
+	// exactly one endpoint configured, agreement cannot be obtained by any amount of
+	// waiting, and the clause ratifies acting on the single view rather than stalling
+	// the pipeline forever. What it does not ratify is doing so quietly: the operator
+	// gets the heights, every time, because unlike the multi-endpoint case there is no
+	// second opinion anywhere behind this classification.
+	if singleView && quarantined > 0 {
+		slog.Warn("SINGLE-VIEW CLASSIFICATION: polled prices were marked unusable on ONE endpoint's word because this fleet has exactly one rpc endpoint configured, so cross-endpoint agreement is unobtainable rather than merely unavailable (D-012 clause 4 ratifies this trade for a one-endpoint deployment; with two or more configured the same state fails closed instead). The classification is permanent — configure more than one endpoint if that is not acceptable",
+			"engine", p.engine, "chain", p.cfg.ChainID,
+			"heightRangeMarked", fmt.Sprintf("(%d, %d]", boundary, cursor),
+			"boundaryExclusive", boundary, "cursorInclusive", cursor,
+			"rowsMarked", quarantined, "endpointsConfigured", p.chain.EndpointCount(),
+			"endpointRelied", p.probeEndpoint, "justification", justification)
+	}
 
 	p.clearRepairState()
 	// The rows this poller owned above the boundary are no longer usable, so the
@@ -1603,133 +1666,6 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 	return nil
 }
 
-// revalidateNeutralized gives previously-marked heights the chance to prove
-// themselves canonical again, and restores the rows of every one that does.
-//
-// THIS IS D-011 CLAUSE 6, AND IT IS WHY MARKING IS ALLOWED TO BE THE ANSWER AT ALL.
-// D-010 chose marking over deletion because a wrong marking "is recoverable", and
-// named insertPrice's supersede arm as the recovery. That arm only fires when a fresh
-// observation lands at the same (chain, asset, source, block) identity — and readRound
-// polls `latest`, always and only. Once the canonical head has passed height H, this
-// poller will never execute a round at H again, so for every PAST height the
-// advertised recovery could not fire even in principle. Wave 6 additionally deleted
-// the anchors, so nothing was left to check even if something had wanted to. The
-// asymmetry D-010 turns on was therefore false as implemented: the rows survived and
-// their usability did not. Codex round 6 found it; this is the half that makes the
-// claim true.
-//
-// THE QUESTION IT ASKS IS ANSWERABLE WHERE THE OTHER ONE IS NOT. A price at H can only
-// be re-read by executing at H, which this system cannot do. But "is the block our
-// round executed against still the block at H?" is a header read, available for any
-// height from any node, forever — and the round wrote that hash down. That is the
-// whole trick: recovery does not need a new POLL at H, only a new PROOF about H, and
-// the second is obtainable when the first is not.
-//
-// WHY EACH CANDIDATE MAY USE ITS OWN ENDPOINT, when verifyFloor pins one for a whole
-// pass. verifyFloor assembles a CHAIN of proofs — "5000 is orphaned, 4900 is orphaned,
-// 4800 is canonical" — and those only compose if they describe one ancestry, which is
-// the coherence defect of A1's fifth round. A revalidation is a single POSITIVE,
-// self-contained claim about one height: the live hash there equals the hash we
-// recorded. It composes with nothing, so there is no ancestry to keep coherent, and
-// probing candidates across endpoints spreads the reliance rather than concentrating
-// it. Each claim is separately corroborated on a second endpoint before it is acted
-// on, for the same reason marking is (clause 7): restoring a row that is NOT canonical
-// would be a correctness fault, not merely an availability one, so a single node's
-// word is not enough in either direction.
-//
-// WHAT IT WILL NEVER RESTORE, stated so the backlog's residue is not mistaken for a
-// bug: rows whose block genuinely no longer exists. Their anchor will mismatch on
-// every endpoint forever, which is correct — they describe a block the chain
-// discarded. Those are the rows D-010 accepted as the standing cost, and after this
-// pass has run they are the only ones left.
-//
-// WHY RESTORING CANNOT RE-OPEN THE DIVERGENCE WEDGE insertPrice's supersede arm was
-// built to close. That arm exists because a chain whose head still sits at a
-// neutralized height would otherwise fail every round on a price divergence it can
-// never resolve — and this pass runs BEFORE the round, so it could in principle hand
-// a marked row back as a VALID row and take the supersede arm's trigger away with it.
-// It cannot, and the reason is what the proof is made of: a row is only restored when
-// the live chain reports at that height the very block hash the round recorded. A poll
-// landing at that same height therefore executes against that same block, and an
-// eth_call at a fixed block is deterministic, so the round observes the value already
-// stored and the insert is an ordinary idempotent replay. A row read at a DIFFERENT
-// block at that height — the case where the values could genuinely differ — is exactly
-// the case whose anchor does not match, so it is never restored in the first place.
-// The property holds because the proof is a block-hash identity and not a height.
-//
-// It is non-fatal throughout. Nothing here is a precondition for a round: a failed
-// read, a failed probe or a refused corroboration all leave the rows exactly as they
-// were, which is the same safe state they were already in.
-func (p *Poller) revalidateNeutralized(ctx context.Context) {
-	// A KNOWN-empty backlog costs nothing to skip: the count is re-read at hydration,
-	// after every neutralization and after every landed round while a backlog exists,
-	// so "known zero" really means there is nothing to probe. An UNKNOWN count (the
-	// aggregate read failed) is probed rather than assumed empty — the failure mode of
-	// guessing zero here is a permanently unread backlog.
-	if p.neutralizedKnown && p.neutralizedStats.Rows == 0 {
-		return
-	}
-	candidates, err := p.store.NeutralizedPriceAnchors(ctx, p.engine, p.cfg.ChainID, revalidationPerStep)
-	if err != nil {
-		slog.Warn("could not read the neutralized heights that still carry provenance; revalidation is deferred to a later round and the rows stay marked",
-			"engine", p.engine, "err", err)
-		return
-	}
-	if len(candidates) == 0 {
-		return
-	}
-
-	var restored int64
-	for i, a := range candidates {
-		primary := p.probeStart(i)
-		live, servedBy, err := p.chain.HeaderHashFrom(ctx, primary, a.BlockNumber)
-		if err != nil {
-			slog.Warn("could not re-probe a neutralized height against the live chain; its rows stay marked and it is retried next round",
-				"engine", p.engine, "block", a.BlockNumber, "markedRows", a.Rows, "err", err)
-			continue
-		}
-		if !bytes.Equal(live.Bytes(), a.BlockHash) {
-			// The block this round executed against is still not the block at that
-			// height. Either the marking was right, or this endpoint is the forked
-			// one; both mean LEAVE IT MARKED, which is the safe reading of a
-			// disagreement in this direction too.
-			continue
-		}
-		// The answering endpoint — not the requested one — is the view being
-		// corroborated: HeaderHashFrom may have failed over, and corroborating the
-		// endpoint that did not answer would leave the one that did unchecked.
-		agreement, why := p.corroborate(ctx, servedBy.Index, a.BlockNumber, a.BlockHash)
-		switch agreement {
-		case agreementConfirmed:
-		case agreementUnobtainable:
-			slog.Warn("restoring neutralized polled prices on ONE endpoint's word: cross-endpoint agreement cannot be obtained on this fleet. The proof is a positive hash match against provenance this engine recorded itself, which is the strongest evidence available here, but it is one node's",
-				"engine", p.engine, "block", a.BlockNumber, "endpoint", servedBy.Index, "why", why)
-		default:
-			slog.Warn("a neutralized height matched on one endpoint and was NOT corroborated, so its rows stay marked: restoring a row whose block is not canonical would be a correctness fault, and retention costs only availability",
-				"engine", p.engine, "block", a.BlockNumber, "endpoint", servedBy.Index,
-				"agreement", agreement, "why", why)
-			continue
-		}
-		n, err := p.store.RevalidateNeutralizedPrices(ctx, p.engine, p.cfg.ChainID, a.BlockNumber, a.BlockHash)
-		if err != nil {
-			slog.Warn("could not revalidate a neutralized height whose block proved canonical; its rows stay marked and it is retried next round",
-				"engine", p.engine, "block", a.BlockNumber, "err", err)
-			continue
-		}
-		restored += n
-	}
-	if restored == 0 {
-		return
-	}
-	slog.Warn("polled price rows are USABLE AGAIN: heights a reorg repair had neutralized proved to still be on the canonical chain, so their marker was cleared. Their recorded values and observation times are untouched — nothing was re-polled, and nothing could have been, since this poller only ever reads `latest`",
-		"engine", p.engine, "chain", p.cfg.ChainID, "rowsRestored", restored,
-		"heightsConsidered", len(candidates))
-	// The restored rows are readable again, so every cache derived from usable rows
-	// is now wrong in the safe direction (it under-reports). readDurableState re-reads
-	// the freshness caches AND the backlog count, so one call closes both.
-	p.rehydrateAfterUncertainty(ctx, "revalidation restored neutralized prices")
-}
-
 // refreshNeutralizedBacklog re-reads how many retained-but-unusable rows this
 // engine has accumulated and how old they are, and reports a change in either
 // direction.
@@ -1738,20 +1674,35 @@ func (p *Poller) revalidateNeutralized(ctx context.Context) {
 // be read, so the size and age of that pile is the cost of the policy and has to be
 // observable.
 //
-// D-011 CLAUSE 8 IS WHY IT IS RE-READ ON A LANDED ROUND AND NOT ONLY AFTER A REPAIR.
+// D-012 CLAUSE 6 IS WHY IT IS RE-READ AFTER A SUPERSEDE AND NOT ONLY AFTER A REPAIR.
 // The acute signals are about the HEAD: ConditionPollInvalidAnswer clears the moment
 // a valid observation lands for an asset, and it says nothing whatever about heights
 // below. A poller that neutralized a stretch of history and then resumed polling
 // normally is, on every acute measure, healthy — and the gap is still there. This
-// number is the separate fact that keeps saying so, and it is refreshed exactly when
-// the acute ones go quiet so it cannot go stale behind them.
+// number is the separate fact that keeps saying so.
 //
-// It remains deliberately NOT a health condition here. Some of the pile is
-// irreducible — rounds whose block the chain genuinely discarded never revalidate —
-// so a condition keyed on its existence would latch /readyz red forever, which is an
-// outage rather than a signal. Whether and how to surface it belongs with the
-// health/readiness unit, which owns that composition; what this wave owes clause 8 is
-// that the count and age EXIST, are durable-derived, and survive the acute recovery.
+// AND THE SAME CLAUSE BOUNDS ITS COST, which is why the CALLERS are enumerated rather
+// than left to a schedule. NeutralizedPriceStats scans an ever-growing table with no
+// index carrying its predicate, so wave 7's "re-read after every landed round while a
+// backlog exists" made a per-cadence cost proportional to total price history — round
+// 7's [medium]. Since the online revalidation pass is gone (clause 3) the count moves
+// on exactly three occasions, and those are the only calls:
+//
+//   - HYDRATION, so a restart reports the accumulated pile rather than zero;
+//   - after NEUTRALIZATION, which is the only thing that raises it;
+//   - after a round whose ApplyResult reports Superseded > 0, which is the only thing
+//     that lowers it.
+//
+// The cost is therefore a function of how often the number CHANGES, not of the poll
+// interval. (An unknown count — an earlier read errored — is also retried, because
+// "unknown" must not decay into "zero".)
+//
+// It remains deliberately NOT a health condition here. The pile is now permanent by
+// specification (clause 3), so a condition keyed on its existence would latch /readyz
+// red forever, which is an outage rather than a signal. Whether and how to surface it
+// belongs with the health/readiness unit, which owns that composition; what this wave
+// owes clause 6 is that the count and age EXIST, are durable-derived, and survive the
+// acute recovery.
 //
 // A failed read is logged and dropped. This is an operator-facing number, not a
 // precondition for any decision, and failing hydration on it would let a counting
@@ -1770,11 +1721,12 @@ func (p *Poller) refreshNeutralizedBacklog(ctx context.Context, when string) {
 	}
 	if stats.Rows == 0 {
 		// A backlog that has just DRAINED is reported, where an empty one that was
-		// always empty is not. Since D-011 clause 6 the count can fall as well as
-		// rise, and "the historical gap is closed" is the one transition an operator
-		// watching a red-then-amber pipeline most needs to see land.
+		// always empty is not. The count can still fall — a current poll superseding a
+		// marked row at the head is the one thing that lowers it — and "the historical
+		// gap is closed" is the transition an operator watching a red-then-amber
+		// pipeline most needs to see land.
 		if had && prev.Rows > 0 {
-			slog.Warn("the neutralized-price backlog is now EMPTY: every retained-but-unusable row has been made readable again, either by revalidation against its own recorded block hash or by a fresh observation superseding it",
+			slog.Warn("the neutralized-price backlog is now EMPTY: every retained-but-unusable row has been superseded by a fresh observation at its own height",
 				"engine", p.engine, "chain", p.cfg.ChainID, "previousRows", prev.Rows, "when", when)
 		}
 		return
@@ -1783,7 +1735,7 @@ func (p *Poller) refreshNeutralizedBacklog(ctx context.Context, when string) {
 	if !stats.Oldest.IsZero() {
 		age = p.now().Sub(stats.Oldest)
 	}
-	slog.Warn("polled price rows are RETAINED BUT UNUSABLE after reorg repair: they were neutralized rather than deleted. Revalidation retires the ones whose recorded block proves still canonical; what stays is history the chain genuinely discarded",
+	slog.Warn("polled price rows are RETAINED BUT PERMANENTLY UNUSABLE after reorg repair: they were classified rather than deleted, and nothing in the running system reverses that (D-012 clause 3). Only a current poll landing at one of these exact heights can retire one, which this poller reaches only while the head is still there. Their provenance is retained forever (clause 2), so an offline reconciliation could still settle the anchored ones; none is built. These are sample gaps of the same kind an rpc outage produces",
 		"engine", p.engine, "chain", p.cfg.ChainID, "rows", stats.Rows, "previousRows", prev.Rows,
 		"backlogKnownBefore", had,
 		"oldestObservedAt", stats.Oldest, "oldestAge", age.Truncate(time.Second),
@@ -1832,34 +1784,36 @@ func (p *Poller) blockRepairOnCheckpoint(cursor uint64, probes int, why string) 
 		why+". Nothing was marked or acked; verification re-runs against the chain as it now stands")
 }
 
-// blockRepairOnAgreement records the refusal D-011 clause 7 creates: the pass is
+// blockRepairOnAgreement records the refusal D-012 clause 4 creates: the pass is
 // self-consistent and still holds on its own endpoint, and no SECOND endpoint would
 // corroborate the chain view it was drawn from.
 //
-// DISCLOSED COST, because this is a new way for the poller to stall and it is not a
-// small one. Until agreement can be obtained, the epoch stays unanswered and no price
-// is applied — /readyz is red and the pipeline is stopped. Two fleets that are
+// DISCLOSED COST, because this is a way for the poller to stall and it is not a small
+// one. Until agreement can be obtained, the epoch stays unanswered and no price is
+// applied — /readyz is red and the pipeline is stopped. Two fleets that are
 // permanently on different forks therefore never repair. That is the decision's
-// choice, not an oversight: clause 7 says retention is the safe default because it
+// choice, not an oversight: clause 4 makes retention the safe default because it
 // costs availability and never correctness, and an operator staring at a stopped
 // pipeline with this reason attached is in a strictly better position than one whose
-// canonical price history was silently marked unreadable on a minority node's word.
-// The states where waiting cannot help are still answered rather than refused — a
-// pass with no checkpoint asserts no chain view and is not gated at all.
+// canonical price history was silently marked unreadable — PERMANENTLY, under clause
+// 3 — on a minority node's word. The states where waiting cannot help are still
+// answered rather than refused: a pass with no checkpoint asserts no chain view and is
+// not gated at all.
 //
-// AND THE ASYMMETRY WITH THE ONE-ENDPOINT FLEET IS DELIBERATE, because it is the
-// obvious thing to call inconsistent. A fleet of one is a CONFIGURATION: the operator
-// chose it, it is visible at startup, it never changes under us, and clause 6's
-// revalidation is what makes acting on a single view recoverable. A peer that did not
-// answer this call is a FAULT — possibly a one-off timeout — and treating a fault as
-// permission to drop to single-view marking would mean one unlucky timeout is all it
-// takes to mark canonical history on one node's word. That is exactly the shape of
-// failure this series keeps finding, so the fault path waits and the configuration
-// path proceeds.
+// AND THE ASYMMETRY WITH THE ONE-ENDPOINT FLEET IS RATIFIED, NOT IMPROVISED. It is
+// the obvious thing to call inconsistent, and Codex round 7 was right that wave 7's
+// version of it was an implementation-only exception to an accepted decision. D-012
+// clause 4 settles it in governance: a fleet of one is a CONFIGURATION — the operator
+// chose it, it is visible at startup, it never changes under us — and the decision
+// accepts a possible wrongly-created sample gap there in exchange for not stalling
+// the pipeline forever. A peer that did not answer this call is a FAULT, possibly a
+// one-off timeout, and treating a fault as permission would mean one unlucky timeout
+// is all it takes to permanently classify canonical history on one node's word. So
+// the fault path waits, and only the configured-count-of-one path proceeds.
 func (p *Poller) blockRepairOnAgreement(cursor uint64, probes int, why string) {
 	p.recordRepairRefusal(cursor, probes,
 		"no second endpoint would corroborate the chain view this pass's anchor proofs were drawn from, and one endpoint's coherent story is not evidence that its chain is the canonical one",
-		why+". Nothing was marked or acked; the data is RETAINED unmarked, which costs availability rather than correctness (D-011 clause 7)")
+		why+". Nothing was marked or acked; the data is RETAINED unmarked, which costs availability rather than correctness (D-012 clause 4). Note the distinction the clause draws: this refusal is what an UNREACHABLE peer produces on a fleet of two or more, and it is deliberately not the ratified single-view path, which requires exactly one endpoint to be CONFIGURED")
 }
 
 // recordRepairRefusal is the single place a standing repair refusal is composed and

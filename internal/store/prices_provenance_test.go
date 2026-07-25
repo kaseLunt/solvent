@@ -112,6 +112,76 @@ func TestApplyPricesRequiresEngine(t *testing.T) {
 	require.ErrorContains(t, err, "engine is required")
 }
 
+// D-012 CLAUSE 1, AGAINST POSTGRES: THE STORE ITSELF REFUSES TO REWIND A POLL-OWNED
+// ENGINE, and the refusal is on the IDENTITY rather than on the arguments.
+//
+// The clause: "the store must structurally reject RewindPrices for poll-owned
+// engines (closes round 7's [medium] — the path the poller cannot reach but other
+// store callers can)". D-010 expressed the same intent by leaving RewindPrices off
+// the PollStore interface, which bounds internal/prices and nothing else; anything
+// holding a *Store could still call it, and this repository's own tests did.
+//
+// TWO PROPERTIES, and the second is why the first matters. The call fails — and
+// NOTHING it would otherwise have done happened: the rows above the target survive,
+// the poll anchors survive (clause 2 forbids any store path expiring the anchor of a
+// neutralized height, and this sweep has no such exemption), the cursor does not
+// move, and the epoch stays unacknowledged. A refusal that had already deleted the
+// anchors would satisfy the letter of clause 1 and defeat clause 2.
+func TestRewindPricesRefusesAPollOwnedEngineAndChangesNothing(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// An anchored round, then a marked one — the exact state whose provenance clause 2
+	// says no store path may expire.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(4900, 0xAA, testPollSource, 1_000_000, 6)}, 4900, anchorAt(4900))))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+		[]PriceObservation{po(5000, 0xBB, testPollSource, 2_000_000, 6)}, 5000, anchorAt(5000))))
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4950, []byte{0x01}))
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5000, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked)
+
+	// A second epoch, so a rewind would have real work to do rather than being
+	// vacuously harmless.
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4800, []byte{0x02}))
+	before := priceRows(t, s, 10)
+	_, lastBefore, ackedBefore := cursorState(t, s, testPollEngine)
+
+	err = s.RewindPrices(ctx, testPollEngine, 10, 5000, 0)
+	require.ErrorIs(t, err, ErrPollOwnedRewindRefused,
+		"the refusal is a contract a caller can assert on, not a message")
+	require.ErrorContains(t, err, "NeutralizeUnverifiablePrices",
+		"and it names the primitive this identity does have")
+
+	require.Equal(t, before, priceRows(t, s, 10), "no row was deleted before the refusal")
+	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 9000, 10)
+	require.NoError(t, err)
+	require.Equal(t, []PollAnchor{anchorAt(5000), anchorAt(4900)}, plainAnchors(anchors),
+		"and NO anchor was deleted: the marked height's provenance is what D-012 clause 2 retains forever")
+	_, lastAfter, ackedAfter := cursorState(t, s, testPollEngine)
+	require.Equal(t, lastBefore, lastAfter, "the cursor did not move")
+	require.Equal(t, ackedBefore, ackedAfter, "and the epoch was NOT acknowledged by a refused call")
+
+	// IT IS THE IDENTITY, NOT THE ARGUMENTS. Every other shape of the same call is
+	// refused identically — including the vacuous ones a caller might think are safe.
+	for _, tc := range []struct {
+		name                  string
+		toBlock, verifiedFloo uint64
+	}{
+		{"target 0", 0, 0},
+		{"target at the cursor", 4950, 0},
+		{"with a verified floor", 5000, 4900},
+	} {
+		require.ErrorIs(t, s.RewindPrices(ctx, testPollEngine, 10, tc.toBlock, tc.verifiedFloo),
+			ErrPollOwnedRewindRefused, tc.name)
+	}
+	// An engine whose key merely CONTAINS the namespace elsewhere is not poll-owned:
+	// the discriminator is the prefix, matching how PollCursorEngine builds keys.
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 0, 0),
+		"an event-derived identity still rewinds")
+}
+
 // A2 — THE PHASE-CHANGE-THEN-DEEP-REORG REGRESSION.
 //
 // The scenario in full: the feed deriver ingests aggregator A, Chainlink performs
@@ -164,15 +234,25 @@ func TestRewindPricesDeletesRetiredPhaseRowsByOwner(t *testing.T) {
 		`SELECT MAX(epoch) FROM reorg_epochs WHERE chain_id = 1`).Scan(&maxEpoch))
 	require.Equal(t, maxEpoch, acked, "the ack still reaches the chain's max epoch, atomically")
 
-	// And the epoch is now prunable without leaving an unrepairable orphan behind:
-	// the deleted rows are gone, so pruning cannot strand them.
-	require.NoError(t, s.RewindPrices(ctx, "prices:poll:1", 1, 210, 0))
+	// And the epoch becomes prunable once the OTHER writer acks too. That writer is
+	// poll-owned, so its ack cannot come from a rewind (D-012 clause 1): it comes from
+	// NeutralizeUnverifiablePrices, which RETAINS its row above the target and marks it
+	// (D-010 clause 1). The two writers therefore leave the table in different states
+	// from the same epoch, which is the whole of the two-primitives split.
+	_, marked, nerr := s.NeutralizeUnverifiablePrices(ctx, "prices:poll:1", 1, 210, 0)
+	require.NoError(t, nerr)
+	require.Equal(t, int64(1), marked)
 	pruned, err := s.PruneAckedReorgEpochs(ctx)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), pruned)
 	require.Equal(t, map[string]string{
-		"00000000000000000000000000000000000000aa/" + oldAgg + "@100": "99000000:8",
-	}, priceRows(t, s, 1), "nothing above the target survived into the pruned state")
+		"00000000000000000000000000000000000000aa/" + oldAgg + "@100":       "99000000:8",
+		"00000000000000000000000000000000000000bb/" + testRatioSrc + "@210": "1060000000000000000:18",
+	}, priceRows(t, s, 1),
+		"the feed engine's unverifiable suffix was DELETED and the poll engine's was RETAINED-and-marked")
+	valid, reason := validityOf(t, s, 1, addr20(0xBB), testRatioSrc, 210)
+	require.False(t, valid)
+	require.Equal(t, InvalidReasonUnverifiableReorg, reason)
 }
 
 // ---------------------------------------------------------------------------
@@ -368,23 +448,23 @@ func TestRewindPricesVerifiedFloorRetainsProvenHistory(t *testing.T) {
 	ctx := context.Background()
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10,
+			[]PriceObservation{po(b, 0xAA, testFeedSource, int64(1_000_000+b), 8)}, b, anchorAt(b))))
 	}
 	// The walker's rewind reached a sparse-log ancestor far below: the degenerate
-	// case that used to delete EVERY polled row.
+	// case that used to delete EVERY row above it.
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 100, []byte{0x64}))
 
 	// The caller re-verified block 4900's hash against the live chain.
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 5000, 4900))
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 5000, 4900))
 
 	require.Equal(t, map[string]string{
-		"00000000000000000000000000000000000000aa/priceproviderv2@4800": "1004800:6",
-		"00000000000000000000000000000000000000aa/priceproviderv2@4900": "1004900:6",
+		"00000000000000000000000000000000000000aa/" + testFeedSource + "@4800": "1004800:8",
+		"00000000000000000000000000000000000000aa/" + testFeedSource + "@4900": "1004900:8",
 	}, priceRows(t, s, 10),
-		"provably-canonical polled history survives; only the unverified suffix above 4900 is deleted")
+		"provably-canonical history survives; only the unverified suffix above 4900 is deleted")
 
-	_, last, acked := cursorState(t, s, testPollEngine)
+	_, last, acked := cursorState(t, s, testFeedEngine10)
 	require.Equal(t, uint64(4900), last, "the cursor stops at the verified block, not at the walker's 100")
 	var maxEpoch int64
 	require.NoError(t, s.pool.QueryRow(ctx,
@@ -392,8 +472,11 @@ func TestRewindPricesVerifiedFloorRetainsProvenHistory(t *testing.T) {
 	require.Equal(t, maxEpoch, acked, "the epoch ack is unaffected by the floor")
 
 	// The orphaned round's anchor is deleted with its rows: an anchor for history
-	// that no longer exists must not be able to "verify" a later repair.
-	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 5000, 8)
+	// that no longer exists must not be able to "verify" a later repair. This sweep
+	// carries NO neutralized-height exemption, which is safe only because D-012
+	// clause 1 keeps every poll-owned identity out of this call — see
+	// TestRewindPricesRefusesAPollOwnedEngineAndChangesNothing.
+	anchors, err := s.PollAnchorsBelow(ctx, testFeedEngine10, 10, 5000, 8)
 	require.NoError(t, err)
 	require.Equal(t, []PollAnchor{anchorAt(4900), anchorAt(4800)}, plainAnchors(anchors))
 }
@@ -410,16 +493,16 @@ func TestRewindPricesWithZeroFloorDeletesEverythingAboveTheTarget(t *testing.T) 
 	ctx := context.Background()
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10,
+			[]PriceObservation{po(b, 0xAA, testFeedSource, int64(1_000_000+b), 8)}, b, anchorAt(b))))
 	}
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 100, []byte{0x64}))
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 5000, 0))
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 5000, 0))
 
 	require.Empty(t, priceRows(t, s, 10))
-	_, last, _ := cursorState(t, s, testPollEngine)
+	_, last, _ := cursorState(t, s, testFeedEngine10)
 	require.Equal(t, uint64(100), last)
-	anchors, err := s.PollAnchorsBelow(ctx, testPollEngine, 10, 5000, 8)
+	anchors, err := s.PollAnchorsBelow(ctx, testFeedEngine10, 10, 5000, 8)
 	require.NoError(t, err)
 	require.Empty(t, anchors)
 }
@@ -430,10 +513,10 @@ func TestRewindPricesWithZeroFloorDeletesEverythingAboveTheTarget(t *testing.T) 
 func TestRewindPricesRefusesFloorAboveTarget(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
-		[]PriceObservation{po(500, 0xAA, testPollSource, 1, 6)}, 500, anchorAt(500))))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10,
+		[]PriceObservation{po(500, 0xAA, testFeedSource, 1, 8)}, 500, anchorAt(500))))
 
-	err := s.RewindPrices(ctx, testPollEngine, 10, 400, 500)
+	err := s.RewindPrices(ctx, testFeedEngine10, 10, 400, 500)
 	require.ErrorContains(t, err, "verified floor 500 is above the requested target 400")
 	require.Len(t, priceRows(t, s, 10), 1, "nothing was deleted before the refusal")
 }
@@ -444,17 +527,17 @@ func TestRewindPricesFloorNeverLowersTheTarget(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 	for _, b := range []uint64{300, 400, 500} {
-		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
-			[]PriceObservation{po(b, 0xAA, testPollSource, int64(b), 6)}, b, anchorAt(b))))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10,
+			[]PriceObservation{po(b, 0xAA, testFeedSource, int64(b), 8)}, b, anchorAt(b))))
 	}
 	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 450, []byte{0x45}))
 
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 500, 300))
-	_, last, _ := cursorState(t, s, testPollEngine)
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 500, 300))
+	_, last, _ := cursorState(t, s, testFeedEngine10)
 	require.Equal(t, uint64(450), last, "the walker's 450 already exceeds the floor and stands")
 	require.Equal(t, map[string]string{
-		"00000000000000000000000000000000000000aa/priceproviderv2@300": "300:6",
-		"00000000000000000000000000000000000000aa/priceproviderv2@400": "400:6",
+		"00000000000000000000000000000000000000aa/" + testFeedSource + "@300": "300:8",
+		"00000000000000000000000000000000000000aa/" + testFeedSource + "@400": "400:8",
 	}, priceRows(t, s, 10))
 }
 
@@ -755,13 +838,13 @@ func TestLatestPriceFreshnessFollowsRewind(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(100, 0xAA, testPollSource, 1_000_000, 6),
-		po(200, 0xAA, testPollSource, 1_000_100, 6),
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10, []PriceObservation{
+		po(100, 0xAA, testFeedSource, 1_000_000, 8),
+		po(200, 0xAA, testFeedSource, 1_000_100, 8),
 	}, 200, anchorAt(200))))
-	require.NoError(t, s.RewindPrices(ctx, testPollEngine, 10, 150, 0))
+	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 150, 0))
 
-	got, err := s.LatestPriceFreshness(ctx, 10, testPollEngine)
+	got, err := s.LatestPriceFreshness(ctx, 10, testFeedEngine10)
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, uint64(100), got[0].BlockNumber, "the deleted newer row no longer counts")

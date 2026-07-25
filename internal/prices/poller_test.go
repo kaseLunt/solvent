@@ -1549,16 +1549,16 @@ func TestPollerRepairDiscardsAHalfWalkedPassWhenItsEndpointStopsAnswering(t *tes
 		"and the corroborating read came from the OTHER endpoint")
 }
 
-// D-010 clause 4: the retained-but-unusable pile is COUNTABLE. Neutralization
-// trades permanent data loss for rows that are kept and can never be read, nothing
-// retires them, and an operator who cannot see the pile cannot tell a handful from
-// a runaway.
+// D-012 CLAUSE 6 (carrying D-010 clause 4): "gap visibility stands... a cleared acute
+// signal must not hide the historical classification." The pile is COUNTABLE and its
+// size and age reach an operator, because the policy that creates it has an accepted
+// cost and an operator who cannot see the pile cannot tell a handful from a runaway.
 //
-// It is deliberately NOT a health condition, and this test pins that too: a
-// condition keyed on rows nothing ever retires would latch /readyz red forever,
-// which is an outage rather than a signal. The acute case — an asset whose NEWEST
-// observation is unusable — is already ConditionPollInvalidAnswer, and that one
-// clears when a valid observation lands.
+// It is deliberately NOT a health condition, and this test pins that too: under
+// clause 3 the classification is permanent, so a condition keyed on its existence
+// would latch /readyz red forever — an outage rather than a signal. The acute case —
+// an asset whose NEWEST observation is unusable — is already
+// ConditionPollInvalidAnswer, and that one clears when a valid observation lands.
 func TestPollerExposesTheNeutralizedBacklog(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
@@ -1584,10 +1584,12 @@ func TestPollerExposesTheNeutralizedBacklog(t *testing.T) {
 	require.Equal(t, int64(2), backlog.Rows)
 	require.Equal(t, oldest, backlog.Oldest)
 	require.Equal(t, uint64(4100), backlog.HighestBlock)
-	require.True(t, containsSubstring(*msgs, "RETAINED BUT UNUSABLE"),
+	require.True(t, containsSubstring(*msgs, "RETAINED BUT PERMANENTLY UNUSABLE"),
 		"the accumulation is reported where an operator reads, not only through an accessor")
+	require.True(t, containsSubstring(*msgs, "D-012 clause 3"),
+		"and the text says the classification is permanent rather than implying a pending repair (clause 7)")
 
-	// It does NOT gate readiness. A backlog nothing retires must not be able to hold
+	// It does NOT gate readiness. A permanent classification must not be able to hold
 	// /readyz red on its own.
 	require.NotContains(t, pollConditions(p), ConditionPollRewindBlocked)
 	for name := range pollConditions(p) {
@@ -1616,142 +1618,8 @@ func TestPollerBacklogReadFailureDoesNotBreakHydration(t *testing.T) {
 }
 
 // =====================================================================
-// D-011 — neutralization must be revalidatable.
+// D-012 clause 4 — marking requires agreement whenever >1 endpoint is CONFIGURED.
 // =====================================================================
-
-// THE REGRESSION D-011 CLAUSE 6 REQUIRES, IN CODEX ROUND 6'S OWN WORDS: a minority
-// endpoint marks block H, the canonical head advances beyond H, and H must become
-// usable again WITHOUT another poll executing at H.
-//
-// WHY IT COULD NOT HAPPEN BEFORE. D-010 preferred marking to deleting on the grounds
-// that marking is recoverable, and named insertPrice's supersede arm as the recovery:
-// a fresh observation at the same (chain, asset, source, block) identity replaces the
-// marked row. readRound polls `latest`, ALWAYS — so once the head is past H, no round
-// will ever execute at H again and that arm can never fire for H. Wave 6 additionally
-// deleted the anchors during neutralization, so even a caller that wanted to re-check
-// H had nothing to check it against. The rows survived and their usability did not.
-//
-// WHAT MAKES THIS TEST GENUINE RATHER THAN SHAPED. Three things are asserted, and no
-// one of them alone would be worth much:
-//
-//  1. NO POLL EXECUTED AT H after the marking — checked over the store's whole apply
-//     record, by through-block and by observation block, not merely by looking at the
-//     round this test happened to script.
-//  2. THE ROW'S observed_at IS UNCHANGED. A supersede re-stamps it (the fake models
-//     that, because the store does); a revalidation must not, because nothing was
-//     re-read. That single field distinguishes "recovered by new evidence about the
-//     old observation" from "quietly replaced by a new observation", which is exactly
-//     the distinction D-010 got wrong.
-//  3. THE HEAD REALLY MOVED PAST H. The round lands at 5200 and the cursor follows,
-//     so H is genuinely historical rather than still at the frontier.
-//
-// The marking itself is a real one, not a contrived one: BOTH endpoints report the
-// fork while it stands, so the clause-7 agreement gate is satisfied and the pass acts
-// on the strongest evidence the system can obtain. Then the fork loses — a reorg of
-// the reorg, the case this package's generation/checkpoint machinery exists for — and
-// the block at H is canonical again.
-func TestPollerRevalidatesAPastHeightWithoutAnotherPollThere(t *testing.T) {
-	st := newFakePriceStore()
-	engine := PollCursorEngine(10)
-	ch := &fakePollChain{endpoints: 2}
-	p, clk := newTestPoller(t, st, ch, 10)
-
-	const H = uint64(5000)
-	observedAt := clk.now()
-	for _, b := range []uint64{4900, H} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, observedAt)
-		st.seedAnchor(engine, b, blockHashAt(b))
-	}
-	st.cursor, st.cursorFound = H, true
-	deep := uint64(100)
-	st.rewindDeepTo = &deep
-
-	// PHASE 1 — THE FORK BOTH NODES SEE. 4900 stands; H was replaced. The two
-	// endpoints agree, so this is not one node's private story.
-	canonicalAt(ch, 4900)
-	ch.setHash(H, common.HexToHash("0xdead"))
-	st.unacked = true
-	p.lastAttempt = clk.now() // not due: isolate the repair
-
-	advanced, err := p.Step(context.Background())
-	require.NoError(t, err)
-	require.True(t, advanced, "the epoch is answered")
-	require.Len(t, st.neutralized, 1)
-	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor)
-
-	byBlock := func() map[uint64]fakeRow {
-		out := map[uint64]fakeRow{}
-		for _, r := range st.rows {
-			out[r.block] = r
-		}
-		return out
-	}
-	require.False(t, byBlock()[H].valid, "H is marked unusable — the loss this test is about")
-	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock()[H].invalidReason)
-	backlog, known := p.NeutralizedBacklog()
-	require.True(t, known)
-	require.Equal(t, int64(1), backlog.Rows)
-
-	// D-011 CLAUSE 5, AS THE ENABLING CONDITION: the anchor at H survived the
-	// marking. Everything below depends on it, and wave 6 deleted it here.
-	anchors, err := st.PollAnchorsBelow(context.Background(), engine, 10, 9000, 10)
-	require.NoError(t, err)
-	var anchoredHeights []uint64
-	for _, a := range anchors {
-		anchoredHeights = append(anchoredHeights, a.BlockNumber)
-	}
-	require.Contains(t, anchoredHeights, H,
-		"the provenance for H must outlive the marking, or there is nothing to revalidate against")
-
-	// PHASE 2 — THE FORK LOSES. The block H's round executed against is canonical
-	// again on both endpoints, and the head has moved on to 5200.
-	canonicalAt(ch, H, 5200)
-	ch.respond = okRound(t, 5200, 20, 1_000_000)
-	clk.advance(2 * time.Minute) // the cadence is due again
-	msgs := captureWarnings(t)
-
-	advanced, err = p.Step(context.Background())
-	require.NoError(t, err)
-	require.True(t, advanced)
-
-	// (1) H IS USABLE AGAIN.
-	restored := byBlock()[H]
-	require.True(t, restored.valid, "the row at H is readable again")
-	require.Empty(t, restored.invalidReason)
-	require.Equal(t, []uint64{H}, st.revalidated, "and it came back through the revalidation path")
-
-	// (2) NOTHING RE-POLLED IT. This is the clause-6 property, checked against the
-	// store's entire apply record rather than against the one round scripted here.
-	for i, b := range st.applied {
-		require.NotEqual(t, H, b.through, "batch %d applied AT H, so this proves nothing about past heights", i)
-		for _, o := range b.obs {
-			require.NotEqual(t, H, o.BlockNumber, "batch %d carried an observation at H", i)
-		}
-	}
-	// (3) AND IT WAS NOT QUIETLY SUPERSEDED EITHER: a fresh observation re-stamps
-	// observed_at, a revalidation cannot.
-	require.Equal(t, observedAt, restored.observedAt,
-		"the recovered row keeps its ORIGINAL observation time: this is a new proof about an old read, not a new read")
-
-	// (4) H IS GENUINELY HISTORICAL — the head advanced past it.
-	require.Equal(t, uint64(5200), st.cursor)
-	require.Greater(t, st.cursor, H)
-
-	backlog, known = p.NeutralizedBacklog()
-	require.True(t, known)
-	require.Zero(t, backlog.Rows, "and the backlog drained")
-	require.True(t, containsSubstring(*msgs, "USABLE AGAIN"),
-		"the recovery is reported where an operator reads it")
-	// Nothing was deleted at any point: the two seeded rounds plus the 20 registry
-	// assets the 5200 round priced.
-	require.Len(t, st.rows, 2+20)
-	survived := map[uint64]bool{}
-	for _, r := range st.rows {
-		survived[r.block] = true
-	}
-	require.True(t, survived[4900])
-	require.True(t, survived[H])
-}
 
 // D-011 CLAUSE 7, AND THE DIRECT KILL OF CODEX ROUND 6's FINDING: a self-consistent
 // pass drawn from a MINORITY fork must not mark canonical history unusable.
@@ -1834,18 +1702,18 @@ func TestPollerRefusesToMarkWhenASecondEndpointContradictsThePass(t *testing.T) 
 	}
 }
 
-// THE SINGLE-ENDPOINT CONCESSION, DISCLOSED AND BOUNDED. Clause 7's agreement cannot
-// be obtained on a fleet with one endpoint — there is no second view, and no amount of
-// waiting produces one. Refusing there would wedge price ingestion permanently on the
-// first reorg, which this package refuses elsewhere for the same reason.
+// D-012 CLAUSE 4, THE RATIFIED HALF: "with exactly one endpoint configured,
+// single-view marking is permitted and here ratified... configuration is not a
+// fault." Refusing on a fleet of one would stall price ingestion permanently on the
+// first reorg, and no amount of waiting produces a second view.
 //
-// So a one-endpoint fleet MAY act, and this test pins both halves of why that is
-// defensible rather than a shortcut: the concession is logged every single time it is
-// taken, AND what it permits is recoverable — the second leg shows the marked row
-// coming back through clause 6 the moment that same endpoint reports the canonical
-// chain at that height. Marking on one view is acceptable exactly because the marking
-// is undoable; that is the property D-010 assumed and this wave built.
-func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheMissingAgreement(t *testing.T) {
+// Codex round 7 was right that wave 7's version of this was an implementation-only
+// exception to an accepted decision, and D-012 clause 4 is the ratification it asked
+// for. What the clause does NOT ratify is silence: it requires a WARN "naming the
+// height range", which is what the second half of this test pins. A disclosure that
+// cannot say what was classified leaves an operator unable to check it against
+// anything.
+func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1}
@@ -1867,14 +1735,19 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheMissingAgreement(t *testin
 
 	advanced, err := p.Step(context.Background())
 	require.NoError(t, err)
-	require.True(t, advanced, "a single-endpoint fleet must not be wedged by an unobtainable agreement")
+	require.True(t, advanced, "a fleet of exactly one endpoint must not be wedged by an unobtainable agreement")
 	require.Len(t, st.neutralized, 1)
 	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor)
-	require.True(t, containsSubstring(*msgs, "cross-endpoint agreement (D-011 clause 7) cannot be obtained"),
-		"the concession is never silent")
 
-	// AND IT IS UNDOABLE. The one endpoint rejoins the canonical chain; the marked
-	// row returns without anything re-polling H.
+	require.True(t, containsSubstring(*msgs, "SINGLE-VIEW CLASSIFICATION"),
+		"the concession is never silent (D-012 clause 4: log at WARN that a single-view classification occurred)")
+	require.True(t, containsSubstring(*msgs, "exactly one rpc endpoint configured"),
+		"and it names the CONFIGURED count, which is the fact that authorises it")
+
+	// AND IT IS PERMANENT (clause 3). The one endpoint rejoins the canonical chain and
+	// the head moves past H; nothing brings the row back, because nothing in the
+	// running system can. This is the assertion wave 7 could not make — it had built a
+	// revalidation pass — and it is now the SPECIFIED behaviour rather than a defect.
 	canonicalAt(ch, H, 5200)
 	ch.respond = okRound(t, 5200, 20, 1_000_000)
 	clk.advance(2 * time.Minute)
@@ -1882,104 +1755,149 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheMissingAgreement(t *testin
 	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Equal(t, []uint64{H}, st.revalidated)
+	require.Equal(t, uint64(5200), st.cursor, "the head really did move past H")
+
+	marked := map[uint64]bool{}
 	for _, r := range st.rows {
-		require.True(t, r.valid, "every row is readable again")
+		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			marked[r.block] = true
+		}
 	}
+	require.True(t, marked[H],
+		"the classification at H stands even though the chain now reports the very block that round recorded: D-012 clause 3 removes the online revalidation that would have retired it")
+
+	// The provenance is still there, which is the whole of clause 2 — the option of an
+	// offline reconciliation is kept open, and only that.
+	anchors, err := st.PollAnchorsBelow(context.Background(), engine, 10, 9000, 10)
+	require.NoError(t, err)
+	var heights []uint64
+	for _, a := range anchors {
+		heights = append(heights, a.BlockNumber)
+	}
+	require.Contains(t, heights, H,
+		"the anchor recording the block H's round executed against is retained forever (D-012 clause 2)")
 }
 
-// CLAUSE 7 APPLIES TO RESTORING TOO, and the asymmetry argument is why. Retaining a
-// marked row costs availability; restoring a row whose block is NOT canonical serves a
-// price from a block that does not exist, which is a correctness fault. So a single
-// endpoint's match is not enough to un-mark, exactly as it is not enough to mark.
+// D-012 CLAUSE 4, THE FAIL-CLOSED HALF, AND THE DISTINCTION THE CLAUSE TURNS ON:
+// "the distinction is CONFIGURED count, not reachable count — two configured with one
+// reachable is a fault and fails closed."
 //
-// Endpoint 0 says the neutralized height is canonical; endpoint 1 still reports the
-// fork. The row stays marked until they agree.
-func TestPollerLeavesARevalidationCandidateMarkedWithoutAgreement(t *testing.T) {
+// This is round 7's [high] #4 in its sharpest form. Two endpoints are configured, so
+// the deployment is NOT the ratified one-endpoint case; but the peer is down, so no
+// second view answers. Wave 7's gate could not tell those apart at the decision site
+// — it read an enum whose provenance it did not re-check — and a single unlucky
+// timeout would have been enough to permanently classify canonical history on one
+// node's word.
+//
+// The pass here is otherwise perfect: coherent, checkpointed, and still holding on its
+// own endpoint. Nothing is marked, and the epoch is deliberately left unanswered.
+func TestPollerFailsClosedWhenTheOnlyOtherEndpointIsUnreachable(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
-	ch := &fakePollChain{endpoints: 2, respond: okRound(t, 5200, 20, 1_000_000)}
+	ch := &fakePollChain{endpoints: 2}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	const H = uint64(4000)
-	st.seedNeutralizedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, H, clk.now())
-	st.seedAnchor(engine, H, blockHashAt(H))
+	const H = uint64(5000)
+	for _, b := range []uint64{4900, H} {
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+	}
 	st.cursor, st.cursorFound = H, true
-	canonicalAt(ch, 5200)
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
 
-	// Endpoint 0 reports the recorded block; endpoint 1 is still on the other chain.
-	ch.setHashOn(0, H, blockHashAt(H))
-	ch.setHashOn(1, H, common.HexToHash("0xdead"))
+	// Endpoint 0 has a complete, coherent story: 4900 stands, H was replaced.
+	ch.canonicalOn(0, 4900)
+	ch.setHashOn(0, H, common.HexToHash("0xdead"))
+	// Endpoint 1 is DOWN — a fault, not a fork, and not a configuration.
+	ch.view(1).down = errors.New("dial tcp: connection refused")
+
+	st.unacked = true
+	p.lastAttempt = clk.now()
 	msgs := captureWarnings(t)
 
 	advanced, err := p.Step(context.Background())
-	require.NoError(t, err)
-	require.True(t, advanced, "the round itself still lands")
-	require.Empty(t, st.revalidated, "one endpoint's match does not restore a row")
-	require.False(t, st.rows[0].valid, "the marked row is RETAINED marked, which costs availability only")
-	require.True(t, containsSubstring(*msgs, "was NOT corroborated"))
+	require.NoError(t, err, "a refusal is a health condition, not a Step error")
+	require.False(t, advanced)
 
-	// Once the second view agrees, the same evidence is now enough.
-	ch.setHashOn(1, H, blockHashAt(H))
-	clk.advance(2 * time.Minute)
+	require.Empty(t, st.neutralized,
+		"two endpoints are CONFIGURED, so an unreachable peer is a fault and marking fails closed (D-012 clause 4)")
+	for _, r := range st.rows {
+		require.True(t, r.valid, "canonical polled history keeps its validity")
+	}
+	require.True(t, st.unacked, "and the epoch stays unanswered rather than being answered on one view")
+	require.Contains(t, pollConditions(p), ConditionPollRewindBlocked)
+	require.Contains(t, pollConditions(p)[ConditionPollRewindBlocked], "no second endpoint would corroborate")
+	require.False(t, containsSubstring(*msgs, "SINGLE-VIEW CLASSIFICATION"),
+		"the ratified single-view path must NOT be reachable by a fault: that is the whole distinction")
+
+	// AND IT IS A STALL, NOT A WEDGE. The peer comes back, agrees, and the epoch is
+	// answered on the next pass — so failing closed costs availability while the fault
+	// lasts and nothing after it.
+	ch.view(1).down = nil
+	ch.canonicalOn(1, 4900)
+	ch.setHashOn(1, H, common.HexToHash("0xdead"))
 
 	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Equal(t, []uint64{H}, st.revalidated)
-	require.True(t, st.rows[0].valid)
+	require.Len(t, st.neutralized, 1)
+	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor)
 }
 
-// CLAUSE 5 IS LOAD-BEARING, SHOWN BY ITS ABSENCE. A marked height with NO surviving
-// anchor is not a revalidation candidate at all: there is no recorded block hash to
-// check the live chain against, so nothing can place it in either direction, forever.
+// D-012 CLAUSE 4, THE DEGENERATE CONFIGURATION: a fleet with NO endpoints is not a
+// ratified fleet of one.
 //
-// That is the state wave 6's neutralization created for EVERY height it marked, and it
-// is why D-011 clause 5 forbids deleting anchors. Here it arises legitimately — legacy
-// history written before this engine anchored its rounds — and the correct behaviour is
-// the same in both cases: leave it marked, and cost one probe rather than pretending.
-func TestPollerCannotRevalidateAMarkedHeightWithNoSurvivingAnchor(t *testing.T) {
+// The clause permits single-view marking "with exactly one endpoint configured". Zero
+// is not one: there is no view to be single, and the honest reading of a poller that
+// cannot reach any chain at all is a misconfiguration, not permission. Wave 7's gate
+// tested `count <= 1`, which would have swept this in.
+//
+// It cannot arise from chain.Failover today (construction refuses an empty endpoint
+// list), which is exactly why it is worth pinning: the guard's correctness must not
+// depend on a precondition enforced two packages away.
+func TestPollerFailsClosedOnAFleetWithNoEndpointsConfigured(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
-	ch := &fakePollChain{endpoints: 2, respond: okRound(t, 5200, 20, 1_000_000)}
+	ch := &fakePollChain{endpoints: 0}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	const H = uint64(4000)
-	st.seedNeutralizedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, H, clk.now())
+	const H = uint64(5000)
+	for _, b := range []uint64{4900, H} {
+		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
+		st.seedAnchor(engine, b, blockHashAt(b))
+	}
 	st.cursor, st.cursorFound = H, true
-	// The chain would happily confirm the height — the poller simply has nothing to
-	// compare its answer with.
-	canonicalAt(ch, H, 5200)
+	deep := uint64(100)
+	st.rewindDeepTo = &deep
+	canonicalAt(ch, 4900)
+	ch.setHash(H, common.HexToHash("0xdead"))
+	st.unacked = true
+	p.lastAttempt = clk.now()
 
 	advanced, err := p.Step(context.Background())
 	require.NoError(t, err)
-	require.True(t, advanced)
-
-	require.Empty(t, st.revalidated, "no provenance, no recovery")
-	require.False(t, st.rows[0].valid)
-	require.Equal(t, store.InvalidReasonUnverifiableReorg, st.rows[0].invalidReason)
-	require.NotContains(t, ch.hashCalls, H,
-		"and it is not even probed: a candidate with no anchor never reaches the chain")
-
-	backlog, known := p.NeutralizedBacklog()
-	require.True(t, known)
-	require.Equal(t, int64(1), backlog.Rows,
-		"it stays in the backlog, which is where an irrecoverable row belongs")
+	require.False(t, advanced)
+	require.Empty(t, st.neutralized, "zero configured endpoints is a misconfiguration, not a ratified fleet of one")
+	require.Contains(t, pollConditions(p), ConditionPollRewindBlocked)
+	for _, r := range st.rows {
+		require.True(t, r.valid)
+	}
 }
 
-// D-011 CLAUSE 8: A CLEARED ACUTE SIGNAL MUST NOT HIDE A HISTORICAL GAP.
+// D-012 CLAUSE 6: A CLEARED ACUTE SIGNAL MUST NOT HIDE THE HISTORICAL CLASSIFICATION.
 //
 // The acute conditions are all about the HEAD. ConditionPollInvalidAnswer clears the
 // moment a valid observation lands for an asset; the round and block-advance
 // conditions clear when a round commits. None of them can see a stretch of unreadable
-// history below the frontier, so a poller that neutralized rows and then resumed
-// polling normally reads entirely healthy while the gap is still there — which was the
-// second half of Codex round 6's finding.
+// history below the frontier, so a poller that classified rows and then resumed
+// polling normally reads entirely healthy while the gap is still there.
 //
-// Two things are asserted, and the second is why this is not merely a restatement of
-// the wave-6 accessor. The count SURVIVES the acute recovery, and it is CURRENT: the
-// round supersedes one of the marked rows, and the number the poller reports afterwards
-// is the one the store now holds rather than the one hydration read.
+// Three things are asserted. The count SURVIVES the acute recovery; it is CURRENT —
+// the round supersedes one of the marked rows and the number follows, rather than
+// staying at what hydration read; and the recount happened because the STORE reported
+// a supersede, which is the same clause's cost bound (see the sibling test below for
+// the negative half).
 func TestPollerNeutralizedBacklogSurvivesAndIsRefreshedByANewerRound(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
@@ -2021,6 +1939,73 @@ func TestPollerNeutralizedBacklogSurvivesAndIsRefreshedByANewerRound(t *testing.
 
 	require.False(t, st.rows[0].valid, "the unanchored row really is still marked")
 	require.Equal(t, store.InvalidReasonUnverifiableReorg, st.rows[0].invalidReason)
+
+	// AND THE RECOUNT WAS EARNED. One read at hydration, one after the round that
+	// actually superseded a row. Wave 7 would have produced the same NUMBER by
+	// re-reading unconditionally; clause 6 requires the number without the standing
+	// cost, so the call count is part of the contract.
+	require.Equal(t, 2, st.neutralizedStatsCalls,
+		"hydration, then exactly one recount for the supersede the store reported")
+}
+
+// D-012 CLAUSE 6, THE COST BOUND: an ordinary landed round must NOT recount the
+// backlog, even while a backlog exists.
+//
+// This is Codex round 7's [medium] as a property rather than as a fix. The clause:
+// "the stats surface must be cheap — its cost may not scale with total price
+// history". NeutralizedPriceStats has no index carrying invalid_reason, and polled
+// rows are never deleted, so wave 7's rule ("re-read after every landed round while a
+// backlog remains") bought a full-history scan every 60 seconds forever on the
+// strength of ONE permanently classified row. The cost depended on total history, not
+// on backlog size.
+//
+// With the online drain removed (clause 3) the number can only move on two events:
+// a neutralization, and a round that superseded a marked row. So the rule is now "ask
+// the database only when the database says it changed", and this test asserts the
+// silent case — the one that used to cost the most, because it is the steady state.
+//
+// The negative assertion is paired with a positive one so it cannot pass by the
+// recount being broken outright: the sibling test above shows the same poller DOES
+// recount when a supersede lands.
+func TestPollerDoesNotRecountTheBacklogOnAnOrdinaryRound(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// A NON-EMPTY backlog at a height nothing will ever revisit — the steady state
+	// that made wave 7's rule expensive.
+	st.seedNeutralizedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4000, clk.now())
+	st.cursor, st.cursorFound = 4000, true
+	canonicalAt(ch, 5000, 5100, 5200)
+
+	require.NoError(t, p.hydrate(context.Background()))
+	require.Equal(t, 1, st.neutralizedStatsCalls, "hydration reads it once")
+	backlog, known := p.NeutralizedBacklog()
+	require.True(t, known)
+	require.Equal(t, int64(1), backlog.Rows)
+
+	// Three ordinary rounds at fresh heights. None of them touches a classified row,
+	// so none of them can change the count.
+	for i, block := range []uint64{5000, 5100, 5200} {
+		ch.respond = okRound(t, block, 20, int64(1_000_000+i))
+		clk.advance(2 * time.Minute)
+		advanced, err := p.Step(context.Background())
+		require.NoError(t, err)
+		require.True(t, advanced)
+		require.Equal(t, block, st.lastBatch(t).through, "round %d landed at its own height", i)
+	}
+	require.Equal(t, uint64(5200), st.cursor, "the rounds really landed")
+
+	require.Equal(t, 1, st.neutralizedStatsCalls,
+		"three landed rounds, zero recounts: the aggregate is paid for on transitions, not on the cadence (D-012 clause 6)")
+
+	// AND THE NUMBER IS STILL REPORTED. Frugality must not become silence: the
+	// classification the operator needs to see is exactly as visible as before.
+	backlog, known = p.NeutralizedBacklog()
+	require.True(t, known)
+	require.Equal(t, int64(1), backlog.Rows)
+	require.Equal(t, uint64(4000), backlog.HighestBlock)
 }
 
 // D-010 clause 1, STRUCTURALLY: the poller's store surface carries no deletion
@@ -2038,6 +2023,20 @@ func TestPollStoreHasNoDeletionPrimitive(t *testing.T) {
 	feedStore := reflect.TypeOf((*FeedStore)(nil)).Elem()
 	_, ok := feedStore.MethodByName("RewindPrices")
 	require.True(t, ok, "the event-derived feed path keeps its rewind: raw_logs makes it replayable")
+
+	// D-012 CLAUSE 3, THE SAME WAY: the online revalidation subsystem is not on this
+	// surface either. Clause 3 removes it outright — "neutralization is a permanent
+	// classification in the running system" — and the two methods D-011 introduced are
+	// named so that re-adding either one fails here rather than quietly restoring the
+	// machinery that hosted both of Codex round 7's criticals.
+	for _, gone := range []string{"RevalidateNeutralizedPrices", "NeutralizedPriceAnchors"} {
+		_, present := pollStore.MethodByName(gone)
+		require.False(t, present,
+			"%s is the online revalidation D-012 clause 3 removes; restoring it needs a decision, not a method", gone)
+	}
+	// Clause 6 keeps the classification VISIBLE even though clause 3 removes the repair.
+	_, ok = pollStore.MethodByName("NeutralizedPriceStats")
+	require.True(t, ok, "the gap must stay countable (D-012 clause 6)")
 }
 
 // A1: adoption is REFUSED while a reorg epoch is pending, at the store as well as
