@@ -143,13 +143,16 @@ func TestPendingEpochWithUnanchoredHistoryHasATerminatingTransition(t *testing.T
 	require.NoError(t, err)
 	require.True(t, adopted)
 
-	// BUT NOT AT A NEUTRALIZED HEIGHT, and this refusal is new with D-011 clause 6.
-	// The rows at 5000 were just declared unplaceable. Adopting the chain's CURRENT
-	// hash there and then letting RevalidateNeutralizedPrices check the chain against
-	// it would be checking the chain against a copy of itself, silently restoring rows
-	// on a proof of nothing. Under D-010 the same adoption was harmless because
-	// nothing could un-mark a row; giving marking an undo is what turns it into a
-	// hazard, so the undo and this gate arrive together.
+	// BUT NOT AT A NEUTRALIZED HEIGHT (D-012 clause 2). The rows at 5000 were just
+	// declared unplaceable. Adopting the chain's CURRENT hash there would write
+	// provenance this engine never witnessed at a height whose anchor clause 2 retains
+	// FOREVER as the input a future offline reconciliation would trust — and that tool
+	// would then be checking the chain against a hash copied from itself.
+	//
+	// The gate arrived with D-011's online revalidation pass and OUTLIVES it: clause 3
+	// removed the consumer, but the hazard lives in the fabricated anchor, which is
+	// permanent. A test that dropped this assertion with the pass would have quietly
+	// re-opened it.
 	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, PollAnchor{BlockNumber: 5000, BlockHash: hash32(0x50)})
 	require.ErrorContains(t, err, "NEUTRALIZED as unplaceable")
 	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
