@@ -149,6 +149,15 @@ type fakePriceStore struct {
 	// neutralizedStatsErr fails the backlog count. It is a read that must NOT be
 	// able to take hydration (and with it the freshness verdict) down with it.
 	neutralizedStatsErr error
+	// neutralizedAnchorsErr / revalidateErr fail the two halves of the D-011
+	// clause-6 recovery path. Neither may break a round: revalidation is an
+	// improvement to already-marked rows, never a precondition for polling.
+	neutralizedAnchorsErr error
+	revalidateErr         error
+	// revalidated records every RevalidateNeutralizedPrices call that actually
+	// restored rows, by block, so a test can prove WHICH past heights were recovered
+	// rather than only that the count moved.
+	revalidated []uint64
 	// neutralized records every NeutralizeUnverifiablePrices call, so a test can
 	// tell "acked without deleting" from "deleted" — the distinction the
 	// pending-epoch legacy state turns on.
@@ -455,18 +464,44 @@ func (f *fakePriceStore) PollAnchorsBelow(_ context.Context, engine string, _ ui
 	return out, nil
 }
 
+// NewestPollAnchor mirrors the real read's FRONTIER scope: the newest anchor whose
+// round is still USABLE, so heights carrying neutralized rows are skipped.
+//
+// The exclusion has to be modelled here because D-011 clause 5 stopped
+// NeutralizeUnverifiablePrices from deleting those anchors. Before that, the
+// exclusion was implicit — the anchor was gone — and a fake that kept the old
+// unconditional "highest anchor" answer would report a frontier the real store no
+// longer reports, hiding a spurious block-advance stall and a misclassified cursor
+// regression behind a green test.
 func (f *fakePriceStore) NewestPollAnchor(_ context.Context, engine string, _ uint64) (store.StoredPollAnchor, bool, error) {
 	if f.anchorReadErr != nil {
 		return store.StoredPollAnchor{}, false, f.anchorReadErr
 	}
+	neutralized := f.neutralizedHeights(engine)
 	var best store.StoredPollAnchor
 	found := false
 	for _, a := range f.anchors[engine] {
+		if neutralized[a.BlockNumber] {
+			continue
+		}
 		if !found || a.BlockNumber > best.BlockNumber {
 			best, found = a, true
 		}
 	}
 	return best, found, nil
+}
+
+// neutralizedHeights is the set of this engine's blocks carrying at least one row
+// with the reorg marker — the join both the frontier read and the revalidation
+// candidate read are scoped by in the real store.
+func (f *fakePriceStore) neutralizedHeights(engine string) map[uint64]bool {
+	out := map[uint64]bool{}
+	for _, r := range f.rows {
+		if r.owner == engine && r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			out[r.block] = true
+		}
+	}
+	return out
 }
 
 func (f *fakePriceStore) CountOwnedPricesAbove(_ context.Context, engine string, _ uint64, above uint64) (int64, error) {
@@ -555,9 +590,16 @@ func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _
 }
 
 // NeutralizeUnverifiablePrices models the real transaction: RETAIN every row above
-// the effective target and mark it, drop the anchors above it, reset the cursor and
-// ack. Nothing is deleted — a fake that deleted here could not distinguish this
+// the effective target and mark it, RETAIN the anchors above it too, reset the cursor
+// and ack. Nothing is deleted — a fake that deleted here could not distinguish this
 // path from a rewind, which is the whole point of the distinction.
+//
+// D-011 CLAUSE 5 IS MODELLED BY THE ABSENCE OF AN ANCHOR SWEEP. Wave 6's version
+// dropped the anchors above the boundary, mirroring the store as it then was. That
+// deletion is what made the marking permanent — a revalidation has nothing to check a
+// row against once its round's block hash is gone — so a fake that still dropped them
+// would make the clause-6 recovery untestable and, worse, would let it look correct
+// while never being reachable in production.
 func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error) {
 	if f.neutralizeErr != nil {
 		return 0, 0, f.neutralizeErr
@@ -583,14 +625,6 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 		r.valid, r.invalidReason = false, store.InvalidReasonUnverifiableReorg
 		marked++
 	}
-	var keptAnchors []store.StoredPollAnchor
-	for _, a := range f.anchors[engine] {
-		if a.BlockNumber > target {
-			continue
-		}
-		keptAnchors = append(keptAnchors, a)
-	}
-	f.anchors[engine] = keptAnchors
 	f.unacked = false // the ack is part of the same transaction
 	if f.repairLeavesNoCursor {
 		f.cursorFound = false
@@ -626,6 +660,87 @@ func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string,
 	return out, nil
 }
 
+// NeutralizedPriceAnchors mirrors the real join: heights where this engine holds
+// marked rows AND still holds the anchor recording the block that round ran at,
+// OLDEST FIRST.
+//
+// The join is the load-bearing part. A marked height whose anchor is missing must not
+// appear — there is nothing to check it against — and modelling that is what makes a
+// test able to show the difference between "clause 5 retained the provenance" and
+// "clause 5 was skipped and recovery silently does nothing".
+func (f *fakePriceStore) NeutralizedPriceAnchors(_ context.Context, engine string, _ uint64, limit int) ([]store.NeutralizedPriceAnchor, error) {
+	if f.neutralizedAnchorsErr != nil {
+		return nil, f.neutralizedAnchorsErr
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+	rowsAt := map[uint64]int64{}
+	for _, r := range f.rows {
+		if r.owner == engine && r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			rowsAt[r.block]++
+		}
+	}
+	var out []store.NeutralizedPriceAnchor
+	for _, a := range f.anchors[engine] {
+		n, marked := rowsAt[a.BlockNumber]
+		if !marked {
+			continue
+		}
+		out = append(out, store.NeutralizedPriceAnchor{
+			BlockNumber: a.BlockNumber, BlockHash: a.BlockHash, Rows: n,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BlockNumber < out[j].BlockNumber })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// RevalidateNeutralizedPrices mirrors the real UPDATE's predicate, including the arm
+// that makes the caller's proof non-negotiable: rows are restored only where the
+// supplied hash EQUALS THE RECORDED ANCHOR at that height. A fake that took the
+// caller's word would let a poller bug that revalidated on the wrong hash — or with no
+// surviving anchor at all — pass as correct recovery.
+//
+// observed_at is deliberately NOT re-stamped, exactly as in the store: this is a new
+// proof about an old observation, not a new observation, and re-stamping would
+// falsify both the row's freshness and the backlog age D-011 clause 8 reports.
+func (f *fakePriceStore) RevalidateNeutralizedPrices(_ context.Context, engine string, _ uint64, block uint64, provenHash []byte) (int64, error) {
+	if f.revalidateErr != nil {
+		return 0, f.revalidateErr
+	}
+	anchored := false
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber == block && string(a.BlockHash) == string(provenHash) {
+			anchored = true
+			break
+		}
+	}
+	if !anchored {
+		return 0, nil
+	}
+	var restored int64
+	for i := range f.rows {
+		r := &f.rows[i]
+		if r.owner != engine || r.block != block || r.invalidReason != store.InvalidReasonUnverifiableReorg {
+			continue
+		}
+		r.valid, r.invalidReason = true, ""
+		restored++
+	}
+	if restored > 0 {
+		f.revalidated = append(f.revalidated, block)
+	}
+	return restored, nil
+}
+
+// UnanchoredPriceBlocks mirrors the real read, INCLUDING its exclusion of heights
+// that carry neutralized rows. Adopting an anchor there would record the chain's
+// current hash and let revalidation "prove" the height by comparing the chain with a
+// copy of itself; the fake has to model the exclusion or a test would certify that
+// circular restore as working recovery.
 func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
 	if f.anchorReadErr != nil {
 		return nil, f.anchorReadErr
@@ -634,10 +749,11 @@ func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string,
 	for _, a := range f.anchors[engine] {
 		anchored[a.BlockNumber] = true
 	}
+	neutralized := f.neutralizedHeights(engine)
 	seen := map[uint64]bool{}
 	var out []uint64
 	for _, r := range f.rows {
-		if r.owner != engine || anchored[r.block] || seen[r.block] {
+		if r.owner != engine || anchored[r.block] || seen[r.block] || neutralized[r.block] {
 			continue
 		}
 		seen[r.block] = true
@@ -650,9 +766,12 @@ func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string,
 	return out, nil
 }
 
-// AdoptPollAnchor models the real call's two refusals — no owned row at that
-// block, and a pending reorg epoch — because both are the safety argument for
-// adopting a hash the round never witnessed.
+// AdoptPollAnchor models the real call's THREE refusals — no owned row at that
+// block, a pending reorg epoch, and a height carrying neutralized rows — because
+// each one is a separate half of the safety argument for adopting a hash the round
+// never witnessed. The third is the D-011 clause-6 circularity gate: without it,
+// adoption manufactures the very provenance revalidation is supposed to check
+// against.
 func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uint64, a store.PollAnchor) (bool, error) {
 	if f.adoptErr != nil {
 		return false, f.adoptErr
@@ -660,15 +779,21 @@ func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uin
 	if f.unacked {
 		return false, fmt.Errorf("engine %q has an unacknowledged reorg epoch: refusing to adopt an anchor", engine)
 	}
-	owned := false
+	owned, neutralized := false, false
 	for _, r := range f.rows {
-		if r.owner == engine && r.block == a.BlockNumber {
-			owned = true
-			break
+		if r.owner != engine || r.block != a.BlockNumber {
+			continue
+		}
+		owned = true
+		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
+			neutralized = true
 		}
 	}
 	if !owned {
 		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there", engine, a.BlockNumber)
+	}
+	if neutralized {
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: rows there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would let revalidation check the chain against a copy of itself", engine, a.BlockNumber)
 	}
 	for _, ex := range f.anchors[engine] {
 		if ex.BlockNumber == a.BlockNumber {
@@ -733,6 +858,18 @@ func (f *fakePriceStore) seedInvalidRow(owner string, asset []byte, source strin
 	f.rows = append(f.rows, fakeRow{
 		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,
 		valid: false, invalidReason: "non-positive oracle answer",
+	})
+}
+
+// seedNeutralizedRow inserts a row a PREVIOUS reorg repair marked: retained,
+// unreadable, carrying InvalidReasonUnverifiableReorg. It is the durable shape
+// D-011 clause 6's recovery acts on and clause 8's count reports, and it is
+// deliberately distinct from seedInvalidRow's non-positive quarantine — the two
+// reasons are treated differently by every predicate that matters.
+func (f *fakePriceStore) seedNeutralizedRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
+	f.rows = append(f.rows, fakeRow{
+		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,
+		valid: false, invalidReason: store.InvalidReasonUnverifiableReorg,
 	})
 }
 

@@ -627,14 +627,35 @@ func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine str
 // engine. Bounded growth is the point: anchors exist to answer "was this round's
 // block replaced", a question that only has operational meaning within reorg
 // depth of the head.
+//
+// EXCEPT WHERE THE ANCHOR IS THE ONLY PATH BACK (D-011 clause 5). An anchor at a
+// height carrying NEUTRALIZED rows is not stale provenance, it is the sole evidence
+// RevalidateNeutralizedPrices can restore those rows from — the poller reads only
+// `latest`, so no fresh observation will ever arrive at that height to supersede
+// them. Ageing it out would silently convert a recoverable marking into a permanent
+// one, which is precisely the defect D-011 corrects; a retention bound that expires
+// the recovery path is a slow version of deleting the anchor outright.
+//
+// The exemption is SELF-LIMITING rather than unbounded: it holds a height only while
+// that height still has a marked row, and a successful revalidation (or a fresh
+// observation superseding the row) clears the marker and hands the anchor back to
+// the ordinary bound. What it can accumulate is genuinely-orphaned rounds, whose
+// blocks no longer exist and which therefore never revalidate — the same pile
+// NeutralizedPriceStats already counts, one anchor row per marked height, and the
+// accepted cost D-010 named made durable instead of quietly discarded.
 func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
-	if _, err := tx.Exec(ctx, `DELETE FROM price_poll_anchors
-		WHERE engine = $1 AND block_number < (
+	if _, err := tx.Exec(ctx, `DELETE FROM price_poll_anchors a
+		WHERE a.engine = $1 AND a.block_number < (
 			SELECT MIN(block_number) FROM (
 				SELECT block_number FROM price_poll_anchors WHERE engine = $1
 				ORDER BY block_number DESC LIMIT $2
 			) keep
-		)`, engine, pollAnchorRetention); err != nil {
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM prices p
+			WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
+			  AND p.block_number = a.block_number AND p.invalid_reason = $3
+		)`, engine, pollAnchorRetention, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("prune poll anchors for %q: %w", engine, err)
 	}
 	return nil
@@ -678,19 +699,41 @@ func (s *Store) PollAnchorsBelow(ctx context.Context, engine string, chainID, be
 	return out, nil
 }
 
-// NewestPollAnchor returns engine's highest recorded anchor, with the database
-// timestamp of the row's insertion. found=false when the engine has never
-// anchored a round (or retention has removed every anchor).
+// NewestPollAnchor returns engine's highest anchor whose round is still USABLE,
+// with the database timestamp of the row's insertion. found=false when the engine
+// has never anchored a round (or retention has removed every anchor, or every
+// surviving anchor sits at a neutralized height).
 //
 // The timestamp is the DURABLE reference for "when did this engine last observe
 // a NEW execution block". A poller hydrates its block-advance clock from it at
 // startup, so a restart cannot grant a frozen RPC path a fresh window.
+//
+// WHY NEUTRALIZED HEIGHTS ARE EXCLUDED. This is the FRONTIER read — "the newest
+// round we still stand behind" — and it has two consumers that both need that
+// meaning: the block-advance health clock, and the regression classifier, which
+// re-probes this anchor to decide whether the poller's own cursor still has
+// canonical ancestry. Before D-011 clause 5 the exclusion was implicit, because
+// NeutralizeUnverifiablePrices deleted the anchors it marked rows at. Now those
+// anchors survive as provenance, so the exclusion has to be stated: without it a
+// deep reorg would leave the newest anchor pointing at an orphaned height with an
+// old timestamp, permanently tripping the block-advance condition and making every
+// later cursor regression look like a fresh reorg. Retention of provenance must not
+// change what the frontier MEANS.
+//
+// A height that revalidates loses its marker and returns to this read on its own,
+// which is the correct behaviour: the round is usable again, so it is once more the
+// newest thing this engine stands behind.
 func (s *Store) NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (StoredPollAnchor, bool, error) {
 	var a StoredPollAnchor
 	err := s.pool.QueryRow(ctx,
-		`SELECT block_number, block_hash, observed_at FROM price_poll_anchors
-		 WHERE engine = $1 AND chain_id = $2 ORDER BY block_number DESC LIMIT 1`,
-		engine, chainID).Scan(&a.BlockNumber, &a.BlockHash, &a.ObservedAt)
+		`SELECT a.block_number, a.block_hash, a.observed_at FROM price_poll_anchors a
+		 WHERE a.engine = $1 AND a.chain_id = $2
+		   AND NOT EXISTS (
+		     SELECT 1 FROM prices p
+		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
+		       AND p.block_number = a.block_number AND p.invalid_reason = $3)
+		 ORDER BY a.block_number DESC LIMIT 1`,
+		engine, chainID, InvalidReasonUnverifiableReorg).Scan(&a.BlockNumber, &a.BlockHash, &a.ObservedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return StoredPollAnchor{}, false, nil
 	}
@@ -873,9 +916,9 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 //     can do clears it — repair needs an anchor, adoption needs the ack, the ack
 //     needs repair. A refusal no path can clear is an outage, not safety.
 //   - NEUTRALIZE (this): the rows are RETAINED and marked
-//     InvalidReasonUnverifiableReorg, so no usable-price read can return them and
-//     no later repair can "verify" them; the anchors above the target are dropped
-//     with the rows they would have blessed; the cursor is reset and every epoch
+//     InvalidReasonUnverifiableReorg, so no usable-price read can return them; their
+//     ANCHORS ARE RETAINED TOO, because the recorded block hash is the only thing a
+//     later revalidation can check them against; the cursor is reset and every epoch
 //     is acked, in ONE transaction. Nothing is destroyed, nothing unverifiable can
 //     be read, and ingestion resumes.
 //
@@ -893,11 +936,17 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 // reach a conclusion on complete evidence from one chain view rather than marking
 // whenever it is unsure (D-010 clause 2, internal/prices.Poller.verifyFloor).
 //
-// There is no un-neutralize on re-interpretation: nothing anywhere flips the marker
-// back on the strength of a later opinion about the same recorded value. The ONE way
-// a marked row becomes usable again is a FRESH OBSERVATION at the same
-// (chain, asset, source, block) identity, which insertPrice treats as superseding it
-// — a new durable fact replacing an unplaceable one, not a re-reading of the old.
+// THERE IS NO UN-NEUTRALIZE ON RE-INTERPRETATION: nothing anywhere flips the marker
+// back on the strength of a later opinion about the same recorded value. Exactly two
+// things clear it, and both are NEW EVIDENCE rather than a new reading of the old:
+//
+//   - a FRESH OBSERVATION at the same (chain, asset, source, block) identity, which
+//     insertPrice treats as superseding the marked row;
+//   - a HASH MATCH at the row's own recorded anchor, which RevalidateNeutralizedPrices
+//     requires and the caller must have just read from the live chain. That is the
+//     path D-011 clause 6 exists for: the poller only ever polls `latest`, so a fresh
+//     observation can never land at a height the head has already passed, and without
+//     revalidation every wrongly-marked PAST height stayed marked forever.
 //
 // verifiedFloor is honoured exactly as RewindPrices honours it: history at or below
 // an INDEPENDENTLY hash-verified block is provably canonical, so it keeps its
@@ -962,15 +1011,25 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	}
 	quarantined = ct.RowsAffected()
 
-	// The anchors above the target described rounds whose rows are now marked
-	// unusable. Keeping them would let a later repair hash-verify a height whose
-	// row this call declared unplaceable, which is the opposite of what the marker
-	// means.
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM price_poll_anchors WHERE engine = $1 AND block_number > $2`,
-		engine, effectiveTarget); err != nil {
-		return 0, 0, fmt.Errorf("delete poll anchors for %q above %d: %w", engine, effectiveTarget, err)
-	}
+	// THE ANCHORS ABOVE THE BOUNDARY ARE KEPT (D-011 clause 5). This call used to
+	// DELETE them, reasoning that an anchor outliving its round's usability would
+	// let a later repair "verify" a height this call declared unplaceable. That
+	// reasoning inverted the anchor's role. The anchor is not a blessing, it is the
+	// PROVENANCE — the hash of the block the round actually executed against — and
+	// it is the only thing from which "was that block canonical after all?" can ever
+	// be answered. Deleting it made the marking permanent: D-010 justified marking
+	// over deleting on the grounds that marking is recoverable, and destroying the
+	// provenance is exactly what removed the recovery. RevalidateNeutralizedPrices
+	// consumes these rows; it can restore nothing at a height whose anchor is gone.
+	//
+	// Nothing here re-reads them as a licence. PollAnchorsBelow is scoped at or below
+	// the cursor, which this transaction resets to effectiveTarget, so the retained
+	// anchors sit above every height a repair pass looks at until fresh polls carry
+	// the cursor back over them — and by then a match at one of them is a true
+	// statement about the live chain, which is what a floor is supposed to mean.
+	// NewestPollAnchor separately excludes neutralized heights, so the FRONTIER reads
+	// (block-advance health, regression attribution) keep the semantics the deletion
+	// gave them. Deletion was doing two jobs; only the second one was right.
 
 	// The conflict arm never touches chain_id, exactly as in RewindPrices.
 	if _, err := tx.Exec(ctx, `INSERT INTO derive_cursors (engine, chain_id, last_block, acked_epoch, updated_at)
@@ -995,10 +1054,17 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 // backlog: rows NeutralizeUnverifiablePrices marked rather than deleted.
 //
 // It exists because the policy that keeps those rows has an accepted cost and the
-// cost has to be countable (D-010 clause 4). Nothing retires them today — a
-// reconciliation that re-verified or dropped them is explicitly a later concern —
-// so the pile only grows, at a rate set by poll cadence and reorg frequency. An
-// operator who cannot see it cannot tell a handful of rows from a runaway.
+// cost has to be countable (D-010 clause 4, carried forward by D-011). The pile now
+// DRAINS as well as grows — RevalidateNeutralizedPrices retires every entry whose
+// block turns out to still be canonical — so what remains after a drain is the
+// genuinely-orphaned residue, and an operator who cannot see it cannot tell a
+// handful of rows from a runaway.
+//
+// D-011 clause 8 is why the number must survive a recovery of the ACUTE signal: a
+// newer poll clears ConditionPollInvalidAnswer for the assets it prices, and that
+// says nothing whatever about the heights below it that are still unreadable. This
+// count is scoped to the marker, not to the head, so it keeps reporting the
+// historical gap after the current path is healthy again.
 //
 // Oldest/Newest are zero when Rows is 0.
 type NeutralizedPriceStats struct {
@@ -1012,9 +1078,9 @@ type NeutralizedPriceStats struct {
 // InvalidReasonUnverifiableReorg marker, with the observation times of the oldest
 // and newest and the highest block among them.
 //
-// It is a plain read: it decides nothing and gates nothing. The marker is exact
-// (insertPrice's supersede arm is the only thing that clears it, by replacing the
-// row with a fresh observation at the same identity), so this counts marked rows
+// It is a plain read: it decides nothing and gates nothing. The marker is exact —
+// exactly two paths clear it, insertPrice's supersede arm and
+// RevalidateNeutralizedPrices, and both write the row — so this counts marked rows
 // rather than estimating them.
 func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (NeutralizedPriceStats, error) {
 	var out NeutralizedPriceStats
@@ -1039,6 +1105,182 @@ func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainI
 	return out, nil
 }
 
+// NeutralizedPriceAnchor is one candidate for revalidation: a height where this
+// engine holds neutralized rows AND still holds the anchor recording the hash of
+// the block that round executed against.
+//
+// Both halves are required and neither is optional. The rows are what is lost; the
+// anchor is the only thing that can be checked against the live chain to get them
+// back. A neutralized height with no surviving anchor simply never appears here —
+// there is nothing to check — which is why D-011 clause 5 forbids deleting anchors
+// during neutralization in the first place.
+type NeutralizedPriceAnchor struct {
+	BlockNumber uint64
+	BlockHash   []byte
+	Rows        int64
+}
+
+// NeutralizedPriceAnchors lists the revalidation candidates for engine, OLDEST
+// FIRST, capped at limit.
+//
+// OLDEST FIRST IS DELIBERATE. A caller can only afford a few probes per Step, so
+// some candidates always wait; the ones that have waited longest are the ones the
+// backlog's reported AGE (NeutralizedPriceStats.Oldest) is measuring. Draining in
+// that order makes that number a true measure of progress instead of one that never
+// moves while the head of the pile is serviced repeatedly. The newest-first
+// alternative would restore the most operationally useful prices first and leave the
+// age metric permanently pinned to a row nothing ever reaches.
+//
+// This is a plain read: it proposes work, and proves nothing. The hash it returns is
+// what was RECORDED, never what the chain says now — deciding whether the two agree
+// is the caller's job, and RevalidateNeutralizedPrices re-checks the recorded half
+// again inside its own transaction so a caller cannot restore rows by supplying a
+// hash of its own invention.
+func (s *Store) NeutralizedPriceAnchors(ctx context.Context, engine string, chainID uint64, limit int) ([]NeutralizedPriceAnchor, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`SELECT a.block_number, a.block_hash, count(*)
+		   FROM price_poll_anchors a
+		   JOIN prices p
+		     ON p.owner_engine = a.engine AND p.chain_id = a.chain_id
+		    AND p.block_number = a.block_number
+		  WHERE a.engine = $1 AND a.chain_id = $2 AND p.invalid_reason = $3
+		  GROUP BY a.block_number, a.block_hash
+		  ORDER BY a.block_number ASC
+		  LIMIT $4`,
+		engine, chainID, InvalidReasonUnverifiableReorg, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read neutralized poll anchors for %q on chain %d: %w", engine, chainID, err)
+	}
+	defer rows.Close()
+	var out []NeutralizedPriceAnchor
+	for rows.Next() {
+		var a NeutralizedPriceAnchor
+		if err := rows.Scan(&a.BlockNumber, &a.BlockHash, &a.Rows); err != nil {
+			return nil, fmt.Errorf("scan neutralized poll anchor: %w", err)
+		}
+		out = append(out, a)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate neutralized poll anchors for %q: %w", engine, err)
+	}
+	return out, nil
+}
+
+// RevalidateNeutralizedPrices clears the reorg marker on engine's rows at one block,
+// on proof that the block the round executed against is STILL ON THE CHAIN.
+//
+// THIS IS D-011 CLAUSE 6, AND IT IS THE HALF D-010 ASSERTED WITHOUT BUILDING. D-010
+// preferred marking to deletion because marking "is recoverable", and pointed at
+// insertPrice's supersede arm as the recovery. That arm only fires when a FRESH
+// OBSERVATION lands at the same (chain, asset, source, block) identity — and the
+// poller reads only `latest`, so once the canonical head has passed height H no poll
+// will ever execute at H again. For every PAST height, the advertised recovery could
+// not fire. The marking was permanent while being justified by its reversibility.
+//
+// WHAT MAKES THIS ONE FIRE WHERE THAT ONE CANNOT. It asks a different question of a
+// different oracle. A price at H can only be re-read by executing at H, which this
+// system cannot do. But the ANCESTRY of H can be re-read at any time, from any
+// archive-free node, by asking for the header at H — and the round already wrote down
+// which block it executed against. So "is this row's block still canonical?" is
+// answerable for arbitrarily old H, and answering it yes is exactly the fact that
+// makes the row usable again. The value was never in doubt; only its placement was.
+//
+// THE PROOF IS CHECKED HERE, NOT TRUSTED FROM THE CALLER. provenHash is what the
+// caller just read from the live chain at that height, and the UPDATE fires only where
+// it EQUALS THE RECORDED ANCHOR. A caller cannot restore a row by inventing a hash,
+// cannot restore one whose anchor was pruned, and cannot restore one at a height it
+// never anchored — the predicate has no arm for any of those. The caller's remaining
+// obligation is the one the store cannot discharge: that provenHash really came from
+// the chain, and (D-011 clause 7) that more than one endpoint said so.
+//
+// SCOPE, stated because each exclusion is load-bearing:
+//
+//   - `invalid_reason = InvalidReasonUnverifiableReorg` — only reorg fallout is
+//     restored. A NON-POSITIVE answer carries a different reason and stays quarantined
+//     forever, which is correct: its block being canonical says nothing about a price
+//     of zero being usable.
+//   - `price > 0` — belt and braces against the prices_valid_is_positive CHECK. No row
+//     can hold the reorg marker without having been valid (and therefore positive) when
+//     it was marked, so this predicate can only ever be redundant; if it ever is not,
+//     the row stays marked instead of aborting the transaction on a constraint.
+//   - owner and chain scoping — another engine's rows at the same height are not this
+//     engine's to restore, and the anchor that proves the height belongs to this engine.
+//
+// It deliberately does NOT re-stamp observed_at. This is not a new observation of the
+// oracle; it is a new proof about an old one. The recorded value and the moment it was
+// read are unchanged, so re-stamping would falsify the freshness of a price nobody
+// re-read — and would corrupt the backlog age D-011 clause 8 exposes.
+//
+// It is also deliberately not gated on a pending reorg epoch, unlike AdoptPollAnchor.
+// Adoption WRITES provenance it did not witness, so a replacement block's hash could
+// be recorded as if it were the round's; this call only READS provenance that already
+// exists and requires the live chain to match it. A hash match at H is a direct proof
+// that H is canonical — strictly better evidence than the log-ancestry estimate a
+// walker rewind is derived from — so there is no epoch under which it becomes unsafe.
+// The poller still runs it only on the no-epoch path, for the state-machine reason
+// that repair returns early from a Step; that placement is convenience, not the
+// safety argument.
+//
+// Returns how many rows became usable again.
+func (s *Store) RevalidateNeutralizedPrices(ctx context.Context, engine string, chainID, block uint64, provenHash []byte) (int64, error) {
+	if engine == "" {
+		return 0, fmt.Errorf("price revalidation: engine is required (it is the ownership scope)")
+	}
+	if len(provenHash) != 32 {
+		return 0, fmt.Errorf("price revalidation for %q at %d: proven block hash is %d bytes, want 32",
+			engine, block, len(provenHash))
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var storedChain uint64
+	if err := tx.QueryRow(ctx, `SELECT chain_id FROM derive_cursors WHERE engine = $1`, engine).Scan(&storedChain); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, fmt.Errorf("price revalidation for %q: no derive cursor, so this engine owns no history to revalidate", engine)
+		}
+		return 0, fmt.Errorf("read derive cursor for %q: %w", engine, err)
+	}
+	if storedChain != chainID {
+		return 0, fmt.Errorf("%w: engine %q is bound to chain %d, refusing price revalidation for chain %d",
+			ErrDeriveCursorChainMismatch, engine, storedChain, chainID)
+	}
+
+	ct, err := tx.Exec(ctx, `UPDATE prices p
+		SET valid = TRUE, invalid_reason = ''
+		WHERE p.chain_id = $1 AND p.owner_engine = $2 AND p.block_number = $3
+		  AND p.invalid_reason = $4 AND p.price > 0
+		  AND EXISTS (
+		    SELECT 1 FROM price_poll_anchors a
+		    WHERE a.engine = $2 AND a.chain_id = $1
+		      AND a.block_number = $3 AND a.block_hash = $5)`,
+		chainID, engine, block, InvalidReasonUnverifiableReorg, provenHash)
+	if err != nil {
+		return 0, fmt.Errorf("revalidate neutralized prices owned by %q at %d: %w", engine, block, err)
+	}
+	restored := ct.RowsAffected()
+	if restored == 0 {
+		// Not an error. The height may have been revalidated already, its anchor may
+		// disagree with the hash the caller read, or the anchor may be gone. All three
+		// mean "nothing to restore here", and none of them is a reason to fail a pass
+		// that is servicing a whole page of candidates.
+		return 0, tx.Commit(ctx)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	slog.Warn("REVALIDATED polled prices that a reorg repair had neutralized: the block their round executed against is still on the canonical chain at that height, so the rows are usable again. Their recorded value and observation time are unchanged — this is a new proof about an old observation, not a new observation",
+		"engine", engine, "chain", chainID, "block", block,
+		"provenHash", fmt.Sprintf("%x", provenHash), "rowsRestored", restored)
+	return restored, nil
+}
+
 // UnanchoredPriceBlocks returns the distinct blocks where engine owns price rows
 // but has NO poll anchor, newest first, capped at limit.
 //
@@ -1047,6 +1289,14 @@ func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainI
 // can neither prove them canonical nor safely delete them — which is why the
 // poller adopts anchors for them proactively, while no reorg is pending. See
 // AdoptPollAnchor for why the timing matters.
+//
+// HEIGHTS CARRYING NEUTRALIZED ROWS ARE EXCLUDED, for the reason AdoptPollAnchor's
+// matching gate spells out: adopting the chain's current hash there would manufacture
+// a "proof" that RevalidateNeutralizedPrices would then accept, restoring rows on the
+// strength of the chain agreeing with a hash copied from itself. This query and that
+// gate say the same thing in two places on purpose — the query keeps the poller from
+// spending a probe on a candidate it must not adopt, and the gate is what makes the
+// property independent of the query.
 func (s *Store) UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error) {
 	if limit <= 0 {
 		return nil, nil
@@ -1057,8 +1307,12 @@ func (s *Store) UnanchoredPriceBlocks(ctx context.Context, engine string, chainI
 		   AND NOT EXISTS (
 		     SELECT 1 FROM price_poll_anchors a
 		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.block_number)
+		   AND NOT EXISTS (
+		     SELECT 1 FROM prices n
+		     WHERE n.chain_id = p.chain_id AND n.owner_engine = p.owner_engine
+		       AND n.block_number = p.block_number AND n.invalid_reason = $4)
 		 ORDER BY p.block_number DESC LIMIT $3`,
-		chainID, engine, limit)
+		chainID, engine, limit, InvalidReasonUnverifiableReorg)
 	if err != nil {
 		return nil, fmt.Errorf("read unanchored price blocks for %q: %w", engine, err)
 	}
@@ -1096,12 +1350,22 @@ func (s *Store) UnanchoredPriceBlocks(ctx context.Context, engine string, chainI
 //     same RPC trust as anchoring the round would have at the time.
 //   - It never overwrites: a divergent hash at an already-anchored height is
 //     ErrPollAnchorDivergence, as everywhere else.
+//   - IT REFUSES AT A HEIGHT CARRYING NEUTRALIZED ROWS. This gate is new with D-011
+//     clause 6 and it closes a circularity that clause would otherwise open. The
+//     bullet below has always said an adopted hash does not prove the rows were read
+//     at that block; while nothing could UN-mark a row that was a limitation, not a
+//     hazard. Now RevalidateNeutralizedPrices restores rows whose recorded anchor
+//     matches the live chain — so adopting the live hash at a marked height and then
+//     "verifying" against it would be checking the chain against a copy of itself and
+//     silently restoring rows a repair had just declared unplaceable. Provenance is
+//     witnessed at poll time or it does not exist; a marked height with none stays
+//     marked, which is the honest answer and the one NeutralizedPriceStats reports.
 //
 // WHAT IT DOES NOT DO: it does not prove the adopted block is the one the rows
 // were read at. It cannot — that fact was never recorded. It establishes an
 // anchor from the chain as it stands now, which is strictly better than having
-// none, and the limitation is why the poller REFUSES to delete unanchored rows
-// rather than adopting during repair.
+// none for rows that are still USABLE, and the limitation is why the poller REFUSES
+// to delete unanchored rows rather than adopting during repair.
 func (s *Store) AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, a PollAnchor) (bool, error) {
 	if engine == "" {
 		return false, fmt.Errorf("adopt poll anchor: engine is required")
@@ -1140,15 +1404,20 @@ func (s *Store) AdoptPollAnchor(ctx context.Context, engine string, chainID uint
 			engine, ErrUnackedReorgEpoch, maxEpoch, chainID, ackedEpoch)
 	}
 
-	var owned int64
+	var owned, neutralized int64
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND block_number = $3`,
-		chainID, engine, a.BlockNumber).Scan(&owned); err != nil {
+		`SELECT count(*), count(*) FILTER (WHERE invalid_reason = $4)
+		   FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND block_number = $3`,
+		chainID, engine, a.BlockNumber, InvalidReasonUnverifiableReorg).Scan(&owned, &neutralized); err != nil {
 		return false, fmt.Errorf("count owned rows at %d for %q: %w", a.BlockNumber, engine, err)
 	}
 	if owned == 0 {
 		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there, refusing to anchor history it did not write",
 			engine, a.BlockNumber)
+	}
+	if neutralized > 0 {
+		return false, fmt.Errorf("adopt poll anchor for %q at %d: %d row(s) there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would let RevalidateNeutralizedPrices check the chain against a hash copied from that same chain — a proof of nothing. Provenance is witnessed at poll time or not at all",
+			engine, a.BlockNumber, neutralized)
 	}
 
 	_, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, a)

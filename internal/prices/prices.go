@@ -626,8 +626,17 @@ var _ PriceStore = (*store.Store)(nil)
 //     unacknowledged epoch) plus what lies above it; the second answers "is
 //     anything above this floor unprovable" for a candidate floor.
 //   - NeutralizeUnverifiablePrices is the ONLY way this writer answers an epoch:
-//     ack without deleting, marking the unprovable suffix unusable.
-//   - NeutralizedPriceStats makes the resulting backlog countable.
+//     ack without deleting, marking the unprovable suffix unusable — and, since
+//     D-011 clause 5, RETAINING the anchors that make the marking reversible.
+//   - NeutralizedPriceAnchors / RevalidateNeutralizedPrices are that reversal
+//     (D-011 clause 6). The first proposes heights whose rows are marked and whose
+//     provenance survives; the second restores them on proof that the recorded
+//     block is still canonical. They exist because the poller reads only `latest`:
+//     no fresh observation can ever land at a height the head has passed, so
+//     without them every wrongly-marked PAST height stayed marked forever, which
+//     is the false premise D-011 corrects in D-010.
+//   - NeutralizedPriceStats makes the resulting backlog countable, and keeps
+//     reporting it after newer polls have cleared the acute condition (clause 8).
 //   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
 //     rows written before this engine anchored its rounds.
 type PollStore interface {
@@ -639,6 +648,8 @@ type PollStore interface {
 	CountUnanchoredPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
 	NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error)
 	NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (store.NeutralizedPriceStats, error)
+	NeutralizedPriceAnchors(ctx context.Context, engine string, chainID uint64, limit int) ([]store.NeutralizedPriceAnchor, error)
+	RevalidateNeutralizedPrices(ctx context.Context, engine string, chainID, block uint64, provenHash []byte) (int64, error)
 	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
 	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }
