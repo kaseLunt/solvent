@@ -2,7 +2,8 @@
 id: D-008
 type: decision
 title: Serial-mode claim leases are non-binding accountability metadata
-status: accepted
+status: superseded
+superseded_by: D-009
 approved_by: "Kase Lunt (explicit delegation, 2026-07-24 session: \"i don't think we need 'timed leases' in the first place ... go with whatever will smoothe this out\")"
 date: 2026-07-25
 supersedes: []
