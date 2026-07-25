@@ -2,7 +2,8 @@
 id: D-010
 type: decision
 title: Polled price history is never deleted; unprovable rows are neutralized
-status: accepted
+status: superseded
+superseded_by: D-011
 approved_by: "Kase Lunt (explicit directive, 2026-07-25 session: \"go with the gold standard here, no shortcuts\")"
 date: 2026-07-25
 supersedes: []
