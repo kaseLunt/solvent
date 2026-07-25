@@ -2,7 +2,8 @@
 id: D-011
 type: decision
 title: Neutralization must be revalidatable; supersedes D-010
-status: accepted
+status: superseded
+superseded_by: D-012
 approved_by: "Kase Lunt (standing directive, 2026-07-25 session: \"go with the gold standard here, no shortcuts\")"
 date: 2026-07-25
 supersedes: [D-010]
