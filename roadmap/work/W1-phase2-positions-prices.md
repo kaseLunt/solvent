@@ -19,6 +19,7 @@ allowed_paths:
   - config/**
   - go.mod
   - go.sum
+  - .superpowers/sdd/**
   - roadmap/work/W1-phase2-positions-prices.md
 deliverables:
   - docs/plans/*solvent-phase2*.md
