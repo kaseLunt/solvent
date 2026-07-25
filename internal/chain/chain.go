@@ -185,6 +185,37 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 	return out, err
 }
 
+// HeaderTime returns the header TIMESTAMP (unix seconds) of block n, under
+// ordinary shared-path failover.
+//
+// It exists because a block DISTANCE is not an elapsed time. The daemon's
+// liquidation-facing freshness requirement is stated in time, and converting it
+// through a nominal block cadence (12s slots, 2s OP blocks) is a unit-conversion
+// fallacy: missed slots or degraded production make the same block count span
+// materially longer, so a distance gate can read green while the state served is
+// hours old. Measuring `now - ts(cursor block)` gates the property directly, and
+// the only place that timestamp exists is the header.
+//
+// It deliberately uses the SHARED path (do), not a caller-scoped walk: the
+// measurement is not a liveness probe that has to route around ingestion's
+// endpoint, and sharing the sticky hint means it rides the endpoint ingestion is
+// already using rather than warming a second one.
+func (f *Failover) HeaderTime(ctx context.Context, n uint64) (uint64, error) {
+	var out uint64
+	_, err := f.do(ctx, "headerTime", func(ctx context.Context, c rpcClient) error {
+		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		if err != nil {
+			return err
+		}
+		if h == nil {
+			return fmt.Errorf("header %d not found", n)
+		}
+		out = h.Time
+		return nil
+	})
+	return out, err
+}
+
 // Head is a chain head observation: the height, the header's own TIMESTAMP and
 // its hash. The timestamp is the part that makes a head observation
 // falsifiable — a node frozen on old state still answers eth_blockNumber with a

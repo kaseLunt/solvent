@@ -591,6 +591,10 @@ type fakeProgress struct {
 	// test can prove the daemon asks the store the same question the snapshotter does
 	// rather than assuming a budget of its own.
 	sweepBudgets []int
+	// sweepBounds records the collateral staleness bound each call was given, for the
+	// same reason: the bound is derived from the deployment's achieved cadence, and a
+	// test must be able to prove the derived value is what actually reaches the store.
+	sweepBounds []time.Duration
 }
 
 func (f *fakeProgress) IngestCursorProgress(context.Context) ([]store.CursorProgress, error) {
@@ -601,10 +605,83 @@ func (f *fakeProgress) DeriveCursorProgress(context.Context) ([]store.CursorProg
 	return f.derive, f.deriveErr
 }
 
-func (f *fakeProgress) SweepProgress(_ context.Context, engine string, maxAttempts int) (store.SweepProgress, bool, error) {
+func (f *fakeProgress) SweepProgress(_ context.Context, engine string, maxAttempts int, staleBound time.Duration) (store.SweepProgress, bool, error) {
 	f.sweepCalls = append(f.sweepCalls, engine)
 	f.sweepBudgets = append(f.sweepBudgets, maxAttempts)
+	f.sweepBounds = append(f.sweepBounds, staleBound)
 	return f.sweep, f.sweepFound, f.sweepErr
+}
+
+// ---------------------------------------------------------------------------
+// The block→time harness for the elapsed-time freshness gate.
+// ---------------------------------------------------------------------------
+
+// fakeHeaderTimes is the chain the staleness gate measures against: a
+// (chain, block) → header-timestamp table, per-chain failure injection, and a CALL
+// LOG.
+//
+// ITS SCHEDULE IS DELIBERATELY NONLINEAR, and that is the point of the harness
+// rather than a detail of it. A fake returning base + block×12s would make elapsed
+// time a strictly increasing linear function of block distance, so every test below
+// would pass equally well against the BLOCK-COUNT predicate this wave removes — the
+// tests would prove nothing about the change. This one models the real degradation
+// instead: a stretch of MISSED SLOTS in which the chain produced very few blocks
+// over a long wall-clock interval, so a small block distance spans a large elapsed
+// time. That is the arrangement in which the old gate read green and the state
+// served was hours old, and it is why seedMissedSlots exists.
+//
+// The CALL LOG carries the legs that are assertions about work NOT done: the
+// per-round memo, the cross-round retained stamp, the fetch cooldown and the
+// restamp throttle are all "no fetch happened here", which no verdict can express.
+type fakeHeaderTimes struct {
+	// at maps (chain, block) → header timestamp in unix seconds.
+	at map[stampKey]uint64
+	// fail, when set for a chain, fails every fetch on that chain.
+	fail map[uint64]error
+	// calls records every fetch attempt in order.
+	calls []stampKey
+}
+
+func newFakeHeaderTimes() *fakeHeaderTimes {
+	return &fakeHeaderTimes{at: map[stampKey]uint64{}, fail: map[uint64]error{}}
+}
+
+// set records one block's header timestamp.
+func (f *fakeHeaderTimes) set(chainID, block uint64, t time.Time) *fakeHeaderTimes {
+	f.at[stampKey{chainID: chainID, block: block}] = uint64(t.Unix())
+	return f
+}
+
+// fetch is the headerTimeFetcher the judge drives.
+func (f *fakeHeaderTimes) fetch(_ context.Context, chainID, block uint64) (uint64, error) {
+	f.calls = append(f.calls, stampKey{chainID: chainID, block: block})
+	if err := f.fail[chainID]; err != nil {
+		return 0, err
+	}
+	secs, ok := f.at[stampKey{chainID: chainID, block: block}]
+	if !ok {
+		return 0, fmt.Errorf("fake has no header for block %d on chain %d", block, chainID)
+	}
+	return secs, nil
+}
+
+// seedMissedSlots lays down a DEGRADED stretch: `blocks` blocks ending at
+// `headBlock`, whose header timestamps are `span` apart in total rather than at the
+// chain's nominal cadence, with the newest stamped at headTime.
+//
+// On Ethereum's 12-second slots, 40 blocks nominally span 8 minutes — comfortably
+// inside the ten-minute requirement, and comfortably inside the 50-block allowance
+// the deleted gate used. Under heavy slot misses those same 40 blocks can span half
+// an hour, and the deleted gate could not tell the two apart because it never
+// looked at a timestamp. Every elapsed-time test below sits in that gap on purpose:
+// each one would PASS against a block-count predicate and FAILS against the real
+// one.
+func (f *fakeHeaderTimes) seedMissedSlots(chainID, headBlock uint64, blocks int, span time.Duration, headTime time.Time) *fakeHeaderTimes {
+	step := span / time.Duration(blocks)
+	for i := 0; i <= blocks; i++ {
+		f.set(chainID, headBlock-uint64(i), headTime.Add(-time.Duration(i)*step))
+	}
+	return f
 }
 
 // B-WORKERS (INGESTION): a walker error used to reach a log line and a local
@@ -645,37 +722,14 @@ func TestStepWalkersRoutesErrorsIntoReadiness(t *testing.T) {
 	require.True(t, h.report().Ready)
 }
 
-// A walker can advance every round and still be falling behind. Head lag is the
-// condition no-progress cannot see, and it fires during backfill on purpose: a
-// process that has not reached the chain is not ready to be depended on.
-func TestStepWalkersReportsHeadLag(t *testing.T) {
-	h, clk := newTestHealth()
-	w := &fakeIngestWorker{name: "eth:feed-usdc", lag: chainLagBound(1) + 1, lagSeen: true}
-	ws := &walkerState{w: w, chainID: 1, bo: retryBackoff{now: clk.now, rand: func() float64 { return 0.5 }}}
-
-	rc := roundConditions{}
-	stepWalkers(context.Background(), []*walkerState{ws}, rc)
-	publishRound(h, rc)
-	key := "eth:feed-usdc/" + conditionHeadLag
-	require.Contains(t, h.report().Recoverable, key)
-	require.Contains(t, h.report().Recoverable[key], "blocks behind the chain head")
-	require.False(t, h.report().Ready)
-
-	// Caught up: cleared.
-	w.lag = 3
-	rc = roundConditions{}
-	stepWalkers(context.Background(), []*walkerState{ws}, rc)
-	publishRound(h, rc)
-	require.NotContains(t, h.report().Recoverable, key)
-
-	// A walker that has never observed a head reports nothing here — its Step
-	// error is the signal instead.
-	w.lagSeen = false
-	rc = roundConditions{}
-	stepWalkers(context.Background(), []*walkerState{ws}, rc)
-	publishRound(h, rc)
-	require.NotContains(t, h.report().Recoverable, key)
-}
+// NOTE: TestStepWalkersReportsHeadLag was retired with the head_lag condition it
+// pinned. It asserted a BLOCK DISTANCE from a head the walker held in memory, and
+// both halves of that are gone: the freshness bound is now measured in elapsed time
+// from the walker's own durable cursor block, by the progress pass rather than by
+// stepWalkers. The property it protected — a walker that advances every round can
+// still be too far behind to serve — is carried by
+// TestWalkerStalenessFiresWhileTheWalkerIsAdvancing, which additionally FALSIFIES
+// the block-distance reading it used to encode.
 
 // B-WORKERS (DERIVATION): ordinary derivation Step errors populated no health entry
 // at all, so position derivation could fail every round while readiness stayed
@@ -846,13 +900,22 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 		}
 		return &priceWorkerState{w: w, bo: retryBackoff{now: clk.now, rand: func() float64 { return 0.5 }}}
 	}
-	watch := progressWatch{consumers: []frontierWatch{
-		{worker: feed, streams: []string{"eth:feed-usdc"}, chainID: 1},
-	}}
+	// The chain schedule is shared by every leg: block 21,000,000 is stamped NOW and
+	// the 40 blocks below it span half an hour of missed slots, so a consumer 40
+	// blocks back is measurably stale while a consumer at the tip is measurably fresh.
+	newWatch := func(now time.Time) (progressWatch, *fakeHeaderTimes) {
+		hdr := newFakeHeaderTimes().seedMissedSlots(1, 21_000_000, 40, 30*time.Minute, now)
+		return progressWatch{
+			consumers: []frontierWatch{
+				{worker: feed, streams: []string{"eth:feed-usdc"}, chainID: 1},
+			},
+			staleness: newStalenessJudge(hdr.fetch),
+		}, hdr
+	}
 
 	// runRound is the daemon's inner loop for these two passes, in its real order:
 	// the price pass first, the progress/frontier pass second, ONE publication.
-	runRound := func(h *healthState, ps *priceWorkerState, pr *fakeProgress, now time.Time) {
+	runRound := func(h *healthState, ps *priceWorkerState, pr *fakeProgress, watch progressWatch, now time.Time) {
 		rc := roundConditions{}
 		stepPriceWorkers(context.Background(), []*priceWorkerState{ps}, rc)
 		applyProgressConditions(context.Background(), pr, now, rc, watch)
@@ -865,32 +928,37 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 		// The consumer is exactly AT its frontier, so the frontier pass has no verdict
 		// of its own to publish — which is precisely when it used to publish an EMPTY
 		// entry set for this worker and delete everything.
+		watch, _ := newWatch(now)
 		pr := &fakeProgress{
 			ingest: []store.CursorProgress{{Name: "eth:feed-usdc", Block: 21_000_000, UpdatedAt: now}},
 			derive: []store.CursorProgress{{Name: feed, Block: 21_000_000, UpdatedAt: now}},
 		}
-		runRound(h, newFeedState(clk), pr, now)
+		runRound(h, newFeedState(clk), pr, watch, now)
 
 		rep := h.report()
 		require.Contains(t, rep.Recoverable, stepErrKey, "the feed Step failure survived the frontier pass")
 		require.Contains(t, rep.Recoverable[stepErrKey], "boom")
 		require.Contains(t, rep.Recoverable, staleKey, "and so did the publication-staleness verdict")
+		require.NotContains(t, rep.Recoverable, feed+"/"+conditionStaleness,
+			"there is no staleness to report — the point is that its ABSENCE erases nothing")
 		require.NotContains(t, rep.Recoverable, feed+"/"+conditionFrontierLag,
-			"there is no lag to report — the point is that its ABSENCE erases nothing")
+			"and attribution cannot appear without a verdict to attribute (amendment L3)")
 		require.False(t, rep.Ready, "/readyz must fail in the round a feed Step failed")
 	})
 
-	t.Run("frontier lag present: they used to be replaced by frontier_lag alone", func(t *testing.T) {
+	t.Run("staleness present: they used to be replaced by the progress pass alone", func(t *testing.T) {
 		h, clk := newTestHealth()
 		now := clk.now()
+		watch, _ := newWatch(now)
 		pr := &fakeProgress{
 			ingest: []store.CursorProgress{{Name: "eth:feed-usdc", Block: 21_000_000, UpdatedAt: now}},
-			derive: []store.CursorProgress{{Name: feed, Block: 20_000_000, UpdatedAt: now}},
+			derive: []store.CursorProgress{{Name: feed, Block: 21_000_000 - 40, UpdatedAt: now}},
 		}
-		runRound(h, newFeedState(clk), pr, now)
+		runRound(h, newFeedState(clk), pr, watch, now)
 
 		rep := h.report()
-		require.Contains(t, rep.Recoverable, feed+"/"+conditionFrontierLag, "the frontier verdict is reported")
+		require.Contains(t, rep.Recoverable, feed+"/"+conditionStaleness, "the freshness verdict is reported")
+		require.Contains(t, rep.Recoverable, feed+"/"+conditionFrontierLag, "with its attribution split")
 		require.Contains(t, rep.Recoverable, stepErrKey, "AND the feed Step failure is still there")
 		require.Contains(t, rep.Recoverable, staleKey, "AND the publication verdict is still there")
 		require.False(t, rep.Ready)
@@ -902,11 +970,12 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 		// deriver had never completed a round declare itself initialised.
 		h, clk := newStartingTestHealth()
 		now := clk.now()
+		watch, _ := newWatch(now)
 		pr := &fakeProgress{
 			ingest: []store.CursorProgress{{Name: "eth:feed-usdc", Block: 21_000_000, UpdatedAt: now}},
 			derive: []store.CursorProgress{{Name: feed, Block: 21_000_000, UpdatedAt: now}},
 		}
-		runRound(h, newFeedState(clk), pr, now)
+		runRound(h, newFeedState(clk), pr, watch, now)
 		require.False(t, h.markInitialized(), "a worker that could not Step must defer initialisation")
 		require.Equal(t, "starting", h.report().Status)
 	})
@@ -937,23 +1006,82 @@ func TestPublishingAWorkerTwiceInOneRoundMergesInsteadOfErasing(t *testing.T) {
 	require.Empty(t, h.report().Recoverable, "a new round replaces, so a cleared condition clears")
 }
 
-// A progress READ failure must not invent a stall: a fabricated signal is its own
-// defect, and the workers' step errors already cover a database that is not
-// answering.
-func TestApplyProgressConditionsIssuesNoVerdictOnReadFailure(t *testing.T) {
+// PRECEDENT CHANGE — controller ruling OQ1, and the reason it changed.
+//
+// This test previously asserted the opposite: a failed progress read issued NO
+// verdict, on the reasoning that inventing a stall from a failed query would be a
+// fabricated signal. The fabrication argument was right and the conclusion was not.
+// The pass TOUCHES every watched worker before it reads, and publication REPLACES a
+// touched worker's entries — so one failed query DELETED every standing red on
+// those workers for that round. A worker that was stalled, stale and erroring went
+// completely clean on /readyz for a round because the database hiccuped: a
+// false-green pulse, on the surface that gates liquidation-facing data, produced by
+// the very check meant to catch silence.
+//
+// progress_unmeasured fabricates nothing. It asserts exactly one thing — the daemon
+// could not look — which is true, actionable, and fail-closed. It is also symmetric
+// with the header-fetch rule the freshness gate uses (a bound that cannot be
+// measured cannot be certified), so the surface now has one rule for unmeasurable
+// state rather than two opposite ones.
+func TestFailedProgressReadEmitsUnmeasuredRatherThanErasingStandingReds(t *testing.T) {
 	h, clk := newTestHealth()
-	walkers := []*walkerState{{w: &fakeIngestWorker{name: "op:debt-manager"}}}
-	pr := &fakeProgress{
-		ingestErr: errors.New("database unreachable"),
-		deriveErr: errors.New("database unreachable"),
-		sweepErr:  errors.New("database unreachable"),
+	now := clk.now()
+	walker := &fakeIngestWorker{name: "op:debt-manager"}
+	runner := &fakeDeriveWorker{name: "debt_manager"}
+	watch := progressWatch{
+		walkers:   []*walkerState{{w: walker, chainID: 10}},
+		runners:   []*runnerState{{r: runner}},
+		consumers: []frontierWatch{{worker: "debt_manager", streams: []string{"op:debt-manager"}, chainID: 10}},
+		// The consumer and the runner are the SAME worker by name, which is the
+		// deduplication case: two sources of the same unmeasured verdict must produce
+		// one condition, not a publisher collision.
+		sweepEngine: "debt_manager", sweepMaxAttempts: 4,
+		collateral: &collateralBoundState{interval: time.Hour},
 	}
 
+	// Round one: a genuine stall is standing on the surface.
+	pr := &fakeProgress{
+		ingest:     []store.CursorProgress{{Name: "op:debt-manager", Block: 500, UpdatedAt: now.Add(-noProgressBound - time.Minute)}},
+		derive:     []store.CursorProgress{{Name: "debt_manager", Block: 480, UpdatedAt: now}},
+		sweepFound: true,
+		sweep:      store.SweepProgress{Generation: 3, Open: false, OpenedAt: now.Add(-2 * time.Hour), CompletedAt: now.Add(-time.Hour)},
+	}
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc,
-		progressWatch{walkers: walkers, sweepEngine: "debt_manager"})
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
 	publishRound(h, rc)
-	require.Empty(t, h.report().Recoverable)
+	stall := "op:debt-manager/" + conditionNoProgress
+	require.Contains(t, h.report().Recoverable, stall, "the standing red this ruling is about")
+
+	// Round two: every durable read fails. The standing red must not simply vanish.
+	pr.ingestErr = errors.New("database unreachable")
+	pr.deriveErr = errors.New("database unreachable")
+	pr.sweepErr = errors.New("database unreachable")
+	rc = roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	publishRound(h, rc)
+
+	rep := h.report()
+	require.False(t, rep.Ready,
+		"a round in which the daemon could not read durable progress must not read as ready — the old behaviour published a clean surface here")
+	for _, key := range []string{
+		"op:debt-manager/" + conditionProgressUnmeasured,
+		"debt_manager/" + conditionProgressUnmeasured,
+		snapshotName + "/" + conditionProgressUnmeasured,
+	} {
+		require.Contains(t, rep.Recoverable, key)
+		require.Contains(t, rep.Recoverable[key], "database unreachable",
+			"the reason names the failure rather than inventing a stall")
+	}
+	require.NotContains(t, rep.Recoverable, stall,
+		"and it does NOT claim the stall it could not observe: the verdict is 'unmeasured', not 'stalled'")
+
+	// Recovery: the reads come back and the unmeasured reds clear on their own.
+	pr.ingestErr, pr.deriveErr, pr.sweepErr = nil, nil, nil
+	pr.ingest[0].UpdatedAt = now
+	rc = roundConditions{}
+	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	publishRound(h, rc)
+	require.Empty(t, h.report().Recoverable, "unmeasured is a re-derived verdict, not a latch")
 }
 
 // SNAPSHOT: the SEMANTIC stall. When every RPC endpoint serves sweep batches at an
@@ -1041,254 +1169,120 @@ func TestSnapshotProgressDoesNotFireBetweenGenerations(t *testing.T) {
 	}
 }
 
-// FRONTIER: readiness must require a raw-log CONSUMER to have caught up to its own
-// input frontier, not merely to have moved recently.
-//
-// A worker advancing small backfill windows refreshes derive_cursors.updated_at
-// every round, so no_progress never fires however stale it is; head_lag does not
-// cover it either, because the walker feeding it can be exactly at the chain head.
-// Wave 3's report claimed not-ready-until-chain-head behaviour and that was FALSE as
-// implemented — the progress check only looked at recency. This is the gate that
-// makes it true for consumers, and it names precisely what it measures: distance
-// from the durable minimum ingest cursor of the streams that feed the worker.
-func TestFrontierLagFailsReadinessWhenDerivationIsBehindItsInput(t *testing.T) {
-	h, clk := newTestHealth()
-	now := clk.now()
-
-	// Raw logs are AT HEAD and the runner's cursor moved a second ago — so both
-	// head_lag and no_progress are silent — but derivation is 900k blocks behind.
-	pr := &fakeProgress{
-		ingest: []store.CursorProgress{
-			{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now},
-			{Name: "eth:atoken-weeth", Block: 20_999_000, UpdatedAt: now},
-		},
-		derive: []store.CursorProgress{
-			{Name: "aave_v3_etherfi", Block: 20_100_000, UpdatedAt: now.Add(-time.Second)},
-		},
-	}
-	watch := progressWatch{
-		runners: []*runnerState{{r: &fakeDeriveWorker{name: "aave_v3_etherfi"}}},
-		consumers: []frontierWatch{
-			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi", "eth:atoken-weeth"}, chainID: 1},
-		},
-	}
-
-	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
-	publishRound(h, rc)
-
-	rep := h.report()
-	key := "aave_v3_etherfi/" + conditionFrontierLag
-	require.Contains(t, rep.Recoverable, key)
-	require.Contains(t, rep.Recoverable[key], "899000 blocks behind")
-	require.Contains(t, rep.Recoverable[key], "20999000",
-		"the frontier is the MINIMUM stream cursor: above it some stream's logs may be missing")
-	require.False(t, rep.Ready, "a process whose derived state is not current is not ready")
-	require.NotContains(t, rep.Recoverable, "aave_v3_etherfi/"+conditionNoProgress,
-		"and no_progress is silent, which is exactly why this gate had to exist")
-
-	// Caught up to within the bound: it clears.
-	pr.derive[0].Block = 20_999_000 - chainLagBound(1)
-	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
-	publishRound(h, rc)
-	require.NotContains(t, h.report().Recoverable, key)
-	require.True(t, h.report().Ready)
-}
-
 // FRONTIER: the price FEED deriver is a raw-log consumer too — it reads
 // AnswerUpdated back out of raw_logs — and it is NOT a derive.Runner, so it has to
 // be registered explicitly or it would be missed. Codex's finding named price
 // workers as excluded outright.
-func TestFrontierLagCoversTheFeedDeriver(t *testing.T) {
+func TestStalenessCoversTheFeedDeriver(t *testing.T) {
 	h, clk := newTestHealth()
 	now := clk.now()
+	chainHeaders := newFakeHeaderTimes().
+		seedMissedSlots(1, 21_000_000, 40, 30*time.Minute, now)
 	pr := &fakeProgress{
 		ingest: []store.CursorProgress{{Name: "eth:feed-usdc", Block: 21_000_000, UpdatedAt: now}},
-		derive: []store.CursorProgress{{Name: "prices:chainlink_feed:1", Block: 20_000_000, UpdatedAt: now}},
+		derive: []store.CursorProgress{{Name: "prices:chainlink_feed:1", Block: 21_000_000 - 40, UpdatedAt: now}},
 	}
-	watch := progressWatch{consumers: []frontierWatch{
-		{worker: "prices:chainlink_feed:1", streams: []string{"eth:feed-usdc"}, chainID: 1},
-	}}
+	watch := progressWatch{
+		consumers: []frontierWatch{
+			{worker: "prices:chainlink_feed:1", streams: []string{"eth:feed-usdc"}, chainID: 1},
+		},
+		staleness: newStalenessJudge(chainHeaders.fetch),
+	}
 
 	rc := roundConditions{}
 	applyProgressConditions(context.Background(), pr, now, rc, watch)
 	publishRound(h, rc)
-	require.Contains(t, h.report().Recoverable, "prices:chainlink_feed:1/"+conditionFrontierLag)
+	require.Contains(t, h.report().Recoverable, "prices:chainlink_feed:1/"+conditionStaleness)
 	require.False(t, h.report().Ready)
 }
 
-// FRONTIER: the two states the gate deliberately does not judge, because judging
-// them would mean inventing a distance. A stream with no ingest cursor has no
-// frontier to be behind, and a consumer with no derive cursor has no height to
-// compare — its first Step either creates one or reports step_error, and the
-// daemon's startup condition holds readiness closed until a full round completes.
+// STALENESS: the two no-cursor states, which used to be judged by inventing a
+// distance or by saying nothing at all.
 //
 // The POLLER is absent by construction rather than by exclusion: it reads `latest`
-// through eth_call and has no raw-log input at all, so there is no frontier for it.
-func TestFrontierLagIssuesNoVerdictWithoutBothCursors(t *testing.T) {
-	h, clk := newTestHealth()
+// through eth_call and has no raw-log cursor at all, so no elapsed-time verdict
+// applies to it. Its analogous gate is whether a NEW poll anchor row came into
+// existence.
+func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
+	clk := &fakeClock{t: time.Unix(1_000_000, 0)}
 	now := clk.now()
 
-	t.Run("a feeding stream has never ingested", func(t *testing.T) {
-		pr := &fakeProgress{
-			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now}},
-			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 1, UpdatedAt: now}},
+	// TestNeverIngestedWalkerIsUnmeasuredNotGreen [cites L1, invariant I10]: a
+	// watched walker with no ingest_cursors row produces (false, nil) from every
+	// Step with NO cursor write — a StartBlock the chain has not reached, or a
+	// frozen endpoint — so it reports no error, no stall and no advance. The
+	// deleted head_lag condition was the only red that ever covered it, so deleting
+	// it without this leg would have opened a silent hole exactly where the wave
+	// was closing one.
+	t.Run("TestNeverIngestedWalkerIsUnmeasuredNotGreen", func(t *testing.T) {
+		h, _ := newTestHealth()
+		chainHeaders := newFakeHeaderTimes()
+		watch := progressWatch{
+			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
+			staleness: newStalenessJudge(chainHeaders.fetch),
 		}
+		// The ingest READ SUCCEEDED and simply has no row for this stream, which is
+		// the distinction that makes this a verdict rather than a read failure.
+		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "other:stream", Block: 5, UpdatedAt: now}}}
+
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
-			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi", "eth:atoken-weeth"}, chainID: 1},
-		}})
+		applyProgressConditions(context.Background(), pr, now, rc, watch)
 		publishRound(h, rc)
-		require.NotContains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionFrontierLag)
+
+		rep := h.report()
+		key := "eth:aave-etherfi/" + conditionStalenessUnmeasured
+		require.Contains(t, rep.Recoverable, key)
+		require.Contains(t, rep.Recoverable[key], "no ingest_cursors row")
+		require.False(t, rep.Ready, "green-by-silence is exactly what this leg forbids")
+		require.Empty(t, chainHeaders.calls, "there is no block to date, so nothing is fetched")
 	})
 
-	t.Run("the consumer has no cursor yet", func(t *testing.T) {
+	t.Run("a consumer that has never completed a window is unmeasured too", func(t *testing.T) {
+		h, _ := newTestHealth()
+		chainHeaders := newFakeHeaderTimes()
 		pr := &fakeProgress{
 			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
-			{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1},
-		}})
+		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+			consumers: []frontierWatch{
+				{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1},
+			},
+			staleness: newStalenessJudge(chainHeaders.fetch),
+		})
 		publishRound(h, rc)
-		require.NotContains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionFrontierLag)
+		require.Contains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionStalenessUnmeasured)
+		require.NotContains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionFrontierLag,
+			"attribution needs a cursor of its own to attribute against")
 	})
 
 	t.Run("a price poller is never registered as a consumer", func(t *testing.T) {
+		h, _ := newTestHealth()
+		chainHeaders := newFakeHeaderTimes().set(10, 150_000_000, now)
 		pr := &fakeProgress{
 			ingest: []store.CursorProgress{{Name: "op:debt-manager", Block: 150_000_000, UpdatedAt: now}},
 			derive: []store.CursorProgress{{Name: "prices:poll:10", Block: 1, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{consumers: []frontierWatch{
-			{worker: "aave_v3_etherfi", streams: []string{"op:debt-manager"}, chainID: 10},
-		}})
+		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "op:debt-manager"}, chainID: 10}},
+			staleness: newStalenessJudge(chainHeaders.fetch),
+		})
 		publishRound(h, rc)
-		require.NotContains(t, h.report().Recoverable, "prices:poll:10/"+conditionFrontierLag)
+		for _, c := range []string{conditionStaleness, conditionStalenessUnmeasured, conditionFrontierLag} {
+			require.NotContains(t, h.report().Recoverable, "prices:poll:10/"+c)
+		}
 	})
 }
 
-// LAG COMPOSITION — the boundary case. Two locally-defensible per-hop bounds do not
-// bound a path. With walker-to-head and consumer-to-frontier each allowed 5,000
-// blocks, and each comparison permitting equality, a walker exactly at its limit
-// feeding a consumer exactly at its limit was reported READY about 10,000 blocks
-// behind head: roughly 33 hours of Ethereum for a liquidation-facing table.
-//
-// This drives exactly that arrangement — MAXIMUM permitted walker lag combined with
-// MAXIMUM permitted consumer lag — and asserts readiness now fails, because the
-// consumer is judged on its distance from the chain HEAD rather than from a frontier
-// that is itself allowed to be stale.
-func TestLagBoundsDoNotComposeIntoAWiderTotal(t *testing.T) {
-	const chainID = uint64(1)
-	bound := chainLagBound(chainID)
-	require.Positive(t, bound)
-
-	// One walker on chain 1, at exactly its permitted lag: head 21,000,000, cursor
-	// `bound` behind it. head_lag therefore does NOT fire for the walker.
-	head := uint64(21_000_000)
-	frontier := head - bound
-	newWatch := func(clk *fakeClock, w *fakeIngestWorker) (progressWatch, *walkerState) {
-		ws := &walkerState{w: w, chainID: chainID,
-			bo: retryBackoff{now: clk.now, rand: func() float64 { return 0.5 }}}
-		return progressWatch{
-			walkers: []*walkerState{ws},
-			consumers: []frontierWatch{
-				{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: chainID},
-			},
-		}, ws
-	}
-
-	t.Run("each hop at its limit was ready and must not be", func(t *testing.T) {
-		h, clk := newTestHealth()
-		now := clk.now()
-		w := &fakeIngestWorker{name: "eth:aave-etherfi", lag: bound, lagSeen: true, head: head, headSeen: true}
-		watch, ws := newWatch(clk, w)
-		pr := &fakeProgress{
-			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: frontier, UpdatedAt: now}},
-			// The consumer sits its OWN full allowance below that frontier.
-			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: frontier - bound, UpdatedAt: now}},
-		}
-
-		rc := roundConditions{}
-		require.False(t, stepWalkers(context.Background(), []*walkerState{ws}, rc))
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
-		publishRound(h, rc)
-
-		rep := h.report()
-		require.NotContains(t, rep.Recoverable, "eth:aave-etherfi/"+conditionHeadLag,
-			"the walker is at its limit, not past it — each hop really is individually within bounds")
-		key := "aave_v3_etherfi/" + conditionHeadLag
-		require.Contains(t, rep.Recoverable, key,
-			"but the PATH is 2x the bound from head, which is the composition that used to read as ready")
-		require.Contains(t, rep.Recoverable[key], fmt.Sprintf("%d blocks behind the chain head", 2*bound))
-		require.Contains(t, rep.Recoverable[key], "of that gap is ingestion",
-			"the message attributes the distance across the two hops so an operator knows which to chase")
-		require.False(t, rep.Ready, "derived state 2x the freshness bound behind head is not ready")
-	})
-
-	t.Run("a caught-up consumer behind a caught-up walker stays ready", func(t *testing.T) {
-		// The gate must not simply be red always: a consumer AT its frontier, behind a
-		// walker at its own permitted lag, is exactly at the bound and equality passes.
-		h, clk := newTestHealth()
-		now := clk.now()
-		w := &fakeIngestWorker{name: "eth:aave-etherfi", lag: bound, lagSeen: true, head: head, headSeen: true}
-		watch, ws := newWatch(clk, w)
-		pr := &fakeProgress{
-			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: frontier, UpdatedAt: now}},
-			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: frontier, UpdatedAt: now}},
-		}
-
-		rc := roundConditions{}
-		stepWalkers(context.Background(), []*walkerState{ws}, rc)
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
-		publishRound(h, rc)
-
-		rep := h.report()
-		require.NotContains(t, rep.Recoverable, "aave_v3_efi/"+conditionHeadLag)
-		require.Empty(t, rep.Recoverable, "everything is inside the one bound, measured from head")
-		require.True(t, rep.Ready)
-	})
-
-	t.Run("one block past the bound, from either hop, fails", func(t *testing.T) {
-		for _, tc := range []struct {
-			name             string
-			walkerLag, extra uint64
-		}{
-			{"the walker is one block too far behind head", bound + 1, 0},
-			{"the consumer is one block too far behind the frontier", bound, 1},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				h, clk := newTestHealth()
-				now := clk.now()
-				w := &fakeIngestWorker{name: "eth:aave-etherfi", lag: tc.walkerLag, lagSeen: true,
-					head: head, headSeen: true}
-				watch, ws := newWatch(clk, w)
-				pr := &fakeProgress{
-					ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: head - tc.walkerLag, UpdatedAt: now}},
-					derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: head - tc.walkerLag - tc.extra, UpdatedAt: now}},
-				}
-				rc := roundConditions{}
-				stepWalkers(context.Background(), []*walkerState{ws}, rc)
-				applyProgressConditions(context.Background(), pr, now, rc, watch)
-				publishRound(h, rc)
-				require.False(t, h.report().Ready)
-			})
-		}
-	})
-
-	t.Run("the bound is chain-specific and derived from the stated requirement", func(t *testing.T) {
-		// The requirement is a TIME; the block counts are only its per-chain
-		// expression, and a faster chain must therefore allow MORE blocks for the same
-		// staleness. A single shared constant cannot express that at all.
-		require.Equal(t, uint64(maxDerivedStaleness/(12*time.Second)), chainLagBound(1))
-		require.Equal(t, uint64(maxDerivedStaleness/(2*time.Second)), chainLagBound(10))
-		require.Greater(t, chainLagBound(10), chainLagBound(1),
-			"OP's 2s blocks mean the same wall-clock staleness is more blocks")
-		require.Equal(t, uint64(maxDerivedStaleness/fallbackBlockTime), chainLagBound(999_999),
-			"an unlisted chain falls back to the SLOWEST configured block time, which is the tightest bound")
-	})
-}
+// NOTE: TestLagBoundsDoNotComposeIntoAWiderTotal was retired with chainLagBound.
+// It existed because the bound was a BLOCK DISTANCE applied to two hops of one
+// path, and two per-hop distance allowances do not bound a path — the composition
+// had to be proven non-additive. The elapsed-time gate has no hops to compose: each
+// worker's own cursor block carries a timestamp and the age is one subtraction, so
+// there is no arithmetic in which two allowances could add. What survives from that
+// test is the boundary discipline (equality passes, one unit past fails), which
+// TestStalenessBoundaryEqualityPassesAndOneSecondPastFails now pins in seconds.
 
 // SNAPSHOT FAILURES: "closed" is not "succeeded".
 //
@@ -1360,22 +1354,45 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 		require.False(t, rep.Ready)
 	})
 
-	t.Run("failures still inside the retry budget are in flight, not unresolved", func(t *testing.T) {
-		// Reporting these would make the gate red through every ordinary transient
-		// revert, which is the false-positive direction. They become visible the moment
-		// the budget is spent.
+	// REPLACED — this is where the round-5 test-integrity defect lived.
+	//
+	// The deleted subtest set Failed:2, Exhausted:0 and asserted `Ready == true`,
+	// codifying "readiness stays green with two current failures" as the specified
+	// behaviour. Codex named it: the test was not detecting the unsafe policy, it was
+	// pinning it. What the subtest was ACTUALLY about — snapshot_failures is keyed on
+	// exhausted rather than any failure, so an ordinary transient revert with budget
+	// left does not fire it — is a real and correct property of THAT KEY, and it is
+	// kept below. What is not kept is the readiness claim: an account with a failure in
+	// flight may also have no usable collateral at all, and that is now a separate,
+	// separately-keyed verdict.
+	//
+	// REPORT NOTE for round 9: the deleted assertion would still PASS against this
+	// implementation as long as the fake reports no unusable accounts. Its deletion is
+	// therefore a policy statement, not a bug fix — a test that says "green is correct
+	// here" is a licence a future change can cite, and this surface has twice shipped
+	// defects that a passing test had licensed.
+	t.Run("failures still inside the retry budget do not fire the EXHAUSTED key", func(t *testing.T) {
 		h, clk := newTestHealth()
 		now := clk.now()
 		pr := &fakeProgress{sweepFound: true, sweep: store.SweepProgress{
 			Generation: 9, Open: true,
 			OpenedAt: now.Add(-time.Minute), LastBatchAt: now.Add(-time.Second),
 			Failed: 2, Exhausted: 0, LastSuccessAt: now.Add(-time.Second),
+			// Those two accounts have NEVER produced collateral. That is the state the
+			// deleted assertion called ready.
+			NeverSucceeded: 2,
 		}}
 		rc := roundConditions{}
 		applyProgressConditions(context.Background(), pr, now, rc, watch)
 		publishRound(h, rc)
-		require.NotContains(t, h.report().Recoverable, key)
-		require.True(t, h.report().Ready)
+
+		rep := h.report()
+		require.NotContains(t, rep.Recoverable, key,
+			"snapshot_failures stays keyed on EXHAUSTED: a failure with budget left is in flight, and firing here would redden every transient revert")
+		require.Contains(t, rep.Recoverable, snapshotName+"/"+conditionCollateralUnusable,
+			"but the accounts have no collateral to serve, which is a different question and gets its own key")
+		require.False(t, rep.Ready,
+			"and readiness FAILS — the assertion this subtest replaced said the opposite, and that was the defect")
 	})
 
 	t.Run("a clean generation, open or closed, reports nothing", func(t *testing.T) {

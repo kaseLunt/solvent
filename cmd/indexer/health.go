@@ -85,38 +85,97 @@ const conditionStepError = "step_error"
 // and its all-endpoints-stale path returns neither an error nor an advance).
 const conditionNoProgress = "no_progress"
 
-// conditionHeadLag is the condition key for ANY worker whose durable cursor sits
-// more than chainLagBound(chain) blocks behind the chain head — a raw-log walker
-// against the head it read itself, and a raw-log CONSUMER against the head its
-// streams' walkers read. A worker can be progressing and still be falling behind;
-// no-progress cannot see that.
+// conditionStaleness is the condition key for ANY raw-log worker — a walker or a
+// raw-log CONSUMER — whose durable cursor points at a block whose own HEADER
+// TIMESTAMP is more than maxDerivedStaleness old. A worker can be progressing and
+// still be falling behind; no-progress cannot see that.
 //
-// ONE KEY FOR BOTH, AND ONE BOUND, because it is one property: distance from chain
-// head. The predecessor of this arrangement gated the walker hop and the consumer
-// hop with two separate 5,000-block constants, which bounded neither the path nor
-// anything an operator cares about — a walker at the limit feeding a consumer at the
-// limit was reported READY about 10,000 blocks (33 hours of Ethereum) behind head.
-// Measuring every worker from the same origin makes the two gates non-additive by
-// construction.
+// IT MEASURES ELAPSED TIME, NOT BLOCK DISTANCE, and that replacement is the point.
+// Its predecessor (head_lag) converted the ten-minute requirement into a fixed
+// block count using nominal cadences — 50 blocks on Ethereum at 12s, 300 on OP at
+// 2s — and then compared distances. Produced-block distance is not elapsed time:
+// missed Ethereum slots or degraded OP production make those same 50 or 300 blocks
+// span materially more than ten minutes while every comparison still passes, so the
+// documented liquidation-facing guarantee could be false-green exactly when the
+// chain was struggling. Head freshness does not rescue it either — that the HEAD is
+// current says nothing about the timestamp of the CURSOR. Subtracting the cursor
+// block's own header timestamp from now gates the stated property directly, with no
+// cadence assumption anywhere in the path.
 //
 // It fires during BACKFILL too, which is deliberate: a process that has not caught
 // up to the chain is not ready to be depended on for liquidation-facing data. That
 // is the same posture the feed deriver already takes with its rpc_ingest_lag
 // condition.
-const conditionHeadLag = "head_lag"
+const conditionStaleness = "staleness"
 
-// conditionFrontierLag is the ATTRIBUTION key for a raw-log CONSUMER — a derivation
-// runner or the Chainlink feed deriver — whose durable cursor sits more than
-// chainLagBound(chain) blocks below the durable frontier of the streams feeding it.
+// conditionStalenessUnmeasured is the FAIL-CLOSED partner of conditionStaleness: a
+// bound the daemon cannot measure is one it cannot certify.
 //
-// It answers "which component is behind": the raw logs are already in the database
-// and this worker has not consumed them, as distinct from a walker that has not
-// ingested them yet. It is NOT an independent allowance — the frontier is at or
-// below the chain head, so this distance can never exceed the head distance
-// head_lag already gates, and it therefore cannot widen the total. Before the two
-// keys existed at all, /readyz could report 200 through an entire restart backfill
-// with positions and prices describing a state days old.
+// It is emitted for three genuinely different unmeasurable states, all of which
+// used to read as green-by-silence:
+//
+//   - the header fetch failed, timed out, or is inside its retry cooldown, so
+//     there is no timestamp to subtract (amendment L4);
+//   - the header came back claiming a time more than headerTimeSkewTolerance in the
+//     FUTURE, which is a measurement failure rather than a fresh block — and is
+//     never memoized, or a wrong-unit timestamp would pin the worker at age 0
+//     forever (amendment L2);
+//   - the worker has NO durable cursor row at all, so there is no block to date
+//     (amendment L1, invariant I10). A watched walker in that state produces
+//     (false, nil) every Step with no cursor write — a StartBlock typo or a frozen
+//     endpoint — and reports no error and no stall; the deleted head_lag condition
+//     was the only red covering it.
+//
+// Honest residual: a stream configured with a StartBlock the chain has not reached
+// stays unmeasured-red until it does. That is the correct reading — nothing has
+// been ingested — but it is a red an operator will see at deploy time.
+const conditionStalenessUnmeasured = "staleness_unmeasured"
+
+// conditionProgressUnmeasured is the same fail-closed shape for a failed DURABLE
+// PROGRESS READ, and it changes a pinned precedent (controller ruling OQ1).
+//
+// The previous behaviour was "a read failure issues no verdict", on the reasoning
+// that inventing a stall from a failed query would be a fabricated signal. That
+// reasoning was right about fabrication and wrong about the consequence: the pass
+// TOUCHES every watched worker before it reads, and publication REPLACES a touched
+// worker's entries, so a single failed query deleted every standing red for those
+// workers — a one-round false-green pulse on a surface that now gates
+// liquidation-facing data. Emitting an explicit unmeasured red instead fabricates
+// nothing (it asserts only that the daemon could not look) and is symmetric with
+// the header-fetch fail-red rationale above.
+const conditionProgressUnmeasured = "progress_unmeasured"
+
+// conditionFrontierLag is the pure ATTRIBUTION key for a raw-log CONSUMER — a
+// derivation runner or the Chainlink feed deriver — reporting how the worker's
+// staleness splits between ingestion and derivation: how far its durable input
+// frontier trails now, and how far the consumer trails that frontier.
+//
+// IT IS NOT A GATE, and after amendment L3 it is structurally incapable of being
+// one: it is emitted only for a consumer that ALREADY carries conditionStaleness or
+// conditionStalenessUnmeasured in the same round, so its presence can never be the
+// reason readiness fails. That is not decoration — the unclamped predecessor let a
+// frontier block stamped in the future redden a consumer that was measurably fresh,
+// which is attribution deciding a verdict.
 const conditionFrontierLag = "frontier_lag"
+
+// conditionCollateralUnusable is the condition key for collateral snapshot accounts
+// whose snapshot is ABSENT or older than the sweep cadence can explain.
+//
+// It exists because snapshot_failures — keyed on exhausted CURRENT-GENERATION
+// failures — cannot answer the question an operator actually has. A first failed
+// read leaves Failed > 0 and Exhausted == 0, so readiness stayed green for an
+// account that had never produced collateral at all; retries queue behind every
+// lagging and never-swept account, so "in flight" can mean an entire pass; and
+// opening the next generation drops the failed row out of the current-generation
+// count before the account ever succeeded, silently clearing the signal. This key
+// is computed from the DURABLE SUCCESS RECORD instead (last_success_block /
+// last_success_at), which generation rollover and status churn cannot move, so it
+// clears only when that account itself succeeds again.
+//
+// snapshot_failures stays as a complementary signal: it names the accounts burning
+// retry budget right now, which is the actionable-today view, while this key names
+// the accounts whose collateral cannot be used.
+const conditionCollateralUnusable = "collateral_unusable"
 
 // conditionSnapshotFailures is the condition key for collateral snapshot accounts
 // whose sweep FAILED and has no retry left in the current generation.
@@ -364,18 +423,22 @@ func (h *healthState) report() healthReport {
 //	               initialising, and thereafter for stale feeds, missing poll
 //	               targets, quarantined answers, a frozen chain view, stalled
 //	               ingestion or derivation, a stalled collateral sweep, collateral
-//	               accounts whose snapshot failed with no retry left, any walker or
-//	               consumer too far behind the chain head, persistent Step failures
-//	               and terminal engine errors.
+//	               accounts whose snapshot failed with no retry left, collateral
+//	               accounts with no usable snapshot at all, any walker or consumer
+//	               whose cursor block is older than maxDerivedStaleness (or whose
+//	               age cannot be measured), a failed durable progress read,
+//	               persistent Step failures and terminal engine errors.
 //
 //	               WHAT IT DOES NOT CLAIM: it is not a statement that every
 //	               cursor is at the chain head. The gates are bounds
-//	               (maxDerivedStaleness expressed per chain by chainLagBound,
-//	               noProgressBound, blockAdvanceTTL) — readiness means "inside
-//	               every bound", not "exactly current". What it DOES now claim is
-//	               that no COMPOSITION of those bounds is looser than the widest
-//	               one: the lag gates all measure distance from chain head, so they
-//	               cannot be added together.
+//	               (maxDerivedStaleness, noProgressBound, blockAdvanceTTL, the
+//	               collateral staleness bound) — readiness means "inside every
+//	               bound", not "exactly current". What it DOES now claim is that
+//	               the freshness bound is measured in the unit it is stated in:
+//	               each raw-log worker's own cursor block carries a header
+//	               timestamp, and the gate subtracts it from now, so no composition
+//	               of hops and no assumption about block production sits between
+//	               the requirement and the check.
 //	GET /healthz — 200 when Live, else 503. Restart-worthy failures only.
 //	GET /health  — always 200 with the full report, for humans and dashboards
 //	               that want the detail without an HTTP failure.

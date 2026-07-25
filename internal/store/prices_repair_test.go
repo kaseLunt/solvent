@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -741,6 +742,13 @@ func TestPriceRepairExposureReportsTheBoundaryAndWhatIsAboveIt(t *testing.T) {
 // because it is the snapshotter's policy rather than the store's.
 const testSweepBudget = 4
 
+// testStaleBound is the collateral freshness bound these tests pass to
+// SweepProgress. It is deliberately WIDE: the tests below are about generations,
+// retry budgets and status transitions, and every success they write is seconds old,
+// so a wide bound keeps the usability counts out of their way. The usability
+// counting itself is pinned by its own tests, which drive the bound directly.
+const testStaleBound = time.Hour
+
 // SweepProgress reports the snapshotter's durable progress, which is the only way
 // the daemon can see a SEMANTIC sweep stall: an all-endpoints-stale sweep refuses
 // every batch, returns no error and advances nothing, and the snapshotter has no
@@ -749,13 +757,13 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	_, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget)
+	_, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.False(t, found, "an engine that has never opened a generation has not started, not stalled")
 
 	gen, err := s.OpenSweepGeneration(ctx, "debt_manager")
 	require.NoError(t, err)
-	p, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget)
+	p, found, err := s.SweepProgress(ctx, "debt_manager", testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, gen, p.Generation)
@@ -771,7 +779,7 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 			"00000000000000000000000000000000000000bb": {"collateral": big.NewInt(1)},
 		}},
 	}))
-	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.False(t, p.LastBatchAt.IsZero(), "the timestamp is the database's, so a restart cannot reset it")
 	require.Zero(t, p.Lagging, "the only account is at the current generation")
@@ -779,13 +787,13 @@ func TestSweepProgressReportsDurableSweepState(t *testing.T) {
 	// A new generation makes it lag again, and completion closes the window.
 	next, err := s.OpenSweepGeneration(ctx, "debt_manager")
 	require.NoError(t, err)
-	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), p.Lagging)
 	_, stamped, err := s.CompleteSweepGeneration(ctx, "debt_manager", next)
 	require.NoError(t, err)
 	require.True(t, stamped)
-	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget)
+	p, _, err = s.SweepProgress(ctx, "debt_manager", testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.False(t, p.Open, "a closed generation is idle by cadence, not stalled")
 	require.False(t, p.CompletedAt.IsZero())
@@ -846,7 +854,7 @@ func TestSweepProgressReportsExhaustedFailuresThroughGenerationClose(t *testing.
 		require.NoError(t, s.ApplySweepBatch(ctx, engine, gen, 5_000+uint64(rounds), results),
 			"a per-account revert is NOT a batch error — which is exactly why nothing else reports it")
 
-		p, _, err := s.SweepProgress(ctx, engine, testSweepBudget)
+		p, _, err := s.SweepProgress(ctx, engine, testSweepBudget, testStaleBound)
 		require.NoError(t, err)
 		require.Equal(t, int64(1), p.Failed, "the failing account is recorded as failed from its first attempt")
 		if rounds < testSweepBudget {
@@ -863,7 +871,7 @@ func TestSweepProgressReportsExhaustedFailuresThroughGenerationClose(t *testing.
 	require.True(t, stamped)
 	require.Equal(t, int64(1), failed, "completion reports the degradation — and only through this value and a WARN")
 
-	p, found, err := s.SweepProgress(ctx, engine, testSweepBudget)
+	p, found, err := s.SweepProgress(ctx, engine, testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.False(t, p.Open, "the generation is CLOSED")
@@ -878,7 +886,7 @@ func TestSweepProgressReportsExhaustedFailuresThroughGenerationClose(t *testing.
 	next, err := s.OpenSweepGeneration(ctx, engine)
 	require.NoError(t, err)
 	require.Greater(t, next, gen)
-	p, _, err = s.SweepProgress(ctx, engine, testSweepBudget)
+	p, _, err = s.SweepProgress(ctx, engine, testSweepBudget, testStaleBound)
 	require.NoError(t, err)
 	require.Zero(t, p.Failed, "the failed row now belongs to an EARLIER generation, so it counts as lagging instead")
 	require.Zero(t, p.Exhausted)

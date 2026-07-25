@@ -590,6 +590,32 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 		  )`, engine, chainID); err != nil {
 		return fmt.Errorf("delete orphaned snapshot history rows: %w", err)
 	}
+	// REWIND CLAMP (wave-9 amendment A1, invariant I11), atomic with everything
+	// above. The deletions have just removed every snapshots history row above the
+	// effective target, but a SURVIVING account's snapshot_sweeps row still claims
+	// a success at a block that no longer exists on the canonical chain, and two
+	// things go wrong if it stands:
+	//
+	//   - the monotonic stale-failover guard in ApplySweepBatch compares the next
+	//     honest success against that phantom last_success_block. Post-reorg the
+	//     canonical head is BELOW it, so every honest success is skipped as
+	//     "stale" and the account wedges — permanently, since nothing else lowers
+	//     the number.
+	//   - the freshness stamp survives too, so the collateral_unusable gate would
+	//     certify exactly the accounts whose collateral the rewind just
+	//     invalidated: a fresh last_success_at describing a deleted observation.
+	//
+	// Clearing both fails those accounts closed into NeverSucceeded (visible, and
+	// the correct reading — no canonical collateral observation exists for them),
+	// un-wedges the guard, and the generation bump immediately below queues the
+	// re-sweep that clears the condition again. Accounts whose last success is at
+	// or below the target are untouched: their observation is still canonical.
+	if _, err := tx.Exec(ctx,
+		`UPDATE snapshot_sweeps SET last_success_block = 0, last_success_at = NULL
+		 WHERE engine = $1 AND last_success_block > $2`,
+		engine, effectiveTarget); err != nil {
+		return fmt.Errorf("clamp sweep successes above %d: %w", effectiveTarget, err)
+	}
 	// Durably OPEN the post-rewind re-sweep, atomic with the ack: bump the
 	// engine's sweep generation so every surviving account lags it. The same
 	// upsert OpenSweepGeneration uses — a crash between this commit and the
@@ -1080,6 +1106,51 @@ type SweepProgress struct {
 	// failure verdict can say how stale the surviving snapshot data is rather than
 	// only that something failed.
 	LastSuccessAt time.Time
+
+	// ---- COLLATERAL USABILITY (wave 9; Codex round 5's still-open [high]) ----
+	//
+	// Failed/Exhausted are STATUS-keyed and CURRENT-GENERATION-keyed, and both
+	// properties are why they cannot answer "is this account's collateral
+	// usable". A first failure leaves Failed > 0 with Exhausted == 0 while the
+	// account may never have produced collateral at all, and opening the next
+	// generation drops the failed row out of the current-generation count before
+	// anything succeeded. The three fields below are keyed on the DURABLE SUCCESS
+	// RECORD instead — last_success_block and last_success_at — so neither
+	// generation rollover nor status churn can move an account out of them. Only a
+	// landed success can (invariant I2′).
+
+	// NeverSucceeded counts REGISTRY accounts (the same distinct-debt-account set
+	// SweepWorkBatch serves) that have never produced a collateral snapshot: no
+	// snapshot_sweeps row at all, or a row whose last_success_block is still 0.
+	// An account here has NO collateral figure in position_balances — not a stale
+	// one, none — so any liquidation arithmetic naming it is computed from an
+	// absent input.
+	NeverSucceeded int64
+	// StaleSuccess counts registry accounts that HAVE succeeded
+	// (last_success_block > 0) but whose success is older than the caller's
+	// staleBound, measured on the DATABASE clock (invariant I4′, strict `<`, so a
+	// success exactly at the bound is not stale). A NULL last_success_at counts as
+	// stale: it means the row predates migration 00006 and ended 'failed', or a
+	// rewind cleared it, and an unknown success time cannot be certified fresh.
+	StaleSuccess int64
+	// OldestSuccessAt is the oldest last_success_at among accounts that have ever
+	// succeeded — the age the operator-facing reason quotes. Zero when no account
+	// carries a recorded success time.
+	OldestSuccessAt time.Time
+	// LastPassDuration is completed_at - opened_at of the most recent COMPLETED
+	// generation: how long a full registry pass actually took. Zero while no
+	// generation has ever completed (sweep_generations keeps one row per engine,
+	// so an OPEN generation has no completion to measure and the caller retains
+	// the value it last read).
+	//
+	// It exists because the staleness bound cannot be a constant. SweepWorkBatch
+	// never re-selects a current-generation success, so an account's snapshot is
+	// refreshed once per (interval + pass duration) under perfectly healthy
+	// operation; a bound ignoring the pass duration is permanently exceeded on any
+	// sizable registry and the gate would then be red forever on a healthy system.
+	// The caller feeds this back in as the next round's bound — see the daemon's
+	// collateralStaleBound.
+	LastPassDuration time.Duration
 }
 
 // SweepProgress reads engine's durable sweep progress. found=false when the
@@ -1092,7 +1163,22 @@ type SweepProgress struct {
 // told it rather than assume one. A non-positive value means "no budget policy",
 // and every current-generation failure then counts as exhausted, which is the
 // fail-closed reading.
-func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts int) (SweepProgress, bool, error) {
+//
+// staleBound is the caller's collateral freshness bound, and it is the same kind
+// of parameter for the same reason: how fresh a collateral snapshot has to be is
+// the DAEMON'S policy (it depends on the sweep cadence and the achieved pass
+// duration — see LastPassDuration), not the store's. A non-positive bound is
+// refused rather than defaulted, because every default here would be an invented
+// number nobody derived.
+func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts int, staleBound time.Duration) (SweepProgress, bool, error) {
+	// A non-positive bound cannot express a staleness question at all: read one
+	// way every success is "older than zero" and the gate is permanently red, read
+	// the other it is permanently green. Refusing makes the misconfiguration an
+	// error a caller must handle instead of a silent verdict; the daemon validates
+	// the same property before its first round.
+	if staleBound <= 0 {
+		return SweepProgress{}, false, fmt.Errorf("sweep progress for %q: collateral staleness bound must be positive, got %s", engine, staleBound)
+	}
 	var p SweepProgress
 	var opened, completed *time.Time
 	err := s.pool.QueryRow(ctx,
@@ -1111,6 +1197,12 @@ func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts in
 		p.CompletedAt = *completed
 	} else {
 		p.Open = true
+	}
+	// The achieved pass duration (see the field comment): only a COMPLETED
+	// generation has one, and sweep_generations keeps a single row per engine, so
+	// whatever is here IS the most recent completed pass.
+	if opened != nil && completed != nil && completed.After(*opened) {
+		p.LastPassDuration = completed.Sub(*opened)
 	}
 	var lastBatch *time.Time
 	if err := s.pool.QueryRow(ctx,
@@ -1147,6 +1239,32 @@ func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts in
 	}
 	if lastSuccess != nil {
 		p.LastSuccessAt = *lastSuccess
+	}
+
+	// COLLATERAL USABILITY, counted over the REGISTRY and not over the sweep
+	// table. An account that has never been attempted has no snapshot_sweeps row
+	// at all, and it is precisely that account whose collateral is missing: the
+	// LEFT JOIN from the registry is what makes "no row" countable, and a query
+	// over snapshot_sweeps alone is structurally blind to it.
+	//
+	// The age comparison uses the DATABASE clock (now()) with strict `<`, so it
+	// matches invariant I4′ exactly (a success at bound-1s is not stale, at
+	// bound+1s it is) and cannot drift with the daemon's own clock.
+	var oldest *time.Time
+	if err := s.pool.QueryRow(ctx, `
+		SELECT
+			count(*) FILTER (WHERE sw.account IS NULL OR sw.last_success_block = 0),
+			count(*) FILTER (WHERE sw.last_success_block > 0
+			                   AND (sw.last_success_at IS NULL
+			                        OR sw.last_success_at < now() - make_interval(secs => $2::double precision))),
+			min(sw.last_success_at) FILTER (WHERE sw.last_success_block > 0)
+		FROM (SELECT DISTINCT account FROM position_events WHERE engine = $1 AND side = 'debt') r
+		LEFT JOIN snapshot_sweeps sw ON sw.engine = $1 AND sw.account = r.account`,
+		engine, staleBound.Seconds()).Scan(&p.NeverSucceeded, &p.StaleSuccess, &oldest); err != nil {
+		return SweepProgress{}, false, fmt.Errorf("count unusable collateral for %q: %w", engine, err)
+	}
+	if oldest != nil {
+		p.OldestSuccessAt = *oldest
 	}
 	return p, true, nil
 }
@@ -1297,8 +1415,10 @@ type SweepResult struct {
 //
 // Status rows carry the durable attempts counter SweepWorkBatch's retry
 // budget reads: an attempt under the SAME generation increments it, a new
-// generation resets it to 1. A success stamps last_success_block; a failure
-// retains the previous success block for staleness measurement. Idempotent
+// generation resets it to 1. A success stamps last_success_block, and stamps
+// last_success_at ONLY when the execution block strictly advances (amendment
+// A2 — see the guard at the success upsert); a failure retains both, touching
+// neither, so a failed attempt can never date an account's collateral. Idempotent
 // under replay: a re-applied batch (crash between commit and the caller's
 // bookkeeping) converges to the same balances/status end state — only
 // attempts overcounts, which NARROWS the retry budget, never widens it.
@@ -1338,6 +1458,11 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 			return fmt.Errorf("sweep result with empty account")
 		}
 		if !res.OK {
+			// last_success_block and last_success_at are absent from BOTH arms on
+			// purpose (invariant I3′): a new row gets the column default (0 / NULL)
+			// and an existing row keeps whatever its last success recorded. A
+			// failure is an attempt, not an observation, so it must not be able to
+			// move — in either direction — the record the usability gate reads.
 			if _, err := tx.Exec(ctx, `INSERT INTO snapshot_sweeps
 				(engine, account, generation, last_attempt_block, last_success_block, status, attempts, updated_at)
 				VALUES ($1,$2,$3,$4,0,'failed',1,now())
@@ -1417,15 +1542,30 @@ func (s *Store) ApplySweepBatch(ctx context.Context, engine string, generation, 
 			map[string]any{"side": "collateral", "balances": doc}); err != nil {
 			return fmt.Errorf("save collateral history for %x at %d: %w", res.Account, execBlock, err)
 		}
+		// The freshness stamp is guarded by STRICT block advance (wave-9
+		// amendment A2, invariant I3′). The monotonic guard above deliberately
+		// admits execBlock == last_success_block so a crash-replay converges
+		// idempotently — but a replay observes NO NEW CHAIN STATE, and stamping
+		// last_success_at = now() for one would refresh the collateral freshness
+		// signal on zero new evidence. That is not hypothetical: an endpoint
+		// frozen at a fixed eth_call state whose BlockNumber view still advances
+		// (the adversary internal/snapshot documents) re-lands the same execution
+		// block every generation, and an ungarded stamp would keep the gate green
+		// through that forever. With the CASE, a replay retains the ORIGINAL
+		// stamp byte-identical and the frozen-endpoint loop trips StaleSuccess
+		// once the bound elapses — making this gate the FIRST catcher of that
+		// quiet failure mode rather than another blind spot.
 		if _, err := tx.Exec(ctx, `INSERT INTO snapshot_sweeps
-			(engine, account, generation, last_attempt_block, last_success_block, status, attempts, updated_at)
-			VALUES ($1,$2,$3,$4,$4,'success',1,now())
+			(engine, account, generation, last_attempt_block, last_success_block, status, attempts, updated_at, last_success_at)
+			VALUES ($1,$2,$3,$4,$4,'success',1,now(),now())
 			ON CONFLICT (engine, account) DO UPDATE
 			SET attempts = CASE WHEN snapshot_sweeps.generation = EXCLUDED.generation
 			                    THEN snapshot_sweeps.attempts + 1 ELSE 1 END,
 			    generation = EXCLUDED.generation,
 			    last_attempt_block = EXCLUDED.last_attempt_block,
 			    last_success_block = EXCLUDED.last_attempt_block,
+			    last_success_at = CASE WHEN EXCLUDED.last_attempt_block > snapshot_sweeps.last_success_block
+			                           THEN now() ELSE snapshot_sweeps.last_success_at END,
 			    status = 'success', updated_at = now()`,
 			engine, res.Account, generation, execBlock); err != nil {
 			return fmt.Errorf("record successful sweep for %x: %w", res.Account, err)

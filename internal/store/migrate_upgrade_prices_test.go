@@ -101,7 +101,7 @@ func TestMigrateUpgradesV4PriceBaselineWithoutDataLoss(t *testing.T) {
 	var version int64
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT max(version_id) FROM goose_db_version`).Scan(&version))
-	require.EqualValues(t, currentSchemaVersion, version, "00005 must land on top of the v4 baseline")
+	require.EqualValues(t, currentSchemaVersion, version, "00005 and everything above it must land on top of the v4 baseline")
 
 	// (d) No data loss, and correct attribution/quarantine of every legacy row.
 	type legacyRow struct {
