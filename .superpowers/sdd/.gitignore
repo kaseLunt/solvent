@@ -14,3 +14,10 @@
 !*-mutations/
 !*-mutations/*.py
 !*-mutations/*.json
+
+# Same argument for measurement probes (R-001 and successors): an observed-throughput
+# number is evidence only if the reviewer can read the probe that produced it and re-run
+# the spec. A `<name>-probe/` directory tracks its script and its machine-readable results.
+!*-probe/
+!*-probe/*.py
+!*-probe/*.json

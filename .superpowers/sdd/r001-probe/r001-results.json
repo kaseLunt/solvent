@@ -1,0 +1,495 @@
+{
+  "probe_started_utc": "2026-07-26T06:30:53Z",
+  "endpoints": [
+    {
+      "url": "https://optimism.drpc.org",
+      "chain": "op",
+      "started_utc": "2026-07-26T06:30:53Z",
+      "head": 154724338,
+      "head_check": "ok",
+      "window_ceiling": [
+        {
+          "span": 2000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1036,
+          "latency": 0.143,
+          "message": null
+        },
+        {
+          "span": 5000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1036,
+          "latency": 0.172,
+          "message": null
+        },
+        {
+          "span": 10000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1036,
+          "latency": 0.235,
+          "message": null
+        },
+        {
+          "span": 20000,
+          "kind": "http-other",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.183,
+          "message": "HTTP 400"
+        }
+      ],
+      "early_exit": "phase 2 rps collapsed (clean 0.4667); higher phases skipped",
+      "phases": [
+        {
+          "target_rps": 2,
+          "seconds": 45,
+          "submitted": 90,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 42,
+            "http-429": 48
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 2,
+          "ok": 42,
+          "clean_fraction": 0.4667,
+          "achieved_ok_rps": 0.93,
+          "latency_p50": 0.144,
+          "latency_p95": 0.311,
+          "getlogs_latency_p50": 0.3,
+          "getlogs_latency_p95": 0.331
+        }
+      ],
+      "max_clean_sustained_rps": 0,
+      "provider_group": "drpc"
+    },
+    {
+      "url": "https://mainnet.optimism.io",
+      "chain": "op",
+      "started_utc": "2026-07-26T06:30:53Z",
+      "head": 154724338,
+      "head_check": "ok",
+      "window_ceiling": [
+        {
+          "span": 2000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1037,
+          "latency": 0.258,
+          "message": null
+        },
+        {
+          "span": 5000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1037,
+          "latency": 0.283,
+          "message": null
+        },
+        {
+          "span": 10000,
+          "kind": "ok",
+          "logs": 2,
+          "bytes": 1037,
+          "latency": 0.243,
+          "message": null
+        },
+        {
+          "span": 20000,
+          "kind": "jsonrpc-error",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.307,
+          "message": "code=-32062 Block range is too large"
+        }
+      ],
+      "early_exit": "phase 20 rps collapsed (clean 0.3444); higher phases skipped",
+      "phases": [
+        {
+          "target_rps": 2,
+          "seconds": 45,
+          "submitted": 90,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 90
+          },
+          "error_samples": [],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 2,
+          "ok": 90,
+          "clean_fraction": 1.0,
+          "achieved_ok_rps": 2.0,
+          "latency_p50": 0.252,
+          "latency_p95": 0.351,
+          "getlogs_latency_p50": 0.345,
+          "getlogs_latency_p95": 0.389
+        },
+        {
+          "target_rps": 5,
+          "seconds": 45,
+          "submitted": 225,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 225
+          },
+          "error_samples": [],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 12,
+          "ok": 225,
+          "clean_fraction": 1.0,
+          "achieved_ok_rps": 5.0,
+          "latency_p50": 0.25,
+          "latency_p95": 0.354,
+          "getlogs_latency_p50": 0.345,
+          "getlogs_latency_p95": 0.37
+        },
+        {
+          "target_rps": 10,
+          "seconds": 45,
+          "submitted": 450,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 396,
+            "http-429": 54
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 396,
+          "clean_fraction": 0.88,
+          "achieved_ok_rps": 8.8,
+          "latency_p50": 0.252,
+          "latency_p95": 0.356,
+          "getlogs_latency_p50": 0.346,
+          "getlogs_latency_p95": 0.399
+        },
+        {
+          "target_rps": 20,
+          "seconds": 45,
+          "submitted": 900,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 310,
+            "http-429": 590
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 104,
+          "ok": 310,
+          "clean_fraction": 0.3444,
+          "achieved_ok_rps": 6.89,
+          "latency_p50": 0.249,
+          "latency_p95": 0.355,
+          "getlogs_latency_p50": 0.345,
+          "getlogs_latency_p95": 0.373
+        }
+      ],
+      "max_clean_sustained_rps": 5.0,
+      "provider_group": "op-foundation"
+    },
+    {
+      "url": "https://ethereum-rpc.publicnode.com",
+      "chain": "eth",
+      "started_utc": "2026-07-26T06:30:53Z",
+      "head": 25615184,
+      "head_check": "ok",
+      "window_ceiling": [
+        {
+          "span": 2000,
+          "kind": "http-403",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.112,
+          "message": "HTTP 403"
+        },
+        {
+          "span": 5000,
+          "kind": "http-403",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.105,
+          "message": "HTTP 403"
+        },
+        {
+          "span": 10000,
+          "kind": "http-403",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.114,
+          "message": "HTTP 403"
+        },
+        {
+          "span": 20000,
+          "kind": "http-403",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.366,
+          "message": "HTTP 403"
+        }
+      ],
+      "phases": [
+        {
+          "target_rps": 2,
+          "seconds": 45,
+          "submitted": 90,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 75,
+            "http-403": 15
+          },
+          "error_samples": [
+            [
+              "http-403",
+              "HTTP 403"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 75,
+          "clean_fraction": 0.8333,
+          "achieved_ok_rps": 1.67,
+          "latency_p50": 0.134,
+          "latency_p95": 0.223,
+          "getlogs_latency_p50": null,
+          "getlogs_latency_p95": null
+        },
+        {
+          "target_rps": 5,
+          "seconds": 45,
+          "submitted": 225,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 188,
+            "http-403": 37
+          },
+          "error_samples": [
+            [
+              "http-403",
+              "HTTP 403"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 188,
+          "clean_fraction": 0.8356,
+          "achieved_ok_rps": 4.18,
+          "latency_p50": 0.131,
+          "latency_p95": 0.212,
+          "getlogs_latency_p50": null,
+          "getlogs_latency_p95": null
+        },
+        {
+          "target_rps": 10,
+          "seconds": 45,
+          "submitted": 450,
+          "dropped_saturated": 0,
+          "counts": {
+            "http-403": 75,
+            "ok": 375
+          },
+          "error_samples": [
+            [
+              "http-403",
+              "HTTP 403"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 375,
+          "clean_fraction": 0.8333,
+          "achieved_ok_rps": 8.33,
+          "latency_p50": 0.139,
+          "latency_p95": 0.225,
+          "getlogs_latency_p50": null,
+          "getlogs_latency_p95": null
+        },
+        {
+          "target_rps": 20,
+          "seconds": 45,
+          "submitted": 900,
+          "dropped_saturated": 0,
+          "counts": {
+            "http-403": 150,
+            "ok": 750
+          },
+          "error_samples": [
+            [
+              "http-403",
+              "HTTP 403"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 750,
+          "clean_fraction": 0.8333,
+          "achieved_ok_rps": 16.67,
+          "latency_p50": 0.131,
+          "latency_p95": 0.213,
+          "getlogs_latency_p50": null,
+          "getlogs_latency_p95": null
+        }
+      ],
+      "max_clean_sustained_rps": 0,
+      "provider_group": "publicnode"
+    },
+    {
+      "url": "https://eth.drpc.org",
+      "chain": "eth",
+      "started_utc": "2026-07-26T06:32:17Z",
+      "head": 25615191,
+      "head_check": "ok",
+      "window_ceiling": [
+        {
+          "span": 2000,
+          "kind": "ok",
+          "logs": 0,
+          "bytes": 36,
+          "latency": 0.352,
+          "message": null
+        },
+        {
+          "span": 5000,
+          "kind": "ok",
+          "logs": 0,
+          "bytes": 36,
+          "latency": 0.387,
+          "message": null
+        },
+        {
+          "span": 10000,
+          "kind": "ok",
+          "logs": 0,
+          "bytes": 36,
+          "latency": 0.624,
+          "message": null
+        },
+        {
+          "span": 20000,
+          "kind": "http-other",
+          "logs": null,
+          "bytes": null,
+          "latency": 0.072,
+          "message": "HTTP 400"
+        }
+      ],
+      "phases": [
+        {
+          "target_rps": 2,
+          "seconds": 45,
+          "submitted": 90,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 80,
+            "http-429": 10
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 0,
+          "ok": 80,
+          "clean_fraction": 0.8889,
+          "achieved_ok_rps": 1.78,
+          "latency_p50": 0.223,
+          "latency_p95": 0.324,
+          "getlogs_latency_p50": 0.286,
+          "getlogs_latency_p95": 0.498
+        },
+        {
+          "target_rps": 5,
+          "seconds": 45,
+          "submitted": 225,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 185,
+            "http-429": 40
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 103,
+          "ok": 185,
+          "clean_fraction": 0.8222,
+          "achieved_ok_rps": 4.11,
+          "latency_p50": 0.22,
+          "latency_p95": 0.307,
+          "getlogs_latency_p50": 0.292,
+          "getlogs_latency_p95": 0.361
+        },
+        {
+          "target_rps": 10,
+          "seconds": 45,
+          "submitted": 450,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 450
+          },
+          "error_samples": [],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 252,
+          "ok": 450,
+          "clean_fraction": 1.0,
+          "achieved_ok_rps": 10.0,
+          "latency_p50": 0.225,
+          "latency_p95": 0.324,
+          "getlogs_latency_p50": 0.29,
+          "getlogs_latency_p95": 0.351
+        },
+        {
+          "target_rps": 20,
+          "seconds": 45,
+          "submitted": 900,
+          "dropped_saturated": 0,
+          "counts": {
+            "ok": 778,
+            "http-429": 122
+          },
+          "error_samples": [
+            [
+              "http-429",
+              "HTTP 429"
+            ]
+          ],
+          "retry_after_samples": [],
+          "getlogs_logs_total": 303,
+          "ok": 778,
+          "clean_fraction": 0.8644,
+          "achieved_ok_rps": 17.29,
+          "latency_p50": 0.224,
+          "latency_p95": 0.369,
+          "getlogs_latency_p50": 0.333,
+          "getlogs_latency_p95": 0.469
+        }
+      ],
+      "max_clean_sustained_rps": 10.0,
+      "provider_group": "drpc"
+    }
+  ],
+  "probe_finished_utc": "2026-07-26T06:35:47Z"
+}
