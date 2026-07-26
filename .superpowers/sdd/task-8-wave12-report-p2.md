@@ -306,3 +306,45 @@ loops" rule exists for the fix commit; it applies just as much to work produced 
 - **The other wave's `internal/store/derive.go` is mid-edit in the shared tree.** All numbers above
   come from the clean export; I did not run the suite against their uncommitted state, and it is not
   mine to judge.
+
+---
+
+## ERRATUM — 2026-07-25 (wave 14, Codex round 10P residual (a))
+
+Appended, not rewritten: the text above is what this wave reported, and this is what a later
+measurement found wrong in it.
+
+**1. The index claim in §P1 is incorrect.** The report says of `unprovableRow`:
+
+> It is an index lookup on 00007's `prices_anchor_binding_idx`.
+
+and the "Anything unverified" bullet repeats it as *"00007's `prices_anchor_binding_idx` is
+`(chain_id, owner_engine, anchor_block)` and the predicate matches it"*. It does not. The predicate's
+inner lookup reads **`price_poll_anchors`** by `(engine, chain_id, block_number)`, so what can serve
+it is an index on **that** table. `prices_anchor_binding_idx` is on `prices`, keyed by `anchor_block`;
+it serves the reads that go the other way — the prune's and `RewindPrices`' *"is any marked row bound
+to this anchor?"* — and plays no part in `unprovableRow`.
+
+Codex named the primary key `(engine, block_number)` as the true server. **Measured** on the live
+database at wave 14 (3,000 anchored rounds, `ANALYZE`d, `force_generic_plan`, `EXPLAIN ANALYZE`), the
+planner chose 00005's **`price_poll_anchors_scan_idx (chain_id, engine, block_number DESC)`** as an
+`Index Only Scan` on the inner side of a `Nested Loop Anti Join` — a three-column exact match, where
+the PK lacks `chain_id`. So Codex's correction is right about the wrong index having been named, and
+the specific index is the 00005 scan index with the PK as the alternative. The load-bearing part of
+the original claim — *correlated index lookup, not a scan* — holds.
+
+The same wrong index name had been copied into the `unprovableRow` doc comment in
+`internal/store/prices.go`; that comment is corrected in wave 14 with the measured plan. The
+measurement was taken with a throwaway test that was **not** committed, so the plan is still not
+pinned by a regression — the "argued, not EXPLAINed" caveat above stands for the three converted
+reads.
+
+**2. `AnchoredHeights` (row #8 of the consumer table, and the first "Anything unverified" bullet) is
+deleted.** The table recorded it as JUSTIFIED-and-left-in-place with no production consumer; Codex
+round 10 adjudicated the residual as *acceptable — delete it to reduce misuse*, and wave 14 did.
+`PriceRepairExposure` no longer carries the field, the anchor-count query is gone, and the fake and
+two test assertions that were its only readers are gone with it. Row #8 should now read **DELETED**.
+
+**3. The cross-chain gap in the last "Anything unverified" bullet is closed.** Wave 14 adds
+`TestProvenanceReadsAreScopedToTheirOwnChain` (`internal/store/prices_binding_test.go`), the two-chain
+fixture that bullet says was missing, and ran the mutation it predicted would survive.
