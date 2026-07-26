@@ -1728,6 +1728,75 @@ func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 	require.False(t, rep.Ready)
 }
 
+// AMENDMENT L5 — THE ORDERING, in the arrangement that actually exercises it.
+//
+// TestHeldStampYieldsAMeasuredVerdictOnADownChain above has ONE worker on the chain,
+// so nothing has populated the round's down-set by the time it is judged and the
+// ordering is not under test at all. This drives the case that is: a SECOND worker on
+// the same chain fails its fetch FIRST, marking the chain down for the round and
+// arming the cooldown, and only then is the worker holding a valid stamp judged. If
+// the down-set or the cooldown were consulted before the memo, a worker whose age the
+// daemon demonstrably knows would be downgraded to "cannot measure" — trading a true
+// verdict for an "I don't know", and losing the red that a wedged-on-a-dead-chain
+// worker must produce.
+func TestAHeldStampOutranksBothTheDownSetAndTheCooldown(t *testing.T) {
+	h, clk := newTestHealth()
+	hdr := newFakeHeaderTimes().set(1, 100, clk.now()).set(1, 999, clk.now())
+	judge := newStalenessJudge(hdr.fetch)
+	// ORDER IS DELIBERATE: the fetch for "eth:new" runs first and marks chain 1 down
+	// for the round, before "eth:held" — which holds a stamp — is judged.
+	watch := progressWatch{
+		walkers: []*walkerState{
+			{w: &fakeIngestWorker{name: "eth:new"}, chainID: 1},
+			{w: &fakeIngestWorker{name: "eth:held"}, chainID: 1},
+		},
+		staleness: judge,
+	}
+	pr := &fakeProgress{ingest: []store.CursorProgress{
+		{Name: "eth:new", Block: 999, UpdatedAt: clk.now()},
+		{Name: "eth:held", Block: 100, UpdatedAt: clk.now()},
+	}}
+	round := func() {
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		publishRound(h, rc)
+	}
+
+	// Round 1, chain healthy: both workers measure, and "eth:held" — judged second —
+	// leaves the retained stamp pointing at ITS block, which the rest of the test
+	// depends on.
+	round()
+	require.Equal(t, uint64(100), judge.stamp[1].block, "block 100 was measured and retained")
+	require.Empty(t, h.report().Recoverable)
+
+	// Round 2: the chain is fully down and time has passed well beyond the bound.
+	// "eth:new" has also moved on, so its fetch is genuinely attempted — and fails,
+	// marking chain 1 down for the round BEFORE "eth:held" is judged.
+	hdr.fail[1] = errors.New("all rpc endpoints failed")
+	clk.advance(maxDerivedStaleness + time.Minute)
+	pr.ingest[0].Block = 1500
+	round()
+	require.Equal(t, stampKey{chainID: 1, block: 1500}, hdr.calls[len(hdr.calls)-1],
+		"the failing fetch really did run first, which is what makes the ordering observable")
+
+	rep := h.report()
+	require.Contains(t, rep.Recoverable, "eth:new/"+conditionStalenessUnmeasured,
+		"the worker with no stamp genuinely cannot be measured")
+	require.Contains(t, rep.Recoverable, "eth:held/"+conditionStaleness,
+		"but the worker holding an exact stamp gets its REAL verdict, even though the chain was already marked down this round")
+	require.NotContains(t, rep.Recoverable, "eth:held/"+conditionStalenessUnmeasured)
+
+	// Round 3: still down, now inside the retry cooldown as well. The stamp still
+	// outranks it — the cooldown schedules MEASUREMENT, it does not withdraw one
+	// already made.
+	clk.advance(time.Second)
+	round()
+	require.Contains(t, h.report().Recoverable, "eth:held/"+conditionStaleness,
+		"the cooldown suppresses fetches, not verdicts the daemon can already reach")
+	require.NotContains(t, h.report().Recoverable, "eth:held/"+conditionStalenessUnmeasured)
+	require.False(t, h.report().Ready)
+}
+
 // AMENDMENT L5 — THE RESTAMP THROTTLE, and the direction that makes it safe.
 //
 // A backfilling worker moves its cursor every round, so the exact-block memo misses
