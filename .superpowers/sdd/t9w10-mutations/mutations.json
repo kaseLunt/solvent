@@ -1,0 +1,275 @@
+{
+  "meta": {
+    "wave": "task-9 wave 10",
+    "unit": "cmd/reconcile + internal/store reconcile/invariants layer — W1's acceptance-evidence harness: the bridge arithmetic, the sampling partition, the as-of predicate, the invariant scan SQL, the RPC classifier, the rewind re-check, the golden Row A live-read law, the DSN tripwire, the schema gate, the tolerance-laundering guard, and the F1 aggregate-weld census (risk-quant amendment).",
+    "purpose": "Wave-10 brief §10's twelve named mutation targets plus the verification bar's named extras (tripwire, schema gate, strata partition, as-of sum boundary, tolerance arms, invariant scans) plus the risk-quant amendment's named F1 kill. Run through the committed applier .superpowers/sdd/wave16-mutations/mutate.py: exactly-one-occurrence asserted per edit, byte-level in-memory restores verified byte-identical, git status clean after the loop.",
+    "design_notes": [
+      "NEW FILES ARE LF IN THE WORKING TREE (written this wave, not yet re-checked-out), so patterns embed \\n — the CRLF trap the applier exists to catch does not apply to them; the applier's exactly-once assertion still guards every edit.",
+      "DB-GATED KILLS: mutants in internal/store SQL are killed by tests that need TEST_DATABASE_URL pointing at the scratch database solvent_test (NEVER solvent — the falsifiability helper refuses that name). The loop shell exports it; the applier inherits env.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET: no live endpoints in mutation loops; every cmd/reconcile kill runs against in-process fakes that can fail (pruned rejections, 429 storms, wrong-height chunks).",
+      "EVERY KILL IS BEHAVIORAL: each mutant makes a named test assert the exact property the brief states, not a coverage count."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W10M1",
+      "description": "bridge floor→ceil (brief target 1): mulDivFloor becomes mulDivCeil",
+      "property": "the §3.3 bridge is EXACTLY the contract's floor (DebtManagerStorageContract.sol:520-522) — a ceil manufactures 1-wei USD drift on every remainder-bearing row; killed by TestMulDivFloorBridge's n=1, I=1e18+1 case (floor 1, ceil 2) and the recon validation triple",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestMulDivFloorBridge", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/dm.go",
+          "search": "\tout := new(big.Int).Mul(n, index)\n\treturn out.Quo(out, wad)",
+          "replace": "\tout := new(big.Int).Mul(n, index)\n\tout.Add(out, new(big.Int).Sub(wad, big.NewInt(1)))\n\treturn out.Quo(out, wad)"
+        }
+      ]
+    },
+    {
+      "id": "W10M2",
+      "description": "migration_genesis dropped from the as-of sum predicate (brief target 2)",
+      "property": "as-of sums include EVERY delta-bearing event type, migration_genesis above all — the majority of DM debt genesis enters derived state only through those rows; killed by TestAsOfEventSumsIncludesMigrationGenesisAndBoundary (sum 1050 becomes 50 under the mutant)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestAsOfEventSumsIncludesMigrationGenesisAndBoundary", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "       AND block_number <= $3 AND delta IS NOT NULL\n\t\t GROUP BY account, asset, side",
+          "replace": "       AND block_number <= $3 AND delta IS NOT NULL AND event_type <> 'migration_genesis'\n\t\t GROUP BY account, asset, side"
+        }
+      ]
+    },
+    {
+      "id": "W10M3",
+      "description": "as-of boundary <= → < (verification-bar target 'as-of sum boundary')",
+      "property": "the boundary is INCLUSIVE: ApplyDerived commits events THROUGH the cursor block atomically with it, so an event AT P is part of the pinned state; killed by TestAsOfEventSumsIncludesMigrationGenesisAndBoundary's boundary event at exactly P (1050 becomes 1000)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestAsOfEventSumsIncludesMigrationGenesisAndBoundary", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "       AND block_number <= $3 AND delta IS NOT NULL\n\t\t GROUP BY account, asset, side",
+          "replace": "       AND block_number < $3 AND delta IS NOT NULL\n\t\t GROUP BY account, asset, side"
+        }
+      ]
+    },
+    {
+      "id": "W10M4",
+      "description": "set-equality weakened to subset (brief target 3): the chain-only arm deleted",
+      "property": "the token-set equality is BIDIRECTIONAL (§3.3): a chain token the DB never derived is a derivation miss — exactly the leg a subset check silently passes; killed by TestCompareDMRowZeroTrimSetEquality's derivation-miss case (SetEqual stays true under the mutant)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestCompareDMRowZeroTrimSetEquality", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/dm.go",
+          "search": "\t\tif onChain && !inDB {\n\t\t\trow.SetEqual = false\n\t\t\trow.SetOnlyChain = append(row.SetOnlyChain, tok.Hex())\n\t\t}",
+          "replace": "\t\t// MUTANT W10M4: chain-only tokens no longer break set equality (subset check)\n\t\t_ = onChain"
+        }
+      ]
+    },
+    {
+      "id": "W10M5",
+      "description": "scan 2 IS DISTINCT FROM → = (brief target 4, arm 1)",
+      "property": "scan 2's predicate selects DISAGREEMENTS; '=' selects agreements — the healthy matched pair becomes a violation row and every seeded orphan vanishes; killed by TestInvariantScan2EventSumFalsifiability (both the empty-pristine and seeded-violation assertions invert)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestInvariantScan2EventSumFalsifiability", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "WHERE ev.total IS DISTINCT FROM bal.amount",
+          "replace": "WHERE ev.total = bal.amount"
+        }
+      ]
+    },
+    {
+      "id": "W10M5b",
+      "description": "scan 2 zero-sum allowance re-added (brief target 4, arm 2 — the L0-4 regression)",
+      "property": "a zero-sum event group with a MISSING balance row is a REAL orphan (both live apply and the rewind rebuild always materialize amount-0 rows) — the allowance makes that class a fixture-that-cannot-fail; killed by TestInvariantScan2EventSumFalsifiability's violation class 1 (expected 1 row, mutant returns 0)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestInvariantScan2EventSumFalsifiability", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "WHERE ev.total IS DISTINCT FROM bal.amount",
+          "replace": "WHERE ev.total IS DISTINCT FROM bal.amount\n  AND NOT (ev.total = 0 AND bal.amount IS NULL)"
+        }
+      ]
+    },
+    {
+      "id": "W10M6",
+      "description": "scan 1 HAVING > 1 → >= 1 (brief target 5)",
+      "property": "exactly one hash per height is the HEALTHY case; >= 1 flags every populated height; killed by TestInvariantScan1DistinctHashFalsifiability's pristine assertion (empty becomes 2 rows under the mutant)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestInvariantScan1DistinctHashFalsifiability", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "HAVING COUNT(DISTINCT block_hash) > 1",
+          "replace": "HAVING COUNT(DISTINCT block_hash) >= 1"
+        }
+      ]
+    },
+    {
+      "id": "W10M7",
+      "description": "scan 3 comparison inverted (brief target 6)",
+      "property": "borrow_index is monotonic NON-DECREASING; the inverted predicate flags the healthy increase and misses the seeded regression; killed by TestInvariantScan3BorrowIndexFalsifiability on both arms",
+      "test": ["go", "test", "./internal/store/", "-run", "TestInvariantScan3BorrowIndexFalsifiability", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "kind = 'borrow_index'\n) t\nWHERE prev_value IS NOT NULL AND value < prev_value",
+          "replace": "kind = 'borrow_index'\n) t\nWHERE prev_value IS NOT NULL AND value > prev_value"
+        }
+      ]
+    },
+    {
+      "id": "W10M8",
+      "description": "REQUIRE_DATA escalation removed — skip becomes the only empty-population outcome (brief target 7)",
+      "property": "under SOLVENT_INVARIANT_REQUIRE_DATA=1 an empty population is a FAILURE, never a skip — the receipt command sets the variable precisely so the evidence run cannot vacuously pass against an empty or wrong database; killed by TestRequireDataVerdictEscalation",
+      "test": ["go", "test", "./internal/store/", "-run", "TestRequireDataVerdictEscalation", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "\tif requireData {\n\t\treturn VerdictFail\n\t}\n\treturn VerdictSkip",
+          "replace": "\t_ = requireData // MUTANT W10M8: the escalation is gone — empty always skips\n\treturn VerdictSkip"
+        }
+      ]
+    },
+    {
+      "id": "W10M9",
+      "description": "classifier misfiles state-pruned as transport-throttle (brief target 8)",
+      "property": "state-pruned is the ARCHIVE-CAPABILITY verdict (exit 2 at a golden pin), never a backoff-and-retry class; killed by TestClassifierBucketTable + TestClassifierPrunedIsNeverThrottle + TestRunnerPrunedOnlyAfterFullBudget (the terminal class assertion flips to throttle)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestClassifier|TestRunnerPrunedOnlyAfterFullBudget", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/rpcclass.go",
+          "search": "\t\t\treturn classStatePruned",
+          "replace": "\t\t\treturn classThrottle // MUTANT W10M9: pruned misfiled as retryable"
+        }
+      ]
+    },
+    {
+      "id": "W10M10",
+      "description": "residue classification without the fully_liquidated predicate (brief target 9)",
+      "property": "the F2 hypothesis is scoped to FULLY-LIQUIDATED accounts: the silent zeroing mechanism (DebtManagerCore.sol:550-553) only fires there, so the same numeric shape on a live account is a DIFFERENT bug that must stay unclassified; killed by TestResidueShapedExactHypothesis's first case",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestResidueShapedExactHypothesis", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/dm.go",
+          "search": "\tif !fullyLiquidated || hasResidueEvent {\n\t\treturn false\n\t}",
+          "replace": "\tif hasResidueEvent { // MUTANT W10M10: the fully_liquidated predicate is gone\n\t\treturn false\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W10M11",
+      "description": "rewind re-check trusts MAX(reorg_epochs.epoch) instead of acked_epoch (brief target 10)",
+      "property": "PruneAckedReorgEpochs deletes acked epochs, so a rewind+ack+prune cycle mid-run leaves MAX unchanged while acked_epoch moved (RewindDerived always bumps it, acks are monotone) — the MAX-trusting detector is silent on exactly that hole; killed by TestRewindMovedIsPruneImmune",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestRewindMovedIsPruneImmune", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\t\tif cur.AckedEpoch != baseline.AckedEpoch[e] {",
+          "replace": "\t\tif baseline.MaxEpoch[cur.ChainID] != baseline.MaxEpoch[cur.ChainID] { // MUTANT W10M11: trusts the prunable MAX signal"
+        }
+      ]
+    },
+    {
+      "id": "W10M12",
+      "description": "golden Row A replaced by fixture comparison (brief target 11)",
+      "property": "Row A is the LITERAL W1 clause: a live pinned chain read at 25,584,990 — never a fixture substitute (constants never cross pins, L0-2); killed by TestGoldenRowAIsALiveChainReadAtTheW1Pin (Row A's chain leg stops being the live value) and TestGoldenRowAFailsWhenDBDisagreesWithTheLiveRead (the mutant PASSES a DB that merely matches the fixtures)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestGoldenRowA", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/golden.go",
+          "search": "\t\t\t\tif spec.row == \"A\" {\n\t\t\t\t\trow.Verdict = compareScaled(derived, chainScaled)\n\t\t\t\t} else {",
+          "replace": "\t\t\t\tif spec.row == \"A\" { // MUTANT W10M12: Row A compares against the fixture constant, not the live read\n\t\t\t\t\tfixture, _ := new(big.Int).SetString(l.fixture, 10)\n\t\t\t\t\trow.Chain = fixture.String()\n\t\t\t\t\trow.Verdict = compareScaled(derived, fixture)\n\t\t\t\t} else {"
+        }
+      ]
+    },
+    {
+      "id": "W10M13",
+      "description": "resolved seed not echoed into the artifact (brief target 12)",
+      "property": "a run whose artifact does not carry the resolved seed is unreproducible — the default seed is the OP pin hash, which exists nowhere else; killed by TestArtifactEchoesResolvedSeed",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestArtifactEchoesResolvedSeed", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\trun[\"seed_resolved\"] = seed",
+          "replace": "\t_ = seed // MUTANT W10M13: the seed is never echoed"
+        }
+      ]
+    },
+    {
+      "id": "W10M14",
+      "description": "DSN-identity tripwire disabled (verification-bar target 'tripwire')",
+      "property": "identical test and live database identities MUST kill the run at Phase 0 (exit 2) — the destructive suite pointed at the live database is the single worst hazard this wave closes (L2-1); killed by TestDSNTripwireDetectsSameDatabase",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestDSNTripwireDetectsSameDatabase", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\treturn reconID == testID",
+          "replace": "\treturn false // MUTANT W10M14: the tripwire never fires"
+        }
+      ]
+    },
+    {
+      "id": "W10M15",
+      "description": "schema gate exact-match weakened to >= (verification-bar target 'schema gate')",
+      "property": "the gate is EXACT both directions: a database ahead of the binary may have reshaped the tables the compiled queries read; killed by TestSchemaGateIsExactBothDirections (got=9, expected=8 must refuse)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestSchemaGateIsExactBothDirections", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\treturn got == expected",
+          "replace": "\treturn got >= expected // MUTANT W10M15: a future schema passes the gate"
+        }
+      ]
+    },
+    {
+      "id": "W10M16",
+      "description": "strata partition precedence inverted (verification-bar target 'strata partition')",
+      "property": "the strata are a DISJOINT PRECEDENCE partition: liquidated beats migrated — an account with both histories belongs to the liquidated stratum (residue probes live there); killed by TestSampleDMBorrowersStrataPrecedenceAndDeterminism (the liq+mig account classifies migrated under the mutant)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestSampleDMBorrowersStrataPrecedenceAndDeterminism", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "       CASE WHEN liquidated THEN 'liquidated'\n            WHEN migrated  THEN 'migrated'",
+          "replace": "       CASE WHEN migrated THEN 'migrated'\n            WHEN liquidated  THEN 'liquidated'"
+        }
+      ]
+    },
+    {
+      "id": "W10M17",
+      "description": "F1 aggregate weld computed over sampled accounts only (risk-quant amendment's NAMED mutation target)",
+      "property": "the weld's derived side is the ALL-ACCOUNTS census — the sampling universe is position_events, so a never-derived borrower is structurally unselectable and ONLY the whole-table aggregate can catch phantom debt; the sampled aggregation exists solely as a coverage diagnostic; killed by TestComputeDMWeldInputsCoversAllAccounts (All shows 400 where the census says 1000)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestComputeDMWeldInputsCoversAllAccounts", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/phase2.go",
+          "search": "\treturn dmWeldInputs{\n\t\tAll:          p1.dmAllNet,\n\t\tSampleTotals: assetNetSumsFromSample(p1.dmAsOf),\n\t}",
+          "replace": "\t// MUTANT W10M17: the weld census is the SAMPLE, not the whole table\n\tsample := assetNetSumsFromSample(p1.dmAsOf)\n\tall := make([]store.AssetNetSum, 0, len(sample))\n\tfor k, v := range sample {\n\t\tb, _ := hex.DecodeString(k)\n\t\tall = append(all, store.AssetNetSum{Asset: b, Total: v})\n\t}\n\treturn dmWeldInputs{All: all, SampleTotals: sample}"
+        }
+      ]
+    },
+    {
+      "id": "W10M18",
+      "description": "tolerance-laundering guard removed (verification-bar target 'tolerance arms')",
+      "property": "ANY nonzero -tolerance-dm-wei forces result=fail-with-tolerance structurally — a tolerance can never launder into a pass receipt, even with zero gated failures (§3.5); killed by TestNonzeroToleranceCannotProducePass",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestNonzeroToleranceCannotProducePass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif toleranceDMWei != 0 {\n\t\treturn \"fail-with-tolerance\", exitVerdictFail\n\t}",
+          "replace": "\t_ = toleranceDMWei // MUTANT W10M18: tolerance no longer forces fail-with-tolerance"
+        }
+      ]
+    },
+    {
+      "id": "W10M19",
+      "description": "scan 5 loses the repay arm of its debt-mutating event list (verification-bar target 'invariant scans', F5.2 specificity)",
+      "property": "same-block IIU coverage must hold for EVERY debt-mutating event type (borrow/repay/liquidation price through the same-block index); killed by TestInvariantScan5IIUCoverageFalsifiability's seeded repay gap (expected 1 row, mutant returns 0)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestInvariantScan5IIUCoverageFalsifiability", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/invariants.go",
+          "search": "AND e.event_type IN ('borrow','repay','liquidation')",
+          "replace": "AND e.event_type IN ('borrow','liquidation')"
+        }
+      ]
+    }
+  ]
+}

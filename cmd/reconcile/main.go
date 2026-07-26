@@ -562,7 +562,7 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		pre.Close(ctx)
 		return exitPrecondition, err
 	}
-	if schemaV != expected {
+	if !schemaGateOK(schemaV, expected) {
 		pre.Close(ctx)
 		return exitPrecondition, fmt.Errorf("schema gate: database at goose version %d, this binary expects exactly %d — reconcile never migrates", schemaV, expected)
 	}
@@ -926,6 +926,15 @@ func checkDSNSplit(ctx context.Context, reconRODSN, testDSN string) error {
 // must be killed by TestDSNTripwireDetectsSameDatabase).
 func dsnCollision(reconID, testID string) bool {
 	return reconID == testID
+}
+
+// schemaGateOK is the Phase-0 schema gate's decision: EXACT equality, both
+// directions (mutation target "schema gate"). A lower database misses
+// tables the compiled queries read; a HIGHER one may have reshaped them —
+// a >=-style gate would silently accept a future schema this binary was
+// never written against.
+func schemaGateOK(got, expected int64) bool {
+	return got == expected
 }
 
 func dbNameFromDSN(dsn string) string {

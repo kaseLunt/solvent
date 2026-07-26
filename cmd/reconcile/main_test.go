@@ -144,6 +144,14 @@ func TestDBNameFromDSN(t *testing.T) {
 	require.Equal(t, "solvent", dbNameFromDSN("postgres://u:p@localhost:5432/solvent?sslmode=disable"))
 }
 
+// TestSchemaGateIsExactBothDirections — mutation target "schema gate": a
+// database AHEAD of the binary is as unacceptable as one behind it.
+func TestSchemaGateIsExactBothDirections(t *testing.T) {
+	require.True(t, schemaGateOK(8, 8))
+	require.False(t, schemaGateOK(7, 8), "a lower database misses tables the queries read")
+	require.False(t, schemaGateOK(9, 8), "a HIGHER database may have reshaped them — >= would accept a schema this binary never saw")
+}
+
 // TestMulticallInBandBlockAssertion (brief §5 multicall discipline): a
 // chunk reporting a block ≠ P aborts with errChunkDivergence (exit 3
 // semantics) — never silently accepted.
