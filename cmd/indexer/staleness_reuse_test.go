@@ -89,19 +89,67 @@ func TestDeepStaleBackfillReusesTheAnchorInsteadOfRefetchingEveryRound(t *testin
 	require.Contains(t, h.report().Recoverable, key,
 		"and the reused anchor still yields the REAL verdict — the reuse is fail-closed, not silent")
 
-	// THE PERIODIC EXACT REFRESH, and the proof that reuse does not renew the
-	// window. 100 reuses have just happened; the window is nonetheless measured
-	// from the FETCH, so it expires on schedule and the anchor is re-read exactly
-	// once. If reuse renewed fetchedAt this assertion would fail — and a caught-up
-	// worker would then be pinned red indefinitely.
-	require.Less(t, clk.now().Sub(clk.now().Add(-20*time.Second)), headerRestampThrottle,
-		"sanity: the 100 rounds above really did fit inside one reuse window")
-	clk.advance(headerRestampThrottle)
+	// THE PERIODIC EXACT REFRESH, and the proof that a REUSE DOES NOT RENEW THE
+	// WINDOW — which is the second of the two bounds, and the one a plausible
+	// "optimisation" would quietly delete.
+	//
+	// The arithmetic is chosen so the two readings disagree. 20 s of hot rounds have
+	// elapsed since the fetch, and the last reuse was 200 ms ago. Advancing 15 s puts
+	// the clock 35 s past the FETCH (window expired ⇒ refresh) but only 15 s past the
+	// last REUSE (window still open ⇒ no refresh). An implementation that stamped
+	// fetchedAt on reuse would ride this anchor forever, one reuse at a time, and a
+	// worker that had caught up would stay red indefinitely; this assertion is the
+	// only thing that separates the two.
+	elapsedSinceFetch := 20 * time.Second
+	clk.advance(headerRestampThrottle - elapsedSinceFetch + 5*time.Second)
 	pr.ingest[0].Block = start + 101
 	round()
-	require.Len(t, hdr.calls, 2, "the anchor is re-read exactly once per reuse window, however many reuses rode on it")
+	require.Len(t, hdr.calls, 2,
+		"the window is measured from the FETCH, not from the last reuse: 35 s after the fetch the anchor is re-read even though it was reused 15 s ago")
 	require.Equal(t, stampKey{chainID: 1, block: start + 101}, hdr.calls[1],
 		"and the refresh is EXACT: it measures the block the cursor actually stands at now")
+}
+
+// FAIL-CLOSED MEANS UPWARD-ONLY, on this arm as much as on the near-head one.
+//
+// A cursor can go DOWN — a reorg rewind resets it — and the anchor above it belongs
+// to a NEWER block, whose timestamp is at or above the true one. Reusing it would
+// UNDER-state the age. On the deep-stale arm that under-statement cannot flip the
+// verdict (both readings are past the bound), so nothing here is a false green; what
+// it corrupts is the number the operator is shown, which is the whole content of the
+// reason text. The direction check is therefore asserted on the REASON, not only on
+// the fetch count, because a verdict-only assertion would call this equivalent and
+// let the reported age drift from the truth.
+func TestAReusedAnchorIsNeverConsultedForALowerBlock(t *testing.T) {
+	h, clk := newTestHealth()
+	hdr := newFakeHeaderTimes()
+	name := "eth:aave-etherfi"
+	high, low := uint64(20_000_000), uint64(19_999_900)
+	hdr.set(1, high, clk.now().Add(-72*time.Hour))
+	hdr.set(1, low, clk.now().Add(-96*time.Hour))
+	watch := progressWatch{
+		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
+		staleness: newStalenessJudge(hdr.fetch),
+	}
+	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: high, UpdatedAt: clk.now()}}}
+	round := func() {
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		publishRound(h, rc)
+	}
+
+	round()
+	require.Len(t, hdr.calls, 1)
+
+	// A REWIND: the cursor drops to an older block, well inside the reuse window.
+	clk.advance(200 * time.Millisecond)
+	pr.ingest[0].Block = low
+	round()
+	require.Len(t, hdr.calls, 2,
+		"a lower block is measured on its own header: the anchor above it can only under-state its age")
+	require.Equal(t, stampKey{chainID: 1, block: low}, hdr.calls[1])
+	require.Contains(t, h.report().Recoverable[name+"/"+conditionStaleness], "96h0m0s old",
+		"and the reported age is the LOW block's real age, not the anchor's — reusing the newer stamp would have said 72h")
 }
 
 // THE DEEP-STALE ARM IS GREEN-PROOF, and that is why it is safe to admit at all.
@@ -300,7 +348,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 		}
 		t.Logf("stale backfill: %d header reads over %d rounds (%.2f/round)", len(reads), rounds, float64(len(reads))/rounds)
 		require.Equal(t, 9, len(reads),
-			"a genuine three-day-behind backfill costs NINE header reads across 20 hot rounds — one per DISTINCT (chain, cursor block) among the 13 gated workers, once, and nothing more until the reuse window expires. Before the deep-stale arm the same 20 rounds cost 260 reads, because every worker's anchor failed the near-head test every round")
+			"a genuine three-day-behind backfill costs NINE header reads across 20 hot rounds — one per DISTINCT (chain, cursor block) among the 13 gated workers, once, and nothing more until the reuse window expires. MEASURED against the same harness with the deep-stale arm removed: 180 reads over the same 20 rounds (9.00 per round), because every worker's anchor failed the near-head test every single round. Nine is also the floor: the five aToken streams share a StartBlock, so they share a memo entry until their cursors diverge, after which the pre-fix figure rises toward the 13-per-round Codex named")
 		require.Len(t, uniqueStamps(reads), 9,
 			"and every one of them is a distinct measurement: none is a re-read of something already anchored")
 		// The verdict is not bought with silence: every gated worker is red.
@@ -441,6 +489,9 @@ func TestEveryStampReuseIsRevalidatedAgainstTheCurrentClock(t *testing.T) {
 			require.Len(t, hdr.calls, 1,
 				"the eviction costs no fetch of its own: this round has no answer, and the next one re-reads")
 			require.False(t, rep.Ready)
+			require.NotContains(t, judge.nextFetchAttempt, uint64(1),
+				"and it must NOT arm the per-chain retry cooldown: the endpoint did nothing wrong — this daemon's clock moved — and a cooldown here would keep the bound unmeasurable past the moment the clock is corrected")
+			require.NotContains(t, judge.stamp, uint64(1), "the invalidated anchor is gone, not merely refused this once")
 
 			// RECOVERY. The clock is corrected; the evicted stamp is gone, so the
 			// next round measures again and the worker returns to a real verdict.
@@ -453,6 +504,77 @@ func TestEveryStampReuseIsRevalidatedAgainstTheCurrentClock(t *testing.T) {
 			require.NotContains(t, rep.Recoverable, measured)
 		})
 	}
+}
+
+// THE ARRANGEMENT IN WHICH ONLY THE BACKFILL ANCHOR'S OWN CHECK CAN SAVE IT.
+//
+// This test exists because a mutation found the gap, not because review did. Removing
+// the skew check from the deep-stale anchor SURVIVED the table test above: in every
+// arrangement there, the chain-keyed stamp holds the same invalidated timestamp and
+// its check fires first, so the anchor's own check was never the thing doing the work.
+//
+// It is not redundant, though, and the arrangement that proves it is one production
+// reaches: two workers on one chain at very different heights. The chain stamp ends
+// up belonging to the worker at the LOWER block, whose header is OLDER — so a clock
+// rollback can leave the chain stamp comfortably in the past (its check passes) while
+// the OTHER worker's newer backfill anchor is grossly future. Only that anchor's own
+// check stands between the daemon and stalenessAge clamping a negative age to zero,
+// which is the false-green this whole finding is about.
+func TestTheBackfillAnchorCarriesItsOwnSkewCheckForTheCaseTheChainStampCannotCover(t *testing.T) {
+	h, clk := newTestHealth()
+	hdr := newFakeHeaderTimes()
+	// deep is judged FIRST and anchors at a HIGH block with a one-hour-old header;
+	// older is judged second, at a LOW block whose header is five hours old, and its
+	// fetch is what leaves the CHAIN stamp pointing at the older timestamp.
+	deep, older := "eth:aave-etherfi", "eth:feed-pyusd"
+	deepBlock, olderBlock := uint64(20_000_000), uint64(19_000_000)
+	hdr.set(1, deepBlock, clk.now().Add(-time.Hour))
+	hdr.set(1, deepBlock+1, clk.now().Add(-time.Hour))
+	hdr.set(1, olderBlock, clk.now().Add(-5*time.Hour))
+	hdr.set(1, olderBlock+1, clk.now().Add(-5*time.Hour))
+	judge := newStalenessJudge(hdr.fetch)
+	watch := progressWatch{
+		walkers: []*walkerState{
+			{w: &fakeIngestWorker{name: deep}, chainID: 1},
+			{w: &fakeIngestWorker{name: older}, chainID: 1},
+		},
+		staleness: judge,
+	}
+	pr := &fakeProgress{ingest: []store.CursorProgress{
+		{Name: deep, Block: deepBlock, UpdatedAt: clk.now()},
+		{Name: older, Block: olderBlock, UpdatedAt: clk.now()},
+	}}
+	round := func() {
+		rc := roundConditions{}
+		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		publishRound(h, rc)
+	}
+
+	round()
+	require.Len(t, hdr.calls, 2, "each worker's own height is measured once")
+	require.Equal(t, olderBlock, judge.stamp[1].block,
+		"the CHAIN stamp is left holding the lower block's five-hour-old timestamp — which is what makes it survive the rollback below")
+	require.Equal(t, deepBlock, judge.backfill[deep].block)
+
+	// A THREE-HOUR ROLLBACK. The chain stamp (five hours old) is still two hours in
+	// the past, so its check passes; the deep worker's own anchor (one hour old) is
+	// now two hours in the FUTURE.
+	clk.advance(-3 * time.Hour)
+	require.False(t, beyondSkewTolerance(judge.stamp[1].at, clk.now()),
+		"the chain stamp is genuinely still valid: it cannot be what catches this")
+	require.True(t, beyondSkewTolerance(judge.backfill[deep].at, clk.now()),
+		"and the backfill anchor genuinely is not")
+
+	pr.ingest[0].Block = deepBlock + 1
+	pr.ingest[1].Block = olderBlock + 1
+	round()
+
+	rep := h.report()
+	require.Contains(t, rep.Recoverable, deep+"/"+conditionStalenessUnmeasured,
+		"without the anchor's own check this reads AGE ZERO — a clamped negative — and the worker goes green forever at a block nothing re-reads")
+	require.NotContains(t, rep.Recoverable, deep+"/"+conditionStaleness)
+	require.NotContains(t, judge.backfill, deep, "and the invalidated anchor is evicted")
+	require.False(t, rep.Ready)
 }
 
 // The ROUND MEMO's arm of the same guard, exercised directly.
