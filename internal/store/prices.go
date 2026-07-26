@@ -1077,8 +1077,15 @@ func (s *Store) CountOwnedPricesAbove(ctx context.Context, engine string, chainI
 // anchor, the name survives and the fact does not, so both halves are required —
 // exactly as NeutralizeUnverifiablePrices' classifier requires them.
 //
-// It is indexed: 00007's prices_anchor_binding_idx is (chain_id, owner_engine,
-// anchor_block), so this is a correlated index lookup rather than a scan.
+// IT IS INDEXED, BUT NOT BY THE INDEX WAVE 12 NAMED (Codex round 10, residual (a)).
+// The inner lookup reads price_poll_anchors by (engine, chain_id, block_number), so
+// what serves it is an index on THAT table: measured on a live database it is 00005's
+// price_poll_anchors_scan_idx (chain_id, engine, block_number DESC) as an Index Only
+// Scan inside a Nested Loop Anti Join, with the table's primary key (engine,
+// block_number) as the alternative. 00007's prices_anchor_binding_idx is on `prices`
+// keyed by anchor_block and plays no part here — it serves the reads that go the other
+// way (the prune's and RewindPrices' "is any marked row bound to this anchor?"). Either
+// way the anti-join's inner side is a correlated index lookup rather than a scan.
 const unprovableRow = `NOT EXISTS (
 		     SELECT 1 FROM price_poll_anchors a
 		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.anchor_block)`
@@ -1138,13 +1145,15 @@ type PriceRepairExposure struct {
 	// boundary can never be judged, so it is the one that must not be able to
 	// inherit somebody else's proof.
 	Unanchored int64
-	// AnchoredHeights counts anchors above EffectiveTarget. It is a fact about
-	// the ANCHOR population, not a provenance claim about any row, and nothing in
-	// the poller decides on it — it is reported so an operator can tell "this
-	// suffix has no anchors at all" from "it has anchors that do not cover these
-	// rows". Deciding through it would be the height rule again, which is why
-	// Unanchored is the field the repair path reads.
-	AnchoredHeights int64
+	// AnchoredHeights IS DELETED, and the deletion is the point (Codex round 10,
+	// residual (c)). It counted ANCHORS above EffectiveTarget — an honest number
+	// about the anchor population — but it had no production consumer at all: only
+	// the fake and two test assertions read it. What it offered a future reader was
+	// a per-HEIGHT anchor count sitting one field away from the per-OBSERVATION
+	// binding count, which is the exact confusion round 9's [high] #1 was, and
+	// nothing was using it to justify keeping the trap. Unanchored is the field the
+	// repair path reads, and now the only one it can.
+	//
 	// ReorgGeneration is the chain's highest recorded reorg epoch at the instant
 	// the fields above were read — the GENERATION the whole exposure describes.
 	//
@@ -1160,7 +1169,7 @@ type PriceRepairExposure struct {
 	ReorgGeneration int64
 }
 
-// PriceRepairExposure reads all five facts in ONE transaction, so the target, the
+// PriceRepairExposure reads all four facts in ONE transaction, so the target, the
 // counts and the reorg generation describe the same instant. Under the enforced
 // single-writer contract (D-004) nothing else is writing, but reading them
 // together also means a caller cannot accidentally pair a stale target — or a
@@ -1209,12 +1218,6 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 		   AND `+unprovableRow,
 		chainID, engine, exp.EffectiveTarget, InvalidReasonUnverifiableReorg).Scan(&exp.Unanchored); err != nil {
 		return exp, fmt.Errorf("count unanchored prices owned by %q above %d: %w", engine, exp.EffectiveTarget, err)
-	}
-	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM price_poll_anchors
-		 WHERE engine = $1 AND chain_id = $2 AND block_number > $3`,
-		engine, chainID, exp.EffectiveTarget).Scan(&exp.AnchoredHeights); err != nil {
-		return exp, fmt.Errorf("count poll anchors for %q above %d: %w", engine, exp.EffectiveTarget, err)
 	}
 	// Read inside the SAME transaction as the counts: a generation paired with
 	// counts from a different instant is exactly the stale-proof pairing the field
@@ -1301,10 +1304,19 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 // validity and only the rows above that boundary are marked. Passing 0 means no
 // anchor verified and the whole suffix above the walker's target is unprovable.
 //
-// Returns the boundary it acted above, how many rows it marked, and — separately,
-// because the two have different meanings for an operator — how many of those sit at
-// ANCHORED heights (provenance exists; an offline check could still settle them) and
-// how many at UNANCHORED ones (no hash was ever recorded, so nothing ever can).
+// Returns the boundary it acted above and how many rows it marked. The WARN splits
+// that count three ways, because the three have different meanings for an operator:
+// rows a SURVIVING anchor vouches for (the hash is on disk; an offline check could
+// still settle them), rows whose binding DANGLES (a hash was recorded and has since
+// been pruned or swept — gone from here, possibly not gone from a backup), and rows
+// that were NEVER BOUND (no hash is known for their round at all). The latter two are
+// both "unanchored" — no surviving anchor is linked to the observation — and only the
+// first may be described as having its recorded hash retained.
+//
+// THE BOUNDARY IT RETURNS IS AUTHORITATIVE AND verifiedFloor IS NOT. The floor is what
+// the caller asks for; the clamp below may lower it, and callers' operator-facing text
+// must be composed from the return value (Codex round 10's [medium] #1, see
+// internal/prices.floorDisposition).
 func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (boundary uint64, quarantined int64, err error) {
 	if engine == "" {
 		return 0, 0, fmt.Errorf("price neutralization: engine is required (it is the ownership scope)")
@@ -1440,28 +1452,54 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	// anchor row there — so both halves are required and a dangling binding counts as
 	// unanchored.
 	//
-	// PRE-00007 ROWS ALL COUNT AS UNANCHORED, because their binding is NULL and NULL
-	// means unprovable (see migration 00007). That understates the anchored side for
-	// history written before this wave, and understating provenance is the only
-	// direction that cannot invent it.
-	var anchoredMarked, unanchoredMarked int64
+	// AND THE UNANCHORED SIDE IS SPLIT IN TWO, BECAUSE ONE SENTENCE CANNOT DESCRIBE BOTH
+	// POPULATIONS TRUTHFULLY (Codex round 10's [medium] #2). "Unanchored" means NO
+	// SURVIVING ANCHOR IS LINKED TO THE OBSERVATION, and there are exactly two ways to
+	// get there:
+	//
+	//   - NEVER BOUND (anchor_block IS NULL): pre-00007 history, or a writer that records
+	//     no anchors at all (ApplyPrices — the Chainlink feed path). No hash is KNOWN for
+	//     these rounds — and "known" rather than "written", because a pre-00007 round may
+	//     well have anchored without anything recording that the anchor covers THIS
+	//     observation, which is precisely the inference migration 00007 forbids.
+	//   - BINDING DANGLES (anchor_block names a block with no anchor row): the round DID
+	//     record a hash and retention has since expired it, or a rewind swept it. Saying
+	//     "no hash was ever recorded for these" is false, and it matters: it points an
+	//     operator away from backups, WAL archives or a re-poll window that might still
+	//     hold the fact. TestARetentionPrunedAnchorIsNeverRecreatedAfterARestart
+	//     constructs exactly this row.
+	//
+	// The split is free — it is the same CTE, one extra IS NULL test — so the WARN
+	// reports both counts and claims recorded-hash retention for NEITHER of them.
+	//
+	// PRE-00007 ROWS ALL LAND IN never-bound, because their binding is NULL and NULL
+	// means unprovable (see migration 00007) even where their round did anchor. That
+	// understates the anchored side for history written before that migration, and
+	// understating provenance is the only direction that cannot invent it — which is
+	// also why never-bound's gloss says no hash is KNOWN for them rather than that none
+	// was ever written.
+	var anchoredMarked, danglingMarked, unboundMarked int64
 	if err := tx.QueryRow(ctx, `WITH marked AS (
 			UPDATE prices
 			   SET valid = FALSE, invalid_reason = $4
 			 WHERE chain_id = $1 AND owner_engine = $2 AND block_number > $3 AND valid
 			RETURNING anchor_block
 		), classified AS (
-			SELECT EXISTS (
+			SELECT marked.anchor_block IS NULL AS unbound,
+			       EXISTS (
 				SELECT 1 FROM price_poll_anchors a
 				 WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = marked.anchor_block
 			) AS vouched
 			FROM marked
 		)
-		SELECT count(*) FILTER (WHERE vouched), count(*) FILTER (WHERE NOT vouched)
+		SELECT count(*) FILTER (WHERE vouched),
+		       count(*) FILTER (WHERE NOT vouched AND NOT unbound),
+		       count(*) FILTER (WHERE unbound)
 		FROM classified`,
-		chainID, engine, effectiveTarget, InvalidReasonUnverifiableReorg).Scan(&anchoredMarked, &unanchoredMarked); err != nil {
+		chainID, engine, effectiveTarget, InvalidReasonUnverifiableReorg).Scan(&anchoredMarked, &danglingMarked, &unboundMarked); err != nil {
 		return 0, 0, fmt.Errorf("neutralize prices owned by %q above %d: %w", engine, effectiveTarget, err)
 	}
+	unanchoredMarked := danglingMarked + unboundMarked
 	quarantined = anchoredMarked + unanchoredMarked
 
 	// THE ANCHORS ABOVE THE BOUNDARY ARE KEPT (D-012 clause 2). This call used to
@@ -1496,14 +1534,16 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, err
 	}
-	slog.Warn("NEUTRALIZED polled prices instead of deleting them: a reorg epoch left rows above the repair boundary that this pass could not place on the chain. They are RETAINED and marked invalid, so no usable-price read can return them, and the epoch is acknowledged so price ingestion resumes. THIS CLASSIFICATION IS PERMANENT in the running system (D-012 clause 3): the only thing that clears it is a CURRENT poll landing at the same height, which can happen only while the head is still there. Polled prices are 60-second samples, so a wrongly-marked row is a sample gap of the same kind an RPC outage produces. Their provenance — the row, its value and the recorded block hash — is retained FOREVER (clause 2), so an offline reconciliation remains possible; no such tool is built",
+	slog.Warn("NEUTRALIZED polled prices instead of deleting them: a reorg epoch left rows above the repair boundary that this pass could not place on the chain. They are RETAINED and marked invalid, so no usable-price read can return them, and the epoch is acknowledged so price ingestion resumes. THIS CLASSIFICATION IS PERMANENT in the running system (D-012 clause 3): the only thing that clears it is a CURRENT poll landing at the same height, which can happen only while the head is still there. Polled prices are 60-second samples, so a wrongly-marked row is a sample gap of the same kind an RPC outage produces. THE ROWS AND THEIR VALUES ARE RETAINED FOREVER; the recorded BLOCK HASH is retained only where one still exists — clause 2 stops any prune or rewind from expiring the anchor a marked row is bound to FROM NOW ON, but it cannot bring back a hash that was already gone when the marking ran. So an offline reconciliation is possible for the rowsAnchored population and for no other; no such tool is built",
 		"engine", engine, "chain", chainID, "requestedTarget", toBlock,
 		"verifiedFloor", verifiedFloor, "boundary", effectiveTarget,
 		"rowsNeutralized", quarantined,
 		"rowsAnchored", anchoredMarked,
 		"rowsUnanchored", unanchoredMarked,
-		"anchoredMeans", "the hash of the block that round executed against is on disk, so an offline check could still settle these",
-		"unanchoredMeans", "no hash was ever recorded for these heights, so nothing — online or offline — can ever settle them",
+		"rowsUnanchoredBindingPruned", danglingMarked,
+		"rowsUnanchoredNeverBound", unboundMarked,
+		"anchoredMeans", "a SURVIVING anchor is linked to the observation, so the hash of the block its round executed against is on disk and an offline check could still settle these; clause 2 now protects that anchor from prune and rewind",
+		"unanchoredMeans", "no SURVIVING anchor is linked to the observation, so nothing on disk can settle these. rowsUnanchoredNeverBound: the binding is NULL, so no hash is KNOWN for the round (pre-00007 history, or a writer that records no anchors). rowsUnanchoredBindingPruned: the binding NAMES a block whose anchor row is gone — retention expired it or a rewind swept it — so a hash WAS recorded and is no longer here, which is the only one of the two a backup or archive could still answer",
 		"ackedEpoch", maxEpoch, "marker", InvalidReasonUnverifiableReorg)
 	return effectiveTarget, quarantined, nil
 }

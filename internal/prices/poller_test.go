@@ -11,6 +11,7 @@ import (
 	"errors"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -506,7 +507,20 @@ func TestPollerRepairRetainsRowsBelowVerifiedAnchor(t *testing.T) {
 	require.False(t, byBlock[5000].valid,
 		"the orphaned round is retained but unreadable, which is the recoverable half of the trade")
 	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[5000].invalidReason)
-	require.True(t, containsSubstring(*msgs, "HASH-VERIFIED poll anchor"))
+	// RE-SPECIFIED IN WAVE 14 (Codex round 10's [medium] #1). This used to assert the
+	// phrase "HASH-VERIFIED poll anchor", which came from a justification the CALLER
+	// composed before the store had answered — and which asserted that everything at or
+	// below that anchor kept its validity, a prediction the store's clamp can falsify.
+	// The pass's string is now EVIDENCE about the chain, and what happened to the floor
+	// is reported from the boundary that came back. Here the floor was admitted whole,
+	// so the two agree; the clamped case is
+	// TestPollerFloorDoesNotBlessANullBoundRowSharingAHeightWithALaterAnchor.
+	require.True(t, containsSubstring(*msgs, "poll anchor 4900 was RE-VERIFIED BY HASH"),
+		"the evidence names the anchor this pass actually re-verified")
+	require.True(t, containsSubstring(*msgs, "floorDisposition=admitted"),
+		"and the disposition of the offered floor is stated, not left to be inferred")
+	require.True(t, containsSubstring(*msgs, "validAtOrBelow=4900"),
+		"the validity boundary reported is the one the store returned")
 	require.True(t, containsSubstring(*msgs, "poll anchor is ORPHANED"), "the replaced round is named")
 	// Probes walk down from the newest anchor and stop at the first match; then the
 	// CHECKPOINT (the highest height this pass got a live answer for, 5000) is read
@@ -979,6 +993,7 @@ func TestPollerFloorDoesNotBlessANullBoundRowSharingAHeightWithALaterAnchor(t *t
 	deep := uint64(4000)
 	st.rewindDeepTo = &deep
 
+	msgs := captureWarnings(t)
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 	require.Len(t, st.neutralized, 1, "the epoch was answered by marking, not deleting")
@@ -994,6 +1009,28 @@ func TestPollerFloorDoesNotBlessANullBoundRowSharingAHeightWithALaterAnchor(t *t
 		require.False(t, r.valid,
 			"no row above the clamped boundary keeps its validity — including the NULL-bound one at the matched anchor's own height (migration 00007)")
 		require.Equal(t, store.InvalidReasonUnverifiableReorg, r.invalidReason)
+	}
+
+	// AND THE OPERATOR IS TOLD THE TRUTH ABOUT IT (Codex round 10's [medium] #1).
+	// This is the regression shape the finding names: floor 5000 clamped to 4999, the
+	// row at 5000 marked PERMANENTLY, and the WARN previously reporting 5000 as the
+	// height at or below which validity survives. The boundary the store RETURNED is
+	// the only authoritative answer, so the text is composed from it, and the fact
+	// that the floor did not survive is stated rather than left to be inferred from
+	// two numbers.
+	require.True(t, containsSubstring(*msgs, "floorDisposition=clamped"),
+		"the WARN says explicitly that the offered floor was not admitted")
+	require.True(t, containsSubstring(*msgs, "validAtOrBelow=4999"),
+		"and names the returned boundary as the validity boundary")
+	require.True(t, containsSubstring(*msgs, "Validity survives at or below 4999, not 5000"),
+		"the justification is rebuilt AFTER the store returns: a pre-composed one can only describe what was asked for")
+	require.False(t, containsSubstring(*msgs, "everything at or below the verified floor keeps its validity"),
+		"the retired sentence: it described the REJECTED floor as the validity boundary")
+	for _, m := range *msgs {
+		if strings.Contains(m, "rowsNeutralized") {
+			require.NotContains(t, m, "validAtOrBelow=5000",
+				"nothing in the neutralization report may present the clamped-away floor as still valid")
+		}
 	}
 }
 
@@ -1021,6 +1058,7 @@ func TestPollerFloorIsAdmittedInFullWhenEveryRowCarriesItsOwnBinding(t *testing.
 	deep := uint64(4000)
 	st.rewindDeepTo = &deep
 
+	msgs := captureWarnings(t)
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 	require.Len(t, st.neutralized, 1)
@@ -1034,6 +1072,14 @@ func TestPollerFloorIsAdmittedInFullWhenEveryRowCarriesItsOwnBinding(t *testing.
 		}
 		require.False(t, r.valid, "and only the suffix above it is marked")
 	}
+
+	// AND THE DISPOSITION IS THE CONTROL FOR THE CLAMPED CASE. Without this arm, a
+	// poller that reported "clamped" unconditionally would satisfy the test above —
+	// the same fail-forever shape this control exists to catch on the data side.
+	require.True(t, containsSubstring(*msgs, "floorDisposition=admitted"),
+		"an admitted floor is reported as admitted, not as clamped")
+	require.True(t, containsSubstring(*msgs, "validAtOrBelow=5000"))
+	require.False(t, containsSubstring(*msgs, "floorDisposition=clamped"))
 }
 
 // A1 CASE: A DEEPER EPOCH ARRIVES WHILE VERIFICATION IS STILL PAGING. The walker

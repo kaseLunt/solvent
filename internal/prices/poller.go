@@ -1068,17 +1068,25 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 	}
 	// EVERY ARM THAT ACTS NEUTRALIZES. There is no deletion arm to choose between,
 	// which is the whole of D-010 clause 1: the outcomes differ only in the FLOOR
-	// they carry — how much provably-canonical history keeps its validity — and in
-	// the justification they record. What used to be a decision about whether the
+	// they OFFER — how much provably-canonical history the pass asks to keep — and in
+	// the evidence they record. What used to be a decision about whether the
 	// evidence was strong enough to destroy non-replayable rows is now a decision
 	// about how much of the suffix has to be marked.
+	//
+	// EACH STRING BELOW IS EVIDENCE, NOT AN OUTCOME (Codex round 10's [medium] #1).
+	// It states what this pass PROVED about the chain — the only thing knowable before
+	// the call. Which rows actually kept their validity is decided by the store, which
+	// may clamp the offered floor, and is composed from the returned boundary in
+	// Poller.neutralize/floorDisposition. The floorVerified arm used to say "everything
+	// at or below anchor N keeps its validity" from here, which was a prediction, and a
+	// wrong one whenever the clamp fired.
 	switch outcome {
 	case floorNothingAtRisk:
 		return true, p.neutralize(ctx, cursor, 0, probes, singleView,
 			"this engine owns nothing above the effective repair target, so nothing is marked")
 	case floorVerified:
 		return true, p.neutralize(ctx, cursor, floor, probes, singleView,
-			fmt.Sprintf("everything at or below HASH-VERIFIED poll anchor %d keeps its validity; every anchor above it was probed on the same endpoint and MISMATCHED, and the verification checkpoint still held immediately before the act", floor))
+			fmt.Sprintf("poll anchor %d was RE-VERIFIED BY HASH on the endpoint this pass is pinned to, so that block and every ancestor are unchanged on its chain; every anchor above it was probed on that same endpoint and MISMATCHED, and the verification checkpoint still held immediately before the act", floor))
 	case floorProvenOrphaned:
 		return true, p.neutralize(ctx, cursor, 0, probes, singleView,
 			"every retained poll anchor was probed on one endpoint and MISMATCHED, and every row above the target sits at one of those anchored heights, so each describes a block that endpoint no longer carries")
@@ -1234,8 +1242,10 @@ func (p *Poller) verifyFloor(ctx context.Context, toBlock uint64) (uint64, floor
 				// The anchors are complete and this one is canonical on the pinned
 				// endpoint, but rows above the boundary sit at heights no anchor
 				// covers, so they can never be judged either way. The verified floor
-				// is still RETURNED: everything at or below it keeps its validity
-				// when the suffix above is neutralized.
+				// is still RETURNED — as an OFFER: how much of it the store admits is
+				// the store's answer (it clamps a floor over history it cannot place),
+				// and Poller.neutralize reports the boundary that comes back rather
+				// than this number.
 				slog.Warn("poll anchor at this height matches the pinned endpoint's chain, but rows above the boundary sit at heights NO anchor covers, so they can be neither proven canonical nor proven orphaned; neutralizing the suffix above it",
 					"engine", p.engine, "matchedBlock", a.BlockNumber, "boundary", boundary,
 					"unanchoredRowsAbove", unanchored, "endpoint", endpoint)
@@ -1699,8 +1709,21 @@ func (p *Poller) resetVerification(why string) {
 // boundary so no usable-price read can return them, RETAINS THE ANCHORS above that
 // boundary (clause 2 — permanent provenance, so an offline reconciliation stays
 // possible), resets the cursor and acks — in one transaction. A verified floor
-// confines the marking: history the pass proved canonical keeps its validity, and
-// only the suffix above it is marked.
+// confines the marking: history the pass proved canonical keeps its validity as far
+// as the store admits the floor, and only the suffix above that is marked.
+//
+// THE FLOOR THIS PASS OFFERS IS A REQUEST; THE BOUNDARY THE STORE RETURNS IS THE
+// FACT (Codex round 10's [medium] #1). The store may CLAMP an offered floor — down
+// to just below the lowest observation in the range whose own round recorded no
+// surviving anchor, or away entirely when such a row sits at the bottom of the range
+// — because a hash proof about the CHAIN does not place a row nothing binds to a
+// block. So every operator-facing sentence here is composed AFTER the call returns,
+// out of `boundary`, and floorDisposition states in words whether the floor survived.
+// The previous version logged the offered floor as "everything at or below this keeps
+// its validity" while the store had already refused it: with a floor of 5000 clamped
+// to 4999 the row at 5000 was marked permanently and the WARN told the operator 5000
+// was still valid. A justification built before the act can only describe what was
+// asked for.
 //
 // WHAT THIS IS NOT: it is not a proof, and it is not free. The marked rows stay in
 // the table as permanently unusable artifacts, and refreshNeutralizedBacklog is what
@@ -1719,10 +1742,10 @@ func (p *Poller) resetVerification(why string) {
 // trade is acceptable BECAUSE it is auditable, so the marking emits a WARN naming the
 // affected height range. Wave 10 could only call this "the wave-8 brief's R4" because
 // the addendum did not yet exist; it does now, and it is the citation.
-func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes int, singleView bool, justification string) error {
-	boundary, quarantined, err := p.store.NeutralizeUnverifiablePrices(ctx, p.engine, p.cfg.ChainID, cursor, floor)
+func (p *Poller) neutralize(ctx context.Context, cursor, floorOffered uint64, probes int, singleView bool, evidence string) error {
+	boundary, quarantined, err := p.store.NeutralizeUnverifiablePrices(ctx, p.engine, p.cfg.ChainID, cursor, floorOffered)
 	if err != nil {
-		return fmt.Errorf("price poller %q: neutralize prices above %d (verified floor %d): %w", p.engine, cursor, floor, err)
+		return fmt.Errorf("price poller %q: neutralize prices above %d (verified floor %d): %w", p.engine, cursor, floorOffered, err)
 	}
 	newCursor, found, err := p.store.DeriveCursor(ctx, p.engine)
 	if err != nil {
@@ -1731,9 +1754,22 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 	if !found {
 		return fmt.Errorf("price poller %q: cursor missing after NeutralizeUnverifiablePrices — store contract violated", p.engine)
 	}
-	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the boundary are retained and marked unusable PERMANENTLY (D-012 clause 3 — nothing in the running system un-marks them; only a current poll landing at the same height can, and this poller reads `latest`), everything at or below the verified floor keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head. Their provenance is retained forever (clause 2), so an offline reconciliation stays possible",
-		"engine", p.engine, "requestedTarget", cursor, "verifiedFloor", floor,
-		"boundary", boundary, "cursor", newCursor, "rowsNeutralized", quarantined,
+	// BUILT HERE, NOT BY THE CALLER: the arms of repair supply the EVIDENCE (what the
+	// pass proved about the chain), and the sentence describing which rows kept their
+	// validity is composed from the boundary the store actually returned.
+	//
+	// validAtOrBelow CARRIES THE SAME NUMBER AS boundary ON PURPOSE. The failure this
+	// closes was a human one — an operator reading the floor as the validity boundary
+	// — and the remedy is a key that says what the number MEANS rather than where it
+	// came from. `boundary` names the mechanism; `validAtOrBelow` answers the question
+	// actually being asked at 3am, which is "what can I still trust?".
+	disposition, floorNote := floorDisposition(floorOffered, boundary)
+	justification := evidence + ". " + floorNote
+	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the BOUNDARY THIS CALL RETURNED are retained and marked unusable PERMANENTLY (D-012 clause 3 — nothing in the running system un-marks them; only a current poll landing at the same height can, and this poller reads `latest`), everything at or below that boundary keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head. The BOUNDARY is authoritative and the offered floor is not: the store clamps a floor it will not admit over history it cannot place, so read floorDisposition before floorOffered. Their provenance is retained forever (clause 2), so an offline reconciliation stays possible",
+		"engine", p.engine, "requestedTarget", cursor,
+		"boundary", boundary, "validAtOrBelow", boundary,
+		"floorOffered", floorOffered, "floorDisposition", disposition,
+		"cursor", newCursor, "rowsNeutralized", quarantined,
 		"anchorProbes", probes, "justification", justification)
 
 	// D-012 CLAUSE 4's DISCLOSURE, EMITTED WHERE THE RANGE IS KNOWN. On a fleet with
@@ -1762,6 +1798,50 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 	// cadence slot is not consumed, so the next Step polls immediately and records
 	// fresh, usable rows at the new head.
 	return nil
+}
+
+// floorDisposition says, in the operator's words, what the store DID with the floor
+// a repair pass offered it — by comparing that offer with the boundary the store
+// returned, which is the only authoritative answer available to this side of the call.
+//
+// IT EXISTS BECAUSE THE TWO CAN DIFFER AND THE DIFFERENCE IS PERMANENT (Codex round
+// 10's [medium] #1). NeutralizeUnverifiablePrices admits a verified floor only as far
+// up as just below the lowest observation inside the repair range whose own round
+// recorded no surviving anchor, and refuses it entirely when such a row sits at the
+// bottom of the range. A hash match at H proves the CHAIN at and below H is unchanged;
+// it does not place a row that never recorded which block it read. So a pass can offer
+// 5000 in good faith, have the store return 4999, and the row at 5000 is marked
+// unusable forever. Reporting the offer as the validity boundary told the operator that
+// exact row was still valid.
+//
+// The four values partition every (offered, boundary) pair this call can produce:
+//
+//	none-offered  no floor was offered at all; the boundary is the epoch's repair target
+//	admitted      the floor was admitted at its own height
+//	below-target  the floor sat at or below the repair target, so it retained nothing
+//	clamped       the store returned a LOWER boundary than the floor offered
+//
+// "clamped" deliberately covers BOTH a partial clamp and a floor refused outright: the
+// distinction is the walker's target, which this side of the call does not read, and
+// the store's own WARNs make it. What matters here is identical in both cases — rows
+// at or below the offered floor were marked anyway, so the offer must not be logged as
+// a validity boundary.
+func floorDisposition(offered, boundary uint64) (disposition, note string) {
+	switch {
+	case offered == 0:
+		return "none-offered", fmt.Sprintf(
+			"no verified floor was offered, so the boundary is the epoch's own repair target %d and the whole suffix above it is marked", boundary)
+	case boundary == offered:
+		return "admitted", fmt.Sprintf(
+			"the verified floor was ADMITTED AT ITS OWN HEIGHT %d, so rows at or below %d keep their validity", offered, boundary)
+	case boundary > offered:
+		return "below-target", fmt.Sprintf(
+			"the verified floor %d sat at or below the epoch's own repair target, so it retained nothing extra: the boundary is that target, %d, and rows at or below it keep their validity", offered, boundary)
+	default:
+		return "clamped", fmt.Sprintf(
+			"THE VERIFIED FLOOR %d WAS NOT ADMITTED: the store CLAMPED it and returned boundary %d, so every row in (%d, %d] was marked unusable PERMANENTLY despite this pass verifying the chain at and below %d — the store admits a floor only up to just below the lowest observation in the range whose own round recorded no surviving anchor. Validity survives at or below %d, not %d",
+			offered, boundary, boundary, offered, offered, boundary, offered)
+	}
 }
 
 // refreshNeutralizedBacklog re-reads how many retained-but-unusable rows this

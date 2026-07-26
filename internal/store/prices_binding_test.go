@@ -261,8 +261,10 @@ func TestEveryRepairReadTreatsANullBoundRowAtAnAnchoredHeightAsUnprovable(t *tes
 	require.Equal(t, int64(2), exp.Owned)
 	require.Equal(t, int64(1), exp.Unanchored,
 		"exposure counts the row's OWN binding, so a later round's anchor at its height cannot vouch for it")
-	require.Equal(t, int64(2), exp.AnchoredHeights,
-		"and AnchoredHeights still counts ANCHORS — it is a fact about the anchor population, not a claim about any row")
+	// AnchoredHeights used to be asserted here — 2 anchors above the target, alongside
+	// 1 unanchored ROW. The two numbers were the height rule and the binding rule
+	// sitting side by side in one struct, which is what made the field a misuse trap
+	// with no production consumer; it is deleted (Codex round 10, residual (c)).
 
 	// (c) THE FLOOR, WHICH IS WHERE THE FABRICATION CASHED OUT. Repair probes the
 	// anchor at H, finds it canonical, and offers H as a verified floor. A match at H
@@ -288,6 +290,85 @@ func TestEveryRepairReadTreatsANullBoundRowAtAnAnchoredHeightAsUnprovable(t *tes
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, uint64(H-1), cursor, "the cursor stands at the boundary this call acted above")
+}
+
+// THE PROVENANCE PREDICATE IS CHAIN-SCOPED, AND ONLY THE PREDICATE CAN BE (Codex round
+// 10, residual (b)). Every other fixture in this package runs on chain 10 alone, so a
+// mutation dropping `a.chain_id = $1` from unprovableRow would have survived all of
+// them — the wave-12 report said so and did not close it. This is the two-chain fixture
+// that closes it.
+//
+// WHY THE TABLE CANNOT DO THIS JOB. 00005 keys price_poll_anchors by (engine,
+// block_number); chain_id is a COLUMN, not part of the key. So the table itself permits
+// one engine to carry anchors for more than one chain, and an anchor row found by
+// (engine, block) alone is not necessarily a fact about the chain being read. The read
+// is what has to ask.
+//
+// TWO ARMS, and the second is the one a mutation dies on:
+//
+//   - ORDINARY TWO-CHAIN OPERATION. Two chains, two engines, rows and anchors at the
+//     SAME heights on both. Each chain's reads see only its own, which is the outer
+//     scoping (p.chain_id) doing its job.
+//   - A FOREIGN-CHAIN ANCHOR AT A BOUND HEIGHT. The row's binding names block 5000 and
+//     the only anchor at 5000 for that engine belongs to another chain. With the clause,
+//     the row is unprovable — correct, because nothing on THIS chain vouches for it.
+//     Without the clause it reads as anchored, and a repair would treat another chain's
+//     hash as this observation's provenance.
+//
+// The second arm is built with direct SQL, and that is stated rather than hidden: no
+// writer produces it, because a poll engine's name embeds its chain and the derive
+// cursor's chain binding refuses a second one. It is defence-in-depth on a predicate
+// whose scoping the schema cannot enforce — the same posture as
+// TestRewindAnchorSweepSparesNeutralizedHeightsEvenThoughNoCallerCanReachThatState.
+func TestProvenanceReadsAreScopedToTheirOwnChain(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	const otherEngine = "prices:poll:999"
+
+	// CHAIN 10: two ordinary anchored rounds.
+	for _, b := range []uint64{5000, 6000} {
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10,
+			[]PriceObservation{po(b, 0xAA, testPollSource, int64(1_000_000+b), 6)}, b, anchorAt(b))))
+	}
+	// CHAIN 999: its own engine, its own round, at a height chain 10 also uses.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, otherEngine, 999,
+		[]PriceObservation{po(5000, 0xAA, testPollSource, 2_000_000, 6)}, 5000, anchorAt(5000))))
+
+	// ARM 1: ordinary operation. Every row on both chains is provable through its own
+	// round's anchor, and neither chain's reads are disturbed by the other's rows.
+	n, err := s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, 0)
+	require.NoError(t, err)
+	require.Zero(t, n, "chain 10's rows are all bound to anchors its own rounds wrote")
+	n, err = s.CountUnanchoredPricesAbove(ctx, otherEngine, 999, 0)
+	require.NoError(t, err)
+	require.Zero(t, n, "and so are chain 999's")
+
+	// ARM 2: the anchor engine 10 wrote at 5000 now belongs to another chain. Direct
+	// SQL, because nothing in the running system can put it there.
+	_, err = s.pool.Exec(ctx,
+		`UPDATE price_poll_anchors SET chain_id = 999 WHERE engine = $1 AND block_number = 5000`,
+		testPollEngine)
+	require.NoError(t, err)
+
+	n, err = s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, 4999)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n,
+		"the row at 5000 is UNPROVABLE on chain 10: the only anchor at that block is another chain's, and a hash from another chain vouches for nothing here")
+
+	// The row at 6000, whose anchor is still chain 10's, is untouched — so this is the
+	// chain clause discriminating, not the read having stopped finding anchors at all.
+	exp, err := s.PriceRepairExposure(ctx, testPollEngine, 10, 4999)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), exp.Owned)
+	require.Equal(t, int64(1), exp.Unanchored,
+		"exactly one of the two rows lost its provenance, and it is the one whose anchor left the chain")
+
+	// And chain 999's own read is unaffected: its row is still bound to its own
+	// engine's anchor, which never moved.
+	n, err = s.CountUnanchoredPricesAbove(ctx, otherEngine, 999, 0)
+	require.NoError(t, err)
+	require.Zero(t, n, "the clause scopes a read to its chain; it does not make everything unprovable")
 }
 
 // THE FRONTIER READ ASKS THE BINDING TOO — the last height-join consumer converted in
@@ -758,12 +839,38 @@ func TestARetentionPrunedAnchorIsNeverRecreatedAfterARestart(t *testing.T) {
 
 	// (5) AND THE EPOCH IS STILL ANSWERABLE — deleting adoption did not re-open the
 	// deadlock, because neutralization never needed it.
+	rec := captureWarnAttrs(t)
 	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, total, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), marked, "the unprovable row is marked rather than blessed")
 	unacked, err := s.HasUnackedReorg(ctx, testPollEngine, 10)
 	require.NoError(t, err)
 	require.False(t, unacked, "fail-closed must not mean fail-forever")
+
+	// (6) AND THE OPERATOR REPORT DESCRIBES *THIS* ROW HONESTLY (Codex round 10's
+	// [medium] #2). This fixture is the exact population the old text got wrong: the
+	// round DID record a hash, retention expired it, and the binding still names the
+	// block. Two claims were false for it — "the recorded block hash is retained
+	// forever" (it is not; it is gone) and "no hash was ever recorded for these
+	// heights" (one was, which is why a backup or WAL archive is a lead here and is
+	// not for a NULL-bound row). The counts and the glosses now separate the two
+	// causes, and neither promises retention for what this call marked.
+	got := rec.find("rowsNeutralized")
+	require.NotNil(t, got, "the classification is reported at all")
+	require.Zero(t, got["rowsAnchored"],
+		"no surviving anchor is linked to this observation, so it is not the anchored population")
+	require.Equal(t, int64(1), got["rowsUnanchored"])
+	require.Equal(t, int64(1), got["rowsUnanchoredBindingPruned"],
+		"the cause is a binding whose anchor retention removed — the row is not legacy history")
+	require.Zero(t, got["rowsUnanchoredNeverBound"],
+		"and it must not be reported as a row that never recorded provenance: that would send a responder looking in the wrong place")
+	require.NotContains(t, got["unanchoredMeans"], "no hash was ever recorded",
+		"false for this row: its round recorded one and retention expired it")
+	require.Contains(t, got["unanchoredMeans"], "no SURVIVING anchor is linked to the observation")
+	require.Contains(t, got["unanchoredMeans"], "a hash WAS recorded and is no longer here",
+		"the dangling half names what actually happened, which is the difference an offline responder acts on")
+	require.NotContains(t, got["msg"], "provenance — the row, its value and the recorded block hash — is retained FOREVER",
+		"the retired unconditional retention claim: this row's hash is already gone")
 }
 
 // ---------------------------------------------------------------------------

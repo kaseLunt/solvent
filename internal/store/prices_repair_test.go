@@ -98,7 +98,6 @@ func TestPendingEpochWithUnanchoredHistoryHasATerminatingTransition(t *testing.T
 		"the store lowers the caller's target to the deepest unacknowledged rewound_to; a caller cannot compute this itself")
 	require.Equal(t, int64(2), exp.Owned)
 	require.Equal(t, int64(2), exp.Unanchored, "no anchor covers either row")
-	require.Zero(t, exp.AnchoredHeights)
 
 	// (3) THE EXIT. Neutralization acks WITHOUT deleting.
 	boundary, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5000, 0)
@@ -267,6 +266,14 @@ func TestNeutralizationRetainsAnchorsAboveTheBoundary(t *testing.T) {
 // This asserts the attributes rather than the prose because the counts are the part a
 // responder acts on, and it is a LIVE test because the split is computed by the same
 // UPDATE that does the marking — a model of it would be asserting itself.
+//
+// THE UNANCHORED SIDE IS NOW ITSELF SPLIT (Codex round 10's [medium] #2), and this
+// test covers the NEVER-BOUND half: a row written by ApplyPrices, which records no
+// anchor at all, so its binding is NULL and no hash is known for its round. The other
+// half — a binding that DANGLES because retention expired the anchor its round really
+// did write — is covered by TestARetentionPrunedAnchorIsNeverRecreatedAfterARestart,
+// which constructs it. The reason the split exists is that the old single sentence
+// ("no hash was ever recorded for these heights") is false for that second population.
 func TestNeutralizationReportsAnchoredAndUnanchoredMarkingsDistinctly(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -292,13 +299,27 @@ func TestNeutralizationReportsAnchoredAndUnanchoredMarkingsDistinctly(t *testing
 	require.Equal(t, int64(2), got["rowsAnchored"],
 		"the two rounds whose block hash this engine recorded are reported as anchored")
 	require.Equal(t, int64(1), got["rowsUnanchored"],
-		"the legacy row, whose hash was never recorded, is reported separately")
+		"the legacy row, for which no hash is known, is reported separately")
+	require.Equal(t, int64(1), got["rowsUnanchoredNeverBound"],
+		"and it is attributed to the right cause: its binding is NULL, so no round ever recorded a hash for it")
+	require.Zero(t, got["rowsUnanchoredBindingPruned"],
+		"nothing here has a binding whose anchor was pruned, and the report must not invent one")
 	require.Contains(t, got["msg"], "PERMANENT",
 		"D-012 clause 3: the text must not describe this as a pending repair")
 	require.Contains(t, got["msg"], "offline",
 		"D-012 clause 2/7: it names the retained-provenance option, without promising a tool")
 	require.NotContains(t, got["msg"], "no later repair can verify them",
 		"the round-7 [low]: the unanchored claim must not be asserted for a mixed call")
+	// AND THE RETENTION PROMISE IS SCOPED TO THE POPULATION IT HOLDS FOR (round 10's
+	// [medium] #2). The message used to say the recorded block hash is retained forever
+	// for everything it marked; for a row whose anchor is already gone that is false,
+	// and the operator reading it would look for provenance that is not there.
+	require.Contains(t, got["msg"], "retained only where one still exists",
+		"the hash-retention claim names the rowsAnchored population and no other")
+	require.NotContains(t, got["unanchoredMeans"], "no hash was ever recorded",
+		"the retired gloss: it is false for a binding retention pruned")
+	require.Contains(t, got["unanchoredMeans"], "no SURVIVING anchor is linked to the observation",
+		"unanchored is a statement about what survives, not about what was written")
 
 	// A SECOND call over an all-anchored suffix reports zero unanchored, so the split
 	// tracks what each call actually did rather than the standing pile.
@@ -751,8 +772,7 @@ func TestPriceRepairExposureReportsTheBoundaryAndWhatIsAboveIt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(4600), exp.EffectiveTarget, "the DEEPEST unacknowledged target wins")
 	require.Equal(t, int64(1), exp.Owned)
-	require.Zero(t, exp.Unanchored, "the row's own height is anchored")
-	require.Equal(t, int64(1), exp.AnchoredHeights)
+	require.Zero(t, exp.Unanchored, "the row's own round anchored it")
 
 	// An engine with no cursor at all is a bootstrap: every epoch counts as unacked.
 	exp, err = s.PriceRepairExposure(ctx, "prices:poll:999", 10, 5000)

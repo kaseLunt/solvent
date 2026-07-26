@@ -102,7 +102,9 @@
 // Repair walks those anchors down from the newest and re-checks each hash against
 // a live endpoint; the first match ENTAILS that this block and every ancestor are
 // unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by parent hash), so rows
-// at or below it keep their validity. That entailment is conditional on the
+// at or below it keep their validity — as far as the store admits the match as a
+// floor, which stops just below any observation in the range that recorded no
+// surviving anchor of its own. That entailment is conditional on the
 // answering endpoint being honest and on one chain view being used throughout —
 // the same trust every ingested log rests on, no more; it is not a cryptographic
 // proof against a hostile provider.
@@ -151,7 +153,10 @@
 //     has complete, same-endpoint answers above it AND those answers still hold at
 //     the instant of acting; or, under the same condition, mark everything above
 //     the walker's target when every retained anchor mismatched and the anchors
-//     cover every row. Everything at or below the floor keeps its validity.
+//     cover every row. Everything at or below the BOUNDARY THE STORE RETURNS keeps
+//     its validity — the matched anchor is what the pass OFFERS as a floor, and
+//     store.NeutralizeUnverifiablePrices admits it only as far as unprovable history
+//     allows (see internal/prices.floorDisposition).
 //   - RETRY, marking and acking nothing, while the evidence is merely UNAVAILABLE
 //     (a probe errored and ended the pass, a page is still to walk, the checkpoint
 //     could not be re-read). ConditionPollRewindBlocked says what is unresolved. A

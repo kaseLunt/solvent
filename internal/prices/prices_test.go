@@ -648,11 +648,10 @@ func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _
 			exp.Unanchored++
 		}
 	}
-	for _, a := range f.anchors[engine] {
-		if a.BlockNumber > exp.EffectiveTarget {
-			exp.AnchoredHeights++
-		}
-	}
+	// No anchor loop here any more: store.PriceRepairExposure.AnchoredHeights is
+	// deleted (Codex round 10, residual (c)). A fake that still computed a per-HEIGHT
+	// anchor count would be modelling a field the store no longer has, and modelling
+	// the height rule is precisely how round 9's [high] #1 got written.
 	return exp, nil
 }
 
