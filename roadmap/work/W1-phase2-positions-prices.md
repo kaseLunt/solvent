@@ -21,6 +21,9 @@ allowed_paths:
   - go.sum
   - .superpowers/sdd/**
   - roadmap/work/W1-phase2-positions-prices.md
+  - docker-compose.yml
+  - Makefile
+  - .env.example
 deliverables:
   - docs/plans/*solvent-phase2*.md
   - internal decode/position/price packages per that plan
