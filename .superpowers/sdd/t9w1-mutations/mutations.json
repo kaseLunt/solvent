@@ -1,0 +1,182 @@
+{
+  "meta": {
+    "wave": "task-9 wave 1",
+    "unit": "prices poller acquisition + chain pinned call",
+    "purpose": "Task 9 wave 1 brief's mutation requirement: every NEW guard arm of the endpoint-coherent, block-pinned readRound recomposition, plus the additive chain.Failover.CallAtFrom's pin and routing discipline, each stating the property it certifies. Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py) per the wave-16 class rule.",
+    "equivalent_mutants_excluded": "Two candidate mutations are equivalent post-guard and carry no row: (a) stamping observations with the multicall's returned block instead of the pin — the blockNumber==pin guard makes them identical wherever a round survives to stamp anything; (b) anchoring to hashAfter instead of hashBefore — the hashAfter==hashBefore guard makes them identical wherever a round survives to anchor. Killing either would require first killing the guard that makes them equivalent, which M2/M3 already attack directly.",
+    "not_mutation_testable": "The comment sweep (package comment, multicall3ABI doc, unpackMulticallResult doc, routing comments no longer claiming the multicall supplies the anchor hash) is prose; no mutation of a comment can fail a test, so it carries no row and is not reported as covered. The explore-over-pin routing PRECEDENCE inside readRound predates this wave (carried over verbatim from the old switch) and is not a new guard arm; it carries no row either.",
+    "test_env": "TEST_DATABASE_URL exported (solvent_t9w1, the wave's dedicated DB — never the running daemon's) so the live-store test runs rather than skips; packages are run whole so a kill is attributed to the tests that actually failed, not to a -run filter chosen to make one fail."
+  },
+  "mutations": [
+    {
+      "id": "M1",
+      "description": "the multicall decoder refuses the zero blockHash again (the live P0 restored)",
+      "property": "the real-EVM zero multicall hash decodes cleanly — tryBlockAndAggregate's blockHash is blockhash(block.number), out of BLOCKHASH range, deterministically zero on every real chain; refusing it refuses every round on every real chain",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/prices.go",
+          "search": "if _, ok := vals[1].([32]byte); !ok {",
+          "replace": "if h, ok := vals[1].([32]byte); !ok || h == ([32]byte{}) {"
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "description": "the blockNumber==pin guard is disabled",
+      "property": "a multicall that reports executing at a different height than the block it was pinned to (a serving inconsistency behind one URL) can never land: the round is discarded, nothing is applied",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if block != pin {",
+          "replace": "if false && block != pin {"
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "description": "the hashAfter==hashBefore close is disabled",
+      "property": "a mid-round reorg — the header hash at the pin changing between the two reads that bracket the multicall — discards the round: no anchor is ever written for a block the serving endpoint no longer carries",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if hashAfter != hashBefore {",
+          "replace": "if false && hashAfter != hashBefore {"
+        }
+      ]
+    },
+    {
+      "id": "M4",
+      "description": "the multicall endpoint-coherence check is disabled",
+      "property": "a pinned multicall the failover client served from a DIFFERENT endpoint than the round's own is another chain view's answer and discards the round — one endpoint serves every read, or nothing lands",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if calledOn.Index != servedBy.Index {",
+          "replace": "if false && calledOn.Index != servedBy.Index {"
+        }
+      ]
+    },
+    {
+      "id": "M5",
+      "description": "the closing re-read's endpoint-coherence check is disabled",
+      "property": "a closing HeaderHash(N) re-read answered by another endpoint cannot confirm the round's own chain view and discards the round — a second node agreeing on a hash is a different fact than one node bracketing its own answer",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if recheckOn.Index != servedBy.Index {",
+          "replace": "if false && recheckOn.Index != servedBy.Index {"
+        }
+      ]
+    },
+    {
+      "id": "M6",
+      "description": "the zero-hash refusal on the OPENING header read is disabled",
+      "property": "a zero header hash is a provider protocol violation and is refused BEFORE any multicall is issued — the guard that used to sit (wrongly) in the multicall decoder now protects the hash the anchor actually rests on",
+      "note": "The before-arm test's load-bearing assertion is require.Empty(ch.calls): under this mutant the round proceeds to the multicall and may still error later for a different reason, so the refusal's POSITION (before any RPC spend) is part of the property.",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if hashBefore == (common.Hash{}) {",
+          "replace": "if false && hashBefore == (common.Hash{}) {"
+        }
+      ]
+    },
+    {
+      "id": "M7",
+      "description": "the zero-hash refusal on the CLOSING header read is disabled",
+      "property": "a zero header hash on the closing read is an ERROR (a broken provider, operator-visible as a fault), never a silent discard-and-retry",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if hashAfter == (common.Hash{}) {",
+          "replace": "if false && hashAfter == (common.Hash{}) {"
+        }
+      ]
+    },
+    {
+      "id": "M8",
+      "description": "Step treats a discarded round as landed",
+      "property": "a discarded round records NOTHING: Step's discard arm is what stands between an incoherent round and ApplyPolledPrices — removing it must be caught by every discard test's 'nothing reached the store' assertion",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "if !ok {",
+          "replace": "if !ok && false {"
+        }
+      ]
+    },
+    {
+      "id": "M9",
+      "description": "the anchor's hash is zeroed at Step's composition site",
+      "property": "the durable anchor persists the round's verified header hash — the exact bytes HeaderHash(N) attested on both sides of the multicall — not a placeholder",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "anchor := store.PollAnchor{BlockNumber: block, BlockHash: round.hash}",
+          "replace": "anchor := store.PollAnchor{BlockNumber: block, BlockHash: make([]byte, 32)}"
+        }
+      ]
+    },
+    {
+      "id": "M10",
+      "description": "the multicall is pinned one block past the resolved head",
+      "property": "the multicall executes AT the pin the round verified — the pinned height and the header-verified height are the same N, or the anchor describes a block nobody read",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "out, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin)",
+          "replace": "out, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin+1)"
+        }
+      ]
+    },
+    {
+      "id": "M11",
+      "description": "the default endpoint resolution ignores the shared routing hint",
+      "property": "with no exploration hint and no attribution pin, the round resolves from the endpoint the shared hint names (read, never written) — not from a hard-coded index",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "start := p.chain.ActiveEndpoint()",
+          "replace": "start := 0"
+        }
+      ]
+    },
+    {
+      "id": "M12",
+      "description": "chain.Failover.CallAtFrom silently drops its pin to latest",
+      "property": "the pin is forwarded to eth_call: a CallAtFrom that executes at 'latest' is indistinguishable from Call at the RPC layer and would reintroduce the unverifiable-round defect one layer down",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, new(big.Int).SetUint64(block))",
+          "replace": "res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, nil)"
+        }
+      ]
+    },
+    {
+      "id": "M13",
+      "description": "chain.Failover.CallAtFrom starts its walk past the caller's endpoint",
+      "property": "the attempt walk starts at exactly the caller's requested endpoint (CallFrom's caller-scoped discipline): starting anywhere else silently hands the pinned call to a chain view the caller did not resolve",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "idx, err := f.doFrom(ctx, \"callAt\", start, func(ctx context.Context, c rpcClient) error {",
+          "replace": "idx, err := f.doFrom(ctx, \"callAt\", start+1, func(ctx context.Context, c rpcClient) error {"
+        }
+      ]
+    }
+  ]
+}
