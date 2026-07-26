@@ -575,13 +575,12 @@ func (f *fakePriceStore) effectiveRewindTarget(toBlock uint64) uint64 {
 	return toBlock
 }
 
-func (f *fakePriceStore) anchoredHeights(engine string) map[uint64]bool {
-	out := map[uint64]bool{}
-	for _, a := range f.anchors[engine] {
-		out[a.BlockNumber] = true
-	}
-	return out
-}
+// anchoredHeights — "the set of heights this engine has an anchor at" — is DELETED
+// rather than left unused. It was the helper every read-side consumer reached for,
+// and it is the precise encoding of the rule Codex round 9 found wrong: an anchor's
+// height says nothing about which observations that round covered. Leaving a correct-
+// looking helper for a rule the store no longer has is how the next consumer gets
+// written against it. What replaces it is provable(), which asks the row's binding.
 
 // provable mirrors store.unprovableRow, INVERTED: a row is provable only when its
 // OWN binding names an anchor that still exists for this engine.
