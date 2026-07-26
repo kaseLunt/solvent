@@ -1,0 +1,185 @@
+{
+  "meta": {
+    "wave": "task-9 wave 8",
+    "unit": "the package-wide bytes canon (Codex round 7): every RPC-decoded quantity passes checkCanonicalQuantity, every variable-length payload passes checkCanonicalData, the mined-log wire shape is presence-tracked, and a null eth_getLogs result is refused — an empty quantity or payload can never become a value THROUGH ANY PATH in internal/chain",
+    "purpose": "Task 9 wave 8 brief's mutation requirement: one mutant per NEW gate arm, with per-path isolation visible in the kill lists — W8M1 (eth_blockNumber, the F1 binding path), W8M2/W8M3/W8M4 (the three log quantity wrappers, W8M2 being the F2 binding path), W8M5 (the log data canon application), W8M6 (the data canon's shared empty arm), W8M7 (the null-window gate), W8M8/W8M9 (presence devolving to zero for logIndex/blockNumber, the pinned decoder's own leniency restored faithfully), W8M10 (eth_chainId), W8M11/W8M12 (tx input canon and presence). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is a uniform-CRLF working copy (CR count == line count, verified), so every multi-line pattern embeds \\r\\n explicitly.",
+    "design_notes": [
+      "EVERY MUTANT LIVES IN A WAVE-8 GATE — the endpointClient overrides' canon calls, the per-field strict wrappers, checkCanonicalData's empty arm, validateReportedLog's presence arms and FilterLogs' null gate. The fake-seam tests are STRUCTURALLY BLIND to all twelve by design: fakeRPC scripts post-decode VALUES (types.Log slices, uint64 heights, big.Int chain ids), so every kill must come from the raw-JSON layer (chain_rawjson_test.go), which drives the REAL stack Dial -> rpc.Client -> endpointClient overrides -> wrappers -> gates. The kill lists are the proof that layer reaches every new gate.",
+      "PER-PATH ISOLATION IS THE POINT OF THE MATRIX SHAPE: W8M1's kill list must be purely eth_blockNumber-side, W8M2's purely logIndex-side, W8M3's purely log-blockNumber-side, W8M4's purely transactionIndex-side, W8M5's purely log-data-side, W8M10's purely chainId-side, W8M11/12's purely tx-input-side. A kill leaking across paths would mean one test is doing another gate's work and the per-field independence claim is false.",
+      "W8M1 AND W8M2 ARE THE BRIEF'S BINDING PAIR (property: an empty quantity can never become a value THROUGH THIS PATH) AND ARE BEHAVIORAL KILLS: under W8M1 the empty eth_blockNumber read SUCCEEDS as height 0 from the malformed primary (no rotation — the walker-starving F1 shape) and the null read succeeds as height 0 too; under W8M2 the empty-logIndex window SUCCEEDS and hands downstream a present index zero as the raw-log identity/order (the F2 persistence-corruption shape). The binding regressions assert error-plus-rotation-plus-landing, so both die on every leg. W8M5 and W8M11 are behavioral the same way for the data canon: hexutil.Bytes lenient-ACCEPTS \"\" (as the empty payload) and uppercase (as the bytes), so with the gate bypassed those reads SUCCEED where the matrix asserts refusal.",
+      "W8M10 IS BEHAVIORAL VIA THE WANT-ZERO ARM: for want 10 the minted chain id 0 still fails VerifyChainID's equality (a name-level observable), but the matrix carries VerifyChainID(ctx, 0) against a scripted \"\" — under the mutant that call PASSES (0 == 0), which is precisely the one-layer-up leniency dependence the gate exists to remove.",
+      "W8M6 AND W8M12 ARE MESSAGE-LEVEL KILLS, disclosed: under W8M6 the empty payload is still refused by the data canon's next arm (the 0x-prefix check), and under W8M12 an omitted input is still refused by the pinned transaction decoder's own required-field list ('missing required field input in transaction') — rotation is identical either way and the observable is the violation's NAME. That name is the property: a gate whose rejections silently devolve to the library's own strictness profile is one library upgrade away from re-admitting the class, and \"\" -> empty IS that library's current profile one form over (the exact wave-7 argument, restated for data).",
+      "W8M8 AND W8M9 RESTORE THE PINNED DECODER'S ABSENCE LENIENCY FAITHFULLY, each with TWO edits: the presence arm stops naming the absence AND the conversion defaults the absent field to zero — exactly what gen_log_json.go does today (an omitted logIndex IS index 0, an omitted blockNumber IS height 0, audit-executed). A single-edit deletion of just the presence arm would nil-panic at the conversion — a kill, but of a strawman; the two-edit form is the honest pre-wave-8 behavior.",
+      "MUTANT COMPILABILITY by construction: W8M1/W8M10 leave `raw` consumed by the hexutil decode below; W8M2-5/W8M11 leave a bare delegation to the hexutil decoder; W8M6 deletes an arm whose operand s remains used by later arms; W8M7 deletes a scoped if-statement (bytes package still used by TransactionByHash); W8M8/W8M9 replace the conversion expression with a guarded closure; W8M12 leaves probe consumed via probe.BlockNumber at the return.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET for every mutation run (no public-endpoint hammering in loops; the raw-JSON servers are local httptest instances). TEST_DATABASE_URL points at solvent_t9w1, never at the backfill daemon's DB solvent."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W8M1",
+      "description": "the eth_blockNumber path skips the canon gate: hexutil's leniency decodes \"\" (and null) as height zero — the round-7 F1 finding restored",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (eth_blockNumber): \"\" is a bytes-level protocol violation that fails the attempt and rotates — under the mutant it decodes as height 0, the attempt SUCCEEDS at the malformed primary, no rotation happens, and Walker.Step sees a head below confirmations and starves despite the healthy secondary",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"eth_blockNumber response result\", raw); err != nil {\r\n\t\treturn 0, err\r\n\t}",
+          "replace": "\t// MUTANT W8M1: the eth_blockNumber path skips the canon gate — hexutil's leniency decodes \"\" as height zero"
+        }
+      ]
+    },
+    {
+      "id": "W8M2",
+      "description": "the logIndex wrapper skips the canon gate: hexutil's leniency decodes \"\" as a present index zero — the round-7 F2 finding restored",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (log logIndex): \"logIndex\":\"\" is a bytes-level protocol violation that fails the attempt and rotates — under the mutant it decodes as a PRESENT zero, the attempt succeeds at the malformed primary, and index 0 is handed downstream as the raw-log identity/order to persist",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"log response logIndex\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W8M2: the logIndex wrapper skips the canon gate — hexutil's leniency decodes \"\" as index zero"
+        }
+      ]
+    },
+    {
+      "id": "W8M3",
+      "description": "the log blockNumber wrapper skips the canon gate",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (log blockNumber): \"blockNumber\":\"\" would decode as height 0 — outside any requested window, but the refusal must happen at the bytes in THIS package, not rely on the walker's window check one consumer up",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"log response blockNumber\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W8M3: the log blockNumber wrapper skips the canon gate"
+        }
+      ]
+    },
+    {
+      "id": "W8M4",
+      "description": "the log transactionIndex wrapper skips the canon gate",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (log transactionIndex): \"transactionIndex\":\"\" would decode as a present zero and flow into the walker's duplicate-conflict comparison — the gate refuses it per-field, isolated from its siblings",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"log response transactionIndex\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W8M4: the log transactionIndex wrapper skips the canon gate"
+        }
+      ]
+    },
+    {
+      "id": "W8M5",
+      "description": "the log data wrapper skips the data canon: hexutil.Bytes lenient-accepts \"\" as an empty payload and uppercase as the bytes",
+      "property": "AN EMPTY PAYLOAD CAN NEVER BECOME A VALUE (log data): \"data\":\"\" is a non-answer, not an empty event payload — under the mutant the read SUCCEEDS and the minted empty payload would persist as raw-log source of truth (behavioral for the empty and uppercase arms, the two forms hexutil accepts)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalData(\"log response data\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W8M5: the log data wrapper skips the data canon — hexutil's leniency decodes \"\" as an empty payload"
+        }
+      ]
+    },
+    {
+      "id": "W8M6",
+      "description": "the data canon's empty-rejection arm is deleted: \"\" falls through to the 0x-prefix arm",
+      "property": "THE EMPTY PAYLOAD IS REFUSED AS WHAT IT IS — a non-answer, not a malformed prefix: the violation's name carries the discrimination (kill is at the NAME; \"\" is still refused by the next arm so rotation is identical — disclosed in design notes). Shared by both data-canon call sites, so the kill list spans log data AND tx input",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif len(s) == 0 {\r\n\t\treturn violation(`empty — an empty payload is a non-answer; the canonical empty payload is \"0x\"`)\r\n\t}",
+          "replace": "\t// MUTANT W8M6: the data canon's empty-rejection arm is deleted — \"\" falls through to the prefix arm"
+        }
+      ]
+    },
+    {
+      "id": "W8M7",
+      "description": "the null-window gate is deleted: a null eth_getLogs result decodes as an empty window and the attempt succeeds",
+      "property": "A NULL RESULT CAN NEVER IMPERSONATE THE EMPTY WINDOW: the provider's honest \"no logs in this range\" is [] — under the mutant a null non-answer SUCCEEDS as zero logs at the malformed primary, no rotation happens, and the walker advances its cursor over a window nobody actually answered for",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || bytes.Equal(trimmed, []byte(\"null\")) {\r\n\t\treturn nil, fmt.Errorf(\"log response result is null — a provider protocol violation; an empty window is answered with [], so a null non-answer is refused before it can impersonate one\")\r\n\t}",
+          "replace": "\t// MUTANT W8M7: the null-window gate is deleted — null decodes as an empty window and the attempt succeeds"
+        }
+      ]
+    },
+    {
+      "id": "W8M8",
+      "description": "logIndex presence devolves to zero: the absence is no longer named and the conversion defaults an absent index to 0 — the pinned decoder's own leniency restored",
+      "property": "AN ABSENT logIndex CAN NEVER BECOME INDEX ZERO: an omitted logIndex in a mined log is a named protocol violation that fails the attempt — under the mutant it silently becomes index 0 (exactly what gen_log_json.go does today, audit-executed) and persists as the raw-log order",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif l.Index == nil {\r\n\t\tmissing = append(missing, \"logIndex\")\r\n\t}",
+          "replace": "\t// MUTANT W8M8a: an absent logIndex is no longer named missing"
+        },
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\t\tIndex:       uint(*l.Index),",
+          "replace": "\t\t\tIndex: func() uint { if l.Index == nil { return 0 }; return uint(*l.Index) }(), // MUTANT W8M8b: an absent logIndex devolves to zero"
+        }
+      ]
+    },
+    {
+      "id": "W8M9",
+      "description": "log blockNumber presence devolves to zero: the absence is no longer named and the conversion defaults an absent height to 0",
+      "property": "AN ABSENT blockNumber CAN NEVER BECOME HEIGHT ZERO: an omitted blockNumber in a mined log is a named protocol violation that fails the attempt — under the mutant it silently becomes height 0, the pinned decoder's own leniency (audit-executed)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif l.BlockNumber == nil {\r\n\t\tmissing = append(missing, \"blockNumber\")\r\n\t}",
+          "replace": "\t// MUTANT W8M9a: an absent blockNumber is no longer named missing"
+        },
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\t\tBlockNumber: uint64(*l.BlockNumber),",
+          "replace": "\t\t\tBlockNumber: func() uint64 { if l.BlockNumber == nil { return 0 }; return uint64(*l.BlockNumber) }(), // MUTANT W8M9b: an absent blockNumber devolves to zero"
+        }
+      ]
+    },
+    {
+      "id": "W8M10",
+      "description": "the eth_chainId path skips the canon gate: hexutil's leniency decodes \"\" as chain id zero",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (eth_chainId): \"\" is refused at the bytes — under the mutant it decodes as chain id 0, and while the equality check still refuses it against want 10 (a name-level observable), VerifyChainID(ctx, 0) PASSES outright: the refusal was relying on a wrong-value comparison one layer up, which is the exact leniency dependence the canon forbids (behavioral via the want-zero arm)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"eth_chainId response result\", raw); err != nil {\r\n\t\treturn nil, err\r\n\t}",
+          "replace": "\t// MUTANT W8M10: the eth_chainId path skips the canon gate — hexutil's leniency decodes \"\" as chain id zero"
+        }
+      ]
+    },
+    {
+      "id": "W8M11",
+      "description": "the tx input wrapper skips the data canon: hexutil.Bytes lenient-accepts \"\" as empty calldata",
+      "property": "AN EMPTY PAYLOAD CAN NEVER BECOME A VALUE (tx input): \"input\":\"\" is a non-answer, not a plain transfer's empty calldata — under the mutant TxCalldata SUCCEEDS with minted empty calldata from the malformed primary (behavioral: the migration-genesis path would derive zero borrower seeds from a response that answered nothing)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalData(\"transaction response input\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W8M11: the tx input wrapper skips the data canon — hexutil's leniency decodes \"\" as empty calldata"
+        }
+      ]
+    },
+    {
+      "id": "W8M12",
+      "description": "the tx input presence check is deleted: an omitted input devolves to the pinned decoder's own required-field refusal",
+      "property": "THE GATE OWNS THE ABSENCE REFUSAL — an omitted input is named by THIS package's violation, not by whatever the lenient library's required-field list happens to refuse: under the mutant the refusal devolves to 'missing required field input in transaction' (rotation identical, the package's violation name gone — a message-level kill, disclosed in design notes)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif probe.Input == nil {\r\n\t\treturn nil, false, fmt.Errorf(\"transaction response omits required field input — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value\")\r\n\t}",
+          "replace": "\t// MUTANT W8M12: the tx input presence check is deleted — the library's required-field list dominates"
+        }
+      ]
+    }
+  ]
+}
