@@ -645,6 +645,25 @@ func (rc roundConditions) publish(health *healthState) {
 // round for hours left /readyz answering 200. Ingestion is the input every derived
 // table depends on; a stalled walker is the most consequential silent failure this
 // daemon has.
+//
+// DISCARDS JOIN THE FAILURE STREAK (Task 9 wave 12, chain-truth consult F2).
+// A discarded window used to arrive here as (false, nil) — indistinguishable
+// from caught-up — so a deterministic discard loop (a stable split backend
+// bracketing every fetch) reset the backoff EVERY round and published no
+// condition: an invisible wedge with a worse detection profile than the
+// incident's error loop. A discard now arrives as *ingest.DiscardError, its
+// own outcome: it consumes a backoff unit (the streak keeps growing toward
+// the cap, preserving outage pacing) and publishes the step_error condition
+// with the discard named — the round-3 [medium] law verbatim ("persistent
+// [failure] involvement neither resets the backoff streak nor clears
+// step_error"), one layer up. The condition KEY stays step_error on purpose:
+// under a mixed discard/error outage the postures alternate, and a separate
+// key would flicker each one off on alternating rounds — the exact
+// visibility failure round 3 closed; the discard is distinguished WHERE THE
+// OPERATOR READS, in the reason. Only a genuine landing or a clean caught-up
+// reaches bo.success(): the walker returns discards as errors, so this
+// function cannot mistake one for progress even if a future walker arm
+// forgets — the typed error is the contract.
 func stepWalkers(ctx context.Context, walkers []*walkerState, rc roundConditions) bool {
 	anyAdvanced := false
 	for _, ws := range walkers {
@@ -658,7 +677,15 @@ func stepWalkers(ctx context.Context, walkers []*walkerState, rc roundConditions
 					if errors.Is(err, context.Canceled) {
 						slog.Info("shutting down", "stream", ws.w.Name())
 					} else {
-						slog.Error("step failed; will retry after backoff", "stream", ws.w.Name(), "err", err)
+						var discard *ingest.DiscardError
+						if errors.As(err, &discard) {
+							// The non-landing posture, not a malfunction: WARN,
+							// but the streak below grows exactly as for an error.
+							slog.Warn("ingest window discarded; the discard joins the failure streak",
+								"stream", ws.w.Name(), "err", err)
+						} else {
+							slog.Error("step failed; will retry after backoff", "stream", ws.w.Name(), "err", err)
+						}
 						roundErred, lastErr = true, err
 					}
 					break
@@ -680,9 +707,14 @@ func stepWalkers(ctx context.Context, walkers []*walkerState, rc roundConditions
 		}
 		// Read while BACKING OFF too: that is precisely when the signal matters.
 		if ws.lastErr != nil {
-			rc.set(ws.w.Name(), conditionStepError,
-				fmt.Sprintf("ingest Step failed %d consecutive round(s), retrying in %s: %v",
-					ws.bo.failures, ws.retryIn.Truncate(time.Second), ws.lastErr))
+			reason := fmt.Sprintf("ingest Step failed %d consecutive round(s), retrying in %s: %v",
+				ws.bo.failures, ws.retryIn.Truncate(time.Second), ws.lastErr)
+			var discard *ingest.DiscardError
+			if errors.As(ws.lastErr, &discard) {
+				reason = fmt.Sprintf("ingest window DISCARDED (non-landing) %d consecutive round(s), retrying in %s: %v",
+					ws.bo.failures, ws.retryIn.Truncate(time.Second), ws.lastErr)
+			}
+			rc.set(ws.w.Name(), conditionStepError, reason)
 		}
 		// A walker's FRESHNESS verdict is deliberately not issued here. It used to
 		// be (as head_lag, from the walker's in-memory head observation), which made
