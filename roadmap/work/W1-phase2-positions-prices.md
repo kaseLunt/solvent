@@ -109,18 +109,18 @@ not run the commands for you. Calculate the receipt's `input_fingerprint` and
   - `internal/store/derive.go` was modified by Task 8 (`rewindTarget` extracted so `RewindDerived`
     and `RewindPrices` share the epoch arithmetic). That file was Codex-approved at `3b864ac` /
     `d1e7d54`, so the change **re-opens approved code** under D-006 and is in the review's scope.
-  - **Open Task 8 design question:** the poller sits on the reorg epoch gate, making polled-price
-    rewind lossy and un-re-derivable (polled prices are point-in-time contract reads, not replayable
-    from logs). The implementer self-flagged it; the switch to ack-but-keep is one call site. Do not
-    treat it as settled until Codex rules.
+  - The polled-price rewind question is **SETTLED** by accepted D-012 (samples, never delete,
+    permanent classification, provenance retained; supersedes D-011/D-010): the poller has NO
+    deletion primitive (reflection-test-pinned) and answers epochs via NeutralizeUnverifiablePrices.
+    Do not reintroduce deletion or online revalidation — read D-012 before touching repair.
   - Claim leases are **non-binding** per D-008 — an expired lease is routine mechanics, not a
     governance breach. But `claim.py` refuses ALL claim mutations while more than one worktree is
     registered, and Codex reviews run in worktrees; `git worktree prune` is part of finishing a
     review. A stray worktree also fails the installer's `git-hooks` adapter check closed.
-  - **The execution ledger is gitignored** (`.gitignore:5` plus a nested `*` in `.superpowers/sdd/`),
-    so it lives only on the dev machine. Rescoping this work to track `.superpowers/sdd/**/*.md` is
-    pending (markdown 396K vs 1.9M of review diffs — track the `.md`, keep ignoring `*.diff`).
-    Precedent for a scope amendment: `db4b926`.
+  - The execution ledger and all SDD artifacts are **TRACKED** since the generation-6 rescope
+    (`211966c`/`23927f1`): `.superpowers/sdd/**` markdown is repository state (plus
+    `<wave>-mutations/` applier artifacts per wave 16's class rule); only the bulky `*.diff`
+    exports stay ignored.
   - Task 9 backfills **from scratch** — the local Postgres volume was recreated during Task 0 recon.
   - Development is local-only; the remote control-plane workflow's scope-review job cannot pass for
     protected-surface pushes and is not authoritative. Local pre-commit hooks are the real gate.
