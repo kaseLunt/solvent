@@ -2,7 +2,11 @@
 
 Brief: `.superpowers/sdd/task-9-wave4-brief.md` (Codex round 3: 1 medium, ACCEPTED; verbatim +
 adjudication in `task-9-codex-round3.md`). Base: `d25b1e8` (the round-3 archive / wave-4 brief
-commit; wave-3 code tip `1b89fb5` unchanged beneath it). ONE fix this wave: order-independent
+commit; wave-3 code tip `1b89fb5` unchanged beneath it). Disclosed: another session's docs-only
+commit `d5207df` (`.superpowers/sdd/**` only — the OP-incident P0 probe record; dot-directories
+are invisible to the go tool) landed between the baseline measurement at `d25b1e8` and this
+wave's first commit. No code file differs beneath the unit because of it, and the final count was
+measured at the tip that includes it. ONE fix this wave: order-independent
 round-outcome classification from the AGGREGATE of per-attempt results. The wave-3 non-landing
 routing seam is closed law and was NOT touched — re-certified by mutation at the rewritten site
 (W4M7/W4M8 below). Implementation commits, in order, all pathspec-staged on `main`:
