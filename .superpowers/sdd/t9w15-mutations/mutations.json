@@ -1,0 +1,113 @@
+{
+  "meta": {
+    "task": "task-9 wave-15 (round-13 fixes: env taint domain + import-restricted snapshot package)",
+    "applier": "../wave16-mutations/mutate.py (committed, exactly-once byte assertion, in-memory restores)",
+    "notes": "One mutant per enforcement mechanism. W15M2-M5 are the round-13 finding's NEGATIVE mutants, one per named evasion shape (aliased import, package-level function value, interface dispatch, exported hook); each COMPILES (verified by an in-memory-restored `go build ./...` pass before this spec was committed) so the kill is the boundary test's, never the compiler's. W15M6 removes the production gate wiring and must die in the DB-backed lifecycle test, which requires TEST_DATABASE_URL (+ SOLVENT_DATABASE_URL for the split guard) exported in the loop environment."
+  },
+  "mutations": [
+    {
+      "id": "W15M1",
+      "property": "F1: an env-asserted sweep cadence LOOSER than the canonical 1h daemon default must taint acceptance - the cap on SOLVENT_SNAPSHOT_INTERVAL is what stops a 1000000h interval from laundering stale snapshots through a ~228-year freshness bound.",
+      "description": "acceptance cap removed from snapshotIntervalTaint (the over-cap branch never fires)",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestEnvSurfaceClosed|TestExtremeSnapshotIntervalEnvIsNonPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\tif d > canonicalSnapshotInterval {",
+          "replace": "\tif false { // W15M1: acceptance cap removed"
+        }
+      ]
+    },
+    {
+      "id": "W15M2",
+      "property": "F2 evasion shape 'aliased import': `import web \"net/http\"` defeats identifier-based qualifier checks (the wave-13 walk matched the NAME http), but the import allowlist asserts PATHS - the package must refuse any non-allowlisted import path however it is spelled.",
+      "description": "aliased net/http import smuggled into snapshotdb (compiles: the alias is referenced)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t\"github.com/ethereum/go-ethereum/common\"\n\t\"github.com/jackc/pgx/v5\"",
+          "replace": "\tweb \"net/http\"\n\n\t\"github.com/ethereum/go-ethereum/common\"\n\t\"github.com/jackc/pgx/v5\""
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tclosed := false",
+          "replace": "\tclosed := false\n\t_ = web.DefaultClient // W15M2: a name-matching walk sees only the qualifier \"web\""
+        }
+      ]
+    },
+    {
+      "id": "W15M3",
+      "property": "F2 evasion shape 'package-level function value': `var snapshotRead = func(...){ ...network... }` called from Collect has no reader type and no named RPC call for a walk to match - but a function value cannot DIAL without an import, and a non-Gate package-level var is itself refused.",
+      "description": "package-level function value dialing raw TCP, invoked inside the open transaction (compiles)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t\"math/big\"\n\t\"os\"",
+          "replace": "\t\"math/big\"\n\t\"net\"\n\t\"os\""
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "var Gate = &Sentinel{}",
+          "replace": "var Gate = &Sentinel{}\n\n// W15M3: the round-13 finding's exact shape.\nvar snapshotRead = func(ctx context.Context) error {\n\tc, err := net.Dial(\"tcp\", \"127.0.0.1:9\")\n\tif err == nil {\n\t\tc.Close()\n\t}\n\treturn err\n}"
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tGate.Enter()\n\tdefer Gate.Exit()",
+          "replace": "\tGate.Enter()\n\tdefer Gate.Exit()\n\t_ = snapshotRead(ctx) // W15M3: network under the open snapshot, via a value no call-walk resolves"
+        }
+      ]
+    },
+    {
+      "id": "W15M4",
+      "property": "F2 evasion shape 'interface dispatch': an interface-typed Params field lets cmd/reconcile (which CAN import chain) load a dialer into the snapshot package with zero new imports here - the API-surface test must refuse any interface type in a declared type or signature.",
+      "description": "injected probe interface on Params, dispatched inside the open transaction (compiles, no new import)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t// CollateralReplay > 0 prefetches the deep-replay history documents\n\t// (the replay targets are picked from the SAMPLE after commit).\n\tCollateralReplay int\n}",
+          "replace": "\t// CollateralReplay > 0 prefetches the deep-replay history documents\n\t// (the replay targets are picked from the SAMPLE after commit).\n\tCollateralReplay int\n\t// W15M4: an injected probe - dispatch, not a named call.\n\tProbe interface{ HeaderProbe(ctx context.Context) error }\n}"
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------",
+          "replace": "\tif prm.Probe != nil {\n\t\t_ = prm.Probe.HeaderProbe(ctx) // W15M4: dispatches whatever the caller loaded in\n\t}\n\t// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------"
+        }
+      ]
+    },
+    {
+      "id": "W15M5",
+      "property": "F2 evasion shape 'exported hook' (the package-boundary spelling of the function-value shape): `var Hook func(...)` assigned by cmd/reconcile smuggles a dialer in with no import change - the only-package-level-var-is-Gate rule must refuse it.",
+      "description": "exported function hook called inside the open transaction (compiles, no new import)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "var Gate = &Sentinel{}",
+          "replace": "var Gate = &Sentinel{}\n\n// W15M5: an exported hook - the importer, not this package, brings the dialer.\nvar Hook func(ctx context.Context)"
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tGate.Enter()\n\tdefer Gate.Exit()",
+          "replace": "\tGate.Enter()\n\tdefer Gate.Exit()\n\tif Hook != nil {\n\t\tHook(ctx) // W15M5\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W15M6",
+      "property": "F2 binding: the PRODUCTION gate must be entered by Collect's own wiring for the transaction's lifetime - a Collect that no longer closes the RPC surface must be caught by the DB-backed lifecycle test observing (never toggling) the gate while the transaction is provably open.",
+      "description": "gate wiring dropped from Collect (BeginTx no longer closes the RPC surface; compiles)",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestProductionGateActiveThroughSnapshotLifecycle", "-count=1"],
+      "note": "Requires TEST_DATABASE_URL (+ SOLVENT_DATABASE_URL for the split guard) in the loop environment - stated in meta.",
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tGate.Enter()\n\tdefer Gate.Exit()",
+          "replace": "\t// W15M6: gate wiring dropped - the RPC surface stays open under the snapshot"
+        }
+      ]
+    }
+  ]
+}
