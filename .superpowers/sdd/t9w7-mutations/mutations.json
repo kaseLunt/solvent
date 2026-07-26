@@ -1,0 +1,95 @@
+{
+  "meta": {
+    "wave": "task-9 wave 7",
+    "unit": "bytes-level canonical-quantity gate on ReportedHeader's number and timestamp decode (ReportedHeader.UnmarshalJSON -> strictNumber/strictTime -> checkCanonicalQuantity) — an empty or non-canonical JSON quantity can never become a value",
+    "purpose": "Task 9 wave 7 brief's mutation requirement: the empty-rejection arm PER WRAPPED FIELD (W7M1 number, W7M2 timestamp — each bypasses its field's canon gate entirely, restoring Codex round 6's finding for that field: v1.13.0 hexutil decodes \"\" as zero, so \"number\":\"\" passes HeadFrom as height 0 and \"timestamp\":\"\" passes presence as the Unix epoch), plus the shared canon's arms (W7M3 empty, W7M4 uppercase, W7M5 leading zeros, W7M6 \"0x\" with no digits). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is CRLF in the working tree, so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "EVERY MUTANT LIVES IN THE WAVE-7 CANON GATE — the strict wrappers' gate calls and checkCanonicalQuantity's arms, the single bytes-level enforcement site. The fake-seam tests are STRUCTURALLY BLIND to all six by design: they script *ReportedHeader VALUES above the decode, so every kill here must come from the raw-JSON fixture layer (chain_rawjson_test.go), which drives the REAL stack Dial -> rpc.Client -> ReportedHeader.UnmarshalJSON -> wrappers -> gate. The transcript's kill lists are the proof that layer actually reaches the wrappers.",
+      "W7M1 AND W7M2 ARE THE BRIEF'S BINDING PAIR (the empty-rejection arm per wrapped field; property: an empty quantity can never become a value) AND ARE BEHAVIORAL KILLS: under each, the empty-quantity read SUCCEEDS — W7M1 hands HeadFrom a height-0 head from the malformed primary (token 0, Head.Number 0, no rotation), W7M2 hands HeaderTime the Unix epoch — exactly the F2 failover-stopping class the round-6 finding named. The binding regression tests assert error-plus-rotation-plus-landing, so the mutants die on every leg.",
+      "W7M4 IS BEHAVIORAL: uppercase digits are a form the pinned hexutil ACCEPTS as a value (\"0x5A\" decodes to 90), so with the lowercase arm relaxed the matrix's uppercase arms SUCCEED where they assert refusal — for the number field the response even passes the wave-6 exact-height gate (90 == asked 90), proving the canon gate is the ONLY line refusing this form.",
+      "W7M3, W7M5 AND W7M6 ARE MESSAGE-LEVEL KILLS, disclosed: the bytes each arm rejects are still refused after the mutation — \"\" by the next canon arm (the 0x-prefix check), \"0x05a\" by hexutil's own ErrLeadingZero, \"0x\" by hexutil's ErrEmptyNumber — so rotation is identical either way and the observable is the violation's NAME. That name is the property: the matrix pins the canon gate's marker ('not a canonical JSON-RPC quantity') and per-arm reason on every refusal, because a gate whose rejections silently devolve to the library's own leniency profile is one library upgrade away from re-admitting the class (\"\" -> 0 IS that library's current profile one form over). W7M5 subtlety: hexutil's leading-zero message happens to contain the words 'leading zero digits', so that kill rides the canon-marker assertion, not the reason assertion.",
+      "MUTANT COMPILABILITY was checked by construction: W7M1/W7M2 leave a bare delegation to the hexutil decoder (no unused variables); W7M3/W7M5/W7M6 delete arms whose operands remain used by later arms; W7M4 widens one condition in place.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET for every mutation run (no public-endpoint hammering inside a loop; the raw-JSON layer needs no gate — its JSON-RPC servers are local httptest instances). TEST_DATABASE_URL points at solvent_t9w1, never at the backfill daemon's DB."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W7M1",
+      "description": "the number wrapper skips the canon gate: hexutil's leniency decodes \"\" as height zero — the round-6 finding restored for the number field",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (number): \"number\":\"\" is a bytes-level protocol violation that fails the attempt and rotates — under the mutant it decodes as height 0, passes the wave-6 presence gate as a NON-NIL number, and HeadFrom hands out a height-zero head from the malformed primary instead of reaching the healthy secondary",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"number\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W7M1: the number wrapper skips the canon gate — hexutil's leniency decodes \"\" as height zero"
+        }
+      ]
+    },
+    {
+      "id": "W7M2",
+      "description": "the timestamp wrapper skips the canon gate: hexutil's leniency decodes \"\" as the Unix epoch — the round-6 finding restored for the timestamp field",
+      "property": "AN EMPTY QUANTITY CAN NEVER BECOME A VALUE (timestamp): \"timestamp\":\"\" is a bytes-level protocol violation that fails the attempt and rotates — under the mutant it decodes as the Unix epoch, passes presence as a NON-NIL time, and HeaderTime dates staleness off 1970 at the malformed primary instead of landing on the healthy secondary",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif err := checkCanonicalQuantity(\"timestamp\", input); err != nil {\r\n\t\treturn err\r\n\t}",
+          "replace": "\t// MUTANT W7M2: the timestamp wrapper skips the canon gate — hexutil's leniency decodes \"\" as the Unix epoch"
+        }
+      ]
+    },
+    {
+      "id": "W7M3",
+      "description": "the canon's empty-rejection arm is deleted: \"\" falls through to the 0x-prefix arm",
+      "property": "THE EMPTY STRING IS REFUSED AS WHAT IT IS — a non-answer, not zero and not a malformed prefix: the violation's name carries the discrimination (kill is at the NAME; \"\" is still refused by the next arm so rotation is identical — disclosed in design notes)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif len(s) == 0 {\r\n\t\treturn violation(\"empty — an empty quantity is a non-answer, not zero\")\r\n\t}",
+          "replace": "\t// MUTANT W7M3: the empty-rejection arm is deleted — \"\" falls through to the prefix arm"
+        }
+      ]
+    },
+    {
+      "id": "W7M4",
+      "description": "the lowercase arm is relaxed: uppercase hex digits pass the canon and hexutil decodes them as values",
+      "property": "THE CANON IS WHAT THE REFERENCE ENCODER EMITS — lowercase digits only: \"0x5A\" is a representation no honest geth-derived node ever serves, and it must be refused at the bytes even though hexutil would happily decode it (for the number field it would then pass the exact-height gate too, so the canon gate is the ONLY refusal line — a behavioral kill)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\tif (c < '0' || c > '9') && (c < 'a' || c > 'f') {",
+          "replace": "\t\tif (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') { // MUTANT W7M4: uppercase digits pass the canon"
+        }
+      ]
+    },
+    {
+      "id": "W7M5",
+      "description": "the leading-zero arm is deleted: non-compact quantities pass the canon and die one layer down in hexutil",
+      "property": "THE GATE OWNS THE COMPACTNESS RULE — \"0x05a\" is refused BY THE CANON, not by whatever hexutil happens to reject: under the mutant the refusal devolves to hexutil's ErrLeadingZero (rotation identical, the canon marker gone from the violation's name — a message-level kill riding the marker assertion, disclosed in design notes)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif len(digits) > 1 && digits[0] == '0' {\r\n\t\treturn violation(\"leading zero digits — the canon is the most compact representation\")\r\n\t}",
+          "replace": "\t// MUTANT W7M5: non-compact quantities pass the canon — hexutil's own leading-zero rule dominates behaviorally"
+        }
+      ]
+    },
+    {
+      "id": "W7M6",
+      "description": "the no-digits arm is deleted: \"0x\" passes the canon and dies one layer down in hexutil",
+      "property": "THE GATE OWNS THE ZERO RULE — \"0x\" is refused BY THE CANON (zero is \"0x0\"), not by hexutil's ErrEmptyNumber: under the mutant the refusal devolves to the library whose leniency profile is the finding (rotation identical, the canon marker gone — a message-level kill, disclosed in design notes)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif len(digits) == 0 {\r\n\t\treturn violation(`\"0x\" carries no digits — zero is \"0x0\"`)\r\n\t}",
+          "replace": "\t// MUTANT W7M6: \"0x\" passes the canon with no digits — hexutil's empty-number rule dominates behaviorally"
+        }
+      ]
+    }
+  ]
+}
