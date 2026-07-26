@@ -1,0 +1,104 @@
+{
+  "meta": {
+    "wave": "task-9 wave 5",
+    "unit": "chain layer provider-reported header hashes (the OP recomputation P0, root cause #2)",
+    "purpose": "Task 9 wave 5 brief's mutation requirement: the revert-to-recomputation mutant (W5M1 at HeaderHash — the exact v1.13.0 defect restored, killed by exactly the OP-shaped regression via a scoped -run; W5M5 the same revert at HeadFrom, where the poller's hashBefore is born), the zero-hash guard (W5M2 removes the protocol gate inside validateReportedHeader; W5M6 severs the gate's call on the head path the anchor rests on), and the reported-hash plumbing through Head/HeadFrom and the routable re-read (W5M3 slips Head.Hash to a different reported field; W5M4 does the same to HeaderHashFrom). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. Every touched file is CRLF in the working tree, so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "THE REVERT MUTANTS MUST DIE BY ASSERTION, NOT BY COMPILE ERROR. rpcClient stopped carrying HeaderByNumber in wave 5 (a header the package cannot see cannot be re-hashed — the structural form of the fix), so a bare h.Hash() revert would not compile. W5M1 and W5M5 therefore each carry TWO edits: put HeaderByNumber back on the interface (the fake still implements it, retained SOLELY for this — the fakePollChain.CallAtFrom / W2M1 precedent, stated at the fake), then restore the old closure. The OP-SHAPED fixture is what kills them: it carries BOTH representations of the incident block (reported 0x3d957321…, and a *types.Header whose recomputed Hash() provably differs), so the reverted code returns a visibly wrong value instead of an uninformative type error.",
+      "W5M1's TEST COMMAND IS DELIBERATELY SCOPED to -run TestHeaderHashIsTheProviderReportedHashNotARecomputation: the brief requires the revert mutant to be killed BY EXACTLY THIS TEST, and a scoped run makes that attribution a recorded fact rather than an inference from a package-wide kill list (the package-wide list is a superset: the zero-hash and not-found regressions also die under W5M1, since the reverted closure ignores the scripted reported headers entirely).",
+      "THE PRICES SUITE IS BLIND TO EVERY MUTANT HERE, recorded not implied: the poller drives fakePollChain, which fakes the PollChain seam ABOVE the Failover, so no chain.go mutation can reach it. W5M3/W5M5 include ./internal/prices/ in their commands anyway so the transcript records that blindness (the W4M4/W4M5 precedent). The composition itself is pinned from the poller side by TestPollerPinnedRoundTripLandsOnAnOPShapedReportedHash / TestPollerPinnedRoundWithARecomputedHashCanNeverLand, whose fixture realism (reported-only recognition at the pin) is the prices-side half of the same property.",
+      "NOT mutation-testable, disclosed: endpointClient.ReportedHeaderByNumber (the raw eth_getBlockByNumber call, the latest/number arg encoding, and the null-result pass-through) is exercised only by the network-gated live regression TestLiveOPIncidentBlockHashIsTheReportedCanonicalHash — the fake seam sits at rpcClient, one level above it. The live test was run ungated once and passed (recorded in the wave-5 report); mutation loops do not dial mainnet, so the adapter's mutants would be killable only by that gated test and are not included.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET for every mutation run: the live regression must not hammer a public endpoint inside a loop, and its SKIP under the gate is the designed steady state for hermetic runs. TEST_DATABASE_URL points at solvent_t9w1 so the prices live-store test participates in the W5M3/W5M5 runs instead of skipping."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W5M1",
+      "description": "the v1.13.0 revert: HeaderHash recomputes the hash locally (HeaderByNumber + h.Hash()) instead of returning the provider-reported value",
+      "property": "EVERY HASH HANDED OUT IS THE PROVIDER-REPORTED eth_getBlockByNumber hash field: local recomputation is silently non-canonical for post-v1.13.0 header shapes (OP incident block 150,105,227: computed 0x70f6bea2… vs canonical 0x3d957321…, hashcheck.go) and must be visible as a WRONG VALUE to the OP-shaped regression — killed by exactly that test, via a scoped run",
+      "test": ["go", "test", "./internal/chain/", "-run", "TestHeaderHashIsTheProviderReportedHashNotARecomputation", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error)",
+          "replace": "\tReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error)\r\n\tHeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) // MUTANT W5M1: the *types.Header recomputation surface returns"
+        },
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t_, err := f.do(ctx, \"headerHash\", func(ctx context.Context, c rpcClient) error {\r\n\t\trh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif err := validateReportedHeader(rh, fmt.Sprintf(\"%d\", n)); err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tout = rh.Hash",
+          "replace": "\t_, err := f.do(ctx, \"headerHash\", func(ctx context.Context, c rpcClient) error { // MUTANT W5M1: recomputation restored\r\n\t\th, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif h == nil {\r\n\t\t\treturn fmt.Errorf(\"header %d not found\", n)\r\n\t\t}\r\n\t\tout = h.Hash()"
+        }
+      ]
+    },
+    {
+      "id": "W5M2",
+      "description": "the zero-hash protocol gate is deleted from validateReportedHeader",
+      "property": "ZERO-HASH REFUSAL RETAINED AT THE SOURCE: a mined block whose reported hash is zero is a provider protocol violation and must never be handed out as a block identity (an anchor holding it would verify against nothing) — every header path refuses it and the walk rotates past the violator",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh.Hash == (common.Hash{}) {\r\n\t\treturn fmt.Errorf(\"header %s reports a zero hash — a provider protocol violation; refusing to hand out an unverifiable block identity\", what)\r\n\t}",
+          "replace": "\t// MUTANT W5M2: the zero-hash protocol gate is gone"
+        }
+      ]
+    },
+    {
+      "id": "W5M3",
+      "description": "Head's hash plumbing slips: HeadFrom populates Head.Hash from the reported parentHash field",
+      "property": "REPORTED-HASH PLUMBING THROUGH Head/HeadFrom: Head.Hash is the reported hash OF THE HEAD BLOCK ITSELF — this is where the poller's hashBefore is born and what the EIP-1898 pin presents back to the node, so a nonzero-but-wrong field here recreates the discard-forever composition with a value no NotZero check can catch",
+      "test": ["go", "test", "./internal/chain/", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\tout = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(rh.Time), Hash: rh.Hash}",
+          "replace": "\t\tout = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(rh.Time), Hash: rh.ParentHash} // MUTANT W5M3: the head's hash plumbing slips to a different reported field"
+        }
+      ]
+    },
+    {
+      "id": "W5M4",
+      "description": "the routable re-verification path hands out the reported parentHash instead of the reported hash",
+      "property": "REPORTED-HASH PLUMBING THROUGH HeaderHashFrom: the poller's closing hashAfter re-read and every repair probe ride this path, and reorg detection compares reported-then against reported-now — a wrong reported field here breaks the comparison one-sidedly with a plausible nonzero value",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tidx, err := f.doFrom(ctx, \"headerHash\", start, func(ctx context.Context, c rpcClient) error {\r\n\t\trh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif err := validateReportedHeader(rh, fmt.Sprintf(\"%d\", n)); err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tout = rh.Hash",
+          "replace": "\tidx, err := f.doFrom(ctx, \"headerHash\", start, func(ctx context.Context, c rpcClient) error {\r\n\t\trh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif err := validateReportedHeader(rh, fmt.Sprintf(\"%d\", n)); err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tout = rh.ParentHash // MUTANT W5M4: the routable re-verification path hands out a different reported field"
+        }
+      ]
+    },
+    {
+      "id": "W5M5",
+      "description": "the v1.13.0 revert at the head: HeadFrom recomputes the latest block's identity locally (HeaderByNumber + h.Hash())",
+      "property": "THE HEAD'S IDENTITY IS REPORTED, NOT RECOMPUTED: HeadFrom is where the poller's hashBefore comes from, so this revert IS the OP production incident (the pin presents a hash no node ever issued and the round discards forever) — the OP-shaped head regression must see the wrong value directly",
+      "test": ["go", "test", "./internal/chain/", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error)",
+          "replace": "\tReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error)\r\n\tHeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) // MUTANT W5M5: the *types.Header recomputation surface returns"
+        },
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\trh, err := c.ReportedHeaderByNumber(ctx, nil)\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif err := validateReportedHeader(rh, \"latest\"); err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tout = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(rh.Time), Hash: rh.Hash}",
+          "replace": "\t\th, err := c.HeaderByNumber(ctx, nil) // MUTANT W5M5: the head's identity is recomputed locally\r\n\t\tif err != nil {\r\n\t\t\treturn err\r\n\t\t}\r\n\t\tif h == nil || h.Number == nil || !h.Number.IsUint64() {\r\n\t\t\treturn fmt.Errorf(\"latest header not usable\")\r\n\t\t}\r\n\t\tout = Head{Number: h.Number.Uint64(), Time: h.Time, Hash: h.Hash()}"
+        }
+      ]
+    },
+    {
+      "id": "W5M6",
+      "description": "the head path ignores the protocol gate: validateReportedHeader's verdict is computed and discarded in HeadFrom",
+      "property": "THE ZERO-HASH REFUSAL GUARDS THE PATH THE ANCHOR RESTS ON: HeadFrom's hash becomes the poller's hashBefore and the durable anchor hash, so the gate must be load-bearing AT THIS CALL SITE, not only present in the shared helper — severing the consult must surface as a zero-hash Head escaping to a caller",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\tif err := validateReportedHeader(rh, \"latest\"); err != nil {\r\n\t\t\treturn err\r\n\t\t}",
+          "replace": "\t\tif err := validateReportedHeader(rh, \"latest\"); false && err != nil { // MUTANT W5M6: the head path ignores the protocol gate\r\n\t\t\treturn err\r\n\t\t}"
+        }
+      ]
+    }
+  ]
+}
