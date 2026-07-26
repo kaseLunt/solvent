@@ -824,7 +824,7 @@ func TestApplyProgressConditionsFailsReadinessOnASilentStall(t *testing.T) {
 	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers, runners: runners})
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{walkers: walkers, runners: runners})
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -843,7 +843,7 @@ func TestApplyProgressConditionsFailsReadinessOnASilentStall(t *testing.T) {
 	// Once the cursor moves, it clears.
 	pr.ingest[0].UpdatedAt = now
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers, runners: runners})
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{walkers: walkers, runners: runners})
 	publishRound(h, rc)
 	require.NotContains(t, h.report().Recoverable, key)
 }
@@ -862,7 +862,7 @@ func TestRoundConditionsComposeStepErrorAndNoProgressTogether(t *testing.T) {
 
 	rc := roundConditions{}
 	stepWalkers(context.Background(), walkers, rc)
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{walkers: walkers})
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{walkers: walkers})
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -910,7 +910,7 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 			consumers: []frontierWatch{
 				{worker: feed, streams: []string{"eth:feed-usdc"}, chainID: 1},
 			},
-			staleness: newStalenessJudge(hdr.fetch, c.now, c.verdict),
+			staleness: newStalenessJudge(hdr.fetch, c.now),
 		}, hdr
 	}
 
@@ -919,7 +919,7 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 	runRound := func(h *healthState, ps *priceWorkerState, pr *fakeProgress, watch progressWatch, now time.Time) {
 		rc := roundConditions{}
 		stepPriceWorkers(context.Background(), []*priceWorkerState{ps}, rc)
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -1048,7 +1048,7 @@ func TestFailedProgressReadEmitsUnmeasuredRatherThanErasingStandingReds(t *testi
 		sweep:      store.SweepProgress{Generation: 3, Open: false, OpenedAt: now.Add(-2 * time.Hour), CompletedAt: now.Add(-time.Hour)},
 	}
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	stall := "op:debt-manager/" + conditionNoProgress
 	require.Contains(t, h.report().Recoverable, stall, "the standing red this ruling is about")
@@ -1058,7 +1058,7 @@ func TestFailedProgressReadEmitsUnmeasuredRatherThanErasingStandingReds(t *testi
 	pr.deriveErr = errors.New("database unreachable")
 	pr.sweepErr = errors.New("database unreachable")
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -1080,7 +1080,7 @@ func TestFailedProgressReadEmitsUnmeasuredRatherThanErasingStandingReds(t *testi
 	pr.ingestErr, pr.deriveErr, pr.sweepErr = nil, nil, nil
 	pr.ingest[0].UpdatedAt = now
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	require.Empty(t, h.report().Recoverable, "unmeasured is a re-derived verdict, not a latch")
 }
@@ -1121,7 +1121,7 @@ func TestSnapshotSemanticStallFailsReadiness(t *testing.T) {
 			LastBatchAt: opened.Add(-time.Hour), Lagging: 3,
 		},
 	}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{sweepEngine: "debt_manager"})
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -1135,7 +1135,7 @@ func TestSnapshotSemanticStallFailsReadiness(t *testing.T) {
 	// A landed batch clears it: this class is recoverable.
 	pr.sweep.LastBatchAt = now.Add(-time.Minute)
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{sweepEngine: "debt_manager"})
 	publishRound(h, rc)
 	require.NotContains(t, h.report().Recoverable, key)
 }
@@ -1163,7 +1163,7 @@ func TestSnapshotProgressDoesNotFireBetweenGenerations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			pr := &fakeProgress{sweepFound: tc.found, sweep: tc.sweep}
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, now, rc, progressWatch{sweepEngine: "debt_manager"})
+			applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{sweepEngine: "debt_manager"})
 			publishRound(h, rc)
 			require.NotContains(t, h.report().Recoverable, snapshotName+"/"+conditionNoProgress)
 		})
@@ -1187,11 +1187,11 @@ func TestStalenessCoversTheFeedDeriver(t *testing.T) {
 		consumers: []frontierWatch{
 			{worker: "prices:chainlink_feed:1", streams: []string{"eth:feed-usdc"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(chainHeaders.fetch, clk.now),
 	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	require.Contains(t, h.report().Recoverable, "prices:chainlink_feed:1/"+conditionStaleness)
 	require.False(t, h.report().Ready)
@@ -1220,14 +1220,14 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 		chainHeaders := newFakeHeaderTimes()
 		watch := progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
-			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now),
 		}
 		// The ingest READ SUCCEEDED and simply has no row for this stream, which is
 		// the distinction that makes this a verdict rather than a read failure.
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "other:stream", Block: 5, UpdatedAt: now}}}
 
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -1245,11 +1245,11 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 			ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 21_000_000, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 			consumers: []frontierWatch{
 				{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1},
 			},
-			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now),
 		})
 		publishRound(h, rc)
 		require.Contains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionStalenessUnmeasured)
@@ -1265,9 +1265,9 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 			derive: []store.CursorProgress{{Name: "prices:poll:10", Block: 1, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "op:debt-manager"}, chainID: 10}},
-			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now),
 		})
 		publishRound(h, rc)
 		for _, c := range []string{conditionStaleness, conditionStalenessUnmeasured, conditionFrontierLag} {
@@ -1315,7 +1315,7 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 		}}
 
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -1343,7 +1343,7 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 			Failed: 2, Exhausted: 1, LastSuccessAt: now.Add(-time.Second),
 		}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -1384,7 +1384,7 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 			NeverSucceeded: 2,
 		}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -1405,7 +1405,7 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 			LastBatchAt: now.Add(-time.Hour), LastSuccessAt: now.Add(-time.Hour),
 		}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 		require.Empty(t, h.report().Recoverable)
 		require.True(t, h.report().Ready)
@@ -1414,7 +1414,7 @@ func TestSnapshotExhaustedFailuresFailReadinessEvenWhenTheGenerationClosed(t *te
 	t.Run("a never-swept engine has not started, so it fails nothing", func(t *testing.T) {
 		h, clk := newTestHealth()
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), &fakeProgress{}, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), &fakeProgress{}, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 		require.Empty(t, h.report().Recoverable)
 	})
@@ -1465,14 +1465,14 @@ func TestWalkerStalenessFiresWhileTheWalkerIsAdvancing(t *testing.T) {
 	// neither errors nor stalls.
 	w := (&fakeIngestWorker{name: "op:debt-manager"}).script(true, nil)
 	ws := &walkerState{w: w, chainID: 10, bo: retryBackoff{now: clk.now, rand: func() float64 { return 0.5 }}}
-	watch := progressWatch{walkers: []*walkerState{ws}, staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict)}
+	watch := progressWatch{walkers: []*walkerState{ws}, staleness: newStalenessJudge(hdr.fetch, clk.now)}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: "op:debt-manager", Block: 150_000_000 - 40, UpdatedAt: now},
 	}}
 
 	rc := roundConditions{}
 	require.True(t, stepWalkers(context.Background(), []*walkerState{ws}, rc), "the walker is advancing")
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -1498,14 +1498,14 @@ func TestWalkerStalenessFiresWhileTheWalkerIsAdvancing(t *testing.T) {
 	// that bound; this asserts the clearing itself still happens.
 	pr.ingest[0].Block = 150_000_000
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	require.Contains(t, h.report().Recoverable, key,
 		"inside the reuse window the stale anchor still answers, which is the fail-closed direction")
 
 	clk.advance(headerRestampThrottle)
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 	publishRound(h, rc)
 	require.NotContains(t, h.report().Recoverable, key)
 	require.True(t, h.report().Ready)
@@ -1530,9 +1530,9 @@ func TestStalenessBoundaryEqualityPassesAndOneSecondPastFails(t *testing.T) {
 			hdr := newFakeHeaderTimes().set(1, 500, now.Add(-tc.age))
 			pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: now}}}
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+			applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 				walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
-				staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+				staleness: newStalenessJudge(hdr.fetch, clk.now),
 			})
 			publishRound(h, rc)
 			if tc.expects {
@@ -1556,7 +1556,7 @@ func TestStalenessUnmeasuredClearsWhenFetchRecovers(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 500, clk.now())
 	hdr.fail[1] = errors.New("dial tcp: connection refused")
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1564,7 +1564,7 @@ func TestStalenessUnmeasuredClearsWhenFetchRecovers(t *testing.T) {
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: clk.now()}}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 	key := "eth:aave-etherfi/" + conditionStalenessUnmeasured
@@ -1614,7 +1614,7 @@ func TestFailedHeaderFetchIsNeverMemoized(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes()
 	hdr.fail[1] = errors.New("upstream 502")
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1622,7 +1622,7 @@ func TestFailedHeaderFetchIsNeverMemoized(t *testing.T) {
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: clk.now()}}}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 	publishRound(h, rc)
 	reason := h.report().Recoverable["eth:aave-etherfi/"+conditionStalenessUnmeasured]
 	require.NotEmpty(t, reason)
@@ -1631,7 +1631,7 @@ func TestFailedHeaderFetchIsNeverMemoized(t *testing.T) {
 
 	clk.advance(headerFetchCooldown + time.Second)
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 	publishRound(h, rc)
 	require.Len(t, hdr.calls, 2, "the block is refetched rather than answered from a memoized failure")
 }
@@ -1650,10 +1650,10 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 		h, clk := newTestHealth()
 		now := clk.now()
 		hdr := newFakeHeaderTimes().set(1, 500, now.Add(skew))
-		judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+		judge := newStalenessJudge(hdr.fetch, clk.now)
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: now}}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 			staleness: judge,
 		})
@@ -1688,10 +1688,10 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 		now := clk.now()
 		hdr := newFakeHeaderTimes()
 		hdr.at[stampKey{chainID: 1, block: 500}] = uint64(now.UnixMilli())
-		judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+		judge := newStalenessJudge(hdr.fetch, clk.now)
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: now}}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 			staleness: judge,
 		})
@@ -1716,7 +1716,7 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 500, clk.now())
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1724,7 +1724,7 @@ func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: clk.now()}}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -1760,7 +1760,7 @@ func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 func TestAHeldStampOutranksBothTheDownSetAndTheCooldown(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 100, clk.now()).set(1, 999, clk.now())
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	// ORDER IS DELIBERATE: the fetch for "eth:new" runs first and marks chain 1 down
 	// for the round, before "eth:held" — which holds a stamp — is judged.
 	watch := progressWatch{
@@ -1776,7 +1776,7 @@ func TestAHeldStampOutranksBothTheDownSetAndTheCooldown(t *testing.T) {
 	}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -1831,13 +1831,13 @@ func TestRestampThrottleReusesOnlyOlderStampsAndOnlyFarFromTheBound(t *testing.T
 	for b := uint64(990); b <= 1010; b++ {
 		hdr.set(1, b, clk.now().Add(-time.Duration(1010-b)*time.Second))
 	}
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 1000, UpdatedAt: clk.now()}}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -1870,18 +1870,18 @@ func TestRestampThrottleReusesOnlyOlderStampsAndOnlyFarFromTheBound(t *testing.T
 	// NEAR THE BOUND, always exact. Reuse is an approximation, so it is refused
 	// whenever the approximated age is more than half the bound: the gate's verdict
 	// near the line is never decided by an estimate.
-	judge2 := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge2 := newStalenessJudge(hdr.fetch, clk.now)
 	watch2 := progressWatch{walkers: []*walkerState{worker}, staleness: judge2}
 	hdr2calls := len(hdr.calls)
 	hdr.set(1, 2000, clk.now().Add(-maxDerivedStaleness+time.Minute)) // age 9m, well past bound/2
 	hdr.set(1, 2001, clk.now().Add(-maxDerivedStaleness+time.Minute))
 	pr.ingest[0].Block = 2000
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch2)
+	applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch2)
 	publishRound(h, rc)
 	pr.ingest[0].Block = 2001
 	rc = roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch2)
+	applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch2)
 	publishRound(h, rc)
 	require.Equal(t, hdr2calls+2, len(hdr.calls),
 		"an age past half the bound is always measured exactly, never approximated from an older block")
@@ -1904,7 +1904,7 @@ func TestOneHeaderFetchPerChainBlockPerRound(t *testing.T) {
 		consumers: []frontierWatch{
 			{worker: "aave_v3_etherfi", streams: []string{"eth:a", "eth:b"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	}
 	pr := &fakeProgress{
 		ingest: []store.CursorProgress{
@@ -1916,7 +1916,7 @@ func TestOneHeaderFetchPerChainBlockPerRound(t *testing.T) {
 	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	require.Equal(t, []stampKey{{chainID: 1, block: 21_000_000}, {chainID: 10, block: 150_000_000}}, hdr.calls,
 		"four workers across two chains at two distinct heights cost exactly two header reads")
@@ -1940,7 +1940,7 @@ func TestChainDownIsRoundScopedNotRemembered(t *testing.T) {
 			{w: &fakeIngestWorker{name: "eth:a"}, chainID: 1},
 			{w: &fakeIngestWorker{name: "eth:b"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: "eth:a", Block: 100, UpdatedAt: clk.now()},
@@ -1948,7 +1948,7 @@ func TestChainDownIsRoundScopedNotRemembered(t *testing.T) {
 	}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -1983,7 +1983,7 @@ func TestFrontierLagAttributesInTime(t *testing.T) {
 		watch := progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 			consumers: []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
-			staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+			staleness: newStalenessJudge(hdr.fetch, clk.now),
 		}
 		return h, clk, hdr, watch
 	}
@@ -1999,7 +1999,7 @@ func TestFrontierLagAttributesInTime(t *testing.T) {
 			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 20_999_960, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -2027,7 +2027,7 @@ func TestFrontierLagAttributesInTime(t *testing.T) {
 			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 20_999_999, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		rep := h.report()
@@ -2046,7 +2046,7 @@ func TestFrontierLagAttributesInTime(t *testing.T) {
 			derive: []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 20_999_000, UpdatedAt: now}},
 		}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 
 		reason := h.report().Recoverable[key]
@@ -2070,10 +2070,10 @@ func TestConsumerStalenessSurvivesAnIngestReadFailure(t *testing.T) {
 		derive:    []store.CursorProgress{{Name: "aave_v3_etherfi", Block: 21_000_000 - 40, UpdatedAt: now}},
 	}
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		consumers: []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	})
 	publishRound(h, rc)
 
@@ -2105,12 +2105,12 @@ func TestCanceledRoundProducesNoWave9Conditions(t *testing.T) {
 		sweepErr:  context.Canceled,
 	}
 	rc := roundConditions{}
-	applyProgressConditions(ctx, pr, now, rc, progressWatch{
+	applyProgressConditions(ctx, pr, fixedClock(now), rc, progressWatch{
 		walkers:     []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		consumers:   []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
 		sweepEngine: "debt_manager", sweepMaxAttempts: 4,
 		collateral: &collateralBoundState{interval: time.Hour},
-		staleness:  newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness:  newStalenessJudge(hdr.fetch, clk.now),
 	})
 	publishRound(h, rc)
 
@@ -2174,7 +2174,7 @@ func TestCollateralUnusableFiresWhetherTheGenerationIsOpenOrClosed(t *testing.T)
 			}
 			pr := &fakeProgress{sweepFound: true, sweep: s}
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+			applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 				sweepEngine: "debt_manager", sweepMaxAttempts: 4,
 				collateral: &collateralBoundState{interval: time.Hour},
 			})
@@ -2200,7 +2200,7 @@ func TestCollateralUnusableFiresWhetherTheGenerationIsOpenOrClosed(t *testing.T)
 			LastBatchAt: now.Add(-time.Hour), LastSuccessAt: now.Add(-time.Hour),
 		}}
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, progressWatch{
 			sweepEngine: "debt_manager", sweepMaxAttempts: 4,
 			collateral: &collateralBoundState{interval: time.Hour},
 		})
@@ -2269,7 +2269,7 @@ func TestCollateralBoundReachesTheStoreWithOneRoundLag(t *testing.T) {
 	}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, now, rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -2325,7 +2325,7 @@ func TestSnapshotterConditionsComposeInOneRoundAndClearInTheNext(t *testing.T) {
 
 	rc := roundConditions{}
 	stepSnapshotter(context.Background(), snap, &ss, rc)
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	require.Len(t, rc[snapshotName], 4,
 		"all four keys are composed into ONE worker entry before anything is published")
 	publishRound(h, rc)
@@ -2348,7 +2348,7 @@ func TestSnapshotterConditionsComposeInOneRoundAndClearInTheNext(t *testing.T) {
 	}
 	rc = roundConditions{}
 	stepSnapshotter(context.Background(), snap, &ss, rc)
-	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	applyProgressConditions(context.Background(), pr, fixedClock(now), rc, watch)
 	publishRound(h, rc)
 	require.Empty(t, h.report().Recoverable, "replacement is what makes recovery visible")
 	require.True(t, h.report().Ready)

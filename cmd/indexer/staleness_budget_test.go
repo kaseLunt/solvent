@@ -33,14 +33,26 @@ package main
 //	C  fetch outcome         succeeds                fails / times out
 //	D  workers per chain     one                     the deployment's fan-out
 //	E  clock behaviour       monotone, agreeing      stepped back; daemon ≠ database
+//	F  scope participation   everyone keeps asking   a scope stops asking, for good
 //
-//	measurement                                              A  B  C  D  E
+//	measurement                                              A  B  C  D  E  F
 //	───────────────────────────────────────────────────────────────────────────────
-//	wave 9   cost harness (deleted)                          ·  ·  ·  ✓  ·
-//	wave 11  TestStalenessPassCostOnAGenuineHistorical…      ✓  ·  ✓  ✓  ·
-//	wave 11  TestEveryStampReuseIsRevalidated…               ✓  ·  ·  ·  ✓ (rollback > anchor age)
-//	wave 13  TestSlowSuccessfulReadsStayBounded…             ✓  ✓  ·  ✓  ·
-//	wave 13  TestAClockRollbackSmallerThanTheHeaderAge…      ✓  ·  ·  ·  ✓ (rollback < anchor age)
+//	wave 9   cost harness (deleted)                          ·  ·  ·  ✓  ·  ·
+//	wave 11  TestStalenessPassCostOnAGenuineHistorical…      ✓  ·  ✓  ✓  ·  ·
+//	wave 11  TestEveryStampReuseIsRevalidated…               ✓  ·  ·  ·  ✓  ·  (rollback > anchor age)
+//	wave 13  TestSlowSuccessfulReadsStayBounded…             ✓  ✓  ·  ✓  ·  ·
+//	wave 13  TestAClockRollbackSmallerThanTheHeaderAge…      ✓  ·  ·  ·  ✓  ·  (rollback < anchor age)
+//	wave 15  TestTheRefreshRotation… (three, budget-one)     ·  ·  ·  ·  ·  ✓
+//	wave 15  TestCatchUpThroughTheNearHeadArm…               ✓  ✓  ·  ✓  ·  ✓
+//	wave 15  TestAClockRollbackCannotSuppressA{,Sweep}Stall  ·  ·  ·  ·  ✓  ·
+//	wave 15  TestTheTrustedInstantAdvancesThroughASlowPass   ✓  ✓  ·  ·  ·  ·
+//
+// AXIS F IS WAVE 15'S, AND IT IS WHY THE ROTATION DEADLOCKED IN PRODUCTION SHAPE
+// WHILE EVERY TEST HERE PASSED. The nine-worker harness below keeps all nine cursors
+// asking for its entire run, so no scope ever leaves and no expiry rule was ever
+// exercised — a mechanism whose failure mode is "a participant leaves" cannot be
+// tested by a harness in which nobody leaves. The same sentence has now been true of
+// this file's blind spot three waves running, on a different axis each time.
 //
 // Nothing below claims to close axis C at hard latency: a chain that both fails AND
 // takes ten seconds to fail is governed by the retry cooldown, which wave 11 already
@@ -127,7 +139,7 @@ func TestSlowSuccessfulReadsStayBoundedAndStillRecover(t *testing.T) {
 		return uint64(clk.now().Add(-backfillAge).Unix()), nil
 	}
 
-	judge := newStalenessJudge(fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(fetch, clk.now)
 	var walkers []*walkerState
 	pr := &fakeProgress{}
 	names := make([]string, slowChainWorkers)
@@ -142,7 +154,7 @@ func TestSlowSuccessfulReadsStayBoundedAndStillRecover(t *testing.T) {
 	round := func() {
 		rounds++
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 		clk.advance(roundCost)
 		// A backfill advances every cursor every round — which is what defeats the
@@ -262,12 +274,12 @@ func TestTheReuseWindowStartsWhenTheReadFINISHES(t *testing.T) {
 	name := "eth:aave-etherfi"
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
-		staleness: newStalenessJudge(fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(fetch, clk.now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: 20_000_000, UpdatedAt: clk.now()}}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 		pr.ingest[0].Block++
 		pr.ingest[0].UpdatedAt = clk.now()
@@ -318,12 +330,12 @@ func TestSchedulingRunsOnTheMonotonicClockAndTheVerdictDoesNot(t *testing.T) {
 		}
 		watch := progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
-			staleness: newStalenessJudge(fetch, sched.now, db.verdict),
+			staleness: newStalenessJudge(fetch, sched.now),
 		}
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: 20_000_000, UpdatedAt: base}}}
 		round := func() {
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, sched.now(), rc, watch)
+			applyProgressConditions(context.Background(), pr, timeAuthority{verdict: db.verdict, sched: sched.now}, rc, watch)
 			publishRound(h, rc)
 			pr.ingest[0].Block++
 		}
@@ -383,11 +395,11 @@ func TestSchedulingRunsOnTheMonotonicClockAndTheVerdictDoesNot(t *testing.T) {
 			walkers = append(walkers, &walkerState{w: &fakeIngestWorker{name: n}, chainID: 1})
 			pr.ingest = append(pr.ingest, store.CursorProgress{Name: n, Block: slowWorkerBlock(i), UpdatedAt: base})
 		}
-		watch := progressWatch{walkers: walkers, staleness: newStalenessJudge(fetch, sched.now, db.verdict)}
+		watch := progressWatch{walkers: walkers, staleness: newStalenessJudge(fetch, sched.now)}
 		start := sched.now()
 		for sched.now().Sub(start) < 4*headerRestampThrottle {
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, sched.now(), rc, watch)
+			applyProgressConditions(context.Background(), pr, timeAuthority{verdict: db.verdict, sched: sched.now}, rc, watch)
 			publishRound(h, rc)
 			sched.advance(200 * time.Millisecond)
 			for i := range pr.ingest {
@@ -436,12 +448,12 @@ func TestAClockRollbackSmallerThanTheHeaderAgeCannotTurnStalenessGreen(t *testin
 		walkers: []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
 		// THE FIX: scheduling runs off the daemon's clock (it may, it is monotonic and
 		// no verdict reads it); the VERDICT runs off the database's.
-		staleness: newStalenessJudge(hdr.fetch, daemon.now, db.verdict),
+		staleness: newStalenessJudge(hdr.fetch, daemon.now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: block, UpdatedAt: db.now()}}}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, daemon.now(), rc, watch)
+	applyProgressConditions(context.Background(), pr, timeAuthority{verdict: db.verdict, sched: daemon.now}, rc, watch)
 	publishRound(h, rc)
 
 	rep := h.report()
@@ -460,10 +472,10 @@ func TestAClockRollbackSmallerThanTheHeaderAgeCannotTurnStalenessGreen(t *testin
 	hdr2 := newFakeHeaderTimes().set(1, block, headerTime)
 	watch2 := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
-		staleness: newStalenessJudge(hdr2.fetch, daemon.now, daemon.verdict),
+		staleness: newStalenessJudge(hdr2.fetch, daemon.now),
 	}
 	rc2 := roundConditions{}
-	applyProgressConditions(context.Background(), pr, daemon.now(), rc2, watch2)
+	applyProgressConditions(context.Background(), pr, daemon.authority(), rc2, watch2)
 	publishRound(h2, rc2)
 	require.NotContains(t, h2.report().Recoverable, name+"/"+conditionStaleness,
 		"with the daemon's wall clock as the time authority the very same state reads GREEN — which is the defect, and the reason the authority is not negotiable")
@@ -475,8 +487,17 @@ func TestAClockRollbackSmallerThanTheHeaderAgeCannotTurnStalenessGreen(t *testin
 // The tempting handling is to fall back to the daemon's wall clock "just for this
 // round", and that is precisely the substitution the [medium] is about — the
 // fallback is not a degraded verdict, it is an unverifiable one, and on this surface
-// unverifiable resolves to green. The header here is FRESH, so a fallback would
-// produce a confident, wrong all-clear.
+// unverifiable resolves to green. The header here is FRESH and every cursor has just
+// moved, so a fallback would produce a confident, wrong all-clear on BOTH gates.
+//
+// WHAT ROUND 11 CHANGED HERE, said out loud because it changes a key an operator
+// greps for. When only the freshness gate read the trusted clock, a failure to read
+// it was staleness_unmeasured. The clock is now the authority for the whole pass —
+// cursor recency and sweep progress are measured against it too — so the failure is
+// the pass's, and it is reported once per worker under progress_unmeasured, which is
+// already this pass's key for "a durable read failed, so neither the stall nor the
+// freshness could be judged". Two keys for one cause would say the same thing twice,
+// and the assertions below pin that it does not.
 func TestNoTrustedClockIsUnmeasuredNeverGreen(t *testing.T) {
 	h, clk := newTestHealth()
 	walker, consumer := "eth:aave-etherfi", "aave"
@@ -484,7 +505,7 @@ func TestNoTrustedClockIsUnmeasuredNeverGreen(t *testing.T) {
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: walker}, chainID: 1}},
 		consumers: []frontierWatch{{worker: consumer, streams: []string{walker}, chainID: 1}},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, brokenClock(errors.New("dial tcp: connection refused"))),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	}
 	pr := &fakeProgress{
 		ingest: []store.CursorProgress{{Name: walker, Block: 20_000_000, UpdatedAt: clk.now()}},
@@ -492,19 +513,68 @@ func TestNoTrustedClockIsUnmeasuredNeverGreen(t *testing.T) {
 	}
 
 	rc := roundConditions{}
-	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+	applyProgressConditions(context.Background(), pr, failingAuthority(errors.New("dial tcp: connection refused")), rc, watch)
 	publishRound(h, rc)
 
 	rep := h.report()
 	for _, w := range []string{walker, consumer} {
-		require.Containsf(t, rep.Recoverable, w+"/"+conditionStalenessUnmeasured,
-			"%s: with no trusted clock there is no honest age, and the gate says so rather than substituting one", w)
+		require.Containsf(t, rep.Recoverable, w+"/"+conditionProgressUnmeasured,
+			"%s: with no trusted clock there is no honest age for anything, and the pass says so rather than substituting one", w)
 		require.NotContainsf(t, rep.Recoverable, w+"/"+conditionStaleness,
 			"%s: and it does not fabricate a RED either — it asserts only that it could not look", w)
-		require.Contains(t, rep.Recoverable[w+"/"+conditionStalenessUnmeasured], "connection refused",
+		require.NotContainsf(t, rep.Recoverable, w+"/"+conditionNoProgress,
+			"%s: nor on the stall gate, which now depends on the same authority", w)
+		require.NotContainsf(t, rep.Recoverable, w+"/"+conditionStalenessUnmeasured,
+			"%s: ONE CAUSE, ONE KEY — the freshness gate does not repeat the pass's own verdict under a second key", w)
+		require.Contains(t, rep.Recoverable[w+"/"+conditionProgressUnmeasured], "connection refused",
 			"the operator is told what actually failed")
 	}
-	require.False(t, rep.Ready, "an unmeasured freshness bound fails readiness")
+	require.False(t, rep.Ready, "a pass with no time authority fails readiness")
 	require.Empty(t, hdr.calls,
 		"and no header read is paid for: without a clock to judge the answer against, the read could not be turned into a verdict anyway")
+	require.Empty(t, pr.sweepCalls,
+		"nor a sweep read: the pass stops at the clock rather than paying for answers it cannot date")
+}
+
+// TestNoTrustedClockLeavesNoWatchedWorkerSilent is the OTHER half of the same rule,
+// and it is the half that matters most for a surface where publication REPLACES.
+//
+// Every worker this pass TOUCHES has its previous entries deleted when the round
+// publishes. A no-clock round that wrote verdicts only for the freshness gate's
+// subjects would therefore silently delete every standing red on a derivation runner
+// and on the snapshotter — a one-round false-green pulse, which is the exact defect
+// controller ruling OQ1 was reversed to prevent, reintroduced through a different
+// door. So the no-clock verdict covers everything the pass touches.
+func TestNoTrustedClockLeavesNoWatchedWorkerSilent(t *testing.T) {
+	h, _ := newTestHealth()
+	walker, runner, feed := "eth:aave-etherfi", "aave", "chainlink-feeds"
+	watch := progressWatch{
+		walkers:          []*walkerState{{w: &fakeIngestWorker{name: walker}, chainID: 1}},
+		runners:          []*runnerState{{r: &fakeDeriveWorker{name: runner}}},
+		consumers:        []frontierWatch{{worker: runner, streams: []string{walker}, chainID: 1}, {worker: feed, streams: []string{walker}, chainID: 1}},
+		sweepEngine:      "debt_manager",
+		sweepMaxAttempts: 3,
+	}
+
+	// A standing red on every one of them, from an earlier round.
+	prev := roundConditions{}
+	for _, n := range []string{walker, runner, feed, snapshotName} {
+		prev.set(n, conditionNoProgress, "standing red from the round before")
+	}
+	publishRound(h, prev)
+
+	rc := roundConditions{}
+	applyProgressConditions(context.Background(), &fakeProgress{}, failingAuthority(errors.New("server closed the connection")), rc, watch)
+	publishRound(h, rc)
+
+	rep := h.report()
+	for _, n := range []string{walker, runner, feed, snapshotName} {
+		require.Containsf(t, rep.Recoverable, n+"/"+conditionProgressUnmeasured,
+			"%s is touched by this pass, so a round that judged nothing must SAY it judged nothing: silence here deletes the standing red instead", n)
+	}
+	// The runner is watched twice over — as a runner and as a consumer — and one
+	// cause may still only produce one entry.
+	require.Len(t, rep.Recoverable, 4,
+		"one cause, one key, one entry per worker: the runner is both a runner and a consumer and must not be written twice")
+	require.False(t, rep.Ready)
 }

@@ -61,7 +61,7 @@ func TestDeepStaleBackfillReusesTheAnchorInsteadOfRefetchingEveryRound(t *testin
 	for b := start; b <= start+400; b++ {
 		hdr.set(1, b, clk.now().Add(-backfillAge))
 	}
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: start, UpdatedAt: clk.now()}}}
@@ -69,7 +69,7 @@ func TestDeepStaleBackfillReusesTheAnchorInsteadOfRefetchingEveryRound(t *testin
 
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -129,12 +129,12 @@ func TestAReusedAnchorIsNeverConsultedForALowerBlock(t *testing.T) {
 	hdr.set(1, low, clk.now().Add(-96*time.Hour))
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: high, UpdatedAt: clk.now()}}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -171,14 +171,14 @@ func TestDeepStaleReuseCanOnlyOverstateAgeAndIsCorrectedWithinOneWindow(t *testi
 	hdr := newFakeHeaderTimes()
 	old, caughtUp := uint64(20_000_000), uint64(20_000_050)
 	hdr.set(1, old, clk.now().Add(-backfillAge))
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: old, UpdatedAt: clk.now()}}}
 	stale := "eth:aave-etherfi/" + conditionStaleness
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -231,7 +231,7 @@ func TestOneWorkersBackfillAnchorNeverDatesAnotherWorkersCursor(t *testing.T) {
 			{w: &fakeIngestWorker{name: lagging}, chainID: 1},
 			{w: &fakeIngestWorker{name: fresh}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
+		staleness: newStalenessJudge(hdr.fetch, clk.now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: lagging, Block: lagBlock, UpdatedAt: clk.now()},
@@ -240,7 +240,7 @@ func TestOneWorkersBackfillAnchorNeverDatesAnotherWorkersCursor(t *testing.T) {
 
 	for i := uint64(0); i < 20; i++ {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 		rep := h.report()
 		require.Contains(t, rep.Recoverable, lagging+"/"+conditionStaleness,
@@ -327,7 +327,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 			watched = append(watched, frontierWatch{worker: c.name, streams: c.streams, chainID: c.chainID})
 			pr.derive = append(pr.derive, store.CursorProgress{Name: c.name, Block: c.start, UpdatedAt: clk.now()})
 		}
-		return progressWatch{walkers: walkers, consumers: watched, staleness: newStalenessJudge(fetch, clk.now, clk.verdict)}, pr
+		return progressWatch{walkers: walkers, consumers: watched, staleness: newStalenessJudge(fetch, clk.now)}, pr
 	}
 	require.Equal(t, 13, len(streams)+len(consumers), "13 gated workers, as deployed")
 
@@ -358,7 +358,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 		watch, pr := build(clk, fetch)
 		for i := 0; i < rounds; i++ {
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+			applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 			publishRound(h, rc)
 			clk.advance(200 * time.Millisecond)
 			advance(pr)
@@ -388,7 +388,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 		watch, pr := build(clk, fetch)
 		for i := 0; i < rounds; i++ {
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+			applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 			publishRound(h, rc)
 			clk.advance(200 * time.Millisecond)
 			advance(pr)
@@ -418,7 +418,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 		watch, pr := build(clk, fetch)
 		for i := 0; i < rounds; i++ {
 			rc := roundConditions{}
-			applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+			applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 			publishRound(h, rc)
 			clk.advance(headerFetchCooldown + time.Second)
 			advance(pr)
@@ -474,7 +474,7 @@ func TestEveryStampReuseIsRevalidatedAgainstTheCurrentClock(t *testing.T) {
 			hdr := newFakeHeaderTimes()
 			anchor := uint64(20_000_000)
 			hdr.set(1, anchor, clk.now().Add(-tc.anchorAge))
-			judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+			judge := newStalenessJudge(hdr.fetch, clk.now)
 			watch := progressWatch{
 				walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
 				staleness: judge,
@@ -482,7 +482,7 @@ func TestEveryStampReuseIsRevalidatedAgainstTheCurrentClock(t *testing.T) {
 			pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: anchor, UpdatedAt: clk.now()}}}
 			round := func() {
 				rc := roundConditions{}
-				applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+				applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 				publishRound(h, rc)
 			}
 
@@ -549,7 +549,7 @@ func TestTheBackfillAnchorCarriesItsOwnSkewCheckForTheCaseTheChainStampCannotCov
 	hdr.set(1, deepBlock+1, clk.now().Add(-time.Hour))
 	hdr.set(1, olderBlock, clk.now().Add(-5*time.Hour))
 	hdr.set(1, olderBlock+1, clk.now().Add(-5*time.Hour))
-	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
+	judge := newStalenessJudge(hdr.fetch, clk.now)
 	watch := progressWatch{
 		walkers: []*walkerState{
 			{w: &fakeIngestWorker{name: deep}, chainID: 1},
@@ -563,7 +563,7 @@ func TestTheBackfillAnchorCarriesItsOwnSkewCheckForTheCaseTheChainStampCannotCov
 	}}
 	round := func() {
 		rc := roundConditions{}
-		applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
+		applyProgressConditions(context.Background(), pr, fixedClock(clk.now()), rc, watch)
 		publishRound(h, rc)
 	}
 
@@ -609,7 +609,7 @@ func TestTheRoundMemoIsRevalidatedAgainstTheClockToo(t *testing.T) {
 	base := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	hdr.set(1, 1000, base.Add(-time.Minute))
 	c := pinnedClock(base)
-	j := newStalenessJudge(hdr.fetch, c.now, c.verdict)
+	j := newStalenessJudge(hdr.fetch, c.now)
 	r := newStalenessRound()
 
 	ts, err := j.measure(context.Background(), r, base, "eth:aave-etherfi", 1, 1000, maxDerivedStaleness)

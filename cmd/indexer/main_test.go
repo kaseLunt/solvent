@@ -36,6 +36,40 @@ func brokenClock(err error) verdictClock {
 	return func(context.Context) (time.Time, error) { return time.Time{}, err }
 }
 
+// authority makes this clock the health pass's whole time authority: the same fake
+// in BOTH roles, which is the ordinary case (a healthy daemon's monotonic clock and
+// its database's clock advance together) and is what a test whose subject is not the
+// split should use.
+//
+// Because the sched half is this same clock, a test whose fetch advances it DURING a
+// pass gets a pass clock that advances with it — which is the arrangement Codex round
+// 11's third finding is about, and the reason those tests use this rather than
+// fixedClock.
+func (c *fakeClock) authority() timeAuthority {
+	return timeAuthority{verdict: c.verdict, sched: c.now}
+}
+
+// fixedClock is a time authority stopped at one instant: it answers `t` and never
+// advances, whatever the pass costs.
+//
+// It is the right harness for a test whose subject is a VERDICT rather than the
+// passage of time — the age under test is arranged by choosing `t` and the durable
+// timestamps, and nothing the pass does can move it. It is the WRONG harness for a
+// test about how long a pass takes, which is what liveAuthority and *fakeClock's own
+// authority exist for.
+func fixedClock(t time.Time) timeAuthority {
+	return timeAuthority{
+		verdict: func(context.Context) (time.Time, error) { return t, nil },
+		sched:   func() time.Time { return t },
+	}
+}
+
+// failingAuthority is a time authority whose trusted clock cannot be reached: the
+// daemon has no authority to judge anything against this round.
+func failingAuthority(err error) timeAuthority {
+	return timeAuthority{verdict: brokenClock(err), sched: time.Now}
+}
+
 // pinnedClock is a clock stopped at one instant, for tests whose subject is not the
 // passage of time. A judge built on it never expires a reuse window and never
 // charges its refresh budget, which is exactly right for a test about some other

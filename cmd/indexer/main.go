@@ -261,9 +261,13 @@ const headerFetchCooldown = 30 * time.Second
 //     second budget, so this changes nothing that wave 11 measured — and within
 //     ⌈W/R⌉ windows when it binds, where W is the chain's deep-stale scopes and R
 //     the reads the budget affords (headerFetchTimeout ÷ per-read latency). A
-//     refusal DEFERS a refresh, it does not drop one: the refused scope is queued
-//     and served before any scope that has already been re-anchored, so nothing
-//     starves and ⌈W/R⌉ is a real bound rather than a hope. What this revises is
+//     refusal DEFERS a refresh, it does not drop one: the refused scope is served
+//     before any scope that has already been re-anchored, so nothing starves and
+//     ⌈W/R⌉ is a real bound rather than a hope. W counts the scopes CURRENTLY
+//     asking, which is the correction Codex round 11's [high] forced — counting
+//     scopes that have merely asked at some point in the past makes W unbounded and,
+//     worse, makes it possible for the rotation never to complete at all (see
+//     admitRefresh's liveness invariant). What this revises is
 //     wave 11's disclosure that a worker which has just caught up stays red for at
 //     most one window: the ceiling is ⌈W/R⌉ windows, reached only while the chain's
 //     endpoint is slow enough for the budget to bind. It degrades in proportion to
@@ -810,8 +814,8 @@ type headerStamp struct {
 	// the approximation fail-closed — see headerRestampThrottle.
 	block uint64
 	// at is the header's own timestamp, as the chain reports it. VERDICT domain:
-	// it is compared against the judge's verdict clock (the DATABASE clock — see
-	// stalenessJudge.clock) to produce an age.
+	// it is compared against the pass's trusted instant (the DATABASE clock, carried
+	// forward — see passClock) to produce an age.
 	at time.Time
 	// fetchedAt is when the fetch that produced this stamp COMPLETED, read from
 	// stalenessJudge.sched — a MONOTONIC clock. SCHEDULING domain: it decides only
@@ -839,27 +843,28 @@ type headerStamp struct {
 // measurement SCHEDULE persists.
 type stalenessJudge struct {
 	fetch headerTimeFetcher
-	// sched and clock are the judge's TWO clocks, and the split is Codex round 10's
-	// whole subject. ONE SOURCE OF TIME TRUTH PER VERDICT; scheduling is not a
-	// verdict, so it gets its own source and is forbidden from touching the other's.
+	// sched is the judge's ONLY clock, and that it is the only one is Codex round
+	// 11's [medium] carried to its conclusion. ONE SOURCE OF TIME TRUTH PER ROUND —
+	// and it does not live here, because it is not the judge's alone: the same
+	// database instant dates cursor recency and sweep progress in the same pass, so
+	// the authority is read once by applyProgressConditions and handed down (see
+	// timeAuthority and passClock). This judge holds no verdict clock at all, which
+	// is the structural guarantee that it cannot acquire a second one.
 	//
-	//   - clock is the VERDICT clock: the DATABASE clock (store.Store.Now), already
-	//     the authority the collateral staleness verdict is decided on. Every age
-	//     this judge reports, and every future-skew comparison it makes, is measured
-	//     against it. THE DAEMON'S OWN WALL CLOCK IS UNTRUSTED INPUT and is not
-	//     consulted here at all: a rollback smaller than a cached header's age slips
-	//     past beyondSkewTolerance (an old header absorbs it) while shortening every
-	//     age computed from it, which is a false green with nothing to catch it.
-	//   - sched is the SCHEDULING clock: time.Now, used only through Sub, so the
-	//     differences are Go's MONOTONIC readings. It cannot run backwards, and it
-	//     does not have to be accurate — it decides reuse windows, retry cooldowns
-	//     and the refresh budget, none of which any verdict reads.
-	//
-	// A failure of clock is fail-closed (staleness_unmeasured for every gated
-	// worker): with no trusted authority there is no honest verdict to issue, and
-	// falling back to the daemon's wall clock is the thing this field exists to stop.
+	// sched is the SCHEDULING clock: time.Now, used only through Sub, so the
+	// differences are Go's MONOTONIC readings. It cannot run backwards, and it does
+	// not have to be accurate — it decides reuse windows, retry cooldowns and the
+	// refresh budget's window, none of which any verdict reads. THE DAEMON'S OWN
+	// WALL CLOCK IS UNTRUSTED INPUT for a verdict and appears nowhere else: a
+	// rollback smaller than a cached header's age slips past beyondSkewTolerance (an
+	// old header absorbs it) while shortening every age computed from it, which is a
+	// false green with nothing to catch it.
 	sched func() time.Time
-	clock verdictClock
+	// round counts daemon passes, and it is the REFRESH ROTATION's liveness clock —
+	// a counter rather than either real clock, deliberately (see admitRefresh). It
+	// is incremented by newRound and is the only cross-round state the rotation's
+	// expiry rule consults.
+	round uint64
 	// stamp is the most recent successful measurement per chain (see headerStamp).
 	stamp map[uint64]headerStamp
 	// backfill is the DEEP-STALE anchor, and it is keyed per REUSE SCOPE (a worker)
@@ -886,16 +891,24 @@ type stalenessJudge struct {
 	// REFRESH BUDGET (Codex round 10's [high]) — see headerRestampThrottle for the
 	// two bounds it enforces and admitRefresh for the rule.
 	//
-	// All four are in the SCHEDULING domain. refreshWindow[c] is when the chain's
-	// current budget window opened and refreshSpent[c] how much read time has been
-	// charged to it. refreshAsked[c] and refreshServed[c] are the ROTATION: which
-	// reuse scopes have wanted a refresh during the current rotation and which have
-	// had one. A scope may not repeat while another that asked is still waiting, and
-	// the rotation restarts once every asker has been served — which is what turns
-	// "deferred" into a bounded wait instead of a permanent loss.
+	// refreshWindow and refreshSpent are in the SCHEDULING domain: refreshWindow[c]
+	// is when the chain's current budget window opened and refreshSpent[c] how much
+	// read time has been charged to it.
+	//
+	// refreshAsked[c] and refreshServed[c] are the ROTATION: which reuse scopes want
+	// a refresh and which have had one. A scope may not repeat while another that
+	// asked is still waiting, and the rotation restarts once every asker has been
+	// served — which is what turns "deferred" into a bounded wait instead of a
+	// permanent loss.
+	//
+	// refreshAsked maps a scope to the ROUND NUMBER of its most recent request, not
+	// to a bare "it asked once". That is Codex round 11's [high]: a membership set
+	// with no expiry records askers that later STOP asking, and a scope that will
+	// never ask again is a scope every other scope waits behind forever. The round
+	// number is what lets an asker go stale (see admitRefresh).
 	refreshWindow map[uint64]time.Time
 	refreshSpent  map[uint64]time.Duration
-	refreshAsked  map[uint64]map[string]bool
+	refreshAsked  map[uint64]map[string]uint64
 	refreshServed map[uint64]map[string]bool
 }
 
@@ -905,18 +918,82 @@ type stalenessJudge struct {
 // reported as unmeasured rather than papered over with the local wall clock.
 type verdictClock func(ctx context.Context) (time.Time, error)
 
-func newStalenessJudge(fetch headerTimeFetcher, sched func() time.Time, clock verdictClock) *stalenessJudge {
+// timeAuthority is everything a daemon round needs in order to date anything: the
+// TRUSTED clock, and the MONOTONIC clock that carries one reading of it forward
+// while the round runs. The daemon binds it to (store.Store.Now, time.Now).
+//
+// It is a PAIR rather than just the trusted clock because one reading is not the
+// same thing as an instant, and Codex round 11's [medium] is precisely that
+// difference — see passClock.
+type timeAuthority struct {
+	verdict verdictClock
+	sched   func() time.Time
+}
+
+// passClock is ONE reading of the time authority, carried forward by MONOTONIC
+// elapsed time — the whole of Codex round 11's third finding.
+//
+// WHY A READING IS NOT AN INSTANT. The pass reads the database clock once and then
+// does work: two durable cursor listings, up to a header read per gated worker, a
+// sweep-progress query. On a degraded endpoint that is tens of seconds, all of it
+// before the verdicts are published — and the pass-start reading, reused verbatim,
+// dates every one of those verdicts as if no time had passed. Measured on the
+// nine-worker four-second-read harness the previous wave shipped, a pass runs 36 s,
+// so a cursor 10m00s old at publication was judged 9m24s old and read GREEN. That
+// is fail-OPEN on a liquidation-facing gate, and it gets worse exactly as the
+// endpoint does.
+//
+// So `at` is anchored, not frozen: now() is the trusted reading plus however much
+// monotonic time has elapsed since it was taken. Across passes nothing accumulates,
+// because every pass re-reads the authority; within a pass the drift between the
+// two clocks is bounded by the pass's own duration, which is the interval over
+// which a monotonic clock and a database clock cannot meaningfully disagree.
+//
+// THE ANCHOR IS TAKEN BEFORE THE READ IS ISSUED, and that is not an accident. The
+// trusted instant is the server's, captured somewhere inside a round trip this
+// process cannot see into; anchoring after the call returns would credit the whole
+// round trip to neither clock and make now() run BEHIND the database — ages short,
+// verdicts green. Anchoring first makes now() run AHEAD by at most the round-trip
+// latency instead: ages long, fail-closed, and bounded by a number that is
+// milliseconds against a local server.
+type passClock struct {
+	// at is the trusted instant the authority returned.
+	at time.Time
+	// anchor is the MONOTONIC reading taken immediately BEFORE the trusted read was
+	// issued. Only its difference from a later sched() reading is ever used.
+	anchor time.Time
+	sched  func() time.Time
+}
+
+// read takes the pass's one reading of the trusted clock.
+func (a timeAuthority) read(ctx context.Context) (passClock, error) {
+	anchor := a.sched()
+	at, err := a.verdict(ctx)
+	if err != nil {
+		return passClock{}, err
+	}
+	return passClock{at: at, anchor: anchor, sched: a.sched}, nil
+}
+
+// now is the trusted instant as of RIGHT NOW: the reading, carried forward.
+//
+// Every timestamp this daemon judges — a header's, a cursor's updated_at, a sweep
+// batch's — is compared against this and nothing else. Call it as LATE as the
+// comparison allows: the cost of calling it early is a verdict aged from a stale
+// instant, which is the finding this type exists to close.
+func (c passClock) now() time.Time { return c.at.Add(c.sched().Sub(c.anchor)) }
+
+func newStalenessJudge(fetch headerTimeFetcher, sched func() time.Time) *stalenessJudge {
 	return &stalenessJudge{
 		fetch:            fetch,
 		sched:            sched,
-		clock:            clock,
 		stamp:            map[uint64]headerStamp{},
 		backfill:         map[string]headerStamp{},
 		nextFetchAttempt: map[uint64]time.Time{},
 		lastFetchErr:     map[uint64]error{},
 		refreshWindow:    map[uint64]time.Time{},
 		refreshSpent:     map[uint64]time.Duration{},
-		refreshAsked:     map[uint64]map[string]bool{},
+		refreshAsked:     map[uint64]map[string]uint64{},
 		refreshServed:    map[uint64]map[string]bool{},
 	}
 }
@@ -936,10 +1013,31 @@ type stalenessRound struct {
 	// fetches counts header reads actually attempted this round. It exists so the
 	// pass can report its own cost rather than the report asserting one.
 	fetches int
+	// seq is this round's number, assigned by stalenessJudge.newRound. It is the
+	// REFRESH ROTATION's notion of "recently" (see admitRefresh) and exists on the
+	// round rather than being read off the judge because the round IS the epoch —
+	// every scope that still wants a refresh asks exactly once per round, so "asked
+	// in round N" is the only honest test of whether a scope is still waiting.
+	//
+	// A round built without a judge carries seq 0 and never expires an asker, which
+	// is the right degenerate behaviour for a unit test that models no passes.
+	seq uint64
 }
 
 func newStalenessRound() *stalenessRound {
 	return &stalenessRound{stamps: map[stampKey]time.Time{}, down: map[uint64]error{}}
+}
+
+// newRound opens the judge's next round, numbering it. The number is the only
+// cross-round state the refresh rotation's liveness rule reads, and it is a COUNTER
+// rather than a clock on purpose: the previous wave's mutation loop found that
+// windowing the budget on the wrong clock froze it silently the moment that clock
+// stopped, and a counter driven by the pass itself cannot be stopped by any clock.
+func (j *stalenessJudge) newRound() *stalenessRound {
+	j.round++
+	r := newStalenessRound()
+	r.seq = j.round
+	return r
 }
 
 // measure returns the header timestamp of (chainID, block), or an error naming why
@@ -1023,15 +1121,16 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 				// Inside the reuse window: the ordinary deep-stale reuse.
 				r.stamps[key] = s.at
 				return s.at, nil
-			case !j.admitRefresh(sched, chainID, scope):
+			case !j.admitRefresh(sched, r.seq, chainID, scope):
 				// The window HAS expired, but the chain's refresh budget for this
 				// window is already spent, so the re-read is DEFERRED — not dropped.
 				// Deferring is admissible here and nowhere else: this arm's anchor is
 				// already past the bound and reuse only over-estimates age, so a
 				// deferred worker keeps reading RED, which is the fail-closed
-				// direction. admitRefresh has queued it, and it is served before any
-				// worker that has already been re-anchored (see headerRestampThrottle
-				// bound 2).
+				// direction. admitRefresh has recorded the request in this round, and
+				// the scope is served before any scope already re-anchored in this
+				// rotation (see headerRestampThrottle bound 2 and admitRefresh's
+				// liveness invariant).
 				r.stamps[key] = s.at
 				return s.at, nil
 			default:
@@ -1140,8 +1239,8 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 //     headerRestampThrottle are the same 30 s. The success path is simply held to
 //     the budget the failure path was already given.
 //  2. ROTATION. A scope that has already been served in the current rotation is
-//     refused, even with spend available, while any scope that ASKED is still
-//     waiting; the rotation restarts once every asker has been served. This is the
+//     refused, even with spend available, while any ACTIVE scope is still waiting;
+//     the rotation restarts once every active scope has been served. This is the
 //     whole of the fairness argument, and it is not decoration: without it the
 //     workers the daemon judges FIRST win the budget in every window and the ones it
 //     judges last are never re-anchored at all — measured, not assumed, and it is
@@ -1149,21 +1248,52 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 //     before the late ones get a turn. With it, refreshes round-robin, and bound 2's
 //     ⌈W/R⌉ is a real ceiling rather than an aspiration.
 //
-// WHY THE ROTATION IS KEYED ON WHO ASKED rather than on a queue of who is owed. A
-// queue has a head, and a head is something to get stuck behind: a worker whose
-// cursor stalls stops reaching this arm entirely (the exact-block hit answers it
-// first), so a queue would wait forever on a scope that will never ask again and no
-// other worker on the chain would ever be refreshed. Membership of `asked` is
-// rebuilt every rotation, so a scope that stops asking simply drops out and blocks
-// nobody. A single deep-stale worker on a chain likewise completes its rotation by
-// itself and is refreshed every window, exactly as it was before this budget existed.
+// ═══ THE LIVENESS INVARIANT, which is what this mechanism has now failed twice ═══
+//
+//	A scope blocks the rotation only while it is ACTIVE: only if it asked in the
+//	CURRENT round or the one immediately before it.
+//
+// Every scope that still wants a refresh asks exactly once per round — that is what
+// this arm IS, the deep-stale path taken by every gated worker whose anchor has
+// expired — so an active scope is one that is provably still waiting, and a scope
+// that stops asking leaves the blocking set within one round. The rotation therefore
+// always completes, and it completes within ⌈W/R⌉ windows where W counts the scopes
+// CURRENTLY asking, not the scopes that ever asked.
+//
+// THE THREE THINGS THAT INVARIANT HAD TO SURVIVE, because the previous two designs
+// each died on one of them:
+//
+//   - A NAIVE BUDGET (no fairness at all) starves: the first-judged workers win the
+//     allowance every window and the last-judged are never re-anchored.
+//   - A DUE QUEUE deadlocks on its head: a worker whose cursor stalls stops reaching
+//     this arm entirely (the exact-block hit answers it first), so the queue waits
+//     forever on a scope that will never ask again, and nobody on the chain is ever
+//     refreshed. Rejected before shipping, for this reason.
+//   - A BARE ASKED-SET — what shipped, and Codex round 11's [high] — deadlocks one
+//     layer up, and this is the subtle one. Membership was said to be "rebuilt every
+//     rotation", but it is only rebuilt when a rotation COMPLETES. A scope recorded
+//     while the budget was exhausted is recorded and not served; if it then stops
+//     asking (it caught up, so the near-head arm answers it; or its worker was
+//     removed), no rotation can ever complete again, so every other scope is refused
+//     forever and the chain is never refreshed again. The set had membership with no
+//     expiry, and permanent membership is indistinguishable from a queue head.
+//
+// The expiry is keyed on the ROUND COUNTER rather than on either clock, and that is
+// deliberate: the previous wave's mutation loop (M15) found that windowing this
+// budget on the wrong clock froze it silently the moment that clock stopped moving.
+// Liveness that depends on a clock is liveness that a stopped clock removes; a
+// counter driven by the pass itself cannot be stopped by any clock, and a daemon
+// that is not running rounds is not one that needs this rotation to turn.
+//
+// A single deep-stale worker on a chain completes its rotation by itself and is
+// refreshed every window, exactly as it was before this budget existed.
 //
 // A scope is marked served at ADMISSION rather than at completion, so a read that is
 // admitted and then blocked by the round's down set or the retry cooldown still
 // spends the turn. That is the conservative direction and it costs nothing real: in
 // both of those cases NO read happens on the chain for anybody, so the rotation is
 // stalled for every scope equally rather than skewed between them.
-func (j *stalenessJudge) admitRefresh(sched time.Time, chainID uint64, scope string) bool {
+func (j *stalenessJudge) admitRefresh(sched time.Time, round, chainID uint64, scope string) bool {
 	opened, windowed := j.refreshWindow[chainID]
 	if !windowed || sched.Sub(opened) >= headerRestampThrottle {
 		j.refreshWindow[chainID] = sched
@@ -1171,27 +1301,54 @@ func (j *stalenessJudge) admitRefresh(sched time.Time, chainID uint64, scope str
 	}
 	asked := j.refreshAsked[chainID]
 	if asked == nil {
-		asked = map[string]bool{}
+		asked = map[string]uint64{}
 		j.refreshAsked[chainID] = asked
-	}
-	asked[scope] = true
-	if j.refreshSpent[chainID] >= headerFetchTimeout {
-		return false
 	}
 	served := j.refreshServed[chainID]
 	if served == nil {
 		served = map[string]bool{}
 		j.refreshServed[chainID] = served
 	}
+	asked[scope] = round
+	// EXPIRE INACTIVE ASKERS — the liveness rule, and the whole of the fix. A scope
+	// whose most recent request is older than the PREVIOUS round has stopped asking,
+	// so it stops BLOCKING: it is dropped from the waiting set the rotation waits on.
+	//
+	// `at+1 < round` and not `at < round`, because within a round the scopes judged
+	// AFTER this one have not asked yet this pass — their most recent request is the
+	// previous round's, and they are exactly the scopes that must still count as
+	// waiting. One round of slack is all that is needed and all that is given.
+	//
+	// IT DROPS FROM `asked` AND NOT FROM `served`, and that asymmetry is the whole
+	// correctness argument — it was measured, not reasoned. Dropping from both looks
+	// tidier and silently restores the STARVATION this rotation exists to prevent:
+	// being served is exactly what makes a scope go quiet (a fresh anchor is reusable
+	// for one window), so "inactive" is the normal state of a scope that has just had
+	// its turn. Forgiving its turn while it is quiet lets it re-enter unserved and
+	// win the next window ahead of scopes that have been waiting for several — which
+	// is what the harness reported: worker 6 at ZERO refreshes over five minutes.
+	// Going quiet must cost a scope its VETO, never its place in the queue.
+	//
+	// `served` is not leaked by this: it is cleared wholesale every time a rotation
+	// completes, so a permanently-retired scope lingers in it for at most one
+	// rotation and blocks nothing while it does (completion only inspects `asked`).
+	for s, at := range asked {
+		if at+1 < round {
+			delete(asked, s)
+		}
+	}
+	if j.refreshSpent[chainID] >= headerFetchTimeout {
+		return false
+	}
 	if served[scope] {
 		for s := range asked {
 			if !served[s] {
-				return false // someone who asked first is still waiting
+				return false // someone still asking has not had a turn
 			}
 		}
-		// Every scope that asked has been served: the rotation is complete, so a new
-		// one opens with this scope as its first member.
-		asked = map[string]bool{scope: true}
+		// Every scope still asking has been served: the rotation is complete, so a
+		// new one opens with this scope as its first member.
+		asked = map[string]uint64{scope: round}
 		served = map[string]bool{}
 		j.refreshAsked[chainID] = asked
 		j.refreshServed[chainID] = served
@@ -1355,6 +1512,21 @@ type progressWatch struct {
 // refresh updated_at without progress (an idempotent same-height replay) and why
 // neither a walker nor a runner can produce it.
 //
+// AND THE CLOCK IT IS COMPARED AGAINST IS THE DATABASE'S TOO (Codex round 11's
+// [medium]). It used to be the daemon's wall clock, which meant this gate subtracted
+// a Postgres-written timestamp from a locally-read one — two clocks, one
+// subtraction, and nothing anywhere reconciling them. A wall clock stepped BACKWARDS
+// shortens every `since` computed here and can suppress a genuine stall outright:
+// the material case is a snapshotter quietly refusing stale collateral, which
+// produces no step error at all and is visible only as an open sweep generation that
+// has stopped landing batches. The previous wave fixed exactly one instance of this
+// (the freshness gate) and left the two here; the authority is now read ONCE, at the
+// top of this function, and every comparison in the pass — cursor recency, sweep
+// progress, and the header ages applyStalenessConditions computes — is measured
+// against it. A failure to read it is progress_unmeasured for everything watched:
+// with no trusted clock there is no honest verdict, and the local one is the
+// substitution the finding is about.
+//
 // SCOPE, stated rather than implied: PRICE workers are deliberately NOT judged
 // here. The poller CAN re-apply the same execution block every interval, so a
 // cursor timestamp would lie about it; it is judged instead by whether a NEW poll
@@ -1386,7 +1558,7 @@ type progressWatch struct {
 //	                     already fired;
 //	snapshot_failures /  collateral accounts with no retry left, and accounts with
 //	collateral_unusable  no usable collateral snapshot at all.
-func applyProgressConditions(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, w progressWatch) {
+func applyProgressConditions(ctx context.Context, pr progressReader, auth timeAuthority, rc roundConditions, w progressWatch) {
 	// Registering every watched worker makes this pass self-sufficient: publish
 	// only replaces workers it knows about, so a worker whose stall CLEARS must
 	// still be named here or its stale entry would survive the round.
@@ -1414,7 +1586,24 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 		return
 	}
 
+	// THE PASS'S ONE TIME AUTHORITY, read here and nowhere else. Read BEFORE the
+	// durable listings so that whatever those cost is elapsed time this pass can
+	// account for rather than time it silently loses (see passClock).
+	clk, clockErr := auth.read(ctx)
+	if clockErr != nil {
+		if ctx.Err() != nil {
+			return // shutdown, not a verdict (amendment L7)
+		}
+		applyClockUnmeasured(rc, w, clockErr)
+		return
+	}
+
+	// EVERY COMPARISON TAKES ITS OWN READING, as late as the comparison allows. The
+	// listing above may have taken tens of seconds on a degraded database, and a
+	// cursor's age must include that: dating these rows from the pass's opening
+	// instant is Codex round 11's third finding in miniature.
 	check := func(rows []store.CursorProgress, watched map[string]bool, kind string) {
+		now := clk.now()
 		for _, p := range rows {
 			if !watched[p.Name] {
 				continue
@@ -1458,14 +1647,13 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 		check(deriveRows, watchDerive, "derive")
 	}
 
-	// NOT GIVEN `now`. The freshness gate sources its own verdict clock from the
-	// database (stalenessJudge.clock): the daemon's wall clock — the `now` this
-	// function was handed — is untrusted input for a verdict measured against
-	// chain-sourced timestamps. See applyStalenessConditions.
-	applyStalenessConditions(ctx, rc, w, ingestRows, ingestErr, deriveRows, deriveErr)
+	// GIVEN THE PASS CLOCK, not a bare instant: the freshness gate reads it at each
+	// worker it judges and again after each header read, because a pass of slow
+	// sequential reads is exactly where a single instant goes stale.
+	applyStalenessConditions(ctx, rc, w, clk, ingestRows, ingestErr, deriveRows, deriveErr)
 
 	if w.sweepEngine != "" {
-		applySweepProgressCondition(ctx, pr, now, rc, w)
+		applySweepProgressCondition(ctx, pr, clk, rc, w)
 	}
 }
 
@@ -1505,7 +1693,7 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 // frozen endpoint — returns (false, nil) from every Step with no cursor write, no
 // error and no stall, and the deleted head_lag condition was the only red that ever
 // covered it.
-func applyStalenessConditions(ctx context.Context, rc roundConditions, w progressWatch,
+func applyStalenessConditions(ctx context.Context, rc roundConditions, w progressWatch, clk passClock,
 	ingestRows []store.CursorProgress, ingestErr error, deriveRows []store.CursorProgress, deriveErr error) {
 	if w.staleness == nil {
 		return
@@ -1522,21 +1710,23 @@ func applyStalenessConditions(ctx context.Context, rc roundConditions, w progres
 	// path would compare the fresh header against the same skewed clock.
 	//
 	// So the verdict clock is the DATABASE's, which is already the authority the
-	// collateral staleness verdict is decided on (in SQL, on the server), read ONCE
-	// per pass so that every worker in a round is judged against one instant.
+	// collateral staleness verdict is decided on (in SQL, on the server). It is read
+	// ONCE per pass — by applyProgressConditions, which hands the reading down here
+	// so that this gate and the stall gate cannot drift onto different authorities.
 	// Scheduling — reuse windows, retry cooldowns, the refresh budget — is a
 	// separate, monotonic clock that no verdict reads (see stalenessJudge).
-	now, clockErr := w.staleness.clock(ctx)
-	if clockErr != nil {
-		if ctx.Err() != nil {
-			return // shutdown, not a verdict (amendment L7)
-		}
-		applyClockUnmeasured(rc, w, ingestErr, deriveErr, clockErr)
-		return
-	}
+	//
+	// ONE AUTHORITY IS NOT ONE INSTANT, and the previous wave conflated the two: it
+	// froze the pass-start reading and judged every worker against it, which on a
+	// slow endpoint under-ages the workers judged last by the whole duration of the
+	// pass (Codex round 11's third finding — see passClock). The authority is read
+	// once; the INSTANT is taken afresh at each worker, and again after each header
+	// read, so a verdict is aged from the moment it is actually made.
+	//
 	// FRESH EVERY ROUND (amendment L4a): the down set and the per-round memo are
-	// local values, so no verdict can outlive the round that derived it.
-	r := newStalenessRound()
+	// local values, so no verdict can outlive the round that derived it. The round is
+	// numbered by the judge, which is what the refresh rotation's liveness rule reads.
+	r := w.staleness.newRound()
 
 	block := func(rows []store.CursorProgress) map[string]uint64 {
 		m := make(map[string]uint64, len(rows))
@@ -1547,24 +1737,35 @@ func applyStalenessConditions(ctx context.Context, rc roundConditions, w progres
 	}
 
 	// judge writes one worker's freshness verdict and reports the header time it
-	// measured (measured=false when it could not be measured at all).
-	judge := func(worker, kind string, chainID, at uint64) (time.Time, bool) {
-		ts, err := w.staleness.measure(ctx, r, now, worker, chainID, at, maxDerivedStaleness)
+	// measured (measured=false when it could not be measured at all), along with the
+	// instant it was judged against so the attribution below uses the same one.
+	judge := func(worker, kind string, chainID, at uint64) (time.Time, time.Time, bool) {
+		// TAKEN AT ENTRY for the reuse and skew arms inside measure: an earlier
+		// instant makes the future-skew guard MORE likely to fire and the reuse
+		// bands more likely to fall through to a real read, which is the
+		// conservative direction for both.
+		ts, err := w.staleness.measure(ctx, r, clk.now(), worker, chainID, at, maxDerivedStaleness)
+		// TAKEN AGAIN AFTER THE READ, and this is the one the VERDICT is made from.
+		// A header fetch is allowed headerFetchTimeout; charging that latency to
+		// neither clock is how a cursor measurably past the bound at publication
+		// gets reported inside it. The age can only grow by re-reading here, so this
+		// is fail-closed by construction.
+		now := clk.now()
 		if err != nil {
 			if ctx.Err() != nil {
-				return time.Time{}, false // shutdown, not a verdict (amendment L7)
+				return time.Time{}, now, false // shutdown, not a verdict (amendment L7)
 			}
 			rc.set(worker, conditionStalenessUnmeasured,
 				fmt.Sprintf("this %s cursor stands at block %d on chain %d and the daemon could not read that block's header timestamp, so it cannot certify the %s freshness bound: %v",
 					kind, at, chainID, maxDerivedStaleness, err))
-			return time.Time{}, false
+			return time.Time{}, now, false
 		}
 		if age := stalenessAge(now, ts); age > maxDerivedStaleness {
 			rc.set(worker, conditionStaleness,
 				fmt.Sprintf("this %s cursor stands at block %d on chain %d, whose header timestamp is %s (%s old, bound %s): the state this worker serves describes a chain that far in the past",
 					kind, at, chainID, ts.Format(time.RFC3339), age.Truncate(time.Second), maxDerivedStaleness))
 		}
-		return ts, true
+		return ts, now, true
 	}
 
 	// WALKERS. Skipped wholesale when the ingest read failed — those workers already
@@ -1603,7 +1804,7 @@ func applyStalenessConditions(ctx context.Context, rc roundConditions, w progres
 					"this raw-log consumer has no derive_cursors row at all, so there is no block whose age could be measured: it has never completed a window")
 				continue
 			}
-			ts, measured := judge(c.worker, "derive", c.chainID, at)
+			ts, now, measured := judge(c.worker, "derive", c.chainID, at)
 			applyFrontierAttribution(ctx, now, rc, w, r, c, at, ts, measured, frontier, ingestErr)
 		}
 	}
@@ -1614,32 +1815,50 @@ func applyStalenessConditions(ctx context.Context, rc roundConditions, w progres
 	}
 }
 
-// applyClockUnmeasured is what the freshness gate reports when it has no trusted
-// clock to judge against.
+// applyClockUnmeasured is what the WHOLE PASS reports when it has no trusted clock
+// to judge against.
 //
-// IT IS THE POINT OF THE VERDICT-CLOCK SPLIT, NOT AN EDGE CASE OF IT. The obvious
+// IT IS THE POINT OF THE VERDICT-CLOCK RULE, NOT AN EDGE CASE OF IT. The obvious
 // handling of "the database clock read failed" is to carry on with the daemon's own
-// wall clock, and that substitution is exactly what Codex round 10's [medium] is
-// about: a clock that has been stepped backwards reports every age shorter than it
-// is, and a freshness gate that reads short is a false green on liquidation-facing
-// data. An unmeasured red asserts only that the daemon could not look, which is
-// true, and it fails readiness, which is the fail-closed direction. Anything the
-// wall clock could contribute here is a number nobody can vouch for.
+// wall clock, and that substitution is exactly what the finding is about: a clock
+// that has been stepped backwards reports every age shorter than it is, and a gate
+// that reads short is a false green on liquidation-facing data. An unmeasured red
+// asserts only that the daemon could not look, which is true, and it fails
+// readiness, which is the fail-closed direction. Anything the wall clock could
+// contribute here is a number nobody can vouch for.
 //
-// It mirrors applyStalenessConditions' own skip rules exactly, so a worker already
-// carrying progress_unmeasured from a failed durable read is not told the same
-// thing twice under a second key.
-func applyClockUnmeasured(rc roundConditions, w progressWatch, ingestErr, deriveErr, clockErr error) {
-	reason := fmt.Sprintf("the daemon could not read the database clock, which is the one time authority this freshness verdict is measured against, so no age could be computed for this cursor. It does not fall back to its own wall clock: a wall clock stepped backwards reports every age shorter than it is, and this gate would report green: %v", clockErr)
-	if ingestErr == nil {
-		for _, ws := range w.walkers {
-			rc.set(ws.w.Name(), conditionStalenessUnmeasured, reason)
+// IT COVERS EVERY WATCHED WORKER, not just the freshness gate's, because the clock
+// is no longer one gate's input: cursor recency, sweep progress and header age are
+// all measured against it. A pass that cannot read it has judged nothing, and
+// publication REPLACES a touched worker's entries — so anything left unwritten here
+// would be a standing red silently deleted for the round, which is the false-green
+// pulse OQ1 was reversed to prevent.
+//
+// ONE CAUSE, ONE KEY. progress_unmeasured is the whole verdict, and no worker also
+// receives staleness_unmeasured for the same failure: that pairing is already how
+// this pass encodes "a durable read failed, so neither the stall nor the freshness
+// could be judged" (see the ingest-read failure above), and writing both would say
+// the same thing twice under two keys.
+func applyClockUnmeasured(rc roundConditions, w progressWatch, clockErr error) {
+	reason := fmt.Sprintf("the daemon could not read the database clock, which is the one time authority every verdict in this pass — cursor recency, sweep progress and header age alike — is measured against, so nothing about this worker could be judged this round. It does not fall back to its own wall clock: a wall clock stepped backwards reports every age shorter than it is, and these gates would report green: %v", clockErr)
+	named := make(map[string]bool, len(w.walkers)+len(w.runners)+len(w.consumers)+1)
+	name := func(n string) {
+		if !named[n] {
+			named[n] = true
+			rc.set(n, conditionProgressUnmeasured, reason)
 		}
 	}
-	if deriveErr == nil {
-		for _, c := range w.consumers {
-			rc.set(c.worker, conditionStalenessUnmeasured, reason)
-		}
+	for _, ws := range w.walkers {
+		name(ws.w.Name())
+	}
+	for _, rs := range w.runners {
+		name(rs.r.Name())
+	}
+	for _, c := range w.consumers {
+		name(c.worker)
+	}
+	if w.sweepEngine != "" {
+		name(snapshotName)
 	}
 }
 
@@ -1787,7 +2006,7 @@ func gapOrZero(a, b uint64) uint64 {
 // DURABLE SUCCESS RECORD instead (NeverSucceeded / StaleSuccess), which no
 // generation rollover and no status churn can move; only that account succeeding
 // clears it. The two are complementary and both are kept.
-func applySweepProgressCondition(ctx context.Context, pr progressReader, now time.Time, rc roundConditions, w progressWatch) {
+func applySweepProgressCondition(ctx context.Context, pr progressReader, clk passClock, rc roundConditions, w progressWatch) {
 	engine, maxAttempts := w.sweepEngine, w.sweepMaxAttempts
 	// The bound is the deployment's ACHIEVED cadence, one round stale (see
 	// collateralBoundState). A watch with no bound state configured cannot ask the
@@ -1812,6 +2031,15 @@ func applySweepProgressCondition(ctx context.Context, pr progressReader, now tim
 	if !found {
 		return
 	}
+	// THE INSTANT IS TAKEN AFTER THE READ THAT PRODUCED THE TIMESTAMPS, and against
+	// the database's authority rather than this process's wall clock. Both halves are
+	// Codex round 11's [medium]: every timestamp below (last batch, generation
+	// opened, last and oldest successful sweep) was written by Postgres, and this
+	// used to subtract them from a locally-read time.Now. The stall this suppresses
+	// when the local clock runs behind is the SILENT one — a snapshotter refusing
+	// every stale batch reports no error at all, and an open generation that has
+	// stopped landing batches is the only thing that catches it.
+	now := clk.now()
 	// Retain the achieved pass duration for the NEXT round's bound. Doing it here,
 	// from the value this call returned, is what makes the one-round lag explicit
 	// rather than a hidden coupling.
@@ -2148,13 +2376,16 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	watch := progressWatch{
 		walkers: walkers, runners: runners, consumers: consumers,
 		sweepEngine: sweepEngine, sweepMaxAttempts: snapshot.MaxSweepAttempts,
-		// THE JUDGE'S TWO CLOCKS, wired here so the split is visible at the one place
-		// it is decided (see stalenessJudge): time.Now is SCHEDULING only — its
-		// differences are Go's monotonic readings, which no clock step can move —
-		// and st.Now is the DATABASE clock, the sole authority any verdict is
-		// measured against.
-		staleness: newStalenessJudge(headerTime, time.Now, st.Now), collateral: collateral,
+		// SCHEDULING ONLY. time.Now's differences are Go's monotonic readings, which
+		// no clock step can move; the judge holds no verdict clock at all, so it
+		// cannot date anything against this (see stalenessJudge).
+		staleness: newStalenessJudge(headerTime, time.Now), collateral: collateral,
 	}
+	// THE PASS'S TIME AUTHORITY, wired at the one place the split is decided: st.Now
+	// is the DATABASE clock — the sole authority every verdict in the health pass is
+	// measured against — and time.Now carries one reading of it forward through the
+	// pass without ever being an authority itself (see timeAuthority and passClock).
+	authority := timeAuthority{verdict: st.Now, sched: time.Now}
 	if sweepEngine != "" {
 		slog.Info("collateral usability gate configured", "engine", sweepEngine,
 			"initialStaleBound", collateral.bound(), "snapshotInterval", cfg.SnapshotInterval,
@@ -2214,7 +2445,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			// its streams observed, whether an open sweep generation has stopped landing
 			// batches, and whether any collateral account's snapshot has failed out of
 			// its retry budget.
-			applyProgressConditions(ctx, st, time.Now(), rc, watch)
+			applyProgressConditions(ctx, st, authority, rc, watch)
 			rc.publish(health)
 
 			health.heartbeat()

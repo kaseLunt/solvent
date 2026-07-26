@@ -469,7 +469,7 @@ func TestQuietlyRefusedSweepFailsReadinessThroughARealStaleBatchRefusal(t *testi
 	// THE VERDICT, from the real store through the daemon's real pass.
 	collateral := &collateralBoundState{interval: time.Minute}
 	collateral.hydrate(ctx, s, liveEngine)
-	applyProgressConditions(ctx, s, time.Now(), rc, progressWatch{
+	applyProgressConditions(ctx, s, fixedClock(time.Now()), rc, progressWatch{
 		sweepEngine: liveEngine, sweepMaxAttempts: snapshot.MaxSweepAttempts, collateral: collateral,
 	})
 	h, _ := newTestHealth()
@@ -542,12 +542,16 @@ func TestTheFreshnessVerdictIsMeasuredAgainstTheREALDatabaseClock(t *testing.T) 
 	watch := progressWatch{
 		walkers: []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
 		// EXACTLY the daemon's wiring: time.Now schedules, the store's clock judges.
-		staleness: newStalenessJudge(hdr.fetch, time.Now, s.Now),
+		staleness: newStalenessJudge(hdr.fetch, time.Now),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: block, UpdatedAt: dbNow}}}
 
+	// EXACTLY the daemon's wiring: the store's clock is the pass's authority and
+	// time.Now only carries a reading of it forward. The rolled-back daemon clock has
+	// nowhere left to enter — that is the shape of the fix, not an omission from the
+	// test — so the counterfactual below supplies it explicitly instead.
 	rc := roundConditions{}
-	applyProgressConditions(ctx, pr, dbNow.Add(-10*time.Minute), rc, watch)
+	applyProgressConditions(ctx, pr, timeAuthority{verdict: s.Now, sched: time.Now}, rc, watch)
 	h, _ := newTestHealth()
 	publishRound(h, rc)
 
@@ -558,4 +562,21 @@ func TestTheFreshnessVerdictIsMeasuredAgainstTheREALDatabaseClock(t *testing.T) 
 		"and it is measured, not refused: the authority answered")
 	require.Contains(t, rep.Recoverable[name+"/"+conditionStaleness], "bound 10m0s")
 	require.False(t, rep.Ready)
+
+	// THE COUNTERFACTUAL against the REAL store, so the live test proves the same
+	// thing the fake-clock one does and not merely that Postgres answers: hand the
+	// pass the rolled-back daemon clock as its authority and the identical database
+	// state reads GREEN. This is the only place the wall clock can still be supplied,
+	// and it is a test harness doing it.
+	h2, _ := newTestHealth()
+	hdr2 := newFakeHeaderTimes().set(1, block, dbNow.Add(-headerAge))
+	watch2 := progressWatch{
+		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
+		staleness: newStalenessJudge(hdr2.fetch, time.Now),
+	}
+	rc2 := roundConditions{}
+	applyProgressConditions(ctx, pr, fixedClock(dbNow.Add(-10*time.Minute)), rc2, watch2)
+	publishRound(h2, rc2)
+	require.NotContains(t, h2.report().Recoverable, name+"/"+conditionStaleness,
+		"with a rolled-back wall clock as the authority the very same rows read GREEN — which is the defect, measured against the real database rather than described")
 }
