@@ -152,6 +152,204 @@ func TestPollerRoundPersistsHashAnchor(t *testing.T) {
 		st.anchors[PollCursorEngine(10)][0].PollAnchor)
 }
 
+// ---------------------------------------------------------------------------
+// Task 9 wave 1: the endpoint-coherent, block-pinned round.
+// ---------------------------------------------------------------------------
+
+// THE HEADLINE PROPERTY OF THE P0 FIX: the poller anchors WITHOUT consuming
+// the multicall's blockHash field. The fake's default multicall already
+// returns the real-EVM zero there (encodeMulticall); this test goes one step
+// further and feeds a NONZERO, WRONG hash through that field — the only value
+// a consumer could possibly be poisoned by — and the anchor still carries the
+// header path's hash. Between them: zero must not refuse the round (the live
+// failure), and nonzero must not be believed (the misanchor the recomposition
+// makes impossible).
+func TestPollerAnchorsWithoutConsumingMulticallHashField(t *testing.T) {
+	st := newFakePriceStore()
+	poisoned := common.HexToHash("0xdeadbeef")
+	ch := &fakePollChain{endpoints: 1, respond: func(int, common.Address, []byte) ([]byte, error) {
+		rets := make([]mcRet, 20)
+		for i := range rets {
+			rets[i] = mcRet{Success: true, ReturnData: encodeUint256(t, big.NewInt(1_000_000))}
+		}
+		return encodeMulticallWithHash(t, 5000, poisoned, rets), nil
+	}}
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	batch := st.lastBatch(t)
+	require.Equal(t, blockHashAt(5000).Bytes(), batch.anchor.BlockHash,
+		"the anchor is the endpoint's header hash at the pin — the multicall's hash field, zero or poisoned, has no consumer")
+	require.NotEqual(t, poisoned.Bytes(), batch.anchor.BlockHash)
+}
+
+// ENDPOINT COHERENCE, the positive arm: one endpoint serves every read of a
+// round — the head resolution, the pinned multicall and the closing header
+// re-read all carry the same token — and the multicall is PINNED at the head
+// that endpoint reported, never issued at "latest".
+func TestPollerRoundIsEndpointCoherentAndPinnedAtHead(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 3, active: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+
+	require.Equal(t, []int{1}, ch.headServed, "the shared hint's endpoint resolved the round")
+	require.Equal(t, []int{1}, ch.served, "the multicall was served by the round's own endpoint")
+	require.Equal(t, []int{1}, ch.hashServed, "and so was the closing header re-read: one token per round")
+	require.Equal(t, []uint64{5000}, ch.atBlocks,
+		"the multicall executed pinned at the resolved head, not at latest")
+	require.Equal(t, []uint64{5000}, ch.hashCalls, "the re-read asked about the pin")
+}
+
+// PIN DIVERGENCE DISCARDS: a multicall whose returned blockNumber differs from
+// the pinned head means the endpoint did not serve the requested state (a
+// load balancer mixing nodes behind one URL is the honest example). The round
+// is DISCARDED — the walker's tip-changed posture: a WARN with the evidence,
+// no error, nothing recorded — and the spent cadence slot means no retry
+// storm.
+func TestPollerDiscardsRoundWhenExecutionBlockDivergesFromPin(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 4999, 20, 1_000_000)} // executed BELOW the pin
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "a discarded round is not an error to back off on")
+	require.False(t, advanced)
+	require.Empty(t, st.applied, "nothing reached the store")
+	require.True(t, containsSubstring(*msgs, "execution block diverged from the pin"))
+
+	// The cadence slot was consumed by the attempt: no immediate retry.
+	calls := len(ch.calls)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Len(t, ch.calls, calls, "no RPC while the cadence slot is unspent")
+}
+
+// MID-ROUND REORG DISCARDS: the header hash at the pin changes between the
+// two reads that bracket the multicall, so the observations may describe a
+// block that no longer exists on that endpoint's chain. Same posture and same
+// log shape as the walker's tip-changed window discard.
+func TestPollerDiscardsRoundOnMidRoundReorg(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		// The chain reorgs at the pin WHILE the multicall is in flight: the
+		// closing re-read will see a different block at 5000.
+		ch.setHashOn(0, 5000, common.HexToHash("0xfeed"))
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "a mid-round reorg is the chain's business, not a poller fault")
+	require.False(t, advanced)
+	require.Empty(t, st.applied, "an anchor for a vanished block was never written")
+	require.True(t, containsSubstring(*msgs, "tip changed mid-round, discarding round"))
+}
+
+// COHERENCE BREACH ON THE MULTICALL DISCARDS: the failover client rotates on
+// transport errors, so the pinned multicall can come back answered by a
+// DIFFERENT endpoint than the one whose head the round pinned. That answer
+// belongs to another chain view; the round is discarded rather than anchored
+// to a hash nobody attested for it.
+func TestPollerDiscardsRoundWhenMulticallServedByAnotherEndpoint(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 0 {
+			return nil, errors.New("endpoint 0 dropped the call") // rotation serves it from 1
+		}
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.applied)
+	require.Equal(t, []int{0}, ch.headServed, "endpoint 0 resolved the round")
+	require.Equal(t, []int{0, 1}, ch.served, "the multicall rotated onto endpoint 1")
+	require.True(t, containsSubstring(*msgs, "served the pinned multicall from another endpoint"))
+}
+
+// COHERENCE BREACH ON THE CLOSING RE-READ DISCARDS: even with the multicall
+// served coherently, a re-read answered by another endpoint cannot confirm
+// the round's own chain view — two nodes agreeing on a hash is a different
+// (weaker, for this purpose) fact than one node bracketing its own answer.
+func TestPollerDiscardsRoundWhenClosingRecheckServedByAnotherEndpoint(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		// Endpoint 0 serves the multicall and then stops answering header
+		// reads at the pin: the closing re-read rotates onto endpoint 1.
+		ch.failProbeOn(0, 5000, errors.New("endpoint 0 lost header 5000"))
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, _ := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.False(t, advanced)
+	require.Empty(t, st.applied)
+	require.Equal(t, []int{0}, ch.served, "the multicall itself was coherent")
+	require.Equal(t, []int{1}, ch.hashServed, "the re-read was answered elsewhere — and that is exactly the discard")
+	require.True(t, containsSubstring(*msgs, "served the closing header re-read from another endpoint"))
+}
+
+// THE ZERO-HASH REFUSAL LIVES ON THE HEADER PATH NOW (moved from the multicall
+// decoder, where it refused every real-chain round): a header whose hash is
+// zero is a provider protocol violation, and an anchor holding it would
+// "verify" against nothing during reorg repair. Both bracketing reads are
+// guarded; both are ERRORS, not discards — the provider is broken, and the
+// operator should see it as a fault.
+func TestPollerRefusesZeroHeaderHash(t *testing.T) {
+	t.Run("before", func(t *testing.T) {
+		st := newFakePriceStore()
+		ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+		ch.setHashOn(0, 5000, common.Hash{}) // scripted BEFORE setHeadOn, which respects it
+		ch.setHeadOn(0, 5000)
+		p, _ := newTestPoller(t, st, ch, 10)
+
+		advanced, err := p.Step(context.Background())
+		require.ErrorContains(t, err, "header hash at 5000 is zero")
+		require.False(t, advanced)
+		require.Empty(t, st.applied)
+		require.Empty(t, ch.calls, "the round was refused before any multicall was issued")
+	})
+	t.Run("after", func(t *testing.T) {
+		st := newFakePriceStore()
+		ch := &fakePollChain{endpoints: 1}
+		ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+			// The endpoint degrades mid-round: the closing re-read gets zero.
+			ch.setHashOn(0, 5000, common.Hash{})
+			return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+		}
+		ch.setHead(5000)
+		p, _ := newTestPoller(t, st, ch, 10)
+
+		advanced, err := p.Step(context.Background())
+		require.ErrorContains(t, err, "header hash at 5000 is zero")
+		require.False(t, advanced)
+		require.Empty(t, st.applied)
+	})
+}
+
 // The ETH poller's only obligation is the weETH getRate() ratio — recorded as
 // its OWN row at 18 decimals, never composed with the stream price.
 func TestPollerETHRatioRow(t *testing.T) {
