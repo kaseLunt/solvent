@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
@@ -11,10 +10,7 @@ import (
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	require.NoError(t, Migrate(context.Background(), dsn))
 	s, err := Open(context.Background(), dsn)
 	require.NoError(t, err)
@@ -161,10 +157,7 @@ func TestHighestLogAtOrBelow(t *testing.T) {
 // Store (a separate pool — i.e. a separate would-be indexer process) must be
 // rejected; after the holder closes, a fresh Store can acquire.
 func TestAcquireWriterLockEnforcesSingleWriter(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 
 	s1, err := Open(ctx, dsn)
@@ -294,10 +287,7 @@ func TestSaveBatchCoalescesIdenticalDuplicateWithinBatch(t *testing.T) {
 }
 
 func TestSaveBatchTempTableReuseOnSingleConnection(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set")
-	}
+	dsn := destructiveTestDSN(t)
 	require.NoError(t, Migrate(context.Background(), dsn))
 	sep := "?"
 	if strings.Contains(dsn, "?") {

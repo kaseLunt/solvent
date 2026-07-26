@@ -11,7 +11,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -1053,10 +1052,7 @@ func planRowsRemoved(t *testing.T, plan string) int64 {
 // invisibly. So the upgrade records ignorance, and every consumer reads NULL as
 // unprovable.
 func TestMigrateAddsProvenanceBindingWithoutClaimingProvenanceForOldRows(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 	const schema = "solvent_migtest_v5_binding"
 

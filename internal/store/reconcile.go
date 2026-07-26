@@ -110,22 +110,99 @@ func SchemaVersion(ctx context.Context, q Querier) (int64, error) {
 	return v, nil
 }
 
-// DatabaseIdentity names the database a Querier's connection is attached to,
-// as database@host:port (inet_server_addr is NULL on unix sockets — "local").
-// The DSN-split tripwire (brief §1.2) compares the RECONCILE identity with
-// TEST_DATABASE_URL's: equality means the destructive test suite and the
-// live evidence database are the same database, which is the single worst
-// hazard this wave closes (L2-1 — the receipt's own command list would have
-// truncated the ~42h backfill).
-func DatabaseIdentity(ctx context.Context, q Querier) (string, error) {
-	var db, addr, port string
+// DBIdentity is the PHYSICAL identity of a database (round-10 F4): the
+// PostgreSQL cluster's system_identifier (pg_control — stable across every
+// alias and transport of one cluster) plus the database OID and name.
+// Equality on THIS tuple means "the same database" no matter how a DSN
+// spells the route to it: IPv4 vs IPv6, unix socket vs TCP, proxy alias.
+// The previous identity (database@inet_server_addr:port) forked on exactly
+// those respellings, so the tripwire could fail OPEN across aliases of the
+// live cluster — the round-10 F4 finding.
+type DBIdentity struct {
+	SystemIdentifier string // pg_control_system().system_identifier, as text
+	DatabaseOID      uint32 // pg_database.oid of current_database()
+	DatabaseName     string // current_database()
+}
+
+func (id DBIdentity) String() string {
+	return fmt.Sprintf("cluster %s database %q (oid %d)", id.SystemIdentifier, id.DatabaseName, id.DatabaseOID)
+}
+
+// SameDatabase is the tripwire's equality: the full (system_identifier,
+// database OID, database name) tuple.
+func SameDatabase(a, b DBIdentity) bool { return a == b }
+
+// DatabaseIdentity resolves the physical identity of the database a
+// Querier's connection is attached to. The DSN-split tripwire (brief §1.2)
+// and the shared destructive-test guard (round-10 F1) compare the RECONCILE
+// / live identity with TEST_DATABASE_URL's: equality means the destructive
+// test suite and the live evidence database are the same database, which is
+// the single worst hazard the wave-10 split closed (L2-1 — the receipt's own
+// command list would have truncated the ~42h backfill). Any failure to
+// resolve the tuple is an error — callers fail CLOSED, never open.
+func DatabaseIdentity(ctx context.Context, q Querier) (DBIdentity, error) {
+	var id DBIdentity
 	if err := q.QueryRow(ctx,
-		`SELECT current_database(),
-		        COALESCE(inet_server_addr()::text, 'local'),
-		        COALESCE(inet_server_port()::text, '0')`).Scan(&db, &addr, &port); err != nil {
-		return "", fmt.Errorf("read database identity: %w", err)
+		`SELECT (SELECT system_identifier::text FROM pg_control_system()),
+		        (SELECT oid FROM pg_database WHERE datname = current_database()),
+		        current_database()`).Scan(&id.SystemIdentifier, &id.DatabaseOID, &id.DatabaseName); err != nil {
+		return DBIdentity{}, fmt.Errorf("resolve database identity (failing CLOSED — an unresolvable identity can never vouch for a split): %w", err)
 	}
-	return db + "@" + addr + ":" + port, nil
+	if id.SystemIdentifier == "" || id.DatabaseOID == 0 || id.DatabaseName == "" {
+		return DBIdentity{}, fmt.Errorf("database identity incomplete (%s) — failing CLOSED", id)
+	}
+	return id, nil
+}
+
+// SplitRunbookMsg is the destructive-boundary refusal message, verbatim from
+// the wave-10 brief §1.2 (runbook §DB-split).
+const SplitRunbookMsg = "test and live DSNs identical; physical split required (see runbook §DB-split)"
+
+// ResolveDSNIdentity connects to dsn with a read-only session and resolves
+// its physical identity. Every failure path is an error so callers fail
+// CLOSED: a DSN whose identity cannot be established must never be treated
+// as "probably fine to truncate".
+func ResolveDSNIdentity(ctx context.Context, dsn string) (DBIdentity, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return DBIdentity{}, fmt.Errorf("parse DSN: %w", err)
+	}
+	// Defense in depth: the identity probe itself can never write.
+	cfg.RuntimeParams["default_transaction_read_only"] = "on"
+	conn, err := pgx.ConnectConfig(ctx, cfg)
+	if err != nil {
+		return DBIdentity{}, fmt.Errorf("connect: %w", err)
+	}
+	defer conn.Close(ctx)
+	return DatabaseIdentity(ctx, conn)
+}
+
+// VerifyDestructiveSplit is the shared destructive-test boundary decision
+// (round-10 F1): resolve BOTH the test and the live database identities via
+// the F4 tuple mechanism and refuse — fail CLOSED — on equality OR on any
+// identity being unresolvable (empty DSN, unparseable DSN, unreachable
+// server). Every destructive test helper (the Migrate+TRUNCATE paths) calls
+// this through internal/store's shared guard BEFORE touching anything; the
+// safe path is the only path.
+func VerifyDestructiveSplit(ctx context.Context, testDSN, liveDSN string) error {
+	if strings.TrimSpace(testDSN) == "" {
+		return fmt.Errorf("destructive-split guard: test DSN is empty — identity unresolvable, failing CLOSED; %s", SplitRunbookMsg)
+	}
+	if strings.TrimSpace(liveDSN) == "" {
+		return fmt.Errorf("destructive-split guard: live DSN is empty (export .env / SOLVENT_DATABASE_URL) — identity unresolvable, failing CLOSED; %s", SplitRunbookMsg)
+	}
+	testID, err := ResolveDSNIdentity(ctx, testDSN)
+	if err != nil {
+		return fmt.Errorf("destructive-split guard: test DSN identity unresolvable (%v) — failing CLOSED; %s", err, SplitRunbookMsg)
+	}
+	liveID, err := ResolveDSNIdentity(ctx, liveDSN)
+	if err != nil {
+		return fmt.Errorf("destructive-split guard: live DSN identity unresolvable (%v) — failing CLOSED; %s", err, SplitRunbookMsg)
+	}
+	if SameDatabase(testID, liveID) {
+		return fmt.Errorf("destructive-split guard: %s (both DSNs resolve to %s)", SplitRunbookMsg, testID)
+	}
+	return nil
 }
 
 // DeriveCursorState is one derive_cursors row: the pin source (last_block)
@@ -302,12 +379,16 @@ type DMBorrowerRow struct {
 	FullyLiquidated bool
 }
 
-// sampleDMBorrowersSQL is the brief §2 sampling query verbatim (schema-bound:
+// sampleDMBorrowersSQL is the brief §2 classification query (schema-bound:
 // engine/side/event_type literals match internal/derive's constants). The
-// ORDER BY is the determinism contract: stratum (bytewise: liquidated <
-// migrated < post_migration), live-first, then md5(seed || account) — a pure
-// function of (DB-at-P, seed), so a re-run with the same pin and seed selects
-// the identical sample.
+// ORDER BY is a SEED-FREE retrieval contract — stratum (bytewise: liquidated
+// < migrated < post_migration), live-first, then account — a pure function
+// of DB-at-P alone. The md5(seed||account) ordering moved to cmd/reconcile's
+// orderPopulation (round-10 F5): the default seed is the OP pin hash, an RPC
+// fact, and NO network call may run while the repeatable-read snapshot is
+// open, so the snapshot returns the classified population and the seed
+// ordering happens in Go after commit — same composite semantics, same
+// reproducibility (same pin + same seed ⇒ identical sample).
 const sampleDMBorrowersSQL = `
 WITH debt AS (
   SELECT account,
@@ -327,15 +408,15 @@ SELECT encode(account,'hex') AS account,
        (net <> 0) AS live, net, residue,
        (liquidated AND net = 0) AS fully_liquidated
 FROM debt
-ORDER BY stratum, (net <> 0) DESC, md5($2::text || encode(account,'hex'))`
+ORDER BY stratum, (net <> 0) DESC, account`
 
-// SampleDMBorrowers runs the stratified sampling query at pin maxBlock with
-// the given seed text, returning EVERY borrower in the deterministic order
-// the Go-side quota selection consumes (selection itself is cmd/reconcile's
-// pure function; this returns the classified population so strata counts land
-// in the artifact's counts section too).
-func SampleDMBorrowers(ctx context.Context, q Querier, maxBlock uint64, seed string) ([]DMBorrowerRow, error) {
-	rows, err := q.Query(ctx, sampleDMBorrowersSQL, maxBlock, seed)
+// SampleDMBorrowers runs the stratified classification query at pin
+// maxBlock, returning EVERY borrower in a deterministic seed-free order
+// (the Go-side orderPopulation + quota selection in cmd/reconcile consume
+// it; this returns the classified population so strata counts land in the
+// artifact's counts section too).
+func SampleDMBorrowers(ctx context.Context, q Querier, maxBlock uint64) ([]DMBorrowerRow, error) {
+	rows, err := q.Query(ctx, sampleDMBorrowersSQL, maxBlock)
 	if err != nil {
 		return nil, fmt.Errorf("query dm borrower sample: %w", err)
 	}
@@ -791,77 +872,115 @@ type BalanceRow struct {
 	UpdatedBlock uint64
 }
 
-// ReconBalancesFor reads every position_balances row for (engine, account)
-// with source and updated_block, and enforces the SAME source-exclusivity
-// invariant as Store.BalancesFor: any (asset, side) present under BOTH
-// sources is ErrBalanceSourceConflict (brief §7's source-exclusivity probe),
-// through the Querier so the probe observes the snapshot, not a later state.
-func ReconBalancesFor(ctx context.Context, q Querier, engine string, account []byte) ([]BalanceRow, error) {
+// ReconBalancesForAccounts reads every position_balances row for (engine,
+// each account) with source and updated_block IN ONE snapshot-scoped query
+// (round-10 F5: the per-sample balance reads must all happen inside the
+// snapshot, and the sample is only known after commit — so the whole
+// candidate population is read here and filtered in Go). It enforces the
+// SAME source-exclusivity invariant as Store.BalancesFor per account: any
+// (asset, side) present under BOTH sources marks that account conflicted
+// (brief §7's source-exclusivity probe) — its message is returned under the
+// account's hex key and its rows are withheld, exactly the per-account
+// semantics the old single-account reader had.
+func ReconBalancesForAccounts(ctx context.Context, q Querier, engine string, accounts [][]byte) (map[string][]BalanceRow, map[string]string, error) {
 	rows, err := q.Query(ctx,
-		`SELECT asset, side, source, amount, updated_block
-		 FROM position_balances WHERE engine = $1 AND account = $2
-		 ORDER BY asset, side, source`, engine, account)
+		`SELECT account, asset, side, source, amount, updated_block
+		 FROM position_balances WHERE engine = $1 AND account = ANY($2::bytea[])
+		 ORDER BY account, asset, side, source`, engine, accounts)
 	if err != nil {
-		return nil, fmt.Errorf("query balances for %q/%x: %w", engine, account, err)
+		return nil, nil, fmt.Errorf("query balances for %q: %w", engine, err)
 	}
 	defer rows.Close()
-	var out []BalanceRow
-	seen := map[string]string{}
+	out := map[string][]BalanceRow{}
+	conflicts := map[string]string{}
+	seen := map[string]string{} // acct/asset/side → source
 	for rows.Next() {
-		var asset []byte
+		var account, asset []byte
 		var r BalanceRow
 		var amount pgtype.Numeric
-		if err := rows.Scan(&asset, &r.Side, &r.Source, &amount, &r.UpdatedBlock); err != nil {
-			return nil, fmt.Errorf("scan balance row: %w", err)
+		if err := rows.Scan(&account, &asset, &r.Side, &r.Source, &amount, &r.UpdatedBlock); err != nil {
+			return nil, nil, fmt.Errorf("scan balance row: %w", err)
 		}
 		v, err := NumericToBigInt(amount)
 		if err != nil {
-			return nil, fmt.Errorf("balance for %x/%s: %w", asset, r.Side, err)
+			return nil, nil, fmt.Errorf("balance for %x/%s: %w", asset, r.Side, err)
 		}
 		r.Amount = v
 		r.AssetHex = hex.EncodeToString(asset)
-		key := r.AssetHex + "/" + r.Side
+		acct := hex.EncodeToString(account)
+		key := acct + "/" + r.AssetHex + "/" + r.Side
 		if prev, dup := seen[key]; dup && prev != r.Source {
-			return nil, fmt.Errorf("%w: engine %q account %x asset %s side %q has both event- and snapshot-sourced rows",
-				ErrBalanceSourceConflict, engine, account, r.AssetHex, r.Side)
+			if _, done := conflicts[acct]; !done {
+				conflicts[acct] = fmt.Sprintf("%v: engine %q account %x asset %s side %q has both event- and snapshot-sourced rows",
+					ErrBalanceSourceConflict, engine, account, r.AssetHex, r.Side)
+			}
+			continue
 		}
 		seen[key] = r.Source
-		out = append(out, r)
+		out[acct] = append(out[acct], r)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate balance rows: %w", err)
+		return nil, nil, fmt.Errorf("iterate balance rows: %w", err)
 	}
-	return out, nil
+	for acct := range conflicts {
+		delete(out, acct) // a conflicted account reports the conflict, never rows
+	}
+	return out, conflicts, nil
 }
 
-// CollateralHistoryDoc reads the snapshots history row for (engine, account)
-// at EXACTLY block (side='collateral') — the deep collateral replay's
-// stable, race-free comparison target (brief §7 / derive.go's ApplySweepBatch
-// writes it atomically with the balances at the multicall execution block).
-// Returns the asset→amount map from the document, or found=false.
-func CollateralHistoryDoc(ctx context.Context, q Querier, engine string, account []byte, block uint64) (map[string]string, bool, error) {
-	var doc map[string]any
-	err := q.QueryRow(ctx,
-		`SELECT balances FROM snapshots
-		 WHERE engine = $1 AND account = $2 AND block_number = $3 AND side = 'collateral'`,
-		engine, account, block).Scan(&doc)
-	if err == pgx.ErrNoRows {
-		return nil, false, nil
-	}
+// CollateralHistoryAt is one account's snapshots history document at exactly
+// its sweep's last_success_block — the deep collateral replay's stable,
+// race-free comparison target (brief §7 / derive.go's ApplySweepBatch writes
+// it atomically with the balances at the multicall execution block).
+type CollateralHistoryAt struct {
+	Block uint64
+	Doc   map[string]string
+}
+
+// CollateralHistoryDocsAtLastSuccess reads, for EVERY engine account with a
+// successful sweep, the snapshots history document at exactly
+// last_success_block (side='collateral'), keyed by lowercase hex account.
+// One snapshot-scoped query (round-10 F5): replay targets are chosen from
+// the SAMPLE, which exists only after the snapshot commits, so the candidate
+// documents are all read here and the post-commit selection picks from the
+// map. Accounts whose document is absent are simply not in the map — the
+// same skip semantics the old per-account read had.
+func CollateralHistoryDocsAtLastSuccess(ctx context.Context, q Querier, engine string) (map[string]CollateralHistoryAt, error) {
+	rows, err := q.Query(ctx,
+		`SELECT s.account, s.last_success_block, sn.balances
+		 FROM snapshot_sweeps s
+		 JOIN snapshots sn ON sn.engine = s.engine AND sn.account = s.account
+		      AND sn.block_number = s.last_success_block AND sn.side = 'collateral'
+		 WHERE s.engine = $1 AND s.status = 'success' AND s.last_success_block > 0
+		 ORDER BY s.account`, engine)
 	if err != nil {
-		return nil, false, fmt.Errorf("read collateral history for %x at %d: %w", account, block, err)
+		return nil, fmt.Errorf("query collateral history docs for %q: %w", engine, err)
 	}
-	out := map[string]string{}
-	if inner, ok := doc["balances"].(map[string]any); ok {
-		for k, v := range inner {
-			s, ok := v.(string)
-			if !ok {
-				return nil, false, fmt.Errorf("collateral history for %x at %d: balance %q is %T, not a string", account, block, k, v)
-			}
-			out[k] = s
+	defer rows.Close()
+	out := map[string]CollateralHistoryAt{}
+	for rows.Next() {
+		var account []byte
+		var block uint64
+		var doc map[string]any
+		if err := rows.Scan(&account, &block, &doc); err != nil {
+			return nil, fmt.Errorf("scan collateral history row: %w", err)
 		}
+		h := CollateralHistoryAt{Block: block, Doc: map[string]string{}}
+		if inner, ok := doc["balances"].(map[string]any); ok {
+			for k, v := range inner {
+				s, ok := v.(string)
+				if !ok {
+					return nil, fmt.Errorf("collateral history for %x at %d: balance %q is %T, not a string", account, block, k, v)
+				}
+				h.Doc[k] = s
+			}
+		}
+		out[hex.EncodeToString(account)] = h
 	}
-	return out, true, nil
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate collateral history rows: %w", err)
+	}
+	return out, nil
 }
 
 // LatestRateIndexAt is the Querier-taking twin of Store.LatestRateIndex:

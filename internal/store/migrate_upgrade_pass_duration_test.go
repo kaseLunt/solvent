@@ -27,7 +27,6 @@ package store
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -35,10 +34,7 @@ import (
 )
 
 func TestMigrateUpgradesV7GenerationBaselineRecoveringOnlyWhatSurvived(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 	const schema = "solvent_migtest_v7_passdur"
 	const closedEngine, openEngine = "debt_manager", "aave"

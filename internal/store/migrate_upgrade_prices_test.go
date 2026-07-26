@@ -28,17 +28,13 @@ package store
 import (
 	"bytes"
 	"context"
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
 func TestMigrateUpgradesV4PriceBaselineWithoutDataLoss(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 	const schema = "solvent_migtest_v4_prices"
 	const (

@@ -70,6 +70,12 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 	}
 
 	// ---- Token universe + Round 2: getCurrentIndex + borrowTokenConfig ----
+	// weldTokens is the AUTHORITATIVE weld universe (round-10 F3): the
+	// EXPLICIT union getBorrowTokens(@pin) ∪ derived assets. Per-account
+	// response tokens join `universe` (index reads) but not the weld
+	// universe — the weld's census is the contract's own configured list
+	// plus everything the DB derived, independent of what happened to be
+	// readable this run.
 	universe := map[common.Address]bool{}
 	weldTokens := map[common.Address]bool{}
 	for _, t := range borrowTokens {
@@ -121,22 +127,16 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 		}
 		indexes[t] = v
 	}
-	chainTotals := map[common.Address]*big.Int{}
-	for i, t := range weldList {
-		res := round2[len(universeList)+i]
-		if !res.Success {
-			continue
-		}
-		cfg, err := unpackBorrowTokenConfig(res.ReturnData)
-		if err != nil {
-			return err
-		}
-		chainTotals[t] = cfg.TotalNormalizedBorrowingAmount
-	}
+	// Read-presence facts for EVERY weld-universe token (round-10 F3): an
+	// unsuccessful or undecodable borrowTokenConfig read is an OK=false
+	// fact, never a skipped entry — so weldDMAggregate turns it into a
+	// GATED weld-unread row instead of letting the token vanish.
+	chainReads := buildDMWeldReads(weldList, round2, len(universeList))
 
-	// ---- F1 aggregate weld (BLOCKING amendment): ALL accounts ------------
+	// ---- F1 aggregate weld (BLOCKING amendment): ALL accounts, over the
+	// AUTHORITATIVE universe getBorrowTokens(@pin) ∪ derived (weldList) ----
 	weldInputs := computeDMWeldInputs(p1)
-	rep.DMWeld = weldDMAggregate(weldInputs, chainTotals)
+	rep.DMWeld = weldDMAggregate(weldInputs, weldList, chainReads)
 	for _, w := range rep.DMWeld {
 		if w.Verdict != verdictExact {
 			*gatedFailures++
@@ -441,30 +441,122 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 		}
 	}
 
-	// ---- Resolve variable debt tokens at the head pin ----------------------
-	debtTokenByReserve := map[common.Address]common.Address{}
+	// ---- Authoritative reserve universe (round-10 F3) ---------------------
+	// The weld universe is the Pool's OWN getReservesList(@pin) ∪ derived
+	// assets (∪ the fixture reserves, a subset on a healthy config): a
+	// reserve the DB never derived still gets a weld row, and an unreadable
+	// leg surfaces as a weld-unread row instead of vanishing.
+	rlData, err := poolReservesListABI.Pack("getReservesList")
+	if err != nil {
+		return err
+	}
+	rlRet, _, err := r.callAtHash(ctx, "aave:getReservesList", aavePool, rlData, pinHash)
+	if err != nil {
+		return aavePhaseErr(err)
+	}
+	reservesList, err := unpackAddressList(poolReservesListABI, "getReservesList", rlRet)
+	if err != nil {
+		return err
+	}
+	universeDebtSet := map[common.Address]bool{}
+	universeCollSet := map[common.Address]bool{}
+	for _, reserve := range reservesList {
+		universeDebtSet[reserve] = true
+		universeCollSet[reserve] = true
+	}
+	for _, s := range p1.aaveDebtNet {
+		universeDebtSet[common.BytesToAddress(s.Asset)] = true
+	}
+	for _, s := range p1.aaveCollNet {
+		universeCollSet[common.BytesToAddress(s.Asset)] = true
+	}
+	var fixtureDebtReserves []common.Address
 	aTokenByReserve := map[common.Address]common.Address{}
 	for _, res := range vec.Reserves {
 		underlying := common.HexToAddress(res.Underlying)
 		if at, ok := atokens[hexLower(res.Underlying)]; ok {
 			aTokenByReserve[underlying] = at
+			universeCollSet[underlying] = true
 		}
-		if res.Role != "debt" {
-			continue
+		if res.Role == "debt" {
+			fixtureDebtReserves = append(fixtureDebtReserves, underlying)
+			universeDebtSet[underlying] = true
 		}
-		data, err := poolReserveDebtTokenABI.Pack("getReserveVariableDebtToken", underlying)
+	}
+	universeDebt := sortedAddrs(universeDebtSet)
+	universeColl := sortedAddrs(universeCollSet)
+
+	// ---- Resolve debt tokens / aTokens at the pin -------------------------
+	// Resolution runs IN-BAND (multicall Success flags) so read-presence is
+	// a per-reserve fact: a reverting or undecodable resolution becomes a
+	// weld-unread row — except a FIXTURE debt reserve, whose golden legs
+	// cannot run without it (loud abort, exit 3, as before).
+	type resolveTag struct {
+		kind    string // "debt" | "coll"
+		reserve common.Address
+	}
+	var resolveCalls []multicallCall
+	var resolveTags []resolveTag
+	for _, reserve := range universeDebt {
+		data, err := poolReserveDebtTokenABI.Pack("getReserveVariableDebtToken", reserve)
 		if err != nil {
 			return err
 		}
-		ret, _, err := r.callAtHash(ctx, "aave:resolveDebtToken("+res.Symbol+")", aavePool, data, pinHash)
+		resolveCalls = append(resolveCalls, multicallCall{Target: aavePool, CallData: data})
+		resolveTags = append(resolveTags, resolveTag{kind: "debt", reserve: reserve})
+	}
+	for _, reserve := range universeColl {
+		if _, ok := aTokenByReserve[reserve]; ok {
+			continue // already resolved from the config streams (fixtures)
+		}
+		data, err := poolReserveATokenABI.Pack("getReserveAToken", reserve)
+		if err != nil {
+			return err
+		}
+		resolveCalls = append(resolveCalls, multicallCall{Target: aavePool, CallData: data})
+		resolveTags = append(resolveTags, resolveTag{kind: "coll", reserve: reserve})
+	}
+	debtTokenByReserve := map[common.Address]common.Address{}
+	unresolvedDebt := map[common.Address]string{}
+	unresolvedColl := map[common.Address]string{}
+	if len(resolveCalls) > 0 {
+		resolveResults, _, err := r.multicall(ctx, "aave:resolveTokens", pinETH, pinHash, resolveCalls)
 		if err != nil {
 			return aavePhaseErr(err)
 		}
-		dt, err := unpackAddress(poolReserveDebtTokenABI, "getReserveVariableDebtToken", ret)
-		if err != nil {
-			return err
+		for i, tag := range resolveTags {
+			method, lens := "getReserveVariableDebtToken", poolReserveDebtTokenABI
+			if tag.kind == "coll" {
+				method, lens = "getReserveAToken", poolReserveATokenABI
+			}
+			note := ""
+			var token common.Address
+			if !resolveResults[i].Success {
+				note = method + " unsuccessful (reverted) at the pin"
+			} else if dt, uerr := unpackAddress(lens, method, resolveResults[i].ReturnData); uerr != nil {
+				note = method + " undecodable at the pin (ABI skew): " + uerr.Error()
+			} else if dt == (common.Address{}) {
+				note = method + " resolved to the zero address at the pin"
+			} else {
+				token = dt
+			}
+			switch {
+			case note != "" && tag.kind == "debt":
+				unresolvedDebt[tag.reserve] = note
+			case note != "":
+				unresolvedColl[tag.reserve] = note
+			case tag.kind == "debt":
+				debtTokenByReserve[tag.reserve] = token
+			default:
+				aTokenByReserve[tag.reserve] = token
+			}
 		}
-		debtTokenByReserve[underlying] = dt
+	}
+	for _, reserve := range fixtureDebtReserves {
+		if _, ok := debtTokenByReserve[reserve]; !ok {
+			return abort(exitRetryable, "aborted: rpc",
+				"fixture debt reserve %s unresolved at the pin (%s) — the golden legs cannot run", reserve.Hex(), unresolvedDebt[reserve])
+		}
 	}
 
 	// ---- One multicall round: golden-at-head + top-10 + welds -------------
@@ -501,7 +593,10 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 			addCall(callTag{kind: "scaled", account: acct, reserve: collReserve, token: at, side: "collateral", gated: true}, at, packScaled(user))
 		}
 	}
-	for reserve := range debtTokenByReserve {
+	for _, reserve := range fixtureDebtReserves {
+		// normalized debt feeds the golden borrowers' §3.4(b) live-value
+		// identity only, so the fixture debt reserves (all resolved —
+		// asserted above) are exactly its scope.
 		nd, _ := poolNormalizedDebtABI.Pack("getReserveNormalizedVariableDebt", reserve)
 		addCall(callTag{kind: "normalized", reserve: reserve}, aavePool, nd)
 	}
@@ -531,11 +626,23 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 	scaledResults := map[string]*big.Int{} // account/reserveHex/side
 	balanceOfResults := map[string]*big.Int{}
 	normalized := map[common.Address]*big.Int{}
-	weldDebtChain := map[common.Address]*big.Int{}
-	weldCollChain := map[common.Address]*big.Int{}
+	// Weld legs carry READ-PRESENCE facts (round-10 F3): an unsuccessful or
+	// undecodable scaledTotalSupply becomes an OK=false fact feeding a gated
+	// weld-unread row — never an abort-hidden or silently absent leg. The
+	// per-account legs (scaled/balanceOf/normalized) keep the loud abort.
+	weldDebtReads := map[common.Address]chainRead{}
+	weldCollReads := map[common.Address]chainRead{}
 	suppTags := []callTag{}
 	for i, tag := range tags {
 		if !results[i].Success {
+			switch tag.kind {
+			case "weldDebt":
+				weldDebtReads[tag.reserve] = chainRead{Note: "scaledTotalSupply unsuccessful (reverted) at the pin"}
+				continue
+			case "weldColl":
+				weldCollReads[tag.reserve] = chainRead{Note: "scaledTotalSupply unsuccessful (reverted) at the pin"}
+				continue
+			}
 			return abort(exitRetryable, "aborted: rpc", "aave head call %d (%s) reverted at the pin", i, tag.kind)
 		}
 		switch tag.kind {
@@ -563,16 +670,26 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 		case "weldDebt":
 			v, err := unpackUint256(aaveScaledTotalSupplyABI, "scaledTotalSupply", results[i].ReturnData)
 			if err != nil {
-				return err
+				weldDebtReads[tag.reserve] = chainRead{Note: "scaledTotalSupply undecodable at the pin (ABI skew): " + err.Error()}
+				continue
 			}
-			weldDebtChain[tag.reserve] = v
+			weldDebtReads[tag.reserve] = chainRead{Total: v, OK: true}
 		case "weldColl":
 			v, err := unpackUint256(aaveScaledTotalSupplyABI, "scaledTotalSupply", results[i].ReturnData)
 			if err != nil {
-				return err
+				weldCollReads[tag.reserve] = chainRead{Note: "scaledTotalSupply undecodable at the pin (ABI skew): " + err.Error()}
+				continue
 			}
-			weldCollChain[tag.reserve] = v
+			weldCollReads[tag.reserve] = chainRead{Total: v, OK: true}
 		}
+	}
+	// Unresolved universe reserves are unread weld legs too — resolution
+	// failure and read failure are the same first-class fact.
+	for reserve, note := range unresolvedDebt {
+		weldDebtReads[reserve] = chainRead{Note: note}
+	}
+	for reserve, note := range unresolvedColl {
+		weldCollReads[reserve] = chainRead{Note: note}
 	}
 
 	headAsOf := goldenAsOfMap(p1.aaveAsOfHead)
@@ -644,10 +761,10 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 		rep.AaveRows = append(rep.AaveRows, row)
 	}
 
-	// ---- F1 Aave welds ------------------------------------------------------
+	// ---- F1 Aave welds over the AUTHORITATIVE universe (round-10 F3) -------
 	rep.AaveWeld = append(
-		weldAaveAggregate("debt", true, derivedScaledByReserve(p1.aaveDebtNet), weldDebtChain, debtTokenByReserve),
-		weldAaveAggregate("collateral", false, derivedScaledByReserve(p1.aaveCollNet), weldCollChain, aTokenByReserve)...)
+		weldAaveAggregate("debt", true, derivedScaledByReserve(p1.aaveDebtNet), weldDebtReads, debtTokenByReserve, universeDebt),
+		weldAaveAggregate("collateral", false, derivedScaledByReserve(p1.aaveCollNet), weldCollReads, aTokenByReserve, universeColl)...)
 	for _, w := range rep.AaveWeld {
 		if w.Gated && w.Verdict != verdictExact {
 			*gatedFailures++

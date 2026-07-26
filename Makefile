@@ -4,7 +4,7 @@
 -include .env
 export
 
-.PHONY: db-up db-down test fmt vet run-indexer reconcile
+.PHONY: db-up db-down test test-acceptance fmt vet run-indexer reconcile
 
 # db-up brings up Postgres AND provisions the physical DB split (Task 9
 # wave 10): db-init idempotently creates solvent_test, the destructive test
@@ -15,8 +15,31 @@ db-up:
 db-down:
 	docker compose down
 
+# test is DEV MODE: DB-gated tests SKIP when TEST_DATABASE_URL is unset.
+# Every destructive helper still runs the shared split guard first (round-10
+# F1): TEST_DATABASE_URL must resolve to a physically different database
+# than SOLVENT_DATABASE_URL (pg_control system_identifier + database OID +
+# name — alias spellings cannot fool it), or the suite fails closed before
+# any Migrate/TRUNCATE. Dev-mode results are NEVER acceptance evidence.
 test:
 	go test ./...
+
+# test-acceptance is ACCEPTANCE MODE — the only mode whose suite-green output
+# may back a W1 receipt (round-10 F1). SOLVENT_ACCEPTANCE=1 makes an unset
+# TEST_DATABASE_URL FATAL in every destructive helper (never a skip), and the
+# target counts `--- SKIP` lines across the whole verbose stream and fails on
+# ANY skip: a skipped live-db suite can never produce suite-green evidence.
+# Full posture also wants SOLVENT_LIVE_RPC_TESTS=1 and
+# SOLVENT_RECON_DATABASE_URL (read-only, live) exported so nothing else skips.
+test-acceptance:
+	@log="$${TMPDIR:-/tmp}/solvent-test-acceptance.log"; \
+	SOLVENT_ACCEPTANCE=1 go test ./... -count=1 -v > "$$log" 2>&1; st=$$?; \
+	skips=$$(grep -c -- '--- SKIP' "$$log" || true); \
+	grep -E '^(ok|FAIL)' "$$log"; \
+	echo "acceptance mode: exit=$$st skips=$$skips (log: $$log)"; \
+	if [ "$$st" -ne 0 ]; then echo "FAIL: go test exit $$st"; exit "$$st"; fi; \
+	if [ "$$skips" -gt 0 ]; then echo "FAIL: acceptance mode rejects skips (>0 skipped tests)"; grep -- '--- SKIP' "$$log"; exit 1; fi; \
+	echo "acceptance suite green: zero skips"
 
 fmt:
 	gofmt -l .

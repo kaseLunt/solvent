@@ -5,6 +5,8 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"os"
@@ -154,11 +156,110 @@ func TestFileSampleBypassesSampling(t *testing.T) {
 	path := filepath.Join(dir, "accounts.txt")
 	content := "# replay list\n0x" + rows[0].AccountHex + "\n" + rows[4].AccountHex + "\n\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
-	sel, err := fileSample(path, rows)
+	accounts, err := readAccountsFile(path)
 	require.NoError(t, err)
+	require.Len(t, accounts, 2)
+	sel := fileSample(accounts, rows, path)
 	require.Len(t, sel.Accounts, 2)
 	require.Equal(t, "file", sel.Accounts[0].Source)
 	require.Contains(t, sel.Notes[0], "BYPASSED")
+
+	empty := filepath.Join(dir, "empty.txt")
+	require.NoError(t, os.WriteFile(empty, []byte("# nothing\n"), 0o644))
+	_, err = readAccountsFile(empty)
+	require.Error(t, err, "an empty replay file is refused up front")
+}
+
+// TestOrderPopulationSeedOrderingSemantics pins the Go-side seed ordering
+// (round-10 F5 — the ordering moved out of the SQL so the snapshot never
+// needs an RPC-derived seed). The semantics are EXACTLY the previous
+// ORDER BY: stratum ascending, live before zero-net, then ascending
+// lowercase-hex md5(seed || accountHex) — verified against an explicitly
+// computed digest — and the result is a pure function of (rows, seed):
+// same seed reproduces, a different seed permutes within groups, and the
+// input order never matters.
+func TestOrderPopulationSeedOrderingSemantics(t *testing.T) {
+	rows := population(3, 3, 2, 2, 2, 2)
+	seedA, seedB := "0x77aa", "0x77ab"
+
+	ordered := orderPopulation(rows, seedA)
+	require.Len(t, ordered, len(rows))
+
+	// Stratum-major, live-first inside each stratum.
+	var groups []string
+	for _, r := range ordered {
+		groups = append(groups, fmt.Sprintf("%s/%v", r.Stratum, r.Live))
+	}
+	require.Equal(t, []string{
+		"liquidated/true", "liquidated/true", "liquidated/true",
+		"liquidated/false", "liquidated/false", "liquidated/false",
+		"migrated/true", "migrated/true", "migrated/false", "migrated/false",
+		"post_migration/true", "post_migration/true", "post_migration/false", "post_migration/false",
+	}, groups)
+
+	// The tie-break is the md5 hex digest, ascending — computed explicitly.
+	md5hex := func(seed, acct string) string {
+		sum := md5.Sum([]byte(seed + acct))
+		return hex.EncodeToString(sum[:])
+	}
+	for i := 1; i < len(ordered); i++ {
+		a, b := ordered[i-1], ordered[i]
+		if a.Stratum == b.Stratum && a.Live == b.Live {
+			require.Less(t, md5hex(seedA, a.AccountHex), md5hex(seedA, b.AccountHex),
+				"within a (stratum, live) group the order IS the md5(seed||account) hex order")
+		}
+	}
+
+	// Determinism + input-order independence.
+	shuffled := make([]store.DMBorrowerRow, len(rows))
+	copy(shuffled, rows)
+	for i, j := range []int{5, 2, 9, 0, 13, 7, 1, 11, 3, 8, 12, 4, 10, 6} {
+		shuffled[i] = rows[j]
+	}
+	require.Equal(t, ordered, orderPopulation(shuffled, seedA),
+		"the ordering is a pure function of (set, seed) — retrieval order can never leak into the sample")
+	require.Equal(t, ordered, orderPopulation(rows, seedA))
+
+	// A different seed permutes within groups (the whole point of seeding).
+	orderedB := orderPopulation(rows, seedB)
+	require.NotEqual(t, ordered, orderedB, "a different seed must produce a different within-group order for this population")
+}
+
+// TestValidateReplaySelection pins the round-10 F2 replay validation: a
+// -accounts file that misses the required size, a stratum's (population-
+// bounded) quota, or a forced anchor produces TAINT strings; a replay
+// meeting all three produces none; and an underpopulated stratum degrades
+// the requirement exactly like sampling's take-all rule.
+func TestValidateReplaySelection(t *testing.T) {
+	rows := population(9, 3, 8, 2, 8, 2) // 32 accounts: quotas 9/8/8 fully satisfiable
+	anchors := []string{rows[0].AccountHex, rows[12].AccountHex}
+
+	full := fileSample(accountHexes(rows), rows, "replay.txt")
+	require.Empty(t, validateReplaySelection(full, rows, 25, anchors),
+		"a replay covering quotas and anchors is VALID — that is what makes -accounts usable for acceptance at all")
+
+	// Missing anchor + too small + a stratum below quota.
+	tiny := fileSample([]string{rows[0].AccountHex, rows[1].AccountHex}, rows, "replay.txt")
+	v := validateReplaySelection(tiny, rows, 25, anchors)
+	joined := strings.Join(v, "\n")
+	require.Contains(t, joined, "required sample size 25")
+	require.Contains(t, joined, "stratum migrated covered by 0")
+	require.Contains(t, joined, "forced anchor "+rows[12].AccountHex+" missing")
+
+	// Population-bounded degradation: a 4-account population cannot supply
+	// 9/8/8, so replaying ALL of it is valid (take-all semantics).
+	small := population(1, 1, 1, 0, 1, 0)
+	all := fileSample(accountHexes(small), small, "replay.txt")
+	require.Empty(t, validateReplaySelection(all, small, 25, []string{small[0].AccountHex}),
+		"take-all over an underpopulated stratum satisfies the degraded quota, exactly like selectSample")
+}
+
+func accountHexes(rows []store.DMBorrowerRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.AccountHex)
+	}
+	return out
 }
 
 func TestNormalizeAccountHex(t *testing.T) {

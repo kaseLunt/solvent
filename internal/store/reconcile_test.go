@@ -80,8 +80,10 @@ func TestAssetNetSumsHasNoAccountFilter(t *testing.T) {
 // TestSampleDMBorrowersStrataPrecedenceAndDeterminism pins the §2
 // classification (mutation target "strata partition"): the strata are a
 // DISJOINT PRECEDENCE partition — liquidated beats migrated beats
-// post_migration — with a live/zero split, and the order is a pure function
-// of (rows, seed).
+// post_migration — with a live/zero split, and the retrieval order is a
+// pure SEED-FREE function of DB-at-P (round-10 F5: the md5(seed||account)
+// ordering moved to cmd/reconcile's orderPopulation so no RPC-derived value
+// is needed while the snapshot is open).
 func TestSampleDMBorrowersStrataPrecedenceAndDeterminism(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -95,7 +97,7 @@ func TestSampleDMBorrowersStrataPrecedenceAndDeterminism(t *testing.T) {
 	seedReconEvent(t, s, 10, 10, "tx-m2", 0, "debt_manager", "migration_genesis", mig, asset, "debt", "300")
 	seedReconEvent(t, s, 10, 30, "tx-b1", 0, "debt_manager", "borrow", post, asset, "debt", "100")
 
-	rows, err := SampleDMBorrowers(ctx, s.pool, 100, "seed-a")
+	rows, err := SampleDMBorrowers(ctx, s.pool, 100)
 	require.NoError(t, err)
 	require.Len(t, rows, 3)
 	byAccount := map[string]DMBorrowerRow{}
@@ -111,10 +113,11 @@ func TestSampleDMBorrowersStrataPrecedenceAndDeterminism(t *testing.T) {
 	require.True(t, byAccount["aa31"].Residue)
 	require.True(t, byAccount["aa32"].Live)
 
-	// Determinism: same seed ⇒ identical order; the order is stratum-major.
-	again, err := SampleDMBorrowers(ctx, s.pool, 100, "seed-a")
+	// Determinism: same (DB, pin) ⇒ identical order; the order is
+	// stratum-major and seed-free (the seed ordering is Go-side now).
+	again, err := SampleDMBorrowers(ctx, s.pool, 100)
 	require.NoError(t, err)
-	require.Equal(t, rows, again, "same (DB, pin, seed) must reproduce the identical classified order")
+	require.Equal(t, rows, again, "same (DB, pin) must reproduce the identical classified order")
 	var strata []string
 	for _, r := range rows {
 		strata = append(strata, r.Stratum)
@@ -226,18 +229,55 @@ func TestLatestAPYObservationOrdersAcrossBothPayloadSources(t *testing.T) {
 
 // TestReconBalancesForSourceConflict mirrors BalancesFor's exclusivity
 // probe through the Querier surface (§7): both sources on one (asset, side)
-// is ErrBalanceSourceConflict.
+// marks THAT account conflicted — message returned, rows withheld — while a
+// clean account in the same batch keeps its rows (the batched shape is
+// round-10 F5's one-snapshot-query reader).
 func TestReconBalancesForSourceConflict(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
-	acct := []byte{0xaa, 0x61}
+	conflicted := []byte{0xaa, 0x61}
+	clean := []byte{0xaa, 0x62}
 	asset := []byte{0xcc, 0x07}
 	_, err := s.pool.Exec(ctx, `INSERT INTO position_balances (engine, account, asset, side, source, amount, updated_block)
-		VALUES ('debt_manager',$1,$2,'collateral','event',5,10),
-		       ('debt_manager',$1,$2,'collateral','snapshot',5,10)`, acct, asset)
+		VALUES ('debt_manager',$1,$3,'collateral','event',5,10),
+		       ('debt_manager',$1,$3,'collateral','snapshot',5,10),
+		       ('debt_manager',$2,$3,'collateral','snapshot',7,11)`, conflicted, clean, asset)
 	require.NoError(t, err)
-	_, err = ReconBalancesFor(ctx, s.pool, "debt_manager", acct)
-	require.ErrorIs(t, err, ErrBalanceSourceConflict)
+	rows, conflicts, err := ReconBalancesForAccounts(ctx, s.pool, "debt_manager", [][]byte{conflicted, clean})
+	require.NoError(t, err)
+	require.Contains(t, conflicts["aa61"], "both event- and snapshot-sourced rows")
+	require.Contains(t, conflicts["aa61"], ErrBalanceSourceConflict.Error())
+	require.NotContains(t, rows, "aa61", "a conflicted account reports the conflict, never rows")
+	require.Len(t, rows["aa62"], 1, "a clean account in the same batch keeps its rows")
+	require.Equal(t, "7", rows["aa62"][0].Amount.String())
+	require.EqualValues(t, 11, rows["aa62"][0].UpdatedBlock)
+}
+
+// TestCollateralHistoryDocsAtLastSuccess pins the replay-target prefetch
+// (round-10 F5): only success-swept accounts appear, each with the document
+// at EXACTLY last_success_block and side='collateral' — a doc at another
+// block or the wrong side never substitutes.
+func TestCollateralHistoryDocsAtLastSuccess(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+	swept := []byte{0xaa, 0x91}
+	failed := []byte{0xaa, 0x92}
+	_, err := s.pool.Exec(ctx, `INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status)
+		VALUES ('debt_manager',$1,120,120,'success'), ('debt_manager',$2,130,0,'failed')`, swept, failed)
+	require.NoError(t, err)
+	_, err = s.pool.Exec(ctx, `INSERT INTO snapshots (engine, account, block_number, balances, side) VALUES
+		('debt_manager',$1,120,'{"balances":{"cc01":"42"}}','collateral'),
+		('debt_manager',$1,119,'{"balances":{"cc01":"41"}}','collateral'),
+		('debt_manager',$1,120,'{"balances":{"cc01":"40"}}','debt')`, swept)
+	require.NoError(t, err)
+
+	docs, err := CollateralHistoryDocsAtLastSuccess(ctx, s.pool, "debt_manager")
+	require.NoError(t, err)
+	require.Len(t, docs, 1)
+	require.EqualValues(t, 120, docs["aa91"].Block, "the document at EXACTLY last_success_block")
+	require.Equal(t, map[string]string{"cc01": "42"}, docs["aa91"].Doc,
+		"the collateral-side doc at 120 — never the 119 doc, never the debt-side doc")
+	require.NotContains(t, docs, "aa92", "a failed sweep contributes no replay target")
 }
 
 // TestCountReconRowsSubAssertions pins the named sub-assertion counters

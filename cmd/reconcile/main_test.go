@@ -55,6 +55,40 @@ func TestAcceptanceTaints(t *testing.T) {
 	require.Contains(t, joined, "-golden-pin-eth overridden")
 	require.Contains(t, joined, "-engine debt_manager")
 	require.Contains(t, joined, "-tolerance-dm-wei")
+
+	// Round-10 F2: the bypass flags Codex named — disabling deep replay,
+	// disabling the head-lag gate, and ordinary pin overrides — ALL taint.
+	o, err = parseFlags([]string{"-collateral-replay", "0", "-max-head-lag", "0", "-pin-op", "154000000", "-pin-eth", "23000000"}, &errBuf)
+	require.NoError(t, err)
+	taints = acceptanceTaints(o)
+	require.Len(t, taints, 4)
+	joined = strings.Join(taints, "\n")
+	require.Contains(t, joined, "-collateral-replay 0 disables")
+	require.Contains(t, joined, "-max-head-lag")
+	require.Contains(t, joined, "-pin-op overridden")
+	require.Contains(t, joined, "-pin-eth overridden")
+}
+
+// TestTaintedRunCannotPass — round-10 F2 (mutation: taint-dropped-from-
+// verdict): computeResult CONSUMES the taint set, so a tainted run is
+// structurally non-pass (result "tainted", exit 1) even when every gated
+// row is exact. Taints as metadata can be ignored by a receipt reader; an
+// exit code cannot.
+func TestTaintedRunCannotPass(t *testing.T) {
+	result, code := computeResult(0, 0, []string{"-collateral-replay 0 disables the deep collateral replay (a required check)"})
+	require.Equal(t, "tainted", result,
+		"zero gated failures + any taint is STILL not a pass — structurally")
+	require.Equal(t, exitVerdictFail, code)
+
+	// Precedence: real drift outranks the taint label (both exit 1).
+	result, code = computeResult(2, 0, []string{"-engine debt_manager"})
+	require.Equal(t, "fail", result)
+	require.Equal(t, exitVerdictFail, code)
+
+	// And the clean path still passes.
+	result, code = computeResult(0, 0, nil)
+	require.Equal(t, "pass", result)
+	require.Equal(t, exitPass, code)
 }
 
 // TestNonzeroToleranceCannotProducePass — the §3.5 laundering guard
@@ -62,20 +96,20 @@ func TestAcceptanceTaints(t *testing.T) {
 // fail-with-tolerance even when every gated row is exact, so a tolerance
 // can never launder into a pass receipt.
 func TestNonzeroToleranceCannotProducePass(t *testing.T) {
-	result, code := computeResult(0, 0)
+	result, code := computeResult(0, 0, nil)
 	require.Equal(t, "pass", result)
 	require.Equal(t, exitPass, code)
 
-	result, code = computeResult(0, 1)
+	result, code = computeResult(0, 1, nil)
 	require.Equal(t, "fail-with-tolerance", result,
 		"zero gated failures + nonzero tolerance is STILL not a pass — structurally")
 	require.Equal(t, exitVerdictFail, code)
 
-	result, code = computeResult(3, 0)
+	result, code = computeResult(3, 0, nil)
 	require.Equal(t, "fail", result)
 	require.Equal(t, exitVerdictFail, code)
 
-	result, code = computeResult(3, -1)
+	result, code = computeResult(3, -1, nil)
 	require.Equal(t, "fail-with-tolerance", result, "negative values are nonzero too")
 	require.Equal(t, exitVerdictFail, code)
 }
@@ -121,12 +155,18 @@ func TestRewindMovedIsPruneImmune(t *testing.T) {
 }
 
 // TestDSNTripwireDetectsSameDatabase — the §1.2 decision (mutation:
-// tripwire): identical live identities collide; different databases on the
-// same server do not.
+// tripwire): identical PHYSICAL identities collide; a different database on
+// the same cluster does not; and — the round-10 F4 point — identity is the
+// (system_identifier, OID, name) tuple, so it cannot fork on host-spelling
+// aliases the way the old database@addr:port string did.
 func TestDSNTripwireDetectsSameDatabase(t *testing.T) {
-	require.True(t, dsnCollision("solvent@127.0.0.1:5432", "solvent@127.0.0.1:5432"),
+	live := store.DBIdentity{SystemIdentifier: "7665718114346942498", DatabaseOID: 16384, DatabaseName: "solvent"}
+	require.True(t, dsnCollision(live, live),
 		"same database identity is THE hazard — the run must die before any test could truncate the backfill")
-	require.False(t, dsnCollision("solvent@127.0.0.1:5432", "solvent_test@127.0.0.1:5432"))
+	require.False(t, dsnCollision(live, store.DBIdentity{SystemIdentifier: "7665718114346942498", DatabaseOID: 16401, DatabaseName: "solvent_test"}),
+		"same cluster, different database — the split the wave-10 fix demands")
+	require.False(t, dsnCollision(live, store.DBIdentity{SystemIdentifier: "1111111111111111111", DatabaseOID: 16384, DatabaseName: "solvent"}),
+		"same name+OID on a DIFFERENT cluster is a different database")
 	require.Contains(t, tripwireMsg, "physical split required", "the brief's message, verbatim")
 }
 

@@ -47,19 +47,27 @@ func TestLiveValueIdentity(t *testing.T) {
 }
 
 // TestWeldAaveAggregate pins the F1 Aave weld: debt side gated at zero
-// bound; collateral side advisory on the first run (amendment); union of
-// key sets.
+// bound; collateral side advisory on the first run (amendment); the row set
+// is the AUTHORITATIVE universe (getReservesList@pin ∪ derived, round-10
+// F3) unioned with both fact sets — and an unread leg is a weld-unread row,
+// never an absent one and never a fake zero.
 func TestWeldAaveAggregate(t *testing.T) {
 	usdc := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 	pyusd := common.HexToAddress("0x6c3ea9036406852006290770BEdFcAbA0e23A0e8")
+	ghost := common.HexToAddress("0x83F20F44975D03b1b09e64809B757c47f942BEeA") // listed reserve, nothing derived, read failed
 	vUSDC := common.HexToAddress("0x9355032d0e5c8Dc8bBcbB55f1b1e18DD6E971b8C")
 	tokens := map[common.Address]common.Address{usdc: vUSDC, pyusd: {}}
+	universe := []common.Address{usdc, ghost} // the Pool's own list; pyusd is derived-only
 
 	rows := weldAaveAggregate("debt", true,
 		map[common.Address]*big.Int{usdc: big.NewInt(125498), pyusd: big.NewInt(83)},
-		map[common.Address]*big.Int{usdc: big.NewInt(125498)},
-		tokens)
-	require.Len(t, rows, 2)
+		map[common.Address]chainRead{
+			usdc:  {Total: big.NewInt(125498), OK: true},
+			pyusd: {Total: big.NewInt(0), OK: true}, // a REAL zero read
+			ghost: {Note: "getReserveVariableDebtToken unsuccessful (reverted) at the pin"},
+		},
+		tokens, universe)
+	require.Len(t, rows, 3, "universe ∪ derived ∪ reads — no reserve vanishes")
 	byReserve := map[string]aaveWeldRow{}
 	for _, r := range rows {
 		require.True(t, r.Gated, "debt weld is GATED")
@@ -67,11 +75,16 @@ func TestWeldAaveAggregate(t *testing.T) {
 	}
 	require.Equal(t, verdictExact, byReserve[usdc.Hex()].Verdict)
 	require.Equal(t, verdictAggregateMismatch, byReserve[pyusd.Hex()].Verdict,
-		"a derived sum with no chain total surfaces — union, never intersection")
+		"a derived sum against a REAL chain zero is a numeric disagreement — union, never intersection")
+	require.Equal(t, verdictWeldUnread, byReserve[ghost.Hex()].Verdict,
+		"an unreadable universe reserve is a GATED weld-unread row (round-10 F3)")
+	require.Equal(t, "(unread)", byReserve[ghost.Hex()].ChainTotal)
+	require.Contains(t, byReserve[ghost.Hex()].ReadError, "reverted")
 
 	adv := weldAaveAggregate("collateral", false,
 		map[common.Address]*big.Int{usdc: big.NewInt(1)},
-		map[common.Address]*big.Int{usdc: big.NewInt(2)}, tokens)
+		map[common.Address]chainRead{usdc: {Total: big.NewInt(2), OK: true}},
+		tokens, []common.Address{usdc})
 	require.Len(t, adv, 1)
 	require.False(t, adv[0].Gated, "collateral weld is ADVISORY on the first run (risk-quant F1, amendment)")
 	require.Equal(t, verdictAggregateMismatch, adv[0].Verdict, "advisory still REPORTS the mismatch")

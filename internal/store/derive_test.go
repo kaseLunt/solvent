@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"math/big"
-	"os"
 	"strings"
 	"testing"
 
@@ -18,12 +17,11 @@ import (
 // left over from a prior test or the ingestion suite. reorg_epochs' BIGSERIAL
 // sequence is deliberately NOT restarted: every epoch comparison in the store
 // is relative (acked vs chain max), so absolute epoch values never matter.
+// The DSN comes from destructiveTestDSN — the shared round-10 F1 guard that
+// proves the physical split before this helper is allowed to TRUNCATE.
 func testDeriveStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	require.NoError(t, Migrate(context.Background(), dsn))
 	s, err := Open(context.Background(), dsn)
 	require.NoError(t, err)

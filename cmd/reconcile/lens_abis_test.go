@@ -39,6 +39,8 @@ func TestLensSelectorsPinned(t *testing.T) {
 		{aaveScaledTotalSupplyABI, "scaledTotalSupply", "scaledTotalSupply()", "b1bf962d"},
 		{erc20BalanceOfABI, "balanceOf", "balanceOf(address)", "70a08231"},
 		{poolReserveDebtTokenABI, "getReserveVariableDebtToken", "getReserveVariableDebtToken(address)", "365090a0"},
+		{poolReservesListABI, "getReservesList", "getReservesList()", "d1946dbc"},
+		{poolReserveATokenABI, "getReserveAToken", "getReserveAToken(address)", "cff027d9"},
 		{poolNormalizedDebtABI, "getReserveNormalizedVariableDebt", "getReserveNormalizedVariableDebt(address)", "386497fd"},
 		{multicall3ABI, "tryBlockAndAggregate", "tryBlockAndAggregate(bool,(address,bytes)[])", "399542e9"},
 	}

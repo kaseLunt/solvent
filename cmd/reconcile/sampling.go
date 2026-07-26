@@ -1,18 +1,52 @@
-// Deterministic sample selection (brief §2). The SQL (store.SampleDMBorrowers)
-// classifies and ORDERS the whole borrower population — a pure function of
-// (DB-at-P, seed) — and this file's selection is a pure function of that row
-// order, so the composite is reproducible end to end: same pin + same seed ⇒
-// byte-identical sample ⇒ byte-identical comparison sections.
+// Deterministic sample selection (brief §2). The SQL
+// (store.SampleDMBorrowers) CLASSIFIES the whole borrower population inside
+// the snapshot in a seed-free deterministic order; orderPopulation below
+// applies the md5(seed||account) ordering IN GO (round-10 F5: the default
+// seed is the OP pin hash — an RPC fact — and no network call may run while
+// the repeatable-read snapshot is open, so the seed ordering happens after
+// commit). Selection is a pure function of that row order, so the composite
+// stays reproducible end to end: same pin + same seed ⇒ byte-identical
+// sample ⇒ byte-identical comparison sections.
 package main
 
 import (
 	"bufio"
+	"crypto/md5"
+	"encoding/hex"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/kaselunt/solvent/internal/store"
 )
+
+// orderPopulation applies the §2 seed ordering with EXACTLY the previous
+// SQL semantics (ORDER BY stratum, (net <> 0) DESC, md5(seed || account)):
+// stratum ascending (bytewise: liquidated < migrated < post_migration),
+// live before zero-net inside each stratum, then ascending lowercase-hex
+// md5 of seed||accountHex — the same digest text PostgreSQL's md5() sorts.
+// Input order does not matter (the sort key is total); the SQL's seed-free
+// retrieval order only exists so the snapshot never needs the seed.
+func orderPopulation(rows []store.DMBorrowerRow, seed string) []store.DMBorrowerRow {
+	out := make([]store.DMBorrowerRow, len(rows))
+	copy(out, rows)
+	digest := make(map[string]string, len(rows))
+	for _, r := range rows {
+		sum := md5.Sum([]byte(seed + r.AccountHex))
+		digest[r.AccountHex] = hex.EncodeToString(sum[:])
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Stratum != out[j].Stratum {
+			return out[i].Stratum < out[j].Stratum
+		}
+		if out[i].Live != out[j].Live {
+			return out[i].Live
+		}
+		return digest[out[i].AccountHex] < digest[out[j].AccountHex]
+	})
+	return out
+}
 
 // Strata names (the SQL's disjoint precedence partition: liquidated >
 // migrated > post_migration).
@@ -83,7 +117,7 @@ func quotasFor(n int) map[string]int {
 // set for them); within the liquidated stratum's zero-net portion,
 // residue-bearing fully-liquidated accounts are taken FIRST until the
 // residue sub-target is met (deterministic: row order within each group is
-// the SQL's md5(seed||account) order). An underpopulated stratum takes all
+// orderPopulation's md5(seed||account) order). An underpopulated stratum takes all
 // its rows; the shortfall is backfilled from the other strata's next unused
 // rows in fixed order liquidated→migrated→post_migration, and both the
 // shortfall and the redistribution are recorded.
@@ -250,14 +284,49 @@ func selectSample(rows []store.DMBorrowerRow, total int, forced, includes []stri
 	return sel
 }
 
-// fileSample loads -accounts FILE (one hex address per line, comments with
-// '#'): exact replay, BYPASSES sampling entirely, recorded in the artifact.
-func fileSample(path string, rows []store.DMBorrowerRow) (sampleSelection, error) {
+// readAccountsFile loads -accounts FILE (one hex address per line, comments
+// with '#') into normalized hex, deduped in file order. Split from the
+// selection step (round-10 F5): the file is read BEFORE the snapshot opens
+// so its accounts join the snapshot's read set, and the selection runs
+// after commit against the classified population.
+func readAccountsFile(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return sampleSelection{}, fmt.Errorf("open -accounts file: %w", err)
+		return nil, fmt.Errorf("open -accounts file: %w", err)
 	}
 	defer f.Close()
+	var out []string
+	seen := map[string]bool{}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		hexAddr, err := normalizeAccountHex(line)
+		if err != nil {
+			return nil, fmt.Errorf("-accounts file line %q: %w", line, err)
+		}
+		if seen[hexAddr] {
+			continue
+		}
+		seen[hexAddr] = true
+		out = append(out, hexAddr)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("read -accounts file: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("-accounts file %s contains no accounts", path)
+	}
+	return out, nil
+}
+
+// fileSample builds the -accounts replay selection from pre-read accounts:
+// exact replay, BYPASSES sampling entirely, recorded in the artifact — and
+// VALIDATED against the acceptance census requirements by
+// validateReplaySelection (round-10 F2), whose violations taint the verdict.
+func fileSample(accounts []string, rows []store.DMBorrowerRow, path string) sampleSelection {
 	rowByHex := map[string]store.DMBorrowerRow{}
 	for _, r := range rows {
 		rowByHex[r.AccountHex] = r
@@ -268,21 +337,7 @@ func fileSample(path string, rows []store.DMBorrowerRow) (sampleSelection, error
 		Shortfalls:      map[string]int{},
 		Notes:           []string{"sampling BYPASSED: exact account list replay from " + path},
 	}
-	seen := map[string]bool{}
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		hexAddr, err := normalizeAccountHex(line)
-		if err != nil {
-			return sampleSelection{}, fmt.Errorf("-accounts file line %q: %w", line, err)
-		}
-		if seen[hexAddr] {
-			continue
-		}
-		seen[hexAddr] = true
+	for _, hexAddr := range accounts {
 		r, known := rowByHex[hexAddr]
 		if !known {
 			r = store.DMBorrowerRow{AccountHex: hexAddr, Stratum: "unsampled", Net: bigZero()}
@@ -295,13 +350,59 @@ func fileSample(path string, rows []store.DMBorrowerRow) (sampleSelection, error
 			sel.ZeroCount++
 		}
 	}
-	if err := sc.Err(); err != nil {
-		return sampleSelection{}, fmt.Errorf("read -accounts file: %w", err)
+	return sel
+}
+
+// validateReplaySelection checks a -accounts replay against the census
+// discipline sampling itself enforces (round-10 F2: "-accounts replay that
+// fails quota/strata/forced-anchor validation" must not back acceptance):
+//
+//   - required sample size: at least min(sample floor, population size);
+//   - strata coverage: each stratum must carry at least
+//     min(quota, stratum population) accounts — the same
+//     take-all-when-underpopulated degradation selectSample applies, so a
+//     replay of a legitimately degraded sample still validates;
+//   - forced anchors: every forced DM anchor must be present.
+//
+// Violations are returned as TAINT strings; computeResult consumes them, so
+// a failing replay is structurally non-pass (result "tainted", exit 1).
+func validateReplaySelection(sel sampleSelection, population []store.DMBorrowerRow, sampleFloor int, forced []string) []string {
+	var v []string
+	popByStratum := map[string]int{}
+	for _, r := range population {
+		popByStratum[r.Stratum]++
 	}
-	if len(sel.Accounts) == 0 {
-		return sampleSelection{}, fmt.Errorf("-accounts file %s contains no accounts", path)
+	have := map[string]int{}
+	haveAcct := map[string]bool{}
+	for _, a := range sel.Accounts {
+		have[a.Row.Stratum]++
+		haveAcct[a.Row.AccountHex] = true
 	}
-	return sel, nil
+	requiredTotal := sampleFloor
+	if len(population) < requiredTotal {
+		requiredTotal = len(population)
+	}
+	if len(sel.Accounts) < requiredTotal {
+		v = append(v, fmt.Sprintf("-accounts replay: %d accounts, required sample size %d (population %d)",
+			len(sel.Accounts), requiredTotal, len(population)))
+	}
+	quotas := quotasFor(sampleFloor)
+	for _, s := range stratumOrder {
+		req := quotas[s]
+		if popByStratum[s] < req {
+			req = popByStratum[s]
+		}
+		if have[s] < req {
+			v = append(v, fmt.Sprintf("-accounts replay: stratum %s covered by %d account(s), quota requires %d (stratum population %d)",
+				s, have[s], req, popByStratum[s]))
+		}
+	}
+	for _, f := range forced {
+		if !haveAcct[f] {
+			v = append(v, fmt.Sprintf("-accounts replay: forced anchor %s missing", f))
+		}
+	}
+	return v
 }
 
 // normalizeAccountHex canonicalizes a 20-byte hex address (with or without

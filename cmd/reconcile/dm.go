@@ -264,11 +264,30 @@ type dmWeldRow struct {
 	DerivedSum     string `json:"derived_sum_all_accounts"`
 	ChainTotal     string `json:"chain_total_normalized"`
 	SampleCoverage string `json:"sample_sum_for_coverage"` // diagnostic only
-	Verdict        string `json:"verdict"`                 // exact | aggregate-mismatch
+	Verdict        string `json:"verdict"`                 // exact | aggregate-mismatch | weld-unread
 	Note           string `json:"note,omitempty"`
+	ReadError      string `json:"read_error,omitempty"` // weld-unread rows: WHY the chain leg is unread
 }
 
 const verdictAggregateMismatch = "aggregate-mismatch"
+
+// verdictWeldUnread (round-10 F3): a weld-universe token whose chain-side
+// read did not succeed or did not decode. Read-presence is a FIRST-CLASS
+// per-token fact, separate from numeric zero: an unread leg is a GATED
+// failure row (exit 1), never a silently absent row and never a zero — so
+// the F1 empty-state completeness requirement holds even under ABI skew or
+// pinned-call reverts.
+const verdictWeldUnread = "weld-unread"
+
+// chainRead is the read-presence fact for one weld leg: OK=true carries the
+// decoded total; OK=false carries WHY the read failed. The absence of an
+// entry means the caller never even attempted the read — weldDMAggregate /
+// weldAaveAggregate treat both identically as weld-unread.
+type chainRead struct {
+	Total *big.Int
+	OK    bool
+	Note  string
+}
 
 // dmWeldNote is the NAMED unpinned leg (risk-quant F1): the migration-era
 // implementation's total seeding is not in the contract clone, so a nonzero
@@ -307,18 +326,26 @@ func assetNetSumsFromSample(sums []store.AsOfSum) map[string]*big.Int {
 }
 
 // weldDMAggregate compares the all-accounts derived sums with the chain
-// totals per token, over the UNION of both key sets (a token with derived
-// debt but no chain config — or vice versa — must surface, not vanish).
-func weldDMAggregate(inputs dmWeldInputs, chainTotals map[common.Address]*big.Int) []dmWeldRow {
+// reads per token over the AUTHORITATIVE universe (round-10 F3): the
+// explicit union of the getBorrowTokens(@pin) ∪ derived-assets list the
+// caller iterated (universe) with both fact sets' keys — so no token can
+// vanish from the weld under any combination of missing derived rows,
+// missing reads, or caller misassembly. A universe token whose chain read
+// is absent or not OK becomes a GATED weld-unread row: read-presence is a
+// first-class fact, never conflated with numeric zero.
+func weldDMAggregate(inputs dmWeldInputs, universe []common.Address, reads map[common.Address]chainRead) []dmWeldRow {
 	derived := map[common.Address]*big.Int{}
 	for _, s := range inputs.All {
 		derived[common.BytesToAddress(s.Asset)] = s.Total
 	}
 	union := map[common.Address]bool{}
+	for _, tok := range universe {
+		union[tok] = true
+	}
 	for tok := range derived {
 		union[tok] = true
 	}
-	for tok := range chainTotals {
+	for tok := range reads {
 		union[tok] = true
 	}
 	tokens := make([]common.Address, 0, len(union))
@@ -333,14 +360,9 @@ func weldDMAggregate(inputs dmWeldInputs, chainTotals map[common.Address]*big.In
 		if d == nil {
 			d = bigZero()
 		}
-		c := chainTotals[tok]
-		if c == nil {
-			c = bigZero()
-		}
 		row := dmWeldRow{
 			TokenHex:   tok.Hex(),
 			DerivedSum: d.String(),
-			ChainTotal: c.String(),
 			Note:       dmWeldNote,
 		}
 		if cov := inputs.SampleTotals[fmt.Sprintf("%x", tok.Bytes())]; cov != nil {
@@ -348,14 +370,48 @@ func weldDMAggregate(inputs dmWeldInputs, chainTotals map[common.Address]*big.In
 		} else {
 			row.SampleCoverage = "0"
 		}
-		if d.Cmp(c) == 0 {
+		read, present := reads[tok]
+		switch {
+		case !present:
+			row.ChainTotal = "(unread)"
+			row.Verdict = verdictWeldUnread
+			row.ReadError = "no borrowTokenConfig read was recorded for this universe token"
+		case !read.OK:
+			row.ChainTotal = "(unread)"
+			row.Verdict = verdictWeldUnread
+			row.ReadError = read.Note
+		case d.Cmp(read.Total) == 0:
+			row.ChainTotal = read.Total.String()
 			row.Verdict = verdictExact
-		} else {
+		default:
+			row.ChainTotal = read.Total.String()
 			row.Verdict = verdictAggregateMismatch
 		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// buildDMWeldReads converts the borrowTokenConfig leg of the phase-2
+// multicall into first-class read-presence facts (round-10 F3): EVERY weld
+// universe token gets an entry; an unsuccessful (reverted) or undecodable
+// (ABI-skew) result becomes an OK=false fact — never dropped, never zero.
+func buildDMWeldReads(weldList []common.Address, results []multicallResult, offset int) map[common.Address]chainRead {
+	reads := map[common.Address]chainRead{}
+	for i, t := range weldList {
+		res := results[offset+i]
+		if !res.Success {
+			reads[t] = chainRead{Note: "borrowTokenConfig unsuccessful (reverted) at the pin"}
+			continue
+		}
+		cfg, err := unpackBorrowTokenConfig(res.ReturnData)
+		if err != nil {
+			reads[t] = chainRead{Note: "borrowTokenConfig undecodable at the pin (ABI skew): " + err.Error()}
+			continue
+		}
+		reads[t] = chainRead{Total: cfg.TotalNormalizedBorrowingAmount, OK: true}
+	}
+	return reads
 }
 
 // --- §3.6 index-integrity check (separate verdict class) -------------------

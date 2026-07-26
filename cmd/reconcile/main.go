@@ -10,11 +10,13 @@
 //	          quick autocommit cursor read, RPC preflight probes cheapest
 //	          first (golden-pin archive capability, fresh-pin serveability).
 //	Phase 1 — ONE connection, REPEATABLE READ READ ONLY: every DB read
-//	          (pins, sampling, as-of sums, aggregates, counts, freshness,
-//	          invariant scans, internal check, rewind baseline). COMMIT
-//	          before any comparison RPC (vacuum-friendliness). The only RPC
-//	          inside the phase is the pin-hash header read the seed default
-//	          requires.
+//	          (pins, population, as-of sums, aggregates, counts, freshness,
+//	          invariant scans, internal check, rewind baseline), then COMMIT
+//	          AND CLOSE — with ZERO network inside the snapshot (round-10
+//	          F5): the pin header reads and the seed-derived sample ordering
+//	          run in Go AFTER the connection is closed, against the
+//	          committed population (vacuum-friendliness: no RPC latency or
+//	          retry storm can ever hold xmin on the live database).
 //	Phase 2 — RPC comparisons, sequential OP then ETH, one shared token
 //	          bucket (the daemon is consuming the same provider budget).
 //	Phase 3 — end-of-run rewind re-check on a FRESH connection (a snapshot
@@ -140,6 +142,12 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 }
 
 // acceptanceTaints lists why this run cannot back an acceptance receipt.
+// Round-10 F2 made the list EXHAUSTIVE over the flags that disable required
+// checks — deep replay, the head-lag staleness gate, and ordinary pin
+// overrides all taint now — and made every taint flow INTO computeResult:
+// a tainted run is structurally non-pass (result "tainted", exit 1), so no
+// flag combination can bypass a required check and still produce pass/exit-0
+// acceptance evidence.
 func acceptanceTaints(o *options) []string {
 	var taints []string
 	if o.allowSmall && o.sample < 25 {
@@ -151,11 +159,23 @@ func acceptanceTaints(o *options) []string {
 	if o.fixturePinETH != 25593800 {
 		taints = append(taints, fmt.Sprintf("-fixture-pin-eth overridden to %d (fixtures captured at 25593800)", o.fixturePinETH))
 	}
+	if o.pinOP != 0 {
+		taints = append(taints, fmt.Sprintf("-pin-op overridden to %d (acceptance pins are the derive cursors, never operator-chosen)", o.pinOP))
+	}
+	if o.pinETH != 0 {
+		taints = append(taints, fmt.Sprintf("-pin-eth overridden to %d (acceptance pins are the derive cursors, never operator-chosen)", o.pinETH))
+	}
 	if o.engine != "all" {
 		taints = append(taints, fmt.Sprintf("-engine %s (acceptance evidence requires both engines)", o.engine))
 	}
 	if o.toleranceDMWei != 0 {
 		taints = append(taints, fmt.Sprintf("-tolerance-dm-wei %d (diagnosis only; forces fail-with-tolerance)", o.toleranceDMWei))
+	}
+	if o.collateralReplay <= 0 {
+		taints = append(taints, fmt.Sprintf("-collateral-replay %d disables the deep collateral replay (a required check)", o.collateralReplay))
+	}
+	if o.maxHeadLag <= 0 {
+		taints = append(taints, fmt.Sprintf("-max-head-lag %s disables the staleness quality gate (a required check)", o.maxHeadLag))
 	}
 	return taints
 }
@@ -164,6 +184,19 @@ func acceptanceTaints(o *options) []string {
 // 12: a run whose artifact does not carry the seed is unreproducible).
 func stampSeed(run map[string]any, seed string) {
 	run["seed_resolved"] = seed
+}
+
+// stampAcceptance records the CURRENT taint set in the run section. The
+// artifact stamp is documentation; the enforcement is computeResult taking
+// the same taint set (round-10 F2) — the two can never tell different
+// stories because both read one slice.
+func stampAcceptance(rep *driftReport, taints []string) {
+	if len(taints) > 0 {
+		rep.Run["acceptance"] = false
+		rep.Run["acceptance_taints"] = taints
+	} else {
+		rep.Run["acceptance"] = true
+	}
 }
 
 // runAbort is a typed early exit; artifacts are still written when Phase 1
@@ -413,16 +446,26 @@ type verdictTotals struct {
 	AdvisoryRows int `json:"advisory_rows"`
 }
 
-// computeResult decides the run result. Structure (brief §3.5): any nonzero
-// -tolerance-dm-wei forces fail-with-tolerance — it CANNOT launder into a
-// pass receipt even when every row is exact (the tolerance-laundering guard,
-// mutation-killed by TestNonzeroToleranceCannotProducePass).
-func computeResult(gatedFailures int, toleranceDMWei int64) (result string, code int) {
+// computeResult decides the run result. Structure (brief §3.5 + round-10
+// F2): any nonzero -tolerance-dm-wei forces fail-with-tolerance — it CANNOT
+// launder into a pass receipt even when every row is exact (the
+// tolerance-laundering guard, mutation-killed by
+// TestNonzeroToleranceCannotProducePass) — and the verdict function CONSUMES
+// THE TAINT SET: a run with any acceptance taint (bypassed required check,
+// pin override, invalid -accounts replay, small sample) is structurally
+// non-pass — result "tainted", exit 1 — even when every gated row is exact
+// (mutation-killed by TestTaintedRunCannotPass). Taints are a VERDICT input
+// here, not run metadata: metadata can be ignored by a receipt reader, an
+// exit code cannot.
+func computeResult(gatedFailures int, toleranceDMWei int64, taints []string) (result string, code int) {
 	if toleranceDMWei != 0 {
 		return "fail-with-tolerance", exitVerdictFail
 	}
 	if gatedFailures > 0 {
 		return "fail", exitVerdictFail
+	}
+	if len(taints) > 0 {
+		return "tainted", exitVerdictFail
 	}
 	return "pass", exitPass
 }
@@ -475,12 +518,8 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 			}
 		}
 	}
-	if taints := acceptanceTaints(o); len(taints) > 0 {
-		rep.Run["acceptance"] = false
-		rep.Run["acceptance_taints"] = taints
-	} else {
-		rep.Run["acceptance"] = true
-	}
+	taints := acceptanceTaints(o)
+	stampAcceptance(rep, taints)
 
 	phase1Done := false
 	finish := func(a *runAbort) (int, error) {
@@ -700,6 +739,14 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		return exitPrecondition, err
 	}
 	phase1Done = true
+	// -accounts replay validation (round-10 F2): a replay file that fails
+	// required-sample-size / strata-coverage / forced-anchor validation
+	// TAINTS the run, and the taint set feeds computeResult — the bypass
+	// cannot be acceptance and cannot even be exit 0.
+	if wantDM && o.accountsFile != "" {
+		taints = append(taints, validateReplaySelection(p1.sel, p1.population, o.sample, forcedDMAnchors)...)
+		stampAcceptance(rep, taints)
+	}
 	stampSeed(rep.Run, p1.seed)
 	rep.Run["config_sha256"] = p1.configSHA
 	rep.Run["derive_lag_at_start"] = p1.deriveLag
@@ -826,7 +873,7 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	rep.Cursors.AckedEpochs = ackedEpochSection(p1.baseline, currentCursors)
 
 	// ---------------- Phase 4: artifact + verdict --------------------------
-	result, code := computeResult(gatedFailures, o.toleranceDMWei)
+	result, code := computeResult(gatedFailures, o.toleranceDMWei, taints)
 	rep.Summary["result"] = result
 	rep.Summary["gated_failures"] = gatedFailures
 	rep.Summary["totals"] = rep.tallyTotals()
@@ -923,9 +970,12 @@ func checkDSNSplit(ctx context.Context, reconRODSN, testDSN string) error {
 }
 
 // dsnCollision is the tripwire's decision (mutation target: disabling it
-// must be killed by TestDSNTripwireDetectsSameDatabase).
-func dsnCollision(reconID, testID string) bool {
-	return reconID == testID
+// must be killed by TestDSNTripwireDetectsSameDatabase). Identity is the F4
+// physical tuple (pg_control system_identifier + database OID + name), so
+// IPv4/IPv6/socket/proxy respellings of one database still collide — the
+// round-10 F4 fail-open is structurally gone.
+func dsnCollision(reconID, testID store.DBIdentity) bool {
+	return store.SameDatabase(reconID, testID)
 }
 
 // schemaGateOK is the Phase-0 schema gate's decision: EXACT equality, both

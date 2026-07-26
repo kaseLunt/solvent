@@ -150,7 +150,9 @@ func TestClassifyDMMismatchPrecedence(t *testing.T) {
 }
 
 // TestWeldDMAggregateZeroBoundAndUnion pins the F1 weld: zero bound, both
-// key directions surfaced, the migration caveat NAMED on every row.
+// key directions surfaced, the migration caveat NAMED on every row. A
+// derived token with a SUCCESSFUL zero-total read is aggregate-mismatch (a
+// real disagreement), never conflated with an unread leg.
 func TestWeldDMAggregateZeroBoundAndUnion(t *testing.T) {
 	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
 	usdt := common.HexToAddress("0x94b008aA00579c1307B0EF2c499aD98a8ce58e58")
@@ -159,16 +161,18 @@ func TestWeldDMAggregateZeroBoundAndUnion(t *testing.T) {
 	inputs := dmWeldInputs{
 		All: []store.AssetNetSum{
 			{Asset: usdc.Bytes(), Total: big.NewInt(1000)},
-			{Asset: usdt.Bytes(), Total: big.NewInt(5)}, // derived, no chain config
+			{Asset: usdt.Bytes(), Total: big.NewInt(5)}, // derived; chain read a REAL zero
 		},
 		SampleTotals: map[string]*big.Int{hexLower(usdc.Hex()): big.NewInt(400)},
 	}
-	chainTotals := map[common.Address]*big.Int{
-		usdc:  big.NewInt(1000),
-		weeth: big.NewInt(9), // chain total, nothing derived
+	universe := []common.Address{usdc, usdt, weeth}
+	reads := map[common.Address]chainRead{
+		usdc:  {Total: big.NewInt(1000), OK: true},
+		usdt:  {Total: big.NewInt(0), OK: true}, // read-presence: an actual zero, not an absence
+		weeth: {Total: big.NewInt(9), OK: true}, // chain total, nothing derived
 	}
-	rows := weldDMAggregate(inputs, chainTotals)
-	require.Len(t, rows, 3, "the union of both key sets — a one-sided token must surface, not vanish")
+	rows := weldDMAggregate(inputs, universe, reads)
+	require.Len(t, rows, 3, "the union of universe and both fact sets — a one-sided token must surface, not vanish")
 	byToken := map[string]dmWeldRow{}
 	for _, r := range rows {
 		byToken[r.TokenHex] = r
@@ -176,16 +180,101 @@ func TestWeldDMAggregateZeroBoundAndUnion(t *testing.T) {
 	}
 	require.Equal(t, verdictExact, byToken[usdc.Hex()].Verdict)
 	require.Equal(t, "400", byToken[usdc.Hex()].SampleCoverage)
-	require.Equal(t, verdictAggregateMismatch, byToken[usdt.Hex()].Verdict)
+	require.Equal(t, verdictAggregateMismatch, byToken[usdt.Hex()].Verdict,
+		"derived 5 vs a REAL chain zero is a numeric disagreement, class aggregate-mismatch")
 	require.Equal(t, verdictAggregateMismatch, byToken[weeth.Hex()].Verdict)
 	// ZERO bound: a 1-wei delta is a mismatch.
-	chainTotals[usdc] = big.NewInt(1001)
-	rows = weldDMAggregate(inputs, chainTotals)
+	reads[usdc] = chainRead{Total: big.NewInt(1001), OK: true}
+	rows = weldDMAggregate(inputs, universe, reads)
 	for _, r := range rows {
 		if r.TokenHex == usdc.Hex() {
 			require.Equal(t, verdictAggregateMismatch, r.Verdict)
 		}
 	}
+}
+
+// TestWeldDMAggregateUnreadTokenIsGatedRow is the round-10 F3 kill
+// (mutation: unread-token-vanishes): a UNIVERSE token whose
+// borrowTokenConfig read failed — or was never recorded at all — must
+// surface as a gated weld-unread row. Under the pre-fix behavior (universe
+// = derived ∪ successful reads) a configured token with no derived rows and
+// a reverting config read produced NO row: an unverifiable aggregate leg
+// passing silently, the exact empty-state-completeness hole Codex named.
+func TestWeldDMAggregateUnreadTokenIsGatedRow(t *testing.T) {
+	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
+	ghost := common.HexToAddress("0x94b008aA00579c1307B0EF2c499aD98a8ce58e58") // configured, never derived, read reverted
+	derivedOnly := common.HexToAddress("0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF")
+
+	inputs := dmWeldInputs{
+		All:          []store.AssetNetSum{{Asset: derivedOnly.Bytes(), Total: big.NewInt(7)}},
+		SampleTotals: map[string]*big.Int{},
+	}
+	universe := []common.Address{usdc, ghost, derivedOnly}
+	reads := map[common.Address]chainRead{
+		usdc:  {Total: big.NewInt(0), OK: true},
+		ghost: {Note: "borrowTokenConfig unsuccessful (reverted) at the pin"},
+		// derivedOnly: NO read recorded at all — must also be weld-unread.
+	}
+	rows := weldDMAggregate(inputs, universe, reads)
+	require.Len(t, rows, 3, "every universe token has a row — none vanishes")
+	byToken := map[string]dmWeldRow{}
+	for _, r := range rows {
+		byToken[r.TokenHex] = r
+	}
+
+	require.Equal(t, verdictWeldUnread, byToken[ghost.Hex()].Verdict,
+		"a failed config read on a universe token is a GATED weld-unread row, never an absent one")
+	require.Equal(t, "(unread)", byToken[ghost.Hex()].ChainTotal,
+		"read-presence is first-class: unread is NEVER represented as zero")
+	require.Contains(t, byToken[ghost.Hex()].ReadError, "reverted")
+
+	require.Equal(t, verdictWeldUnread, byToken[derivedOnly.Hex()].Verdict,
+		"a universe token with NO recorded read is unread too — absence of an attempt is not health")
+	require.Equal(t, "(unread)", byToken[derivedOnly.Hex()].ChainTotal)
+
+	require.Equal(t, verdictExact, byToken[usdc.Hex()].Verdict,
+		"a REAL zero read on an empty-state token stays exact — zero and unread are different facts")
+}
+
+// TestBuildDMWeldReads pins the phase-2 wiring: EVERY weld-universe token
+// gets a read-presence entry — reverted and undecodable results become
+// OK=false facts, never skipped entries.
+func TestBuildDMWeldReads(t *testing.T) {
+	a := common.HexToAddress("0x01")
+	b := common.HexToAddress("0x02")
+	c := common.HexToAddress("0x03")
+	type cfg struct {
+		InterestIndexSnapshot          *big.Int `abi:"interestIndexSnapshot"`
+		TotalNormalizedBorrowingAmount *big.Int `abi:"totalNormalizedBorrowingAmount"`
+		TotalSharesOfBorrowTokens      *big.Int `abi:"totalSharesOfBorrowTokens"`
+		LastUpdateTimestamp            uint64   `abi:"lastUpdateTimestamp"`
+		BorrowApy                      uint64   `abi:"borrowApy"`
+		MinShares                      *big.Int `abi:"minShares"`
+	}
+	okData, err := dmBorrowTokenConfigABI.Methods["borrowTokenConfig"].Outputs.Pack(cfg{
+		InterestIndexSnapshot:          big.NewInt(1e18),
+		TotalNormalizedBorrowingAmount: big.NewInt(12345),
+		TotalSharesOfBorrowTokens:      big.NewInt(1),
+		LastUpdateTimestamp:            1,
+		BorrowApy:                      1,
+		MinShares:                      big.NewInt(0),
+	})
+	require.NoError(t, err)
+
+	results := []multicallResult{
+		{}, // offset padding (round 2 carries the getCurrentIndex leg first)
+		{Success: true, ReturnData: okData},
+		{Success: false},
+		{Success: true, ReturnData: []byte{0xde, 0xad}}, // undecodable
+	}
+	reads := buildDMWeldReads([]common.Address{a, b, c}, results, 1)
+	require.Len(t, reads, 3, "every weld token gets an entry")
+	require.True(t, reads[a].OK)
+	require.Equal(t, "12345", reads[a].Total.String())
+	require.False(t, reads[b].OK)
+	require.Contains(t, reads[b].Note, "reverted")
+	require.False(t, reads[c].OK)
+	require.Contains(t, reads[c].Note, "ABI skew")
 }
 
 // TestComputeDMWeldInputsCoversAllAccounts is the amendment's NAMED mutation
@@ -198,7 +287,9 @@ func TestComputeDMWeldInputsCoversAllAccounts(t *testing.T) {
 	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
 	sampledAccount := []byte{0xaa, 0x01}
 	p1 := &phase1Data{
-		dmAllNet: []store.AssetNetSum{{Asset: usdc.Bytes(), Total: big.NewInt(1000)}}, // ALL accounts (incl. the never-sampled 600)
+		snapshotData: snapshotData{
+			dmAllNet: []store.AssetNetSum{{Asset: usdc.Bytes(), Total: big.NewInt(1000)}}, // ALL accounts (incl. the never-sampled 600)
+		},
 		dmAsOf: []store.AsOfSum{
 			{Account: sampledAccount, Asset: usdc.Bytes(), Side: "debt", Total: big.NewInt(400)},
 		},

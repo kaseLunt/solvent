@@ -15,8 +15,6 @@ package store
 
 import (
 	"context"
-	"net/url"
-	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -25,13 +23,9 @@ import (
 
 func testInvariantStore(t *testing.T) *Store {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
-	if u, err := url.Parse(dsn); err == nil && u.Path == "/solvent" {
-		t.Fatalf("TEST_DATABASE_URL points at the LIVE database %q — the test helpers TRUNCATE; point it at solvent_test (wave-10 DB split)", u.Path)
-	}
+	// The refuse-a-database-named-solvent check and the identity-tuple split
+	// verification both live in the SHARED guard now (destructiveTestDSN,
+	// round-10 F1), which testDeriveStore calls before any TRUNCATE.
 	return testDeriveStore(t)
 }
 

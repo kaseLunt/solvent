@@ -149,6 +149,29 @@ var poolReserveDebtTokenABI = mustParseABI(`[{
 	"outputs": [{"name": "", "type": "address"}]
 }]`)
 
+// poolReservesListABI: getReservesList() → address[]. Provenance: Aave v3
+// Pool. THE AUTHORITATIVE Aave weld universe source (round-10 F3): the F1
+// welds iterate getReservesList(@pin) ∪ derived-assets, so a reserve the DB
+// never derived — the exact phantom-debt shape risk-quant F1 names — still
+// gets a weld row, and an unreadable leg surfaces as weld-unread instead of
+// silently vanishing. Selector 0xd1946dbc.
+var poolReservesListABI = mustParseABI(`[{
+	"type": "function", "name": "getReservesList", "stateMutability": "view",
+	"inputs": [],
+	"outputs": [{"name": "", "type": "address[]"}]
+}]`)
+
+// poolReserveATokenABI: getReserveAToken(asset) → address. Provenance: Aave
+// v3.2+ Pool (same lens family as getReserveVariableDebtToken — the
+// deployed ether.fi Pool is a v3.3-line instance). Resolves the aToken for
+// universe reserves the config streams don't name, so the collateral weld's
+// universe stays authoritative too. Selector 0xcff027d9.
+var poolReserveATokenABI = mustParseABI(`[{
+	"type": "function", "name": "getReserveAToken", "stateMutability": "view",
+	"inputs": [{"name": "asset", "type": "address"}],
+	"outputs": [{"name": "", "type": "address"}]
+}]`)
+
 // poolNormalizedDebtABI: getReserveNormalizedVariableDebt(asset) → uint256
 // (ray). Provenance: Aave v3 Pool. The §3.4(b) identity multiplies the
 // derived scaled figure by THIS value at the SAME pin, so the contract does

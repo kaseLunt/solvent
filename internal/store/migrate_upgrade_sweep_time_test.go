@@ -29,7 +29,6 @@ package store
 import (
 	"context"
 	"math/big"
-	"os"
 	"testing"
 	"time"
 
@@ -37,10 +36,7 @@ import (
 )
 
 func TestMigrateUpgradesV5SweepBaselineFailClosed(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 	const schema = "solvent_migtest_v5_sweeps"
 	engine := "debt_manager"

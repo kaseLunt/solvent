@@ -1,10 +1,27 @@
-// Phase 1 — the REPEATABLE READ READ ONLY snapshot (brief §0). Every DB
-// read of the run happens inside ONE transaction on ONE connection, through
-// the store package's Querier-taking functions, so the drift report's DB
-// side is a single atomic database state. The only RPC inside the phase is
-// the pin-hash header read the default seed requires (seed = hex of the OP
-// pin's block hash — argumentless runs stay reproducible). COMMIT closes
-// the snapshot BEFORE any comparison RPC (vacuum-friendliness).
+// Phase 1 — the REPEATABLE READ READ ONLY snapshot (brief §0), restructured
+// by round-10 F5 into two STRICTLY ordered stages:
+//
+//	Stage A (collectSnapshot): ONE connection, ONE RR RO transaction, EVERY
+//	DB read of the run — then COMMIT AND CLOSE. The function signature
+//	carries NO chain reader and its result (snapshotData) is plain values,
+//	so network-under-snapshot is not merely avoided, it is UNREPRESENTABLE
+//	at this seam: there is no RPC surface in scope while the transaction is
+//	open, and no connection/tx can leak out of the stage
+//	(TestSnapshotDataCarriesNoConnections walks the type). A slow or
+//	retry-storming endpoint therefore can NEVER hold the live database's
+//	xmin (vacuum-friendliness while the daemon writes).
+//
+//	Stage B (runPhase1 tail): pin header hash/time RPC against the FIXED
+//	pins the snapshot chose, seed resolution (default = OP pin hash), the
+//	md5(seed||account) population ordering IN GO, quota selection, and
+//	filtering of the snapshot's population-wide reads down to the sample.
+//	Rewind/fork protection around the fixed pin is unchanged: the weld DB
+//	side was read in the snapshot, the welds compare it with live headers
+//	right after Phase 1 and again in Phase 3 on a fresh connection.
+//
+// The whole run's DB side remains a single atomic database state; the seed
+// default (hex of the OP pin's block hash) keeps argumentless runs
+// reproducible exactly as before — the ordering just runs after commit.
 package main
 
 import (
@@ -44,14 +61,20 @@ type idxObs struct {
 	Block uint64
 }
 
-type phase1Data struct {
-	pins      map[string]uint64      // engine → P
-	pinHashes map[string]common.Hash // chain → pin hash
-	pinTimes  map[string]uint64      // chain → pin header time
-	chainFor  map[string]string      // engine → chain name
-	seed      string
+// snapshotData is everything Stage A reads from the database — PLAIN VALUES
+// ONLY. No connection, no transaction, no chain reader may live here: the
+// type is the F5 structural seam's second half (the first is
+// collectSnapshot's reader-free signature), and
+// TestSnapshotDataCarriesNoConnections enforces it by reflection walk.
+// Population-scoped fields (allAsOfDM, internalDMAll, balances, residue,
+// stableSnap, historyDocs, sourceConflictsByAcct) cover the WHOLE candidate
+// account set — population ∪ forced anchors ∪ includes ∪ accounts-file —
+// because the sample is only known after the seed exists, and the seed
+// needs RPC, which needs the snapshot closed.
+type snapshotData struct {
+	pins      map[string]uint64 // engine → P
+	chainFor  map[string]string // engine → chain name
 	configSHA string
-	deriveLag map[string]any
 
 	baseline      rewindBaseline
 	deriveCursors []store.DeriveCursorState
@@ -60,37 +83,56 @@ type phase1Data struct {
 	counts       *store.ReconRowCounts
 	population   []store.DMBorrowerRow
 	strataCounts map[string]int
-	sel          sampleSelection
 
-	dmAsOf       []store.AsOfSum // sampled accounts @ P_op
+	allAsOfDM    []store.AsOfSum // candidate accounts @ P_op (filtered to the sample post-commit)
 	dmAllNet     []store.AssetNetSum
 	aaveDebtNet  []store.AssetNetSum
 	aaveCollNet  []store.AssetNetSum
 	aaveAsOfHead []store.AsOfSum // golden + top accounts @ P_eth
 
-	internalDM   []store.InternalMismatch
-	internalAave []store.InternalMismatch
+	internalDMAll []store.InternalMismatch // candidate accounts (filtered to the sample post-commit)
+	internalAave  []store.InternalMismatch
 
 	golden  goldenDBSide
 	topAave []store.TopDebtAccount
 
-	freshRows        []store.AccountFreshness
-	sweepGen         store.SweepGenerationState
-	freshBound       time.Duration
-	freshBoundInputs map[string]string
+	freshRows []store.AccountFreshness
+	sweepGen  store.SweepGenerationState
 
-	balances        map[string][]store.BalanceRow
-	sourceConflicts []string
-	replays         []replayTarget
+	balances              map[string][]store.BalanceRow // candidate accounts; consulted per SAMPLED account only
+	sourceConflictsByAcct map[string]string
+	historyDocs           map[string]store.CollateralHistoryAt
 
 	dmIdxBase map[string]idxObs
 	dmAPY     map[string]*store.APYObservation
 
-	residue    map[string]map[string]bool
-	stableSnap map[string]int64
+	residue    map[string]map[string]bool // candidate accounts; consulted per SAMPLED account only
+	stableSnap map[string]int64           // candidate accounts; consulted per SAMPLED account only
 
 	weldDB     map[string]weldDBData
 	invariants *invariantsSection
+}
+
+// phase1Data is the full Phase-1 result: the committed snapshot plus the
+// Stage-B (post-commit) facts — pin headers, seed, selection, and the
+// sample-filtered views of the snapshot's population-wide reads.
+type phase1Data struct {
+	snapshotData
+
+	pinHashes map[string]common.Hash // chain → pin hash
+	pinTimes  map[string]uint64      // chain → pin header time
+	seed      string
+	deriveLag map[string]any
+
+	sel        sampleSelection
+	dmAsOf     []store.AsOfSum          // sampled accounts @ P_op
+	internalDM []store.InternalMismatch // sampled accounts
+
+	sourceConflicts []string
+	replays         []replayTarget
+
+	freshBound       time.Duration
+	freshBoundInputs map[string]string
 }
 
 type replayTarget struct {
@@ -103,11 +145,18 @@ type replayTarget struct {
 // artifact (the count is always exact; the detail is a diagnosis aid).
 const invariantDetailCap = 100
 
-func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, opReader, ethReader *pinnedReader) (*phase1Data, error) {
-	p := &phase1Data{
+// collectSnapshot is Stage A (round-10 F5): connect, open the RR RO
+// transaction, perform EVERY DB read of the run, COMMIT AND CLOSE — and
+// return plain data. The signature carries NO chain reader, which is the
+// structural seam: while the snapshot transaction is open there is no RPC
+// surface in scope, so a network call under the snapshot is unrepresentable
+// without changing this function's signature in review-visible ways.
+// extraAccounts are the pre-snapshot flag/file accounts (forced anchors,
+// -include, -accounts) that must join the candidate read set because the
+// sample itself is chosen only after commit.
+func collectSnapshot(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, extraAccounts [][]byte) (*snapshotData, error) {
+	p := &snapshotData{
 		pins:         map[string]uint64{},
-		pinHashes:    map[string]common.Hash{},
-		pinTimes:     map[string]uint64{},
 		chainFor:     map[string]string{},
 		balances:     map[string][]store.BalanceRow{},
 		dmIdxBase:    map[string]idxObs{},
@@ -129,7 +178,12 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 	if err != nil {
 		return nil, fmt.Errorf("connect (snapshot): %w", err)
 	}
-	defer conn.Close(ctx)
+	closed := false
+	defer func() {
+		if !closed {
+			conn.Close(ctx)
+		}
+	}()
 	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, fmt.Errorf("begin RR RO snapshot: %w", err)
@@ -175,94 +229,36 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		p.pins[aaveEngine] = pin
 	}
 
-	// Pin hashes (the one RPC inside the phase — the seed default needs the
-	// OP pin hash before the sampling query can run).
-	readers := map[string]*pinnedReader{}
-	if opReader != nil {
-		readers["op"] = opReader
-	}
-	if ethReader != nil {
-		readers["eth"] = ethReader
-	}
-	for engine, pin := range p.pins {
-		chainName := p.chainFor[engine]
-		r := readers[chainName]
-		if r == nil {
-			continue
-		}
-		h, _, err := r.headerHash(ctx, pin)
-		if err != nil {
-			return nil, fmt.Errorf("pin hash for %s @ %d: %w", chainName, pin, err)
-		}
-		t, _, err := r.headerTime(ctx, pin)
-		if err != nil {
-			return nil, fmt.Errorf("pin header time for %s @ %d: %w", chainName, pin, err)
-		}
-		p.pinHashes[chainName] = h
-		p.pinTimes[chainName] = t
-	}
-	p.deriveLag = map[string]any{}
-	for chainName, t := range p.pinTimes {
-		p.deriveLag[chainName] = time.Since(time.Unix(int64(t), 0)).Round(time.Second).String()
-	}
-
-	// Seed (§2): default hex of the OP pin's block hash (falls back to the
-	// ETH pin hash on an aave-only run); overridable; ALWAYS echoed.
-	p.seed = o.seed
-	if p.seed == "" {
-		if h, ok := p.pinHashes["op"]; ok {
-			p.seed = h.Hex()
-		} else if h, ok := p.pinHashes["eth"]; ok {
-			p.seed = h.Hex()
-		} else {
-			return nil, abort(exitPrecondition, "aborted: precondition", "no pin hash available to derive the default seed")
-		}
-	}
-
-	// --- sampling (§2) ------------------------------------------------------
+	// --- population, as-of sums, aggregates, internal checks ---------------
+	// Everything account-scoped reads the CANDIDATE set (population ∪
+	// extraAccounts): the sample is chosen post-commit, so the snapshot must
+	// cover every account the selection could name.
 	if wantDM {
-		p.population, err = store.SampleDMBorrowers(ctx, tx, p.pins[dmEngine], p.seed)
+		pinOP := p.pins[dmEngine]
+		p.population, err = store.SampleDMBorrowers(ctx, tx, pinOP)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range p.population {
 			p.strataCounts[r.Stratum]++
 		}
-		var includes []string
-		if o.include != "" {
-			for _, raw := range strings.Split(o.include, ",") {
-				h, err := normalizeAccountHex(raw)
-				if err != nil {
-					return nil, abort(exitUsage, "aborted: usage", "-include: %v", err)
-				}
-				includes = append(includes, h)
-			}
-		}
-		if o.accountsFile != "" {
-			p.sel, err = fileSample(o.accountsFile, p.population)
+		accounts := make([][]byte, 0, len(p.population)+len(extraAccounts))
+		seen := map[string]bool{}
+		for _, r := range p.population {
+			b, err := hex.DecodeString(r.AccountHex)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("population account %q: %w", r.AccountHex, err)
 			}
-		} else {
-			p.sel = selectSample(p.population, o.sample, forcedDMAnchors, includes)
+			accounts = append(accounts, b)
+			seen[r.AccountHex] = true
 		}
-	}
-
-	sampleAccounts := make([][]byte, 0, len(p.sel.Accounts))
-	sampleSet := map[string]bool{}
-	for _, a := range p.sel.Accounts {
-		b, err := hex.DecodeString(a.Row.AccountHex)
-		if err != nil {
-			return nil, fmt.Errorf("sample account %q: %w", a.Row.AccountHex, err)
+		for _, b := range extraAccounts {
+			if h := hex.EncodeToString(b); !seen[h] {
+				seen[h] = true
+				accounts = append(accounts, b)
+			}
 		}
-		sampleAccounts = append(sampleAccounts, b)
-		sampleSet[a.Row.AccountHex] = true
-	}
-
-	// --- as-of sums, aggregates, internal checks ---------------------------
-	if wantDM {
-		pinOP := p.pins[dmEngine]
-		p.dmAsOf, err = store.AsOfEventSums(ctx, tx, dmEngine, sampleAccounts, pinOP)
+		p.allAsOfDM, err = store.AsOfEventSums(ctx, tx, dmEngine, accounts, pinOP)
 		if err != nil {
 			return nil, err
 		}
@@ -270,15 +266,15 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		if err != nil {
 			return nil, err
 		}
-		p.internalDM, err = store.EventBalanceInternalCheck(ctx, tx, dmEngine, sampleAccounts, pinOP)
+		p.internalDMAll, err = store.EventBalanceInternalCheck(ctx, tx, dmEngine, accounts, pinOP)
 		if err != nil {
 			return nil, err
 		}
-		p.residue, err = store.ResidueZeroedAssets(ctx, tx, sampleAccounts, pinOP)
+		p.residue, err = store.ResidueZeroedAssets(ctx, tx, accounts, pinOP)
 		if err != nil {
 			return nil, err
 		}
-		p.stableSnap, err = store.StableSnapBorrowPresence(ctx, tx, sampleAccounts, pinOP)
+		p.stableSnap, err = store.StableSnapBorrowPresence(ctx, tx, accounts, pinOP)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +298,9 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 			}
 		}
 		// Freshness registry + per-account balances (source-exclusivity
-		// probe runs on the SNAPSHOT state, brief §7).
+		// probe runs on the SNAPSHOT state, brief §7) — one batched query
+		// over the candidate set; conflicts keyed per account so Stage B
+		// gates exactly the sampled ones.
 		p.freshRows, err = store.SnapshotFreshnessRows(ctx, tx, dmEngine)
 		if err != nil {
 			return nil, err
@@ -311,43 +309,17 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		if err != nil {
 			return nil, err
 		}
-		for _, a := range p.sel.Accounts {
-			b, _ := hex.DecodeString(a.Row.AccountHex)
-			rows, err := store.ReconBalancesFor(ctx, tx, dmEngine, b)
-			if err != nil {
-				if strings.Contains(err.Error(), "both event- and snapshot-sourced rows") {
-					p.sourceConflicts = append(p.sourceConflicts, err.Error())
-					continue
-				}
-				return nil, err
-			}
-			p.balances[a.Row.AccountHex] = rows
+		p.balances, p.sourceConflictsByAcct, err = store.ReconBalancesForAccounts(ctx, tx, dmEngine, accounts)
+		if err != nil {
+			return nil, err
 		}
-		// Deep-replay targets: first N sampled accounts (sample order —
-		// deterministic) with a successful sweep and a history document at
-		// exactly last_success_block.
+		// Deep-replay candidate documents: every success-swept account's
+		// history doc at exactly last_success_block, prefetched because the
+		// replay targets are picked from the SAMPLE after commit.
 		if o.collateralReplay > 0 {
-			freshByAccount := map[string]store.AccountFreshness{}
-			for _, f := range p.freshRows {
-				freshByAccount[hex.EncodeToString(f.Account)] = f
-			}
-			for _, a := range p.sel.Accounts {
-				if len(p.replays) >= o.collateralReplay {
-					break
-				}
-				f, ok := freshByAccount[a.Row.AccountHex]
-				if !ok || f.Status != "success" || f.LastSuccessBlock == 0 {
-					continue
-				}
-				b, _ := hex.DecodeString(a.Row.AccountHex)
-				doc, found, err := store.CollateralHistoryDoc(ctx, tx, dmEngine, b, f.LastSuccessBlock)
-				if err != nil {
-					return nil, err
-				}
-				if !found {
-					continue
-				}
-				p.replays = append(p.replays, replayTarget{AccountHex: a.Row.AccountHex, Block: f.LastSuccessBlock, Doc: doc})
+			p.historyDocs, err = store.CollateralHistoryDocsAtLastSuccess(ctx, tx, dmEngine)
+			if err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -392,24 +364,6 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		}
 	}
 
-	// Freshness bound (§7 / F7: labeled policy).
-	snapshotInterval := time.Hour
-	if v := os.Getenv("SOLVENT_SNAPSHOT_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			snapshotInterval = d
-		}
-	}
-	if o.snapshotMaxAge == "auto" || o.snapshotMaxAge == "" {
-		p.freshBound, p.freshBoundInputs = freshnessBound(snapshotInterval, p.sweepGen.LastPassSeconds)
-	} else {
-		d, err := time.ParseDuration(o.snapshotMaxAge)
-		if err != nil {
-			return nil, abort(exitUsage, "aborted: usage", "-snapshot-max-age: %v", err)
-		}
-		p.freshBound = d
-		p.freshBoundInputs = map[string]string{"resolved_bound": d.String(), "label": "policy (explicit flag)"}
-	}
-
 	// --- counts + invariant scans (§6, all inside the snapshot) -----------
 	p.counts, err = store.CountReconRows(ctx, tx)
 	if err != nil {
@@ -450,8 +404,180 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		p.weldDB[chainName] = w
 	}
 
+	// COMMIT AND CLOSE (round-10 F5): the connection is gone before this
+	// function returns, so nothing downstream — where the chain readers
+	// live — can possibly hold the snapshot across RPC.
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit snapshot (read-only): %w", err)
+	}
+	if err := conn.Close(ctx); err != nil {
+		return nil, fmt.Errorf("close snapshot connection: %w", err)
+	}
+	closed = true
+	return p, nil
+}
+
+// runPhase1 = Stage A (collectSnapshot, all DB, no chain) + Stage B (all
+// chain, no DB): pin headers, seed, Go-side seed ordering, selection, and
+// the sample-filtered views.
+func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, opReader, ethReader *pinnedReader) (*phase1Data, error) {
+	// -include / -accounts parsing first: pure flag/file facts (no DB, no
+	// RPC) whose accounts must join the snapshot's candidate read set.
+	var includes []string
+	var fileAccounts []string
+	var extras [][]byte
+	if wantDM {
+		if o.include != "" {
+			for _, raw := range strings.Split(o.include, ",") {
+				h, err := normalizeAccountHex(raw)
+				if err != nil {
+					return nil, abort(exitUsage, "aborted: usage", "-include: %v", err)
+				}
+				includes = append(includes, h)
+			}
+		}
+		if o.accountsFile != "" {
+			var err error
+			fileAccounts, err = readAccountsFile(o.accountsFile)
+			if err != nil {
+				return nil, err
+			}
+		}
+		seen := map[string]bool{}
+		for _, h := range append(append(append([]string{}, forcedDMAnchors...), includes...), fileAccounts...) {
+			if seen[h] {
+				continue
+			}
+			seen[h] = true
+			b, err := hex.DecodeString(h)
+			if err != nil {
+				return nil, fmt.Errorf("forced/include account %q: %w", h, err)
+			}
+			extras = append(extras, b)
+		}
+	}
+
+	// ---- Stage A: every DB read, then commit + close ----------------------
+	snap, err := collectSnapshot(ctx, o, cfg, roDSN, vec, wantDM, wantAave, extras)
+	if err != nil {
+		return nil, err
+	}
+	p := &phase1Data{snapshotData: *snap}
+
+	// ---- Stage B: RPC against the FIXED pins the snapshot chose -----------
+	p.pinHashes = map[string]common.Hash{}
+	p.pinTimes = map[string]uint64{}
+	readers := map[string]*pinnedReader{}
+	if opReader != nil {
+		readers["op"] = opReader
+	}
+	if ethReader != nil {
+		readers["eth"] = ethReader
+	}
+	for engine, pin := range p.pins {
+		chainName := p.chainFor[engine]
+		r := readers[chainName]
+		if r == nil {
+			continue
+		}
+		h, _, err := r.headerHash(ctx, pin)
+		if err != nil {
+			return nil, fmt.Errorf("pin hash for %s @ %d: %w", chainName, pin, err)
+		}
+		t, _, err := r.headerTime(ctx, pin)
+		if err != nil {
+			return nil, fmt.Errorf("pin header time for %s @ %d: %w", chainName, pin, err)
+		}
+		p.pinHashes[chainName] = h
+		p.pinTimes[chainName] = t
+	}
+	p.deriveLag = map[string]any{}
+	for chainName, t := range p.pinTimes {
+		p.deriveLag[chainName] = time.Since(time.Unix(int64(t), 0)).Round(time.Second).String()
+	}
+
+	// Seed (§2): default hex of the OP pin's block hash (falls back to the
+	// ETH pin hash on an aave-only run); overridable; ALWAYS echoed.
+	p.seed = o.seed
+	if p.seed == "" {
+		if h, ok := p.pinHashes["op"]; ok {
+			p.seed = h.Hex()
+		} else if h, ok := p.pinHashes["eth"]; ok {
+			p.seed = h.Hex()
+		} else {
+			return nil, abort(exitPrecondition, "aborted: precondition", "no pin hash available to derive the default seed")
+		}
+	}
+
+	// ---- selection (Go-side seed ordering) + sample-filtered views --------
+	if wantDM {
+		if o.accountsFile != "" {
+			p.sel = fileSample(fileAccounts, p.population, o.accountsFile)
+		} else {
+			p.sel = selectSample(orderPopulation(p.population, p.seed), o.sample, forcedDMAnchors, includes)
+		}
+		sampleSet := map[string]bool{}
+		for _, a := range p.sel.Accounts {
+			sampleSet[a.Row.AccountHex] = true
+		}
+		for _, s := range p.allAsOfDM {
+			if sampleSet[hex.EncodeToString(s.Account)] {
+				p.dmAsOf = append(p.dmAsOf, s)
+			}
+		}
+		for _, m := range p.internalDMAll {
+			if sampleSet[hex.EncodeToString(m.Account)] {
+				p.internalDM = append(p.internalDM, m)
+			}
+		}
+		// Source-exclusivity conflicts gate for SAMPLED accounts (the same
+		// scope the old per-account reader had), in sample order.
+		for _, a := range p.sel.Accounts {
+			if msg, ok := p.sourceConflictsByAcct[a.Row.AccountHex]; ok {
+				p.sourceConflicts = append(p.sourceConflicts, msg)
+			}
+		}
+		// Deep-replay targets: first N sampled accounts (sample order —
+		// deterministic) with a successful sweep and a history document at
+		// exactly last_success_block.
+		if o.collateralReplay > 0 {
+			freshByAccount := map[string]store.AccountFreshness{}
+			for _, f := range p.freshRows {
+				freshByAccount[hex.EncodeToString(f.Account)] = f
+			}
+			for _, a := range p.sel.Accounts {
+				if len(p.replays) >= o.collateralReplay {
+					break
+				}
+				f, ok := freshByAccount[a.Row.AccountHex]
+				if !ok || f.Status != "success" || f.LastSuccessBlock == 0 {
+					continue
+				}
+				doc, ok := p.historyDocs[a.Row.AccountHex]
+				if !ok || doc.Block != f.LastSuccessBlock {
+					continue
+				}
+				p.replays = append(p.replays, replayTarget{AccountHex: a.Row.AccountHex, Block: f.LastSuccessBlock, Doc: doc.Doc})
+			}
+		}
+	}
+
+	// Freshness bound (§7 / F7: labeled policy) — env/flag facts, no DB.
+	snapshotInterval := time.Hour
+	if v := os.Getenv("SOLVENT_SNAPSHOT_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			snapshotInterval = d
+		}
+	}
+	if o.snapshotMaxAge == "auto" || o.snapshotMaxAge == "" {
+		p.freshBound, p.freshBoundInputs = freshnessBound(snapshotInterval, p.sweepGen.LastPassSeconds)
+	} else {
+		d, err := time.ParseDuration(o.snapshotMaxAge)
+		if err != nil {
+			return nil, abort(exitUsage, "aborted: usage", "-snapshot-max-age: %v", err)
+		}
+		p.freshBound = d
+		p.freshBoundInputs = map[string]string{"resolved_bound": d.String(), "label": "policy (explicit flag)"}
 	}
 	return p, nil
 }

@@ -18,7 +18,6 @@ import (
 	"database/sql"
 	"math/big"
 	"net/url"
-	"os"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -60,10 +59,7 @@ func scratchSchemaDSN(t *testing.T, dsn, schema string) string {
 }
 
 func TestMigrateUpgradesV3BaselineWithoutDataLoss(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL not set; run `make db-up` and export it")
-	}
+	dsn := destructiveTestDSN(t)
 	ctx := context.Background()
 	const schema = "solvent_migtest_v3"
 	engine := "debt_manager"

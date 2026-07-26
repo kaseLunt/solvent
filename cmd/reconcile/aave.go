@@ -87,18 +87,27 @@ type aaveWeldRow struct {
 	Side       string `json:"side"`
 	DerivedSum string `json:"derived_sum_all_accounts"`
 	ChainTotal string `json:"chain_scaled_total_supply"`
-	Verdict    string `json:"verdict"`
+	Verdict    string `json:"verdict"` // exact | aggregate-mismatch | weld-unread
 	Gated      bool   `json:"gated"`
+	ReadError  string `json:"read_error,omitempty"` // weld-unread rows: WHY the chain leg is unread
 }
 
 // weldAaveAggregate compares all-accounts derived scaled sums per reserve
-// with the chain totals, over the union of keys.
-func weldAaveAggregate(side string, gated bool, derived map[common.Address]*big.Int, chainTotals map[common.Address]*big.Int, tokenByReserve map[common.Address]common.Address) []aaveWeldRow {
+// with the chain reads over the AUTHORITATIVE universe (round-10 F3): the
+// Pool's own getReservesList(@pin) ∪ derived-assets (universe) unioned with
+// both fact sets' keys. A universe reserve whose token resolution or
+// scaledTotalSupply read did not succeed becomes a weld-unread row (gated
+// on the debt side, like every other weld row of that side) — never a
+// silently absent row, never a fake zero.
+func weldAaveAggregate(side string, gated bool, derived map[common.Address]*big.Int, reads map[common.Address]chainRead, tokenByReserve map[common.Address]common.Address, universe []common.Address) []aaveWeldRow {
 	union := map[common.Address]bool{}
+	for _, r := range universe {
+		union[r] = true
+	}
 	for r := range derived {
 		union[r] = true
 	}
-	for r := range chainTotals {
+	for r := range reads {
 		union[r] = true
 	}
 	reserves := make([]common.Address, 0, len(union))
@@ -113,21 +122,28 @@ func weldAaveAggregate(side string, gated bool, derived map[common.Address]*big.
 		if d == nil {
 			d = bigZero()
 		}
-		c := chainTotals[r]
-		if c == nil {
-			c = bigZero()
-		}
 		row := aaveWeldRow{
 			ReserveHex: r.Hex(),
 			TokenHex:   tokenByReserve[r].Hex(),
 			Side:       side,
 			DerivedSum: d.String(),
-			ChainTotal: c.String(),
 			Gated:      gated,
 		}
-		if d.Cmp(c) == 0 {
+		read, present := reads[r]
+		switch {
+		case !present:
+			row.ChainTotal = "(unread)"
+			row.Verdict = verdictWeldUnread
+			row.ReadError = "no scaledTotalSupply read was recorded for this universe reserve"
+		case !read.OK:
+			row.ChainTotal = "(unread)"
+			row.Verdict = verdictWeldUnread
+			row.ReadError = read.Note
+		case d.Cmp(read.Total) == 0:
+			row.ChainTotal = read.Total.String()
 			row.Verdict = verdictExact
-		} else {
+		default:
+			row.ChainTotal = read.Total.String()
 			row.Verdict = verdictAggregateMismatch
 		}
 		rows = append(rows, row)
