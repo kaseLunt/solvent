@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "wave": "task-9 wave 11",
+    "unit": "cmd/reconcile + internal/store reconcile layer + store test guard — the five round-10 structural fixes: the shared destructive-test boundary (F1), taints-in-the-verdict (F2), the authoritative weld universe with first-class read-presence (F3), physical DSN identity (F4), and the no-network-under-snapshot seam (F5).",
+    "purpose": "One named mutant per round-10 finding (Codex's next-steps, binding): guard-bypassed, taint-dropped-from-verdict, unread-token-vanishes, string-identity-revert, and the F5 seam. F5's network-under-snapshot itself is NOT point-representable after the restructure (collectSnapshot's signature carries no chain reader; moving an RPC inside it is a multi-site signature change, not a mutation) — W11M5 therefore attacks the seam's second half (smuggling a connection handle out through snapshotData), and the report carries the structural argument for the first half.",
+    "design_notes": [
+      "ENV FOR THE LOOP: TEST_DATABASE_URL=solvent_test AND SOLVENT_DATABASE_URL=<live solvent DSN> both exported — the shared guard (F1) resolves BOTH identities before any destructive helper runs, so the live DSN must be present for the store-package kills; the guard's own live-DB touch is two read-only identity SELECTs per test process. SOLVENT_LIVE_RPC_TESTS and SOLVENT_ACCEPTANCE stay UNSET.",
+      "The W11M1 mutant disables the guard decision itself; the loop still points TEST_DATABASE_URL at solvent_test, so the destructive helpers keep truncating only the scratch database while the kill test observes the missing refusal directly.",
+      "EVERY KILL IS BEHAVIORAL: each mutant makes a named test assert the exact property the wave-11 brief states, not a coverage count.",
+      "Files edited this wave are CRLF in the working tree where they pre-existed (Serena edits preserved line endings) and LF where new; the applier's exactly-once byte assertion guards every edit either way. Patterns below embed \\n and are verified against working-tree bytes by apply_edit; a 0-count refusal means CRLF bit the pattern and the mutation must be respelled with \\r\\n."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W11M1",
+      "description": "guard-bypassed (round-10 F1): VerifyDestructiveSplit returns nil unconditionally — the shared destructive-test boundary stops deciding",
+      "property": "EVERY destructive helper's split verification must refuse — fail CLOSED with the runbook message — on test/live identity equality OR on any unresolvable identity; a guard that returns nil lets `make test` truncate the live backfill the moment TEST_DATABASE_URL is mis-pointed. Killed by TestDestructiveGuardRefusesSameDatabase (same DSN both sides MUST error with 'physical split required') and TestVerifyDestructiveSplitFailsClosedWithoutADatabase (empty/unparseable DSNs MUST error).",
+      "test": ["go", "test", "./internal/store/", "-run", "TestDestructiveGuardRefusesSameDatabase|TestVerifyDestructiveSplitFailsClosedWithoutADatabase", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "func VerifyDestructiveSplit(ctx context.Context, testDSN, liveDSN string) error {\r\n\tif strings.TrimSpace(testDSN) == \"\" {",
+          "replace": "func VerifyDestructiveSplit(ctx context.Context, testDSN, liveDSN string) error {\r\n\tif true {\r\n\t\treturn nil // MUTANT: guard bypassed\r\n\t}\r\n\tif strings.TrimSpace(testDSN) == \"\" {"
+        }
+      ]
+    },
+    {
+      "id": "W11M2",
+      "description": "taint-dropped-from-verdict (round-10 F2): computeResult ignores the taint set — taints become metadata again",
+      "property": "the verdict function CONSUMES the taint set: any acceptance taint (bypassed required check, pin override, invalid -accounts replay, small sample) forces result 'tainted' with exit 1 even when every gated row is exact — a tainted run structurally CANNOT return pass. Killed by TestTaintedRunCannotPass (taints present + zero gated failures must yield 'tainted'/exit 1; the mutant yields 'pass'/exit 0).",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestTaintedRunCannotPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif len(taints) > 0 {\r\n\t\treturn \"tainted\", exitVerdictFail\r\n\t}\r\n\treturn \"pass\", exitPass",
+          "replace": "\t_ = taints // MUTANT: taints are metadata again, not a verdict input\r\n\treturn \"pass\", exitPass"
+        }
+      ]
+    },
+    {
+      "id": "W11M3",
+      "description": "unread-token-vanishes (round-10 F3): weldDMAggregate's row set reverts to derived ∪ successfully-read tokens — the universe stops being authoritative",
+      "property": "the DM weld iterates the EXPLICIT universe getBorrowTokens(@pin) ∪ derived; a universe token whose borrowTokenConfig read failed (or was never recorded) must surface as a GATED weld-unread row. Under the mutant, a configured token with no derived rows and a reverting config read produces NO row at all — the unverifiable aggregate leg passes silently, which is verbatim the round-10 F3 hole. Killed by TestWeldDMAggregateUnreadTokenIsGatedRow (expects 3 rows including two weld-unread; the mutant drops the read-failed universe token).",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestWeldDMAggregateUnreadTokenIsGatedRow", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/dm.go",
+          "search": "\tunion := map[common.Address]bool{}\r\n\tfor _, tok := range universe {\r\n\t\tunion[tok] = true\r\n\t}\r\n\tfor tok := range derived {\r\n\t\tunion[tok] = true\r\n\t}\r\n\tfor tok := range reads {\r\n\t\tunion[tok] = true\r\n\t}",
+          "replace": "\tunion := map[common.Address]bool{}\r\n\tfor tok := range derived {\r\n\t\tunion[tok] = true\r\n\t}\r\n\tfor tok := range reads {\r\n\t\tif reads[tok].OK {\r\n\t\t\tunion[tok] = true\r\n\t\t}\r\n\t}\r\n\t_ = universe // MUTANT: the weld universe is whatever happened to be readable"
+        }
+      ]
+    },
+    {
+      "id": "W11M4",
+      "description": "string-identity-revert (round-10 F4): DatabaseIdentity's cluster leg reverts to the connection's transport address (inet_server_addr:port) — the pre-fix worldview",
+      "property": "database identity is the PHYSICAL tuple (pg_control system_identifier, database OID, database name): two DSN spellings of one database MUST resolve to the same identity regardless of transport (IPv4 vs IPv6 vs hostname), and the tuple's cluster leg provably comes from pg_control_system(). Killed by TestDatabaseIdentityTupleAndAliasEquivalence twice over: the direct pg_control cross-check (the mutant's addr:port never equals system_identifier) and alias equivalence (localhost→::1 vs 127.0.0.1 produce different transport addresses, so the mutant forks the identity across aliases of one database — exactly the round-10 fail-open).",
+      "test": ["go", "test", "./internal/store/", "-run", "TestDatabaseIdentityTupleAndAliasEquivalence", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "\t\t`SELECT (SELECT system_identifier::text FROM pg_control_system()),\r\n\t\t        (SELECT oid FROM pg_database WHERE datname = current_database()),\r\n\t\t        current_database()`).Scan(&id.SystemIdentifier, &id.DatabaseOID, &id.DatabaseName); err != nil {",
+          "replace": "\t\t`SELECT COALESCE(inet_server_addr()::text, 'local') || ':' || COALESCE(inet_server_port()::text, '0'),\r\n\t\t        (SELECT oid FROM pg_database WHERE datname = current_database()),\r\n\t\t        current_database()`).Scan(&id.SystemIdentifier, &id.DatabaseOID, &id.DatabaseName); err != nil {"
+        }
+      ]
+    },
+    {
+      "id": "W11M5",
+      "description": "F5 seam smuggle (network-under-snapshot's representable half): snapshotData grows a pgx.Tx field — a connection handle crossing the Stage A/Stage B seam",
+      "property": "the F5 guarantee is structural, in two halves: (1) collectSnapshot's signature carries no chain reader, so RPC-under-snapshot is not writable without a review-visible signature change — NOT point-representable, argued in the report; (2) snapshotData, the only value crossing the seam, is PLAIN DATA — no connection, transaction, pool, or reader can leak out of the committed-and-closed stage for later code to hold across RPC. This mutant attacks half (2). Killed by TestSnapshotDataCarriesNoConnections (the reflection walk finds the jackc/pgx type).",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestSnapshotDataCarriesNoConnections", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/phase1.go",
+          "search": "\tweldDB     map[string]weldDBData\r\n\tinvariants *invariantsSection\r\n}",
+          "replace": "\tweldDB     map[string]weldDBData\r\n\tinvariants *invariantsSection\r\n\tleakedTx   pgx.Tx // MUTANT: a connection handle crossing the F5 seam\r\n}"
+        }
+      ]
+    }
+  ]
+}
