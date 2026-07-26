@@ -30,6 +30,10 @@ type fakeRPC struct {
 	// extraNonce perturbs returned header hashes so two endpoints can disagree
 	// about the block at a height (a fork), not merely about the height.
 	extraNonce uint64
+	// callBlocks records the blockNumber argument of every CallContract this
+	// endpoint served, so a test can prove a pinned call forwarded its pin
+	// (and that an unpinned call asked for "latest", i.e. nil).
+	callBlocks []*big.Int
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -86,6 +90,7 @@ func (f *fakeRPC) TransactionByHash(ctx context.Context, hash common.Hash) (*typ
 
 func (f *fakeRPC) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	f.calls++
+	f.callBlocks = append(f.callBlocks, blockNumber)
 	if f.fail {
 		return nil, errors.New(f.name + " down")
 	}
@@ -256,6 +261,64 @@ func TestCallFromSuccessDoesNotRepinSharedHint(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), n)
 	require.Equal(t, aCalls, a.calls, "the shared path still starts at its own hint, not the caller-scoped success")
+}
+
+// CallAtFrom forwards its BLOCK PIN to the endpoint — the property that makes
+// an endpoint-coherent round possible, since a "latest" call could execute on
+// a different block than the one the caller pinned and verified — while Call's
+// own request stays "latest" (nil), so the two cannot be silently conflated.
+// Routing is CallFrom's: caller-scoped start, shared hint untouched.
+func TestCallAtFromPinsBlockAndLeavesSharedHintAlone(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}, blockNum: 7}
+	b := &fakeRPC{name: "b", callResult: []byte{0xbb}}
+	f := newFailover([]rpcClient{a, b})
+
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	out, tok, err := f.CallAtFrom(context.Background(), 1, to, []byte{0x01}, 123456)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xbb}, out)
+	require.Equal(t, 1, tok.Index, "the token names the endpoint that served the pinned call")
+	require.Equal(t, 0, a.calls, "the walk starts at the caller's index, not the shared hint")
+	require.Len(t, b.callBlocks, 1)
+	require.Equal(t, new(big.Int).SetUint64(123456), b.callBlocks[0],
+		"the pin is forwarded to eth_call, not silently dropped to latest")
+
+	// The unpinned variant keeps asking for latest: the pin is CallAtFrom's alone.
+	_, err = f.Call(context.Background(), to, []byte{0x01})
+	require.NoError(t, err)
+	require.Len(t, a.callBlocks, 1)
+	require.Nil(t, a.callBlocks[0], "Call still executes at latest (nil block)")
+
+	// The caller-scoped success wrote nothing shared: the shared path still
+	// starts at endpoint 0 (which the Call above just proved by serving from a).
+	n, err := f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), n)
+}
+
+// CallAtFrom normalizes its start (mod the endpoint count), rotates on error
+// within its own walk exactly like CallFrom, and reports Index -1 when every
+// endpoint fails — the caller can then tell "the pinned endpoint did not
+// serve this" from "nobody did".
+func TestCallAtFromWrapsModuloAndRotatesOnError(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}}
+	b := &fakeRPC{name: "b", fail: true}
+	f := newFailover([]rpcClient{a, b})
+
+	// start 3 on 2 endpoints → endpoint 1; it fails; the walk wraps to 0.
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	out, tok, err := f.CallAtFrom(context.Background(), 3, to, []byte{0x01}, 99)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xaa}, out)
+	require.Equal(t, 0, tok.Index, "the token names the endpoint that actually answered, not the requested start")
+	require.Equal(t, 1, b.calls, "the walk started at the normalized index")
+	require.Equal(t, 1, a.calls)
+	require.Equal(t, new(big.Int).SetUint64(99), a.callBlocks[0], "the pin survives rotation")
+
+	a.fail = true
+	_, tok, err = f.CallAtFrom(context.Background(), 0, to, []byte{0x01}, 99)
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.Equal(t, -1, tok.Index, "all endpoints failed: nothing to reject")
 }
 
 func TestVerifyChainIDAcceptsMatching(t *testing.T) {

@@ -958,6 +958,12 @@ type capturedCall struct {
 //
 // An entry written for endpoint 0 says nothing whatever about endpoint 1.
 type endpointView struct {
+	// head / headSet script this endpoint's chain HEAD, which the poller's
+	// HeadFrom resolution reads. An endpoint with no head scripted fails the
+	// head read (and the walk rotates on), so a test cannot accidentally poll
+	// against a chain it never described.
+	head    uint64
+	headSet bool
 	// hashes is this endpoint's chain: block → hash. A block absent from it
 	// answers "not found", the shape a probe above that endpoint's head takes.
 	hashes map[uint64]common.Hash
@@ -976,30 +982,42 @@ type endpointView struct {
 	reads map[uint64]int
 }
 
-// fakePollChain models chain.Failover's routing contract: CallWithToken serves
-// from the SHARED sticky hint, CallFrom serves from the caller-given start
-// WITHOUT touching that hint, and every call stamps its token with the endpoint
-// that served it — so the tests prove the POLLER, not the fake, chooses the
-// endpoint.
+// fakePollChain models chain.Failover's routing contract: every method is
+// CALLER-SCOPED (HeadFrom / CallAtFrom / HeaderHashFrom walk endpoints from the
+// requested start WITHOUT touching the shared hint, which ActiveEndpoint merely
+// reports), and every call stamps its token with the endpoint that served it —
+// so the tests prove the POLLER, not the fake, chooses the endpoint.
 //
-// HeaderHashFrom additionally models FAILOVER, which the previous fake did not:
-// the real client walks endpoints from the requested start and returns the first
-// answer it gets, stamping the token with whichever endpoint actually replied.
-// A caller that ignores that token silently mixes chain views. Reproducing the
-// walk is what lets a test show the difference between "endpoint 0 answered" and
-// "endpoint 0 was down and endpoint 1 answered in its place".
+// Every read models FAILOVER the way chain.Failover.doFrom does: the walk
+// starts at the requested index, rotates on error, returns the FIRST answer
+// and stamps the token with whichever endpoint actually replied. A caller that
+// ignores that token silently mixes chain views. Reproducing the walk is what
+// lets a test show the difference between "endpoint 0 answered" and "endpoint
+// 0 was down and endpoint 1 answered in its place" — the whole subject of the
+// round's endpoint-coherence guards.
 type fakePollChain struct {
 	endpoints int
 	active    int
-	// respond answers per endpoint index; a nil entry means "reuse index 0".
+	// respond answers the pinned multicall per endpoint index.
 	respond func(idx int, to common.Address, data []byte) ([]byte, error)
 
 	calls  []capturedCall
 	served []int
-	starts []int // CallFrom start indices, in order
+	// starts / atBlocks record each CallAtFrom attempt's requested start index
+	// and pinned block, in order — the proof the round pinned its multicall at
+	// the head it verified rather than calling "latest".
+	starts   []int
+	atBlocks []uint64
 
 	// views is the live chain PER ENDPOINT, grown lazily by view().
 	views map[int]*endpointView
+
+	// headStarts / headServed record each HeadFrom resolution's requested
+	// start index and the endpoint that ANSWERED it (-1 when all failed) — the
+	// record of the poller's routing precedence (explore > pin > shared hint)
+	// and of which endpoint became each round's serving endpoint.
+	headStarts []int
+	headServed []int
 
 	hashStart []int    // HeaderHashFrom start indices, in order
 	hashCalls []uint64 // the height each probe asked about, in order
@@ -1009,20 +1027,74 @@ type fakePollChain struct {
 	hashServed []int
 }
 
-func (c *fakePollChain) CallWithToken(_ context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
-	return c.serve(c.active, to, data)
-}
-
-func (c *fakePollChain) CallFrom(_ context.Context, start int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error) {
-	c.starts = append(c.starts, start)
-	idx := start
-	if c.endpoints > 0 {
-		idx = ((start % c.endpoints) + c.endpoints) % c.endpoints
-	}
-	return c.serve(idx, to, data)
-}
+func (c *fakePollChain) ActiveEndpoint() int { return c.active }
 
 func (c *fakePollChain) EndpointCount() int { return c.endpoints }
+
+// HeadFrom walks endpoints from start exactly as chain.Failover.doFrom does and
+// returns the first scripted head, stamping the token with the endpoint that
+// answered — the resolution that makes that endpoint the round's serving
+// endpoint. The returned Head carries the scripted head height and THAT
+// ENDPOINT'S hash at it, read from the same view HeaderHashFrom serves, so a
+// coherent endpoint answers its own head read and its own header re-read
+// identically — and a test that scripts divergence gets exactly the divergence
+// it scripted.
+func (c *fakePollChain) HeadFrom(_ context.Context, start int) (chain.Head, chain.EndpointToken, error) {
+	c.headStarts = append(c.headStarts, start)
+	n := c.endpoints
+	if n <= 0 {
+		n = 1
+	}
+	first := ((start % n) + n) % n
+	var lastErr error
+	for i := 0; i < n; i++ {
+		idx := (first + i) % n
+		v := c.view(idx)
+		if v.down != nil {
+			lastErr = v.down
+			continue
+		}
+		if !v.headSet {
+			lastErr = fmt.Errorf("no head scripted on endpoint %d", idx)
+			continue
+		}
+		h, err := c.probe(idx, v.head)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		c.headServed = append(c.headServed, idx)
+		return chain.Head{Number: v.head, Time: 1, Hash: h}, chain.EndpointToken{Index: idx}, nil
+	}
+	c.headServed = append(c.headServed, -1)
+	return chain.Head{}, chain.EndpointToken{Index: -1}, lastErr
+}
+
+// CallAtFrom walks endpoints from start (rotating on respond errors, exactly
+// like the real doFrom) and records the pinned block of every attempt. The
+// fake's respond function remains the authority on the response bytes, so a
+// test can script an endpoint whose multicall reports a DIFFERENT execution
+// block than the pin — the serving inconsistency the poller must discard.
+func (c *fakePollChain) CallAtFrom(_ context.Context, start int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error) {
+	c.starts = append(c.starts, start)
+	c.atBlocks = append(c.atBlocks, block)
+	n := c.endpoints
+	if n <= 0 {
+		n = 1
+	}
+	first := ((start % n) + n) % n
+	var lastErr error
+	for i := 0; i < n; i++ {
+		idx := (first + i) % n
+		out, tok, err := c.serve(idx, to, data)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return out, tok, nil
+	}
+	return nil, chain.EndpointToken{Index: -1}, lastErr
+}
 
 // view returns endpoint idx's chain view, creating an empty one on first use.
 func (c *fakePollChain) view(idx int) *endpointView {
@@ -1059,6 +1131,26 @@ func (c *fakePollChain) endpointIndexes() []int {
 // primitive that expresses endpoint DISAGREEMENT: nothing propagates.
 func (c *fakePollChain) setHashOn(endpoint int, block uint64, h common.Hash) {
 	c.view(endpoint).hashes[block] = h
+}
+
+// setHeadOn scripts ONE endpoint's chain head, filling in the standard hash at
+// that height only when the test has not already scripted one — a test about
+// the hash itself stays the authority on it.
+func (c *fakePollChain) setHeadOn(endpoint int, block uint64) {
+	v := c.view(endpoint)
+	v.head, v.headSet = block, true
+	if _, ok := v.hashes[block]; !ok {
+		v.hashes[block] = blockHashAt(block)
+	}
+}
+
+// setHead scripts the same head on EVERY endpoint — the endpoints AGREE the
+// chain is at this height. Most tests are not about head divergence and want
+// this alongside their scripted multicall response.
+func (c *fakePollChain) setHead(block uint64) {
+	for _, i := range c.endpointIndexes() {
+		c.setHeadOn(i, block)
+	}
 }
 
 // setHash writes the same hash into EVERY endpoint's view — the endpoints AGREE
@@ -1254,23 +1346,35 @@ type mcRet struct {
 	ReturnData []byte
 }
 
-// blockHashAt is the deterministic stand-in for a block's hash: a distinct,
-// NON-ZERO hash per height, so a test can build a "live chain" the poller's
-// anchor probes agree with. The zero hash is deliberately never produced —
-// unpackMulticallResult refuses it.
+// blockHashAt is the deterministic stand-in for a block's HEADER hash: a
+// distinct, non-zero hash per height, so a test can build a "live chain" the
+// poller's head reads and anchor probes agree with. It stands in for header
+// hashes only — the multicall's own blockHash output is a different animal
+// (see encodeMulticall).
 func blockHashAt(block uint64) common.Hash {
 	return common.BigToHash(new(big.Int).SetUint64(block + 1))
 }
 
-// encodeMulticall builds a tryBlockAndAggregate return carrying block, that
-// block's hash and rets.
+// encodeMulticall builds a tryBlockAndAggregate return carrying block, rets —
+// and a ZERO blockHash, because that is what every real EVM returns there:
+// the contract computes blockhash(block.number), and BLOCKHASH cannot reach
+// the executing block, so the field is deterministically zero on-chain.
+//
+// FIXTURE-REALISM RULE (Task 9 wave 1, the P0's root cause): every fake in
+// this fleet used to return a NONZERO hash here — a value physically
+// impossible on a real chain — and sixteen waves of tests passed against a
+// poller that could never anchor outside them. The realistic fake is the
+// default; a test that needs a nonzero value (to prove the poller IGNORES this
+// field) must say so explicitly via encodeMulticallWithHash.
 func encodeMulticall(t *testing.T, block uint64, rets []mcRet) []byte {
 	t.Helper()
-	return encodeMulticallWithHash(t, block, blockHashAt(block), rets)
+	return encodeMulticallWithHash(t, block, common.Hash{}, rets)
 }
 
-// encodeMulticallWithHash is encodeMulticall with an explicit block hash, for the
-// cases where the hash itself is what a test is about.
+// encodeMulticallWithHash is encodeMulticall with an explicit block hash, for
+// the cases where the hash itself is what a test is about — today that means
+// proving the poller never consumes it, since a real chain only ever produces
+// the zero value encodeMulticall already uses.
 func encodeMulticallWithHash(t *testing.T, block uint64, hash common.Hash, rets []mcRet) []byte {
 	t.Helper()
 	var h [32]byte
@@ -1509,37 +1613,41 @@ func TestUnpackHardening(t *testing.T) {
 	require.Error(t, err)
 	_, err = unpackAddress("aggregator", chainlinkProxyABI, []byte{0x01})
 	require.Error(t, err)
-	_, _, _, err = unpackMulticallResult([]byte{0xde, 0xad}, 1)
+	_, _, err = unpackMulticallResult([]byte{0xde, 0xad}, 1)
 	require.Error(t, err)
 
 	// A well-formed envelope with the WRONG result count is refused: silently
 	// zipping N results onto M targets would mis-attribute prices.
 	out := encodeMulticall(t, 100, []mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
-	_, _, _, err = unpackMulticallResult(out, 2)
+	_, _, err = unpackMulticallResult(out, 2)
 	require.ErrorContains(t, err, "1 results for 2 calls")
 }
 
-// The multicall's EXECUTION BLOCK HASH is decoded, not discarded: it is the whole
-// basis of the durable poll anchor that lets reorg repair keep provably-canonical
-// history instead of deleting all of it.
-func TestUnpackMulticallKeepsBlockHash(t *testing.T) {
-	want := blockHashAt(5000)
+// The multicall's blockHash output is ACCEPTED AT ZERO — the value every real
+// EVM produces there, since blockhash(block.number) is out of BLOCKHASH's
+// 256-ancestor range — and the decoder's signature exposes no way to read it,
+// so no caller can anchor to it. The earlier decoder REFUSED the zero value,
+// which refused every round on both live chains: the Task 9 wave 1 P0.
+func TestUnpackMulticallAcceptsRealChainZeroBlockHash(t *testing.T) {
 	out := encodeMulticall(t, 5000, []mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
-	block, hash, results, err := unpackMulticallResult(out, 1)
-	require.NoError(t, err)
+	block, results, err := unpackMulticallResult(out, 1)
+	require.NoError(t, err, "the real-EVM zero hash must decode cleanly — refusing it is the P0")
 	require.Equal(t, uint64(5000), block)
-	require.Equal(t, want.Bytes(), hash, "the execution block hash must survive decoding")
 	require.Len(t, results, 1)
 }
 
-// A ZERO block hash is refused: multicall3 returns blockhash(block.number),
-// which is never zero for the executing block, and an anchor holding a zero hash
-// would "verify" against nothing during reorg repair.
-func TestUnpackMulticallRefusesZeroBlockHash(t *testing.T) {
-	out := encodeMulticallWithHash(t, 5000, common.Hash{},
+// The hash word is still DECODED — a response whose second word is not a
+// bytes32 is malformed and refused — its VALUE just never leaves the decoder.
+// A nonzero hash (impossible on a real chain, but cheap for a broken shim to
+// fabricate) decodes exactly like the zero one: the field has no consumer to
+// poison.
+func TestUnpackMulticallIgnoresNonzeroBlockHash(t *testing.T) {
+	out := encodeMulticallWithHash(t, 5000, common.HexToHash("0xdead"),
 		[]mcRet{{Success: true, ReturnData: encodeUint256(t, big.NewInt(1))}})
-	_, _, _, err := unpackMulticallResult(out, 1)
-	require.ErrorContains(t, err, "block hash at 5000 is zero")
+	block, results, err := unpackMulticallResult(out, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5000), block)
+	require.Len(t, results, 1)
 }
 
 // ---------------------------------------------------------------------------

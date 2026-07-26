@@ -386,6 +386,38 @@ func (f *Failover) CallFrom(ctx context.Context, startIndex int, to common.Addre
 	return out, EndpointToken{Index: idx}, nil
 }
 
+// CallAtFrom is CallFrom PINNED AT A BLOCK: the eth_call executes against the
+// state of block `block` rather than "latest", with the same caller-scoped
+// routing and token discipline (the attempt walk starts at startIndex, success
+// neither reads nor writes the shared hint, and the token names the endpoint
+// that answered). Additive for the price poller's endpoint-coherent rounds
+// (Task 9 wave 1): a round that reads its serving endpoint's head N and
+// verifies HeaderHash(N) on both sides of the multicall needs the multicall
+// itself to execute AT N — a "latest" call can land on a different block than
+// the one the round pinned and verified, and the caller could not tell.
+//
+// The pin is a REQUEST, not a proof: a provider that silently serves other
+// state still reports the execution block inside responses that carry one
+// (multicall3's blockNumber output), and callers that depend on the pin must
+// check it there.
+func (f *Failover) CallAtFrom(ctx context.Context, startIndex int, to common.Address, data []byte, block uint64) ([]byte, EndpointToken, error) {
+	n := len(f.clients)
+	start := ((startIndex % n) + n) % n // normalize, negatives included
+	var out []byte
+	idx, err := f.doFrom(ctx, "callAt", start, func(ctx context.Context, c rpcClient) error {
+		res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, new(big.Int).SetUint64(block))
+		if err != nil {
+			return err
+		}
+		out = res
+		return nil
+	})
+	if err != nil {
+		return nil, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
 func (f *Failover) Logs(ctx context.Context, from, to uint64, addrs []common.Address) ([]types.Log, error) {
 	var out []types.Log
 	_, err := f.do(ctx, "getLogs", func(ctx context.Context, c rpcClient) error {

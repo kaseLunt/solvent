@@ -3,11 +3,18 @@ package prices
 // The oracle POLLER: one per chain that carries registry `poll` obligations.
 //
 // A round is ONE multicall3 tryBlockAndAggregate of every obligation on the
-// chain, so all of a round's rows are as-of the SAME execution block — the
-// property that makes them comparable to each other, and the reason the
-// execution block (not a separately-fetched head) is what stamps them. The same
-// call returns that block's HASH, which the round persists as a durable ANCHOR;
-// everything this file does about reorgs rests on it.
+// chain, executed as an ENDPOINT-COHERENT, BLOCK-PINNED round (readRound): one
+// endpoint serves every read, N is that endpoint's head, HeaderHash(N) is
+// pinned on both sides of a multicall executed AT N, and the round persists
+// (N, HeaderHash(N)) as a durable ANCHOR — everything this file does about
+// reorgs rests on it. All of a round's rows are therefore as-of the SAME
+// verified block, the property that makes them comparable to each other.
+//
+// The multicall's own blockHash output plays NO part in the anchor: on-chain
+// it is blockhash(block.number), which EVM BLOCKHASH cannot serve for the
+// executing block, so it is deterministically ZERO on every real chain — the
+// live-proven P0 that refused every round on both chains until Task 9 wave 1
+// recomposed acquisition around the header path.
 //
 // Rounds are CADENCE-driven (SOLVENT_PRICE_INTERVAL, default 60s). The cadence
 // anchor advances when a due round is ATTEMPTED, not when it succeeds, so a
@@ -95,9 +102,14 @@ package prices
 //   - A durable reorg epoch is answered FIRST, before the cadence gate: an epoch
 //     must be acknowledged whether or not a poll is due, or the next apply is
 //     refused anyway — but only once repair can prove which rows survive.
-//   - A transport failure or a malformed multicall response is a round-level
-//     error: nothing is recorded, the durable cursor is untouched, the round
-//     retries.
+//   - A transport failure, a malformed multicall response or a ZERO header
+//     hash is a round-level error: nothing is recorded, the durable cursor is
+//     untouched, the round retries.
+//   - A round whose coherence broke — the chain reorged between the two
+//     HeaderHash(N) reads, the multicall executed at a block other than the
+//     pin, or the failover client served a read from a different endpoint —
+//     is DISCARDED, not an error: the walker's tip-changed posture. The
+//     evidence is logged, nothing is recorded, and the next due round retries.
 //   - An INDIVIDUAL oracle revert (success=false under requireSuccess=false) is
 //     a per-asset skip with a WARN, never a round failure — one broken oracle
 //     must not cost every other asset its price. A round where EVERY oracle
@@ -122,11 +134,12 @@ package prices
 //     that would make classification decidable.
 //   - Once an endpoint IS implicated, the poller pins a CALLER-SCOPED endpoint
 //     preference, exactly the mechanism the collateral snapshotter established
-//     (see internal/snapshot's package doc): start the next multicall one past
-//     the endpoint that served the stale batch via CallFrom, leave the SHARED
-//     routing hint alone (another caller's success on the frozen endpoint would
-//     legitimately re-pin it and bounce us straight back), and release the
-//     preference only on genuine progress. Retaining it across an AMBIGUOUS apply
+//     (see internal/snapshot's package doc): start the next round's
+//     endpoint-resolving head read (HeadFrom) one past the endpoint that
+//     served the stale round, leave the SHARED routing hint alone (another
+//     caller's success on the frozen endpoint would legitimately re-pin it
+//     and bounce us straight back), and release the preference only on
+//     genuine progress. Retaining it across an AMBIGUOUS apply
 //     error is bounded by an ambiguity lease: after maxConsecutiveAmbiguous
 //     consecutive ambiguous errors against the same pinned preference, rotate it
 //     one further so a recovered endpoint is eventually reprobed instead of
@@ -496,15 +509,14 @@ func (p *Poller) Health() (healthy bool, reason string) {
 
 // Step performs one bounded unit of poll work: hydrate durable state if it has
 // not been, answer any durable reorg epoch (never destructively, and not at all
-// on incomplete evidence),
-// then — when the cadence says a round is due — one multicall of every
-// obligation, landed with its (block, hash) anchor through one
-// ApplyPolledPrices transaction.
+// on incomplete evidence), then — when the cadence says a round is due — one
+// endpoint-coherent, block-pinned round of every obligation (readRound), landed
+// with its (N, HeaderHash(N)) anchor through one ApplyPolledPrices transaction.
 //
 // Returns advanced=false when no round is due, when repair refused to proceed,
-// or when a round was refused without recording anything. advanced=true with a
-// nil error means the round's rows, anchor and cursor committed, or that an
-// epoch was acknowledged.
+// or when a round was refused or discarded without recording anything.
+// advanced=true with a nil error means the round's rows, anchor and cursor
+// committed, or that an epoch was acknowledged.
 func (p *Poller) Step(ctx context.Context) (bool, error) {
 	if err := p.hydrate(ctx); err != nil {
 		return false, err
@@ -543,13 +555,22 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	// the backfill migration 00007 prohibits. See store's tombstone above
 	// LatestPriceFreshness for the full argument and the population question.
 
-	block, blockHash, obs, servedBy, err := p.readRound(ctx)
+	round, ok, err := p.readRound(ctx)
 	if err != nil {
 		return false, err
 	}
+	if !ok {
+		// The round was DISCARDED (mid-round reorg, or a serving inconsistency
+		// on the round's one endpoint) — the walker's tip-changed posture:
+		// readRound logged the evidence, nothing is recorded, no error is
+		// raised, and the already-spent cadence slot means the next due round
+		// simply retries.
+		return false, nil
+	}
+	block := round.block
 
-	anchor := store.PollAnchor{BlockNumber: block, BlockHash: blockHash}
-	res, err := p.store.ApplyPolledPrices(ctx, p.engine, p.cfg.ChainID, obs, block, anchor)
+	anchor := store.PollAnchor{BlockNumber: block, BlockHash: round.hash}
+	res, err := p.store.ApplyPolledPrices(ctx, p.engine, p.cfg.ChainID, round.obs, block, anchor)
 	if err != nil {
 		// EVERY apply-error path discards this round's in-memory effects and
 		// re-hydrates durable state. The poller only ever records freshness AFTER
@@ -583,7 +604,7 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 		if errors.Is(err, store.ErrDeriveCursorRegression) {
 			// CAUSE UNKNOWN until investigated — a frozen endpoint and an
 			// unrecorded reorg produce the identical symptom.
-			p.classifyRegression(ctx, block, servedBy, err)
+			p.classifyRegression(ctx, block, round.servedBy, err)
 			return false, nil
 		}
 		// AMBIGUOUS: ApplyPrices returns its transaction Commit's error, so the
@@ -599,7 +620,7 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	}
 
 	p.recordDurableInserts(res)
-	p.logRoundOutcome(block, obs, res)
+	p.logRoundOutcome(block, round.obs, res)
 	p.recordProgress()
 
 	// D-012 CLAUSE 6, AND ITS COST BOUND. A cleared acute signal must not hide the
@@ -778,51 +799,145 @@ func (p *Poller) rehydrateAfterUncertainty(ctx context.Context, why string) {
 	}
 }
 
-// readRound issues one multicall of every obligation and turns the results into
-// deduped observations stamped with the multicall's EXECUTION block, returning
-// that block's hash alongside so the round can be anchored. Individual reverts
-// and undecodable returns are per-asset skips with a WARN; only transport
-// failures and a malformed multicall envelope fail the round.
+// pollRound is one landed round's worth of facts, all attested by ONE
+// endpoint: the pin N (that endpoint's head, the anchor height and every
+// observation's as-of block), HeaderHash(N) as read from it before the
+// multicall and re-verified after (the anchor hash), the deduped
+// observations, and the token naming the endpoint that served every read.
+type pollRound struct {
+	block    uint64
+	hash     []byte
+	obs      []store.PriceObservation
+	servedBy chain.EndpointToken
+}
+
+// readRound performs one ENDPOINT-COHERENT, BLOCK-PINNED round — the walker's
+// reviewed coherent-window pattern (ingest.Walker.Step), transplanted to
+// eth_call:
+//
+//	resolve ONE serving endpoint → N := its head, hashBefore := HeaderHash(N)
+//	→ multicall PINNED AT N on that endpoint → require returned blockNumber == N
+//	→ HeaderHash(N) again, require it still == hashBefore
+//	→ anchor = (N, hashBefore).
+//
+// The multicall's own blockHash output takes NO part in the anchor: on-chain
+// it is blockhash(block.number), which BLOCKHASH cannot serve for the
+// executing block, so it is deterministically ZERO on every real chain — the
+// live-proven P0 this recomposition fixes. The one-execution-context atomicity
+// the old design assumed does not exist via eth_call; what stands in its place
+// is the before/after pin, whose honest residual is the walker's own: a fork
+// diverging exactly at N whose replacement block reuses N's hash is
+// undetectable, and a fork with a DIFFERENT hash at N is caught by the
+// re-read, not atomically.
+//
+// It returns ok=false with a nil error when the round was DISCARDED — a
+// mid-round reorg or a serving inconsistency, each logged with its evidence.
+// That is the walker's tip-changed posture: not an error, nothing recorded,
+// the cadence slot stays spent and the next due round retries.
+//
+// Individual reverts and undecodable returns are per-asset skips with a WARN;
+// only transport failures, a malformed multicall envelope and zero header
+// hashes fail the round.
 //
 // ROUTING PRECEDENCE: an active EXPLORATION hint wins over an attribution pin.
 // When the last regression could not be explained, the pin's evidence no longer
 // accounts for what we are seeing, and continuing to honour it is what let a
 // frozen shared endpoint stall the poller indefinitely. Both are released
 // together on genuine progress.
-func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceObservation, chain.EndpointToken, error) {
-	noServer := chain.EndpointToken{Index: -1}
+func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
+	none := pollRound{servedBy: chain.EndpointToken{Index: -1}}
 	calls := make([]multicall3Call, len(p.targets))
 	for i, t := range p.targets {
 		data, err := t.view.pack(t.Asset)
 		if err != nil {
-			return 0, nil, nil, noServer, fmt.Errorf("price poller %q: pack %s for %s: %w", p.engine, t.Method, t.Symbol, err)
+			return none, false, fmt.Errorf("price poller %q: pack %s for %s: %w", p.engine, t.Method, t.Symbol, err)
 		}
 		calls[i] = multicall3Call{Target: t.Contract, CallData: data}
 	}
 	// requireSuccess=false: one broken oracle must not fail the whole round.
 	input, err := multicall3ABI.Pack("tryBlockAndAggregate", false, calls)
 	if err != nil {
-		return 0, nil, nil, noServer, fmt.Errorf("price poller %q: pack multicall: %w", p.engine, err)
+		return none, false, fmt.Errorf("price poller %q: pack multicall: %w", p.engine, err)
 	}
 
-	var out []byte
-	var servedBy chain.EndpointToken
+	// RESOLVE THE SERVING ENDPOINT FIRST. The head read doubles as the
+	// resolution: whichever endpoint answers it is the round's one serving
+	// endpoint, and every later read is pinned to exactly it. The start index
+	// honours the existing routing machinery — exploration, then an
+	// attribution pin, then the shared hint (READ, never written: a
+	// caller-scoped round must not fight error-driven routing).
+	start := p.chain.ActiveEndpoint()
 	switch {
 	case p.exploreStart >= 0:
-		out, servedBy, err = p.chain.CallFrom(ctx, p.exploreStart, Multicall3Address, input)
+		start = p.exploreStart
 	case p.preferredStart >= 0:
-		// A prior implicated endpoint pinned the caller-scoped preference: start
-		// there, leaving the shared routing hint alone.
-		out, servedBy, err = p.chain.CallFrom(ctx, p.preferredStart, Multicall3Address, input)
-	default:
-		out, servedBy, err = p.chain.CallWithToken(ctx, Multicall3Address, input)
+		// A prior implicated endpoint pinned the caller-scoped preference:
+		// start there, leaving the shared routing hint alone.
+		start = p.preferredStart
 	}
+	head, servedBy, err := p.chain.HeadFrom(ctx, start)
 	if err != nil {
-		return 0, nil, nil, noServer, fmt.Errorf("price poller %q: multicall (%d oracles): %w", p.engine, len(p.targets), err)
+		return none, false, fmt.Errorf("price poller %q: resolve serving endpoint head: %w", p.engine, err)
 	}
-	block, blockHash, results, err := unpackMulticallResult(out, len(p.targets))
+	pin, hashBefore := head.Number, head.Hash
+	// THE ZERO-HASH REFUSAL, moved here from the multicall decoder: the header
+	// path is what the anchor rests on now, and a header whose hash is zero is
+	// a provider protocol violation — an anchor holding it would "verify"
+	// against nothing during reorg repair.
+	if hashBefore == (common.Hash{}) {
+		return none, false, fmt.Errorf("price poller %q: header hash at %d is zero on endpoint %d — a provider protocol violation; refusing to anchor a round to an unverifiable block", p.engine, pin, servedBy.Index)
+	}
+
+	// The multicall executes PINNED AT the serving endpoint's head N — never
+	// at "latest", which could be a different block than the one this round
+	// verified — and must be served by the round's own endpoint: the failover
+	// client rotates on transport errors, and an answer from another endpoint
+	// is another chain view that cannot join this round's pin.
+	out, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin)
 	if err != nil {
-		return 0, nil, nil, servedBy, fmt.Errorf("price poller %q: %w", p.engine, err)
+		return none, false, fmt.Errorf("price poller %q: multicall (%d oracles) pinned at %d: %w", p.engine, len(p.targets), pin, err)
+	}
+	if calledOn.Index != servedBy.Index {
+		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the pinned multicall from another endpoint, so its answer belongs to another chain view",
+			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", calledOn.Index)
+		return none, false, nil // round discarded; next cadence retries
+	}
+	block, results, err := unpackMulticallResult(out, len(p.targets))
+	if err != nil {
+		return none, false, fmt.Errorf("price poller %q: %w", p.engine, err)
+	}
+	// The multicall's returned blockNumber is the one atomic fact the response
+	// carries about its own execution context, and it must equal the pin. A
+	// mismatch means the endpoint did not actually serve the requested state
+	// (a serving inconsistency behind one URL — e.g. a load balancer mixing
+	// nodes); nothing it reported can join this round's anchor.
+	if block != pin {
+		slog.Warn("execution block diverged from the pin, discarding round: the multicall reports it executed at a different height than the block it was pinned to",
+			"engine", p.engine, "pinned", pin, "executed", block, "endpoint", servedBy.Index)
+		return none, false, nil // round discarded; next cadence retries
+	}
+	// Coherent-window close (the walker's pattern): re-read HeaderHash(N) from
+	// the same endpoint. Unchanged, it proves the multicall executed against a
+	// block that was still canonical on that endpoint AFTER the observations
+	// were read; changed, the chain moved mid-round and the observations may
+	// describe a block that no longer exists.
+	hashAfter, recheckOn, err := p.chain.HeaderHashFrom(ctx, servedBy.Index, pin)
+	if err != nil {
+		return none, false, fmt.Errorf("price poller %q: re-read header %d after the pinned multicall: %w", p.engine, pin, err)
+	}
+	if recheckOn.Index != servedBy.Index {
+		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the closing header re-read from another endpoint, so it cannot confirm the round's own chain view",
+			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", recheckOn.Index)
+		return none, false, nil // round discarded; next cadence retries
+	}
+	if hashAfter == (common.Hash{}) {
+		return none, false, fmt.Errorf("price poller %q: header hash at %d is zero on endpoint %d — a provider protocol violation; refusing to anchor a round to an unverifiable block", p.engine, pin, servedBy.Index)
+	}
+	if hashAfter != hashBefore {
+		slog.Warn("tip changed mid-round, discarding round",
+			"engine", p.engine, "block", pin,
+			"before", hashBefore, "after", hashAfter)
+		return none, false, nil // mid-round reorg; next cadence retries
 	}
 
 	set := newPriceSet()
@@ -833,7 +948,7 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 			reverted++
 			slog.Warn("oracle read reverted; skipping this asset for the round (its previous prices stand, and its per-asset freshness now ages)",
 				"engine", p.engine, "symbol", t.Symbol, "asset", t.Asset.Hex(),
-				"oracle", t.Contract.Hex(), "method", t.Method, "block", block)
+				"oracle", t.Contract.Hex(), "method", t.Method, "block", pin)
 			continue
 		}
 		value, err := t.view.unpack(res.returnData)
@@ -844,7 +959,7 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 			undecodable++
 			slog.Warn("oracle return did not decode; skipping this asset for the round",
 				"engine", p.engine, "symbol", t.Symbol, "asset", t.Asset.Hex(),
-				"oracle", t.Contract.Hex(), "method", t.Method, "block", block, "err", err)
+				"oracle", t.Contract.Hex(), "method", t.Method, "block", pin, "err", err)
 			continue
 		}
 		set.add(store.PriceObservation{
@@ -852,7 +967,7 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 			Source:      t.Source,
 			Price:       value,
 			Decimals:    t.Decimals,
-			BlockNumber: block,
+			BlockNumber: pin,
 		})
 	}
 	if skipped := reverted + undecodable; skipped == len(p.targets) {
@@ -862,9 +977,9 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 		// window.
 		slog.Warn("price round DEGRADED: every oracle read failed — no prices recorded this round; the cursor advances for the epoch ack only and health will FAIL within the grace window",
 			"engine", p.engine, "oracles", len(p.targets), "reverted", reverted,
-			"undecodable", undecodable, "block", block)
+			"undecodable", undecodable, "block", pin)
 	}
-	return block, blockHash, set.observations(), servedBy, nil
+	return pollRound{block: pin, hash: hashBefore.Bytes(), obs: set.observations(), servedBy: servedBy}, true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -2220,7 +2335,8 @@ func (p *Poller) classifyRegression(ctx context.Context, block uint64, servedBy 
 // and re-verified as canonical, so a lower reported execution block means that
 // node is behind.
 //
-// Behaviour: pin the next multicall one past the endpoint that served it, drop any
+// Behaviour: pin the next round's endpoint resolution one past the endpoint
+// that served it, drop any
 // exploration hint (we now have a diagnosis, so guessing stops), restart the
 // ambiguity lease (a stale batch is its own bounded preference machinery, not a
 // lease consumption), and count the streak toward the all-endpoints-behind
@@ -2232,7 +2348,7 @@ func (p *Poller) classifyRegression(ctx context.Context, block uint64, servedBy 
 // floods the log with apply errors; this warning exists for the QUIET mode where
 // every endpoint is behind and nothing errors.
 func (p *Poller) onStaleEndpoint(block uint64, servedBy chain.EndpointToken, verifiedAt uint64, cause error) {
-	slog.Warn("price round DEGRADED: stale rpc endpoint — the multicall reported an execution block behind the recorded cursor while our own poll anchor reaches the cursor and is still canonical, so the endpoint is behind; nothing recorded, retrying next round",
+	slog.Warn("price round DEGRADED: stale rpc endpoint — the round's serving endpoint reported a head behind the recorded cursor while our own poll anchor reaches the cursor and is still canonical, so the endpoint is behind; nothing recorded, retrying next round",
 		"engine", p.engine, "execBlock", block, "endpoint", servedBy.Index,
 		"frontierVerifiedAt", verifiedAt, "err", cause)
 	if n := p.chain.EndpointCount(); n > 0 && servedBy.Index >= 0 {
@@ -2336,7 +2452,7 @@ func (p *Poller) onAmbiguousApply() {
 
 	p.staleRotations = 0
 	if p.preferredStart < 0 {
-		return // nothing pinned: multicalls already follow the shared hint
+		return // nothing pinned: rounds already follow the shared hint
 	}
 	p.consecutiveAmbiguous++
 	if p.consecutiveAmbiguous < maxConsecutiveAmbiguous {

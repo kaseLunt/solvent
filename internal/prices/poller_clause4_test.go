@@ -40,6 +40,7 @@ func noAnchorLegacyFixture(t *testing.T, endpoints int) (*fakePriceStore, *fakeP
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: endpoints, respond: okRound(t, 5100, 20, 1_000_000)}
+	ch.setHead(5100)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	asset := realFeeds(t).PollAssets(10)[0].Address
@@ -164,6 +165,7 @@ func TestNeutralizedBacklogIsNotRecountedOnUncertainApplyOrTwiceOnRepair(t *test
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4000, clk.now())
 	st.cursor, st.cursorFound = 4000, true
@@ -220,6 +222,7 @@ func TestFailedRecountAfterANeutralizationReportsUnknownAndTheNextRoundCorrectsI
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
+	ch.setHead(5100)
 	p, clk := newTestPoller(t, st, ch, 10)
 	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
 	st.cursor, st.cursorFound = 5000, true
@@ -286,6 +289,7 @@ func TestFailedRecountAfterASupersedeReportsUnknownAndTheNextRoundCorrectsIt(t *
 	// The round supersedes it, and the recount that would observe the drain fails.
 	st.neutralizedStatsErr = errors.New("connection reset counting the backlog")
 	ch.respond = okRound(t, H, 20, 1_000_000)
+	ch.setHead(H)
 	clk.advance(2 * time.Minute)
 	advanced, err := p.Step(context.Background())
 	require.NoError(t, err)

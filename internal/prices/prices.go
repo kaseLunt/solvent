@@ -429,9 +429,16 @@ var Multicall3Address = common.HexToAddress("0xcA11bde05977b3631167028862bE2a173
 
 // multicall3ABI carries tryBlockAndAggregate, chosen for the same reason the
 // collateral snapshotter chose it: it returns the EXECUTION BLOCK NUMBER
-// atomically with the results, so every price row is stamped with the block it
-// was actually read at rather than a separately-fetched head that may have
-// moved. Selector 0x399542e9, pinned by TestSelectors.
+// atomically with the results, which is what lets a block-pinned round verify
+// that the multicall really executed at the block it pinned. Selector
+// 0x399542e9, pinned by TestSelectors.
+//
+// THE blockHash OUTPUT IS USELESS AND IGNORED (Task 9 wave 1, live-proven on
+// mainnet). On-chain it is blockhash(block.number), and EVM BLOCKHASH serves
+// only the 256 blocks BEFORE the executing one — so the field is
+// deterministically ZERO on every real chain (the known Multicall3 gotcha).
+// The round's anchor hash comes from the header path (readRound's
+// HeaderHash(N) before/after pin), never from this output.
 //
 // DELIBERATE DUPLICATION (disclosed): internal/snapshot carries its own copy of
 // this ABI, its call tuple and its unpacker. Extracting a shared multicall
@@ -472,51 +479,45 @@ type multicallResult struct {
 }
 
 // unpackMulticallResult decodes a tryBlockAndAggregate return: the execution
-// block number, the execution block HASH, and one (success, returnData) pair per
-// submitted call. Any panic from malformed provider bytes is converted into an
-// error.
+// block number and one (success, returnData) pair per submitted call. Any
+// panic from malformed provider bytes is converted into an error.
 //
-// The HASH is the load-bearing addition of the fix wave. An earlier version
-// decoded it and threw it away, which left reorg repair with no way to ask
-// whether a poll round's block still exists on the canonical chain — and
-// therefore no alternative to deleting every polled row above the raw-log
-// walker's deepest verified ancestor. It is returned as raw bytes so the store
-// layer can persist it without importing an address/hash type.
-//
-// A ZERO hash is refused: multicall3 returns blockhash(block.number), which is
-// never zero for the block being executed, so a zero here means the response is
-// malformed or came from a shim that does not implement the call properly — and
-// an anchor with a zero hash would "verify" against nothing.
-func unpackMulticallResult(out []byte, wantCalls int) (block uint64, blockHash []byte, results []multicallResult, err error) {
+// The blockHash output is DECODED — a response whose second word is not a
+// bytes32 is malformed and refused — but its VALUE is deliberately dropped,
+// and the signature carries no way to retrieve it. On-chain that field is
+// blockhash(block.number), which EVM BLOCKHASH cannot serve for the executing
+// block (it reaches only the 256 blocks BEFORE it), so it is deterministically
+// ZERO on every real chain. An earlier wave anchored the round to it — which
+// refused every round on both live chains the moment the poller met a real
+// EVM (Task 9 wave 1 P0). The round's anchor hash is the header path's
+// HeaderHash(N), pinned on both sides of the call in readRound; the zero-hash
+// refusal lives there now, protecting the hash that IS load-bearing.
+func unpackMulticallResult(out []byte, wantCalls int) (block uint64, results []multicallResult, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			block, blockHash, results, err = 0, nil, nil, fmt.Errorf("unpack multicall result: recovered panic: %v", rec)
+			block, results, err = 0, nil, fmt.Errorf("unpack multicall result: recovered panic: %v", rec)
 		}
 	}()
 	vals, err := multicall3ABI.Unpack("tryBlockAndAggregate", out)
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: %w", err)
+		return 0, nil, fmt.Errorf("unpack multicall result: %w", err)
 	}
 	if len(vals) != 3 {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: expected 3 values, got %d", len(vals))
+		return 0, nil, fmt.Errorf("unpack multicall result: expected 3 values, got %d", len(vals))
 	}
 	blockNum, ok := vals[0].(*big.Int)
 	if !ok || !blockNum.IsUint64() {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: block number %v is not a uint64", vals[0])
+		return 0, nil, fmt.Errorf("unpack multicall result: block number %v is not a uint64", vals[0])
 	}
-	hash, ok := vals[1].([32]byte)
-	if !ok {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: block hash is %T, not a bytes32", vals[1])
-	}
-	if hash == ([32]byte{}) {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: block hash at %s is zero — refusing to anchor a round to an unverifiable block", blockNum)
+	if _, ok := vals[1].([32]byte); !ok {
+		return 0, nil, fmt.Errorf("unpack multicall result: block hash is %T, not a bytes32", vals[1])
 	}
 	raw := reflect.ValueOf(vals[2])
 	if raw.Kind() != reflect.Slice {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: returnData is %T, not a slice", vals[2])
+		return 0, nil, fmt.Errorf("unpack multicall result: returnData is %T, not a slice", vals[2])
 	}
 	if raw.Len() != wantCalls {
-		return 0, nil, nil, fmt.Errorf("unpack multicall result: %d results for %d calls", raw.Len(), wantCalls)
+		return 0, nil, fmt.Errorf("unpack multicall result: %d results for %d calls", raw.Len(), wantCalls)
 	}
 	results = make([]multicallResult, raw.Len())
 	for i := 0; i < raw.Len(); i++ {
@@ -526,9 +527,7 @@ func unpackMulticallResult(out []byte, wantCalls int) (block uint64, blockHash [
 			returnData: el.Field(1).Interface().([]byte),
 		}
 	}
-	hashBytes := make([]byte, 32)
-	copy(hashBytes, hash[:])
-	return blockNum.Uint64(), hashBytes, results, nil
+	return blockNum.Uint64(), results, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -711,23 +710,36 @@ var _ PollStore = (*store.Store)(nil)
 
 // PollChain is the poller's chain surface (*chain.Failover satisfies it).
 //
-// CallFrom/EndpointCount back the SEMANTIC-staleness routing the collateral
-// snapshotter established: an RPC endpoint frozen on old chain state answers
-// eth_call successfully, so the failover client's own error-driven rotation
-// never sees a problem — the poller has to route around it itself, with a
-// CALLER-SCOPED preference that leaves the shared routing hint (which other
-// callers' successes legitimately re-pin) alone.
+// EVERY method here is CALLER-SCOPED (the From/token discipline): a poll round
+// is only meaningful if one endpoint serves all of its reads, so the poller
+// resolves its serving endpoint once per round and pins every subsequent read
+// to it, rejecting answers the failover client served from anywhere else. The
+// shared routing hint is READ (ActiveEndpoint seeds the default start) but
+// never written — a caller-scoped round must not fight the error-driven
+// routing other callers depend on.
 //
-// HeaderHashFrom is the ANCESTRY check. Two separate findings need it: reorg
-// repair asks "is this stored poll anchor still canonical" before deleting the
-// rows it covers, and a cursor regression asks the same question before blaming
-// the endpoint that served the round — a regression can equally mean a reorg the
-// walker has not recorded yet, and the two diagnoses point operators in opposite
-// directions.
+//   - HeadFrom RESOLVES the round: whichever endpoint answers is the round's
+//     one serving endpoint, its head N is the round's pin and anchor height,
+//     and the head header's own hash is HeaderHash(N) "before".
+//   - CallAtFrom executes the multicall PINNED AT N. A "latest" call could
+//     execute on a different block than the one the round verified; the pin,
+//     cross-checked against multicall3's returned blockNumber, closes that.
+//   - HeaderHashFrom serves two masters: the round's "after" re-read of N
+//     (the walker's coherent-window pattern), and the ANCESTRY checks — reorg
+//     repair asking "is this stored poll anchor still canonical", and a cursor
+//     regression asking the same before blaming the endpoint that served the
+//     round. A regression can equally mean a reorg the walker has not recorded
+//     yet, and the two diagnoses point operators in opposite directions.
+//   - EndpointCount backs the SEMANTIC-staleness routing the collateral
+//     snapshotter established: an RPC endpoint frozen on old chain state
+//     answers every read successfully, so error-driven rotation never sees a
+//     problem — the poller routes around it itself, with a caller-scoped
+//     preference applied to the NEXT round's HeadFrom start.
 type PollChain interface {
-	CallWithToken(ctx context.Context, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
-	CallFrom(ctx context.Context, startIndex int, to common.Address, data []byte) ([]byte, chain.EndpointToken, error)
+	HeadFrom(ctx context.Context, startIndex int) (chain.Head, chain.EndpointToken, error)
+	CallAtFrom(ctx context.Context, startIndex int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error)
 	HeaderHashFrom(ctx context.Context, startIndex int, block uint64) (common.Hash, chain.EndpointToken, error)
+	ActiveEndpoint() int
 	EndpointCount() int
 }
 

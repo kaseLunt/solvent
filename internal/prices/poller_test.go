@@ -78,6 +78,7 @@ func pollConditions(p *Poller) map[string]string {
 func TestPollerRoundRequestShape(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	advanced, err := p.Step(context.Background())
@@ -105,6 +106,7 @@ func TestPollerRoundRequestShape(t *testing.T) {
 func TestPollerRecordsObservations(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -125,12 +127,16 @@ func TestPollerRecordsObservations(t *testing.T) {
 	require.Equal(t, uint64(5000), st.cursor)
 }
 
-// A1: every landed round persists its EXECUTION (block, hash) as a durable poll
-// anchor, in the same call as its rows — the anchor is what makes a later rewind
-// able to prove which history is still canonical.
+// A1: every landed round persists its verified (N, HeaderHash(N)) as a durable
+// poll anchor, in the same call as its rows — the anchor is what makes a later
+// rewind able to prove which history is still canonical. The hash is the
+// HEADER path's: the fake's multicall returns the real-EVM ZERO hash, so an
+// anchor carrying blockHashAt(5000) can only have come from the endpoint's
+// header, never from the multicall output.
 func TestPollerRoundPersistsHashAnchor(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -138,9 +144,9 @@ func TestPollerRoundPersistsHashAnchor(t *testing.T) {
 
 	batch := st.lastBatch(t)
 	require.NotNil(t, batch.anchor, "a poll round must anchor itself")
-	require.Equal(t, uint64(5000), batch.anchor.BlockNumber, "the anchor is the round's execution block")
+	require.Equal(t, uint64(5000), batch.anchor.BlockNumber, "the anchor is the round's pinned, verified block")
 	require.Equal(t, blockHashAt(5000).Bytes(), batch.anchor.BlockHash,
-		"the anchor carries the hash multicall3 returned, which the decoder used to discard")
+		"the anchor carries the header hash pinned on both sides of the multicall — the multicall's own hash field is zero on a real chain and is ignored")
 	require.Len(t, st.anchors[PollCursorEngine(10)], 1)
 	require.Equal(t, store.PollAnchor{BlockNumber: 5000, BlockHash: blockHashAt(5000).Bytes()},
 		st.anchors[PollCursorEngine(10)][0].PollAnchor)
@@ -155,6 +161,7 @@ func TestPollerETHRatioRow(t *testing.T) {
 	ch := &fakePollChain{endpoints: 1, respond: func(int, common.Address, []byte) ([]byte, error) {
 		return encodeMulticall(t, 900, []mcRet{{Success: true, ReturnData: encodeUint256(t, rate)}}), nil
 	}}
+	ch.setHead(900)
 	p, _ := newTestPoller(t, st, ch, 1)
 
 	_, err := p.Step(context.Background())
@@ -187,6 +194,7 @@ func TestPollerRevertIsPerAsset(t *testing.T) {
 		rets[3] = mcRet{Success: false} // one broken oracle
 		return encodeMulticall(t, 5000, rets), nil
 	}}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -210,6 +218,7 @@ func TestPollerUndecodableInnerReturnIsPerAsset(t *testing.T) {
 		rets[7] = mcRet{Success: true, ReturnData: []byte{0x01, 0x02}} // short word
 		return encodeMulticall(t, 5000, rets), nil
 	}}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -230,6 +239,7 @@ func TestPollerAllFailedStillAdvancesCursor(t *testing.T) {
 		}
 		return encodeMulticall(t, 5000, rets), nil
 	}}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -259,6 +269,7 @@ func TestPollerHealthFailsWhenEveryOracleKeepsFailing(t *testing.T) {
 
 	// Four consecutive intervals in which every oracle reverts.
 	for i := 0; i < 4; i++ {
+		ch.setHead(block)
 		advanced, err := p.Step(context.Background())
 		require.NoError(t, err)
 		require.True(t, advanced, "the cursor still advances for the epoch ack")
@@ -293,6 +304,7 @@ func TestPollerHealthFailsForOneStaleAssetWhileOthersLand(t *testing.T) {
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	for i := 0; i < 5; i++ {
+		ch.setHead(block)
 		_, err := p.Step(context.Background())
 		require.NoError(t, err)
 		block += 100
@@ -317,6 +329,7 @@ func TestPollerHealthFailsForOneStaleAssetWhileOthersLand(t *testing.T) {
 func TestPollerHydratesStaleFreshnessAcrossRestart(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// A previous process priced every asset, but one of them last landed hours
@@ -351,6 +364,7 @@ func TestPollerUnhydratedFreshnessFailsClosed(t *testing.T) {
 	st := newFakePriceStore()
 	st.freshnessErr = errors.New("database unreachable")
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -370,6 +384,7 @@ func TestPollerUnhydratedFreshnessFailsClosed(t *testing.T) {
 func TestPollerCadenceGate(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	advanced, err := p.Step(context.Background())
@@ -383,6 +398,7 @@ func TestPollerCadenceGate(t *testing.T) {
 
 	clk.advance(time.Minute)
 	ch.respond = okRound(t, 5100, 20, 1_000_001)
+	ch.setHead(5100)
 	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
@@ -397,6 +413,7 @@ func TestPollerFailedRoundConsumesCadenceSlot(t *testing.T) {
 	ch := &fakePollChain{endpoints: 1, respond: func(int, common.Address, []byte) ([]byte, error) {
 		return nil, errors.New("transport boom")
 	}}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -419,6 +436,7 @@ func TestPollerMalformedEnvelopeIsRoundError(t *testing.T) {
 	ch := &fakePollChain{endpoints: 1, respond: func(int, common.Address, []byte) ([]byte, error) {
 		return []byte{0xde, 0xad, 0xbe, 0xef}, nil
 	}}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	advanced, err := p.Step(context.Background())
@@ -435,6 +453,7 @@ func TestPollerReorgAnsweredBeforeCadenceGate(t *testing.T) {
 	st.unacked = true
 	st.cursor, st.cursorFound = 4000, true
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	// Make the round NOT due, so only the reorg leg can act.
 	p.lastAttempt = p.now()
@@ -901,6 +920,7 @@ func TestPollerPendingEpochWithLegacyUnanchoredRowsTerminates(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
+	ch.setHead(5100)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// Post-upgrade state: polled rows at 5000, NO anchor anywhere, and a reorg epoch
@@ -983,6 +1003,7 @@ func TestPollerFloorDoesNotBlessANullBoundRowSharingAHeightWithALaterAnchor(t *t
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5200, 20, 1_000_000)}
+	ch.setHead(5200)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// The legacy row and the later round's anchor, at the SAME height. Seeded as two
@@ -1054,6 +1075,7 @@ func TestPollerFloorIsAdmittedInFullWhenEveryRowCarriesItsOwnBinding(t *testing.
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5200, 20, 1_000_000)}
+	ch.setHead(5200)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	assets := realFeeds(t).PollAssets(10)
@@ -2068,6 +2090,7 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) 
 	// revalidation pass — and it is now the SPECIFIED behaviour rather than a defect.
 	canonicalAt(ch, H, 5200)
 	ch.respond = okRound(t, 5200, 20, 1_000_000)
+	ch.setHead(5200)
 	clk.advance(2 * time.Minute)
 
 	advanced, err = p.Step(context.Background())
@@ -2218,6 +2241,7 @@ func TestPollerNeutralizedBacklogSurvivesAndIsRefreshedByANewerRound(t *testing.
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// A marked row at a height the chain never anchored: nothing can ever place it, so
@@ -2289,6 +2313,7 @@ func TestPollerDoesNotRecountTheBacklogOnAnOrdinaryRound(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// A NON-EMPTY backlog at a height nothing will ever revisit — the steady state
@@ -2307,6 +2332,7 @@ func TestPollerDoesNotRecountTheBacklogOnAnOrdinaryRound(t *testing.T) {
 	// so none of them can change the count.
 	for i, block := range []uint64{5000, 5100, 5200} {
 		ch.respond = okRound(t, block, 20, int64(1_000_000+i))
+		ch.setHead(block)
 		clk.advance(2 * time.Minute)
 		advanced, err := p.Step(context.Background())
 		require.NoError(t, err)
@@ -2398,6 +2424,7 @@ func TestPollerRewindResumesFromCursorReadBack(t *testing.T) {
 	deep := uint64(3500)
 	st.rewindDeepTo = &deep
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -2414,6 +2441,7 @@ func TestPollerBootstrapRepairTargetsZero(t *testing.T) {
 	st.unacked = true
 	st.cursorFound = false
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -2432,6 +2460,7 @@ func TestPollerRepairMissingCursorIsAnError(t *testing.T) {
 	st.cursor, st.cursorFound = 4000, true
 	st.repairLeavesNoCursor = true
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -2445,6 +2474,7 @@ func TestPollerReactiveEpochRewind(t *testing.T) {
 	st.cursor, st.cursorFound = 4000, true
 	st.applyErrs = []error{store.ErrUnackedReorgEpoch}
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	advanced, err := p.Step(context.Background())
@@ -2465,6 +2495,7 @@ func TestPollerStaleEndpointPinsNextEndpointAfterVerifyingFrontier(t *testing.T)
 	st.seedAnchor(engine, 5000, blockHashAt(5000))
 	st.applyErrs = []error{store.ErrDeriveCursorRegression}
 	ch := &fakePollChain{endpoints: 3, active: 1, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	canonicalAt(ch, 5000) // our frontier is still canonical
 	msgs := captureWarnings(t)
@@ -2472,19 +2503,24 @@ func TestPollerStaleEndpointPinsNextEndpointAfterVerifyingFrontier(t *testing.T)
 	advanced, err := p.Step(context.Background())
 	require.NoError(t, err, "a stale round is DEGRADED, not an error to back off on")
 	require.False(t, advanced, "nothing was recorded")
-	require.Equal(t, []int{1}, ch.served, "the first round followed the shared hint")
-	require.Equal(t, []int{2}, ch.hashStart, "the ancestry probe avoided the endpoint under suspicion")
-	require.Equal(t, 2, p.preferredStart, "one past the endpoint that served the stale batch")
+	require.Equal(t, []int{1}, ch.headServed, "the first round resolved its serving endpoint from the shared hint")
+	require.Equal(t, []int{1}, ch.served, "and the pinned multicall was served by that same endpoint")
+	require.Equal(t, []int{1, 2}, ch.hashStart,
+		"the round's own closing re-read stayed pinned to its endpoint; the ancestry probe then avoided the endpoint under suspicion")
+	require.Equal(t, []uint64{4000, 5000}, ch.hashCalls,
+		"the re-read asked about the round's pin, the probe about the frontier anchor")
+	require.Equal(t, 2, p.preferredStart, "one past the endpoint that served the stale round")
 	require.True(t, containsSubstring(*msgs, "stale rpc endpoint"))
 	require.Equal(t, 1, p.staleRotations)
 
-	// The next round routes through CallFrom at the pinned start.
+	// The next round resolves its serving endpoint at the pinned start.
 	clk.advance(time.Minute)
 	ch.respond = okRound(t, 5100, 20, 1_000_001)
+	ch.setHead(5100)
 	advanced, err = p.Step(context.Background())
 	require.NoError(t, err)
 	require.True(t, advanced)
-	require.Equal(t, []int{2}, ch.starts, "CallFrom started at the pin")
+	require.Equal(t, []int{1, 2}, ch.headStarts, "the head resolution started at the pin")
 	require.Equal(t, -1, p.preferredStart, "genuine progress released the preference")
 }
 
@@ -2500,6 +2536,7 @@ func TestPollerRegressionDuringWalkerBackoffSuppressesEndpointBlame(t *testing.T
 	st.seedAnchor(engine, 5000, blockHashAt(5000))
 	// The chain replaced our frontier, and no epoch is recorded (walker backing off).
 	ch := &fakePollChain{endpoints: 2, respond: okRound(t, 4900, 20, 1_000_000)}
+	ch.setHead(4900)
 	ch.setHash(5000, common.HexToHash("0xfeed"))
 	st.applyErrs = []error{
 		store.ErrDeriveCursorRegression,
@@ -2532,6 +2569,7 @@ func TestPollerRegressionWithUndeterminedCauseSuppressesRotation(t *testing.T) {
 	st.cursor, st.cursorFound = 5000, true // cursor but NO anchor (post-bootstrap)
 	st.applyErrs = []error{store.ErrDeriveCursorRegression}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -2541,7 +2579,8 @@ func TestPollerRegressionWithUndeterminedCauseSuppressesRotation(t *testing.T) {
 	require.Equal(t, -1, p.preferredStart, "nothing may be pinned on undetermined evidence")
 	require.Zero(t, p.staleRotations)
 	require.True(t, containsSubstring(*msgs, "UNDETERMINED cause"))
-	require.Empty(t, ch.hashCalls, "with no anchor there is nothing to probe")
+	require.Equal(t, []uint64{4000}, ch.hashCalls,
+		"only the round's own coherent-window re-read: with no anchor there is no ancestry probe to issue")
 }
 
 // D3 (UNKNOWN BRANCH, PROBE FAILURE): an anchor exists but cannot be checked.
@@ -2553,7 +2592,11 @@ func TestPollerRegressionWithFailedAncestryProbeSuppressesRotation(t *testing.T)
 	st.seedAnchor(engine, 5000, blockHashAt(5000))
 	st.applyErrs = []error{store.ErrDeriveCursorRegression}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4000, 20, 1_000_000)}
-	ch.failAll(errors.New("probe timed out"))
+	ch.setHead(4000)
+	// The frontier anchor's height is unreadable on EVERY endpoint, while the
+	// round's own reads (head and re-read at 4000) stay healthy — the probe
+	// outage is the ancestry check's alone.
+	ch.failProbe(5000, errors.New("probe timed out"))
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -2572,6 +2615,7 @@ func TestPollerRegressionWithRecordedEpochNeedsNoProbe(t *testing.T) {
 	st.cursor, st.cursorFound = 5000, true
 	st.applyErrs = []error{store.ErrDeriveCursorRegression}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	// HasUnackedReorg is false on the proactive check and true by the time the
 	// apply is classified: a walker rewind landed in between.
@@ -2581,7 +2625,8 @@ func TestPollerRegressionWithRecordedEpochNeedsNoProbe(t *testing.T) {
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, -1, p.preferredStart)
-	require.Empty(t, ch.hashCalls, "the durable reorg check settles it without an RPC")
+	require.Equal(t, []uint64{4000}, ch.hashCalls,
+		"only the round's own re-read: the durable reorg check settles the classification without an ancestry probe")
 	require.True(t, containsSubstring(*msgs, "durable reorg epoch is already recorded"))
 }
 
@@ -2593,6 +2638,7 @@ func TestPollerAnchorDivergenceIsTreatedAsReorg(t *testing.T) {
 	st.cursor, st.cursorFound = 5000, true
 	st.applyErrs = []error{store.ErrPollAnchorDivergence}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -2617,6 +2663,7 @@ func TestPollerAllEndpointsBehindWarns(t *testing.T) {
 		store.ErrDeriveCursorRegression,
 	}
 	ch := &fakePollChain{endpoints: 2, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	canonicalAt(ch, 5000)
 	msgs := captureWarnings(t)
@@ -2645,6 +2692,7 @@ func TestPollerAmbiguousApplyRetainsPinThenRotates(t *testing.T) {
 		errors.New("commit ack lost 3"),
 	}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	canonicalAt(ch, 5000)
 	msgs := captureWarnings(t)
@@ -2677,6 +2725,7 @@ func TestPollerAmbiguousApplyWithoutPinConsumesNoLease(t *testing.T) {
 	st.cursor, st.cursorFound = 4000, true
 	st.applyErrs = []error{errors.New("commit ack lost")}
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -2694,6 +2743,7 @@ func TestPollerRehydratesFreshnessAfterAmbiguousApply(t *testing.T) {
 	st.applyErrs = []error{errors.New("commit ack lost")}
 	st.applyAdvancesDespiteErr = true // the transaction committed; the ack was lost
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
@@ -2714,6 +2764,7 @@ func TestPollerFailedRehydrationMarksVerdictUntrusted(t *testing.T) {
 	st.cursor, st.cursorFound = 4000, true
 	st.applyErrs = []error{errors.New("commit ack lost")}
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -2736,6 +2787,7 @@ func TestPollerFailedRehydrationMarksVerdictUntrusted(t *testing.T) {
 func TestPollerHealthIsRecoverable(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	healthy, _ := p.Health()
@@ -2752,6 +2804,7 @@ func TestPollerHealthIsRecoverable(t *testing.T) {
 	require.Contains(t, reason, "no poll round has durably recorded a usable price")
 
 	ch.respond = okRound(t, 5100, 20, 1_000_001)
+	ch.setHead(5100)
 	_, err = p.Step(context.Background())
 	require.NoError(t, err)
 	healthy, reason = p.Health()
@@ -2815,6 +2868,7 @@ func TestPollerFrozenEndpointAtCursorRefreshesNothing(t *testing.T) {
 	st := newFakePriceStore()
 	st.enforceCursorMonotonic = true
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -2857,6 +2911,7 @@ func TestPollerHydratesBlockAdvanceClockFromDurableAnchor(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// Durable history a previous process left: every asset priced a moment ago, but
@@ -2905,11 +2960,13 @@ func TestPollerQuarantinedAnswerDoesNotRefreshUsableFreshness(t *testing.T) {
 
 	// One good round, then four rounds in which one oracle answers ZERO while the
 	// rest stay healthy. Rounds keep landing and the block keeps advancing.
+	ch.setHead(block)
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 	zeroed = true
 	for i := 0; i < 4; i++ {
 		block += 100
+		ch.setHead(block)
 		clk.advance(time.Minute)
 		_, err = p.Step(context.Background())
 		require.NoError(t, err)
@@ -2932,6 +2989,7 @@ func TestPollerQuarantinedAnswerDoesNotRefreshUsableFreshness(t *testing.T) {
 	// A usable answer clears both: this class is recoverable.
 	zeroed = false
 	block += 100
+	ch.setHead(block)
 	clk.advance(time.Minute)
 	_, err = p.Step(context.Background())
 	require.NoError(t, err)
@@ -2946,6 +3004,7 @@ func TestPollerHydratesQuarantineMarkerAcrossRestart(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5000, 20, 1_000_000)}
+	ch.setHead(5000)
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	assets := realFeeds(t).PollAssets(10)
@@ -2992,6 +3051,11 @@ func TestPollerRepeatedCauseUnknownExploresAlternateEndpointsUntilProgress(t *te
 		}
 		return okRound(t, 4000, 20, 1_000_000)(idx, to, data) // frozen below the cursor
 	}
+	// Each endpoint's HEAD matches the state its multicall serves: the frozen
+	// nodes report the old head, the healthy one a live head.
+	ch.setHeadOn(0, 4000)
+	ch.setHeadOn(1, 4000)
+	ch.setHeadOn(2, 5100)
 	p, clk := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
 
@@ -3003,8 +3067,8 @@ func TestPollerRepeatedCauseUnknownExploresAlternateEndpointsUntilProgress(t *te
 		clk.advance(time.Minute)
 	}
 
-	require.Equal(t, []int{1, 2}, ch.starts,
-		"exploration moved one endpoint further each undiagnosable round, and stopped once a round landed")
+	require.Equal(t, []int{0, 1, 2}, ch.headStarts,
+		"the first round followed the shared hint; exploration then moved one endpoint further each undiagnosable round, and stopped once a round landed")
 	require.Equal(t, uint64(5100), st.cursor, "the healthy endpoint ended the stall")
 	require.Len(t, st.rows, 20)
 	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
@@ -3021,13 +3085,15 @@ func TestPollerCauseUnknownWithOneEndpointCannotExplore(t *testing.T) {
 	st.enforceCursorMonotonic = true
 	st.cursor, st.cursorFound = 5000, true
 	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 4000, 20, 1_000_000)}
+	ch.setHead(4000)
 	p, _ := newTestPoller(t, st, ch, 10)
 
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, -1, p.exploreStart, "one endpoint: exploration is unavailable, not faked")
 	require.Equal(t, -1, p.preferredStart)
-	require.Empty(t, ch.starts, "no CallFrom was issued")
+	require.Equal(t, []int{0}, ch.headStarts,
+		"the round resolved from the shared hint: no exploration start was ever pinned")
 }
 
 // D3-BOUND: an anchor BELOW the cursor cannot cover the heights a regression is
@@ -3046,6 +3112,7 @@ func TestPollerRegressionWithFrontierBelowCursorIsCauseUnknown(t *testing.T) {
 	st.cursor, st.cursorFound = 5000, true
 	st.seedAnchor(engine, 4000, blockHashAt(4000)) // the anchor does NOT reach the cursor
 	ch := &fakePollChain{endpoints: 3, respond: okRound(t, 4500, 20, 1_000_000)}
+	ch.setHead(4500)
 	p, clk := newTestPoller(t, st, ch, 10)
 	canonicalAt(ch, 4000) // it still verifies — and that is exactly the trap
 	msgs := captureWarnings(t)
@@ -3059,8 +3126,8 @@ func TestPollerRegressionWithFrontierBelowCursorIsCauseUnknown(t *testing.T) {
 		clk.advance(time.Minute)
 	}
 
-	require.Empty(t, ch.hashCalls,
-		"the probe is not even issued: an anchor below the cursor cannot answer the question")
+	require.Equal(t, []uint64{4500, 4500, 4500, 4500}, ch.hashCalls,
+		"only the rounds' own re-reads: the ancestry probe is not even issued, because an anchor below the cursor cannot answer the question")
 	require.True(t, containsSubstring(*msgs, "UNDETERMINED cause"))
 	require.True(t, containsSubstring(*msgs, "but the cursor is at"))
 	require.False(t, containsSubstring(*msgs, "stale rpc endpoint"))
