@@ -563,11 +563,12 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	if !ok {
-		// The round was DISCARDED (mid-round reorg, or a serving inconsistency
-		// on the round's one endpoint) — the walker's tip-changed posture:
-		// readRound logged the evidence, nothing is recorded, no error is
-		// raised, and the already-spent cadence slot means the next due round
-		// simply retries.
+		// The round was DISCARDED (an ambiguous bracketing-hash mismatch, or
+		// a serving inconsistency on the round's one endpoint) — the walker's
+		// tip-changed posture: readRound logged the evidence, nothing is
+		// recorded, no error is raised, the non-landing seam already moved
+		// the next round's start, and the already-spent cadence slot means
+		// the next due round simply retries.
 		return false, nil
 	}
 	block := round.block
@@ -857,15 +858,21 @@ type pollRound struct {
 // That is the walker's tip-changed posture: not an error, nothing recorded,
 // the cadence slot stays spent and the next due round retries.
 //
-// ROUTING ON A DISCARD (Codex task-9 round 1 [high]): every coherence or
-// serving-inconsistency discard — the multicall or the closing re-read
-// answered by another endpoint, an execution block diverging from the pin,
-// the pin rejected as unknown — also advances the caller-scoped exploration
-// start past the round's endpoint (routeNextRoundPastDiscard, which states
-// the invariant). The one discard that deliberately does NOT advance is the
-// mid-round reorg: that is evidence about the CHAIN, not the endpoint, and
-// fleeing a healthy endpoint over it would be exactly the false attribution
-// the classification machinery exists to prevent.
+// ROUTING ON EVERY NON-LANDING OUTCOME (Codex task-9 round 2, both findings
+// accepted; controller ruling): LANDING IS THE ONLY OUTCOME THAT KEEPS THE
+// STARTING POINT. Once the round has resolved its serving endpoint, every
+// exit that does not land — the named discards, the ambiguous before/after
+// hash mismatch, out-of-class pin rejections, trailing transport failures,
+// malformed envelopes, closing-header failures, and any failure arm added
+// after this writing — advances the caller-scoped exploration start past
+// the round's endpoint. The advance is applied by ONE deferred seam keyed
+// on the round-landed flag (installed at the resolution below), never by
+// per-arm calls: wave 2 advanced four named arms and round 2 found the
+// fifth and sixth, so the class is closed structurally — a future arm gets
+// the advance by NOT being the landed return, not by remembering a helper.
+// Failure classification (isBlockNotFoundErr) decides the ERROR POSTURE —
+// discard vs error — and nothing else; routing never depends on
+// recognizing phrasings.
 //
 // Individual reverts and undecodable returns are per-asset skips with a WARN;
 // only transport failures, a malformed multicall envelope and zero header
@@ -911,6 +918,24 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	if err != nil {
 		return none, false, fmt.Errorf("price poller %q: resolve serving endpoint head: %w", p.engine, err)
 	}
+
+	// THE ROUTING SEAM — one deferred outcome handler, keyed on the
+	// round-landed flag. From this point on the round HAS a serving endpoint,
+	// and the invariant holds structurally: LANDING IS THE ONLY OUTCOME THAT
+	// KEEPS THE STARTING POINT. Every return below that does not first mark
+	// the round landed — every discard, every error, and every failure arm
+	// anyone adds later — advances the caller-scoped exploration start
+	// through this defer, FOR FREE. Classification at each return decides
+	// only how the failure is REPORTED (discard vs error), never whether
+	// routing moves. Only the single landed return at the end of this
+	// function sets the flag.
+	landed := false
+	defer func() {
+		if !landed {
+			p.routeNextRoundPastNonLanding(servedBy)
+		}
+	}()
+
 	pin, hashBefore := head.Number, head.Hash
 	// THE ZERO-HASH REFUSAL, moved here from the multicall decoder: the header
 	// path is what the anchor rests on now, and a header whose hash is zero is
@@ -932,20 +957,25 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 		if isBlockNotFoundErr(err) {
 			// The pin was REJECTED: no reachable endpoint has the block the
 			// serving endpoint's head named. The serving node may genuinely
-			// be alone on its fork — exploration-worthy information, not an
-			// error to burn the daemon's backoff on retrying against the
-			// same view.
+			// be alone on its fork — worth a WARN with the evidence, not an
+			// error to burn the daemon's backoff on. Recognizing the wording
+			// picks THIS POSTURE ONLY; the routing advance comes from the
+			// seam either way.
 			slog.Warn("pinned block unknown, discarding round: no endpoint could execute at the round's verified head hash, so the serving endpoint may be alone on its fork; the next round starts elsewhere",
 				"engine", p.engine, "block", pin, "hash", hashBefore, "endpoint", servedBy.Index, "err", err)
-			p.routeNextRoundPastDiscard(servedBy)
 			return none, false, nil // round discarded; next cadence retries elsewhere
 		}
+		// An out-of-class rejection wording, a trailing transport failure
+		// masking a rejection (the failover layer keeps only the LAST
+		// endpoint's error), or any other provider failure: the ERROR
+		// posture — and the seam still moves the next round's start (round-2
+		// finding 2: the error posture is fail-closed for correctness and
+		// must never be fail-forever for routing).
 		return none, false, fmt.Errorf("price poller %q: multicall (%d oracles) pinned to %s (block %d): %w", p.engine, len(p.targets), hashBefore, pin, err)
 	}
 	if calledOn.Index != servedBy.Index {
 		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the pinned multicall from another endpoint, so its answer belongs to another chain view",
 			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", calledOn.Index)
-		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	block, results, err := unpackMulticallResult(out, len(p.targets))
@@ -961,7 +991,6 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	if block != pin {
 		slog.Warn("execution block diverged from the pin, discarding round: the multicall reports it executed at a different height than the pinned block's",
 			"engine", p.engine, "pinned", pin, "executed", block, "endpoint", servedBy.Index)
-		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	// Coherent-window close (the walker's pattern): re-read HeaderHash(N) from
@@ -978,20 +1007,27 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	if recheckOn.Index != servedBy.Index {
 		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the closing header re-read from another endpoint, so it cannot confirm the round's own chain view",
 			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", recheckOn.Index)
-		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	if hashAfter == (common.Hash{}) {
 		return none, false, fmt.Errorf("price poller %q: header hash at %d is zero on endpoint %d — a provider protocol violation; refusing to anchor a round to an unverifiable block", p.engine, pin, servedBy.Index)
 	}
 	if hashAfter != hashBefore {
-		// DELIBERATELY NO ROUTING ADVANCE HERE: a mid-round reorg is the
-		// chain's business, not the endpoint's, and moving the next round's
-		// start over it would flee a healthy endpoint on false attribution.
-		slog.Warn("tip changed mid-round, discarding round",
+		// SUBSUMED BY THE SEAM, DELIBERATELY (round 2 finding 1 reverses
+		// wave 2's exclusion): a before/after mismatch from one token is
+		// AMBIGUOUS — genuine chain movement and a stable backend split
+		// behind the same URL (fork A serving the head and the call, fork B
+		// the closing header) are indistinguishable from here, and wave 2's
+		// "chain evidence, not endpoint evidence" reading starved the poller
+		// under the split while a healthy peer sat idle. The false-
+		// attribution objection is void: the advance is caller-scoped
+		// exploration, no endpoint is accused, the shared routing hint is
+		// never written — a genuine reorg discard that advances merely
+		// begins the next round elsewhere, at zero correctness cost.
+		slog.Warn("header hash changed between the round's bracketing reads, discarding round: chain movement and a split backend behind the same URL are indistinguishable here; the next round starts elsewhere",
 			"engine", p.engine, "block", pin,
 			"before", hashBefore, "after", hashAfter)
-		return none, false, nil // mid-round reorg; next cadence retries
+		return none, false, nil // ambiguous discard; next cadence retries elsewhere
 	}
 
 	set := newPriceSet()
@@ -1033,30 +1069,43 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 			"engine", p.engine, "oracles", len(p.targets), "reverted", reverted,
 			"undecodable", undecodable, "block", pin)
 	}
+	// THE ONE LANDED RETURN — the only exit that keeps the starting point.
+	landed = true
 	return pollRound{block: pin, hash: hashBefore.Bytes(), obs: set.observations(), servedBy: servedBy}, true, nil
 }
 
-// routeNextRoundPastDiscard is the routing half of every coherence/serving-
-// inconsistency discard (Codex task-9 round 1 [high]).
+// routeNextRoundPastNonLanding is the routing half of the round's one seam —
+// readRound's deferred outcome handler. Codex task-9 round 1 [high]
+// established the advance for discards; round 2 (both findings accepted)
+// generalized it to EVERY non-landing outcome, because the per-arm approach
+// missed twice: wave 2 advanced four named arms and round 2 found the fifth
+// (the ambiguous bracketing-hash mismatch) and sixth (post-head provider
+// failures taking the error posture).
 //
-// INVARIANT: a discard that cannot name a healthy endpoint must at least
-// ensure the NEXT round starts somewhere else. The discard itself is correct
-// and stays; what it must not do is leave the routing state untouched,
-// because HeadFrom then re-resolves the same endpoint next cadence and an
-// endpoint that serves heads while permanently failing pinned calls starves
-// the poller FOREVER with a healthy peer idle — the fail-closed-not-
-// fail-forever class a fourth time (wave-13 scheduling starvation, wave-15
-// rotation liveness, cause-unknown exploration before both).
+// THE INVARIANT, verbatim from the ruling: LANDING IS THE ONLY OUTCOME THAT
+// KEEPS THE STARTING POINT. Once a round has resolved its serving endpoint,
+// every non-landing outcome — named discard, ambiguous hash mismatch,
+// out-of-class rejection, transport failure, malformed envelope,
+// closing-header failure — advances the caller-scoped exploration start.
+// Failure classification decides the ERROR POSTURE (discard vs error vs
+// backoff), never whether routing moves. Anything less re-resolves the same
+// endpoint next cadence, and an endpoint that serves heads while failing
+// everything after them starves the poller FOREVER with a healthy peer
+// idle — the fail-closed-not-fail-forever class a fifth time (wave-13
+// scheduling starvation, wave-15 rotation liveness, cause-unknown
+// exploration, wave 2's discard arms).
 //
 // The advance is CALLER-SCOPED EXPLORATION past the round's endpoint:
-// advanceExploration records no attribution (a discard is not a diagnosis),
-// the shared routing hint is never written (d1e7d54's ambiguity rules — a
-// caller-scoped round must not fight error-driven routing), and genuine
-// progress releases the hint as always. With a single configured endpoint
-// there is nowhere else to start and advanceExploration says so rather than
-// pretending. A mid-round-reorg discard deliberately does NOT come here:
-// that is evidence about the chain, not the endpoint.
-func (p *Poller) routeNextRoundPastDiscard(servedBy chain.EndpointToken) {
+// advanceExploration records no attribution (a failed round is not a
+// diagnosis), the shared routing hint is never written (d1e7d54's ambiguity
+// rules — a caller-scoped round must not fight error-driven routing), and
+// genuine progress releases the hint as always. Advancing on ambiguity costs
+// nothing and starving on it costs everything. With a single configured
+// endpoint there is nowhere else to start and advanceExploration says so
+// rather than pretending; with every endpoint failing, the advance
+// ping-pongs across the fleet, which is the LIVENESS property — a recovered
+// endpoint is revisited within one rotation, never excluded forever.
+func (p *Poller) routeNextRoundPastNonLanding(servedBy chain.EndpointToken) {
 	p.advanceExploration(servedBy)
 }
 
@@ -1064,16 +1113,21 @@ func (p *Poller) routeNextRoundPastDiscard(servedBy chain.EndpointToken) {
 // eth_call earns from a node that does not have the pinned block, as distinct
 // from a node that failed to answer.
 //
+// CLASSIFICATION DECIDES POSTURE ONLY (Codex task-9 round 2, finding 2): a
+// recognized rejection is reported as a WARN discard; anything else keeps
+// the fail-closed ERROR posture — the daemon's backoff. It has NO routing
+// role. The exploration advance comes from readRound's non-landing seam
+// whether or not any phrasing is recognized, so a rejection worded outside
+// the class, or masked entirely by a trailing transport failure (the
+// failover layer preserves only the LAST endpoint's error), costs log
+// precision and backoff time, never liveness.
+//
 // THE CLASSIFICATION IS BY ERROR TEXT, AND ITS BOUND IS STATED PLAINLY: the
 // accepted phrasings mirror the live matrix's uniformly observed rejection
 // ("block not found" on all four production endpoints, fabricated-hash
 // negative controls included; 2026-07-26) plus the dominant client families'
 // wordings for the same refusal (geth "header for hash not found", erigon
-// "block not found", nethermind "unknown block"). A rejection phrased outside
-// this class degrades to the ERROR posture — the daemon's backoff — which is
-// fail-closed: it can delay recovery, it can never land a round or misroute
-// one. The failover layer preserves the LAST endpoint's error, so an
-// all-endpoints rejection stays classifiable through the wrapping.
+// "block not found", nethermind "unknown block").
 func isBlockNotFoundErr(err error) bool {
 	if err == nil {
 		return false

@@ -9,6 +9,7 @@ package prices
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"reflect"
 	"strings"
@@ -242,22 +243,24 @@ func TestPollerDiscardsRoundWhenExecutionBlockDivergesFromPin(t *testing.T) {
 	require.Len(t, ch.calls, calls, "no RPC while the cadence slot is unspent")
 }
 
-// MID-ROUND REORG DISCARDS: the header hash at the pin changes between the
-// two reads that bracket the multicall, so the observations may describe a
-// block that no longer exists on that endpoint's chain. Same posture and same
-// log shape as the walker's tip-changed window discard.
-//
-// AND — pinned deliberately, against a blanket-advance refactor — this is the
-// ONE discard that must NOT move the next round's start: a mid-round reorg is
-// evidence about the CHAIN, not the endpoint, and routing away from a healthy
-// endpoint over it would be exactly the false attribution the classification
-// machinery exists to prevent.
-func TestPollerDiscardsRoundOnMidRoundReorg(t *testing.T) {
+// BRACKETING-HASH-MISMATCH DISCARDS — AND, reversing wave 2's exclusion
+// (Codex round 2 finding 1, accepted), MOVES THE START. The header hash at
+// the pin changing between the two reads that bracket the multicall was wave
+// 2's "mid-round reorg: chain evidence, not endpoint evidence" — but a
+// stable backend split behind the same URL produces the IDENTICAL
+// observation, the two are indistinguishable from one token, and refusing to
+// move on the ambiguity starved the poller under the split while a healthy
+// peer sat idle. The discard stays (the observations may describe a block
+// that no longer exists on that endpoint's chain); the START moves, because
+// the advance is caller-scoped exploration that accuses nobody — a genuine
+// reorg pays zero correctness cost for beginning its next round elsewhere.
+func TestPollerBracketingHashMismatchDiscardsAndMovesTheStart(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 2, active: 0}
 	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
-		// The chain reorgs at the pin WHILE the multicall is in flight: the
-		// closing re-read will see a different block at 5000.
+		// The hash at the pin changes WHILE the multicall is in flight —
+		// chain movement or a second backend behind the URL, unknowable: the
+		// closing re-read will see a different block at 5000 either way.
 		ch.setHashOn(0, 5000, common.HexToHash("0xfeed"))
 		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
 	}
@@ -266,13 +269,14 @@ func TestPollerDiscardsRoundOnMidRoundReorg(t *testing.T) {
 	msgs := captureWarnings(t)
 
 	advanced, err := p.Step(context.Background())
-	require.NoError(t, err, "a mid-round reorg is the chain's business, not a poller fault")
+	require.NoError(t, err, "the ambiguous mismatch is a discard, not an error")
 	require.False(t, advanced)
-	require.Empty(t, st.applied, "an anchor for a vanished block was never written")
-	require.True(t, containsSubstring(*msgs, "tip changed mid-round, discarding round"))
-	require.Equal(t, -1, p.exploreStart,
-		"a mid-round reorg implicates the chain, not the endpoint: the next round's start does NOT move")
-	require.Equal(t, -1, p.preferredStart)
+	require.Empty(t, st.applied, "an anchor the close could not confirm was never written")
+	require.True(t, containsSubstring(*msgs, "changed between the round's bracketing reads"))
+	require.Equal(t, 1, p.exploreStart,
+		"LANDING IS THE ONLY OUTCOME THAT KEEPS THE STARTING POINT: the ambiguous mismatch moved the next round's start (round-2 finding 1)")
+	require.Equal(t, -1, p.preferredStart,
+		"exploration, not attribution: ambiguous evidence accuses nobody")
 }
 
 // COHERENCE BREACH ON THE MULTICALL DISCARDS: the failover client rotates on
@@ -455,6 +459,441 @@ func TestPollerPinRejectionExploresAndTheNextRoundLandsElsewhere(t *testing.T) {
 	require.Equal(t, blockHashAt(5000).Bytes(), st.lastBatch(t).anchor.BlockHash,
 		"the landed anchor is endpoint 1's verified header hash, not the private fork's")
 	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+}
+
+// ---------------------------------------------------------------------------
+// Task 9 wave 3: ONE routing invariant — landing is the only outcome that
+// keeps the starting point (Codex round 2, both findings; controller ruling).
+// ---------------------------------------------------------------------------
+
+// ROUND-2 FINDING 1, END TO END: a STABLE same-token backend split — fork A
+// answers the head read and executes the call, fork B answers the closing
+// header, every cadence, behind ONE endpoint token — while a healthy peer
+// sits idle. Wave 2 classified the before/after mismatch as chain movement
+// and kept the starting point, so every cadence re-resolved the split URL
+// and the poller starved indefinitely. The property under test is RECOVERY:
+// the ambiguous discard moves the start, and the NEXT cadence lands a FULL
+// round (anchor + observations + cursor) through the healthy peer.
+func TestPollerStableSameTokenBackendSplitRecoversThroughTheHealthyPeer(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	forkB := common.HexToHash("0xb10cb10c")
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 0 {
+			// The OTHER backend behind the same URL answers the closing
+			// header — EVERY cadence, not once: whatever the head read saw,
+			// the close sees the other fork. The split is stable, so without
+			// the routing advance no round through this URL can ever land.
+			if ch.view(0).hashes[5000] == forkB {
+				ch.setHashOn(0, 5000, blockHashAt(5000))
+			} else {
+				ch.setHashOn(0, 5000, forkB)
+			}
+		}
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, clk := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	// Round 1: resolved by endpoint 0 (the shared hint); the close reads fork
+	// B's block — an ambiguous mismatch, discarded, AND the start moves.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "the ambiguous discard is not an error")
+	require.False(t, advanced)
+	require.Empty(t, st.applied, "nothing recorded through the split URL")
+	require.True(t, containsSubstring(*msgs, "changed between the round's bracketing reads"))
+	require.Equal(t, 1, p.exploreStart, "…and the mismatch moved the next round's start")
+	require.Equal(t, -1, p.preferredStart, "no attribution: the mismatch is ambiguous evidence")
+
+	// Round 2, next cadence: resolves the healthy peer and lands in full —
+	// eventual progress, not a correct discard repeated forever.
+	clk.advance(time.Minute)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed a full round through the healthy peer")
+	require.Equal(t, []int{0, 1}, ch.headStarts, "round 2 STARTED at the advanced exploration hint")
+	require.Equal(t, []int{0, 1}, ch.headServed, "endpoint 1 resolved round 2")
+	batch := st.lastBatch(t)
+	require.Equal(t, uint64(5000), batch.through)
+	require.Len(t, batch.obs, 20, "the full round's observations were written")
+	require.NotNil(t, batch.anchor)
+	require.Equal(t, blockHashAt(5000).Bytes(), batch.anchor.BlockHash,
+		"the landed anchor is the healthy peer's verified hash, not either of the split URL's forks")
+	require.Equal(t, uint64(5000), st.cursor)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+	require.Equal(t, -1, p.preferredStart, "no endpoint was ever accused")
+}
+
+// ROUND-2 FINDING 2, END TO END: a TRAILING TRANSPORT FAILURE MASKS the
+// recognized rejection class. Endpoint 0's head names a private-fork block A;
+// its own call path rejects the pin with the recognized "block not found"
+// wording — but the failover walk keeps only the LAST endpoint's error, and
+// endpoint 1's call path fails with a transport error. Wave 2 advanced the
+// start only when isBlockNotFoundErr recognized the FINAL error, so this
+// round took the error posture with routing untouched and every later
+// cadence resolved endpoint 0 again — even though endpoint 1 would land from
+// its own canonical head B. The seam advances on the un-recognized failure
+// too: posture and routing are separate concerns.
+func TestPollerMixedRejectionTransportFailureRecoversThroughThePeersOwnHead(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 5000, 20, 1_000_000)}
+	// Endpoint 0's HEADER path: a private fork at 5000 (scripted before
+	// setHeadOn, which respects an existing hash). Its CALL path has never
+	// heard of that block — the recognized rejection…
+	ch.setHashOn(0, 5000, common.HexToHash("0xa10e"))
+	ch.setHeadOn(0, 5000)
+	ch.splitCallBackendOn(0)
+	ch.setHeadOn(1, 5000) // endpoint 1: the canonical chain, its own head B
+	// …and endpoint 1's call path is briefly unreachable, so the walk's FINAL
+	// error — the only one the failover layer surfaces — is transport.
+	peerCalls := ch.splitCallBackendOn(1)
+	peerCalls.down = errors.New("connection reset by peer")
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	_, err := p.Step(context.Background())
+	require.ErrorContains(t, err, "connection reset by peer",
+		"the surfaced error is the transport failure: the recognized rejection wording is masked")
+	require.Empty(t, st.applied)
+	require.Equal(t, 1, p.exploreStart,
+		"routing must not depend on RECOGNIZING the failure: the un-landed round advanced the start anyway (round-2 finding 2)")
+	require.Equal(t, -1, p.preferredStart)
+
+	// The transport blip passes: endpoint 1's call path serves its own
+	// canonical chain again.
+	peerCalls.down = nil
+	peerCalls.hashes[5000] = blockHashAt(5000)
+
+	clk.advance(time.Minute)
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed through endpoint 1's OWN head B")
+	require.Equal(t, []int{0, 1}, ch.headStarts, "round 2 started at the advanced hint")
+	require.Equal(t, blockHashAt(5000).Bytes(), st.lastBatch(t).anchor.BlockHash,
+		"the landed anchor is the peer's canonical head, not the private fork's")
+	require.Equal(t, uint64(5000), st.cursor)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+}
+
+// A MALFORMED MULTICALL ENVELOPE has the same unchanged-routing shape as the
+// masked rejection (round-2 finding 2's list): the round takes the ERROR
+// posture — a broken provider is an operator-visible fault — and the seam
+// still moves the start, so the next cadence lands through the peer instead
+// of re-resolving the endpoint that served garbage.
+func TestPollerMalformedEnvelopeAdvancesAndTheNextRoundLandsElsewhere(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 0 {
+			// Served without transport error, so no rotation: the round's own
+			// endpoint answers with an undecodable envelope.
+			return []byte{0xde, 0xad, 0xbe, 0xef}, nil
+		}
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.ErrorContains(t, err, "unpack multicall result", "a malformed envelope keeps the error posture")
+	require.False(t, advanced)
+	require.Empty(t, st.applied)
+	require.Equal(t, 1, p.exploreStart, "…and the error still moved the next round's start")
+	require.Equal(t, -1, p.preferredStart)
+
+	clk.advance(time.Minute)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed through the peer")
+	require.Equal(t, []int{0, 1}, ch.headStarts)
+	require.Equal(t, blockHashAt(5000).Bytes(), st.lastBatch(t).anchor.BlockHash)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+}
+
+// A TOTAL CLOSING-HEADER FAILURE — the re-read of the pin cannot be answered
+// by ANY endpoint — is the last of round-2 finding 2's named shapes: an error
+// (the round cannot prove its pin stayed canonical), and the seam still
+// moves the start. The next cadence lands through the peer's OWN head, which
+// its header path serves fine.
+func TestPollerClosingHeaderFailureAdvancesAndTheNextRoundLandsElsewhere(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 0 {
+			// The header path at the pin dies mid-round on EVERY endpoint:
+			// the closing re-read has nowhere to go. (Head reads at 5001 are
+			// untouched, so the peer still resolves next cadence.)
+			ch.failProbe(5000, errors.New("header 5000 lost mid-round"))
+			return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+		}
+		return okRound(t, 5001, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHeadOn(0, 5000)
+	ch.setHeadOn(1, 5001) // the peer is one block ahead: its own head, its own hash
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.ErrorContains(t, err, "re-read header 5000", "a total closing failure keeps the error posture")
+	require.False(t, advanced)
+	require.Empty(t, st.applied)
+	require.Equal(t, 1, p.exploreStart, "…and the error still moved the next round's start")
+	require.Equal(t, -1, p.preferredStart)
+
+	clk.advance(time.Minute)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed through the peer's own head")
+	require.Equal(t, []int{0, 1}, ch.headStarts)
+	batch := st.lastBatch(t)
+	require.Equal(t, uint64(5001), batch.through)
+	require.Equal(t, blockHashAt(5001).Bytes(), batch.anchor.BlockHash)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+}
+
+// THE PRINCIPLE TEST — the class-closer. Every currently reachable
+// post-resolution non-landing exit of readRound, table-driven, with ONE
+// uniform assertion block: the round records nothing, and the caller-scoped
+// exploration start ADVANCES past the round's endpoint. What varies per row
+// is only the injected failure shape and the error POSTURE the classifier
+// picks; the routing assertion never varies, because the invariant does not:
+// LANDING IS THE ONLY OUTCOME THAT KEEPS THE STARTING POINT.
+//
+// The advance is applied by readRound's single deferred seam, so a NEW
+// failure arm forgetting routing is structurally impossible — it would have
+// to mark itself landed to dodge the defer, and rows driven through the seam
+// fail the moment any exit keeps the start. Two controls bracket the table:
+// a landed round KEEPS the start, and a pre-resolution failure (no serving
+// endpoint exists yet) moves nothing, because the invariant begins at
+// resolution and there is nothing to advance past on a total outage.
+func TestPollerEveryNonLandingOutcomeAdvancesTheRoundsStartingPoint(t *testing.T) {
+	privateHash := common.HexToHash("0xa10e")
+	cases := []struct {
+		name    string
+		arrange func(ch *fakePollChain)
+		wantErr string // "" = the discard posture; otherwise the error posture's wording
+	}{
+		{
+			name: "hash-pin rejection: no reachable backend has the serving head's block",
+			arrange: func(ch *fakePollChain) {
+				ch.setHashOn(0, 5000, privateHash) // endpoint 0's head names a private-fork block…
+				ch.splitCallBackendOn(0)           // …its own call path has never heard of
+			},
+		},
+		{
+			name: "ambiguous bracketing-hash mismatch: the close reads another fork",
+			arrange: func(ch *fakePollChain) {
+				prev := ch.respond
+				ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+					ch.setHashOn(0, 5000, common.HexToHash("0xfeed"))
+					return prev(idx, to, data)
+				}
+			},
+		},
+		{
+			name: "multicall answered by another endpoint",
+			arrange: func(ch *fakePollChain) {
+				prev := ch.respond
+				ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+					if idx == 0 {
+						return nil, errors.New("endpoint 0 dropped the call")
+					}
+					return prev(idx, to, data)
+				}
+			},
+		},
+		{
+			name: "execution block diverged from the pin",
+			arrange: func(ch *fakePollChain) {
+				ch.respond = okRound(t, 4999, 20, 1_000_000)
+			},
+		},
+		{
+			name: "closing re-read answered by another endpoint",
+			arrange: func(ch *fakePollChain) {
+				prev := ch.respond
+				ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+					ch.failProbeOn(0, 5000, errors.New("endpoint 0 lost header 5000"))
+					return prev(idx, to, data)
+				}
+			},
+		},
+		{
+			name: "zero header hash at the head read (provider protocol violation)",
+			arrange: func(ch *fakePollChain) {
+				ch.setHashOn(0, 5000, common.Hash{})
+			},
+			wantErr: "header hash at 5000 is zero",
+		},
+		{
+			name: "trailing transport failure masks a recognized rejection",
+			arrange: func(ch *fakePollChain) {
+				ch.setHashOn(0, 5000, privateHash)
+				// Endpoint 0 rejects with the recognized class; endpoint 1's
+				// transport failure is the LAST error and masks it.
+				ch.splitCallBackendOn(0)
+				ch.splitCallBackendOn(1).down = errors.New("connection reset by peer")
+			},
+			wantErr: "connection reset by peer",
+		},
+		{
+			name: "out-of-class rejection wording (fail-closed error posture)",
+			arrange: func(ch *fakePollChain) {
+				ch.splitCallBackendOn(0).down = errors.New("state pruned at requested height")
+				ch.splitCallBackendOn(1).down = errors.New("state pruned at requested height")
+			},
+			wantErr: "state pruned",
+		},
+		{
+			name: "total transport failure on the pinned call",
+			arrange: func(ch *fakePollChain) {
+				ch.respond = func(int, common.Address, []byte) ([]byte, error) {
+					return nil, errors.New("eth_call transport failure")
+				}
+			},
+			wantErr: "eth_call transport failure",
+		},
+		{
+			name: "malformed multicall envelope",
+			arrange: func(ch *fakePollChain) {
+				ch.respond = func(int, common.Address, []byte) ([]byte, error) {
+					return []byte{0xde, 0xad, 0xbe, 0xef}, nil
+				}
+			},
+			wantErr: "unpack multicall result",
+		},
+		{
+			name: "closing header re-read fails on every endpoint",
+			arrange: func(ch *fakePollChain) {
+				prev := ch.respond
+				ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+					ch.failProbe(5000, errors.New("header path lost mid-round"))
+					return prev(idx, to, data)
+				}
+			},
+			wantErr: "re-read header 5000",
+		},
+		{
+			name: "zero header hash on the close",
+			arrange: func(ch *fakePollChain) {
+				prev := ch.respond
+				ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+					ch.setHashOn(0, 5000, common.Hash{})
+					return prev(idx, to, data)
+				}
+			},
+			wantErr: "header hash at 5000 is zero",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st := newFakePriceStore()
+			ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 5000, 20, 1_000_000)}
+			ch.setHead(5000)
+			tc.arrange(ch)
+			p, _ := newTestPoller(t, st, ch, 10)
+			captureWarnings(t)
+
+			advanced, err := p.Step(context.Background())
+			if tc.wantErr == "" {
+				require.NoError(t, err, "this exit's classified posture is a discard")
+			} else {
+				require.ErrorContains(t, err, tc.wantErr, "this exit's classified posture is an error")
+			}
+			require.False(t, advanced)
+			require.Empty(t, st.applied, "a round that did not land records nothing")
+			require.Equal(t, []int{0}, ch.headServed, "endpoint 0 resolved the round")
+			require.Equal(t, 1, p.exploreStart,
+				"LANDING IS THE ONLY OUTCOME THAT KEEPS THE STARTING POINT: this exit did not land, so the start must have moved past the round's endpoint")
+			require.Equal(t, -1, p.preferredStart,
+				"the advance is exploration, never attribution: no failure shape may accuse an endpoint")
+			require.Equal(t, 0, ch.active,
+				"the shared routing hint is never written by a caller-scoped round (d1e7d54)")
+		})
+	}
+
+	t.Run("control: a landed round keeps the starting point", func(t *testing.T) {
+		st := newFakePriceStore()
+		ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 5000, 20, 1_000_000)}
+		ch.setHead(5000)
+		p, _ := newTestPoller(t, st, ch, 10)
+
+		advanced, err := p.Step(context.Background())
+		require.NoError(t, err)
+		require.True(t, advanced)
+		require.Equal(t, -1, p.exploreStart, "the landed round kept the starting point")
+		require.Equal(t, -1, p.preferredStart)
+	})
+	t.Run("control: a pre-resolution failure moves nothing", func(t *testing.T) {
+		st := newFakePriceStore()
+		ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 5000, 20, 1_000_000)}
+		ch.setHead(5000)
+		ch.failAll(errors.New("every endpoint unreachable"))
+		p, _ := newTestPoller(t, st, ch, 10)
+
+		advanced, err := p.Step(context.Background())
+		require.ErrorContains(t, err, "resolve serving endpoint head")
+		require.False(t, advanced)
+		require.Equal(t, -1, p.exploreStart,
+			"the invariant begins AT resolution: no serving endpoint exists, so there is nothing to advance past, and guessing would churn the start on every total outage")
+	})
+}
+
+// LIVENESS WITH BOTH ENDPOINTS HALF-BROKEN (round-2 question (a), held over
+// to this wave): every endpoint serves heads and fails every pinned call, so
+// every round takes a non-landing exit and the advance PING-PONGS across the
+// fleet. The property is that the ping-pong keeps REVISITING each endpoint —
+// no oscillation lock may park the start and exclude a broken endpoint
+// forever — because that revisiting is exactly what makes recovery
+// observable: when one endpoint comes back, a round lands through it within
+// one rotation of the fleet, bounded by the endpoint count and not by luck.
+func TestPollerBothEndpointsHalfBrokenPingPongsAndObservesRecovery(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	recovered := false
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if recovered && idx == 1 {
+			return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+		}
+		return nil, fmt.Errorf("eth_call unavailable on endpoint %d", idx)
+	}
+	ch.setHead(5000)
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	// Phase 1: four cadences with every call path down. Each round errors,
+	// and the start alternates — endpoint 0, endpoint 1, endpoint 0 again:
+	// both broken endpoints keep being retried.
+	for i := 0; i < 4; i++ {
+		_, err := p.Step(context.Background())
+		require.Error(t, err, "round %d: every call path is down", i+1)
+		require.Equal(t, (i+1)%2, p.exploreStart,
+			"round %d: the non-landing round advanced the start past its serving endpoint", i+1)
+		require.Equal(t, -1, p.preferredStart, "round %d: an outage accuses nobody", i+1)
+		clk.advance(time.Minute)
+	}
+	require.Equal(t, []int{0, 1, 0, 1}, ch.headStarts,
+		"the advance ping-pongs: each half-broken endpoint is revisited, never excluded forever")
+	require.Equal(t, []int{0, 1, 0, 1}, ch.headServed)
+	require.Empty(t, st.applied, "nothing landed while both call paths were down")
+
+	// Phase 2: endpoint 1 recovers while the start is parked on endpoint 0 —
+	// the worst case for an oscillation lock. The round through endpoint 0
+	// still cannot land (its call rotates onto the recovered peer: a
+	// coherence discard), but it advances, and the NEXT round resolves the
+	// recovered endpoint and lands in full.
+	recovered = true
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "the coherence breach is a discard, not an error")
+	require.False(t, advanced)
+	clk.advance(time.Minute)
+
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "recovery was observed within one rotation of the fleet")
+	require.Equal(t, []int{0, 1, 0, 1, 0, 1}, ch.headStarts)
+	require.Equal(t, uint64(5000), st.cursor, "the recovered endpoint's round landed in full")
+	require.Equal(t, blockHashAt(5000).Bytes(), st.lastBatch(t).anchor.BlockHash)
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+	require.Equal(t, -1, p.preferredStart, "nothing was ever accused across the whole outage")
 }
 
 // THE ZERO-HASH REFUSAL LIVES ON THE HEADER PATH NOW (moved from the multicall
@@ -3075,6 +3514,8 @@ func TestPollerAmbiguousApplyWithoutPinConsumesNoLease(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, -1, p.preferredStart)
 	require.Zero(t, p.consecutiveAmbiguous)
+	require.Equal(t, -1, p.exploreStart,
+		"the round LANDED — the only outcome that keeps the starting point; an ambiguous APPLY error is the lease's business, never the non-landing seam's")
 }
 
 // THE APPLY-ERROR RESET, poller side: in the commit-landed-with-lost-ack world
