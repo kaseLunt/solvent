@@ -419,31 +419,42 @@ func TestRewindAnchorSweepSparesNeutralizedHeightsEvenThoughNoCallerCanReachThat
 	}, 5100, anchorAt(5100))))
 	// A round executing at 5200 that stamps an observation at 5150 — BELOW its own
 	// execution block, which ApplyPolledPrices accepts. The row's provenance is the
-	// anchor at 5200; there is no anchor at 5150 at all.
+	// anchor at 5200; there is no anchor at 5150 at all. ONLY THE BINDING CLAUSE can
+	// spare 5200.
 	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10, []PriceObservation{
 		po(5150, 0xCC, testFeedSource, 500, 8),
 	}, 5200, anchorAt(5200))))
 	require.EqualValues(t, 5200, *anchorBindingAt(t, s, 10, 0xCC, testFeedSource, 5150),
 		"the observation is bound to the block its ROUND executed at, not to its own height")
+	// And the mirror shape: a PRE-00007 row — NULL binding — at a height that carries
+	// an anchor written by a different, empty round. ONLY THE HEIGHT CLAUSE can spare
+	// 5300, which is why both clauses are here and neither is redundant.
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testFeedEngine10, 10, []PriceObservation{
+		po(5300, 0xDD, testFeedSource, 600, 8),
+	}, 5300)))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10, nil, 5300, anchorAt(5300))))
+	require.Nil(t, anchorBindingAt(t, s, 10, 0xDD, testFeedSource, 5300),
+		"the legacy row's binding stays NULL even though an anchor now sits at its height")
 
-	// THE DOOR WALKED AROUND: mark the rows at 5000 and 5150 directly.
+	// THE DOOR WALKED AROUND: mark the rows at 5000, 5150 and 5300 directly.
 	// NeutralizeUnverifiablePrices refuses this identity
 	// (TestNeutralizeRefusesANonPollEngineAndChangesNothing), so no API sequence
 	// produces this state. It is written here to drive the predicate.
 	_, err := s.pool.Exec(ctx,
 		`UPDATE prices SET valid = FALSE, invalid_reason = $1
-		 WHERE chain_id = 10 AND owner_engine = $2 AND block_number IN (5000, 5150)`,
+		 WHERE chain_id = 10 AND owner_engine = $2 AND block_number IN (5000, 5150, 5300)`,
 		InvalidReasonUnverifiableReorg, testFeedEngine10)
 	require.NoError(t, err)
 
 	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 4000, 0))
 
-	// The marked rows are retained (that predicate was already there) AND so are BOTH
-	// anchors that record what their rounds executed against: 5000 by the height
-	// clause, 5200 by the binding clause. 5100's round left nothing marked, so its
-	// anchor goes — retention still works.
-	require.Equal(t, []uint64{5000, 5200}, anchorBlocks(t, s, testFeedEngine10),
-		"the anchor a marked row is BOUND to survives even though no marked row sits at its height (D-012 clause 2: no store path may expire it)")
+	// The marked rows are retained (that predicate was already there) AND so is every
+	// anchor that records what a marked row's round executed against: 5000 by either
+	// clause, 5200 by the BINDING clause alone (no marked row sits at 5200), 5300 by
+	// the HEIGHT clause alone (the marked row there has no binding). 5100's round left
+	// nothing marked, so its anchor goes — retention still works.
+	require.Equal(t, []uint64{5000, 5200, 5300}, anchorBlocks(t, s, testFeedEngine10),
+		"the anchor a marked row is BOUND to survives even though no marked row sits at its height, AND a pre-00007 marked row still protects the anchor at its height (D-012 clause 2: no store path may expire either)")
 	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testFeedSource, 5000)
 	require.False(t, valid)
 	require.Equal(t, InvalidReasonUnverifiableReorg, reason)

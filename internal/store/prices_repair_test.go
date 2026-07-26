@@ -631,6 +631,56 @@ func TestPollAnchorRetentionExemptsNeutralizedHeights(t *testing.T) {
 		"the row is still classified, which is what holds its anchor exempt")
 }
 
+// THE SAME EXEMPTION, THROUGH THE BINDING CLAUSE — the arm the test above cannot
+// reach, because there the marked row sits at its anchor's own height and either
+// clause would spare it.
+//
+// ApplyPolledPrices accepts observations BELOW throughBlock, so a round executing at
+// B may stamp a row at some lower height. That row's provenance is the anchor at B,
+// and NO marked row sits at B at all. prunePollAnchorsQuery's height clause is blind
+// to it; only its anchor_block clause keeps the anchor alive. Without this test the
+// clause is unprotected, and D-012 clause 2's "no retention bound may expire it" holds
+// for the easy arrangement and quietly fails for the legal one — which is exactly the
+// shape round 9 found in RewindPrices' sweep. (Found by wave 12's mutation loop: M9
+// survived until this test existed.)
+func TestPollAnchorRetentionExemptsTheAnchorAMarkedRowIsBoundTo(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// A round executing at 10 that stamps its observation at 5. The row is bound to
+	// 10; nothing is ever written at height 10.
+	const execBlock, obsBlock = uint64(10), uint64(5)
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(obsBlock, 0xAA, testPollSource, 1_000_000, 6),
+	}, execBlock, anchorAt(execBlock))))
+	require.EqualValues(t, execBlock, *anchorBindingAt(t, s, 10, 0xAA, testPollSource, obsBlock))
+
+	// A repair marks it. The boundary sits below the row, above nothing else.
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, obsBlock-1, []byte{0x01}))
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, execBlock, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked)
+
+	// Then a long, healthy run pushes the anchor at 10 far past the retention window.
+	total := uint64(pollAnchorRetention + 40)
+	for i := execBlock + 1; i <= total; i++ {
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, i, anchorAt(i))))
+	}
+
+	require.Contains(t, anchorBlocks(t, s, testPollEngine), execBlock,
+		"the anchor a marked row is BOUND to outlives retention, even though no marked row sits at its height")
+	// And the binding is not left dangling — the pair is what an offline reconciliation
+	// would need, and half of it is worth nothing.
+	require.EqualValues(t, execBlock, *anchorBindingAt(t, s, 10, 0xAA, testPollSource, obsBlock))
+
+	// The cost is still bounded: exactly the retained window plus this one exempt row.
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM price_poll_anchors WHERE engine = $1`, testPollEngine).Scan(&n))
+	require.Equal(t, pollAnchorRetention+1, n,
+		"one anchor row per classified round, which is the accepted cost clause 2 names — not a leak")
+}
+
 // The circularity gate this test guarded — never propose a NEUTRALIZED height as an
 // adoption candidate — is gone with the query and the call it guarded (Codex round 9's
 // [high] #2). It was a real hazard and the gate was correct; what removes it is that
