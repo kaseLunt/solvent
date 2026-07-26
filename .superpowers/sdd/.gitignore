@@ -1,3 +1,16 @@
 *
 !.gitignore
 !*.md
+
+# Mutation-testing artifacts are REVIEW MATERIAL, not scratch (Codex round 11P's
+# [medium] #4). A mutation matrix is evidence about the tests, and the reviewer being
+# asked to trust it has to be able to read the applier that produced it and re-run the
+# spec. So a `<wave>-mutations/` directory tracks its applier and its spec; its
+# transcripts are markdown and `!*.md` above already covers them.
+#
+# Everything else here stays ignored, which is the point of the `*` at the top: the
+# ~1.9MB of `review-*.diff` exports are derived from git history and belong nowhere
+# near it.
+!*-mutations/
+!*-mutations/*.py
+!*-mutations/*.json
