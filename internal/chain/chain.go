@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -80,12 +81,145 @@ type rpcClient interface {
 // silently dropped that gate). A mined block whose response omits hash,
 // parentHash, number or timestamp — or reports a zero hash — is a provider
 // protocol violation (validateReportedHeader), refused before the value can
-// reach any consumer.
+// reach any consumer. Since Task 9 wave 7 (Codex round 6) presence is paired
+// with a BYTES-level canon: number and timestamp decode through strict
+// quantity wrappers (UnmarshalJSON → strictNumber/strictTime →
+// checkCanonicalQuantity) because the pinned hexutil decoders read the empty
+// string as ZERO — a present-but-empty quantity must fail the attempt, never
+// impersonate the Unix epoch or height 0.
 type ReportedHeader struct {
 	Hash       *common.Hash    `json:"hash"`
 	ParentHash *common.Hash    `json:"parentHash"`
 	Number     *hexutil.Big    `json:"number"`
 	Time       *hexutil.Uint64 `json:"timestamp"`
+}
+
+// UnmarshalJSON decodes the raw eth_getBlockByNumber result through a
+// BYTES-level wire shape: the two quantity fields pass checkCanonicalQuantity
+// (via the strictNumber/strictTime wrappers) BEFORE any hexutil conversion
+// runs. The gate cannot live after the conversion: the pinned go-ethereum
+// v1.13.0 hexutil decoders read the empty JSON string as ZERO (non-nil), so
+// by the time a *hexutil.Big exists, "number":"" has already become height 0
+// and "timestamp":"" the Unix epoch — presence tracking sees a present field
+// and the F2 failover-stopping class walks back in through decode leniency
+// (Task 9 wave 7, Codex round 6).
+//
+// The two HASH fields carry no analogous leniency to gate, audited: the
+// pinned common.Hash decoder (hexutil.UnmarshalFixedJSON → UnmarshalFixedText)
+// accepts EXACTLY a JSON string of "0x" plus 64 hex digits — "" and "0x" fail
+// its length check ("hex string has length 0, want 64"), a missing prefix and
+// odd lengths are named errors — so no empty or truncated hash can decode
+// into a value; every malformed shape already fails the attempt. The one
+// accepted residue: mixed-CASE hex digits decode (both nibble cases), which —
+// unlike "" → 0 — cannot mint a wrong VALUE: the 32 decoded bytes are
+// identical either way and every downstream comparison uses the decoded
+// value. Fixed-length DATA therefore stays on the library's exact-length
+// gate; the canon gate is scoped to QUANTITIES, where leniency manufactures
+// values out of non-answers.
+func (rh *ReportedHeader) UnmarshalJSON(input []byte) error {
+	var w struct {
+		Hash       *common.Hash  `json:"hash"`
+		ParentHash *common.Hash  `json:"parentHash"`
+		Number     *strictNumber `json:"number"`
+		Time       *strictTime   `json:"timestamp"`
+	}
+	if err := json.Unmarshal(input, &w); err != nil {
+		return err
+	}
+	rh.Hash = w.Hash
+	rh.ParentHash = w.ParentHash
+	rh.Number = (*hexutil.Big)(w.Number)
+	rh.Time = (*hexutil.Uint64)(w.Time)
+	return nil
+}
+
+// strictNumber and strictTime are ReportedHeader's two quantity fields at the
+// bytes level: hexutil values whose decode is gated by checkCanonicalQuantity
+// first. Each wrapper covers exactly one field, so a violation names the
+// field it arrived in and each field's gate is independently attackable (the
+// wave-7 mutation matrix bypasses them one at a time). An omitted or null
+// field never reaches a wrapper — encoding/json leaves the pointer nil — so
+// presence tracking (wave 6) is untouched: absence still surfaces as absence,
+// and the wrapper judges only bytes that claim to BE a quantity.
+type strictNumber hexutil.Big
+
+func (q *strictNumber) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalQuantity("number", input); err != nil {
+		return err
+	}
+	return (*hexutil.Big)(q).UnmarshalJSON(input)
+}
+
+type strictTime hexutil.Uint64
+
+func (q *strictTime) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalQuantity("timestamp", input); err != nil {
+		return err
+	}
+	return (*hexutil.Uint64)(q).UnmarshalJSON(input)
+}
+
+// checkCanonicalQuantity is the wave-7 rule (Codex round 6): "the response
+// must answer the question asked" holds at the BYTES level. raw is the
+// untouched JSON text of one quantity field, and it either IS a canonical
+// JSON-RPC quantity or the attempt fails — violation = failed attempt =
+// rotation, the uniform posture of every gate in this file.
+//
+// THE CANON, pinned: a canonical JSON-RPC quantity is exactly what the
+// reference encoder (hexutil.EncodeUint64 / hexutil.EncodeBig — the same
+// pinned library that decodes) emits for some value: a JSON string holding
+// "0x" followed by one or more lowercase hex digits [0-9a-f], the first digit
+// nonzero unless the whole digit string is exactly "0". Canonical bytes
+// round-trip decode∘encode to themselves; nothing else does. Rejected BY
+// NAME, in check order:
+//
+//   - not a JSON string (bare number, object, array, boolean);
+//   - the empty string — THE round-6 finding: v1.13.0's *hexutil.Big and
+//     *hexutil.Uint64 decode "" as ZERO (non-nil), so "timestamp":"" passed
+//     the wave-6 presence gate as the Unix epoch and "number":"" passed
+//     HeadFrom as height 0 — the F2 failover-stopping class one decoder
+//     layer down;
+//   - a string without the "0x" prefix;
+//   - "0x" with no digits (the spec: zero is "0x0");
+//   - leading zero digits (the spec: the most compact representation);
+//   - any byte after the prefix that is not a lowercase hex digit —
+//     uppercase decodes to the same value under hexutil, but a
+//     representation the reference encoder can never emit is not the
+//     protocol's answer, and acceptance leniency one layer below the gates
+//     is exactly how this finding class survives.
+//
+// Canon is decidable from the bytes alone, which is why the gate runs BEFORE
+// hexutil: nothing hexutil tolerates can reach it. Where the canon and
+// hexutil's own strictness overlap (missing prefix, "0x", leading zeros), the
+// gate still owns the rejection — the refusal must never RELY on the leniency
+// profile of the library whose "" → 0 is the finding.
+func checkCanonicalQuantity(field string, raw []byte) error {
+	violation := func(reason string) error {
+		return fmt.Errorf("header response %s %s is not a canonical JSON-RPC quantity (%s) — a provider protocol violation; the response must answer the question asked at the bytes level, so a non-answer is refused before a lenient decoder can turn it into a plausible value", field, raw, reason)
+	}
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return violation("not a JSON string")
+	}
+	s := raw[1 : len(raw)-1]
+	if len(s) == 0 {
+		return violation("empty — an empty quantity is a non-answer, not zero")
+	}
+	if len(s) < 2 || s[0] != '0' || s[1] != 'x' {
+		return violation(`missing the "0x" prefix`)
+	}
+	digits := s[2:]
+	if len(digits) == 0 {
+		return violation(`"0x" carries no digits — zero is "0x0"`)
+	}
+	if len(digits) > 1 && digits[0] == '0' {
+		return violation("leading zero digits — the canon is the most compact representation")
+	}
+	for _, c := range digits {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return violation(fmt.Sprintf("%q is not a lowercase hex digit", c))
+		}
+	}
+	return nil
 }
 
 // validateReportedHeader is the protocol gate every header read passes

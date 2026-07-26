@@ -132,6 +132,28 @@ func rawJSON(fields map[string]string) string {
 	return string(b)
 }
 
+// rawJSONOverride serializes fields like rawJSON but injects ONE field as raw
+// JSON bytes, un-reencoded — so tests control the exact wire representation
+// the strict quantity wrappers judge: `""`, `"0x5A"`, a bare 90 (Task 9
+// wave 7 — the canon gate is a BYTES-level gate, so its fixtures must be
+// byte-exact).
+func rawJSONOverride(fields map[string]string, field, rawValue string) string {
+	m := make(map[string]json.RawMessage, len(fields)+1)
+	for k, v := range fields {
+		b, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
+		m[k] = b
+	}
+	m[field] = json.RawMessage(rawValue)
+	b, err := json.Marshal(m)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 var (
 	rawCursorHash   = common.HexToHash("0x8a1f00000000000000000000000000000000000000000000000000000000005a")
 	rawCursorParent = common.HexToHash("0x8a1f000000000000000000000000000000000000000000000000000000000059")
@@ -278,27 +300,137 @@ func TestRawJSONMissingRequiredFieldsAreProtocolViolationsThatRotate(t *testing.
 	})
 }
 
-// Malformed hex in a required field is a decode failure of the attempt — the
-// rpc layer rejects the response before validation ever sees it, and the walk
-// rotates like any endpoint fault.
+// The malformed-QUANTITY matrix (Task 9 wave 7, Codex round 6 — extending
+// wave 6's single 0xnope form): every non-canonical representation of number
+// and timestamp fails the attempt as a NAMED canon violation, judged at the
+// bytes level by checkCanonicalQuantity BEFORE hexutil conversion. Two arms
+// are forms the pinned hexutil would LENIENT-ACCEPT as values — "" (as zero:
+// the round-6 finding) and uppercase digits (as the value) — so their
+// assertions are behavioral: with the gate bypassed those reads would
+// SUCCEED. The remaining arms overlap hexutil's own strictness; the
+// assertions pin the canon gate's NAME on the refusal so the rejection never
+// relies on the leniency profile of the library whose "" → 0 is the finding.
+// The zero subtest pins the canon's one compactness exception: "0x0" IS
+// canonical — a gate that rejected it would break genesis-height reads
+// (over-tightening, the other face of the wave-6 lesson).
 func TestRawJSONMalformedHexFailsTheAttemptAndRotates(t *testing.T) {
-	garbled := func() *rawJSONEndpoint {
+	forms := []struct{ name, raw, reason string }{
+		{"empty string", `""`, "an empty quantity is a non-answer, not zero"},
+		{"0x with no digits", `"0x"`, `"0x" carries no digits`},
+		{"leading zero digits", `"0x05a"`, "leading zero digits"},
+		{"uppercase hex digits", `"0x5A"`, "not a lowercase hex digit"},
+		{"missing 0x prefix", `"5a"`, `missing the "0x" prefix`},
+		{"non-hex garbage", `"0xnope"`, "not a lowercase hex digit"},
+		{"bare JSON number", `90`, "not a JSON string"},
+	}
+	for _, field := range []string{"number", "timestamp"} {
+		for _, tc := range forms {
+			t.Run(field+" "+tc.name, func(t *testing.T) {
+				fields := rawBlockFields(rawCursor, rawCursorHash, rawCursorParent, rawCursorTime)
+				e := newRawJSONEndpoint(t, map[string]string{"0x5a": rawJSONOverride(fields, field, tc.raw)})
+				f := rawDial(t, e)
+				ts, err := f.HeaderTime(context.Background(), rawCursor)
+				require.ErrorContains(t, err, "all rpc endpoints failed")
+				require.ErrorContains(t, err, "not a canonical JSON-RPC quantity",
+					"the canon gate owns the refusal — not whatever hexutil happens to reject")
+				require.ErrorContains(t, err, "header response "+field, "the violation names the field it arrived in")
+				require.ErrorContains(t, err, tc.reason, "and the arm of the canon it broke")
+				require.Zero(t, ts, "a non-canonical quantity never becomes a value")
+			})
+		}
+	}
+
+	t.Run("the canon's zero: genesis-shaped quantities stay servable", func(t *testing.T) {
+		// "0x0" is canonical (the spec's one compactness exception) — the
+		// reference encoder emits it for zero, and rawBlockFields uses that
+		// encoder, so this fixture doubles as the round-trip proof.
+		e := newRawJSONEndpoint(t, map[string]string{
+			"0x0": rawJSON(rawBlockFields(0, rawCursorHash, rawCursorParent, 0)),
+		})
+		f := rawDial(t, e)
+		got, err := f.HeaderHash(context.Background(), 0)
+		require.NoError(t, err)
+		require.Equal(t, rawCursorHash, got)
+		ts, err := f.HeaderTime(context.Background(), 0)
+		require.NoError(t, err)
+		require.Zero(t, ts, "a REPORTED zero timestamp is a value like any other — only a non-answer is refused")
+	})
+
+	t.Run("rotation lands the healthy secondary for each wrapped field", func(t *testing.T) {
+		for _, field := range []string{"number", "timestamp"} {
+			fields := rawBlockFields(rawCursor, rawCursorHash, rawCursorParent, rawCursorTime)
+			broken := newRawJSONEndpoint(t, map[string]string{"0x5a": rawJSONOverride(fields, field, `"0xnope"`)})
+			f := rawDial(t, broken, healthyRawEndpoint(t))
+			ts, err := f.HeaderTime(context.Background(), rawCursor)
+			require.NoError(t, err)
+			require.Equal(t, rawCursorTime, ts, "the healthy secondary lands the read past a garbled "+field)
+			require.Equal(t, []string{"0x5a"}, broken.blockAsks(t))
+		}
+	})
+}
+
+// The round-6 finding, face one — "timestamp":"" — as a real-Dial regression:
+// the pinned hexutil decoders read the empty string as zero, so without the
+// bytes-level gate this response passes the presence gate as a NON-NIL Unix
+// epoch and HeaderTime dates staleness off 1970 — the F2 failover-stopping
+// class one decoder layer down from wave 6. The gate makes it a named canon
+// violation that fails the attempt, and the healthy secondary DEMONSTRABLY
+// lands HeaderTime.
+func TestRawJSONEmptyTimestampFailsTheAttemptAndTheSecondaryLandsHeaderTime(t *testing.T) {
+	emptyTS := func() *rawJSONEndpoint {
 		fields := rawBlockFields(rawCursor, rawCursorHash, rawCursorParent, rawCursorTime)
-		fields["timestamp"] = "0xnope"
+		fields["timestamp"] = ""
 		return newRawJSONEndpoint(t, map[string]string{"0x5a": rawJSON(fields)})
 	}
 
-	f := rawDial(t, garbled())
-	_, err := f.HeaderTime(context.Background(), rawCursor)
-	require.ErrorContains(t, err, "all rpc endpoints failed")
-	require.ErrorContains(t, err, "invalid hex", "the decode failure names the garbage")
-
-	broken := garbled()
-	f = rawDial(t, broken, healthyRawEndpoint(t))
+	// Alone, the violation surfaces by name and no epoch value escapes.
+	f := rawDial(t, emptyTS())
 	ts, err := f.HeaderTime(context.Background(), rawCursor)
+	require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+	require.ErrorContains(t, err, "header response timestamp")
+	require.ErrorContains(t, err, "an empty quantity is a non-answer, not zero")
+	require.Zero(t, ts, "the empty quantity never becomes a value — no Unix epoch is handed out")
+
+	// With a healthy secondary the malformed primary is rotated past and the
+	// read LANDS — the honest endpoint's own timestamp, not zero.
+	primary := emptyTS()
+	f = rawDial(t, primary, healthyRawEndpoint(t))
+	ts, err = f.HeaderTime(context.Background(), rawCursor)
 	require.NoError(t, err)
-	require.Equal(t, rawCursorTime, ts, "the healthy secondary lands the read")
-	require.Equal(t, []string{"0x5a"}, broken.blockAsks(t))
+	require.Equal(t, rawCursorTime, ts, "HeaderTime lands on the healthy secondary")
+	require.Equal(t, []string{"0x5a"}, primary.blockAsks(t), "the malformed primary was attempted once and rotated past")
+}
+
+// Face two — "number":"" — the same leniency passing HeadFrom as HEIGHT ZERO:
+// a head at height 0 ages every cursor comparison off a block that does not
+// exist and stops failover at the malformed primary. The gate fails the
+// attempt and the healthy secondary lands the FULL head — number, time and
+// hash — not merely a skipped primary.
+func TestRawJSONEmptyNumberFailsTheAttemptAndTheSecondaryLandsHeadFrom(t *testing.T) {
+	emptyNum := func() *rawJSONEndpoint {
+		fields := rawBlockFields(rawHead, rawHeadHash, rawHeadParent, rawHeadTime)
+		fields["number"] = ""
+		return newRawJSONEndpoint(t, map[string]string{"latest": rawJSON(fields)})
+	}
+
+	// Alone: a named canon violation; no height-zero head escapes.
+	f := rawDial(t, emptyNum())
+	head, token, err := f.HeadFrom(context.Background(), 0)
+	require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+	require.ErrorContains(t, err, "header response number")
+	require.ErrorContains(t, err, "an empty quantity is a non-answer, not zero")
+	require.Equal(t, Head{}, head, "the empty quantity never becomes a value — no height-0 head is handed out")
+	require.Equal(t, -1, token.Index)
+
+	// With a healthy secondary: the full landing.
+	primary := emptyNum()
+	f = rawDial(t, primary, healthyRawEndpoint(t))
+	head, token, err = f.HeadFrom(context.Background(), 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, token.Index, "failover reached the healthy secondary instead of stopping at the malformed primary")
+	require.Equal(t, Head{Number: rawHead, Time: rawHeadTime, Hash: rawHeadHash}, head,
+		"the FULL head lands from the honest endpoint — number, time and hash")
+	require.Equal(t, []string{"latest"}, primary.blockAsks(t), "the malformed primary was attempted once and rotated past")
 }
 
 // F1 below the fake seam: a WELL-FORMED response for the WRONG height — the
