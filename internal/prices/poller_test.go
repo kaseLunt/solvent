@@ -877,7 +877,7 @@ func TestPollerRewindNeutralizesWhenAVerifiedFloorLeavesUnanchoredRowsAbove(t *t
 	require.False(t, byBlock[4950].valid, "the unprovable row is quarantined, not trusted")
 	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[4950].invalidReason)
 	require.True(t, byBlock[4900].valid,
-		"history at or below the HASH-VERIFIED floor keeps its validity: it was proven canonical, so neutralization must not touch it")
+		"the store admitted the hash-verified floor in full here (the boundary asserted below IS 4900), so this row is at or below the RETURNED boundary and keeps its validity")
 	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor,
 		"the verified floor is passed through, which is what confines the marking to the unprovable suffix")
 	require.Equal(t, uint64(4900), st.cursor, "and the cursor stands at the verified floor, not at the walker's 100")
@@ -1149,6 +1149,17 @@ func TestPollerFloorBelowTheEpochsRepairTargetIsReportedAsBelowTarget(t *testing
 	require.True(t, advanced)
 	require.Empty(t, st.rewinds, "the poller has no deletion primitive")
 	require.Len(t, st.neutralized, 1)
+	require.Equal(t, uint64(5100), st.neutralized[0].toBlock, "repair targets the poller's OWN cursor")
+
+	// THE PASS SHAPE, so `below-target` cannot be reached by a poller that stopped
+	// verifying: 5100 probed and mismatched, 4900 probed and MATCHED, then the
+	// checkpoint — the highest height this pass got a live answer for — re-read on the
+	// pass's own endpoint and corroborated on a different one, both immediately before
+	// the act. A floor that was never verified is a different finding, not this one.
+	require.Equal(t, []uint64{5100, 4900, 5100, 5100}, ch.hashCalls,
+		"newest-first probes, then the checkpoint re-read and the cross-endpoint corroboration")
+	require.Equal(t, []int{0, 0, 0, 1}, probeEndpoints(ch),
+		"one endpoint answered the whole pass; the SECOND answered the corroboration")
 
 	// THE TWO NUMBERS, AND THEY DIFFER IN THE UNDER-REPORTING DIRECTION.
 	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor,
@@ -1245,13 +1256,25 @@ func TestPollerNeutralizationPromisesNoOfflineRecoveryForAPrunedBinding(t *testi
 	require.True(t, byBlock[4900].valid, "the verified floor's own round is untouched")
 	require.False(t, byBlock[5100].valid, "the pruned-binding row is RETAINED and marked, never deleted")
 	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[5100].invalidReason)
+
+	// THE FIXTURE'S PREMISE, ASSERTED IN BOTH HALVES RATHER THAN DESCRIBED. The store
+	// classifies by the row's own BINDING, so "binding pruned" needs the binding to be
+	// present AND its anchor to be absent. Asserting only the absence would let the
+	// fixture drift into the never-bound population, where the retention claim is false
+	// for a different reason and the test would still pass — the shape of test-integrity
+	// failure this project has shipped five times.
+	require.NotNil(t, byBlock[5100].anchorBlock,
+		"its round DID record an anchor, so this row is binding-pruned and not never-bound")
+	require.Equal(t, uint64(5100), *byBlock[5100].anchorBlock)
 	require.Nil(t, st.anchorAt(engine, 5100),
-		"the premise of the fixture: no anchor survives at the marked row's height, so no hash for its round is on disk")
+		"and the anchor that binding names is gone, so no hash for its round is on disk anywhere")
 
 	// THE PROPERTY. The neutralization WARN scopes hash retention and offline
 	// reconciliation to rows that still HAVE an anchor, and points at the store's WARN
 	// as the only place the split is counted.
 	neutralizeWarn := messageContaining(t, *msgs, "rowsNeutralized")
+	require.Contains(t, neutralizeWarn, "rowsNeutralized=1",
+		"exactly one row was marked and it is the pruned-binding one: the claim is being judged against a population of only that kind")
 	require.Contains(t, neutralizeWarn, "THE ROWS AND THEIR VALUES ARE RETAINED FOREVER",
 		"what clause 2 guarantees unconditionally is still stated unconditionally")
 	require.Contains(t, neutralizeWarn, "the recorded BLOCK HASH survives only where the marked row's own round still has an anchor",
