@@ -26,7 +26,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
-	"github.com/kaselunt/solvent/internal/store"
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 )
 
 //go:embed golden_vectors.json
@@ -107,52 +107,10 @@ type goldenRow struct {
 	Endpoints []int             `json:"endpoints_consulted,omitempty"`
 }
 
-// goldenDBSide is Phase 1's snapshot-scoped read of everything golden needs
-// from the database (no DB read may happen after the snapshot closes).
-type goldenDBSide struct {
-	// AsOfW1 / AsOfFixture: accountHex → reserveHex → side → sum.
-	AsOfW1        map[string]map[string]map[string]*big.Int
-	AsOfFixture   map[string]map[string]map[string]*big.Int
-	IntervalCount int64
-}
-
-// goldenAsOfMap folds AsOfSums into the lookup shape.
-func goldenAsOfMap(sums []store.AsOfSum) map[string]map[string]map[string]*big.Int {
-	out := map[string]map[string]map[string]*big.Int{}
-	for _, s := range sums {
-		acct := fmt.Sprintf("%x", s.Account)
-		res := fmt.Sprintf("%x", s.Asset)
-		if out[acct] == nil {
-			out[acct] = map[string]map[string]*big.Int{}
-		}
-		if out[acct][res] == nil {
-			out[acct][res] = map[string]*big.Int{}
-		}
-		out[acct][res][s.Side] = s.Total
-	}
-	return out
-}
-
-// collectGoldenDBSide runs inside the Phase-1 snapshot.
-func collectGoldenDBSide(ctx context.Context, q store.Querier, vec goldenVectors) (goldenDBSide, error) {
-	accounts := make([][]byte, 0, len(vec.Borrowers))
-	for _, b := range vec.Borrowers {
-		accounts = append(accounts, common.HexToAddress(b.Address).Bytes())
-	}
-	w1, err := store.AsOfEventSums(ctx, q, aaveEngine, accounts, vec.W1PinETH)
-	if err != nil {
-		return goldenDBSide{}, fmt.Errorf("golden as-of at w1 pin: %w", err)
-	}
-	fx, err := store.AsOfEventSums(ctx, q, aaveEngine, accounts, vec.FixturePinETH)
-	if err != nil {
-		return goldenDBSide{}, fmt.Errorf("golden as-of at fixture pin: %w", err)
-	}
-	n, err := store.AaveIntervalEventCount(ctx, q, aaveEngine, accounts, vec.W1PinETH, vec.FixturePinETH)
-	if err != nil {
-		return goldenDBSide{}, fmt.Errorf("golden interval count: %w", err)
-	}
-	return goldenDBSide{AsOfW1: goldenAsOfMap(w1), AsOfFixture: goldenAsOfMap(fx), IntervalCount: n}, nil
-}
+// The golden DB side (snapshotdb.GoldenDBSide, collected by
+// snapshotdb.Collect) lives with the snapshot since round-13 F2 — it is read
+// inside the RR transaction, and no DB read may happen after the snapshot
+// closes.
 
 // goldenLookup pulls one derived figure (missing ⇒ zero: an account with no
 // events at the pin has derived state zero, and the chain must agree).
@@ -177,7 +135,7 @@ func goldenLookup(m map[string]map[string]map[string]*big.Int, accountHex, reser
 // figure comes from CallAtHashFrom under that hash — there is no code path
 // from the fixture constants into a Row A value (asserted by
 // TestGoldenRowAIsALiveChainReadAtTheW1Pin).
-func runGoldenChainSide(ctx context.Context, r *pinnedReader, vec goldenVectors, db goldenDBSide, poolAddr common.Address, atokens map[string]common.Address) ([]goldenRow, error) {
+func runGoldenChainSide(ctx context.Context, r *pinnedReader, vec goldenVectors, db snapshotdb.GoldenDBSide, poolAddr common.Address, atokens map[string]common.Address) ([]goldenRow, error) {
 	var rows []goldenRow
 
 	type pinSpec struct {

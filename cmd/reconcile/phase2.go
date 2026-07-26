@@ -15,13 +15,14 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
 // runDMPhase executes §3.3 (per-account rows), the F1 weld, §3.6 (index
 // integrity), and §7 (freshness spot reads + deep replay) against OP.
 func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader, dmProxy common.Address, rep *driftReport, gatedFailures *int) error {
-	pinOP := p1.pins[dmEngine]
+	pinOP := p1.Pins[dmEngine]
 	pinHash := p1.pinHashes["op"]
 
 	// ---- Round 1: getBorrowTokens + borrowingOf(account) ------------------
@@ -82,7 +83,7 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 		universe[t] = true
 		weldTokens[t] = true
 	}
-	for _, s := range p1.dmAllNet {
+	for _, s := range p1.DMAllNet {
 		tok := common.BytesToAddress(s.Asset)
 		universe[tok] = true
 		weldTokens[tok] = true
@@ -210,11 +211,11 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 		tokenHex := hex.EncodeToString(t.Bytes())
 		var idxBase *big.Int
 		var baseBlock uint64
-		if obs, ok := p1.dmIdxBase[tokenHex]; ok {
+		if obs, ok := p1.DMIdxBase[tokenHex]; ok {
 			idxBase = obs.Value
 			baseBlock = obs.Block
 		}
-		apy := p1.dmAPY[tokenHex]
+		apy := p1.DMAPY[tokenHex]
 		var dt uint64
 		if idxBase != nil && apy != nil {
 			bt, ok := headerTimeCache[baseBlock]
@@ -242,14 +243,14 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 	for _, a := range p1.sel.Accounts {
 		sampleSet[a.Row.AccountHex] = true
 	}
-	fresh := evaluateFreshness(p1.freshRows, sampleSet, p1.freshBound, p1.freshBoundInputs, time.Now())
+	fresh := evaluateFreshness(p1.FreshRows, sampleSet, p1.freshBound, p1.freshBoundInputs, time.Now())
 	freshByAccount := map[string]store.AccountFreshness{}
-	for _, f := range p1.freshRows {
+	for _, f := range p1.FreshRows {
 		freshByAccount[hex.EncodeToString(f.Account)] = f
 	}
 	for _, a := range p1.sel.Accounts {
 		var snapRows []store.BalanceRow
-		for _, b := range p1.balances[a.Row.AccountHex] {
+		for _, b := range p1.Balances[a.Row.AccountHex] {
 			if b.Source == "snapshot" && b.Side == "collateral" {
 				snapRows = append(snapRows, b)
 			}
@@ -289,7 +290,7 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 		}
 		f := freshByAccount[a.Row.AccountHex]
 		rep.SpotReads = append(rep.SpotReads,
-			buildSpotReadRow(a.Row.AccountHex, p1.balances[a.Row.AccountHex], foldCollateralOf(list), f.LastSuccessBlock, pinOP))
+			buildSpotReadRow(a.Row.AccountHex, p1.Balances[a.Row.AccountHex], foldCollateralOf(list), f.LastSuccessBlock, pinOP))
 	}
 
 	// Deep collateral replay (§7): gates ONLY when served.
@@ -332,13 +333,13 @@ func runDMPhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader
 }
 
 // computeDMWeldInputs assembles the F1 weld's derived side: the ALL-ACCOUNTS
-// census (p1.dmAllNet — store.AssetNetSums has no account filter) plus the
+// census (p1.DMAllNet — store.AssetNetSums has no account filter) plus the
 // sampled subset's totals as a coverage diagnostic. Substituting the sample
 // aggregation for the census is the exact blindness F1 blocks; the named
 // kill is TestComputeDMWeldInputsCoversAllAccounts.
 func computeDMWeldInputs(p1 *phase1Data) dmWeldInputs {
 	return dmWeldInputs{
-		All:          p1.dmAllNet,
+		All:          p1.DMAllNet,
 		SampleTotals: assetNetSumsFromSample(p1.dmAsOf),
 	}
 }
@@ -354,21 +355,21 @@ func classifyRowLegs(row *dmRowResult, sample store.DMBorrowerRow, p1 *phase1Dat
 		nDerived, _ := new(big.Int).SetString(leg.DerivedNet, 10)
 		chainAmt, _ := new(big.Int).SetString(leg.ChainUSD, 10)
 		var dbIdx *big.Int
-		if obs, ok := p1.dmIdxBase[tokenHex]; ok {
+		if obs, ok := p1.DMIdxBase[tokenHex]; ok {
 			dbIdx = obs.Value
 		}
-		hasResidue := p1.residue[row.AccountHex][tokenHex]
+		hasResidue := p1.Residue[row.AccountHex][tokenHex]
 		leg.Classification = classifyDMMismatch(
 			sample.FullyLiquidated, hasResidue,
 			nDerived, indexes[common.HexToAddress(leg.TokenHex)], chainAmt, dbIdx,
-			true, p1.stableSnap[row.AccountHex])
+			true, p1.StableSnap[row.AccountHex])
 		if nDerived == nil || nDerived.Sign() == 0 {
 			// The classifier's missing-genesis arm needs "no derived events"
 			// — re-evaluate with that fact when the DB side is empty.
 			leg.Classification = classifyDMMismatch(
 				sample.FullyLiquidated, hasResidue,
 				nDerived, indexes[common.HexToAddress(leg.TokenHex)], chainAmt, dbIdx,
-				false, p1.stableSnap[row.AccountHex])
+				false, p1.StableSnap[row.AccountHex])
 		}
 	}
 }
@@ -418,11 +419,11 @@ func sortedAddrs(set map[common.Address]bool) []common.Address {
 // runAavePhase executes §3.4 (golden borrowers gated + top-10 labeled
 // supplementary), §4 (golden rows A/B/C), and the F1 Aave welds against ETH.
 func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedReader, aavePool common.Address, atokens map[string]common.Address, vec goldenVectors, rep *driftReport, gatedFailures *int) error {
-	pinETH := p1.pins[aaveEngine]
+	pinETH := p1.Pins[aaveEngine]
 	pinHash := p1.pinHashes["eth"]
 
 	// ---- Golden rows A/B/C (§4) --------------------------------------------
-	goldenRows, err := runGoldenChainSide(ctx, r, vec, p1.golden, aavePool, atokens)
+	goldenRows, err := runGoldenChainSide(ctx, r, vec, p1.Golden, aavePool, atokens)
 	rep.Golden = goldenRows
 	if err != nil {
 		return aavePhaseErr(err)
@@ -464,10 +465,10 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 		universeDebtSet[reserve] = true
 		universeCollSet[reserve] = true
 	}
-	for _, s := range p1.aaveDebtNet {
+	for _, s := range p1.AaveDebtNet {
 		universeDebtSet[common.BytesToAddress(s.Asset)] = true
 	}
-	for _, s := range p1.aaveCollNet {
+	for _, s := range p1.AaveCollNet {
 		universeCollSet[common.BytesToAddress(s.Asset)] = true
 	}
 	var fixtureDebtReserves []common.Address
@@ -602,7 +603,7 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 	}
 	// Top-10 supplementary (labeled, non-gating — F4 carried as a named
 	// note: gated Aave census breadth is the golden borrowers).
-	for _, t := range p1.topAave {
+	for _, t := range p1.TopAave {
 		reserve := common.BytesToAddress(t.Asset)
 		dt, ok := debtTokenByReserve[reserve]
 		if !ok {
@@ -692,7 +693,7 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 		weldCollReads[reserve] = chainRead{Note: note}
 	}
 
-	headAsOf := goldenAsOfMap(p1.aaveAsOfHead)
+	headAsOf := snapshotdb.GoldenAsOfMap(p1.AaveAsOfHead)
 	// Golden borrowers at fresh P_eth (gated — "both vectors also run at
 	// fresh P: derivation holds at head, not only historically").
 	for _, b := range vec.Borrowers {
@@ -770,8 +771,8 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 	// getReserveAToken or an unreadable scaledTotalSupply leg reaches the
 	// exit code even while collateral numeric drift does not.
 	rep.AaveWeld = append(
-		weldAaveAggregate("debt", true, derivedScaledByReserve(p1.aaveDebtNet), weldDebtReads, debtTokenByReserve, universeDebt),
-		weldAaveAggregate("collateral", false, derivedScaledByReserve(p1.aaveCollNet), weldCollReads, aTokenByReserve, universeColl)...)
+		weldAaveAggregate("debt", true, derivedScaledByReserve(p1.AaveDebtNet), weldDebtReads, debtTokenByReserve, universeDebt),
+		weldAaveAggregate("collateral", false, derivedScaledByReserve(p1.AaveCollNet), weldCollReads, aTokenByReserve, universeColl)...)
 	*gatedFailures += aaveWeldGatedFailures(rep.AaveWeld)
 	_ = o
 	return nil

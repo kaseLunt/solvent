@@ -9,10 +9,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
-const aaveEngine = "aave_v3_etherfi"
+// aaveEngine aliases the snapshot package's constant so the two packages
+// cannot drift on the engine name.
+const aaveEngine = snapshotdb.AaveEngine
 
 // rayUnit is WadRayMath.RAY = 1e27.
 var rayUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(27), nil)

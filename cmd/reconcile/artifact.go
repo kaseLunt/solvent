@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 )
 
 const driftReportSchema = "solvent.reconcile.drift-report/v1"
@@ -58,25 +60,10 @@ type cursorInfo struct {
 	MaxReorgEpochsInfo map[string]int64            `json:"max_reorg_epochs_informational"`
 }
 
-// invariantsSection embeds every scan's result (counts + rows).
-type invariantsSection struct {
-	Scan1DistinctHash   scanResult `json:"scan1_distinct_hash_per_height"`
-	Scan2EventSums      scanResult `json:"scan2_event_sums_vs_balances"`
-	Scan3BorrowIndex    scanResult `json:"scan3_borrow_index_monotonic"`
-	Scan4EventLogOrphan scanResult `json:"scan4_event_log_referential"`
-	Scan5IIUCoverage    scanResult `json:"scan5_same_block_iiu_coverage"`
-	AdvisoryAaveIndex   scanResult `json:"advisory_aave_index_monotonic"`
-	// Sub-assertions (named): NULL-asset and side-less delta-bearing rows.
-	NullAssetDeltaRows int64  `json:"null_asset_delta_rows"`
-	SidelessDeltaRows  int64  `json:"sideless_delta_rows"`
-	Note               string `json:"note"`
-}
-
-type scanResult struct {
-	Rows   int  `json:"rows"`
-	Gated  bool `json:"gated"`
-	Detail any  `json:"detail,omitempty"`
-}
+// The invariants section types (snapshotdb.InvariantsSection / ScanResult)
+// live with the scans that fill them since round-13 F2 — the scans run
+// inside the snapshot transaction. JSON tags are unchanged, so the artifact
+// shape is byte-identical.
 
 // driftReport is the whole artifact.
 type driftReport struct {
@@ -101,11 +88,11 @@ type driftReport struct {
 	SpotReads        []spotReadRow         `json:"collateral_spot_reads,omitempty"`
 	CollateralReplay []collateralReplayRow `json:"collateral_replay,omitempty"`
 
-	Invariants       *invariantsSection `json:"invariants,omitempty"`
-	RPC              *rpcCallLog        `json:"rpc,omitempty"`
-	Summary          map[string]any     `json:"summary"`
-	HashScope        any                `json:"hash_scope"`
-	ComparisonSHA256 string             `json:"comparison_sha256,omitempty"`
+	Invariants       *snapshotdb.InvariantsSection `json:"invariants,omitempty"`
+	RPC              *rpcCallLog                   `json:"rpc,omitempty"`
+	Summary          map[string]any                `json:"summary"`
+	HashScope        any                           `json:"hash_scope"`
+	ComparisonSHA256 string                        `json:"comparison_sha256,omitempty"`
 }
 
 // canonicalJSON renders v with sorted keys and json.Number round-tripping

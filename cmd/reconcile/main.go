@@ -44,6 +44,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/chain"
 	"github.com/kaselunt/solvent/internal/config"
 	"github.com/kaselunt/solvent/internal/store"
@@ -180,9 +181,11 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 // taint-free. The vacuous-via-loose-bounds class — round 11's
 // `-snapshot-max-age 2562047h -max-head-lag 2562047h` — is the same class
 // as vacuous-via-skip and taints identically: a bound weakened is a check
-// bypassed.
+// bypassed. Round-13 F1 extended the generator's domain to the ENV surface
+// (env.go): the env sweep is appended HERE, inside the one function every
+// caller uses, so the flag and env taints cannot be wired apart.
 func acceptanceTaints(o *options) []string {
-	var taints []string
+	taints := envAcceptanceTaints()
 	if o.configPath != canonicalConfigPath {
 		taints = append(taints, fmt.Sprintf("-config %s (acceptance evidence is defined over the canonical contract set at %s; any other config changes the claim's subject)", o.configPath, canonicalConfigPath))
 	}
@@ -301,11 +304,12 @@ type pinnedReader struct {
 }
 
 func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, chain.EndpointToken, error) {
-	// Round-11 F3: the F5 runtime seam. The gate check is FIRST — before
-	// the runner, before the limiter, before any dial — in every entry
-	// point, so a network attempt while the snapshot transaction is open
-	// fails closed however it was reached.
-	if err := snapshotGate.violation(fmt.Sprintf("headerHash(%d)", n)); err != nil {
+	// Round-11 F3: the F5 runtime seam (the sentinel lives in snapshotdb
+	// since round-13 F2 — the package that opens it owns it). The gate
+	// check is FIRST — before the runner, before the limiter, before any
+	// dial — in every entry point, so a network attempt while the snapshot
+	// transaction is open fails closed however it was reached.
+	if err := snapshotdb.Gate.Violation(fmt.Sprintf("headerHash(%d)", n)); err != nil {
 		return common.Hash{}, chain.EndpointToken{}, err
 	}
 	var out common.Hash
@@ -320,7 +324,7 @@ func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, c
 }
 
 func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.EndpointToken, error) {
-	if err := snapshotGate.violation(fmt.Sprintf("headerTime(%d)", n)); err != nil {
+	if err := snapshotdb.Gate.Violation(fmt.Sprintf("headerTime(%d)", n)); err != nil {
 		return 0, chain.EndpointToken{}, err
 	}
 	var out uint64
@@ -335,7 +339,7 @@ func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.
 }
 
 func (r *pinnedReader) callAtHash(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash) ([]byte, chain.EndpointToken, error) {
-	if err := snapshotGate.violation("callAtHash:" + op); err != nil {
+	if err := snapshotdb.Gate.Violation("callAtHash:" + op); err != nil {
 		return nil, chain.EndpointToken{}, err
 	}
 	var out []byte
@@ -404,7 +408,7 @@ func (r *pinnedReader) secondOpinion(ctx context.Context, op string, to common.A
 	// secondOpinion bypasses the runner (single deliberate attempt), so it
 	// carries its own gate check; its signature has no error path, so the
 	// violation is returned as the recorded note — still never corroboration.
-	if err := snapshotGate.violation("secondOpinion:" + op); err != nil {
+	if err := snapshotdb.Gate.Violation("secondOpinion:" + op); err != nil {
 		return err.Error(), nil
 	}
 	if r.c.EndpointCount() <= 1 {
@@ -454,22 +458,9 @@ func summarizeSecondOpinionErr(err error) string {
 }
 
 // --- rewind detection (§8) --------------------------------------------------
-
-// rewindBaseline is the Phase-1 snapshot of the detector's inputs.
-type rewindBaseline struct {
-	AckedEpoch map[string]int64
-	LastBlock  map[string]uint64
-	MaxEpoch   map[int64]int64 // INFORMATIONAL ONLY — prune-defeated (§8)
-}
-
-func baselineFromCursors(cursors []store.DeriveCursorState, maxEpochs map[int64]int64) rewindBaseline {
-	b := rewindBaseline{AckedEpoch: map[string]int64{}, LastBlock: map[string]uint64{}, MaxEpoch: maxEpochs}
-	for _, c := range cursors {
-		b.AckedEpoch[c.Engine] = c.AckedEpoch
-		b.LastBlock[c.Engine] = c.LastBlock
-	}
-	return b
-}
+// The baseline type lives in snapshotdb since round-13 F2 (it is read inside
+// the snapshot transaction); the DETECTOR stays here — it runs on a fresh
+// post-run connection.
 
 // rewindMoved is the end-of-run re-check: per engine, acked_epoch UNCHANGED
 // and last_block ≥ P. It reads acked_epoch, NEVER MAX(reorg_epochs.epoch):
@@ -477,7 +468,7 @@ func baselineFromCursors(cursors []store.DeriveCursorState, maxEpochs map[int64]
 // completing mid-run leaves MAX unchanged, while RewindDerived always bumps
 // acked_epoch and acks are monotone (derive.go) — the prune-immune signal
 // (mutation target 10).
-func rewindMoved(baseline rewindBaseline, current []store.DeriveCursorState, pins map[string]uint64) []string {
+func rewindMoved(baseline snapshotdb.RewindBaseline, current []store.DeriveCursorState, pins map[string]uint64) []string {
 	var reasons []string
 	byEngine := map[string]store.DeriveCursorState{}
 	for _, c := range current {
@@ -812,34 +803,34 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	// TAINTS the run, and the taint set feeds computeResult — the bypass
 	// cannot be acceptance and cannot even be exit 0.
 	if wantDM && o.accountsFile != "" {
-		taints = append(taints, validateReplaySelection(p1.sel, p1.population, o.sample, forcedDMAnchors)...)
+		taints = append(taints, validateReplaySelection(p1.sel, p1.Population, o.sample, forcedDMAnchors)...)
 		stampAcceptance(rep, taints)
 	}
 	stampSeed(rep.Run, p1.seed)
-	rep.Run["config_sha256"] = p1.configSHA
+	rep.Run["config_sha256"] = p1.ConfigSHA
 	rep.Run["derive_lag_at_start"] = p1.deriveLag
 	rep.Cursors = p1.cursorInfo()
-	rep.Counts = p1.counts
+	rep.Counts = p1.Counts
 	rep.Sample = p1.sampleSection()
-	rep.Invariants = p1.invariants
+	rep.Invariants = p1.Invariants
 	rep.InternalInconsistencies = p1.internalSection()
 	rep.Pins = p1.pinSection()
 
 	// Population preconditions (§2) — exit 2, never a silent pass; the
 	// artifact for a precondition abort is still written (phase1Done).
 	if wantDM {
-		if p1.counts.MigrationGenesisRows != expectedMigrationGenesisRows {
+		if p1.Counts.MigrationGenesisRows != expectedMigrationGenesisRows {
 			return finish(abort(exitPrecondition, "aborted: precondition",
 				"migration_genesis SEED-ROW count %d != %d (the recon-fetched batch census); distinct accounts %d recorded separately — a row-vs-distinct gap is an adjudication finding, never normalized",
-				p1.counts.MigrationGenesisRows, expectedMigrationGenesisRows, p1.counts.MigrationGenesisDistinct))
+				p1.Counts.MigrationGenesisRows, expectedMigrationGenesisRows, p1.Counts.MigrationGenesisDistinct))
 		}
 		for _, s := range stratumOrder {
-			if p1.strataCounts[s] == 0 {
+			if p1.StrataCounts[s] == 0 {
 				return finish(abort(exitPrecondition, "aborted: precondition",
 					"stratum %q is EMPTY — taxonomy drift tripwire (§2)", s))
 			}
 		}
-		if len(p1.population) == 0 {
+		if len(p1.Population) == 0 {
 			return finish(abort(exitPrecondition, "aborted: precondition", "borrower population is empty"))
 		}
 	}
@@ -917,7 +908,7 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	if err != nil {
 		return finish(abort(exitRetryable, "aborted: recheck", "re-read derive cursors: %v", err))
 	}
-	if reasons := rewindMoved(p1.baseline, currentCursors, p1.pins); len(reasons) > 0 {
+	if reasons := rewindMoved(p1.Baseline, currentCursors, p1.Pins); len(reasons) > 0 {
 		return finish(abort(exitRetryable, "aborted: rewind during run", "%s", strings.Join(reasons, "; ")))
 	}
 	for i := range rep.Pins {
@@ -938,7 +929,7 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 				"fork weld re-run FAILED on %s: %s (requireCanonical=false means an orphaned pin keeps serving silently — this end-of-run check is load-bearing, L1-8)", rep.Pins[i].Chain, verdict))
 		}
 	}
-	rep.Cursors.AckedEpochs = ackedEpochSection(p1.baseline, currentCursors)
+	rep.Cursors.AckedEpochs = ackedEpochSection(p1.Baseline, currentCursors)
 
 	// ---------------- Phase 4: artifact + verdict --------------------------
 	result, code := computeResult(gatedFailures, o.toleranceDMWei, taints)
@@ -1093,7 +1084,7 @@ func resolveContracts(cfg *config.Config, vec goldenVectors) (dmProxy, aavePool 
 	return dmProxy, aavePool, atokens, nil
 }
 
-func ackedEpochSection(baseline rewindBaseline, current []store.DeriveCursorState) map[string]map[string]int64 {
+func ackedEpochSection(baseline snapshotdb.RewindBaseline, current []store.DeriveCursorState) map[string]map[string]int64 {
 	out := map[string]map[string]int64{}
 	for _, c := range current {
 		out[c.Engine] = map[string]int64{

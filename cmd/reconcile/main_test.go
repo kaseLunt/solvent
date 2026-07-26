@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
@@ -42,6 +43,10 @@ func TestParseFlagsValidation(t *testing.T) {
 }
 
 func TestAcceptanceTaints(t *testing.T) {
+	// acceptanceTaints judges the ENV surface too since round-13 F1; pin it
+	// to the canonical (unset) state so this test asserts the FLAG surface
+	// hermetically whatever the ambient environment carries.
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "")
 	var errBuf bytes.Buffer
 	o, err := parseFlags([]string{}, &errBuf)
 	require.NoError(t, err)
@@ -81,6 +86,9 @@ func TestAcceptanceTaints(t *testing.T) {
 // dropping a flag's branch from acceptanceTaints fails its mustTaint case
 // (mutation W13M1).
 func TestFlagSurfaceClosed(t *testing.T) {
+	// Env surface pinned canonical (round-13 F1): this test is about the
+	// FLAG surface; the env twin is TestEnvSurfaceClosed.
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "")
 	type taintCase struct {
 		args     []string
 		nameHint string // the taint text must name the weakened flag
@@ -159,6 +167,10 @@ func TestFlagSurfaceClosed(t *testing.T) {
 // the same class as disabled; tighter-than-canonical stays taint-free
 // because it can only strengthen.
 func TestLooseBoundsInvocationIsNonPass(t *testing.T) {
+	// Env surface pinned canonical (round-13 F1): the loose-bounds class
+	// under test here is the FLAG spelling; the env spelling is
+	// TestExtremeSnapshotIntervalEnvIsNonPass.
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "")
 	var errBuf bytes.Buffer
 	o, err := parseFlags([]string{"-snapshot-max-age", "2562047h", "-max-head-lag", "2562047h"}, &errBuf)
 	require.NoError(t, err)
@@ -237,7 +249,7 @@ func TestNonzeroToleranceCannotProducePass(t *testing.T) {
 // (the epoch row was pruned) while acked_epoch moved. A MAX-based detector
 // sees nothing; the acked_epoch detector must fire.
 func TestRewindMovedIsPruneImmune(t *testing.T) {
-	baseline := rewindBaseline{
+	baseline := snapshotdb.RewindBaseline{
 		AckedEpoch: map[string]int64{"debt_manager": 4, "aave_v3_etherfi": 2},
 		LastBlock:  map[string]uint64{"debt_manager": 1000, "aave_v3_etherfi": 500},
 		MaxEpoch:   map[int64]int64{10: 4, 1: 2}, // informational — and UNCHANGED below

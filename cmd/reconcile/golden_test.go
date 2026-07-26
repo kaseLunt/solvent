@@ -18,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/chain"
 )
 
@@ -152,10 +153,10 @@ func goldenFakeEnv(t *testing.T, vec goldenVectors) (*fakeChain, common.Address,
 	return f, pool, atokens, w1Live
 }
 
-// dbSideMatching builds a goldenDBSide whose W1 sums equal the fake's live
-// values and whose fixture sums equal the fixture constants.
-func dbSideMatching(vec goldenVectors, w1Live map[string]*big.Int) goldenDBSide {
-	db := goldenDBSide{
+// dbSideMatching builds a snapshotdb.GoldenDBSide whose W1 sums equal the
+// fake's live values and whose fixture sums equal the fixture constants.
+func dbSideMatching(vec goldenVectors, w1Live map[string]*big.Int) snapshotdb.GoldenDBSide {
+	db := snapshotdb.GoldenDBSide{
 		AsOfW1:      map[string]map[string]map[string]*big.Int{},
 		AsOfFixture: map[string]map[string]map[string]*big.Int{},
 	}

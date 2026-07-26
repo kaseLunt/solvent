@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
@@ -279,7 +280,7 @@ func TestBuildDMWeldReads(t *testing.T) {
 
 // TestComputeDMWeldInputsCoversAllAccounts is the amendment's NAMED mutation
 // kill (F1: "a weld computed over sampled-accounts-only must be killed"):
-// the weld's derived side is the ALL-ACCOUNTS census (p1.dmAllNet), and the
+// the weld's derived side is the ALL-ACCOUNTS census (p1.DMAllNet), and the
 // sampled aggregation exists ONLY as the coverage diagnostic. A mutant that
 // swaps the sample aggregation into .All shows 400 where the census says
 // 1000 — the phantom borrower's 600 vanishes exactly as F1 describes.
@@ -287,8 +288,8 @@ func TestComputeDMWeldInputsCoversAllAccounts(t *testing.T) {
 	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
 	sampledAccount := []byte{0xaa, 0x01}
 	p1 := &phase1Data{
-		snapshotData: snapshotData{
-			dmAllNet: []store.AssetNetSum{{Asset: usdc.Bytes(), Total: big.NewInt(1000)}}, // ALL accounts (incl. the never-sampled 600)
+		Data: snapshotdb.Data{
+			DMAllNet: []store.AssetNetSum{{Asset: usdc.Bytes(), Total: big.NewInt(1000)}}, // ALL accounts (incl. the never-sampled 600)
 		},
 		dmAsOf: []store.AsOfSum{
 			{Account: sampledAccount, Asset: usdc.Bytes(), Side: "debt", Total: big.NewInt(400)},

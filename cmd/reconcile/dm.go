@@ -12,10 +12,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
-const dmEngine = "debt_manager"
+// dmEngine aliases the snapshot package's constant so the two packages
+// cannot drift on the engine name.
+const dmEngine = snapshotdb.DMEngine
 
 var wad = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil) // 1e18
 
