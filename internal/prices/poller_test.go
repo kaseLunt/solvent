@@ -1091,6 +1091,188 @@ func TestPollerFloorIsAdmittedInFullWhenEveryRowCarriesItsOwnBinding(t *testing.
 	require.False(t, containsSubstring(*msgs, "floorDisposition=clamped"))
 }
 
+// THE FOURTH DISPOSITION, AND THE ONLY ONE NOTHING ASSERTED: A FLOOR THAT SITS AT OR
+// BELOW THE EPOCH'S OWN REPAIR TARGET RETAINS NOTHING EXTRA, AND THE BOUNDARY COMES
+// BACK ABOVE THE OFFER.
+//
+// Codex round 11's [medium] #3. `admitted`, `clamped` and `none-offered` each had a
+// test; `below-target` had none, so the arm that reports the offer being LOWER than
+// the returned boundary was the one arm a mutation could rewrite for free. It is also
+// the arm whose mis-report fails in the opposite DIRECTION from the clamp, which is
+// why pinning it is not bookkeeping: a clamp mis-report tells the operator a marked
+// row is still valid (round 10's finding), and a below-target mis-report tells the
+// operator that canonical, readable history is unusable. Both are the same mistake —
+// composing the sentence out of the number that was ASKED FOR rather than the one that
+// came back — and only one of them had a regression.
+//
+// THE SHAPE, and why it is an ordinary production state rather than a contrivance.
+// Poll rounds anchor at cadence, so anchors are sparse relative to blocks: on chain 10
+// a 60-second interval leaves ~30 blocks between them. A walker rewind therefore lands
+// BETWEEN two anchors as a matter of course. Here it rewound to 5000 while the poller's
+// anchors sit at 5100 (replaced) and 4900 (still canonical), so verification offers
+// 4900 — a real, hash-verified floor — and the store returns 5000, because the epoch
+// never reached below 5000 and a floor cannot lower a boundary.
+//
+// The row at 4950 is the reason the direction matters. It is at or below the RETURNED
+// boundary, so the store leaves it valid and readable; it is ABOVE the offered floor,
+// so a WARN naming 4900 as the validity boundary would have told the operator to treat
+// a perfectly good price as lost.
+func TestPollerFloorBelowTheEpochsRepairTargetIsReportedAsBelowTarget(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 2}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	assets := realFeeds(t).PollAssets(10)
+	// Two anchored rounds, straddling the walker's target.
+	st.seedRound(engine, assets[0].Address.Bytes(), SourcePriceProviderV2, 4900, blockHashAt(4900), clk.now())
+	st.seedRound(engine, assets[0].Address.Bytes(), SourcePriceProviderV2, 5100, blockHashAt(5100), clk.now())
+	// A row between the offered floor and the returned boundary. It is BELOW the
+	// epoch's target, so no repair ever asks anything about it — which is exactly why
+	// its binding is irrelevant here and it is seeded as the plain legacy row D-012
+	// clause 5 describes (population zero in production; accepted in dev).
+	st.seedRow(engine, assets[1].Address.Bytes(), SourcePriceProviderV2, 4950, clk.now())
+	st.cursor, st.cursorFound = 5100, true
+
+	// The chain replaced 5100 and still carries 4900: probe 5100 (mismatch), probe
+	// 4900 (match), offer 4900.
+	canonicalAt(ch, 4900)
+	ch.setHash(5100, common.HexToHash("0xdead"))
+	st.unacked = true
+	deep := uint64(5000)
+	st.rewindDeepTo = &deep   // the epoch only ever reached 5000
+	p.lastAttempt = clk.now() // not due: isolate the repair
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Empty(t, st.rewinds, "the poller has no deletion primitive")
+	require.Len(t, st.neutralized, 1)
+
+	// THE TWO NUMBERS, AND THEY DIFFER IN THE UNDER-REPORTING DIRECTION.
+	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor,
+		"the pass DID verify 4900 by hash and offered it: below-target is not a failure to find a floor")
+	require.Equal(t, uint64(5000), st.cursor,
+		"the store returned the epoch's own target, ABOVE the offer — a floor cannot lower a boundary")
+
+	byBlock := map[uint64]fakeRow{}
+	for _, r := range st.rows {
+		byBlock[r.block] = r
+	}
+	require.Len(t, byBlock, 3, "every row survives: nothing here deletes")
+	require.True(t, byBlock[4900].valid)
+	require.True(t, byBlock[4950].valid,
+		"at or below the RETURNED boundary, so it keeps its validity — the offered floor 4900 does not cover it and the store did not ask it to")
+	require.False(t, byBlock[5100].valid, "only the suffix above the returned boundary is marked")
+	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[5100].invalidReason)
+
+	// THE PROPERTY (Codex round 11's [medium] #3): the disposition names this outcome,
+	// and every operator-facing number is the one the store RETURNED.
+	require.True(t, containsSubstring(*msgs, "floorDisposition=below-target"),
+		"the arm is reported by name, not left to be inferred from two numbers")
+	require.True(t, containsSubstring(*msgs, "validAtOrBelow=5000"),
+		"the validity boundary reported is the returned boundary, not the offer")
+	require.True(t, containsSubstring(*msgs, "floorOffered=4900"),
+		"the offer is still disclosed — it is evidence about the chain, just not a validity claim")
+	require.True(t, containsSubstring(*msgs, "sat at or below the epoch's own repair target, so it retained nothing extra"),
+		"and the explanation is composed from the returned boundary AFTER the store answered")
+	require.False(t, containsSubstring(*msgs, "floorDisposition=admitted"),
+		"a floor the boundary rose above was NOT admitted at its own height")
+	require.False(t, containsSubstring(*msgs, "floorDisposition=clamped"),
+		"nor was it clamped: nothing refused it, the epoch simply never reached that deep")
+	for _, m := range *msgs {
+		if strings.Contains(m, "rowsNeutralized") {
+			require.NotContains(t, m, "validAtOrBelow=4900",
+				"presenting the offer as the validity boundary would report readable history as lost")
+		}
+	}
+}
+
+// D-012 CLAUSE 2 IS A FORWARD GUARANTEE, SO THE POLLER'S OWN WARNS MAY NOT PROMISE
+// HASH-BASED RECONCILIATION FOR A POPULATION THAT HAS NO HASH.
+//
+// Codex round 11's [medium] #2. Wave 14 split the STORE's classification WARN three
+// ways — rowsAnchored / rowsUnanchoredBindingPruned / rowsUnanchoredNeverBound — and
+// scoped the retention claim to the first. The poller's two WARNs kept the blanket
+// version ("their provenance is retained forever, so an offline reconciliation stays
+// possible"), which contradicts that split precisely when rowsAnchored is 0.
+//
+// NeutralizeUnverifiablePrices returns a boundary and a total and nothing else, so the
+// poller CANNOT condition its text on the split — which means its text has to be true
+// for the worst population. This fixture IS that population: the only row this repair
+// marks carries a binding whose anchor retention has already removed, so no hash for
+// its round exists anywhere in the database and clause 2 — which forbids expiring such
+// an anchor FROM NOW ON — cannot bring one back. Clause 5 ratifies marking it anyway.
+//
+// Both poller WARNs are asserted here because both carried the same sentence: the one
+// neutralize emits, and the backlog one refreshNeutralizedBacklog emits on the
+// transition the marking causes.
+func TestPollerNeutralizationPromisesNoOfflineRecoveryForAPrunedBinding(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 2}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	assets := realFeeds(t).PollAssets(10)
+	// The floor this pass will verify: an ordinary anchored round, still canonical.
+	st.seedRound(engine, assets[0].Address.Bytes(), SourcePriceProviderV2, 4900, blockHashAt(4900), clk.now())
+	// THE MARKED POPULATION: a row that DID anchor and whose anchor is gone. Its
+	// binding still names block 5100 and no anchor row remains there, which is what
+	// retention leaves behind — the shape
+	// TestARetentionPrunedAnchorIsNeverRecreatedAfterARestart pins on the store side.
+	// rowsAnchored is 0 for this call and every marked row is unanchored-binding-pruned.
+	st.seedBoundRow(engine, assets[1].Address.Bytes(), SourcePriceProviderV2, 5100, 5100, clk.now())
+	st.cursor, st.cursorFound = 5100, true
+
+	canonicalAt(ch, 4900)
+	st.unacked = true
+	deep := uint64(4000)
+	st.rewindDeepTo = &deep
+	p.lastAttempt = clk.now()
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, st.neutralized, 1)
+	require.Empty(t, st.rewinds)
+
+	byBlock := map[uint64]fakeRow{}
+	for _, r := range st.rows {
+		byBlock[r.block] = r
+	}
+	require.True(t, byBlock[4900].valid, "the verified floor's own round is untouched")
+	require.False(t, byBlock[5100].valid, "the pruned-binding row is RETAINED and marked, never deleted")
+	require.Equal(t, store.InvalidReasonUnverifiableReorg, byBlock[5100].invalidReason)
+	require.Nil(t, st.anchorAt(engine, 5100),
+		"the premise of the fixture: no anchor survives at the marked row's height, so no hash for its round is on disk")
+
+	// THE PROPERTY. The neutralization WARN scopes hash retention and offline
+	// reconciliation to rows that still HAVE an anchor, and points at the store's WARN
+	// as the only place the split is counted.
+	neutralizeWarn := messageContaining(t, *msgs, "rowsNeutralized")
+	require.Contains(t, neutralizeWarn, "THE ROWS AND THEIR VALUES ARE RETAINED FOREVER",
+		"what clause 2 guarantees unconditionally is still stated unconditionally")
+	require.Contains(t, neutralizeWarn, "the recorded BLOCK HASH survives only where the marked row's own round still has an anchor",
+		"and the hash is scoped to the population that has one")
+	require.Contains(t, neutralizeWarn, "FOR THOSE ROWS AND NO OTHERS",
+		"the reconciliation promise is scoped in the same sentence, not left to be inferred")
+	require.Contains(t, neutralizeWarn, "rowsUnanchoredBindingPruned",
+		"and the operator is sent to the store WARN that actually knows the split")
+	require.NotContains(t, neutralizeWarn, "Their provenance is retained forever (clause 2), so an offline reconciliation stays possible",
+		"the retired blanket sentence: false for exactly this row")
+
+	// THE SAME SENTENCE WAS IN THE BACKLOG WARN, which fires on the transition this
+	// marking causes and is the message an operator sees for as long as the pile lasts.
+	backlogWarn := messageContaining(t, *msgs, "RETAINED BUT PERMANENTLY UNUSABLE")
+	require.Contains(t, backlogWarn, "the recorded block hash survives only where a row's own round still has an anchor",
+		"the backlog report is scoped the same way")
+	require.Contains(t, backlogWarn, "could settle THOSE rows and no others")
+	require.NotContains(t, backlogWarn, "Their provenance is retained forever (clause 2), so an offline reconciliation could still settle the anchored ones",
+		"the retired blanket sentence, in its second home")
+}
+
 // A1 CASE: A DEEPER EPOCH ARRIVES WHILE VERIFICATION IS STILL PAGING. The walker
 // records a second, deeper rewind between two verification Steps, which lowers the
 // effective target under the poller's feet.

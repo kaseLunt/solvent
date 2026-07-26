@@ -83,9 +83,12 @@ package prices
 //     So the online reversal is removed (clause 3), and what stands in its place is
 //     (a) a stronger gate before marking — cross-endpoint agreement whenever two or
 //     more endpoints are CONFIGURED, fail-closed otherwise (clause 4,
-//     checkpointCorroborated); (b) provenance retained forever so an offline
-//     reconciliation stays possible (clause 2); and (c) the classification's size
-//     and age kept visible (clause 6, refreshNeutralizedBacklog).
+//     checkpointCorroborated); (b) the row and its value retained forever, and the
+//     recorded block hash retained wherever the row's own round still HAS one, so an
+//     offline reconciliation stays possible for those rows (clause 2 — a forward
+//     guarantee against prune and rewind, not a way back to a hash never written or
+//     already swept); and (c) the classification's size and age kept visible
+//     (clause 6, refreshNeutralizedBacklog).
 //
 // # FAILURE POSTURE, in the order the failures happen
 //
@@ -882,8 +885,15 @@ func (p *Poller) readRound(ctx context.Context) (uint64, []byte, []store.PriceOb
 //	floorUnverifiable   unplaceable, permanently   yes        yes
 //	floorUnprobed       not concluded yet          NO         NO  (retry)
 //
-//	* only the suffix ABOVE the verified floor; everything at or below it keeps
-//	  its validity, which is the whole value of finding a floor.
+//	* only the suffix ABOVE THE BOUNDARY THE STORE RETURNS — which is NOT the same
+//	  number as the verified floor, and saying it was cost a review round. A floor is
+//	  an OFFER. NeutralizeUnverifiablePrices may return a boundary BELOW it (clamped
+//	  over history the store cannot place, or refused outright) or ABOVE it (the offer
+//	  already sat under the epoch's own repair target and bought nothing). Validity
+//	  survives at or below the RETURNED boundary and nowhere else; floorDisposition
+//	  names which of those four outcomes an offer met. Finding a floor is still the
+//	  difference between an asset keeping its prices and losing their readability —
+//	  it is just not this side of the call that decides how much it buys.
 //
 // The invariant they serve is now a marking rule: NEVER MARK OR BLESS A ROW
 // WITHOUT A COMPLETE, COHERENT ANSWER FROM ONE ENDPOINT FOR EVERYTHING ABOVE THE
@@ -977,9 +987,11 @@ const (
 // There is no third bullet any more, and that is the point of D-012: the marking is
 // PERMANENT (clause 3), and what bounds the damage is the classification of the data
 // rather than a repair path — a wrongly-marked row is a sample gap, indistinguishable
-// to every consumer from the missed polls this system already produces. Its
-// provenance survives forever (clause 2) so an offline reconciliation could settle
-// it; none exists.
+// to every consumer from the missed polls this system already produces. Its row and
+// value survive forever, and the hash of the block its round ran against survives
+// wherever that round's anchor still does (clause 2), so an offline reconciliation
+// could settle THOSE rows; for a row whose binding names no surviving anchor there is
+// nothing left to settle it with. No such tool exists either way.
 //
 // It is still not a cryptographic proof against a hostile provider and does not claim
 // to be: two colluding endpoints defeat the agreement rule. It is a
@@ -1104,11 +1116,23 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 // floorOutcomes holds.
 //
 // WHAT MAKES A MATCH ACCEPTABLE, and why a bare match is not. Anchors are probed
-// newest-first. A match at height H entails that H and every ancestor are
-// unchanged on the answering endpoint's chain, so rows at or below H keep their
-// validity — but it says NOTHING about the heights ABOVE H, and those are exactly
-// the rows a floor of H leaves to be marked. Three independent things have to hold
-// before a match may be accepted as a floor:
+// newest-first. A match at height H entails that H and every ancestor are unchanged
+// on the answering endpoint's chain. That is a fact about the CHAIN, and it is the
+// only fact this function establishes: it says NOTHING about the heights ABOVE H —
+// exactly the rows a floor of H leaves to be marked — and it does not by itself
+// keep any row valid.
+//
+// SO WHAT THIS FUNCTION RETURNS IS AN OFFER, NOT A VALIDITY BOUNDARY (Codex round
+// 11's [medium] #1). NeutralizeUnverifiablePrices decides how much of the offer to
+// admit, and the boundary it RETURNS is what rows keep their validity at or below.
+// It can differ from H in both directions: DOWNWARD, because the store clamps a floor
+// below any observation in the repair range whose own round left it unplaceable — a
+// hash proof about the chain cannot place a row that never recorded which block it
+// read; and UPWARD, because the epoch's own effective repair target may already sit
+// above H, in which case the offer retained nothing extra. Poller.neutralize composes
+// every operator-facing sentence from the returned boundary and floorDisposition says
+// which case happened. Three independent things have to hold before a match may be
+// offered as a floor at all:
 //
 //  1. EVERY ANCHOR ABOVE H WAS PROBED AND MISMATCHED. A probe that ERRORED
 //     establishes nothing, so a match below it is not a licence to mark what the
@@ -1129,10 +1153,14 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 //     nothing available to place it in either direction. Those states are
 //     floorUnverifiable, never floorVerified.
 //
-// The boundary is max(floor, effective target), because the store lowers a
-// caller's target to the deepest unacknowledged rewound_to and the floor then
-// raises it back: a floor BELOW the effective target does not move the boundary at
-// all.
+// The boundary rule (3) is checked against is max(floor, effective target), because
+// the store lowers a caller's target to the deepest unacknowledged rewound_to and the
+// floor then raises it back: a floor BELOW the effective target does not move the
+// boundary at all — and, since the offer is still returned unchanged, that is the
+// `below-target` disposition Poller.neutralize will report. This local maximum is a
+// LOWER BOUND on what the store will do, not a prediction of it: the store's own clamp
+// can take the returned boundary below the floor as well, which is why nothing here
+// composes an operator-facing claim out of it.
 //
 // Each Step spends at most anchorProbePage probes. A page that finds no match
 // lowers the resume point and returns floorUnprobed, so the NEXT Step continues
@@ -1707,10 +1735,20 @@ func (p *Poller) resetVerification(why string) {
 //
 // store.NeutralizeUnverifiablePrices retains every row, marks the ones above the
 // boundary so no usable-price read can return them, RETAINS THE ANCHORS above that
-// boundary (clause 2 — permanent provenance, so an offline reconciliation stays
-// possible), resets the cursor and acks — in one transaction. A verified floor
-// confines the marking: history the pass proved canonical keeps its validity as far
-// as the store admits the floor, and only the suffix above that is marked.
+// boundary, resets the cursor and acks — in one transaction. A verified floor confines
+// the marking: only the suffix above the boundary THE STORE RETURNS is marked, and how
+// much of the offered floor that boundary reflects is the store's answer rather than
+// the pass's.
+//
+// WHAT CLAUSE 2 BUYS, STATED AT ITS ACTUAL STRENGTH. It is a FORWARD guarantee: from
+// the marking onward, no retention bound, prune or rewind may expire the anchor a
+// marked row is bound to. So an offline reconciliation stays possible for a marked row
+// THAT HAS ONE. It is not a way back to a hash that the row's round never recorded, or
+// that retention had already swept before the marking ran — for those rows the value
+// and the row survive and nothing else does. The store's classification WARN is where
+// that split is counted (rowsAnchored / rowsUnanchoredBindingPruned /
+// rowsUnanchoredNeverBound); this call returns only a boundary and a total, so nothing
+// composed here may speak for the anchored population as if it were all of them.
 //
 // THE FLOOR THIS PASS OFFERS IS A REQUEST; THE BOUNDARY THE STORE RETURNS IS THE
 // FACT (Codex round 10's [medium] #1). The store may CLAMP an offered floor — down
@@ -1765,7 +1803,7 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floorOffered uint64, pr
 	// actually being asked at 3am, which is "what can I still trust?".
 	disposition, floorNote := floorDisposition(floorOffered, boundary)
 	justification := evidence + ". " + floorNote
-	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the BOUNDARY THIS CALL RETURNED are retained and marked unusable PERMANENTLY (D-012 clause 3 — nothing in the running system un-marks them; only a current poll landing at the same height can, and this poller reads `latest`), everything at or below that boundary keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head. The BOUNDARY is authoritative and the offered floor is not: the store clamps a floor it will not admit over history it cannot place, so read floorDisposition before floorOffered. Their provenance is retained forever (clause 2), so an offline reconciliation stays possible",
+	slog.Warn("polled prices NEUTRALIZED rather than deleted after a reorg epoch: nothing was deleted, the rows above the BOUNDARY THIS CALL RETURNED are retained and marked unusable PERMANENTLY (D-012 clause 3 — nothing in the running system un-marks them; only a current poll landing at the same height can, and this poller reads `latest`), everything at or below that boundary keeps its validity, the epoch is acknowledged, and poll ingestion resumes at the new head. The BOUNDARY is authoritative and the offered floor is not: the store clamps a floor it will not admit over history it cannot place, so read floorDisposition before floorOffered. THE ROWS AND THEIR VALUES ARE RETAINED FOREVER (clause 2); the recorded BLOCK HASH survives only where the marked row's own round still has an anchor, so hash-based OFFLINE RECONCILIATION IS POSSIBLE FOR THOSE ROWS AND NO OTHERS — clause 2 stops a prune or rewind from expiring such an anchor from now on and cannot bring back one that was already gone. This message does not know the split; the store's own classification WARN counts it (rowsAnchored / rowsUnanchoredBindingPruned / rowsUnanchoredNeverBound)",
 		"engine", p.engine, "requestedTarget", cursor,
 		"boundary", boundary, "validAtOrBelow", boundary,
 		"floorOffered", floorOffered, "floorDisposition", disposition,
@@ -1940,7 +1978,7 @@ func (p *Poller) refreshNeutralizedBacklog(ctx context.Context, when string) {
 	if !stats.Oldest.IsZero() {
 		age = p.now().Sub(stats.Oldest)
 	}
-	slog.Warn("polled price rows are RETAINED BUT PERMANENTLY UNUSABLE after reorg repair: they were classified rather than deleted, and nothing in the running system reverses that (D-012 clause 3). Only a current poll landing at one of these exact heights can retire one, which this poller reaches only while the head is still there. Their provenance is retained forever (clause 2), so an offline reconciliation could still settle the anchored ones; none is built. These are sample gaps of the same kind an rpc outage produces",
+	slog.Warn("polled price rows are RETAINED BUT PERMANENTLY UNUSABLE after reorg repair: they were classified rather than deleted, and nothing in the running system reverses that (D-012 clause 3). Only a current poll landing at one of these exact heights can retire one, which this poller reaches only while the head is still there. The rows and their values are retained forever (clause 2); the recorded block hash survives only where a row's own round still has an anchor, so an offline reconciliation could settle THOSE rows and no others, and none is built. These are sample gaps of the same kind an rpc outage produces",
 		"engine", p.engine, "chain", p.cfg.ChainID, "rows", stats.Rows, "previousRows", prev.Rows,
 		"backlogKnownBefore", had,
 		"oldestObservedAt", stats.Oldest, "oldestAge", age.Truncate(time.Second),

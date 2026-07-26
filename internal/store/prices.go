@@ -48,14 +48,17 @@ package store
 // longer depends on which interface a caller happens to hold.
 //
 // The (block, hash) ANCHOR per landed round survives that change and does more
-// work than before, not less. Repair walks the anchors down from the newest,
-// keeping everything at or below the first one whose hash the caller re-verified
-// against a live endpoint and marking only the suffix above it. A hash match at
-// height H entails that every block up to H is unchanged on THAT endpoint's chain
-// (blocks are chained by parent hash), so a verified floor is what confines the
-// marking — the difference between an asset keeping its prices and losing their
-// readability. A floor of 0 means the caller could place nothing, never that it
-// gave up looking.
+// work than before, not less. Repair walks the anchors down from the newest and
+// OFFERS the first one whose hash the caller re-verified against a live endpoint as
+// a floor; what is kept is everything at or below the BOUNDARY THIS LAYER RETURNS
+// for that offer, and only the suffix above it is marked. A hash match at height H
+// entails that every block up to H is unchanged on THAT endpoint's chain (blocks are
+// chained by parent hash), so a verified floor is what confines the marking — the
+// difference between an asset keeping its prices and losing their readability. It is
+// not, on its own, a decision about any row: NeutralizeUnverifiablePrices clamps the
+// offer below history it cannot place, and the epoch's target may already sit above
+// it. A floor of 0 means the caller could place nothing, never that it gave up
+// looking.
 //
 // This layer still does not decide policy. It marks what its caller's floor tells
 // it to, and the caller is the one that must refuse on incomplete evidence;
@@ -1293,16 +1296,28 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 // the head still sits at a marked height — a shallow-reorg shape — and never for a
 // height the head has passed.
 //
-// PROVENANCE OUTLIVES THE CLASSIFICATION ANYWAY (D-012 clause 2). The row, its
-// value, and the anchor recording the hash of the block its round executed against
-// are all retained forever, on every store path. Nothing online reads them for
-// recovery; they are kept so an OFFLINE reconciliation could, at zero ongoing cost.
-// No such tool exists today, and nothing here should be read as promising one.
+// PROVENANCE OUTLIVES THE CLASSIFICATION AS FAR AS IT EXISTS AT ALL (D-012 clause 2).
+// The row and its value are retained forever, on every store path, unconditionally.
+// The ANCHOR recording the hash of the block the round executed against is retained
+// forever too — but only where that round wrote one and it is still here. Clause 2 is
+// a FORWARD guarantee (no retention bound, prune or rewind may expire the anchor a
+// marked row is bound to) and not a way back to a hash never written, or already aged
+// out when the marking ran; clause 5 ratifies marking those rows regardless. The WARN
+// below splits the marked population on exactly that line, and it is the only place
+// the split is known. Nothing online reads any of it for recovery; it is kept so an
+// OFFLINE reconciliation could, at zero ongoing cost, FOR THE ROWS THAT STILL HAVE AN
+// ANCHOR. No such tool exists today, and nothing here should be read as promising one.
 //
-// verifiedFloor is honoured exactly as RewindPrices honours it: history at or below
-// an INDEPENDENTLY hash-verified block is provably canonical, so it keeps its
-// validity and only the rows above that boundary are marked. Passing 0 means no
-// anchor verified and the whole suffix above the walker's target is unprovable.
+// verifiedFloor IS AN OFFER, AND IT IS NOT HONOURED THE WAY RewindPrices HONOURS ONE
+// — that claim stood here after the clamp below was added and was false for as long
+// (Codex round 11's [medium] #1). RewindPrices raises its target to the floor
+// unconditionally; this call additionally CLAMPS the floor beneath any observation in
+// the repair range whose own round left it unplaceable, so an INDEPENDENTLY
+// hash-verified block does not by itself keep a row's validity. What does is THE
+// BOUNDARY THIS CALL RETURNS: rows at or below it are untouched, rows above it are
+// marked, and the two numbers coincide only when the offer is admitted in full.
+// Passing 0 means no anchor verified and the whole suffix above the walker's target is
+// unprovable.
 //
 // Returns the boundary it acted above and how many rows it marked. The WARN splits
 // that count three ways, because the three have different meanings for an operator:

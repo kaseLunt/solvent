@@ -101,10 +101,12 @@
 // round records (block, hash) in price_poll_anchors atomically with its rows.
 // Repair walks those anchors down from the newest and re-checks each hash against
 // a live endpoint; the first match ENTAILS that this block and every ancestor are
-// unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by parent hash), so rows
-// at or below it keep their validity — as far as the store admits the match as a
-// floor, which stops just below any observation in the range that recorded no
-// surviving anchor of its own. That entailment is conditional on the
+// unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by parent hash). That match
+// is OFFERED as a floor, and what keeps rows valid is the BOUNDARY the store returns
+// for it: the offer is admitted only up to just below any observation in the range
+// that recorded no surviving anchor of its own, and if the epoch's own repair target
+// already sits above the match the offer retains nothing extra. That entailment is
+// conditional on the
 // answering endpoint being honest and on one chain view being used throughout —
 // the same trust every ingested log rests on, no more; it is not a cryptographic
 // proof against a hostile provider.
@@ -128,7 +130,8 @@
 // nothing has ever made up, because every consumer (LatestUsablePrice, P3 risk reads,
 // reconciliation) simply skips an absent sample. A wrongly-marked row is
 // observationally identical to one of those holes and differs only by carrying MORE
-// information: the value and the block hash its round ran against both survive.
+// information: the value always survives, and the block hash its round ran against
+// survives wherever that round's anchor does.
 //
 // So a marking is a PERMANENT CLASSIFICATION in the running system (clause 3), not a
 // pending repair. D-011 mandated an online revalidation pass and wave 7 built one;
@@ -138,8 +141,14 @@
 //
 //   - PREVENTION, strengthened: with two or more endpoints CONFIGURED, marking
 //     requires cross-endpoint agreement and fails closed without it (clause 4).
-//   - PROVENANCE, retained forever on every store path (clause 2), so an OFFLINE
-//     reconciliation stays possible at any future time. None is built.
+//   - PROVENANCE, retained forever on every store path (clause 2) — the row and its
+//     value unconditionally, and the anchor recording the hash of the block the round
+//     executed against wherever the row's own round still HAS one. So an OFFLINE
+//     reconciliation stays possible at any future time for the ANCHORED rows and for
+//     no others: clause 2 is a forward guarantee that no retention bound, prune or
+//     rewind expires such an anchor, not a way back to a hash that was never written
+//     or had already been swept when the marking ran (clause 5 ratifies marking those
+//     rows anyway). None is built.
 //   - VISIBILITY, so the accumulated classification is countable (clause 6).
 //
 // The one thing that still un-marks a row online is insertPrice's supersede arm: a

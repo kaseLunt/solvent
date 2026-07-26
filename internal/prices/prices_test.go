@@ -864,6 +864,19 @@ func (f *fakePriceStore) seedAnchor(engine string, block uint64, hash common.Has
 	f.seedAnchorAt(engine, block, hash, f.now())
 }
 
+// anchorAt returns the durable anchor this engine holds at block, or nil. It is how a
+// test states the PREMISE of a pruned-binding fixture as an assertion rather than as a
+// comment: "no hash for this round is on disk" is the fact the scoped retention claim
+// turns on, and a fixture that quietly grew an anchor would make that claim vacuous.
+func (f *fakePriceStore) anchorAt(engine string, block uint64) *store.StoredPollAnchor {
+	for i, a := range f.anchors[engine] {
+		if a.BlockNumber == block {
+			return &f.anchors[engine][i]
+		}
+	}
+	return nil
+}
+
 // seedAnchorAt is seedAnchor with an explicit database timestamp, for tests about
 // how long it has been since a NEW execution block was observed.
 func (f *fakePriceStore) seedAnchorAt(engine string, block uint64, hash common.Hash, at time.Time) {
@@ -1603,4 +1616,27 @@ func containsSubstring(msgs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// messageContaining returns THE ONE captured record identified by want, and fails if
+// there is not exactly one.
+//
+// It exists because containsSubstring answers "does any message say X", which is the
+// wrong question for a test asserting that a PARTICULAR message no longer makes a
+// claim: a NotContains over the whole slice passes whenever the claim moved to another
+// record, and a Contains over the whole slice passes whenever some other record
+// happens to carry the phrase. Pinning the record first makes both directions
+// meaningful. The uniqueness requirement is part of that — two records answering to
+// the same selector would make "the" message ambiguous, and the assertion silently
+// about whichever came first.
+func messageContaining(t *testing.T, msgs []string, want string) string {
+	t.Helper()
+	var found []string
+	for _, m := range msgs {
+		if strings.Contains(m, want) {
+			found = append(found, m)
+		}
+	}
+	require.Len(t, found, 1, "expected exactly one captured record containing %q; got %d of %d records", want, len(found), len(msgs))
+	return found[0]
 }
