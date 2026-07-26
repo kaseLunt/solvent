@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "wave": "task-9 wave 13",
+    "unit": "cmd/reconcile — the three round-11 fixes: the taint generator closed over the flag surface (F1), weld-unread always gated regardless of the numeric policy (F2), and the REAL F5 seam (F3: runtime sentinel + AST reachability walk).",
+    "purpose": "One named mutant per round-11 finding, each attacking the fix's load-bearing line: drop a bound-weakening flag from the taint generator (W13M1), let unread weld rows fall back to the side's advisory numeric policy (W13M2), and — the round-11 mandated mutation — reintroduce an ACTUAL headerHash call under BeginTx, with the reader parameter it needs (W13M3). W13M3 is exactly the mutation wave 11 claimed was unrepresentable; it compiles (verified before this spec was committed) and must die on the AST reachability test, retracting that claim with evidence.",
+    "design_notes": [
+      "ENV FOR THE LOOP: no DB and no RPC needed — all three kill tests are hermetic unit tests in cmd/reconcile (flag parse → taint → verdict; weld aggregation → accounting → verdict; AST walk over non-test sources). TEST_DATABASE_URL / SOLVENT_* stay unset.",
+      "All three files are CRLF in the working tree; every search pattern below embeds \\r\\n and was verified exactly-once against the committed bytes at spec time (apply_edit re-asserts on every run).",
+      "W13M3 is THREE edits (signature, gate-adjacent body, call site) so the mutant COMPILES — a build-failure kill would be evidence about the compiler, not the tests. The kill must come from TestCollectSnapshotReachesNoChainSurface naming the smuggled surface.",
+      "EVERY KILL IS BEHAVIORAL: each mutant makes a named test assert the exact property the wave-13 brief states, not a coverage count."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W13M1",
+      "description": "generator-drop (round-11 F1): the -snapshot-max-age branch is removed from acceptanceTaints — the freshness bound becomes an acceptance-clean override again",
+      "property": "the taint GENERATOR is closed over every bound-weakening flag: any explicit -snapshot-max-age replaces the §7 policy bound with an operator constant and MUST taint, so the round-11 invocation `-snapshot-max-age 2562047h -max-head-lag 2562047h` is structurally non-pass. Killed by TestFlagSurfaceClosed (the snapshot-max-age mustTaint case parses real argv through parseFlags → acceptanceTaints → computeResult) and TestLooseBoundsInvocationIsNonPass (the binding invocation verbatim).",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestFlagSurfaceClosed|TestLooseBoundsInvocationIsNonPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif o.snapshotMaxAge != canonicalSnapshotMaxAge && o.snapshotMaxAge != \"\" {\r\n\t\ttaints = append(taints, fmt.Sprintf(\"-snapshot-max-age %s replaces the §7 policy bound (auto = derived from the daemon's own cadence) with an operator constant — a loose value makes the freshness gate vacuous for any realistic stale state\", o.snapshotMaxAge))\r\n\t}",
+          "replace": "\t_ = o.snapshotMaxAge // MUTANT: -snapshot-max-age dropped from the taint generator"
+        }
+      ]
+    },
+    {
+      "id": "W13M2",
+      "description": "unread-ungated (round-11 F2): weld-unread rows fall back to the side's numeric-mismatch policy — an unreadable collateral leg becomes advisory again",
+      "property": "ability-to-check is never advisory: a weld-unread row (reverted getReserveAToken, unreadable scaledTotalSupply, or a never-attempted universe leg) is GATED on BOTH Aave weld sides regardless of the gated parameter, which carries the numeric-mismatch policy only. Under the mutant, a reverting collateral resolution flows through aaveWeldGatedFailures as zero and the run can pass with an unverifiable collateral universe — verbatim the round-11 finding 2 hole. Killed by TestCollateralUnreadIsGatedEvenWhenNumericIsAdvisory (asserts Gated on both unread shapes, 2 gated failures through the REAL accounting, and the non-pass verdict).",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestCollateralUnreadIsGatedEvenWhenNumericIsAdvisory", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/aave.go",
+          "search": "\t\tif row.Verdict == verdictWeldUnread {\r\n\t\t\trow.Gated = true\r\n\t\t}",
+          "replace": "\t\t_ = verdictWeldUnread // MUTANT: unread rows fall back to the side's numeric policy"
+        }
+      ]
+    },
+    {
+      "id": "W13M3",
+      "description": "header-under-BeginTx (round-11 F3, the MANDATED mutation): an actual headerHash RPC call is reintroduced inside collectSnapshot while the repeatable-read transaction is open — with the *pinnedReader parameter and call-site change it needs to compile",
+      "property": "no network call is reachable from collectSnapshot while the snapshot transaction is open. Wave 11 claimed this mutant was unrepresentable; it is representable (three mechanical edits, compiles clean — verified before this spec was committed) and must be KILLED by TestCollectSnapshotReachesNoChainSurface, which refuses both the smuggled pinnedReader type in the signature and the headerHash call in the body by AST reachability — without executing a single query. (The runtime sentinel would ALSO refuse this call on any live run: snapshotGate is open at the injected call site, so the mutant's own execution path returns the F5 seam violation.)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestCollectSnapshotReachesNoChainSurface", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/phase1.go",
+          "search": "func collectSnapshot(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, extraAccounts [][]byte) (*snapshotData, error) {",
+          "replace": "func collectSnapshot(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, extraAccounts [][]byte, r *pinnedReader) (*snapshotData, error) {"
+        },
+        {
+          "file": "cmd/reconcile/phase1.go",
+          "search": "\tsnapshotGate.enter()\r\n\tdefer snapshotGate.exit()\r\n",
+          "replace": "\tsnapshotGate.enter()\r\n\tdefer snapshotGate.exit()\r\n\tif r != nil { // MUTANT: an actual header read under BeginTx — the round-10 F5 regression\r\n\t\tif _, _, err := r.headerHash(ctx, 1); err != nil {\r\n\t\t\treturn nil, err\r\n\t\t}\r\n\t}\r\n"
+        },
+        {
+          "file": "cmd/reconcile/phase1.go",
+          "search": "\tsnap, err := collectSnapshot(ctx, o, cfg, roDSN, vec, wantDM, wantAave, extras)\r\n",
+          "replace": "\tsnap, err := collectSnapshot(ctx, o, cfg, roDSN, vec, wantDM, wantAave, extras, opReader)\r\n"
+        }
+      ]
+    }
+  ]
+}
