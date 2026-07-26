@@ -214,6 +214,82 @@ func TestNeutralizationSplitsAnchoredFromUnanchoredByTheRowsOwnBinding(t *testin
 		"the legacy row is reported as unprovable even though a later round anchored its height (D-012 clause 2)")
 }
 
+// THE SAME ARRANGEMENT, ON THE READ SIDE — Codex round 9's [high] #1.
+//
+// Wave 10 bound provenance at WRITE time and converted exactly one reader: the
+// neutralization split above. Every other consumer still joined an anchor to
+// p.block_number, so the identical fixture — a NULL-bound row at H, an anchor at H
+// written by a LATER round — was reported ANCHORED by the reads that decide what a
+// repair may do. This drives all three of them against Postgres, plus the floor,
+// because the floor is where the fabrication actually cashes out: a match at H used to
+// bless the old observation and leave an orphan-fork price usable.
+//
+// The row is deliberately left UNMARKED here. A marked row is excluded from these
+// reads by ADD-2 and would make every assertion below pass for the wrong reason.
+func TestEveryRepairReadTreatsANullBoundRowAtAnAnchoredHeightAsUnprovable(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	const H = 5010
+	// A properly anchored round below, whose row IS bound.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(5000, 0xAA, testPollSource, 1_000_000, 6),
+	}, 5000, anchorAt(5000))))
+	// The legacy row at H, and then a LATER, empty round anchoring H. Nothing in the
+	// database records that this row's round ran at the block that anchor names — and
+	// inferring it is the backfill migration 00007 prohibits.
+	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(H, 0xBB, testPollSource, 2_000_000, 6),
+	}, H)))
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, H, anchorAt(H))))
+	require.Nil(t, anchorBindingAt(t, s, 10, 0xBB, testPollSource, H))
+
+	// (a) CountUnanchoredPricesAbove — the read that forbids deleting above a floor.
+	n, err := s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, 5000)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n,
+		"the NULL-bound row above the floor is unprovable; the anchor at its height belongs to another round")
+	n, err = s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, 4000)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n, "and the bound row at 5000 is NOT counted: its own round anchored it")
+
+	// (b) PriceRepairExposure — the read repair actually decides on.
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4000, []byte{0x01}))
+	exp, err := s.PriceRepairExposure(ctx, testPollEngine, 10, H)
+	require.NoError(t, err)
+	require.Equal(t, uint64(4000), exp.EffectiveTarget)
+	require.Equal(t, int64(2), exp.Owned)
+	require.Equal(t, int64(1), exp.Unanchored,
+		"exposure counts the row's OWN binding, so a later round's anchor at its height cannot vouch for it")
+	require.Equal(t, int64(2), exp.AnchoredHeights,
+		"and AnchoredHeights still counts ANCHORS — it is a fact about the anchor population, not a claim about any row")
+
+	// (c) THE FLOOR, WHICH IS WHERE THE FABRICATION CASHED OUT. Repair probes the
+	// anchor at H, finds it canonical, and offers H as a verified floor. A match at H
+	// proves the CHAIN at and below H is unchanged; it says nothing about a row whose
+	// round never recorded which block it read. Under the old rule the row at H sat at
+	// or below the floor and KEPT ITS VALIDITY — an orphan-fork price left usable on a
+	// hash recorded for somebody else's round.
+	boundary, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, H, H)
+	require.NoError(t, err)
+	require.Equal(t, uint64(H-1), boundary,
+		"the floor is CLAMPED to just below the lowest unprovable row rather than admitted at its height")
+	require.Equal(t, int64(1), marked,
+		"and the row a floor may not vouch for is MARKED — under the height rule this call marked nothing at all")
+
+	valid, reason := invalidReasonAt(t, s, 10, 0xBB, testPollSource, H)
+	require.False(t, valid, "the NULL-bound row is unusable")
+	require.Equal(t, InvalidReasonUnverifiableReorg, reason)
+	valid, _ = invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
+	require.True(t, valid,
+		"and the clamp is PRECISE, not a refusal to honour floors: the row whose own round anchored it keeps its validity")
+
+	cursor, ok, err := s.DeriveCursor(ctx, testPollEngine)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(H-1), cursor, "the cursor stands at the boundary this call acted above")
+}
+
 // A REPLAYED ANCHOR IS STILL A WITNESSED ONE. A frozen endpoint re-reports the same
 // execution block, so the anchor insert conflicts and reports inserted=false — but the
 // anchor for THAT block was written by a real round, insertPollAnchor's divergence
@@ -322,6 +398,14 @@ func TestEveryEngineIdentityHasExactlyOneRepairPrimitive(t *testing.T) {
 // three hundred lines away, and the deleted defence-in-depth test is what would have
 // caught the second door standing open. D-012 clause 2 says "on any store path"; this
 // is the predicate that makes the sweep itself comply, independent of who may call it.
+//
+// AND IT NOW DRIVES BOTH EXEMPTIONS, WHICH IS ROUND 9's [medium] #3. The sweep used to
+// spare only an anchor at a marked row's OWN HEIGHT. ApplyPolledPrices legally accepts
+// observations BELOW throughBlock, so a marked row's provenance may be an anchor at a
+// different height entirely — and in that shape the old sweep retained the row and
+// deleted its actual anchor, leaving anchor_block dangling. Clause 2 was satisfied for
+// the easy arrangement and violated for the legal one; the third round of history at
+// 5200/5150 below is the arrangement that shows it.
 func TestRewindAnchorSweepSparesNeutralizedHeightsEvenThoughNoCallerCanReachThatState(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -333,25 +417,43 @@ func TestRewindAnchorSweepSparesNeutralizedHeightsEvenThoughNoCallerCanReachThat
 	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10, []PriceObservation{
 		po(5100, 0xBB, testFeedSource, 400, 8),
 	}, 5100, anchorAt(5100))))
+	// A round executing at 5200 that stamps an observation at 5150 — BELOW its own
+	// execution block, which ApplyPolledPrices accepts. The row's provenance is the
+	// anchor at 5200; there is no anchor at 5150 at all.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testFeedEngine10, 10, []PriceObservation{
+		po(5150, 0xCC, testFeedSource, 500, 8),
+	}, 5200, anchorAt(5200))))
+	require.EqualValues(t, 5200, *anchorBindingAt(t, s, 10, 0xCC, testFeedSource, 5150),
+		"the observation is bound to the block its ROUND executed at, not to its own height")
 
-	// THE DOOR WALKED AROUND: mark the row at 5000 directly. NeutralizeUnverifiablePrices
-	// refuses this identity (TestNeutralizeRefusesANonPollEngineAndChangesNothing), so
-	// no API sequence produces this state. It is written here to drive the predicate.
+	// THE DOOR WALKED AROUND: mark the rows at 5000 and 5150 directly.
+	// NeutralizeUnverifiablePrices refuses this identity
+	// (TestNeutralizeRefusesANonPollEngineAndChangesNothing), so no API sequence
+	// produces this state. It is written here to drive the predicate.
 	_, err := s.pool.Exec(ctx,
 		`UPDATE prices SET valid = FALSE, invalid_reason = $1
-		 WHERE chain_id = 10 AND owner_engine = $2 AND block_number = 5000`,
+		 WHERE chain_id = 10 AND owner_engine = $2 AND block_number IN (5000, 5150)`,
 		InvalidReasonUnverifiableReorg, testFeedEngine10)
 	require.NoError(t, err)
 
 	require.NoError(t, s.RewindPrices(ctx, testFeedEngine10, 10, 4000, 0))
 
-	// The marked row is retained (that predicate was already there) AND so is the
-	// anchor that records what its round executed against.
-	require.Equal(t, []uint64{5000}, anchorBlocks(t, s, testFeedEngine10),
-		"the neutralized height's anchor SURVIVES the rewind (D-012 clause 2: no store path may expire it); the unmarked height's does not")
+	// The marked rows are retained (that predicate was already there) AND so are BOTH
+	// anchors that record what their rounds executed against: 5000 by the height
+	// clause, 5200 by the binding clause. 5100's round left nothing marked, so its
+	// anchor goes — retention still works.
+	require.Equal(t, []uint64{5000, 5200}, anchorBlocks(t, s, testFeedEngine10),
+		"the anchor a marked row is BOUND to survives even though no marked row sits at its height (D-012 clause 2: no store path may expire it)")
 	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testFeedSource, 5000)
 	require.False(t, valid)
 	require.Equal(t, InvalidReasonUnverifiableReorg, reason)
+
+	// THE BINDING IS NOT LEFT DANGLING, which is the whole finding: the row still names
+	// 5200, and 5200 is still on disk, so an offline reconciliation has the hash it
+	// would need. A sweep that spared the row and dropped the anchor would have
+	// destroyed exactly the provenance the retention exists for.
+	require.EqualValues(t, 5200, *anchorBindingAt(t, s, 10, 0xCC, testFeedSource, 5150))
+	require.Contains(t, anchorBlocks(t, s, testFeedEngine10), uint64(5200))
 }
 
 // ---------------------------------------------------------------------------
@@ -525,42 +627,75 @@ func TestAFrontierAboveTheRetentionCutoffIsDiscardedRatherThanTrusted(t *testing
 // always at or above the cursor and therefore far above the frontier; an adopted
 // anchor is by definition at a LEGACY height and may be anywhere.
 //
-// Without this, an adopted anchor would sit in the "already considered" range it was
-// never considered in, and retention could never reach it.
-func TestAdoptingALegacyAnchorLowersThePruneFrontierToIt(t *testing.T) {
+// THAT PATH IS GONE, AND THIS IS THE REGRESSION THAT REPLACES ITS TEST (Codex round
+// 9's [high] #2). What follows is the exact cycle the finding describes, driven
+// against Postgres: an ordinary anchored round, retention pruning its anchor, the
+// chain changing at that height, and then a RESTART — which is what used to clear the
+// poller's one-time adoption latch and start the whole thing again at cadence.
+//
+// The property is that nothing can put an anchor back at that height. Not adoption,
+// which no longer exists; and not the one anchor writer that remains, because
+// ApplyPolledPrices is refused below the cursor. So the row keeps its binding, the
+// binding stays dangling, and the row stays UNPROVABLE — which is the honest state,
+// and the one the fabricated re-adoption used to paper over with a replacement block's
+// hash.
+func TestARetentionPrunedAnchorIsNeverRecreatedAfterARestart(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
-	// Legacy rows at 100 with no anchor, then ordinary anchored rounds that carry the
-	// frontier up past them.
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(100, 0xAA, testPollSource, 1_000_000, 6),
-	}, 100)))
-	// Enough anchored rounds ABOVE the legacy height that retention actually bites —
-	// the frontier only advances once anchors start falling out of the window.
-	total := uint64(100 + pollAnchorRetention + 25)
-	for i := uint64(101); i <= total; i++ {
+	// An ordinary anchored round at 100: a row BOUND to the anchor it wrote. This is
+	// post-00007 history with genuine provenance — not a legacy row.
+	const H = 100
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(H, 0xAA, testPollSource, 1_000_000, 6),
+	}, H, anchorAt(H))))
+	require.EqualValues(t, H, *anchorBindingAt(t, s, 10, 0xAA, testPollSource, H))
+
+	// Enough anchored rounds above it that retention actually bites.
+	total := uint64(H + pollAnchorRetention + 25)
+	for i := uint64(H + 1); i <= total; i++ {
 		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, i, anchorAt(i))))
 	}
-	var frontier int64
-	require.NoError(t, s.pool.QueryRow(ctx,
-		`SELECT frontier FROM price_poll_anchor_prune WHERE engine = $1`, testPollEngine).Scan(&frontier))
-	require.Greater(t, frontier, int64(100), "the frontier has moved well past the legacy height")
 
-	adopted, err := s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(100))
+	// (1) THE GENUINE ANCHOR IS GONE, AND THE BINDING SURVIVES IT. This is the state
+	// UnanchoredPriceBlocks used to select for adoption, and the reason that selection
+	// was wrong: the row is not legacy history missing an anchor, it is real history
+	// whose anchor was deliberately expired.
+	require.NotContains(t, anchorBlocks(t, s, testPollEngine), uint64(H),
+		"retention expired the anchor, which is what it is for")
+	require.EqualValues(t, H, *anchorBindingAt(t, s, 10, 0xAA, testPollSource, H),
+		"the binding is not rewritten by a prune: it still NAMES the block, and the hash is simply no longer on disk")
+
+	// (2) THE ROW IS UNPROVABLE, AND EVERY READ AGREES. A dangling binding is not a
+	// weaker proof, it is no proof: the name survives and the fact does not.
+	n, err := s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, H-1)
 	require.NoError(t, err)
-	require.True(t, adopted)
+	require.Equal(t, int64(1), n, "a bound row whose anchor was pruned is unprovable")
 
-	require.NoError(t, s.pool.QueryRow(ctx,
-		`SELECT frontier FROM price_poll_anchor_prune WHERE engine = $1`, testPollEngine).Scan(&frontier))
-	require.LessOrEqual(t, frontier, int64(100),
-		"the frontier is lowered to the adopted height: it now claims only what has truly been considered")
+	// (3) THE CHAIN MOVES AT THAT HEIGHT, AND THE EPOCH IS RECORDED. This is the
+	// ordering the finding turns on: the hash changed BEFORE anything went looking for
+	// a hash to adopt, so an adoption here would have recorded the REPLACEMENT block's.
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, H-1, []byte{0x01}))
 
-	// And the adopted anchor is duly pruned by the next round, because it is a legacy
-	// height far outside retention with no marked row holding it.
-	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, total+1, anchorAt(total+1))))
-	require.NotContains(t, anchorBlocks(t, s, testPollEngine), uint64(100),
-		"retention reaches it, which it could not have done from inside the settled range")
+	// (4) THE RESTART. In-process latches are gone with the process; what a restarted
+	// writer can do is exactly what the store lets it do. The only remaining anchor
+	// writer is ApplyPolledPrices, and the cursor's monotonic guard refuses it at a
+	// height the cursor has passed — with a DIVERGENT hash, which is what makes this a
+	// test about fabrication rather than about idempotency.
+	_, err = s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, H,
+		PollAnchor{BlockNumber: H, BlockHash: hash32(0x99)})
+	require.Error(t, err, "no path may re-anchor a height whose provenance retention removed")
+	require.NotContains(t, anchorBlocks(t, s, testPollEngine), uint64(H),
+		"and no anchor appeared there: the adopt/prune cycle cannot start")
+
+	// (5) AND THE EPOCH IS STILL ANSWERABLE — deleting adoption did not re-open the
+	// deadlock, because neutralization never needed it.
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, total, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked, "the unprovable row is marked rather than blessed")
+	unacked, err := s.HasUnackedReorg(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.False(t, unacked, "fail-closed must not mean fail-forever")
 }
 
 // ---------------------------------------------------------------------------

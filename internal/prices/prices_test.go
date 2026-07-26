@@ -103,6 +103,16 @@ type fakeRow struct {
 	observedAt    time.Time
 	valid         bool
 	invalidReason string
+	// anchorBlock is prices.anchor_block — THE ROW'S OWN PROVENANCE, and nil means
+	// NULL, which means unprovable forever (migration 00007, D-012 clause 2).
+	//
+	// It exists because round 9 found this fake modelling the OLD height rule while
+	// the real store had moved to the binding: the fake decided "is this row
+	// anchored" by asking whether any anchor sat at r.block, so a legacy NULL-bound
+	// row sharing a height with a later round's anchor looked provable here and the
+	// 11/11 mutation matrix could not see the arm. A fake that models a rule the
+	// store does not have certifies behaviour nothing implements.
+	anchorBlock *uint64
 }
 
 // key is the row's primary-key identity, the same one the real
@@ -135,11 +145,6 @@ type fakePriceStore struct {
 	// anchors is price_poll_anchors, keyed by engine, each carrying the database
 	// timestamp of its insertion.
 	anchors map[string][]store.StoredPollAnchor
-	// adopted records every AdoptPollAnchor call that inserted, so a test can
-	// prove the legacy policy ran (and on which blocks).
-	adopted []uint64
-	// adoptErr, when set, fails AdoptPollAnchor.
-	adoptErr error
 	// countErr / anchorReadErr fail the two reads reorg repair must have before it
 	// may delete anything — the paths that must REFUSE rather than degrade.
 	countErr      error
@@ -307,9 +312,16 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 		if !valid {
 			reason = "non-positive oracle answer"
 		}
+		// THE ROUND'S ANCHOR IS THE ROW'S BINDING, passed down rather than looked up
+		// by height — insertPrice's contract. An unanchored apply leaves it nil/NULL.
+		var binding *uint64
+		if anchor != nil {
+			b := anchor.BlockNumber
+			binding = &b
+		}
 		row := fakeRow{
 			owner: engine, asset: o.Asset, source: o.Source, block: o.BlockNumber,
-			observedAt: at, valid: valid, invalidReason: reason,
+			observedAt: at, valid: valid, invalidReason: reason, anchorBlock: binding,
 		}
 		if existing[row.key()] {
 			// A NEUTRALIZED row is SUPERSEDED by a fresh observation at the same
@@ -327,7 +339,12 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 				if ex.invalidReason != store.InvalidReasonUnverifiableReorg {
 					break
 				}
+				// The binding is RE-STAMPED with this round's anchor, exactly as
+				// observed_at is and for the same reason: this is a new durable
+				// observation, so its provenance is THIS round's anchor — or NULL
+				// again when the superseding round recorded none.
 				ex.valid, ex.invalidReason, ex.observedAt = valid, reason, at
+				ex.anchorBlock = binding
 				superseded = true
 				break
 			}
@@ -479,23 +496,37 @@ func (f *fakePriceStore) PollAnchorsBelow(_ context.Context, engine string, _ ui
 }
 
 // NewestPollAnchor mirrors the real read's FRONTIER scope: the newest anchor whose
-// round is still USABLE, so heights carrying neutralized rows are skipped.
+// round is still USABLE, so an anchor is skipped when a marked row sits at its height
+// OR when a marked row is BOUND to it.
 //
-// The exclusion has to be modelled here because D-011 clause 5 stopped
-// NeutralizeUnverifiablePrices from deleting those anchors. Before that, the
-// exclusion was implicit — the anchor was gone — and a fake that kept the old
-// unconditional "highest anchor" answer would report a frontier the real store no
-// longer reports, hiding a spurious block-advance stall and a misclassified cursor
-// regression behind a green test.
+// The exclusion has to be modelled here because neutralization stopped deleting those
+// anchors (D-012 clause 2; the retention arrived as D-011 clause 5, which is superseded
+// text). Before that, the exclusion was implicit — the anchor was gone — and a fake
+// that kept the old unconditional "highest anchor" answer would report a frontier the
+// real store no longer reports, hiding a spurious block-advance stall and a
+// misclassified cursor regression behind a green test.
+//
+// BOTH CLAUSES, AS IN THE STORE (Codex round 9's [high] #1). A round may stamp
+// observations below its own execution block, so "is this round still one we stand
+// behind" is answered by the rows bound to it; the height clause is kept alongside as
+// the conservative one, because a pre-00007 marked row has a NULL binding and the
+// anchor at its height may well be its genuine provenance. Both only ever EXCLUDE, and
+// exclusion is the safe direction for every consumer of this read.
 func (f *fakePriceStore) NewestPollAnchor(_ context.Context, engine string, _ uint64) (store.StoredPollAnchor, bool, error) {
 	if f.anchorReadErr != nil {
 		return store.StoredPollAnchor{}, false, f.anchorReadErr
 	}
 	neutralized := f.neutralizedHeights(engine)
+	boundToMarked := map[uint64]bool{}
+	for _, r := range f.rows {
+		if r.owner == engine && r.invalidReason == store.InvalidReasonUnverifiableReorg && r.anchorBlock != nil {
+			boundToMarked[*r.anchorBlock] = true
+		}
+	}
 	var best store.StoredPollAnchor
 	found := false
 	for _, a := range f.anchors[engine] {
-		if neutralized[a.BlockNumber] {
+		if neutralized[a.BlockNumber] || boundToMarked[a.BlockNumber] {
 			continue
 		}
 		if !found || a.BlockNumber > best.BlockNumber {
@@ -552,16 +583,40 @@ func (f *fakePriceStore) anchoredHeights(engine string) map[uint64]bool {
 	return out
 }
 
+// provable mirrors store.unprovableRow, INVERTED: a row is provable only when its
+// OWN binding names an anchor that still exists for this engine.
+//
+// This is the read-side rule round 9's [high] #1 installed, and modelling it here is
+// the whole reason the poller regressions can now see the arm. Two rows the old
+// height rule could not tell apart:
+//
+//   - a legacy row with anchorBlock == nil at height H, with a LATER round's anchor
+//     at H: NOT provable. The anchor vouches for that later round, and nothing ever
+//     recorded which block this row's round read.
+//   - a row bound to an anchor that retention has since pruned: NOT provable. The
+//     name survives; the hash does not.
+func (f *fakePriceStore) provable(engine string, r fakeRow) bool {
+	if r.anchorBlock == nil {
+		return false
+	}
+	for _, a := range f.anchors[engine] {
+		if a.BlockNumber == *r.anchorBlock {
+			return true
+		}
+	}
+	return false
+}
+
 // CountUnanchoredPricesAbove mirrors the real read: owned rows above the boundary
-// at heights no surviving anchor covers, excluding rows already neutralized.
+// whose own provenance binding names no surviving anchor, excluding rows already
+// neutralized.
 func (f *fakePriceStore) CountUnanchoredPricesAbove(_ context.Context, engine string, _ uint64, above uint64) (int64, error) {
 	if f.countErr != nil {
 		return 0, f.countErr
 	}
-	anchored := f.anchoredHeights(engine)
 	var n int64
 	for _, r := range f.rows {
-		if r.owner != engine || r.block <= above || anchored[r.block] {
+		if r.owner != engine || r.block <= above || f.provable(engine, r) {
 			continue
 		}
 		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
@@ -582,16 +637,15 @@ func (f *fakePriceStore) PriceRepairExposure(_ context.Context, engine string, _
 		EffectiveTarget: f.effectiveRewindTarget(toBlock),
 		ReorgGeneration: f.reorgGeneration(),
 	}
-	anchored := f.anchoredHeights(engine)
 	for _, r := range f.rows {
 		if r.owner != engine || r.block <= exp.EffectiveTarget {
 			continue
 		}
 		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
-			continue
+			continue // ADD-2: marked rows are not part of any repair's proof obligation
 		}
 		exp.Owned++
-		if !anchored[r.block] {
+		if !f.provable(engine, r) {
 			exp.Unanchored++
 		}
 	}
@@ -618,10 +672,30 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 		return 0, 0, f.neutralizeErr
 	}
 	target := f.effectiveRewindTarget(toBlock)
-	// The verified floor RAISES the boundary, exactly as in RewindPrices: history
-	// proven canonical keeps its validity and only the unprovable suffix is marked.
+	// The verified floor RAISES the boundary — but only as far as the LOWEST
+	// unprovable row inside the repair range, exactly as the real call now clamps it
+	// (Codex round 9's [high] #1). A floor proves the CHAIN at and below it; it says
+	// nothing about a row whose own round never recorded which block it read, so a
+	// NULL-bound row must not be blessed by an anchor a later round wrote at its
+	// height. Modelled here because a fake that still let the floor bless them would
+	// certify the fabrication the store now refuses.
 	if verifiedFloor > target {
-		target = verifiedFloor
+		walkerTarget := target
+		admitted := verifiedFloor
+		for _, r := range f.rows {
+			if r.owner != engine || r.block <= walkerTarget || r.block > verifiedFloor {
+				continue
+			}
+			if r.invalidReason == store.InvalidReasonUnverifiableReorg || f.provable(engine, r) {
+				continue
+			}
+			if r.block-1 < admitted {
+				admitted = r.block - 1
+			}
+		}
+		if admitted > walkerTarget {
+			target = admitted
+		}
 	}
 	f.neutralized = append(f.neutralized, rewindRec{
 		engine: engine, chainID: chainID, toBlock: toBlock, verifiedFloor: verifiedFloor,
@@ -681,76 +755,12 @@ func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string,
 	return out, nil
 }
 
-// UnanchoredPriceBlocks mirrors the real read, INCLUDING its exclusion of heights
-// that carry neutralized rows. Adopting an anchor there would write provenance the
-// round never witnessed at a height whose anchor D-012 clause 2 then retains forever,
-// so a future offline reconciliation would be checking the chain against a hash
-// copied from itself; the fake has to model the exclusion or a test would certify
-// that fabrication as sound provenance.
-func (f *fakePriceStore) UnanchoredPriceBlocks(_ context.Context, engine string, _ uint64, limit int) ([]uint64, error) {
-	if f.anchorReadErr != nil {
-		return nil, f.anchorReadErr
-	}
-	anchored := map[uint64]bool{}
-	for _, a := range f.anchors[engine] {
-		anchored[a.BlockNumber] = true
-	}
-	neutralized := f.neutralizedHeights(engine)
-	seen := map[uint64]bool{}
-	var out []uint64
-	for _, r := range f.rows {
-		if r.owner != engine || anchored[r.block] || seen[r.block] || neutralized[r.block] {
-			continue
-		}
-		seen[r.block] = true
-		out = append(out, r.block)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] > out[j] })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-// AdoptPollAnchor models the real call's THREE refusals — no owned row at that
-// block, a pending reorg epoch, and a height carrying neutralized rows — because
-// each one is a separate half of the safety argument for adopting a hash the round
-// never witnessed. The third is the circularity gate: without it, adoption
-// manufactures provenance at a height whose anchor D-012 clause 2 retains forever as
-// a TRUE input for an offline check. The gate arrived with D-011's online pass and
-// outlives it, because the hazard is in the fabricated anchor, not in the consumer.
-func (f *fakePriceStore) AdoptPollAnchor(_ context.Context, engine string, _ uint64, a store.PollAnchor) (bool, error) {
-	if f.adoptErr != nil {
-		return false, f.adoptErr
-	}
-	if f.unacked {
-		return false, fmt.Errorf("engine %q has an unacknowledged reorg epoch: refusing to adopt an anchor", engine)
-	}
-	owned, neutralized := false, false
-	for _, r := range f.rows {
-		if r.owner != engine || r.block != a.BlockNumber {
-			continue
-		}
-		owned = true
-		if r.invalidReason == store.InvalidReasonUnverifiableReorg {
-			neutralized = true
-		}
-	}
-	if !owned {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there", engine, a.BlockNumber)
-	}
-	if neutralized {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: rows there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would record provenance this engine never witnessed", engine, a.BlockNumber)
-	}
-	for _, ex := range f.anchors[engine] {
-		if ex.BlockNumber == a.BlockNumber {
-			return false, nil
-		}
-	}
-	f.anchors[engine] = append(f.anchors[engine], store.StoredPollAnchor{PollAnchor: a, ObservedAt: f.now()})
-	f.adopted = append(f.adopted, a.BlockNumber)
-	return true, nil
-}
+// UnanchoredPriceBlocks and AdoptPollAnchor were modelled here and are gone with the
+// production path they modelled (Codex round 9's [high] #2). Their fake carried the
+// three refusals faithfully and still could not have caught the finding, because the
+// hazard was in what a RESTART did to the poller's one-time latch — a fact about
+// process lifetime, not about the store call. Nothing here replaces them: PollStore no
+// longer declares either method, so no test can reach them to begin with.
 
 // LatestLogsByTopic mirrors the real store's DISTINCT ON (address) newest-first
 // semantics, bounded by throughBlock — the durable read the feed deriver hydrates
@@ -791,11 +801,41 @@ func (f *fakePriceStore) Cursor(_ context.Context, stream string) (*store.Cursor
 	return f.ingest[stream], nil
 }
 
-// seedRow inserts a durable VALID row directly, for tests that need pre-existing
-// history without replaying an apply (a RESTART, in other words).
+// seedRow inserts a durable VALID row with NO PROVENANCE BINDING — the LEGACY shape,
+// and since wave 12 the shape that is unprovable forever.
+//
+// It is deliberately the bare-named helper and deliberately NOT the one that also
+// writes an anchor. A test that wants an ordinary anchored round wants seedRound; a
+// test that says seedRow is asserting "this row's round never recorded which block it
+// read", which is a pre-00007 row or one whose anchor is gone. Calling seedRow and
+// seedAnchor at the same height does NOT produce an anchored round — it produces
+// exactly the fabrication case round 9 found (a NULL-bound row sharing a height with
+// somebody else's anchor), and it should only appear where that is the point.
 func (f *fakePriceStore) seedRow(owner string, asset []byte, source string, block uint64, observedAt time.Time) {
 	f.rows = append(f.rows, fakeRow{
 		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt, valid: true,
+	})
+}
+
+// seedRound is one ordinary anchored poll round landed durably before this process
+// started: the anchor at `block`, and a VALID row BOUND to it. This is what
+// ApplyPolledPrices leaves on disk, and it is what almost every restart-shaped test
+// means when it seeds history.
+func (f *fakePriceStore) seedRound(engine string, asset []byte, source string, block uint64, hash common.Hash, observedAt time.Time) {
+	f.seedBoundRow(engine, asset, source, block, block, observedAt)
+	f.seedAnchorAt(engine, block, hash, observedAt)
+}
+
+// seedBoundRow inserts a VALID row bound to an anchor at anchorBlock, WITHOUT writing
+// that anchor. Two shapes need it: an observation stamped BELOW its round's execution
+// block (ApplyPolledPrices accepts those, so anchorBlock may differ from block), and a
+// row whose anchor retention has since pruned — bound, and still unprovable, because
+// the binding names a hash that is no longer on disk.
+func (f *fakePriceStore) seedBoundRow(owner string, asset []byte, source string, block, anchorBlock uint64, observedAt time.Time) {
+	b := anchorBlock
+	f.rows = append(f.rows, fakeRow{
+		owner: owner, asset: asset, source: source, block: block, observedAt: observedAt,
+		valid: true, anchorBlock: &b,
 	})
 }
 

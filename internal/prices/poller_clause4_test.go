@@ -117,11 +117,11 @@ func TestPollerMarksUnanchoredLegacyRowsOnAOneEndpointFleetWithTheDisclosure(t *
 	require.False(t, st.unacked, "the store answered the epoch in the same transaction")
 
 	require.True(t, containsSubstring(*msgs, "SINGLE-VIEW CLASSIFICATION"),
-		"clause 4 ratifies the marking; the wave-8 brief's R4 is what requires it never be silent")
+		"D-012 clause 4 ratifies the marking; ADD-1 is what requires it never be silent — the trade is acceptable BECAUSE it is auditable")
 	require.True(t, containsSubstring(*msgs, "exactly one rpc endpoint configured"),
 		"and the disclosure names the CONFIGURED count, which is the fact that authorises it")
 	require.True(t, containsSubstring(*msgs, "heightRangeMarked"),
-		"a disclosure that cannot say WHAT it classified is not a disclosure (wave-8 brief R4)")
+		"ADD-1 requires the WARN to name the affected height range; a disclosure that cannot say WHAT it classified is not a disclosure")
 }
 
 // ZERO ENDPOINTS CONFIGURED: fail closed. Clause 4 permits single-view marking "with

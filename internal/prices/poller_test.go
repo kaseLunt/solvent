@@ -467,8 +467,7 @@ func TestPollerRepairRetainsRowsBelowVerifiedAnchor(t *testing.T) {
 
 	// Durable history: three landed rounds, each with its anchor and a row.
 	for _, b := range []uint64{4800, 4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = 5000, true
 	// The walker's rewind reached all the way down to a sparse-log ancestor: the
@@ -544,8 +543,7 @@ func TestPollerRewindRefusesWhenAnchorVerificationIsUnavailable(t *testing.T) {
 	ch := &fakePollChain{endpoints: 1}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
-	st.seedAnchor(engine, 5000, blockHashAt(5000))
+	st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, blockHashAt(5000), clk.now())
 	st.cursor, st.cursorFound = 5000, true
 	deep := uint64(100)
 	st.rewindDeepTo = &deep
@@ -602,8 +600,7 @@ func TestPollerRewindPagesAnchorProbesAcrossStepsWithoutDeleting(t *testing.T) {
 	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
 		blocks = append(blocks, b)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef")) // replaced
 	}
 	ch.setHash(4050, blockHashAt(4050)) // the deepest surviving canonical anchor
@@ -672,8 +669,7 @@ func TestPollerRepairEndsThePassWhenAProbeFailsAboveACandidateFloor(t *testing.T
 	// Three anchored rounds. 5000 is the newest and is STILL CANONICAL; 4900 is
 	// canonical too. Only the probe of 5000 fails.
 	for _, b := range []uint64{4800, 4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	canonicalAt(ch, 4800, 4900, 5000)
 	ch.failProbe(5000, errors.New("probe endpoint timed out"))
@@ -738,8 +734,7 @@ func TestPollerRewindRefusesWhenSomeProbesFailWithoutAMatch(t *testing.T) {
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	ch.setHash(4800, common.HexToHash("0xbeef")) // probed, MISMATCH
 	ch.failProbe(5000, errors.New("probe endpoint timed out"))
@@ -782,8 +777,7 @@ func TestPollerRepairNeutralizesWhenEveryAnchorIsProvenOrphaned(t *testing.T) {
 
 	for i := 0; i < anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef")) // every one replaced
 	}
 	st.cursor, st.cursorFound = 4000+10*uint64(anchorProbePage-1), true
@@ -833,8 +827,7 @@ func TestPollerRewindNeutralizesWhenAVerifiedFloorLeavesUnanchoredRowsAbove(t *t
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// Anchored, canonical history at 4900; an UNANCHORED legacy row at 4950 above it.
-	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4900, clk.now())
-	st.seedAnchor(engine, 4900, blockHashAt(4900))
+	st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4900, blockHashAt(4900), clk.now())
 	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4950, clk.now())
 	canonicalAt(ch, 4900)
 	st.cursor, st.cursorFound = 4950, true
@@ -946,46 +939,101 @@ func TestPollerPendingEpochWithLegacyUnanchoredRowsTerminates(t *testing.T) {
 	require.Empty(t, st.rewinds)
 }
 
-// A1 CASE: LEGACY UNANCHORED ROWS WITH NO EPOCH PENDING are ADOPTED, which is the
-// explicit one-time policy that makes a LATER reorg repairable by proof rather than
-// by neutralization. Adoption runs only from the no-pending-epoch path, so it can
-// never record the hash of a replacement block.
-func TestPollerAdoptsAnchorsForLegacyUnanchoredRowsThenCanRepair(t *testing.T) {
+// P1, ON THE POLLER: AN UNMARKED NULL-BOUND ROW SHARING A HEIGHT WITH A LATER
+// ROUND'S ANCHOR IS STILL UNPROVABLE, AND A FLOOR AT THAT HEIGHT MUST NOT BLESS IT.
+//
+// This is the arm Codex round 9 found uncovered, and the reason it was uncovered is
+// that the fake modelled provenance by HEIGHT while the store had moved to the row's
+// own anchor_block binding. The shape, which is the one migration 00007 exists for:
+//
+//	5000  a LEGACY row, anchor_block NULL — its round never recorded what it read
+//	5000  an anchor, written LATER by a different (here: empty) round at that height
+//	5100  an ordinary anchored round: a row BOUND to the anchor at 5100
+//
+// The live chain still carries 5000 and has replaced 5100. So verification probes
+// 5100 (mismatch), then 5000 (match) and offers 5000 as a verified floor. Under the
+// height rule the legacy row at 5000 sat at an "anchored" height at or below the
+// floor and kept its validity — an orphan-fork price left usable on the strength of a
+// hash recorded for somebody else's round. Under the binding rule the floor is clamped
+// below it and it is MARKED.
+func TestPollerFloorDoesNotBlessANullBoundRowSharingAHeightWithALaterAnchor(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
-	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5200, 20, 1_000_000)}
 	p, clk := newTestPoller(t, st, ch, 10)
 
-	// Post-upgrade state with NO epoch pending: rows at 5000, no anchor anywhere.
+	// The legacy row and the later round's anchor, at the SAME height. Seeded as two
+	// separate facts precisely because that is what they are: seedRow leaves the
+	// binding NULL, and no anchor at the row's height can supply one.
 	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
-	st.cursor, st.cursorFound = 5000, true
-	canonicalAt(ch, 5000, 5100)
+	st.seedAnchor(engine, 5000, blockHashAt(5000))
+	// An ordinary anchored round above it, whose row IS bound.
+	st.seedRound(engine, realFeeds(t).PollAssets(10)[1].Address.Bytes(), SourcePriceProviderV2, 5100, blockHashAt(5100), clk.now())
+	st.cursor, st.cursorFound = 5100, true
 
-	advanced, err := p.Step(context.Background())
-	require.NoError(t, err)
-	require.True(t, advanced)
-	require.Equal(t, []uint64{5000}, st.adopted, "the legacy block was anchored from the live chain")
-
-	// A reorg arriving now is repairable BY PROOF, retaining the adopted history and
-	// never reaching the neutralization path.
+	// The chain kept 5000 and REPLACED 5100, so verification probes 5100 (mismatch),
+	// then 5000 (match) and offers 5000 as the floor.
+	canonicalAt(ch, 5000)
+	ch.setHash(5100, common.HexToHash("0xdead"))
 	st.unacked = true
-	deep := uint64(100)
+	deep := uint64(4000)
 	st.rewindDeepTo = &deep
-	advanced, err = p.Step(context.Background())
+
+	_, err := p.Step(context.Background())
 	require.NoError(t, err)
-	require.True(t, advanced)
-	require.Len(t, st.neutralized, 1)
-	require.Equal(t, uint64(5100), st.neutralized[0].verifiedFloor,
-		"the newest verified anchor — the round that just landed — is the floor")
+	require.Len(t, st.neutralized, 1, "the epoch was answered by marking, not deleting")
 	require.Empty(t, st.rewinds)
-	require.NotEmpty(t, st.rows, "adopted legacy history survived the repair")
+	require.Equal(t, uint64(5000), st.neutralized[0].verifiedFloor,
+		"the poller did offer 5000 as a verified floor — the clamp is the STORE's refusal to admit it, not a failure to find it")
+
+	// THE PROPERTY. 5000 matched and was offered as the floor; the store admitted it
+	// only up to 4999, because the row at 5000 cannot be placed on any chain.
+	require.Equal(t, uint64(4999), st.cursor,
+		"the verified floor was CLAMPED below the unprovable row rather than admitted at its height")
 	for _, r := range st.rows {
-		require.True(t, r.valid,
-			"and it survived as USABLE history: the floor covers every row, so adoption bought real availability")
+		require.False(t, r.valid,
+			"no row above the clamped boundary keeps its validity — including the NULL-bound one at the matched anchor's own height (migration 00007)")
+		require.Equal(t, store.InvalidReasonUnverifiableReorg, r.invalidReason)
 	}
-	backlog, known := p.NeutralizedBacklog()
-	require.True(t, known)
-	require.Zero(t, backlog.Rows, "a verified floor covering everything marks nothing, so no backlog accrues")
+}
+
+// THE SAME SHAPE, WITH THE LEGACY ROW REMOVED, IS THE CONTROL: when every row in the
+// repair range carries its own binding, the floor is admitted IN FULL and the rows at
+// or below it keep their validity.
+//
+// Without this arm the test above would pass against a store that had simply stopped
+// honouring verified floors, which is a fail-forever of the kind this project has
+// shipped and removed three times.
+func TestPollerFloorIsAdmittedInFullWhenEveryRowCarriesItsOwnBinding(t *testing.T) {
+	st := newFakePriceStore()
+	engine := PollCursorEngine(10)
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5200, 20, 1_000_000)}
+	p, clk := newTestPoller(t, st, ch, 10)
+
+	assets := realFeeds(t).PollAssets(10)
+	st.seedRound(engine, assets[0].Address.Bytes(), SourcePriceProviderV2, 5000, blockHashAt(5000), clk.now())
+	st.seedRound(engine, assets[1].Address.Bytes(), SourcePriceProviderV2, 5100, blockHashAt(5100), clk.now())
+	st.cursor, st.cursorFound = 5100, true
+
+	canonicalAt(ch, 5000)
+	ch.setHash(5100, common.HexToHash("0xdead"))
+	st.unacked = true
+	deep := uint64(4000)
+	st.rewindDeepTo = &deep
+
+	_, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.Len(t, st.neutralized, 1)
+	require.Equal(t, uint64(5000), st.neutralized[0].verifiedFloor)
+	require.Equal(t, uint64(5000), st.cursor, "the floor is admitted at its own height")
+
+	for _, r := range st.rows {
+		if r.block <= 5000 {
+			require.True(t, r.valid, "history the floor proves canonical keeps its validity")
+			continue
+		}
+		require.False(t, r.valid, "and only the suffix above it is marked")
+	}
 }
 
 // A1 CASE: A DEEPER EPOCH ARRIVES WHILE VERIFICATION IS STILL PAGING. The walker
@@ -1012,8 +1060,7 @@ func TestPollerRewindHandlesADeeperEpochArrivingMidVerification(t *testing.T) {
 	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
 		blocks = append(blocks, b)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef"))
 	}
 	ch.setHash(4050, blockHashAt(4050))
@@ -1095,8 +1142,7 @@ func TestPollerRewindDiscardsAnchorProofsWhenALaterEpochRestoresThem(t *testing.
 	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
 		blocks = append(blocks, b)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef")) // chain B: every recorded round replaced
 	}
 	st.cursor, st.cursorFound = 4150, true
@@ -1170,8 +1216,7 @@ func TestPollerRewindRefusesWhenTheCheckpointMovedBeforeDeletion(t *testing.T) {
 	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
 		blocks = append(blocks, b)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef"))
 	}
 	st.cursor, st.cursorFound = 4150, true
@@ -1247,8 +1292,7 @@ func TestPollerRepairRefusesWhenTheCheckpointCannotBeReRead(t *testing.T) {
 	// concludes inside a single page with a floor of 4000.
 	for i := 0; i < anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef"))
 	}
 	ch.setHash(4000, blockHashAt(4000))
@@ -1311,8 +1355,7 @@ func TestPollerRepairRunsOneCoherentEndpointAcrossDivergentAncestries(t *testing
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	for _, b := range []uint64{4800, 4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = 5000, true
 	deep := uint64(100)
@@ -1390,8 +1433,7 @@ func TestPollerRepairRefusesAProbeSilentlyServedByAnotherEndpoint(t *testing.T) 
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	for _, b := range []uint64{4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = 5000, true
 	deep := uint64(100)
@@ -1482,8 +1524,7 @@ func TestPollerRepairDiscardsAHalfWalkedPassWhenItsEndpointStopsAnswering(t *tes
 	for i := 0; i < 2*anchorProbePage; i++ {
 		b := uint64(4000 + 10*i)
 		blocks = append(blocks, b)
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 		ch.setHash(b, common.HexToHash("0xbeef"))
 	}
 	ch.setHash(4000, blockHashAt(4000))
@@ -1623,8 +1664,13 @@ func TestPollerBacklogReadFailureDoesNotBreakHydration(t *testing.T) {
 // D-012 clause 4 — marking requires agreement whenever >1 endpoint is CONFIGURED.
 // =====================================================================
 
-// D-011 CLAUSE 7, AND THE DIRECT KILL OF CODEX ROUND 6's FINDING: a self-consistent
+// D-012 CLAUSE 4, AND THE DIRECT KILL OF CODEX ROUND 6's FINDING: a self-consistent
 // pass drawn from a MINORITY fork must not mark canonical history unusable.
+//
+// (The clause number moved with the decision. This requirement was D-011 clause 7;
+// D-011 is SUPERSEDED, and naming it as the live source is exactly the citation drift
+// round 8's F7 exists to stop — which is how this heading survived a round longer than
+// it should have.)
 //
 // This is the scenario the finding describes, and until this wave the poller acted on
 // it. Endpoint 0 sits alone on a fork where block 5000 was replaced; endpoint 1 — the
@@ -1645,8 +1691,7 @@ func TestPollerRefusesToMarkWhenASecondEndpointContradictsThePass(t *testing.T) 
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	for _, b := range []uint64{4900, 5000} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = 5000, true
 	deep := uint64(100)
@@ -1715,12 +1760,16 @@ func TestPollerRefusesToMarkWhenASecondEndpointContradictsThePass(t *testing.T) 
 //
 // THE DISCLOSURE'S SOURCE IS NOT CLAUSE 4, AND SAYING SO WAS THE ROUND-8 [medium].
 // Clause 4 ratifies the MARKING and says nothing whatever about a WARN or a height
-// range; the range-naming requirement comes from the WAVE-8 BRIEF's R4, an
-// implementation requirement of this wave line rather than decision text. Attributing
-// it to the clause dressed a local choice in borrowed authority — which is the same
-// disease as citing no source, one step worse, because it looks checkable and is not.
-// The two are therefore cited separately below, and the report nominates the
-// disclosure for ratification so a later wave has a real clause to point at.
+// range. Attributing the range-naming to the clause dressed a local choice in borrowed
+// authority — the same disease as citing no source, one step worse, because it looks
+// checkable and is not.
+//
+// THE SOURCE NOW EXISTS: ADD-1 (.superpowers/sdd/task-8-normative-addenda.md), ratified
+// at fdb9f8d. "When the D-012 clause-4 one-endpoint arm authorizes a marking on a single
+// chain view, the marking emits a WARN naming the affected height range" — because the
+// trade is acceptable only while it is auditable. Wave 10 could cite nothing better than
+// the wave-8 brief's R4, which was honest at the time and is superseded now. The two are
+// cited separately below, as they always should have been.
 func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
@@ -1729,8 +1778,7 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) 
 
 	const H = uint64(5000)
 	for _, b := range []uint64{4900, H} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = H, true
 	deep := uint64(100)
@@ -1748,9 +1796,11 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) 
 	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor)
 
 	require.True(t, containsSubstring(*msgs, "SINGLE-VIEW CLASSIFICATION"),
-		"the concession is never silent (wave-8 brief R4; D-012 clause 4 ratifies the MARKING, not this disclosure)")
+		"the concession is never silent (ADD-1; D-012 clause 4 ratifies the MARKING, not this disclosure)")
 	require.True(t, containsSubstring(*msgs, "exactly one rpc endpoint configured"),
 		"and it names the CONFIGURED count, which is the fact clause 4 makes the marking turn on")
+	require.True(t, containsSubstring(*msgs, "heightRangeMarked"),
+		"and it names the HEIGHT RANGE, which is ADD-1's own requirement: an unauditable concession is not the one clause 4 ratified")
 
 	// AND IT IS PERMANENT (clause 3). The one endpoint rejoins the canonical chain and
 	// the head moves past H; nothing brings the row back, because nothing in the
@@ -1807,8 +1857,7 @@ func TestPollerFailsClosedWhenTheOnlyOtherEndpointIsUnreachable(t *testing.T) {
 
 	const H = uint64(5000)
 	for _, b := range []uint64{4900, H} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = H, true
 	deep := uint64(100)
@@ -1872,8 +1921,7 @@ func TestPollerFailsClosedOnAFleetWithNoEndpointsConfigured(t *testing.T) {
 
 	const H = uint64(5000)
 	for _, b := range []uint64{4900, H} {
-		st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, clk.now())
-		st.seedAnchor(engine, b, blockHashAt(b))
+		st.seedRound(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, b, blockHashAt(b), clk.now())
 	}
 	st.cursor, st.cursorFound = H, true
 	deep := uint64(100)
@@ -2049,23 +2097,36 @@ func TestPollStoreHasNoDeletionPrimitive(t *testing.T) {
 	require.True(t, ok, "the gap must stay countable (D-012 clause 6)")
 }
 
-// A1: adoption is REFUSED while a reorg epoch is pending, at the store as well as
-// by the call site. Adopting then could record a replacement block's hash and let
-// a later probe "verify" rows describing the block the chain discarded.
-func TestPollerAnchorAdoptionRefusedWhileEpochPending(t *testing.T) {
-	st := newFakePriceStore()
-	engine := PollCursorEngine(10)
-	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 5100, 20, 1_000_000)}
-	p, clk := newTestPoller(t, st, ch, 10)
-
-	st.seedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 5000, clk.now())
-	st.cursor, st.cursorFound = 5000, true
-	canonicalAt(ch, 5000)
-	st.unacked = true
-
-	// Call adoption directly on the pending-epoch state: the store refuses it.
-	p.adoptLegacyAnchors(context.Background())
-	require.Empty(t, st.adopted, "no anchor may be adopted while the chain may have moved under that height")
+// LEGACY ANCHOR ADOPTION IS GONE, AND ITS ABSENCE IS ASSERTED STRUCTURALLY (Codex
+// round 9's [high] #2).
+//
+// The old tests here drove the adoption path and its pending-epoch refusal. Neither
+// could have caught the finding, because the hazard was not in a store refusal: after
+// a RESTART the poller's one-time latch is false again, so heights whose GENUINE
+// anchor retention had pruned were re-adopted from the CURRENT chain — with no
+// surviving anchor to diverge against — and the next successful poll pruned the
+// adoption again. Fabricated provenance at cadence, from a path all of whose guards
+// were working as designed.
+//
+// It is deleted rather than guarded because round 9's other high removed its purpose:
+// a row is provable only through its OWN anchor_block binding, and adoption cannot
+// write one without performing the backfill migration 00007 prohibits. So the
+// assertion is that the METHODS ARE NOT THERE — a path the interface does not declare
+// cannot be re-entered by a future edit, which is the same argument D-012 clause 3's
+// removal test makes.
+func TestPollStoreDeclaresNoLegacyAnchorAdoption(t *testing.T) {
+	pollStore := reflect.TypeOf((*PollStore)(nil)).Elem()
+	for _, gone := range []string{"AdoptPollAnchor", "UnanchoredPriceBlocks"} {
+		_, present := pollStore.MethodByName(gone)
+		require.False(t, present,
+			"%s is legacy anchor adoption, deleted in wave 12: it can no longer make any row provable (its binding stays NULL) and it re-fabricated pruned anchors after every restart. Restoring it needs a decision, not a method", gone)
+	}
+	// The poller's own adoption step is gone too. That half is proven by the COMPILER
+	// rather than asserted here: reflect does not expose unexported methods, so a
+	// require.NotContains over reflect.TypeOf(&Poller{}) would pass whether or not
+	// adoptLegacyAnchors existed — a test that cannot fail is worse than none. What
+	// stands in its place is that no call site remains anywhere in the package, which
+	// the build enforces continuously.
 }
 
 // The rewind resumes from the CURSOR READ BACK, never from the requested target:

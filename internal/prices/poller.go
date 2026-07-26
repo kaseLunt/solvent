@@ -69,11 +69,11 @@ package prices
 //     an outage. Where the evidence is merely UNAVAILABLE (a probe errored, a page
 //     is still to come, a checkpoint could not be re-read, no second endpoint would
 //     corroborate it) repair waits and reports ConditionPollRewindBlocked. Where it
-//     is UNOBTAINABLE — rows at heights whose block hash was never recorded —
-//     waiting is permanent: repair needs an anchor, adoption is refused while an
-//     epoch is pending, and the ack only advances through repair. Those rows are
-//     NEUTRALIZED instead: retained, marked unusable, the epoch acked, ingestion
-//     resumed. Nothing is destroyed and nothing unprovable is trusted.
+//     is UNOBTAINABLE — rows whose own provenance binding names no surviving anchor,
+//     so no hash for their round is on disk — waiting is permanent: repair needs an
+//     anchor, nothing may write one after the fact, and the ack only advances through
+//     repair. Those rows are NEUTRALIZED instead: retained, marked unusable, the epoch
+//     acked, ingestion resumed. Nothing is destroyed and nothing unprovable is trusted.
 //   - A MARKING IS PERMANENT, SO PREVENTION IS WHERE THE EFFORT GOES (D-012). D-010
 //     justified marking over deleting by calling it reversible; D-011 then required
 //     an online reversal, and the subsystem wave 7 built to provide one carried both
@@ -182,11 +182,6 @@ const maxConsecutiveAmbiguous = 3
 // which is how a transient probe outage became permanent data loss.
 const anchorProbePage = 8
 
-// anchorAdoptionPerStep bounds the one-time legacy-anchor adoption pass: how many
-// unanchored blocks one Step may adopt an anchor for. Each costs one
-// eth_getBlockByNumber. See adoptLegacyAnchors.
-const anchorAdoptionPerStep = 8
-
 // blockAdvanceTTL bounds how long this poller may go without observing a NEW
 // execution block before that is itself an unhealthy condition. "New" means a
 // poll anchor ROW that did not exist before; a frozen endpoint replaying the same
@@ -263,10 +258,6 @@ type Poller struct {
 	anchorKnown     bool
 	lastAnchorBlock uint64
 	lastAnchorAt    time.Time
-
-	// legacyAnchorsAdopted latches once the store reports no unanchored owned
-	// blocks left, so the adoption query stops running for the process's life.
-	legacyAnchorsAdopted bool
 
 	// neutralizedStats / neutralizedKnown are the retained-but-unusable backlog
 	// (D-010 clause 4): how many rows this engine has marked rather than deleted,
@@ -538,10 +529,16 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	// like a successful one instead of retrying every daemon tick.
 	p.lastAttempt = now
 
-	// The one safe window for legacy-anchor adoption is here: no reorg epoch is
-	// pending, so the live chain's hash at a height we already own rows at is not
-	// a replacement block's. See adoptLegacyAnchors.
-	p.adoptLegacyAnchors(ctx)
+	// LEGACY ANCHOR ADOPTION RAN HERE and is deleted (Codex round 9's [high] #2).
+	// This was "the one safe window": no epoch pending, so the live hash at a height
+	// we already own rows at is not a replacement block's. The window was real and the
+	// call was still wrong — a restart cleared its one-time latch, so heights whose
+	// GENUINE anchor retention had pruned were re-adopted from the current chain, and
+	// the next successful poll pruned the adoption again, at cadence. It is deleted
+	// rather than guarded because an adopted anchor can no longer make any row provable:
+	// provenance is the row's anchor_block binding, and writing one for a legacy row is
+	// the backfill migration 00007 prohibits. See store's tombstone above
+	// LatestPriceFreshness for the full argument and the population question.
 
 	block, blockHash, obs, servedBy, err := p.readRound(ctx)
 	if err != nil {
@@ -1447,8 +1444,8 @@ func (p *Poller) corroborate(ctx context.Context, primary int, block uint64, wan
 //
 // It returns (agreed, singleView, why). singleView is true only on the ratified
 // one-endpoint arms, and the caller carries it to the marking so the disclosure can
-// name the height range (D-012 clause 4 for the marking; the range-naming WARN itself
-// is this wave's implementation requirement — see Poller.neutralize).
+// name the height range (D-012 clause 4 authorises the marking; ADD-1 requires the
+// range-naming WARN — see Poller.neutralize).
 func (p *Poller) checkpointCorroborated(ctx context.Context) (agreed bool, singleView bool, why string) {
 	if !p.probeCheckpointSet {
 		// THE NO-CHECKPOINT ARM, GATED BY THE SAME RULE AS EVERY OTHER (Codex round
@@ -1492,7 +1489,7 @@ func (p *Poller) checkpointCorroborated(ctx context.Context) (agreed bool, singl
 			// of one, agreement is unobtainable rather than unavailable, waiting
 			// produces no second view ever, and refusing would wedge price ingestion on
 			// the first reorg that reaches legacy history. singleView is set, so
-			// Poller.neutralize emits the range-naming disclosure — the concession is
+			// Poller.neutralize emits ADD-1's range-naming disclosure — the concession is
 			// never silent, and here it is the only signal an operator gets that rows
 			// were classified with no hash evidence whatsoever.
 			return true, true, ""
@@ -1530,8 +1527,8 @@ func (p *Poller) checkpointCorroborated(ctx context.Context) (agreed bool, singl
 				p.chain.EndpointCount(), why)
 			return false, false, why
 		}
-		// The loud, range-naming disclosure is emitted at the marking (Poller.neutralize),
-		// which is the first point that knows WHAT was classified.
+		// ADD-1's loud, range-naming disclosure is emitted at the marking
+		// (Poller.neutralize), which is the first point that knows WHAT was classified.
 		return true, true, ""
 	case agreementContradicted:
 		// The pinned endpoint may be the minority one and nothing here can tell. The
@@ -1715,6 +1712,13 @@ func (p *Poller) resetVerification(why string) {
 // carried down here rather than logged at the gate because this is the first point
 // at which the affected HEIGHT RANGE is known, and a disclosure that cannot name
 // what it classified is not much of a disclosure.
+//
+// THE DISCLOSURE ITSELF IS ADD-1, a ratified normative addendum
+// (.superpowers/sdd/task-8-normative-addenda.md), not an implementation preference.
+// Clause 4 ratifies the TRADE and is silent on observability; ADD-1 states that the
+// trade is acceptable BECAUSE it is auditable, so the marking emits a WARN naming the
+// affected height range. Wave 10 could only call this "the wave-8 brief's R4" because
+// the addendum did not yet exist; it does now, and it is the citation.
 func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes int, singleView bool, justification string) error {
 	boundary, quarantined, err := p.store.NeutralizeUnverifiablePrices(ctx, p.engine, p.cfg.ChainID, cursor, floor)
 	if err != nil {
@@ -1739,7 +1743,7 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 	// gets the heights, every time, because unlike the multi-endpoint case there is no
 	// second opinion anywhere behind this classification.
 	if singleView && quarantined > 0 {
-		slog.Warn("SINGLE-VIEW CLASSIFICATION: polled prices were marked unusable on ONE endpoint's word because this fleet has exactly one rpc endpoint configured, so cross-endpoint agreement is unobtainable rather than merely unavailable (D-012 clause 4 ratifies this trade for a one-endpoint deployment; with two or more configured the same state fails closed instead). The classification is permanent — configure more than one endpoint if that is not acceptable",
+		slog.Warn("SINGLE-VIEW CLASSIFICATION: polled prices were marked unusable on ONE endpoint's word because this fleet has exactly one rpc endpoint configured, so cross-endpoint agreement is unobtainable rather than merely unavailable (D-012 clause 4 ratifies this trade for a one-endpoint deployment; with two or more configured the same state fails closed instead; ADD-1 requires this disclosure, because the trade is acceptable only while it is auditable). The classification is permanent — configure more than one endpoint if that is not acceptable",
 			"engine", p.engine, "chain", p.cfg.ChainID,
 			"heightRangeMarked", fmt.Sprintf("(%d, %d]", boundary, cursor),
 			"boundaryExclusive", boundary, "cursorInclusive", cursor,
@@ -1917,9 +1921,15 @@ func (p *Poller) blockRepairOnCheckpoint(cursor uint64, probes int, why string) 
 // costs availability and never correctness, and an operator staring at a stopped
 // pipeline with this reason attached is in a strictly better position than one whose
 // canonical price history was silently marked unreadable — PERMANENTLY, under clause
-// 3 — on a minority node's word. The states where waiting cannot help are still
-// answered rather than refused: a pass with no checkpoint asserts no chain view and is
-// not gated at all.
+// 3 — on a minority node's word.
+//
+// AND THE NO-CHECKPOINT ARM IS GATED BY THE SAME RULE, which this comment used to deny
+// (Codex round 9's [medium] #4; the text below it had already been corrected by round
+// 8's fix, so the two contradicted each other). "A pass with no checkpoint asserts no
+// chain view" was true and irrelevant: clause 4 governs MARKING, and that arm marks.
+// See checkpointCorroborated's !probeCheckpointSet branch — exactly one endpoint
+// CONFIGURED proceeds with singleView (and the ADD-1 disclosure); zero or two-or-more
+// fail closed. There is no arm of this decision that is ungated.
 //
 // AND THE ASYMMETRY WITH THE ONE-ENDPOINT FLEET IS RATIFIED, NOT IMPROVISED. It is
 // the obvious thing to call inconsistent, and Codex round 7 was right that wave 7's
@@ -1965,54 +1975,6 @@ func (p *Poller) clearRepairState() {
 	p.probeEndpoint, p.probeEndpointSet = 0, false
 	p.probeGeneration = 0
 	p.rewindBlocked = ""
-}
-
-// adoptLegacyAnchors gives unanchored owned rows the anchor their round never
-// wrote, so reorg repair can verify them instead of refusing to touch them.
-//
-// It runs ONLY from the no-pending-epoch path in Step. That placement is the
-// safety argument: adopting a hash while a reorg is unacknowledged could take the
-// hash of a REPLACEMENT block at that height and then "verify" against it,
-// retaining rows that describe the block the chain discarded — the exact failure
-// anchors exist to prevent. store.AdoptPollAnchor re-checks the same gate, so the
-// property does not depend on this call site staying where it is.
-//
-// It is bounded (anchorAdoptionPerStep blocks per Step) and latches off once the
-// store reports nothing left to adopt. Failures are logged and dropped: adoption
-// is an improvement to repair's future prospects, never a precondition for a
-// round, and repair's own refusal is what keeps the unadopted case safe.
-//
-// WHAT ADOPTION DOES NOT ESTABLISH: it does not prove the adopted block is the one
-// the rows were read at — that fact was never recorded and cannot be recovered. It
-// records the anchor the round should have written, from the chain as it stands
-// with no reorg pending.
-func (p *Poller) adoptLegacyAnchors(ctx context.Context) {
-	if p.legacyAnchorsAdopted {
-		return
-	}
-	blocks, err := p.store.UnanchoredPriceBlocks(ctx, p.engine, p.cfg.ChainID, anchorAdoptionPerStep)
-	if err != nil {
-		slog.Warn("could not read unanchored price blocks; legacy anchor adoption is deferred to a later round",
-			"engine", p.engine, "err", err)
-		return
-	}
-	if len(blocks) == 0 {
-		p.legacyAnchorsAdopted = true
-		return
-	}
-	for i, b := range blocks {
-		live, servedBy, err := p.chain.HeaderHashFrom(ctx, p.probeStart(i), b)
-		if err != nil {
-			slog.Warn("could not read the live hash for an unanchored price block; it stays unanchored, so a later reorg can only NEUTRALIZE it rather than place it",
-				"engine", p.engine, "block", b, "err", err)
-			continue
-		}
-		if _, err := p.store.AdoptPollAnchor(ctx, p.engine, p.cfg.ChainID,
-			store.PollAnchor{BlockNumber: b, BlockHash: live.Bytes()}); err != nil {
-			slog.Warn("anchor adoption refused for an unanchored price block; it stays unanchored",
-				"engine", p.engine, "block", b, "endpoint", servedBy.Index, "err", err)
-		}
-	}
 }
 
 // probeStart spreads verification probes across endpoints, starting one past the

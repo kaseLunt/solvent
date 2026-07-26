@@ -64,30 +64,30 @@ func invalidReasonAt(t *testing.T, s *Store, chainID uint64, asset byte, source 
 
 // THE DEADLOCK, AGAINST POSTGRES. From {cursor, unacknowledged epoch, owned rows,
 // no anchors} the previous code had no exit at all: repair needed an anchor to
-// verify, AdoptPollAnchor refuses while an epoch is pending, and acked_epoch only
-// ever advanced through repair. Every subsequent Step repeated the refusal, so poll
-// price ingestion stopped permanently after an upgrade-time reorg.
+// verify, the only thing that could supply one after the fact was adoption, adoption
+// was refused while an epoch was pending, and acked_epoch only ever advanced through
+// repair. Every subsequent Step repeated the refusal, so poll price ingestion stopped
+// permanently after an upgrade-time reorg.
 //
-// This drives every transition of that cycle against the database — including the
-// two that CANNOT clear it — and then the one that can, asserting that ingestion
-// really resumes afterwards.
+// THE CYCLE IS SHORTER NOW, NOT LONGER. Adoption is deleted (wave 12), so the second
+// leg is no longer a refusal to assert — it is a path that does not exist. That does
+// not re-open the deadlock, and this test is what says so: the exit was never adoption,
+// it was neutralization, which needs no anchor at all.
+//
+// This drives every transition of the cycle against the database — including the one
+// that CANNOT clear it — and then the one that can, asserting that ingestion really
+// resumes afterwards.
 func TestPendingEpochWithUnanchoredHistoryHasATerminatingTransition(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 	unanchoredHistory(t, s, 4000)
 
-	// (1) THE CYCLE. Applying is refused because the epoch is unacked...
+	// (1) THE CYCLE. Applying is refused because the epoch is unacked, and nothing
+	// else in the store can make the rows verifiable — there is no call that writes an
+	// anchor for history a round did not anchor at the time.
 	_, err := s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 5100,
 		PollAnchor{BlockNumber: 5100, BlockHash: hash32(0x51)})
 	require.ErrorIs(t, err, ErrUnackedReorgEpoch, "no price can be applied while the epoch stands")
-
-	// ...and adoption, the only thing that could make the rows verifiable, is
-	// refused for exactly as long as the epoch stands. Adopting here could record a
-	// REPLACEMENT block's hash and let a later probe "verify" rows describing the
-	// block the chain discarded.
-	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, PollAnchor{BlockNumber: 5000, BlockHash: hash32(0x50)})
-	require.ErrorIs(t, err, ErrUnackedReorgEpoch,
-		"adoption cannot break the cycle: it is gated on the very epoch repair is trying to clear")
 
 	// (2) THE EVIDENCE. The exposure read reports the boundary a rewind would act
 	// above and that everything above it is UNPROVABLE — which is what makes the
@@ -134,31 +134,17 @@ func TestPendingEpochWithUnanchoredHistoryHasATerminatingTransition(t *testing.T
 	require.Len(t, res.Inserted, 1)
 	require.True(t, res.AnchorInserted)
 
-	// And adoption is available again — the epoch gate that made step (1) a cycle is
-	// genuinely lifted. Proven on a height with no history of its own quarrel: a fresh
-	// unanchored row written after the repair.
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(5200, 0xDD, testPollSource, 1_030_000, 6),
-	}, 5200)))
-	adopted, err := s.AdoptPollAnchor(ctx, testPollEngine, 10, PollAnchor{BlockNumber: 5200, BlockHash: hash32(0x52)})
-	require.NoError(t, err)
-	require.True(t, adopted)
-
-	// BUT NOT AT A NEUTRALIZED HEIGHT (D-012 clause 2). The rows at 5000 were just
-	// declared unplaceable. Adopting the chain's CURRENT hash there would write
-	// provenance this engine never witnessed at a height whose anchor clause 2 retains
-	// FOREVER as the input a future offline reconciliation would trust — and that tool
-	// would then be checking the chain against a hash copied from itself.
-	//
-	// The gate arrived with D-011's online revalidation pass and OUTLIVES it: clause 3
-	// removed the consumer, but the hazard lives in the fabricated anchor, which is
-	// permanent. A test that dropped this assertion with the pass would have quietly
-	// re-opened it.
-	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, PollAnchor{BlockNumber: 5000, BlockHash: hash32(0x50)})
-	require.ErrorContains(t, err, "NEUTRALIZED as unplaceable")
+	// AND THE MARKED ROWS STAY MARKED. The old version of this leg proved that
+	// adoption became available again once the epoch was acked, and then that it was
+	// STILL refused at a neutralized height — the circularity gate. Both legs are gone
+	// with adoption itself, and what replaces them is stronger: the classified rows
+	// cannot acquire provenance from any path at all, so the hazard the gate defended
+	// against is unreachable rather than guarded.
 	valid, reason := invalidReasonAt(t, s, 10, 0xAA, testPollSource, 5000)
-	require.False(t, valid, "and the row stays exactly as the repair left it")
+	require.False(t, valid, "the row stays exactly as the repair left it")
 	require.Equal(t, InvalidReasonUnverifiableReorg, reason)
+	require.Nil(t, anchorBindingAt(t, s, 10, 0xAA, testPollSource, 5000),
+		"and it stays unprovable: nothing in the store can give a legacy row a binding after the fact")
 }
 
 // A verified floor must confine neutralization to the UNPROVABLE suffix: history at
@@ -457,15 +443,19 @@ func TestNeutralizedPriceStatsCountsOnlyReorgMarkedRowsOfOneEngine(t *testing.T)
 // after the classification, the retained row is invisible to the exposure reads, so
 // its permanent presence cannot veto a later PROVEN repair of genuinely new history.
 //
-// THAT HALF HAS NO CLAUSE, AND THE HEADER USED TO CLAIM CLAUSE 1 FOR IT (round 8's
+// THAT HALF IS ADD-2, AND THE HEADER ONCE CLAIMED CLAUSE 1 FOR IT (round 8's
 // [medium]). Clause 1 is about deletion and the RewindPrices refusal; it does not
-// specify what the exposure reads count, and no other clause does either. The honest
-// statement is that the filtering is the implementation consequence that makes clause
-// 3's PERMANENCE operable: marked rows are permanent, so if they counted as
-// history-at-risk they would veto every future repair forever, and a classification
-// that wedges all later repair is not the "accepted sample gap" clause 3 ratifies.
-// That reasoning is sound and is still not a citation — the wave-10 report nominates
-// it for ratification rather than borrowing a clause number that does not cover it.
+// specify what the exposure reads count. Wave 10 could only say the behaviour was
+// sound and uncited, because the addendum did not exist yet; it was ratified at
+// fdb9f8d and is the citation now.
+//
+// ADD-2 (.superpowers/sdd/task-8-normative-addenda.md): "PriceRepairExposure (and any
+// repair-scoping read) excludes rows already marked InvalidReasonUnverifiableReorg
+// when computing what a repair must prove." Its rationale is what this test drives:
+// D-012 clause 3 makes marking permanent, so if marked rows still counted as
+// history-at-risk, every epoch after the first would demand proof about rows that can
+// never be proven — permanence would veto all future repair, a fail-forever by
+// composition. Excluding them is what lets permanence and continued operation coexist.
 func TestNeutralizedRowsAreNotHistoryAtRiskForALaterRepair(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -641,35 +631,11 @@ func TestPollAnchorRetentionExemptsNeutralizedHeights(t *testing.T) {
 		"the row is still classified, which is what holds its anchor exempt")
 }
 
-// The circularity gate, on the QUERY side (D-012 clause 2). UnanchoredPriceBlocks
-// proposes adoption candidates, and a neutralized height must never be proposed:
-// adopting the chain's CURRENT hash there writes provenance the round never
-// witnessed, at a height whose anchor clause 2 then retains forever as the input an
-// offline reconciliation would trust. AdoptPollAnchor refuses it too (see the deadlock
-// test), so the property does not depend on this query — but a poller that spent a
-// probe learning that would be paying for an answer it must discard.
-//
-// The gate arrived with D-011's online revalidation pass and OUTLIVES it: the hazard
-// is in the fabricated anchor, which is permanent, not in the consumer that was
-// removed.
-func TestUnanchoredPriceBlocksSkipsNeutralizedHeights(t *testing.T) {
-	s := testDeriveStore(t)
-	ctx := context.Background()
-
-	require.NoError(t, applyErr(s.ApplyPrices(ctx, testPollEngine, 10, []PriceObservation{
-		po(4950, 0xAA, testPollSource, 1_000_000, 6),
-		po(5000, 0xBB, testPollSource, 2_000_000, 6),
-	}, 5000)))
-	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4960, []byte{0x01}))
-	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5000, 0)
-	require.NoError(t, err)
-	require.Equal(t, int64(1), marked, "only the row above the walker's target is marked")
-
-	blocks, err := s.UnanchoredPriceBlocks(ctx, testPollEngine, 10, 10)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{4950}, blocks,
-		"the still-usable legacy row is adoptable; the marked one is not")
-}
+// The circularity gate this test guarded — never propose a NEUTRALIZED height as an
+// adoption candidate — is gone with the query and the call it guarded (Codex round 9's
+// [high] #2). It was a real hazard and the gate was correct; what removes it is that
+// nothing can adopt an anchor at ANY height any more, marked or not. The structural
+// proof lives in TestLegacyRowsHaveNoProvenanceAndTheStoreOffersNoWayToInventOne.
 
 // CountUnanchoredPricesAbove is the read that forbids deleting above a floor when
 // something above it can never be proven. It is scoped by owner, by height, and by

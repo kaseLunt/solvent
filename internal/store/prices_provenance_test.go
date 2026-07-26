@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -786,11 +787,22 @@ func TestCountOwnedPricesAboveIsOwnerAndHeightScoped(t *testing.T) {
 	require.Zero(t, n, "another owner's rows are not this engine's to lose")
 }
 
-// A1 (LEGACY POLICY): rows written before this engine anchored its rounds are
-// reported as unanchored, and adoption records the anchor the round should have
-// written — refusing a block this engine owns no row at, and refusing entirely
-// while a reorg epoch is pending.
-func TestUnanchoredPriceBlocksAndAnchorAdoption(t *testing.T) {
+// THE LEGACY ADOPTION POLICY IS DELETED, AND THE STORE DECLARES NO WAY BACK TO IT
+// (Codex round 9's [high] #2). This replaces TestUnanchoredPriceBlocksAndAnchorAdoption,
+// which drove the policy and its three refusals.
+//
+// The refusals were all correct and none of them addressed the finding, which was
+// about a RESTART re-running the policy over anchors retention had legitimately
+// pruned. The policy is gone instead, because round 9's other high left it with no
+// reachable benefit: provenance is the row's own anchor_block binding, and adoption
+// cannot write one without the backfill migration 00007 prohibits.
+//
+// What this test keeps is the half that is still true and still load-bearing — legacy
+// rows are reported as having no provenance — plus the structural assertion that the
+// methods are not there. A path the store does not declare cannot be re-entered by a
+// future edit; that is the same argument TestStoreHasNoOnlineRevalidationPrimitive
+// makes for D-012 clause 3.
+func TestLegacyRowsHaveNoProvenanceAndTheStoreOffersNoWayToInventOne(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
 
@@ -800,36 +812,22 @@ func TestUnanchoredPriceBlocksAndAnchorAdoption(t *testing.T) {
 		po(200, 0xAA, testPollSource, 1_000_100, 6),
 	}, 200)))
 
-	blocks, err := s.UnanchoredPriceBlocks(ctx, testPollEngine, 10, 8)
+	require.Nil(t, anchorBindingAt(t, s, 10, 0xAA, testPollSource, 100),
+		"an unanchored apply records ignorance, not a height")
+	require.Nil(t, anchorBindingAt(t, s, 10, 0xAA, testPollSource, 200))
+
+	n, err := s.CountUnanchoredPricesAbove(ctx, testPollEngine, 10, 0)
 	require.NoError(t, err)
-	require.Equal(t, []uint64{200, 100}, blocks, "newest first, so the useful floor is adopted first")
+	require.Equal(t, int64(2), n, "both are unprovable, and no future fact changes that")
 
-	adopted, err := s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(200))
-	require.NoError(t, err)
-	require.True(t, adopted)
-	adopted, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(200))
-	require.NoError(t, err)
-	require.False(t, adopted, "adoption is idempotent")
-
-	blocks, err = s.UnanchoredPriceBlocks(ctx, testPollEngine, 10, 8)
-	require.NoError(t, err)
-	require.Equal(t, []uint64{100}, blocks)
-
-	// It cannot fabricate an anchor for history this engine does not own.
-	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(150))
-	require.ErrorContains(t, err, "owns no row there")
-
-	// A divergent hash at an already-anchored height is still a divergence.
-	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10,
-		PollAnchor{BlockNumber: 200, BlockHash: hash32(0xFE)})
-	require.ErrorIs(t, err, ErrPollAnchorDivergence)
-
-	// THE LOAD-BEARING REFUSAL: adopting while a reorg epoch is unacknowledged
-	// could record a REPLACEMENT block's hash at that height and let a later probe
-	// "verify" rows describing the block the chain discarded.
-	require.NoError(t, s.Rewind(ctx, "op:stream", 10, 50, []byte{0x32}))
-	_, err = s.AdoptPollAnchor(ctx, testPollEngine, 10, anchorAt(100))
-	require.ErrorIs(t, err, ErrUnackedReorgEpoch)
+	// THE STRUCTURAL HALF. Neither method exists, so no caller — present or future —
+	// can adopt an anchor this engine never witnessed.
+	st := reflect.TypeOf(&Store{})
+	for _, gone := range []string{"AdoptPollAnchor", "UnanchoredPriceBlocks"} {
+		_, present := st.MethodByName(gone)
+		require.False(t, present,
+			"%s is legacy anchor adoption, deleted in wave 12: it could not make a row provable and it re-fabricated retention-pruned anchors after every restart. Restoring it needs a decision, not a method", gone)
+	}
 }
 
 // A rewind removes the rows a freshness verdict was built from, so the read must

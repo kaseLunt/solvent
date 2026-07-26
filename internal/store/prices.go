@@ -823,9 +823,11 @@ func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine str
 // cutoff is impossible in a population this frontier truly describes, so finding one
 // means the anchors were replaced beneath it; the frontier is discarded and one full
 // pass runs. The check costs nothing — both numbers are already read — and it is what
-// keeps the optimisation from being able to lose a deletion silently. The one path
-// that can legitimately place an anchor below the frontier, AdoptPollAnchor, lowers
-// the frontier itself rather than relying on that backstop.
+// keeps the optimisation from being able to lose a deletion silently. Since legacy
+// anchor adoption was deleted there is no path at all that places an anchor below the
+// frontier — adoption was the one that could, and it lowered the frontier itself — so
+// the backstop now guards against nothing the current code does, which is exactly the
+// condition under which a re-checked premise is worth keeping rather than dropping.
 // prunePollAnchorsQuery is the prune's DELETE, kept as a package constant so the
 // EXPLAIN test measures THIS statement rather than a copy of it. A performance test
 // that re-types the query it is measuring proves nothing about the code: the two drift,
@@ -880,9 +882,9 @@ func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
 		// This is the difference between an optimisation and a shortcut: the premise is
 		// re-checked every round, for free, out of two numbers already in hand, and the
 		// failure mode is one full pass rather than a silent deletion leak. Nothing in
-		// the running system is known to produce it (a poll round's anchor is at or
-		// above the cursor, and AdoptPollAnchor lowers the frontier itself), which is
-		// exactly why it must not be assumed away.
+		// the running system can produce it — a poll round's anchor is at or above the
+		// cursor, and adoption, the one path that ever placed an anchor lower, is gone —
+		// which is exactly why it must not be assumed away.
 		slog.Warn("poll-anchor prune frontier DISCARDED: it sits above the current retention cutoff, so it describes an anchor population that no longer exists. Reconsidering every anchor once, then resuming incremental pruning",
 			"engine", engine, "staleFrontier", frontier, "retentionCutoff", *cutoff)
 		frontier = 0
@@ -983,6 +985,23 @@ func (s *Store) PollAnchorsBelow(ctx context.Context, engine string, chainID, be
 // arm — the only thing that clears one in the running system, D-012 clause 3)
 // returns to this read on its own, which is correct: the round is usable again, so
 // it is once more the newest thing this engine stands behind.
+//
+// AND THE EXCLUSION ASKS BOTH QUESTIONS, LIKE prunePollAnchorsQuery (Codex round 9's
+// [high] #1). "Is this anchor's round still one we stand behind" is answered by the
+// rows BOUND to it — a round may stamp observations below its own execution block,
+// and if those were marked the round is not usable however clean its height looks.
+// The height clause alone missed exactly that. It is kept alongside rather than
+// replaced because it is the CONSERVATIVE one: a pre-00007 marked row has a NULL
+// binding, and the anchor at its height may well be its genuine provenance, so a
+// marked row sitting at an anchor's height still withdraws that anchor from the
+// frontier. Both clauses only ever EXCLUDE, and exclusion is the safe direction for
+// every consumer of this read: a lower frontier makes the block-advance clock trip
+// sooner and makes a cursor regression look older, never fresher.
+//
+// TWO SEPARATE NOT EXISTS RATHER THAN ONE WITH `OR`, for the plan reason
+// prunePollAnchorsQuery spells out: split, each is a correlated index lookup (the
+// first on prices_owner_idx, the second on 00007's prices_anchor_binding_idx);
+// written as a disjunction PostgreSQL can drive neither by index.
 func (s *Store) NewestPollAnchor(ctx context.Context, engine string, chainID uint64) (StoredPollAnchor, bool, error) {
 	var a StoredPollAnchor
 	err := s.pool.QueryRow(ctx,
@@ -992,6 +1011,10 @@ func (s *Store) NewestPollAnchor(ctx context.Context, engine string, chainID uin
 		     SELECT 1 FROM prices p
 		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
 		       AND p.block_number = a.block_number AND p.invalid_reason = $3)
+		   AND NOT EXISTS (
+		     SELECT 1 FROM prices p
+		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
+		       AND p.anchor_block = a.block_number AND p.invalid_reason = $3)
 		 ORDER BY a.block_number DESC LIMIT 1`,
 		engine, chainID, InvalidReasonUnverifiableReorg).Scan(&a.BlockNumber, &a.BlockHash, &a.ObservedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1027,16 +1050,53 @@ func (s *Store) CountOwnedPricesAbove(ctx context.Context, engine string, chainI
 	return n, nil
 }
 
+// unprovableRow is the READ-SIDE definition of "this observation has no
+// provenance", written once and shared by every consumer that decides what a repair
+// may act on, so the definition cannot drift between them. The row is aliased `p`;
+// $1 is chain_id and $2 is the owning engine.
+//
+// IT ASKS THE ROW'S OWN BINDING AND NEVER ITS HEIGHT (D-012 clause 2, migration
+// 00007, Codex round 9's [high] #1). Wave 10 bound provenance per observation at
+// WRITE time and left every read joining an anchor to p.block_number. The two
+// diverge exactly where it matters: a legacy NULL-bound row at H, joined at H by a
+// LATER round's anchor, was reported as anchored — and if that later anchor then
+// matched during repair, verifyFloor established H as a height-wide floor and the
+// old observation kept its validity on the strength of a hash recorded for somebody
+// else's round. That is the fabrication migration 00007 exists to forbid, arriving
+// through the read side instead of the write side.
+//
+// THE NULL SEMANTICS ARE THE SQL'S OWN, NOT A SEPARATE BRANCH. When p.anchor_block
+// is NULL the comparison `a.block_number = p.anchor_block` is NULL rather than true,
+// no anchor row matches, and NOT EXISTS holds — so a pre-00007 row is unprovable
+// everywhere, including at or below a later matching height anchor. That is the
+// assertion migration 00007 wrote the NULL to make, and it is why a backfill of
+// "anchor_block = block_number where an anchor exists there" is prohibited.
+//
+// A DANGLING BINDING IS UNPROVABLE TOO. The binding names a block; the anchor row
+// carrying that block's hash is the provenance. If retention or a rewind removed the
+// anchor, the name survives and the fact does not, so both halves are required —
+// exactly as NeutralizeUnverifiablePrices' classifier requires them.
+//
+// It is indexed: 00007's prices_anchor_binding_idx is (chain_id, owner_engine,
+// anchor_block), so this is a correlated index lookup rather than a scan.
+const unprovableRow = `NOT EXISTS (
+		     SELECT 1 FROM price_poll_anchors a
+		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.anchor_block)`
+
 // CountUnanchoredPricesAbove counts the rows engine owns strictly above
-// aboveBlock at heights that NO surviving poll anchor covers.
+// aboveBlock whose OWN provenance binding names no surviving poll anchor.
 //
 // This is the load-bearing read for A1's invariant. A rewind is only allowed to
 // delete above a floor when every row above that floor has been PROVEN
 // non-canonical, and the only proof this system has is an anchor whose recorded
-// hash no longer matches the live chain. A row at a height with no anchor has no
-// such proof and can never acquire one — the hash of the block its round executed
-// at was never recorded and cannot be recovered — so its presence above the
+// hash no longer matches the live chain. A row whose round never recorded an anchor
+// has no such proof and can never acquire one — the hash of the block it executed
+// at was never written down and cannot be recovered — so its presence above the
 // deletion boundary is what forbids deletion outright.
+//
+// "No anchor of its own" is decided by unprovableRow, which reads the row's binding
+// rather than its height. An anchor that happens to sit at the same height was
+// written by a different round and vouches for nothing here.
 //
 // Rows already carrying InvalidReasonUnverifiableReorg are excluded for the same
 // reason as in CountOwnedPricesAbove: they have already been accounted for once
@@ -1047,9 +1107,7 @@ func (s *Store) CountUnanchoredPricesAbove(ctx context.Context, engine string, c
 		`SELECT count(*) FROM prices p
 		 WHERE p.chain_id = $1 AND p.owner_engine = $2 AND p.block_number > $3
 		   AND p.invalid_reason <> $4
-		   AND NOT EXISTS (
-		     SELECT 1 FROM price_poll_anchors a
-		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.block_number)`,
+		   AND `+unprovableRow,
 		chainID, engine, aboveBlock, InvalidReasonUnverifiableReorg).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count unanchored prices owned by %q above %d: %w", engine, aboveBlock, err)
 	}
@@ -1072,9 +1130,20 @@ type PriceRepairExposure struct {
 	EffectiveTarget uint64
 	// Owned counts rows above EffectiveTarget that a rewind would delete.
 	Owned int64
-	// Unanchored counts those of Owned at heights no surviving anchor covers.
+	// Unanchored counts those of Owned whose OWN provenance binding names no
+	// surviving anchor (unprovableRow) — NOT those at unanchored heights. A
+	// legacy NULL-bound row is counted here even when a later round's anchor
+	// sits at its exact height, because that anchor vouches for a different
+	// round. This is the field repair reads to decide whether anything above the
+	// boundary can never be judged, so it is the one that must not be able to
+	// inherit somebody else's proof.
 	Unanchored int64
-	// AnchoredHeights counts distinct anchored heights above EffectiveTarget.
+	// AnchoredHeights counts anchors above EffectiveTarget. It is a fact about
+	// the ANCHOR population, not a provenance claim about any row, and nothing in
+	// the poller decides on it — it is reported so an operator can tell "this
+	// suffix has no anchors at all" from "it has anchors that do not cover these
+	// rows". Deciding through it would be the height rule again, which is why
+	// Unanchored is the field the repair path reads.
 	AnchoredHeights int64
 	// ReorgGeneration is the chain's highest recorded reorg epoch at the instant
 	// the fields above were read — the GENERATION the whole exposure describes.
@@ -1096,6 +1165,13 @@ type PriceRepairExposure struct {
 // single-writer contract (D-004) nothing else is writing, but reading them
 // together also means a caller cannot accidentally pair a stale target — or a
 // stale generation — with fresh counts.
+//
+// EVERY COUNT EXCLUDES ROWS ALREADY MARKED InvalidReasonUnverifiableReorg (ADD-2,
+// .superpowers/sdd/task-8-normative-addenda.md). D-012 clause 3 makes a marking
+// permanent, so if marked rows still counted toward a repair's proof obligation,
+// every epoch after the first would demand proof about rows that can never be
+// proven — permanence would veto all future repair. Excluding them is what lets
+// clause 3's permanence and continued operation coexist.
 func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID, toBlock uint64) (PriceRepairExposure, error) {
 	var exp PriceRepairExposure
 	tx, err := s.pool.Begin(ctx)
@@ -1130,9 +1206,7 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 		`SELECT count(*) FROM prices p
 		 WHERE p.chain_id = $1 AND p.owner_engine = $2 AND p.block_number > $3
 		   AND p.invalid_reason <> $4
-		   AND NOT EXISTS (
-		     SELECT 1 FROM price_poll_anchors a
-		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.block_number)`,
+		   AND `+unprovableRow,
 		chainID, engine, exp.EffectiveTarget, InvalidReasonUnverifiableReorg).Scan(&exp.Unanchored); err != nil {
 		return exp, fmt.Errorf("count unanchored prices owned by %q above %d: %w", engine, exp.EffectiveTarget, err)
 	}
@@ -1159,13 +1233,15 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 // Since D-010 it is the ONLY way the poller answers one.
 //
 // THE STATE IT WAS BUILT FOR. A poller holds rows above the effective rewind
-// target at heights that no poll anchor covers — legacy history written before
-// this engine anchored its rounds, or history whose anchors retention removed.
-// Those rows cannot be proven canonical (no recorded hash to re-check) and cannot
-// be proven orphaned (same reason), and no future fact changes that: the hash of
-// the block their round executed at was never written down. Anchor adoption cannot
-// help either, because adoption is itself refused while an epoch is pending — for
-// the sound reason that it would otherwise record a REPLACEMENT block's hash.
+// target whose own provenance binding names no surviving anchor (unprovableRow) —
+// legacy history written before this engine bound its observations, or history whose
+// anchors retention removed. Those rows cannot be proven canonical (no recorded hash
+// to re-check) and cannot be proven orphaned (same reason), and no future fact
+// changes that: the hash of the block their round executed at was never written down,
+// or no longer exists. Legacy anchor adoption used to be offered as the escape and it
+// never was one — it was refused for exactly as long as an epoch stood — and it is now
+// deleted outright, because an adopted anchor cannot give a row the binding this read
+// requires without performing the backfill migration 00007 prohibits.
 //
 // The three candidate answers, and why this is the one:
 //
@@ -1173,8 +1249,11 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 //     canonical, irreversibly, on no evidence. This is finding A1.
 //   - REFUSE forever (the behaviour before wave 4): the epoch gate then blocks
 //     every apply, the poller stops ingesting prices, and nothing any code path
-//     can do clears it — repair needs an anchor, adoption needs the ack, the ack
-//     needs repair. A refusal no path can clear is an outage, not safety.
+//     can do clears it — repair needs an anchor, the anchor could only come from
+//     adoption, adoption needed the ack, and the ack needed repair. A refusal no
+//     path can clear is an outage, not safety. (That cycle is why deleting adoption
+//     is safe today and would not have been then: THIS call is the exit, and it
+//     needs nothing from adoption.)
 //   - NEUTRALIZE (this): the rows are RETAINED and marked
 //     InvalidReasonUnverifiableReorg, so no usable-price read can return them; their
 //     ANCHORS ARE RETAINED TOO (D-012 clause 2); the cursor is reset and every epoch
@@ -1270,11 +1349,67 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	if err != nil {
 		return 0, 0, err
 	}
+	// THE FLOOR MAY NOT RISE ABOVE UNPROVABLE HISTORY (Codex round 9's [high] #1).
+	//
+	// A verified floor at H says "the block at H is canonical on the endpoint that
+	// answered, so the chain at and below H is unchanged". That is a statement about the
+	// CHAIN. Turning it into "every row at or below H keeps its validity" additionally
+	// assumes each of those rows describes the chain — which is only known for a row
+	// whose own round recorded the block it read. For a NULL-bound row it is exactly the
+	// inference migration 00007 forbids: an anchor written by a LATER, possibly empty,
+	// round at the same height would bless an observation it never covered, and an
+	// orphan-fork price would stay usable.
+	//
+	// So the floor is admitted only as far up as the LOWEST unprovable row inside the
+	// repair range (walkerTarget, verifiedFloor]. Rows above the clamp are marked; rows
+	// at or below it were never at risk from this epoch in the first place, because the
+	// walker's target is what says how deep the reorg reached.
+	//
+	// WHY CLAMPING RATHER THAN MARKING JUST THE UNPROVABLE ONES. The precise version
+	// would mark unprovable rows individually and spare provable rows above them, which
+	// costs less availability — and it would make the boundary this call RETURNS stop
+	// describing what it marked, so the ADD-1 disclosure range and the cursor would each
+	// need their own answer. One honest boundary is worth more than the rows saved,
+	// because the population it can over-mark is D-012 clause 5's legacy rows, recorded
+	// as ZERO in production, and because pollAnchorRetention is 4096 rounds — orders of
+	// magnitude deeper than any reorg — so a row inside a repair range whose anchor has
+	// been pruned is not a state the running system reaches.
 	if verifiedFloor > effectiveTarget {
-		slog.Warn("price neutralization boundary RAISED to a hash-verified poll anchor: rows at or below an independently verified block are provably canonical and keep their validity",
-			"engine", engine, "chain", chainID, "callerTarget", toBlock,
-			"walkerLoweredTarget", effectiveTarget, "verifiedFloor", verifiedFloor)
-		effectiveTarget = verifiedFloor
+		walkerTarget := effectiveTarget
+		var lowestUnprovable *uint64
+		if err := tx.QueryRow(ctx,
+			`SELECT MIN(p.block_number) FROM prices p
+			 WHERE p.chain_id = $1 AND p.owner_engine = $2
+			   AND p.block_number > $3 AND p.block_number <= $5
+			   AND p.invalid_reason <> $4
+			   AND `+unprovableRow,
+			chainID, engine, walkerTarget, InvalidReasonUnverifiableReorg, verifiedFloor).Scan(&lowestUnprovable); err != nil {
+			return 0, 0, fmt.Errorf("read lowest unprovable row for %q in (%d, %d]: %w",
+				engine, walkerTarget, verifiedFloor, err)
+		}
+		admitted := verifiedFloor
+		if lowestUnprovable != nil {
+			admitted = *lowestUnprovable - 1
+		}
+		switch {
+		case admitted > walkerTarget:
+			effectiveTarget = admitted
+			if lowestUnprovable != nil {
+				slog.Warn("price neutralization boundary raised to a hash-verified poll anchor, but CLAMPED below unprovable history: rows at or below the verified block are provably on the canonical CHAIN, and that says nothing about a row whose own round never recorded which block it read. The floor is admitted only up to just under the lowest such row",
+					"engine", engine, "chain", chainID, "callerTarget", toBlock,
+					"walkerLoweredTarget", walkerTarget, "verifiedFloor", verifiedFloor,
+					"lowestUnprovableRow", *lowestUnprovable, "admittedBoundary", admitted)
+			} else {
+				slog.Warn("price neutralization boundary RAISED to a hash-verified poll anchor: rows at or below an independently verified block are provably canonical, and every one of them carries its own anchor binding, so the floor is admitted in full",
+					"engine", engine, "chain", chainID, "callerTarget", toBlock,
+					"walkerLoweredTarget", walkerTarget, "verifiedFloor", verifiedFloor)
+			}
+		default:
+			slog.Warn("price neutralization VERIFIED FLOOR REFUSED ENTIRELY: unprovable history sits at the very bottom of the repair range, so no part of the floor may be admitted. The whole suffix above the walker's target is marked, which is what a floor over rows nothing can place is worth",
+				"engine", engine, "chain", chainID, "callerTarget", toBlock,
+				"walkerLoweredTarget", walkerTarget, "verifiedFloor", verifiedFloor,
+				"lowestUnprovableRow", *lowestUnprovable)
+		}
 	}
 
 	// ONLY ROWS THAT ARE STILL READABLE ARE MARKED. The predicate is `valid`, not
@@ -1462,186 +1597,40 @@ func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainI
 	return out, nil
 }
 
-// UnanchoredPriceBlocks returns the distinct blocks where engine owns price rows
-// but has NO poll anchor, newest first, capped at limit.
+// LEGACY ANCHOR ADOPTION IS DELETED (Codex round 9's [high] #2). UnanchoredPriceBlocks
+// and AdoptPollAnchor lived here. What they did: find heights where this engine owns
+// rows but recorded no anchor, read the live chain's CURRENT hash there, and write it
+// as an anchor so reorg repair could "verify" that history instead of refusing to
+// touch it.
 //
-// These are LEGACY rows: history written before this engine anchored its rounds
-// (or before the anchor table existed). They are unverifiable, so reorg repair
-// can neither prove them canonical nor safely delete them — which is why the
-// poller adopts anchors for them proactively, while no reorg is pending. See
-// AdoptPollAnchor for why the timing matters.
+// WHY IT IS GONE RATHER THAN GUARDED. Round 9 found it recreating fabricated
+// provenance at cadence: UnanchoredPriceBlocks selected post-00007 rows whose GENUINE
+// anchor had been retention-pruned, a restart cleared the poller's one-time latch, and
+// adoption then wrote a replacement block's hash at that height with no surviving
+// anchor to diverge against — after which the next successful poll pruned the adopted
+// anchor again and the cycle repeated. Guards for that were available and were not
+// taken, because the same round's [high] #1 removed adoption's entire purpose:
 //
-// HEIGHTS CARRYING NEUTRALIZED ROWS ARE EXCLUDED, for the reason AdoptPollAnchor's
-// matching gate spells out: adopting the chain's CURRENT hash at a marked height
-// manufactures provenance the round never witnessed, and D-012 clause 2 retains
-// anchors precisely so that an offline reconciliation has a TRUE input. A fabricated
-// one would let that future tool check the chain against a hash copied from itself.
-// The gate survives the removal of the online pass (clause 3) because the hazard was
-// never specific to that pass — it is in the anchor, which is retained forever. This
-// query and that gate say the same thing in two places on purpose: the query keeps
-// the poller from spending a probe on a candidate it must not adopt, and the gate is
-// what makes the property independent of the query.
-func (s *Store) UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error) {
-	if limit <= 0 {
-		return nil, nil
-	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT p.block_number FROM prices p
-		 WHERE p.chain_id = $1 AND p.owner_engine = $2
-		   AND NOT EXISTS (
-		     SELECT 1 FROM price_poll_anchors a
-		     WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = p.block_number)
-		   AND NOT EXISTS (
-		     SELECT 1 FROM prices n
-		     WHERE n.chain_id = p.chain_id AND n.owner_engine = p.owner_engine
-		       AND n.block_number = p.block_number AND n.invalid_reason = $4)
-		 ORDER BY p.block_number DESC LIMIT $3`,
-		chainID, engine, limit, InvalidReasonUnverifiableReorg)
-	if err != nil {
-		return nil, fmt.Errorf("read unanchored price blocks for %q: %w", engine, err)
-	}
-	defer rows.Close()
-	var out []uint64
-	for rows.Next() {
-		var b uint64
-		if err := rows.Scan(&b); err != nil {
-			return nil, fmt.Errorf("scan unanchored price block: %w", err)
-		}
-		out = append(out, b)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate unanchored price blocks for %q: %w", engine, err)
-	}
-	return out, nil
-}
-
-// AdoptPollAnchor records an anchor for a block where engine ALREADY OWNS ROWS
-// but never anchored — the one-time policy that makes legacy unanchored history
-// repairable instead of permanently blocking repair.
+//   - Under unprovableRow, a row is provable only through its OWN anchor_block
+//     binding. Adoption writes a row into price_poll_anchors; it does not and MUST NOT
+//     set prices.anchor_block, because "anchor_block = block_number where an anchor
+//     exists at that height" is precisely the backfill migration 00007 prohibits.
+//   - So after adoption the legacy rows are STILL unprovable to every consumer. The
+//     stated benefit — "reorg repair can verify that history" — is unreachable by
+//     construction, and no combination of guards restores it.
+//   - What survived was pure hazard. An adopted anchor is still a probe candidate for
+//     PollAnchorsBelow, where a match against a hash copied from the same chain is a
+//     proof of nothing that can nonetheless RAISE a verified floor; and it is still a
+//     candidate for NewestPollAnchor, where its fresh observed_at would tell a
+//     restarted poller it had just seen the chain move.
 //
-// THE SAFETY ARGUMENT, STATED IN FULL, because this call writes a hash it did not
-// witness at read time:
-//
-//   - It refuses unless engine owns at least one row at that exact block. It can
-//     therefore never fabricate an anchor for history that does not exist, and it
-//     cannot raise a rewind floor above where rows actually are.
-//   - It refuses while ANY reorg epoch on the chain is unacknowledged by engine.
-//     This is the load-bearing gate. Adopting during a pending reorg could take
-//     the hash of a REPLACEMENT block at that height and then "verify" against
-//     it, retaining rows that describe the block the chain discarded — exactly
-//     the failure anchors exist to prevent. With no pending epoch, adopting the
-//     live chain's current hash at a height we already hold rows for rests on the
-//     same RPC trust as anchoring the round would have at the time.
-//   - It never overwrites: a divergent hash at an already-anchored height is
-//     ErrPollAnchorDivergence, as everywhere else.
-//   - IT REFUSES AT A HEIGHT CARRYING NEUTRALIZED ROWS. The bullet below has always
-//     said an adopted hash does not prove the rows were read at that block. That is a
-//     limitation for a row that is still USABLE and a HAZARD for one that is marked,
-//     because D-012 clause 2 retains a marked height's anchor forever as the input an
-//     OFFLINE reconciliation would trust. Adopting the chain's current hash there
-//     would hand that future tool a hash copied from the very chain it is about to
-//     check — a proof of nothing, indistinguishable on disk from a genuine one.
-//     Provenance is witnessed at poll time or it does not exist; a marked height with
-//     none stays marked, which is the honest answer and the one
-//     NeutralizedPriceStats reports. (The gate arrived with D-011's online pass and
-//     OUTLIVES it: the hazard lives in the anchor, not in the consumer.)
-//
-// WHAT IT DOES NOT DO: it does not prove the adopted block is the one the rows
-// were read at. It cannot — that fact was never recorded. It establishes an
-// anchor from the chain as it stands now, which is strictly better than having
-// none for rows that are still USABLE, and the limitation is why the poller REFUSES
-// to delete unanchored rows rather than adopting during repair.
-func (s *Store) AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, a PollAnchor) (bool, error) {
-	if engine == "" {
-		return false, fmt.Errorf("adopt poll anchor: engine is required")
-	}
-	if len(a.BlockHash) != 32 {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: block hash is %d bytes, want 32",
-			engine, a.BlockNumber, len(a.BlockHash))
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("begin: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	var storedChain uint64
-	var ackedEpoch int64
-	if err := tx.QueryRow(ctx,
-		`SELECT chain_id, acked_epoch FROM derive_cursors WHERE engine = $1`,
-		engine).Scan(&storedChain, &ackedEpoch); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, fmt.Errorf("adopt poll anchor for %q: no derive cursor, so this engine owns no verifiable history yet", engine)
-		}
-		return false, fmt.Errorf("read derive cursor for %q: %w", engine, err)
-	}
-	if storedChain != chainID {
-		return false, fmt.Errorf("%w: engine %q is bound to chain %d, refusing anchor adoption for chain %d",
-			ErrDeriveCursorChainMismatch, engine, storedChain, chainID)
-	}
-	maxEpoch, err := chainMaxEpoch(ctx, tx, chainID)
-	if err != nil {
-		return false, err
-	}
-	if ackedEpoch < maxEpoch {
-		return false, fmt.Errorf("engine %q has %w %d on chain %d (acked %d): refusing to adopt an anchor while the chain may have moved under this height",
-			engine, ErrUnackedReorgEpoch, maxEpoch, chainID, ackedEpoch)
-	}
-
-	var owned, neutralized int64
-	if err := tx.QueryRow(ctx,
-		`SELECT count(*), count(*) FILTER (WHERE invalid_reason = $4)
-		   FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND block_number = $3`,
-		chainID, engine, a.BlockNumber, InvalidReasonUnverifiableReorg).Scan(&owned, &neutralized); err != nil {
-		return false, fmt.Errorf("count owned rows at %d for %q: %w", a.BlockNumber, engine, err)
-	}
-	if owned == 0 {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: this engine owns no row there, refusing to anchor history it did not write",
-			engine, a.BlockNumber)
-	}
-	if neutralized > 0 {
-		return false, fmt.Errorf("adopt poll anchor for %q at %d: %d row(s) there were NEUTRALIZED as unplaceable, and adopting the chain's current hash would record provenance this engine never witnessed at a height whose anchor D-012 clause 2 retains forever — an offline reconciliation would then be checking the chain against a hash copied from that same chain, a proof of nothing. Provenance is witnessed at poll time or not at all",
-			engine, a.BlockNumber, neutralized)
-	}
-
-	_, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, a)
-	if err != nil {
-		return false, err
-	}
-	if inserted {
-		// ADOPTION IS THE ONE PATH THAT PLACES AN ANCHOR BELOW THE PRUNE FRONTIER, so it
-		// is the one path that has to move the frontier back. A poll round's anchor is
-		// always at or above the engine's cursor, which is far above the frontier
-		// (pollAnchorRetention anchors below the newest); an adopted anchor is by
-		// definition at a LEGACY height, which may be anywhere. Leaving the frontier
-		// alone would put the adopted anchor in the "already considered" range it was
-		// never considered in, and retention would never reach it.
-		//
-		// LEAST() rather than a conditional write: the frontier means "everything
-		// strictly below here has been considered", so admitting an unconsidered height
-		// means lowering it to at or below that height. This runs only when an anchor was
-		// actually inserted, and adoption is a bounded one-time activity per legacy
-		// height, so it costs nothing on the poll cadence.
-		if _, err := tx.Exec(ctx, `INSERT INTO price_poll_anchor_prune (engine, frontier, updated_at)
-			VALUES ($1,$2,now())
-			ON CONFLICT (engine) DO UPDATE
-			SET frontier = LEAST(price_poll_anchor_prune.frontier, EXCLUDED.frontier), updated_at = now()`,
-			engine, a.BlockNumber); err != nil {
-			return false, fmt.Errorf("lower poll-anchor prune frontier for %q to the adopted height %d: %w",
-				engine, a.BlockNumber, err)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, err
-	}
-	if inserted {
-		slog.Warn("ADOPTED a poll anchor for legacy unanchored price rows: the live chain's hash at a height this engine already owns rows at is now recorded, so reorg repair can verify that history instead of refusing to touch it. This does NOT prove the rows were read at this exact block — that fact was never recorded — it establishes the anchor the round should have written",
-			"engine", engine, "chain", chainID, "block", a.BlockNumber,
-			"adoptedHash", fmt.Sprintf("%x", a.BlockHash), "rowsAtBlock", owned)
-	}
-	return inserted, nil
-}
+// THE POPULATION QUESTION, ANSWERED. D-012 clause 5 records legacy unanchored rows as
+// ZERO in production — they exist only in databases that ran pre-00005 code, and Task 9
+// backfills from scratch. Adoption was never the exit from the pending-epoch deadlock
+// either: it refused for exactly as long as an epoch stood, so the terminating
+// transition was always NeutralizeUnverifiablePrices, which needs nothing from here.
+// The controller could name no remaining population, so the path is deleted rather than
+// repaired.
 
 // LatestPriceFreshness returns, for every (asset, source) key ownerEngine has
 // ever written on chainID, BOTH durable answers a health verdict needs: the
@@ -1933,13 +1922,33 @@ func (s *Store) RewindPrices(ctx context.Context, engine string, chainID uint64,
 	// regression says so explicitly while constructing the state directly: a test that
 	// can only reach a defence by going around the front door should say that is what
 	// it is doing, not pretend the state is ordinary.
+	//
+	// AND IT EXEMPTS THE ANCHOR THE ROW IS BOUND TO, NOT ONLY THE ONE AT ITS HEIGHT
+	// (Codex round 9's [medium] #3). ApplyPolledPrices legally accepts observations
+	// BELOW throughBlock, so a marked row's provenance may be an anchor at a different
+	// height entirely. With only the height clause this statement retained the row and
+	// deleted its actual anchor, leaving anchor_block dangling — provenance destroyed by
+	// the very statement clause 2 names. The two clauses are the same pair, in the same
+	// split form and for the same plan reason, as prunePollAnchorsQuery: the binding one
+	// is EXACT (an anchor is provenance for whatever points at it) and the height one is
+	// CONSERVATIVE (it protects pre-00007 marked rows, whose binding is NULL and whose
+	// height anchor may well be their genuine provenance).
+	//
+	// The point of putting it here is that clause 2 must be a property of the DELETING
+	// STATEMENT, independent of the identity guards. Round 8 closed the gap between the
+	// two doors; round 9 found that the predicate behind them was still asking the wrong
+	// question, which is exactly what "defence in depth" is supposed to survive.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM price_poll_anchors a
 		 WHERE a.engine = $1 AND a.block_number > $2
 		   AND NOT EXISTS (
 		     SELECT 1 FROM prices p
 		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
-		       AND p.block_number = a.block_number AND p.invalid_reason = $3)`,
+		       AND p.block_number = a.block_number AND p.invalid_reason = $3)
+		   AND NOT EXISTS (
+		     SELECT 1 FROM prices p
+		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
+		       AND p.anchor_block = a.block_number AND p.invalid_reason = $3)`,
 		engine, effectiveTarget, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("delete poll anchors for %q above %d: %w", engine, effectiveTarget, err)
 	}

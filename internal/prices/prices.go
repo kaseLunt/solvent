@@ -156,11 +156,12 @@
 //     (a probe errored and ended the pass, a page is still to walk, the checkpoint
 //     could not be re-read). ConditionPollRewindBlocked says what is unresolved. A
 //     stalled poller with a red /readyz is recoverable.
-//   - MARK where the evidence can never exist: rows at heights whose block hash was
-//     never recorded. Waiting there was permanent — repair needs an anchor,
-//     adoption is refused while an epoch is pending, and the ack only advances
-//     through repair — so those rows are marked, the epoch is acked, and ingestion
-//     resumes.
+//   - MARK where the evidence can never exist: rows whose own provenance binding
+//     names no surviving anchor, so no block hash for their round is on disk.
+//     Waiting there is permanent — repair needs an anchor and no path can supply one
+//     after the fact, while the ack only advances through repair — so those rows are
+//     marked, the epoch is acked, and ingestion resumes. On a fleet of two or more
+//     that marking still requires cross-endpoint agreement (D-012 clause 4).
 //
 // WHAT IS STILL LOST: the USABILITY of a marked row, and only that. It stays on
 // disk and stays auditable. There is no un-mark on re-interpretation; the one way
@@ -168,10 +169,12 @@
 // (chain, asset, source, block) identity, which insertPrice treats as superseding
 // it. Marked rows are otherwise never retired, so they accumulate —
 // Poller.NeutralizedBacklog and store.NeutralizedPriceStats exist so that pile is
-// countable rather than merely tolerated. Rows written before this engine anchored its rounds are ADOPTED
-// into anchors on a normal round with no epoch pending (store.AdoptPollAnchor
-// carries the safety argument and its limit), which is what keeps a LATER reorg on
-// the floor-finding path rather than marking the lot.
+// countable rather than merely tolerated. Rows written before this engine BOUND its
+// observations to their round's anchor carry a NULL binding, and NULL means
+// unprovable permanently: there is no adoption, no backfill and no later inference
+// that can change it (migration 00007). Such a row reaching a reorg is marked, not
+// placed — which is the honest outcome, and D-012 clause 5 records the production
+// population of those rows as zero.
 //
 // # NOT SAFE FOR CONCURRENT USE
 //
@@ -670,8 +673,15 @@ var _ PriceStore = (*store.Store)(nil)
 //   - NeutralizedPriceStats makes the resulting backlog countable, and keeps
 //     reporting it after newer polls have cleared the acute condition (D-012
 //     clause 6).
-//   - UnanchoredPriceBlocks / AdoptPollAnchor are the one-time legacy policy for
-//     rows written before this engine anchored its rounds.
+//
+// IT NO LONGER DECLARES ANY WAY TO WRITE AN ANCHOR THIS ENGINE DID NOT WITNESS, and
+// that omission is the point in exactly the way the deletion clause above is. The
+// legacy policy — UnanchoredPriceBlocks / AdoptPollAnchor — is deleted (Codex round
+// 9's [high] #2): after wave 12 a row is provable only through its OWN anchor_block
+// binding, which adoption cannot write without performing migration 00007's
+// prohibited backfill, so adoption had no reachable benefit left and a live hazard
+// (re-adoption over retention-pruned anchors after every restart). A method the
+// interface does not carry cannot be called at all.
 type PollStore interface {
 	PriceStore
 	ApplyPolledPrices(ctx context.Context, engine string, chainID uint64, obs []store.PriceObservation, throughBlock uint64, anchor store.PollAnchor) (store.ApplyResult, error)
@@ -681,8 +691,6 @@ type PollStore interface {
 	CountUnanchoredPricesAbove(ctx context.Context, engine string, chainID, aboveBlock uint64) (int64, error)
 	NeutralizeUnverifiablePrices(ctx context.Context, engine string, chainID, toBlock, verifiedFloor uint64) (uint64, int64, error)
 	NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (store.NeutralizedPriceStats, error)
-	UnanchoredPriceBlocks(ctx context.Context, engine string, chainID uint64, limit int) ([]uint64, error)
-	AdoptPollAnchor(ctx context.Context, engine string, chainID uint64, anchor store.PollAnchor) (bool, error)
 }
 
 var _ PollStore = (*store.Store)(nil)
