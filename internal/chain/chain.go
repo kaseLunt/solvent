@@ -675,18 +675,35 @@ func (b *strictTxInput) UnmarshalJSON(input []byte) error {
 // list), then the SAME raw bytes decode through types.Transaction exactly
 // as the typed client would.
 //
-// THE RESPONSE MUST ALSO ANSWER THE QUESTION ASKED (the wave-6 rule,
-// applied to this path by the wave-8 sweep): a hash-keyed read serves
-// exactly the transaction asked for, so the response's own reported hash
-// field must be present and EQUAL the asked hash — the same
-// reported-vs-asked comparison validateReportedHeader makes for numbered
-// heights, and like it, no local recomputation is involved (types.
-// Transaction.Hash() re-derives from decoded fields, which is exactly the
-// recomputation class wave 5 retired for headers; the REPORTED hash is the
-// provider's own claim about which transaction it answered with, which is
-// the honest form of the question). Without this, a proxy answering with a
-// well-formed WRONG transaction would silently feed the deriver another
-// transaction's calldata.
+// THE RESPONSE MUST ANSWER THE QUESTION ASKED, AND THE ANSWER MUST BE
+// AUTHENTICATED (the wave-6 rule, completed by Task 9 wave 9 after Codex
+// round 8): a hash-keyed read serves exactly the transaction asked for.
+// The response's reported hash field is required present and EQUAL to the
+// asked hash — kept as a cheap early tripwire for sloppier lies — but the
+// GATE is the decoded comparison after it: tx.Hash() recomputed over the
+// decoded body must equal the asked hash, or the attempt fails and
+// rotates. The controller's round-8 adjudication line, verbatim, because
+// waves 5 and 9 could otherwise read as contradictory:
+//
+//	Local recomputation is BANNED where the pinned library's type model
+//	is incomplete (headers — wave 5's law: v1.13.0 cannot represent
+//	modern OP headers, so a computed header hash is garbage), and
+//	REQUIRED where the type model is complete and recomputation is the
+//	only authentication (signed transactions — `tx.Hash()` over the
+//	decoded body is consensus-stable for every type v1.13.0 can decode,
+//	and a tx type it cannot decode fails loudly into rotation). The
+//	reported `hash` FIELD authenticates nothing: the decoder ignores it,
+//	so it is merely the provider agreeing with itself.
+//
+// Both arms follow from one principle: authenticate with the strongest
+// tool the type model makes sound. Without the decoded comparison, a
+// provider echoing the asked hash over ANOTHER transaction's signed body
+// passes the field check — echoing the label cannot authenticate the
+// body — and TxCalldata would silently feed the deriver the substituted
+// transaction's calldata. The undecodable-type arm is structural, not
+// aspirational: a tx type the pinned decoder cannot represent errors out
+// of json.Unmarshal below and fails the attempt into rotation, so no
+// body ever reaches a recomputation the type model cannot make sound.
 //
 // Mirrored from the pinned ethclient: a null result is ethereum.NotFound
 // (the honest not-found, exactly the header path's discrimination), a
@@ -726,6 +743,14 @@ func (e *endpointClient) TransactionByHash(ctx context.Context, hash common.Hash
 	}
 	if _, r, _ := tx.RawSignatureValues(); r == nil {
 		return nil, false, fmt.Errorf("server returned transaction without signature")
+	}
+	// The identity GATE (Task 9 wave 9): the decoded body must hash to the
+	// asked hash. The reported-field equality above is only a tripwire —
+	// the doc comment carries the adjudication's recomputation line — and
+	// a decoded body that is not the transaction asked for is a protocol
+	// violation that fails the attempt into rotation.
+	if recomputed := tx.Hash(); recomputed != hash {
+		return nil, false, fmt.Errorf("transaction response body hashes to %s, not the asked %s — a provider protocol violation; the reported hash field is the provider agreeing with itself, so only the hash recomputed over the decoded signed body authenticates the answer, and echoing the label cannot authenticate the body", recomputed, hash)
 	}
 	return &tx, probe.BlockNumber == nil, nil
 }

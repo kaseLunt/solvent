@@ -37,6 +37,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 )
 
@@ -904,7 +905,17 @@ func rawTxFixtureTx() *types.Transaction {
 // identity gates are judged against.
 func rawTxJSON(t *testing.T, overrides map[string]string, deletes ...string) string {
 	t.Helper()
-	b, err := rawTxFixtureTx().MarshalJSON()
+	return rawTxJSONFor(t, rawTxFixtureTx(), overrides, deletes...)
+}
+
+// rawTxJSONFor is rawTxJSON generalized over the transaction: it round-trips
+// ANY *types.Transaction through the pinned encoder, stamps the mined
+// coordinates, then applies byte-exact raw overrides and deletions. The
+// wave-9 lying fixture needs this to serve a validly-signed FOREIGN body
+// under an overridden hash field.
+func rawTxJSONFor(t *testing.T, tx *types.Transaction, overrides map[string]string, deletes ...string) string {
+	t.Helper()
+	b, err := tx.MarshalJSON()
 	require.NoError(t, err)
 	var m map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(b, &m))
@@ -975,8 +986,23 @@ func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testi
 	})
 
 	t.Run("the canonical empty payload stays servable", func(t *testing.T) {
-		f := rawDial(t, withInput(`"0x"`))
-		data, err := f.TxCalldata(context.Background(), askedTx)
+		// Since the wave-9 identity gate, the decoded body must HASH to
+		// the asked hash — so the acceptance fixture must be a transaction
+		// whose calldata is GENUINELY empty (a plain transfer), asked for
+		// by its own hash. (The wave-8 form of this subtest grafted
+		// "input":"0x" onto the fixture body under the fixture's reported
+		// hash; under the new law that graft IS a forged body, refused by
+		// recomputation.) The property is unchanged: a plain transfer's
+		// empty calldata is a value — only a non-answer is refused.
+		to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+		transfer := types.NewTx(&types.LegacyTx{
+			Nonce: 2, GasPrice: big.NewInt(1), Gas: 21000, To: &to,
+			Value: big.NewInt(5), V: big.NewInt(27), R: big.NewInt(1), S: big.NewInt(1),
+		})
+		e := newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", rawTxJSONFor(t, transfer, nil))
+		f := rawDial(t, e)
+		data, err := f.TxCalldata(context.Background(), transfer.Hash())
 		require.NoError(t, err)
 		require.Empty(t, data, "a plain transfer's empty calldata is a value — only a non-answer is refused")
 	})
@@ -1031,4 +1057,84 @@ func TestRawJSONWrongTransactionAnsweredIsAViolationThatRotates(t *testing.T) {
 		require.ErrorContains(t, err, "transaction response omits required field hash")
 		require.ErrorContains(t, err, "protocol violation")
 	})
+}
+
+var rawForeignCalldata = []byte{0xde, 0xad, 0xbe, 0xef, 0x09}
+
+// rawForeignSignedTx is the wave-9 lying fixture's BODY: a validly-signed
+// transaction (deterministic test key material, HomesteadSigner) that is NOT
+// the fixture transaction — different nonce, recipient, and calldata. A
+// provider substituting a REAL transaction serves exactly this shape: every
+// field well-formed, the signature valid, only the identity wrong. Returns
+// the transaction and the signing key's address so the test can prove the
+// signature is genuinely valid via recovery.
+func rawForeignSignedTx(t *testing.T) (*types.Transaction, common.Address) {
+	t.Helper()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	to := common.HexToAddress("0x1111000000000000000000000000000000001111")
+	tx, err := types.SignTx(types.NewTx(&types.LegacyTx{
+		Nonce: 7, GasPrice: big.NewInt(2), Gas: 21000, To: &to,
+		Value: big.NewInt(1), Data: rawForeignCalldata,
+	}), types.HomesteadSigner{}, key)
+	require.NoError(t, err)
+	return tx, crypto.PubkeyToAddress(key.PublicKey)
+}
+
+// Task 9 wave 9 (Codex round 8): the INVERSE of the wave-8 wrong-transaction
+// shape. There the body was honest and the reported label was wrong; here
+// the label lies AFFIRMATIVELY — the response's reported hash field EQUALS
+// the request — while the signed body underneath belongs to another,
+// validly-signed transaction. The pinned types.Transaction.UnmarshalJSON
+// ignores the reported hash field entirely, so the reported-field tripwire
+// passes by construction and only the decoded comparison — tx.Hash()
+// recomputed over the decoded body — can refuse the substitution. The
+// property under test: echoing the label cannot authenticate the body.
+func TestRawJSONEchoedHashOverForeignSignedBodyIsAViolationThatRotates(t *testing.T) {
+	askedTx := rawTxFixtureTx().Hash()
+
+	foreign, signer := rawForeignSignedTx(t)
+	require.NotEqual(t, askedTx, foreign.Hash(), "the foreign body must be a DIFFERENT transaction")
+	require.NotEqual(t, rawTxCalldata, []byte(foreign.Data()),
+		"and it must carry different calldata, so a silent escape would be visible")
+	recovered, err := types.Sender(types.HomesteadSigner{}, foreign)
+	require.NoError(t, err)
+	require.Equal(t, signer, recovered,
+		"the foreign body is validly signed — a substituted REAL transaction, not junk any decoder would refuse")
+
+	lyingBody := rawTxJSONFor(t, foreign, map[string]string{"hash": `"` + askedTx.Hex() + `"`})
+	var reportedField struct {
+		Hash common.Hash `json:"hash"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(lyingBody), &reportedField))
+	require.Equal(t, askedTx, reportedField.Hash,
+		"the lie is affirmative: the response's reported hash field EQUALS the request")
+
+	liar := func() *rawJSONEndpoint {
+		return newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", lyingBody)
+	}
+
+	// Alone: the decoded comparison names the violation; the foreign
+	// calldata never escapes; and the refusal is NOT the reported-field
+	// tripwire's — that check PASSED, the label agreed with itself.
+	f := rawDial(t, liar())
+	data, err := f.TxCalldata(context.Background(), askedTx)
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.ErrorContains(t, err, "body hashes to "+foreign.Hash().Hex())
+	require.ErrorContains(t, err, "protocol violation")
+	require.NotContains(t, err.Error(), "answers for transaction",
+		"the reported-field tripwire must NOT be what fired — the echoed label matched; only recomputation refuses the body")
+	require.Nil(t, data, "the foreign body's calldata never escapes")
+
+	// With a healthy secondary: rotation, and the calldata LANDS in full.
+	primary := liar()
+	secondary := newRawJSONEndpoint(t, map[string]string{}).
+		scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil))
+	f = rawDial(t, primary, secondary)
+	data, err = f.TxCalldata(context.Background(), askedTx)
+	require.NoError(t, err)
+	require.Equal(t, rawTxCalldata, data, "the healthy secondary's calldata LANDS, byte for byte")
+	require.Equal(t, 1, primary.asksOf("eth_getTransactionByHash"),
+		"the liar was asked exactly once and rotated past")
 }
