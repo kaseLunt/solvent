@@ -7,17 +7,17 @@
 
 ## Verification
 
-Measured from a **`git archive` export of `1705f2e`**, because the shared working tree carries the
-concurrent wave's in-flight edits — `cmd/indexer/{main,health_test,main_test,staleness_reuse_test}.go`
-and **`internal/store/derive.go`**, which is inside my own package and therefore compiles into my
-test binary. The export contains only committed blobs, so nothing foreign and mid-edit is in it.
-(`c877ed2` is a test-only helper deletion landed after the export; `go vet` + the prices package were
-re-run green on it in the shared tree.)
+Measured from a **`git archive` export**, because the shared working tree carries the concurrent
+wave's in-flight edits — `cmd/indexer/{main,health_test,main_test,staleness_reuse_test}.go` and
+**`internal/store/derive.go`**, which is inside my own package and therefore compiles into my test
+binary. The export contains only committed blobs, so nothing foreign and mid-edit is in it. Measured
+twice: once at `1705f2e` (the last code commit) and again at the **final HEAD `7bda43c`**, with
+identical results.
 
 | | top-level PASS | incl. subtests | FAIL | SKIP |
 |---|---|---|---|---|
 | Baseline `827a9e6` | 552 | 643 (91 sub) | 0 | 0 |
-| **This wave `1705f2e`** | **555** | **646 (91 sub)** | **0** | **0** |
+| **This wave `7bda43c`** | **555** | **646 (91 sub)** | **0** | **0** |
 
 Convention: `go test ./... -count=1 -v`; top-level = `^--- PASS`, incl. subtests = `^ *--- PASS`.
 
@@ -303,9 +303,6 @@ loops" rule exists for the fix commit; it applies just as much to work produced 
 - **Cross-chain scoping of `unprovableRow` is untested.** Every fixture in this package uses chain 10,
   so a mutation dropping `a.chain_id = $1` would likely survive. I did not run it as a numbered
   mutation and did not add a two-chain fixture.
-- **`c877ed2` is not in the measured export.** It landed after the `git archive` at `1705f2e`; it
-  deletes a dead test helper only, and `go vet ./internal/prices/` plus the prices package were re-run
-  green on it. The 555/646 counts are unchanged by it (no test added or removed).
 - **The other wave's `internal/store/derive.go` is mid-edit in the shared tree.** All numbers above
   come from the clean export; I did not run the suite against their uncommitted state, and it is not
   mine to judge.
