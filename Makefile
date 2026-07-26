@@ -31,9 +31,15 @@ test:
 # ANY skip: a skipped live-db suite can never produce suite-green evidence.
 # Full posture also wants SOLVENT_LIVE_RPC_TESTS=1 and
 # SOLVENT_RECON_DATABASE_URL (read-only, live) exported so nothing else skips.
+# NOTE: the recipe clears SOLVENT_RPC_* / SOLVENT_RECON_RPC_* — the Makefile's
+# global `-include .env` + `export` would otherwise inject them into the test
+# processes, and the suite's proven zero-skip posture keeps them UNSET
+# (TestLoadFailsWhenRPCEnvMissing asserts config.Load fails without them; no
+# test dials through them — the gate-ON chain regression pins its own URL).
 test-acceptance:
 	@log="$${TMPDIR:-/tmp}/solvent-test-acceptance.log"; \
-	SOLVENT_ACCEPTANCE=1 go test ./... -count=1 -v > "$$log" 2>&1; st=$$?; \
+	env -u SOLVENT_RPC_OP -u SOLVENT_RPC_ETH -u SOLVENT_RECON_RPC_OP -u SOLVENT_RECON_RPC_ETH \
+		SOLVENT_ACCEPTANCE=1 go test ./... -count=1 -v > "$$log" 2>&1; st=$$?; \
 	skips=$$(grep -c -- '--- SKIP' "$$log" || true); \
 	grep -E '^(ok|FAIL)' "$$log"; \
 	echo "acceptance mode: exit=$$st skips=$$skips (log: $$log)"; \
