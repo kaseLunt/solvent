@@ -87,14 +87,17 @@ not run the commands for you. Calculate the receipt's `input_fingerprint` and
 
 ## Handoff
 
-- next: Tasks 0–8 of the Phase 2 plan are landed (Task 8 = `bf72d8e`, oracle prices). Immediate step
-  is the **Codex verdict on Task 8** under D-006; adjudicate its findings, and if a fix wave is
-  needed that wave returns to Codex before Task 8 counts as trusted. Then **Task 9** (full backfill
-  from scratch + `cmd/reconcile` + invariant scans — this produces W1's actual acceptance evidence,
-  and carries the **R-001 owner gate**: if free-RPC 403/429 makes sustained backfill infeasible,
-  stop and present observed throughput for a paid-tier decision). Then **Task 10** (anvil-fork
-  replay + phase gate). Finally the P2 exit review: stamp receipts, populate `evidence_receipts`,
-  flip this work to `achieved` via `doctor.py --stamp W1`.
+- next: **Task 8 is CLOSED under D-006 (2026-07-26)** — full stack senior-approved: decode
+  `d8c462b`, derive `3b864ac`, runner `d1e7d54`, health `ff42a80`, prices `fb28061`; 16 waves,
+  14 Codex rounds, governing decision D-012 (supersedes D-011/D-010), addenda ADD-1/ADD-2,
+  migrations 00005–00008, controller merged-HEAD verification 577/674/0/0. Immediate step is
+  **Task 9**: full backfill from scratch + `cmd/reconcile` + invariant scans — this produces W1's
+  actual acceptance evidence. **Start with the R-001 live throughput probe** (the paper analysis
+  and levers are in the `r001_input` ledger entry in `.superpowers/sdd/progress-phase2.md`: ~152k
+  RPC calls total, 42/N hours at N req/s, one keyed free-tier endpoint likely suffices; the gate
+  requires OBSERVED numbers, then the owner decides free-vs-paid). Then **Task 10** (anvil-fork
+  replay + phase gate). Finally the P2 exit review per D-006 clause 2 (whole-branch Codex review),
+  stamp receipts, populate `evidence_receipts`, flip to `achieved` via `doctor.py --stamp W1`.
 - read_first: `.superpowers/sdd/progress-phase2.md` — the execution ledger, and the single most
   important file for a cold start (nine Task 7 review waves, 21 Codex session IDs, every design
   decision and erratum). Then `recon/derivation-notes.md` (**NORMATIVE** for Tasks 4–10, including
