@@ -74,6 +74,16 @@ func fakeReportedHash(n, nonce uint64) common.Hash {
 	return h
 }
 
+// hashPtr and timePtr build the pointer-typed ReportedHeader fields (Task 9
+// wave 6: the fields are pointers so ABSENCE is decodable — a scripted header
+// leaves a field nil to model a provider omitting it).
+func hashPtr(h common.Hash) *common.Hash { return &h }
+
+func timePtr(v uint64) *hexutil.Uint64 {
+	u := hexutil.Uint64(v)
+	return &u
+}
+
 // fakeReported builds the reported header the fake serves for a height.
 func (f *fakeRPC) fakeReported(num uint64) *ReportedHeader {
 	if rh, ok := f.reported[num]; ok {
@@ -84,10 +94,10 @@ func (f *fakeRPC) fakeReported(num uint64) *ReportedHeader {
 		parent = num - 1
 	}
 	return &ReportedHeader{
-		Hash:       fakeReportedHash(num, f.extraNonce),
-		ParentHash: fakeReportedHash(parent, f.extraNonce),
+		Hash:       hashPtr(fakeReportedHash(num, f.extraNonce)),
+		ParentHash: hashPtr(fakeReportedHash(parent, f.extraNonce)),
 		Number:     (*hexutil.Big)(new(big.Int).SetUint64(num)),
-		Time:       hexutil.Uint64(f.headerTime),
+		Time:       timePtr(f.headerTime),
 	}
 }
 

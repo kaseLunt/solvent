@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,33 +70,79 @@ type rpcClient interface {
 //     either recognizes its own hash or rejects — a recomputed hash no node
 //     ever issued is rejected FOREVER.
 //
-// The refusals stay: a mined block whose reported hash is zero or absent is a
-// provider protocol violation (validateReportedHeader), refused before the
-// value can reach any consumer.
+// The refusals stay, and since Task 9 wave 6 (Codex round 5) the decode is
+// PRESENCE-TRACKED: every field is a pointer precisely so an omitted JSON
+// field decodes as nil instead of as a plausible zero value. The previous
+// non-pointer Time turned an omitted timestamp into a Unix-epoch head — a
+// malformed primary could freeze failover with a false stale verdict instead
+// of rotating to a healthy secondary (the F2 defect; the old types.Header
+// decoder rejected a missing timestamp, and swapping in a minimal decoder
+// silently dropped that gate). A mined block whose response omits hash,
+// parentHash, number or timestamp — or reports a zero hash — is a provider
+// protocol violation (validateReportedHeader), refused before the value can
+// reach any consumer.
 type ReportedHeader struct {
-	Hash       common.Hash    `json:"hash"`
-	ParentHash common.Hash    `json:"parentHash"`
-	Number     *hexutil.Big   `json:"number"`
-	Time       hexutil.Uint64 `json:"timestamp"`
+	Hash       *common.Hash    `json:"hash"`
+	ParentHash *common.Hash    `json:"parentHash"`
+	Number     *hexutil.Big    `json:"number"`
+	Time       *hexutil.Uint64 `json:"timestamp"`
 }
 
 // validateReportedHeader is the protocol gate every header read passes
-// through. A missing block (nil header) is an honest "not found"; a PRESENT
-// block whose reported hash is ZERO, or whose number is absent or not a
-// uint64, violates the JSON-RPC contract for mined blocks — nothing in such a
-// response is trustworthy, so the attempt fails and the failover walk rotates
-// to the next endpoint. This is the zero-hash refusal enforced at the source:
-// a zero hash must never be handed out as a block identity, because an anchor
-// holding it would "verify" against nothing during reorg repair.
-func validateReportedHeader(rh *ReportedHeader, what string) error {
+// through, and THE RULE lives here (Task 9 wave 6, Codex round 5): trusting
+// the provider's REPORTED fields is only sound when paired with verifying the
+// response ANSWERS THE QUESTION ASKED. Concretely:
+//
+//   - a nil header is an honest "not found" — the legitimate answer for a
+//     block beyond the endpoint's head. It surfaces AS not-found: it is NOT a
+//     protocol violation, and it is never fabricated into a zero header.
+//   - a PRESENT block must carry every required field: hash, parentHash,
+//     number, timestamp. The struct's fields are pointers so absence is
+//     decodable (F2): an omitted timestamp is a protocol violation, not a
+//     Unix-epoch head that stops failover at a malformed primary.
+//   - a reported ZERO hash stays refused (the wave-5 gate): an anchor holding
+//     it would "verify" against nothing during reorg repair.
+//   - the number must be a uint64, and on every NUMBERED read (want non-nil)
+//     it must EQUAL the height the caller asked for (F1). A well-formed
+//     header for the WRONG height — a proxy answering "latest" for numeric
+//     requests — would date HeaderTime's freshness measurement off the wrong
+//     block and feed walker ancestry a hash for a block nobody asked about
+//     (spurious mass rewind instead of rotation). Head reads (want nil)
+//     validate internal consistency only: "latest" pins no height, so there
+//     is no asked question to compare against.
+//
+// Any violation FAILS THE ATTEMPT: the failover walk rotates to the next
+// endpoint, exactly the zero-hash posture, uniformly applied — nothing in a
+// protocol-violating response is trustworthy, so no field of it may influence
+// any consumer.
+func validateReportedHeader(rh *ReportedHeader, what string, want *uint64) error {
 	if rh == nil {
 		return fmt.Errorf("header %s not found", what)
 	}
-	if rh.Hash == (common.Hash{}) {
+	var missing []string
+	if rh.Hash == nil {
+		missing = append(missing, "hash")
+	}
+	if rh.ParentHash == nil {
+		missing = append(missing, "parentHash")
+	}
+	if rh.Number == nil {
+		missing = append(missing, "number")
+	}
+	if rh.Time == nil {
+		missing = append(missing, "timestamp")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("header %s response omits required field(s) %s — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value", what, strings.Join(missing, ", "))
+	}
+	if *rh.Hash == (common.Hash{}) {
 		return fmt.Errorf("header %s reports a zero hash — a provider protocol violation; refusing to hand out an unverifiable block identity", what)
 	}
-	if rh.Number == nil || !(*big.Int)(rh.Number).IsUint64() {
+	if !(*big.Int)(rh.Number).IsUint64() {
 		return fmt.Errorf("header %s reports number %v, not a uint64", what, rh.Number)
+	}
+	if want != nil && (*big.Int)(rh.Number).Uint64() != *want {
+		return fmt.Errorf("header %s response answers for height %d — a provider protocol violation; a numbered read serves exactly the block asked for or fails the attempt", what, (*big.Int)(rh.Number).Uint64())
 	}
 	return nil
 }
@@ -366,10 +413,10 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 		if err != nil {
 			return err
 		}
-		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n), &n); err != nil {
 			return err
 		}
-		out = rh.Hash
+		out = *rh.Hash
 		return nil
 	})
 	return out, err
@@ -418,10 +465,10 @@ func (f *Failover) HeaderTime(ctx context.Context, n uint64) (uint64, error) {
 		if err != nil {
 			return err
 		}
-		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n), &n); err != nil {
 			return err
 		}
-		out = uint64(rh.Time)
+		out = uint64(*rh.Time)
 		return nil
 	})
 	return out, err
@@ -477,10 +524,10 @@ func (f *Failover) HeadFrom(ctx context.Context, startIndex int) (Head, Endpoint
 		if err != nil {
 			return err
 		}
-		if err := validateReportedHeader(rh, "latest"); err != nil {
+		if err := validateReportedHeader(rh, "latest", nil); err != nil {
 			return err
 		}
-		out = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(rh.Time), Hash: rh.Hash}
+		out = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(*rh.Time), Hash: *rh.Hash}
 		return nil
 	})
 	if err != nil {
@@ -524,10 +571,10 @@ func (f *Failover) HeaderHashFrom(ctx context.Context, startIndex int, n uint64)
 		if err != nil {
 			return err
 		}
-		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n), &n); err != nil {
 			return err
 		}
-		out = rh.Hash
+		out = *rh.Hash
 		return nil
 	})
 	if err != nil {

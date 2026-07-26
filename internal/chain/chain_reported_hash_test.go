@@ -60,10 +60,10 @@ func opShapedEndpoint(t *testing.T) *fakeRPC {
 		blockNum: opIncidentBlock,
 		reported: map[uint64]*ReportedHeader{
 			opIncidentBlock: {
-				Hash:       opIncidentReportedHash,
-				ParentHash: full.ParentHash,
+				Hash:       hashPtr(opIncidentReportedHash),
+				ParentHash: hashPtr(full.ParentHash),
 				Number:     (*hexutil.Big)(new(big.Int).SetUint64(opIncidentBlock)),
-				Time:       hexutil.Uint64(full.Time),
+				Time:       timePtr(full.Time),
 			},
 		},
 		fullHeaders: map[uint64]*types.Header{opIncidentBlock: full},
@@ -137,10 +137,14 @@ func TestHeaderTimeIsTheReportedTimestamp(t *testing.T) {
 // honest endpoint left surfaces the violation.
 func TestHeaderReadsRefuseAZeroReportedHash(t *testing.T) {
 	zeroAt := func(n uint64) map[uint64]*ReportedHeader {
+		// Every OTHER required field is present and plausible, so the zero
+		// hash is the ONE violation each subtest observes (wave 6's presence
+		// gates would otherwise fire first and steal the assertion).
 		return map[uint64]*ReportedHeader{n: {
-			Hash:   common.Hash{}, // the protocol violation
-			Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
-			Time:   hexutil.Uint64(1),
+			Hash:       hashPtr(common.Hash{}), // the protocol violation
+			ParentHash: hashPtr(fakeReportedHash(n-1, 0)),
+			Number:     (*hexutil.Big)(new(big.Int).SetUint64(n)),
+			Time:       timePtr(1),
 		}}
 	}
 
