@@ -1042,8 +1042,9 @@ func (p *Poller) repair(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("price poller %q: verify poll anchors before repair: %w", p.engine, err)
 	}
 	// LAST GATE BEFORE ACTING — TWO QUESTIONS, ASKED HERE AND NOWHERE ELSE. The three
-	// outcomes below mark rows unusable, or bless rows at or below a floor as still
-	// valid, on proofs this pass may have accumulated across earlier Steps. Both
+	// outcomes below mark rows unusable, or OFFER the store a hash-verified floor —
+	// only the boundary the store RETURNS decides which rows stay valid — on proofs
+	// this pass may have accumulated across earlier Steps. Both
 	// re-reads happen HERE, with nothing between them and the store call, so "the
 	// proof was true when we acted on it" is a property of the code path rather than
 	// of how long verification happened to take.
