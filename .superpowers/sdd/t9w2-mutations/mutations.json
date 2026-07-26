@@ -1,0 +1,155 @@
+{
+  "meta": {
+    "wave": "task-9 wave 2",
+    "unit": "prices poller EIP-1898 hash pin + discard routing advance; chain CallAtHashFrom",
+    "purpose": "Task 9 wave 2 brief's mutation requirement: the pin argument (hash-to-number regression, which the brief mandates the split-fork test kill), the rejection-to-discard arm, and the F1 routing transition, plus every individual discard arm's advance and the deliberate mid-round-reorg exclusion. Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. Files are CRLF in the working tree, so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "W2M1 is a TWO-EDIT mutation BY DESIGN. prices.PollChain deliberately carries ONLY the hash-pinned call (structural closure: a method the interface does not declare cannot be called), so a hash-to-number regression is only expressible by reverting the interface line together with the call site. chain.Failover keeps the number-pinned CallAtFrom and the test fake carries one too, precisely so this mutant COMPILES and dies by assertion in the split-fork test instead of dying as an uninformative compiler error.",
+      "W2M1s repeats W2M1's edits with the test run scoped to the single split-fork regression, proving the brief's mandated killer kills it WITHOUT help from the rest of the fleet.",
+      "NOT mutation-testable, disclosed: the package-contract rewrite and prose class sweep (comments carry no behavior); the closing-re-read KEEP decision (keeping an existing guard adds no new arm to mutate -- its behavior remains certified by wave 1's M3/M5/M7 tests, which still pass unchanged in this fleet).",
+      "The blockNumber==pin and coherence DISCARD halves of the arms (nothing lands, nothing recorded) are wave-1 ground already certified by t9w1-mutations M2/M4/M5 at 53c0688; wave 2 attacks the ROUTING half those arms gained."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W2M1",
+      "description": "hash-to-number pin regression: PollChain and readRound revert to the number-pinned CallAtFrom",
+      "property": "execution is bound to the round's verified block IDENTITY (hashBefore, EIP-1898), not to a height -- a same-height split backend behind one endpoint token (headers fork A, state fork B) must NEVER land B's observations under A's hash",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/prices.go",
+          "search": "\tCallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error)",
+          "replace": "\tCallAtFrom(ctx context.Context, startIndex int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error)"
+        },
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\tout, calledOn, err := p.chain.CallAtHashFrom(ctx, servedBy.Index, Multicall3Address, input, hashBefore)",
+          "replace": "\tout, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin)"
+        }
+      ]
+    },
+    {
+      "id": "W2M1s",
+      "description": "W2M1 again, test run scoped to the split-fork regression alone (the brief's mandated killer)",
+      "property": "the same-height split-fork regression test kills the hash-to-number pin regression BY ITSELF -- the property is pinned by that one test, not by incidental fleet coverage",
+      "test": ["go", "test", "-run", "^TestPollerHashPinRefusesASplitForkBackendAtTheSameHeight$", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/prices.go",
+          "search": "\tCallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error)",
+          "replace": "\tCallAtFrom(ctx context.Context, startIndex int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error)"
+        },
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\tout, calledOn, err := p.chain.CallAtHashFrom(ctx, servedBy.Index, Multicall3Address, input, hashBefore)",
+          "replace": "\tout, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin)"
+        }
+      ]
+    },
+    {
+      "id": "W2M2",
+      "description": "the rejection-to-discard arm is severed: a 'block not found' pin rejection falls through to the ERROR posture",
+      "property": "a 'block not found'-class pin rejection is a DISCARD that moves the next round's start (the serving node may genuinely lack the fork -- exploration-worthy information), never an error that burns the daemon's backoff retrying the same view",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\tif isBlockNotFoundErr(err) {",
+          "replace": "\t\tif false && isBlockNotFoundErr(err) {"
+        }
+      ]
+    },
+    {
+      "id": "W2M3",
+      "description": "the F1 routing transition is severed: routeNextRoundPastDiscard becomes a no-op",
+      "property": "a coherence/serving-inconsistency discard ADVANCES the next round's caller-scoped start (fail-closed-not-fail-forever): an endpoint serving heads while permanently failing pinned calls must not re-resolve itself every cadence while a healthy peer sits idle",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "func (p *Poller) routeNextRoundPastDiscard(servedBy chain.EndpointToken) {\r\n\tp.advanceExploration(servedBy)\r\n}",
+          "replace": "func (p *Poller) routeNextRoundPastDiscard(servedBy chain.EndpointToken) {\r\n\t_ = servedBy // MUTANT: the discard no longer moves the next round's start\r\n}"
+        }
+      ]
+    },
+    {
+      "id": "W2M4",
+      "description": "the chain layer silently degrades the hash pin to a latest call",
+      "property": "CallAtHashFrom forwards the EIP-1898 block-hash pin to eth_call -- the mechanism layer can never silently degrade identity-pinned execution to 'latest'",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\tres, err := c.CallContractAtHash(ctx, ethereum.CallMsg{To: &to, Data: data}, blockHash)",
+          "replace": "\t\tres, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, nil)"
+        }
+      ]
+    },
+    {
+      "id": "W2M5",
+      "description": "the mid-round-reorg exclusion is violated: the tip-changed discard also advances routing",
+      "property": "a mid-round reorg discard implicates the CHAIN, not the endpoint -- the routing state must NOT move on it (advancing would flee a healthy endpoint on false attribution); the exclusion is pinned in BOTH directions, not just implied by the advance arms",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\t\t\"before\", hashBefore, \"after\", hashAfter)\r\n\t\treturn none, false, nil // mid-round reorg; next cadence retries",
+          "replace": "\t\t\t\"before\", hashBefore, \"after\", hashAfter)\r\n\t\tp.routeNextRoundPastDiscard(servedBy)\r\n\t\treturn none, false, nil // mid-round reorg; next cadence retries"
+        }
+      ]
+    },
+    {
+      "id": "W2M6",
+      "description": "the closing-recheck arm's advance is dropped (discard kept, routing untouched)",
+      "property": "EVERY serving-inconsistency arm advances the next round's start -- dropping the closing-recheck arm alone re-opens per-arm starvation for an endpoint that serves heads and calls but cannot close its own round",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"servedBy\", recheckOn.Index)\r\n\t\tp.routeNextRoundPastDiscard(servedBy)",
+          "replace": "\"servedBy\", recheckOn.Index)"
+        }
+      ]
+    },
+    {
+      "id": "W2M7",
+      "description": "the pin-divergence arm's advance is dropped (discard kept, routing untouched)",
+      "property": "EVERY serving-inconsistency arm advances the next round's start -- dropping the blockNumber-divergence arm alone re-opens per-arm starvation for a backend that persistently mis-serves the pinned state",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"executed\", block, \"endpoint\", servedBy.Index)\r\n\t\tp.routeNextRoundPastDiscard(servedBy)",
+          "replace": "\"executed\", block, \"endpoint\", servedBy.Index)"
+        }
+      ]
+    },
+    {
+      "id": "W2M8",
+      "description": "the multicall-coherence arm's advance is dropped (discard kept, routing untouched)",
+      "property": "EVERY serving-inconsistency arm advances the next round's start -- dropping the multicall token-mismatch arm alone restores the round-1 [high] starvation verbatim: heads from endpoint 0, calls failed over, discard, same endpoint next cadence, forever",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"servedBy\", calledOn.Index)\r\n\t\tp.routeNextRoundPastDiscard(servedBy)",
+          "replace": "\"servedBy\", calledOn.Index)"
+        }
+      ]
+    },
+    {
+      "id": "W2M9",
+      "description": "the rejection arm's advance is dropped (discard kept, routing untouched)",
+      "property": "the pin-rejection discard MOVES the next round's start: a serving endpoint whose head no reachable backend can execute at may be alone on its fork, and only exploration ends that round-shape",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\t\tp.routeNextRoundPastDiscard(servedBy)\r\n\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere",
+          "replace": "\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere"
+        }
+      ]
+    }
+  ]
+}
