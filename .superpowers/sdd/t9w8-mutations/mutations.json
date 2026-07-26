@@ -2,7 +2,7 @@
   "meta": {
     "wave": "task-9 wave 8",
     "unit": "the package-wide bytes canon (Codex round 7): every RPC-decoded quantity passes checkCanonicalQuantity, every variable-length payload passes checkCanonicalData, the mined-log wire shape is presence-tracked, and a null eth_getLogs result is refused — an empty quantity or payload can never become a value THROUGH ANY PATH in internal/chain",
-    "purpose": "Task 9 wave 8 brief's mutation requirement: one mutant per NEW gate arm, with per-path isolation visible in the kill lists — W8M1 (eth_blockNumber, the F1 binding path), W8M2/W8M3/W8M4 (the three log quantity wrappers, W8M2 being the F2 binding path), W8M5 (the log data canon application), W8M6 (the data canon's shared empty arm), W8M7 (the null-window gate), W8M8/W8M9 (presence devolving to zero for logIndex/blockNumber, the pinned decoder's own leniency restored faithfully), W8M10 (eth_chainId), W8M11/W8M12 (tx input canon and presence). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is a uniform-CRLF working copy (CR count == line count, verified), so every multi-line pattern embeds \\r\\n explicitly.",
+    "purpose": "Task 9 wave 8 brief's mutation requirement: one mutant per NEW gate arm, with per-path isolation visible in the kill lists — W8M1 (eth_blockNumber, the F1 binding path), W8M2/W8M3/W8M4 (the three log quantity wrappers, W8M2 being the F2 binding path), W8M5 (the log data canon application), W8M6 (the data canon's shared empty arm), W8M7 (the null-window gate), W8M8/W8M9 (presence devolving to zero for logIndex/blockNumber, the pinned decoder's own leniency restored faithfully), W8M10 (eth_chainId), W8M11/W8M12 (tx input canon and presence), W8M13/W8M14 (the tx answered-identity gate and its presence arm — the wave-6 question-answering rule on the tx path). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is a uniform-CRLF working copy (CR count == line count, verified), so every multi-line pattern embeds \\r\\n explicitly.",
     "design_notes": [
       "EVERY MUTANT LIVES IN A WAVE-8 GATE — the endpointClient overrides' canon calls, the per-field strict wrappers, checkCanonicalData's empty arm, validateReportedLog's presence arms and FilterLogs' null gate. The fake-seam tests are STRUCTURALLY BLIND to all twelve by design: fakeRPC scripts post-decode VALUES (types.Log slices, uint64 heights, big.Int chain ids), so every kill must come from the raw-JSON layer (chain_rawjson_test.go), which drives the REAL stack Dial -> rpc.Client -> endpointClient overrides -> wrappers -> gates. The kill lists are the proof that layer reaches every new gate.",
       "PER-PATH ISOLATION IS THE POINT OF THE MATRIX SHAPE: W8M1's kill list must be purely eth_blockNumber-side, W8M2's purely logIndex-side, W8M3's purely log-blockNumber-side, W8M4's purely transactionIndex-side, W8M5's purely log-data-side, W8M10's purely chainId-side, W8M11/12's purely tx-input-side. A kill leaking across paths would mean one test is doing another gate's work and the per-field independence claim is false.",
@@ -10,7 +10,8 @@
       "W8M10 IS BEHAVIORAL VIA THE WANT-ZERO ARM: for want 10 the minted chain id 0 still fails VerifyChainID's equality (a name-level observable), but the matrix carries VerifyChainID(ctx, 0) against a scripted \"\" — under the mutant that call PASSES (0 == 0), which is precisely the one-layer-up leniency dependence the gate exists to remove.",
       "W8M6 AND W8M12 ARE MESSAGE-LEVEL KILLS, disclosed: under W8M6 the empty payload is still refused by the data canon's next arm (the 0x-prefix check), and under W8M12 an omitted input is still refused by the pinned transaction decoder's own required-field list ('missing required field input in transaction') — rotation is identical either way and the observable is the violation's NAME. That name is the property: a gate whose rejections silently devolve to the library's own strictness profile is one library upgrade away from re-admitting the class, and \"\" -> empty IS that library's current profile one form over (the exact wave-7 argument, restated for data).",
       "W8M8 AND W8M9 RESTORE THE PINNED DECODER'S ABSENCE LENIENCY FAITHFULLY, each with TWO edits: the presence arm stops naming the absence AND the conversion defaults the absent field to zero — exactly what gen_log_json.go does today (an omitted logIndex IS index 0, an omitted blockNumber IS height 0, audit-executed). A single-edit deletion of just the presence arm would nil-panic at the conversion — a kill, but of a strawman; the two-edit form is the honest pre-wave-8 behavior.",
-      "MUTANT COMPILABILITY by construction: W8M1/W8M10 leave `raw` consumed by the hexutil decode below; W8M2-5/W8M11 leave a bare delegation to the hexutil decoder; W8M6 deletes an arm whose operand s remains used by later arms; W8M7 deletes a scoped if-statement (bytes package still used by TransactionByHash); W8M8/W8M9 replace the conversion expression with a guarded closure; W8M12 leaves probe consumed via probe.BlockNumber at the return.",
+      "MUTANT COMPILABILITY by construction: W8M1/W8M10 leave `raw` consumed by the hexutil decode below; W8M2-5/W8M11 leave a bare delegation to the hexutil decoder; W8M6 deletes an arm whose operand s remains used by later arms; W8M7 deletes a scoped if-statement (bytes package still used by TransactionByHash); W8M8/W8M9 replace the conversion expression with a guarded closure; W8M12 leaves probe consumed via probe.BlockNumber at the return; W8M13 deletes the equality block (probe.Hash remains consumed by the presence arm); W8M14 deletes the presence arm AND guards the equality with a nil check (the faithful absence-is-skipped leniency — a single-edit deletion would nil-panic a strawman).",
+      "W8M13 IS BEHAVIORAL: under it a well-formed response reporting ANOTHER transaction's hash SUCCEEDS and TxCalldata hands out the wrong transaction's calldata — the proxy shape the wave-6 rule exists to refuse. W8M14 IS BEHAVIORAL TOO: an omitted hash skips the identity check entirely and the read succeeds where the matrix asserts a named absence.",
       "SOLVENT_LIVE_RPC_TESTS stays UNSET for every mutation run (no public-endpoint hammering in loops; the raw-JSON servers are local httptest instances). TEST_DATABASE_URL points at solvent_t9w1, never at the backfill daemon's DB solvent."
     ]
   },
@@ -178,6 +179,37 @@
           "file": "internal/chain/chain.go",
           "search": "\tif probe.Input == nil {\r\n\t\treturn nil, false, fmt.Errorf(\"transaction response omits required field input — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value\")\r\n\t}",
           "replace": "\t// MUTANT W8M12: the tx input presence check is deleted — the library's required-field list dominates"
+        }
+      ]
+    },
+    {
+      "id": "W8M13",
+      "description": "the tx answered-identity gate is deleted: a well-formed response for the WRONG transaction succeeds",
+      "property": "THE RESPONSE MUST ANSWER THE QUESTION ASKED (tx path): a hash-keyed read serves exactly the transaction asked for — under the mutant a proxy reporting another transaction's hash SUCCEEDS and TxCalldata hands the deriver the wrong transaction's calldata (behavioral: the wrong-tx read succeeds where the regression asserts violation-plus-rotation-plus-landing)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif *probe.Hash != hash {\r\n\t\treturn nil, false, fmt.Errorf(\"transaction response answers for transaction %s — a provider protocol violation; a hash-keyed read serves exactly the transaction asked for or fails the attempt\", *probe.Hash)\r\n\t}",
+          "replace": "\t// MUTANT W8M13: the answered-identity gate is deleted — any well-formed transaction passes for any asked hash"
+        }
+      ]
+    },
+    {
+      "id": "W8M14",
+      "description": "the tx hash presence arm devolves to a skipped check: an absent hash is no longer named and the identity comparison is silently skipped",
+      "property": "AN ABSENT REPORTED HASH CAN NEVER SKIP THE IDENTITY CHECK: an omitted hash field is a named protocol violation that fails the attempt — under the mutant the response passes unidentified and the read succeeds (behavioral)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif probe.Hash == nil {\r\n\t\treturn nil, false, fmt.Errorf(\"transaction response omits required field hash — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value\")\r\n\t}",
+          "replace": "\t// MUTANT W8M14a: an absent reported hash is no longer named missing"
+        },
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif *probe.Hash != hash {",
+          "replace": "\tif probe.Hash != nil && *probe.Hash != hash { // MUTANT W8M14b: an absent hash skips the identity check"
         }
       ]
     }
