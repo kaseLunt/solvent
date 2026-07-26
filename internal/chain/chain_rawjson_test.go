@@ -884,20 +884,27 @@ func TestRawJSONChainIDStrictQuantity(t *testing.T) {
 
 var rawTxCalldata = []byte{0xcf, 0xc3, 0x25, 0x70, 0x01, 0x02}
 
-// rawTxJSON builds a mined transaction's eth_getTransactionByHash result
-// from a REAL types.Transaction round-trip (the pinned encoder emits every
-// field, so the fixture is canonical by construction), then applies
-// byte-exact raw overrides and deletions — the wire control the input gate
-// is judged against.
-func rawTxJSON(t *testing.T, overrides map[string]string, deletes ...string) string {
-	t.Helper()
+// rawTxFixtureTx is the deterministic transaction behind every tx fixture;
+// its Hash() is the hash tests ASK for, so the healthy fixture answers the
+// question asked (the reported hash field equals the asked hash by
+// construction — a round-trip through the pinned encoder).
+func rawTxFixtureTx() *types.Transaction {
 	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
-	tx := types.NewTx(&types.LegacyTx{
+	return types.NewTx(&types.LegacyTx{
 		Nonce: 1, GasPrice: big.NewInt(1), Gas: 21000, To: &to,
 		Value: big.NewInt(0), Data: rawTxCalldata,
 		V: big.NewInt(27), R: big.NewInt(1), S: big.NewInt(1),
 	})
-	b, err := tx.MarshalJSON()
+}
+
+// rawTxJSON builds a mined transaction's eth_getTransactionByHash result
+// from a REAL types.Transaction round-trip (the pinned encoder emits every
+// field, so the fixture is canonical by construction), then applies
+// byte-exact raw overrides and deletions — the wire control the input and
+// identity gates are judged against.
+func rawTxJSON(t *testing.T, overrides map[string]string, deletes ...string) string {
+	t.Helper()
+	b, err := rawTxFixtureTx().MarshalJSON()
 	require.NoError(t, err)
 	var m map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(b, &m))
@@ -921,9 +928,11 @@ func rawTxJSON(t *testing.T, overrides map[string]string, deletes ...string) str
 // without error, a non-answer impersonating "this transaction carried no
 // data" (which on the migration-genesis path would mint zero borrower
 // seeds). The data canon refuses it by name and rotation lands the healthy
-// secondary's calldata.
+// secondary's calldata. The response must also answer the question ASKED:
+// the reported hash field must equal the asked hash (the wave-6 rule on
+// the tx path — reported-vs-asked, no recomputation).
 func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testing.T) {
-	someTx := common.HexToHash("0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454")
+	askedTx := rawTxFixtureTx().Hash() // the fixture answers for itself
 	withInput := func(input string) *rawJSONEndpoint {
 		return newRawJSONEndpoint(t, map[string]string{}).
 			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, map[string]string{"input": input}))
@@ -931,7 +940,7 @@ func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testi
 
 	// Alone: a named data-canon violation; no empty calldata escapes.
 	f := rawDial(t, withInput(`""`))
-	data, err := f.TxCalldata(context.Background(), someTx)
+	data, err := f.TxCalldata(context.Background(), askedTx)
 	require.ErrorContains(t, err, "all rpc endpoints failed")
 	require.ErrorContains(t, err, "not canonical JSON-RPC hex data")
 	require.ErrorContains(t, err, "transaction response input")
@@ -943,14 +952,14 @@ func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testi
 	secondary := newRawJSONEndpoint(t, map[string]string{}).
 		scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil))
 	f = rawDial(t, primary, secondary)
-	data, err = f.TxCalldata(context.Background(), someTx)
+	data, err = f.TxCalldata(context.Background(), askedTx)
 	require.NoError(t, err)
 	require.Equal(t, rawTxCalldata, data, "the healthy secondary's calldata LANDS, byte for byte")
 	require.Equal(t, 1, primary.asksOf("eth_getTransactionByHash"), "the malformed primary was asked exactly once and rotated past")
 
 	t.Run("uppercase input is refused at the bytes", func(t *testing.T) {
 		f := rawDial(t, withInput(`"0xCFC32570"`))
-		_, err := f.TxCalldata(context.Background(), someTx)
+		_, err := f.TxCalldata(context.Background(), askedTx)
 		require.ErrorContains(t, err, "not canonical JSON-RPC hex data")
 		require.ErrorContains(t, err, "transaction response input")
 		require.ErrorContains(t, err, "not a lowercase hex digit")
@@ -960,14 +969,14 @@ func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testi
 		e := newRawJSONEndpoint(t, map[string]string{}).
 			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil, "input"))
 		f := rawDial(t, e)
-		_, err := f.TxCalldata(context.Background(), someTx)
+		_, err := f.TxCalldata(context.Background(), askedTx)
 		require.ErrorContains(t, err, "transaction response omits required field input")
 		require.ErrorContains(t, err, "protocol violation")
 	})
 
 	t.Run("the canonical empty payload stays servable", func(t *testing.T) {
 		f := rawDial(t, withInput(`"0x"`))
-		data, err := f.TxCalldata(context.Background(), someTx)
+		data, err := f.TxCalldata(context.Background(), askedTx)
 		require.NoError(t, err)
 		require.Empty(t, data, "a plain transfer's empty calldata is a value — only a non-answer is refused")
 	})
@@ -975,9 +984,51 @@ func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testi
 	t.Run("a null result is the honest not-found, not a violation", func(t *testing.T) {
 		e := newRawJSONEndpoint(t, map[string]string{}) // unscripted → null
 		f := rawDial(t, e)
-		_, err := f.TxCalldata(context.Background(), someTx)
+		_, err := f.TxCalldata(context.Background(), askedTx)
 		require.ErrorContains(t, err, "not found")
 		require.NotContains(t, err.Error(), "protocol violation",
 			"a legitimate not-found must not be misclassified as a violation")
+	})
+}
+
+// The wave-6 rule on the transaction path: a hash-keyed read serves exactly
+// the transaction asked for. A well-formed response whose reported hash
+// names ANOTHER transaction — the proxy shape — is a protocol violation
+// that fails the attempt and rotates; without the gate it would silently
+// feed the deriver another transaction's calldata. Reported-vs-asked only:
+// no local tx-hash recomputation is involved (the wave-5 law).
+func TestRawJSONWrongTransactionAnsweredIsAViolationThatRotates(t *testing.T) {
+	askedTx := rawTxFixtureTx().Hash()
+
+	// The proxy: asked for the fixture, it reports a DIFFERENT hash with
+	// every field well-formed.
+	wrongTx := func() *rawJSONEndpoint {
+		return newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, map[string]string{"hash": `"` + rawLogTxHash.Hex() + `"`}))
+	}
+
+	f := rawDial(t, wrongTx())
+	data, err := f.TxCalldata(context.Background(), askedTx)
+	require.ErrorContains(t, err, "answers for transaction "+rawLogTxHash.Hex())
+	require.ErrorContains(t, err, "protocol violation")
+	require.Nil(t, data, "the wrong transaction's calldata never escapes")
+
+	// Rotation: the healthy secondary answers the question asked and lands.
+	primary := wrongTx()
+	secondary := newRawJSONEndpoint(t, map[string]string{}).
+		scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil))
+	f = rawDial(t, primary, secondary)
+	data, err = f.TxCalldata(context.Background(), askedTx)
+	require.NoError(t, err)
+	require.Equal(t, rawTxCalldata, data)
+	require.Equal(t, 1, primary.asksOf("eth_getTransactionByHash"), "the proxy was asked exactly once and rotated past")
+
+	t.Run("omitted hash is a named absence, not a skipped check", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil, "hash"))
+		f := rawDial(t, e)
+		_, err := f.TxCalldata(context.Background(), askedTx)
+		require.ErrorContains(t, err, "transaction response omits required field hash")
+		require.ErrorContains(t, err, "protocol violation")
 	})
 }

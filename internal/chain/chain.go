@@ -673,13 +673,28 @@ func (b *strictTxInput) UnmarshalJSON(input []byte) error {
 // and a presence check (the pinned decoder also refuses an omitted input,
 // but the refusal must not RELY on the lenient library's required-field
 // list), then the SAME raw bytes decode through types.Transaction exactly
-// as the typed client would. Mirrored from the pinned ethclient: a null
-// result is ethereum.NotFound (the honest not-found, exactly the header
-// path's discrimination), a signature-less response is refused verbatim,
-// and pending-ness is blockNumber's absence. NOT mirrored, disclosed: the
-// sender-address cache (setSenderFromServer) — TxCalldata never reads the
-// sender, no other caller consumes this method, and a Sender() call would
-// fall back to signature recovery rather than misbehave.
+// as the typed client would.
+//
+// THE RESPONSE MUST ALSO ANSWER THE QUESTION ASKED (the wave-6 rule,
+// applied to this path by the wave-8 sweep): a hash-keyed read serves
+// exactly the transaction asked for, so the response's own reported hash
+// field must be present and EQUAL the asked hash — the same
+// reported-vs-asked comparison validateReportedHeader makes for numbered
+// heights, and like it, no local recomputation is involved (types.
+// Transaction.Hash() re-derives from decoded fields, which is exactly the
+// recomputation class wave 5 retired for headers; the REPORTED hash is the
+// provider's own claim about which transaction it answered with, which is
+// the honest form of the question). Without this, a proxy answering with a
+// well-formed WRONG transaction would silently feed the deriver another
+// transaction's calldata.
+//
+// Mirrored from the pinned ethclient: a null result is ethereum.NotFound
+// (the honest not-found, exactly the header path's discrimination), a
+// signature-less response is refused verbatim, and pending-ness is
+// blockNumber's absence. NOT mirrored, disclosed: the sender-address cache
+// (setSenderFromServer) — TxCalldata never reads the sender, no other
+// caller consumes this method, and a Sender() call would fall back to
+// signature recovery rather than misbehave.
 func (e *endpointClient) TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error) {
 	var raw json.RawMessage
 	if err := e.raw.CallContext(ctx, &raw, "eth_getTransactionByHash", hash); err != nil {
@@ -689,6 +704,7 @@ func (e *endpointClient) TransactionByHash(ctx context.Context, hash common.Hash
 		return nil, false, ethereum.NotFound
 	}
 	var probe struct {
+		Hash        *common.Hash     `json:"hash"`
 		Input       *strictTxInput   `json:"input"`
 		BlockNumber *json.RawMessage `json:"blockNumber"`
 	}
@@ -697,6 +713,12 @@ func (e *endpointClient) TransactionByHash(ctx context.Context, hash common.Hash
 	}
 	if probe.Input == nil {
 		return nil, false, fmt.Errorf("transaction response omits required field input — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value")
+	}
+	if probe.Hash == nil {
+		return nil, false, fmt.Errorf("transaction response omits required field hash — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value")
+	}
+	if *probe.Hash != hash {
+		return nil, false, fmt.Errorf("transaction response answers for transaction %s — a provider protocol violation; a hash-keyed read serves exactly the transaction asked for or fails the attempt", *probe.Hash)
 	}
 	var tx types.Transaction
 	if err := json.Unmarshal(raw, &tx); err != nil {
