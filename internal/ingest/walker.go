@@ -11,13 +11,31 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 
+	"github.com/kaselunt/solvent/internal/chain"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
+// Chain is the walker's chain surface. Since Task 9 wave 12 it is ENDPOINT-
+// AWARE: every read is a caller-scoped *From method that walks endpoints from
+// an explicit start and stamps the token of the endpoint that answered
+// (chain.Failover's doFrom contract). The walker was endpoint-blind before —
+// no tokens, no From variants — which made its per-Step endpoint affinity
+// "documented, not enforced": window pieces could legitimately be assembled
+// cross-endpoint after any mid-window rotation, the exact ambiguity that made
+// the OP incident undiagnosable for hours (chain-truth consult Q1).
+//
+// ActiveEndpoint is READ-ONLY here: it seeds the very first Step's start.
+// Nothing in this package ever writes the shared routing hint — a shared hint
+// structurally cannot carry a caller-specific exclusion (the Task 7 wave-6
+// RotateAwayFrom deletion and d1e7d54's ambiguity rules are accepted-decision-
+// level; the consult's R3 sibling-interference schedule exists to kill any
+// reimplementation).
 type Chain interface {
-	BlockNumber(ctx context.Context) (uint64, error)
-	HeaderHash(ctx context.Context, n uint64) (common.Hash, error)
-	Logs(ctx context.Context, from, to uint64, addrs []common.Address) ([]types.Log, error)
+	ActiveEndpoint() int
+	EndpointCount() int
+	BlockNumberFrom(ctx context.Context, startIndex int) (uint64, chain.EndpointToken, error)
+	HeaderHashFrom(ctx context.Context, startIndex int, n uint64) (common.Hash, chain.EndpointToken, error)
+	LogsFrom(ctx context.Context, startIndex int, from, to uint64, addrs []common.Address) ([]types.Log, chain.EndpointToken, error)
 }
 
 type Store interface {
@@ -25,6 +43,29 @@ type Store interface {
 	SaveBatch(ctx context.Context, stream string, chainID uint64, logs []store.RawLog, tipBlock uint64, tipHash []byte) error
 	Rewind(ctx context.Context, stream string, chainID uint64, toBlock uint64, hashAtBlock []byte) error
 	HighestLogAtOrBelow(ctx context.Context, chainID, height uint64) (block uint64, blockHash []byte, found bool, err error)
+}
+
+// DiscardError is a Step's DISCARD outcome: the window (or rewind evidence)
+// was incoherent — tip moved mid-fetch, cursor hash changed mid-Step, or a
+// pinned read was served by a different endpoint — so nothing was saved and
+// nothing was learned that clears the stream.
+//
+// It is a TYPED error deliberately (Task 9 wave 12 F2): the pre-wave shape
+// returned (false, nil) for these arms, which the daemon counted as SUCCESS —
+// backoff reset every round, no step_error, an invisible wedge with a WORSE
+// detection profile than the incident's error loop. A discard now surfaces as
+// its own outcome so the daemon can keep the failure streak growing and the
+// health surface honest (the round-3 [medium] pacing/visibility law, applied
+// at ingest), while remaining distinguishable from both a landing and a plain
+// error. Routing does not depend on this type: the discard advances the
+// stream's start through the same deferred seam as every non-landing exit.
+type DiscardError struct {
+	Stream string
+	Reason string
+}
+
+func (d *DiscardError) Error() string {
+	return fmt.Sprintf("window discarded (non-landing): %s", d.Reason)
 }
 
 type WalkerConfig struct {
@@ -45,6 +86,25 @@ type Walker struct {
 	// and rejected by config validation, so an empty set here would silently
 	// fail every batch on the address check.
 	addrSet map[common.Address]struct{}
+
+	// startPref is THIS STREAM'S routing state: the endpoint index the next
+	// Step's serving-endpoint resolution starts from. -1 until first touched,
+	// which means "seed from the shared hint, read-only". It joins the
+	// existing single-writer per-Step concurrency contract below — written
+	// only from Step's goroutine, zero new concurrency surface.
+	//
+	// RETENTION, NOT RESET (chain-truth consult Q2.3): a landing sets it to
+	// the endpoint that served the landed Step — the stream's own affinity —
+	// and it is never reset to follow the shared hint afterwards. Resetting
+	// would recreate the A-bounce the poller needed the wave-9 bounded lease
+	// (d1e7d54) to escape: a sibling's legitimate success re-pins the hint at
+	// the offender, this stream fails there, advances, lands elsewhere,
+	// resets, bounces back — every other Step wasted. Retention converges
+	// each stream to a witness that lands FOR IT; a recovered endpoint is
+	// re-probed through the non-landing ping-pong (the liveness property:
+	// with every endpoint failing, the advance cycles the fleet, so recovery
+	// is revisited within one rotation, never excluded forever).
+	startPref int
 
 	// lastHead / lastCursor / headSeen record what the most recent Step observed:
 	// the chain head it read and where this stream's durable cursor stood. They
@@ -100,32 +160,146 @@ func NewWalker(ch Chain, st Store, cfg WalkerConfig) *Walker {
 	for _, a := range cfg.Addresses {
 		set[a] = struct{}{}
 	}
-	return &Walker{chain: ch, store: st, cfg: cfg, addrSet: set}
+	return &Walker{chain: ch, store: st, cfg: cfg, addrSet: set, startPref: -1}
 }
 
 // Name returns the stream name this walker ingests, for log attribution.
 func (w *Walker) Name() string { return w.cfg.Stream }
 
+// stepOutcome is what the Step's one deferred routing seam switches on. The
+// ZERO VALUE IS NON-LANDING on purpose: an outcome nobody set is an outcome
+// that advances routing, so every failure arm added after this writing gets
+// the advance by NOT being a landed return — never by remembering a helper.
+type stepOutcome int
+
+const (
+	// stepNonLanding: the Step resolved a serving endpoint and did not land —
+	// an error, a discard, anything. The next Step starts past that endpoint.
+	stepNonLanding stepOutcome = iota
+	// stepLanded: a DURABLE write happened — a batch saved or a rewind
+	// executed. The only outcome that keeps (and retains) the starting point.
+	stepLanded
+	// stepCaughtUp: no window was attempted, so there is no window outcome to
+	// judge; the starting point is kept, unchanged. (The responsive-frozen-
+	// endpoint hole this leaves is the consult's F4, recorded OPEN — the seam
+	// deliberately does not claim to cover it.)
+	stepCaughtUp
+)
+
+// coherent enforces the Step's ENDPOINT-COHERENT WINDOW contract: every read
+// after the serving-endpoint resolution must have been served by exactly the
+// resolved endpoint. A read the failover walk satisfied elsewhere belongs to
+// another chain view — joining it to this Step's window would rebuild the
+// cross-provider ambiguity that consumed the incident night — so the mismatch
+// is a COHERENCE DISCARD: non-landing, nothing saved. With all reads pinned
+// to one token, the tip-log-vs-tipBefore check below becomes a SAME-WITNESS
+// contradiction — decidable, attributable — instead of cross-provider noise.
+func (w *Walker) coherent(servedBy, tok chain.EndpointToken, what string, block uint64) error {
+	if tok.Index == servedBy.Index {
+		return nil
+	}
+	slog.Warn("pinned read served by a different endpoint, discarding window: pieces would join two chain views",
+		"stream", w.cfg.Stream, "read", what, "block", block,
+		"pinned", servedBy.Index, "servedBy", tok.Index)
+	return &DiscardError{Stream: w.cfg.Stream,
+		Reason: fmt.Sprintf("%s at %d served by endpoint %d while the Step is pinned to endpoint %d", what, block, tok.Index, servedBy.Index)}
+}
+
+// routeNextStepPastNonLanding is the routing half of the Step's one seam —
+// the deferred outcome handler's non-landing arm. It advances this stream's
+// caller-scoped starting preference past the Step's serving endpoint.
+//
+// THE INVARIANT, verbatim from the Codex task-9 round-2 ruling (the closed
+// law this walker transposes from the poller): LANDING IS THE ONLY OUTCOME
+// THAT KEEPS THE STARTING POINT. Failure classification decides the ERROR
+// POSTURE (discard vs error), never whether routing moves. The advance
+// attributes no fault and costs one preference move; the shared routing hint
+// is never written (see the Chain interface contract). With a single
+// configured endpoint there is nowhere else to start and this says so rather
+// than pretending; with every endpoint failing, the advance ping-pongs across
+// the fleet — the LIVENESS property: a recovered endpoint is revisited within
+// one rotation, never excluded forever.
+func (w *Walker) routeNextStepPastNonLanding(servedBy chain.EndpointToken) {
+	n := w.chain.EndpointCount()
+	if n <= 1 {
+		slog.Warn("non-landing step with a single configured endpoint: nowhere else to start, keeping the starting point rather than pretending to rotate",
+			"stream", w.cfg.Stream, "endpoint", servedBy.Index)
+		return
+	}
+	next := ((servedBy.Index+1)%n + n) % n
+	if w.startPref != next {
+		slog.Info("stream routing advanced past non-landing endpoint",
+			"stream", w.cfg.Stream, "from", servedBy.Index, "to", next)
+	}
+	w.startPref = next
+}
+
 // Step performs one bounded unit of work: a reorg check + at most one
 // getLogs window. Returns advanced=false when caught up to the safe head.
+// A DISCARDED window returns advanced=false with a *DiscardError — its own
+// outcome, distinct from both success and a plain error (F2: the daemon
+// counts it into the failure streak instead of resetting backoff on it).
 //
 // Residual TOCTOU: a fork landing between the pre-save cursor recheck and
 // SaveBatch can still persist stale rows, but it is caught by the NEXT
 // Step's cursor check + verified-ancestor rewind. Trust assumptions:
-// per-Step endpoint affinity comes from the failover client's sticky-active
-// routing (documented, not enforced here), and a successful-but-incomplete
-// getLogs response is trusted — inherent to the RPC model. Deferred
-// hardening: per-block header verification of every returned log,
-// receipt-membership proofs, and a distinct-hash-per-height store invariant
-// check are deliberate deferrals to the derivation layer's health checks;
-// the provider is trusted to return internally consistent responses beyond
-// the batch-coherence checks enforced here.
+// per-Step endpoint affinity is ENFORCED since Task 9 wave 12 — the first
+// read resolves the serving endpoint, every later read is pinned to it with
+// token equality required — but a successful-but-incomplete getLogs response
+// is still trusted, inherent to the RPC model (the consult's F5 disclosure:
+// rotation does not touch silent truncation; the detection net is the
+// wave-10 reconcile aggregate welds). Deferred hardening: per-block header
+// verification of every returned log, receipt-membership proofs, and a
+// distinct-hash-per-height store invariant check remain deliberate deferrals
+// to the derivation layer's health checks.
 func (w *Walker) Step(ctx context.Context) (bool, error) {
-	head, err := w.chain.BlockNumber(ctx)
+	// RESOLVE THE SERVING ENDPOINT FIRST (the poller's readRound shape,
+	// transposed). The head read doubles as the resolution: whichever
+	// endpoint answers it is the Step's one serving endpoint, and every later
+	// read is pinned to exactly it. The start honours this stream's own
+	// retained preference; the shared hint is READ once, only before the
+	// first preference exists.
+	start := w.startPref
+	if start < 0 {
+		start = w.chain.ActiveEndpoint()
+	}
+	head, servedBy, err := w.chain.BlockNumberFrom(ctx, start)
 	if err != nil {
+		// The resolution walk itself visited every endpoint and none served;
+		// there is no serving endpoint to route past. The error posture and
+		// the daemon's backoff carry the outage.
 		return false, fmt.Errorf("head: %w", err)
 	}
+
+	// THE ROUTING SEAM — one deferred outcome handler, keyed on the Step's
+	// outcome flag (the poller.go readRound seam, structurally verbatim).
+	// From this point on the Step HAS a serving endpoint, and the invariant
+	// holds structurally: LANDING IS THE ONLY OUTCOME THAT KEEPS THE STARTING
+	// POINT (Codex task-9 round 2, both findings accepted; controller ruling —
+	// the per-arm approach missed twice at the poller and is not re-run at
+	// ingest). Every return below that does not first mark the Step landed or
+	// caught-up — every discard, every error, and every failure arm anyone
+	// adds later — advances this stream's start past the serving endpoint
+	// through this defer, FOR FREE. Classification at each return decides
+	// only how the failure is REPORTED (discard vs error), never whether
+	// routing moves. Landing RETAINS: the stream's next Step starts at the
+	// endpoint that just landed for it, never back at the shared hint.
+	// Caught-up KEEPS: no window was attempted, nothing is judged.
+	// Rewind COUNTS AS LANDING: it is a durable write.
+	outcome := stepNonLanding
+	defer func() {
+		switch outcome {
+		case stepLanded:
+			w.startPref = servedBy.Index
+		case stepCaughtUp:
+			// keep the starting point, unchanged
+		default:
+			w.routeNextStepPastNonLanding(servedBy)
+		}
+	}()
+
 	if head < w.cfg.Confirmations {
+		outcome = stepCaughtUp
 		return false, nil
 	}
 	safe := head - w.cfg.Confirmations
@@ -149,22 +323,31 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 	} else {
 		// Reorg check must run before the caught-up return: a mismatched
 		// cursor needs rewinding even when there is nothing new to ingest.
-		chainHash, err := w.chain.HeaderHash(ctx, cur.Block)
+		chainHash, tok, err := w.chain.HeaderHashFrom(ctx, servedBy.Index, cur.Block)
 		if err != nil {
 			return false, fmt.Errorf("reorg check header %d: %w", cur.Block, err)
 		}
+		if err := w.coherent(servedBy, tok, "reorg-check header", cur.Block); err != nil {
+			return false, err
+		}
 		if !bytes.Equal(chainHash.Bytes(), cur.Hash) {
-			return w.rewindToVerifiedAncestor(ctx, cur)
+			adv, err := w.rewindToVerifiedAncestor(ctx, cur, servedBy)
+			if err == nil {
+				outcome = stepLanded // rewind counts as landing: a durable write
+			}
+			return adv, err
 		}
 		// Caught-up check BEFORE computing next: a cursor at MaxUint64 would
 		// wrap next to 0 and silently restart the walk from genesis.
 		if cur.Block >= safe {
+			outcome = stepCaughtUp
 			return false, nil
 		}
 		next = cur.Block + 1
 	}
 
 	if next > safe {
+		outcome = stepCaughtUp
 		return false, nil
 	}
 	// Overflow-safe window cap: compare distances instead of computing
@@ -177,36 +360,56 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 
 	// Coherent-window fetch: pin the tip hash on both sides of getLogs so a
 	// mid-fetch reorg cannot anchor the cursor to a hash the logs never
-	// belonged to.
-	tipBefore, err := w.chain.HeaderHash(ctx, to)
+	// belonged to — and pin every read to the Step's one serving endpoint so
+	// both sides are the SAME WITNESS's answers.
+	tipBefore, tok, err := w.chain.HeaderHashFrom(ctx, servedBy.Index, to)
 	if err != nil {
 		return false, fmt.Errorf("tip header %d: %w", to, err)
 	}
-	logs, err := w.chain.Logs(ctx, next, to, w.cfg.Addresses)
+	if err := w.coherent(servedBy, tok, "tip header", to); err != nil {
+		return false, err
+	}
+	logs, tok, err := w.chain.LogsFrom(ctx, servedBy.Index, next, to, w.cfg.Addresses)
 	if err != nil {
 		return false, fmt.Errorf("logs [%d,%d]: %w", next, to, err)
 	}
-	tipAfter, err := w.chain.HeaderHash(ctx, to)
+	if err := w.coherent(servedBy, tok, "logs window", to); err != nil {
+		return false, err
+	}
+	tipAfter, tok, err := w.chain.HeaderHashFrom(ctx, servedBy.Index, to)
 	if err != nil {
 		return false, fmt.Errorf("tip header recheck %d: %w", to, err)
 	}
+	if err := w.coherent(servedBy, tok, "tip header recheck", to); err != nil {
+		return false, err
+	}
 	if tipAfter != tipBefore {
+		// One token, two answers: genuine chain movement at depth
+		// Confirmations (a ≥conf-deep reorg — an anomaly, not weather) and a
+		// split backend behind one URL are indistinguishable from here. The
+		// discard posture is fail-closed either way, and the seam advances
+		// routing either way (consult Q3: no discrimination machinery).
 		slog.Warn("tip changed mid-fetch, discarding window",
 			"stream", w.cfg.Stream, "block", to,
 			"before", tipBefore, "after", tipAfter)
-		return false, nil // chain moved mid-fetch; next tick retries
+		return false, &DiscardError{Stream: w.cfg.Stream,
+			Reason: fmt.Sprintf("tip header %d changed mid-fetch on endpoint %d (%s -> %s)", to, servedBy.Index, tipBefore, tipAfter)}
 	}
 	if cur != nil {
 		// Re-check the cursor ancestor: a reorg below the window during the
 		// fetch would splice this batch onto a dead fork.
-		recheck, err := w.chain.HeaderHash(ctx, cur.Block)
+		recheck, tok, err := w.chain.HeaderHashFrom(ctx, servedBy.Index, cur.Block)
 		if err != nil {
 			return false, fmt.Errorf("cursor recheck header %d: %w", cur.Block, err)
+		}
+		if err := w.coherent(servedBy, tok, "cursor recheck header", cur.Block); err != nil {
+			return false, err
 		}
 		if !bytes.Equal(recheck.Bytes(), cur.Hash) {
 			slog.Warn("cursor hash changed mid-step, discarding window",
 				"stream", w.cfg.Stream, "block", cur.Block)
-			return false, nil // reorg mid-Step; next Step's check rewinds
+			return false, &DiscardError{Stream: w.cfg.Stream,
+				Reason: fmt.Sprintf("cursor hash at %d changed mid-step on endpoint %d", cur.Block, servedBy.Index)}
 		}
 	}
 
@@ -246,7 +449,10 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 			hashAt[l.BlockNumber] = l.BlockHash.Bytes()
 		}
 		// Logs at the window tip must sit on the fork the cursor is being
-		// anchored to.
+		// anchored to. With the Step pinned to one endpoint this is a
+		// SAME-WITNESS contradiction when it fires: the serving endpoint's
+		// own getLogs disagreeing with its own header — decidable evidence,
+		// not cross-provider noise.
 		if l.BlockNumber == to && l.BlockHash != tipBefore {
 			return false, fmt.Errorf("log %s/%d: log at window tip does not match anchored tip hash", l.TxHash, l.Index)
 		}
@@ -288,6 +494,9 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 	if err := w.store.SaveBatch(ctx, w.cfg.Stream, w.cfg.ChainID, raw, to, tipBefore.Bytes()); err != nil {
 		return false, fmt.Errorf("save batch: %w", err)
 	}
+	// THE ONE LANDED RETURN of the window path — the only exit (with the
+	// rewind above) that keeps and retains the starting point.
+	outcome = stepLanded
 	return true, nil
 }
 
@@ -297,12 +506,31 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 // row at or below it is canonical, so rewinding there is safe at any fork
 // depth — unlike a fixed-distance rewind, which silently blesses stale rows
 // below its target when the fork is deeper.
-func (w *Walker) rewindToVerifiedAncestor(ctx context.Context, cur *store.CursorPos) (bool, error) {
+//
+// Every header read here is PINNED to the Step's serving endpoint (Task 9
+// wave 12): the rewind decision is evidence about ONE witness's chain, and a
+// probe answered by a different endpoint would authorize a destructive
+// Rewind against a view the reorg check never saw — that mismatch is a
+// coherence discard, and no Rewind runs. (Corroborating the mismatch on a
+// SECOND endpoint before rewinding is the consult's F3, deliberately NOT
+// implemented this wave — it needs its own ratified clause.)
+func (w *Walker) rewindToVerifiedAncestor(ctx context.Context, cur *store.CursorPos, servedBy chain.EndpointToken) (bool, error) {
 	var (
 		target     uint64
 		targetHash []byte
 		verified   bool
 	)
+	// pinnedHeader is the one probe shape this decision may use.
+	pinnedHeader := func(at uint64, what string) (common.Hash, error) {
+		h, tok, err := w.chain.HeaderHashFrom(ctx, servedBy.Index, at)
+		if err != nil {
+			return common.Hash{}, fmt.Errorf("%s %d: %w", what, at, err)
+		}
+		if err := w.coherent(servedBy, tok, what, at); err != nil {
+			return common.Hash{}, err
+		}
+		return h, nil
+	}
 	// fullRewalk targets StartBlock-1 (or 0 in the degenerate StartBlock==0
 	// case) so the next Step re-ingests the stream's entire range.
 	fullRewalk := func() error {
@@ -310,9 +538,9 @@ func (w *Walker) rewindToVerifiedAncestor(ctx context.Context, cur *store.Cursor
 		if w.cfg.StartBlock > 0 {
 			at = w.cfg.StartBlock - 1
 		}
-		h, err := w.chain.HeaderHash(ctx, at)
+		h, err := pinnedHeader(at, "rewind header")
 		if err != nil {
-			return fmt.Errorf("rewind header %d: %w", at, err)
+			return err
 		}
 		target, targetHash, verified = at, h.Bytes(), false
 		return nil
@@ -336,9 +564,9 @@ func (w *Walker) rewindToVerifiedAncestor(ctx context.Context, cur *store.Cursor
 				}
 				break
 			}
-			liveHash, err := w.chain.HeaderHash(ctx, b)
+			liveHash, err := pinnedHeader(b, "rewind header")
 			if err != nil {
-				return false, fmt.Errorf("rewind header %d: %w", b, err)
+				return false, err
 			}
 			if bytes.Equal(liveHash.Bytes(), storedHash) {
 				// PROVEN canonical: stored == live. Anchor to the stored

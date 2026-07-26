@@ -325,38 +325,11 @@ func (c *fakeEndpointChain) LogsFrom(_ context.Context, start int, from, to uint
 	return nil, chain.EndpointToken{Index: -1}, fmt.Errorf("all rpc endpoints failed (getLogs [%d,%d]): %w", from, to, lastErr)
 }
 
-// --- the SHARED-hint path (chain.Failover.do, mirrored) ---------------------
-//
-// These are the blind methods the pre-wave-12 walker consumes: the walk
-// starts at the shared hint and RE-PINS the hint onto whichever endpoint
-// served the successful attempt (chain.go's do()) — the exact machinery that
-// actively pins a walker back onto a content-faulty endpoint. They exist so
-// the precondition run proves this fake against the UNCHANGED walker, and so
-// tests can model shared-path traffic beside the caller-scoped walk.
-
-func (c *fakeEndpointChain) BlockNumber(ctx context.Context) (uint64, error) {
-	v, tok, err := c.BlockNumberFrom(ctx, c.active)
-	if err != nil {
-		return 0, err
-	}
-	c.active = tok.Index
-	return v, nil
-}
-
-func (c *fakeEndpointChain) HeaderHash(ctx context.Context, height uint64) (common.Hash, error) {
-	h, tok, err := c.HeaderHashFrom(ctx, c.active, height)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	c.active = tok.Index
-	return h, nil
-}
-
-func (c *fakeEndpointChain) Logs(ctx context.Context, from, to uint64, addrs []common.Address) ([]types.Log, error) {
-	logs, tok, err := c.LogsFrom(ctx, c.active, from, to, addrs)
-	if err != nil {
-		return nil, err
-	}
-	c.active = tok.Index
-	return logs, nil
-}
+// The blind shared-hint bridge methods (BlockNumber/HeaderHash/Logs mirroring
+// Failover.do) existed only for the precondition commit's run against the
+// UNCHANGED walker and were removed with the interface they bridged: the
+// walker now consumes exclusively the caller-scoped From surface above. The
+// shared hint survives as the `active` field, which tests WRITE directly to
+// model a sibling's shared-path success re-pinning it (the R3 schedule) —
+// nothing in the From methods can touch it, which is itself the contract
+// under test.

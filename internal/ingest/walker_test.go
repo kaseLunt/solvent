@@ -195,7 +195,10 @@ func TestForkBeyondAllStoredLogsRewindsToStartBlock(t *testing.T) {
 }
 
 // Invariant: a window fetched while the chain tip moved is incoherent and
-// must be discarded, not saved.
+// must be discarded, not saved. Since wave 12 the discard is its OWN outcome
+// (*DiscardError), never a silent (false, nil) the daemon would count as
+// success — F2's round-3 pacing/visibility law; the fail-closed half of the
+// arm (nothing saved) is unchanged.
 func TestTipChangedMidStepAborts(t *testing.T) {
 	ch := agreeingChain(1000).
 		seqAll(149, common.HexToHash("0xa1"), common.HexToHash("0xa2")) // tip hash changes across the Logs call
@@ -203,14 +206,16 @@ func TestTipChangedMidStepAborts(t *testing.T) {
 	w := walker(ch, st)
 
 	advanced, err := w.Step(context.Background())
-	require.NoError(t, err)
+	var discard *DiscardError
+	require.ErrorAs(t, err, &discard, "the discard surfaces as its own outcome, not as silent success")
 	require.False(t, advanced)
 	require.Empty(t, st.saved)
 	require.Nil(t, st.cursor)
 }
 
 // Invariant: a reorg landing under the cursor mid-Step must abort the save;
-// the next Step's cursor check performs the rewind.
+// the next Step's cursor check performs the rewind. Since wave 12 the
+// discard is its OWN outcome (*DiscardError) — see TestTipChangedMidStepAborts.
 func TestCursorRecheckMismatchAborts(t *testing.T) {
 	ch := agreeingChain(1000).
 		seqAll(200, common.HexToHash("0x01"), common.HexToHash("0x02")) // matches at step start, differs on pre-save recheck
@@ -218,7 +223,8 @@ func TestCursorRecheckMismatchAborts(t *testing.T) {
 	w := walker(ch, st)
 
 	advanced, err := w.Step(context.Background())
-	require.NoError(t, err)
+	var discard *DiscardError
+	require.ErrorAs(t, err, &discard, "the discard surfaces as its own outcome, not as silent success")
 	require.False(t, advanced)
 	require.Empty(t, st.saved)
 	require.Nil(t, st.rewound)
