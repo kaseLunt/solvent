@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "wave": "task-9 wave 14 (bounded retention lease, ingest)",
+    "brief": "task-9-wave14-brief.md: three mutants, one per mandated row - budget-removed (Codex's pin regression kills), probe-adopts-unconditionally (the annex regression kills), budget-derivation drift (property: the bound is finite and stated; the regression builds its schedule from the same constants the derivation uses, so the drift is visible to it)",
+    "applier": "wave16-mutations/mutate.py (exactly-one-occurrence, in-memory restores, byte-level)",
+    "note": "all search patterns are SINGLE-LINE on purpose (the wave-12 CRLF trap the applier exists to refuse); internal/ingest/walker.go is LF in the working tree. W14M1's replace keeps `wall` and `probing` referenced in one multi-assign because removing the recordLanding call would otherwise leave both declared-and-unused - a compile error is not a kill."
+  },
+  "mutations": [
+    {
+      "id": "W14M1",
+      "property": "Retention is BOUNDED: consecutive over-budget landings spend the lease and the next Step probes the neighbour. Removing the lease (the landed arm reverts to unconditional retention) restores Codex round-12's pin: a just-below-timeout endpoint lands every Step, no error arm ever fires, and the stream never reaches the fast peer - fail-forever for latency.",
+      "description": "budget-removed: the seam's landed arm bypasses recordLanding and retains unconditionally",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowSuccessfulEndpointIsEscapedWithinTheStatedBound|TestSlowerProbeReturnsToTheIncumbentAndReArmsTheLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tw.recordLanding(servedBy, wall, probing, incumbent)",
+          "replace": "\t\t\tw.startPref, _, _ = servedBy.Index, wall, probing // W14M1: lease removed - unconditional retention"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W14M2",
+      "property": "A probe landing is ADJUDICATED, never blindly retained: only a strictly faster landing transfers retention; a no-faster probe returns to the incumbent and re-arms the lease. Unconditional adoption recreates the bounce pole the annex's retention rule closed - the stream hops to whichever witness served the probe regardless of evidence, and a no-better (or worse) neighbour steals the pin every spent lease.",
+      "description": "probe-adopts-unconditionally: the baseline comparison is forced true",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowerProbeReturnsToTheIncumbentAndReArmsTheLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\tif wall < w.slowBaseline {",
+          "replace": "\t\tif true { // W14M2: probe adopts unconditionally"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W14M3",
+      "property": "The budget's DERIVATION is load-bearing and its bound finite and stated: slowStepBudget is ONE chainAttemptTimeout, sitting stepMaxPinnedReads-times BELOW the failover's blind-spot ceiling, which is exactly what lets the lease see the just-below-timeout posture the failover cannot. Drifting the budget up to the ceiling (the natural wrong derivation: 'budget = worst case') makes every pathological landing read as within-budget - the lease never spends, the pin returns, the stated bound stops existing.",
+      "description": "budget-derivation drift: slowStepBudget raised to the blind-spot ceiling (stepMaxPinnedReads x chainAttemptTimeout)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowSuccessfulEndpointIsEscapedWithinTheStatedBound"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "const slowStepBudget = chainAttemptTimeout",
+          "replace": "const slowStepBudget = stepMaxPinnedReads * chainAttemptTimeout // W14M3: budget drifted to the blind-spot ceiling"
+        }
+      ],
+      "expect": "KILLED"
+    }
+  ]
+}
