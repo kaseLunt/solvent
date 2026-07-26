@@ -509,3 +509,53 @@ func liveGeneration(t *testing.T, db *sql.DB) uint64 {
 		`SELECT current_generation FROM sweep_generations WHERE engine = $1`, liveEngine).Scan(&gen))
 	return gen
 }
+
+// TestTheFreshnessVerdictIsMeasuredAgainstTheREALDatabaseClock drives Codex round
+// 10's [medium] the whole way down: real Postgres, real store.Now, and the daemon's
+// own wiring of the two clocks.
+//
+// The fake-clock test (TestAClockRollbackSmallerThanTheHeaderAgeCannotTurnStalenessGreen)
+// proves the RULE. This proves the SQL and the plumbing under it — that `SELECT
+// now()` scans into a usable instant, that the UTC normalisation happens, and that
+// store.Store actually satisfies verdictClock, none of which a fake can be wrong
+// about on the real store's behalf. It is the check wave 11's residual #3 flagged
+// the absence of for its own new store method, so it is not repeated here.
+func TestTheFreshnessVerdictIsMeasuredAgainstTheREALDatabaseClock(t *testing.T) {
+	s, _ := liveHealthStore(t)
+	ctx := context.Background()
+
+	dbNow, err := s.Now(ctx)
+	require.NoError(t, err)
+	require.Equal(t, time.UTC, dbNow.Location(),
+		"normalised to UTC, so reason text does not render the client session's offset")
+	require.WithinDuration(t, time.Now().UTC(), dbNow, time.Minute,
+		"and it is a real instant, not a zero value that would date every header to 1970 and redden the whole deployment")
+
+	// A cursor whose block is fifteen minutes old ON THE DATABASE CLOCK, judged by a
+	// daemon whose own wall clock has been stepped back ten minutes. On that clock
+	// the header reads five minutes old — green — and the future-skew guard sees
+	// nothing wrong, because a fifteen-minute-old header absorbs a ten-minute
+	// rollback without ever becoming future.
+	const headerAge = 15 * time.Minute
+	name, block := "eth:aave-etherfi", uint64(20_000_000)
+	hdr := newFakeHeaderTimes().set(1, block, dbNow.Add(-headerAge))
+	watch := progressWatch{
+		walkers: []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
+		// EXACTLY the daemon's wiring: time.Now schedules, the store's clock judges.
+		staleness: newStalenessJudge(hdr.fetch, time.Now, s.Now),
+	}
+	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: block, UpdatedAt: dbNow}}}
+
+	rc := roundConditions{}
+	applyProgressConditions(ctx, pr, dbNow.Add(-10*time.Minute), rc, watch)
+	h, _ := newTestHealth()
+	publishRound(h, rc)
+
+	rep := h.report()
+	require.Contains(t, rep.Recoverable, name+"/"+conditionStaleness,
+		"the verdict is made against the database's clock, which nothing stepped, so a rolled-back daemon cannot talk this gate into a green")
+	require.NotContains(t, rep.Recoverable, name+"/"+conditionStalenessUnmeasured,
+		"and it is measured, not refused: the authority answered")
+	require.Contains(t, rep.Recoverable[name+"/"+conditionStaleness], "bound 10m0s")
+	require.False(t, rep.Ready)
+}

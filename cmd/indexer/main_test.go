@@ -7,6 +7,7 @@ package main
 // loop polls ready().
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -18,6 +19,28 @@ type fakeClock struct{ t time.Time }
 
 func (c *fakeClock) now() time.Time          { return c.t }
 func (c *fakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
+
+// verdict makes this clock a verdictClock — in the freshness tests, the DATABASE
+// clock the staleness verdict is measured against.
+//
+// Most tests drive one clock through BOTH of the judge's roles (scheduling and
+// verdict), which is the ordinary case: a healthy daemon's monotonic clock and its
+// database's clock advance together. The tests that matter for Codex round 10's
+// [medium] deliberately use TWO clocks and move them apart, because "the daemon's
+// wall clock disagrees with the database's" is the entire failure mode.
+func (c *fakeClock) verdict(context.Context) (time.Time, error) { return c.t, nil }
+
+// brokenClock is a verdictClock that always fails: the daemon has no trusted time
+// authority this round.
+func brokenClock(err error) verdictClock {
+	return func(context.Context) (time.Time, error) { return time.Time{}, err }
+}
+
+// pinnedClock is a clock stopped at one instant, for tests whose subject is not the
+// passage of time. A judge built on it never expires a reuse window and never
+// charges its refresh budget, which is exactly right for a test about some other
+// property — and wrong, loudly, for one about scheduling.
+func pinnedClock(t time.Time) *fakeClock { return &fakeClock{t: t} }
 func newBackoff(c *fakeClock, r float64) *retryBackoff {
 	return &retryBackoff{now: c.now, rand: func() float64 { return r }}
 }

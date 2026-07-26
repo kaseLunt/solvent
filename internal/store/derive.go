@@ -1334,6 +1334,34 @@ func (s *Store) SweepLastPassDuration(ctx context.Context, engine string) (time.
 	return 0, false, nil
 }
 
+// Now reads the DATABASE's current time.
+//
+// WHY THIS EXISTS AT ALL, when every process already has a clock. It is the
+// daemon's TIME AUTHORITY for verdicts made against durable or chain-sourced
+// timestamps (Codex round 10's [medium]). A daemon's own wall clock is untrusted
+// input to such a verdict: NTP can step it, and a VM restore or hypervisor rollback
+// can move it by minutes or hours. A rollback SMALLER than a cached header's age is
+// invisible to a future-skew check — an old header simply absorbs it — while
+// silently shortening every age computed from it, and a freshness gate that reads
+// short reads GREEN.
+//
+// The database clock is the authority the collateral staleness verdict is already
+// decided on (that comparison happens in SQL, inside the server), so using it for
+// the freshness gate too means one source of time truth per verdict rather than two
+// clocks that are free to disagree.
+//
+// now() is Postgres's TRANSACTION start time, which is what makes it usable as an
+// authority: it is one server's clock, shared by every process that talks to it,
+// and it does not drift within a statement. The value is normalised to UTC so that
+// reason text rendered from it does not carry the client session's offset.
+func (s *Store) Now(ctx context.Context) (time.Time, error) {
+	var t time.Time
+	if err := s.pool.QueryRow(ctx, `SELECT now()`).Scan(&t); err != nil {
+		return time.Time{}, fmt.Errorf("read database clock: %w", err)
+	}
+	return t.UTC(), nil
+}
+
 // SweepGeneration reads engine's durable sweep-generation state
 // (sweep_generations): the current generation number, whether that generation
 // is OPEN (opened but not completed — the restart-resume signal: a fresh

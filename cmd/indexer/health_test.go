@@ -905,11 +905,12 @@ func TestFeedWorkerConditionsSurviveTheFrontierPass(t *testing.T) {
 	// blocks back is measurably stale while a consumer at the tip is measurably fresh.
 	newWatch := func(now time.Time) (progressWatch, *fakeHeaderTimes) {
 		hdr := newFakeHeaderTimes().seedMissedSlots(1, 21_000_000, 40, 30*time.Minute, now)
+		c := pinnedClock(now)
 		return progressWatch{
 			consumers: []frontierWatch{
 				{worker: feed, streams: []string{"eth:feed-usdc"}, chainID: 1},
 			},
-			staleness: newStalenessJudge(hdr.fetch),
+			staleness: newStalenessJudge(hdr.fetch, c.now, c.verdict),
 		}, hdr
 	}
 
@@ -1186,7 +1187,7 @@ func TestStalenessCoversTheFeedDeriver(t *testing.T) {
 		consumers: []frontierWatch{
 			{worker: "prices:chainlink_feed:1", streams: []string{"eth:feed-usdc"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(chainHeaders.fetch),
+		staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
 	}
 
 	rc := roundConditions{}
@@ -1219,7 +1220,7 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 		chainHeaders := newFakeHeaderTimes()
 		watch := progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
-			staleness: newStalenessJudge(chainHeaders.fetch),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
 		}
 		// The ingest READ SUCCEEDED and simply has no row for this stream, which is
 		// the distinction that makes this a verdict rather than a read failure.
@@ -1248,7 +1249,7 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 			consumers: []frontierWatch{
 				{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1},
 			},
-			staleness: newStalenessJudge(chainHeaders.fetch),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
 		})
 		publishRound(h, rc)
 		require.Contains(t, h.report().Recoverable, "aave_v3_etherfi/"+conditionStalenessUnmeasured)
@@ -1266,7 +1267,7 @@ func TestStalenessIsUnmeasuredNotSilentWithoutACursor(t *testing.T) {
 		rc := roundConditions{}
 		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "op:debt-manager"}, chainID: 10}},
-			staleness: newStalenessJudge(chainHeaders.fetch),
+			staleness: newStalenessJudge(chainHeaders.fetch, clk.now, clk.verdict),
 		})
 		publishRound(h, rc)
 		for _, c := range []string{conditionStaleness, conditionStalenessUnmeasured, conditionFrontierLag} {
@@ -1464,7 +1465,7 @@ func TestWalkerStalenessFiresWhileTheWalkerIsAdvancing(t *testing.T) {
 	// neither errors nor stalls.
 	w := (&fakeIngestWorker{name: "op:debt-manager"}).script(true, nil)
 	ws := &walkerState{w: w, chainID: 10, bo: retryBackoff{now: clk.now, rand: func() float64 { return 0.5 }}}
-	watch := progressWatch{walkers: []*walkerState{ws}, staleness: newStalenessJudge(hdr.fetch)}
+	watch := progressWatch{walkers: []*walkerState{ws}, staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict)}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: "op:debt-manager", Block: 150_000_000 - 40, UpdatedAt: now},
 	}}
@@ -1531,7 +1532,7 @@ func TestStalenessBoundaryEqualityPassesAndOneSecondPastFails(t *testing.T) {
 			rc := roundConditions{}
 			applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
 				walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
-				staleness: newStalenessJudge(hdr.fetch),
+				staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 			})
 			publishRound(h, rc)
 			if tc.expects {
@@ -1555,7 +1556,7 @@ func TestStalenessUnmeasuredClearsWhenFetchRecovers(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 500, clk.now())
 	hdr.fail[1] = errors.New("dial tcp: connection refused")
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1613,7 +1614,7 @@ func TestFailedHeaderFetchIsNeverMemoized(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes()
 	hdr.fail[1] = errors.New("upstream 502")
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1649,7 +1650,7 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 		h, clk := newTestHealth()
 		now := clk.now()
 		hdr := newFakeHeaderTimes().set(1, 500, now.Add(skew))
-		judge := newStalenessJudge(hdr.fetch)
+		judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: now}}}
 		rc := roundConditions{}
 		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
@@ -1687,7 +1688,7 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 		now := clk.now()
 		hdr := newFakeHeaderTimes()
 		hdr.at[stampKey{chainID: 1, block: 500}] = uint64(now.UnixMilli())
-		judge := newStalenessJudge(hdr.fetch)
+		judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 500, UpdatedAt: now}}}
 		rc := roundConditions{}
 		applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
@@ -1715,7 +1716,7 @@ func TestGrossFutureHeaderTimeIsUnmeasuredNotGreen(t *testing.T) {
 func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 500, clk.now())
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		staleness: judge,
@@ -1759,7 +1760,7 @@ func TestHeldStampYieldsAMeasuredVerdictOnADownChain(t *testing.T) {
 func TestAHeldStampOutranksBothTheDownSetAndTheCooldown(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes().set(1, 100, clk.now()).set(1, 999, clk.now())
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	// ORDER IS DELIBERATE: the fetch for "eth:new" runs first and marks chain 1 down
 	// for the round, before "eth:held" — which holds a stamp — is judged.
 	watch := progressWatch{
@@ -1830,7 +1831,7 @@ func TestRestampThrottleReusesOnlyOlderStampsAndOnlyFarFromTheBound(t *testing.T
 	for b := uint64(990); b <= 1010; b++ {
 		hdr.set(1, b, clk.now().Add(-time.Duration(1010-b)*time.Second))
 	}
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: 1000, UpdatedAt: clk.now()}}}
@@ -1869,7 +1870,7 @@ func TestRestampThrottleReusesOnlyOlderStampsAndOnlyFarFromTheBound(t *testing.T
 	// NEAR THE BOUND, always exact. Reuse is an approximation, so it is refused
 	// whenever the approximated age is more than half the bound: the gate's verdict
 	// near the line is never decided by an estimate.
-	judge2 := newStalenessJudge(hdr.fetch)
+	judge2 := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	watch2 := progressWatch{walkers: []*walkerState{worker}, staleness: judge2}
 	hdr2calls := len(hdr.calls)
 	hdr.set(1, 2000, clk.now().Add(-maxDerivedStaleness+time.Minute)) // age 9m, well past bound/2
@@ -1903,7 +1904,7 @@ func TestOneHeaderFetchPerChainBlockPerRound(t *testing.T) {
 		consumers: []frontierWatch{
 			{worker: "aave_v3_etherfi", streams: []string{"eth:a", "eth:b"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch),
+		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	}
 	pr := &fakeProgress{
 		ingest: []store.CursorProgress{
@@ -1939,7 +1940,7 @@ func TestChainDownIsRoundScopedNotRemembered(t *testing.T) {
 			{w: &fakeIngestWorker{name: "eth:a"}, chainID: 1},
 			{w: &fakeIngestWorker{name: "eth:b"}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch),
+		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: "eth:a", Block: 100, UpdatedAt: clk.now()},
@@ -1982,7 +1983,7 @@ func TestFrontierLagAttributesInTime(t *testing.T) {
 		watch := progressWatch{
 			walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 			consumers: []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
-			staleness: newStalenessJudge(hdr.fetch),
+			staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 		}
 		return h, clk, hdr, watch
 	}
@@ -2072,7 +2073,7 @@ func TestConsumerStalenessSurvivesAnIngestReadFailure(t *testing.T) {
 	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}},
 		consumers: []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
-		staleness: newStalenessJudge(hdr.fetch),
+		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	})
 	publishRound(h, rc)
 
@@ -2109,7 +2110,7 @@ func TestCanceledRoundProducesNoWave9Conditions(t *testing.T) {
 		consumers:   []frontierWatch{{worker: "aave_v3_etherfi", streams: []string{"eth:aave-etherfi"}, chainID: 1}},
 		sweepEngine: "debt_manager", sweepMaxAttempts: 4,
 		collateral: &collateralBoundState{interval: time.Hour},
-		staleness:  newStalenessJudge(hdr.fetch),
+		staleness:  newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	})
 	publishRound(h, rc)
 

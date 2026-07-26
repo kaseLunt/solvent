@@ -61,7 +61,7 @@ func TestDeepStaleBackfillReusesTheAnchorInsteadOfRefetchingEveryRound(t *testin
 	for b := start; b <= start+400; b++ {
 		hdr.set(1, b, clk.now().Add(-backfillAge))
 	}
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: start, UpdatedAt: clk.now()}}}
@@ -129,7 +129,7 @@ func TestAReusedAnchorIsNeverConsultedForALowerBlock(t *testing.T) {
 	hdr.set(1, low, clk.now().Add(-96*time.Hour))
 	watch := progressWatch{
 		walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
-		staleness: newStalenessJudge(hdr.fetch),
+		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: high, UpdatedAt: clk.now()}}}
 	round := func() {
@@ -160,12 +160,18 @@ func TestAReusedAnchorIsNeverConsultedForALowerBlock(t *testing.T) {
 // return a timestamp a verdict reads as STALE. The price is the opposite error — a
 // worker that has just caught up is held red — and this pins how long that lasts:
 // one reuse window, not indefinitely.
+//
+// AXES VARIED (wave 13): A only. Latency is ZERO here, which is what makes "one
+// window" the exact answer — the per-chain refresh budget cannot bind when reads
+// cost nothing, so this measures the healthy ceiling. The degraded ceiling is
+// ⌈W/R⌉ windows and is measured in TestSlowSuccessfulReadsStayBoundedAndStillRecover;
+// neither number is quoted without the endpoint it assumes.
 func TestDeepStaleReuseCanOnlyOverstateAgeAndIsCorrectedWithinOneWindow(t *testing.T) {
 	h, clk := newTestHealth()
 	hdr := newFakeHeaderTimes()
 	old, caughtUp := uint64(20_000_000), uint64(20_000_050)
 	hdr.set(1, old, clk.now().Add(-backfillAge))
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	worker := &walkerState{w: &fakeIngestWorker{name: "eth:aave-etherfi"}, chainID: 1}
 	watch := progressWatch{walkers: []*walkerState{worker}, staleness: judge}
 	pr := &fakeProgress{ingest: []store.CursorProgress{{Name: "eth:aave-etherfi", Block: old, UpdatedAt: clk.now()}}}
@@ -225,7 +231,7 @@ func TestOneWorkersBackfillAnchorNeverDatesAnotherWorkersCursor(t *testing.T) {
 			{w: &fakeIngestWorker{name: lagging}, chainID: 1},
 			{w: &fakeIngestWorker{name: fresh}, chainID: 1},
 		},
-		staleness: newStalenessJudge(hdr.fetch),
+		staleness: newStalenessJudge(hdr.fetch, clk.now, clk.verdict),
 	}
 	pr := &fakeProgress{ingest: []store.CursorProgress{
 		{Name: lagging, Block: lagBlock, UpdatedAt: clk.now()},
@@ -261,6 +267,17 @@ func TestOneWorkersBackfillAnchorNeverDatesAnotherWorkersCursor(t *testing.T) {
 //
 // It is a SHIPPED test, with assertions, deliberately: wave 9's cost figures lived
 // in a throwaway harness and were therefore undefended by CI (its own residual #2).
+//
+// AXES VARIED — added by wave 13, and the reason it had to be added is the finding
+// itself. See the table at the top of staleness_budget_test.go. This measurement
+// varies A (cursors three days behind), C (a leg where both chains fail) and D (the
+// deployment's real fan-out), and holds B — FETCH LATENCY — at ZERO. Its
+// 9-reads-per-20-rounds figure is true at that point and only at that point: with
+// successful reads costing seconds instead of nothing, the pass outran its own reuse
+// window and the same code paid nine reads per pass indefinitely (Codex round 10's
+// [high]). The figure below is still the right number for a healthy endpoint, which
+// is why it is unchanged by that fix — but it is a claim about one point, and it
+// says so now rather than reading as a claim about the gate.
 func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T) {
 	// The real deployment's streams, in config order, with their configured
 	// StartBlocks — so the ORDER cursors are judged in is the deployment's, not a
@@ -310,7 +327,7 @@ func TestStalenessPassCostOnAGenuineHistoricalBackfillAndADeadChain(t *testing.T
 			watched = append(watched, frontierWatch{worker: c.name, streams: c.streams, chainID: c.chainID})
 			pr.derive = append(pr.derive, store.CursorProgress{Name: c.name, Block: c.start, UpdatedAt: clk.now()})
 		}
-		return progressWatch{walkers: walkers, consumers: watched, staleness: newStalenessJudge(fetch)}, pr
+		return progressWatch{walkers: walkers, consumers: watched, staleness: newStalenessJudge(fetch, clk.now, clk.verdict)}, pr
 	}
 	require.Equal(t, 13, len(streams)+len(consumers), "13 gated workers, as deployed")
 
@@ -457,7 +474,7 @@ func TestEveryStampReuseIsRevalidatedAgainstTheCurrentClock(t *testing.T) {
 			hdr := newFakeHeaderTimes()
 			anchor := uint64(20_000_000)
 			hdr.set(1, anchor, clk.now().Add(-tc.anchorAge))
-			judge := newStalenessJudge(hdr.fetch)
+			judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 			watch := progressWatch{
 				walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
 				staleness: judge,
@@ -532,7 +549,7 @@ func TestTheBackfillAnchorCarriesItsOwnSkewCheckForTheCaseTheChainStampCannotCov
 	hdr.set(1, deepBlock+1, clk.now().Add(-time.Hour))
 	hdr.set(1, olderBlock, clk.now().Add(-5*time.Hour))
 	hdr.set(1, olderBlock+1, clk.now().Add(-5*time.Hour))
-	judge := newStalenessJudge(hdr.fetch)
+	judge := newStalenessJudge(hdr.fetch, clk.now, clk.verdict)
 	watch := progressWatch{
 		walkers: []*walkerState{
 			{w: &fakeIngestWorker{name: deep}, chainID: 1},
@@ -591,7 +608,8 @@ func TestTheRoundMemoIsRevalidatedAgainstTheClockToo(t *testing.T) {
 	hdr := newFakeHeaderTimes()
 	base := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	hdr.set(1, 1000, base.Add(-time.Minute))
-	j := newStalenessJudge(hdr.fetch)
+	c := pinnedClock(base)
+	j := newStalenessJudge(hdr.fetch, c.now, c.verdict)
 	r := newStalenessRound()
 
 	ts, err := j.measure(context.Background(), r, base, "eth:aave-etherfi", 1, 1000, maxDerivedStaleness)
@@ -603,7 +621,7 @@ func TestTheRoundMemoIsRevalidatedAgainstTheClockToo(t *testing.T) {
 	// The same round value, a clock that has moved backwards past the tolerance.
 	_, err = j.measure(context.Background(), r, base.Add(-10*time.Minute), "eth:aave-etherfi", 1, 1000, maxDerivedStaleness)
 	require.Error(t, err, "the memo is revalidated, not trusted")
-	require.Contains(t, err.Error(), "ahead of this daemon's clock")
+	require.Contains(t, err.Error(), "ahead of the verdict clock this round is measured against")
 	require.NotContains(t, r.stamps, stampKey{chainID: 1, block: 1000}, "and the invalidated entry is evicted from the round")
 	require.NotContains(t, j.stamp, uint64(1), "as is the retained anchor it came from")
 	require.Len(t, hdr.calls, 1, "eviction pays for no fetch")

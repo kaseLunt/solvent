@@ -232,28 +232,51 @@ const headerFetchCooldown = 30 * time.Second
 // Between bound/2 and bound NEITHER arm applies: that band is where an approximation
 // could flip a verdict, so it is paid for with an exact read.
 //
-// THE TWO BOUNDS ON REUSE, both stated because both are load-bearing:
+// THE TWO BOUNDS ON REUSE, both stated because both are load-bearing, and both
+// rewritten by Codex round 10's [high]. The window ALONE bounded reuse per WORKER
+// and left the pass's cost per CHAIN unbounded the moment a successful read stopped
+// being instantaneous — an expiry grants permission to re-read, it does not say how
+// many workers may act on that permission at once.
 //
-//  1. TIME — this window, which is therefore also the PERIODIC EXACT-REFRESH
-//     cadence: a stamp is reusable only for 30 s after THE FETCH THAT PRODUCED IT,
-//     so every window each chain pays at least one real header read that re-anchors
-//     the measurement, and a worker that has caught up is re-measured inside it. The
-//     cadence is taken from the fetch budget this pass has ALREADY accepted on its
-//     failure path — one attempt per chain per headerFetchCooldown (also 30 s), each
-//     costing up to headerFetchTimeout (10 s). A success-path read is a single
-//     eth_getBlockByNumber and costs far less than that, so the same cadence sits
-//     strictly inside a budget already justified. Loosening it would only delay
-//     catch-up detection; tightening it buys nothing, since a deep-stale worker's
-//     verdict is red either way.
-//  2. ROUNDS AND BLOCKS — bounded BY (1), not by a second constant, and that is a
-//     deliberate refusal. A reuse never renews the window: fetchedAt is written only
-//     by a real fetch, so no number of reuses, rounds or blocks can extend an
-//     anchor's life past one window. A separate block-span cap would have to convert
-//     blocks into elapsed time, which is precisely the nominal-cadence conversion
-//     this wave deleted from the gate; there is no constant for it anyone could
-//     derive, so none is invented. What the window guarantees is unit-free instead:
-//     at most 30 s worth of rounds, and at most whatever block distance a worker can
-//     cover in 30 s.
+//  1. COST. At most headerFetchTimeout of deep-stale REFRESH reads is started per
+//     chain per window, and the window itself is measured on a MONOTONIC clock from
+//     the instant each fetch COMPLETED (headerStamp.fetchedAt, admitRefresh). Both
+//     halves are the fix and neither works alone. The completion stamp stops a slow
+//     pass from charging each stamp for its own latency: one round-start `now` used
+//     to stamp all nine of a pass's sequential reads, so a pass averaging more than
+//     30 s ÷ 9 a read — still well inside the 10 s per-read timeout — expired every
+//     anchor before the next pass reached it, and the daemon paid nine reads again,
+//     every pass, indefinitely. The budget then stops the workers whose anchors
+//     expire together from converting one permission into nine simultaneous reads.
+//     No new constant is invented for it: one attempt per chain per
+//     headerFetchCooldown, each costing up to headerFetchTimeout, is the spend this
+//     pass ALREADY accepts on its failure path for a dead chain, and
+//     headerFetchCooldown and this window are the same 30 s — so the success path is
+//     held to a budget the failure path was already given. It holds whatever a pass
+//     costs and however many workers are gated, which is exactly what the bare
+//     window did not. Worst case is just under 2 × headerFetchTimeout in a window,
+//     because admission is decided before a read whose duration is not yet known.
+//  2. FRESHNESS. An anchor is re-read within ONE window whenever the budget is not
+//     binding — the healthy case, where nine reads cost milliseconds against a ten
+//     second budget, so this changes nothing that wave 11 measured — and within
+//     ⌈W/R⌉ windows when it binds, where W is the chain's deep-stale scopes and R
+//     the reads the budget affords (headerFetchTimeout ÷ per-read latency). A
+//     refusal DEFERS a refresh, it does not drop one: the refused scope is queued
+//     and served before any scope that has already been re-anchored, so nothing
+//     starves and ⌈W/R⌉ is a real bound rather than a hope. What this revises is
+//     wave 11's disclosure that a worker which has just caught up stays red for at
+//     most one window: the ceiling is ⌈W/R⌉ windows, reached only while the chain's
+//     endpoint is slow enough for the budget to bind. It degrades in proportion to
+//     the endpoint, in the fail-closed direction, and never without limit.
+//  3. ROUNDS AND BLOCKS — bounded BY (1) and (2), not by a third constant, and that
+//     is a deliberate refusal. A reuse never renews the window: fetchedAt is written
+//     only by a real fetch, so no number of reuses, rounds or blocks can extend an
+//     anchor's life past what the budget schedules. A separate block-span cap would
+//     have to convert blocks into elapsed time, which is precisely the
+//     nominal-cadence conversion this wave deleted from the gate; there is no
+//     constant for it anyone could derive, so none is invented. What the window
+//     guarantees is unit-free instead: at most one window's worth of rounds per
+//     re-anchoring, and at most whatever block distance a worker can cover in it.
 const headerRestampThrottle = 30 * time.Second
 
 // collateralStaleBound is how old a per-account collateral snapshot may be before
@@ -776,14 +799,30 @@ type stampKey struct {
 }
 
 // headerStamp is one successful header measurement, retained per chain.
+//
+// IT CARRIES TWO TIMES FROM TWO DIFFERENT CLOCKS, and keeping them apart is the
+// point (Codex round 10). `at` is a real-world instant that a VERDICT reads;
+// `fetchedAt` is a SCHEDULING instant that no verdict ever reads. They are not
+// interchangeable and must never be subtracted from one another.
 type headerStamp struct {
 	// block is the height the stamp describes. Reuse for a DIFFERENT height is
 	// admitted only upward (block <= the height being judged), which is what makes
 	// the approximation fail-closed — see headerRestampThrottle.
 	block uint64
-	// at is the header's own timestamp.
+	// at is the header's own timestamp, as the chain reports it. VERDICT domain:
+	// it is compared against the judge's verdict clock (the DATABASE clock — see
+	// stalenessJudge.clock) to produce an age.
 	at time.Time
-	// fetchedAt is when the daemon read it, for the reuse window.
+	// fetchedAt is when the fetch that produced this stamp COMPLETED, read from
+	// stalenessJudge.sched — a MONOTONIC clock. SCHEDULING domain: it decides only
+	// when the stamp stops being reusable.
+	//
+	// "Completed", not "the round started", is Codex round 10's [high]. One
+	// round-start timestamp used to stamp every fetch in a pass, so a pass of nine
+	// sequential reads averaging over headerRestampThrottle/9 recorded every stamp
+	// as already older than it was, expiring the whole chain's anchors before the
+	// next pass reached them — the throttle silently switched itself off exactly
+	// when the endpoint was slow enough to need it most.
 	fetchedAt time.Time
 }
 
@@ -800,6 +839,27 @@ type headerStamp struct {
 // measurement SCHEDULE persists.
 type stalenessJudge struct {
 	fetch headerTimeFetcher
+	// sched and clock are the judge's TWO clocks, and the split is Codex round 10's
+	// whole subject. ONE SOURCE OF TIME TRUTH PER VERDICT; scheduling is not a
+	// verdict, so it gets its own source and is forbidden from touching the other's.
+	//
+	//   - clock is the VERDICT clock: the DATABASE clock (store.Store.Now), already
+	//     the authority the collateral staleness verdict is decided on. Every age
+	//     this judge reports, and every future-skew comparison it makes, is measured
+	//     against it. THE DAEMON'S OWN WALL CLOCK IS UNTRUSTED INPUT and is not
+	//     consulted here at all: a rollback smaller than a cached header's age slips
+	//     past beyondSkewTolerance (an old header absorbs it) while shortening every
+	//     age computed from it, which is a false green with nothing to catch it.
+	//   - sched is the SCHEDULING clock: time.Now, used only through Sub, so the
+	//     differences are Go's MONOTONIC readings. It cannot run backwards, and it
+	//     does not have to be accurate — it decides reuse windows, retry cooldowns
+	//     and the refresh budget, none of which any verdict reads.
+	//
+	// A failure of clock is fail-closed (staleness_unmeasured for every gated
+	// worker): with no trusted authority there is no honest verdict to issue, and
+	// falling back to the daemon's wall clock is the thing this field exists to stop.
+	sched func() time.Time
+	clock verdictClock
 	// stamp is the most recent successful measurement per chain (see headerStamp).
 	stamp map[uint64]headerStamp
 	// backfill is the DEEP-STALE anchor, and it is keyed per REUSE SCOPE (a worker)
@@ -817,20 +877,47 @@ type stalenessJudge struct {
 	// near-head throttle, where sharing across workers IS the right answer because
 	// the approximation there is small by construction.
 	backfill map[string]headerStamp
-	// nextFetchAttempt and lastFetchErr are the per-chain retry cooldown: while now
-	// is before the attempt time, the retained error is reported and no fetch is
-	// paid for. Both are cleared by the next successful fetch.
+	// nextFetchAttempt and lastFetchErr are the per-chain retry cooldown: while the
+	// SCHEDULING clock is before the attempt time, the retained error is reported and
+	// no fetch is paid for. Both are cleared by the next successful fetch.
 	nextFetchAttempt map[uint64]time.Time
 	lastFetchErr     map[uint64]error
+	// refreshWindow, refreshSpent, refreshAsked and refreshServed are the PER-CHAIN
+	// REFRESH BUDGET (Codex round 10's [high]) — see headerRestampThrottle for the
+	// two bounds it enforces and admitRefresh for the rule.
+	//
+	// All four are in the SCHEDULING domain. refreshWindow[c] is when the chain's
+	// current budget window opened and refreshSpent[c] how much read time has been
+	// charged to it. refreshAsked[c] and refreshServed[c] are the ROTATION: which
+	// reuse scopes have wanted a refresh during the current rotation and which have
+	// had one. A scope may not repeat while another that asked is still waiting, and
+	// the rotation restarts once every asker has been served — which is what turns
+	// "deferred" into a bounded wait instead of a permanent loss.
+	refreshWindow map[uint64]time.Time
+	refreshSpent  map[uint64]time.Duration
+	refreshAsked  map[uint64]map[string]bool
+	refreshServed map[uint64]map[string]bool
 }
 
-func newStalenessJudge(fetch headerTimeFetcher) *stalenessJudge {
+// verdictClock sources the ONE time a verdict is measured against. The daemon
+// binds it to store.Store.Now — the database clock — and an error from it means
+// the daemon has no trusted authority to judge against this round, which is
+// reported as unmeasured rather than papered over with the local wall clock.
+type verdictClock func(ctx context.Context) (time.Time, error)
+
+func newStalenessJudge(fetch headerTimeFetcher, sched func() time.Time, clock verdictClock) *stalenessJudge {
 	return &stalenessJudge{
 		fetch:            fetch,
+		sched:            sched,
+		clock:            clock,
 		stamp:            map[uint64]headerStamp{},
 		backfill:         map[string]headerStamp{},
 		nextFetchAttempt: map[uint64]time.Time{},
 		lastFetchErr:     map[uint64]error{},
+		refreshWindow:    map[uint64]time.Time{},
+		refreshSpent:     map[uint64]time.Duration{},
+		refreshAsked:     map[uint64]map[string]bool{},
+		refreshServed:    map[uint64]map[string]bool{},
 	}
 }
 
@@ -883,6 +970,13 @@ func newStalenessRound() *stalenessRound {
 // An empty scope disables that arm, which is what a measurement belonging to no
 // single worker should do rather than borrow another worker's anchor.
 func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now time.Time, scope string, chainID, block uint64, bound time.Duration) (time.Time, error) {
+	// TWO CLOCKS, TWO JOBS (stalenessJudge). `now` is the VERDICT clock — read once
+	// per pass from the DATABASE by the caller — and every age and skew comparison
+	// below uses it. `sched` is the MONOTONIC scheduling clock and appears only in
+	// reuse-window, cooldown and refresh-budget arithmetic, which no verdict reads.
+	// Subtracting one from the other would be a category error, and there is no
+	// place below where the two meet.
+	sched := j.sched()
 	key := stampKey{chainID: chainID, block: block}
 	if t, ok := r.stamps[key]; ok {
 		if err := j.rejectSkewedReuse(r, now, scope, chainID, t); err != nil {
@@ -900,7 +994,7 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 			r.stamps[key] = s.at
 			return s.at, nil
 		case s.block < block &&
-			now.Sub(s.fetchedAt) < headerRestampThrottle &&
+			sched.Sub(s.fetchedAt) < headerRestampThrottle &&
 			now.Sub(s.at) <= bound/2:
 			// NEAR-HEAD fail-closed reuse: an earlier block's timestamp is at or
 			// below the true one, so the age this yields is an over-estimate, and
@@ -918,27 +1012,43 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 	// — from paying one header read per gated worker per hot round. Reuse does not
 	// renew the window, so the worker is re-anchored by a real read at least once
 	// per headerRestampThrottle.
+	refreshing := false
 	if s, held := j.backfill[scope]; scope != "" && held {
 		if err := j.rejectSkewedReuse(r, now, scope, chainID, s.at); err != nil {
 			return time.Time{}, err
 		}
-		if s.block < block &&
-			now.Sub(s.fetchedAt) < headerRestampThrottle &&
-			now.Sub(s.at) > bound {
-			r.stamps[key] = s.at
-			return s.at, nil
+		if s.block < block && now.Sub(s.at) > bound {
+			switch {
+			case sched.Sub(s.fetchedAt) < headerRestampThrottle:
+				// Inside the reuse window: the ordinary deep-stale reuse.
+				r.stamps[key] = s.at
+				return s.at, nil
+			case !j.admitRefresh(sched, chainID, scope):
+				// The window HAS expired, but the chain's refresh budget for this
+				// window is already spent, so the re-read is DEFERRED — not dropped.
+				// Deferring is admissible here and nowhere else: this arm's anchor is
+				// already past the bound and reuse only over-estimates age, so a
+				// deferred worker keeps reading RED, which is the fail-closed
+				// direction. admitRefresh has queued it, and it is served before any
+				// worker that has already been re-anchored (see headerRestampThrottle
+				// bound 2).
+				r.stamps[key] = s.at
+				return s.at, nil
+			default:
+				refreshing = true
+			}
 		}
 	}
 	if err, down := r.down[chainID]; down {
 		return time.Time{}, err
 	}
-	if next, scheduled := j.nextFetchAttempt[chainID]; scheduled && now.Before(next) {
+	if next, scheduled := j.nextFetchAttempt[chainID]; scheduled && sched.Before(next) {
 		err := j.lastFetchErr[chainID]
 		if err == nil {
 			err = errors.New("header fetch is in its retry cooldown")
 		}
 		retained := fmt.Errorf("no header fetch attempted (retrying in %s after: %w)",
-			next.Sub(now).Truncate(time.Second), err)
+			next.Sub(sched).Truncate(time.Second), err)
 		r.down[chainID] = retained
 		return time.Time{}, retained
 	}
@@ -946,7 +1056,17 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 	fetchCtx, cancel := context.WithTimeout(ctx, headerFetchTimeout)
 	secs, err := j.fetch(fetchCtx, chainID, block)
 	cancel()
+	// THE SCHEDULING CLOCK IS READ AGAIN HERE, AT COMPLETION, and that is Codex
+	// round 10's [high] in one line. A slow-but-successful endpoint makes the read
+	// itself the pass's dominant cost; stamping it with a time captured before the
+	// read charges the stamp for its own latency and can expire it the instant it is
+	// written. Everything scheduled off this measurement — the reuse window, the
+	// retry cooldown, the refresh budget — is scheduled from `done`.
+	done := j.sched()
 	r.fetches++
+	if refreshing {
+		j.chargeRefresh(chainID, done.Sub(sched))
+	}
 	if err != nil {
 		// A CANCELLED round context is shutdown, not a measurement failure
 		// (amendment L7): it must not arm a cooldown or produce a verdict.
@@ -955,7 +1075,7 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 		}
 		wrapped := fmt.Errorf("header %d on chain %d: %w", block, chainID, err)
 		r.down[chainID] = wrapped
-		j.nextFetchAttempt[chainID] = now.Add(headerFetchCooldown)
+		j.nextFetchAttempt[chainID] = done.Add(headerFetchCooldown)
 		j.lastFetchErr[chainID] = wrapped
 		return time.Time{}, wrapped
 	}
@@ -965,7 +1085,7 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 	if secs > uint64(math.MaxInt64) {
 		wrapped := fmt.Errorf("header %d on chain %d reports timestamp %d, which is not a representable time", block, chainID, secs)
 		r.down[chainID] = wrapped
-		j.nextFetchAttempt[chainID] = now.Add(headerFetchCooldown)
+		j.nextFetchAttempt[chainID] = done.Add(headerFetchCooldown)
 		j.lastFetchErr[chainID] = wrapped
 		return time.Time{}, wrapped
 	}
@@ -979,12 +1099,12 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 		wrapped := fmt.Errorf("header %d on chain %d claims %s, which is more than %s in the future: the timestamp is unusable, not fresh",
 			block, chainID, ts.Format(time.RFC3339), headerTimeSkewTolerance)
 		r.down[chainID] = wrapped
-		j.nextFetchAttempt[chainID] = now.Add(headerFetchCooldown)
+		j.nextFetchAttempt[chainID] = done.Add(headerFetchCooldown)
 		j.lastFetchErr[chainID] = wrapped
 		return time.Time{}, wrapped
 	}
 	r.stamps[key] = ts
-	stamp := headerStamp{block: block, at: ts, fetchedAt: now}
+	stamp := headerStamp{block: block, at: ts, fetchedAt: done}
 	j.stamp[chainID] = stamp
 	// The exact read just taken is also this worker's new deep-stale anchor, and
 	// re-anchoring is the ONLY thing that resets the reuse window: reuse never
@@ -997,11 +1117,124 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 	return ts, nil
 }
 
+// admitRefresh is the PER-CHAIN REFRESH BUDGET's admission rule: may this reuse
+// scope pay a real header read to re-anchor its expired deep-stale stamp right
+// now? It is called only from that one arm, and headerRestampThrottle states the
+// two bounds it exists to hold.
+//
+// WHY AN EXPIRY ALONE IS NOT A SCHEDULE. An expiry says a stamp MAY be re-read; it
+// says nothing about how many workers may act on that permission at once. With
+// nine deep-stale workers on one chain, every window every one of them expires, so
+// "refresh on expiry" spends nine reads per window — and when each read costs
+// seconds, that is the whole window, which is the hot-loop cost the throttle was
+// added to remove (Codex round 10's [high]). The budget turns permission into a
+// schedule.
+//
+// THE RULE, in two clauses:
+//
+//  1. SPEND. While the chain has charged less than headerFetchTimeout of read time
+//     to this window, refreshes are admitted. Past that they are deferred and the
+//     scope is marked DUE. Nothing here is a new constant: headerFetchTimeout per
+//     headerFetchCooldown is exactly the wall time this pass ALREADY accepts on its
+//     failure path for a dead chain, and headerFetchCooldown and
+//     headerRestampThrottle are the same 30 s. The success path is simply held to
+//     the budget the failure path was already given.
+//  2. ROTATION. A scope that has already been served in the current rotation is
+//     refused, even with spend available, while any scope that ASKED is still
+//     waiting; the rotation restarts once every asker has been served. This is the
+//     whole of the fairness argument, and it is not decoration: without it the
+//     workers the daemon judges FIRST win the budget in every window and the ones it
+//     judges last are never re-anchored at all — measured, not assumed, and it is
+//     what a naive due-set does too, because the early workers re-enter the set
+//     before the late ones get a turn. With it, refreshes round-robin, and bound 2's
+//     ⌈W/R⌉ is a real ceiling rather than an aspiration.
+//
+// WHY THE ROTATION IS KEYED ON WHO ASKED rather than on a queue of who is owed. A
+// queue has a head, and a head is something to get stuck behind: a worker whose
+// cursor stalls stops reaching this arm entirely (the exact-block hit answers it
+// first), so a queue would wait forever on a scope that will never ask again and no
+// other worker on the chain would ever be refreshed. Membership of `asked` is
+// rebuilt every rotation, so a scope that stops asking simply drops out and blocks
+// nobody. A single deep-stale worker on a chain likewise completes its rotation by
+// itself and is refreshed every window, exactly as it was before this budget existed.
+//
+// A scope is marked served at ADMISSION rather than at completion, so a read that is
+// admitted and then blocked by the round's down set or the retry cooldown still
+// spends the turn. That is the conservative direction and it costs nothing real: in
+// both of those cases NO read happens on the chain for anybody, so the rotation is
+// stalled for every scope equally rather than skewed between them.
+func (j *stalenessJudge) admitRefresh(sched time.Time, chainID uint64, scope string) bool {
+	opened, windowed := j.refreshWindow[chainID]
+	if !windowed || sched.Sub(opened) >= headerRestampThrottle {
+		j.refreshWindow[chainID] = sched
+		j.refreshSpent[chainID] = 0
+	}
+	asked := j.refreshAsked[chainID]
+	if asked == nil {
+		asked = map[string]bool{}
+		j.refreshAsked[chainID] = asked
+	}
+	asked[scope] = true
+	if j.refreshSpent[chainID] >= headerFetchTimeout {
+		return false
+	}
+	served := j.refreshServed[chainID]
+	if served == nil {
+		served = map[string]bool{}
+		j.refreshServed[chainID] = served
+	}
+	if served[scope] {
+		for s := range asked {
+			if !served[s] {
+				return false // someone who asked first is still waiting
+			}
+		}
+		// Every scope that asked has been served: the rotation is complete, so a new
+		// one opens with this scope as its first member.
+		asked = map[string]bool{scope: true}
+		served = map[string]bool{}
+		j.refreshAsked[chainID] = asked
+		j.refreshServed[chainID] = served
+	}
+	served[scope] = true
+	return true
+}
+
+// chargeRefresh books one admitted refresh read against its chain's budget.
+//
+// It charges the MEASURED duration rather than a nominal one, which is what makes
+// the budget self-tuning: an endpoint answering in milliseconds never exhausts it —
+// so a healthy pass behaves exactly as it did before this budget existed, and the
+// cost measurements wave 11 shipped are unchanged — while an endpoint answering in
+// seconds exhausts it after a few reads. Overshoot is bounded and admitted rather
+// than hidden: admission is checked BEFORE a read whose length is not yet known, so
+// a read admitted with the budget nearly spent can carry a window to just under
+// 2 × headerFetchTimeout.
+func (j *stalenessJudge) chargeRefresh(chainID uint64, spent time.Duration) {
+	if spent > 0 {
+		j.refreshSpent[chainID] += spent
+	}
+}
+
 // beyondSkewTolerance is amendment L2's predicate, factored out so the ONE rule is
 // evaluated at every point a header timestamp enters a verdict — at the fetch that
 // produces it AND at every reuse of a retained one. Two copies of the same
 // comparison is how the two arms drift apart, and one arm gated with the other open
 // is the exact shape this surface has now shipped twice.
+//
+// WHAT IT DOES NOT COVER, stated because it was read as covering it (Codex round
+// 10's [medium]). This predicate fires only when a header is FUTURE relative to the
+// verdict clock, so it detects a clock rollback only when the rollback exceeds the
+// header's own age. A rollback SMALLER than that age is absorbed — a header fifteen
+// minutes old, under a ten-minute rollback, is still five minutes in the past — and
+// the age computed afterwards is short by the whole rollback, which is a false green
+// this predicate is structurally unable to see. Nor could it be widened to catch it:
+// a header genuinely five minutes old and a header fifteen minutes old under a
+// ten-minute rollback are the same two numbers. The defect was never in the
+// predicate; it was in trusting the clock it compares against. That is fixed at the
+// SOURCE — `now` here is the database clock (see applyStalenessConditions), not this
+// process's — and this predicate keeps its original, narrower job: catching a
+// nonsense header timestamp.
 func beyondSkewTolerance(headerTime, now time.Time) bool {
 	return headerTime.After(now.Add(headerTimeSkewTolerance))
 }
@@ -1038,7 +1271,7 @@ func (j *stalenessJudge) rejectSkewedReuse(r *stalenessRound, now time.Time, sco
 	if !beyondSkewTolerance(headerTime, now) {
 		return nil
 	}
-	wrapped := fmt.Errorf("the retained header timestamp for chain %d reads %s, which is more than %s ahead of this daemon's clock (%s): a measurement that was valid when it was taken has been invalidated by the clock moving, so it is discarded rather than reused",
+	wrapped := fmt.Errorf("the retained header timestamp for chain %d reads %s, which is more than %s ahead of the verdict clock this round is measured against (%s): a measurement that was valid when it was taken has been invalidated by the clock moving, so it is discarded rather than reused",
 		chainID, headerTime.Format(time.RFC3339), headerTimeSkewTolerance, now.Format(time.RFC3339))
 	delete(j.stamp, chainID)
 	delete(j.backfill, scope)
@@ -1225,7 +1458,11 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 		check(deriveRows, watchDerive, "derive")
 	}
 
-	applyStalenessConditions(ctx, now, rc, w, ingestRows, ingestErr, deriveRows, deriveErr)
+	// NOT GIVEN `now`. The freshness gate sources its own verdict clock from the
+	// database (stalenessJudge.clock): the daemon's wall clock — the `now` this
+	// function was handed — is untrusted input for a verdict measured against
+	// chain-sourced timestamps. See applyStalenessConditions.
+	applyStalenessConditions(ctx, rc, w, ingestRows, ingestErr, deriveRows, deriveErr)
 
 	if w.sweepEngine != "" {
 		applySweepProgressCondition(ctx, pr, now, rc, w)
@@ -1268,9 +1505,33 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 // frozen endpoint — returns (false, nil) from every Step with no cursor write, no
 // error and no stall, and the deleted head_lag condition was the only red that ever
 // covered it.
-func applyStalenessConditions(ctx context.Context, now time.Time, rc roundConditions, w progressWatch,
+func applyStalenessConditions(ctx context.Context, rc roundConditions, w progressWatch,
 	ingestRows []store.CursorProgress, ingestErr error, deriveRows []store.CursorProgress, deriveErr error) {
 	if w.staleness == nil {
+		return
+	}
+	// ONE SOURCE OF TIME TRUTH PER VERDICT (Codex round 10's [medium]), and it is
+	// NOT this process's wall clock. The age below is a chain-sourced timestamp
+	// subtracted from "now", so "now" is an input to a liquidation-facing verdict,
+	// and the daemon's own clock is an input nobody authenticates: NTP can step it,
+	// a VM restore or hypervisor rollback can move it by minutes. The future-skew
+	// guard does not cover this, and cannot — it only fires when a retained header
+	// becomes FUTURE, so a rollback smaller than the header's own age is absorbed by
+	// the header being old, and every age computed afterwards is short by the
+	// rollback. Short ages read GREEN. Refetching does not help either: the fetch
+	// path would compare the fresh header against the same skewed clock.
+	//
+	// So the verdict clock is the DATABASE's, which is already the authority the
+	// collateral staleness verdict is decided on (in SQL, on the server), read ONCE
+	// per pass so that every worker in a round is judged against one instant.
+	// Scheduling — reuse windows, retry cooldowns, the refresh budget — is a
+	// separate, monotonic clock that no verdict reads (see stalenessJudge).
+	now, clockErr := w.staleness.clock(ctx)
+	if clockErr != nil {
+		if ctx.Err() != nil {
+			return // shutdown, not a verdict (amendment L7)
+		}
+		applyClockUnmeasured(rc, w, ingestErr, deriveErr, clockErr)
 		return
 	}
 	// FRESH EVERY ROUND (amendment L4a): the down set and the per-round memo are
@@ -1350,6 +1611,35 @@ func applyStalenessConditions(ctx context.Context, now time.Time, rc roundCondit
 	if r.fetches > 0 {
 		slog.Debug("staleness pass header reads", "fetches", r.fetches,
 			"gatedWorkers", len(w.walkers)+len(w.consumers))
+	}
+}
+
+// applyClockUnmeasured is what the freshness gate reports when it has no trusted
+// clock to judge against.
+//
+// IT IS THE POINT OF THE VERDICT-CLOCK SPLIT, NOT AN EDGE CASE OF IT. The obvious
+// handling of "the database clock read failed" is to carry on with the daemon's own
+// wall clock, and that substitution is exactly what Codex round 10's [medium] is
+// about: a clock that has been stepped backwards reports every age shorter than it
+// is, and a freshness gate that reads short is a false green on liquidation-facing
+// data. An unmeasured red asserts only that the daemon could not look, which is
+// true, and it fails readiness, which is the fail-closed direction. Anything the
+// wall clock could contribute here is a number nobody can vouch for.
+//
+// It mirrors applyStalenessConditions' own skip rules exactly, so a worker already
+// carrying progress_unmeasured from a failed durable read is not told the same
+// thing twice under a second key.
+func applyClockUnmeasured(rc roundConditions, w progressWatch, ingestErr, deriveErr, clockErr error) {
+	reason := fmt.Sprintf("the daemon could not read the database clock, which is the one time authority this freshness verdict is measured against, so no age could be computed for this cursor. It does not fall back to its own wall clock: a wall clock stepped backwards reports every age shorter than it is, and this gate would report green: %v", clockErr)
+	if ingestErr == nil {
+		for _, ws := range w.walkers {
+			rc.set(ws.w.Name(), conditionStalenessUnmeasured, reason)
+		}
+	}
+	if deriveErr == nil {
+		for _, c := range w.consumers {
+			rc.set(c.worker, conditionStalenessUnmeasured, reason)
+		}
 	}
 }
 
@@ -1858,7 +2148,12 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	watch := progressWatch{
 		walkers: walkers, runners: runners, consumers: consumers,
 		sweepEngine: sweepEngine, sweepMaxAttempts: snapshot.MaxSweepAttempts,
-		staleness: newStalenessJudge(headerTime), collateral: collateral,
+		// THE JUDGE'S TWO CLOCKS, wired here so the split is visible at the one place
+		// it is decided (see stalenessJudge): time.Now is SCHEDULING only — its
+		// differences are Go's monotonic readings, which no clock step can move —
+		// and st.Now is the DATABASE clock, the sole authority any verdict is
+		// measured against.
+		staleness: newStalenessJudge(headerTime, time.Now, st.Now), collateral: collateral,
 	}
 	if sweepEngine != "" {
 		slog.Info("collateral usability gate configured", "engine", sweepEngine,
