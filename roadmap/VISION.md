@@ -7,9 +7,9 @@
 
 - ~70k people borrow against crypto collateral through ether.fi Cash with no public surface showing
   how close they are to liquidation; Solvent is that missing risk surface.
-- The project is a hiring-signal flagship: it must demonstrate end-to-end full-stack ownership
-  (Go/Postgres backend, Next.js frontend, real mainnet data) at a level that gets its author hired
-  at ether.fi or a peer company.
+- The project is a flagship credibility artifact: it must demonstrate end-to-end full-stack
+  ownership (Go/Postgres backend, Next.js frontend, real mainnet data) at a professional,
+  production-credible level.
 - Every displayed number must be provably correct — the credibility of the whole artifact rests on
   risk math validated against on-chain ground truth.
 
