@@ -1,5 +1,15 @@
 package ingest
 
+// Task 9 wave 12 HARNESS PRECONDITION (chain-truth consult, binding): every
+// test in this file predates the wave and is ported VERBATIM in name,
+// scenario and assertion onto the per-endpoint fake in walker_fake_test.go —
+// run against the UNCHANGED walker first, so that when the rotation-seam
+// tests later fail or pass, the fake is never the suspect (the prices wave-6
+// discipline). The old single-view `fakeChain` is retired by this port; the
+// posture every ported test runs in is `agreeingChain`: two endpoints, both
+// fully synced on the same canonical chain, which is exactly the single-view
+// world expressed honestly.
+
 import (
 	"context"
 	"errors"
@@ -12,35 +22,6 @@ import (
 
 	"github.com/kaselunt/solvent/internal/store"
 )
-
-type fakeChain struct {
-	head      uint64
-	hashes    map[uint64]common.Hash   // height -> hash
-	headerSeq map[uint64][]common.Hash // height -> per-call overrides, consumed in order
-	logs      map[uint64][]types.Log   // height -> logs at that height
-}
-
-func (f *fakeChain) BlockNumber(ctx context.Context) (uint64, error) { return f.head, nil }
-
-func (f *fakeChain) HeaderHash(ctx context.Context, n uint64) (common.Hash, error) {
-	if seq := f.headerSeq[n]; len(seq) > 0 {
-		h := seq[0]
-		f.headerSeq[n] = seq[1:]
-		return h, nil
-	}
-	if h, ok := f.hashes[n]; ok {
-		return h, nil
-	}
-	return common.HexToHash("0xdefa017"), nil // deterministic default
-}
-
-func (f *fakeChain) Logs(ctx context.Context, from, to uint64, addrs []common.Address) ([]types.Log, error) {
-	var out []types.Log
-	for b := from; b <= to; b++ {
-		out = append(out, f.logs[b]...)
-	}
-	return out, nil
-}
 
 type rewindCall struct {
 	toBlock uint64
@@ -111,7 +92,7 @@ func testLog(block uint64) types.Log {
 }
 
 func TestFreshWalkStartsAtStartBlockAndCapsAtWindow(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{}}
+	ch := agreeingChain(1000)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -123,7 +104,7 @@ func TestFreshWalkStartsAtStartBlockAndCapsAtWindow(t *testing.T) {
 }
 
 func TestWalkCapsAtSafeHead(t *testing.T) {
-	ch := &fakeChain{head: 130, hashes: map[uint64]common.Hash{}}
+	ch := agreeingChain(130)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -135,7 +116,7 @@ func TestWalkCapsAtSafeHead(t *testing.T) {
 }
 
 func TestNoAdvanceWhenCaughtUp(t *testing.T) {
-	ch := &fakeChain{head: 130, hashes: map[uint64]common.Hash{125: common.HexToHash("0x01")}}
+	ch := agreeingChain(130).setHashAll(125, common.HexToHash("0x01"))
 	st := &fakeStore{cursor: &store.CursorPos{Block: 125, Hash: common.HexToHash("0x01").Bytes()}}
 	w := walker(ch, st)
 
@@ -148,10 +129,9 @@ func TestNoAdvanceWhenCaughtUp(t *testing.T) {
 // Invariant: the reorg check runs even when caught up — a mismatched cursor
 // must rewind rather than be skipped by the caught-up early return.
 func TestCaughtUpWithMismatchStillRewinds(t *testing.T) {
-	ch := &fakeChain{head: 130, hashes: map[uint64]common.Hash{
-		125: common.HexToHash("0x11"), // live disagrees with stored cursor hash
-		99:  common.HexToHash("0x99"),
-	}}
+	ch := agreeingChain(130).
+		setHashAll(125, common.HexToHash("0x11")). // live disagrees with stored cursor hash
+		setHashAll(99, common.HexToHash("0x99"))
 	st := &fakeStore{cursor: &store.CursorPos{Block: 125, Hash: common.HexToHash("0x22").Bytes()}}
 	w := walker(ch, st)
 
@@ -168,11 +148,10 @@ func TestCaughtUpWithMismatchStillRewinds(t *testing.T) {
 func TestDeepForkWalksBackToVerifiedAncestor(t *testing.T) {
 	stored180 := common.HexToHash("0xf180")
 	stored150 := common.HexToHash("0xc150")
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
-		200: common.HexToHash("0x11"),   // mismatches cursor
-		180: common.HexToHash("0xdead"), // live disagrees with stored log at 180
-		150: stored150,                  // live agrees with stored log at 150
-	}}
+	ch := agreeingChain(1000).
+		setHashAll(200, common.HexToHash("0x11")).   // mismatches cursor
+		setHashAll(180, common.HexToHash("0xdead")). // live disagrees with stored log at 180
+		setHashAll(150, stored150)                   // live agrees with stored log at 150
 	st := &fakeStore{
 		cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
 		highestLogs: map[uint64][]byte{
@@ -193,12 +172,11 @@ func TestDeepForkWalksBackToVerifiedAncestor(t *testing.T) {
 // Invariant: when no stored log matches the live chain, everything is suspect
 // and the walker re-walks the whole range from StartBlock.
 func TestForkBeyondAllStoredLogsRewindsToStartBlock(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
-		200: common.HexToHash("0x11"),   // mismatches cursor
-		180: common.HexToHash("0xdead"), // disagrees with stored log at 180
-		150: common.HexToHash("0xbeef"), // disagrees with stored log at 150
-		99:  common.HexToHash("0x99"),
-	}}
+	ch := agreeingChain(1000).
+		setHashAll(200, common.HexToHash("0x11")).   // mismatches cursor
+		setHashAll(180, common.HexToHash("0xdead")). // disagrees with stored log at 180
+		setHashAll(150, common.HexToHash("0xbeef")). // disagrees with stored log at 150
+		setHashAll(99, common.HexToHash("0x99"))
 	st := &fakeStore{
 		cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
 		highestLogs: map[uint64][]byte{
@@ -219,10 +197,8 @@ func TestForkBeyondAllStoredLogsRewindsToStartBlock(t *testing.T) {
 // Invariant: a window fetched while the chain tip moved is incoherent and
 // must be discarded, not saved.
 func TestTipChangedMidStepAborts(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		headerSeq: map[uint64][]common.Hash{
-			149: {common.HexToHash("0xa1"), common.HexToHash("0xa2")}, // tip hash changes across the Logs call
-		}}
+	ch := agreeingChain(1000).
+		seqAll(149, common.HexToHash("0xa1"), common.HexToHash("0xa2")) // tip hash changes across the Logs call
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -236,10 +212,8 @@ func TestTipChangedMidStepAborts(t *testing.T) {
 // Invariant: a reorg landing under the cursor mid-Step must abort the save;
 // the next Step's cursor check performs the rewind.
 func TestCursorRecheckMismatchAborts(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		headerSeq: map[uint64][]common.Hash{
-			200: {common.HexToHash("0x01"), common.HexToHash("0x02")}, // matches at step start, differs on pre-save recheck
-		}}
+	ch := agreeingChain(1000).
+		seqAll(200, common.HexToHash("0x01"), common.HexToHash("0x02")) // matches at step start, differs on pre-save recheck
 	st := &fakeStore{cursor: &store.CursorPos{Block: 200, Hash: common.HexToHash("0x01").Bytes()}}
 	w := walker(ch, st)
 
@@ -256,8 +230,7 @@ func TestCursorRecheckMismatchAborts(t *testing.T) {
 func TestRejectsRemovedLog(t *testing.T) {
 	l := testLog(110)
 	l.Removed = true
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {l}}}
+	ch := agreeingChain(1000).setLogsAll(110, l)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -271,8 +244,7 @@ func TestRejectsRemovedLog(t *testing.T) {
 // error out, save nothing.
 func TestRejectsOutOfRangeLog(t *testing.T) {
 	l := testLog(500) // claims block 500, window is [100,149]
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {l}}}
+	ch := agreeingChain(1000).setLogsAll(110, l)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -287,8 +259,7 @@ func TestRejectsOutOfRangeLog(t *testing.T) {
 func TestRejectsForeignAddressLog(t *testing.T) {
 	l := testLog(110)
 	l.Address = common.HexToAddress("0xbb00000000000000000000000000000000000000")
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {l}}}
+	ch := agreeingChain(1000).setLogsAll(110, l)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -301,7 +272,7 @@ func TestRejectsForeignAddressLog(t *testing.T) {
 // Invariant: head below Confirmations means no safe block exists yet — no
 // work, no underflow.
 func TestHeadBelowConfirmationsNoAdvance(t *testing.T) {
-	ch := &fakeChain{head: 3, hashes: map[uint64]common.Hash{}}
+	ch := agreeingChain(3)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -313,7 +284,7 @@ func TestHeadBelowConfirmationsNoAdvance(t *testing.T) {
 
 // Invariant: a failed SaveBatch propagates and leaves the cursor unchanged.
 func TestSaveBatchErrorPropagates(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{}}
+	ch := agreeingChain(1000)
 	st := &fakeStore{saveErr: errors.New("boom")}
 	w := walker(ch, st)
 
@@ -324,9 +295,7 @@ func TestSaveBatchErrorPropagates(t *testing.T) {
 }
 
 func TestLogsAreConvertedAndSaved(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{}, logs: map[uint64][]types.Log{
-		110: {testLog(110)},
-	}}
+	ch := agreeingChain(1000).setLogsAll(110, testLog(110))
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -348,8 +317,7 @@ func TestRejectsMixedHashesAtSameHeight(t *testing.T) {
 	b := testLog(110)
 	b.TxHash = common.HexToHash("0x0cc")
 	b.BlockHash = common.HexToHash("0x0f") // differs from a's 0x0e at the same height
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {a, b}}}
+	ch := agreeingChain(1000).setLogsAll(110, a, b)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -362,9 +330,8 @@ func TestRejectsMixedHashesAtSameHeight(t *testing.T) {
 // Invariant: a log at the window tip must sit on the fork the cursor is being
 // anchored to (tipBefore) — otherwise logs and cursor describe different forks.
 func TestRejectsTipLogNotMatchingAnchor(t *testing.T) {
-	l := testLog(149) // window tip; BlockHash 0x0e != the fake's HeaderHash(149)
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{149: {l}}}
+	l := testLog(149) // window tip; BlockHash 0x0e != the canonical header at 149
+	ch := agreeingChain(1000).setLogsAll(149, l)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -377,8 +344,7 @@ func TestRejectsTipLogNotMatchingAnchor(t *testing.T) {
 // Invariant: a byte-identical duplicate in one response is coalesced — one
 // copy saved, no error.
 func TestCoalescesIdenticalDuplicateLogs(t *testing.T) {
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {testLog(110), testLog(110)}}}
+	ch := agreeingChain(1000).setLogsAll(110, testLog(110), testLog(110))
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -395,8 +361,7 @@ func TestRejectsConflictingDuplicateLogs(t *testing.T) {
 	a := testLog(110)
 	b := testLog(110)
 	b.Data = []byte{0xff} // same identity, different payload
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {a, b}}}
+	ch := agreeingChain(1000).setLogsAll(110, a, b)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -411,8 +376,7 @@ func TestRejectsConflictingDuplicateLogs(t *testing.T) {
 func TestRejectsOversizedLogIndex(t *testing.T) {
 	l := testLog(110)
 	l.Index = uint(math.MaxInt32) + 1
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{},
-		logs: map[uint64][]types.Log{110: {l}}}
+	ch := agreeingChain(1000).setLogsAll(110, l)
 	st := &fakeStore{}
 	w := walker(ch, st)
 
@@ -426,8 +390,7 @@ func TestRejectsOversizedLogIndex(t *testing.T) {
 // silently restart the walk from genesis.
 func TestCursorAtMaxUint64DoesNotWrap(t *testing.T) {
 	tip := common.HexToHash("0x01")
-	ch := &fakeChain{head: math.MaxUint64,
-		hashes: map[uint64]common.Hash{math.MaxUint64: tip}}
+	ch := agreeingChain(math.MaxUint64).setHashAll(math.MaxUint64, tip)
 	st := &fakeStore{cursor: &store.CursorPos{Block: math.MaxUint64, Hash: tip.Bytes()}}
 	w := walker(ch, st)
 
@@ -443,10 +406,9 @@ func TestCursorAtMaxUint64DoesNotWrap(t *testing.T) {
 // would anchor sibling cursors to unverified hashes.
 func TestVerifiedMatchBelowStartBlockAccepted(t *testing.T) {
 	stored50 := common.HexToHash("0xc050")
-	ch := &fakeChain{head: 1000, hashes: map[uint64]common.Hash{
-		200: common.HexToHash("0x11"), // mismatches cursor
-		50:  stored50,                 // live agrees with stored log below StartBlock (100)
-	}}
+	ch := agreeingChain(1000).
+		setHashAll(200, common.HexToHash("0x11")). // mismatches cursor
+		setHashAll(50, stored50)                   // live agrees with stored log below StartBlock (100)
 	st := &fakeStore{
 		cursor:      &store.CursorPos{Block: 200, Hash: common.HexToHash("0x22").Bytes()},
 		highestLogs: map[uint64][]byte{50: stored50.Bytes()},
