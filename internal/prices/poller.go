@@ -956,10 +956,13 @@ const (
 // cursor as the requested target (the store lowers it to the deepest
 // unacknowledged rewound_to) and with a VERIFIED FLOOR — the highest stored poll
 // anchor whose block hash still matches the chain the pass's endpoint reports —
-// which raises the effective boundary back up. A hash match at height H entails
-// that H and every ancestor are unchanged on that endpoint's chain, because blocks
-// are chained by parent hash, so keeping rows at or below H READABLE rests on that
-// entailment rather than on optimism. Rows above the boundary are retained and
+// which is an OFFER, not the outcome. A hash match at height H entails that H and
+// every ancestor are unchanged on that endpoint's chain (blocks are chained by
+// parent hash), which is why H is worth OFFERING — but only the boundary the store
+// RETURNS decides which rows stay readable. The store may clamp the boundary below
+// H (an unprovable row sits in the range) or place it above H (the epoch target is
+// higher); the wave-14 4999/5000 and wave-16 4900/5000 regressions pin both
+// directions. Rows above the RETURNED boundary are retained and
 // marked. The epoch ack is unaffected: it still reaches the chain's max epoch,
 // atomically with the marking.
 //
@@ -1712,9 +1715,10 @@ func (p *Poller) resetVerification(why string) {
 // It replaced a rewind arm, and the reason is an asymmetry rather than a
 // preference (D-010). Both operations act on a judgement that can be wrong. A
 // wrong DELETION of a polled row destroys a point-in-time PriceProviderV2 read that
-// nothing anywhere can reproduce. A wrong MARKING leaves the row, its value and its
-// recorded block hash all on disk, and costs the availability of that asset's price
-// at those heights.
+// nothing anywhere can reproduce. A wrong MARKING leaves the row and its value on
+// disk unconditionally — and, for a row whose own round still has a surviving
+// anchor, the recorded block hash too — costing the availability of that asset's
+// price at those heights.
 //
 // D-012 RESTATES WHY THAT ASYMMETRY IS DECISIVE, because the previous statement of it
 // was wrong and cost two review rounds. D-010 said marking is preferable because it

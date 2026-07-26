@@ -72,8 +72,12 @@ package store
 // the sampling already has holes — RPC outages, oracle reverts, restarts — that no
 // mechanism has ever made up. A wrongly-marked row is observationally identical to
 // one of those missed polls (every consumer skips both) and differs only by
-// carrying MORE: the value and the block hash its round executed against both
-// survive. So the running system does not try to un-mark anything on its own. The
+// carrying MORE: the value always survives, and the block hash its round executed
+// against survives for as long as that round's anchor does (clause 2 protects
+// anchors at marked heights FROM NOW ON; an anchor already pruned before marking is
+// gone, and such rows have no hash to reconcile against — see the
+// rowsUnanchoredBindingPruned split). So the running system does not try to
+// un-mark anything on its own. The
 // D-011 online revalidation pass (NeutralizedPriceAnchors /
 // RevalidateNeutralizedPrices / the per-Step drain) is REMOVED — it hosted both of
 // Codex round 7's criticals, in the most correctness-critical path the poller had.
@@ -1261,8 +1265,10 @@ func (s *Store) PriceRepairExposure(ctx context.Context, engine string, chainID,
 //     is safe today and would not have been then: THIS call is the exit, and it
 //     needs nothing from adoption.)
 //   - NEUTRALIZE (this): the rows are RETAINED and marked
-//     InvalidReasonUnverifiableReorg, so no usable-price read can return them; their
-//     ANCHORS ARE RETAINED TOO (D-012 clause 2); the cursor is reset and every epoch
+//     InvalidReasonUnverifiableReorg, so no usable-price read can return them; any
+//     SURVIVING anchors at those heights are retained from now on (D-012 clause 2
+//     is a forward guarantee — it cannot restore an anchor already pruned before
+//     the marking); the cursor is reset and every epoch
 //     is acked, in ONE transaction. Nothing is destroyed, nothing unverifiable can
 //     be read, and ingestion resumes.
 //
