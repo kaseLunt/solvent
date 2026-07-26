@@ -401,6 +401,30 @@ func TestStoreHasNoOnlineRevalidationPrimitive(t *testing.T) {
 	require.True(t, ok, "clause 6 keeps the gap visible even though clause 3 removes the repair")
 }
 
+// THE EXPOSURE READ OFFERS NO PER-HEIGHT ANCHOR COUNT (Codex round 10, residual (c)).
+//
+// AnchoredHeights counted anchors above the effective target. The number was honest —
+// it was a fact about the ANCHOR population, not a provenance claim about any row — and
+// that is exactly why it was a trap: it sat one field away from Unanchored, which is a
+// per-OBSERVATION count, and reading the wrong one is round 9's [high] #1 verbatim. It
+// had no production consumer at any point; only the fake and two test assertions read
+// it, so nothing was trading a real capability for the risk.
+//
+// This is an ABSENCE test for the same reason TestStoreHasNoOnlineRevalidationPrimitive
+// is one: a deletion that only the compiler protects comes back the first time somebody
+// needs "just a count of anchors for a log line", and the field's presence is what makes
+// the height rule reachable again.
+func TestRepairExposureOffersNoPerHeightAnchorCount(t *testing.T) {
+	et := reflect.TypeOf(PriceRepairExposure{})
+	_, ok := et.FieldByName("AnchoredHeights")
+	require.False(t, ok,
+		"AnchoredHeights is deleted: a per-HEIGHT anchor count next to a per-OBSERVATION binding count is the misuse this struct kept re-enabling. Unanchored is what repair reads")
+	for _, want := range []string{"EffectiveTarget", "Owned", "Unanchored", "ReorgGeneration"} {
+		_, ok := et.FieldByName(want)
+		require.True(t, ok, "%s is what the repair path actually decides on and must stay", want)
+	}
+}
+
 // D-010 clause 4, AGAINST POSTGRES: the retained-but-unusable pile is countable,
 // and the count is engine- and marker-scoped rather than "everything invalid".
 //
