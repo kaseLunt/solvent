@@ -167,20 +167,26 @@ func TestSlowSuccessfulReadsStayBoundedAndStillRecover(t *testing.T) {
 	t.Logf("slow successful reads: %d header reads and %d completed rounds over %s (%d reuse windows)",
 		len(reads), rounds, elapsed.Truncate(time.Second), windows)
 
-	// BOUND 1, COST. The budget admits reads while a window's charged read time is
-	// under headerFetchTimeout, so at this latency three per window, plus the nine
-	// unbudgeted anchoring reads of the first pass. The pre-fix daemon's figure is
-	// measured by mutation, not asserted here: with the completion stamp and the
-	// budget removed, every one of these passes pays nine reads again.
+	// THE MEASURED COMPARISON, both halves of the fix reverted (round-start stamping
+	// and no refresh budget), same harness, same five minutes:
+	//
+	//	                       header reads   COMPLETED ROUNDS   simulated
+	//	pre-fix (measured)              81                  9      5m25s
+	//	this code                       36                780      5m00s
+	//
+	// The read count barely doubles. The ROUND COUNT is the finding: nine sequential
+	// four-second reads is 36 s of wall clock per pass, so the daemon completes nine
+	// rounds in five minutes and a backfill runs at that rate — the hot-loop collapse
+	// the throttle was added to prevent, restored in full, on an endpoint that never
+	// once failed.
+	//
+	// And the number that makes the axes table worth writing: wave 11's cost harness,
+	// run against this same reverted code, still reports its 9-reads-per-20-rounds.
+	// It cannot see any of this, because its reads are instantaneous.
 	require.LessOrEqual(t, len(reads), slowChainWorkers+windows*slowBudgetRotation,
-		"a chain may not spend more than headerFetchTimeout of refresh reads per reuse window, whatever a pass costs and however many workers are gated")
-
-	// THE COST THAT ACTUALLY HURT: the daemon's round rate. Nine four-second reads
-	// per pass is 36 s of wall clock per round, which is the backfill slowdown the
-	// throttle exists to prevent — the reads ride the same endpoints ingestion needs.
-	// Bounding the reads is what gives the rounds back.
+		"a chain may not spend more than headerFetchTimeout of refresh reads per reuse window, whatever a pass costs and however many workers are gated (pre-fix, measured: 81)")
 	require.Greater(t, rounds, 500,
-		"the hot loop must keep turning: at nine 4 s reads per pass a round costs 36 s and the daemon completes ~8 rounds in five minutes")
+		"the hot loop must keep turning (pre-fix, measured: 9 rounds in five minutes)")
 
 	// BOUND 2, FRESHNESS — AND THAT IT IS FAIR. Every worker must have been
 	// re-anchored, not just the ones the judged order reaches first. Without the due
@@ -280,6 +286,117 @@ func TestTheReuseWindowStartsWhenTheReadFINISHES(t *testing.T) {
 	round()
 	require.Len(t, reads, 2,
 		"and it is still a WINDOW: past 30 s from the completion the anchor is re-read, so the completion stamp lengthens nothing — it merely stops the window being spent before it starts")
+}
+
+// TestSchedulingRunsOnTheMonotonicClockAndTheVerdictDoesNot pins the SEPARATION
+// itself, on both reuse arms, which neither of the other tests can do.
+//
+// AXES VARIED: E, in its second form — not a rollback, but the two clocks simply
+// being different clocks. Everything else is held easy.
+//
+// Every other test in this package drives both of the judge's clocks from ONE fake,
+// which is realistic (a healthy daemon's monotonic clock and its database's clock do
+// advance together) and is exactly why it cannot see a confusion between them. Here
+// they are moved independently, so each assertion fails if either role reads the
+// other's clock. The direction that matters is stated in stalenessJudge: a verdict
+// may never be measured on the daemon's wall clock, and scheduling may never be
+// measured on a clock a verdict depends on — a database clock step would otherwise
+// expire or extend every reuse window in the deployment at once.
+func TestSchedulingRunsOnTheMonotonicClockAndTheVerdictDoesNot(t *testing.T) {
+	base := time.Unix(1_000_000, 0).UTC()
+	name := "eth:aave-etherfi"
+
+	// run drives one worker whose header is headerAge old, and returns the read log.
+	run := func(t *testing.T, headerAge time.Duration, verdictStep time.Duration) []stampKey {
+		t.Helper()
+		h, _ := newTestHealth()
+		sched, db := pinnedClock(base), pinnedClock(base)
+		var reads []stampKey
+		fetch := func(_ context.Context, chainID, block uint64) (uint64, error) {
+			reads = append(reads, stampKey{chainID: chainID, block: block})
+			return uint64(db.now().Add(-headerAge).Unix()), nil
+		}
+		watch := progressWatch{
+			walkers:   []*walkerState{{w: &fakeIngestWorker{name: name}, chainID: 1}},
+			staleness: newStalenessJudge(fetch, sched.now, db.verdict),
+		}
+		pr := &fakeProgress{ingest: []store.CursorProgress{{Name: name, Block: 20_000_000, UpdatedAt: base}}}
+		round := func() {
+			rc := roundConditions{}
+			applyProgressConditions(context.Background(), pr, sched.now(), rc, watch)
+			publishRound(h, rc)
+			pr.ingest[0].Block++
+		}
+
+		round()
+		require.Len(t, reads, 1, "the first measurement is a real read")
+
+		// THE VERDICT CLOCK MOVES, well past the reuse window; scheduling does not.
+		db.advance(verdictStep)
+		round()
+		require.Len(t, reads, 1,
+			"the reuse window is SCHEDULING, so it is measured on the monotonic clock alone: a database-clock step must not expire every retained stamp in the deployment at once")
+
+		// THE SCHEDULING CLOCK MOVES past the window; the verdict clock does not.
+		sched.advance(headerRestampThrottle + time.Second)
+		round()
+		require.Len(t, reads, 2,
+			"and the window really is a window — it is simply measured on the clock whose job that is")
+		return reads
+	}
+
+	t.Run("deep-stale arm", func(t *testing.T) {
+		// Three days old, so the deep-stale arm answers, and a five-minute verdict-clock
+		// step cannot take it out of that arm.
+		run(t, backfillAge, 10*headerRestampThrottle)
+	})
+
+	t.Run("near-head arm", func(t *testing.T) {
+		// One minute old, so the near-head arm answers. The verdict step is two minutes
+		// — four times the reuse window, and still inside bound/2 once added to the
+		// header's age, so the arm is the same arm before and after.
+		run(t, time.Minute, 2*time.Minute)
+	})
+
+	// THE REFRESH BUDGET'S OWN WINDOW is scheduling as well, and it is the arm with
+	// the worst failure mode of the three, which is why it gets its own scenario
+	// rather than a line in the one above. A budget windowed on the verdict clock
+	// stops rolling the moment that clock stops moving or steps back: the first
+	// window's allowance is spent, never renewed, and every deep-stale worker on the
+	// chain rides an anchor nothing ever re-reads again. That is a permanent, silent
+	// loss of the catch-up guarantee — the very guarantee the budget was added
+	// alongside — and no verdict would ever look wrong. Found by mutation (M15), not
+	// by review.
+	t.Run("refresh budget window", func(t *testing.T) {
+		h, _ := newTestHealth()
+		sched, db := pinnedClock(base), pinnedClock(base) // db deliberately never moves
+		var reads []stampKey
+		fetch := func(_ context.Context, chainID, block uint64) (uint64, error) {
+			reads = append(reads, stampKey{chainID: chainID, block: block})
+			sched.advance(slowReadLatency)
+			return uint64(db.now().Add(-backfillAge).Unix()), nil
+		}
+		var walkers []*walkerState
+		pr := &fakeProgress{}
+		for i := 0; i < slowChainWorkers; i++ {
+			n := fmt.Sprintf("eth:stream-%d", i)
+			walkers = append(walkers, &walkerState{w: &fakeIngestWorker{name: n}, chainID: 1})
+			pr.ingest = append(pr.ingest, store.CursorProgress{Name: n, Block: slowWorkerBlock(i), UpdatedAt: base})
+		}
+		watch := progressWatch{walkers: walkers, staleness: newStalenessJudge(fetch, sched.now, db.verdict)}
+		start := sched.now()
+		for sched.now().Sub(start) < 4*headerRestampThrottle {
+			rc := roundConditions{}
+			applyProgressConditions(context.Background(), pr, sched.now(), rc, watch)
+			publishRound(h, rc)
+			sched.advance(200 * time.Millisecond)
+			for i := range pr.ingest {
+				pr.ingest[i].Block++
+			}
+		}
+		require.Greater(t, len(reads), slowChainWorkers+slowBudgetRotation,
+			"the budget window must roll on the MONOTONIC clock: windowed on a verdict clock that is not moving, it spends its first allowance and renews it never, and the deployment silently stops re-anchoring altogether")
+	})
 }
 
 // TestAClockRollbackSmallerThanTheHeaderAgeCannotTurnStalenessGreen is Codex round
