@@ -22,8 +22,8 @@ allowed_paths:
   - roadmap/work/W1-phase2-positions-prices.md
 scope_hash: sha256:d11fe7a57352870b8e50d1dc1d3d5927185d09275c222fb3282e623f93c9a239
 issued_at: 2026-07-25T22:24:48Z
-lease_expires: 2026-07-26T22:24:48Z
-updated_at: 2026-07-25T22:24:48Z
+lease_expires: 2026-07-27T07:39:04Z
+updated_at: 2026-07-26T07:39:04Z
 ---
 
 # Claim: claude-integrator -> W1
