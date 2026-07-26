@@ -1,0 +1,120 @@
+{
+  "meta": {
+    "wave": "task-9 wave 4",
+    "unit": "prices poller round-outcome classification (one classification authority per round outcome) + chain pinned-call per-attempt aggregate",
+    "purpose": "Task 9 wave 4 brief's mutation requirement: the aggregate-vs-last-error classification (property: the posture is order-independent -- W4M1 restores last-error-wins verbatim, W4M5 shrinks the aggregate to a last-attempt window at the chain layer, W4M6 judges only the first attempt), the any-transport-retains-error arm (W4M2 flips unanimity to any-rejection-wins), the all-rejections-discard arm (W4M3 severs the aggregate consult so every total failure takes the error posture), the chain-layer wiring itself (W4M4 puts the pinned path back on doFrom), and the seam interaction at the rewritten site (W4M7/W4M8: the wave-3 landed-flag dodge re-pinned on both rewritten returns, proving the closed routing law survived the wave-4 edit). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. Every touched file is CRLF in the working tree (chain.go/chain_test.go were rewritten CRLF by this wave's edits; core.autocrlf normalizes the committed blobs to LF), so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "THE POSTURE IS A PROPERTY OF THE OUTAGE, NOT OF THE WALK ORDER. Codex round 3's finding is last-error-wins transposing 'one time authority per verdict': the round's posture depended on whichever endpoint's error the failover rotation happened to surface last, and the deferred routing advance rotated that order every cadence, so a persistent mixed outage alternated discard/error -- resetting the daemon's retryBackoff and blanking step_error on alternating rounds. W4M1/W4M5/W4M6 attack order-independence from three directions (wholesale revert, back-biased window, front-biased window); each must die to a daemon-wrapper streak assertion, not to a compile error.",
+      "W4M4 AND W4M5 ARE CHAIN-LAYER MUTANTS AND THE PRICES SUITE ALONE CANNOT SEE THEM, disclosed: the poller tests drive fakePollChain, whose CallAtHashFrom mirrors doFromAttempts' aggregate contract. The killers are the chain package's own per-attempt-outcome tests, which pin the REAL Failover to the contract the fake models -- the same fidelity discipline that made the fake's last-error walk honest in waves 2-3. Both mutants' test commands include ./internal/prices/ anyway so the transcript RECORDS that the prices suite is blind to them (the disclosed seam), rather than leaving it to prose.",
+      "W4M7/W4M8 re-pin wave 3's dodge shape on the two returns wave 4 rewrote. The seam is closed law ('the deferred routing advance applies unconditionally to every non-landing round'); re-editing the classification site is exactly the edit shape that could have weakened it, so the landed-flag dodge is re-attacked at both rewritten exits even though W3M3/W3M7 pinned the same law at the pre-rewrite text.",
+      "NOT mutation-testable, disclosed: the empty-Attempts guard in allAttemptsRejectedPin (len(walk.Attempts) == 0 fails closed to ERROR) -- doFromAttempts constructs a PinnedCallError only after at least one attempt failed and Dial refuses zero endpoints, so no reachable behavior distinguishes the guard; it is defensive depth against a hand-built aggregate. PinnedCallError.Error()/Unwrap()'s last-error mirroring is pinned by the chain tests' wording assertions rather than mutated separately. The daemon-wrapper harness (harnessBackoff + daemonWorkerHarness) is TEST code mirroring cmd/indexer's stepPriceWorkers/retryBackoff verbatim (cmd/** is out of this wave's scope); mutants attack production code only, and the mirror's fidelity is stated line-by-line in the report.",
+      "The wave-3 matrix (t9w3-mutations, 14/14 at 1b89fb5) remains the ground for the seam itself, the per-arm dodges and the liveness ping-pong; wave 4 attacks only what wave 4 changed: WHERE the posture comes from (the aggregate) and WHETHER the rewritten site still cannot dodge the seam."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W4M1",
+      "description": "last-error-wins restored: the classification site consults the surfaced (last) error instead of the per-attempt aggregate",
+      "property": "ONE CLASSIFICATION AUTHORITY PER ROUND OUTCOME: the posture is computed from the AGGREGATE of per-attempt outcomes and is therefore order-independent -- the same persistent mixed outage must take the ERROR posture whichever failure the walk surfaces last",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\tif allAttemptsRejectedPin(err) {",
+          "replace": "\t\tif isBlockNotFoundErr(err) { // MUTANT: last-error-wins restored -- the posture is whichever attempt ran last"
+        }
+      ]
+    },
+    {
+      "id": "W4M2",
+      "description": "unanimity flipped to any-rejection-wins: one recognized rejection anywhere in the walk earns the discard posture",
+      "property": "ANY TRANSPORT OR UNKNOWN INVOLVEMENT RETAINS THE ERROR POSTURE: the discard requires the recognized rejection on EVERY attempted endpoint, so a mixed outage keeps growing the daemon's backoff streak and keeps step_error visible",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\tfor _, a := range walk.Attempts {\r\n\t\tif !isBlockNotFoundErr(a.Err) {\r\n\t\t\treturn false // transport or unknown involvement: ERROR posture\r\n\t\t}\r\n\t}\r\n\treturn true",
+          "replace": "\tfor _, a := range walk.Attempts {\r\n\t\tif isBlockNotFoundErr(a.Err) { // MUTANT: ANY recognized rejection wins the discard posture\r\n\t\t\treturn true\r\n\t\t}\r\n\t}\r\n\treturn false"
+        }
+      ]
+    },
+    {
+      "id": "W4M3",
+      "description": "the aggregate is never consulted: every total pinned-call failure takes the error posture",
+      "property": "THE ALL-REJECTIONS ROUND STILL DISCARDS CLEANLY: a unanimous recognized rejection is the WARN-discard posture (the serving node may be alone on its fork -- not a fault to burn the daemon's backoff on), and severing that arm turns an honest discard into a spurious error",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\tif !errors.As(err, &walk) || len(walk.Attempts) == 0 {",
+          "replace": "\tif true || !errors.As(err, &walk) || len(walk.Attempts) == 0 { // MUTANT: the aggregate is never consulted"
+        }
+      ]
+    },
+    {
+      "id": "W4M4",
+      "description": "the chain layer forgets the aggregate: CallAtHashFrom walks through doFrom again (last-error-wins at the source)",
+      "property": "THE PINNED-CALL PATH RETAINS PER-ATTEMPT OUTCOMES: the real Failover must return the *PinnedCallError aggregate the fake models and the poller classifies over -- without it every total failure is unclassifiable and the discard posture is unreachable in production",
+      "test": ["go", "test", "./internal/chain/", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tidx, err := f.doFromAttempts(ctx, \"callAtHash\", start, func(ctx context.Context, c rpcClient) error {",
+          "replace": "\tidx, err := f.doFrom(ctx, \"callAtHash\", start, func(ctx context.Context, c rpcClient) error { // MUTANT: the pinned path forgets per-attempt outcomes"
+        }
+      ]
+    },
+    {
+      "id": "W4M5",
+      "description": "the aggregate degenerates to a window of one: doFromAttempts keeps only the LAST attempt",
+      "property": "THE AGGREGATE CARRIES EVERY ATTEMPTED ENDPOINT'S OUTCOME: a last-attempt window is last-error-wins wearing the aggregate's type, and unanimity judged over it re-creates the order dependence at the chain layer",
+      "test": ["go", "test", "./internal/chain/", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\t\t\tattempts = append(attempts, AttemptError{Endpoint: idx, Err: err})",
+          "replace": "\t\t\tattempts = []AttemptError{{Endpoint: idx, Err: err}} // MUTANT: the aggregate keeps only the last attempt"
+        }
+      ]
+    },
+    {
+      "id": "W4M6",
+      "description": "only the FIRST attempt is judged: front-biased order dependence injected into the classification",
+      "property": "ORDER-INDEPENDENCE, ATTACKED FROM THE FRONT: a classification that samples any single attempt -- first or last -- re-creates the alternation, because the deferred routing advance rotates which endpoint leads the walk every cadence",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\tfor _, a := range walk.Attempts {",
+          "replace": "\tfor _, a := range walk.Attempts[:1] { // MUTANT: only the FIRST attempt is judged"
+        }
+      ]
+    },
+    {
+      "id": "W4M7",
+      "description": "the rewritten unanimous-rejection discard dodges the routing seam (landed = true before the nil return)",
+      "property": "THE SEAM IS CLOSED LAW AT THE REWRITTEN SITE: the deferred routing advance applies unconditionally to every non-landing round, discard posture included -- wave 4's edit of the classification arm must not have reopened the dodge wave 3 closed",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\t\t\t\"engine\", p.engine, \"block\", pin, \"hash\", hashBefore, \"endpoint\", servedBy.Index, \"err\", err)\r\n\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere",
+          "replace": "\t\t\t\t\"engine\", p.engine, \"block\", pin, \"hash\", hashBefore, \"endpoint\", servedBy.Index, \"err\", err)\r\n\t\t\tlanded = true // MUTANT: the unanimous-rejection discard keeps the starting point\r\n\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere"
+        }
+      ]
+    },
+    {
+      "id": "W4M8",
+      "description": "the rewritten post-call ERROR return dodges the routing seam (landed = true before the error return)",
+      "property": "THE SEAM IS CLOSED LAW AT THE REWRITTEN SITE, ERROR SIDE: the mixed-outage error posture must still advance the start every round (fail-closed for correctness, never fail-forever for routing) -- otherwise the mixed outage parks the walk on one endpoint and the alternation the daemon-wrapper tests pin never happens",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\treturn none, false, fmt.Errorf(\"price poller %q: multicall (%d oracles) pinned to %s (block %d): %w\", p.engine, len(p.targets), hashBefore, pin, err)",
+          "replace": "\t\tlanded = true // MUTANT: the post-call error return keeps the starting point\r\n\t\treturn none, false, fmt.Errorf(\"price poller %q: multicall (%d oracles) pinned to %s (block %d): %w\", p.engine, len(p.targets), hashBefore, pin, err)"
+        }
+      ]
+    }
+  ]
+}
