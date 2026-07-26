@@ -1,0 +1,62 @@
+{
+  "_provenance": [
+    "Task 9 wave 10 (brief §4). Two PINS, never interchanged: w1_pin_eth is the LITERAL",
+    "W1 acceptance clause block (roadmap/work/W1-phase2-positions-prices.md — golden-vector",
+    "borrower at ETH block 25,584,990); fixture_pin_eth is the block the committed Task 6",
+    "fixtures were captured at (internal/derive/aave_test.go TestAaveGoldenFullHistoryReplay:",
+    "cast reads via eth.drpc.org, 2026-07-23). Constants must NEVER be ported across blocks:",
+    "Row A is a live pinned chain read at w1_pin_eth with no constants; Row B welds derived ==",
+    "fixture constant == chain at fixture_pin_eth; Row C records interval quiescence between",
+    "the pins so a reviewer sees why A and B agree.",
+    "Reserve underlyings are from recon/derivation-notes.md (NORMATIVE, 'Aave v3 ether.fi",
+    "market' table); aToken addresses are resolved at runtime from config/contracts.json",
+    "streams (atoken_stream names below); variable debt token addresses are resolved at the",
+    "pin via Pool.getReserveVariableDebtToken(reserve) — never embedded."
+  ],
+  "w1_pin_eth": 25584990,
+  "fixture_pin_eth": 25593800,
+  "reserves": [
+    {
+      "symbol": "weETH",
+      "underlying": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "atoken_stream": "eth:atoken-weeth",
+      "role": "collateral"
+    },
+    {
+      "symbol": "USDC",
+      "underlying": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "atoken_stream": "eth:atoken-usdc",
+      "role": "debt"
+    },
+    {
+      "symbol": "PYUSD",
+      "underlying": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+      "atoken_stream": "eth:atoken-pyusd",
+      "role": "debt"
+    },
+    {
+      "symbol": "FRAX",
+      "underlying": "0x853d955aCEf822Db058eb8505911ED77F175b99e",
+      "atoken_stream": "eth:atoken-frax",
+      "role": "debt"
+    }
+  ],
+  "borrowers": [
+    {
+      "_provenance": "recon golden-vector borrower 1 (W1 acceptance clause). Fixture constants captured at fixture_pin_eth: vUSDC.scaledBalanceOf = 125415, aWeETH.scaledBalanceOf = 58420665095130 (aave_test.go:616-627).",
+      "address": "0x70daaac436465a0d03e45916fa68ddee6086e5fe",
+      "debt_reserve": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "fixture_scaled_debt": "125415",
+      "collateral_reserve": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "fixture_scaled_collateral": "58420665095130"
+    },
+    {
+      "_provenance": "recon golden-vector borrower 2 (Task 6 fixtures). Fixture constants captured at fixture_pin_eth: vPYUSD.scaledBalanceOf = 83, aWeETH.scaledBalanceOf = 7045575913579 (aave_test.go:616-627).",
+      "address": "0xe649a394fb16b58ee2e59feb2ea571e7733c812a",
+      "debt_reserve": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+      "fixture_scaled_debt": "83",
+      "collateral_reserve": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "fixture_scaled_collateral": "7045575913579"
+    }
+  ]
+}

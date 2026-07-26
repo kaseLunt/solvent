@@ -1166,6 +1166,37 @@ func (f *Failover) HeaderHashFrom(ctx context.Context, startIndex int, n uint64)
 	return out, EndpointToken{Index: idx}, nil
 }
 
+// HeaderTimeFrom is HeaderTime with a CALLER-SCOPED starting endpoint and an
+// EndpointToken naming the endpoint that answered — the exact routing shape of
+// HeaderHashFrom, for the same reason: a caller that pinned other reads to a
+// specific endpoint (or that must DISCLOSE which endpoint served a header) has
+// no honest use for the shared-hint path, whose serving endpoint it can neither
+// choose nor report. Additive for Task 9 wave 10: cmd/reconcile's DM
+// index-integrity check derives an accrual interval dt from two header times
+// and records the serving endpoint of each read in its artifact; the plain
+// HeaderTime has no routing and names no endpoint, which would leave that
+// interval's provenance undisclosed (brief §3.6 / L2-13).
+func (f *Failover) HeaderTimeFrom(ctx context.Context, startIndex int, n uint64) (uint64, EndpointToken, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out uint64
+	idx, err := f.doFrom(ctx, "headerTime", start, func(ctx context.Context, c rpcClient) error {
+		rh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		if err != nil {
+			return err
+		}
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n), &n); err != nil {
+			return err
+		}
+		out = uint64(*rh.Time)
+		return nil
+	})
+	if err != nil {
+		return 0, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
 // TxCalldata returns the raw input data (selector included) of the
 // transaction with hash txHash. Additive method for the debt_manager
 // deriver's migration-genesis path (Phase 2 Task 5): the 7,337 migrated

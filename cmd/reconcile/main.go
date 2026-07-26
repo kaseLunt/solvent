@@ -1,0 +1,1022 @@
+// cmd/reconcile — W1's acceptance-evidence harness (Task 9 wave 10).
+//
+// One-shot, STRICTLY READ-ONLY CLI: never calls AcquireWriterLock, never
+// Migrates, runs while the backfill daemon is live. Phase order is mandatory
+// (brief §0) — an archive miss must abort in seconds, not after minutes of
+// held snapshot:
+//
+//	Phase 0 — preflight, no snapshot held: env/config, DSN-split tripwire,
+//	          schema gate (max goose version == embedded expected, exact),
+//	          quick autocommit cursor read, RPC preflight probes cheapest
+//	          first (golden-pin archive capability, fresh-pin serveability).
+//	Phase 1 — ONE connection, REPEATABLE READ READ ONLY: every DB read
+//	          (pins, sampling, as-of sums, aggregates, counts, freshness,
+//	          invariant scans, internal check, rewind baseline). COMMIT
+//	          before any comparison RPC (vacuum-friendliness). The only RPC
+//	          inside the phase is the pin-hash header read the seed default
+//	          requires.
+//	Phase 2 — RPC comparisons, sequential OP then ETH, one shared token
+//	          bucket (the daemon is consuming the same provider budget).
+//	Phase 3 — end-of-run rewind re-check on a FRESH connection (a snapshot
+//	          cannot observe its own invalidation) + fork welds re-run.
+//	Phase 4 — artifact emit + verdict.
+//
+// Exit codes (brief §5): 0 pass; 1 verdict-reached drift/violation (artifacts
+// fully written); 2 precondition; 3 retryable environment; 4 usage.
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"math/big"
+	"net/url"
+	"os"
+	"runtime/debug"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/kaselunt/solvent/internal/chain"
+	"github.com/kaselunt/solvent/internal/config"
+	"github.com/kaselunt/solvent/internal/store"
+)
+
+const (
+	exitPass         = 0
+	exitVerdictFail  = 1
+	exitPrecondition = 2
+	exitRetryable    = 3
+	exitUsage        = 4
+)
+
+// tripwireMsg is the brief §1.2 message, verbatim.
+const tripwireMsg = "test and live DSNs identical; physical split required (see runbook §DB-split)"
+
+// forcedDMAnchors are the brief §2 forced includes: the three recon
+// validation borrowers (Phase-1 bit-exact at PIN 154,021,227 with
+// net-normalized 963,813 / 3,985,789,485 / 7,153,773 — provenance
+// constants, recorded in the artifact, not asserted at today's pin) and the
+// liquidation Safe.
+var forcedDMAnchors = []string{
+	"0303a641b9255a4240e879c76efc704dc1c6383d",
+	"0b7043c82c5ad152137ad7d503daa02f5e777f85",
+	"05e3a665efc843d77e3867ee6db41bc38d1ed33f",
+	"ac5f3ce95f602e31b672cc38cddf7a3ea9ae5fcc",
+}
+
+// expectedMigrationGenesisRows is the §2 population precondition: the
+// SEED-ROW count (positions across 80 batches), deliberately not a
+// distinct-account count (L0-3/L2-8).
+const expectedMigrationGenesisRows = 7337
+
+type options struct {
+	configPath       string
+	engine           string
+	sample           int
+	allowSmall       bool
+	seed             string
+	include          string
+	accountsFile     string
+	pinOP            uint64
+	pinETH           uint64
+	goldenPinETH     uint64
+	fixturePinETH    uint64
+	snapshotMaxAge   string
+	toleranceDMWei   int64
+	rps              float64
+	rpcAttempts      int
+	collateralReplay int
+	out              string
+	timeout          time.Duration
+	maxHeadLag       time.Duration
+	preflightOnly    bool
+}
+
+func parseFlags(args []string, stderr io.Writer) (*options, error) {
+	fs := flag.NewFlagSet("reconcile", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	o := &options{}
+	fs.StringVar(&o.configPath, "config", "config/contracts.json", "contracts config path")
+	fs.StringVar(&o.engine, "engine", "all", "all|debt_manager|aave_v3_etherfi")
+	fs.IntVar(&o.sample, "sample", 25, "sample size floor (>=25 enforced; -allow-small for debugging taints acceptance)")
+	fs.BoolVar(&o.allowSmall, "allow-small", false, "permit -sample below 25 (taints artifact acceptance:false)")
+	fs.StringVar(&o.seed, "seed", "", "sampling seed (default: hex of the OP pin's block hash; resolved value always echoed)")
+	fs.StringVar(&o.include, "include", "", "comma-separated extra forced-include accounts (hex)")
+	fs.StringVar(&o.accountsFile, "accounts", "", "file of accounts — bypasses sampling (exact replay, recorded)")
+	fs.Uint64Var(&o.pinOP, "pin-op", 0, "OP pin override (default: derive cursor; refused above it)")
+	fs.Uint64Var(&o.pinETH, "pin-eth", 0, "ETH pin override (default: derive cursor; refused above it)")
+	fs.Uint64Var(&o.goldenPinETH, "golden-pin-eth", 25584990, "W1 golden pin (fixed; overriding taints acceptance:false)")
+	fs.Uint64Var(&o.fixturePinETH, "fixture-pin-eth", 25593800, "fixture pin (fixed; overriding taints acceptance:false)")
+	fs.StringVar(&o.snapshotMaxAge, "snapshot-max-age", "auto", "collateral freshness bound (auto = policy bound from §7)")
+	fs.Int64Var(&o.toleranceDMWei, "tolerance-dm-wei", 0, "DIAGNOSIS ONLY: nonzero forces result=fail-with-tolerance")
+	fs.Float64Var(&o.rps, "rps", 1.5, "client token bucket across ALL endpoints")
+	fs.IntVar(&o.rpcAttempts, "rpc-attempts", 5, "bounded walk retries (backoff applies to 429 only)")
+	fs.IntVar(&o.collateralReplay, "collateral-replay", 3, "deep collateral replay account count (0 disables)")
+	fs.StringVar(&o.out, "out", "roadmap/evidence/artifacts/w1-reconcile", "artifact output directory")
+	fs.DurationVar(&o.timeout, "timeout", 20*time.Minute, "whole-run timeout")
+	fs.DurationVar(&o.maxHeadLag, "max-head-lag", 30*time.Minute, "staleness QUALITY gate on the pin's header time (daemon stalled ⇒ evidence stale; exit 3) — never a serveability inference")
+	fs.BoolVar(&o.preflightOnly, "preflight-only", false, "run Phase 0 only and exit (the smoke mode; never touches Phase 1)")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
+	switch o.engine {
+	case "all", "debt_manager", "aave_v3_etherfi":
+	default:
+		return nil, fmt.Errorf("-engine must be all|debt_manager|aave_v3_etherfi, got %q", o.engine)
+	}
+	if o.sample < 25 && !o.allowSmall {
+		return nil, fmt.Errorf("-sample %d is below the 25 floor (use -allow-small for debugging; it taints acceptance)", o.sample)
+	}
+	if o.sample < 1 {
+		return nil, fmt.Errorf("-sample must be >= 1")
+	}
+	return o, nil
+}
+
+// acceptanceTaints lists why this run cannot back an acceptance receipt.
+func acceptanceTaints(o *options) []string {
+	var taints []string
+	if o.allowSmall && o.sample < 25 {
+		taints = append(taints, fmt.Sprintf("-sample %d below the 25 floor (-allow-small)", o.sample))
+	}
+	if o.goldenPinETH != 25584990 {
+		taints = append(taints, fmt.Sprintf("-golden-pin-eth overridden to %d (W1 clause pins 25584990)", o.goldenPinETH))
+	}
+	if o.fixturePinETH != 25593800 {
+		taints = append(taints, fmt.Sprintf("-fixture-pin-eth overridden to %d (fixtures captured at 25593800)", o.fixturePinETH))
+	}
+	if o.engine != "all" {
+		taints = append(taints, fmt.Sprintf("-engine %s (acceptance evidence requires both engines)", o.engine))
+	}
+	if o.toleranceDMWei != 0 {
+		taints = append(taints, fmt.Sprintf("-tolerance-dm-wei %d (diagnosis only; forces fail-with-tolerance)", o.toleranceDMWei))
+	}
+	return taints
+}
+
+// stampSeed echoes the RESOLVED seed into the run section (mutation target
+// 12: a run whose artifact does not carry the seed is unreproducible).
+func stampSeed(run map[string]any, seed string) {
+	run["seed_resolved"] = seed
+}
+
+// runAbort is a typed early exit; artifacts are still written when Phase 1
+// data exists.
+type runAbort struct {
+	code   int
+	status string
+	msg    string
+}
+
+func (a *runAbort) Error() string { return a.msg }
+
+func abort(code int, status, format string, args ...any) *runAbort {
+	return &runAbort{code: code, status: status, msg: fmt.Sprintf(format, args...)}
+}
+
+// --- DSN helpers ------------------------------------------------------------
+
+// readOnlyDSN forces default_transaction_read_only=on at the SESSION level:
+// even autocommit statements on this connection cannot write.
+func readOnlyDSN(dsn string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Scheme == "" {
+		return "", fmt.Errorf("database url %q is not a URL-form DSN", dsn)
+	}
+	q := u.Query()
+	q.Set("options", "-c default_transaction_read_only=on")
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+// --- chain plumbing ---------------------------------------------------------
+
+// chainReader is the failover surface reconcile consumes; *chain.Failover
+// satisfies it. Test fakes implement it WITH failure modes (state-pruned
+// rejections, 429 storms, wrong-height multicall responses) per the house
+// fixture-realism law.
+type chainReader interface {
+	HeaderHashFrom(ctx context.Context, startIndex int, n uint64) (common.Hash, chain.EndpointToken, error)
+	HeaderTimeFrom(ctx context.Context, startIndex int, n uint64) (uint64, chain.EndpointToken, error)
+	CallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error)
+	EndpointCount() int
+}
+
+var _ chainReader = (*chain.Failover)(nil)
+
+// pinnedReader wraps a chainReader with the shared runner (token bucket +
+// bounded retries + per-attempt classification into the artifact).
+type pinnedReader struct {
+	name string
+	c    chainReader
+	run  *rpcRunner
+}
+
+func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, chain.EndpointToken, error) {
+	var out common.Hash
+	tok, err := r.run.run(ctx, r.name, fmt.Sprintf("headerHash(%d)", n), func(ctx context.Context) (chain.EndpointToken, error) {
+		h, t, err := r.c.HeaderHashFrom(ctx, 0, n)
+		if err == nil {
+			out = h
+		}
+		return t, err
+	})
+	return out, tok, err
+}
+
+func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.EndpointToken, error) {
+	var out uint64
+	tok, err := r.run.run(ctx, r.name, fmt.Sprintf("headerTime(%d)", n), func(ctx context.Context) (chain.EndpointToken, error) {
+		v, t, err := r.c.HeaderTimeFrom(ctx, 0, n)
+		if err == nil {
+			out = v
+		}
+		return t, err
+	})
+	return out, tok, err
+}
+
+func (r *pinnedReader) callAtHash(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash) ([]byte, chain.EndpointToken, error) {
+	var out []byte
+	tok, err := r.run.run(ctx, r.name, op, func(ctx context.Context) (chain.EndpointToken, error) {
+		ret, t, err := r.c.CallAtHashFrom(ctx, 0, to, data, hash)
+		if err == nil {
+			out = ret
+		}
+		return t, err
+	})
+	return out, tok, err
+}
+
+// errChunkDivergence marks a multicall chunk reporting a block ≠ P — never
+// silently accepted (brief §5 multicall discipline; exit 3).
+var errChunkDivergence = errors.New("multicall chunk reported a different block than the pin")
+
+// multicallChunkSize bounds one chunk to ≤15 calls (L1-7: the one-arg
+// borrowingOf iterates all configured borrow tokens server-side; 25-50/chunk
+// approaches free-tier caps).
+const multicallChunkSize = 15
+
+// multicall executes calls in ≤15-call chunks at pinHash, asserting each
+// chunk's in-band block number == pin (belt-and-braces on the hash pin) and
+// recording each chunk's serving endpoint. Chunks MAY legitimately be served
+// by different endpoints after mid-walk rotation — no single-endpoint
+// assertion.
+func (r *pinnedReader) multicall(ctx context.Context, op string, pin uint64, pinHash common.Hash, calls []multicallCall) ([]multicallResult, []int, error) {
+	var results []multicallResult
+	var endpoints []int
+	for start := 0; start < len(calls); start += multicallChunkSize {
+		end := start + multicallChunkSize
+		if end > len(calls) {
+			end = len(calls)
+		}
+		data, err := packTryBlockAndAggregate(calls[start:end])
+		if err != nil {
+			return nil, nil, err
+		}
+		ret, tok, err := r.callAtHash(ctx, fmt.Sprintf("%s[chunk %d..%d]", op, start, end-1), multicall3Address, data, pinHash)
+		if err != nil {
+			return nil, nil, err
+		}
+		blockNum, _, chunkResults, err := unpackTryBlockAndAggregate(ret)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !blockNum.IsUint64() || blockNum.Uint64() != pin {
+			return nil, nil, fmt.Errorf("%w: %s chunk served block %s, pin %d (endpoint %d)",
+				errChunkDivergence, op, blockNum, pin, tok.Index)
+		}
+		if len(chunkResults) != end-start {
+			return nil, nil, fmt.Errorf("%s: chunk returned %d results for %d calls", op, len(chunkResults), end-start)
+		}
+		results = append(results, chunkResults...)
+		endpoints = append(endpoints, tok.Index)
+	}
+	return results, endpoints, nil
+}
+
+// secondOpinion re-reads one call from a DIFFERENT endpoint index (§3.5):
+// both answers recorded (drift vs lying endpoint); a 429'd/pruned/absent
+// alternative is "no second opinion available" — never counted as
+// corroboration or contradiction (L1-9).
+func (r *pinnedReader) secondOpinion(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash, servedBy int) (string, *big.Int) {
+	if r.c.EndpointCount() <= 1 {
+		return "no second opinion available (single endpoint)", nil
+	}
+	start := servedBy + 1
+	var out []byte
+	var tok chain.EndpointToken
+	err := func() error {
+		if err := r.run.limiter.wait(ctx); err != nil {
+			return err
+		}
+		r.run.calls++
+		ret, t, err := r.c.CallAtHashFrom(ctx, start, to, data, hash)
+		if err != nil {
+			return err
+		}
+		out, tok = ret, t
+		return nil
+	}()
+	if err != nil {
+		return fmt.Sprintf("no second opinion available (%s)", summarizeSecondOpinionErr(err)), nil
+	}
+	if tok.Index == servedBy {
+		return "no second opinion available (walk fell back to the first-opinion endpoint)", nil
+	}
+	v, err := unpackUint256(dmBorrowingOfOneABI, "borrowingOf", out)
+	if err != nil {
+		return fmt.Sprintf("no second opinion available (undecodable: %v)", err), nil
+	}
+	_ = op
+	return fmt.Sprintf("endpoint %d answered %s", tok.Index, v.String()), v
+}
+
+func summarizeSecondOpinionErr(err error) string {
+	records := classifyFailure(err)
+	classes := map[string]bool{}
+	for _, r := range records {
+		classes[r.Class] = true
+	}
+	keys := make([]string, 0, len(classes))
+	for k := range classes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
+// --- rewind detection (§8) --------------------------------------------------
+
+// rewindBaseline is the Phase-1 snapshot of the detector's inputs.
+type rewindBaseline struct {
+	AckedEpoch map[string]int64
+	LastBlock  map[string]uint64
+	MaxEpoch   map[int64]int64 // INFORMATIONAL ONLY — prune-defeated (§8)
+}
+
+func baselineFromCursors(cursors []store.DeriveCursorState, maxEpochs map[int64]int64) rewindBaseline {
+	b := rewindBaseline{AckedEpoch: map[string]int64{}, LastBlock: map[string]uint64{}, MaxEpoch: maxEpochs}
+	for _, c := range cursors {
+		b.AckedEpoch[c.Engine] = c.AckedEpoch
+		b.LastBlock[c.Engine] = c.LastBlock
+	}
+	return b
+}
+
+// rewindMoved is the end-of-run re-check: per engine, acked_epoch UNCHANGED
+// and last_block ≥ P. It reads acked_epoch, NEVER MAX(reorg_epochs.epoch):
+// PruneAckedReorgEpochs deletes acked epochs, so a rewind+ack+prune cycle
+// completing mid-run leaves MAX unchanged, while RewindDerived always bumps
+// acked_epoch and acks are monotone (derive.go) — the prune-immune signal
+// (mutation target 10).
+func rewindMoved(baseline rewindBaseline, current []store.DeriveCursorState, pins map[string]uint64) []string {
+	var reasons []string
+	byEngine := map[string]store.DeriveCursorState{}
+	for _, c := range current {
+		byEngine[c.Engine] = c
+	}
+	engines := make([]string, 0, len(baseline.AckedEpoch))
+	for e := range baseline.AckedEpoch {
+		engines = append(engines, e)
+	}
+	sort.Strings(engines)
+	for _, e := range engines {
+		cur, ok := byEngine[e]
+		if !ok {
+			reasons = append(reasons, fmt.Sprintf("engine %s: derive cursor disappeared during the run", e))
+			continue
+		}
+		if cur.AckedEpoch != baseline.AckedEpoch[e] {
+			reasons = append(reasons, fmt.Sprintf("engine %s: acked_epoch moved %d → %d (rewind during run)", e, baseline.AckedEpoch[e], cur.AckedEpoch))
+		}
+		if pin, ok := pins[e]; ok && cur.LastBlock < pin {
+			reasons = append(reasons, fmt.Sprintf("engine %s: last_block %d fell below pin %d (rewind during run)", e, cur.LastBlock, pin))
+		}
+	}
+	return reasons
+}
+
+// --- summary / verdict ------------------------------------------------------
+
+// verdictTotals is the summary section's per-class accounting.
+type verdictTotals struct {
+	GatedRows    int `json:"gated_rows"`
+	GatedExact   int `json:"gated_exact"`
+	GatedDrift   int `json:"gated_drift"`
+	AdvisoryRows int `json:"advisory_rows"`
+}
+
+// computeResult decides the run result. Structure (brief §3.5): any nonzero
+// -tolerance-dm-wei forces fail-with-tolerance — it CANNOT launder into a
+// pass receipt even when every row is exact (the tolerance-laundering guard,
+// mutation-killed by TestNonzeroToleranceCannotProducePass).
+func computeResult(gatedFailures int, toleranceDMWei int64) (result string, code int) {
+	if toleranceDMWei != 0 {
+		return "fail-with-tolerance", exitVerdictFail
+	}
+	if gatedFailures > 0 {
+		return "fail", exitVerdictFail
+	}
+	return "pass", exitPass
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+func run(args []string, stdout, stderr io.Writer) int {
+	o, err := parseFlags(args, stderr)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return exitPass
+		}
+		fmt.Fprintln(stderr, "usage error:", err)
+		return exitUsage
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), o.timeout)
+	defer cancel()
+
+	code, err := execute(ctx, o, stdout, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+	}
+	return code
+}
+
+// execute drives the phases; it returns the process exit code.
+func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, error) {
+	rpcLog := &rpcCallLog{}
+	runner := newRPCRunner(o.rps, o.rpcAttempts, rpcLog)
+
+	rep := &driftReport{
+		Schema: driftReportSchema,
+		Status: "completed",
+		Run: map[string]any{
+			"cmdline":    strings.Join(os.Args, " "),
+			"started_at": time.Now().UTC().Format(time.RFC3339),
+		},
+		Summary: map[string]any{},
+		RPC:     rpcLog,
+	}
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				rep.Run["git_commit"] = s.Value
+			}
+			if s.Key == "vcs.modified" {
+				rep.Run["git_dirty"] = s.Value
+			}
+		}
+	}
+	if taints := acceptanceTaints(o); len(taints) > 0 {
+		rep.Run["acceptance"] = false
+		rep.Run["acceptance_taints"] = taints
+	} else {
+		rep.Run["acceptance"] = true
+	}
+
+	phase1Done := false
+	finish := func(a *runAbort) (int, error) {
+		if a.code != exitPass {
+			rep.Status = a.status
+			rep.Summary["result"] = statusResult(a)
+		}
+		if phase1Done || a.code == exitVerdictFail {
+			rep.Run["finished_at"] = time.Now().UTC().Format(time.RFC3339)
+			jsonPath, txtPath, werr := writeArtifacts(o.out, rep)
+			if werr != nil {
+				fmt.Fprintln(stderr, "artifact write failed:", werr)
+			} else {
+				fmt.Fprintf(stdout, "artifacts: %s %s\ncomparison sha256: %s\n", jsonPath, txtPath, rep.ComparisonSHA256)
+			}
+		}
+		if a.code == exitPass {
+			return exitPass, nil
+		}
+		return a.code, fmt.Errorf("%s", a.msg)
+	}
+
+	// ---------------- Phase 0: preflight (no snapshot held) ----------------
+	cfg, err := config.Load(o.configPath)
+	if err != nil {
+		return exitPrecondition, fmt.Errorf("config/env load failed: %w\n(hint: run via `make reconcile` or export .env — reconcile needs SOLVENT_DATABASE_URL and the SOLVENT_RPC_* variables even when SOLVENT_RECON_RPC_* overrides are set)", err)
+	}
+	reconDSN := cfg.DatabaseURL
+	roDSN, err := readOnlyDSN(reconDSN)
+	if err != nil {
+		return exitPrecondition, err
+	}
+
+	// Recon-specific RPC configuration (controller gate amendment): the ETH
+	// recon endpoint must be archive-state capable; SOLVENT_RECON_RPC_* take
+	// precedence, falling back to SOLVENT_RPC_*. Keys live in env only —
+	// never in code, never in artifacts (URLs are NOT recorded; only their
+	// env-var provenance is).
+	rpcSource := map[string]string{}
+	urlsFor := func(chainName, reconEnv string) []string {
+		if v := strings.TrimSpace(os.Getenv(reconEnv)); v != "" {
+			var out []string
+			for _, u := range strings.Split(v, ",") {
+				if u = strings.TrimSpace(u); u != "" {
+					out = append(out, u)
+				}
+			}
+			if len(out) > 0 {
+				rpcSource[chainName] = reconEnv
+				return out
+			}
+		}
+		rpcSource[chainName] = "SOLVENT_RPC_" + strings.ToUpper(chainName) + " (fallback)"
+		return cfg.Chains[chainName].RPCURLs
+	}
+	opURLs := urlsFor("op", "SOLVENT_RECON_RPC_OP")
+	ethURLs := urlsFor("eth", "SOLVENT_RECON_RPC_ETH")
+	rep.Run["rpc_source"] = rpcSource
+	rep.Run["db_name"] = dbNameFromDSN(reconDSN)
+
+	// DSN-split tripwire (§1.2, resolving L2-1 — THE hazard).
+	if testDSN := os.Getenv("TEST_DATABASE_URL"); testDSN != "" {
+		if err := checkDSNSplit(ctx, roDSN, testDSN); err != nil {
+			return exitPrecondition, err
+		}
+	}
+
+	// Schema gate: exact equality, read-only, never Migrate.
+	expected, err := store.ExpectedSchemaVersion()
+	if err != nil {
+		return exitPrecondition, err
+	}
+	pre, err := pgx.Connect(ctx, roDSN)
+	if err != nil {
+		return exitPrecondition, fmt.Errorf("connect (preflight): %w", err)
+	}
+	schemaV, err := store.SchemaVersion(ctx, pre)
+	if err != nil {
+		pre.Close(ctx)
+		return exitPrecondition, err
+	}
+	if schemaV != expected {
+		pre.Close(ctx)
+		return exitPrecondition, fmt.Errorf("schema gate: database at goose version %d, this binary expects exactly %d — reconcile never migrates", schemaV, expected)
+	}
+	rep.Run["schema_version"] = schemaV
+
+	// Quick autocommit read: derive cursors (preflight pins + derive-lag
+	// diagnostic).
+	preCursors, err := store.DeriveCursorStates(ctx, pre)
+	if err != nil {
+		pre.Close(ctx)
+		return exitPrecondition, err
+	}
+	pre.Close(ctx)
+	preByEngine := map[string]store.DeriveCursorState{}
+	for _, c := range preCursors {
+		preByEngine[c.Engine] = c
+	}
+
+	wantDM := o.engine == "all" || o.engine == dmEngine
+	wantAave := o.engine == "all" || o.engine == aaveEngine
+
+	// Dial + verify chains.
+	var opReader, ethReader *pinnedReader
+	if wantDM {
+		opChain, err := chain.Dial(ctx, opURLs)
+		if err != nil {
+			return exitRetryable, fmt.Errorf("dial op: %w", err)
+		}
+		if err := opChain.VerifyChainID(ctx, uint64(cfg.Chains["op"].ChainID)); err != nil {
+			return exitPrecondition, fmt.Errorf("op chain-id verify: %w", err)
+		}
+		opReader = &pinnedReader{name: "op", c: opChain, run: runner}
+	}
+	if wantAave {
+		ethChain, err := chain.Dial(ctx, ethURLs)
+		if err != nil {
+			return exitRetryable, fmt.Errorf("dial eth: %w", err)
+		}
+		if err := ethChain.VerifyChainID(ctx, uint64(cfg.Chains["eth"].ChainID)); err != nil {
+			return exitPrecondition, fmt.Errorf("eth chain-id verify: %w", err)
+		}
+		ethReader = &pinnedReader{name: "eth", c: ethChain, run: runner}
+	}
+
+	vec, err := loadGoldenVectors()
+	if err != nil {
+		return exitPrecondition, err
+	}
+	if o.goldenPinETH != 0 {
+		vec.W1PinETH = o.goldenPinETH
+	}
+	if o.fixturePinETH != 0 {
+		vec.FixturePinETH = o.fixturePinETH
+	}
+	dmProxy, aavePool, atokens, err := resolveContracts(cfg, vec)
+	if err != nil {
+		return exitPrecondition, err
+	}
+
+	// RPC preflight probes, cheapest first (§0): golden-pin archive
+	// capability on ETH (both deep pins), one pinned call at the OP derive
+	// cursor. A state-pruned classification HERE is exit 2 (golden pins:
+	// named endpoint + depth) / exit 3 (fresh pin: wait for catch-up,
+	// re-pin, or use an archive endpoint).
+	if wantAave {
+		borrower1 := common.HexToAddress(vec.Borrowers[0].Address)
+		weethAToken := atokens[strings.ToLower(strings.TrimPrefix(vec.Borrowers[0].CollateralReserve, "0x"))]
+		for _, pin := range []uint64{vec.W1PinETH, vec.FixturePinETH} {
+			h, _, err := ethReader.headerHash(ctx, pin)
+			if err != nil {
+				return preflightExit(err, "eth", pin, true)
+			}
+			data, err := aaveScaledBalanceOfABI.Pack("scaledBalanceOf", borrower1)
+			if err != nil {
+				return exitPrecondition, err
+			}
+			if _, _, err := ethReader.callAtHash(ctx, fmt.Sprintf("preflight:eth@%d", pin), weethAToken, data, h); err != nil {
+				return preflightExit(err, "eth", pin, true)
+			}
+		}
+	}
+	if wantDM {
+		dmCursor, ok := preByEngine[dmEngine]
+		if !ok {
+			return exitPrecondition, fmt.Errorf("no derive cursor for %s — nothing to reconcile (backfill not started?)", dmEngine)
+		}
+		h, _, err := opReader.headerHash(ctx, dmCursor.LastBlock)
+		if err != nil {
+			return preflightExit(err, "op", dmCursor.LastBlock, false)
+		}
+		anchor := common.HexToAddress(forcedDMAnchors[0])
+		data, err := dmBorrowingOfOneABI.Pack("borrowingOf", anchor, anchor) // shape probe only: any pinned eth_call proves serveability
+		if err != nil {
+			return exitPrecondition, err
+		}
+		if _, _, err := opReader.callAtHash(ctx, fmt.Sprintf("preflight:op@%d", dmCursor.LastBlock), dmProxy, data, h); err != nil {
+			return preflightExit(err, "op", dmCursor.LastBlock, false)
+		}
+	}
+
+	// Head-lag QUALITY gate (§3.1: the false serveability inference is
+	// GONE; this is purely "the daemon is stalled, evidence would be
+	// stale").
+	if o.maxHeadLag > 0 {
+		for engine, reader := range map[string]*pinnedReader{dmEngine: opReader, aaveEngine: ethReader} {
+			if reader == nil {
+				continue
+			}
+			c, ok := preByEngine[engine]
+			if !ok {
+				continue
+			}
+			t, _, err := reader.headerTime(ctx, c.LastBlock)
+			if err != nil {
+				return exitRetryable, fmt.Errorf("head-lag probe (%s): %w", engine, err)
+			}
+			if lag := time.Since(time.Unix(int64(t), 0)); lag > o.maxHeadLag {
+				return exitRetryable, fmt.Errorf("derive cursor for %s is %s behind wall clock (bound %s) — daemon stalled or backfill incomplete; evidence would be stale (exit 3, retryable)", engine, lag.Round(time.Second), o.maxHeadLag)
+			}
+		}
+	}
+
+	if o.preflightOnly {
+		fmt.Fprintln(stdout, "preflight OK (Phase 0 complete; snapshot never opened)")
+		return exitPass, nil
+	}
+
+	// ---------------- Phase 1: RR snapshot — ALL DB reads ----------------
+	p1, err := runPhase1(ctx, o, cfg, roDSN, vec, wantDM, wantAave, opReader, ethReader)
+	if err != nil {
+		var a *runAbort
+		if errors.As(err, &a) {
+			return finish(a)
+		}
+		return exitPrecondition, err
+	}
+	phase1Done = true
+	stampSeed(rep.Run, p1.seed)
+	rep.Run["config_sha256"] = p1.configSHA
+	rep.Run["derive_lag_at_start"] = p1.deriveLag
+	rep.Cursors = p1.cursorInfo()
+	rep.Counts = p1.counts
+	rep.Sample = p1.sampleSection()
+	rep.Invariants = p1.invariants
+	rep.InternalInconsistencies = p1.internalSection()
+	rep.Pins = p1.pinSection()
+
+	// Population preconditions (§2) — exit 2, never a silent pass; the
+	// artifact for a precondition abort is still written (phase1Done).
+	if wantDM {
+		if p1.counts.MigrationGenesisRows != expectedMigrationGenesisRows {
+			return finish(abort(exitPrecondition, "aborted: precondition",
+				"migration_genesis SEED-ROW count %d != %d (the recon-fetched batch census); distinct accounts %d recorded separately — a row-vs-distinct gap is an adjudication finding, never normalized",
+				p1.counts.MigrationGenesisRows, expectedMigrationGenesisRows, p1.counts.MigrationGenesisDistinct))
+		}
+		for _, s := range stratumOrder {
+			if p1.strataCounts[s] == 0 {
+				return finish(abort(exitPrecondition, "aborted: precondition",
+					"stratum %q is EMPTY — taxonomy drift tripwire (§2)", s))
+			}
+		}
+		if len(p1.population) == 0 {
+			return finish(abort(exitPrecondition, "aborted: precondition", "borrower population is empty"))
+		}
+	}
+	if wantAave {
+		aaveCursor := preByEngine[aaveEngine]
+		if aaveCursor.LastBlock < vec.FixturePinETH {
+			return finish(abort(exitPrecondition, "aborted: precondition",
+				"aave derive cursor %d is below the fixture vector block %d — golden rows cannot run (exit 2)",
+				aaveCursor.LastBlock, vec.FixturePinETH))
+		}
+	}
+
+	// ---------------- Phase 2: RPC comparisons (OP, then ETH) -------------
+	gatedFailures := 0
+
+	// Fork welds "before" (§3.1 + L0-10) — run for both chains right after
+	// the snapshot closes, before any expensive comparison.
+	for i := range rep.Pins {
+		reader := opReader
+		if rep.Pins[i].Chain == "eth" {
+			reader = ethReader
+		}
+		if reader == nil || rep.Pins[i].Chain == "golden" {
+			continue
+		}
+		verdict, err := p1.runWeld(ctx, reader, rep.Pins[i].Chain)
+		if err != nil {
+			var a *runAbort
+			if errors.As(err, &a) {
+				return finish(a)
+			}
+			return finish(abort(exitRetryable, "aborted: weld", "fork weld (%s): %v", rep.Pins[i].Chain, err))
+		}
+		rep.Pins[i].WeldBefore = verdict
+		if verdict != "ok" {
+			return finish(abort(exitRetryable, "aborted: weld",
+				"fork weld FAILED before comparisons on %s: %s — the pin's chain state is not canonical; re-pin and re-run (exit 3)", rep.Pins[i].Chain, verdict))
+		}
+	}
+
+	if wantDM {
+		if err := runDMPhase(ctx, o, p1, opReader, dmProxy, rep, &gatedFailures); err != nil {
+			var a *runAbort
+			if errors.As(err, &a) {
+				return finish(a)
+			}
+			return finish(abort(exitRetryable, "aborted: rpc", "dm phase: %v", err))
+		}
+	}
+	if wantAave {
+		if err := runAavePhase(ctx, o, p1, ethReader, aavePool, atokens, vec, rep, &gatedFailures); err != nil {
+			var a *runAbort
+			if errors.As(err, &a) {
+				return finish(a)
+			}
+			return finish(abort(exitRetryable, "aborted: rpc", "aave phase: %v", err))
+		}
+	}
+
+	// Freshness gate + internal-inconsistency gate accounting (DB-derived,
+	// but gated with everything else).
+	if rep.Freshness != nil {
+		gatedFailures += rep.Freshness.GateFailures
+	}
+	gatedFailures += p1.internalFailures()
+	gatedFailures += p1.invariantGatedRows()
+
+	// ---------------- Phase 3: rewind re-check (fresh connection) ---------
+	fresh, err := pgx.Connect(ctx, roDSN)
+	if err != nil {
+		return finish(abort(exitRetryable, "aborted: recheck", "fresh connection for rewind re-check: %v", err))
+	}
+	currentCursors, err := store.DeriveCursorStates(ctx, fresh)
+	fresh.Close(ctx)
+	if err != nil {
+		return finish(abort(exitRetryable, "aborted: recheck", "re-read derive cursors: %v", err))
+	}
+	if reasons := rewindMoved(p1.baseline, currentCursors, p1.pins); len(reasons) > 0 {
+		return finish(abort(exitRetryable, "aborted: rewind during run", "%s", strings.Join(reasons, "; ")))
+	}
+	for i := range rep.Pins {
+		reader := opReader
+		if rep.Pins[i].Chain == "eth" {
+			reader = ethReader
+		}
+		if reader == nil || rep.Pins[i].Chain == "golden" {
+			continue
+		}
+		verdict, err := p1.runWeld(ctx, reader, rep.Pins[i].Chain)
+		if err != nil {
+			return finish(abort(exitRetryable, "aborted: recheck", "fork weld re-run (%s): %v", rep.Pins[i].Chain, err))
+		}
+		rep.Pins[i].WeldAfter = verdict
+		if verdict != "ok" {
+			return finish(abort(exitRetryable, "aborted: rewind during run",
+				"fork weld re-run FAILED on %s: %s (requireCanonical=false means an orphaned pin keeps serving silently — this end-of-run check is load-bearing, L1-8)", rep.Pins[i].Chain, verdict))
+		}
+	}
+	rep.Cursors.AckedEpochs = ackedEpochSection(p1.baseline, currentCursors)
+
+	// ---------------- Phase 4: artifact + verdict --------------------------
+	result, code := computeResult(gatedFailures, o.toleranceDMWei)
+	rep.Summary["result"] = result
+	rep.Summary["gated_failures"] = gatedFailures
+	rep.Summary["totals"] = rep.tallyTotals()
+	rep.Summary["estimated_eth_calls"] = runner.calls
+	rep.Summary["injectivity"] = "floor(n·I/1e18) is injective in n for I ≥ 1e18 (always true — the index starts at 1e18 and accrues), so USD-level equality ⟺ normalized equality; using the contract's own index at P is not circular"
+	rep.Run["finished_at"] = time.Now().UTC().Format(time.RFC3339)
+
+	jsonPath, txtPath, err := writeArtifacts(o.out, rep)
+	if err != nil {
+		return exitRetryable, err
+	}
+	fmt.Fprintf(stdout, "artifacts: %s %s\ncomparison sha256: %s\nresult: %s (gated failures: %d)\n",
+		jsonPath, txtPath, rep.ComparisonSHA256, result, gatedFailures)
+	if code != exitPass {
+		return code, fmt.Errorf("reconcile verdict: %s", result)
+	}
+	return exitPass, nil
+}
+
+func statusResult(a *runAbort) string {
+	if a.code == exitVerdictFail {
+		return "fail"
+	}
+	return "aborted"
+}
+
+// preflightExit maps a preflight probe failure to the right exit code:
+// state-pruned at a GOLDEN pin (deep, mandatory for Row A) is exit 2 naming
+// endpoint + depth; at the FRESH pin it is exit 3 (retryable: wait for
+// daemon catch-up, re-pin, or use an archive endpoint).
+func preflightExit(err error, chainName string, pin uint64, goldenPin bool) (int, error) {
+	var pf *pinnedFailure
+	if errors.As(err, &pf) {
+		switch pf.Class {
+		case classStatePruned:
+			endpoints := endpointList(pf.Attempts)
+			if goldenPin {
+				return exitPrecondition, fmt.Errorf("preflight: %s endpoint(s) %v cannot serve state at pin %d (state-pruned after bounded retries) — the W1 golden row needs an archive-capable endpoint (SOLVENT_RECON_RPC_ETH); never skipped, never fixture-substituted", chainName, endpoints, pin)
+			}
+			return exitRetryable, fmt.Errorf("preflight: %s endpoint(s) %v cannot serve state at fresh pin %d (state-pruned) — wait for daemon catch-up, re-pin, or use an archive endpoint (exit 3)", chainName, endpoints, pin)
+		case classCapability:
+			return exitPrecondition, fmt.Errorf("preflight: every %s endpoint refused on capability (403) at pin %d", chainName, pin)
+		case classThrottle:
+			return exitRetryable, fmt.Errorf("preflight: %s throttled through the whole retry budget at pin %d (exit 3)", chainName, pin)
+		}
+	}
+	return exitRetryable, fmt.Errorf("preflight probe (%s @ %d): %w", chainName, pin, err)
+}
+
+func endpointList(attempts []attemptRecord) []int {
+	seen := map[int]bool{}
+	var out []int
+	for _, a := range attempts {
+		if a.Class == classStatePruned && !seen[a.Endpoint] {
+			seen[a.Endpoint] = true
+			out = append(out, a.Endpoint)
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// checkDSNSplit is the §1.2 tripwire: connect BOTH DSNs read-only and
+// compare live database identity — parsing strings would miss host aliases.
+// An unverifiable test DSN fails CLOSED: the whole point is that the
+// destructive suite must provably point elsewhere.
+func checkDSNSplit(ctx context.Context, reconRODSN, testDSN string) error {
+	reconConn, err := pgx.Connect(ctx, reconRODSN)
+	if err != nil {
+		return fmt.Errorf("connect (tripwire, recon side): %w", err)
+	}
+	defer reconConn.Close(ctx)
+	reconID, err := store.DatabaseIdentity(ctx, reconConn)
+	if err != nil {
+		return err
+	}
+	testRO, err := readOnlyDSN(testDSN)
+	if err != nil {
+		return fmt.Errorf("TEST_DATABASE_URL: %w", err)
+	}
+	testConn, err := pgx.Connect(ctx, testRO)
+	if err != nil {
+		return fmt.Errorf("TEST_DATABASE_URL is set but unverifiable (%v) — failing closed: %s", err, tripwireMsg)
+	}
+	defer testConn.Close(ctx)
+	testID, err := store.DatabaseIdentity(ctx, testConn)
+	if err != nil {
+		return err
+	}
+	if dsnCollision(reconID, testID) {
+		return fmt.Errorf("%s (both resolve to %s)", tripwireMsg, reconID)
+	}
+	return nil
+}
+
+// dsnCollision is the tripwire's decision (mutation target: disabling it
+// must be killed by TestDSNTripwireDetectsSameDatabase).
+func dsnCollision(reconID, testID string) bool {
+	return reconID == testID
+}
+
+func dbNameFromDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "(unparseable)"
+	}
+	return strings.TrimPrefix(u.Path, "/")
+}
+
+// resolveContracts pulls every contract address from config/fixtures at
+// runtime (never hardcoded): the DM proxy from the op:debt-manager stream,
+// the Aave Pool from eth:aave-etherfi, and the aToken per underlying
+// reserve from the eth:atoken-* streams the golden vectors name.
+func resolveContracts(cfg *config.Config, vec goldenVectors) (dmProxy, aavePool common.Address, atokens map[string]common.Address, err error) {
+	streams := map[string]config.Stream{}
+	for _, s := range cfg.Streams {
+		streams[s.Name] = s
+	}
+	dm, ok := streams["op:debt-manager"]
+	if !ok || len(dm.Addresses) == 0 {
+		return dmProxy, aavePool, nil, fmt.Errorf("config stream op:debt-manager missing or empty")
+	}
+	dmProxy = dm.Addresses[0]
+	pool, ok := streams["eth:aave-etherfi"]
+	if !ok || len(pool.Addresses) == 0 {
+		return dmProxy, aavePool, nil, fmt.Errorf("config stream eth:aave-etherfi missing or empty")
+	}
+	aavePool = pool.Addresses[0]
+	atokens = map[string]common.Address{}
+	for _, r := range vec.Reserves {
+		s, ok := streams[r.AtokenStream]
+		if !ok || len(s.Addresses) == 0 {
+			return dmProxy, aavePool, nil, fmt.Errorf("config stream %s (aToken for %s) missing or empty", r.AtokenStream, r.Symbol)
+		}
+		atokens[strings.ToLower(strings.TrimPrefix(r.Underlying, "0x"))] = s.Addresses[0]
+	}
+	return dmProxy, aavePool, atokens, nil
+}
+
+func ackedEpochSection(baseline rewindBaseline, current []store.DeriveCursorState) map[string]map[string]int64 {
+	out := map[string]map[string]int64{}
+	for _, c := range current {
+		out[c.Engine] = map[string]int64{
+			"start": baseline.AckedEpoch[c.Engine],
+			"end":   c.AckedEpoch,
+		}
+	}
+	return out
+}
+
+// tallyTotals sums per-verdict counts across every row family.
+func (r *driftReport) tallyTotals() verdictTotals {
+	t := verdictTotals{}
+	add := func(gated bool, verdict string) {
+		if gated {
+			t.GatedRows++
+			if verdict == verdictExact || verdict == "ok" || verdict == "fresh" {
+				t.GatedExact++
+			} else {
+				t.GatedDrift++
+			}
+		} else {
+			t.AdvisoryRows++
+		}
+	}
+	for _, row := range r.DMRows {
+		add(true, row.Verdict)
+	}
+	for _, w := range r.DMWeld {
+		add(true, w.Verdict)
+	}
+	for _, c := range r.DMIndexCheck {
+		add(c.Gated, c.Verdict)
+	}
+	for _, row := range r.AaveRows {
+		add(row.Gated, row.Verdict)
+	}
+	for _, w := range r.AaveWeld {
+		add(w.Gated, w.Verdict)
+	}
+	for _, g := range r.Golden {
+		add(true, g.Verdict)
+	}
+	for _, c := range r.CollateralReplay {
+		add(c.Gated, c.Verdict)
+	}
+	if r.Freshness != nil {
+		for _, s := range r.Freshness.Sampled {
+			add(true, s.Verdict)
+		}
+	}
+	return t
+}
