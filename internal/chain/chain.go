@@ -983,6 +983,35 @@ func (f *Failover) BlockNumber(ctx context.Context) (uint64, error) {
 	return out, err
 }
 
+// BlockNumberFrom is BlockNumber with a CALLER-SCOPED starting endpoint (see
+// CallFrom for why the shared hint stays out of it) and an EndpointToken
+// naming the endpoint that answered — the walker's per-Step serving-endpoint
+// resolution (Task 9 wave 12, chain-truth consult F1). The QUESTION ON THE
+// WIRE IS UNCHANGED: eth_blockNumber stays eth_blockNumber, through the same
+// strict raw-quantity gate as the shared path (endpointClient.BlockNumber —
+// the wave-8 canon gate; see that method's comment for why the head probe
+// must not become eth_getBlockByNumber("latest")). Plain doFrom, no
+// per-attempt aggregate: the walker advances routing on BOTH failure
+// postures, so pinned-call-style outcome retention is deliberately not
+// carried here — the smallest possible reopen of this approved surface.
+func (f *Failover) BlockNumberFrom(ctx context.Context, startIndex int) (uint64, EndpointToken, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out uint64
+	idx, err := f.doFrom(ctx, "blockNumber", start, func(ctx context.Context, c rpcClient) error {
+		v, err := c.BlockNumber(ctx)
+		if err != nil {
+			return err
+		}
+		out = v
+		return nil
+	})
+	if err != nil {
+		return 0, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
 // HeaderHash returns the PROVIDER-REPORTED hash of block n, under ordinary
 // shared-path failover. The value is the raw response's own hash field —
 // never a local types.Header.Hash() recomputation, which is silently
@@ -1379,4 +1408,34 @@ func (f *Failover) Logs(ctx context.Context, from, to uint64, addrs []common.Add
 		return err
 	})
 	return out, err
+}
+
+// LogsFrom is Logs with a CALLER-SCOPED starting endpoint (see CallFrom for
+// why the shared hint stays out of it) and an EndpointToken naming the
+// endpoint that served the window — the read the walker pins to its Step's
+// serving endpoint so a window is never assembled from two chain views
+// (Task 9 wave 12, chain-truth consult F1). The QUESTION ON THE WIRE IS
+// UNCHANGED: the same eth_getLogs filter as Logs, through the same strict
+// per-log wire gates (endpointClient.FilterLogs — the wave-8 canon layer).
+// Plain doFrom, no per-attempt aggregate, for the reason on BlockNumberFrom.
+func (f *Failover) LogsFrom(ctx context.Context, startIndex int, from, to uint64, addrs []common.Address) ([]types.Log, EndpointToken, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out []types.Log
+	idx, err := f.doFrom(ctx, "getLogs", start, func(ctx context.Context, c rpcClient) error {
+		logs, err := c.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(from),
+			ToBlock:   new(big.Int).SetUint64(to),
+			Addresses: addrs,
+		})
+		if err != nil {
+			return err
+		}
+		out = logs
+		return nil
+	})
+	if err != nil {
+		return nil, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
 }
