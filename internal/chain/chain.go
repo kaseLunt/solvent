@@ -10,8 +10,10 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // defaultAttemptTimeout bounds a single RPC attempt against one endpoint so a
@@ -20,7 +22,19 @@ const defaultAttemptTimeout = 30 * time.Second
 
 type rpcClient interface {
 	BlockNumber(ctx context.Context) (uint64, error)
-	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
+	// ReportedHeaderByNumber returns the block's PROVIDER-REPORTED identity —
+	// the hash/parentHash/number/timestamp fields of a raw
+	// eth_getBlockByNumber(number, false) response, the hash taken verbatim
+	// and never locally recomputed (see ReportedHeader's trust posture). A nil
+	// number asks for "latest"; a nil header with a nil error means the
+	// endpoint does not have the block.
+	//
+	// This interface deliberately carries NO method returning *types.Header:
+	// a header this package cannot see is a header it cannot re-hash, so the
+	// wave-5 principle — the chain layer never locally recomputes a header
+	// hash — holds structurally, not by convention (the same argument
+	// prices.PollChain makes by not carrying CallAtFrom).
+	ReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error)
 	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
 	ChainID(ctx context.Context) (*big.Int, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
@@ -30,6 +44,85 @@ type rpcClient interface {
 	// the request ("block not found" class) — it can never be silently served
 	// from a different block that happens to share the height.
 	CallContractAtHash(ctx context.Context, msg ethereum.CallMsg, blockHash common.Hash) ([]byte, error)
+}
+
+// ReportedHeader is a block's identity AS THE PROVIDER REPORTS IT: the hash,
+// parentHash, number and timestamp fields of the raw eth_getBlockByNumber
+// response, verbatim. Every hash this package hands out comes from here.
+//
+// TRUST POSTURE (Task 9 wave 5; forensic proof committed at
+// .superpowers/sdd/r001-probe/hashcheck.go). The previous acquisition —
+// ethclient.HeaderByNumber + types.Header.Hash(), i.e. keccak over the
+// re-RLP-encoded KNOWN fields — was a FALSE guarantee: go-ethereum v1.13.0
+// cannot represent the 2026 OP-mainnet header shape, so its recomputation is
+// silently non-canonical for every modern OP block (computed 0x70f6bea2…
+// where the canonical hash of OP block 150,105,227 is 0x3d957321…; MATCH
+// false, live-proven). Local recomputation is not a stronger claim than the
+// provider's word — L2 consensus is NOT locally verifiable from header bytes
+// — and pretending otherwise broke exactly the cross-checks it was supposed
+// to strengthen. Reported hashes keep every one of those checks meaningful on
+// its honest terms:
+//
+//   - reorg detection compares reported-now against reported-then;
+//   - the walker's tip-log equality compares two provider-internal values;
+//   - the EIP-1898 pin round-trips the same identity back to the node, which
+//     either recognizes its own hash or rejects — a recomputed hash no node
+//     ever issued is rejected FOREVER.
+//
+// The refusals stay: a mined block whose reported hash is zero or absent is a
+// provider protocol violation (validateReportedHeader), refused before the
+// value can reach any consumer.
+type ReportedHeader struct {
+	Hash       common.Hash    `json:"hash"`
+	ParentHash common.Hash    `json:"parentHash"`
+	Number     *hexutil.Big   `json:"number"`
+	Time       hexutil.Uint64 `json:"timestamp"`
+}
+
+// validateReportedHeader is the protocol gate every header read passes
+// through. A missing block (nil header) is an honest "not found"; a PRESENT
+// block whose reported hash is ZERO, or whose number is absent or not a
+// uint64, violates the JSON-RPC contract for mined blocks — nothing in such a
+// response is trustworthy, so the attempt fails and the failover walk rotates
+// to the next endpoint. This is the zero-hash refusal enforced at the source:
+// a zero hash must never be handed out as a block identity, because an anchor
+// holding it would "verify" against nothing during reorg repair.
+func validateReportedHeader(rh *ReportedHeader, what string) error {
+	if rh == nil {
+		return fmt.Errorf("header %s not found", what)
+	}
+	if rh.Hash == (common.Hash{}) {
+		return fmt.Errorf("header %s reports a zero hash — a provider protocol violation; refusing to hand out an unverifiable block identity", what)
+	}
+	if rh.Number == nil || !(*big.Int)(rh.Number).IsUint64() {
+		return fmt.Errorf("header %s reports number %v, not a uint64", what, rh.Number)
+	}
+	return nil
+}
+
+// endpointClient is one endpoint's rpcClient: go-ethereum's typed client for
+// every call that consumes decoded VALUES, plus the raw connection for the
+// one read the typed client cannot be trusted with — a header's identity.
+// ethclient.HeaderByNumber decodes into types.Header and DERIVES the hash by
+// re-RLP-hashing the fields it knows, which is silently non-canonical on any
+// chain whose header shape is newer than the vendored geth (the live-proven
+// OP case; see ReportedHeader). The raw response's own hash field is the only
+// honest source, so header identity reads go through the raw client.
+type endpointClient struct {
+	*ethclient.Client
+	raw *rpc.Client
+}
+
+func (e *endpointClient) ReportedHeaderByNumber(ctx context.Context, number *big.Int) (*ReportedHeader, error) {
+	arg := "latest"
+	if number != nil {
+		arg = hexutil.EncodeBig(number)
+	}
+	var rh *ReportedHeader
+	if err := e.raw.CallContext(ctx, &rh, "eth_getBlockByNumber", arg, false); err != nil {
+		return nil, err
+	}
+	return rh, nil // nil (not found) when the endpoint answered null
 }
 
 // EndpointToken identifies which endpoint served a successful semantic-layer
@@ -71,11 +164,15 @@ func Dial(ctx context.Context, urls []string) (*Failover, error) {
 	}
 	clients := make([]rpcClient, 0, len(urls))
 	for _, u := range urls {
-		c, err := ethclient.DialContext(ctx, u)
+		// Dial the RAW connection and wrap the typed client around it: the
+		// typed client serves the value-decoding calls, and the raw handle
+		// serves ReportedHeaderByNumber, whose whole point is to bypass the
+		// typed client's hash recomputation (see endpointClient).
+		rc, err := rpc.DialContext(ctx, u)
 		if err != nil {
 			return nil, fmt.Errorf("dial %s: %w", u, err)
 		}
-		clients = append(clients, c)
+		clients = append(clients, &endpointClient{Client: ethclient.NewClient(rc), raw: rc})
 	}
 	return newFailover(clients), nil
 }
@@ -256,17 +353,23 @@ func (f *Failover) BlockNumber(ctx context.Context) (uint64, error) {
 	return out, err
 }
 
+// HeaderHash returns the PROVIDER-REPORTED hash of block n, under ordinary
+// shared-path failover. The value is the raw response's own hash field —
+// never a local types.Header.Hash() recomputation, which is silently
+// non-canonical for chains whose header shape postdates the vendored geth
+// (see ReportedHeader's trust posture; live-proven on OP mainnet at block
+// 150,105,227).
 func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error) {
 	var out common.Hash
 	_, err := f.do(ctx, "headerHash", func(ctx context.Context, c rpcClient) error {
-		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		rh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))
 		if err != nil {
 			return err
 		}
-		if h == nil {
-			return fmt.Errorf("header %d not found", n)
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+			return err
 		}
-		out = h.Hash()
+		out = rh.Hash
 		return nil
 	})
 	return out, err
@@ -287,17 +390,38 @@ func (f *Failover) HeaderHash(ctx context.Context, n uint64) (common.Hash, error
 // measurement is not a liveness probe that has to route around ingestion's
 // endpoint, and sharing the sticky hint means it rides the endpoint ingestion is
 // already using rather than warming a second one.
+// HeaderTime returns the header TIMESTAMP (unix seconds) of block n, under
+// ordinary shared-path failover.
+//
+// It exists because a block DISTANCE is not an elapsed time. The daemon's
+// liquidation-facing freshness requirement is stated in time, and converting it
+// through a nominal block cadence (12s slots, 2s OP blocks) is a unit-conversion
+// fallacy: missed slots or degraded production make the same block count span
+// materially longer, so a distance gate can read green while the state served is
+// hours old. Measuring `now - ts(cursor block)` gates the property directly, and
+// the only place that timestamp exists is the header.
+//
+// It deliberately uses the SHARED path (do), not a caller-scoped walk: the
+// measurement is not a liveness probe that has to route around ingestion's
+// endpoint, and sharing the sticky hint means it rides the endpoint ingestion is
+// already using rather than warming a second one.
+//
+// Since Task 9 wave 5 it shares the REPORTED-header fetch. Its field use was
+// never wrong — the timestamp always came decoded from the provider's own
+// response, untouched by the hash-recomputation defect — but one fetch path
+// means one protocol gate: a response malformed enough to fail
+// validateReportedHeader is not trusted for its timestamp either.
 func (f *Failover) HeaderTime(ctx context.Context, n uint64) (uint64, error) {
 	var out uint64
 	_, err := f.do(ctx, "headerTime", func(ctx context.Context, c rpcClient) error {
-		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		rh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))
 		if err != nil {
 			return err
 		}
-		if h == nil {
-			return fmt.Errorf("header %d not found", n)
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+			return err
 		}
-		out = h.Time
+		out = uint64(rh.Time)
 		return nil
 	})
 	return out, err
@@ -308,7 +432,8 @@ func (f *Failover) HeaderTime(ctx context.Context, n uint64) (uint64, error) {
 // falsifiable — a node frozen on old state still answers eth_blockNumber with a
 // plausible-looking height, but it cannot make that block's header claim to be
 // recent. A caller judging "is this node actually at a live head" must look at
-// Time, not only at Number.
+// Time, not only at Number. Hash is the PROVIDER-REPORTED hash of the head
+// block (Task 9 wave 5; see ReportedHeader) — never a local recomputation.
 type Head struct {
 	Number uint64
 	Time   uint64
@@ -327,22 +452,35 @@ type Head struct {
 // With a single configured endpoint there is nothing to route around and the
 // probe is NOT independent; callers that rely on independence must say so and
 // carry another guard (see internal/prices' verdict TTL).
+// HeadFrom reads the latest header with a CALLER-SCOPED starting endpoint, the
+// same routing discipline as CallFrom: the attempt walk starts at startIndex
+// (mod the endpoint count) rather than at the shared sticky hint, and success
+// neither reads nor writes that hint. It exists so a caller can probe the head
+// through an endpoint OTHER than the one ingestion is currently pinned to: a
+// liveness probe that shares its dependency with the pipeline it is supposed to
+// be judging cannot distinguish "the feeds stopped publishing" from "our RPC
+// froze".
+//
+// The returned Head's hash is the PROVIDER-REPORTED hash of the latest block
+// (see ReportedHeader), which is what makes it usable as a pin: the EIP-1898
+// round presents it back to the node that issued it.
+//
+// With a single configured endpoint there is nothing to route around and the
+// probe is NOT independent; callers that rely on independence must say so and
+// carry another guard (see internal/prices' verdict TTL).
 func (f *Failover) HeadFrom(ctx context.Context, startIndex int) (Head, EndpointToken, error) {
 	n := len(f.clients)
 	start := ((startIndex % n) + n) % n // normalize, negatives included
 	var out Head
 	idx, err := f.doFrom(ctx, "head", start, func(ctx context.Context, c rpcClient) error {
-		h, err := c.HeaderByNumber(ctx, nil)
+		rh, err := c.ReportedHeaderByNumber(ctx, nil)
 		if err != nil {
 			return err
 		}
-		if h == nil {
-			return fmt.Errorf("latest header not found")
+		if err := validateReportedHeader(rh, "latest"); err != nil {
+			return err
 		}
-		if h.Number == nil || !h.Number.IsUint64() {
-			return fmt.Errorf("latest header number %v is not a uint64", h.Number)
-		}
-		out = Head{Number: h.Number.Uint64(), Time: h.Time, Hash: h.Hash()}
+		out = Head{Number: (*big.Int)(rh.Number).Uint64(), Time: uint64(rh.Time), Hash: rh.Hash}
 		return nil
 	})
 	if err != nil {
@@ -369,19 +507,27 @@ func (f *Failover) ActiveEndpoint() int {
 // the endpoint that answered. Callers use it to re-verify a hash they recorded
 // earlier against the live chain — the check that turns "the chain may have
 // reorged under this row" from an assumption into a decidable question.
+// HeaderHashFrom is HeaderHash with a CALLER-SCOPED starting endpoint (see
+// CallFrom for why the shared hint stays out of it) and an EndpointToken naming
+// the endpoint that answered. Callers use it to re-verify a hash they recorded
+// earlier against the live chain — the check that turns "the chain may have
+// reorged under this row" from an assumption into a decidable question. Both
+// sides of that comparison are PROVIDER-REPORTED values (see ReportedHeader):
+// reported-then against reported-now is the only form of the question an L2
+// client can honestly decide.
 func (f *Failover) HeaderHashFrom(ctx context.Context, startIndex int, n uint64) (common.Hash, EndpointToken, error) {
 	count := len(f.clients)
 	start := ((startIndex % count) + count) % count
 	var out common.Hash
 	idx, err := f.doFrom(ctx, "headerHash", start, func(ctx context.Context, c rpcClient) error {
-		h, err := c.HeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		rh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))
 		if err != nil {
 			return err
 		}
-		if h == nil {
-			return fmt.Errorf("header %d not found", n)
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n)); err != nil {
+			return err
 		}
-		out = h.Hash()
+		out = rh.Hash
 		return nil
 	})
 	if err != nil {

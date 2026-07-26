@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/config"
@@ -4219,4 +4220,84 @@ func TestPollerRegressionWithFrontierBelowCursorIsCauseUnknown(t *testing.T) {
 	require.False(t, containsSubstring(*msgs, "stale rpc endpoint"))
 	require.False(t, containsSubstring(*msgs, "all endpoints behind"),
 		"the false all-endpoints-behind diagnosis is exactly what this branch prevents")
+}
+
+// ---------------------------------------------------------------------------
+// Task 9 wave 5: provider-reported header hashes — the OP-shaped round trip.
+// ---------------------------------------------------------------------------
+
+// THE COMPOSITION THAT WAS IMPOSSIBLE BEFORE WAVE 5: on a chain whose header
+// shape postdates the vendored geth (2026 OP mainnet, hashcheck.go), the
+// EIP-1898 pinned round can LAND — because the hash the pin presents is the
+// one the provider reported, so the node recognizes its own value. The
+// fixture is OP-SHAPED: the reported hash at the incident height is the
+// canonical 0x3d957321… while re-RLP-hashing the header's representable
+// fields yields something else entirely (asserted, so the fixture can never
+// degenerate back into the self-consistent fakes that hid this defect for 16
+// waves), and the fake's CallAtHashFrom recognizes ONLY hashes its chain view
+// actually reports — exactly the EIP-1898 behavior of the live matrix.
+//
+// The poller itself is UNCHANGED by wave 5: hashBefore flows from
+// chain.HeadFrom and hashAfter from chain.HeaderHashFrom, both converted
+// beneath it. This regression pins the composition end to end at the poller's
+// own seam, so a future chain-layer regression cannot hide behind a green
+// chain suite.
+func TestPollerPinnedRoundTripLandsOnAnOPShapedReportedHash(t *testing.T) {
+	const opBlock = 150_105_227
+	reported := common.HexToHash("0x3d9573215de44873740c98df8ad6c062c85b6135cbcbd0cc62381f886d07fe23")
+	recomputed := (&types.Header{
+		ParentHash: common.HexToHash("0x64c3ff4b5eaa4f2f5a76c2708e11b3a24d5eaf99e2d1a0f28f6ea45cf2c0b9d3"),
+		Number:     new(big.Int).SetUint64(opBlock),
+		Time:       1_753_500_000,
+	}).Hash()
+	require.NotEqual(t, reported, recomputed,
+		"fixture self-check: OP-SHAPED means the reported hash is NOT what local recomputation of the known fields yields")
+
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, opBlock, 20, 1_000_000)}
+	ch.setHashOn(0, opBlock, reported) // the provider REPORTS the canonical hash…
+	ch.setHeadOn(0, opBlock)           // …and serves the incident block as its head
+	p, _ := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the round LANDS: the pin presents the reported hash and the node recognizes its own value")
+	require.Equal(t, []common.Hash{reported}, ch.atHashes,
+		"the EIP-1898 pin presented EXACTLY the provider-reported hash — never a recomputation")
+	batch := st.lastBatch(t)
+	require.Equal(t, uint64(opBlock), batch.anchor.BlockNumber)
+	require.Equal(t, reported.Bytes(), batch.anchor.BlockHash,
+		"the durable anchor carries the reported hash — the identity reorg repair can re-verify against the provider")
+}
+
+// THE PRE-WAVE COMPOSITION, kept visible as the disease it was: a chain layer
+// that hands the poller a locally RECOMPUTED head hash presents a pin no node
+// ever issued — the node's own view (the split call backend) recognizes only
+// the hash it reports, so the round discards, and would discard FOREVER. This
+// is the OP production incident in fixture form; wave 5's conversion beneath
+// the poller is what makes the landing test above possible at all.
+func TestPollerPinnedRoundWithARecomputedHashCanNeverLand(t *testing.T) {
+	const opBlock = 150_105_227
+	reported := common.HexToHash("0x3d9573215de44873740c98df8ad6c062c85b6135cbcbd0cc62381f886d07fe23")
+	recomputed := (&types.Header{
+		ParentHash: common.HexToHash("0x64c3ff4b5eaa4f2f5a76c2708e11b3a24d5eaf99e2d1a0f28f6ea45cf2c0b9d3"),
+		Number:     new(big.Int).SetUint64(opBlock),
+		Time:       1_753_500_000,
+	}).Hash()
+
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1, respond: okRound(t, opBlock, 20, 1_000_000)}
+	ch.setHashOn(0, opBlock, recomputed) // the OLD chain layer's output: a recomputed header path…
+	ch.setHeadOn(0, opBlock)
+	backend := ch.splitCallBackendOn(0)
+	backend.hashes[opBlock] = reported // …while the node itself recognizes only what it reports
+	p, _ := newTestPoller(t, st, ch, 10)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "an all-attempts pin rejection is the WARN-discard posture, not an error")
+	require.False(t, advanced, "a recomputed hash is a pin no node recognizes: the round can never land")
+	require.Equal(t, []common.Hash{recomputed}, ch.atHashes,
+		"the poison in one frame: the pin presented the locally recomputed hash")
+	require.Empty(t, st.applied, "nothing recorded — on OP this was every round, forever")
+	require.Empty(t, st.anchors[PollCursorEngine(10)])
 }

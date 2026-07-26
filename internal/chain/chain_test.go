@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"math/big"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 )
@@ -42,6 +44,65 @@ type fakeRPC struct {
 	// "block not found" class — a node that does not have the pinned block,
 	// which is a different animal from a node that is down.
 	hashUnknown bool
+	// reported scripts ReportedHeaderByNumber for individual heights, served
+	// VERBATIM — the OP-SHAPED fixture primitive: a reported header whose hash
+	// is deliberately NOT what re-RLP-hashing its known fields would produce,
+	// which is the modern-OP reality the recomputation defect hid (v1.13.0
+	// computes 0x70f6bea2… where OP mainnet reports 0x3d957321… at block
+	// 150,105,227 — hashcheck.go). An explicit nil entry means the endpoint
+	// does not have the block (the honest "not found"). Heights without an
+	// entry synthesize a deterministic nonzero hash from (height, extraNonce),
+	// so ordinary tests keep their fork-sensitivity semantics.
+	reported map[uint64]*ReportedHeader
+	// fullHeaders scripts the RETIRED *types.Header path for the same heights
+	// (see HeaderByNumber below). It lets the OP-shaped fixture carry BOTH
+	// representations of one block: what the provider reports, and what a
+	// reverted recomputation would hash.
+	fullHeaders map[uint64]*types.Header
+}
+
+// fakeReportedHash synthesizes the provider-reported hash the fake serves for
+// unscripted heights: deterministic, endpoint-distinguishable via nonce (two
+// endpoints with different extraNonce disagree about a height — a fork), and
+// never zero (a zero reported hash is a protocol violation the Failover
+// refuses; tests that want one script it explicitly via `reported`).
+func fakeReportedHash(n, nonce uint64) common.Hash {
+	var h common.Hash
+	h[0] = 0x5e // never the zero hash, even at height 0 nonce 0
+	binary.BigEndian.PutUint64(h[8:16], n)
+	binary.BigEndian.PutUint64(h[16:24], nonce)
+	return h
+}
+
+// fakeReported builds the reported header the fake serves for a height.
+func (f *fakeRPC) fakeReported(num uint64) *ReportedHeader {
+	if rh, ok := f.reported[num]; ok {
+		return rh // scripted verbatim; nil means "endpoint does not have it"
+	}
+	parent := uint64(0)
+	if num > 0 {
+		parent = num - 1
+	}
+	return &ReportedHeader{
+		Hash:       fakeReportedHash(num, f.extraNonce),
+		ParentHash: fakeReportedHash(parent, f.extraNonce),
+		Number:     (*hexutil.Big)(new(big.Int).SetUint64(num)),
+		Time:       hexutil.Uint64(f.headerTime),
+	}
+}
+
+// ReportedHeaderByNumber serves the provider-REPORTED header identity — the
+// only header surface rpcClient carries since Task 9 wave 5.
+func (f *fakeRPC) ReportedHeaderByNumber(ctx context.Context, n *big.Int) (*ReportedHeader, error) {
+	f.calls++
+	if f.fail {
+		return nil, errors.New(f.name + " down")
+	}
+	num := f.blockNum // nil asks for "latest"
+	if n != nil {
+		num = n.Uint64()
+	}
+	return f.fakeReported(num), nil
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -56,14 +117,24 @@ func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
 	return f.blockNum, nil
 }
 
+// HeaderByNumber is the RETIRED *types.Header surface. rpcClient stopped
+// carrying it in Task 9 wave 5 (a header the chain layer cannot see is a
+// header it cannot re-hash); it survives on the fake SOLELY so the
+// revert-to-recomputation mutant (W5M1/W5M5: put HeaderByNumber back on the
+// interface and h.Hash() back in the closures) compiles and is KILLED by the
+// OP-shaped regressions instead of dying as an uninformative compile error —
+// the same precedent as fakePollChain.CallAtFrom (t9w2 mutation spec, W2M1).
 func (f *fakeRPC) HeaderByNumber(ctx context.Context, n *big.Int) (*types.Header, error) {
 	f.calls++
 	if f.fail {
 		return nil, errors.New(f.name + " down")
 	}
-	// A nil number means "latest", the shape HeadFrom uses.
+	// A nil number means "latest", the shape the old HeadFrom used.
 	if n == nil {
 		n = new(big.Int).SetUint64(f.blockNum)
+	}
+	if h, ok := f.fullHeaders[n.Uint64()]; ok {
+		return h, nil
 	}
 	return &types.Header{
 		Number: n,
