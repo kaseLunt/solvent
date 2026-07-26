@@ -25,6 +25,11 @@ type rpcClient interface {
 	ChainID(ctx context.Context) (*big.Int, error)
 	TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error)
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	// CallContractAtHash is the EIP-1898 form of CallContract: the call executes
+	// against the state of the block with EXACTLY this hash, or the node rejects
+	// the request ("block not found" class) — it can never be silently served
+	// from a different block that happens to share the height.
+	CallContractAtHash(ctx context.Context, msg ethereum.CallMsg, blockHash common.Hash) ([]byte, error)
 }
 
 // EndpointToken identifies which endpoint served a successful semantic-layer
@@ -386,15 +391,18 @@ func (f *Failover) CallFrom(ctx context.Context, startIndex int, to common.Addre
 	return out, EndpointToken{Index: idx}, nil
 }
 
-// CallAtFrom is CallFrom PINNED AT A BLOCK: the eth_call executes against the
-// state of block `block` rather than "latest", with the same caller-scoped
-// routing and token discipline (the attempt walk starts at startIndex, success
-// neither reads nor writes the shared hint, and the token names the endpoint
-// that answered). Additive for the price poller's endpoint-coherent rounds
-// (Task 9 wave 1): a round that reads its serving endpoint's head N and
-// verifies HeaderHash(N) on both sides of the multicall needs the multicall
-// itself to execute AT N — a "latest" call can land on a different block than
-// the one the round pinned and verified, and the caller could not tell.
+// CallAtFrom is CallFrom PINNED AT A BLOCK NUMBER: the eth_call executes
+// against the state of block `block` rather than "latest", with the same
+// caller-scoped routing and token discipline (the attempt walk starts at
+// startIndex, success neither reads nor writes the shared hint, and the token
+// names the endpoint that answered). Added for the price poller's
+// endpoint-coherent rounds (Task 9 wave 1); RETIRED FROM THE POLLER in wave 2
+// (Codex round 1 [medium]): a NUMBER names a height on whatever fork the
+// serving node is on, not a block — one load-balanced hostname is many nodes,
+// so headers from fork A and a number-pinned call served by fork B at the
+// same height pass every height check. prices.PollChain deliberately does not
+// carry this method; a caller that needs execution bound to a block's
+// IDENTITY must use CallAtHashFrom.
 //
 // The pin is a REQUEST, not a proof: a provider that silently serves other
 // state still reports the execution block inside responses that carry one
@@ -406,6 +414,48 @@ func (f *Failover) CallAtFrom(ctx context.Context, startIndex int, to common.Add
 	var out []byte
 	idx, err := f.doFrom(ctx, "callAt", start, func(ctx context.Context, c rpcClient) error {
 		res, err := c.CallContract(ctx, ethereum.CallMsg{To: &to, Data: data}, new(big.Int).SetUint64(block))
+		if err != nil {
+			return err
+		}
+		out = res
+		return nil
+	})
+	if err != nil {
+		return nil, EndpointToken{Index: -1}, err
+	}
+	return out, EndpointToken{Index: idx}, nil
+}
+
+// CallAtHashFrom is CallFrom PINNED AT A BLOCK HASH — the EIP-1898 block-hash
+// object form of eth_call, with CallFrom's exact caller-scoped routing and
+// token discipline (the attempt walk starts at startIndex, success neither
+// reads nor writes the shared hint, and the token names the endpoint that
+// answered). Additive for the price poller's rounds (Task 9 wave 2, Codex
+// round 1 [medium]): a number pin binds a HEIGHT, which every fork has one
+// of, while the hash pin binds the block's IDENTITY — the node either
+// executes against exactly the block the caller verified or rejects the
+// request outright, so state from a same-height fork can never be served
+// under this pin.
+//
+// requireCanonical is left at its EIP-1898 default (false): the pin's job is
+// IDENTITY, and detecting that the pinned block later stopped being canonical
+// stays the anchor machinery's job (the poller's closing re-read, the next
+// round's anchor-divergence check, reorg repair).
+//
+// The honest trust boundary is the NODE'S IMPLEMENTATION of the pin — a
+// dishonest node could claim execution at a hash while serving other state,
+// the same trust class every read here carries. The observed behavior class
+// (live matrix, 2026-07-26, all four production endpoints across both
+// chains): the hash-pinned call executed exactly at the pinned block, and a
+// fabricated hash was REJECTED with "block not found" everywhere — negative
+// controls included. Callers treat that rejection class as "the serving node
+// does not have this block" (exploration-worthy), not as a transport fault.
+func (f *Failover) CallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, EndpointToken, error) {
+	n := len(f.clients)
+	start := ((startIndex % n) + n) % n // normalize, negatives included
+	var out []byte
+	idx, err := f.doFrom(ctx, "callAtHash", start, func(ctx context.Context, c rpcClient) error {
+		res, err := c.CallContractAtHash(ctx, ethereum.CallMsg{To: &to, Data: data}, blockHash)
 		if err != nil {
 			return err
 		}

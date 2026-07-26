@@ -982,11 +982,26 @@ type endpointView struct {
 	reads map[uint64]int
 }
 
+// knowsHash reports whether this view's chain CONTAINS a block with this
+// hash — the question an EIP-1898 hash-pinned call asks of a backend. It is
+// about the chain's CONTENT, deliberately independent of errAt/failAfter,
+// which script the header-probe PATH's availability: a backend whose header
+// endpoint is flaky still has its blocks.
+func (v *endpointView) knowsHash(h common.Hash) bool {
+	for _, have := range v.hashes {
+		if have == h {
+			return true
+		}
+	}
+	return false
+}
+
 // fakePollChain models chain.Failover's routing contract: every method is
-// CALLER-SCOPED (HeadFrom / CallAtFrom / HeaderHashFrom walk endpoints from the
-// requested start WITHOUT touching the shared hint, which ActiveEndpoint merely
-// reports), and every call stamps its token with the endpoint that served it —
-// so the tests prove the POLLER, not the fake, chooses the endpoint.
+// CALLER-SCOPED (HeadFrom / CallAtHashFrom / HeaderHashFrom walk endpoints
+// from the requested start WITHOUT touching the shared hint, which
+// ActiveEndpoint merely reports), and every call stamps its token with the
+// endpoint that served it — so the tests prove the POLLER, not the fake,
+// chooses the endpoint.
 //
 // Every read models FAILOVER the way chain.Failover.doFrom does: the walk
 // starts at the requested index, rotates on error, returns the FIRST answer
@@ -1003,14 +1018,29 @@ type fakePollChain struct {
 
 	calls  []capturedCall
 	served []int
-	// starts / atBlocks record each CallAtFrom attempt's requested start index
-	// and pinned block, in order — the proof the round pinned its multicall at
-	// the head it verified rather than calling "latest".
+	// starts / atHashes record each pinned-call attempt's requested start
+	// index and pinned block HASH, in order — the proof the round pinned its
+	// multicall to the block identity it verified, never to a bare height and
+	// never to "latest".
 	starts   []int
+	atHashes []common.Hash
+	// atBlocks records the pinned block of each NUMBER-pinned CallAtFrom
+	// attempt. Production code cannot reach that method (PollChain does not
+	// carry it since wave 2); it survives on the fake SOLELY so the
+	// hash→number pin regression stays expressible as a compilable mutation
+	// (t9w2 mutation spec, W2M1) instead of a compiler error nobody learns
+	// from.
 	atBlocks []uint64
 
 	// views is the live chain PER ENDPOINT, grown lazily by view().
 	views map[int]*endpointView
+	// callBackends optionally gives an endpoint a SEPARATE chain view for its
+	// eth_call path — the round-1 [medium] scenario made expressible: one
+	// load-balanced hostname is many nodes, so the backend answering a URL's
+	// header reads and the backend executing its calls need not be on the
+	// same fork. An endpoint without an entry executes calls against its own
+	// header view, the coherent single-node case.
+	callBackends map[int]*endpointView
 
 	// headStarts / headServed record each HeadFrom resolution's requested
 	// start index and the endpoint that ANSWERED it (-1 when all failed) — the
@@ -1070,11 +1100,54 @@ func (c *fakePollChain) HeadFrom(_ context.Context, start int) (chain.Head, chai
 	return chain.Head{}, chain.EndpointToken{Index: -1}, lastErr
 }
 
-// CallAtFrom walks endpoints from start (rotating on respond errors, exactly
-// like the real doFrom) and records the pinned block of every attempt. The
-// fake's respond function remains the authority on the response bytes, so a
-// test can script an endpoint whose multicall reports a DIFFERENT execution
-// block than the pin — the serving inconsistency the poller must discard.
+// CallAtHashFrom walks endpoints from start exactly like the real doFrom and
+// executes ONLY on a backend that HAS the pinned block: an endpoint whose
+// call-path view does not know the hash rejects the attempt with the observed
+// "block not found" class (the EIP-1898 behavior the live matrix pinned on
+// all four production endpoints, fabricated-hash negative controls included)
+// and the walk rotates on. The fake's respond function remains the authority
+// on the response bytes, so a test can still script an endpoint whose
+// multicall reports a DIFFERENT execution block than the pin — the serving
+// inconsistency the poller must discard.
+func (c *fakePollChain) CallAtHashFrom(_ context.Context, start int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error) {
+	c.starts = append(c.starts, start)
+	c.atHashes = append(c.atHashes, blockHash)
+	n := c.endpoints
+	if n <= 0 {
+		n = 1
+	}
+	first := ((start % n) + n) % n
+	var lastErr error
+	for i := 0; i < n; i++ {
+		idx := (first + i) % n
+		backend := c.callBackend(idx)
+		if backend.down != nil {
+			lastErr = backend.down
+			continue
+		}
+		if !backend.knowsHash(blockHash) {
+			lastErr = fmt.Errorf("block %s not found on endpoint %d", blockHash, idx)
+			continue
+		}
+		out, tok, err := c.serve(idx, to, data)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return out, tok, nil
+	}
+	return nil, chain.EndpointToken{Index: -1}, lastErr
+}
+
+// CallAtFrom is the NUMBER-pinned call production code can no longer reach:
+// PollChain stopped carrying it in wave 2, because a number names a height on
+// whatever fork the serving backend is on, not a block. It survives on the
+// fake SOLELY so the hash→number pin regression can be applied as a
+// compilable mutation and KILLED by the split-fork regression test rather
+// than dying as an uninformative compile error (t9w2 mutation spec, W2M1).
+// Note what it does NOT do: no hash-knowledge check — a number-pinned call
+// happily executes on ANY backend at that height, which is exactly the side
+// door the hash pin closes.
 func (c *fakePollChain) CallAtFrom(_ context.Context, start int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error) {
 	c.starts = append(c.starts, start)
 	c.atBlocks = append(c.atBlocks, block)
@@ -1094,6 +1167,35 @@ func (c *fakePollChain) CallAtFrom(_ context.Context, start int, to common.Addre
 		return out, tok, nil
 	}
 	return nil, chain.EndpointToken{Index: -1}, lastErr
+}
+
+// callBackend is the chain view endpoint idx EXECUTES CALLS against: its own
+// header view unless a test split the two with splitCallBackendOn.
+func (c *fakePollChain) callBackend(idx int) *endpointView {
+	if b, ok := c.callBackends[idx]; ok {
+		return b
+	}
+	return c.view(idx)
+}
+
+// splitCallBackendOn gives endpoint idx a call-path backend SEPARATE from its
+// header view and returns it for scripting — the "one URL, many nodes" split
+// of Codex task-9 round 1: header reads keep answering from the endpoint's
+// own view (fork A) while eth_call executes against the returned view
+// (fork B). The returned view starts EMPTY: it knows no blocks until the test
+// says otherwise, so a hash-pinned call against it rejects by default.
+func (c *fakePollChain) splitCallBackendOn(idx int) *endpointView {
+	if c.callBackends == nil {
+		c.callBackends = map[int]*endpointView{}
+	}
+	v := &endpointView{
+		hashes:    map[uint64]common.Hash{},
+		errAt:     map[uint64]error{},
+		failAfter: map[uint64]int{},
+		reads:     map[uint64]int{},
+	}
+	c.callBackends[idx] = v
+	return v
 }
 
 // view returns endpoint idx's chain view, creating an empty one on first use.

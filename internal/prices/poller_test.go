@@ -188,8 +188,9 @@ func TestPollerAnchorsWithoutConsumingMulticallHashField(t *testing.T) {
 
 // ENDPOINT COHERENCE, the positive arm: one endpoint serves every read of a
 // round — the head resolution, the pinned multicall and the closing header
-// re-read all carry the same token — and the multicall is PINNED at the head
-// that endpoint reported, never issued at "latest".
+// re-read all carry the same token — and the multicall is PINNED TO the HASH
+// of the head that endpoint reported (EIP-1898), never issued at "latest" and
+// never pinned to a bare height.
 func TestPollerRoundIsEndpointCoherentAndPinnedAtHead(t *testing.T) {
 	st := newFakePriceStore()
 	ch := &fakePollChain{endpoints: 3, active: 1, respond: okRound(t, 5000, 20, 1_000_000)}
@@ -203,20 +204,23 @@ func TestPollerRoundIsEndpointCoherentAndPinnedAtHead(t *testing.T) {
 	require.Equal(t, []int{1}, ch.headServed, "the shared hint's endpoint resolved the round")
 	require.Equal(t, []int{1}, ch.served, "the multicall was served by the round's own endpoint")
 	require.Equal(t, []int{1}, ch.hashServed, "and so was the closing header re-read: one token per round")
-	require.Equal(t, []uint64{5000}, ch.atBlocks,
-		"the multicall executed pinned at the resolved head, not at latest")
+	require.Equal(t, []common.Hash{blockHashAt(5000)}, ch.atHashes,
+		"the multicall executed pinned to the resolved head's HASH — the block's identity, not a bare height and not latest")
+	require.Empty(t, ch.atBlocks, "no number-pinned call was issued in its place")
 	require.Equal(t, []uint64{5000}, ch.hashCalls, "the re-read asked about the pin")
 }
 
 // PIN DIVERGENCE DISCARDS: a multicall whose returned blockNumber differs from
-// the pinned head means the endpoint did not serve the requested state (a
-// load balancer mixing nodes behind one URL is the honest example). The round
-// is DISCARDED — the walker's tip-changed posture: a WARN with the evidence,
-// no error, nothing recorded — and the spent cadence slot means no retry
-// storm.
+// the pinned block's height means the endpoint did not honour the requested
+// state (a load balancer mixing nodes behind one URL is the honest example).
+// The round is DISCARDED — the walker's tip-changed posture: a WARN with the
+// evidence, no error, nothing recorded — and the spent cadence slot means no
+// retry storm. AND the discard MOVES the next round's start (round-1 [high]):
+// the caller-scoped exploration hint advances past the round's endpoint, so
+// the same inconsistent endpoint cannot re-resolve itself every cadence.
 func TestPollerDiscardsRoundWhenExecutionBlockDivergesFromPin(t *testing.T) {
 	st := newFakePriceStore()
-	ch := &fakePollChain{endpoints: 1, respond: okRound(t, 4999, 20, 1_000_000)} // executed BELOW the pin
+	ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 4999, 20, 1_000_000)} // executed BELOW the pin
 	ch.setHead(5000)
 	p, _ := newTestPoller(t, st, ch, 10)
 	msgs := captureWarnings(t)
@@ -226,6 +230,9 @@ func TestPollerDiscardsRoundWhenExecutionBlockDivergesFromPin(t *testing.T) {
 	require.False(t, advanced)
 	require.Empty(t, st.applied, "nothing reached the store")
 	require.True(t, containsSubstring(*msgs, "execution block diverged from the pin"))
+	require.Equal(t, 1, p.exploreStart,
+		"the discard advanced the next round's start past the inconsistent endpoint")
+	require.Equal(t, -1, p.preferredStart, "exploration, not attribution: nothing was pinned as a diagnosis")
 
 	// The cadence slot was consumed by the attempt: no immediate retry.
 	calls := len(ch.calls)
@@ -239,9 +246,15 @@ func TestPollerDiscardsRoundWhenExecutionBlockDivergesFromPin(t *testing.T) {
 // two reads that bracket the multicall, so the observations may describe a
 // block that no longer exists on that endpoint's chain. Same posture and same
 // log shape as the walker's tip-changed window discard.
+//
+// AND — pinned deliberately, against a blanket-advance refactor — this is the
+// ONE discard that must NOT move the next round's start: a mid-round reorg is
+// evidence about the CHAIN, not the endpoint, and routing away from a healthy
+// endpoint over it would be exactly the false attribution the classification
+// machinery exists to prevent.
 func TestPollerDiscardsRoundOnMidRoundReorg(t *testing.T) {
 	st := newFakePriceStore()
-	ch := &fakePollChain{endpoints: 1}
+	ch := &fakePollChain{endpoints: 2, active: 0}
 	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
 		// The chain reorgs at the pin WHILE the multicall is in flight: the
 		// closing re-read will see a different block at 5000.
@@ -257,6 +270,9 @@ func TestPollerDiscardsRoundOnMidRoundReorg(t *testing.T) {
 	require.False(t, advanced)
 	require.Empty(t, st.applied, "an anchor for a vanished block was never written")
 	require.True(t, containsSubstring(*msgs, "tip changed mid-round, discarding round"))
+	require.Equal(t, -1, p.exploreStart,
+		"a mid-round reorg implicates the chain, not the endpoint: the next round's start does NOT move")
+	require.Equal(t, -1, p.preferredStart)
 }
 
 // COHERENCE BREACH ON THE MULTICALL DISCARDS: the failover client rotates on
@@ -284,6 +300,9 @@ func TestPollerDiscardsRoundWhenMulticallServedByAnotherEndpoint(t *testing.T) {
 	require.Equal(t, []int{0}, ch.headServed, "endpoint 0 resolved the round")
 	require.Equal(t, []int{0, 1}, ch.served, "the multicall rotated onto endpoint 1")
 	require.True(t, containsSubstring(*msgs, "served the pinned multicall from another endpoint"))
+	require.Equal(t, 1, p.exploreStart,
+		"the discard advanced the next round's start past the endpoint that could not carry its own round (round-1 [high])")
+	require.Equal(t, -1, p.preferredStart, "exploration, not attribution")
 }
 
 // COHERENCE BREACH ON THE CLOSING RE-READ DISCARDS: even with the multicall
@@ -310,6 +329,132 @@ func TestPollerDiscardsRoundWhenClosingRecheckServedByAnotherEndpoint(t *testing
 	require.Equal(t, []int{0}, ch.served, "the multicall itself was coherent")
 	require.Equal(t, []int{1}, ch.hashServed, "the re-read was answered elsewhere — and that is exactly the discard")
 	require.True(t, containsSubstring(*msgs, "served the closing header re-read from another endpoint"))
+	require.Equal(t, 1, p.exploreStart,
+		"the discard advanced the next round's start past the endpoint that could not close its own round (round-1 [high])")
+	require.Equal(t, -1, p.preferredStart, "exploration, not attribution")
+}
+
+// THE ROUND-1 [high] REGRESSION, END TO END: endpoint 0 serves heads but
+// PERMANENTLY fails eth_call, and a healthy endpoint 1 sits idle. Wave 1
+// discarded each such round correctly and then re-resolved endpoint 0 every
+// cadence — starving the poller forever. The property under test is not the
+// first discard but RECOVERY: the discard must MOVE the round's starting
+// point, and the NEXT cadence must land a FULL round (anchor + observations
+// + cursor) through the healthy peer.
+func TestPollerCoherenceDiscardMovesTheNextRoundToAHealthyPeer(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		if idx == 0 {
+			return nil, errors.New("endpoint 0 permanently fails eth_call") // heads fine, calls never
+		}
+		return okRound(t, 5000, 20, 1_000_000)(idx, to, data)
+	}
+	ch.setHead(5000)
+	p, clk := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	// Round 1: resolved by endpoint 0 (the shared hint), whose pinned call
+	// rotates onto endpoint 1 — a coherence breach, discarded.
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "the discard is not an error")
+	require.False(t, advanced)
+	require.Empty(t, st.applied, "the first round discarded: nothing recorded")
+	require.Equal(t, 1, p.exploreStart, "…and the discard moved the next round's start")
+	require.True(t, containsSubstring(*msgs, "served the pinned multicall from another endpoint"))
+
+	// Round 2, next cadence: the round resolves FROM endpoint 1 and lands in
+	// full. This is the recovery the round-1 finding demanded — eventual
+	// progress, not merely a correct discard repeated forever.
+	clk.advance(time.Minute)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed a full round through the healthy peer")
+	require.Equal(t, []int{0, 1}, ch.headStarts, "round 2 STARTED at the advanced exploration hint")
+	require.Equal(t, []int{0, 1}, ch.headServed, "endpoint 1 resolved round 2")
+	batch := st.lastBatch(t)
+	require.Equal(t, uint64(5000), batch.through)
+	require.Len(t, batch.obs, 20, "the full round's observations were written")
+	require.NotNil(t, batch.anchor, "…anchored")
+	require.Equal(t, uint64(5000), batch.anchor.BlockNumber)
+	require.Equal(t, blockHashAt(5000).Bytes(), batch.anchor.BlockHash)
+	require.Equal(t, uint64(5000), st.cursor, "…and the cursor advanced")
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+	require.Equal(t, -1, p.preferredStart, "no endpoint was ever ACCUSED: exploration is not attribution")
+}
+
+// THE SAME-HEIGHT SPLIT-FORK REGRESSION (round-1 [medium], the wave-2
+// headline): ONE endpoint token, TWO backends behind it — the header path on
+// fork A, the eth_call path on fork B, both at height N. Every wave-1 guard
+// passes in that world: one token serves every read, the multicall reports
+// blockNumber == N, and the bracketing header reads agree on fork A's hash.
+// Only the EIP-1898 hash pin tells the two apart: fork B does not HAVE the
+// block whose hash the round verified, so the pinned call is REJECTED
+// ("block not found" — the class the live matrix observed on all four
+// production endpoints, fabricated-hash negative controls included) and the
+// round DISCARDS. Under a number pin this round would LAND — fork B's
+// observations stored under fork A's hash, fabrication through the side
+// door — which is exactly what the empty-store assertions below refuse.
+func TestPollerHashPinRefusesASplitForkBackendAtTheSameHeight(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 1}
+	// The multicall response is fork B's state at the SAME height 5000:
+	// blockNumber matches the pin, so the height guard alone cannot help.
+	ch.respond = okRound(t, 5000, 20, 2_222_222)
+	ch.setHead(5000) // the header path: fork A at 5000, hash blockHashAt(5000)
+	// The call path executes on fork B: same HEIGHT, different BLOCK. Fork B
+	// knows its own block at 5000 and has never heard of fork A's.
+	forkB := ch.splitCallBackendOn(0)
+	forkB.hashes[5000] = common.HexToHash("0xb10cb10c")
+	p, _ := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "a pin rejection is a DISCARD, not an error to burn the daemon's backoff on")
+	require.False(t, advanced)
+	require.Empty(t, st.applied,
+		"fork B's observations must NEVER be stored under fork A's hash — the split backend passes every other guard, so this refusal is the hash pin's whole justification")
+	require.Empty(t, st.rows)
+	require.Empty(t, ch.served, "no backend lacking the pinned block ever executed the multicall")
+	require.Equal(t, []common.Hash{blockHashAt(5000)}, ch.atHashes,
+		"the call was pinned to the header path's hash — the identity fork B cannot satisfy")
+	require.True(t, containsSubstring(*msgs, "pinned block unknown, discarding round"))
+}
+
+// A PIN REJECTION IS EXPLORATION-WORTHY INFORMATION (the F1 invariant on the
+// F2 rejection arm): the serving endpoint's head named a block NO reachable
+// backend could execute at — that node may be alone on a private fork — so
+// beyond discarding, the NEXT round must start somewhere else. Here endpoint
+// 0's header path sits on a private fork; the next cadence resolves endpoint
+// 1 and lands a full round on the chain everyone else can see.
+func TestPollerPinRejectionExploresAndTheNextRoundLandsElsewhere(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0, respond: okRound(t, 5000, 20, 1_000_000)}
+	// Endpoint 0's HEADER path: a private fork at 5000 (scripted before
+	// setHeadOn, which respects an existing hash). Its CALL path has never
+	// heard of that block — and neither has endpoint 1.
+	ch.setHashOn(0, 5000, common.HexToHash("0xa10e"))
+	ch.setHeadOn(0, 5000)
+	ch.splitCallBackendOn(0) // fork B: knows NO blocks at all
+	ch.setHeadOn(1, 5000)    // endpoint 1: the canonical chain at the same height
+	p, clk := newTestPoller(t, st, ch, 10)
+	msgs := captureWarnings(t)
+
+	advanced, err := p.Step(context.Background())
+	require.NoError(t, err, "the rejection is a discard, not an error")
+	require.False(t, advanced)
+	require.Empty(t, st.applied, "the rejected round recorded nothing")
+	require.Equal(t, 1, p.exploreStart, "the rejection moved the next round's start")
+	require.True(t, containsSubstring(*msgs, "pinned block unknown, discarding round"))
+
+	clk.advance(time.Minute)
+	advanced, err = p.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the next cadence landed through the other endpoint")
+	require.Equal(t, []int{0, 1}, ch.headStarts)
+	require.Equal(t, blockHashAt(5000).Bytes(), st.lastBatch(t).anchor.BlockHash,
+		"the landed anchor is endpoint 1's verified header hash, not the private fork's")
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
 }
 
 // THE ZERO-HASH REFUSAL LIVES ON THE HEADER PATH NOW (moved from the multicall

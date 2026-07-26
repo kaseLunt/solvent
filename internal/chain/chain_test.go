@@ -34,6 +34,14 @@ type fakeRPC struct {
 	// endpoint served, so a test can prove a pinned call forwarded its pin
 	// (and that an unpinned call asked for "latest", i.e. nil).
 	callBlocks []*big.Int
+	// callHashes records the blockHash argument of every CallContractAtHash
+	// this endpoint served, so a test can prove the EIP-1898 pin was forwarded
+	// as a HASH — never silently degraded to a number or to "latest".
+	callHashes []common.Hash
+	// hashUnknown makes CallContractAtHash reject every hash with the observed
+	// "block not found" class — a node that does not have the pinned block,
+	// which is a different animal from a node that is down.
+	hashUnknown bool
 }
 
 func (f *fakeRPC) BlockNumber(ctx context.Context) (uint64, error) {
@@ -93,6 +101,18 @@ func (f *fakeRPC) CallContract(ctx context.Context, msg ethereum.CallMsg, blockN
 	f.callBlocks = append(f.callBlocks, blockNumber)
 	if f.fail {
 		return nil, errors.New(f.name + " down")
+	}
+	return f.callResult, nil
+}
+
+func (f *fakeRPC) CallContractAtHash(ctx context.Context, msg ethereum.CallMsg, blockHash common.Hash) ([]byte, error) {
+	f.calls++
+	f.callHashes = append(f.callHashes, blockHash)
+	if f.fail {
+		return nil, errors.New(f.name + " down")
+	}
+	if f.hashUnknown {
+		return nil, errors.New("block not found")
 	}
 	return f.callResult, nil
 }
@@ -318,6 +338,73 @@ func TestCallAtFromWrapsModuloAndRotatesOnError(t *testing.T) {
 	a.fail = true
 	_, tok, err = f.CallAtFrom(context.Background(), 0, to, []byte{0x01}, 99)
 	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.Equal(t, -1, tok.Index, "all endpoints failed: nothing to reject")
+}
+
+// CallAtHashFrom forwards its pin AS A HASH via the EIP-1898 eth_call form —
+// the property that binds execution to a block's IDENTITY rather than to a
+// height every fork has one of — while Call keeps asking for "latest" (nil)
+// and CallAtFrom keeps sending a number, so the three cannot be silently
+// conflated. Routing is CallFrom's: caller-scoped start, shared hint
+// untouched.
+func TestCallAtHashFromPinsHashAndLeavesSharedHintAlone(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}, blockNum: 7}
+	b := &fakeRPC{name: "b", callResult: []byte{0xbb}}
+	f := newFailover([]rpcClient{a, b})
+
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	pin := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000cafe1")
+	out, tok, err := f.CallAtHashFrom(context.Background(), 1, to, []byte{0x01}, pin)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xbb}, out)
+	require.Equal(t, 1, tok.Index, "the token names the endpoint that served the hash-pinned call")
+	require.Equal(t, 0, a.calls, "the walk starts at the caller's index, not the shared hint")
+	require.Len(t, b.callHashes, 1)
+	require.Equal(t, pin, b.callHashes[0],
+		"the pin is forwarded to eth_call as the EIP-1898 block hash, never degraded to a number or latest")
+	require.Empty(t, b.callBlocks, "no number-pinned or latest call was issued in its place")
+
+	// The unpinned variant keeps asking for latest: the identity pin is
+	// CallAtHashFrom's alone.
+	_, err = f.Call(context.Background(), to, []byte{0x01})
+	require.NoError(t, err)
+	require.Len(t, a.callBlocks, 1)
+	require.Nil(t, a.callBlocks[0], "Call still executes at latest (nil block)")
+
+	// The caller-scoped success wrote nothing shared: the shared path still
+	// starts at endpoint 0 (which the Call above just proved by serving from a).
+	n, err := f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), n)
+}
+
+// CallAtHashFrom normalizes its start (mod the endpoint count), rotates on
+// error within its own walk exactly like CallFrom — including on the observed
+// "block not found" rejection class, since a node that does not have the
+// pinned block is precisely a node to walk past — and reports Index -1 when
+// every endpoint fails, surfacing the LAST error so an all-endpoints
+// rejection stays classifiable by the caller.
+func TestCallAtHashFromWrapsModuloAndRotatesOnError(t *testing.T) {
+	a := &fakeRPC{name: "a", callResult: []byte{0xaa}}
+	b := &fakeRPC{name: "b", hashUnknown: true} // knows nothing of the pinned block
+	f := newFailover([]rpcClient{a, b})
+
+	// start 3 on 2 endpoints → endpoint 1; it rejects the hash; the walk wraps to 0.
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	pin := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000cafe2")
+	out, tok, err := f.CallAtHashFrom(context.Background(), 3, to, []byte{0x01}, pin)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xaa}, out)
+	require.Equal(t, 0, tok.Index, "the token names the endpoint that actually answered, not the requested start")
+	require.Equal(t, 1, b.calls, "the walk started at the normalized index")
+	require.Equal(t, 1, a.calls)
+	require.Equal(t, pin, a.callHashes[0], "the hash pin survives rotation")
+
+	a.hashUnknown = true
+	_, tok, err = f.CallAtHashFrom(context.Background(), 0, to, []byte{0x01}, pin)
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.ErrorContains(t, err, "block not found",
+		"the rejection class survives the failover wrapping, so the caller can tell 'nobody has this block' from 'nobody answered'")
 	require.Equal(t, -1, tok.Index, "all endpoints failed: nothing to reject")
 }
 

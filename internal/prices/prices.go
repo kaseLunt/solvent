@@ -96,20 +96,40 @@
 //
 // TWO THINGS ANSWER IT, and only the second one closed it.
 //
-// DURABLE POLL ANCHORS made repair decidable. multicall3's tryBlockAndAggregate
-// already returns the execution block HASH; the decoder keeps it, and each landed
-// round records (block, hash) in price_poll_anchors atomically with its rows.
-// Repair walks those anchors down from the newest and re-checks each hash against
-// a live endpoint; the first match ENTAILS that this block and every ancestor are
-// unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by parent hash). That match
-// is OFFERED as a floor, and what keeps rows valid is the BOUNDARY the store returns
-// for it: the offer is admitted only up to just below any observation in the range
-// that recorded no surviving anchor of its own, and if the epoch's own repair target
-// already sits above the match the offer retains nothing extra. That entailment is
-// conditional on the
-// answering endpoint being honest and on one chain view being used throughout —
-// the same trust every ingested log rests on, no more; it is not a cryptographic
-// proof against a hostile provider.
+// DURABLE POLL ANCHORS made repair decidable. Each landed round records
+// (N, hashBefore) in price_poll_anchors atomically with its rows: N is the
+// round's serving endpoint's head and hashBefore is that endpoint's own header
+// hash at N, read before the multicall and re-verified unchanged after it.
+//
+// WHAT THE ANCHOR ATTESTS (Task 9 waves 1-2): the round's multicall executed
+// PINNED TO hashBefore ITSELF — the EIP-1898 block-hash form of eth_call — so
+// the recorded observations are bound to that block's IDENTITY, not merely to
+// a height, which every same-height fork also has. A serving node either
+// executes against exactly the pinned block or rejects the request, and a
+// rejection discards the round; a same-height split behind one URL (headers
+// from fork A, state from fork B — one load-balanced hostname is many nodes)
+// therefore cannot land B's state under A's hash. The multicall's own
+// blockHash output plays NO part in this: on-chain it is
+// blockhash(block.number), deterministically ZERO for the executing block —
+// the live-proven P0 wave 1 removed.
+//
+// THE HONEST TRUST BOUNDARY is the serving node's IMPLEMENTATION of the hash
+// pin. The observed behavior class (live matrix, 2026-07-26, all four
+// production endpoints across both chains): the hash-pinned call executed
+// exactly at the pinned block everywhere, and a fabricated hash was REJECTED
+// ("block not found") everywhere — negative controls included. A node lying
+// about the pin is the same trust class every ingested log rests on, no more;
+// none of this is a cryptographic proof against a hostile provider.
+//
+// Repair walks those anchors down from the newest and re-checks each hash
+// against a live endpoint; the first match ENTAILS that this block and every
+// ancestor are unchanged ON THAT ENDPOINT'S CHAIN (blocks are chained by
+// parent hash). That match is OFFERED as a floor, and what keeps rows valid is
+// the BOUNDARY the store returns for it: the offer is admitted only up to just
+// below any observation in the range that recorded no surviving anchor of its
+// own, and if the epoch's own repair target already sits above the match the
+// offer retains nothing extra. That entailment is conditional on the answering
+// endpoint being honest and on one chain view being used throughout.
 //
 // REMOVING THE DELETION closed it (D-010). Five review rounds tried to make the
 // anchor proof strong enough to justify destroying rows, and each round found a
@@ -429,16 +449,16 @@ var Multicall3Address = common.HexToAddress("0xcA11bde05977b3631167028862bE2a173
 
 // multicall3ABI carries tryBlockAndAggregate, chosen for the same reason the
 // collateral snapshotter chose it: it returns the EXECUTION BLOCK NUMBER
-// atomically with the results, which is what lets a block-pinned round verify
-// that the multicall really executed at the block it pinned. Selector
-// 0x399542e9, pinned by TestSelectors.
+// atomically with the results, which is what lets a pinned round cross-check
+// that the serving node honoured its pin. Selector 0x399542e9, pinned by
+// TestSelectors.
 //
 // THE blockHash OUTPUT IS USELESS AND IGNORED (Task 9 wave 1, live-proven on
 // mainnet). On-chain it is blockhash(block.number), and EVM BLOCKHASH serves
 // only the 256 blocks BEFORE the executing one — so the field is
 // deterministically ZERO on every real chain (the known Multicall3 gotcha).
-// The round's anchor hash comes from the header path (readRound's
-// HeaderHash(N) before/after pin), never from this output.
+// The round's anchor hash is the serving endpoint's HeaderHash(N), which the
+// multicall executes PINNED TO by EIP-1898 (readRound), never this output.
 //
 // DELIBERATE DUPLICATION (disclosed): internal/snapshot carries its own copy of
 // this ABI, its call tuple and its unpacker. Extracting a shared multicall
@@ -489,9 +509,10 @@ type multicallResult struct {
 // block (it reaches only the 256 blocks BEFORE it), so it is deterministically
 // ZERO on every real chain. An earlier wave anchored the round to it — which
 // refused every round on both live chains the moment the poller met a real
-// EVM (Task 9 wave 1 P0). The round's anchor hash is the header path's
-// HeaderHash(N), pinned on both sides of the call in readRound; the zero-hash
-// refusal lives there now, protecting the hash that IS load-bearing.
+// EVM (Task 9 wave 1 P0). The round's anchor hash is the serving endpoint's
+// HeaderHash(N): readRound executes the call PINNED TO that hash (EIP-1898)
+// and re-verifies it unchanged after; the zero-hash refusal lives there now,
+// protecting the hash that IS load-bearing.
 func unpackMulticallResult(out []byte, wantCalls int) (block uint64, results []multicallResult, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -721,9 +742,13 @@ var _ PollStore = (*store.Store)(nil)
 //   - HeadFrom RESOLVES the round: whichever endpoint answers is the round's
 //     one serving endpoint, its head N is the round's pin and anchor height,
 //     and the head header's own hash is HeaderHash(N) "before".
-//   - CallAtFrom executes the multicall PINNED AT N. A "latest" call could
-//     execute on a different block than the one the round verified; the pin,
-//     cross-checked against multicall3's returned blockNumber, closes that.
+//   - CallAtHashFrom executes the multicall PINNED TO hashBefore ITSELF — the
+//     EIP-1898 block-hash form of eth_call. A "latest" call could execute on a
+//     different block than the one the round verified, and a NUMBER-pinned
+//     call could execute on a same-height block of another fork behind the
+//     same URL (Codex task-9 round 1); the hash pin binds execution to the
+//     block's identity, cross-checked against multicall3's returned
+//     blockNumber, and a node that does not have the block rejects the call.
 //   - HeaderHashFrom serves two masters: the round's "after" re-read of N
 //     (the walker's coherent-window pattern), and the ANCESTRY checks — reorg
 //     repair asking "is this stored poll anchor still canonical", and a cursor
@@ -735,9 +760,14 @@ var _ PollStore = (*store.Store)(nil)
 //     answers every read successfully, so error-driven rotation never sees a
 //     problem — the poller routes around it itself, with a caller-scoped
 //     preference applied to the NEXT round's HeadFrom start.
+//
+// The NUMBER-pinned call variant (chain.Failover.CallAtFrom) is deliberately
+// NOT carried: a method the interface does not declare cannot be called — the
+// same structural argument PollStore makes about deletion — so no poller code
+// path can regress to pinning by height.
 type PollChain interface {
 	HeadFrom(ctx context.Context, startIndex int) (chain.Head, chain.EndpointToken, error)
-	CallAtFrom(ctx context.Context, startIndex int, to common.Address, data []byte, block uint64) ([]byte, chain.EndpointToken, error)
+	CallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error)
 	HeaderHashFrom(ctx context.Context, startIndex int, block uint64) (common.Hash, chain.EndpointToken, error)
 	ActiveEndpoint() int
 	EndpointCount() int

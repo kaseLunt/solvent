@@ -3,12 +3,14 @@ package prices
 // The oracle POLLER: one per chain that carries registry `poll` obligations.
 //
 // A round is ONE multicall3 tryBlockAndAggregate of every obligation on the
-// chain, executed as an ENDPOINT-COHERENT, BLOCK-PINNED round (readRound): one
+// chain, executed as an ENDPOINT-COHERENT, HASH-PINNED round (readRound): one
 // endpoint serves every read, N is that endpoint's head, HeaderHash(N) is
-// pinned on both sides of a multicall executed AT N, and the round persists
+// read on both sides of a multicall executed PINNED TO that hash itself (the
+// EIP-1898 block-hash form of eth_call), and the round persists
 // (N, HeaderHash(N)) as a durable ANCHOR — everything this file does about
 // reorgs rests on it. All of a round's rows are therefore as-of the SAME
-// verified block, the property that makes them comparable to each other.
+// verified block — bound to its identity by the pin, not merely to its
+// height — the property that makes them comparable to each other.
 //
 // The multicall's own blockHash output plays NO part in the anchor: on-chain
 // it is blockhash(block.number), which EVM BLOCKHASH cannot serve for the
@@ -152,6 +154,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -510,7 +513,7 @@ func (p *Poller) Health() (healthy bool, reason string) {
 // Step performs one bounded unit of poll work: hydrate durable state if it has
 // not been, answer any durable reorg epoch (never destructively, and not at all
 // on incomplete evidence), then — when the cadence says a round is due — one
-// endpoint-coherent, block-pinned round of every obligation (readRound), landed
+// endpoint-coherent, hash-pinned round of every obligation (readRound), landed
 // with its (N, HeaderHash(N)) anchor through one ApplyPolledPrices transaction.
 //
 // Returns advanced=false when no round is due, when repair refused to proceed,
@@ -800,10 +803,11 @@ func (p *Poller) rehydrateAfterUncertainty(ctx context.Context, why string) {
 }
 
 // pollRound is one landed round's worth of facts, all attested by ONE
-// endpoint: the pin N (that endpoint's head, the anchor height and every
+// endpoint: N (that endpoint's head, the anchor height and every
 // observation's as-of block), HeaderHash(N) as read from it before the
-// multicall and re-verified after (the anchor hash), the deduped
-// observations, and the token naming the endpoint that served every read.
+// multicall — the EIP-1898 pin the multicall executed under, and the anchor
+// hash — re-verified unchanged after it, the deduped observations, and the
+// token naming the endpoint that served every read.
 type pollRound struct {
 	block    uint64
 	hash     []byte
@@ -811,29 +815,57 @@ type pollRound struct {
 	servedBy chain.EndpointToken
 }
 
-// readRound performs one ENDPOINT-COHERENT, BLOCK-PINNED round — the walker's
+// readRound performs one ENDPOINT-COHERENT, HASH-PINNED round — the walker's
 // reviewed coherent-window pattern (ingest.Walker.Step), transplanted to
-// eth_call:
+// eth_call and bound to the block's identity:
 //
 //	resolve ONE serving endpoint → N := its head, hashBefore := HeaderHash(N)
-//	→ multicall PINNED AT N on that endpoint → require returned blockNumber == N
+//	→ multicall PINNED TO hashBefore (EIP-1898) on that endpoint
+//	→ require returned blockNumber == N
 //	→ HeaderHash(N) again, require it still == hashBefore
 //	→ anchor = (N, hashBefore).
 //
-// The multicall's own blockHash output takes NO part in the anchor: on-chain
-// it is blockhash(block.number), which BLOCKHASH cannot serve for the
-// executing block, so it is deterministically ZERO on every real chain — the
-// live-proven P0 this recomposition fixes. The one-execution-context atomicity
-// the old design assumed does not exist via eth_call; what stands in its place
-// is the before/after pin, whose honest residual is the walker's own: a fork
-// diverging exactly at N whose replacement block reuses N's hash is
-// undetectable, and a fork with a DIFFERENT hash at N is caught by the
-// re-read, not atomically.
+// THE PIN IS THE HASH ITSELF, not the height (Codex task-9 round 1 [medium]):
+// an EndpointToken names a configured URL, not a backend — one load-balanced
+// hostname is many nodes — so headers from fork A plus a NUMBER-pinned call
+// served by fork B at the same height would pass every token and height guard
+// and store B's observations under A's hash. The EIP-1898 block-hash pin
+// closes that side door: the node either executes against exactly the block
+// whose hash this round verified, or rejects the call — "block not found",
+// the uniform rejection class observed on all four production endpoints with
+// fabricated-hash negative controls (live matrix, 2026-07-26) — and a
+// rejection DISCARDS the round. The honest residual is the serving node's own
+// implementation of the pin, the same trust class as every other read. The
+// multicall's own blockHash output still takes NO part in the anchor:
+// on-chain it is blockhash(block.number), which BLOCKHASH cannot serve for
+// the executing block, so it is deterministically ZERO on every real chain —
+// the live-proven P0 wave 1 removed.
+//
+// THE CLOSING RE-READ IS KEPT, DELIBERATELY, WITH A CHANGED JOB. It no longer
+// guards fabrication — the pin binds execution to hashBefore whatever happens
+// mid-round. What it still buys, for one header read per round: a mid-round
+// reorg that orphans N is caught NOW, costing one discarded round, instead of
+// landing an anchor already orphaned at commit time and costing a walker
+// epoch, a repair pass and (D-012 clause 3: markings are permanent
+// classifications) possibly-permanent row markings later. Prevention is
+// strictly cheaper than the marking it prevents, and the zero-hash refusal on
+// the close keeps surfacing a degraded provider as an ERROR at the moment of
+// contact.
 //
 // It returns ok=false with a nil error when the round was DISCARDED — a
 // mid-round reorg or a serving inconsistency, each logged with its evidence.
 // That is the walker's tip-changed posture: not an error, nothing recorded,
 // the cadence slot stays spent and the next due round retries.
+//
+// ROUTING ON A DISCARD (Codex task-9 round 1 [high]): every coherence or
+// serving-inconsistency discard — the multicall or the closing re-read
+// answered by another endpoint, an execution block diverging from the pin,
+// the pin rejected as unknown — also advances the caller-scoped exploration
+// start past the round's endpoint (routeNextRoundPastDiscard, which states
+// the invariant). The one discard that deliberately does NOT advance is the
+// mid-round reorg: that is evidence about the CHAIN, not the endpoint, and
+// fleeing a healthy endpoint over it would be exactly the false attribution
+// the classification machinery exists to prevent.
 //
 // Individual reverts and undecodable returns are per-asset skips with a WARN;
 // only transport failures, a malformed multicall envelope and zero header
@@ -888,39 +920,57 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 		return none, false, fmt.Errorf("price poller %q: header hash at %d is zero on endpoint %d — a provider protocol violation; refusing to anchor a round to an unverifiable block", p.engine, pin, servedBy.Index)
 	}
 
-	// The multicall executes PINNED AT the serving endpoint's head N — never
-	// at "latest", which could be a different block than the one this round
-	// verified — and must be served by the round's own endpoint: the failover
-	// client rotates on transport errors, and an answer from another endpoint
-	// is another chain view that cannot join this round's pin.
-	out, calledOn, err := p.chain.CallAtFrom(ctx, servedBy.Index, Multicall3Address, input, pin)
+	// The multicall executes PINNED TO hashBefore ITSELF — the EIP-1898
+	// block-hash form of eth_call — never at "latest" and never at a bare
+	// height, which a same-height block on another fork behind the same URL
+	// could also satisfy. It must still be served by the round's own endpoint:
+	// the failover client rotates on errors, and even an identity-pinned
+	// answer from another endpoint would join observations to a round whose
+	// head read and closing re-read that endpoint never attested.
+	out, calledOn, err := p.chain.CallAtHashFrom(ctx, servedBy.Index, Multicall3Address, input, hashBefore)
 	if err != nil {
-		return none, false, fmt.Errorf("price poller %q: multicall (%d oracles) pinned at %d: %w", p.engine, len(p.targets), pin, err)
+		if isBlockNotFoundErr(err) {
+			// The pin was REJECTED: no reachable endpoint has the block the
+			// serving endpoint's head named. The serving node may genuinely
+			// be alone on its fork — exploration-worthy information, not an
+			// error to burn the daemon's backoff on retrying against the
+			// same view.
+			slog.Warn("pinned block unknown, discarding round: no endpoint could execute at the round's verified head hash, so the serving endpoint may be alone on its fork; the next round starts elsewhere",
+				"engine", p.engine, "block", pin, "hash", hashBefore, "endpoint", servedBy.Index, "err", err)
+			p.routeNextRoundPastDiscard(servedBy)
+			return none, false, nil // round discarded; next cadence retries elsewhere
+		}
+		return none, false, fmt.Errorf("price poller %q: multicall (%d oracles) pinned to %s (block %d): %w", p.engine, len(p.targets), hashBefore, pin, err)
 	}
 	if calledOn.Index != servedBy.Index {
 		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the pinned multicall from another endpoint, so its answer belongs to another chain view",
 			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", calledOn.Index)
+		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	block, results, err := unpackMulticallResult(out, len(p.targets))
 	if err != nil {
 		return none, false, fmt.Errorf("price poller %q: %w", p.engine, err)
 	}
-	// The multicall's returned blockNumber is the one atomic fact the response
-	// carries about its own execution context, and it must equal the pin. A
-	// mismatch means the endpoint did not actually serve the requested state
+	// The multicall's returned blockNumber is the response's own report of its
+	// execution context, and it must equal the pinned block's height. A
+	// mismatch means the endpoint did not actually honour the requested state
 	// (a serving inconsistency behind one URL — e.g. a load balancer mixing
-	// nodes); nothing it reported can join this round's anchor.
+	// nodes, or a node ignoring the EIP-1898 pin); nothing it reported can
+	// join this round's anchor.
 	if block != pin {
-		slog.Warn("execution block diverged from the pin, discarding round: the multicall reports it executed at a different height than the block it was pinned to",
+		slog.Warn("execution block diverged from the pin, discarding round: the multicall reports it executed at a different height than the pinned block's",
 			"engine", p.engine, "pinned", pin, "executed", block, "endpoint", servedBy.Index)
+		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	// Coherent-window close (the walker's pattern): re-read HeaderHash(N) from
-	// the same endpoint. Unchanged, it proves the multicall executed against a
-	// block that was still canonical on that endpoint AFTER the observations
-	// were read; changed, the chain moved mid-round and the observations may
-	// describe a block that no longer exists.
+	// the same endpoint. Its job CHANGED with the hash pin — integrity no
+	// longer needs it (execution is bound to hashBefore either way); what it
+	// decides is whether the pinned block was STILL CANONICAL on the serving
+	// endpoint when the round closed. Changed, the chain moved mid-round and
+	// this round would be landing an anchor known-orphaned at commit time —
+	// see the KEEP decision in the contract above.
 	hashAfter, recheckOn, err := p.chain.HeaderHashFrom(ctx, servedBy.Index, pin)
 	if err != nil {
 		return none, false, fmt.Errorf("price poller %q: re-read header %d after the pinned multicall: %w", p.engine, pin, err)
@@ -928,12 +978,16 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	if recheckOn.Index != servedBy.Index {
 		slog.Warn("endpoint changed mid-round, discarding round: the failover client served the closing header re-read from another endpoint, so it cannot confirm the round's own chain view",
 			"engine", p.engine, "block", pin, "endpoint", servedBy.Index, "servedBy", recheckOn.Index)
+		p.routeNextRoundPastDiscard(servedBy)
 		return none, false, nil // round discarded; next cadence retries
 	}
 	if hashAfter == (common.Hash{}) {
 		return none, false, fmt.Errorf("price poller %q: header hash at %d is zero on endpoint %d — a provider protocol violation; refusing to anchor a round to an unverifiable block", p.engine, pin, servedBy.Index)
 	}
 	if hashAfter != hashBefore {
+		// DELIBERATELY NO ROUTING ADVANCE HERE: a mid-round reorg is the
+		// chain's business, not the endpoint's, and moving the next round's
+		// start over it would flee a healthy endpoint on false attribution.
 		slog.Warn("tip changed mid-round, discarding round",
 			"engine", p.engine, "block", pin,
 			"before", hashBefore, "after", hashAfter)
@@ -980,6 +1034,55 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 			"undecodable", undecodable, "block", pin)
 	}
 	return pollRound{block: pin, hash: hashBefore.Bytes(), obs: set.observations(), servedBy: servedBy}, true, nil
+}
+
+// routeNextRoundPastDiscard is the routing half of every coherence/serving-
+// inconsistency discard (Codex task-9 round 1 [high]).
+//
+// INVARIANT: a discard that cannot name a healthy endpoint must at least
+// ensure the NEXT round starts somewhere else. The discard itself is correct
+// and stays; what it must not do is leave the routing state untouched,
+// because HeadFrom then re-resolves the same endpoint next cadence and an
+// endpoint that serves heads while permanently failing pinned calls starves
+// the poller FOREVER with a healthy peer idle — the fail-closed-not-
+// fail-forever class a fourth time (wave-13 scheduling starvation, wave-15
+// rotation liveness, cause-unknown exploration before both).
+//
+// The advance is CALLER-SCOPED EXPLORATION past the round's endpoint:
+// advanceExploration records no attribution (a discard is not a diagnosis),
+// the shared routing hint is never written (d1e7d54's ambiguity rules — a
+// caller-scoped round must not fight error-driven routing), and genuine
+// progress releases the hint as always. With a single configured endpoint
+// there is nowhere else to start and advanceExploration says so rather than
+// pretending. A mid-round-reorg discard deliberately does NOT come here:
+// that is evidence about the chain, not the endpoint.
+func (p *Poller) routeNextRoundPastDiscard(servedBy chain.EndpointToken) {
+	p.advanceExploration(servedBy)
+}
+
+// isBlockNotFoundErr recognizes the rejection class an EIP-1898 hash-pinned
+// eth_call earns from a node that does not have the pinned block, as distinct
+// from a node that failed to answer.
+//
+// THE CLASSIFICATION IS BY ERROR TEXT, AND ITS BOUND IS STATED PLAINLY: the
+// accepted phrasings mirror the live matrix's uniformly observed rejection
+// ("block not found" on all four production endpoints, fabricated-hash
+// negative controls included; 2026-07-26) plus the dominant client families'
+// wordings for the same refusal (geth "header for hash not found", erigon
+// "block not found", nethermind "unknown block"). A rejection phrased outside
+// this class degrades to the ERROR posture — the daemon's backoff — which is
+// fail-closed: it can delay recovery, it can never land a round or misroute
+// one. The failover layer preserves the LAST endpoint's error, so an
+// all-endpoints rejection stays classifiable through the wrapping.
+func isBlockNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	if !strings.Contains(s, "not found") && !strings.Contains(s, "unknown block") {
+		return false
+	}
+	return strings.Contains(s, "block") || strings.Contains(s, "header") || strings.Contains(s, "hash")
 }
 
 // ---------------------------------------------------------------------------
