@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"flag"
 	"fmt"
 	"math/big"
 	"strings"
@@ -67,6 +68,122 @@ func TestAcceptanceTaints(t *testing.T) {
 	require.Contains(t, joined, "-max-head-lag")
 	require.Contains(t, joined, "-pin-op overridden")
 	require.Contains(t, joined, "-pin-eth overridden")
+}
+
+// TestFlagSurfaceClosed — round-11 F1: the taint GENERATOR is closed over
+// the ENTIRE flag surface. Every flag registered in reconFlagSet must be
+// classified here as exactly one of (a) mustTaint — a real argv whose
+// value weakens a required acceptance bound is parsed through the REAL
+// pipeline (parseFlags → acceptanceTaints → computeResult) and must yield
+// a non-pass verdict naming the flag — or (b) verdictFree — justified
+// below as unable to reach the verdict at all. An unclassified flag fails
+// the test, so the surface cannot silently grow an unexamined override;
+// dropping a flag's branch from acceptanceTaints fails its mustTaint case
+// (mutation W13M1).
+func TestFlagSurfaceClosed(t *testing.T) {
+	type taintCase struct {
+		args     []string
+		nameHint string // the taint text must name the weakened flag
+	}
+	mustTaint := map[string]taintCase{
+		"config":            {args: []string{"-config", "testdata/other.json"}, nameHint: "-config"},
+		"engine":            {args: []string{"-engine", "debt_manager"}, nameHint: "-engine"},
+		"sample":            {args: []string{"-sample", "5", "-allow-small"}, nameHint: "-sample"},
+		"allow-small":       {args: []string{"-allow-small", "-sample", "1"}, nameHint: "-sample"}, // weakens only jointly with -sample; the joint form taints
+		"seed":              {args: []string{"-seed", "operator-chosen"}, nameHint: "-seed"},
+		"accounts":          {args: []string{"-accounts", "picked.txt"}, nameHint: "-accounts"},
+		"pin-op":            {args: []string{"-pin-op", "1"}, nameHint: "-pin-op"},
+		"pin-eth":           {args: []string{"-pin-eth", "1"}, nameHint: "-pin-eth"},
+		"golden-pin-eth":    {args: []string{"-golden-pin-eth", "1"}, nameHint: "-golden-pin-eth"},
+		"fixture-pin-eth":   {args: []string{"-fixture-pin-eth", "1"}, nameHint: "-fixture-pin-eth"},
+		"snapshot-max-age":  {args: []string{"-snapshot-max-age", "2562047h"}, nameHint: "-snapshot-max-age"},
+		"tolerance-dm-wei":  {args: []string{"-tolerance-dm-wei", "1"}, nameHint: "-tolerance-dm-wei"},
+		"collateral-replay": {args: []string{"-collateral-replay", "1"}, nameHint: "-collateral-replay"},
+		"max-head-lag":      {args: []string{"-max-head-lag", "2562047h"}, nameHint: "-max-head-lag"},
+	}
+	// verdictFree flags CANNOT weaken a required bound; each carries its
+	// justification (the report's flag-surface table mirrors this map).
+	verdictFree := map[string]string{
+		"include":        "additive-only: forced includes are appended ON TOP of quota (selectSample pass 3) — they add gated rows, never displace seed-selected ones",
+		"rps":            "pacing only: no verdict bound consumes it; a stall ends in a loud abort (timeout/exit 3), never a pass",
+		"rpc-attempts":   "bounded-retry budget: <=0 is coerced to the default (newRPCRunner), exhaustion is a classified loud abort, and retrying more cannot change a hash-pinned answer",
+		"out":            "artifact destination only: a failed write is a loud abort, never a pass",
+		"timeout":        "whole-run deadline: expiry aborts loudly, and waiting longer only makes the wall-clock staleness gates STRICTER",
+		"preflight-only": "exits after Phase 0 with no artifact and no verdict — there is no receipt to launder",
+	}
+
+	var errBuf bytes.Buffer
+	fs := reconFlagSet(&options{}, &errBuf)
+	fs.VisitAll(func(f *flag.Flag) {
+		_, taints := mustTaint[f.Name]
+		_, free := verdictFree[f.Name]
+		require.True(t, taints || free,
+			"flag -%s is registered but UNCLASSIFIED — close the taint generator over it before shipping (round-11 F1)", f.Name)
+		require.False(t, taints && free, "flag -%s is classified twice", f.Name)
+	})
+	for name := range mustTaint {
+		require.NotNil(t, fs.Lookup(name), "mustTaint names -%s but reconFlagSet does not register it (stale table)", name)
+	}
+	for name := range verdictFree {
+		require.NotNil(t, fs.Lookup(name), "verdictFree names -%s but reconFlagSet does not register it (stale table)", name)
+	}
+
+	// Every mustTaint flag: REAL argv → REAL parse → REAL generator → REAL
+	// verdict. Non-pass, and the taint names its flag.
+	for name, tc := range mustTaint {
+		o, err := parseFlags(tc.args, &errBuf)
+		require.NoError(t, err, "-%s: %v must parse", name, tc.args)
+		taints := acceptanceTaints(o)
+		require.NotEmpty(t, taints, "-%s: weakening value %v must taint", name, tc.args)
+		require.Contains(t, strings.Join(taints, "\n"), tc.nameHint,
+			"-%s: the taint must name the weakened flag", name)
+		result, code := computeResult(0, o.toleranceDMWei, taints)
+		require.NotEqual(t, "pass", result, "-%s: a weakened bound can never produce pass (round-11 F1)", name)
+		require.NotEqual(t, exitPass, code, "-%s: a weakened bound can never produce exit 0", name)
+	}
+
+	// And the canonical default invocation stays taint-free and passes.
+	o, err := parseFlags(nil, &errBuf)
+	require.NoError(t, err)
+	require.Empty(t, acceptanceTaints(o), "canonical defaults must not taint")
+	result, code := computeResult(0, 0, acceptanceTaints(o))
+	require.Equal(t, "pass", result)
+	require.Equal(t, exitPass, code)
+}
+
+// TestLooseBoundsInvocationIsNonPass — round-11 F1's binding invocation,
+// verbatim: `-snapshot-max-age 2562047h -max-head-lag 2562047h` used to
+// parse acceptance-clean while making both required age checks vacuous for
+// any realistic stale state. Both must taint, and the verdict must be
+// structurally non-pass even with zero gated failures. Loose-positive is
+// the same class as disabled; tighter-than-canonical stays taint-free
+// because it can only strengthen.
+func TestLooseBoundsInvocationIsNonPass(t *testing.T) {
+	var errBuf bytes.Buffer
+	o, err := parseFlags([]string{"-snapshot-max-age", "2562047h", "-max-head-lag", "2562047h"}, &errBuf)
+	require.NoError(t, err)
+	taints := acceptanceTaints(o)
+	joined := strings.Join(taints, "\n")
+	require.Contains(t, joined, "-snapshot-max-age", "the freshness-bound override must taint")
+	require.Contains(t, joined, "-max-head-lag", "the loose-positive head-lag override must taint")
+	result, code := computeResult(0, 0, taints)
+	require.Equal(t, "tainted", result, "vacuous-via-loose-bounds is the same class as vacuous-via-skip")
+	require.Equal(t, exitVerdictFail, code)
+
+	// Loose-positive alone (not disabled): still tainted.
+	o, err = parseFlags([]string{"-max-head-lag", "31m"}, &errBuf)
+	require.NoError(t, err)
+	require.NotEmpty(t, acceptanceTaints(o), "positive-but-looser max-head-lag must taint (round 11)")
+
+	// Tighter-than-canonical: taint-free (can only turn pass into abort).
+	o, err = parseFlags([]string{"-max-head-lag", "5m"}, &errBuf)
+	require.NoError(t, err)
+	require.Empty(t, acceptanceTaints(o), "a TIGHTER bound weakens nothing")
+
+	// The canonical spelling of the default value is not an override.
+	o, err = parseFlags([]string{"-snapshot-max-age", "auto", "-max-head-lag", "30m"}, &errBuf)
+	require.NoError(t, err)
+	require.Empty(t, acceptanceTaints(o), "restating the canonical defaults must not taint")
 }
 
 // TestTaintedRunCannotPass — round-10 F2 (mutation: taint-dropped-from-

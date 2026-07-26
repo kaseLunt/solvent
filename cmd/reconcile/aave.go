@@ -77,10 +77,11 @@ func liveValueIdentity(derivedScaled, normalizedDebt, chainBalance *big.Int) (co
 // accounts) vs scaledTotalSupply() @ pinHash(P_eth). Debt side GATED, zero
 // bound (mint/burn move user scaled and total by the same rayDiv result;
 // BalanceTransfer conserves; the DeficitCreated burn is included).
-// Collateral (aToken) side ADVISORY on this first run per the amendment —
-// the treasury-accrual account must be present in the derived Σ; the
-// deriver folds Mint for any account, so exactness is expected — promoted
-// to gated after one clean run.
+// Collateral (aToken) side: NUMERIC mismatches ADVISORY on this first run
+// per the amendment — the treasury-accrual account must be present in the
+// derived Σ; the deriver folds Mint for any account, so exactness is
+// expected — promoted to gated after one clean run. Ability-to-check is a
+// SEPARATE policy (round-11 F2): weld-unread rows gate on BOTH sides.
 type aaveWeldRow struct {
 	ReserveHex string `json:"reserve"`
 	TokenHex   string `json:"token"` // the scaled token actually read
@@ -96,9 +97,11 @@ type aaveWeldRow struct {
 // with the chain reads over the AUTHORITATIVE universe (round-10 F3): the
 // Pool's own getReservesList(@pin) ∪ derived-assets (universe) unioned with
 // both fact sets' keys. A universe reserve whose token resolution or
-// scaledTotalSupply read did not succeed becomes a weld-unread row (gated
-// on the debt side, like every other weld row of that side) — never a
-// silently absent row, never a fake zero.
+// scaledTotalSupply read did not succeed becomes a weld-unread row — never
+// a silently absent row, never a fake zero — and weld-unread rows are
+// ALWAYS GATED, on both sides, regardless of the numeric-mismatch policy
+// the gated parameter carries (round-11 F2: "cannot verify" is never
+// advisory).
 func weldAaveAggregate(side string, gated bool, derived map[common.Address]*big.Int, reads map[common.Address]chainRead, tokenByReserve map[common.Address]common.Address, universe []common.Address) []aaveWeldRow {
 	union := map[common.Address]bool{}
 	for _, r := range universe {
@@ -146,9 +149,33 @@ func weldAaveAggregate(side string, gated bool, derived map[common.Address]*big.
 			row.ChainTotal = read.Total.String()
 			row.Verdict = verdictAggregateMismatch
 		}
+		// AXIOM (round-11 F2): "cannot verify" is NEVER advisory. The
+		// gated parameter above carries the side's NUMERIC-mismatch policy
+		// only (collateral aggregate-mismatch stays advisory on the first
+		// run per the amendment); ability-to-check is a separate,
+		// non-negotiable policy — a weld-unread row GATES on every side,
+		// whichever weld produced it, because an unreadable leg proves
+		// nothing about the universe it was supposed to verify.
+		if row.Verdict == verdictWeldUnread {
+			row.Gated = true
+		}
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+// aaveWeldGatedFailures counts the Aave weld rows that gate the exit code.
+// It is THE accounting the phase-2 site uses (never a test-only twin), so
+// TestCollateralUnreadIsGatedEvenWhenNumericIsAdvisory exercises the exact
+// path a live run takes from an unreadable collateral leg to exit 1.
+func aaveWeldGatedFailures(rows []aaveWeldRow) int {
+	n := 0
+	for _, w := range rows {
+		if w.Gated && w.Verdict != verdictExact {
+			n++
+		}
+	}
+	return n
 }
 
 // derivedScaledByReserve folds AssetNetSums (asset = underlying reserve)

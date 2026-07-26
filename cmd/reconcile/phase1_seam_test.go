@@ -1,20 +1,19 @@
-// Round-10 F5 structural-seam regression. The no-network-under-snapshot
-// guarantee is enforced by construction, in two halves:
-//
-//  1. collectSnapshot's SIGNATURE carries no chain reader — while the RR
-//     transaction is open there is no RPC surface in scope, so a network
-//     call under the snapshot cannot be written without changing the
-//     function signature (a review-visible structural event, not a slipped
-//     line);
-//  2. snapshotData — the ONLY value that crosses the seam — is plain data:
-//     no connection, transaction, pool, or chain-reader can leak out of
-//     Stage A for later code to abuse while... there is nothing to hold
-//     open anyway, because Stage A commits AND closes before returning.
-//
-// This test enforces the second half mechanically: a reflection walk over
+// Round-10 F5 seam, DATA half: snapshotData — the ONLY value that crosses
+// the Stage A/Stage B seam — must be plain data. No connection,
+// transaction, pool, or chain-reader can leak out of Stage A for later
+// code to hold across RPC (Stage A commits AND closes before returning).
+// This test enforces that half mechanically: a reflection walk over
 // snapshotData's full reachable type graph asserting that no pgx / pgxpool
 // type and no chain-reading type is embedded anywhere. A mutant that
 // smuggles the transaction or a reader out through a new field dies here.
+//
+// SCOPE (round-11 F3): this test inspects DATA, not BEHAVIOR. Wave 11
+// overclaimed it — together with collectSnapshot's reader-free signature —
+// as making network-under-snapshot unrepresentable; round 11 disproved
+// that (a package-level helper or environment-dialed client needs no new
+// field and no signature change), and the claim is retracted in the
+// wave-13 report. The BEHAVIOR halves live in phase1_f5_seam_test.go: the
+// snapshotGate runtime sentinel and the AST reachability walk.
 package main
 
 import (

@@ -762,14 +762,17 @@ func runAavePhase(ctx context.Context, o *options, p1 *phase1Data, r *pinnedRead
 	}
 
 	// ---- F1 Aave welds over the AUTHORITATIVE universe (round-10 F3) -------
+	// The gated argument carries each side's NUMERIC-mismatch policy only
+	// (collateral aggregate-mismatch is advisory on the first run, per the
+	// amendment). Ability-to-check is NOT that policy's to waive: a
+	// weld-unread row comes back GATED from weldAaveAggregate on BOTH sides
+	// — "cannot verify" is never advisory (round-11 F2) — so a reverting
+	// getReserveAToken or an unreadable scaledTotalSupply leg reaches the
+	// exit code even while collateral numeric drift does not.
 	rep.AaveWeld = append(
 		weldAaveAggregate("debt", true, derivedScaledByReserve(p1.aaveDebtNet), weldDebtReads, debtTokenByReserve, universeDebt),
 		weldAaveAggregate("collateral", false, derivedScaledByReserve(p1.aaveCollNet), weldCollReads, aTokenByReserve, universeColl)...)
-	for _, w := range rep.AaveWeld {
-		if w.Gated && w.Verdict != verdictExact {
-			*gatedFailures++
-		}
-	}
+	*gatedFailures += aaveWeldGatedFailures(rep.AaveWeld)
 	_ = o
 	return nil
 }

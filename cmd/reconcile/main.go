@@ -100,30 +100,55 @@ type options struct {
 	preflightOnly    bool
 }
 
-func parseFlags(args []string, stderr io.Writer) (*options, error) {
+// Canonical acceptance defaults (round-11 F1): the ONE set of values an
+// acceptance run may use without tainting. reconFlagSet seeds the flag
+// defaults from these same constants, so the taint generator below and the
+// defaults can never drift apart silently.
+const (
+	canonicalConfigPath       = "config/contracts.json"
+	canonicalSampleFloor      = 25
+	canonicalGoldenPinETH     = 25584990
+	canonicalFixturePinETH    = 25593800
+	canonicalSnapshotMaxAge   = "auto"
+	canonicalCollateralReplay = 3
+	canonicalMaxHeadLag       = 30 * time.Minute
+)
+
+// reconFlagSet registers the COMPLETE reconcile flag surface on a fresh
+// FlagSet bound to o. TestFlagSurfaceClosed enumerates this set and refuses
+// any flag that lacks a taint-or-justified classification — adding a flag
+// here without closing acceptanceTaints over it fails the suite (round-11
+// F1: the taint GENERATOR must be closed over the flag surface, not just
+// the taints consumed).
+func reconFlagSet(o *options, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("reconcile", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	o := &options{}
-	fs.StringVar(&o.configPath, "config", "config/contracts.json", "contracts config path")
+	fs.StringVar(&o.configPath, "config", canonicalConfigPath, "contracts config path")
 	fs.StringVar(&o.engine, "engine", "all", "all|debt_manager|aave_v3_etherfi")
-	fs.IntVar(&o.sample, "sample", 25, "sample size floor (>=25 enforced; -allow-small for debugging taints acceptance)")
+	fs.IntVar(&o.sample, "sample", canonicalSampleFloor, "sample size floor (>=25 enforced; -allow-small for debugging taints acceptance)")
 	fs.BoolVar(&o.allowSmall, "allow-small", false, "permit -sample below 25 (taints artifact acceptance:false)")
-	fs.StringVar(&o.seed, "seed", "", "sampling seed (default: hex of the OP pin's block hash; resolved value always echoed)")
+	fs.StringVar(&o.seed, "seed", "", "sampling seed (default: hex of the OP pin's block hash; resolved value always echoed; overriding taints acceptance:false)")
 	fs.StringVar(&o.include, "include", "", "comma-separated extra forced-include accounts (hex)")
-	fs.StringVar(&o.accountsFile, "accounts", "", "file of accounts — bypasses sampling (exact replay, recorded)")
+	fs.StringVar(&o.accountsFile, "accounts", "", "file of accounts — bypasses sampling (exact replay, recorded; taints acceptance:false)")
 	fs.Uint64Var(&o.pinOP, "pin-op", 0, "OP pin override (default: derive cursor; refused above it)")
 	fs.Uint64Var(&o.pinETH, "pin-eth", 0, "ETH pin override (default: derive cursor; refused above it)")
-	fs.Uint64Var(&o.goldenPinETH, "golden-pin-eth", 25584990, "W1 golden pin (fixed; overriding taints acceptance:false)")
-	fs.Uint64Var(&o.fixturePinETH, "fixture-pin-eth", 25593800, "fixture pin (fixed; overriding taints acceptance:false)")
-	fs.StringVar(&o.snapshotMaxAge, "snapshot-max-age", "auto", "collateral freshness bound (auto = policy bound from §7)")
+	fs.Uint64Var(&o.goldenPinETH, "golden-pin-eth", canonicalGoldenPinETH, "W1 golden pin (fixed; overriding taints acceptance:false)")
+	fs.Uint64Var(&o.fixturePinETH, "fixture-pin-eth", canonicalFixturePinETH, "fixture pin (fixed; overriding taints acceptance:false)")
+	fs.StringVar(&o.snapshotMaxAge, "snapshot-max-age", canonicalSnapshotMaxAge, "collateral freshness bound (auto = policy bound from §7; any explicit value taints acceptance:false)")
 	fs.Int64Var(&o.toleranceDMWei, "tolerance-dm-wei", 0, "DIAGNOSIS ONLY: nonzero forces result=fail-with-tolerance")
 	fs.Float64Var(&o.rps, "rps", 1.5, "client token bucket across ALL endpoints")
 	fs.IntVar(&o.rpcAttempts, "rpc-attempts", 5, "bounded walk retries (backoff applies to 429 only)")
-	fs.IntVar(&o.collateralReplay, "collateral-replay", 3, "deep collateral replay account count (0 disables)")
+	fs.IntVar(&o.collateralReplay, "collateral-replay", canonicalCollateralReplay, "deep collateral replay account count (0 disables; below the default taints acceptance:false)")
 	fs.StringVar(&o.out, "out", "roadmap/evidence/artifacts/w1-reconcile", "artifact output directory")
 	fs.DurationVar(&o.timeout, "timeout", 20*time.Minute, "whole-run timeout")
-	fs.DurationVar(&o.maxHeadLag, "max-head-lag", 30*time.Minute, "staleness QUALITY gate on the pin's header time (daemon stalled ⇒ evidence stale; exit 3) — never a serveability inference")
+	fs.DurationVar(&o.maxHeadLag, "max-head-lag", canonicalMaxHeadLag, "staleness QUALITY gate on the pin's header time (daemon stalled ⇒ evidence stale; exit 3) — never a serveability inference; loosening or disabling taints acceptance:false")
 	fs.BoolVar(&o.preflightOnly, "preflight-only", false, "run Phase 0 only and exit (the smoke mode; never touches Phase 1)")
+	return fs
+}
+
+func parseFlags(args []string, stderr io.Writer) (*options, error) {
+	o := &options{}
+	fs := reconFlagSet(o, stderr)
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -132,8 +157,8 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 	default:
 		return nil, fmt.Errorf("-engine must be all|debt_manager|aave_v3_etherfi, got %q", o.engine)
 	}
-	if o.sample < 25 && !o.allowSmall {
-		return nil, fmt.Errorf("-sample %d is below the 25 floor (use -allow-small for debugging; it taints acceptance)", o.sample)
+	if o.sample < canonicalSampleFloor && !o.allowSmall {
+		return nil, fmt.Errorf("-sample %d is below the %d floor (use -allow-small for debugging; it taints acceptance)", o.sample, canonicalSampleFloor)
 	}
 	if o.sample < 1 {
 		return nil, fmt.Errorf("-sample must be >= 1")
@@ -142,22 +167,39 @@ func parseFlags(args []string, stderr io.Writer) (*options, error) {
 }
 
 // acceptanceTaints lists why this run cannot back an acceptance receipt.
-// Round-10 F2 made the list EXHAUSTIVE over the flags that disable required
-// checks — deep replay, the head-lag staleness gate, and ordinary pin
-// overrides all taint now — and made every taint flow INTO computeResult:
-// a tainted run is structurally non-pass (result "tainted", exit 1), so no
-// flag combination can bypass a required check and still produce pass/exit-0
-// acceptance evidence.
+// Round-10 F2 made every taint flow INTO computeResult (a tainted run is
+// structurally non-pass, result "tainted", exit 1); round-11 F1 CLOSED the
+// generator over the whole flag surface: every registered flag either
+// taints here whenever its value can weaken a required acceptance bound,
+// or is verdict-free by construction and justified in
+// TestFlagSurfaceClosed's classification table (raising -sample only
+// strengthens; -include only ADDS gated rows on top of quota; -rps,
+// -rpc-attempts, -timeout and -out change pacing or destinations and their
+// every failure mode is a loud abort, never a pass; -preflight-only exits
+// before any verdict or artifact exists). Canonical defaults are
+// taint-free. The vacuous-via-loose-bounds class — round 11's
+// `-snapshot-max-age 2562047h -max-head-lag 2562047h` — is the same class
+// as vacuous-via-skip and taints identically: a bound weakened is a check
+// bypassed.
 func acceptanceTaints(o *options) []string {
 	var taints []string
-	if o.allowSmall && o.sample < 25 {
-		taints = append(taints, fmt.Sprintf("-sample %d below the 25 floor (-allow-small)", o.sample))
+	if o.configPath != canonicalConfigPath {
+		taints = append(taints, fmt.Sprintf("-config %s (acceptance evidence is defined over the canonical contract set at %s; any other config changes the claim's subject)", o.configPath, canonicalConfigPath))
 	}
-	if o.goldenPinETH != 25584990 {
-		taints = append(taints, fmt.Sprintf("-golden-pin-eth overridden to %d (W1 clause pins 25584990)", o.goldenPinETH))
+	if o.allowSmall && o.sample < canonicalSampleFloor {
+		taints = append(taints, fmt.Sprintf("-sample %d below the %d floor (-allow-small)", o.sample, canonicalSampleFloor))
 	}
-	if o.fixturePinETH != 25593800 {
-		taints = append(taints, fmt.Sprintf("-fixture-pin-eth overridden to %d (fixtures captured at 25593800)", o.fixturePinETH))
+	if o.seed != "" {
+		taints = append(taints, fmt.Sprintf("-seed %q overridden (acceptance's seed is the OP pin's block hash — a chain fact; an operator-chosen seed can steer the sample away from failing accounts)", o.seed))
+	}
+	if o.accountsFile != "" {
+		taints = append(taints, fmt.Sprintf("-accounts %s replaces the seed-derived sample with operator-chosen membership (validateReplaySelection checks census SHAPE — size, strata, anchors — not selection, so hand-picked membership could avoid known-drift accounts)", o.accountsFile))
+	}
+	if o.goldenPinETH != canonicalGoldenPinETH {
+		taints = append(taints, fmt.Sprintf("-golden-pin-eth overridden to %d (W1 clause pins %d)", o.goldenPinETH, canonicalGoldenPinETH))
+	}
+	if o.fixturePinETH != canonicalFixturePinETH {
+		taints = append(taints, fmt.Sprintf("-fixture-pin-eth overridden to %d (fixtures captured at %d)", o.fixturePinETH, canonicalFixturePinETH))
 	}
 	if o.pinOP != 0 {
 		taints = append(taints, fmt.Sprintf("-pin-op overridden to %d (acceptance pins are the derive cursors, never operator-chosen)", o.pinOP))
@@ -171,11 +213,18 @@ func acceptanceTaints(o *options) []string {
 	if o.toleranceDMWei != 0 {
 		taints = append(taints, fmt.Sprintf("-tolerance-dm-wei %d (diagnosis only; forces fail-with-tolerance)", o.toleranceDMWei))
 	}
+	if o.snapshotMaxAge != canonicalSnapshotMaxAge && o.snapshotMaxAge != "" {
+		taints = append(taints, fmt.Sprintf("-snapshot-max-age %s replaces the §7 policy bound (auto = derived from the daemon's own cadence) with an operator constant — a loose value makes the freshness gate vacuous for any realistic stale state", o.snapshotMaxAge))
+	}
 	if o.collateralReplay <= 0 {
 		taints = append(taints, fmt.Sprintf("-collateral-replay %d disables the deep collateral replay (a required check)", o.collateralReplay))
+	} else if o.collateralReplay < canonicalCollateralReplay {
+		taints = append(taints, fmt.Sprintf("-collateral-replay %d below the canonical %d shrinks deep-replay coverage (a required check, weakened rather than disabled — the same class)", o.collateralReplay, canonicalCollateralReplay))
 	}
 	if o.maxHeadLag <= 0 {
 		taints = append(taints, fmt.Sprintf("-max-head-lag %s disables the staleness quality gate (a required check)", o.maxHeadLag))
+	} else if o.maxHeadLag > canonicalMaxHeadLag {
+		taints = append(taints, fmt.Sprintf("-max-head-lag %s looser than the canonical %s weakens the staleness quality gate — positive-but-loose is the same class as disabled (round 11)", o.maxHeadLag, canonicalMaxHeadLag))
 	}
 	return taints
 }
@@ -252,6 +301,13 @@ type pinnedReader struct {
 }
 
 func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, chain.EndpointToken, error) {
+	// Round-11 F3: the F5 runtime seam. The gate check is FIRST — before
+	// the runner, before the limiter, before any dial — in every entry
+	// point, so a network attempt while the snapshot transaction is open
+	// fails closed however it was reached.
+	if err := snapshotGate.violation(fmt.Sprintf("headerHash(%d)", n)); err != nil {
+		return common.Hash{}, chain.EndpointToken{}, err
+	}
 	var out common.Hash
 	tok, err := r.run.run(ctx, r.name, fmt.Sprintf("headerHash(%d)", n), func(ctx context.Context) (chain.EndpointToken, error) {
 		h, t, err := r.c.HeaderHashFrom(ctx, 0, n)
@@ -264,6 +320,9 @@ func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, c
 }
 
 func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.EndpointToken, error) {
+	if err := snapshotGate.violation(fmt.Sprintf("headerTime(%d)", n)); err != nil {
+		return 0, chain.EndpointToken{}, err
+	}
 	var out uint64
 	tok, err := r.run.run(ctx, r.name, fmt.Sprintf("headerTime(%d)", n), func(ctx context.Context) (chain.EndpointToken, error) {
 		v, t, err := r.c.HeaderTimeFrom(ctx, 0, n)
@@ -276,6 +335,9 @@ func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.
 }
 
 func (r *pinnedReader) callAtHash(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash) ([]byte, chain.EndpointToken, error) {
+	if err := snapshotGate.violation("callAtHash:" + op); err != nil {
+		return nil, chain.EndpointToken{}, err
+	}
 	var out []byte
 	tok, err := r.run.run(ctx, r.name, op, func(ctx context.Context) (chain.EndpointToken, error) {
 		ret, t, err := r.c.CallAtHashFrom(ctx, 0, to, data, hash)
@@ -339,6 +401,12 @@ func (r *pinnedReader) multicall(ctx context.Context, op string, pin uint64, pin
 // alternative is "no second opinion available" — never counted as
 // corroboration or contradiction (L1-9).
 func (r *pinnedReader) secondOpinion(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash, servedBy int) (string, *big.Int) {
+	// secondOpinion bypasses the runner (single deliberate attempt), so it
+	// carries its own gate check; its signature has no error path, so the
+	// violation is returned as the recorded note — still never corroboration.
+	if err := snapshotGate.violation("secondOpinion:" + op); err != nil {
+		return err.Error(), nil
+	}
 	if r.c.EndpointCount() <= 1 {
 		return "no second opinion available (single endpoint)", nil
 	}

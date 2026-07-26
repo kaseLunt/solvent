@@ -90,6 +90,66 @@ func TestWeldAaveAggregate(t *testing.T) {
 	require.Equal(t, verdictAggregateMismatch, adv[0].Verdict, "advisory still REPORTS the mismatch")
 }
 
+// TestCollateralUnreadIsGatedEvenWhenNumericIsAdvisory — round-11 F2. Two
+// SEPARATE policies meet in the collateral weld: the NUMERIC-mismatch
+// policy (advisory on the first run, per the amendment) and the
+// ability-to-check policy — "cannot verify" is NEVER advisory. A universe
+// reserve whose getReserveAToken resolution reverted (phase 2 wires
+// unresolvedColl into the read map in exactly the OK=false shape used
+// here), or whose scaledTotalSupply leg was never read at all, must GATE
+// the run even while the side's numeric rows stay advisory — and the
+// assertion runs through the REAL accounting (aaveWeldGatedFailures, the
+// phase-2 site's own function) into the REAL verdict.
+func TestCollateralUnreadIsGatedEvenWhenNumericIsAdvisory(t *testing.T) {
+	usdc := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+	weeth := common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") // universe reserve, NO read recorded at all
+	ghost := common.HexToAddress("0x83F20F44975D03b1b09e64809B757c47f942BEeA") // getReserveAToken reverted at the pin
+
+	rows := weldAaveAggregate("collateral", false, /* numeric policy: advisory (amendment) */
+		map[common.Address]*big.Int{usdc: big.NewInt(5)},
+		map[common.Address]chainRead{
+			usdc:  {Total: big.NewInt(7), OK: true}, // read fine, numbers disagree
+			ghost: {Note: "getReserveAToken unsuccessful (reverted) at the pin"},
+		},
+		map[common.Address]common.Address{},
+		[]common.Address{usdc, weeth, ghost})
+	require.Len(t, rows, 3)
+	byReserve := map[string]aaveWeldRow{}
+	for _, r := range rows {
+		byReserve[r.ReserveHex] = r
+	}
+
+	// Policy 1 — numeric collateral mismatch stays ADVISORY (amendment).
+	require.Equal(t, verdictAggregateMismatch, byReserve[usdc.Hex()].Verdict)
+	require.False(t, byReserve[usdc.Hex()].Gated,
+		"a READ collateral mismatch stays advisory on the first run (amendment)")
+
+	// Policy 2 — inability to check GATES, whichever weld produced it.
+	for _, r := range []common.Address{ghost, weeth} {
+		require.Equal(t, verdictWeldUnread, byReserve[r.Hex()].Verdict)
+		require.True(t, byReserve[r.Hex()].Gated,
+			"weld-unread is ALWAYS GATED — 'cannot verify' is never advisory (round-11 F2)")
+	}
+	require.Contains(t, byReserve[ghost.Hex()].ReadError, "getReserveAToken")
+
+	// The REAL accounting + the REAL verdict: two unread collateral legs
+	// are two gated failures; the run is structurally non-pass.
+	failures := aaveWeldGatedFailures(rows)
+	require.Equal(t, 2, failures, "the advisory numeric row must NOT count; both unread rows MUST")
+	result, code := computeResult(failures, 0, nil)
+	require.Equal(t, "fail", result)
+	require.Equal(t, exitVerdictFail, code)
+
+	// And a fully-read collateral weld with only numeric drift still
+	// contributes ZERO gated failures — the separation cuts both ways.
+	clean := weldAaveAggregate("collateral", false,
+		map[common.Address]*big.Int{usdc: big.NewInt(5)},
+		map[common.Address]chainRead{usdc: {Total: big.NewInt(7), OK: true}},
+		map[common.Address]common.Address{}, []common.Address{usdc})
+	require.Zero(t, aaveWeldGatedFailures(clean),
+		"numeric-advisory alone must not gate — the two policies are separate")
+}
+
 func TestDerivedScaledByReserve(t *testing.T) {
 	usdc := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 	m := derivedScaledByReserve([]store.AssetNetSum{{Asset: usdc.Bytes(), Total: big.NewInt(9)}})

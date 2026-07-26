@@ -3,13 +3,18 @@
 //
 //	Stage A (collectSnapshot): ONE connection, ONE RR RO transaction, EVERY
 //	DB read of the run — then COMMIT AND CLOSE. The function signature
-//	carries NO chain reader and its result (snapshotData) is plain values,
-//	so network-under-snapshot is not merely avoided, it is UNREPRESENTABLE
-//	at this seam: there is no RPC surface in scope while the transaction is
-//	open, and no connection/tx can leak out of the stage
-//	(TestSnapshotDataCarriesNoConnections walks the type). A slow or
-//	retry-storming endpoint therefore can NEVER hold the live database's
-//	xmin (vacuum-friendliness while the daemon writes).
+//	carries NO chain reader and its result (snapshotData) is plain values.
+//	Round 11 (finding 3) disproved wave 11's stronger claim that this made
+//	network-under-snapshot UNREPRESENTABLE — a package-level helper or an
+//	environment-dialed client could always have been called from inside
+//	Stage A without changing a signature — so the ordering is now ENFORCED,
+//	twice over: snapshotGate makes every pinnedReader entry point FAIL at
+//	run time while the transaction is open, and
+//	TestCollectSnapshotReachesNoChainSurface refuses, by AST reachability,
+//	any chain surface reachable from collectSnapshot
+//	(TestSnapshotDataCarriesNoConnections still walks the result type). A
+//	slow or retry-storming endpoint therefore can NEVER hold the live
+//	database's xmin (vacuum-friendliness while the daemon writes).
 //
 //	Stage B (runPhase1 tail): pin header hash/time RPC against the FIXED
 //	pins the snapshot chose, seed resolution (default = OP pin hash), the
@@ -33,6 +38,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -63,9 +69,9 @@ type idxObs struct {
 
 // snapshotData is everything Stage A reads from the database — PLAIN VALUES
 // ONLY. No connection, no transaction, no chain reader may live here: the
-// type is the F5 structural seam's second half (the first is
-// collectSnapshot's reader-free signature), and
-// TestSnapshotDataCarriesNoConnections enforces it by reflection walk.
+// type is the F5 seam's DATA half, enforced by reflection walk in
+// TestSnapshotDataCarriesNoConnections (the BEHAVIOR halves — round-11 F3
+// — are snapshotGate and the AST reachability walk).
 // Population-scoped fields (allAsOfDM, internalDMAll, balances, residue,
 // stableSnap, historyDocs, sourceConflictsByAcct) cover the WHOLE candidate
 // account set — population ∪ forced anchors ∪ includes ∪ accounts-file —
@@ -145,12 +151,47 @@ type replayTarget struct {
 // artifact (the count is always exact; the detail is a diagnosis aid).
 const invariantDetailCap = 100
 
+// snapshotSentinel is the F5 RUNTIME seam (round-11 F3). Round 11 disproved
+// wave 11's claim that network-under-snapshot had become unrepresentable —
+// a package-level helper or an environment-dialed client could always have
+// been called from inside Stage A without changing any signature or adding
+// any snapshotData field, and TestSnapshotDataCarriesNoConnections inspects
+// DATA, not BEHAVIOR. So the ordering is now enforced at run time:
+// collectSnapshot opens this gate for the lifetime of the repeatable-read
+// transaction, and EVERY pinnedReader entry point (headerHash, headerTime,
+// callAtHash, secondOpinion — multicall funnels through callAtHash) refuses
+// with a named seam violation while it is open. Package-level state BY
+// DESIGN: the invariant is process-wide — one reconcile run per process,
+// and no RPC may run ANYWHERE in it while the snapshot transaction is open,
+// whatever call path smuggled the attempt in. The static half of the seam
+// is TestCollectSnapshotReachesNoChainSurface (AST reachability walk over
+// the non-test package sources); this gate is the half that fails CLOSED
+// even on a path neither static check anticipated.
+type snapshotSentinel struct{ open atomic.Bool }
+
+func (s *snapshotSentinel) enter() { s.open.Store(true) }
+func (s *snapshotSentinel) exit()  { s.open.Store(false) }
+
+// violation returns a named error when op is attempted while the snapshot
+// transaction is open, nil otherwise.
+func (s *snapshotSentinel) violation(op string) error {
+	if s.open.Load() {
+		return fmt.Errorf("F5 seam violation: %s attempted while the repeatable-read snapshot transaction is open — no network call may hold the snapshot's xmin (round-10 F5, round-11 F3)", op)
+	}
+	return nil
+}
+
+var snapshotGate = &snapshotSentinel{}
+
 // collectSnapshot is Stage A (round-10 F5): connect, open the RR RO
 // transaction, perform EVERY DB read of the run, COMMIT AND CLOSE — and
-// return plain data. The signature carries NO chain reader, which is the
-// structural seam: while the snapshot transaction is open there is no RPC
-// surface in scope, so a network call under the snapshot is unrepresentable
-// without changing this function's signature in review-visible ways.
+// return plain data. The signature carries NO chain reader; since round 11
+// (finding 3) that discipline is ENFORCED rather than asserted: the
+// snapshotGate above closes the process's whole RPC surface for the
+// transaction's lifetime, and TestCollectSnapshotReachesNoChainSurface
+// fails on any chain surface reachable from this function. (Wave 11's
+// claim that the regression was thereby UNREPRESENTABLE is retracted —
+// data-inspection is not behavior-inspection; see the wave-13 report.)
 // extraAccounts are the pre-snapshot flag/file accounts (forced anchors,
 // -include, -accounts) that must join the candidate read set because the
 // sample itself is chosen only after commit.
@@ -189,6 +230,14 @@ func collectSnapshot(ctx context.Context, o *options, cfg *config.Config, roDSN 
 		return nil, fmt.Errorf("begin RR RO snapshot: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	// The RR transaction is OPEN: close the process's RPC surface until this
+	// function returns (round-11 F3). Every pinnedReader entry point consults
+	// the gate, so ANY network attempt while the snapshot is live — whatever
+	// path smuggled it in — fails with a named seam violation instead of
+	// holding the snapshot's xmin across a retry storm. The deferred exit
+	// runs at return, strictly after the commit-and-close below.
+	snapshotGate.enter()
+	defer snapshotGate.exit()
 
 	// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------
 	p.deriveCursors, err = store.DeriveCursorStates(ctx, tx)
