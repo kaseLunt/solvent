@@ -189,6 +189,8 @@ func TestNeutralizationSplitsAnchoredFromUnanchoredByTheRowsOwnBinding(t *testin
 	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, 5010, anchorAt(5010))))
 
 	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 4000, []byte{0x01}))
+
+	rec := captureWarnAttrs(t)
 	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 5010, 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(2), marked)
@@ -197,6 +199,19 @@ func TestNeutralizationSplitsAnchoredFromUnanchoredByTheRowsOwnBinding(t *testin
 		"the anchored round's row carries its own round's anchor")
 	require.Nil(t, anchorBindingAt(t, s, 10, 0xBB, testPollSource, 5010),
 		"the legacy row stays unprovable even though an anchor now sits at its height")
+
+	// THE REPORTED SPLIT IS THE ASSERTION THAT BINDS THE FIX, and the column values
+	// above are only the mechanism. This fixture is the one arrangement where the two
+	// possible rules DISAGREE: both marked rows sit at heights carrying an anchor, so
+	// the height-derived split reports 2 anchored / 0 unanchored, while the row's own
+	// binding reports 1 / 1. The WARN's gloss on rowsAnchored — "the hash of the block
+	// that round executed against is on disk" — is only true under the second.
+	got := rec.find("rowsNeutralized")
+	require.NotNil(t, got, "the classification is reported to the operator at all")
+	require.Equal(t, int64(1), got["rowsAnchored"],
+		"only the row whose OWN round wrote an anchor has provenance an offline check could use")
+	require.Equal(t, int64(1), got["rowsUnanchored"],
+		"the legacy row is reported as unprovable even though a later round anchored its height (D-012 clause 2)")
 }
 
 // A REPLAYED ANCHOR IS STILL A WITNESSED ONE. A frozen endpoint re-reports the same
@@ -369,9 +384,16 @@ func TestPruneDoesNotReconsiderPermanentlyProtectedAnchors(t *testing.T) {
 	require.EqualValues(t, protectedHeights, marked)
 
 	// Then a long healthy run that pushes every classified height far past retention.
+	// EVERY round writes a row, which is what a poller actually does — and it matters
+	// for the measurement below, not just for realism: with a near-empty `prices` table
+	// a sequential scan is genuinely the cheapest plan for any lookup into it, so a
+	// toy-sized fixture would measure the planner's correct preference at toy scale
+	// rather than the property this finding is about.
 	total := uint64(pollAnchorRetention + protectedHeights + 50)
 	for i := uint64(protectedHeights + 1); i <= total; i++ {
-		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, nil, i, anchorAt(i))))
+		require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+			po(i, 0xAA, testPollSource, 1_000_000, 6),
+		}, i, anchorAt(i))))
 	}
 
 	// CORRECTNESS FIRST: every classified height kept its anchor, and the ordinary
@@ -413,18 +435,10 @@ func TestPruneDoesNotReconsiderPermanentlyProtectedAnchors(t *testing.T) {
 	_, aerr = s.pool.Exec(ctx, "ANALYZE price_poll_anchors")
 	require.NoError(t, aerr)
 
-	plan := explain(t, s, fmt.Sprintf(`DELETE FROM price_poll_anchors a
-		WHERE a.engine = '%s'
-		  AND a.block_number >= %d AND a.block_number < %d
-		  AND NOT EXISTS (
-		    SELECT 1 FROM prices p
-		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
-		      AND p.block_number = a.block_number AND p.invalid_reason = '%s')
-		  AND NOT EXISTS (
-		    SELECT 1 FROM prices p
-		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
-		      AND p.anchor_block = a.block_number AND p.invalid_reason = '%s')`,
-		testPollEngine, frontier, cutoff+1, InvalidReasonUnverifiableReorg, InvalidReasonUnverifiableReorg))
+	// EXPLAIN THE PRODUCTION STATEMENT ITSELF (prunePollAnchorsQuery), not a copy of
+	// it typed into the test. A copy is the classic way a plan test rots: the two drift
+	// apart and the test goes on certifying a shape the code no longer has.
+	plan := explainPrune(t, s, prunePollAnchorsQuery, testPollEngine, frontier, cutoff+1)
 	t.Logf("F4 incremental prune, %d permanently-protected anchors below the frontier:\n%s", protectedHeights, plan)
 	require.NotContains(t, plan, "Seq Scan on price_poll_anchors",
 		"a sequential scan here is the finding: it reconsiders every protected anchor, every round")
@@ -439,6 +453,39 @@ func TestPruneDoesNotReconsiderPermanentlyProtectedAnchors(t *testing.T) {
 	// 300 protected heights sitting below the frontier.
 	require.Less(t, planRowsRemoved(t, plan), int64(protectedHeights),
 		"no plan node may touch the permanently-protected pile: that is the reconsideration D-012 clause 6 forbids")
+
+	// AND THE FRONTIER IS ACTUALLY CONSULTED AT RUNTIME, which the plan above cannot
+	// show: it is EXPLAINed with the frontier read from the table, so code that ignored
+	// the stored value would produce an identical plan here and a different query in
+	// production. The behavioural signature is what settles it — an anchor sitting
+	// BELOW the frontier is not reconsidered, so it survives even though it is far
+	// outside retention and nothing protects it.
+	//
+	// THAT SURVIVAL IS THE OPTIMISATION'S COST, AND IT IS BENIGN AND BOUNDED. Retention
+	// is the safe direction under clause 2 (an anchor kept too long forecloses nothing;
+	// one expired early forecloses an offline check forever), and the state is not
+	// reachable in the running system: a poll round's anchor is at or above the cursor,
+	// and adoption — the only path that writes a legacy height — lowers the frontier
+	// itself, which TestAdoptingALegacyAnchorLowersThePruneFrontierToIt drives. It is
+	// written here with direct SQL precisely because no caller can produce it.
+	// A height inside the SETTLED range that carries no anchor: above the protected
+	// run (1..protectedHeights, whose anchors survive) and below the frontier, so its
+	// own anchor was pruned by an earlier round and the slot is free.
+	belowFrontier := uint64(protectedHeights + 5)
+	require.Less(t, int64(belowFrontier), frontier, "the fixture must place this inside the settled range")
+	require.NotContains(t, anchorBlocks(t, s, testPollEngine), belowFrontier,
+		"and the slot must be free, or this asserts nothing about pruning")
+	_, err = s.pool.Exec(ctx,
+		`INSERT INTO price_poll_anchors (engine, chain_id, block_number, block_hash) VALUES ($1, 10, $2, $3)`,
+		testPollEngine, belowFrontier, hash32(0x77))
+	require.NoError(t, err)
+
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(total+1, 0xAA, testPollSource, 1_000_000, 6),
+	}, total+1, anchorAt(total+1))))
+
+	require.Contains(t, anchorBlocks(t, s, testPollEngine), belowFrontier,
+		"an anchor below the frontier is NOT reconsidered — which is what makes the per-round cost independent of the protected pile")
 }
 
 // THE FRONTIER IS A CHECKED CLAIM, NOT A TRUSTED ONE. Its premise — "everything below
@@ -574,16 +621,28 @@ func TestNeutralizedBacklogAggregateUsesItsCoveringIndex(t *testing.T) {
 // EXPLAIN helpers.
 // ---------------------------------------------------------------------------
 
-// explain runs EXPLAIN (ANALYZE, BUFFERS) on a literal statement inside a rolled-back
-// transaction, so a DELETE under measurement changes nothing.
-func explain(t *testing.T, s *Store, stmt string) string {
+// explainPrune runs EXPLAIN (ANALYZE, BUFFERS) on the prune's real DELETE inside a
+// rolled-back transaction, so the statement under measurement changes nothing.
+//
+// It goes through PREPARE/EXECUTE over the SIMPLE protocol for the same reason
+// explainParams does: the statement text carries $1..$4 of its own, which the extended
+// protocol would try to bind as the outer EXPLAIN's parameters. force_generic_plan
+// keeps the measurement honest about what a long-running process gets.
+func explainPrune(t *testing.T, s *Store, stmt, engine string, frontier, cutoff int64) string {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := s.pool.Begin(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback(ctx)
 
-	rows, err := tx.Query(ctx, "EXPLAIN (ANALYZE, BUFFERS) "+stmt)
+	_, err = tx.Exec(ctx, "SET LOCAL plan_cache_mode = force_generic_plan", pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, fmt.Sprintf("PREPARE prune_plan (TEXT, BIGINT, BIGINT, TEXT) AS %s", stmt),
+		pgx.QueryExecModeSimpleProtocol)
+	require.NoError(t, err)
+
+	rows, err := tx.Query(ctx, fmt.Sprintf("EXPLAIN (ANALYZE, BUFFERS) EXECUTE prune_plan('%s', %d, %d, '%s')",
+		engine, frontier, cutoff, InvalidReasonUnverifiableReorg), pgx.QueryExecModeSimpleProtocol)
 	require.NoError(t, err)
 	defer rows.Close()
 	var b strings.Builder

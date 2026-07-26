@@ -826,6 +826,26 @@ func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine str
 // keeps the optimisation from being able to lose a deletion silently. The one path
 // that can legitimately place an anchor below the frontier, AdoptPollAnchor, lowers
 // the frontier itself rather than relying on that backstop.
+// prunePollAnchorsQuery is the prune's DELETE, kept as a package constant so the
+// EXPLAIN test measures THIS statement rather than a copy of it. A performance test
+// that re-types the query it is measuring proves nothing about the code: the two drift,
+// and the test keeps passing against the shape it remembers.
+//
+// $1 engine, $2 frontier (inclusive), $3 retention cutoff (exclusive), $4 marker.
+const prunePollAnchorsQuery = `DELETE FROM price_poll_anchors a
+		WHERE a.engine = $1
+		  AND a.block_number >= $2 AND a.block_number < $3
+		  AND NOT EXISTS (
+		    SELECT 1 FROM prices p
+		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
+		      AND p.block_number = a.block_number AND p.invalid_reason = $4
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM prices p
+		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
+		      AND p.anchor_block = a.block_number AND p.invalid_reason = $4
+		  )`
+
 func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
 	var frontier int64
 	err := tx.QueryRow(ctx, `SELECT frontier FROM price_poll_anchor_prune WHERE engine = $1`, engine).Scan(&frontier)
@@ -887,19 +907,8 @@ func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
 	// is NULL and whose height anchor may well be their genuine provenance. Dropping
 	// it would expire exactly the anchors clause 2 most wants kept, on the strength of
 	// a fact the database never recorded.
-	if _, err := tx.Exec(ctx, `DELETE FROM price_poll_anchors a
-		WHERE a.engine = $1
-		  AND a.block_number >= $2 AND a.block_number < $3
-		  AND NOT EXISTS (
-		    SELECT 1 FROM prices p
-		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
-		      AND p.block_number = a.block_number AND p.invalid_reason = $4
-		  )
-		  AND NOT EXISTS (
-		    SELECT 1 FROM prices p
-		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
-		      AND p.anchor_block = a.block_number AND p.invalid_reason = $4
-		  )`, engine, frontier, *cutoff, InvalidReasonUnverifiableReorg); err != nil {
+	if _, err := tx.Exec(ctx, prunePollAnchorsQuery,
+		engine, frontier, *cutoff, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("prune poll anchors for %q: %w", engine, err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO price_poll_anchor_prune (engine, frontier, updated_at)
