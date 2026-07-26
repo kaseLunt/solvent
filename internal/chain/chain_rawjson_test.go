@@ -25,28 +25,36 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 )
 
 // rawJSONEndpoint is a hermetic JSON-RPC HTTP server serving crafted raw
 // `result` payloads for eth_getBlockByNumber, keyed by the request's block
-// argument ("0x5a", "latest"). An argument with no scripted entry is answered
-// with JSON null — the provider does not have the block. Every ask is
-// recorded so tests can assert the exact question the adapter put on the
-// wire.
+// argument ("0x5a", "latest"). Since Task 9 wave 8 it also serves scripted
+// results for the other gated methods (scriptMethod: eth_blockNumber,
+// eth_chainId, eth_getLogs, eth_getTransactionByHash). A method or argument
+// with no scripted entry is answered with JSON null — the provider does not
+// have the answer. Every ask is recorded so tests can assert the exact
+// question the adapter put on the wire.
 type rawJSONEndpoint struct {
 	srv *httptest.Server
 
-	mu      sync.Mutex
-	results map[string]string
-	asks    []rawAsk
+	mu            sync.Mutex
+	results       map[string]string
+	methodResults map[string]string
+	asks          []rawAsk
 }
 
 type rawAsk struct {
@@ -82,10 +90,38 @@ func (e *rawJSONEndpoint) handle(w http.ResponseWriter, r *http.Request) {
 				result = res
 			}
 		}
+	} else if res, ok := e.methodResults[req.Method]; ok {
+		result = res
 	}
 	e.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"result":%s}`, req.ID, result)
+}
+
+// scriptMethod scripts a raw `result` payload for one of the wave-8 gated
+// methods; the value is served verbatim for every ask of that method.
+func (e *rawJSONEndpoint) scriptMethod(method, result string) *rawJSONEndpoint {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.methodResults == nil {
+		e.methodResults = map[string]string{}
+	}
+	e.methodResults[method] = result
+	return e
+}
+
+// asksOf counts how many times method was asked — the rotation proof for
+// the non-header paths (a malformed primary must be asked exactly once).
+func (e *rawJSONEndpoint) asksOf(method string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := 0
+	for _, a := range e.asks {
+		if a.method == method {
+			n++
+		}
+	}
+	return n
 }
 
 // blockAsks returns the block argument of every eth_getBlockByNumber request
@@ -463,4 +499,485 @@ func TestRawJSONWellFormedWrongHeightResponseIsAViolationThatRotates(t *testing.
 	got, err := f.HeaderHash(context.Background(), rawCursor)
 	require.NoError(t, err)
 	require.Equal(t, rawCursorHash, got, "the healthy secondary answers the question asked and lands the round")
+}
+
+// ---------------------------------------------------------------------------
+// Task 9 wave 8 (Codex round 7): the canon applies to the WHOLE package.
+// Every quantity the package decodes from an RPC response — eth_blockNumber,
+// eth_chainId, a log's blockNumber/logIndex/transactionIndex — passes
+// checkCanonicalQuantity at the bytes, every variable-length payload (a
+// log's data, a transaction's input) passes checkCanonicalData, and the
+// mined-log wire shape is presence-tracked. The fixtures below drive the
+// REAL stack (Dial → rpc.Client → the endpointClient overrides → wrappers →
+// gates) against byte-exact crafted payloads, exactly like the header fleet
+// above. quantityForms is wave 7's matrix verbatim: the canon is ONE, so
+// each new path must refuse every form the header fields refuse.
+// ---------------------------------------------------------------------------
+
+var quantityForms = []struct{ name, raw, reason string }{
+	{"empty string", `""`, "an empty quantity is a non-answer, not zero"},
+	{"0x with no digits", `"0x"`, `"0x" carries no digits`},
+	{"leading zero digits", `"0x05a"`, "leading zero digits"},
+	{"uppercase hex digits", `"0x5A"`, "not a lowercase hex digit"},
+	{"missing 0x prefix", `"5a"`, `missing the "0x" prefix`},
+	{"non-hex garbage", `"0xnope"`, "not a lowercase hex digit"},
+	{"bare JSON number", `90`, "not a JSON string"},
+}
+
+var dataForms = []struct{ name, raw, reason string }{
+	{"empty string", `""`, "an empty payload is a non-answer"},
+	{"odd digit count", `"0xabc"`, "odd digit count"},
+	{"uppercase hex digits", `"0xAB"`, "not a lowercase hex digit"},
+	{"missing 0x prefix", `"ab"`, `missing the "0x" prefix`},
+	{"non-hex garbage", `"0xnope"`, "not a lowercase hex digit"},
+	{"bare JSON number", `12`, "not a JSON string"},
+}
+
+// The round-7 finding, face one — an empty eth_blockNumber result — as a
+// real-Dial regression: the pinned hexutil.Uint64 decodes "" as height ZERO
+// without error, so without the gate the closure records zero, the attempt
+// SUCCEEDS, failover stops at the malformed primary, and the walker sees a
+// head below confirmations and starves. The gate makes it a named canon
+// violation that fails the attempt, and the healthy secondary's height
+// DEMONSTRABLY lands.
+func TestRawJSONEmptyBlockNumberFailsTheAttemptAndTheSecondaryLandsHeight(t *testing.T) {
+	empty := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_blockNumber", `""`)
+	f := rawDial(t, empty)
+	n, err := f.BlockNumber(context.Background())
+	require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+	require.ErrorContains(t, err, "eth_blockNumber response result")
+	require.ErrorContains(t, err, "an empty quantity is a non-answer, not zero")
+	require.Zero(t, n, "the empty quantity never becomes a height — no zero head can starve the walker")
+
+	primary := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_blockNumber", `""`)
+	secondary := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_blockNumber", hexQuoted(rawHead))
+	f = rawDial(t, primary, secondary)
+	n, err = f.BlockNumber(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, rawHead, n, "the healthy secondary's height LANDS")
+	require.Equal(t, 1, primary.asksOf("eth_blockNumber"), "the malformed primary was asked exactly once and rotated past")
+	require.Equal(t, 1, secondary.asksOf("eth_blockNumber"))
+}
+
+func hexQuoted(v uint64) string { return strconv.Quote(hexutil.EncodeUint64(v)) }
+
+// The eth_blockNumber gate refuses every non-canonical form the header
+// fields refuse (one canon), serves the genesis-shaped zero (the
+// over-tightening guard), and refuses a null result — which the ungated
+// typed decode would silently leave as height zero too.
+func TestRawJSONBlockNumberMatrixFailsEveryNonCanonicalForm(t *testing.T) {
+	for _, tc := range quantityForms {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_blockNumber", tc.raw)
+			f := rawDial(t, e)
+			n, err := f.BlockNumber(context.Background())
+			require.ErrorContains(t, err, "all rpc endpoints failed")
+			require.ErrorContains(t, err, "not a canonical JSON-RPC quantity",
+				"the canon gate owns the refusal — not whatever hexutil happens to reject")
+			require.ErrorContains(t, err, "eth_blockNumber response result", "the violation names the path it arrived in")
+			require.ErrorContains(t, err, tc.reason)
+			require.Zero(t, n)
+		})
+	}
+
+	t.Run("the canon's zero: a genesis-shaped height stays servable", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_blockNumber", `"0x0"`)
+		f := rawDial(t, e)
+		n, err := f.BlockNumber(context.Background())
+		require.NoError(t, err)
+		require.Zero(t, n, "a REPORTED height 0 is a value like any other — only a non-answer is refused")
+	})
+
+	t.Run("a null result is a non-answer, not height zero", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}) // eth_blockNumber unscripted → null
+		f := rawDial(t, e)
+		n, err := f.BlockNumber(context.Background())
+		require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+		require.ErrorContains(t, err, "not a JSON string")
+		require.Zero(t, n)
+	})
+}
+
+var (
+	rawLogTopic  = common.HexToHash("0x8a1f0000000000000000000000000000000000000000000000000000000000aa")
+	rawLogTxHash = common.HexToHash("0x8a1f0000000000000000000000000000000000000000000000000000000000bb")
+	rawLogAddr   = common.HexToAddress("0x4200000000000000000000000000000000000011")
+)
+
+// rawLogEntry is one mined eth_getLogs entry with every field the wire
+// decode reads, as RAW JSON values — tests overwrite values byte-exactly
+// (the strict wrappers judge exactly these bytes) and delete keys to model
+// a provider omitting a field.
+func rawLogEntry() map[string]string {
+	return map[string]string{
+		"address":          `"0x4200000000000000000000000000000000000011"`,
+		"topics":           `["` + rawLogTopic.Hex() + `"]`,
+		"data":             `"0xcafe"`,
+		"blockNumber":      `"0x5a"`,
+		"transactionHash":  `"` + rawLogTxHash.Hex() + `"`,
+		"transactionIndex": `"0x1"`,
+		"blockHash":        `"` + rawCursorHash.Hex() + `"`,
+		"logIndex":         `"0x2"`,
+		"removed":          `false`,
+	}
+}
+
+// rawLogsResult serializes entries as the eth_getLogs result array, values
+// passed through VERBATIM — rawJSONOverride's byte-exactness principle
+// applied to whole objects.
+func rawLogsResult(entries ...map[string]string) string {
+	objs := make([]string, len(entries))
+	for i, m := range entries {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, len(keys))
+		for j, k := range keys {
+			parts[j] = strconv.Quote(k) + ":" + m[k]
+		}
+		objs[i] = "{" + strings.Join(parts, ",") + "}"
+	}
+	return "[" + strings.Join(objs, ",") + "]"
+}
+
+// wantRawLog is the types.Log the healthy rawLogEntry converts to — every
+// consumed field the crafted response's own, none defaulted.
+func wantRawLog() types.Log {
+	return types.Log{
+		Address:     rawLogAddr,
+		Topics:      []common.Hash{rawLogTopic},
+		Data:        []byte{0xca, 0xfe},
+		BlockNumber: rawCursor,
+		TxHash:      rawLogTxHash,
+		TxIndex:     1,
+		BlockHash:   rawCursorHash,
+		Index:       2,
+		Removed:     false,
+	}
+}
+
+// The round-7 finding, face two — "logIndex":"" in an otherwise valid mined
+// log — as a real-Dial regression: the pinned *hexutil.Uint decodes "" as a
+// PRESENT ZERO without error, so without the gate the attempt SUCCEEDS,
+// failover stops at the malformed primary, and index zero persists as the
+// raw-log identity/order — source-of-truth corruption, not a routing wart.
+// The gate makes it a named canon violation that fails the attempt, and the
+// healthy secondary DEMONSTRABLY lands the full window.
+func TestRawJSONEmptyLogIndexFailsTheAttemptAndTheSecondaryLandsTheWindow(t *testing.T) {
+	brokenLogs := func() *rawJSONEndpoint {
+		entry := rawLogEntry()
+		entry["logIndex"] = `""`
+		return newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_getLogs", rawLogsResult(entry))
+	}
+
+	// Alone: a named canon violation; no index-zero log escapes.
+	f := rawDial(t, brokenLogs())
+	logs, err := f.Logs(context.Background(), rawCursor, rawCursor, []common.Address{rawLogAddr})
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+	require.ErrorContains(t, err, "log response logIndex")
+	require.ErrorContains(t, err, "an empty quantity is a non-answer, not zero")
+	require.Nil(t, logs, "the empty quantity never becomes a raw-log identity — no index-zero log is handed out")
+
+	// With a healthy secondary: rotation, and the secondary LANDS the window.
+	primary := brokenLogs()
+	secondary := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_getLogs", rawLogsResult(rawLogEntry()))
+	f = rawDial(t, primary, secondary)
+	logs, err = f.Logs(context.Background(), rawCursor, rawCursor, []common.Address{rawLogAddr})
+	require.NoError(t, err)
+	require.Equal(t, []types.Log{wantRawLog()}, logs,
+		"the FULL window lands from the honest endpoint — every consumed field is the crafted response's own")
+	require.Equal(t, 1, primary.asksOf("eth_getLogs"), "the malformed primary was asked exactly once and rotated past")
+	require.Equal(t, 1, secondary.asksOf("eth_getLogs"))
+}
+
+// Every consumed log quantity refuses every non-canonical form, the data
+// payload refuses the data canon's forms, and the zero-valued acceptances
+// pin the over-tightening guard: index 0, height 0, txIndex 0 and the "0x"
+// empty payload are all VALUES, refused nowhere.
+func TestRawJSONLogQuantityAndDataMatrixFailsEveryNonCanonicalForm(t *testing.T) {
+	serve := func(t *testing.T, entry map[string]string) ([]types.Log, error) {
+		t.Helper()
+		e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_getLogs", rawLogsResult(entry))
+		f := rawDial(t, e)
+		return f.Logs(context.Background(), 0, rawCursor, []common.Address{rawLogAddr})
+	}
+
+	for _, field := range []string{"blockNumber", "logIndex", "transactionIndex"} {
+		for _, tc := range quantityForms {
+			t.Run(field+" "+tc.name, func(t *testing.T) {
+				entry := rawLogEntry()
+				entry[field] = tc.raw
+				logs, err := serve(t, entry)
+				require.ErrorContains(t, err, "all rpc endpoints failed")
+				require.ErrorContains(t, err, "not a canonical JSON-RPC quantity",
+					"the canon gate owns the refusal — not whatever hexutil happens to reject")
+				require.ErrorContains(t, err, "log response "+field, "the violation names the field it arrived in")
+				require.ErrorContains(t, err, tc.reason)
+				require.Nil(t, logs, "a non-canonical quantity never becomes a value")
+			})
+		}
+	}
+
+	for _, tc := range dataForms {
+		t.Run("data "+tc.name, func(t *testing.T) {
+			entry := rawLogEntry()
+			entry["data"] = tc.raw
+			logs, err := serve(t, entry)
+			require.ErrorContains(t, err, "all rpc endpoints failed")
+			require.ErrorContains(t, err, "not canonical JSON-RPC hex data",
+				"the data canon owns the refusal — hexutil.Bytes would lenient-accept the empty and uppercase forms")
+			require.ErrorContains(t, err, "log response data")
+			require.ErrorContains(t, err, tc.reason)
+			require.Nil(t, logs, "a non-canonical payload never becomes log data")
+		})
+	}
+
+	t.Run("zero-valued quantities and the empty payload stay servable", func(t *testing.T) {
+		entry := rawLogEntry()
+		entry["blockNumber"] = `"0x0"`
+		entry["logIndex"] = `"0x0"`
+		entry["transactionIndex"] = `"0x0"`
+		entry["data"] = `"0x"`
+		logs, err := serve(t, entry)
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Zero(t, logs[0].BlockNumber, "a REPORTED genesis height is a value")
+		require.Zero(t, logs[0].Index, "log index zero is a value — the first log of a block")
+		require.Zero(t, logs[0].TxIndex)
+		require.Empty(t, logs[0].Data, `"0x" is the canonical empty payload — only "" is a non-answer`)
+	})
+}
+
+// The mined-log wire shape is presence-tracked (the wave-6 rule, one decode
+// path over): eth_getLogs answers a numbered range, so every returned log
+// is mined and every consumed field must be PRESENT — the pinned decoder's
+// optional-field leniency (an omitted blockHash silently becoming the zero
+// hash, an omitted logIndex becoming index 0) is a protocol violation here,
+// never a zero value. `removed` is the one accepted absence; a null result
+// cannot impersonate the honest empty window []; zero hash identities are
+// refused (the wave-5 posture — the fixed-length gate happily decodes 64
+// zero digits, audit-executed).
+func TestRawJSONLogPresenceAndNullWindowAreProtocolViolations(t *testing.T) {
+	serve := func(t *testing.T, result string) ([]types.Log, error) {
+		t.Helper()
+		e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_getLogs", result)
+		f := rawDial(t, e)
+		return f.Logs(context.Background(), 0, rawCursor, []common.Address{rawLogAddr})
+	}
+
+	required := []string{"address", "topics", "data", "blockNumber", "transactionHash", "transactionIndex", "blockHash", "logIndex"}
+	for _, field := range required {
+		t.Run("omitted "+field, func(t *testing.T) {
+			entry := rawLogEntry()
+			delete(entry, field)
+			logs, err := serve(t, rawLogsResult(entry))
+			require.ErrorContains(t, err, "log response entry 0 omits required field(s) "+field,
+				"the absence is named as what it is — it does not decode into a plausible zero value")
+			require.ErrorContains(t, err, "protocol violation")
+			require.Nil(t, logs)
+		})
+	}
+
+	t.Run("omitted removed is the one accepted absence", func(t *testing.T) {
+		entry := rawLogEntry()
+		delete(entry, "removed")
+		logs, err := serve(t, rawLogsResult(entry))
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.False(t, logs[0].Removed,
+			"absence decodes as false — the only honest value a mined-range query can carry")
+	})
+
+	t.Run("an anonymous log's empty topics array is a value, not an absence", func(t *testing.T) {
+		entry := rawLogEntry()
+		entry["topics"] = `[]`
+		logs, err := serve(t, rawLogsResult(entry))
+		require.NoError(t, err)
+		require.Len(t, logs, 1)
+		require.Empty(t, logs[0].Topics, "LOG0 events carry no topics — refusing [] would be over-tightening")
+	})
+
+	t.Run("a zero blockHash is refused", func(t *testing.T) {
+		entry := rawLogEntry()
+		entry["blockHash"] = `"` + common.Hash{}.Hex() + `"`
+		logs, err := serve(t, rawLogsResult(entry))
+		require.ErrorContains(t, err, "log response entry 0 reports a zero blockHash")
+		require.ErrorContains(t, err, "protocol violation")
+		require.Nil(t, logs)
+	})
+
+	t.Run("a zero transactionHash is refused", func(t *testing.T) {
+		entry := rawLogEntry()
+		entry["transactionHash"] = `"` + common.Hash{}.Hex() + `"`
+		logs, err := serve(t, rawLogsResult(entry))
+		require.ErrorContains(t, err, "log response entry 0 reports a zero transactionHash")
+		require.Nil(t, logs)
+	})
+
+	t.Run("a null result cannot impersonate the empty window", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}) // eth_getLogs unscripted → null
+		f := rawDial(t, e)
+		logs, err := f.Logs(context.Background(), 0, rawCursor, []common.Address{rawLogAddr})
+		require.ErrorContains(t, err, "log response result is null")
+		require.ErrorContains(t, err, "protocol violation")
+		require.Nil(t, logs, "a non-answer never becomes an empty window")
+
+		// Rotation: the null primary is walked past and the honest EMPTY
+		// window [] serves from the secondary — the over-tightening guard.
+		primary := newRawJSONEndpoint(t, map[string]string{})
+		secondary := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_getLogs", `[]`)
+		f = rawDial(t, primary, secondary)
+		logs, err = f.Logs(context.Background(), 0, rawCursor, []common.Address{rawLogAddr})
+		require.NoError(t, err)
+		require.Empty(t, logs, "the provider's honest 'no logs in this range' is [] and it serves")
+		require.Equal(t, 1, primary.asksOf("eth_getLogs"), "the null primary was asked exactly once and rotated past")
+	})
+}
+
+// eth_chainId passes the same bytes canon (the wave-8 sweep): the pinned
+// hexutil.Big decodes "" as chain id ZERO, and while VerifyChainID's
+// equality would usually catch the minted zero, that refusal would rely on
+// a wrong-value comparison one layer up — and for want zero it would not
+// refuse at all. On this every-endpoint-must-agree path a violation fails
+// the whole verification (no rotation by design).
+func TestRawJSONChainIDStrictQuantity(t *testing.T) {
+	t.Run("empty chainId is a canon violation, not chain id zero", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_chainId", `""`)
+		f := rawDial(t, e)
+		err := f.VerifyChainID(context.Background(), 10)
+		require.ErrorContains(t, err, "chain id check failed on endpoint 0")
+		require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+		require.ErrorContains(t, err, "eth_chainId response result")
+		require.ErrorContains(t, err, "an empty quantity is a non-answer, not zero")
+
+		// The sharpest face: a caller wanting zero. Without the bytes gate,
+		// "" decodes to 0, 0 == 0, and the malformed endpoint VERIFIES.
+		err = f.VerifyChainID(context.Background(), 0)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "not a canonical JSON-RPC quantity",
+			"a minted zero must never satisfy a zero want — the refusal happens at the bytes, not at the equality")
+	})
+
+	for _, tc := range quantityForms {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_chainId", tc.raw)
+			f := rawDial(t, e)
+			err := f.VerifyChainID(context.Background(), 10)
+			require.ErrorContains(t, err, "not a canonical JSON-RPC quantity")
+			require.ErrorContains(t, err, "eth_chainId response result")
+			require.ErrorContains(t, err, tc.reason)
+		})
+	}
+
+	t.Run("a canonical chain id verifies and a mismatch stays a mismatch", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}).scriptMethod("eth_chainId", `"0xa"`)
+		f := rawDial(t, e)
+		require.NoError(t, f.VerifyChainID(context.Background(), 10))
+		err := f.VerifyChainID(context.Background(), 1)
+		require.ErrorContains(t, err, "reports chain id 10, want 1",
+			"the wave-8 gate did not move the misconfiguration wording")
+	})
+}
+
+var rawTxCalldata = []byte{0xcf, 0xc3, 0x25, 0x70, 0x01, 0x02}
+
+// rawTxJSON builds a mined transaction's eth_getTransactionByHash result
+// from a REAL types.Transaction round-trip (the pinned encoder emits every
+// field, so the fixture is canonical by construction), then applies
+// byte-exact raw overrides and deletions — the wire control the input gate
+// is judged against.
+func rawTxJSON(t *testing.T, overrides map[string]string, deletes ...string) string {
+	t.Helper()
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce: 1, GasPrice: big.NewInt(1), Gas: 21000, To: &to,
+		Value: big.NewInt(0), Data: rawTxCalldata,
+		V: big.NewInt(27), R: big.NewInt(1), S: big.NewInt(1),
+	})
+	b, err := tx.MarshalJSON()
+	require.NoError(t, err)
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(b, &m))
+	// The mined coordinates a provider reports alongside the envelope.
+	m["blockNumber"] = json.RawMessage(`"0x5a"`)
+	m["blockHash"] = json.RawMessage(strconv.Quote(rawCursorHash.Hex()))
+	m["transactionIndex"] = json.RawMessage(`"0x1"`)
+	for k, v := range overrides {
+		m[k] = json.RawMessage(v)
+	}
+	for _, k := range deletes {
+		delete(m, k)
+	}
+	out, err := json.Marshal(m)
+	require.NoError(t, err)
+	return string(out)
+}
+
+// The wave-8 sweep's transaction face: TxCalldata consumes exactly one wire
+// field — input — and the pinned decoder reads "input":"" as EMPTY calldata
+// without error, a non-answer impersonating "this transaction carried no
+// data" (which on the migration-genesis path would mint zero borrower
+// seeds). The data canon refuses it by name and rotation lands the healthy
+// secondary's calldata.
+func TestRawJSONEmptyTxInputFailsTheAttemptAndTheSecondaryLandsCalldata(t *testing.T) {
+	someTx := common.HexToHash("0xf57febcab9e40b18b13fe6e24dc0c846935eed5423b41443dfd287aae582f454")
+	withInput := func(input string) *rawJSONEndpoint {
+		return newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, map[string]string{"input": input}))
+	}
+
+	// Alone: a named data-canon violation; no empty calldata escapes.
+	f := rawDial(t, withInput(`""`))
+	data, err := f.TxCalldata(context.Background(), someTx)
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.ErrorContains(t, err, "not canonical JSON-RPC hex data")
+	require.ErrorContains(t, err, "transaction response input")
+	require.ErrorContains(t, err, "an empty payload is a non-answer")
+	require.Nil(t, data, "the empty payload never becomes calldata")
+
+	// With a healthy secondary: rotation, and the calldata LANDS.
+	primary := withInput(`""`)
+	secondary := newRawJSONEndpoint(t, map[string]string{}).
+		scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil))
+	f = rawDial(t, primary, secondary)
+	data, err = f.TxCalldata(context.Background(), someTx)
+	require.NoError(t, err)
+	require.Equal(t, rawTxCalldata, data, "the healthy secondary's calldata LANDS, byte for byte")
+	require.Equal(t, 1, primary.asksOf("eth_getTransactionByHash"), "the malformed primary was asked exactly once and rotated past")
+
+	t.Run("uppercase input is refused at the bytes", func(t *testing.T) {
+		f := rawDial(t, withInput(`"0xCFC32570"`))
+		_, err := f.TxCalldata(context.Background(), someTx)
+		require.ErrorContains(t, err, "not canonical JSON-RPC hex data")
+		require.ErrorContains(t, err, "transaction response input")
+		require.ErrorContains(t, err, "not a lowercase hex digit")
+	})
+
+	t.Run("omitted input is a named absence, not empty calldata", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}).
+			scriptMethod("eth_getTransactionByHash", rawTxJSON(t, nil, "input"))
+		f := rawDial(t, e)
+		_, err := f.TxCalldata(context.Background(), someTx)
+		require.ErrorContains(t, err, "transaction response omits required field input")
+		require.ErrorContains(t, err, "protocol violation")
+	})
+
+	t.Run("the canonical empty payload stays servable", func(t *testing.T) {
+		f := rawDial(t, withInput(`"0x"`))
+		data, err := f.TxCalldata(context.Background(), someTx)
+		require.NoError(t, err)
+		require.Empty(t, data, "a plain transfer's empty calldata is a value — only a non-answer is refused")
+	})
+
+	t.Run("a null result is the honest not-found, not a violation", func(t *testing.T) {
+		e := newRawJSONEndpoint(t, map[string]string{}) // unscripted → null
+		f := rawDial(t, e)
+		_, err := f.TxCalldata(context.Background(), someTx)
+		require.ErrorContains(t, err, "not found")
+		require.NotContains(t, err.Error(), "protocol violation",
+			"a legitimate not-found must not be misclassified as a violation")
+	})
 }

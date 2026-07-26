@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -115,7 +116,9 @@ type ReportedHeader struct {
 // identical either way and every downstream comparison uses the decoded
 // value. Fixed-length DATA therefore stays on the library's exact-length
 // gate; the canon gate is scoped to QUANTITIES, where leniency manufactures
-// values out of non-answers.
+// values out of non-answers. (VARIABLE-length data — a log's payload, a
+// transaction's input — has no exact-length gate to lean on and carries its
+// own bytes canon since Task 9 wave 8: checkCanonicalData.)
 func (rh *ReportedHeader) UnmarshalJSON(input []byte) error {
 	var w struct {
 		Hash       *common.Hash  `json:"hash"`
@@ -144,7 +147,7 @@ func (rh *ReportedHeader) UnmarshalJSON(input []byte) error {
 type strictNumber hexutil.Big
 
 func (q *strictNumber) UnmarshalJSON(input []byte) error {
-	if err := checkCanonicalQuantity("number", input); err != nil {
+	if err := checkCanonicalQuantity("header response number", input); err != nil {
 		return err
 	}
 	return (*hexutil.Big)(q).UnmarshalJSON(input)
@@ -153,7 +156,7 @@ func (q *strictNumber) UnmarshalJSON(input []byte) error {
 type strictTime hexutil.Uint64
 
 func (q *strictTime) UnmarshalJSON(input []byte) error {
-	if err := checkCanonicalQuantity("timestamp", input); err != nil {
+	if err := checkCanonicalQuantity("header response timestamp", input); err != nil {
 		return err
 	}
 	return (*hexutil.Uint64)(q).UnmarshalJSON(input)
@@ -163,7 +166,12 @@ func (q *strictTime) UnmarshalJSON(input []byte) error {
 // must answer the question asked" holds at the BYTES level. raw is the
 // untouched JSON text of one quantity field, and it either IS a canonical
 // JSON-RPC quantity or the attempt fails — violation = failed attempt =
-// rotation, the uniform posture of every gate in this file.
+// rotation, the uniform posture of every gate in this file. field names the
+// wire location the bytes arrived in ("header response number",
+// "eth_blockNumber response result"): since Task 9 wave 8 (Codex round 7)
+// the canon guards EVERY quantity this package decodes from an RPC
+// response, not only the header's two — the arms below are unchanged, only
+// the naming generalized.
 //
 // THE CANON, pinned: a canonical JSON-RPC quantity is exactly what the
 // reference encoder (hexutil.EncodeUint64 / hexutil.EncodeBig — the same
@@ -195,7 +203,7 @@ func (q *strictTime) UnmarshalJSON(input []byte) error {
 // profile of the library whose "" → 0 is the finding.
 func checkCanonicalQuantity(field string, raw []byte) error {
 	violation := func(reason string) error {
-		return fmt.Errorf("header response %s %s is not a canonical JSON-RPC quantity (%s) — a provider protocol violation; the response must answer the question asked at the bytes level, so a non-answer is refused before a lenient decoder can turn it into a plausible value", field, raw, reason)
+		return fmt.Errorf("%s %s is not a canonical JSON-RPC quantity (%s) — a provider protocol violation; the response must answer the question asked at the bytes level, so a non-answer is refused before a lenient decoder can turn it into a plausible value", field, raw, reason)
 	}
 	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
 		return violation("not a JSON string")
@@ -213,6 +221,57 @@ func checkCanonicalQuantity(field string, raw []byte) error {
 	}
 	if len(digits) > 1 && digits[0] == '0' {
 		return violation("leading zero digits — the canon is the most compact representation")
+	}
+	for _, c := range digits {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return violation(fmt.Sprintf("%q is not a lowercase hex digit", c))
+		}
+	}
+	return nil
+}
+
+// checkCanonicalData is checkCanonicalQuantity's sibling for VARIABLE-length
+// data payloads — a log's data, a transaction's input (Task 9 wave 8, Codex
+// round 7). raw is the untouched JSON text of one field, and it either IS
+// canonical hex data — exactly what the reference encoder (hexutil.Encode,
+// the same pinned library that decodes) emits for some byte string: a JSON
+// string holding "0x" followed by an EVEN number of lowercase hex digits,
+// zero digits included ("0x" IS the canonical empty payload, unlike a
+// quantity's "0x0") — or the attempt fails.
+//
+// The leniency it closes, audit-executed against the pinned v1.13.0:
+// hexutil.Bytes decodes the empty string "" as an EMPTY payload without
+// error, so a non-answer impersonates "this log/transaction carried no
+// data" — and unlike the fixed-length hash fields there is no exact-length
+// gate underneath to refuse it. The minted empty payload is not a transient
+// routing wart: log data is PERSISTED as the raw-log source of truth and
+// calldata is DERIVED FROM (the migration-genesis borrower seeds), so the
+// non-answer must be refused before the lenient decoder turns it into a
+// plausible value. Uppercase digits decode too (to the same bytes), and the
+// wave-7 reference-encoder argument applies unchanged: a representation the
+// encoder can never emit is not the protocol's answer. Check order and
+// violation shape mirror the quantity canon; odd digit counts are named
+// (data is whole bytes), and where the canon overlaps hexutil's own
+// strictness (odd length, missing prefix, non-string) the gate still owns
+// the rejection — the refusal must never rely on the leniency profile of
+// the library whose "" → empty is the finding.
+func checkCanonicalData(field string, raw []byte) error {
+	violation := func(reason string) error {
+		return fmt.Errorf("%s %s is not canonical JSON-RPC hex data (%s) — a provider protocol violation; the response must answer the question asked at the bytes level, so a non-answer is refused before a lenient decoder can turn it into a plausible value", field, raw, reason)
+	}
+	if len(raw) < 2 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return violation("not a JSON string")
+	}
+	s := raw[1 : len(raw)-1]
+	if len(s) == 0 {
+		return violation(`empty — an empty payload is a non-answer; the canonical empty payload is "0x"`)
+	}
+	if len(s) < 2 || s[0] != '0' || s[1] != 'x' {
+		return violation(`missing the "0x" prefix`)
+	}
+	digits := s[2:]
+	if len(digits)%2 != 0 {
+		return violation("odd digit count — hex data encodes whole bytes")
 	}
 	for _, c := range digits {
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
@@ -304,6 +363,349 @@ func (e *endpointClient) ReportedHeaderByNumber(ctx context.Context, number *big
 		return nil, err
 	}
 	return rh, nil // nil (not found) when the endpoint answered null
+}
+
+// BlockNumber shadows the embedded ethclient method with a strict raw
+// quantity decode (Task 9 wave 8, Codex round 7). The typed client decodes
+// eth_blockNumber straight into hexutil.Uint64, where the empty string
+// becomes height ZERO without error (audit-executed against the pinned
+// v1.13.0): the closure records zero, the attempt SUCCEEDS, no rotation
+// happens, and Walker.Step sees a head below confirmations and repeatedly
+// makes no progress despite a healthy secondary — the F2 failover-stopping
+// class through the one head-probe path the walker paces itself by. The raw
+// result passes checkCanonicalQuantity BEFORE any hexutil conversion, so a
+// non-answer fails the attempt and rotates.
+//
+// The strict-raw-decode form was chosen over Codex's alternative (deriving
+// the height from the strictly decoded latest header) because it keeps the
+// QUESTION on the wire unchanged: eth_blockNumber stays eth_blockNumber —
+// the recorded-ask regressions pin it — rather than becoming
+// eth_getBlockByNumber("latest"), which would couple the walker's cheap
+// head probe to full-header availability and silently conflate two
+// provider surfaces the failover measures separately. One-fetch-path
+// uniformity is real for header IDENTITY reads (wave 5), but a height
+// probe asks a different question, and the gate belongs on the answer to
+// the question actually asked.
+func (e *endpointClient) BlockNumber(ctx context.Context) (uint64, error) {
+	var raw json.RawMessage
+	if err := e.raw.CallContext(ctx, &raw, "eth_blockNumber"); err != nil {
+		return 0, err
+	}
+	if err := checkCanonicalQuantity("eth_blockNumber response result", raw); err != nil {
+		return 0, err
+	}
+	var v hexutil.Uint64
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return 0, err
+	}
+	return uint64(v), nil
+}
+
+// ChainID shadows the embedded ethclient method with the same strict raw
+// quantity decode (Task 9 wave 8 sweep). The typed path decodes eth_chainId
+// into hexutil.Big, where "" becomes chain id ZERO without error.
+// VerifyChainID's equality check would still refuse the minted zero against
+// any real configured chain id — but that refusal would RELY on a
+// wrong-value comparison one layer up, the exact leniency dependence the
+// wave-7 canon forbids (and for a hypothetical want of zero it would not
+// refuse at all). The violation is named at the bytes instead. On this
+// every-endpoint-must-agree path a violation fails the whole verification
+// rather than rotating — VerifyChainID's designed posture, unchanged.
+func (e *endpointClient) ChainID(ctx context.Context) (*big.Int, error) {
+	var raw json.RawMessage
+	if err := e.raw.CallContext(ctx, &raw, "eth_chainId"); err != nil {
+		return nil, err
+	}
+	if err := checkCanonicalQuantity("eth_chainId response result", raw); err != nil {
+		return nil, err
+	}
+	var v hexutil.Big
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil, err
+	}
+	return (*big.Int)(&v), nil
+}
+
+// reportedLog is one eth_getLogs entry AS THE PROVIDER REPORTS IT, at the
+// bytes level — ReportedHeader's wire-shape pattern extended to the
+// package's second raw decode path (Task 9 wave 8, Codex round 7). The
+// pinned types.Log decoder is lenient in exactly the ways the canon
+// forbids, audit-executed against v1.13.0: its quantity fields decode ""
+// as a PRESENT ZERO (blockNumber, logIndex, transactionIndex), its
+// optional fields decode ABSENCE as zero values (an omitted blockHash
+// silently becomes the zero hash; an omitted logIndex becomes index 0),
+// and its data field decodes "" as an empty payload. A log's blockNumber
+// and logIndex are the raw-log IDENTITY AND ORDER the store persists as
+// source of truth, so a minted zero here is not a transient routing wart —
+// it corrupts derivation ordering at the root. Every field is therefore a
+// pointer (presence-tracked, the wave-6 rule), every consumed quantity
+// decodes through a per-field strict wrapper and the payload through the
+// data canon (the wave-7 rule, one wrapper per field so the violation
+// names the field it arrived in), and validateReportedLog holds the
+// presence and zero-hash gates. Any violation fails the WHOLE attempt —
+// violation = failed attempt = rotation, the file's uniform posture.
+type reportedLog struct {
+	Address     *common.Address   `json:"address"`
+	Topics      []common.Hash     `json:"topics"`
+	Data        *strictLogData    `json:"data"`
+	BlockNumber *strictLogNumber  `json:"blockNumber"`
+	TxHash      *common.Hash      `json:"transactionHash"`
+	TxIndex     *strictLogTxIndex `json:"transactionIndex"`
+	BlockHash   *common.Hash      `json:"blockHash"`
+	Index       *strictLogIndex   `json:"logIndex"`
+	Removed     *bool             `json:"removed"`
+}
+
+// strictLogNumber, strictLogIndex, strictLogTxIndex and strictLogData are
+// reportedLog's consumed wire fields at the bytes level — one wrapper per
+// field, so each field's gate is independently attackable (the wave-8
+// mutation matrix bypasses them one at a time) and a violation names its
+// field. An omitted or null field never reaches a wrapper — encoding/json
+// leaves the pointer nil — so absence stays validateReportedLog's question;
+// the wrappers judge only bytes that claim to BE an answer.
+type strictLogNumber hexutil.Uint64
+
+func (q *strictLogNumber) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalQuantity("log response blockNumber", input); err != nil {
+		return err
+	}
+	return (*hexutil.Uint64)(q).UnmarshalJSON(input)
+}
+
+type strictLogIndex hexutil.Uint
+
+func (q *strictLogIndex) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalQuantity("log response logIndex", input); err != nil {
+		return err
+	}
+	return (*hexutil.Uint)(q).UnmarshalJSON(input)
+}
+
+type strictLogTxIndex hexutil.Uint
+
+func (q *strictLogTxIndex) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalQuantity("log response transactionIndex", input); err != nil {
+		return err
+	}
+	return (*hexutil.Uint)(q).UnmarshalJSON(input)
+}
+
+type strictLogData hexutil.Bytes
+
+func (b *strictLogData) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalData("log response data", input); err != nil {
+		return err
+	}
+	return (*hexutil.Bytes)(b).UnmarshalJSON(input)
+}
+
+// validateReportedLog is validateReportedHeader's sibling for one
+// eth_getLogs entry. Every field this package's consumers read must be
+// PRESENT: eth_getLogs answers a numbered block range, so every returned
+// log is MINED — the pending-log shape that legitimately omits block
+// coordinates cannot occur on this path, and an absence is a provider
+// protocol violation, never a zero value. Reported hash identities must be
+// nonzero (the wave-5 posture: an identity of all zeroes verifies against
+// nothing — the audit confirmed the fixed-length gate happily decodes 64
+// zero digits). `removed` is the ONE optional field, deliberately: its
+// absence decodes as false, the only honest value a mined-range query can
+// carry (removal markers belong to filter-change notifications); a present
+// `true` is refused by the walker's batch validation, and a present
+// non-bool is an encoding/json type error that already fails the attempt
+// (audit-executed). The topics slice must be present but MAY be empty — an
+// anonymous LOG0 event carries no topics, and refusing [] would be
+// over-tightening (the wave-6 lesson's other face).
+func validateReportedLog(l *reportedLog, position int) error {
+	var missing []string
+	if l.Address == nil {
+		missing = append(missing, "address")
+	}
+	if l.Topics == nil {
+		missing = append(missing, "topics")
+	}
+	if l.Data == nil {
+		missing = append(missing, "data")
+	}
+	if l.BlockNumber == nil {
+		missing = append(missing, "blockNumber")
+	}
+	if l.TxHash == nil {
+		missing = append(missing, "transactionHash")
+	}
+	if l.TxIndex == nil {
+		missing = append(missing, "transactionIndex")
+	}
+	if l.BlockHash == nil {
+		missing = append(missing, "blockHash")
+	}
+	if l.Index == nil {
+		missing = append(missing, "logIndex")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("log response entry %d omits required field(s) %s — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value", position, strings.Join(missing, ", "))
+	}
+	if *l.BlockHash == (common.Hash{}) {
+		return fmt.Errorf("log response entry %d reports a zero blockHash — a provider protocol violation; refusing to persist an unverifiable block identity", position)
+	}
+	if *l.TxHash == (common.Hash{}) {
+		return fmt.Errorf("log response entry %d reports a zero transactionHash — a provider protocol violation; refusing to persist an unverifiable log identity", position)
+	}
+	return nil
+}
+
+// FilterLogs shadows the embedded ethclient method with a raw, gated decode
+// (Task 9 wave 8, Codex round 7). ethclient.FilterLogs decodes straight
+// into types.Log, whose pinned decoder turns "" quantities into present
+// zeros and absences into zero values — so an otherwise valid mined log
+// with "logIndex":"" made the attempt SUCCEED, stopped failover at the
+// malformed primary, and handed downstream validation a plausible index
+// zero to persist as the raw-log identity/order. The raw result now
+// decodes through reportedLog (strict wrappers + presence + zero-hash
+// gates) BEFORE conversion to types.Log, and a null result — which the
+// typed path silently serves as an empty window (audit-executed) — is a
+// protocol violation: the provider's honest "no logs in this range" is [],
+// and a non-answer must not impersonate it. The QUESTION on the wire is
+// unchanged — filterArg mirrors the pinned client's toFilterArg byte for
+// byte — only the answer's decode gained gates. Violations fail the
+// attempt; rotation is doFrom's, uniformly.
+func (e *endpointClient) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	arg, err := filterArg(q)
+	if err != nil {
+		return nil, err
+	}
+	var raw json.RawMessage
+	if err := e.raw.CallContext(ctx, &raw, "eth_getLogs", arg); err != nil {
+		return nil, err
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, fmt.Errorf("log response result is null — a provider protocol violation; an empty window is answered with [], so a null non-answer is refused before it can impersonate one")
+	}
+	var wire []reportedLog
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return nil, err
+	}
+	out := make([]types.Log, len(wire))
+	for i := range wire {
+		l := &wire[i]
+		if err := validateReportedLog(l, i); err != nil {
+			return nil, err
+		}
+		var removed bool
+		if l.Removed != nil {
+			removed = *l.Removed
+		}
+		out[i] = types.Log{
+			Address:     *l.Address,
+			Topics:      l.Topics,
+			Data:        []byte(*l.Data),
+			BlockNumber: uint64(*l.BlockNumber),
+			TxHash:      *l.TxHash,
+			TxIndex:     uint(*l.TxIndex),
+			BlockHash:   *l.BlockHash,
+			Index:       uint(*l.Index),
+			Removed:     removed,
+		}
+	}
+	return out, nil
+}
+
+// filterArg and blockNumArg mirror the pinned ethclient's toFilterArg and
+// toBlockNumArg exactly (go-ethereum v1.13.0), so FilterLogs' raw decode
+// changes NOTHING about the question on the wire — same params, same
+// encodings, same BlockHash/range exclusivity error. Kept verbatim rather
+// than simplified to this package's actual call shape (numbered from/to,
+// addresses only) so the override can never silently ask a different
+// question than the typed client it shadows.
+func filterArg(q ethereum.FilterQuery) (interface{}, error) {
+	arg := map[string]interface{}{
+		"address": q.Addresses,
+		"topics":  q.Topics,
+	}
+	if q.BlockHash != nil {
+		arg["blockHash"] = *q.BlockHash
+		if q.FromBlock != nil || q.ToBlock != nil {
+			return nil, fmt.Errorf("cannot specify both BlockHash and FromBlock/ToBlock")
+		}
+		return arg, nil
+	}
+	if q.FromBlock == nil {
+		arg["fromBlock"] = "0x0"
+	} else {
+		arg["fromBlock"] = blockNumArg(q.FromBlock)
+	}
+	arg["toBlock"] = blockNumArg(q.ToBlock)
+	return arg, nil
+}
+
+func blockNumArg(number *big.Int) string {
+	if number == nil {
+		return "latest"
+	}
+	if number.Sign() >= 0 {
+		return hexutil.EncodeBig(number)
+	}
+	// Negative numbers are the rpc package's named specials.
+	if number.IsInt64() {
+		return rpc.BlockNumber(number.Int64()).String()
+	}
+	return fmt.Sprintf("<invalid %d>", number)
+}
+
+// strictTxInput is the transaction's input field at the bytes level — the
+// ONE field TxCalldata consumes from the transaction envelope, gated by
+// the data canon exactly like a log's payload.
+type strictTxInput hexutil.Bytes
+
+func (b *strictTxInput) UnmarshalJSON(input []byte) error {
+	if err := checkCanonicalData("transaction response input", input); err != nil {
+		return err
+	}
+	return (*hexutil.Bytes)(b).UnmarshalJSON(input)
+}
+
+// TransactionByHash shadows the embedded ethclient method to gate the one
+// field this package consumes from it (Task 9 wave 8 sweep). TxCalldata
+// reads tx.Data() alone, and the pinned transaction decoder reads
+// "input":"" as an EMPTY calldata payload without error (audit-executed) —
+// a non-answer impersonating "this transaction carried no data", which on
+// the migration-genesis path would mint zero borrower seeds out of a
+// malformed response. The raw result's input bytes pass checkCanonicalData
+// and a presence check (the pinned decoder also refuses an omitted input,
+// but the refusal must not RELY on the lenient library's required-field
+// list), then the SAME raw bytes decode through types.Transaction exactly
+// as the typed client would. Mirrored from the pinned ethclient: a null
+// result is ethereum.NotFound (the honest not-found, exactly the header
+// path's discrimination), a signature-less response is refused verbatim,
+// and pending-ness is blockNumber's absence. NOT mirrored, disclosed: the
+// sender-address cache (setSenderFromServer) — TxCalldata never reads the
+// sender, no other caller consumes this method, and a Sender() call would
+// fall back to signature recovery rather than misbehave.
+func (e *endpointClient) TransactionByHash(ctx context.Context, hash common.Hash) (*types.Transaction, bool, error) {
+	var raw json.RawMessage
+	if err := e.raw.CallContext(ctx, &raw, "eth_getTransactionByHash", hash); err != nil {
+		return nil, false, err
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, false, ethereum.NotFound
+	}
+	var probe struct {
+		Input       *strictTxInput   `json:"input"`
+		BlockNumber *json.RawMessage `json:"blockNumber"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil, false, err
+	}
+	if probe.Input == nil {
+		return nil, false, fmt.Errorf("transaction response omits required field input — a provider protocol violation; an absent field must surface as absent, never decode as a plausible zero value")
+	}
+	var tx types.Transaction
+	if err := json.Unmarshal(raw, &tx); err != nil {
+		return nil, false, err
+	}
+	if _, r, _ := tx.RawSignatureValues(); r == nil {
+		return nil, false, fmt.Errorf("server returned transaction without signature")
+	}
+	return &tx, probe.BlockNumber == nil, nil
 }
 
 // EndpointToken identifies which endpoint served a successful semantic-layer
