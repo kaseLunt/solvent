@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "wave": "task-9 wave 9",
+    "unit": "the transaction identity gate's DECODED comparison (Codex round 8): after decode, tx.Hash() recomputed over the signed body must equal the asked hash — the reported hash field authenticates nothing (the pinned types.Transaction.UnmarshalJSON ignores it; it is the provider agreeing with itself), so recomputation over the decoded body is the only authentication the type model makes sound on this path",
+    "purpose": "Task 9 wave 9 brief's mutation requirement, surgical: ONE mutant — remove the decoded comparison — killed by exactly the inverse regression (reported hash EQUALS the request, signed body belongs to another transaction). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is a uniform-CRLF working copy (CR count == line count, verified), so the multi-line pattern embeds \\r\\n explicitly.",
+    "design_notes": [
+      "THE MUTANT RESTORES THE ROUND-8 FINDING FAITHFULLY: deleting the recomputed-hash if-block leaves the wave-8 reported-field tripwire (presence + equality with the asked hash) fully intact — which is exactly the pre-wave-9 code. Under the mutant, a response whose reported hash field echoes the request over ANOTHER validly-signed transaction's body passes every remaining check (the field check passes by construction; the body decodes cleanly; the signature is present), so TxCalldata SUCCEEDS and hands the deriver the substituted transaction's calldata.",
+      "THE KILL MUST COME FROM THE INVERSE REGRESSION ALONE (TestRawJSONEchoedHashOverForeignSignedBodyIsAViolationThatRotates): the wave-8 wrong-tx test scripts a body whose reported field DISAGREES with the request, which the surviving tripwire still refuses, and every other tx-path test serves self-consistent bodies. A kill list containing anything else would mean another test is doing this gate's work and the tripwire/gate separation claim is false.",
+      "THE KILL IS BEHAVIORAL ON EVERY ASSERTED LEG: under the mutant the liar-alone read SUCCEEDS where the regression asserts the named violation (and asserts the tripwire's message is NOT the refusal), the foreign calldata ESCAPES where the regression asserts nil, and the rotation/landing legs never happen (the liar is never rotated past).",
+      "MUTANT COMPILABILITY by construction: the deleted if-block declares `recomputed` in its own scope and `tx` remains consumed by the signature check above and the `return &tx` below; the replacement is a comment.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET for the mutation run (no public-endpoint hammering in loops; the raw-JSON servers are local httptest instances). TEST_DATABASE_URL points at solvent_t9w1, never at the backfill daemon's DB solvent."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W9M1",
+      "description": "the decoded comparison is deleted: the reported hash field — the provider agreeing with itself — becomes the only identity check, restoring the round-8 finding",
+      "property": "ECHOING THE LABEL CANNOT AUTHENTICATE THE BODY: a response whose reported hash field EQUALS the asked hash but whose validly-signed body belongs to another transaction is a protocol violation refused by recomputation (tx.Hash() over the decoded body) — under the mutant that read SUCCEEDS at the lying primary, no rotation happens, and TxCalldata hands the deriver the substituted transaction's calldata (on the migration path: incorrect borrower and debt genesis state from valid-looking calldata)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif recomputed := tx.Hash(); recomputed != hash {\r\n\t\treturn nil, false, fmt.Errorf(\"transaction response body hashes to %s, not the asked %s — a provider protocol violation; the reported hash field is the provider agreeing with itself, so only the hash recomputed over the decoded signed body authenticates the answer, and echoing the label cannot authenticate the body\", recomputed, hash)\r\n\t}",
+          "replace": "\t// MUTANT W9M1: the decoded comparison is deleted — the reported hash field (the provider agreeing with itself) is the only identity check"
+        }
+      ]
+    }
+  ]
+}
