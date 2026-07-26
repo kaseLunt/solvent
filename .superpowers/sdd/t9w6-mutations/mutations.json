@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "wave": "task-9 wave 6",
+    "unit": "chain-layer decoder gates: exact-height equality on numbered reads (F1) and presence-tracked required fields (F2) — the response must answer the question asked",
+    "purpose": "Task 9 wave 6 brief's mutation requirement: the height-equality check (W6M1 deletes it — the buggy-proxy defect Codex round 5 named as [high]), each required-field presence check (W6M2 hash, W6M3 parentHash, W6M4 number, W6M5 timestamp — W6M5 IS the round-5 [medium] F2 defect restored: an absent timestamp decoding as the Unix epoch), and the null-vs-violation discrimination (W6M6 misclassifies an honest not-found as a protocol violation; W6M7 fabricates a header from the null result). Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. chain.go is CRLF in the working tree, so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "EVERY MUTANT LIVES INSIDE validateReportedHeader — the wave-6 rule's single enforcement site. The raw-JSON fixture layer (chain_rawjson_test.go) reaches it through the REAL decode (Dial -> rpc.Client -> endpointClient -> gate), so these mutants are killable from BELOW the fake seam as well as through it; the transcript's kill lists record both fronts.",
+      "W6M2 (hash presence) IS A MESSAGE-LEVEL KILL, disclosed: an absent hash backfilled to a zero value is still refused one line later by the wave-5 zero-hash gate, so rotation behavior is identical either way — the observable difference is the violation's NAME ('omits required field(s) hash' vs 'reports a zero hash'). That name is the property: a decoder that misreports absence as a reported zero value is the F2 lie one level up, and the regression tests assert the absence surfaces AS absence. No stronger observable exists because the zero gate deliberately dominates.",
+      "W6M3/W6M4/W6M5 ARE BEHAVIORAL KILLS: under each, the malformed primary's attempt SUCCEEDS (parentHash/number/timestamp backfilled), so the regression tests see a value handed out where they assert a violation-plus-rotation — W6M4 additionally models the echo-chamber defect (the decoder answering the height question FOR the provider, which makes the F1 equality gate pass vacuously), and W6M5 restores the exact production shape round 5 described: HeaderTime returning the Unix epoch and failover stopping at the malformed primary.",
+      "W6M4's guard is `rh.Number == nil && want != nil`: on the head path (want nil) the mutant leaves Number nil and the later IsUint64 deref would panic — no test drives that composition (the missing-number regressions are numbered reads, where the mutant vacuously passes the equality gate and dies by assertion), disclosed so a future reader does not mistake the guard for coverage.",
+      "W6M6 AND W6M7 TARGET THE SAME SEARCH TEXT (the nil-header arm) with different lies — misclassification vs fabrication. They are separate mutants applied and restored independently, so the exactly-once assertion holds for each; together they pin both faces of the discrimination: a null result for a beyond-head block is a LEGITIMATE not-found that must surface as such, never as a protocol violation (W6M6) and never as a header for the gates to judge (W6M7).",
+      "THE PRICES SUITE IS STRUCTURALLY BLIND to every mutant here (fakePollChain fakes the PollChain seam above the Failover). W6M5 includes ./internal/prices/ anyway so the transcript records that blindness — the W4M4/W5M3 precedent; the freshness/staleness composition is pinned from the chain side by the HeaderTime and HeadFrom regressions.",
+      "SOLVENT_LIVE_RPC_TESTS stays UNSET for every mutation run (no public-endpoint hammering inside a loop; the live regression's gated SKIP is its designed hermetic-run state). TEST_DATABASE_URL points at solvent_t9w1 so nothing DB-gated skips in the W6M5 prices run. The raw-JSON layer needs no gate: its JSON-RPC servers are local httptest instances."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W6M1",
+      "description": "the height-equality gate is deleted: numbered reads accept a well-formed answer for ANY height",
+      "property": "EXACT-HEIGHT EQUALITY ON EVERY NUMBERED READ (F1, round-5 [high]): a well-formed response for the wrong height — a proxy answering latest for numeric requests — is a protocol violation that fails the attempt and rotates; it can never date HeaderTime's freshness measurement or feed walker ancestry a hash for a block nobody asked about",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif want != nil && (*big.Int)(rh.Number).Uint64() != *want {\r\n\t\treturn fmt.Errorf(\"header %s response answers for height %d — a provider protocol violation; a numbered read serves exactly the block asked for or fails the attempt\", what, (*big.Int)(rh.Number).Uint64())\r\n\t}",
+          "replace": "\t// MUTANT W6M1: numbered reads accept a well-formed answer for ANY height"
+        }
+      ]
+    },
+    {
+      "id": "W6M2",
+      "description": "the hash presence check backfills: an absent hash silently becomes a zero value for the zero gate to judge",
+      "property": "ABSENCE SURFACES AS ABSENCE (F2, hash): a response omitting the hash field is refused as 'omits required field(s) hash' — a decoder that backfills a plausible zero value misreports what the provider actually said, which is the F2 lie one level up (kill is at the violation's NAME; rotation is identical either way because the zero-hash gate dominates — disclosed in design notes)",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh.Hash == nil {\r\n\t\tmissing = append(missing, \"hash\")\r\n\t}",
+          "replace": "\tif rh.Hash == nil {\r\n\t\trh.Hash = &common.Hash{} // MUTANT W6M2: absent hash silently becomes a zero value\r\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W6M3",
+      "description": "the parentHash presence check backfills: an absent parentHash silently becomes a zero value and the read succeeds",
+      "property": "PRESENCE-TRACKED parentHash (F2): a response omitting parentHash is a protocol violation that fails the attempt — under the mutant the read SUCCEEDS with a fabricated zero parent, handing reorg ancestry a lineage the provider never reported",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh.ParentHash == nil {\r\n\t\tmissing = append(missing, \"parentHash\")\r\n\t}",
+          "replace": "\tif rh.ParentHash == nil {\r\n\t\trh.ParentHash = &common.Hash{} // MUTANT W6M3: absent parentHash silently becomes a zero value\r\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W6M4",
+      "description": "the number presence check echoes: an absent number is backfilled with the height the caller asked for",
+      "property": "PRESENCE-TRACKED number (F2) AND THE ECHO-CHAMBER GUARD ON F1: an absent number is a violation in its own right — a decoder that backfills it with the height asked makes the exact-height gate pass vacuously, 'verifying' the response against an answer the decoder itself invented",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh.Number == nil {\r\n\t\tmissing = append(missing, \"number\")\r\n\t}",
+          "replace": "\tif rh.Number == nil && want != nil {\r\n\t\trh.Number = (*hexutil.Big)(new(big.Int).SetUint64(*want)) // MUTANT W6M4: absent number echoed back as the height asked\r\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W6M5",
+      "description": "the timestamp presence check backfills: an absent timestamp decodes as the Unix epoch — the round-5 F2 defect restored",
+      "property": "PRESENCE-TRACKED timestamp (F2, round-5 [medium], the incident shape): an omitted timestamp is a protocol violation that fails the attempt so failover reaches a healthy secondary — under the mutant HeaderTime reports the Unix epoch and HeadFrom an epoch-aged head from the malformed primary, the false-stale composition that froze failover",
+      "test": ["go", "test", "./internal/chain/", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh.Time == nil {\r\n\t\tmissing = append(missing, \"timestamp\")\r\n\t}",
+          "replace": "\tif rh.Time == nil {\r\n\t\trh.Time = new(hexutil.Uint64) // MUTANT W6M5: absent timestamp decodes as the Unix epoch — the F2 defect restored\r\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W6M6",
+      "description": "the null result is misclassified: an honest not-found surfaces as a provider protocol violation",
+      "property": "NULL-VS-VIOLATION DISCRIMINATION, face one: a null result for a beyond-head block is a LEGITIMATE not-found that must surface as such — misclassifying it as a protocol violation would put honest lagging endpoints in the same bucket as malformed ones and page operators for ordinary beyond-head reads",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh == nil {\r\n\t\treturn fmt.Errorf(\"header %s not found\", what)\r\n\t}",
+          "replace": "\tif rh == nil {\r\n\t\treturn fmt.Errorf(\"header %s absent — treating the null result as a provider protocol violation\", what) // MUTANT W6M6: an honest not-found misclassified as a violation\r\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W6M7",
+      "description": "the null result is fabricated into an empty header for the downstream gates to judge",
+      "property": "NULL-VS-VIOLATION DISCRIMINATION, face two: a null result is never fabricated into a header — under the mutant the empty header trips the presence gates and the not-found surfaces as a field-omission protocol violation, erasing the one honest answer a lagging endpoint gave",
+      "test": ["go", "test", "./internal/chain/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/chain/chain.go",
+          "search": "\tif rh == nil {\r\n\t\treturn fmt.Errorf(\"header %s not found\", what)\r\n\t}",
+          "replace": "\tif rh == nil {\r\n\t\trh = &ReportedHeader{} // MUTANT W6M7: the null result fabricated into an empty header for the gates to judge\r\n\t}"
+        }
+      ]
+    }
+  ]
+}
