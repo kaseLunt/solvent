@@ -12,7 +12,8 @@ Branch `main`, serial tree; controller docs commits interleaved mid-wave (disclo
 | `fc6a040` | (controller, mid-wave) oracle-sentinel B3 consult — docs-only, disclosed; the mutation loop's tested SHA (code bytes identical to `d2bf6d1`) |
 | `6ca5ac3` | `t9w11-mutations/transcript.md`, **5/5 KILLED** |
 | `ec6da60` | Makefile refinement: `test-acceptance` clears `SOLVENT_RPC_*` (the proven zero-skip posture keeps them unset) — FINAL code state |
-| (this report's commit) | `task-9-wave11-report-p2.md` |
+| `544535b`, `f2612e1` | (controller, mid-wave) chain-truth walker-rotation ruling + wave-12 brief — docs-only, verified by `git show --stat`, disclosed |
+| `3d40f8c` + this amendment | `task-9-wave11-report-p2.md` |
 
 Scope: `git diff --name-only 3ee6cfc..ec6da60` = `cmd/reconcile/**` (13 files),
 `internal/store/reconcile.go` + store TEST files (12 files: the reconcile tests, the new
