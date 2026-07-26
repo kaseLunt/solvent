@@ -24,6 +24,7 @@ allowed_paths:
   - docker-compose.yml
   - Makefile
   - .env.example
+  - docs/specs/**
 deliverables:
   - docs/plans/*solvent-phase2*.md
   - internal decode/position/price packages per that plan
