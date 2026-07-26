@@ -408,6 +408,100 @@ func TestCallAtHashFromWrapsModuloAndRotatesOnError(t *testing.T) {
 	require.Equal(t, -1, tok.Index, "all endpoints failed: nothing to reject")
 }
 
+// THE PINNED-CALL PATH RETAINS EVERY PER-ATTEMPT OUTCOME (Task 9 wave 4,
+// Codex round 3 [medium]): a total failure surfaces a *PinnedCallError
+// carrying each attempted endpoint's OWN error, named by endpoint index, in
+// walk order — so a caller classifying the outcome can require unanimity
+// across attempts instead of trusting whichever error the rotation left
+// last. Driven in BOTH walk orders over the same mixed outage (endpoint a
+// transport-down, endpoint b rejecting the pin): the aggregate carries the
+// same two outcomes either way, and only the order differs; the surfaced
+// wording keeps doFrom's exact total-failure shape with the LAST attempt's
+// error as the headline and unwrap target.
+func TestCallAtHashFromRetainsPerAttemptOutcomesInBothWalkOrders(t *testing.T) {
+	a := &fakeRPC{name: "a", fail: true}        // transport failure
+	b := &fakeRPC{name: "b", hashUnknown: true} // recognized pin rejection
+	f := newFailover([]rpcClient{a, b})
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	pin := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000cafe3")
+
+	// Walk from 0: transport first, the rejection LAST — the exact shape a
+	// last-error-wins classifier misreads as "everyone rejected the pin".
+	_, tok, err := f.CallAtHashFrom(context.Background(), 0, to, []byte{0x01}, pin)
+	require.Equal(t, -1, tok.Index)
+	var walk *PinnedCallError
+	require.ErrorAs(t, err, &walk, "a total pinned-call failure carries the per-attempt aggregate")
+	require.Equal(t, "callAtHash", walk.Op)
+	require.Len(t, walk.Attempts, 2, "every attempted endpoint's outcome is retained")
+	require.Equal(t, 0, walk.Attempts[0].Endpoint)
+	require.ErrorContains(t, walk.Attempts[0].Err, "a down")
+	require.Equal(t, 1, walk.Attempts[1].Endpoint)
+	require.ErrorContains(t, walk.Attempts[1].Err, "block not found")
+	require.ErrorContains(t, err, "all rpc endpoints failed (callAtHash)",
+		"the surfaced wording is doFrom's total-failure shape, unchanged")
+	require.ErrorContains(t, err, "block not found", "the headline stays the LAST attempt's error")
+
+	// Walk from 1: the SAME outage in the opposite order. The aggregate still
+	// carries both outcomes; only the order (and the headline) differs.
+	_, _, err = f.CallAtHashFrom(context.Background(), 1, to, []byte{0x01}, pin)
+	require.ErrorAs(t, err, &walk)
+	require.Len(t, walk.Attempts, 2)
+	require.Equal(t, 1, walk.Attempts[0].Endpoint)
+	require.ErrorContains(t, walk.Attempts[0].Err, "block not found")
+	require.Equal(t, 0, walk.Attempts[1].Endpoint)
+	require.ErrorContains(t, walk.Attempts[1].Err, "a down")
+	require.ErrorContains(t, err, "a down", "the headline is still the last attempt's error")
+}
+
+// THE AGGREGATE IS THE PINNED-CALL PATH'S ALONE (the wave-4 brief's
+// keep-existing-behavior bound): every other method still fails through
+// doFrom's last-error shape, so no other caller — the snapshotter's Call /
+// CallFrom, the walker's shared-path reads — sees its error shape move.
+func TestOnlyThePinnedCallPathCarriesTheAttemptAggregate(t *testing.T) {
+	a := &fakeRPC{name: "a", fail: true}
+	b := &fakeRPC{name: "b", fail: true}
+	f := newFailover([]rpcClient{a, b})
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	var walk *PinnedCallError
+
+	_, _, err := f.CallFrom(context.Background(), 0, to, []byte{0x01})
+	require.ErrorContains(t, err, "all rpc endpoints failed")
+	require.False(t, errors.As(err, &walk), "CallFrom keeps doFrom's last-error shape")
+
+	_, err = f.Call(context.Background(), to, []byte{0x01})
+	require.False(t, errors.As(err, &walk), "Call keeps doFrom's last-error shape")
+
+	_, _, err = f.CallAtFrom(context.Background(), 0, to, []byte{0x01}, 99)
+	require.False(t, errors.As(err, &walk), "the number-pinned variant keeps doFrom's last-error shape")
+
+	_, err = f.BlockNumber(context.Background())
+	require.False(t, errors.As(err, &walk), "the shared path keeps doFrom's last-error shape")
+}
+
+// A CONTEXT ABORT IS NOT AN ATTEMPT AGGREGATE: a walk cut off by its caller
+// proves nothing about how the unattempted endpoints would have answered, so
+// it must not be classifiable as "every attempt rejected the pin" — the
+// caller sees a plain aborted error and fails closed to its error posture.
+func TestCallAtHashFromAbortIsNotAnAttemptAggregate(t *testing.T) {
+	a := &fakeRPC{name: "a", hashUnknown: true}
+	b := &fakeRPC{name: "b", hashUnknown: true}
+	f := newFailover([]rpcClient{a, b})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	to := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	pin := common.HexToHash("0x00000000000000000000000000000000000000000000000000000000000cafe4")
+	_, tok, err := f.CallAtHashFrom(ctx, 0, to, []byte{0x01}, pin)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorContains(t, err, "callAtHash aborted")
+	require.Equal(t, -1, tok.Index)
+	var walk *PinnedCallError
+	require.False(t, errors.As(err, &walk),
+		"an aborted walk carries no aggregate: unanimity was never established")
+	require.Equal(t, 0, a.calls, "no attempt ran")
+	require.Equal(t, 0, b.calls)
+}
+
 func TestVerifyChainIDAcceptsMatching(t *testing.T) {
 	a := &fakeRPC{name: "a", chainID: 10}
 	b := &fakeRPC{name: "b", chainID: 10}

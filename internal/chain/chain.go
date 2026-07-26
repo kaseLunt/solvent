@@ -132,6 +132,88 @@ func (f *Failover) doFrom(ctx context.Context, op string, start int, fn func(ctx
 	return -1, fmt.Errorf("all rpc endpoints failed (%s): %w", op, lastErr)
 }
 
+// AttemptError is ONE endpoint's own failure inside the pinned-call walk
+// (CallAtHashFrom), named by the endpoint that produced it — the token
+// discipline mirrored onto failures: EndpointToken names the endpoint that
+// served a success, and an attempt record names the endpoint that produced
+// each failure, so a caller judging the walk's OUTCOME can see what every
+// attempted endpoint said instead of only what the last one said.
+type AttemptError struct {
+	// Endpoint is the failing endpoint's position in the failover's client
+	// list — the index the EndpointToken would have carried had this attempt
+	// succeeded.
+	Endpoint int
+	// Err is that endpoint's own error, verbatim and unwrapped: recognizing
+	// a rejection class in it is the caller's per-attempt judgment to make.
+	Err error
+}
+
+// PinnedCallError is the PINNED-CALL path's total-failure error: every
+// attempted endpoint failed, and every per-attempt outcome is RETAINED in
+// walk order. Additive for Task 9 wave 4 (Codex round 3 [medium]): doFrom
+// keeps only the LAST endpoint's error, which made the price poller's
+// round-outcome classification depend on failover ORDER — endpoint 0
+// transport-failing while endpoint 1 rejects the pin read as a discard when
+// the walk started at 0 and as an error when it started at 1, for the same
+// persistent outage. The aggregate is what lets the caller hold ONE
+// classification authority per outcome: a posture computed over EVERY
+// attempt, never over whichever attempt happened to run last.
+//
+// Error() and Unwrap() deliberately mirror doFrom's total-failure shape —
+// "all rpc endpoints failed (op): <last error>", unwrapping to the last
+// attempt's error — so surfaced wording and errors.Is/As chains over the
+// last error are unchanged for every existing consumer.
+type PinnedCallError struct {
+	// Op names the failed operation, doFrom's wording ("callAtHash").
+	Op string
+	// Attempts holds every attempted endpoint's own failure, in walk order.
+	// Never empty: the walk constructs this error only after at least one
+	// attempt failed (a pre-attempt context abort returns a plain error).
+	Attempts []AttemptError
+}
+
+func (e *PinnedCallError) Error() string {
+	return fmt.Sprintf("all rpc endpoints failed (%s): %v", e.Op, e.last())
+}
+
+// Unwrap exposes the LAST attempt's error — doFrom's %w target — so existing
+// matching against the surfaced error keeps working unchanged.
+func (e *PinnedCallError) Unwrap() error { return e.last() }
+
+func (e *PinnedCallError) last() error {
+	if len(e.Attempts) == 0 {
+		return nil
+	}
+	return e.Attempts[len(e.Attempts)-1].Err
+}
+
+// doFromAttempts is doFrom's exact walk with the per-attempt failures
+// RETAINED: the same rotation, the same per-attempt timeout, the same
+// abort-on-context behavior — but a total failure returns a *PinnedCallError
+// carrying every attempted endpoint's own error instead of only the last
+// one. It exists for the PINNED-CALL path alone (CallAtHashFrom, Task 9
+// wave 4's sanctioned additive change); every other method keeps doFrom, so
+// no other caller's error shape moves.
+func (f *Failover) doFromAttempts(ctx context.Context, op string, start int, fn func(ctx context.Context, c rpcClient) error) (int, error) {
+	var attempts []AttemptError
+	for i := 0; i < len(f.clients); i++ {
+		if err := ctx.Err(); err != nil {
+			return -1, fmt.Errorf("%s aborted: %w", op, err)
+		}
+		idx := (start + i) % len(f.clients)
+		attemptCtx, cancel := context.WithTimeout(ctx, f.attemptTimeout)
+		err := fn(attemptCtx, f.clients[idx])
+		cancel()
+		if err != nil {
+			attempts = append(attempts, AttemptError{Endpoint: idx, Err: err})
+			slog.Warn("rpc endpoint failed, rotating", "op", op, "endpoint", idx, "err", err)
+			continue
+		}
+		return idx, nil
+	}
+	return -1, &PinnedCallError{Op: op, Attempts: attempts}
+}
+
 // NOTE: RotateAwayFrom (the shared-hint semantic rotation) and its rotation
 // revision counter were retired in fix wave 6, superseded by CallFrom's
 // caller-scoped routing: a shared-hint rotation could not survive an
@@ -450,11 +532,21 @@ func (f *Failover) CallAtFrom(ctx context.Context, startIndex int, to common.Add
 // fabricated hash was REJECTED with "block not found" everywhere — negative
 // controls included. Callers treat that rejection class as "the serving node
 // does not have this block" (exploration-worthy), not as a transport fault.
+//
+// TOTAL FAILURE RETAINS EVERY PER-ATTEMPT OUTCOME (Task 9 wave 4, Codex
+// round 3 [medium]): the walk runs through doFromAttempts, so when every
+// endpoint fails the returned error is a *PinnedCallError carrying each
+// attempted endpoint's own error in walk order. The surfaced wording and
+// the unwrap target (the last attempt's error) are unchanged; what is new
+// is that a caller classifying the OUTCOME can require unanimity across
+// attempts instead of trusting whichever error the rotation happened to
+// leave last. The aggregate is the pinned-call path's alone — every other
+// method keeps doFrom's last-error shape.
 func (f *Failover) CallAtHashFrom(ctx context.Context, startIndex int, to common.Address, data []byte, blockHash common.Hash) ([]byte, EndpointToken, error) {
 	n := len(f.clients)
 	start := ((startIndex % n) + n) % n // normalize, negatives included
 	var out []byte
-	idx, err := f.doFrom(ctx, "callAtHash", start, func(ctx context.Context, c rpcClient) error {
+	idx, err := f.doFromAttempts(ctx, "callAtHash", start, func(ctx context.Context, c rpcClient) error {
 		res, err := c.CallContractAtHash(ctx, ethereum.CallMsg{To: &to, Data: data}, blockHash)
 		if err != nil {
 			return err
