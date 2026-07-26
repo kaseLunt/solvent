@@ -896,6 +896,308 @@ func TestPollerBothEndpointsHalfBrokenPingPongsAndObservesRecovery(t *testing.T)
 	require.Equal(t, -1, p.preferredStart, "nothing was ever accused across the whole outage")
 }
 
+// ---------------------------------------------------------------------------
+// Task 9 wave 4: ONE CLASSIFICATION AUTHORITY PER ROUND OUTCOME (Codex round
+// 3 [medium], accepted). The round's posture is computed from the AGGREGATE
+// of per-attempt pinned-call outcomes: the discard posture ONLY when every
+// failed attempt is a recognized pin rejection; ANY transport or unknown
+// involvement retains the error posture, so the daemon's backoff streak
+// grows and step_error stays visible. The deferred routing advance applies
+// to BOTH postures — the wave-3 seam is closed law and is untouched here.
+// ---------------------------------------------------------------------------
+
+// Mirrored from cmd/indexer/main.go — the daemon worker wrapper's scheduling
+// constants (retryBackoffBase / retryBackoffCap / retryBackoffJitter and
+// stepsPerRound). Mirrored rather than imported because the wrapper lives in
+// package main, which no test outside it can import.
+const (
+	harnessBackoffBase   = 30 * time.Second
+	harnessBackoffCap    = 10 * time.Minute
+	harnessBackoffJitter = 0.20
+	harnessStepsPerRound = 5
+)
+
+// harnessBackoff mirrors cmd/indexer's retryBackoff VERBATIM: ready() is
+// state-free, failure() schedules base·2^(failures-1) capped and jittered,
+// success() resets. Tests pin rand to 0.5, which zeroes the ±20% jitter term
+// exactly (the health harness's own convention), so every delay below is
+// deterministic.
+type harnessBackoff struct {
+	now      func() time.Time
+	rand     func() float64
+	failures int
+	next     time.Time
+}
+
+func (b *harnessBackoff) ready() bool { return !b.now().Before(b.next) }
+
+func (b *harnessBackoff) failure() time.Duration {
+	b.failures++
+	d := harnessBackoffCap
+	if shift := b.failures - 1; shift < 10 {
+		if scaled := harnessBackoffBase << shift; scaled < harnessBackoffCap {
+			d = scaled
+		}
+	}
+	d = time.Duration(float64(d) * (1 + harnessBackoffJitter*(2*b.rand()-1)))
+	b.next = b.now().Add(d)
+	return d
+}
+
+func (b *harnessBackoff) success() {
+	b.failures = 0
+	b.next = time.Time{}
+}
+
+// daemonWorkerHarness drives the REAL Poller through the daemon's price-
+// worker wrapper composition — cmd/indexer's priceWorkerState + retryBackoff
+// + stepPriceWorkers, mirrored verbatim for one worker (the wave-13/15
+// health-harness precedent: drive the real component, and assert on the
+// contract its REAL consumer derives from it). It is replicated here rather
+// than imported because the wrapper lives in package main; the composition
+// below is stepPriceWorkers' exactly: when the backoff deadline has passed,
+// Step up to stepsPerRound times stopping at the first error or the first
+// non-advancing Step; a non-nil, non-canceled error consumes one backoff
+// unit and is RETAINED; a clean round (landed OR discarded — the daemon
+// cannot tell them apart, which is the whole point of the posture rules)
+// resets the streak and clears the retention; and the step_error condition
+// is recomputed from the retained error every daemon round, INCLUDING rounds
+// spent waiting out the backoff window, carrying the consecutive count.
+type daemonWorkerHarness struct {
+	p       *Poller
+	clk     *testClock
+	bo      harnessBackoff
+	lastErr error
+	retryIn time.Duration
+	// stepError is the step_error condition as the daemon would publish it
+	// after the most recent round ("" = condition absent).
+	stepError string
+}
+
+func newDaemonWorkerHarness(p *Poller, clk *testClock) *daemonWorkerHarness {
+	return &daemonWorkerHarness{
+		p:   p,
+		clk: clk,
+		bo:  harnessBackoff{now: clk.now, rand: func() float64 { return 0.5 }},
+	}
+}
+
+// round is ONE daemon pass over the worker — stepPriceWorkers' loop body for
+// a single priceWorkerState.
+func (h *daemonWorkerHarness) round(ctx context.Context) {
+	if h.bo.ready() {
+		roundErred := false
+		var lastErr error
+		for i := 0; i < harnessStepsPerRound; i++ {
+			advanced, err := h.p.Step(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) { // canceled = shutdown: no backoff, no entry
+					roundErred, lastErr = true, err
+				}
+				break
+			}
+			if !advanced {
+				break
+			}
+		}
+		if roundErred {
+			delay := h.bo.failure()
+			h.lastErr, h.retryIn = lastErr, delay
+		} else {
+			h.bo.success()
+			h.lastErr, h.retryIn = nil, 0
+		}
+	}
+	h.stepError = ""
+	if h.lastErr != nil {
+		h.stepError = fmt.Sprintf("Step failed %d consecutive round(s), retrying in %s: %v",
+			h.bo.failures, h.retryIn.Truncate(time.Second), h.lastErr)
+	}
+}
+
+// tick advances the shared clock far enough that BOTH gates reopen — the
+// poller's own cadence and the wrapper's backoff deadline — so the next
+// round() makes a real attempt. The daemon reaches the same state by ticking
+// every interval and republishing the retained step_error in between; those
+// waiting rounds are exercised by the mid-window assertions below.
+func (h *daemonWorkerHarness) tick() {
+	d := time.Minute // the poller's cadence (newTestPoller's Interval)
+	if h.retryIn > d {
+		d = h.retryIn
+	}
+	h.clk.advance(d)
+}
+
+// CODEX ROUND 3'S HEADLINE, ORDER A (transport, then rejection): endpoint 0
+// serves heads but transport-fails every pinned call; endpoint 1 serves
+// heads but REJECTS every pin with the recognized wording. The walk from
+// endpoint 0 surfaces the rejection LAST, so last-error-wins misread this
+// persistent mixed outage as a clean discard on its very first round: the
+// daemon reset retryBackoff and cleared step_error, and because the deferred
+// routing advance rotates the walk's start every round, the misread recurred
+// every other cadence — retries never approached the 10-minute cap and
+// failure visibility flickered. The aggregate classification reads the SAME
+// walk as transport-involved and keeps the error posture in BOTH orders:
+// driven through the daemon worker wrapper, the backoff streak grows
+// monotonically with the exponential pacing intact, step_error stays visible
+// on every round (mid-backoff-window rounds included), and the seam still
+// advances routing every non-landing round.
+func TestPollerMixedOutageTransportThenRejectionNeverResetsTheDaemonBackoff(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		return nil, fmt.Errorf("connection reset by peer (endpoint %d)", idx)
+	}
+	ch.setHead(5000)         // both endpoints agree on the canonical chain
+	ch.splitCallBackendOn(1) // endpoint 1's call path knows NO blocks: every pin rejected
+	p, clk := newTestPoller(t, st, ch, 10)
+	h := newDaemonWorkerHarness(p, clk)
+
+	for i := 1; i <= 4; i++ {
+		h.round(context.Background())
+		require.Equal(t, i, h.bo.failures,
+			"round %d: transport involvement retains the ERROR posture, so the streak grows and never resets", i)
+		require.Equal(t, harnessBackoffBase<<(i-1), h.retryIn,
+			"round %d: the exponential outage pacing is preserved toward the cap", i)
+		require.Contains(t, h.stepError, fmt.Sprintf("Step failed %d consecutive round(s)", i),
+			"round %d: step_error is visible and carries the honest streak", i)
+		require.Equal(t, i%2, p.exploreStart,
+			"round %d: the seam still advances routing on EVERY non-landing round (both postures)", i)
+		require.Equal(t, -1, p.preferredStart, "round %d: exploration, never attribution", i)
+		switch i {
+		case 1:
+			// The walk started at endpoint 0: the recognized rejection was the
+			// LAST error — exactly the shape last-error-wins misread as a
+			// unanimous rejection and discarded. The posture stayed ERROR.
+			require.Contains(t, h.stepError, "not found on endpoint 1",
+				"round 1 surfaced the rejection last and STILL kept the error posture")
+		case 2:
+			// The advanced start reversed the walk: transport last. Same
+			// posture — order-independence is the property under test.
+			require.Contains(t, h.stepError, "connection reset by peer (endpoint 0)",
+				"round 2 surfaced the transport failure last: same outage, same posture")
+			// A daemon round INSIDE the backoff window: no Step is attempted,
+			// and the retained step_error stays published — visibility does
+			// not flicker between attempts.
+			steps := len(ch.headStarts)
+			clk.advance(time.Second)
+			h.round(context.Background())
+			require.Len(t, ch.headStarts, steps, "no Step attempt inside the backoff window")
+			require.Contains(t, h.stepError, "Step failed 2 consecutive round(s)",
+				"step_error stays visible for the whole backoff window")
+		}
+		h.tick()
+	}
+	require.Equal(t, []int{0, 1, 0, 1}, ch.headStarts,
+		"the alternation Codex described: the deferred advance rotates the start every round — and the posture no longer alternates with it")
+	require.Empty(t, st.applied, "nothing landed across the whole outage")
+
+	// The outage ends: endpoint 0's call path serves again. The wrapper's
+	// next round lands through it, the streak resets, step_error clears.
+	ch.respond = okRound(t, 5000, 20, 1_000_000)
+	h.round(context.Background())
+	require.Zero(t, h.bo.failures, "recovery resets the streak")
+	require.Empty(t, h.stepError, "…and clears step_error")
+	require.Equal(t, uint64(5000), st.cursor, "the recovered round landed in full")
+	require.Equal(t, -1, p.exploreStart, "progress released the exploration hint")
+}
+
+// ORDER B, THE MIRROR (rejection, then transport): endpoint 0 REJECTS every
+// pin, endpoint 1 transport-fails every call. Round 1's walk (from endpoint
+// 0) surfaces the transport failure last — the order last-error-wins already
+// classified as an error — and round 2's walk (from the advanced start at
+// endpoint 1) surfaces the RECOGNIZED REJECTION last, which is where the old
+// classification flipped to a discard, reset the backoff streak mid-outage
+// and blanked step_error. The aggregate holds the error posture across the
+// whole alternation: the streak is monotone through round 2 and beyond, and
+// step_error never disappears while the outage persists.
+func TestPollerMixedOutageRejectionThenTransportKeepsStepErrorAcrossAlternation(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		return nil, fmt.Errorf("connection reset by peer (endpoint %d)", idx)
+	}
+	ch.setHead(5000)
+	ch.splitCallBackendOn(0) // endpoint 0's call path knows NO blocks: every pin rejected
+	p, clk := newTestPoller(t, st, ch, 10)
+	h := newDaemonWorkerHarness(p, clk)
+
+	for i := 1; i <= 4; i++ {
+		h.round(context.Background())
+		require.Equal(t, i, h.bo.failures,
+			"round %d: the streak is monotone — in particular it must NOT reset at round 2, where the rejection runs last", i)
+		require.NotEmpty(t, h.stepError,
+			"round %d: step_error never disappears while the outage persists", i)
+		require.Equal(t, i%2, p.exploreStart,
+			"round %d: routing still advances every non-landing round", i)
+		switch i {
+		case 1:
+			require.Contains(t, h.stepError, "connection reset by peer (endpoint 1)",
+				"round 1 surfaced the transport failure last")
+		case 2:
+			require.Contains(t, h.stepError, "not found on endpoint 0",
+				"round 2 surfaced the recognized rejection last — the old classification's discard trigger — and the posture STAYED the error")
+			require.Contains(t, h.stepError, "Step failed 2 consecutive round(s)",
+				"…so the streak the daemon reports did not restart")
+		}
+		h.tick()
+	}
+	require.Equal(t, []int{0, 1, 0, 1}, ch.headStarts, "both walk orders were exercised by the alternation")
+	require.Equal(t, harnessBackoffBase<<3, h.retryIn, "four uninterrupted failures: the delay kept doubling")
+	require.Empty(t, st.applied)
+}
+
+// THE ALL-REJECTIONS ROUND STILL DISCARDS CLEANLY: unanimity is the one
+// shape whose honest posture is the WARN discard — the serving endpoint's
+// head named a block NO attempted endpoint has, which may mean that node is
+// alone on its fork and is not a fault to burn the daemon's backoff on.
+// Driven through the wrapper right after a genuine mixed-outage streak: the
+// unanimous-rejection round reads as a clean round (nil), the streak resets,
+// step_error clears — and the seam still advances routing, every time.
+func TestPollerAllRejectionsRoundStillDiscardsCleanlyThroughTheDaemonWrapper(t *testing.T) {
+	st := newFakePriceStore()
+	ch := &fakePollChain{endpoints: 2, active: 0}
+	ch.respond = func(idx int, to common.Address, data []byte) ([]byte, error) {
+		return nil, fmt.Errorf("connection reset by peer (endpoint %d)", idx)
+	}
+	ch.setHead(5000)
+	ch.splitCallBackendOn(1) // endpoint 1 rejects; endpoint 0 transport-fails
+	p, clk := newTestPoller(t, st, ch, 10)
+	h := newDaemonWorkerHarness(p, clk)
+	msgs := captureWarnings(t)
+
+	// Phase 1: two mixed rounds build a genuine streak (the tests above pin
+	// this in detail; here it is the CONTRAST for the reset that follows).
+	for i := 1; i <= 2; i++ {
+		h.round(context.Background())
+		require.Equal(t, i, h.bo.failures, "round %d: the mixed outage errs", i)
+		h.tick()
+	}
+
+	// Phase 2: endpoint 0's call path stops carrying the pinned block too —
+	// the walk is now a UNANIMOUS recognized rejection on every attempt.
+	ch.splitCallBackendOn(0)
+	h.round(context.Background())
+	require.Zero(t, h.bo.failures,
+		"a unanimous rejection is a clean discard: the wrapper reads nil and resets the streak")
+	require.Empty(t, h.stepError, "…and step_error clears")
+	require.True(t, containsSubstring(*msgs, "pinned block unknown, discarding round"),
+		"the discard is a WARN with the evidence, not silence")
+	require.Equal(t, 1, p.exploreStart,
+		"the seam advanced on the discard too: routing moves on EVERY non-landing round")
+	require.Equal(t, -1, p.preferredStart, "exploration, never attribution")
+
+	// Multi-cadence: the unanimous rejection repeats cleanly, ping-ponging
+	// the start, with no backoff and no step_error for as long as it stays
+	// unanimous.
+	h.tick()
+	h.round(context.Background())
+	require.Zero(t, h.bo.failures)
+	require.Empty(t, h.stepError)
+	require.Equal(t, 0, p.exploreStart, "the discard kept advancing the start")
+	require.Empty(t, st.applied, "no rejected round ever recorded anything")
+}
+
 // THE ZERO-HASH REFUSAL LIVES ON THE HEADER PATH NOW (moved from the multicall
 // decoder, where it refused every real-chain round): a header whose hash is
 // zero is a provider protocol violation, and an anchor holding it would

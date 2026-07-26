@@ -1100,15 +1100,22 @@ func (c *fakePollChain) HeadFrom(_ context.Context, start int) (chain.Head, chai
 	return chain.Head{}, chain.EndpointToken{Index: -1}, lastErr
 }
 
-// CallAtHashFrom walks endpoints from start exactly like the real doFrom and
-// executes ONLY on a backend that HAS the pinned block: an endpoint whose
-// call-path view does not know the hash rejects the attempt with the observed
-// "block not found" class (the EIP-1898 behavior the live matrix pinned on
-// all four production endpoints, fabricated-hash negative controls included)
-// and the walk rotates on. The fake's respond function remains the authority
-// on the response bytes, so a test can still script an endpoint whose
-// multicall reports a DIFFERENT execution block than the pin — the serving
-// inconsistency the poller must discard.
+// CallAtHashFrom walks endpoints from start exactly like the real
+// doFromAttempts and executes ONLY on a backend that HAS the pinned block:
+// an endpoint whose call-path view does not know the hash rejects the
+// attempt with the observed "block not found" class (the EIP-1898 behavior
+// the live matrix pinned on all four production endpoints, fabricated-hash
+// negative controls included) and the walk rotates on. The fake's respond
+// function remains the authority on the response bytes, so a test can still
+// script an endpoint whose multicall reports a DIFFERENT execution block
+// than the pin — the serving inconsistency the poller must discard.
+//
+// A TOTAL failure returns *chain.PinnedCallError with every attempted
+// endpoint's own error retained in walk order, exactly as the real pinned
+// path does since Task 9 wave 4 (Codex round 3 [medium]) — a fake that kept
+// last-error-wins here would make the poller's aggregate posture
+// classification untestable in the direction that matters: no test could
+// ever present it a mixed walk to refuse.
 func (c *fakePollChain) CallAtHashFrom(_ context.Context, start int, to common.Address, data []byte, blockHash common.Hash) ([]byte, chain.EndpointToken, error) {
 	c.starts = append(c.starts, start)
 	c.atHashes = append(c.atHashes, blockHash)
@@ -1117,26 +1124,27 @@ func (c *fakePollChain) CallAtHashFrom(_ context.Context, start int, to common.A
 		n = 1
 	}
 	first := ((start % n) + n) % n
-	var lastErr error
+	var attempts []chain.AttemptError
 	for i := 0; i < n; i++ {
 		idx := (first + i) % n
 		backend := c.callBackend(idx)
 		if backend.down != nil {
-			lastErr = backend.down
+			attempts = append(attempts, chain.AttemptError{Endpoint: idx, Err: backend.down})
 			continue
 		}
 		if !backend.knowsHash(blockHash) {
-			lastErr = fmt.Errorf("block %s not found on endpoint %d", blockHash, idx)
+			attempts = append(attempts, chain.AttemptError{Endpoint: idx,
+				Err: fmt.Errorf("block %s not found on endpoint %d", blockHash, idx)})
 			continue
 		}
 		out, tok, err := c.serve(idx, to, data)
 		if err != nil {
-			lastErr = err
+			attempts = append(attempts, chain.AttemptError{Endpoint: idx, Err: err})
 			continue
 		}
 		return out, tok, nil
 	}
-	return nil, chain.EndpointToken{Index: -1}, lastErr
+	return nil, chain.EndpointToken{Index: -1}, &chain.PinnedCallError{Op: "callAtHash", Attempts: attempts}
 }
 
 // CallAtFrom is the NUMBER-pinned call production code can no longer reach:

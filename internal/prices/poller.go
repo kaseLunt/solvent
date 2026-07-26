@@ -841,7 +841,8 @@ type pollRound struct {
 // whose hash this round verified, or rejects the call — "block not found",
 // the uniform rejection class observed on all four production endpoints with
 // fabricated-hash negative controls (live matrix, 2026-07-26) — and a
-// rejection DISCARDS the round. The honest residual is the serving node's own
+// rejection from EVERY attempted endpoint DISCARDS the round (the aggregate
+// rule below). The honest residual is the serving node's own
 // implementation of the pin, the same trust class as every other read. The
 // multicall's own blockHash output still takes NO part in the anchor:
 // on-chain it is blockhash(block.number), which BLOCKHASH cannot serve for
@@ -878,9 +879,11 @@ type pollRound struct {
 // per-arm calls: wave 2 advanced four named arms and round 2 found the
 // fifth and sixth, so the class is closed structurally — a future arm gets
 // the advance by NOT being the landed return, not by remembering a helper.
-// Failure classification (isBlockNotFoundErr) decides the ERROR POSTURE —
-// discard vs error — and nothing else; routing never depends on
-// recognizing phrasings.
+// Failure classification decides the ERROR POSTURE — discard vs error —
+// and nothing else; routing never depends on recognizing phrasings. The
+// posture itself is computed from the AGGREGATE of per-attempt pinned-call
+// outcomes (allAttemptsRejectedPin: discard only on a unanimous recognized
+// rejection; Codex round 3), so it cannot depend on failover order either.
 //
 // Individual reverts and undecodable returns are per-asset skips with a WARN;
 // only transport failures, a malformed multicall envelope and zero header
@@ -962,23 +965,41 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	// head read and closing re-read that endpoint never attested.
 	out, calledOn, err := p.chain.CallAtHashFrom(ctx, servedBy.Index, Multicall3Address, input, hashBefore)
 	if err != nil {
-		if isBlockNotFoundErr(err) {
-			// The pin was REJECTED: no reachable endpoint has the block the
-			// serving endpoint's head named. The serving node may genuinely
-			// be alone on its fork — worth a WARN with the evidence, not an
-			// error to burn the daemon's backoff on. Recognizing the wording
-			// picks THIS POSTURE ONLY; the routing advance comes from the
-			// seam either way.
+		// ONE CLASSIFICATION AUTHORITY PER ROUND OUTCOME (Codex task-9 round
+		// 3 [medium], accepted): the round's posture is computed from the
+		// AGGREGATE of per-attempt outcomes — chain.PinnedCallError, which
+		// the pinned-call path retains per attempt — never from whichever
+		// endpoint's error the failover walk happened to surface LAST. The
+		// DISCARD posture applies ONLY when every failed attempt is a
+		// recognized pin rejection; ANY transport or unknown involvement
+		// keeps the fail-closed ERROR posture, so the daemon's backoff
+		// streak keeps growing and its step_error condition stays visible
+		// for the whole outage. Last-error-wins made the posture an accident
+		// of rotation: the same persistent mixed outage discarded (resetting
+		// the backoff, clearing step_error) whenever the recognized
+		// rejection ran last and erred whenever the transport failure did —
+		// alternating every cadence, because the deferred routing advance
+		// rotates the walk's starting endpoint. That advance is the seam's
+		// closed law and applies to BOTH postures, unconditionally:
+		// classification decides how the failure is REPORTED, never whether
+		// routing moves.
+		if allAttemptsRejectedPin(err) {
+			// The pin was REJECTED by EVERY attempted endpoint: none of them
+			// has the block the serving endpoint's head named. The serving
+			// node may genuinely be alone on its fork — worth a WARN with
+			// the evidence, not an error to burn the daemon's backoff on.
+			// Recognizing the unanimous rejection picks THIS POSTURE ONLY;
+			// the routing advance comes from the seam either way.
 			slog.Warn("pinned block unknown, discarding round: no endpoint could execute at the round's verified head hash, so the serving endpoint may be alone on its fork; the next round starts elsewhere",
 				"engine", p.engine, "block", pin, "hash", hashBefore, "endpoint", servedBy.Index, "err", err)
 			return none, false, nil // round discarded; next cadence retries elsewhere
 		}
-		// An out-of-class rejection wording, a trailing transport failure
-		// masking a rejection (the failover layer keeps only the LAST
-		// endpoint's error), or any other provider failure: the ERROR
-		// posture — and the seam still moves the next round's start (round-2
-		// finding 2: the error posture is fail-closed for correctness and
-		// must never be fail-forever for routing).
+		// An out-of-class rejection wording anywhere in the walk, transport
+		// or unknown involvement on ANY attempt, or a walk that never built
+		// an aggregate (a context abort): the ERROR posture — and the seam
+		// still moves the next round's start (round-2 finding 2: the error
+		// posture is fail-closed for correctness and must never be
+		// fail-forever for routing).
 		return none, false, fmt.Errorf("price poller %q: multicall (%d oracles) pinned to %s (block %d): %w", p.engine, len(p.targets), hashBefore, pin, err)
 	}
 	if calledOn.Index != servedBy.Index {
@@ -1121,13 +1142,16 @@ func (p *Poller) routeNextRoundPastNonLanding(servedBy chain.EndpointToken) {
 // eth_call earns from a node that does not have the pinned block, as distinct
 // from a node that failed to answer.
 //
-// CLASSIFICATION DECIDES POSTURE ONLY (Codex task-9 round 2, finding 2): a
-// recognized rejection is reported as a WARN discard; anything else keeps
-// the fail-closed ERROR posture — the daemon's backoff. It has NO routing
-// role. The exploration advance comes from readRound's non-landing seam
-// whether or not any phrasing is recognized, so a rejection worded outside
-// the class, or masked entirely by a trailing transport failure (the
-// failover layer preserves only the LAST endpoint's error), costs log
+// CLASSIFICATION DECIDES POSTURE ONLY (Codex task-9 round 2, finding 2),
+// and since wave 4 it is applied PER ATTEMPT over the pinned-call walk's
+// retained outcomes (allAttemptsRejectedPin over chain.PinnedCallError,
+// Codex round 3: one classification authority per round outcome): the WARN
+// discard requires the recognized rejection on EVERY attempted endpoint,
+// and any transport or unknown involvement keeps the fail-closed ERROR
+// posture — the daemon's backoff — so the posture cannot depend on failover
+// order any more than routing does. It has NO routing role. The exploration
+// advance comes from readRound's non-landing seam whether or not any
+// phrasing is recognized, so a rejection worded outside the class costs log
 // precision and backoff time, never liveness.
 //
 // THE CLASSIFICATION IS BY ERROR TEXT, AND ITS BOUND IS STATED PLAINLY: the
@@ -1145,6 +1169,31 @@ func isBlockNotFoundErr(err error) bool {
 		return false
 	}
 	return strings.Contains(s, "block") || strings.Contains(s, "header") || strings.Contains(s, "hash")
+}
+
+// allAttemptsRejectedPin is the AGGREGATE half of the posture classification
+// (Codex task-9 round 3 [medium]: one classification authority per round
+// outcome): it reports whether a failed pinned-call walk was a recognized
+// pin rejection on EVERY attempted endpoint. Only that unanimity earns the
+// WARN-discard posture; a walk with ANY transport or unknown failure — or
+// one that never built a per-attempt aggregate at all (a context abort, or
+// a chain surface that does not retain attempts) — reports false, and the
+// caller keeps the fail-closed ERROR posture. Judging the aggregate instead
+// of the surfaced (last) error is what makes the posture a property of the
+// OUTAGE rather than of the failover walk's rotation order.
+func allAttemptsRejectedPin(err error) bool {
+	var walk *chain.PinnedCallError
+	if !errors.As(err, &walk) || len(walk.Attempts) == 0 {
+		// No per-attempt aggregate: nothing proves unanimity, so the posture
+		// fails closed to ERROR.
+		return false
+	}
+	for _, a := range walk.Attempts {
+		if !isBlockNotFoundErr(a.Err) {
+			return false // transport or unknown involvement: ERROR posture
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
