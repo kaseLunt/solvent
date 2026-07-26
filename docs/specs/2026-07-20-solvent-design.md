@@ -9,9 +9,8 @@ load-bearing anywhere except the npm package scope and the domain.
 
 ## 1. Purpose & context
 
-A portfolio project engineered to get a mid-level full-stack engineer (3 yrs experience,
-edtech background) hired at ether.fi via a head-of-growth referral, and to signal strongly
-to the wider crypto industry.
+A portfolio project engineered to demonstrate production-grade full-stack protocol
+engineering on real mainnet data, and to signal strongly to the wider crypto industry.
 
 **One-sentence pitch:** *70,000 people borrow against crypto collateral to spend on a Visa
 card, and none of them can see how close they are to liquidation — Solvent is the missing
@@ -21,7 +20,7 @@ risk surface for ether.fi Cash.*
 
 | Decision | Choice |
 |---|---|
-| Hiring signal | Full-stack product depth: real data plumbing + consumer-grade frontend |
+| Positioning signal | Full-stack product depth: real data plumbing + consumer-grade frontend |
 | Deliverable | Live, publicly deployed, real mainnet data |
 | Chain depth | Build on existing deployed contracts; no custom Solidity |
 | Backend | Go + PostgreSQL (user is new to Go — the ramp is a deliberate, visible learning story) |
@@ -35,8 +34,8 @@ risk surface for ether.fi Cash.*
 - ether.fi has repositioned from restaking protocol to **crypto neobank**. Cash is the
   growth engine: ~70k+ active cards, ~$1B annualized spend, ~$25M active borrows across
   16+ collateral assets. Restaking-narrative projects are off-brand for them now.
-- Their posted stack: **Go + PostgreSQL backend, TypeScript/Next.js frontend**. Open
-  "Senior Full Stack" role in NYC ($160–200K) is the natural target.
+- Their posted stack: **Go + PostgreSQL backend, TypeScript/Next.js frontend** —
+  matched deliberately by this project.
 - **Live now:** a July 2026 governance proposal replaces Cash's proprietary "Debt Manager"
   lending engine with a dedicated **Aave V4 whitelabel instance on OP Mainnet** ($175M at
   launch, ~$500M target by EOY). Today's engines: Debt Manager + an Aave v3 "EtherFi
