@@ -290,6 +290,63 @@ func TestEveryRepairReadTreatsANullBoundRowAtAnAnchoredHeightAsUnprovable(t *tes
 	require.Equal(t, uint64(H-1), cursor, "the cursor stands at the boundary this call acted above")
 }
 
+// THE FRONTIER READ ASKS THE BINDING TOO — the last height-join consumer converted in
+// wave 12, and the one the mutation loop caught untested (M12 survived until this
+// existed).
+//
+// NewestPollAnchor answers "the newest round this engine still stands behind", and two
+// consumers depend on that meaning: the block-advance health clock and the cursor
+// regression classifier. A round that stamped its observation BELOW its own execution
+// block, and whose row was then marked, is a round we do NOT stand behind — but no
+// marked row sits at its anchor's height, so the height clause alone hands the anchor
+// straight back as the frontier. The consequences are both wrong in the unsafe
+// direction: a stale block-advance clock refreshed by a round that was repudiated, and
+// a regression attributed against an anchor the repair already disowned.
+//
+// The height clause is KEPT alongside, and this test does not challenge it: it is the
+// conservative one that protects pre-00007 marked rows, whose binding is NULL and
+// whose height anchor may well be their genuine provenance. Both clauses only ever
+// EXCLUDE, and for this read exclusion is always the safe direction.
+func TestTheFrontierExcludesAnAnchorAMarkedRowIsBoundTo(t *testing.T) {
+	s := testDeriveStore(t)
+	ctx := context.Background()
+
+	// A clean round: executes at 50, stamps at 40. Nothing here is ever marked, so
+	// this anchor stays eligible and is what the frontier must fall back to.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(40, 0xAA, testPollSource, 1_000_000, 6),
+	}, 50, anchorAt(50))))
+	// The round under test: executes at 100, stamps at 90. Its row is bound to 100,
+	// and NO row of any kind exists at height 100.
+	require.NoError(t, applyErr(s.ApplyPolledPrices(ctx, testPollEngine, 10, []PriceObservation{
+		po(90, 0xBB, testPollSource, 2_000_000, 6),
+	}, 100, anchorAt(100))))
+	require.EqualValues(t, 100, *anchorBindingAt(t, s, 10, 0xBB, testPollSource, 90))
+
+	newest, found, err := s.NewestPollAnchor(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.EqualValues(t, 100, newest.BlockNumber, "before any marking, the newest round is the frontier")
+
+	// A repair marks the row at 90 and nothing else.
+	require.NoError(t, s.Rewind(ctx, "op:debt-manager", 10, 80, []byte{0x01}))
+	_, marked, err := s.NeutralizeUnverifiablePrices(ctx, testPollEngine, 10, 100, 0)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), marked, "only the row above the walker's target")
+
+	// THE PROPERTY. No marked row sits at height 100, so the height clause sees a clean
+	// anchor there; the binding clause sees the round that was repudiated.
+	newest, found, err = s.NewestPollAnchor(ctx, testPollEngine, 10)
+	require.NoError(t, err)
+	require.True(t, found, "the frontier falls back rather than disappearing — an engine with a usable older round still has one")
+	require.EqualValues(t, 50, newest.BlockNumber,
+		"the anchor of a round whose observations were marked is NOT the frontier, even though its own height carries no marked row")
+
+	// And the repudiated anchor is still ON DISK — the frontier read excludes it, it
+	// does not delete it (D-012 clause 2).
+	require.Contains(t, anchorBlocks(t, s, testPollEngine), uint64(100))
+}
+
 // A REPLAYED ANCHOR IS STILL A WITNESSED ONE. A frozen endpoint re-reports the same
 // execution block, so the anchor insert conflicts and reports inserted=false — but the
 // anchor for THAT block was written by a real round, insertPollAnchor's divergence
