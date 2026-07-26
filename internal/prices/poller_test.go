@@ -823,6 +823,15 @@ func TestPollerRepairNeutralizesWhenEveryAnchorIsProvenOrphaned(t *testing.T) {
 		require.Equal(t, store.InvalidReasonUnverifiableReorg, r.invalidReason)
 	}
 	require.True(t, containsSubstring(*msgs, "MISMATCHED"))
+	// AND THE FLOOR'S DISPOSITION IS REPORTED HERE TOO (Codex round 10's [medium] #1).
+	// This arm offers no floor at all, and "none offered" is a different operator story
+	// from "offered and admitted" — the boundary is the walker's target, not a height
+	// anything vouched for. Without this the disposition would be pinned only on the two
+	// arms that carry a floor, and the value most repairs actually log would be untested.
+	require.True(t, containsSubstring(*msgs, "floorDisposition=none-offered"),
+		"an arm that offers no floor says so, rather than reporting a floor as admitted")
+	require.True(t, containsSubstring(*msgs, "validAtOrBelow=3900"),
+		"and the validity boundary is the walker's target the store fell back to")
 	require.False(t, st.unacked)
 }
 
