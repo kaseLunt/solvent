@@ -107,11 +107,17 @@ package prices
 //   - A transport failure, a malformed multicall response or a ZERO header
 //     hash is a round-level error: nothing is recorded, the durable cursor is
 //     untouched, the round retries.
-//   - A round whose coherence broke — the chain reorged between the two
-//     HeaderHash(N) reads, the multicall executed at a block other than the
-//     pin, or the failover client served a read from a different endpoint —
-//     is DISCARDED, not an error: the walker's tip-changed posture. The
-//     evidence is logged, nothing is recorded, and the next due round retries.
+//   - A round whose coherence broke — the header hash changing between the
+//     two HeaderHash(N) reads (chain movement or a split backend behind the
+//     same URL: ambiguous, and treated as such), the multicall executing at
+//     a block other than the pin, or the failover client serving a read from
+//     a different endpoint — is DISCARDED, not an error: the walker's
+//     tip-changed posture. The evidence is logged, nothing is recorded, and
+//     the next due round retries.
+//   - Either way — error or discard — a round that resolved its serving
+//     endpoint and did not LAND moves the caller-scoped exploration start
+//     past that endpoint (readRound's non-landing seam): landing is the only
+//     outcome that keeps the starting point.
 //   - An INDIVIDUAL oracle revert (success=false under requireSuccess=false) is
 //     a per-asset skip with a WARN, never a round failure — one broken oracle
 //     must not cost every other asset its price. A round where EVERY oracle
@@ -853,10 +859,12 @@ type pollRound struct {
 // the close keeps surfacing a degraded provider as an ERROR at the moment of
 // contact.
 //
-// It returns ok=false with a nil error when the round was DISCARDED — a
-// mid-round reorg or a serving inconsistency, each logged with its evidence.
-// That is the walker's tip-changed posture: not an error, nothing recorded,
-// the cadence slot stays spent and the next due round retries.
+// It returns ok=false with a nil error when the round was DISCARDED — an
+// ambiguous bracketing-hash mismatch (chain movement or a split backend:
+// unknowable from one token) or a serving inconsistency, each logged with
+// its evidence. That is the walker's tip-changed posture: not an error,
+// nothing recorded, the cadence slot stays spent and the next due round
+// retries.
 //
 // ROUTING ON EVERY NON-LANDING OUTCOME (Codex task-9 round 2, both findings
 // accepted; controller ruling): LANDING IS THE ONLY OUTCOME THAT KEEPS THE
