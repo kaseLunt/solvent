@@ -469,7 +469,12 @@ func TestQuietlyRefusedSweepFailsReadinessThroughARealStaleBatchRefusal(t *testi
 	// THE VERDICT, from the real store through the daemon's real pass.
 	collateral := &collateralBoundState{interval: time.Minute}
 	collateral.hydrate(ctx, s, liveEngine)
-	applyProgressConditions(ctx, s, fixedClock(time.Now()), rc, progressWatch{
+	// THE DAEMON'S OWN WIRING, and against the real store it is the only defensible
+	// one: every timestamp this verdict reads — generation opened_at, last batch,
+	// oldest successful sweep — was written by THIS Postgres, so the clock they are
+	// subtracted from is Postgres's too. Handing this pass time.Now here would be the
+	// very substitution Codex round 11's [medium] is about, in a live test.
+	applyProgressConditions(ctx, s, timeAuthority{verdict: s.Now, sched: time.Now}, rc, progressWatch{
 		sweepEngine: liveEngine, sweepMaxAttempts: snapshot.MaxSweepAttempts, collateral: collateral,
 	})
 	h, _ := newTestHealth()
