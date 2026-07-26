@@ -456,6 +456,16 @@ func TestNeutralizedPriceStatsCountsOnlyReorgMarkedRowsOfOneEngine(t *testing.T)
 // What this test keeps is the half that is still reachable and still load-bearing:
 // after the classification, the retained row is invisible to the exposure reads, so
 // its permanent presence cannot veto a later PROVEN repair of genuinely new history.
+//
+// THAT HALF HAS NO CLAUSE, AND THE HEADER USED TO CLAIM CLAUSE 1 FOR IT (round 8's
+// [medium]). Clause 1 is about deletion and the RewindPrices refusal; it does not
+// specify what the exposure reads count, and no other clause does either. The honest
+// statement is that the filtering is the implementation consequence that makes clause
+// 3's PERMANENCE operable: marked rows are permanent, so if they counted as
+// history-at-risk they would veto every future repair forever, and a classification
+// that wedges all later repair is not the "accepted sample gap" clause 3 ratifies.
+// That reasoning is sound and is still not a citation — the wave-10 report nominates
+// it for ratification rather than borrowing a clause number that does not cover it.
 func TestNeutralizedRowsAreNotHistoryAtRiskForALaterRepair(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()

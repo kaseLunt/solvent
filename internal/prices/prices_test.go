@@ -652,9 +652,11 @@ func (f *fakePriceStore) NeutralizeUnverifiablePrices(_ context.Context, engine 
 // D-012 clause 6) is read from durable rows rather than counted in process memory.
 //
 // It also COUNTS ITS CALLS, because clause 6 bounds the cost of that visibility: the
-// real aggregate scans this engine's whole price history with no index on its
-// predicate, so "called only when the number can have changed" is part of the
-// contract and not an optimisation.
+// real aggregate is bounded by migration 00007's partial covering index rather than
+// by this engine's whole price history, but "called only when the number can have
+// changed" is still part of the contract and not an optimisation: clause 6 bounds the
+// cost of the visibility, and a cheap query paid for every 60 seconds forever is
+// still a per-cadence cost proportional to uptime.
 func (f *fakePriceStore) NeutralizedPriceStats(_ context.Context, engine string, _ uint64) (store.NeutralizedPriceStats, error) {
 	f.neutralizedStatsCalls++
 	if f.neutralizedStatsErr != nil {

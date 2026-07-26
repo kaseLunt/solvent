@@ -515,7 +515,9 @@ func TestPollerRepairRetainsRowsBelowVerifiedAnchor(t *testing.T) {
 	//
 	//   - on the pass's OWN endpoint — does the proof still hold on the chain it was
 	//     computed against? (time)
-	//   - on a DIFFERENT endpoint — does any other chain view agree? (D-011 clause 7)
+	//   - on a DIFFERENT endpoint — does any other chain view agree? (D-012 clause 4 -- this
+	//     was D-011 clause 7, and D-011 is SUPERSEDED; naming it as the live source is
+	//     the citation drift R7 exists to stop)
 	//
 	// The endpoint column is what distinguishes them, and it is asserted rather than
 	// inferred: two reads of the same height from the same node would be a repeat, not
@@ -1351,7 +1353,7 @@ func TestPollerRepairRunsOneCoherentEndpointAcrossDivergentAncestries(t *testing
 	// The structural claim, checked rather than asserted in prose. Every probe in the
 	// PASS — page probes and the checkpoint re-read alike — was answered by ONE
 	// endpoint; that is coherence, and it is what makes "5000 orphaned" compose with
-	// "4900 canonical". The LAST call is the D-011 clause-7 corroboration and comes
+	// "4900 canonical". The LAST call is the D-012 clause-4 corroboration and comes
 	// from a DIFFERENT endpoint by construction: a second opinion sourced from the
 	// same node would be no second opinion at all.
 	served := probeEndpoints(ch)
@@ -1361,7 +1363,7 @@ func TestPollerRepairRunsOneCoherentEndpointAcrossDivergentAncestries(t *testing
 		require.Equal(t, pass[0], e, "probe %d was answered by endpoint %d, breaking the pass's coherence", i, e)
 	}
 	require.NotEqual(t, pass[0], corroboration,
-		"the corroborating read must come from another endpoint, or clause 7 corroborates one node with itself")
+		"the corroborating read must come from another endpoint, or D-012 clause 4 corroborates one node with itself")
 	require.Equal(t, uint64(5000), ch.hashCalls[len(ch.hashCalls)-1],
 		"and it must ask about the pass's CHECKPOINT, whose hash entails every proof at or below it")
 	// Here the two forks AGREE that 5000 was replaced (they diverge only at 4900,
@@ -1428,7 +1430,7 @@ func TestPollerRepairRefusesAProbeSilentlyServedByAnotherEndpoint(t *testing.T) 
 	// STEP 2 — COHERENT, AND STILL NOT ENOUGH. The next pass runs entirely against
 	// endpoint 1, which can answer both heights, and reaches a conclusion that is
 	// self-consistent on that one chain. Under D-010 that was the whole bar and the
-	// pass would have marked 5000 here. Under D-011 clause 7 it is not: corroborating
+	// pass would have marked 5000 here. Under D-012 clause 4 it is not: corroborating
 	// the checkpoint means asking the OTHER endpoint about height 5000, and endpoint 0
 	// is precisely the node that cannot answer about 5000. Missing agreement is not
 	// contrary agreement, so nothing is marked and the epoch waits.
@@ -1537,7 +1539,7 @@ func TestPollerRepairDiscardsAHalfWalkedPassWhenItsEndpointStopsAnswering(t *tes
 	require.Len(t, st.rows, 2*anchorProbePage, "nothing was deleted at any point")
 
 	// Every probe of the concluding pass came from endpoint 1 — except the LAST, which
-	// is the clause-7 corroboration and must come from somewhere else by construction.
+	// is the D-012 clause-4 corroboration and must come from somewhere else by construction.
 	// Both endpoints report the same chain here, so it confirms and the pass may act;
 	// this test is about availability, not divergence.
 	served := probeEndpoints(ch)[pageOne+1:]
@@ -1709,10 +1711,16 @@ func TestPollerRefusesToMarkWhenASecondEndpointContradictsThePass(t *testing.T) 
 //
 // Codex round 7 was right that wave 7's version of this was an implementation-only
 // exception to an accepted decision, and D-012 clause 4 is the ratification it asked
-// for. What the clause does NOT ratify is silence: it requires a WARN "naming the
-// height range", which is what the second half of this test pins. A disclosure that
-// cannot say what was classified leaves an operator unable to check it against
-// anything.
+// for.
+//
+// THE DISCLOSURE'S SOURCE IS NOT CLAUSE 4, AND SAYING SO WAS THE ROUND-8 [medium].
+// Clause 4 ratifies the MARKING and says nothing whatever about a WARN or a height
+// range; the range-naming requirement comes from the WAVE-8 BRIEF's R4, an
+// implementation requirement of this wave line rather than decision text. Attributing
+// it to the clause dressed a local choice in borrowed authority — which is the same
+// disease as citing no source, one step worse, because it looks checkable and is not.
+// The two are therefore cited separately below, and the report nominates the
+// disclosure for ratification so a later wave has a real clause to point at.
 func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) {
 	st := newFakePriceStore()
 	engine := PollCursorEngine(10)
@@ -1740,9 +1748,9 @@ func TestPollerMarksOnAOneEndpointFleetAndDisclosesTheHeightRange(t *testing.T) 
 	require.Equal(t, uint64(4900), st.neutralized[0].verifiedFloor)
 
 	require.True(t, containsSubstring(*msgs, "SINGLE-VIEW CLASSIFICATION"),
-		"the concession is never silent (D-012 clause 4: log at WARN that a single-view classification occurred)")
+		"the concession is never silent (wave-8 brief R4; D-012 clause 4 ratifies the MARKING, not this disclosure)")
 	require.True(t, containsSubstring(*msgs, "exactly one rpc endpoint configured"),
-		"and it names the CONFIGURED count, which is the fact that authorises it")
+		"and it names the CONFIGURED count, which is the fact clause 4 makes the marking turn on")
 
 	// AND IT IS PERMANENT (clause 3). The one endpoint rejoins the canonical chain and
 	// the head moves past H; nothing brings the row back, because nothing in the
@@ -1905,7 +1913,8 @@ func TestPollerNeutralizedBacklogSurvivesAndIsRefreshedByANewerRound(t *testing.
 	p, clk := newTestPoller(t, st, ch, 10)
 
 	// A marked row at a height the chain never anchored: nothing can ever place it, so
-	// it is the irreducible residue clause 8 has to keep reporting.
+	// it is the irreducible residue D-012 clause 6 has to keep reporting (carrying
+	// D-011 clause 8, which is superseded text and not the live source).
 	gapAt := clk.now()
 	st.seedNeutralizedRow(engine, priceProviderV2.Bytes(), SourcePriceProviderV2, 4000, gapAt)
 	// And a marked row at the height the NEXT round will execute at, for a registry
@@ -1953,7 +1962,8 @@ func TestPollerNeutralizedBacklogSurvivesAndIsRefreshedByANewerRound(t *testing.
 //
 // This is Codex round 7's [medium] as a property rather than as a fix. The clause:
 // "the stats surface must be cheap — its cost may not scale with total price
-// history". NeutralizedPriceStats has no index carrying invalid_reason, and polled
+// history". Before migration 00007 NeutralizedPriceStats had no index carrying
+// invalid_reason (it does now, and round 8 required the measured evidence), and polled
 // rows are never deleted, so wave 7's rule ("re-read after every landed round while a
 // backlog remains") bought a full-history scan every 60 seconds forever on the
 // strength of ONE permanently classified row. The cost depended on total history, not

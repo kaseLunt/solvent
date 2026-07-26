@@ -616,9 +616,11 @@ func (p *Poller) Step(ctx context.Context) (bool, error) {
 	// asks "did the database just change the number?" instead of "might it have?".
 	//
 	// Wave 7 re-read it after every landed round while a backlog existed. That is the
-	// shape round 7's [medium] named: NeutralizedPriceStats has no index carrying its
+	// shape round 7's [medium] named: NeutralizedPriceStats had no index carrying its
 	// predicate, polled rows are never deleted, and so one permanent row bought a
-	// full-history scan every 60 seconds forever. An unknown count is still retried —
+	// full-history scan every 60 seconds forever. Migration 00007 adds that index, so
+	// each call now costs the BACKLOG rather than the history — but the call still only
+	// happens on a transition, because a cheap query on a cadence is still a cadence. An unknown count is still retried —
 	// "unknown" means an earlier read ERRORED, and guessing zero there would hide the
 	// pile permanently.
 	if res.Superseded > 0 || !p.neutralizedKnown {
@@ -688,11 +690,27 @@ func (p *Poller) hydrate(ctx context.Context) error {
 	if err := p.readDurableState(ctx); err != nil {
 		return fmt.Errorf("price poller %q: hydrate durable price state: %w", p.engine, err)
 	}
+	// THE ONE STARTUP RECOUNT (D-012 clause 6). A restart must report the accumulated
+	// pile rather than starting from zero, and this is the only place that is a
+	// hydration rather than a re-read: the `p.hydrated` guard above means it runs at
+	// most once per process, whereas readDurableState runs again on every uncertain
+	// apply. It is LAST and non-fatal — it informs an operator and decides nothing, so
+	// a failure must not take the freshness verdict down with it; the failure instead
+	// marks the count unknown and the next ordinary round retries.
+	p.refreshNeutralizedBacklog(ctx, "hydration")
 	return nil
 }
 
 // readDurableState performs the two durable reads every hydration needs and
 // commits them together, so a partial read can never leave half-fresh state.
+//
+// IT DOES NOT RECOUNT THE NEUTRALIZED BACKLOG (Codex round 8's [high] #5). It used to,
+// and that is what made "transition-only" false: this function is not a transition, it
+// is the RE-READ, and rehydrateAfterUncertainty calls it after every uncertain apply
+// and again inside neutralize — so the aggregate ran on non-transitions and ran twice
+// on the one real transition. The recount now sits at the three call sites that ARE
+// transitions (Poller.hydrate, the end of Poller.neutralize, and a superseding round),
+// which is what refreshNeutralizedBacklog's contract says and now what the code does.
 func (p *Poller) readDurableState(ctx context.Context) error {
 	rows, err := p.store.LatestPriceFreshness(ctx, p.cfg.ChainID, p.engine)
 	if err != nil {
@@ -708,11 +726,6 @@ func (p *Poller) readDurableState(ctx context.Context) error {
 	if found {
 		p.lastAnchorBlock, p.lastAnchorAt = anchor.BlockNumber, anchor.ObservedAt
 	}
-	// The retained-but-unusable backlog is read here so a restart reports the
-	// accumulated pile rather than starting from zero, and it is read LAST and
-	// non-fatally: it informs an operator and decides nothing, so a failure must
-	// not take the freshness verdict down with it.
-	p.refreshNeutralizedBacklog(ctx, "hydration")
 	return nil
 }
 
@@ -749,6 +762,14 @@ func (p *Poller) applyFreshness(rows []store.PriceFreshness) {
 // an untrusted verdict instead of a stale-but-green one — the whole point being
 // that health never rests on in-memory state whose relationship to storage is
 // unknown.
+//
+// IT DOES NOT RECOUNT THE NEUTRALIZED BACKLOG, and that is the difference between
+// "transition-only" as a doc claim and as a fact (D-012 clause 6). Its two callers are
+// an apply error and a neutralization; the first is not a transition at all, and the
+// second already recounts once on its own arm, so recounting here bought a scan on
+// every routine apply error plus a duplicate scan on every repair. Where an apply
+// error genuinely leaves the count in doubt — the ambiguous commit — onAmbiguousApply
+// marks it UNKNOWN instead, which defers one read to the next ordinary round.
 func (p *Poller) rehydrateAfterUncertainty(ctx context.Context, why string) {
 	if err := p.readDurableState(ctx); err != nil {
 		p.hydrated = false
@@ -1383,8 +1404,10 @@ func (p *Poller) corroborate(ctx context.Context, primary int, block uint64, wan
 	return agreementConfirmed, ""
 }
 
-// checkpointCorroborated is the clause-7 gate in front of every marking act: does a
-// SECOND endpoint agree with the chain view this pass's proofs were drawn from?
+// checkpointCorroborated is D-012 CLAUSE 4's gate in front of every marking act: does
+// a SECOND endpoint agree with the chain view this pass's proofs were drawn from?
+// (The clause number moved with the decision — this was D-011 clause 7, and calling it
+// that after D-012 superseded D-011 is the citation drift R7 exists to stop.)
 //
 // WHY THE CHECKPOINT ANSWERS FOR THE WHOLE PASS, and not just for one height. A block
 // hash commits to the block's entire ancestry, so two endpoints reporting the same
@@ -1395,22 +1418,93 @@ func (p *Poller) corroborate(ctx context.Context, primary int, block uint64, wan
 // accumulated, on exactly the entailment checkpointStillHolds already relies on for
 // time. One extra RPC call per repair, not one per anchor.
 //
-// A PASS WITH NO CHECKPOINT IS NOT WAVED THROUGH ON A TECHNICALITY. It is the one
-// state in which no endpoint's chain view is being trusted at all: verifyFloor returns
-// floorUnverifiable with no probes when this engine has NO anchor at or below the
-// cursor, and the marking then rests on a durable fact about the store — we hold rows
-// whose block hash was never written down — that every endpoint would report
-// identically because no endpoint is consulted. Requiring agreement there would demand
-// corroboration of a claim nobody made, and since no anchor will ever appear for those
-// heights (adoption is refused while the epoch stands) the refusal could never clear:
-// a fail-forever stall, which this package refuses elsewhere for the same reason.
+// A PASS WITH NO CHECKPOINT IS GATED TOO, AND THE ARGUMENT THAT SAID OTHERWISE WAS
+// WRONG. Wave 8 wrote here that a checkpointless pass "is the one state in which no
+// endpoint's chain view is being trusted at all", so "requiring agreement there would
+// demand corroboration of a claim nobody made". Codex round 8 found the hole that
+// reasoning covered: clause 4 governs MARKING, not corroboration machinery, and the
+// arm still MARKS — permanently, on rows whose canonicality nothing ever established.
+// Consulting no endpoint is not the same as every endpoint agreeing. The argument also
+// contained its own refutation: it justified proceeding by observing that no anchor
+// will ever appear for those heights, which is the reason the rows are unprovable, not
+// a reason to act on them. The configured-count rule is therefore applied to this arm
+// as well, before the return — see the body.
+//
+// THE FAIL-FOREVER WORRY THE OLD TEXT RAISED IS REAL, AND CLAUSE 4 ALREADY DECIDED IT.
+// A refusal here leaves the reorg epoch UNACKED, so repair re-runs every Step, no
+// price batch is admitted, and ConditionPollRewindBlocked latches — ingestion for this
+// engine stops until an operator acts. That is not an accident of this gate: clause 4
+// prescribes exactly it — "agreement unobtainable with >=2 endpoints configured => fail
+// closed: retain unmarked, repair blocked, readiness red — an operator-visible fault,
+// never a marking." What the old text got wrong was treating "the stall would be bad"
+// as licence to mark instead; the decision weighed that trade and chose the stall.
+//
+// The population it can strand is D-012 clause 5's legacy unanchored rows, which the
+// decision records as ZERO in production (they exist only in databases that ran
+// pre-00005 code; Task 9 backfills from scratch). A fleet that hits this is telling
+// its operator that it holds history no configured endpoint can ever vouch for, which
+// is a true and actionable statement.
 //
 // It returns (agreed, singleView, why). singleView is true only on the ratified
-// one-endpoint arm, and the caller carries it to the marking so the disclosure can
-// name the height range (D-012 clause 4).
+// one-endpoint arms, and the caller carries it to the marking so the disclosure can
+// name the height range (D-012 clause 4 for the marking; the range-naming WARN itself
+// is this wave's implementation requirement — see Poller.neutralize).
 func (p *Poller) checkpointCorroborated(ctx context.Context) (agreed bool, singleView bool, why string) {
 	if !p.probeCheckpointSet {
-		return true, false, ""
+		// THE NO-CHECKPOINT ARM, GATED BY THE SAME RULE AS EVERY OTHER (Codex round
+		// 8's blocker). Wave 8 returned unconditional success here.
+		//
+		// HOW THIS ARM IS REACHED: verifyFloor returns floorUnverifiable WITHOUT
+		// probing anything when the engine holds no anchor at or below the cursor —
+		// D-012 clause 5's legacy unanchored rows. There is no page to probe, so
+		// noteCheckpoint never fires, and resetVerification clears probeResumeSet and
+		// probeCheckpointSet together, so this is the ONLY arm that can act with no
+		// checkpoint at all. It marks rows: repair's floorUnverifiable case calls
+		// neutralize with whatever floor it was given.
+		//
+		// WHY THE COUNT RULE APPLIES ANYWAY. D-012 clause 4 is written about MARKING —
+		// "marking requires cross-endpoint agreement when more than one endpoint is
+		// configured" — not about checkpoints. Wave 8 read it as a property of the
+		// corroboration machinery and so gated only the arm that ran the machinery,
+		// which let this arm mark with two or more endpoints configured and no
+		// agreement, with ZERO endpoints configured, and on a fleet of one WITHOUT
+		// singleView — that is, without the disclosure the clause's ratified trade is
+		// paid for with.
+		//
+		// AND NO PROOF IS A STRONGER CASE FOR FAILING CLOSED THAN A CONTRADICTED ONE,
+		// NOT A WEAKER ONE. With >=2 endpoints configured the clause's remedy — obtain
+		// agreement — cannot even be attempted here: there is no hash for a second
+		// endpoint to agree WITH. Retention costs availability; marking canonical
+		// history on a fleet that was configured to require corroboration and supplied
+		// none costs correctness.
+		//
+		// THE PRICE OF FAILING CLOSED IS STATED, NOT HIDDEN: the epoch stays unacked,
+		// so repair re-runs every Step and NO price batch is admitted for this engine
+		// until an operator intervenes. Clause 4 names that outcome verbatim ("retain
+		// unmarked, repair blocked, readiness red — an operator-visible fault, never a
+		// marking"), so this is the decision's choice and not this code's. It is
+		// harmless in production because the rows that reach here — clause 5's legacy
+		// unanchored ones — have a production population of ZERO.
+		switch c := p.chain.EndpointCount(); {
+		case c == 1:
+			// CLAUSE 4'S RATIFIED TRADE, ON THE ARM WITH NO PROOF AT ALL. The clause
+			// scopes the trade to the CONFIGURED count and to nothing else: on a fleet
+			// of one, agreement is unobtainable rather than unavailable, waiting
+			// produces no second view ever, and refusing would wedge price ingestion on
+			// the first reorg that reaches legacy history. singleView is set, so
+			// Poller.neutralize emits the range-naming disclosure — the concession is
+			// never silent, and here it is the only signal an operator gets that rows
+			// were classified with no hash evidence whatsoever.
+			return true, true, ""
+		case c < 1:
+			// A fleet with no endpoints is a misconfiguration, not a ratified
+			// one-endpoint deployment; there is no view here to be single.
+			return false, false, fmt.Sprintf("no poll anchor covers this history, so there is no proof to corroborate, and this fleet has %d configured endpoints — clause 4 permits single-view marking only on a fleet of exactly one. Failing closed: the rows are retained unmarked and this is reported as a fault",
+				c)
+		default:
+			return false, false, fmt.Sprintf("no poll anchor covers this history, so no hash exists for a second endpoint to agree with, and %d endpoints are CONFIGURED: D-012 clause 4 requires agreement whenever more than one is, and agreement is impossible to obtain for a proof that does not exist. Failing closed: the rows are retained unmarked. Legacy unanchored rows exist only in databases that ran pre-00005 code",
+				c)
+		}
 	}
 	agreement, why := p.corroborate(ctx, p.probeEndpoint, p.probeCheckpointBlock, p.probeCheckpointHash)
 	switch agreement {
@@ -1682,20 +1776,28 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 // number is the separate fact that keeps saying so.
 //
 // AND THE SAME CLAUSE BOUNDS ITS COST, which is why the CALLERS are enumerated rather
-// than left to a schedule. NeutralizedPriceStats scans an ever-growing table with no
-// index carrying its predicate, so wave 7's "re-read after every landed round while a
-// backlog exists" made a per-cadence cost proportional to total price history — round
-// 7's [medium]. Since the online revalidation pass is gone (clause 3) the count moves
-// on exactly three occasions, and those are the only calls:
+// than left to a schedule. Since the online revalidation pass is gone (clause 3) the
+// count moves on exactly three occasions, and those are the only calls:
 //
-//   - HYDRATION, so a restart reports the accumulated pile rather than zero;
-//   - after NEUTRALIZATION, which is the only thing that raises it;
+//   - HYDRATION, so a restart reports the accumulated pile rather than zero. This is
+//     Poller.hydrate, which runs ONCE per process — not readDurableState, which also
+//     serves rehydrateAfterUncertainty and therefore ran after every uncertain apply
+//     (Codex round 8's [high] #5, first of three);
+//   - after NEUTRALIZATION, which is the only thing that raises it — called once, at
+//     the end of Poller.neutralize. It used to be called twice, because
+//     rehydrateAfterUncertainty recounted on its own (same finding, second of three);
 //   - after a round whose ApplyResult reports Superseded > 0, which is the only thing
 //     that lowers it.
 //
 // The cost is therefore a function of how often the number CHANGES, not of the poll
-// interval. (An unknown count — an earlier read errored — is also retried, because
-// "unknown" must not decay into "zero".)
+// interval. And what each call costs is bounded by migration 00007's partial covering
+// index, which carries the marker predicate so the aggregate reads the BACKLOG rather
+// than scanning the engine's whole price history (same finding, third of three).
+//
+// AN UNKNOWN COUNT IS RETRIED, because "unknown" must not decay into "zero" — and it
+// is the ONLY thing that makes this function run off a transition. Two states produce
+// it: a read that errored (see the error arm below), and an AMBIGUOUS apply, where a
+// commit error means a supersede may have landed unobserved. Neither is a cadence.
 //
 // It remains deliberately NOT a health condition here. The pile is now permanent by
 // specification (clause 3), so a condition keyed on its existence would latch /readyz
@@ -1704,14 +1806,33 @@ func (p *Poller) neutralize(ctx context.Context, cursor, floor uint64, probes in
 // owes clause 6 is that the count and age EXIST, are durable-derived, and survive the
 // acute recovery.
 //
-// A failed read is logged and dropped. This is an operator-facing number, not a
-// precondition for any decision, and failing hydration on it would let a counting
-// query take the poller's freshness verdict down with it.
+// A failed read is NON-FATAL but never silent, and never leaves a stale number
+// standing as current: it is logged and the count is marked UNKNOWN. Non-fatal because
+// this is an operator-facing number rather than a precondition for any decision, and
+// failing hydration on it would let a counting query take the poller's freshness
+// verdict down with it. Marked unknown because the alternative — what wave 8 did — was
+// to keep reporting the pre-transition value as if it were current.
 func (p *Poller) refreshNeutralizedBacklog(ctx context.Context, when string) {
 	stats, err := p.store.NeutralizedPriceStats(ctx, p.engine, p.cfg.ChainID)
 	if err != nil {
-		slog.Warn("could not read the neutralized-price backlog; its size and age are unknown this round",
-			"engine", p.engine, "when", when, "err", err)
+		// A FAILED RECOUNT MARKS THE COUNT UNKNOWN (Codex round 8's [high] #6). The
+		// previous value is left in neutralizedStats — it is the last thing that was
+		// ever true, and discarding it would report a fabricated zero — but
+		// neutralizedKnown goes FALSE, so NeutralizedBacklog's second return says
+		// "this number is not current" and Step's `|| !p.neutralizedKnown` retries on
+		// the next ordinary round.
+		//
+		// WHY IT IS NOT MERELY COSMETIC. This function is only called on transitions,
+		// so a failure here is always a failure to observe a CHANGE: the marking that
+		// just raised the pile, or the supersede that just lowered it. Returning with
+		// known=true left the pre-transition number standing as current indefinitely —
+		// hiding a new gap, or claiming one that had just been cleared — until the
+		// next transition or a restart, which for a permanent classification (D-012
+		// clause 3) may be never. Clause 6 requires the count to be a durable fact, and
+		// a number nothing has confirmed since it stopped being true is not one.
+		p.neutralizedKnown = false
+		slog.Warn("could not read the neutralized-price backlog; its size and age are now UNKNOWN rather than assumed unchanged, and the next ordinary round retries the count",
+			"engine", p.engine, "when", when, "lastKnownRows", p.neutralizedStats.Rows, "err", err)
 		return
 	}
 	prev, had := p.neutralizedStats, p.neutralizedKnown
@@ -2109,6 +2230,25 @@ func (p *Poller) advanceExploration(servedBy chain.EndpointToken) {
 // NOT release the preference, and leaves any exploration hint alone: an
 // indeterminate commit is evidence about neither.
 func (p *Poller) onAmbiguousApply() {
+	// THE BACKLOG COUNT BECOMES UNKNOWN, NOT STALE (D-012 clause 6). An ambiguous apply
+	// is a COMMIT error: the batch may have landed, and if it did it may have carried
+	// insertPrice's supersede arm, which is the only thing in the running system that
+	// LOWERS the backlog. So this process no longer knows the count — and the honest
+	// representation of that is the unknown flag, not a rescan here.
+	//
+	// A rescan here would reintroduce exactly what round 8's [high] #5 removed: a
+	// recount on a non-transition, driven by RPC-and-database luck rather than by a
+	// change in the number. Marking unknown instead defers the read to the next
+	// ordinary round (Step's `|| !p.neutralizedKnown`), where it is paid for once, and
+	// keeps the last known value readable through NeutralizedBacklog with its
+	// second return saying it is not current.
+	//
+	// This is on the AMBIGUOUS arm alone, not in rehydrateAfterUncertainty, because
+	// the other apply-error arms — an unacked epoch, an anchor divergence, a cursor
+	// regression — are ROLLBACKS. Nothing landed on those, so the count cannot have
+	// moved, and marking it unknown would manufacture a recount out of a routine error.
+	p.neutralizedKnown = false
+
 	p.staleRotations = 0
 	if p.preferredStart < 0 {
 		return // nothing pinned: multicalls already follow the shared hint

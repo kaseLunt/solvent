@@ -158,6 +158,31 @@ const PollOwnedEnginePrefix = "prices:poll:"
 // structural rule fired, and not merely that some string appeared.
 var ErrPollOwnedRewindRefused = errors.New("price rewind refused: this engine is poll-owned, and a polled row is a point-in-time contract read that nothing can re-derive (D-012 clause 1)")
 
+// ErrNonPollNeutralizeRefused is what NeutralizeUnverifiablePrices returns for an
+// engine OUTSIDE the poll-owned namespace. It is the mirror image of
+// ErrPollOwnedRewindRefused, and the two together are what make D-012 clause 2
+// structural rather than conventional: each repair primitive serves exactly one
+// family of writers, so no caller can assemble a state the other primitive would then
+// mishandle.
+//
+// THE STATE IT PREVENTS, WHICH CODEX ROUND 8 FOUND REACHABLE. Neutralization retains
+// an engine's rows and marks them, and clause 2 requires the anchors recording their
+// provenance to survive forever "on any store path". RewindPrices is legal for
+// event-derived engines and deletes EVERY anchor above its target unconditionally. So
+// a caller that neutralized under a non-poll identity — which the old signature
+// accepted from any non-empty string — could then rewind that same identity and strip
+// the provenance off retained marked rows: clause 2 violated through two individually
+// legal calls.
+//
+// THE REFUSAL IS ON THE MARKING SIDE BECAUSE THE MARKING IS WHAT IS POLL-SPECIFIC.
+// D-012's framing is that POLLED prices are samples — a marked row is observationally
+// a missed poll, and the classification is accepted because nothing can re-derive the
+// observation. An event-derived row does not have that property: raw_logs replays it,
+// so its answer to a reorg is RewindPrices, and marking it would retain an unreadable
+// row where a correct one could simply be re-derived. There is no engine for which
+// both primitives are right, and this is the half that says so.
+var ErrNonPollNeutralizeRefused = errors.New("price neutralization refused: this engine is not poll-owned, and neutralization is the POLLED writer's answer to a reorg epoch — an event-derived engine re-derives its rows from raw_logs through RewindPrices instead (D-012 clause 2)")
+
 // IsPollOwnedEngine reports whether engine is a poll-owned pseudo-engine key, i.e.
 // one whose rows are point-in-time `latest` reads with no replayable input.
 func IsPollOwnedEngine(engine string) bool {
@@ -264,7 +289,8 @@ type ApplyResult struct {
 	// It exists for D-012 clause 6's cost bound. The supersede arm is the only thing
 	// in the running system that shrinks the neutralized backlog, so it is the only
 	// landed-round event that can change NeutralizedPriceStats — and that aggregate
-	// scans an ever-growing table with no index on its predicate. Recomputing it
+	// scanned an ever-growing table with no index on its predicate before 00007, and is
+	// still paid per call. Recomputing it
 	// after every round (wave 7) made a per-cadence cost proportional to total price
 	// history; recomputing it when this field is non-zero makes the cost proportional
 	// to the number of transitions, which is what clause 6 requires. It is DERIVED
@@ -464,9 +490,31 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 			engine, chainID, ErrUnackedReorgEpoch, maxEpoch)
 	}
 
+	// THE ANCHOR IS RECORDED BEFORE THE ROWS IT VOUCHES FOR, so the binding each row
+	// carries names a row that exists in this same transaction. Order matters only for
+	// readability — both statements commit together — but it is the order the
+	// dependency runs in, and a reader should not have to check.
 	var result ApplyResult
+	var anchorBlock *uint64
+	if anchor != nil {
+		result.AnchorBlock = anchor.BlockNumber
+		at, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, *anchor)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		result.AnchorInserted, result.AnchorObservedAt = inserted, at
+		// Bound even when inserted=false: an idempotent replay means the anchor for
+		// THIS execution block was already recorded, by an earlier round that executed
+		// at the same block. It vouches for this round's observations exactly as it
+		// vouched for that one's — same engine, same block, same hash, verified by
+		// insertPollAnchor's divergence abort — so a replayed anchor is still a
+		// witnessed one, and withholding the binding here would manufacture an
+		// unprovable row out of a perfectly provable round.
+		b := anchor.BlockNumber
+		anchorBlock = &b
+	}
 	for _, o := range obs {
-		ins, inserted, superseded, err := insertPrice(ctx, tx, chainID, engine, o)
+		ins, inserted, superseded, err := insertPrice(ctx, tx, chainID, engine, o, anchorBlock)
 		if err != nil {
 			return ApplyResult{}, err
 		}
@@ -476,14 +524,6 @@ func (s *Store) applyPrices(ctx context.Context, engine string, chainID uint64, 
 		if superseded {
 			result.Superseded++
 		}
-	}
-	if anchor != nil {
-		result.AnchorBlock = anchor.BlockNumber
-		at, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, *anchor)
-		if err != nil {
-			return ApplyResult{}, err
-		}
-		result.AnchorInserted, result.AnchorObservedAt = inserted, at
 	}
 
 	// acked_epoch is only ever SET on the insert arm (implicit first-write
@@ -570,6 +610,17 @@ func validatePriceObservation(o PriceObservation) error {
 // caller derives health from inserted, and the backlog-recount decision (D-012
 // clause 6) from superseded. It is set on exactly one arm below.
 //
+// anchorBlock IS THE ROW'S PROVENANCE, AND IT IS A PARAMETER RATHER THAN A LOOKUP
+// (D-012 clause 2, Codex round 8's [high] #2). It is the block of the anchor this
+// round recorded in this same transaction, or nil when the round recorded none. The
+// caller passes it down because provenance is a fact about the ROUND — "an anchor was
+// witnessed and written alongside this observation" — and the only place that fact
+// exists is where the round is being applied. Deriving it here, by asking whether any
+// anchor happens to sit at o.BlockNumber, is precisely the fabrication the finding
+// names: a later round anchoring at a height would retroactively become provenance for
+// every older row there, including ones it never covered. nil stores NULL, which means
+// unprovable and never "look it up by height".
+//
 // NON-POSITIVE ANSWERS ARE QUARANTINED, NOT REFUSED. Refusing the row would
 // wedge a feed deriver forever on a log that already exists in raw_logs, and
 // stalling its cursor would wedge the epoch gate; but recording a zero or
@@ -581,7 +632,7 @@ func validatePriceObservation(o PriceObservation) error {
 // than accepted from the caller, so no writer can mark a non-positive answer
 // usable; migration 00005's CHECK enforces the same thing at the storage layer.
 // The check lives here so BOTH price writers get it.
-func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine string, o PriceObservation) (ins PriceInsert, inserted bool, superseded bool, err error) {
+func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine string, o PriceObservation, anchorBlock *uint64) (ins PriceInsert, inserted bool, superseded bool, err error) {
 	valid := o.Price.Sign() > 0
 	reason := ""
 	if !valid {
@@ -592,12 +643,12 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 	}
 	var observedAt time.Time
 	err = tx.QueryRow(ctx, `INSERT INTO prices
-		(chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, invalid_reason)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		(chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, invalid_reason, anchor_block)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		ON CONFLICT (chain_id, asset, source, block_number) DO NOTHING
 		RETURNING observed_at`,
 		chainID, o.Asset, o.Source, pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals,
-		o.BlockNumber, ownerEngine, valid, reason).Scan(&observedAt)
+		o.BlockNumber, ownerEngine, valid, reason, anchorBlock).Scan(&observedAt)
 	if err == nil {
 		// Fresh insert. The asset is copied so the returned fact cannot alias a
 		// caller's buffer that may be reused after the apply.
@@ -632,13 +683,19 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 		// divergence it can never resolve. The row's observed_at is re-stamped
 		// because this IS a new durable observation, and it is reported as an
 		// insert for exactly that reason.
+		// THE BINDING IS RE-STAMPED WITH THIS ROUND'S ANCHOR, exactly as observed_at is,
+		// and for the same reason: this IS a new durable observation, so its provenance
+		// is THIS round's anchor rather than whatever the superseded row carried. When
+		// the superseding round recorded no anchor the binding goes back to NULL — the
+		// honest answer, since a row that has just been overwritten by an unanchored
+		// observation is no longer vouched for by anything.
 		var observedAt time.Time
 		if err := tx.QueryRow(ctx, `UPDATE prices
-			SET price = $5, price_decimals = $6, valid = $7, invalid_reason = $8, observed_at = now()
+			SET price = $5, price_decimals = $6, valid = $7, invalid_reason = $8, anchor_block = $9, observed_at = now()
 			WHERE chain_id = $1 AND asset = $2 AND source = $3 AND block_number = $4
 			RETURNING observed_at`,
 			chainID, o.Asset, o.Source, o.BlockNumber,
-			pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals, valid, reason).Scan(&observedAt); err != nil {
+			pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals, valid, reason, anchorBlock).Scan(&observedAt); err != nil {
 			return PriceInsert{}, false, false, fmt.Errorf("supersede neutralized price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
 		}
 		slog.Warn("re-observed a price at a height whose earlier row had been NEUTRALIZED as unverifiable after a reorg; the fresh observation supersedes it",
@@ -739,20 +796,117 @@ func insertPollAnchor(ctx context.Context, tx pgx.Tx, chainID uint64, engine str
 // reorg frequency and not bounded in principle. That is the same pile
 // NeutralizedPriceStats counts, and it is the accepted cost D-010 named for the rows
 // themselves, now made durable instead of quietly discarded.
+//
+// AND IT IS PAID FOR ONCE PER HEIGHT, NOT ONCE PER ROUND (D-012 clause 6, Codex round
+// 8's [high] #4). Wave 8 evaluated the exemption over every anchor below the window on
+// every anchored round, and this function runs inside every anchored round — so
+// permanently-protected anchors were re-examined at the poll cadence, forever, and the
+// per-round cost grew with the ALL-TIME number of classified heights. Clause 6 says
+// permanent state must be cheap to CARRY, which that was not.
+//
+// THE FRONTIER IS WHAT MAKES IT INCREMENTAL. price_poll_anchor_prune.frontier records
+// "every anchor for this engine strictly below here has already been considered, and
+// whatever survives there is permanently protected", so each call only looks at
+// [frontier, cutoff) — the heights that have newly fallen out of retention, normally
+// one per round. Below-frontier heights are settled and never re-read.
+//
+// WHY "SETTLED" IS A FACT AND NOT A HOPE. The frontier only ever advances to the
+// retention cutoff, pollAnchorRetention anchors BELOW the newest. Releasing an
+// exemption requires clearing the marker on the rows at that height; the sole clearer
+// is insertPrice's supersede arm, which needs a CURRENT poll to land at that exact
+// height; and the cursor's monotonic guard refuses any batch below the cursor. A
+// height a full retention window behind the cursor therefore cannot be superseded, so
+// nothing below the frontier can ever become prunable. Skipping it loses no deletion —
+// it is not a heuristic that trades completeness for speed.
+//
+// THE CLAIM IS RE-CHECKED, NOT TRUSTED. A stored frontier ABOVE the current retention
+// cutoff is impossible in a population this frontier truly describes, so finding one
+// means the anchors were replaced beneath it; the frontier is discarded and one full
+// pass runs. The check costs nothing — both numbers are already read — and it is what
+// keeps the optimisation from being able to lose a deletion silently. The one path
+// that can legitimately place an anchor below the frontier, AdoptPollAnchor, lowers
+// the frontier itself rather than relying on that backstop.
 func pruneOldPollAnchors(ctx context.Context, tx pgx.Tx, engine string) error {
+	var frontier int64
+	err := tx.QueryRow(ctx, `SELECT frontier FROM price_poll_anchor_prune WHERE engine = $1`, engine).Scan(&frontier)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("read poll-anchor prune frontier for %q: %w", engine, err)
+	}
+	// The retention cutoff: the lowest height among the pollAnchorRetention newest
+	// anchors. Everything strictly below it is out of the window.
+	var cutoff *int64
+	if err := tx.QueryRow(ctx, `SELECT MIN(block_number) FROM (
+			SELECT block_number FROM price_poll_anchors WHERE engine = $1
+			ORDER BY block_number DESC LIMIT $2
+		) keep`, engine, pollAnchorRetention).Scan(&cutoff); err != nil {
+		return fmt.Errorf("read poll-anchor retention cutoff for %q: %w", engine, err)
+	}
+	if cutoff == nil {
+		return nil // this engine has no anchors at all
+	}
+	switch {
+	case *cutoff == frontier:
+		// NOTHING NEW HAS FALLEN OUT OF THE WINDOW. This is the steady-state branch and
+		// the whole of the finding: two indexed reads, no delete, no dependence
+		// whatever on how many permanently-protected anchors sit below the frontier.
+		return nil
+	case *cutoff < frontier:
+		// THE FRONTIER'S CLAIM IS FALSE, SO IT IS DISCARDED RATHER THAN TRUSTED. The
+		// frontier only ever advances TO a cutoff, and a cutoff only rises while anchors
+		// are added at rising heights, so a cutoff BELOW the stored frontier means the
+		// anchor population this frontier described no longer exists — heights were
+		// removed and lower ones took their place. Continuing would skip them forever.
+		//
+		// This is the difference between an optimisation and a shortcut: the premise is
+		// re-checked every round, for free, out of two numbers already in hand, and the
+		// failure mode is one full pass rather than a silent deletion leak. Nothing in
+		// the running system is known to produce it (a poll round's anchor is at or
+		// above the cursor, and AdoptPollAnchor lowers the frontier itself), which is
+		// exactly why it must not be assumed away.
+		slog.Warn("poll-anchor prune frontier DISCARDED: it sits above the current retention cutoff, so it describes an anchor population that no longer exists. Reconsidering every anchor once, then resuming incremental pruning",
+			"engine", engine, "staleFrontier", frontier, "retentionCutoff", *cutoff)
+		frontier = 0
+	}
+	// The window considered by THIS call is exactly [frontier, cutoff) — the heights
+	// that have newly fallen out of retention, normally one per round. Anchors below
+	// the frontier were considered by an earlier call and are not looked at again.
+	// THE TWO EXEMPTION TESTS ARE SEPARATE NOT EXISTS CLAUSES, NOT ONE WITH AN `OR`,
+	// and that is a plan decision rather than a style one. Written as a disjunction,
+	// PostgreSQL cannot drive either side by index — it builds a Hash Anti Join whose
+	// inner side materialises EVERY marked row for the engine, which puts the
+	// all-time classified-height count straight back into the per-round cost this
+	// finding is about, just on the other side of the join. Split, each clause is a
+	// correlated lookup: the first on prices_owner_idx (chain_id, owner_engine,
+	// block_number), the second on 00007's prices_anchor_binding_idx (chain_id,
+	// owner_engine, anchor_block).
+	//
+	// BOTH ARE REQUIRED, AND THEY ARE NOT REDUNDANT. The binding clause is the exact
+	// one — an anchor is provenance for whatever rows point AT it, and a round may
+	// stamp rows at heights below its own execution block. The height clause is the
+	// conservative one, and it is what protects PRE-00007 marked rows, whose binding
+	// is NULL and whose height anchor may well be their genuine provenance. Dropping
+	// it would expire exactly the anchors clause 2 most wants kept, on the strength of
+	// a fact the database never recorded.
 	if _, err := tx.Exec(ctx, `DELETE FROM price_poll_anchors a
-		WHERE a.engine = $1 AND a.block_number < (
-			SELECT MIN(block_number) FROM (
-				SELECT block_number FROM price_poll_anchors WHERE engine = $1
-				ORDER BY block_number DESC LIMIT $2
-			) keep
-		)
-		AND NOT EXISTS (
-			SELECT 1 FROM prices p
-			WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
-			  AND p.block_number = a.block_number AND p.invalid_reason = $3
-		)`, engine, pollAnchorRetention, InvalidReasonUnverifiableReorg); err != nil {
+		WHERE a.engine = $1
+		  AND a.block_number >= $2 AND a.block_number < $3
+		  AND NOT EXISTS (
+		    SELECT 1 FROM prices p
+		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
+		      AND p.block_number = a.block_number AND p.invalid_reason = $4
+		  )
+		  AND NOT EXISTS (
+		    SELECT 1 FROM prices p
+		    WHERE p.chain_id = a.chain_id AND p.owner_engine = a.engine
+		      AND p.anchor_block = a.block_number AND p.invalid_reason = $4
+		  )`, engine, frontier, *cutoff, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("prune poll anchors for %q: %w", engine, err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO price_poll_anchor_prune (engine, frontier, updated_at)
+		VALUES ($1,$2,now())
+		ON CONFLICT (engine) DO UPDATE SET frontier = EXCLUDED.frontier, updated_at = now()`,
+		engine, *cutoff); err != nil {
+		return fmt.Errorf("advance poll-anchor prune frontier for %q: %w", engine, err)
 	}
 	return nil
 }
@@ -1067,6 +1221,17 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	if engine == "" {
 		return 0, 0, fmt.Errorf("price neutralization: engine is required (it is the ownership scope)")
 	}
+	// D-012 CLAUSE 2, ENFORCED BEFORE ANYTHING ELSE — the structural half, in the same
+	// style as RewindPrices' poll-owned refusal and for the complementary reason. A
+	// non-poll engine that reached this call could be marked here and then rewound
+	// through RewindPrices, whose anchor sweep carries no neutralized-height exemption,
+	// leaving retained marked rows with no provenance at all. See
+	// ErrNonPollNeutralizeRefused for the full argument. It is a property of the
+	// IDENTITY, so no combination of target, floor or chain can reach the state.
+	if !IsPollOwnedEngine(engine) {
+		return 0, 0, fmt.Errorf("%w: engine %q is outside the %q namespace. Answer the epoch with RewindPrices, which deletes rows raw_logs can replay",
+			ErrNonPollNeutralizeRefused, engine, PollOwnedEnginePrefix)
+	}
 	if verifiedFloor > toBlock {
 		return 0, 0, fmt.Errorf("price neutralization %q: verified floor %d is above the requested target %d — a floor may only retain rows the cursor already covers",
 			engine, verifiedFloor, toBlock)
@@ -1113,27 +1278,43 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 	// set is then exactly "rows this call made unreadable".
 	//
 	// THE SPLIT IS TAKEN FROM THE UPDATE ITSELF (D-012 clause 7). The marked set is
-	// classified by whether this engine still holds an anchor at the row's height,
-	// inside the same statement, so the two counts describe exactly the rows this call
-	// changed — not "every marked row above the boundary", which would fold in earlier
-	// calls' work. Round 7's [low] was that the old WARN asserted the unanchored story
-	// for a call that is also used on anchored suffixes; the two now travel separately
-	// because an operator's next step differs between them.
+	// classified inside the same statement, so the two counts describe exactly the rows
+	// this call changed — not "every marked row above the boundary", which would fold in
+	// earlier calls' work. Round 7's [low] was that the old WARN asserted the unanchored
+	// story for a call that is also used on anchored suffixes; the two now travel
+	// separately because an operator's next step differs between them.
+	//
+	// AND IT ASKS THE ROW'S OWN BINDING, NOT ITS HEIGHT (D-012 clause 2, Codex round 8's
+	// [high] #2). Wave 8 classified a row as anchored when ANY anchor existed at
+	// p.block_number. That made the count a claim about the height rather than about the
+	// observation, and the two diverge exactly where it matters: a legacy row at H with
+	// no anchor of its own, marked, then joined at H by a later round's anchor, would be
+	// reported as "the hash of the block that round executed against is on disk" when no
+	// such hash was ever recorded for it. The WARN's own gloss on rowsAnchored is a
+	// provenance claim, and this is what makes it true. The row must ALSO still have its
+	// anchor — the binding names a block, and clause 2's retention is what keeps the
+	// anchor row there — so both halves are required and a dangling binding counts as
+	// unanchored.
+	//
+	// PRE-00007 ROWS ALL COUNT AS UNANCHORED, because their binding is NULL and NULL
+	// means unprovable (see migration 00007). That understates the anchored side for
+	// history written before this wave, and understating provenance is the only
+	// direction that cannot invent it.
 	var anchoredMarked, unanchoredMarked int64
 	if err := tx.QueryRow(ctx, `WITH marked AS (
 			UPDATE prices
 			   SET valid = FALSE, invalid_reason = $4
 			 WHERE chain_id = $1 AND owner_engine = $2 AND block_number > $3 AND valid
-			RETURNING block_number
+			RETURNING anchor_block
+		), classified AS (
+			SELECT EXISTS (
+				SELECT 1 FROM price_poll_anchors a
+				 WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = marked.anchor_block
+			) AS vouched
+			FROM marked
 		)
-		SELECT
-			count(*) FILTER (WHERE EXISTS (
-				SELECT 1 FROM price_poll_anchors a
-				 WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = marked.block_number)),
-			count(*) FILTER (WHERE NOT EXISTS (
-				SELECT 1 FROM price_poll_anchors a
-				 WHERE a.engine = $2 AND a.chain_id = $1 AND a.block_number = marked.block_number))
-		FROM marked`,
+		SELECT count(*) FILTER (WHERE vouched), count(*) FILTER (WHERE NOT vouched)
+		FROM classified`,
 		chainID, engine, effectiveTarget, InvalidReasonUnverifiableReorg).Scan(&anchoredMarked, &unanchoredMarked); err != nil {
 		return 0, 0, fmt.Errorf("neutralize prices owned by %q above %d: %w", engine, effectiveTarget, err)
 	}
@@ -1196,12 +1377,14 @@ func (s *Store) NeutralizeUnverifiablePrices(ctx context.Context, engine string,
 // count is scoped to the marker, not to the head, so it keeps reporting the
 // historical classification after the current path is healthy again.
 //
-// AND WHY THE SAME CLAUSE BOUNDS ITS COST. This aggregate has no index carrying the
-// invalid_reason predicate, so it scans the engine's price history — a table that
-// only ever grows, since polled rows are never deleted. Wave 7 ran it after every
-// landed round while a backlog existed, which made a per-minute cost proportional to
-// TOTAL HISTORY rather than to backlog size (round 7's [medium]). It is now called
-// only on the transitions that can actually move it: neutralization, a round that
+// AND WHY THE SAME CLAUSE BOUNDS ITS COST, TWICE OVER. Before migration 00007 this
+// aggregate had no index carrying the invalid_reason predicate, so it scanned the
+// engine's whole price history — a table that only ever grows, since polled rows are
+// never deleted. 00007's partial covering index fixes the PER-CALL cost (round 8's
+// [high] #5). The CALL FREQUENCY is the separate half: wave 7 ran it after every
+// landed round while a backlog existed, which made the cost proportional to total
+// history AND to uptime (round 7's [medium]). Both bounds are required, and it is
+// called only on the transitions that can actually move it: neutralization, a round that
 // SUPERSEDED a marked row (store.ApplyResult.Superseded), and hydration. Those are
 // events, not a cadence, which is what keeps the cost off the poll interval. See
 // internal/prices.Poller.refreshNeutralizedBacklog for the caller-side rule.
@@ -1214,6 +1397,28 @@ type NeutralizedPriceStats struct {
 	HighestBlock uint64
 }
 
+// neutralizedBacklogQuery is NeutralizedPriceStats' aggregate, with the marker
+// INLINED AS A LITERAL rather than bound as $3.
+//
+// THAT IS NOT A STYLE CHOICE, IT IS WHAT MAKES THE PARTIAL INDEX USABLE. PostgreSQL
+// will only choose a partial index when it can PROVE the query's predicate implies the
+// index's, and it cannot prove that of a bound parameter under a generic plan — the
+// plan the extended protocol settles on after a few executions. A parameterised
+// `invalid_reason = $3` therefore reverts to the full scan migration 00007's
+// prices_neutralized_backlog_idx exists to eliminate, silently, some executions in.
+//
+// It is a COMPILE-TIME CONSTANT CONCATENATION, so there is no runtime string building
+// and no value from outside this package can reach the SQL text: the marker is a
+// package constant with no quote characters, and the compiler pastes it. The migration
+// writes the same literal into the index predicate, and the two texts agreeing is
+// pinned by TestNeutralizedBacklogAggregateUsesItsCoveringIndex, which reads a live
+// EXPLAIN — a stronger guard than comparing the strings, because it fails if the plan
+// stops using the index for ANY reason, drift included.
+const neutralizedBacklogQuery = `SELECT count(*), min(observed_at), max(observed_at), max(block_number)
+	   FROM prices
+	  WHERE chain_id = $1 AND owner_engine = $2
+	    AND invalid_reason = '` + InvalidReasonUnverifiableReorg + `'`
+
 // NeutralizedPriceStats counts the rows engine owns on chainID that carry the
 // InvalidReasonUnverifiableReorg marker, with the observation times of the oldest
 // and newest and the highest block among them.
@@ -1221,15 +1426,19 @@ type NeutralizedPriceStats struct {
 // It is a plain read: it decides nothing and gates nothing. The marker is exact —
 // exactly ONE path clears it in the running system, insertPrice's supersede arm, and
 // it writes the row — so this counts marked rows rather than estimating them.
+//
+// ITS COST IS BOUNDED BY THE BACKLOG, NOT BY HISTORY (D-012 clause 6, Codex round 8's
+// [high] #5). Migration 00007 adds prices_neutralized_backlog_idx, partial on the
+// marker and covering (chain_id, owner_engine, observed_at, block_number), so this is
+// an index-only scan over exactly the marked rows. Without it the aggregate scanned
+// the engine's entire price history — a table that only ever grows, because polled
+// rows are never deleted — which is the cost the clause forbids.
 func (s *Store) NeutralizedPriceStats(ctx context.Context, engine string, chainID uint64) (NeutralizedPriceStats, error) {
 	var out NeutralizedPriceStats
 	var oldest, newest *time.Time
 	var highest *int64
-	if err := s.pool.QueryRow(ctx,
-		`SELECT count(*), min(observed_at), max(observed_at), max(block_number)
-		   FROM prices
-		  WHERE chain_id = $1 AND owner_engine = $2 AND invalid_reason = $3`,
-		chainID, engine, InvalidReasonUnverifiableReorg).Scan(&out.Rows, &oldest, &newest, &highest); err != nil {
+	if err := s.pool.QueryRow(ctx, neutralizedBacklogQuery,
+		chainID, engine).Scan(&out.Rows, &oldest, &newest, &highest); err != nil {
 		return NeutralizedPriceStats{}, fmt.Errorf("count neutralized prices owned by %q on chain %d: %w", engine, chainID, err)
 	}
 	if oldest != nil {
@@ -1390,6 +1599,29 @@ func (s *Store) AdoptPollAnchor(ctx context.Context, engine string, chainID uint
 	_, inserted, err := insertPollAnchor(ctx, tx, chainID, engine, a)
 	if err != nil {
 		return false, err
+	}
+	if inserted {
+		// ADOPTION IS THE ONE PATH THAT PLACES AN ANCHOR BELOW THE PRUNE FRONTIER, so it
+		// is the one path that has to move the frontier back. A poll round's anchor is
+		// always at or above the engine's cursor, which is far above the frontier
+		// (pollAnchorRetention anchors below the newest); an adopted anchor is by
+		// definition at a LEGACY height, which may be anywhere. Leaving the frontier
+		// alone would put the adopted anchor in the "already considered" range it was
+		// never considered in, and retention would never reach it.
+		//
+		// LEAST() rather than a conditional write: the frontier means "everything
+		// strictly below here has been considered", so admitting an unconsidered height
+		// means lowering it to at or below that height. This runs only when an anchor was
+		// actually inserted, and adoption is a bounded one-time activity per legacy
+		// height, so it costs nothing on the poll cadence.
+		if _, err := tx.Exec(ctx, `INSERT INTO price_poll_anchor_prune (engine, frontier, updated_at)
+			VALUES ($1,$2,now())
+			ON CONFLICT (engine) DO UPDATE
+			SET frontier = LEAST(price_poll_anchor_prune.frontier, EXCLUDED.frontier), updated_at = now()`,
+			engine, a.BlockNumber); err != nil {
+			return false, fmt.Errorf("lower poll-anchor prune frontier for %q to the adopted height %d: %w",
+				engine, a.BlockNumber, err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
@@ -1587,11 +1819,11 @@ func (s *Store) LatestLogsByTopic(ctx context.Context, chainID uint64, addresses
 //   - The engine's poll anchors above the effective target are deleted with the
 //     rows they describe: an anchor for a round whose rows are gone would
 //     otherwise let a later repair "verify" history that no longer exists. This
-//     sweep carries NO neutralized-height exemption, unlike pruneOldPollAnchors —
-//     and that asymmetry is safe only because the poll-owned refusal above means no
-//     engine reaching this line can hold a neutralized row's provenance. It is the
-//     second reason the refusal is on identity rather than on arguments (D-012
-//     clause 2: no store path may expire such an anchor).
+//     sweep now carries the SAME neutralized-height exemption pruneOldPollAnchors
+//     has, because D-012 clause 2 forbids expiring such an anchor on ANY store path
+//     and this is one. Wave 8 omitted it, reasoning that the poll-owned refusal above
+//     made it unreachable; that was true of the refusal as written and did not make
+//     the invariant a property of this statement. Both are now in place.
 //
 //   - The epoch ack and the deletions are ATOMIC: a crash can never leave the
 //     ack recorded while orphaned price rows survive, which is precisely the
@@ -1673,9 +1905,33 @@ func (s *Store) RewindPrices(ctx context.Context, engine string, chainID uint64,
 		chainID, engine, effectiveTarget, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("delete prices owned by %q above %d: %w", engine, effectiveTarget, err)
 	}
+	// THE ANCHOR SWEEP CARRIES THE NEUTRALIZED-HEIGHT EXEMPTION TOO (D-012 clause 2,
+	// Codex round 8's [high] #3). Clause 2 says no retention bound, prune OR REWIND may
+	// expire the anchor of a neutralized height, ON ANY STORE PATH — and this is a
+	// store path. Wave 8 left the sweep unconditional and justified it by the
+	// poll-owned refusal at the top of this function: no engine reaching here can hold
+	// a neutralized row, so the exemption would be dead code.
+	//
+	// THAT ARGUMENT WAS TRUE AND STILL INSUFFICIENT. It made a clause-2 invariant hold
+	// by coincidence of a guard three hundred lines away rather than by anything in the
+	// statement that does the deleting; round 8 found the second door standing open
+	// (NeutralizeUnverifiablePrices accepted any engine), and the DELETED
+	// defence-in-depth test is what would have caught it. Both doors are now shut —
+	// that refusal, and this predicate — and the predicate is the one that survives a
+	// future edit to either identity rule.
+	//
+	// It is genuinely unreachable through the public API today, and its live-Postgres
+	// regression says so explicitly while constructing the state directly: a test that
+	// can only reach a defence by going around the front door should say that is what
+	// it is doing, not pretend the state is ordinary.
 	if _, err := tx.Exec(ctx,
-		`DELETE FROM price_poll_anchors WHERE engine = $1 AND block_number > $2`,
-		engine, effectiveTarget); err != nil {
+		`DELETE FROM price_poll_anchors a
+		 WHERE a.engine = $1 AND a.block_number > $2
+		   AND NOT EXISTS (
+		     SELECT 1 FROM prices p
+		     WHERE p.owner_engine = a.engine AND p.chain_id = a.chain_id
+		       AND p.block_number = a.block_number AND p.invalid_reason = $3)`,
+		engine, effectiveTarget, InvalidReasonUnverifiableReorg); err != nil {
 		return fmt.Errorf("delete poll anchors for %q above %d: %w", engine, effectiveTarget, err)
 	}
 
