@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"reflect"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -104,7 +105,34 @@ type Walker struct {
 	// re-probed through the non-landing ping-pong (the liveness property:
 	// with every endpoint failing, the advance cycles the fleet, so recovery
 	// is revisited within one rotation, never excluded forever).
+	//
+	// Retention holds by DEFAULT, not unconditionally (Task 9 wave 14, the
+	// round-12 revision): landings are also measured against slowStepBudget,
+	// and the retention lease above bounds how long slow-but-successful
+	// landings can keep the pin — an exit condition error-driven rotation
+	// structurally cannot provide, because the pathological endpoint never
+	// errs. The probe that follows a spent lease starts the NEXT Step one
+	// past this preference WITHOUT writing it; only a strictly faster probe
+	// landing moves it (recordLanding).
 	startPref int
+
+	// now is the Step's wall clock — the seam the latency-lease regressions
+	// script pathological read latency through, instead of real half-minute
+	// sleeps. NewWalker always sets time.Now; only tests in this package
+	// replace it. Read solely from Step's goroutine (same single-writer
+	// contract as every field here).
+	now func() time.Time
+
+	// slowLandings / slowBaseline are the retention lease's state (see the
+	// slowStepBudget block above): slowLandings counts CONSECUTIVE landed
+	// Steps on the retained endpoint whose wall time exceeded slowStepBudget
+	// — a within-budget landing or any non-landing restarts it; a caught-up
+	// Step attempts no window and leaves it untouched. slowBaseline is the
+	// most recent such landing's wall time: the evidence a probe's landing
+	// must BEAT for retention to transfer. Same single-writer per-Step
+	// contract as startPref.
+	slowLandings int
+	slowBaseline time.Duration
 
 	// lastHead / lastCursor / headSeen record what the most recent Step observed:
 	// the chain head it read and where this stream's durable cursor stood. They
@@ -160,11 +188,77 @@ func NewWalker(ch Chain, st Store, cfg WalkerConfig) *Walker {
 	for _, a := range cfg.Addresses {
 		set[a] = struct{}{}
 	}
-	return &Walker{chain: ch, store: st, cfg: cfg, addrSet: set, startPref: -1}
+	return &Walker{chain: ch, store: st, cfg: cfg, addrSet: set, startPref: -1, now: time.Now}
 }
 
 // Name returns the stream name this walker ingests, for log attribution.
 func (w *Walker) Name() string { return w.cfg.Stream }
+
+// THE BOUNDED RETENTION LEASE (Task 9 wave 14; Codex round-12 [high],
+// accepted — and it REVISES the annex's unconditional retention: retention
+// with no exit condition is fail-forever for LATENCY, the opposite pole of
+// the A-bounce the retention rule was designed against). The pattern is the
+// one this repo already ratified at the poller — d1e7d54's bounded ambiguity
+// lease: retention holds by DEFAULT, and a caller-scoped budget bounds how
+// long pathological-but-successful evidence may keep it, after which ONE
+// probe of the neighbouring endpoint is paid — adopted only on a BETTER
+// landing, the shared hint never touched, nothing ever reset.
+
+// chainAttemptTimeout restates chain.Failover's per-endpoint attempt bound
+// (chain.defaultAttemptTimeout, 30s), which that package keeps unexported.
+// Restatement-with-citation is the repo's standing pattern for reusing a
+// ratified constant across packages (internal/prices' maxConsecutiveAmbiguous
+// restates internal/snapshot's, with the same sentence); the walker does not
+// invent a number here, it MIRRORS the chain layer's, and if that bound ever
+// moves this must move with it — the slowStepBudget derivation below is the
+// reason the two are one value.
+const chainAttemptTimeout = 30 * time.Second
+
+// stepMaxPinnedReads is the Step's ROUND SHAPE: the maximum number of
+// sequential RPC reads one cursor-bearing window Step performs — the
+// resolving head read, the reorg-check header, the tip header, the logs
+// window, the tip recheck and the cursor recheck (count them in Step below).
+// A description of Step's own structure, not a tuning knob: it exists so the
+// latency budget's derivation is stated in code instead of prose, and so the
+// regressions can build the pathological schedule from the same two facts
+// the derivation uses.
+const stepMaxPinnedReads = 6
+
+// slowStepBudget is the per-Step wall-time budget behind the retention
+// lease, DERIVED — not tuned — from the two constants above:
+//
+//   - the chain layer bounds each single read at chainAttemptTimeout, so a
+//     Step's reads are bounded only by stepMaxPinnedReads×chainAttemptTimeout
+//     (~3 minutes). That product is the failover's BLIND SPOT: an endpoint
+//     answering every read successfully just below the per-attempt bound
+//     trips no error and no timeout, so error-driven rotation never fires
+//     (Codex round-12 [high]: five such Steps hold the serialized daemon
+//     ~15 minutes with a fast peer never queried);
+//   - a healthy endpoint lands a whole Step in a small fraction of ONE
+//     attempt bound.
+//
+// The budget is therefore ONE chainAttemptTimeout for the WHOLE Step: a
+// landed Step that spent more wall time than the chain layer allows a single
+// read has spent at least one entire pathological read's worth of waiting
+// across its round, and the round shape separates the postures unambiguously
+// — the blind-spot ceiling sits stepMaxPinnedReads× ABOVE this budget while
+// healthy landings sit far below it. No third constant is involved, so there
+// is nothing to tune and nothing to drift except the two stated inputs.
+const slowStepBudget = chainAttemptTimeout
+
+// MaxConsecutiveSlowLandings bounds the retention lease: how many
+// CONSECUTIVE over-budget landed Steps the retained endpoint survives before
+// the next Step probes its neighbour. One slow landing is likely weather (a
+// heavy window, a provider hiccup); persistent recurrence is bounded
+// evidence that retention has stopped paying off — the same constant and the
+// same reasoning as internal/prices' maxConsecutiveAmbiguous (d1e7d54) and
+// internal/snapshot's before it. Exported for the daemon-level scheduling
+// regression, which asserts the cross-layer bound
+// MaxConsecutiveSlowLandings+1 <= stepsPerRound: the lease spends and the
+// probe fires inside a SINGLE stepWalkers round, so a slow-successful
+// endpoint's monopoly of the serialized loop ends within the round the
+// pathology starts in, not whenever an operator notices.
+const MaxConsecutiveSlowLandings = 3
 
 // stepOutcome is what the Step's one deferred routing seam switches on. The
 // ZERO VALUE IS NON-LANDING on purpose: an outcome nobody set is an outcome
@@ -234,11 +328,95 @@ func (w *Walker) routeNextStepPastNonLanding(servedBy chain.EndpointToken) {
 	w.startPref = next
 }
 
+// recordLanding is the seam's LANDED arm: retention, plus the retention
+// lease's accounting (the d1e7d54 bounded-lease pattern at the walker; Codex
+// task-9 round-12 [high], accepted — the adjudication that revised the
+// annex's unconditional retention-not-reset).
+//
+// RETENTION HOLDS BY DEFAULT: an ordinary landing keeps the stream on the
+// endpoint that landed for it, exactly as wave 12 shipped it. What this adds
+// is the bounded exit for the one posture error-driven rotation structurally
+// cannot see — the slow-but-successful endpoint answering every read just
+// below the chain layer's per-attempt bound, landing forever at pathological
+// wall cost. Every landing is measured against slowStepBudget:
+//
+//   - within budget → the lease restarts; retention exactly as before.
+//   - over budget on the SAME retained endpoint → the lease is consumed one
+//     landing further, and this landing's wall time becomes the probe's
+//     baseline. At MaxConsecutiveSlowLandings the NEXT Step probes the
+//     neighbour (Step's probe block).
+//   - over budget on a DIFFERENT endpoint → that endpoint starts its own
+//     lease at one: the count is evidence about ONE witness, never
+//     inherited across witnesses.
+//
+// A PROBE landing is adjudicated, never blindly retained: strictly faster
+// than the baseline → ADOPTED (retention transfers; the adopted endpoint's
+// own lease accounting starts from this landing's measurement, so a
+// uniformly slow fleet keeps probing round-robin instead of laundering the
+// count across witnesses); no faster → the stream RETURNS to the incumbent —
+// startPref never moved, so the return is a routing no-op — and the lease
+// re-arms in full, so the incumbent gets a fresh MaxConsecutiveSlowLandings
+// landings before the next probe. Ties keep the incumbent: a probe that
+// cannot beat the evidence is no reason to move. In no arm is the shared
+// hint read or written, and in no arm does startPref revert to it — the
+// probe is a bounded exploration, not a reset, which is what keeps the
+// annex's A-bounce regressions (R3/R5) binding alongside Codex's pin
+// regression (the probe-adopts-unconditionally mutation dies on exactly
+// this).
+func (w *Walker) recordLanding(servedBy chain.EndpointToken, wall time.Duration, probing bool, incumbent int) {
+	if probing && servedBy.Index != incumbent {
+		if wall < w.slowBaseline {
+			slog.Info("latency probe landed faster; retention transfers",
+				"stream", w.cfg.Stream, "from", incumbent, "to", servedBy.Index,
+				"probeWall", wall, "incumbentWall", w.slowBaseline)
+			w.startPref = servedBy.Index
+			w.slowLandings, w.slowBaseline = 0, 0
+			if wall > slowStepBudget {
+				w.slowLandings, w.slowBaseline = 1, wall
+			}
+			return
+		}
+		slog.Info("latency probe landed no faster; returning to the incumbent and re-arming the lease",
+			"stream", w.cfg.Stream, "incumbent", incumbent, "probe", servedBy.Index,
+			"probeWall", wall, "incumbentWall", w.slowBaseline)
+		w.slowLandings, w.slowBaseline = 0, 0
+		return
+	}
+	// Ordinary landing — including a probe Step the failover walk answered
+	// from the incumbent itself (the probed neighbour was down and the walk
+	// wrapped): no second witness was measured, so there is nothing to
+	// adjudicate; if the landing ran slow the lease stays spent and the next
+	// Step probes again, which is the liveness the probe owes a recovering
+	// neighbour.
+	prev := w.startPref
+	w.startPref = servedBy.Index
+	if wall <= slowStepBudget {
+		w.slowLandings, w.slowBaseline = 0, 0
+		return
+	}
+	if servedBy.Index == prev {
+		w.slowLandings++
+	} else {
+		w.slowLandings = 1
+	}
+	w.slowBaseline = wall
+	if w.slowLandings == MaxConsecutiveSlowLandings {
+		slog.Warn("retention lease spent: consecutive landings exceeded the latency budget; the next Step probes the neighbouring endpoint",
+			"stream", w.cfg.Stream, "endpoint", servedBy.Index,
+			"consecutiveSlow", w.slowLandings, "wall", wall, "budget", slowStepBudget)
+	}
+}
+
 // Step performs one bounded unit of work: a reorg check + at most one
 // getLogs window. Returns advanced=false when caught up to the safe head.
 // A DISCARDED window returns advanced=false with a *DiscardError — its own
 // outcome, distinct from both success and a plain error (F2: the daemon
 // counts it into the failure streak instead of resetting backoff on it).
+//
+// Since Task 9 wave 14 the landing's WALL TIME is part of the outcome:
+// retention is bounded by the latency lease (slowStepBudget above), so a
+// stream pinned to a slow-but-successful endpoint escapes it within
+// MaxConsecutiveSlowLandings+1 Steps instead of never.
 //
 // Residual TOCTOU: a fork landing between the pre-save cursor recheck and
 // SaveBatch can still persist stale rows, but it is caught by the NEXT
@@ -263,6 +441,28 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 	if start < 0 {
 		start = w.chain.ActiveEndpoint()
 	}
+	// THE RETENTION LEASE'S PROBE (see slowStepBudget): when the lease is
+	// spent — MaxConsecutiveSlowLandings consecutive over-budget landings on
+	// the retained endpoint — this Step STARTS one past it. Caller-scoped
+	// through and through: the shared hint is neither consulted nor written,
+	// and startPref is NOT reset — retention still points at the incumbent
+	// unless this probe LANDS strictly faster (the adjudicated round-12
+	// revision of the annex: the probe must never behave as a reset-to-hint,
+	// which is the A-bounce the retention rule exists to prevent).
+	incumbent := w.startPref
+	probing := false
+	if incumbent >= 0 && w.slowLandings >= MaxConsecutiveSlowLandings {
+		if n := w.chain.EndpointCount(); n > 1 {
+			start = ((incumbent+1)%n + n) % n
+			probing = true
+			slog.Info("retention lease spent: probing the neighbouring endpoint for a faster landing",
+				"stream", w.cfg.Stream, "incumbent", incumbent, "probe", start,
+				"consecutiveSlow", w.slowLandings, "budget", slowStepBudget)
+		}
+		// n <= 1: nowhere to probe — retention stands, honestly unprobed
+		// (the single-endpoint telemetry rule already covers non-landings).
+	}
+	began := w.now()
 	head, servedBy, err := w.chain.BlockNumberFrom(ctx, start)
 	if err != nil {
 		// The resolution walk itself visited every endpoint and none served;
@@ -283,18 +483,31 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 	// through this defer, FOR FREE. Classification at each return decides
 	// only how the failure is REPORTED (discard vs error), never whether
 	// routing moves. Landing RETAINS: the stream's next Step starts at the
-	// endpoint that just landed for it, never back at the shared hint.
-	// Caught-up KEEPS: no window was attempted, nothing is judged.
+	// endpoint that just landed for it, never back at the shared hint — by
+	// DEFAULT, bounded by the retention lease (recordLanding), the one exit
+	// for the posture the failover cannot see: successful pathological
+	// latency. Caught-up KEEPS: no window was attempted, nothing is judged.
 	// Rewind COUNTS AS LANDING: it is a durable write.
 	outcome := stepNonLanding
 	defer func() {
+		wall := w.now().Sub(began)
 		switch outcome {
 		case stepLanded:
-			w.startPref = servedBy.Index
+			w.recordLanding(servedBy, wall, probing, incumbent)
 		case stepCaughtUp:
-			// keep the starting point, unchanged
+			// keep the starting point AND the lease state, unchanged: no
+			// window was attempted, so nothing is judged — not routing, not
+			// latency (a caught-up Step reads no window; its wall time says
+			// nothing about the endpoint's landing latency). An armed probe
+			// stays armed for the next Step that attempts a window.
 		default:
 			w.routeNextStepPastNonLanding(servedBy)
+			// A non-landing breaks the lease's consecutive-landings chain
+			// and dissolves any armed probe: the seam's advance has already
+			// moved routing (a FAILED probe is exactly this arm — a
+			// non-landing that advances past the probed endpoint), and the
+			// lease re-arms from zero wherever the stream next lands.
+			w.slowLandings, w.slowBaseline = 0, 0
 		}
 	}()
 

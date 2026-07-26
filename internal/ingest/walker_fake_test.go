@@ -36,6 +36,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -82,6 +83,15 @@ type walkerEndpointView struct {
 	down error
 	// errAt fails this endpoint's header probe for SPECIFIC heights.
 	errAt map[uint64]error
+	// readCost is the wall time ONE attempt against this endpoint costs,
+	// charged to the chain's advanceClock hook (wave 14, the latency-lease
+	// schedules). It models the posture Codex round 12 named: an endpoint
+	// whose reads SUCCEED just below the chain layer's per-attempt bound, so
+	// no error and no timeout ever fires — a real state a degraded provider
+	// is in (fixture-realism law: slow-but-successful is a documented
+	// degraded posture in this repo, not an invented one). Zero costs
+	// nothing, so every pre-wave test is untouched.
+	readCost time.Duration
 }
 
 // headerHash answers this view's header probe at n, exactly one endpoint's
@@ -136,6 +146,12 @@ type fakeEndpointChain struct {
 	active int
 
 	views map[int]*walkerEndpointView
+
+	// advanceClock, when set, is charged each attempt's readCost (wave 14):
+	// the latency-lease tests wire it to the same fake clock the walker's
+	// `now` seam reads, so a Step's measured wall time is exactly the sum of
+	// its reads' scripted costs.
+	advanceClock func(time.Duration)
 
 	// Recorded asks: the routing evidence the regressions assert on.
 	// blockStarts is each BlockNumberFrom's REQUESTED start — the walker's
@@ -235,6 +251,16 @@ func agreeingChain(head uint64) *fakeEndpointChain {
 
 // --- the caller-scoped From walk (chain.Failover.doFrom, mirrored) ----------
 
+// spend charges one attempt against endpoint idx to the fake wall clock —
+// success and failure alike, the way real latency is paid.
+func (c *fakeEndpointChain) spend(idx int) {
+	if c.advanceClock != nil {
+		if d := c.view(idx).readCost; d > 0 {
+			c.advanceClock(d)
+		}
+	}
+}
+
 // normalizeStart is doFrom's start normalization, negatives included.
 func (c *fakeEndpointChain) normalizeStart(start int) int {
 	n := c.count()
@@ -256,6 +282,7 @@ func (c *fakeEndpointChain) BlockNumberFrom(_ context.Context, start int) (uint6
 	for i := 0; i < n; i++ {
 		idx := (first + i) % n
 		v := c.view(idx)
+		c.spend(idx)
 		if v.down != nil {
 			lastErr = v.down
 			continue
@@ -284,6 +311,7 @@ func (c *fakeEndpointChain) HeaderHashFrom(_ context.Context, start int, height 
 	var lastErr error
 	for i := 0; i < n; i++ {
 		idx := (first + i) % n
+		c.spend(idx)
 		h, err := c.view(idx).headerHash(height)
 		if err != nil {
 			lastErr = err
@@ -306,6 +334,7 @@ func (c *fakeEndpointChain) LogsFrom(_ context.Context, start int, from, to uint
 	for i := 0; i < n; i++ {
 		idx := (first + i) % n
 		v := c.view(idx)
+		c.spend(idx)
 		if v.down != nil {
 			lastErr = v.down
 			continue
