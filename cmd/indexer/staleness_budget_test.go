@@ -539,42 +539,68 @@ func TestNoTrustedClockIsUnmeasuredNeverGreen(t *testing.T) {
 // TestNoTrustedClockLeavesNoWatchedWorkerSilent is the OTHER half of the same rule,
 // and it is the half that matters most for a surface where publication REPLACES.
 //
-// Every worker this pass TOUCHES has its previous entries deleted when the round
-// publishes. A no-clock round that wrote verdicts only for the freshness gate's
-// subjects would therefore silently delete every standing red on a derivation runner
-// and on the snapshotter — a one-round false-green pulse, which is the exact defect
-// controller ruling OQ1 was reversed to prevent, reintroduced through a different
-// door. So the no-clock verdict covers everything the pass touches.
+// THE INVARIANT, and it is asserted STRUCTURALLY rather than by listing names:
+//
+//	a worker this pass TOUCHED and then said nothing about is a standing red DELETED.
+//
+// touch() registers a worker with an empty condition map and publication replaces a
+// registered worker's entries wholesale, so "touched and empty" is exactly the
+// false-green pulse controller ruling OQ1 was reversed to prevent. The assertion
+// therefore walks the round's own composition and requires every registered worker
+// to carry a verdict — which holds for any watch shape, including ones the daemon's
+// wiring does not currently build.
+//
+// THAT LAST CLAUSE IS LOAD-BEARING AND WAS FOUND BY MUTATION. The first version of
+// this test listed the workers by name, and the daemon happens to register every
+// derivation runner as a CONSUMER as well — so deleting the runners loop from
+// applyClockUnmeasured entirely changed nothing any assertion could see (M10
+// survived). The loop is not redundant: the pass touches runners unconditionally, so
+// a watch with a runner that is not also a consumer silently loses that runner's
+// standing reds. The watch below contains exactly such a runner, and the assertion
+// is written against the invariant rather than against the roster.
 func TestNoTrustedClockLeavesNoWatchedWorkerSilent(t *testing.T) {
 	h, _ := newTestHealth()
 	walker, runner, feed := "eth:aave-etherfi", "aave", "chainlink-feeds"
+	// A runner that is NOT registered as a consumer: a shape progressWatch permits
+	// and the touch loop already covers, and the only shape in which the runners leg
+	// of the no-clock verdict is observable.
+	lone := "debt-positions"
 	watch := progressWatch{
 		walkers:          []*walkerState{{w: &fakeIngestWorker{name: walker}, chainID: 1}},
-		runners:          []*runnerState{{r: &fakeDeriveWorker{name: runner}}},
+		runners:          []*runnerState{{r: &fakeDeriveWorker{name: runner}}, {r: &fakeDeriveWorker{name: lone}}},
 		consumers:        []frontierWatch{{worker: runner, streams: []string{walker}, chainID: 1}, {worker: feed, streams: []string{walker}, chainID: 1}},
 		sweepEngine:      "debt_manager",
 		sweepMaxAttempts: 3,
 	}
 
 	// A standing red on every one of them, from an earlier round.
+	all := []string{walker, runner, lone, feed, snapshotName}
 	prev := roundConditions{}
-	for _, n := range []string{walker, runner, feed, snapshotName} {
+	for _, n := range all {
 		prev.set(n, conditionNoProgress, "standing red from the round before")
 	}
 	publishRound(h, prev)
 
 	rc := roundConditions{}
 	applyProgressConditions(context.Background(), &fakeProgress{}, failingAuthority(errors.New("server closed the connection")), rc, watch)
-	publishRound(h, rc)
 
-	rep := h.report()
-	for _, n := range []string{walker, runner, feed, snapshotName} {
-		require.Containsf(t, rep.Recoverable, n+"/"+conditionProgressUnmeasured,
-			"%s is touched by this pass, so a round that judged nothing must SAY it judged nothing: silence here deletes the standing red instead", n)
+	// THE STRUCTURAL ASSERTION, made on the round's composition before it publishes:
+	// nothing this pass registered may be empty.
+	for name, conds := range rc {
+		require.NotEmptyf(t, conds,
+			"%s was TOUCHED by this pass and then judged silently: publication replaces a touched worker's entries, so an empty composition here deletes its standing red and pulses green for a round", name)
 	}
-	// The runner is watched twice over — as a runner and as a consumer — and one
-	// cause may still only produce one entry.
-	require.Len(t, rep.Recoverable, 4,
-		"one cause, one key, one entry per worker: the runner is both a runner and a consumer and must not be written twice")
+	require.Len(t, rc, len(all), "and every watched worker is registered exactly once")
+
+	publishRound(h, rc)
+	rep := h.report()
+	for _, n := range all {
+		require.Containsf(t, rep.Recoverable, n+"/"+conditionProgressUnmeasured,
+			"%s: a round that judged nothing must SAY it judged nothing", n)
+	}
+	// The runner `aave` is watched twice over — as a runner and as a consumer — and
+	// one cause may still only produce one entry.
+	require.Len(t, rep.Recoverable, len(all),
+		"one cause, one key, one entry per worker: a worker that is both a runner and a consumer must not be written twice")
 	require.False(t, rep.Ready)
 }

@@ -315,3 +315,44 @@ func TestASlowDurableReadIsChargedToTheCursorsItDates(t *testing.T) {
 	require.Contains(t, rep.Recoverable[key], "15m30s")
 	require.False(t, rep.Ready)
 }
+
+// TestASlowPassIsChargedToTheSweepItDates is the same measurement on the LAST check
+// the pass makes, which is the one with the most elapsed time behind it.
+//
+// The snapshotter's open-generation check runs after both cursor listings and after
+// every header read, so on a degraded deployment it is judged furthest from the
+// pass's opening instant — and it is the check with the least margin for that error,
+// because a sweep that has silently stopped landing batches produces no other signal
+// at all. Its age must therefore include the whole pass, not none of it.
+func TestASlowPassIsChargedToTheSweepItDates(t *testing.T) {
+	const readCost = 30 * time.Second // three durable reads happen before the verdict
+	h, clk := newTestHealth()
+
+	stalledFor := noProgressBound - time.Minute
+	pr := &slowProgressReader{
+		clk:  clk,
+		cost: readCost,
+		inner: &fakeProgress{
+			sweepFound: true,
+			sweep: store.SweepProgress{
+				Generation: 9, Open: true,
+				OpenedAt:    clk.now().Add(-2 * time.Hour),
+				LastBatchAt: clk.now().Add(-stalledFor),
+				Lagging:     2,
+			},
+		},
+	}
+	watch := progressWatch{sweepEngine: "debt_manager", sweepMaxAttempts: 3}
+
+	rc := roundConditions{}
+	applyProgressConditions(context.Background(), pr, clk.authority(), rc, watch)
+	publishRound(h, rc)
+
+	key := snapshotName + "/" + conditionNoProgress
+	rep := h.report()
+	require.Contains(t, rep.Recoverable, key,
+		"the sweep is judged last, so it carries the whole pass's elapsed time: dating it from the opening instant is where the largest under-ageing in this pass lives")
+	require.Contains(t, rep.Recoverable[key], "15m30s",
+		"14m of durable stall plus the 90s of durable reads this pass paid for before reaching the question")
+	require.False(t, rep.Ready)
+}

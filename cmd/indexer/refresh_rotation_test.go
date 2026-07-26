@@ -155,6 +155,12 @@ func TestTheRefreshRotationDoesNotDeadlockOnAStoppedCaller(t *testing.T) {
 // was built to prevent, restored by its own liveness rule.
 //
 // Going quiet costs a scope its VETO. It must never cost the others their place.
+// THE SHAPE OF THIS TEST IS ITSELF A FINDING. Its first version had the quiet scope
+// go quiet forever, and that version could not see the bug at all: a scope that never
+// comes back never gets to spend a turn it was wrongly forgiven, so the mutation that
+// forgives it survived every assertion here and was caught only by the nine-worker
+// cost harness three files away. A scope that goes quiet must COME BACK for the
+// difference to be observable — which is also what real scopes do, every window.
 func TestTheRefreshRotationDoesNotForgiveTheTurnOfAQuietScope(t *testing.T) {
 	h := newRotationHarness()
 
@@ -162,18 +168,23 @@ func TestTheRefreshRotationDoesNotForgiveTheTurnOfAQuietScope(t *testing.T) {
 	require.Equal(t, []string{"A"}, h.pass("A", "B", "C"))
 	h.nextWindow()
 
-	// A now goes QUIET for a whole window — which is what a scope with a freshly
-	// re-anchored stamp does — while B and C keep asking.
-	var order []string
-	for r := 0; r < 3; r++ {
-		order = append(order, h.pass("B", "C")...)
-	}
+	// Window 2: A goes QUIET — which is exactly what a scope with a freshly
+	// re-anchored stamp does, for one whole window — while B and C keep asking.
+	require.Equal(t, []string{"B"}, h.pass("B", "C"))
+	require.Empty(t, h.pass("B", "C"), "the allowance is spent for this window")
+	require.NotContains(t, h.j.refreshAsked[1], "A",
+		"A has stopped BLOCKING, which is the liveness half of the rule")
+
+	// Window 3: A's anchor has expired and it asks again. It must NOT be served: C
+	// has been waiting since window 1 and the rotation is not complete.
 	h.nextWindow()
-	for r := 0; r < 3; r++ {
-		order = append(order, h.pass("B", "C")...)
-	}
-	require.Equal(t, []string{"B", "C"}, order,
-		"A went quiet, so it stops BLOCKING — but it does not get its turn back: B and C have been waiting since the first window and must be served before A repeats")
+	require.Equal(t, []string{"C"}, h.pass("A", "B", "C"),
+		"going quiet costs a scope its VETO, never its PLACE. Clearing its served mark while it is quiet hands it a fresh turn every time it is served — and since being served is precisely what makes it go quiet, that is a scope that wins every window and a queue behind it that never advances: the starvation this rotation exists to prevent, restored by its own liveness rule")
+
+	// And only now, with every asker served, does the rotation restart with A.
+	h.nextWindow()
+	require.Equal(t, []string{"A"}, h.pass("A", "B", "C"),
+		"the rotation completes and reopens in order")
 }
 
 // TestCatchUpThroughTheNearHeadArmDoesNotWedgeTheChain is the finding's own
