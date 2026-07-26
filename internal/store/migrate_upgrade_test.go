@@ -28,7 +28,7 @@ import (
 // currentSchemaVersion is the highest embedded migration. Bumping it is part of
 // adding a migration, and the upgrade-path tests below assert against it so a new
 // migration cannot land without its own upgrade proof.
-const currentSchemaVersion = 7
+const currentSchemaVersion = 8
 
 // migrateUpTo applies the embedded migrations through version — the
 // test-only lever that reconstructs a historical schema baseline. Mirrors

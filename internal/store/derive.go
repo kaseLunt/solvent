@@ -621,6 +621,13 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 	// upsert OpenSweepGeneration uses — a crash between this commit and the
 	// snapshotter's next Step loses nothing (the open generation IS the
 	// durable re-sweep request).
+	//
+	// last_pass_seconds is deliberately ABSENT from both arms, exactly as it is
+	// in OpenSweepGeneration: how long the last completed pass took is a fact
+	// about a pass that really happened, and a rewind does not un-happen it. It
+	// is the only input to the collateral bound that survives an open, and a
+	// rewind clearing it would reproduce the restart-continuity defect through a
+	// different door.
 	if _, err := tx.Exec(ctx, `INSERT INTO sweep_generations (engine, current_generation, opened_at, completed_at)
 		VALUES ($1, 1, now(), NULL)
 		ON CONFLICT (engine) DO UPDATE
@@ -1137,11 +1144,21 @@ type SweepProgress struct {
 	// succeeded — the age the operator-facing reason quotes. Zero when no account
 	// carries a recorded success time.
 	OldestSuccessAt time.Time
-	// LastPassDuration is completed_at - opened_at of the most recent COMPLETED
-	// generation: how long a full registry pass actually took. Zero while no
-	// generation has ever completed (sweep_generations keeps one row per engine,
-	// so an OPEN generation has no completion to measure and the caller retains
-	// the value it last read).
+	// LastPassDuration is how long the most recent COMPLETED registry pass took.
+	// Zero only while no generation has ever completed under a binary carrying
+	// migration 00008.
+	//
+	// IT SURVIVES THE NEXT GENERATION OPENING, and that is the whole point of the
+	// durable last_pass_seconds column this reads (Codex round 9's restart
+	// finding). It used to be computed as completed_at - opened_at, which made it
+	// readable only while the generation was still closed: OpenSweepGeneration and
+	// RewindDerived's bump both NULL completed_at, so from the instant the next
+	// generation opened the store reported zero and the ONLY surviving copy of the
+	// achieved cadence was the daemon's process memory. A restart mid-sweep threw
+	// it away and collapsed the collateral bound to the naive formula for the rest
+	// of that generation. CompleteSweepGeneration now stamps the duration durably
+	// in the same guarded UPDATE that closes the generation, and nothing that opens
+	// a generation touches it.
 	//
 	// It exists because the staleness bound cannot be a constant. SweepWorkBatch
 	// never re-selects a current-generation success, so an account's snapshot is
@@ -1181,9 +1198,10 @@ func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts in
 	}
 	var p SweepProgress
 	var opened, completed *time.Time
+	var lastPassSeconds *int64
 	err := s.pool.QueryRow(ctx,
-		`SELECT current_generation, opened_at, completed_at FROM sweep_generations WHERE engine = $1`,
-		engine).Scan(&p.Generation, &opened, &completed)
+		`SELECT current_generation, opened_at, completed_at, last_pass_seconds FROM sweep_generations WHERE engine = $1`,
+		engine).Scan(&p.Generation, &opened, &completed, &lastPassSeconds)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return SweepProgress{}, false, nil
 	}
@@ -1198,10 +1216,21 @@ func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts in
 	} else {
 		p.Open = true
 	}
-	// The achieved pass duration (see the field comment): only a COMPLETED
-	// generation has one, and sweep_generations keeps a single row per engine, so
-	// whatever is here IS the most recent completed pass.
-	if opened != nil && completed != nil && completed.After(*opened) {
+	// The achieved pass duration (see the field comment). The DURABLE column is
+	// authoritative and is read whether this generation is open or closed — that is
+	// what makes the value survive the next open, and what makes a restarted
+	// process judge with exactly the number its predecessor was judging with.
+	//
+	// The completed_at - opened_at arithmetic is retained ONLY as a fallback for a
+	// row whose column is still NULL: a generation closed before migration 00008
+	// and left open across the upgrade (the one case 00008's backfill cannot
+	// recover) reports zero, and a generation closed before the upgrade but still
+	// closed at read time is recovered here exactly as it always was. Neither path
+	// invents a number.
+	switch {
+	case lastPassSeconds != nil && *lastPassSeconds > 0:
+		p.LastPassDuration = time.Duration(*lastPassSeconds) * time.Second
+	case opened != nil && completed != nil && completed.After(*opened):
 		p.LastPassDuration = completed.Sub(*opened)
 	}
 	var lastBatch *time.Time
@@ -1269,6 +1298,42 @@ func (s *Store) SweepProgress(ctx context.Context, engine string, maxAttempts in
 	return p, true, nil
 }
 
+// SweepLastPassDuration reports the durable achieved duration of engine's most
+// recent COMPLETED sweep pass, and nothing else. Zero (with found=false) when the
+// engine has no sweep_generations row, or has one that has never completed a pass
+// under a binary carrying migration 00008.
+//
+// It exists so the daemon can HYDRATE its collateral staleness bound before it
+// issues its first readiness verdict (round 9's restart finding). SweepProgress
+// reports the same duration, but it cannot be used for hydration: it takes the
+// bound as an argument and refuses a non-positive one, so asking it for the bound's
+// own input is circular, and it runs six aggregate queries the startup path has no
+// use for. This is one indexed single-row read.
+//
+// The same NULL-column fallback SweepProgress applies is applied here, for the same
+// reason: a generation that closed before 00008 and is still closed is recoverable
+// from its own timestamps exactly.
+func (s *Store) SweepLastPassDuration(ctx context.Context, engine string) (time.Duration, bool, error) {
+	var opened, completed *time.Time
+	var lastPassSeconds *int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT opened_at, completed_at, last_pass_seconds FROM sweep_generations WHERE engine = $1`,
+		engine).Scan(&opened, &completed, &lastPassSeconds)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("read last sweep pass duration for %q: %w", engine, err)
+	}
+	switch {
+	case lastPassSeconds != nil && *lastPassSeconds > 0:
+		return time.Duration(*lastPassSeconds) * time.Second, true, nil
+	case opened != nil && completed != nil && completed.After(*opened):
+		return completed.Sub(*opened), true, nil
+	}
+	return 0, false, nil
+}
+
 // SweepGeneration reads engine's durable sweep-generation state
 // (sweep_generations): the current generation number, whether that generation
 // is OPEN (opened but not completed — the restart-resume signal: a fresh
@@ -1298,6 +1363,14 @@ func (s *Store) SweepGeneration(ctx context.Context, engine string) (generation 
 // Increments (or creates at 1), stamps opened_at, clears completed_at;
 // returns the newly-opened generation. RewindDerived performs the identical
 // bump inside its own transaction for the post-rewind re-sweep.
+//
+// It does NOT name last_pass_seconds, and that omission is load-bearing rather
+// than incidental (round 9's restart finding). Clearing completed_at is what
+// destroyed the achieved pass duration before migration 00008 — the daemon's
+// collateral bound then had no durable input at all and depended on process
+// memory across restarts. The duration of a pass that really completed is not
+// invalidated by the next pass starting, so the column survives every open, and
+// a new row simply takes the NULL default until its first generation closes.
 func (s *Store) OpenSweepGeneration(ctx context.Context, engine string) (uint64, error) {
 	var gen uint64
 	if err := s.pool.QueryRow(ctx, `INSERT INTO sweep_generations (engine, current_generation, opened_at, completed_at)
@@ -1375,8 +1448,19 @@ func (s *Store) SweepWorkBatch(ctx context.Context, engine string, generation ui
 // stamped — the caller simply resumes the newer generation on its next step;
 // nothing is lost either way. The failed count is advisory (it may include
 // accounts a rewind removed from the registry after their failure).
+//
+// It ALSO records the pass's achieved duration durably, in the same guarded
+// statement (round 9's restart finding). Doing it here rather than in a second
+// write is what makes "this generation closed" and "this is how long it took"
+// one indivisible fact: there is no window in which a generation is closed with
+// its duration unrecorded, and a superseded completion (stamped=false) records
+// nothing, exactly as it stamps nothing. Nothing that OPENS a generation names
+// this column, so the value outlives the open that clears completed_at — which
+// is the whole reason it exists. See SweepProgress.LastPassDuration.
 func (s *Store) CompleteSweepGeneration(ctx context.Context, engine string, generation uint64) (failed int64, stamped bool, err error) {
-	ct, err := s.pool.Exec(ctx, `UPDATE sweep_generations SET completed_at = now()
+	ct, err := s.pool.Exec(ctx, `UPDATE sweep_generations
+		SET completed_at = now(),
+		    last_pass_seconds = GREATEST(0, EXTRACT(EPOCH FROM (now() - opened_at))::bigint)
 		WHERE engine = $1 AND current_generation = $2 AND completed_at IS NULL`,
 		engine, generation)
 	if err != nil {

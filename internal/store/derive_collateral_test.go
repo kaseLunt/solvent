@@ -413,10 +413,12 @@ func TestRewindClampsSweepSuccessAboveTarget(t *testing.T) {
 // bound ignoring the achieved pass duration is permanently exceeded on a healthy
 // system.
 //
-// Only a COMPLETED generation has a duration to report; sweep_generations keeps one
-// row per engine, so an OPEN generation reports zero and the daemon is required to
-// retain the last value it saw rather than snapping back to the naive formula
-// mid-sweep.
+// The duration is stamped DURABLY by the same guarded UPDATE that closes a
+// generation (migration 00008), so it survives the next open. Before that it was
+// derived from completed_at - opened_at and was therefore destroyed the instant
+// OpenSweepGeneration NULLed completed_at, leaving the daemon's process memory as
+// the only copy — Codex round 9's restart finding, and the reason the final leg of
+// this test now asserts the opposite of what it used to.
 func TestSweepProgressReportsAchievedPassDuration(t *testing.T) {
 	s := testDeriveStore(t)
 	ctx := context.Background()
@@ -427,7 +429,7 @@ func TestSweepProgressReportsAchievedPassDuration(t *testing.T) {
 	require.NoError(t, err)
 	p, _, err := s.SweepProgress(ctx, engine, collateralBudget, time.Hour)
 	require.NoError(t, err)
-	require.Zero(t, p.LastPassDuration, "an OPEN generation has no completed pass to measure")
+	require.Zero(t, p.LastPassDuration, "no generation has EVER completed, so there is no achieved cadence to report")
 
 	// Back-date the open time so the completed pass has a measurable duration
 	// (the alternative is sleeping, which pins nothing extra).
@@ -443,12 +445,26 @@ func TestSweepProgressReportsAchievedPassDuration(t *testing.T) {
 	require.InDelta(t, (25 * time.Minute).Seconds(), p.LastPassDuration.Seconds(), 5,
 		"a completed generation reports completed_at - opened_at, which is what the pass actually took")
 
-	// Reopening clears completed_at, so the store has nothing to report again — the
-	// retention obligation genuinely sits with the caller.
+	closed := p.LastPassDuration
+
+	// REOPENING CLEARS completed_at — and used to clear the only surviving record of
+	// the achieved cadence with it. That is the restart-continuity defect: from this
+	// instant the store reported zero, so the daemon's in-memory copy was the only
+	// thing standing between a restart and a collapsed bound, and a restart is
+	// exactly what memory does not survive. The durable column is named by no
+	// statement that opens a generation, so the fact outlives the open.
 	_, err = s.OpenSweepGeneration(ctx, engine)
 	require.NoError(t, err)
 	p, _, err = s.SweepProgress(ctx, engine, collateralBudget, time.Hour)
 	require.NoError(t, err)
-	require.Zero(t, p.LastPassDuration,
-		"reopening leaves no completed pass on the row: the daemon must retain the value, and collateralBoundState does")
+	require.True(t, p.Open, "the generation really is open again: completed_at is gone")
+	require.Equal(t, closed, p.LastPassDuration,
+		"an OPEN generation still reports the last COMPLETED pass, byte-identically: a process that restarts here judges with the same bound its predecessor had")
+
+	// And the same fact is readable through the narrow hydration path the daemon
+	// uses before its first verdict.
+	d, found, err := s.SweepLastPassDuration(ctx, engine)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, closed, d)
 }

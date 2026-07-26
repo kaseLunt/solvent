@@ -1484,10 +1484,27 @@ func TestWalkerStalenessFiresWhileTheWalkerIsAdvancing(t *testing.T) {
 	require.NotContains(t, rep.Recoverable, "op:debt-manager/"+conditionStepError)
 	require.False(t, rep.Ready)
 
-	// Caught up in TIME (not in blocks): it clears.
+	// Caught up in TIME (not in blocks): it clears — at the next EXACT refresh.
+	//
+	// THE ONE-WINDOW LAG IS THE DEEP-STALE ARM'S PRICE, and it is stated here rather
+	// than hidden by arranging the test around it. This worker's anchor is thirty
+	// minutes old, so round 9's backfill arm reuses it for advancing cursors instead
+	// of re-reading a header every round (which is what made a genuine backfill cost
+	// ~13 sequential RPC reads per hot round). Reuse can only OVER-estimate age, so
+	// the worst it can do is hold a just-caught-up worker red — never green — and
+	// only until the reuse window expires, because reuse never renews that window.
+	// TestDeepStaleReuseCanOnlyOverstateAgeAndIsCorrectedWithinOneWindow pins exactly
+	// that bound; this asserts the clearing itself still happens.
 	pr.ingest[0].Block = 150_000_000
 	rc = roundConditions{}
 	applyProgressConditions(context.Background(), pr, now, rc, watch)
+	publishRound(h, rc)
+	require.Contains(t, h.report().Recoverable, key,
+		"inside the reuse window the stale anchor still answers, which is the fail-closed direction")
+
+	clk.advance(headerRestampThrottle)
+	rc = roundConditions{}
+	applyProgressConditions(context.Background(), pr, clk.now(), rc, watch)
 	publishRound(h, rc)
 	require.NotContains(t, h.report().Recoverable, key)
 	require.True(t, h.report().Ready)
@@ -2192,52 +2209,22 @@ func TestCollateralUnusableFiresWhetherTheGenerationIsOpenOrClosed(t *testing.T)
 	})
 }
 
-// THE QUIET-REFUSAL LEG. A generation in which every batch is refused as stale
-// (store.ErrStaleSweepBatch) produces Step returning (false, nil) — no error for the
-// daemon's failure bookkeeping, no advance for the loop — and if that generation then
-// closes with accounts that never succeeded, NOTHING in the daemon's own state says
-// so. This is the composite state Codex's finding describes, and it must read red.
-func TestQuietlyRefusedGenerationFailsReadinessThroughUsability(t *testing.T) {
-	h, clk := newTestHealth()
-	now := clk.now()
-
-	// The snapshotter reports nothing at all, round after round.
-	snap := &fakeSnapshotWorker{}
-	var ss snapshotState
-	rc := roundConditions{}
-	for i := 0; i < 5; i++ {
-		require.False(t, stepSnapshotter(context.Background(), snap, &ss, rc),
-			"a wholesale-stale batch advances nothing, round %d", i)
-	}
-	require.Nil(t, ss.lastErr)
-	require.NotContains(t, rc[snapshotName], conditionStepError, "which is exactly why nothing was reported")
-
-	// The generation closed recently, so no_progress is silent too, and no account
-	// is currently failed — the counts snapshot_failures reads are all zero.
-	pr := &fakeProgress{sweepFound: true, sweep: store.SweepProgress{
-		Generation: 12, Open: false,
-		OpenedAt: now.Add(-30 * time.Minute), CompletedAt: now.Add(-time.Minute),
-		LastBatchAt: now.Add(-time.Minute),
-		Failed:      0, Exhausted: 0,
-		StaleSuccess:     1,
-		OldestSuccessAt:  now.Add(-3 * time.Hour),
-		LastPassDuration: 29 * time.Minute,
-	}}
-	applyProgressConditions(context.Background(), pr, now, rc, progressWatch{
-		sweepEngine: "debt_manager", sweepMaxAttempts: 4,
-		collateral: &collateralBoundState{interval: time.Hour},
-	})
-	publishRound(h, rc)
-
-	rep := h.report()
-	require.NotContains(t, rep.Recoverable, snapshotName+"/"+conditionStepError)
-	require.NotContains(t, rep.Recoverable, snapshotName+"/"+conditionNoProgress)
-	require.NotContains(t, rep.Recoverable, snapshotName+"/"+conditionSnapshotFailures)
-	require.Contains(t, rep.Recoverable, snapshotName+"/"+conditionCollateralUnusable,
-		"every other signal is silent by construction, so this is the only thing that can catch it")
-	require.Contains(t, rep.Recoverable[snapshotName+"/"+conditionCollateralUnusable], "3h0m0s old")
-	require.False(t, rep.Ready)
-}
+// THE QUIET-REFUSAL LEG MOVED, and why it had to.
+//
+// TestQuietlyRefusedGenerationFailsReadinessThroughUsability used to live here. It
+// composed five synthetic (false, nil) Steps with a hand-built CLOSED generation
+// holding a stale account — and Codex round 9 was right that ErrStaleSweepBatch
+// cannot produce that state (test-integrity failure #6). The refusal applies NO
+// status update, so the account stays in SweepWorkBatch's queue and the generation
+// can never reach the empty-batch completion path; the test asserted a composition
+// the real store cannot reach, which means it was not evidence for the property it
+// claimed.
+//
+// Its replacement is TestQuietlyRefusedSweepFailsReadinessThroughARealStaleBatchRefusal
+// in health_live_test.go: a real open generation, a real prior success aged past the
+// bound, and a real ErrStaleSweepBatch refusal driven through the real snapshotter
+// against live Postgres, with a fake CHAIN (an endpoint serving an old execution
+// block) as the only stub — which is the shape production actually fails in.
 
 // AMENDMENT A3 — the bound is a PROPERTY of the achieved cadence, not a constant.
 //

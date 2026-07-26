@@ -111,7 +111,7 @@ const conditionStaleness = "staleness"
 // conditionStalenessUnmeasured is the FAIL-CLOSED partner of conditionStaleness: a
 // bound the daemon cannot measure is one it cannot certify.
 //
-// It is emitted for three genuinely different unmeasurable states, all of which
+// It is emitted for four genuinely different unmeasurable states, all of which
 // used to read as green-by-silence:
 //
 //   - the header fetch failed, timed out, or is inside its retry cooldown, so
@@ -120,6 +120,12 @@ const conditionStaleness = "staleness"
 //     FUTURE, which is a measurement failure rather than a fresh block — and is
 //     never memoized, or a wrong-unit timestamp would pin the worker at age 0
 //     forever (amendment L2);
+//   - a RETAINED timestamp that was valid when it was taken has since become more
+//     than headerTimeSkewTolerance future because THIS DAEMON'S CLOCK moved
+//     backwards. Validity is a relation between the stamp and the current clock, not
+//     a property of the stamp, so the same guard is applied at every reuse and the
+//     invalidated stamp is evicted rather than served (Codex round 9). Without it the
+//     memo answered first, forever, at an age stalenessAge clamped to zero;
 //   - the worker has NO durable cursor row at all, so there is no block to date
 //     (amendment L1, invariant I10). A watched walker in that state produces
 //     (false, nil) every Step with no cursor write — a StartBlock typo or a frozen

@@ -203,7 +203,7 @@ const headerFetchTimeout = 10 * time.Second
 const headerFetchCooldown = 30 * time.Second
 
 // headerRestampThrottle is the fail-closed reuse window for a header stamp taken at
-// an EARLIER block on the same chain (amendment L5).
+// an EARLIER block on the same chain (amendment L5, extended by round 9's [high]).
 //
 // A backfilling worker moves its cursor every round, so the exact-block memo misses
 // every round and the pass would fetch a header per worker per round — on the same
@@ -212,9 +212,48 @@ const headerFetchCooldown = 30 * time.Second
 // stamp must belong to a block at or below the one being judged, so its timestamp is
 // at or below the true one and the computed age can only be an OVER-estimate. A
 // reused stamp can therefore report a worker stale that is actually fresh; it can
-// never report one fresh that is actually stale. Reuse additionally requires the
-// over-estimated age to sit inside HALF the bound, so the approximation is never
-// what decides a verdict near the line.
+// never report one fresh that is actually stale.
+//
+// TWO DISJOINT REGIMES ARE ADMITTED, and the gap between them is deliberate:
+//
+//   - NEAR-HEAD, where the over-estimated age sits inside HALF the bound, so the
+//     approximation is never what decides a verdict near the line.
+//   - DEEP-STALE, where the retained stamp's own implied age ALREADY EXCEEDS the
+//     bound. This arm exists because the near-head one is UNREACHABLE during a
+//     genuine historical backfill — a cursor days behind head can never imply an age
+//     inside five minutes — so before it every gated worker refetched every hot
+//     round, taxing exactly the endpoints the backfill itself depends on (Codex
+//     round 9's [high]). It is structurally incapable of a false green: the reused
+//     timestamp is already past the bound, and reuse only over-estimates, so the
+//     verdict it can produce is always `staleness`. The cost of being wrong is a
+//     worker that has just caught up staying red a little longer — the fail-closed
+//     direction.
+//
+// Between bound/2 and bound NEITHER arm applies: that band is where an approximation
+// could flip a verdict, so it is paid for with an exact read.
+//
+// THE TWO BOUNDS ON REUSE, both stated because both are load-bearing:
+//
+//  1. TIME — this window, which is therefore also the PERIODIC EXACT-REFRESH
+//     cadence: a stamp is reusable only for 30 s after THE FETCH THAT PRODUCED IT,
+//     so every window each chain pays at least one real header read that re-anchors
+//     the measurement, and a worker that has caught up is re-measured inside it. The
+//     cadence is taken from the fetch budget this pass has ALREADY accepted on its
+//     failure path — one attempt per chain per headerFetchCooldown (also 30 s), each
+//     costing up to headerFetchTimeout (10 s). A success-path read is a single
+//     eth_getBlockByNumber and costs far less than that, so the same cadence sits
+//     strictly inside a budget already justified. Loosening it would only delay
+//     catch-up detection; tightening it buys nothing, since a deep-stale worker's
+//     verdict is red either way.
+//  2. ROUNDS AND BLOCKS — bounded BY (1), not by a second constant, and that is a
+//     deliberate refusal. A reuse never renews the window: fetchedAt is written only
+//     by a real fetch, so no number of reuses, rounds or blocks can extend an
+//     anchor's life past one window. A separate block-span cap would have to convert
+//     blocks into elapsed time, which is precisely the nominal-cadence conversion
+//     this wave deleted from the gate; there is no constant for it anyone could
+//     derive, so none is invented. What the window guarantees is unit-free instead:
+//     at most 30 s worth of rounds, and at most whatever block distance a worker can
+//     cover in 30 s.
 const headerRestampThrottle = 30 * time.Second
 
 // collateralStaleBound is how old a per-account collateral snapshot may be before
@@ -262,13 +301,23 @@ func collateralStaleBound(interval, lastPass time.Duration) time.Duration {
 // whole sweeps, not of daemon rounds. Before any generation has ever completed the
 // retained value is zero and the bound degrades to max(2·interval, noProgressBound)
 // — the naive formula, correct only while no pass duration exists to know.
+//
+// IT IS NO LONGER THE ONLY COPY, and that is round 9's restart finding. This value
+// used to be pure process memory over a store fact that was destroyed the moment a
+// generation opened (OpenSweepGeneration NULLs completed_at), so a restart during a
+// long healthy sweep threw the achieved cadence away and collapsed the bound to the
+// naive formula for the REST of that generation — false-red readiness for hours or
+// days on a large registry, after every restart, on a surface whose entire premise
+// is that a restart neither grants nor destroys a verdict. The duration is now
+// durable (migration 00008), this state is HYDRATED from it before the first verdict
+// (hydrate), and observe keeps carrying it across rounds so nothing changes in the
+// hot path.
 type collateralBoundState struct {
 	// interval is the configured sweep cadence (SOLVENT_SNAPSHOT_INTERVAL).
 	interval time.Duration
 	// lastPass is the most recent COMPLETED generation's duration, retained across
-	// rounds because sweep_generations keeps one row per engine: while a generation
-	// is open the store has no completed pass to report, and forgetting the last
-	// known one would snap the bound back to the naive formula mid-sweep.
+	// rounds so the per-round read does not have to be the only source, and
+	// re-established from the store at startup by hydrate.
 	lastPass time.Duration
 }
 
@@ -283,6 +332,43 @@ func (c *collateralBoundState) observe(d time.Duration) {
 	if d > 0 {
 		c.lastPass = d
 	}
+}
+
+// lastPassReader is the narrow store surface hydrate needs (*store.Store satisfies
+// it). It is deliberately not progressReader: hydration happens once, at startup,
+// before any verdict, and it must not be able to reach the per-round counts.
+type lastPassReader interface {
+	SweepLastPassDuration(ctx context.Context, engine string) (time.Duration, bool, error)
+}
+
+// hydrate re-establishes the achieved pass duration from durable state, before the
+// daemon issues its FIRST collateral verdict.
+//
+// WITHOUT IT the fix to the store is only half a fix. The bound's input is durable
+// now, but the first round of a restarted process would still judge with lastPass
+// zero — the naive formula — because the per-round read only feeds the NEXT round
+// (that is the one-round lag the type exists to manage). One round of false-red at
+// every restart is small, but it is the same defect in miniature, and a surface that
+// gates liquidation-facing data should not have to be described as "wrong only
+// briefly".
+//
+// A FAILED READ IS NOT FATAL and is not silent either. The naive bound is the
+// TIGHTER of the two (a smaller bound counts more accounts stale), so falling back
+// to it errs red — the fail-closed direction — and the very next round's
+// SweepProgress restores the durable value through observe anyway. Refusing to boot
+// over a transient query failure would trade a brief over-strict readiness answer
+// for no readiness answer at all.
+func (c *collateralBoundState) hydrate(ctx context.Context, r lastPassReader, engine string) {
+	d, found, err := r.SweepLastPassDuration(ctx, engine)
+	if err != nil {
+		slog.Warn("could not hydrate the collateral staleness bound from durable sweep state; this round judges with the naive interval-only bound, which is the TIGHTER of the two (it errs red, never green), and the next round restores it",
+			"engine", engine, "err", err)
+		return
+	}
+	if !found {
+		return // no completed pass on record: the naive bound is the honest one
+	}
+	c.observe(d)
 }
 
 // ingestWorker / deriveWorker / snapshotWorker are the narrow surfaces the passes
@@ -682,7 +768,8 @@ type headerTimeFetcher func(ctx context.Context, chainID, block uint64) (uint64,
 // stampKey identifies one header measurement: a block on a chain. Deliberately NOT
 // keyed by worker (amendment L5) — two workers sitting at the same cursor block on
 // the same chain are asking one question, and keying by worker would pay for it
-// twice.
+// twice. (The ONE thing that is worker-keyed is the deep-stale backfill anchor, and
+// stalenessJudge.backfill says why that key is right there and wrong here.)
 type stampKey struct {
 	chainID uint64
 	block   uint64
@@ -715,6 +802,21 @@ type stalenessJudge struct {
 	fetch headerTimeFetcher
 	// stamp is the most recent successful measurement per chain (see headerStamp).
 	stamp map[uint64]headerStamp
+	// backfill is the DEEP-STALE anchor, and it is keyed per REUSE SCOPE (a worker)
+	// rather than per chain — the one place in this judge where that is the right
+	// key, and for a reason worth stating because the chain key is right everywhere
+	// else.
+	//
+	// "This cursor is deep-stale and advancing" is a claim about ONE worker, not
+	// about a chain. Chains routinely carry a caught-up worker and a backfilling one
+	// at once (a newly-added stream, a post-rewind re-derive), and letting the
+	// backfiller's three-day-old anchor answer for the caught-up worker would report
+	// a demonstrably fresh worker as stale. That is fail-closed, but it is also
+	// wrong, and a gate that names the wrong worker is a gate an operator learns to
+	// distrust. The chain-keyed stamp above still serves the exact-block hit and the
+	// near-head throttle, where sharing across workers IS the right answer because
+	// the approximation there is small by construction.
+	backfill map[string]headerStamp
 	// nextFetchAttempt and lastFetchErr are the per-chain retry cooldown: while now
 	// is before the attempt time, the retained error is reported and no fetch is
 	// paid for. Both are cleared by the next successful fetch.
@@ -726,6 +828,7 @@ func newStalenessJudge(fetch headerTimeFetcher) *stalenessJudge {
 	return &stalenessJudge{
 		fetch:            fetch,
 		stamp:            map[uint64]headerStamp{},
+		backfill:         map[string]headerStamp{},
 		nextFetchAttempt: map[uint64]time.Time{},
 		lastFetchErr:     map[uint64]error{},
 	}
@@ -757,24 +860,40 @@ func newStalenessRound() *stalenessRound {
 //
 // THE ORDER OF THE CHECKS IS THE CONTRACT (amendment L5), not an optimisation:
 //
+//  0. the future-skew guard, applied to EVERY reuse path before anything is returned
+//     from one (round 9's memo-bypass finding — see rejectSkewedReuse);
 //  1. this round's memo — one fetch per (chain, block) per round;
-//  2. a retained stamp for the SAME block — a block's timestamp is immutable, so a
-//     stamp taken an hour ago is still exactly right, and the age computed from it
-//     grows correctly as the cursor stands still. This is why a worker wedged on a
+//  2. a retained CHAIN stamp for the SAME block — a block's timestamp is immutable,
+//     so a stamp taken an hour ago is still exactly right, and the age computed from
+//     it grows correctly as the cursor stands still. This is why a worker wedged on a
 //     dead chain still gets a REAL measured verdict (and goes red on elapsed time)
 //     rather than an unmeasured one;
-//  3. a retained stamp for an EARLIER block, inside the reuse window and comfortably
-//     inside the bound — the fail-closed throttle (see headerRestampThrottle);
-//  4. only then the round's down set, then the cooldown, then an actual fetch.
+//  3. a retained CHAIN stamp for an EARLIER block, inside the reuse window and
+//     comfortably inside the bound — the near-head fail-closed throttle;
+//  4. this WORKER's own deep-stale anchor, inside the same window — the
+//     historical-backfill arm (see headerRestampThrottle for both bounds);
+//  5. only then the round's down set, then the cooldown, then an actual fetch.
 //
-// Steps 1-3 run BEFORE 4 deliberately: a held valid stamp must not be discarded
-// because the chain happens to be unreachable right now.
-func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now time.Time, chainID, block uint64, bound time.Duration) (time.Time, error) {
+// Steps 1-4 run BEFORE 5 deliberately: a held valid stamp must not be discarded
+// because the chain happens to be unreachable right now. Step 0 runs before ALL of
+// them for the opposite reason: a held stamp that has become invalid must not be
+// served just because it is held.
+//
+// scope names the reuse scope of step 4 — the worker whose cursor is being dated.
+// An empty scope disables that arm, which is what a measurement belonging to no
+// single worker should do rather than borrow another worker's anchor.
+func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now time.Time, scope string, chainID, block uint64, bound time.Duration) (time.Time, error) {
 	key := stampKey{chainID: chainID, block: block}
 	if t, ok := r.stamps[key]; ok {
+		if err := j.rejectSkewedReuse(r, now, scope, chainID, t); err != nil {
+			return time.Time{}, err
+		}
 		return t, nil
 	}
 	if s, held := j.stamp[chainID]; held {
+		if err := j.rejectSkewedReuse(r, now, scope, chainID, s.at); err != nil {
+			return time.Time{}, err
+		}
 		switch {
 		case s.block == block:
 			// Exact and immutable: no fetch, no staleness of its own.
@@ -783,8 +902,29 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 		case s.block < block &&
 			now.Sub(s.fetchedAt) < headerRestampThrottle &&
 			now.Sub(s.at) <= bound/2:
-			// Fail-closed reuse: an earlier block's timestamp is at or below the
-			// true one, so the age this yields is an over-estimate.
+			// NEAR-HEAD fail-closed reuse: an earlier block's timestamp is at or
+			// below the true one, so the age this yields is an over-estimate, and
+			// the over-estimate is far enough from the bound not to decide anything.
+			r.stamps[key] = s.at
+			return s.at, nil
+		}
+	}
+	// DEEP-STALE fail-closed reuse — the historical-backfill arm (round 9's [high]),
+	// and the reason it reads THIS WORKER'S anchor rather than the chain's is in
+	// stalenessJudge.backfill. The anchor is already past the bound and reuse only
+	// over-estimates age, so this arm cannot return anything a verdict would read as
+	// fresh: it is green-proof by construction, not by argument. It is what stops a
+	// genuine backfill — where the near-head arm above is arithmetically unreachable
+	// — from paying one header read per gated worker per hot round. Reuse does not
+	// renew the window, so the worker is re-anchored by a real read at least once
+	// per headerRestampThrottle.
+	if s, held := j.backfill[scope]; scope != "" && held {
+		if err := j.rejectSkewedReuse(r, now, scope, chainID, s.at); err != nil {
+			return time.Time{}, err
+		}
+		if s.block < block &&
+			now.Sub(s.fetchedAt) < headerRestampThrottle &&
+			now.Sub(s.at) > bound {
 			r.stamps[key] = s.at
 			return s.at, nil
 		}
@@ -835,7 +975,7 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 	// one would pin every worker on this chain at age 0 permanently. It arms the
 	// cooldown for the same reason a transport failure does: the endpoint's answer
 	// is unusable and retrying it immediately, every round, buys nothing.
-	if ts.After(now.Add(headerTimeSkewTolerance)) {
+	if beyondSkewTolerance(ts, now) {
 		wrapped := fmt.Errorf("header %d on chain %d claims %s, which is more than %s in the future: the timestamp is unusable, not fresh",
 			block, chainID, ts.Format(time.RFC3339), headerTimeSkewTolerance)
 		r.down[chainID] = wrapped
@@ -844,10 +984,71 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 		return time.Time{}, wrapped
 	}
 	r.stamps[key] = ts
-	j.stamp[chainID] = headerStamp{block: block, at: ts, fetchedAt: now}
+	stamp := headerStamp{block: block, at: ts, fetchedAt: now}
+	j.stamp[chainID] = stamp
+	// The exact read just taken is also this worker's new deep-stale anchor, and
+	// re-anchoring is the ONLY thing that resets the reuse window: reuse never
+	// writes here, so the window measures from the fetch (see headerRestampThrottle).
+	if scope != "" {
+		j.backfill[scope] = stamp
+	}
 	delete(j.nextFetchAttempt, chainID)
 	delete(j.lastFetchErr, chainID)
 	return ts, nil
+}
+
+// beyondSkewTolerance is amendment L2's predicate, factored out so the ONE rule is
+// evaluated at every point a header timestamp enters a verdict — at the fetch that
+// produces it AND at every reuse of a retained one. Two copies of the same
+// comparison is how the two arms drift apart, and one arm gated with the other open
+// is the exact shape this surface has now shipped twice.
+func beyondSkewTolerance(headerTime, now time.Time) bool {
+	return headerTime.After(now.Add(headerTimeSkewTolerance))
+}
+
+// rejectSkewedReuse is the READ-OUT half of the future-skew guard (Codex round 9's
+// memo-bypass finding). It returns nil when the retained measurement is still usable
+// and, when it is not, EVICTS it and returns the measurement failure the round must
+// report.
+//
+// WHY A WRITE-TIME CHECK WAS NOT ENOUGH. measure validated skew only at the fetch,
+// so the memo, the exact-block hit and the restamp throttle all returned a retained
+// timestamp without re-examining it. Validity of a stamp is not a property of the
+// stamp alone — it is a relation between the stamp and the CURRENT clock, and the
+// clock moves. A daemon clock stepped backwards by more than the tolerance (an NTP
+// correction, a VM restore, a hypervisor rollback) turns an entirely legitimate
+// cached stamp grossly future; stalenessAge then clamps the negative age to zero and
+// every worker on that chain reads FOREVER-FRESH, at a block nothing ever re-reads
+// because the memo answers first. That is a false-green with no exit — precisely
+// what amendment L2 was written to make impossible, defeated by the path L2 was not
+// applied to.
+//
+// The eviction is CHAIN-WIDE and covers this round's memo as well: the retained
+// stamp and every memo entry derived from it come from the same broken relation, so
+// leaving any of them in place would just move the false green one lookup along.
+//
+// It deliberately does NOT arm the per-chain fetch cooldown. Nothing has been shown
+// to be wrong with the ENDPOINT — the daemon's own clock is the thing that moved —
+// and arming a 30 s cooldown here would extend the unmeasured window past the moment
+// the clock is corrected. The chain is put in the round's down set so the remaining
+// workers on it pay nothing more this round, and the NEXT round re-fetches: if the
+// clock is still rolled back the fetch path's own L2 check fires and arms the
+// cooldown there, which is where endpoint-fault semantics belong.
+func (j *stalenessJudge) rejectSkewedReuse(r *stalenessRound, now time.Time, scope string, chainID uint64, headerTime time.Time) error {
+	if !beyondSkewTolerance(headerTime, now) {
+		return nil
+	}
+	wrapped := fmt.Errorf("the retained header timestamp for chain %d reads %s, which is more than %s ahead of this daemon's clock (%s): a measurement that was valid when it was taken has been invalidated by the clock moving, so it is discarded rather than reused",
+		chainID, headerTime.Format(time.RFC3339), headerTimeSkewTolerance, now.Format(time.RFC3339))
+	delete(j.stamp, chainID)
+	delete(j.backfill, scope)
+	for k := range r.stamps {
+		if k.chainID == chainID {
+			delete(r.stamps, k)
+		}
+	}
+	r.down[chainID] = wrapped
+	return wrapped
 }
 
 // stalenessAge is now minus a header timestamp, clamped at zero.
@@ -855,7 +1056,9 @@ func (j *stalenessJudge) measure(ctx context.Context, r *stalenessRound, now tim
 // The clamp is amendment L2's other half: a header a few seconds ahead of this
 // process's clock is ordinary skew, and a negative age would render as nonsense
 // in the reason text. Anything genuinely far ahead never reaches here — measure
-// rejects it as a broken measurement.
+// rejects it as a broken measurement at the fetch that produced it AND at every
+// reuse of a retained one (beyondSkewTolerance / rejectSkewedReuse), so the clamp
+// can only ever be absorbing ordinary skew, never hiding a rolled-back clock.
 func stalenessAge(now, headerTime time.Time) time.Duration {
 	if age := now.Sub(headerTime); age > 0 {
 		return age
@@ -1043,13 +1246,18 @@ func applyProgressConditions(ctx context.Context, pr progressReader, now time.Ti
 // WHAT IT COSTS, both directions bounded (amendment L8):
 //
 //   - SUCCESS PATH: at most one header fetch per (chain, cursor block) per round,
-//     shared across every worker at that height, and suppressed entirely by the
-//     restamp throttle while a backfilling worker's measured age stays inside half
-//     the bound. So the steady-state ceiling is (number of gated workers) × one
-//     header read per round, and the realistic figure is far below that. The erosion
-//     unit is per gated WORKER rather than per endpoint because chain.Failover
-//     re-pins its sticky hint on every success — a slow-but-succeeding endpoint is
-//     never rotated away, so these reads ride the same endpoint ingestion uses.
+//     shared across every worker at that height, and suppressed across rounds by the
+//     restamp throttle in BOTH of its regimes — a near-head worker inside half the
+//     bound, and (round 9's [high]) a deep-stale backfilling worker whose retained
+//     stamp is already past it. The absolute per-round ceiling is still (number of
+//     gated workers) × one header read, but that ceiling is only reachable in the
+//     round after a window expires; sustained cost is bounded by the reuse window
+//     instead — at most one read per chain per headerRestampThrottle per descent in
+//     the order cursors happen to be judged in, since a fetch re-anchors the chain's
+//     stamp for every worker judged after it at a HIGHER block. The erosion unit is
+//     per gated WORKER rather than per endpoint because chain.Failover re-pins its
+//     sticky hint on every success — a slow-but-succeeding endpoint is never rotated
+//     away, so these reads ride the same endpoint ingestion uses.
 //   - FAILURE PATH: at most one attempt per chain per headerFetchCooldown window,
 //     each bounded by headerFetchTimeout. A dead chain therefore costs one timeout
 //     per 30 seconds, not one per round — which matters because this pass runs
@@ -1080,7 +1288,7 @@ func applyStalenessConditions(ctx context.Context, now time.Time, rc roundCondit
 	// judge writes one worker's freshness verdict and reports the header time it
 	// measured (measured=false when it could not be measured at all).
 	judge := func(worker, kind string, chainID, at uint64) (time.Time, bool) {
-		ts, err := w.staleness.measure(ctx, r, now, chainID, at, maxDerivedStaleness)
+		ts, err := w.staleness.measure(ctx, r, now, worker, chainID, at, maxDerivedStaleness)
 		if err != nil {
 			if ctx.Err() != nil {
 				return time.Time{}, false // shutdown, not a verdict (amendment L7)
@@ -1198,7 +1406,12 @@ func applyFrontierAttribution(ctx context.Context, now time.Time, rc roundCondit
 		rc.set(c.worker, conditionFrontierLag, blocks)
 		return
 	}
-	inputTime, err := w.staleness.measure(ctx, r, now, c.chainID, input, maxDerivedStaleness)
+	// SCOPE IS EMPTY, deliberately. The frontier block belongs to the feeding
+	// STREAMS, not to this consumer, so borrowing the consumer's deep-stale anchor
+	// for it would attribute one worker's backfill to another's input. It costs
+	// nothing: the frontier is the minimum cursor across streams this pass has
+	// already judged this round, so the round memo answers first.
+	inputTime, err := w.staleness.measure(ctx, r, now, "", c.chainID, input, maxDerivedStaleness)
 	if err != nil || ctx.Err() != nil {
 		rc.set(c.worker, conditionFrontierLag, blocks+
 			"; the frontier block's own timestamp could not be read this round, so the split between ingestion and derivation is not available")
@@ -1634,6 +1847,13 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	if sweepEngine != "" && collateral.bound() <= 0 {
 		return fmt.Errorf("collateral staleness bound is %s for snapshot interval %s: a non-positive bound cannot gate collateral freshness",
 			collateral.bound(), cfg.SnapshotInterval)
+	}
+	// HYDRATE BEFORE THE FIRST VERDICT (round 9's restart finding). The achieved
+	// pass duration is durable now, but the per-round read only feeds the NEXT
+	// round, so without this a restarted process would spend its first round
+	// judging with the naive bound it just learned not to trust.
+	if sweepEngine != "" {
+		collateral.hydrate(ctx, st, sweepEngine)
 	}
 	watch := progressWatch{
 		walkers: walkers, runners: runners, consumers: consumers,
