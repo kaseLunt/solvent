@@ -1,0 +1,199 @@
+{
+  "meta": {
+    "wave": "task-9 wave 3",
+    "unit": "prices poller non-landing routing seam (readRound's deferred outcome handler)",
+    "purpose": "Task 9 wave 3 brief's mutation requirement: the seam itself (removing the advance must be killed by the principle test, alone), the reversed W2M5 (the mismatch arm keeping the starting point must now be KILLED), a per-arm landed-flag dodge for every named regression arm (the only way a future arm could evade the seam), the keep side of the invariant (a LANDED round must not advance), the liveness ping-pong (an oscillation lock must be killed), and the posture-only role of classification. Run through the wave-16 committed applier (.superpowers/sdd/wave16-mutations/mutate.py): exactly-one-occurrence asserted per edit, byte-level backups, in-memory restores verified byte-identical. Files are CRLF in the working tree, so multi-line patterns embed \\r\\n explicitly.",
+    "design_notes": [
+      "THE DODGE SHAPE IS THE ATTACK SHAPE. With the deferred seam, 'this arm forgets to advance' is no longer expressible as a missing call -- the only way any exit keeps the starting point is to mark the round landed before returning. Every per-arm mutant below (W3M2..W3M9) is therefore a `landed = true` insertion: exactly the edit a careless future arm would need, killed to prove it cannot land unnoticed.",
+      "W3M1s repeats W3M1's edit with the test run scoped to the principle test alone, proving the class-closer kills the severed seam WITHOUT help from the named regression fleet.",
+      "W3M12 attacks the KEEP side: never setting the landed flag makes even a landed round advance. recordProgress masks that on the happy path, so the killer is the ambiguous-apply test's exploreStart assertion -- a landed round whose APPLY errs ambiguously must still have kept its starting point (the lease machinery owns that arm, d1e7d54).",
+      "W3M13 certifies classification decides POSTURE only and its unknown-wording bound stays fail-closed ERROR: classifying every failure as the recognized rejection flips transport errors to discards, killed by the tests that assert the surfaced error text. Routing is indifferent to this mutant by construction (the seam advances either way), which is exactly the round-2 restructuring.",
+      "NOT mutation-testable, disclosed: the invariant prose at the seam and in the contract (comments carry no behavior); the removal of the per-arm routeNextRoundPastDiscard calls (their absence IS the tested structure -- re-adding one alongside the seam would double-advance only in principle, and advanceExploration is idempotent for a fixed servedBy, so no test can or should distinguish it); the Step-side discard comment.",
+      "The discard/refusal halves of every arm (nothing lands, nothing recorded) remain wave-1/wave-2 mutation ground (t9w1 M2/M4/M5 at 53c0688; t9w2 W2M2 at 2981f3e); wave 3 attacks only what wave 3 changed: WHERE the advance lives and WHICH outcomes it covers."
+    ]
+  },
+  "mutations": [
+    {
+      "id": "W3M1",
+      "description": "the seam is severed: the deferred outcome handler no longer advances on non-landing exits",
+      "property": "LANDING IS THE ONLY OUTCOME THAT KEEPS THE STARTING POINT: every post-resolution non-landing exit of readRound advances the caller-scoped exploration start through the one deferred seam",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\tif !landed {\r\n\t\t\tp.routeNextRoundPastNonLanding(servedBy)\r\n\t\t}",
+          "replace": "\t\tif false && !landed { // MUTANT: the seam no longer advances on non-landing exits\r\n\t\t\tp.routeNextRoundPastNonLanding(servedBy)\r\n\t\t}"
+        }
+      ]
+    },
+    {
+      "id": "W3M1s",
+      "description": "W3M1 again, test run scoped to the principle test alone (the class-closer)",
+      "property": "the principle test kills the severed seam BY ITSELF: the invariant is pinned by the table-driven class-closer, not by incidental coverage from the named regression fleet",
+      "test": ["go", "test", "-run", "^TestPollerEveryNonLandingOutcomeAdvancesTheRoundsStartingPoint$", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\tif !landed {\r\n\t\t\tp.routeNextRoundPastNonLanding(servedBy)\r\n\t\t}",
+          "replace": "\t\tif false && !landed { // MUTANT: the seam no longer advances on non-landing exits\r\n\t\t\tp.routeNextRoundPastNonLanding(servedBy)\r\n\t\t}"
+        }
+      ]
+    },
+    {
+      "id": "W3M2",
+      "description": "W2M5 REVERSED: the ambiguous bracketing-hash-mismatch arm dodges the seam and keeps the starting point (wave-2 behavior restored)",
+      "property": "the before/after hash mismatch is AMBIGUOUS (chain movement and a stable same-token backend split are indistinguishable) and MUST advance the start: wave 2's exclusion starved the poller under a stable split while a healthy peer sat idle (round-2 finding 1)",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\t\t\"before\", hashBefore, \"after\", hashAfter)\r\n\t\treturn none, false, nil // ambiguous discard; next cadence retries elsewhere",
+          "replace": "\t\t\t\"before\", hashBefore, \"after\", hashAfter)\r\n\t\tlanded = true // MUTANT: the mismatch arm keeps the starting point (wave-2 behavior)\r\n\t\treturn none, false, nil // ambiguous discard; next cadence retries elsewhere"
+        }
+      ]
+    },
+    {
+      "id": "W3M3",
+      "description": "the hash-pin-rejection discard dodges the seam",
+      "property": "a recognized pin rejection still moves the start: only exploration ends the private-fork round-shape, and the discard posture must not become a keep-the-start posture just because the wording was recognized",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\t\t\t\"engine\", p.engine, \"block\", pin, \"hash\", hashBefore, \"endpoint\", servedBy.Index, \"err\", err)\r\n\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere",
+          "replace": "\t\t\t\t\"engine\", p.engine, \"block\", pin, \"hash\", hashBefore, \"endpoint\", servedBy.Index, \"err\", err)\r\n\t\t\tlanded = true // MUTANT: the rejection discard keeps the starting point\r\n\t\t\treturn none, false, nil // round discarded; next cadence retries elsewhere"
+        }
+      ]
+    },
+    {
+      "id": "W3M4",
+      "description": "the multicall-coherence discard dodges the seam",
+      "property": "a round whose pinned multicall was answered by another endpoint still moves the start: dropping this arm's advance restores the round-1 [high] starvation verbatim",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"servedBy\", calledOn.Index)\r\n\t\treturn none, false, nil // round discarded; next cadence retries",
+          "replace": "\"servedBy\", calledOn.Index)\r\n\t\tlanded = true // MUTANT: the multicall-coherence discard keeps the starting point\r\n\t\treturn none, false, nil // round discarded; next cadence retries"
+        }
+      ]
+    },
+    {
+      "id": "W3M5",
+      "description": "the pin-divergence discard dodges the seam",
+      "property": "a multicall reporting a different execution height than the pinned block still moves the start: a backend persistently mis-serving the pinned state must not re-resolve itself every cadence",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"executed\", block, \"endpoint\", servedBy.Index)\r\n\t\treturn none, false, nil // round discarded; next cadence retries",
+          "replace": "\"executed\", block, \"endpoint\", servedBy.Index)\r\n\t\tlanded = true // MUTANT: the pin-divergence discard keeps the starting point\r\n\t\treturn none, false, nil // round discarded; next cadence retries"
+        }
+      ]
+    },
+    {
+      "id": "W3M6",
+      "description": "the closing-recheck-coherence discard dodges the seam",
+      "property": "a round whose closing header re-read was answered by another endpoint still moves the start: an endpoint that cannot close its own round must not re-resolve itself every cadence",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\"servedBy\", recheckOn.Index)\r\n\t\treturn none, false, nil // round discarded; next cadence retries",
+          "replace": "\"servedBy\", recheckOn.Index)\r\n\t\tlanded = true // MUTANT: the closing-recheck discard keeps the starting point\r\n\t\treturn none, false, nil // round discarded; next cadence retries"
+        }
+      ]
+    },
+    {
+      "id": "W3M7",
+      "description": "the post-call ERROR return (out-of-class rejection / trailing transport failure) dodges the seam",
+      "property": "routing must not depend on RECOGNIZING the failure (round-2 finding 2): a pin failure whose final surfaced error is transport or out-of-class wording takes the error posture AND still moves the start -- the error posture is fail-closed for correctness, never fail-forever for routing",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\treturn none, false, fmt.Errorf(\"price poller %q: multicall (%d oracles) pinned to %s (block %d): %w\", p.engine, len(p.targets), hashBefore, pin, err)",
+          "replace": "\t\tlanded = true // MUTANT: the masked/out-of-class pin failure keeps the starting point\r\n\t\treturn none, false, fmt.Errorf(\"price poller %q: multicall (%d oracles) pinned to %s (block %d): %w\", p.engine, len(p.targets), hashBefore, pin, err)"
+        }
+      ]
+    },
+    {
+      "id": "W3M8",
+      "description": "the malformed-envelope ERROR return dodges the seam",
+      "property": "an undecodable multicall envelope takes the error posture AND still moves the start: the endpoint that served garbage must not re-resolve itself every cadence (round-2 finding 2's named shape)",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\treturn none, false, fmt.Errorf(\"price poller %q: %w\", p.engine, err)",
+          "replace": "\t\tlanded = true // MUTANT: the malformed-envelope failure keeps the starting point\r\n\t\treturn none, false, fmt.Errorf(\"price poller %q: %w\", p.engine, err)"
+        }
+      ]
+    },
+    {
+      "id": "W3M9",
+      "description": "the closing-header-failure ERROR return dodges the seam",
+      "property": "a closing re-read that no endpoint can answer takes the error posture AND still moves the start: the next cadence must be free to land through a peer's own head (round-2 finding 2's named shape)",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t\treturn none, false, fmt.Errorf(\"price poller %q: re-read header %d after the pinned multicall: %w\", p.engine, pin, err)",
+          "replace": "\t\tlanded = true // MUTANT: the closing-header failure keeps the starting point\r\n\t\treturn none, false, fmt.Errorf(\"price poller %q: re-read header %d after the pinned multicall: %w\", p.engine, pin, err)"
+        }
+      ]
+    },
+    {
+      "id": "W3M10",
+      "description": "the seam's routing half becomes a no-op: routeNextRoundPastNonLanding does nothing",
+      "property": "the seam's advance is real, not ceremonial: the helper the deferred handler calls actually moves the caller-scoped exploration start",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "func (p *Poller) routeNextRoundPastNonLanding(servedBy chain.EndpointToken) {\r\n\tp.advanceExploration(servedBy)\r\n}",
+          "replace": "func (p *Poller) routeNextRoundPastNonLanding(servedBy chain.EndpointToken) {\r\n\t_ = servedBy // MUTANT: the non-landing outcome no longer moves the next round's start\r\n}"
+        }
+      ]
+    },
+    {
+      "id": "W3M11",
+      "description": "oscillation lock: advanceExploration refuses to move an already-active exploration hint",
+      "property": "LIVENESS UNDER BOTH ENDPOINTS HALF-BROKEN (round-2 question (a)): the advance must keep ping-ponging across a fully failing fleet so every endpoint is revisited and a recovered endpoint is observed within one rotation -- a hint that locks in place excludes half the fleet forever",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "func (p *Poller) advanceExploration(servedBy chain.EndpointToken) {\r\n\tn := p.chain.EndpointCount()",
+          "replace": "func (p *Poller) advanceExploration(servedBy chain.EndpointToken) {\r\n\tif p.exploreStart >= 0 {\r\n\t\treturn // MUTANT: oscillation lock -- an active hint is never advanced again\r\n\t}\r\n\tn := p.chain.EndpointCount()"
+        }
+      ]
+    },
+    {
+      "id": "W3M12",
+      "description": "the KEEP side violated: the landed flag is never set, so even a landed round advances",
+      "property": "LANDING KEEPS THE STARTING POINT -- the invariant's other half: a round that landed must leave the exploration start alone even when its APPLY later errs ambiguously (the lease machinery owns that arm, d1e7d54; the seam owns only the round read)",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\t// THE ONE LANDED RETURN — the only exit that keeps the starting point.\r\n\tlanded = true\r\n\treturn pollRound{",
+          "replace": "\t// THE ONE LANDED RETURN — the only exit that keeps the starting point.\r\n\t// MUTANT: the flag is never set, so even a landed round advances.\r\n\treturn pollRound{"
+        }
+      ]
+    },
+    {
+      "id": "W3M13",
+      "description": "classification loses its bound: every failure is classified as the recognized rejection",
+      "property": "classification decides POSTURE ONLY, and its unknown-wording bound is fail-closed ERROR: a transport failure must surface as an error for the daemon's backoff, never be silently swallowed as a discard -- while routing is indifferent either way (the seam advances regardless), which is exactly round 2's separation of posture from routing",
+      "test": ["go", "test", "./internal/prices/", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/prices/poller.go",
+          "search": "\ts := strings.ToLower(err.Error())\r\n\tif !strings.Contains(s, \"not found\") && !strings.Contains(s, \"unknown block\") {\r\n\t\treturn false\r\n\t}\r\n\treturn strings.Contains(s, \"block\") || strings.Contains(s, \"header\") || strings.Contains(s, \"hash\")",
+          "replace": "\t_ = strings.ToLower(err.Error()) // MUTANT: every failure is classified as the recognized rejection\r\n\treturn true"
+        }
+      ]
+    }
+  ]
+}
