@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "wave": "task-9 wave 12 (walker rotation seam, ingest+chain reopen)",
+    "consult": "consult-chaintruth-walker-rotation.md M1-M7 (schedule verbatim; M5 realized as the compilable shared-hint-implementation form: the advance defers to ActiveEndpoint(), which is the routing behavior any shared-hint walker would exhibit and exactly what R3's sibling schedule kills)",
+    "applier": "wave16-mutations/mutate.py (exactly-one-occurrence, in-memory restores, byte-level)",
+    "note": "all search patterns are SINGLE-LINE on purpose: cmd/indexer/main.go is CRLF in the working tree and internal/ingest/walker.go is LF; a pattern containing a line break could silently match nothing (the wave-12 CRLF trap the applier exists to refuse)."
+  },
+  "mutations": [
+    {
+      "id": "M1",
+      "property": "Every non-landing Step outcome advances the stream's caller-scoped start past the serving endpoint (the round-2 law: landing is the only outcome that keeps the starting point). Deleting the deferred advance recreates the incident wedge: the same offender is re-resolved forever with a healthy peer idle.",
+      "description": "delete the deferred routing advance (the seam's non-landing arm becomes a no-op)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestContentFaultAdvancesRoutingAndLandsOnHealthyPeer|TestSilentDiscardSplitAdvancesRoutingAndLandsOnHealthyPeer|TestRetentionKeepsLandingEndpointAndRecoveryIsReprobedWithinOneRotation"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tw.routeNextStepPastNonLanding(servedBy)",
+          "replace": "\t\t\t_ = servedBy // M1: deferred advance deleted"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "M2",
+      "property": "The tip-changed discard arm is a NON-LANDING outcome: it advances routing exactly like an error (the W2M5 reversal transposed - wave 2's poller exempted the ambiguous-mismatch arm and round 2 refuted the exemption). Exempting it re-creates the stable-split starvation: the stream discards on the same endpoint forever.",
+      "description": "exempt the tip-changed discard arm from the seam (outcome forced to caught-up before the discard return)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSilentDiscardSplitAdvancesRoutingAndLandsOnHealthyPeer"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\tslog.Warn(\"tip changed mid-fetch, discarding window\",",
+          "replace": "\t\toutcome = stepCaughtUp // M2: discard arm exempted from the seam\n\t\tslog.Warn(\"tip changed mid-fetch, discarding window\","
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "M3",
+      "property": "A discarded window consumes a backoff unit at the daemon: the failure streak grows and step_error is published (F2; round-3 pacing/visibility law). Counting a discard into bo.success() restores the pre-wave silent wedge - backoff reset every round, nothing on the health surface.",
+      "description": "stepWalkers treats a discard round as non-erring (discard reaches bo.success())",
+      "test": ["go", "test", "./cmd/indexer/", "-count=1", "-run", "TestStepWalkersDiscardRoundsGrowTheFailureStreak|TestStepWalkersMixedDiscardErrorPostureNeverResetsPacingOrVisibility"],
+      "edits": [
+        {
+          "file": "cmd/indexer/main.go",
+          "search": "roundErred, lastErr = true, err",
+          "replace": "if discard == nil { // M3: discards no longer erred\r\n\t\t\t\t\t\t\troundErred, lastErr = true, err\r\n\t\t\t\t\t\t}"
+        }
+      ],
+      "expect": "KILLED",
+      "note": "the SEARCH is single-line (CRLF-safe, verified unique in main.go: the price/runner passes phrase their error retention differently); the REPLACE side carries explicit \\r\\n because main.go is CRLF and the inserted lines should match the file's own endings. `discard` is the errors.As target already in scope at this line."
+    },
+    {
+      "id": "M4",
+      "property": "Token equality is required on EVERY pinned read after the serving-endpoint resolution: window pieces served by another endpoint are a coherence discard and never reach SaveBatch. Dropping the gate silently re-joins two chain views into one window - the incident-night assembly, with no content arm able to see it.",
+      "description": "drop token equality (coherent() accepts every serving endpoint)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestCrossEndpointWindowPiecesAreDiscardedNotSaved"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\tif tok.Index == servedBy.Index {",
+          "replace": "\tif true { // M4: token-equality dropped"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "M5",
+      "property": "The non-landing advance is CALLER-SCOPED, never the shared hint: a walker that routes its advance through ActiveEndpoint() is a shared-hint implementation, and a sibling's legitimate landing on the offender re-pins it there within one round (the Task 7 gate counter-schedule, transposed as R3). The consult's M5 ('write the shared hint on non-landing') is realized in its compilable form: the walker HAS no hint-write surface - structurally, by interface - so the shared-hint implementation under attack is the read-through.",
+      "description": "the advance defers to the shared hint instead of the caller-scoped next index",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSiblingLandingOnOffenderDoesNotDragThisStreamBack"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\tw.startPref = next",
+          "replace": "\tw.startPref = w.chain.ActiveEndpoint() // M5: the advance defers to the shared hint"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "M6",
+      "property": "RETENTION, NOT RESET: landing sets startPref to the endpoint that landed and never resets it to follow the shared hint - resetting recreates the A-bounce (hint re-pinned at the offender drags the stream back every other Step; the poller needed d1e7d54's bounded lease to escape exactly this).",
+      "description": "reset startPref to the shared hint on landing",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestRetentionKeepsLandingEndpointAndRecoveryIsReprobedWithinOneRotation"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tw.startPref = servedBy.Index",
+          "replace": "\t\t\tw.startPref = -1 // M6: retention dropped - landing resets to follow the shared hint"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "M7",
+      "property": "The tip-log-vs-anchored-tip validation arm is LOAD-BEARING CUSTODY, not just a rotation trigger: with the window pinned to one endpoint it is a same-witness contradiction, and removing it saves a window whose tip log sits on a fork the cursor anchor never described (R1's custody assertion: the validation, not just the routing).",
+      "description": "remove the tip-log validation arm",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestContentFaultAdvancesRoutingAndLandsOnHealthyPeer"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\tif l.BlockNumber == to && l.BlockHash != tipBefore {",
+          "replace": "\t\tif false { // M7: tip-log-vs-anchored-tip arm removed"
+        }
+      ],
+      "expect": "KILLED"
+    }
+  ]
+}
