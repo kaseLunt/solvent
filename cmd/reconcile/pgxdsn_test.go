@@ -170,7 +170,7 @@ func TestAppdataTrustMaterialTaint(t *testing.T) {
 
 	// Partial pinning fails closed: the root CA alone leaves the CLIENT
 	// pair to the APPDATA defaults (presented under every TLS mode,
-	// config.go:702-754 — a subject input via cert-based auth).
+	// config.go:702-755 — a subject input via cert-based auth).
 	require.NotEmpty(t, appdataTrustTaint("postgres://solvent@db/solvent?sslmode=verify-full&sslrootcert=/pinned/root.crt"),
 		"pinning only the root CA is not pinning the trust material")
 

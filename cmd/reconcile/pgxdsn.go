@@ -147,7 +147,8 @@ func effectiveDSNClaim(dsn string) (host, database string, err error) {
 //     "require" is silently UPGRADED to verify-ca semantics when a root-cert
 //     setting is present (:638-643) — so an APPDATA-planted root.crt changes
 //     even a non-verify mode's behavior — and the client cert/key pair is
-//     loaded and PRESENTED under every TLS mode (:704-757). Only a
+//     loaded and PRESENTED under every TLS mode (pair-required check
+//     :702-704, loading :706-755). Only a
 //     connection string that pins ALL THREE (mergeSettings :245 —
 //     connection-string settings override the defaults) makes every one of
 //     those paths APPDATA-independent.

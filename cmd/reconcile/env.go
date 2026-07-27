@@ -279,7 +279,8 @@ func init() {
 //     by verify-ca's VerifyPeerCertificate closure :645-678 and
 //     verify-full's standard verification :679-680, and silently UPGRADING
 //     sslmode=require to verify-ca semantics :638-643) and the client
-//     cert/key pair presented under every TLS mode (:702-754).
+//     cert/key pair presented under every TLS mode (pair-required check
+//     :702-704, loading :706-755).
 //   - anything else: an APPDATA-planted root.crt or client pair can reach
 //     the connection's trust decisions → taint. FAIL CLOSED: an unpinned
 //     verify-full DSN taints even though the impersonation also needs the
