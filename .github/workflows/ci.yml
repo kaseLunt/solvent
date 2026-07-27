@@ -17,11 +17,17 @@ jobs:
           --health-cmd "pg_isready -U solvent" --health-interval 2s
           --health-timeout 2s --health-retries 15
     env:
-      TEST_DATABASE_URL: postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable
+      # solvent_test is the blessed destructive-test DB (wave-10 split); the guard
+      # refuses to Migrate+TRUNCATE any DB carrying the live name/identity, and it
+      # needs SOLVENT_DATABASE_URL resolvable to prove test != live (fails closed).
+      TEST_DATABASE_URL: postgres://solvent:solvent@localhost:5432/solvent_test?sslmode=disable
+      SOLVENT_DATABASE_URL: postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with: { go-version: "1.24" }
+      - name: create test db
+        run: psql "$SOLVENT_DATABASE_URL" -c "CREATE DATABASE solvent_test OWNER solvent;"
       - name: gofmt
         run: test -z "$(gofmt -l .)"
       - name: vet
