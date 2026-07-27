@@ -1,0 +1,151 @@
+{
+  "meta": {
+    "wave": "task-9 wave 17 (round-15 fixes: probe outcome discipline + per-witness sigma-attempts, ingest)",
+    "brief": "task-9-wave17-brief.md + consult-chaintruth-round15.md (BINDING): one mutant per consult matrix row R-A..R-G (R-C carries two: the reset and the guard deletion; R-E shares R-D's wall mutant - same text, both schedules listed as killers), plus the three wave-14 mutants RE-ANCHORED at this wave's line shapes (the consult: wave-12/14 specs remain valid only at their recorded SHAs - patterns moved again, so the historical properties are re-pinned here rather than re-run blind).",
+    "applier": "wave16-mutations/mutate.py (exactly-one-occurrence, in-memory restores, byte-level; historical Task-8 name, shared applier since round 11P)",
+    "note": "all search patterns are SINGLE-LINE on purpose (the wave-12 CRLF trap the applier exists to refuse). Replacements keep every otherwise-orphaned identifier referenced so each mutant COMPILES and dies on BEHAVIOR - a compile error is not a kill. W17M5 relies on `served` staying used via the &served rewind accumulator and the compound-assignment sites. The consult's R-C mutant '(ii) restore the early-return bypass' is NOT in this spec: the consult itself records the bypass as behaviorally identical for the witness-less posture at the current arm count, so a 'kill' would be theater; the two killable adjacent shapes (W17M3 reset, W17M4 guard deletion) are speced instead and the structural law is enforced by the seam comment + report disclosure.",
+    "tested_sha_expected": "the commit that lands this spec's parent implementation (ecfe8ce) or a docs-only descendant"
+  },
+  "mutations": [
+    {
+      "id": "W17M1",
+      "property": "R15-1 (consult row R-A): a CAUGHT-UP probe is REJECTED - the lease re-arms in full and the armed state lives exactly ONE Step. Reverting to the wave-14 shape (caught-up leaves the armed lease untouched) restores the frozen-neighbour capture: every subsequent Step probes the frozen peer, returns caught-up forever, the cursor freezes while the healthy incumbent is never revisited.",
+      "description": "caught-up probe leaves the armed lease untouched (revert R15-1)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestFrozenNeighbourCaughtUpProbeIsRejectedAndTheLeaseReArms"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\t\tw.rejectProbe(\"caught-up\")",
+          "replace": "\t\t\t\t_ = incumbent // W17M1: caught-up probe leaves the armed lease untouched (wave-14 shape)"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M2",
+      "property": "R15-2a (consult row R-B): a FALL-THROUGH probe (the walk answered from the incumbent because the probed neighbour was down/hung) re-arms the lease in full - the liveness owed a recovering neighbour is paid ONCE per spent lease. Reverting (lease stays spent) re-probes the hung neighbour EVERY Step and pays its attempt timeout every Step: finding 2's ~17-minute round.",
+      "description": "fall-through probe keeps the lease spent (revert R15-2a)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestFallThroughProbeReArmsAndTheTimeoutTaxIsPaidOncePerLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\tw.rejectProbe(\"fall-through\")",
+          "replace": "\t\t// W17M2: fall-through keeps the lease spent (wave-14 shape restored)"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M3",
+      "property": "R15-2b (consult row R-C, mutant i): the witness-less arm PRESERVES the lease - a total resolution failure is evidence about nobody, and the landings on either side of it are still consecutive landings on the retained endpoint. Resetting instead lets a flapping network (one blip every < MaxConsecutiveSlowLandings landings) suppress probes forever with no compensating routing move.",
+      "description": "witness-less total failure resets the lease",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestWitnessLessFailurePreservesTheLeaseMidSpend|TestWitnessLessFailureWhileArmedPreservesTheArmedProbe"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\t\treturn // witness-less: startPref and the lease survive untouched (ledger :80 antecedent unsatisfied)",
+          "replace": "\t\t\t\tw.slowLandings, w.slowBaseline = 0, 0; return // W17M3: witness-less resets the lease"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M4",
+      "property": "R15-2b (consult row R-C, adjacent killable shape of mutant ii): witness-less Steps take the WITNESS-LESS arm, never the witnessed non-landing advance. Deleting the guard routes the -1 token through routeNextStepPastNonLanding - startPref is dragged to endpoint 0 by a failure that named no witness, and the lease is reset on top (the schedule pins an incumbent at endpoint 1 so the mis-advance is visible).",
+      "description": "witness-less guard deleted: total failure flows into the witnessed non-landing arm",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestWitnessLessFailurePreservesTheLeaseMidSpend|TestWitnessLessFailureWhileArmedPreservesTheArmedProbe"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tif servedBy.Index < 0 {",
+          "replace": "\t\t\tif false { // W17M4: witness-less failures take the witnessed-non-landing arm"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M5",
+      "property": "R15-3/R15-4 (consult rows R-D and R-E): adjudication is on the SERVING WITNESS'S OWN sigma-attempts, never the Step wall. On wall, (a) a five-times-faster third endpoint behind a hung neighbour is judged 'no faster' forever (finding 3 half one), (b) an adopted endpoint inherits a slow landing from the neighbour's hang (half two), and (c) slow store commits arm the lease although no endpoint is at fault (finding 4 - store time enters via wall, never via sigma).",
+      "description": "adjudicate on the whole-Step wall (revert R15-3; re-includes store time, R15-4)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestProbeAdjudicatesOnTheServingWitnessOwnElapsedNotTheWalkWall|TestSlowStoreCommitsNeverArmTheLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tw.recordLanding(servedBy, served, wall, probing, incumbent)",
+          "replace": "\t\t\tw.recordLanding(servedBy, wall, wall, probing, incumbent) // W17M5: wall adjudication"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M6",
+      "property": "R15-6 (consult row R-F): a probe Step carries NO rewind authority - a cursor-hash mismatch reported by a probed witness is a DISCARD, and store.Rewind is never called on that witness's sole word. Restoring the authority lets an unvetted neighbour on a minority view trigger a destructive rewind (and be adopted off the churn it caused) once per spent lease.",
+      "description": "probe rewind authority restored (revert R15-6)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestProbedWitnessCursorMismatchDiscardsInsteadOfRewinding|TestGenuineReorgRewindsOnTheIncumbentStepNotTheProbeStep"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tif probing && servedBy.Index != incumbent {",
+          "replace": "\t\t\tif false { // W17M6: probe rewind authority restored"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M7",
+      "property": "R15-7 (consult row R-G): every rejected probe ADVANCES the probe-target cursor, so a rejected-but-non-failing neighbour cannot shield the peers behind it and the escape bound (n-1)(MaxConsecutiveSlowLandings+1) holds at n>=3. Frozen cursor = the probe target is a pure function of startPref again: the fast third peer is never probed, the round-12 pin recreated one level up.",
+      "description": "probe-target cursor never advances (revert R15-7)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestRejectedProbeCyclesTheTargetPastTheShieldToTheFastPeer"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\tw.probeOffset = (w.probeOffset + 1) % (n - 1)",
+          "replace": "\t_ = n // W17M7: probe-target cursor never advances"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M8",
+      "property": "Wave-14 W14M1, RE-ANCHORED (the landed-arm call moved to the sigma-attempts signature): retention is BOUNDED - removing the lease (unconditional retention in the landed arm) restores Codex round-12's pin, fail-forever for latency.",
+      "description": "budget-removed: the seam's landed arm bypasses recordLanding and retains unconditionally (W14M1 re-anchored)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowSuccessfulEndpointIsEscapedWithinTheStatedBound|TestSlowerProbeReturnsToTheIncumbentAndReArmsTheLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tw.recordLanding(servedBy, served, wall, probing, incumbent)",
+          "replace": "\t\t\tw.startPref, _, _, _ = servedBy.Index, served, wall, probing // W17M8: lease removed - unconditional retention"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M9",
+      "property": "Wave-14 W14M2, RE-ANCHORED (the comparison now reads served, same shape): a probe landing is ADJUDICATED, never blindly retained - unconditional adoption recreates the A-bounce pole the annex closed.",
+      "description": "probe-adopts-unconditionally: the baseline comparison is forced true (W14M2 re-anchored)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowerProbeReturnsToTheIncumbentAndReArmsTheLease"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\tif served < w.slowBaseline {",
+          "replace": "\t\tif true { // W17M9: probe adopts unconditionally"
+        }
+      ],
+      "expect": "KILLED"
+    },
+    {
+      "id": "W17M10",
+      "property": "Wave-14 W14M3, RE-ANCHORED (chainAttemptTimeout is now the compile-time alias of chain.AttemptTimeout; the derivation relation is unchanged and still load-bearing): drifting the budget up to the blind-spot ceiling makes the just-below-timeout posture invisible and the round-12 pin returns. This guards the DERIVATION; the mirror's equality needs no test - the alias makes drift unrepresentable.",
+      "description": "budget-derivation drift: slowStepBudget raised to the blind-spot ceiling (W14M3 re-anchored)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestSlowSuccessfulEndpointIsEscapedWithinTheStatedBound"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "const slowStepBudget = chainAttemptTimeout",
+          "replace": "const slowStepBudget = stepMaxPinnedReads * chainAttemptTimeout // W17M10: budget drifted to the blind-spot ceiling"
+        }
+      ],
+      "expect": "KILLED"
+    }
+  ]
+}
