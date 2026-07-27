@@ -20,17 +20,20 @@ const aaveEngine = snapshotdb.AaveEngine
 // rayUnit is WadRayMath.RAY = 1e27.
 var rayUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(27), nil)
 
-// rayMulCeil replicates the DEPLOYED variable-debt token's scaled→live
-// projection: c = ceil(a×b / RAY). The pool's debt token rounds UP
-// (aave-v3-origin lineage: debt is never understated), NOT WadRayMath
-// half-up — proven on-chain at ETH pin 25,627,125 (2026-07-27 acceptance
-// run): scaled 125415 × n 1094089501745475497022017896 (frac ≈ .235) →
-// balanceOf 137216, and scaled 83 × n 1000520158840839583052050491
-// (frac ≈ .043) → balanceOf 84; half-up yields 137215 and 83 and
-// false-fails the §3.4(b) identity on exact derived state. Same QuoRem
-// shape as internal/derive's rayMulCeil. Replicated on the same inputs at
-// the same pin, the identity stays deterministic with a ZERO bound (the
-// contract does the compounding; we do one multiplication).
+// rayMulCeil models the DEPLOYED variable-debt token's scaled→live
+// projection as c = ceil(a×b / RAY). Evidence (empirical, two vectors at
+// one pin — NOT a source-level or exhaustive proof): at ETH pin 25,627,125
+// (2026-07-27 acceptance run), scaled 125415 × n
+// 1094089501745475497022017896 (frac ≈ .235) → balanceOf 137216, and
+// scaled 83 × n 1000520158840839583052050491 (frac ≈ .043) → balanceOf 84.
+// Both sub-half fracs rounding UP decisively REFUTE WadRayMath half-up and
+// floor for these inputs and are consistent with ceiling and the
+// aave-v3-origin lineage (debt never understated); half-up yields
+// 137215/83 and false-fails the §3.4(b) identity on exact derived state.
+// Same QuoRem shape as internal/derive's rayMulCeil. Replicated on the
+// same inputs at the same pin, the identity stays deterministic with a
+// ZERO bound (the contract does the compounding; we do one
+// multiplication).
 func rayMulCeil(a, b *big.Int) *big.Int {
 	out := new(big.Int).Mul(a, b)
 	q, r := new(big.Int).QuoRem(out, rayUnit, new(big.Int))
@@ -51,7 +54,7 @@ type aaveRowResult struct {
 	Verdict    string `json:"verdict"`
 	Gated      bool   `json:"gated"`
 	Supplement bool   `json:"supplementary,omitempty"` // top-N advisory rows
-	// Live-value identity (§3.4(b), debt side only): rayMulHalfUp(derived,
+	// Live-value identity (§3.4(b), debt side only): rayMulCeil(derived,
 	// normalizedDebt@P) vs balanceOf@P, gated at 0.
 	LiveDerived string `json:"live_value_derived,omitempty"`
 	LiveChain   string `json:"live_value_chain,omitempty"`
