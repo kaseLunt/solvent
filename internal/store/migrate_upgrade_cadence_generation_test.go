@@ -182,3 +182,97 @@ func TestSweepCadenceUnreadableFromPriorGeneration(t *testing.T) {
 		`SELECT configured_interval_generation FROM sweep_generations WHERE engine = $1`, engine).Scan(&rawGen))
 	require.EqualValues(t, 2, rawGen)
 }
+
+// TestCadenceBindsToRunningInstanceNotGeneration is the round-19 H1 BINDING
+// regression at the store layer — Codex's exact scenario (2h prior stamp,
+// 30m new daemon), DB-backed. Generation binding is NOT instance binding:
+// restart does not roll current_generation, so a PREVIOUS instance's stamp
+// (generation == current) survives a restart looking daemon-verified.
+// Mechanism (b) — requireStartupSweepCadence in cmd/indexer, mandatory and
+// fatal — closes it at the process level; what THIS test pins is the DB
+// half of that argument, step by step:
+//
+//	(1) the hazard is real — the prior instance's 2h stamp really does stay
+//	    readable across a "restart" (nothing here rolls the generation);
+//	(2) the only admission path for a new instance — a successful startup
+//	    overwrite — RETIRES the stale value in the same single UPDATE, so a
+//	    running 30m daemon and a readable 2h cadence cannot coexist;
+//	(3) mid-run generation rollover with a FAILED re-stamp fails closed:
+//	    migration 00010's mask makes the cadence unreadable, and reconcile
+//	    taints on the NULL (TestUnverifiedCadenceTaintsAcceptance,
+//	    cmd/reconcile) rather than reading either instance's stale number —
+//	    which is exactly why per-round write failures may STAY tolerated
+//	    under mechanism (b).
+//
+// The failing-write half of the scenario (startup write fails → the daemon
+// NEVER RUNS, so no sweep evidence is ever produced under a rule the stamp
+// does not describe) is process behavior, proven in cmd/indexer:
+// TestStartupCadenceStampIsMandatoryFatal (the fatality) and
+// TestStartupCadenceFatalWiredIntoRun (the wiring).
+func TestCadenceBindsToRunningInstanceNotGeneration(t *testing.T) {
+	dsn := destructiveTestDSN(t)
+	ctx := context.Background()
+	const schema = "solvent_cadence_instance_binding"
+	const engine = "debt_manager"
+
+	admin, err := Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(admin.Close)
+	_, err = admin.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+	require.NoError(t, err)
+	_, err = admin.pool.Exec(ctx, "CREATE SCHEMA "+schema)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = admin.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+	})
+	scratch := scratchSchemaDSN(t, dsn, schema)
+	require.NoError(t, Migrate(ctx, scratch))
+	s, err := Open(ctx, scratch)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+
+	// The PREVIOUS instance: configured 2h, stamped onto the open generation.
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, gen)
+	wrote, err := s.RecordSweepConfiguredInterval(ctx, engine, 2*time.Hour)
+	require.NoError(t, err)
+	require.True(t, wrote)
+
+	// (1) THE HAZARD: the process "restarts" — which changes NOTHING in this
+	// table. The 2h stamp still reads as daemon-verified: generation binding
+	// alone cannot tell a dead instance's stamp from a running one's.
+	row, err := SweepGenerationRow(ctx, s.pool, engine)
+	require.NoError(t, err)
+	require.NotNil(t, row.ConfiguredIntervalSeconds)
+	require.EqualValues(t, 7200, *row.ConfiguredIntervalSeconds,
+		"the prior instance's stamp SURVIVES restart, readable-as-verified — this is why the new instance must overwrite at startup or refuse to run (round-19 H1)")
+
+	// (2) THE ONLY ADMISSION PATH: the new 30m instance's startup overwrite
+	// succeeds. (Had it failed, requireStartupSweepCadence would have
+	// refused to run the daemon — no rounds, no snapshots, no sweep evidence
+	// produced under a rule the stamp does not describe.) The same single
+	// UPDATE that admits the instance retires the stale value: a running 30m
+	// daemon and a readable 2h cadence cannot coexist.
+	wrote, err = s.RecordSweepConfiguredInterval(ctx, engine, 30*time.Minute)
+	require.NoError(t, err)
+	require.True(t, wrote)
+	row, err = SweepGenerationRow(ctx, s.pool, engine)
+	require.NoError(t, err)
+	require.NotNil(t, row.ConfiguredIntervalSeconds)
+	require.EqualValues(t, 1800, *row.ConfiguredIntervalSeconds,
+		"after the mandatory startup stamp, reconcile can only read THIS instance's cadence — 2×(2h+lastPass) is unreachable while a 30m daemon runs")
+
+	// (3) MID-RUN ROLLOVER WITH A FAILED RE-STAMP FAILS CLOSED: the bump
+	// retires the 30m stamp; the per-round re-stamp "fails" here by never
+	// being attempted; the 00010 mask reports ABSENT, and reconcile taints
+	// on the NULL (round-16 M4) instead of trusting either instance's stale
+	// number.
+	gen, err = s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, gen)
+	row, err = SweepGenerationRow(ctx, s.pool, engine)
+	require.NoError(t, err)
+	require.Nil(t, row.ConfiguredIntervalSeconds,
+		"post-rollover, an un-re-stamped cadence is UNREADABLE (00010 mask) — the failed-write window taints, it never widens")
+}

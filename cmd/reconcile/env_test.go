@@ -199,14 +199,17 @@ func TestEnvSurfaceClosed(t *testing.T) {
 			linkedRows = append(linkedRows, spec.Name)
 			if spec.Name == "APPDATA" {
 				// The ONE linked row with no VALUE-ONLY judge: whether
-				// APPDATA is verdict-bearing depends on the DSN (round-16
-				// M2 — it selects TLS trust material exactly when the
-				// connection string does not pin it), so its judge is the
-				// DSN-aware appdataTrustTaint wired in execute, not a
-				// Taint func this table's value sweep could run. Kept nil
-				// HERE so the sweep cannot double-judge; the DSN-aware
-				// judgment is regression-tested in
-				// TestAppdataTrustMaterialTaint.
+				// APPDATA's read is verdict-bearing depends on the
+				// (platform, DSN) pair — round-16 M2 (it selects TLS trust
+				// material exactly when the connection string does not pin
+				// it) made platform-true by round-19 H2 (non-Windows pgx
+				// never reads it; Windows taints even when it is EMPTY, the
+				// CWD-relative case) — so its judge is the platform- and
+				// DSN-aware appdataTrustTaint wired in execute, not a Taint
+				// func this table's value sweep could run. Kept nil HERE so
+				// the sweep cannot double-judge; the judgment is
+				// regression-tested in TestAppdataTrustMaterialTaint /
+				// TestAppdataJudgeIgnoresNonWindowsPlatforms.
 				require.Nil(t, spec.Taint)
 			} else {
 				require.NotNil(t, spec.Taint, "linked-library env var %s must presence-taint (round-14 F1)", spec.Name)

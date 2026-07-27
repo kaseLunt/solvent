@@ -131,8 +131,12 @@ func effectiveDSNClaim(dsn string) (host, database string, err error) {
 }
 
 // trustMaterialPinned reports whether a DSN's connection string makes pgx's
-// APPDATA-derived TLS trust-material DEFAULTS unreachable (round-16 M2). The
-// predicate, justified against pgx v5.5.1's own loading logic:
+// platform TLS trust-material DEFAULTS unreachable (round-16 M2): on Windows
+// the %APPDATA%\postgresql paths — or the CWD-RELATIVE postgresql\ paths
+// when APPDATA is empty, since defaults_windows.go:30-44 join it unguarded
+// (round-19 H2) — and on non-Windows the ~/.postgresql equivalents
+// (defaults.go:26-38, user.Current().HomeDir-derived). The predicate,
+// justified against pgx v5.5.1's own loading logic:
 //
 //   - sslmode=disable: configTLS returns a nil TLS config IMMEDIATELY
 //     (pgconn/config.go:629-630), before any certificate path is consulted —

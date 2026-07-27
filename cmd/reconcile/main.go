@@ -633,10 +633,13 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	if err != nil {
 		return exitPrecondition, err
 	}
-	// Round-16 M2: APPDATA joins the verdict whenever it can SELECT the
-	// connection's TLS trust material (pgconn defaults_windows.go:32-44 fill
-	// sslcert/sslkey/sslrootcert from %APPDATA%\postgresql when the DSN does
-	// not pin them; config.go:685-699 loads that root into TLS verification).
+	// Round-16 M2, platform-true per round-19 H2: on Windows pgx builds the
+	// platform defaults can SELECT the connection's TLS trust material
+	// whenever the DSN does not pin it (pgconn defaults_windows.go:32-44
+	// fill sslcert/sslkey/sslrootcert — from %APPDATA%\postgresql, or from
+	// the CWD-relative postgresql\ when APPDATA is empty; config.go:685-699
+	// loads that root into TLS verification), while non-Windows pgx never
+	// reads APPDATA at all (defaults.go, //go:build !windows). Platform- and
 	// DSN-aware, so it is judged here — where the DSN exists — and joins the
 	// SAME taint set as every value-only env row (round-10 F2).
 	if msg := appdataTrustTaint(reconDSN); msg != "" {

@@ -41,6 +41,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -234,9 +235,17 @@ func init() {
 	// :41-44 set sslrootcert, each whenever the file exists), and pgx loads
 	// that root CA into TLS verification (config.go:685-699) — so on Windows
 	// a redirected APPDATA can plant the trust root that authorizes an
-	// impersonating server. That is verdict-bearing whenever the trust
-	// material can actually reach the connection, which is a property of the
-	// (APPDATA, DSN) PAIR — a value-only Taint func cannot judge it, so the
+	// impersonating server. Round-19 H2 then made the judge PLATFORM-TRUE in
+	// both directions: non-Windows pgx builds never read APPDATA at all
+	// (defaults.go, //go:build !windows — no env read), so the judge IGNORES
+	// it there instead of false-tainting; and on Windows the VALUE of
+	// APPDATA — emptiness included — decides nothing, because
+	// defaults_windows.go joins the trust-material paths UNGUARDED
+	// (filepath.Join(appData, "postgresql", ...), :30-44), so an empty
+	// APPDATA yields CWD-RELATIVE default trust paths a planted file
+	// satisfies. What is verdict-bearing is the (platform, DSN) pair —
+	// whether the connection string pins the trust material out of the
+	// defaults' reach — which a value-only Taint func cannot judge, so the
 	// judge is the DSN-aware appdataTrustTaint below, wired in execute right
 	// after the DSN is accepted. This row stays Taint-nil so the value-only
 	// sweep does not double-judge; a blanket presence taint here would refuse
@@ -253,47 +262,83 @@ func init() {
 	reconEnvSurface = append(reconEnvSurface, envSpec{
 		Name:  "APPDATA",
 		Class: envLinkedLibrary,
-		Why:   "pgx v5.5.1 Windows platform defaults (pgconn/defaults_windows.go:20): locates the default passfile AND the default TLS client cert/key/root CA (:30-44). Verdict-bearing whenever it can select trust material for the connection (round-16 M2) — judged DSN-aware by appdataTrustTaint (this table's value-only sweep cannot see the DSN), which taints unless the connection string itself pins sslrootcert+sslcert+sslkey or pins sslmode=disable (config.go:629-631 — TLS never negotiated). Presence with a trust-pinned DSN stays verdict-free: APPDATA is unconditionally set on Windows, and with every trust input pinned by the DSN, mergeSettings (config.go:245) makes the APPDATA-derived defaults unreachable",
+		Why:   "pgx v5.5.1 Windows platform defaults (pgconn/defaults_windows.go:20): locates the default passfile AND the default TLS client cert/key/root CA (:30-44). Judged PLATFORM-TRUE and DSN-aware by appdataTrustTaint (round-16 M2, corrected by round-19 H2; this table's value-only sweep can see neither the platform nor the DSN): non-Windows pgx builds never read APPDATA (defaults.go, //go:build !windows — no env read), so it never taints there; Windows builds taint whenever the connection string leaves ANY trust-material input to the platform defaults — even with APPDATA EMPTY, because defaults_windows.go joins the paths unguarded and an empty value yields the CWD-relative postgresql\\root.crt a planted file satisfies. Clean only when the DSN pins sslmode=disable (config.go:629-631 — TLS never negotiated) or sslrootcert+sslcert+sslkey (mergeSettings, config.go:245 — the defaults become unreachable)",
 	})
 }
 
-// appdataTrustTaint is the DSN-aware judge for the APPDATA row (round-16
-// M2): APPDATA taints exactly when it can select TLS trust material for THIS
-// connection. The predicate, justified against pgx v5.5.1's own loading
-// logic (see also trustMaterialPinned in pgxdsn.go, which implements the
-// DSN half):
+// appdataTrustTaint is the judge for the APPDATA row (round-16 M2, made
+// PLATFORM-TRUE by round-19 H2). It binds the two production inputs — the
+// RUNNING platform and the ambient APPDATA value — and delegates every
+// judgment to appdataTrustTaintFor, the GOOS-parameterized seam the tests
+// drive in both directions on any development platform.
 //
-//   - APPDATA absent-or-empty (pgx's own emptiness convention for env,
-//     config.go:429-431; and filepath.Join("", ...) still yields paths, but
-//     a cleared APPDATA is the test-neutralization channel exactly like the
-//     PG* rows): nothing to judge, no taint. On non-Windows this is the
-//     normal state and the platform-defaults file reads no env at all
-//     (pgconn/defaults.go — home-dir derived, no os.Getenv).
-//   - DSN pins sslmode=disable in its CONNECTION STRING: configTLS returns
-//     a nil TLS config immediately (config.go:629-631) — no trust material
-//     is ever consulted, APPDATA cannot matter.
-//   - DSN pins sslrootcert AND sslcert AND sslkey in its connection string:
-//     mergeSettings (config.go:245) makes connection-string settings beat
-//     the APPDATA-derived defaults for every trust-material input configTLS
-//     consumes — the root CA loaded into RootCAs/ClientCAs (:685-699, used
-//     by verify-ca's VerifyPeerCertificate closure :645-678 and
-//     verify-full's standard verification :679-680, and silently UPGRADING
-//     sslmode=require to verify-ca semantics :638-643) and the client
-//     cert/key pair presented under every TLS mode (pair-required check
-//     :702-704, loading :706-755).
-//   - anything else: an APPDATA-planted root.crt or client pair can reach
-//     the connection's trust decisions → taint. FAIL CLOSED: an unpinned
-//     verify-full DSN taints even though the impersonation also needs the
-//     file to exist — reconcile cannot prove from inside the run that it
-//     did not.
+// runtime.GOOS is the RIGHT platform input, not a proxy for one: this judge
+// and the pgx build it judges are linked into the SAME binary, so the GOOS
+// that selected pgconn's platform-defaults file (defaults_windows.go by
+// filename convention; defaults.go under //go:build !windows) is by
+// construction the GOOS this process reports — the judge cannot disagree
+// with the library about which platform's defaults apply. A build-tagged
+// pair of judge implementations would pin the same fact but would leave the
+// non-native branch uncompilable — and therefore untestable — on the native
+// platform (this repo's CI/dev runs on Windows, the race suite in a Linux
+// container: each needs the OTHER branch testable); the pure function over
+// an explicit goos string keeps both branches testable everywhere, with
+// production narrowed to this one binding line.
 func appdataTrustTaint(dsn string) string {
-	if os.Getenv("APPDATA") == "" {
+	return appdataTrustTaintFor(runtime.GOOS, os.Getenv("APPDATA"), dsn)
+}
+
+// appdataTrustTaintFor is the platform-true predicate (round-19 H2), judged
+// against pgx v5.5.1's per-platform defaults sources (see also
+// trustMaterialPinned in pgxdsn.go, which implements the DSN half):
+//
+//   - goos != "windows": NO TAINT, whatever APPDATA holds. The non-Windows
+//     defaults file (pgconn/defaults.go, //go:build !windows) reads no
+//     environment variable at all — its trust-material defaults derive from
+//     user.Current().HomeDir (defaults.go:21-38) — so an APPDATA value
+//     cannot reach a non-Windows pgx connection, and round 19 showed the
+//     wave-19 judge FALSE-TAINTED exactly here. (The home-dir defaults are
+//     an os/user input, not an env input; they stay outside this env judge,
+//     and the same trustMaterialPinned posture that clears Windows makes
+//     them unreachable too.)
+//   - goos == "windows" and the DSN pins its trust material
+//     (trustMaterialPinned: sslmode=disable — configTLS returns nil
+//     immediately, config.go:629-631 — or sslrootcert+sslcert+sslkey all
+//     pinned in the connection string): clean — mergeSettings
+//     (config.go:245) makes every APPDATA-derived default unreachable. The
+//     trust loading the pin closes off: the root CA into RootCAs/ClientCAs
+//     (:685-699, consumed by verify-ca's VerifyPeerCertificate closure
+//     :645-678 and verify-full's standard verification :679-680, and
+//     silently UPGRADING sslmode=require to verify-ca semantics :638-643)
+//     and the client cert/key pair presented under every TLS mode
+//     (pair-required check :702-704, loading :706-755).
+//   - goos == "windows", unpinned: TAINT — EVEN WHEN APPDATA IS EMPTY (the
+//     round-19 correction; wave 19 returned clean on empty). The Windows
+//     defaults file computes its trust-material paths with
+//     filepath.Join(appData, "postgresql", ...) under NO emptiness guard
+//     (defaults_windows.go:20 reads APPDATA; :32-33 build the client pair
+//     paths, :41 the root CA path; only user.Current failing at :19-21
+//     skips the block), so an empty APPDATA yields the RELATIVE paths
+//     postgresql\postgresql.crt|.key and postgresql\root.crt — resolved
+//     against the process WORKING DIRECTORY by the os.Stat existence
+//     probes (:34-35, :42) and by the TLS loading they enable. A planted
+//     postgresql\root.crt in the CWD therefore supplies the trust root
+//     exactly like a redirected %APPDATA% does. FAIL CLOSED as before: the
+//     defaults are stat-gated, but reconcile cannot prove the file's
+//     absence at pgx's own connect time — the planted-file attack IS the
+//     existence case.
+func appdataTrustTaintFor(goos, appdata, dsn string) string {
+	if goos != "windows" {
 		return ""
 	}
 	if trustMaterialPinned(dsn) {
 		return ""
 	}
-	return fmt.Sprintf("APPDATA is set and the DSN does not pin the connection's TLS trust material: pgx v5.5.1's Windows defaults derive the client certificate, private key AND root CA from %%APPDATA%%\\postgresql (pgconn/defaults_windows.go:30-44), and an ambient root CA is loaded into TLS verification (pgconn/config.go:685-699) — a redirected APPDATA can authorize an impersonating database that self-reports the expected identity (round-16 M2); pin sslrootcert+sslcert+sslkey in the DSN, or sslmode=disable, or clear APPDATA (dsn shape: %s)", redactDSNForTaint(dsn))
+	source := "%APPDATA%\\postgresql (APPDATA is set; pgconn/defaults_windows.go:30-44)"
+	if appdata == "" {
+		source = `the CWD-relative directory postgresql\ (APPDATA is EMPTY and defaults_windows.go:30-44 join it unguarded, so the default trust paths resolve against the process working directory)`
+	}
+	return fmt.Sprintf("the DSN does not pin the connection's TLS trust material and this is a Windows pgx build: pgx v5.5.1's platform defaults derive the client certificate, private key AND root CA from %s, and an ambient root CA is loaded into TLS verification (pgconn/config.go:685-699) — a redirected APPDATA or a planted file can authorize an impersonating database that self-reports the expected identity (round-16 M2, platform-true per round-19 H2; clearing APPDATA does NOT neutralize — empty makes the trust paths CWD-relative); pin sslrootcert+sslcert+sslkey in the DSN, or sslmode=disable (dsn shape: %s)", source, redactDSNForTaint(dsn))
 }
 
 // redactDSNForTaint reduces a DSN to its scheme for taint messages: taints

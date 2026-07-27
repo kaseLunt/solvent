@@ -614,13 +614,32 @@ func TestSnapshotDBCapabilityBoundary(t *testing.T) {
 				case *types.Var:
 					// A call through a function VALUE held by a local
 					// identifier (`cancel()`, `resolvePin(...)`). Permitted
-					// ONLY because of the formation ban below: with every
-					// disciplined-package function refused outside direct
-					// call position, and func-typed params/fields/package
-					// vars refused by the API-surface tests, such a value
-					// can only be an in-package func literal or a value an
-					// allowlisted import returned (e.g. context.CancelFunc —
-					// covered by that import's capability argument).
+					// only because every way such a value can FORM is
+					// closed: disciplined-package functions are refused
+					// outside direct call position by (4), func-typed
+					// params/fields/package vars are refused by the
+					// API-surface tests, and — round-19 M3 — function values
+					// can no longer be READ OUT OF STRUCT FIELDS in any
+					// position (5). What remains formable is an in-package
+					// func literal (walked by this same inspection) or a
+					// value an allowlisted import returned. Round-19 M3 adds
+					// the TYPE belt on top: a value whose static type is a
+					// FOREIGN NAMED function type must be individually
+					// justified — `dial := conn.Config().DialFunc` carries
+					// pgconn.DialFunc and dies here even if some unforeseen
+					// channel formed it. An in-package named function type
+					// cannot exist (section (1) refuses declaring one), and
+					// laundering the foreign name away requires SPELLING the
+					// signature, which for a dialer names net.Conn — a type
+					// this package cannot import.
+					if named, ok := types.Unalias(info.TypeOf(callee)).(*types.Named); ok {
+						if tn := named.Obj(); tn != nil && tn.Pkg() != nil {
+							full := tn.Pkg().Path() + "." + tn.Name()
+							if !justifiedForeignFuncValueTypes[full] {
+								t.Fatalf("call at %s goes through a local function value of foreign named function type %s — an unjustified foreign function type is a parked capability (round-19 M3)", pos, full)
+							}
+						}
+					}
 					return true
 				default:
 					t.Fatalf("call at %s: callee identifier %q does not resolve (%T) — extend the boundary deliberately or remove the call", pos, callee.Name, o)
@@ -692,6 +711,48 @@ func TestSnapshotDBCapabilityBoundary(t *testing.T) {
 			return true
 		})
 	}
+
+	// (5) FUNC-TYPED FIELD FORMATION BAN (round-19 M3): no function value
+	// may be read out of a struct field ANYWHERE in this package — value
+	// position and call position alike. Round 16 refused CALLS through
+	// function-typed fields (the FieldVal check in (3)); round 19 named the
+	// remaining door: form the value first (`dial := conn.Config().DialFunc`
+	// — a field READ, not a call), then call it through a local identifier
+	// the Var-callee case admits. The admission of local function values in
+	// (3) is an enumeration of every channel through which such a value can
+	// FORM, so this ban closes the field channel at the FORMATION SITE —
+	// the alias becomes unrepresentable in this package's sources rather
+	// than merely detected at some later use:
+	//   - package-level functions of disciplined packages: banned outside
+	//     direct call position by (4);
+	//   - func-typed params/fields/package vars on this package's API:
+	//     banned by TestSnapshotDBAPISurfaceRejectsInjection;
+	//   - struct-field reads — pgx's ConnConfig.DialFunc, or ANY struct's
+	//     func field, this package's own included (it declares none, and
+	//     this keeps it that way): banned HERE, in every syntactic position;
+	//   - method values: exempt with the same argument as method calls
+	//     (they dispatch over a receiver the audited imports built);
+	//   - what remains: in-package func literals (their bodies are walked
+	//     by this same scan) and values returned by allowlisted imports,
+	//     whose named types the Var-callee belt in (3) vets against
+	//     justifiedForeignFuncValueTypes.
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			selInfo, ok := info.Selections[sel]
+			if !ok || selInfo.Kind() != types.FieldVal {
+				return true
+			}
+			if _, isFunc := selInfo.Type().Underlying().(*types.Signature); isFunc {
+				t.Fatalf("function-typed field %s is read at %s — forming a function value from a struct field is the round-19 M3 alias generation (dial := conn.Config().DialFunc); function values may not be excavated from ANY struct, in any position",
+					selInfo.String(), fset.Position(sel.Pos()))
+			}
+			return true
+		})
+	}
 }
 
 // disciplinedCallPkgs are the packages whose PACKAGE-LEVEL functions are
@@ -706,6 +767,19 @@ var disciplinedCallPkgs = map[string]bool{
 	"github.com/jackc/pgx/v5/pgxpool":             true,
 	"github.com/kaselunt/solvent/internal/config": true,
 	"github.com/kaselunt/solvent/internal/store":  true,
+}
+
+// justifiedForeignFuncValueTypes are the ONLY foreign NAMED function types a
+// local function value may carry into a call (round-19 M3 — the explicit
+// justification list). The justification is per-type and total:
+// context.CancelFunc is the return shape of the allowlisted context
+// package's constructors, the cleanup path requires calling it, and it can
+// only cancel contexts — it reaches no connection, no file, no socket.
+// Everything else — pgconn.DialFunc is the canonical counterexample — is a
+// capability parked under a name, refused even if some channel the
+// formation bans did not anticipate ever formed one.
+var justifiedForeignFuncValueTypes = map[string]bool{
+	"context.CancelFunc": true,
 }
 
 // auditedStoreEntryPoints is the EXACT set of internal/store package-level
