@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "wave": "task-9 wave 19 (Codex round-16 fixes M1-M4, reconcile closing round attempt two)",
+    "applier": "../wave16-mutations/mutate.py (committed, exactly-once assertion; historical name)",
+    "notes": "Spec committed BEFORE the loop. Every mutant was pre-verified to apply exactly once, compile (go build ./...), and vet clean via an in-memory probe with byte-identical restore, BEFORE this spec was committed - the wave-16 CRLF lesson. All anchors are single-line (convention-independent). DB-backed kill tests (W19M6, W19M9) require TEST_DATABASE_URL -> solvent_t9w19 scratch and SOLVENT_DATABASE_URL exported for the destructive-split guard; the driver inherits the environment. The brief's mutant list (guard reverted to path-only; mismatch informational; APPDATA inert; store.Open after Enter; aliased pgx.Connect; prior-generation read allowed; fallback restored) is the floor - W19M8 and W19M9 exceed it."
+  },
+  "mutations": [
+    {
+      "id": "W19M1",
+      "property": "M1: 'pinned' is judged under PGX'S OWN precedence - a dbname/host query parameter overwrites the path EVEN WITH AN EMPTY VALUE (pgconn/config.go:487-496, settings[k]=v[0] unconditionally). Reverting the empty-value override makes the guard path-only in exactly the reviewer's dimension: postgres://solvent@db/claimed?dbname= passes again while pgx connects to the server's default database.",
+      "description": "guard reverted to path-only semantics: empty query values no longer override (the round-16 reversal)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestPartialDSNIsRejected|TestDSNEffectiveClaimMatchesPgxParseConfig", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/pgxdsn.go",
+          "search": "\t\tsettings[k] = v[0]",
+          "replace": "\t\tif v[0] != \"\" { settings[k] = v[0] }"
+        }
+      ]
+    },
+    {
+      "id": "W19M2",
+      "property": "M1: the claimed-vs-connected database comparison is VERDICT-BEARING (round-16 M1) - a mismatch in either direction returns a taint that flows into computeResult. Making the mismatch informational (always-empty judge) is the wave-16 posture the finding named: both sides recorded honestly, the disagreement free.",
+      "description": "claimVsConnectedTaint made informational: returns empty on every input",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestClaimVsConnectedMismatchTaints", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif claimed == connected.Database {",
+          "replace": "\tif true || claimed == connected.Database {"
+        }
+      ]
+    },
+    {
+      "id": "W19M3",
+      "property": "M2: APPDATA is verdict-bearing whenever it can select TLS trust material for the connection (pgconn defaults_windows.go:20-44 -> config.go:685-699) - appdataTrustTaint must taint a set APPDATA unless the DSN pins sslrootcert+sslcert+sslkey or sslmode=disable. Reclassifying it inert restores the wave-16 subject-inert claim round 16 disproved.",
+      "description": "APPDATA reclassified inert: appdataTrustTaint returns empty regardless of DSN",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestAppdataTrustMaterialTaint", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\tif os.Getenv(\"APPDATA\") == \"\" {",
+          "replace": "\tif true || os.Getenv(\"APPDATA\") == \"\" {"
+        }
+      ]
+    },
+    {
+      "id": "W19M4",
+      "property": "M3: capability closure over FIRST-PARTY packages - internal/store calls from snapshotdb are restricted to the named audited entry points; store.Open (dial+ping on an arbitrary DSN) inserted under the closed gate must trip the boundary. The reviewer's exact shape: zero new imports, no interface, no function field, no direct pgx.Connect.",
+      "description": "store.Open(ctx, roDSN) inserted immediately after gate.Enter()",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb/", "-run", "TestSnapshotDB", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\treleased := false",
+          "replace": "\treleased := false; side, sideErr := store.Open(ctx, roDSN); if sideErr == nil { side.Close() }"
+        }
+      ]
+    },
+    {
+      "id": "W19M5",
+      "property": "M3: non-selector calls and locally-aliased function values join the scan - `dial := pgx.Connect; dial(ctx, ...)` contains no selector call to Connect, so the wave-16 scan passed it; the round-16 formation ban must refuse the alias at its formation site (a disciplined-package function referenced outside direct call position).",
+      "description": "pgx.Connect locally aliased and dialed through the alias (non-selector call) under the closed gate",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb/", "-run", "TestSnapshotDB", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\treleased := false",
+          "replace": "\treleased := false; dial := pgx.Connect; c2, dErr := dial(ctx, roDSN); if dErr == nil { _ = c2.Close(ctx) }"
+        }
+      ]
+    },
+    {
+      "id": "W19M6",
+      "property": "M4: a cadence stamped by a PRIOR generation is UNREADABLE BY CONSTRUCTION - SweepGenerationRow's CASE mask surfaces configured_interval_seconds only when configured_interval_generation = current_generation. Reverting the mask to the bare column allows the prior-generation read: the reviewer's stale 2h would again back 2x(2h+lastPass).",
+      "description": "prior-generation read allowed: the CASE mask reverted to the bare configured_interval_seconds column",
+      "test": ["go", "test", "./internal/store/", "-run", "TestSweepCadenceUnreadableFromPriorGeneration|TestMigrateUpgradesV9AddingCadenceGenerationUnstamped|TestMigrateUpgradesV8AddingConfiguredIntervalNullEverywhere", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/reconcile.go",
+          "search": "\t\t        CASE WHEN configured_interval_generation = current_generation THEN configured_interval_seconds END",
+          "replace": "\t\t        configured_interval_seconds"
+        }
+      ]
+    },
+    {
+      "id": "W19M7",
+      "property": "M4: absent/NULL cadence in acceptance IS a taint - an acceptance verdict never rests on an unverified cadence, and the recorded bound is advisory-under-taint, never clean. Popping the unconditional taint restores the fallback's verdict half: NULL is clean again and the advisory bound silently backs a pass.",
+      "description": "fallback restored (verdict half): the unconditional unverified-cadence taint is dropped after being appended",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestUnverifiedCadenceTaintsAcceptance|TestExtremeSnapshotIntervalEnvIsNonPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\t\tsweep.CurrentGeneration))",
+          "replace": "\t\tsweep.CurrentGeneration)); taints = taints[:len(taints)-1]"
+        }
+      ]
+    },
+    {
+      "id": "W19M8",
+      "property": "M4: SOLVENT_SNAPSHOT_INTERVAL never feeds a bound on ANY path - the advisory bound is the canonical default shape only. Feeding the env value back into the advisory bound restores the fallback's width half: a 1000000h env claim inflates the recorded bound exactly like wave 15's max(2xenv, ...) arm.",
+      "description": "fallback restored (width half): the advisory bound computed from the env value when parseable",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestUnverifiedCadenceTaintsAcceptance|TestExtremeSnapshotIntervalEnvIsNonPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\tbound = 2 * (canonicalSnapshotInterval + lastPass)",
+          "replace": "\tif d, err := time.ParseDuration(envRaw); err == nil && d > 0 { bound = 2 * (d + lastPass) } else { bound = 2 * (canonicalSnapshotInterval + lastPass) }"
+        }
+      ]
+    },
+    {
+      "id": "W19M9",
+      "property": "M4: the write stamps configured_interval_generation = current_generation in the SAME UPDATE as the seconds - the binding the current-generation read requires. Freezing the stamp (self-assignment) means a written cadence never becomes readable under the new generation and the idempotence guard re-fires forever: the write-side half of the generation binding.",
+      "description": "generation stamp never lands: SET configured_interval_generation = configured_interval_generation (self-assignment)",
+      "test": ["go", "test", "./internal/store/", "-run", "TestSweepCadenceUnreadableFromPriorGeneration|TestMigrateUpgradesV9AddingCadenceGenerationUnstamped", "-count=1"],
+      "edits": [
+        {
+          "file": "internal/store/derive.go",
+          "search": "\t\t    configured_interval_generation = current_generation",
+          "replace": "\t\t    configured_interval_generation = configured_interval_generation"
+        }
+      ]
+    }
+  ]
+}
