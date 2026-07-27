@@ -25,6 +25,7 @@ allowed_paths:
   - Makefile
   - .env.example
   - docs/specs/**
+  - .github/workflows/ci.yml
 deliverables:
   - docs/plans/*solvent-phase2*.md
   - internal decode/position/price packages per that plan
