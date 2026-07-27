@@ -1,0 +1,87 @@
+{
+  "meta": {
+    "wave": "task-9 wave 20 (Codex round-19 fixes H1/H2/M3/L4, reconcile closing round attempt three)",
+    "applier": "../wave16-mutations/mutate.py (committed, exactly-once assertion; historical name)",
+    "notes": "Spec committed BEFORE the loop. Every mutant was pre-verified to apply exactly once, compile (go build ./...), and vet clean (go vet ./...) via an in-memory probe with byte-identical restore, BEFORE this spec was committed - the wave-16 CRLF lesson. All anchors are single-line (convention-independent). No kill test in this wave needs the database (fakes, seam-driven judges, and AST/type-scan tests throughout); the driver inherits the environment anyway. The brief's mutant list (instance-binding removed; APPDATA predicate reverted to empty==clean; non-Windows ignore removed; the exact DialFunc-alias shape after gate.Enter(); the execute wiring removed) is the floor - W20M2 (the run() wiring of the H1 fatality) exceeds it, applying the L4 lesson to H1's own wiring."
+  },
+  "mutations": [
+    {
+      "id": "W20M1",
+      "property": "H1: the pre-loop cadence stamp is MANDATORY AND FATAL (round-19 H1, mechanism b) - a daemon that cannot stamp its OWN configured cadence refuses to run, because restart does not roll current_generation and a PRIOR instance's stamp would otherwise remain readable-as-verified while this instance enforces a different rule (Codex's 2h/30m scenario). Swallowing the startup error restores the tolerated posture the finding named.",
+      "description": "instance binding removed: requireStartupSweepCadence tolerates the failed startup write (logs and returns nil)",
+      "test": ["go", "test", "./cmd/indexer/", "-run", "TestStartupCadenceStampIsMandatoryFatal", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/indexer/main.go",
+          "search": "\t\treturn fmt.Errorf(\"refusing to start: the configured sweep cadence (%s) could not be stamped onto engine %q's durable sweep row: %w — restart does not roll current_generation, so a PRIOR instance's stamp would remain readable as daemon-verified while this instance enforces a different rule (round-19 H1); the daemon does not run until the readable cadence belongs to the running instance\", interval, engine, err)",
+          "replace": "\t\tslog.Warn(\"could not persist the configured sweep cadence at startup; tolerated\", \"engine\", engine, \"interval\", interval, \"err\", err); return nil"
+        }
+      ]
+    },
+    {
+      "id": "W20M2",
+      "property": "H1 wiring (the round-19 L4 lesson applied to H1 preemptively): run() must actually CALL requireStartupSweepCadence and RETURN its error - a fatality helper nobody calls is the predecessor-draft bug class. Deleting the call recreates the unwired state while the fatality unit test stays green.",
+      "description": "the run() wiring of the startup fatality removed: the call replaced by a vacuous nil-error check",
+      "test": ["go", "test", "./cmd/indexer/", "-run", "TestStartupCadenceFatalWiredIntoRun", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/indexer/main.go",
+          "search": "\t\tif err := requireStartupSweepCadence(ctx, st, sweepEngine, cfg.SnapshotInterval); err != nil {",
+          "replace": "\t\tif err := error(nil); err != nil {"
+        }
+      ]
+    },
+    {
+      "id": "W20M3",
+      "property": "H2: on Windows, unpinned TLS trust material is unverified EVEN WHEN APPDATA IS EMPTY - pgx joins the default trust paths unguarded (defaults_windows.go:30-44), so an empty APPDATA yields the CWD-relative postgresql\\root.crt a planted file satisfies. Reverting to empty==clean restores the wave-19 arm round 19 named: clearing APPDATA would again read as neutralization while the working directory supplies the trust root.",
+      "description": "the APPDATA predicate reverted to empty==clean (empty APPDATA short-circuits to no-taint on Windows)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestAppdataTrustMaterialTaint", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\tif goos != \"windows\" {",
+          "replace": "\tif goos != \"windows\" || appdata == \"\" {"
+        }
+      ]
+    },
+    {
+      "id": "W20M4",
+      "property": "H2: non-Windows builds of pgx NEVER read APPDATA (defaults.go, //go:build !windows - no env read), so the judge must IGNORE it off Windows. Removing the platform check makes every platform judge like Windows: an unrelated nonempty APPDATA + unpinned DSN false-taints on linux/darwin - the round-19 false-taint direction, and the direction the Linux race container exercises for real.",
+      "description": "the non-Windows ignore removed: the platform check short-circuited so every GOOS judges like Windows",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestAppdataJudgeIgnoresNonWindowsPlatforms", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\tif goos != \"windows\" {",
+          "replace": "\tif false && goos != \"windows\" {"
+        }
+      ]
+    },
+    {
+      "id": "W20M5",
+      "property": "M3: function-value provenance closure - the round-19 alias generation `dial := conn.Config().DialFunc; dial(ctx, ...)` forms a capability function from a FOREIGN STRUCT FIELD (no new import, no package-level function reference, no direct func-field call) and dials under the open snapshot. It must die at the formation site (func-typed FieldVal selections banned in every position) and again at the call (foreign named function type pgconn.DialFunc not on the justification list).",
+      "description": "the exact round-19 DialFunc-alias shape inserted immediately after gate.Enter()",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb/", "-run", "TestSnapshotDB", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\treleased := false",
+          "replace": "\treleased := false; dialAlias := conn.Config().DialFunc; sideConn, sideDialErr := dialAlias(ctx, \"tcp\", \"attacker.example:443\"); if sideDialErr == nil { _ = sideConn.Close() }"
+        }
+      ]
+    },
+    {
+      "id": "W20M6",
+      "property": "L4: the claimed-vs-connected regression protects the WIRING - deleting the execute call that appends the taint recreates the predecessor draft's exact unwired state (judge defined, zero call sites) while TestClaimVsConnectedMismatchTaints and mutant W19M2 stay green. The structural call-site assertion must fail on zero call sites.",
+      "description": "the execute wiring removed: the claimVsConnectedTaint call replaced by a vacuous empty-string guard (judge defined, never called)",
+      "test": ["go", "test", "./cmd/reconcile/", "-run", "TestClaimVsConnectedTaintWiredIntoExecute", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif msg := claimVsConnectedTaint(claimedDB, p1.Identity); msg != \"\" {",
+          "replace": "\tif msg := \"\"; msg != \"\" {"
+        }
+      ]
+    }
+  ]
+}
