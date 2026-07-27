@@ -40,12 +40,14 @@ Scope: `git diff --name-only 66adaa4..0aab45d` restricted to MY commits =
 walker_rotation_test.go, walker_probe_discipline_test.go}`,
 `internal/chain/{chain.go, chain_timed_from_test.go}`,
 `.superpowers/sdd/t9w17-mutations/**`. Pathspec staging on every commit; the
-scope gate accepted each (7, 1, 1 paths). The four interleaved sibling
-commits are wave 16's (`cmd/reconcile/**`, `cmd/indexer/**`,
-`internal/store/**`, their sdd records) — verified by `git show --stat`,
-zero file overlap with mine; wave 16's UNCOMMITTED working-tree edits were
-present in the shared tree throughout, which is why every verification run
-below used PINNED WORKTREES, never the shared tree.
+scope gate accepted each (7, 1, 1 paths). The five interleaved sibling
+commits are wave 16's (`5b53306`/`6dff5f3`/`8454ee7`/`c5deebc` —
+`cmd/reconcile/**`, `cmd/indexer/**`, `internal/store/**`, their sdd
+records — plus `0977bcb`, their report, docs-only, which landed between my
+transcript and this report) — each verified by `git show --stat`, zero file
+overlap with mine; wave 16's UNCOMMITTED working-tree edits were present in
+the shared tree throughout, which is why every verification run below used
+PINNED WORKTREES, never the shared tree.
 
 ## The fix, precisely — the corrected total ordering (consult Q1, implemented verbatim)
 
