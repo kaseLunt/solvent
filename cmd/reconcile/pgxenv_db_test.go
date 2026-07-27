@@ -48,13 +48,28 @@ func TestPartialDSNIsRejected(t *testing.T) {
 		"postgres://solvent:pw@localhost:5432?sslmode=disable",  // no path at all
 		"postgres:///?sslmode=disable",                          // neither
 		"postgres://:5432/solvent?sslmode=disable",              // empty host, port only
+		// Round-16 M1: "pinned" is judged under PGX'S OWN precedence — the
+		// dbname/host query parameters overwrite the path/host EVEN WITH AN
+		// EMPTY VALUE (pgconn/config.go:482-497), erasing the claim while a
+		// path-only guard still sees one.
+		"postgres://solvent@db/claimed?dbname=",                 // the reviewer's exact DSN: path claim erased, server picks its default
+		"postgres://solvent@db/claimed?dbname=&sslmode=disable", // same, with other parameters present
+		"postgres://solvent@db/claimed?sslmode=disable&dbname=", // parameter order is irrelevant to a map
+		"postgres://solvent@db/solvent_x?host=&sslmode=disable", // the HOST claim erased the same way
+		"postgres://solvent@db/claimed?dbname=&dbname=real",     // repeated param: pgx takes v[0] (config.go:496) — the FIRST value is empty, the claim stays erased
 	} {
 		_, err := readOnlyDSN(dsn)
-		require.Error(t, err, "partial DSN %q must be refused (round-14 F1)", dsn)
+		require.Error(t, err, "partial/erased DSN %q must be refused (round-14 F1 / round-16 M1)", dsn)
 		require.Contains(t, err.Error(), "PG*", "the refusal must say WHY: %q", dsn)
 	}
 	// Complete DSNs still pass and still gain the read-only session option.
 	out, err := readOnlyDSN("postgres://solvent:pw@localhost:5432/solvent_x?sslmode=disable")
+	require.NoError(t, err)
+	require.Contains(t, out, "default_transaction_read_only")
+	// A NON-EMPTY dbname override is a legitimate pin — of the OVERRIDE
+	// value: the DSN is accepted and the claim follows pgx (round-16 M1;
+	// see TestClaimedDBFollowsPgxOverride).
+	out, err = readOnlyDSN("postgres://solvent:pw@localhost:5432/ignored?dbname=solvent_x&sslmode=disable")
 	require.NoError(t, err)
 	require.Contains(t, out, "default_transaction_read_only")
 }

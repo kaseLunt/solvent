@@ -1,0 +1,38 @@
+-- +goose Up
+-- FORWARD migration for round 16's cadence-binding finding (task 9,
+-- reconcile, M4): "persisted cadence can be absent or stale in a way that
+-- widens the bound while remaining clean". Nothing in 00001-00009 is edited
+-- (the 00003 incident's law: goose tracks applied versions by NUMBER, an
+-- in-place edit silently never runs); everything lands here as version 10.
+--
+-- WHAT WAS MISSING. 00009 made the daemon's configured cadence durable, but
+-- the value was UNBOUND in time: a prior daemon instance's 2h could sit in
+-- the row while a restarted 30m daemon's UPDATE failed transiently and was
+-- tolerated — reconcile would then evaluate 2*(2h+lastPass) from a value no
+-- running daemon vouches for, judging with a WIDER bound than the daemon it
+-- claims to describe. The reviewer's second scenario is worse: with NULL
+-- persisted cadence the wave-15 fallback bound (2h from the default) could
+-- exceed the real daemon's 80m rule — the fallback itself widened.
+--
+-- THE BINDING. configured_interval_generation records WHICH sweep generation
+-- the cadence was stamped under. The daemon's write
+-- (RecordSweepConfiguredInterval) sets it to the row's current_generation in
+-- the same UPDATE that sets the seconds — one indivisible stamp; the read
+-- (SweepGenerationRow) surfaces configured_interval_seconds ONLY when
+-- configured_interval_generation = current_generation, in the SQL itself: a
+-- stale value is UNREADABLE BY CONSTRUCTION, not filtered by judgment. A
+-- generation bump (OpenSweepGeneration, RewindDerived) touches neither
+-- column — the bump alone makes the old stamp unreadable, and the daemon's
+-- every-round write re-stamps the current generation within one round.
+--
+-- NULLABLE, NO BACKFILL, like 00009 and for the same reason: inventing a
+-- generation stamp for a value whose writing generation is unrecorded would
+-- manufacture exactly the binding this column exists to prove. Existing
+-- 00009-era values therefore read as ABSENT until the daemon's next round
+-- stamps them — reconcile TAINTS on absence now (round-16 M4: an acceptance
+-- verdict never rests on an unverified cadence), and the taint clears itself
+-- one daemon round after restart. Fail-closed, never fail-forever.
+ALTER TABLE sweep_generations ADD COLUMN configured_interval_generation BIGINT;
+
+-- +goose Down
+ALTER TABLE sweep_generations DROP COLUMN configured_interval_generation;

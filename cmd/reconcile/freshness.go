@@ -21,28 +21,13 @@ import (
 // registry fresh is the "pipeline is healthy" orientation line.
 const advisoryFleetFreshFraction = 0.95
 
-// freshnessBound resolves `-snapshot-max-age auto` (brief §7 / L2-9):
-// max(2 × SOLVENT_SNAPSHOT_INTERVAL, 2 × sweep_generations.last_pass_seconds)
-// — hydrated from the SAME durable column the daemon's own
-// collateralStaleBound uses. Both inputs and the resolved bound are
-// recorded; the bound is labeled POLICY in the artifact (risk-quant F7): an
-// operator margin, not a contract-derived quantity.
-func freshnessBound(snapshotInterval time.Duration, lastPassSeconds *int64) (bound time.Duration, inputs map[string]string) {
-	bound = 2 * snapshotInterval
-	inputs = map[string]string{
-		"snapshot_interval": snapshotInterval.String(),
-		"last_pass_seconds": "(null)",
-		"label":             "policy",
-	}
-	if lastPassSeconds != nil {
-		inputs["last_pass_seconds"] = fmt.Sprintf("%d", *lastPassSeconds)
-		if p := 2 * time.Duration(*lastPassSeconds) * time.Second; p > bound {
-			bound = p
-		}
-	}
-	inputs["resolved_bound"] = bound.String()
-	return bound, inputs
-}
+// freshnessBound (the wave-15 `-snapshot-max-age auto` resolver,
+// max(2×SOLVENT_SNAPSHOT_INTERVAL-or-default, 2×last_pass_seconds)) is GONE
+// (round-16 M4): every auto bound now comes out of sweepCadenceEvaluation —
+// the daemon's generation-bound persisted cadence, or an ADVISORY bound
+// under an unconditional taint. Round 16 proved the max-shape fallback
+// could be WIDER than the daemon's real additive rule (30m daemon, 10m
+// pass: real 80m vs fallback 2h) — a fallback that can widen is a bypass.
 
 // accountFreshnessVerdict is one SAMPLED account's gate row.
 type accountFreshnessVerdict struct {

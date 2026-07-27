@@ -198,9 +198,15 @@ func TestEnvSurfaceClosed(t *testing.T) {
 		case envLinkedLibrary:
 			linkedRows = append(linkedRows, spec.Name)
 			if spec.Name == "APPDATA" {
-				// The ONE justified verdict-free linked row (Windows default
-				// passfile path — subject-inert, unconditionally set on
-				// Windows; see the table row's Why).
+				// The ONE linked row with no VALUE-ONLY judge: whether
+				// APPDATA is verdict-bearing depends on the DSN (round-16
+				// M2 — it selects TLS trust material exactly when the
+				// connection string does not pin it), so its judge is the
+				// DSN-aware appdataTrustTaint wired in execute, not a
+				// Taint func this table's value sweep could run. Kept nil
+				// HERE so the sweep cannot double-judge; the DSN-aware
+				// judgment is regression-tested in
+				// TestAppdataTrustMaterialTaint.
 				require.Nil(t, spec.Taint)
 			} else {
 				require.NotNil(t, spec.Taint, "linked-library env var %s must presence-taint (round-14 F1)", spec.Name)
@@ -348,19 +354,20 @@ func TestEnvSurfaceClosed(t *testing.T) {
 		require.NotEqual(t, "pass", result, "SOLVENT_SNAPSHOT_INTERVAL=%s can never produce pass", v)
 		require.NotEqual(t, exitPass, code)
 	}
-	// Round-14 F4: syntactically-valid over-default values are NOT judged
-	// pre-DB any more — they are judged against the daemon-persisted cadence
-	// inside Phase 1 (sweepCadenceEvaluation): with no persisted interval
-	// the wave-15 cap still refuses them; with a MATCHING persisted interval
-	// they are clean (the fail-forever posture died — see cadence_f4_test).
+	// Round-14 F4 / round-16 M4: syntactically-valid values are NOT judged
+	// pre-DB — they are judged against the generation-bound daemon cadence
+	// inside Phase 1 (sweepCadenceEvaluation): mismatch taints, a MATCHING
+	// persisted interval is clean (the fail-forever posture stays dead —
+	// see cadence_f4_test), and with NO generation-bound cadence the run
+	// taints unconditionally (round-16 M4), whatever the env says.
 	for _, v := range []string{"1000000h", "61m", "2h", "24h"} {
 		t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", v)
 		o, err := parseFlags(nil, &errBuf)
 		require.NoError(t, err)
 		require.Empty(t, acceptanceTaints(o),
 			"SOLVENT_SNAPSHOT_INTERVAL=%q is judged against the persisted daemon cadence in Phase 1, not pre-DB (round-14 F4)", v)
-		_, _, taints := sweepCadenceEvaluation(store.SweepGenerationState{}) // no persisted row: wave-15 law
-		require.NotEmpty(t, taints, "with NO persisted daemon cadence, SOLVENT_SNAPSHOT_INTERVAL=%s must still taint (fallback keeps the wave-15 1h cap)", v)
+		_, _, taints := sweepCadenceEvaluation(store.SweepGenerationState{}) // no generation-bound cadence: unconditional taint (round-16 M4)
+		require.NotEmpty(t, taints, "with NO generation-bound daemon cadence, the run must taint regardless of SOLVENT_SNAPSHOT_INTERVAL=%s (round-16 M4)", v)
 		result, _ := computeResult(0, 0, taints)
 		require.NotEqual(t, "pass", result)
 	}
@@ -393,11 +400,14 @@ func TestEnvSurfaceClosed(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, acceptanceTaints(o), "%s empty is absent under pgx's own rule and must not taint", name)
 	}
-	// APPDATA: classified, deliberately verdict-free (see the table row).
+	// APPDATA: classified, with NO value-only judge — the table sweep must
+	// not taint on it (Windows sets it unconditionally, and whether it can
+	// reach the verdict depends on the DSN, which this sweep cannot see).
+	// The DSN-aware judgment (round-16 M2) is TestAppdataTrustMaterialTaint.
 	t.Setenv("APPDATA", `C:\Users\example\AppData\Roaming`)
 	o, err := parseFlags(nil, &errBuf)
 	require.NoError(t, err)
-	require.Empty(t, acceptanceTaints(o), "APPDATA is subject-inert and must not taint (Windows sets it unconditionally)")
+	require.Empty(t, acceptanceTaints(o), "APPDATA must not taint through the VALUE-ONLY sweep — its judge is DSN-aware (appdataTrustTaint, round-16 M2)")
 }
 
 // clearPgxEnv neutralizes every pgx-read variable for the duration of a
@@ -412,71 +422,67 @@ func clearPgxEnv(t *testing.T) {
 
 // TestExtremeSnapshotIntervalEnvIsNonPass is the round-13 F1 BINDING
 // regression: env → freshness bound → verdict with an extreme positive
-// interval. It first demonstrates the hole the finding names — under the
+// interval. It first demonstrates the hole the finding named — under an
 // inflated bound, a snapshot refreshed YEARS ago classifies "fresh" and
-// contributes zero gate failures — and then proves the verdict chain refuses
-// anyway. Since round-14 F4 the refusal runs through sweepCadenceEvaluation
-// (the same evaluation runPhase1 wires into execute's taint set): with NO
-// persisted daemon cadence the wave-15 1h cap holds unchanged, and no
-// persisted cadence can ever equal 1000000h anyway (config.Load would have
-// refused... nothing legitimizes it: a mismatch taints, a match cannot
-// exist because the daemon itself validated its interval). Mutation W15M1
-// (acceptance cap removed) must die here.
+// contributes zero gate failures — and then proves the verdict chain
+// refuses anyway. Since round-16 M4 the refusal is structural TWICE over:
+// the env value feeds NO bound on ANY path (the wave-15 resolver and
+// fallback are gone), and with no generation-bound daemon cadence the run
+// taints unconditionally. Mutation W15M1's shape (the refusal removed) must
+// still die here.
 func TestExtremeSnapshotIntervalEnvIsNonPass(t *testing.T) {
 	clearPgxEnv(t)
 	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "1000000h")
 
-	// The REAL resolver (the one runPhase1 feeds freshnessBound).
-	interval, source := resolveSnapshotInterval()
-	require.Equal(t, 1000000*time.Hour, interval, "no silent clamp — the artifact records the truth")
-	require.Equal(t, "SOLVENT_SNAPSHOT_INTERVAL", source)
-
-	bound, inputs := freshnessBound(interval, nil)
-	require.Equal(t, 2000000*time.Hour, bound, "the 2×interval arm — ~228 years")
-	require.Equal(t, "policy", inputs["label"])
-
-	// The vacuity, demonstrated: a sweep last succeeded TWO YEARS ago and
-	// still classifies fresh under this bound — the freshness gate alone
-	// can no longer catch it (this is the laundering path round 13 named).
+	// The vacuity, demonstrated with the bound the OLD law would have
+	// computed (2×interval — ~228 years): a sweep last succeeded TWO YEARS
+	// ago and still classifies fresh under it — the freshness gate alone
+	// cannot catch an inflated bound (the laundering path round 13 named).
+	inflated := 2 * 1000000 * time.Hour
 	now := time.Now()
 	ancient := now.Add(-2 * 365 * 24 * time.Hour)
 	res := evaluateFreshness([]store.AccountFreshness{
 		{Account: []byte{0x01}, HasRow: true, Status: "success", LastSuccessBlock: 42, LastSuccessAt: &ancient},
-	}, map[string]bool{"01": true}, bound, inputs, now)
-	require.Equal(t, 0, res.GateFailures, "the inflated bound really is vacuous — that is the finding")
+	}, map[string]bool{"01": true}, inflated, map[string]string{"label": "policy"}, now)
+	require.Equal(t, 0, res.GateFailures, "an inflated bound really is vacuous — that is the finding")
 	require.Equal(t, "fresh", res.Sampled[0].Verdict)
 
-	// And the verdict chain refuses regardless: the SAME evaluation
-	// runPhase1 performs (bound and taints from one judgment), fed to the
-	// SAME computeResult execute() uses. No persisted daemon cadence exists
-	// here — the wave-15 fallback law refuses the loose env claim.
+	// The refusal, arm 1 (round-16 M4): with NO generation-bound cadence,
+	// the env claim cannot reach any bound — the advisory bound ignores it
+	// entirely — and the run taints unconditionally through the SAME
+	// evaluation runPhase1 wires into execute's taint set.
 	evalBound, evalInputs, taints := sweepCadenceEvaluation(store.SweepGenerationState{})
-	require.Equal(t, bound, evalBound, "no silent clamp in the fallback — the recorded bound tells the whole story")
-	require.Contains(t, evalInputs, "fallback")
+	require.Equal(t, 2*time.Hour, evalBound,
+		"the 1000000h env claim must move NOTHING: the advisory bound is 2×(1h default + 0 lastPass) — the wave-15 env-fed fallback is structurally gone (round-16 M4)")
+	require.Contains(t, evalInputs["label"], "advisory")
 	require.NotEmpty(t, taints)
 	joined := strings.Join(taints, "\n")
-	require.Contains(t, joined, "SOLVENT_SNAPSHOT_INTERVAL=1000000h", "the taint names the env var and value")
-	require.Contains(t, joined, "last_pass_seconds", "the taint names the legitimate widening channel")
+	require.Contains(t, joined, "no daemon-verified sweep cadence", "the unconditional round-16 M4 taint")
 	result, code := computeResult(0, 0, taints)
-	require.Equal(t, "tainted", result, "zero gated failures + the env taint is STILL not a pass — structurally (round-10 F2)")
+	require.Equal(t, "tainted", result, "zero gated failures + the taint is STILL not a pass — structurally (round-10 F2)")
 	require.Equal(t, exitVerdictFail, code)
 
-	// And a PERSISTED cadence cannot legitimize it either: any persisted
-	// value ≠ 1000000h makes the env claim a MISMATCH taint, and the bound
-	// comes from the persisted value — never widened by the env claim.
+	// The refusal, arm 2: a PERSISTED cadence cannot legitimize the claim
+	// either — any persisted value ≠ 1000000h makes the env claim a
+	// MISMATCH taint, and the bound comes from the persisted value, never
+	// widened by the env claim.
 	persisted := int64(7200)
 	pBound, _, pTaints := sweepCadenceEvaluation(store.SweepGenerationState{Found: true, ConfiguredIntervalSeconds: &persisted})
 	require.Equal(t, 4*time.Hour, pBound, "bound = 2×(2h+0) from the PERSISTED row — the 1000000h env claim never touches it")
 	require.NotEmpty(t, pTaints, "env-vs-persisted mismatch must taint")
+	require.Contains(t, strings.Join(pTaints, "\n"), "SOLVENT_SNAPSHOT_INTERVAL=1000000h", "the taint names the env var and value")
 	result, _ = computeResult(0, 0, pTaints)
 	require.NotEqual(t, "pass", result)
 
-	// The resolver and the taint judge see ONE value: tightening the env to
-	// the canonical default clears both (fallback path, no persisted row).
+	// A matching restatement is the ONLY clean env posture with a persisted
+	// cadence; with none, even the canonical default cannot clear the
+	// unverified-cadence taint (the round-16 M4 law — absence taints, and
+	// only the daemon's next stamped round clears it).
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "2h")
+	_, _, matched := sweepCadenceEvaluation(store.SweepGenerationState{Found: true, ConfiguredIntervalSeconds: &persisted})
+	require.Empty(t, matched, "env == persisted contradicts nothing")
 	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "1h")
-	interval, _ = resolveSnapshotInterval()
-	require.Equal(t, time.Hour, interval)
 	require.Empty(t, envAcceptanceTaints())
-	_, _, clean := sweepCadenceEvaluation(store.SweepGenerationState{})
-	require.Empty(t, clean)
+	_, _, stillTainted := sweepCadenceEvaluation(store.SweepGenerationState{})
+	require.NotEmpty(t, stillTainted, "no generation-bound cadence taints even under the canonical default env (round-16 M4)")
 }

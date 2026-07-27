@@ -15,8 +15,11 @@ package store
 // The write path is asserted here too: RecordSweepConfiguredInterval is
 // UPDATE-only (OpenSweepGeneration owns row creation), idempotent via IS
 // DISTINCT FROM, refuses nonpositive cadences, and — like last_pass_seconds,
-// 00008's load-bearing omission — the value survives every statement that
-// opens or completes a generation.
+// 00008's load-bearing omission — the COLUMN survives every statement that
+// opens or completes a generation. Since round-16 M4 (migration 00010)
+// survival and READABILITY are distinct: a generation bump retires the
+// stamp, so the surviving value reads as absent until the daemon's next
+// round re-stamps it (see step f, and the 00010 upgrade test).
 
 import (
 	"context"
@@ -69,7 +72,7 @@ func TestMigrateUpgradesV8AddingConfiguredIntervalNullEverywhere(t *testing.T) {
 	var version int64
 	require.NoError(t, s.pool.QueryRow(ctx,
 		`SELECT max(version_id) FROM goose_db_version`).Scan(&version))
-	require.EqualValues(t, currentSchemaVersion, version, "00009 must land on top of the v8 baseline")
+	require.EqualValues(t, currentSchemaVersion, version, "00009 and everything above it must land on top of the v8 baseline")
 
 	// (d) NOTHING IS INVENTED: the pre-existing row's interval is NULL, and
 	// the reconcile read reports exactly that (the fail-closed fallback
@@ -120,14 +123,30 @@ func TestMigrateUpgradesV8AddingConfiguredIntervalNullEverywhere(t *testing.T) {
 	_, err = s.RecordSweepConfiguredInterval(ctx, engine, 0)
 	require.Error(t, err)
 
-	// (f) SURVIVAL: opening and completing generations — the statements that
-	// clear completed_at and stamp durations — must leave the configured
-	// cadence standing, exactly like last_pass_seconds (00008's law).
+	// (f) SURVIVAL vs READABILITY, the round-16 M4 split of 00008's law:
+	// opening a generation must not REWRITE the cadence columns (the bump
+	// names neither — no history is destroyed), but the READ is bound to
+	// the current generation, so the un-restamped value reports ABSENT
+	// until the daemon's next round stamps it. CompleteSweepGeneration
+	// changes no generation, so readability survives completion untouched.
 	gen, err := s.OpenSweepGeneration(ctx, engine)
 	require.NoError(t, err)
+	var rawSecs int64
+	require.NoError(t, s.pool.QueryRow(ctx,
+		`SELECT configured_interval_seconds FROM sweep_generations WHERE engine = $1`, engine).Scan(&rawSecs))
+	require.EqualValues(t, 1800, rawSecs, "OpenSweepGeneration must not clear the column — the bump retires the stamp, never the history")
 	row, err = SweepGenerationRow(ctx, s.pool, engine)
 	require.NoError(t, err)
-	require.NotNil(t, row.ConfiguredIntervalSeconds, "OpenSweepGeneration must not clear the configured cadence")
+	require.Nil(t, row.ConfiguredIntervalSeconds,
+		"a value stamped under a PRIOR generation is unreadable by construction after the bump (round-16 M4; migration 00010)")
+
+	// The daemon's next round re-stamps the current generation; readable again.
+	wrote, err = s.RecordSweepConfiguredInterval(ctx, engine, 30*time.Minute)
+	require.NoError(t, err)
+	require.True(t, wrote, "the generation-stamp half of the IS DISTINCT FROM guard must re-fire after a bump even though the seconds are unchanged")
+	row, err = SweepGenerationRow(ctx, s.pool, engine)
+	require.NoError(t, err)
+	require.NotNil(t, row.ConfiguredIntervalSeconds)
 	require.EqualValues(t, 1800, *row.ConfiguredIntervalSeconds)
 
 	_, stamped, err := s.CompleteSweepGeneration(ctx, engine, gen)
@@ -135,6 +154,6 @@ func TestMigrateUpgradesV8AddingConfiguredIntervalNullEverywhere(t *testing.T) {
 	require.True(t, stamped)
 	row, err = SweepGenerationRow(ctx, s.pool, engine)
 	require.NoError(t, err)
-	require.NotNil(t, row.ConfiguredIntervalSeconds, "CompleteSweepGeneration must not clear the configured cadence")
+	require.NotNil(t, row.ConfiguredIntervalSeconds, "CompleteSweepGeneration must not clear the configured cadence, and it bumps no generation — readability survives")
 	require.EqualValues(t, 1800, *row.ConfiguredIntervalSeconds)
 }

@@ -309,8 +309,11 @@ func TestReadOnlyDSNInjectsSessionOption(t *testing.T) {
 	require.Error(t, err, "key-value DSNs are refused rather than silently un-hardened")
 }
 
-func TestDBNameFromDSN(t *testing.T) {
-	require.Equal(t, "solvent", dbNameFromDSN("postgres://u:p@localhost:5432/solvent?sslmode=disable"))
+func TestDBNameClaimed(t *testing.T) {
+	// Renamed from dbNameFromDSN by round-16 M1: the claim is the EFFECTIVE
+	// database under pgx's own precedence, not the URL path — the override
+	// cases live in TestClaimedDBFollowsPgxOverride (pgxdsn_test.go).
+	require.Equal(t, "solvent", dbNameClaimed("postgres://u:p@localhost:5432/solvent?sslmode=disable"))
 }
 
 // TestSchemaGateIsExactBothDirections — mutation target "schema gate": a

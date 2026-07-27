@@ -270,21 +270,31 @@ func abort(code int, status, format string, args ...any) *runAbort {
 // readOnlyDSN forces default_transaction_read_only=on at the SESSION level:
 // even autocommit statements on this connection cannot write.
 //
-// It ALSO refuses PARTIAL DSNs (round-14 F1): pgx v5.5.1 merges ambient PG*
-// variables UNDER the connection string (pgconn/config.go:245
-// `mergeSettings(defaultSettings, envSettings, connStringSettings)`), so a
-// DSN that omits the host or the database delegates the claim's SUBJECT to
-// whatever PGHOST/PGDATABASE happens to be exported — the artifact would
-// describe one database while pgx connects to another. Host AND database
-// must be explicit; anything less is refused before any connection exists
-// (exit 2, precondition — same class as an unparseable config).
+// It ALSO refuses DSNs whose EFFECTIVE host or database is not pinned by the
+// connection string (round-14 F1, corrected by round-16 M1): pgx v5.5.1
+// merges ambient PG* variables UNDER the connection string
+// (pgconn/config.go:245 `mergeSettings(defaultSettings, envSettings,
+// connStringSettings)`), so a DSN that does not pin the host or the database
+// delegates the claim's SUBJECT to whatever PGHOST/PGDATABASE happens to be
+// exported. And "pinned" is judged by PGX'S OWN precedence, not by the URL
+// path: the `dbname` (and `host`) query parameters overwrite the path/host —
+// even with an EMPTY value (pgconn/config.go:482-497; empty database is then
+// omitted from the startup message, pgconn/pgconn.go:326-328, so the SERVER
+// picks its default). The reviewer's `postgres://solvent@db/claimed?dbname=`
+// passed the wave-16 path-only guard while pgx connected elsewhere; here it
+// is refused before any connection exists (exit 2, precondition — same class
+// as an unparseable config). See pgxdsn.go for the cited replication.
 func readOnlyDSN(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme == "" {
 		return "", fmt.Errorf("database url %q is not a URL-form DSN", dsn)
 	}
-	if u.Hostname() == "" || strings.TrimPrefix(u.Path, "/") == "" {
-		return "", fmt.Errorf("database url %q lacks an explicit host and/or database — a partial DSN hands the claim's SUBJECT to ambient PG* variables (pgx pgconn/config.go parseEnvSettings), so the audited database would be chosen by the environment, not by the receipt; spell both out (round-14 F1)", dsn)
+	host, database, err := effectiveDSNClaim(dsn)
+	if err != nil {
+		return "", fmt.Errorf("database url %q is not parseable under pgx's connection-string semantics: %w", dsn, err)
+	}
+	if host == "" || database == "" {
+		return "", fmt.Errorf("database url %q does not pin an effective host and/or database under pgx's OWN precedence (path, then dbname/host query-parameter override INCLUDING empty values — pgconn/config.go:482-497): the claim's SUBJECT would be chosen by ambient PG* variables or by the server's default database, not by the receipt; spell both out, and never with an empty override (round-14 F1 / round-16 M1)", dsn)
 	}
 	q := u.Query()
 	q.Set("options", "-c default_transaction_read_only=on")
@@ -623,6 +633,16 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	if err != nil {
 		return exitPrecondition, err
 	}
+	// Round-16 M2: APPDATA joins the verdict whenever it can SELECT the
+	// connection's TLS trust material (pgconn defaults_windows.go:32-44 fill
+	// sslcert/sslkey/sslrootcert from %APPDATA%\postgresql when the DSN does
+	// not pin them; config.go:685-699 loads that root into TLS verification).
+	// DSN-aware, so it is judged here — where the DSN exists — and joins the
+	// SAME taint set as every value-only env row (round-10 F2).
+	if msg := appdataTrustTaint(reconDSN); msg != "" {
+		taints = append(taints, msg)
+		stampAcceptance(rep, taints)
+	}
 
 	// Recon-specific RPC configuration (controller gate amendment): the ETH
 	// recon endpoint must be archive-state capable; SOLVENT_RECON_RPC_* take
@@ -649,11 +669,14 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	opURLs := urlsFor("op", "SOLVENT_RECON_RPC_OP")
 	ethURLs := urlsFor("eth", "SOLVENT_RECON_RPC_ETH")
 	rep.Run["rpc_source"] = rpcSource
-	// The DSN's parsed intent is recorded as a CLAIM only (round-14 F1); the
-	// artifact's db identity — run.db_name and run.db_identity — is written
-	// after Phase 1 from what the SERVER said over the snapshot's own
-	// connection, never from this string.
-	rep.Run["db_name_claimed"] = dbNameFromDSN(reconDSN)
+	// The DSN's EFFECTIVE claim — computed the way pgx itself computes it
+	// (round-16 M1; path, then dbname query override, pgxdsn.go) — is
+	// recorded as a CLAIM only (round-14 F1); the artifact's db identity —
+	// run.db_name and run.db_identity — is written after Phase 1 from what
+	// the SERVER said over the snapshot's own connection, never from this
+	// string. The two are then COMPARED, and a mismatch taints (below).
+	claimedDB := dbNameClaimed(reconDSN)
+	rep.Run["db_name_claimed"] = claimedDB
 
 	// DSN-split tripwire (§1.2, resolving L2-1 — THE hazard).
 	if testDSN := os.Getenv("TEST_DATABASE_URL"); testDSN != "" {
@@ -821,6 +844,15 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	// intent (recorded above as db_name_claimed only).
 	rep.Run["db_name"] = p1.Identity.Database
 	rep.Run["db_identity"] = p1.Identity
+	// Round-16 M1: the claimed-vs-connected comparison is VERDICT-BEARING.
+	// Wave 16 recorded both sides honestly but let a disagreement ride as
+	// information; a mismatch the verdict ignores is a mismatch an attacker
+	// can afford. Either direction taints, through the same computeResult
+	// path as every other taint.
+	if msg := claimVsConnectedTaint(claimedDB, p1.Identity); msg != "" {
+		taints = append(taints, msg)
+		stampAcceptance(rep, taints)
+	}
 	// Cadence taints (round-14 F4) are DB-AWARE, so they join the set here,
 	// after Phase 1 read the persisted daemon cadence: an env claim that
 	// contradicts the daemon-written interval — or a looser-than-default
@@ -1078,12 +1110,38 @@ func schemaGateOK(got, expected int64) bool {
 	return got == expected
 }
 
-func dbNameFromDSN(dsn string) string {
-	u, err := url.Parse(dsn)
+// dbNameClaimed is the CLAIMED database recorded in run.db_name_claimed:
+// the EFFECTIVE database under pgx's own connection-string precedence
+// (round-16 M1) — path, then dbname query-parameter override, empty values
+// overriding too (pgconn/config.go:482-497; see pgxdsn.go). Wave 16's
+// path-only reading reported "claimed" for
+// `postgres://solvent@db/claimed?dbname=other` while pgx connected to
+// "other"; the claim is what the library computes. execute only calls this
+// after readOnlyDSN accepted the DSN, so the claim is always non-empty; the
+// error arm is a belt for any future caller.
+func dbNameClaimed(dsn string) string {
+	_, database, err := effectiveDSNClaim(dsn)
 	if err != nil {
 		return "(unparseable)"
 	}
-	return strings.TrimPrefix(u.Path, "/")
+	return database
+}
+
+// claimVsConnectedTaint makes a claimed-vs-connected database mismatch
+// VERDICT-BEARING (round-16 M1): db_name_claimed is the DSN's effective
+// claim, db_name is what the SERVER reported over the snapshot's own
+// transaction, and if the two disagree — in EITHER direction — the receipt
+// is describing a database the run did not audit or auditing one the receipt
+// does not name. Wave 16 recorded both honestly but let the mismatch ride as
+// information; a mismatch the verdict ignores is a mismatch an attacker can
+// afford. The comparison is exact (Postgres database names are identifiers;
+// the server reports the one true spelling of the database the session is
+// in).
+func claimVsConnectedTaint(claimed string, connected snapshotdb.ConnectedIdentity) string {
+	if claimed == connected.Database {
+		return ""
+	}
+	return fmt.Sprintf("claimed database %q (DSN-effective under pgx's own precedence, run.db_name_claimed) != connected database %q (server-reported over the snapshot's transaction, run.db_name): the receipt and the audited subject disagree — whichever one is 'right', a verdict issued under this mismatch would launder the other (round-16 M1)", claimed, connected.Database)
 }
 
 // resolveContracts pulls every contract address from config/fixtures at

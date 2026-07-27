@@ -1504,10 +1504,22 @@ func (s *Store) CompleteSweepGeneration(ctx context.Context, engine string, gene
 
 // RecordSweepConfiguredInterval persists the daemon's CONFIGURED sweep
 // cadence on its engine's sweep_generations row (migration 00009, round-14
-// F4). The daemon calls it every round: the interval is a fact about the
+// F4), stamped with the generation it belongs to (migration 00010, round-16
+// M4). The daemon calls it every round: the interval is a fact about the
 // RUNNING daemon, and making it durable is what lets reconcile evaluate the
 // daemon's real freshness rule 2*(interval+lastPass) from database state
 // instead of trusting an unverifiable env assertion.
+//
+// THE GENERATION STAMP is what SweepGenerationRow's current-generation-only
+// read requires: configured_interval_generation = current_generation is set
+// in the SAME UPDATE as the seconds, so "this cadence" and "the generation
+// it describes" are one indivisible fact — there is no window in which the
+// value exists unstamped or stamped with a generation it was not written
+// under. Reading current_generation from the row itself (not a parameter)
+// keeps the stamp truthful even if a generation bump lands between the
+// caller's last read and this write. The guard re-fires the write whenever
+// EITHER the seconds or the stamp is stale, so a generation bump is
+// re-stamped by the very next daemon round.
 //
 // UPDATE, never upsert, deliberately: OpenSweepGeneration owns the row's
 // creation semantics (INSERT starts current_generation at 1), and an upsert
@@ -1515,21 +1527,25 @@ func (s *Store) CompleteSweepGeneration(ctx context.Context, engine string, gene
 // has never opened a sweep — state no daemon produced. Before the first
 // generation ever opens there is no sweep evidence for reconcile to judge
 // anyway; once the row exists, the very next daemon round lands the
-// interval. Nothing that opens or completes a generation names this column,
-// so the value survives opens, completions and rewind bumps exactly like
-// last_pass_seconds (00008's load-bearing omission).
+// interval. Nothing that opens or completes a generation names these
+// columns — the binding to the current generation is enforced at READ time
+// (the 00010 CASE mask), so a bump silently retires the old stamp without
+// rewriting history, exactly like last_pass_seconds survives opens (00008's
+// load-bearing omission).
 //
 // wrote=false with a nil error means either "no row yet" or "already
-// current" (IS DISTINCT FROM guard) — both are healthy; callers retry next
-// round by construction.
+// current and stamped" (the IS DISTINCT FROM guards) — both are healthy;
+// callers retry next round by construction.
 func (s *Store) RecordSweepConfiguredInterval(ctx context.Context, engine string, interval time.Duration) (wrote bool, err error) {
 	secs := int64(interval / time.Second)
 	if secs <= 0 {
 		return false, fmt.Errorf("record configured sweep interval for %q: %v is not a positive whole-second cadence", engine, interval)
 	}
 	ct, err := s.pool.Exec(ctx, `UPDATE sweep_generations
-		SET configured_interval_seconds = $2
-		WHERE engine = $1 AND configured_interval_seconds IS DISTINCT FROM $2`,
+		SET configured_interval_seconds = $2,
+		    configured_interval_generation = current_generation
+		WHERE engine = $1 AND (configured_interval_seconds IS DISTINCT FROM $2
+		   OR configured_interval_generation IS DISTINCT FROM current_generation)`,
 		engine, secs)
 	if err != nil {
 		return false, fmt.Errorf("record configured sweep interval for %q: %w", engine, err)

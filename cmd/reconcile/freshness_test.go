@@ -15,17 +15,25 @@ import (
 	"github.com/kaselunt/solvent/internal/store"
 )
 
-func TestFreshnessBoundIsPolicyMax(t *testing.T) {
-	// Arm 1: 2× snapshot interval dominates.
-	bound, inputs := freshnessBound(time.Hour, nil)
-	require.Equal(t, 2*time.Hour, bound)
-	require.Equal(t, "policy", inputs["label"], "the bound is POLICY, not a contract quantity (risk-quant F7)")
-	require.Equal(t, "(null)", inputs["last_pass_seconds"])
-	// Arm 2: 2× last observed pass dominates.
-	lp := int64(2 * 3600 * 3) // 6h pass
-	bound, inputs = freshnessBound(time.Hour, &lp)
-	require.Equal(t, 12*time.Hour, bound)
-	require.Equal(t, "12h0m0s", inputs["resolved_bound"])
+// TestFreshnessBoundIsPolicyMax is GONE with freshnessBound itself (round-16
+// M4): the wave-15 max(2×interval, 2×lastPass) auto bound died — round 16
+// proved it could be WIDER than the daemon's real additive rule. Every auto
+// bound now comes out of sweepCadenceEvaluation, whose two arms (policy from
+// the generation-bound persisted cadence; advisory-under-taint otherwise)
+// are regression-tested in cadence_f4_test.go and env_test.go.
+
+func TestFreshnessBoundLabelsSurviveEvaluation(t *testing.T) {
+	// The label contract evaluateFreshness consumers rely on: the persisted
+	// arm is "policy", the unverified arm is advisory and NEVER "policy".
+	clearPgxEnv(t)
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "")
+	persisted := int64(3600)
+	_, inputs, _ := sweepCadenceEvaluation(store.SweepGenerationState{Found: true, ConfiguredIntervalSeconds: &persisted})
+	require.Equal(t, "policy", inputs["label"], "the generation-bound daemon cadence is the POLICY bound (risk-quant F7)")
+	_, inputs, taints := sweepCadenceEvaluation(store.SweepGenerationState{Found: true})
+	require.NotEqual(t, "policy", inputs["label"], "an unverified cadence must never present as policy")
+	require.Contains(t, inputs["label"], "advisory")
+	require.NotEmpty(t, taints)
 }
 
 func TestEvaluateFreshnessGateAndFleet(t *testing.T) {

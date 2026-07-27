@@ -817,22 +817,35 @@ type sweepIntervalWriter interface {
 }
 
 // persistSweepInterval writes the CONFIGURED sweep cadence onto the engine's
-// durable sweep_generations row (round-14 F4, migration 00009). Called once
-// at startup and once per round beside the snapshot pass: the write is a
-// single-row UPDATE guarded by IS DISTINCT FROM, so after it lands once it
-// is a no-op row-match every round, and before the first generation ever
-// opens it matches no row (the store function documents why that is the
-// correct order of authority — OpenSweepGeneration owns row creation).
+// durable sweep_generations row, stamped with the row's current generation
+// (round-14 F4 migration 00009; round-16 M4 migration 00010). Called once at
+// startup and once per round beside the snapshot pass: the write is a
+// single-row UPDATE guarded by IS DISTINCT FROM on BOTH the seconds and the
+// generation stamp, so it is a no-op row-match whenever the current
+// generation is already stamped, re-fires within one round of any
+// generation bump, and before the first generation ever opens it matches no
+// row (the store function documents why that is the correct order of
+// authority — OpenSweepGeneration owns row creation).
 //
-// A failure is logged and TOLERATED, never allowed to gate sweeps: the value
-// is evidence FOR RECONCILE, and reconcile's own fallback for its absence is
-// fail-closed (the wave-15 1h-default bound) — so an unlanded write can only
-// make reconcile stricter, never looser. The next round retries by
-// construction.
-func persistSweepInterval(ctx context.Context, w sweepIntervalWriter, engine string, interval time.Duration) {
+// A failure is TOLERATED — never allowed to gate sweeps: the value is
+// evidence FOR RECONCILE, and reconcile fails CLOSED on its absence (the
+// round-16 M4 taint — an unlanded write can only make reconcile stricter,
+// never looser; the next round retries by construction). But it is NO
+// LONGER SILENT (round-16 M4): a failure joins the round's health
+// composition under its own condition key, so a persistently-failing
+// cadence write is visible on the health surface for exactly as many rounds
+// as it keeps failing (see conditionCadenceUnpersisted for why the health
+// surface, not the sweep evidence, is the honest channel). rc is nil for
+// the pre-loop startup call — there is no round composition yet; round 1
+// re-runs the write with a live rc within one poll interval.
+func persistSweepInterval(ctx context.Context, w sweepIntervalWriter, engine string, interval time.Duration, rc roundConditions) {
 	if _, err := w.RecordSweepConfiguredInterval(ctx, engine, interval); err != nil {
-		slog.Warn("could not persist the configured sweep cadence; reconcile judges with its fail-closed fallback bound until a later round lands it",
+		slog.Warn("could not persist the configured sweep cadence; reconcile TAINTS acceptance runs until a later round lands it (round-16 M4, fail-closed)",
 			"engine", engine, "interval", interval, "err", err)
+		if rc != nil {
+			rc.set(snapshotName, conditionCadenceUnpersisted,
+				fmt.Sprintf("configured sweep cadence (%s) could not be stamped onto the current generation: %v — reconcile taints acceptance runs until this write lands; retrying next round", interval, err))
+		}
 	}
 }
 
@@ -2433,7 +2446,9 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		// And the converse direction (round-14 F4): persist the CONFIGURED
 		// cadence before the first round, so a restarted daemon's durable row
 		// describes THIS process's configuration from its first verdict on.
-		persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval)
+		// No round composition exists yet (nil rc): a failure here is logged,
+		// and round 1's in-loop call re-runs it against a live composition.
+		persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval, nil)
 	}
 	watch := progressWatch{
 		walkers: walkers, runners: runners, consumers: consumers,
@@ -2487,10 +2502,11 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 				if stepSnapshotter(ctx, snap, &snapState, rc) {
 					anyAdvanced = true
 				}
-				// Round-14 F4: keep the durable row's configured cadence
-				// current every round (no-op once landed; see
-				// persistSweepInterval for the tolerated-failure argument).
-				persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval)
+				// Round-14 F4 / round-16 M4: keep the durable row's configured
+				// cadence stamped on the CURRENT generation every round (no-op
+				// once landed and stamped; a failure joins THIS round's health
+				// composition — see persistSweepInterval).
+				persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval, rc)
 			}
 
 			// Price pass: each price worker answers any pending reorg epoch

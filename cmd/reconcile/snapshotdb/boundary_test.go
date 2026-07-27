@@ -547,43 +547,113 @@ func TestSnapshotDBCapabilityBoundary(t *testing.T) {
 	require.Equal(t, []string{"gate"}, pkgVars,
 		"the unexported gate must be the ONLY package-level var (typed check — build tags and aliases cannot hide one from the type checker)")
 
-	// (3) call-site discipline.
+	// (3) call-site discipline over inherent capabilities — closed over
+	// EVERY call shape and over the FIRST-PARTY packages (round-16 M3).
+	// Round 16 showed the wave-16 version had two open doors: it skipped
+	// every non-selector call (so `dial := pgx.Connect; dial(ctx, dsn)`
+	// passed all three boundary tests), and it disciplined internal/config
+	// but not internal/store — yet store.Open (store.go:41) creates a pgx
+	// pool and PINGS it, an unaudited network dial reachable through a
+	// package already on the import allowlist, with zero new imports.
 	var connectCalls []string
+	// sanctioned collects every identifier consumed as a DIRECT callee —
+	// the formation ban below refuses any OTHER reference to a disciplined
+	// package's function (assignment, argument, field, closure capture):
+	// a capability function that can only ever appear as the operand of a
+	// call expression cannot be aliased, stored, or passed, so every use is
+	// auditable at its call site.
+	sanctioned := map[*ast.Ident]bool{}
 	for _, f := range files {
 		ast.Inspect(f, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			obj := info.Uses[sel.Sel]
-			fn, ok := obj.(*types.Func)
-			if !ok || fn.Pkg() == nil {
-				return true
-			}
-			// Only package-level entry points matter here (methods on pgx
-			// objects operate over the one audited connection).
-			if fn.Type().(*types.Signature).Recv() != nil {
-				return true
-			}
 			pos := fset.Position(call.Pos())
-			switch fn.Pkg().Path() {
-			case "github.com/jackc/pgx/v5", "github.com/jackc/pgx/v5/pgconn", "github.com/jackc/pgx/v5/pgxpool":
-				if strings.HasPrefix(fn.Name(), "Connect") || strings.HasPrefix(fn.Name(), "ParseConfig") || strings.HasPrefix(fn.Name(), "New") {
-					connectCalls = append(connectCalls, fmt.Sprintf("%s.%s at %s", fn.Pkg().Path(), fn.Name(), pos))
-					// The one sanctioned dial must target the caller's
-					// audited DSN parameter, never a literal or a rebuilt
-					// string.
-					require.Len(t, call.Args, 2, "pgx dial at %s must be Connect(ctx, roDSN)", pos)
-					arg, ok := call.Args[1].(*ast.Ident)
-					require.True(t, ok && arg.Name == "roDSN",
-						"pgx dial at %s must take Collect's roDSN parameter — a second DSN is a second, unaudited destination (round-14 F3)", pos)
+			// Type conversions are spelled like calls; they construct data,
+			// not control flow.
+			if tv, ok := info.Types[call.Fun]; ok && tv.IsType() {
+				return true
+			}
+			// Strip parens and generic instantiation: `(pgx.Connect)(...)`
+			// and `capDetail[T](...)` are the same calls in different
+			// clothes, and the wave-16 scan would have missed the first.
+			fun := call.Fun
+			for {
+				if p, ok := fun.(*ast.ParenExpr); ok {
+					fun = p.X
+					continue
 				}
-			case "github.com/kaselunt/solvent/internal/config":
-				t.Fatalf("call to %s.%s at %s — internal/config is imported for TYPES only; calling into it re-acquires file/env capabilities through a first-party door (round-14 F3)", fn.Pkg().Path(), fn.Name(), pos)
+				if ix, ok := fun.(*ast.IndexExpr); ok {
+					fun = ix.X
+					continue
+				}
+				if ix, ok := fun.(*ast.IndexListExpr); ok {
+					fun = ix.X
+					continue
+				}
+				break
+			}
+			switch callee := fun.(type) {
+			case *ast.FuncLit:
+				// An inline literal: its body is part of THIS package's
+				// sources and is walked by this same inspection.
+				return true
+			case *ast.Ident:
+				switch o := info.Uses[callee].(type) {
+				case *types.Builtin, *types.TypeName:
+					return true
+				case *types.Func:
+					// Direct non-selector call (a dot-import or same-package
+					// function): joins the SAME discipline as selector calls
+					// — the wave-16 scan's skip here was the gap round 16
+					// named alongside local aliasing.
+					sanctioned[callee] = true
+					connectCalls = disciplineForeignCall(t, o, call, pos, connectCalls)
+					return true
+				case *types.Var:
+					// A call through a function VALUE held by a local
+					// identifier (`cancel()`, `resolvePin(...)`). Permitted
+					// ONLY because of the formation ban below: with every
+					// disciplined-package function refused outside direct
+					// call position, and func-typed params/fields/package
+					// vars refused by the API-surface tests, such a value
+					// can only be an in-package func literal or a value an
+					// allowlisted import returned (e.g. context.CancelFunc —
+					// covered by that import's capability argument).
+					return true
+				default:
+					t.Fatalf("call at %s: callee identifier %q does not resolve (%T) — extend the boundary deliberately or remove the call", pos, callee.Name, o)
+				}
+			case *ast.SelectorExpr:
+				// A call through a function stored in a struct FIELD is a
+				// capability hook regardless of whose struct it is — pgx's
+				// own ConnConfig.DialFunc is the canonical example; this
+				// package's declared types are already func-field-free.
+				if selInfo, ok := info.Selections[callee]; ok && selInfo.Kind() == types.FieldVal {
+					t.Fatalf("call at %s goes through function-typed FIELD %s — a function value parked in a struct is round 13's evasion shape with a foreign struct as the parking lot", pos, selInfo.String())
+				}
+				switch o := info.Uses[callee.Sel].(type) {
+				case *types.Builtin, *types.TypeName:
+					return true
+				case *types.Func:
+					sanctioned[callee.Sel] = true
+					// Methods dispatch over a receiver constructed from the
+					// allowlisted imports (pgx objects operate over the one
+					// audited connection); package-level entry points are
+					// where capabilities enter.
+					if o.Type().(*types.Signature).Recv() != nil {
+						return true
+					}
+					connectCalls = disciplineForeignCall(t, o, call, pos, connectCalls)
+					return true
+				case *types.Var:
+					t.Fatalf("call at %s goes through a function VALUE reached by selector (%s) — a foreign package-level function value is a capability this scan cannot pin to a call site", pos, callee.Sel.Name)
+				default:
+					t.Fatalf("call at %s: selector callee %q does not resolve (%T)", pos, callee.Sel.Name, o)
+				}
+			default:
+				t.Fatalf("call at %s has callee shape %T — extend the boundary deliberately or restructure the call", pos, fun)
 			}
 			return true
 		})
@@ -591,4 +661,130 @@ func TestSnapshotDBCapabilityBoundary(t *testing.T) {
 	require.Len(t, connectCalls, 1,
 		"the package must contain EXACTLY ONE pgx dial call site (found %v) — pgx can dial arbitrary hosts, so every additional connect is an unaudited network capability under the open snapshot (round-14 F3)", connectCalls)
 	require.Contains(t, connectCalls[0], "github.com/jackc/pgx/v5.Connect", "the one dial must be pgx.Connect")
+
+	// (4) THE FORMATION BAN (round-16 M3): no function of a disciplined
+	// package may be referenced anywhere except as the operand of a call.
+	// `dial := pgx.Connect` introduces no import, no interface, no field and
+	// no direct dial call — the reviewer's exact shape — and dies here.
+	// Method VALUES (recv != nil) are exempt for the same reason method
+	// CALLS are: they dispatch over a receiver already constructed from the
+	// audited imports, and cannot reach a new destination.
+	for _, f := range files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			fn, ok := info.Uses[id].(*types.Func)
+			if !ok || fn.Pkg() == nil {
+				return true
+			}
+			if fn.Type().(*types.Signature).Recv() != nil {
+				return true
+			}
+			if !disciplinedCallPkgs[fn.Pkg().Path()] {
+				return true
+			}
+			if !sanctioned[id] {
+				t.Fatalf("%s.%s is referenced as a VALUE at %s — a locally-aliased capability function escapes call-site discipline; disciplined-package functions may appear ONLY in direct call position (round-16 M3)",
+					fn.Pkg().Path(), fn.Name(), fset.Position(id.Pos()))
+			}
+			return true
+		})
+	}
+}
+
+// disciplinedCallPkgs are the packages whose PACKAGE-LEVEL functions are
+// individually disciplined at every call site (and banned from value
+// formation): the driver family, whose entry points dial, and the two
+// first-party imports, whose entry points must not become side doors.
+// Everything else callable is bounded by the import allowlist's
+// whole-capability-set argument.
+var disciplinedCallPkgs = map[string]bool{
+	"github.com/jackc/pgx/v5":                     true,
+	"github.com/jackc/pgx/v5/pgconn":              true,
+	"github.com/jackc/pgx/v5/pgxpool":             true,
+	"github.com/kaselunt/solvent/internal/config": true,
+	"github.com/kaselunt/solvent/internal/store":  true,
+}
+
+// auditedStoreEntryPoints is the EXACT set of internal/store package-level
+// functions snapshotdb may call (round-16 M3): named symbols, never the
+// whole package. Every entry is a read-only query helper whose database
+// access flows through the store.Querier it is HANDED — the open snapshot
+// transaction — which is what makes it auditable: it cannot dial, retry, or
+// touch any connection this package did not give it. store.Open is the
+// counterexample that forced this list: it takes a DSN, creates a pgxpool
+// and PINGS it — a network dial with retry semantics — and before round 16
+// it was reachable under the closed gate without tripping any boundary
+// test. The call-time Querier-parameter check in disciplineForeignCall is
+// the structural belt: an entry point that acquires its own connection has
+// no Querier to take.
+var auditedStoreEntryPoints = map[string]bool{
+	"AaveIntervalEventCount":             true,
+	"AsOfEventSums":                      true,
+	"AssetNetSums":                       true,
+	"CollateralHistoryDocsAtLastSuccess": true,
+	"CountReconRows":                     true,
+	"DeriveCursorStates":                 true,
+	"EventBalanceInternalCheck":          true,
+	"IngestCursorStates":                 true,
+	"InvariantAaveIndexRegressions":      true,
+	"InvariantBorrowIndexRegressions":    true,
+	"InvariantDistinctHashViolations":    true,
+	"InvariantEventLogOrphans":           true,
+	"InvariantEventSumMismatches":        true,
+	"InvariantIIUCoverageGaps":           true,
+	"LatestAPYObservation":               true,
+	"LatestRateIndexAt":                  true,
+	"MaxReorgEpochs":                     true,
+	"ReconBalancesForAccounts":           true,
+	"ReconHighestLogAtOrBelow":           true,
+	"ResidueZeroedAssets":                true,
+	"SampleDMBorrowers":                  true,
+	"SnapshotFreshnessRows":              true,
+	"StableSnapBorrowPresence":           true,
+	"SweepGenerationRow":                 true,
+	"TopAaveDebtAccounts":                true,
+}
+
+// disciplineForeignCall applies the per-package call rules to one direct
+// call of a package-level function, whatever shape the call took. It
+// returns the (possibly grown) list of pgx dial call sites.
+func disciplineForeignCall(t *testing.T, fn *types.Func, call *ast.CallExpr, pos token.Position, connectCalls []string) []string {
+	t.Helper()
+	if fn.Pkg() == nil {
+		return connectCalls
+	}
+	switch fn.Pkg().Path() {
+	case "github.com/jackc/pgx/v5", "github.com/jackc/pgx/v5/pgconn", "github.com/jackc/pgx/v5/pgxpool":
+		if strings.HasPrefix(fn.Name(), "Connect") || strings.HasPrefix(fn.Name(), "ParseConfig") || strings.HasPrefix(fn.Name(), "New") {
+			connectCalls = append(connectCalls, fmt.Sprintf("%s.%s at %s", fn.Pkg().Path(), fn.Name(), pos))
+			// The one sanctioned dial must target the caller's audited DSN
+			// parameter, never a literal or a rebuilt string.
+			require.Len(t, call.Args, 2, "pgx dial at %s must be Connect(ctx, roDSN)", pos)
+			arg, ok := call.Args[1].(*ast.Ident)
+			require.True(t, ok && arg.Name == "roDSN",
+				"pgx dial at %s must take Collect's roDSN parameter — a second DSN is a second, unaudited destination (round-14 F3)", pos)
+		}
+	case "github.com/kaselunt/solvent/internal/config":
+		t.Fatalf("call to %s.%s at %s — internal/config is imported for TYPES only; calling into it re-acquires file/env capabilities through a first-party door (round-14 F3)", fn.Pkg().Path(), fn.Name(), pos)
+	case "github.com/kaselunt/solvent/internal/store":
+		if !auditedStoreEntryPoints[fn.Name()] {
+			t.Fatalf("call to %s.%s at %s — internal/store is allowlisted as a package but its entry points are audited INDIVIDUALLY (round-16 M3): store.Open dials and pings whatever DSN it is handed, so an unaudited store call under the closed gate is exactly the capability this boundary exists to refuse; argue the symbol onto auditedStoreEntryPoints first", fn.Pkg().Path(), fn.Name(), pos)
+		}
+		// Structural belt: an audited entry point queries through the
+		// transaction it is handed. A function with no store.Querier
+		// parameter owns its own connection by construction.
+		sig := fn.Type().(*types.Signature)
+		hasQuerier := false
+		for i := 0; i < sig.Params().Len(); i++ {
+			if types.TypeString(types.Unalias(sig.Params().At(i).Type()), nil) == "github.com/kaselunt/solvent/internal/store.Querier" {
+				hasQuerier = true
+			}
+		}
+		require.True(t, hasQuerier,
+			"store.%s at %s takes no store.Querier parameter — an audited entry point must read through the transaction snapshotdb hands it, never through a connection of its own (round-16 M3)", fn.Name(), pos)
+	}
+	return connectCalls
 }

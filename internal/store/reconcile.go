@@ -822,12 +822,19 @@ func SnapshotFreshnessRows(ctx context.Context, q Querier, engine string) ([]Acc
 // bound: LastPassSeconds is the SAME durable column the daemon's own
 // collateralStaleBound hydrates from (brief §7 / L2-9), so reconcile judges
 // with the bound the deployment actually achieves.
-// ConfiguredIntervalSeconds (migration 00009, round-14 F4) is the daemon's
-// CONFIGURED cadence, written by the daemon itself every round: reconcile
-// evaluates the daemon's real rule 2*(interval+lastPass) from this persisted
-// pair and demotes the env copy of the interval to a cross-check. NULL means
-// no daemon has written it yet (pre-00009 rows) — reconcile falls back to
-// the wave-15 1h-default bound, fail-closed.
+// ConfiguredIntervalSeconds (migration 00009, round-14 F4; generation-bound
+// by migration 00010, round-16 M4) is the daemon's CONFIGURED cadence AS
+// STAMPED ON THE CURRENT SWEEP GENERATION: SweepGenerationRow's SQL surfaces
+// it only when configured_interval_generation = current_generation, so a
+// value a prior generation (or a dead daemon instance whose re-stamp never
+// landed) wrote is UNREADABLE BY CONSTRUCTION — this field can never carry
+// it, and no Go-side judgment filters it. Reconcile evaluates the daemon's
+// real rule 2*(interval+lastPass) from this pair and demotes the env copy of
+// the interval to a cross-check. NIL means no cadence is stamped on the
+// current generation (pre-00010 rows included) — reconcile TAINTS on that
+// (round-16 M4: an acceptance verdict never rests on an unverified cadence;
+// the daemon re-stamps every round, so the taint clears itself one round
+// after restart or generation open — fail-closed, never fail-forever).
 type SweepGenerationState struct {
 	Found                     bool
 	CurrentGeneration         int64
@@ -837,13 +844,16 @@ type SweepGenerationState struct {
 	ConfiguredIntervalSeconds *int64
 }
 
-// SweepGenerationRow reads engine's sweep_generations row.
+// SweepGenerationRow reads engine's sweep_generations row. The CASE mask is
+// the round-16 M4 mechanism: the cadence column crosses this boundary only
+// under a current-generation stamp — stale values never leave the database.
 func SweepGenerationRow(ctx context.Context, q Querier, engine string) (SweepGenerationState, error) {
 	var s SweepGenerationState
 	var opened, completed pgtype.Timestamptz
 	var lastPass, configured pgtype.Int8
 	err := q.QueryRow(ctx,
-		`SELECT current_generation, opened_at, completed_at, last_pass_seconds, configured_interval_seconds
+		`SELECT current_generation, opened_at, completed_at, last_pass_seconds,
+		        CASE WHEN configured_interval_generation = current_generation THEN configured_interval_seconds END
 		 FROM sweep_generations WHERE engine = $1`, engine).
 		Scan(&s.CurrentGeneration, &opened, &completed, &lastPass, &configured)
 	if err == pgx.ErrNoRows {

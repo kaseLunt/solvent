@@ -72,6 +72,24 @@ import (
 // failures were invisible to a supervisor.
 const conditionStepError = "step_error"
 
+// conditionCadenceUnpersisted is the condition key for the snapshotter when
+// the round's configured-cadence write (persistSweepInterval, round-14 F4 /
+// round-16 M4) failed. It is its OWN key, not step_error, because
+// stepSnapshotter already publishes step_error for the snapshotter and one
+// condition key must identify one publisher (roundConditions.set treats a
+// same-key double-write as a collision); the two conditions coexist on the
+// worker. WHY THE HEALTH SURFACE and not the sweep evidence: the failing
+// operation IS a write to the database that carries the sweep evidence — a
+// channel that just refused a one-column UPDATE cannot be trusted to
+// durably record its own refusal — while this surface is process-local,
+// already the daemon's failure-visibility contract, and self-clearing (the
+// round composition REPLACES each round, so the first landed write makes
+// the condition disappear — recovery stays visible, healthState.publishRound).
+// The consequence it surfaces is real: while the cadence is unstamped,
+// every reconcile acceptance run TAINTS (round-16 M4 — an acceptance
+// verdict never rests on an unverified cadence).
+const conditionCadenceUnpersisted = "cadence_unpersisted"
+
 // conditionNoProgress is the condition key for a worker that has made no DURABLE
 // progress within noProgressBound. It is the silent-stall detector: a worker that
 // neither errors nor advances reports nothing at all, and before this key existed
