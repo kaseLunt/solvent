@@ -269,10 +269,22 @@ func abort(code int, status, format string, args ...any) *runAbort {
 
 // readOnlyDSN forces default_transaction_read_only=on at the SESSION level:
 // even autocommit statements on this connection cannot write.
+//
+// It ALSO refuses PARTIAL DSNs (round-14 F1): pgx v5.5.1 merges ambient PG*
+// variables UNDER the connection string (pgconn/config.go:245
+// `mergeSettings(defaultSettings, envSettings, connStringSettings)`), so a
+// DSN that omits the host or the database delegates the claim's SUBJECT to
+// whatever PGHOST/PGDATABASE happens to be exported — the artifact would
+// describe one database while pgx connects to another. Host AND database
+// must be explicit; anything less is refused before any connection exists
+// (exit 2, precondition — same class as an unparseable config).
 func readOnlyDSN(dsn string) (string, error) {
 	u, err := url.Parse(dsn)
 	if err != nil || u.Scheme == "" {
 		return "", fmt.Errorf("database url %q is not a URL-form DSN", dsn)
+	}
+	if u.Hostname() == "" || strings.TrimPrefix(u.Path, "/") == "" {
+		return "", fmt.Errorf("database url %q lacks an explicit host and/or database — a partial DSN hands the claim's SUBJECT to ambient PG* variables (pgx pgconn/config.go parseEnvSettings), so the audited database would be chosen by the environment, not by the receipt; spell both out (round-14 F1)", dsn)
 	}
 	q := u.Query()
 	q.Set("options", "-c default_transaction_read_only=on")
@@ -309,7 +321,7 @@ func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, c
 	// check is FIRST — before the runner, before the limiter, before any
 	// dial — in every entry point, so a network attempt while the snapshot
 	// transaction is open fails closed however it was reached.
-	if err := snapshotdb.Gate.Violation(fmt.Sprintf("headerHash(%d)", n)); err != nil {
+	if err := snapshotdb.Gate().Violation(fmt.Sprintf("headerHash(%d)", n)); err != nil {
 		return common.Hash{}, chain.EndpointToken{}, err
 	}
 	var out common.Hash
@@ -324,7 +336,7 @@ func (r *pinnedReader) headerHash(ctx context.Context, n uint64) (common.Hash, c
 }
 
 func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.EndpointToken, error) {
-	if err := snapshotdb.Gate.Violation(fmt.Sprintf("headerTime(%d)", n)); err != nil {
+	if err := snapshotdb.Gate().Violation(fmt.Sprintf("headerTime(%d)", n)); err != nil {
 		return 0, chain.EndpointToken{}, err
 	}
 	var out uint64
@@ -339,7 +351,7 @@ func (r *pinnedReader) headerTime(ctx context.Context, n uint64) (uint64, chain.
 }
 
 func (r *pinnedReader) callAtHash(ctx context.Context, op string, to common.Address, data []byte, hash common.Hash) ([]byte, chain.EndpointToken, error) {
-	if err := snapshotdb.Gate.Violation("callAtHash:" + op); err != nil {
+	if err := snapshotdb.Gate().Violation("callAtHash:" + op); err != nil {
 		return nil, chain.EndpointToken{}, err
 	}
 	var out []byte
@@ -408,7 +420,7 @@ func (r *pinnedReader) secondOpinion(ctx context.Context, op string, to common.A
 	// secondOpinion bypasses the runner (single deliberate attempt), so it
 	// carries its own gate check; its signature has no error path, so the
 	// violation is returned as the recorded note — still never corroboration.
-	if err := snapshotdb.Gate.Violation("secondOpinion:" + op); err != nil {
+	if err := snapshotdb.Gate().Violation("secondOpinion:" + op); err != nil {
 		return err.Error(), nil
 	}
 	if r.c.EndpointCount() <= 1 {
@@ -637,7 +649,11 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	opURLs := urlsFor("op", "SOLVENT_RECON_RPC_OP")
 	ethURLs := urlsFor("eth", "SOLVENT_RECON_RPC_ETH")
 	rep.Run["rpc_source"] = rpcSource
-	rep.Run["db_name"] = dbNameFromDSN(reconDSN)
+	// The DSN's parsed intent is recorded as a CLAIM only (round-14 F1); the
+	// artifact's db identity — run.db_name and run.db_identity — is written
+	// after Phase 1 from what the SERVER said over the snapshot's own
+	// connection, never from this string.
+	rep.Run["db_name_claimed"] = dbNameFromDSN(reconDSN)
 
 	// DSN-split tripwire (§1.2, resolving L2-1 — THE hazard).
 	if testDSN := os.Getenv("TEST_DATABASE_URL"); testDSN != "" {
@@ -798,6 +814,22 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		return exitPrecondition, err
 	}
 	phase1Done = true
+	// CONNECTED identity (round-14 F1): the artifact's db identity is the
+	// tuple the SERVER reported over the snapshot's own connection —
+	// current_database / inet_server_addr / inet_server_port / server
+	// version plus the physical cluster identity — never the DSN's parsed
+	// intent (recorded above as db_name_claimed only).
+	rep.Run["db_name"] = p1.Identity.Database
+	rep.Run["db_identity"] = p1.Identity
+	// Cadence taints (round-14 F4) are DB-AWARE, so they join the set here,
+	// after Phase 1 read the persisted daemon cadence: an env claim that
+	// contradicts the daemon-written interval — or a looser-than-default
+	// claim with no persisted interval to check it against — taints, through
+	// the SAME computeResult path as every other taint.
+	if len(p1.cadenceTaints) > 0 {
+		taints = append(taints, p1.cadenceTaints...)
+		stampAcceptance(rep, taints)
+	}
 	// -accounts replay validation (round-10 F2): a replay file that fails
 	// required-sample-size / strata-coverage / forced-anchor validation
 	// TAINTS the run, and the taint set feeds computeResult — the bypass

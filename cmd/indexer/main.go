@@ -810,6 +810,32 @@ func stepSnapshotter(ctx context.Context, snap snapshotWorker, ss *snapshotState
 	return err == nil && advanced
 }
 
+// sweepIntervalWriter is the narrow store surface persistSweepInterval needs
+// (*store.Store satisfies it; tests pass a fake).
+type sweepIntervalWriter interface {
+	RecordSweepConfiguredInterval(ctx context.Context, engine string, interval time.Duration) (bool, error)
+}
+
+// persistSweepInterval writes the CONFIGURED sweep cadence onto the engine's
+// durable sweep_generations row (round-14 F4, migration 00009). Called once
+// at startup and once per round beside the snapshot pass: the write is a
+// single-row UPDATE guarded by IS DISTINCT FROM, so after it lands once it
+// is a no-op row-match every round, and before the first generation ever
+// opens it matches no row (the store function documents why that is the
+// correct order of authority — OpenSweepGeneration owns row creation).
+//
+// A failure is logged and TOLERATED, never allowed to gate sweeps: the value
+// is evidence FOR RECONCILE, and reconcile's own fallback for its absence is
+// fail-closed (the wave-15 1h-default bound) — so an unlanded write can only
+// make reconcile stricter, never looser. The next round retries by
+// construction.
+func persistSweepInterval(ctx context.Context, w sweepIntervalWriter, engine string, interval time.Duration) {
+	if _, err := w.RecordSweepConfiguredInterval(ctx, engine, interval); err != nil {
+		slog.Warn("could not persist the configured sweep cadence; reconcile judges with its fail-closed fallback bound until a later round lands it",
+			"engine", engine, "interval", interval, "err", err)
+	}
+}
+
 // progressReader is the store surface the progress checks need (*store.Store
 // satisfies it; tests pass a fake).
 type progressReader interface {
@@ -2404,6 +2430,10 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	// judging with the naive bound it just learned not to trust.
 	if sweepEngine != "" {
 		collateral.hydrate(ctx, st, sweepEngine)
+		// And the converse direction (round-14 F4): persist the CONFIGURED
+		// cadence before the first round, so a restarted daemon's durable row
+		// describes THIS process's configuration from its first verdict on.
+		persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval)
 	}
 	watch := progressWatch{
 		walkers: walkers, runners: runners, consumers: consumers,
@@ -2453,8 +2483,14 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			// Snapshot pass: at most one multicall batch per round; a due
 			// sweep keeps the loop hot until its generation completes. The
 			// queue is durable — an error leaves it untouched for retry.
-			if snap != nil && stepSnapshotter(ctx, snap, &snapState, rc) {
-				anyAdvanced = true
+			if snap != nil {
+				if stepSnapshotter(ctx, snap, &snapState, rc) {
+					anyAdvanced = true
+				}
+				// Round-14 F4: keep the durable row's configured cadence
+				// current every round (no-op once landed; see
+				// persistSweepInterval for the tolerated-failure argument).
+				persistSweepInterval(ctx, st, sweepEngine, cfg.SnapshotInterval)
 			}
 
 			// Price pass: each price worker answers any pending reorg epoch

@@ -19,24 +19,41 @@
 // queries), config (plain data), go-ethereum/common (value types), and a
 // handful of stdlib value/encoding packages.
 //
-// The proof obligations are split across three tests:
+// Round 14 tightened the boundary from a NAMESPACE claim to a CAPABILITY
+// claim (finding 3): allowlisting `os` for one config-file read granted every
+// os capability (os.StartProcess is a network client one exec away), so the
+// config hash is now computed by the CALLER and passed in as a plain value —
+// `os` is gone from the import list entirely, and the import list states the
+// true capability set. Round 14 also ordered the cleanup (finding 2): the
+// gate exits LAST, strictly after rollback and connection close, through ONE
+// deferred function whose internal order is explicit — never through stacked
+// LIFO defers that reopened the RPC surface while the transaction still held
+// xmin.
+//
+// The proof obligations are split across four tests:
 //
 //   - TestSnapshotDBImportsAreDBOnly (this package): asserts the EXACT
 //     import allowlist — an aliased import cannot hide because import PATHS,
 //     not identifiers, are asserted; a smuggled function value cannot reach
 //     a network without importing one.
 //   - TestSnapshotDBAPISurfaceRejectsInjection (this package): asserts the
-//     package exposes no injection surface — no exported package-level var
-//     except Gate, no function-typed or interface-typed parameter, field or
-//     hook an outside caller could load a dialer into, and no in-package
-//     type assertion that could excavate a callable from an `any` field.
-//     Interface dispatch inside the package can therefore only reach code
-//     from the allowlisted imports.
+//     package exposes no injection surface — no package-level var except the
+//     unexported gate, no function-typed or interface-typed parameter, field
+//     or hook an outside caller could load a dialer into, and no in-package
+//     type assertion or type switch that could excavate a callable from an
+//     `any` field.
+//   - TestSnapshotDBCapabilityBoundary (this package, go/types): resolves
+//     UNDERLYING types, so a NAMED interface (round-14 F3's evasion shape)
+//     is caught wherever it appears; and enforces call-site discipline over
+//     the capabilities the remaining allowlist inherently grants — exactly
+//     one pgx.Connect (to the caller's DSN), zero calls into internal/config
+//     (types only).
 //   - TestProductionGateActiveThroughSnapshotLifecycle (cmd/reconcile,
 //     DB-backed): proves the RUNTIME gate below is entered and exited by
 //     Collect's own wiring — from BeginTx through commit AND through the
-//     rollback path, with the connection provably closed after — not by a
-//     test toggling it.
+//     rollback path, with the gate observed still closed AT the rollback,
+//     close, and post-close checkpoints (round-14 F2), and the connection
+//     provably closed after — not by a test toggling it.
 //
 // Collect performs EVERY DB read of the run in ONE connection and ONE RR RO
 // transaction, then COMMITS AND CLOSES before returning plain data: a slow
@@ -46,12 +63,11 @@ package snapshotdb
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"math/big"
-	"os"
 	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/jackc/pgx/v5"
@@ -67,6 +83,34 @@ const (
 	AaveEngine = "aave_v3_etherfi"
 )
 
+// CleanupStage names one checkpoint of Collect's ORDERED cleanup (round-14
+// F2). The lifecycle test holds each stage in turn and asserts the gate is
+// STILL closed there — observing the ordering while it happens, not
+// reconstructing it from post-return state.
+type CleanupStage int
+
+const (
+	// StageBeforeRollback: cleanup entered, tx.Rollback not yet issued — the
+	// server-side transaction (and its xmin) still exists.
+	StageBeforeRollback CleanupStage = iota
+	// StageBeforeClose: rollback returned, conn.Close not yet issued — the
+	// connection is still open.
+	StageBeforeClose
+	// StageAfterClose: conn.Close returned, Gate exit not yet performed —
+	// the gate must STILL be closed here; it exits last.
+	StageAfterClose
+
+	numCleanupStages
+)
+
+// cleanupTimeout bounds the graceful error-path cleanup. The cleanup runs on
+// a context derived WithoutCancel from the caller's (a canceled run must
+// still roll back and close gracefully rather than abandoning the backend),
+// so it needs its own bound against a dead server. 30s is deliberately wide:
+// while cleanup runs the gate is still CLOSED, so a slow cleanup errs in the
+// fail-closed direction (RPC stays refused), never the open one.
+const cleanupTimeout = 30 * time.Second
+
 // Sentinel is the F5 RUNTIME seam (round-11 F3, re-homed by round-13 F2).
 // Collect opens the gate for the lifetime of the repeatable-read transaction,
 // and EVERY pinnedReader entry point in cmd/reconcile (headerHash,
@@ -78,14 +122,28 @@ const (
 // The static half of the seam is this package's import allowlist (the
 // compiler as the proof); this gate is the half that fails CLOSED even on a
 // path outside this package that no static check anticipated.
-type Sentinel struct{ open atomic.Bool }
+//
+// The holds/arrived pairs are the round-14 F2 lifecycle BARRIERS: the
+// DB-backed test engages a hold, waits for cleanup to arrive at that stage,
+// observes the gate (and the server's view of the transaction/connection)
+// while cleanup is provably parked THERE, then releases. They are bools, not
+// hooks: a barrier can only DELAY the fixed rollback→close→exit order — it
+// cannot skip a step, reorder them, or carry a callable — and its worst
+// effect is keeping the gate closed longer (the fail-closed direction). Cost
+// when disengaged: one atomic load per stage per run.
+type Sentinel struct {
+	open    atomic.Bool
+	holds   [numCleanupStages]atomic.Bool
+	arrived [numCleanupStages]atomic.Bool
+}
 
 // Enter closes the process's RPC surface. Production code calls it in
 // exactly one place: Collect, immediately after BeginTx succeeds.
 func (s *Sentinel) Enter() { s.open.Store(true) }
 
 // Exit reopens the RPC surface. Production code calls it in exactly one
-// place: Collect's deferred exit, strictly after commit-and-close.
+// place: the tail of Collect's single ordered cleanup, strictly after
+// rollback/commit and connection close (round-14 F2).
 func (s *Sentinel) Exit() { s.open.Store(false) }
 
 // Violation returns a named error when op is attempted while the snapshot
@@ -97,18 +155,55 @@ func (s *Sentinel) Violation(op string) error {
 	return nil
 }
 
-// Gate is the process-wide sentinel. It is the ONE exported package-level
-// var this package may carry (TestSnapshotDBAPISurfaceRejectsInjection
-// enforces exactly that): a concrete struct over an atomic.Bool exposes no
-// behavior an outside caller could replace.
-var Gate = &Sentinel{}
+// HoldAt engages (or releases) the lifecycle barrier at stage st.
+func (s *Sentinel) HoldAt(st CleanupStage, hold bool) { s.holds[st].Store(hold) }
+
+// Arrived reports whether the ordered cleanup has reached stage st since the
+// last ResetArrivals.
+func (s *Sentinel) Arrived(st CleanupStage) bool { return s.arrived[st].Load() }
+
+// ResetArrivals clears the arrival markers between lifecycle-test legs.
+func (s *Sentinel) ResetArrivals() {
+	for i := range s.arrived {
+		s.arrived[i].Store(false)
+	}
+}
+
+// checkpoint marks arrival at st and parks while its barrier is held. The
+// order of checkpoints is fixed by the ONE cleanup function below; a barrier
+// can only stretch the timeline, never bend it.
+func (s *Sentinel) checkpoint(st CleanupStage) {
+	s.arrived[st].Store(true)
+	for s.holds[st].Load() {
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// gate is the process-wide sentinel — the ONE package-level var this package
+// may carry, and it is UNEXPORTED since round-14 F3: `var Gate` was
+// assignable from any importer (`snapshotdb.Gate = &Sentinel{}` would hand
+// the pinnedReader checks a decoy while Collect held the real one), which
+// made the sentinel itself an injection surface. Outside packages reach it
+// only through the Gate accessor; a function's identity cannot be
+// reassigned.
+var gate = &Sentinel{}
+
+// Gate returns the process-wide sentinel. Accessor, not a var, so the
+// binding between Collect's gate and the pinnedReader checks in
+// cmd/reconcile is not assignable from outside the package (round-14 F3).
+func Gate() *Sentinel { return gate }
 
 // Params are the flag-derived facts Collect consumes — plain values only,
 // carried in a struct so the API surface stays function- and interface-free.
 type Params struct {
-	// ConfigPath is hashed (sha256) into the artifact for provenance; a
-	// read failure leaves the hash empty rather than failing the run.
-	ConfigPath string
+	// ConfigSHA is the sha256 of the config file, computed by the CALLER
+	// (cmd/reconcile) and passed in as a plain value — round-14 F3 hoisted
+	// the file read out of this package so `os` (and with it StartProcess,
+	// Pipe, every non-read capability the package never needed) is not
+	// linkable from the code that holds the open snapshot transaction. A
+	// caller-side read failure leaves it empty rather than failing the run,
+	// exactly as the in-package read did.
+	ConfigSHA string
 	// PinOP / PinETH are operator pin overrides (0 = derive cursor).
 	// Overrides above the cursor are refused (W1's disproof clause).
 	PinOP  uint64
@@ -211,6 +306,57 @@ func baselineFromCursors(cursors []store.DeriveCursorState, maxEpochs map[int64]
 	return b
 }
 
+// ConnectedIdentity is the SERVER-REPORTED identity of the snapshot
+// connection (round-14 F1): what the database says about itself, read over
+// the SAME connection — inside the SAME repeatable-read transaction — that
+// every DB fact of the run came from. It exists because a DSN is a CLAIM
+// about where a connection will land, and pgx merges ambient PG* variables
+// under partial DSNs (pgconn/config.go parseEnvSettings), so the artifact
+// must record where the connection ACTUALLY landed, never what the URL
+// spelled. The tuple is the wave-11 identity set (current_database,
+// inet_server_addr, inet_server_port, server version) plus the wave-10/11
+// PHYSICAL identity (pg_control system_identifier + database OID), which no
+// transport respelling or proxy alias can fake.
+type ConnectedIdentity struct {
+	Database         string `json:"database"`
+	ServerAddr       string `json:"server_addr"` // inet_server_addr(); "(unix socket)" when null
+	ServerPort       int32  `json:"server_port"`
+	ServerVersion    string `json:"server_version"`
+	SystemIdentifier string `json:"system_identifier"` // pg_control_system()
+	DatabaseOID      int64  `json:"database_oid"`
+}
+
+// readConnectedIdentity resolves the identity over q. Any failure is an
+// error — a snapshot whose subject cannot be named by the SERVER cannot back
+// a receipt (fail closed, same law as store.DatabaseIdentity).
+func readConnectedIdentity(ctx context.Context, q store.Querier) (ConnectedIdentity, error) {
+	var id ConnectedIdentity
+	var addr *string
+	var port *int32
+	if err := q.QueryRow(ctx,
+		`SELECT current_database(),
+		        inet_server_addr()::text,
+		        inet_server_port(),
+		        current_setting('server_version'),
+		        (SELECT system_identifier::text FROM pg_control_system()),
+		        (SELECT oid::bigint FROM pg_database WHERE datname = current_database())`).
+		Scan(&id.Database, &addr, &port, &id.ServerVersion, &id.SystemIdentifier, &id.DatabaseOID); err != nil {
+		return ConnectedIdentity{}, fmt.Errorf("read connected server identity (failing CLOSED — a claim whose subject the server cannot confirm is not evidence): %w", err)
+	}
+	if addr != nil {
+		id.ServerAddr = *addr
+	} else {
+		id.ServerAddr = "(unix socket)"
+	}
+	if port != nil {
+		id.ServerPort = *port
+	}
+	if id.Database == "" || id.SystemIdentifier == "" || id.DatabaseOID == 0 {
+		return ConnectedIdentity{}, fmt.Errorf("connected server identity incomplete (%+v) — failing CLOSED", id)
+	}
+	return id, nil
+}
+
 // invariantDetailCap bounds how many violation rows land verbatim in the
 // artifact (the count is always exact; the detail is a diagnosis aid).
 const invariantDetailCap = 100
@@ -250,6 +396,10 @@ type Data struct {
 	Pins      map[string]uint64 // engine → P
 	ChainFor  map[string]string // engine → chain name
 	ConfigSHA string
+	// Identity is what the SERVER said it was, over the snapshot's own
+	// connection (round-14 F1) — the artifact's db identity is this, never
+	// the DSN's parsed intent.
+	Identity ConnectedIdentity
 
 	Baseline      RewindBaseline
 	DeriveCursors []store.DeriveCursorState
@@ -312,36 +462,61 @@ func Collect(ctx context.Context, prm Params, cfg *config.Config, roDSN string, 
 			p.ChainFor[s.Engine] = s.Chain
 		}
 	}
-	if raw, err := os.ReadFile(prm.ConfigPath); err == nil {
-		sum := sha256.Sum256(raw)
-		p.ConfigSHA = hex.EncodeToString(sum[:])
-	}
+	p.ConfigSHA = prm.ConfigSHA
 
 	conn, err := pgx.Connect(ctx, roDSN)
 	if err != nil {
 		return nil, fmt.Errorf("connect (snapshot): %w", err)
 	}
-	closed := false
-	defer func() {
-		if !closed {
-			conn.Close(ctx)
-		}
-	}()
 	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
+		// The gate was never entered; nothing ordered to unwind yet.
+		conn.Close(ctx)
 		return nil, fmt.Errorf("begin RR RO snapshot: %w", err)
 	}
-	defer tx.Rollback(ctx)
 	// The RR transaction is OPEN: close the process's RPC surface until this
 	// function returns (round-11 F3). Every pinnedReader entry point consults
 	// the gate, so ANY network attempt while the snapshot is live — whatever
 	// path smuggled it in — fails with a named seam violation instead of
-	// holding the snapshot's xmin across a retry storm. The deferred exit
-	// runs at return, strictly after the commit-and-close below — on the
-	// error path it runs after the deferred rollback's registration point,
-	// i.e. the gate NEVER outlives the transaction.
-	Gate.Enter()
-	defer Gate.Exit()
+	// holding the snapshot's xmin across a retry storm.
+	//
+	// ONE ordered cleanup (round-14 F2), never stacked defers: LIFO ordering
+	// of `defer conn.Close` / `defer tx.Rollback` / `defer Gate.Exit` ran the
+	// gate exit FIRST on every post-BeginTx error, reopening the RPC surface
+	// while the transaction still held xmin. The order here is explicit and
+	// inside a single function: rollback, then close, THEN gate exit — the
+	// gate never outlives the transaction OR the connection, on either path.
+	// Cleanup runs on a WithoutCancel context (bounded by cleanupTimeout): a
+	// canceled run must still release the server gracefully, and while it
+	// does, the gate stays closed (fail-closed in the only direction that
+	// matters). The checkpoints are the round-14 F2 observation seam — see
+	// Sentinel.
+	gate.Enter()
+	released := false
+	defer func() {
+		if released {
+			// Success path: commit and close already ran, in order, below.
+			gate.Exit()
+			return
+		}
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		defer cancel()
+		gate.checkpoint(StageBeforeRollback)
+		_ = tx.Rollback(cctx)
+		gate.checkpoint(StageBeforeClose)
+		_ = conn.Close(cctx)
+		gate.checkpoint(StageAfterClose)
+		gate.Exit()
+	}()
+
+	// --- connected identity (round-14 F1): what the server SAYS it is, over
+	// this very transaction — recorded fact, never the DSN's parsed intent.
+	// (System functions only: Collect's first RELATION read stays the
+	// derive_cursors read below, which the lifecycle test parks on.)
+	p.Identity, err = readConnectedIdentity(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------
 	p.DeriveCursors, err = store.DeriveCursorStates(ctx, tx)
@@ -561,14 +736,17 @@ func Collect(ctx context.Context, prm Params, cfg *config.Config, roDSN string, 
 
 	// COMMIT AND CLOSE (round-10 F5): the connection is gone before this
 	// function returns, so nothing downstream — where the chain readers
-	// live — can possibly hold the snapshot across RPC.
+	// live — can possibly hold the snapshot across RPC. The deferred ordered
+	// cleanup sees released=true and performs ONLY the gate exit — strictly
+	// after the close below, preserving the round-14 F2 order on the success
+	// path too.
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit snapshot (read-only): %w", err)
 	}
 	if err := conn.Close(ctx); err != nil {
 		return nil, fmt.Errorf("close snapshot connection: %w", err)
 	}
-	closed = true
+	released = true
 	return p, nil
 }
 

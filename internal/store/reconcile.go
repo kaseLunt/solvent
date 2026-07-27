@@ -822,23 +822,30 @@ func SnapshotFreshnessRows(ctx context.Context, q Querier, engine string) ([]Acc
 // bound: LastPassSeconds is the SAME durable column the daemon's own
 // collateralStaleBound hydrates from (brief §7 / L2-9), so reconcile judges
 // with the bound the deployment actually achieves.
+// ConfiguredIntervalSeconds (migration 00009, round-14 F4) is the daemon's
+// CONFIGURED cadence, written by the daemon itself every round: reconcile
+// evaluates the daemon's real rule 2*(interval+lastPass) from this persisted
+// pair and demotes the env copy of the interval to a cross-check. NULL means
+// no daemon has written it yet (pre-00009 rows) — reconcile falls back to
+// the wave-15 1h-default bound, fail-closed.
 type SweepGenerationState struct {
-	Found             bool
-	CurrentGeneration int64
-	OpenedAt          *time.Time
-	CompletedAt       *time.Time
-	LastPassSeconds   *int64
+	Found                     bool
+	CurrentGeneration         int64
+	OpenedAt                  *time.Time
+	CompletedAt               *time.Time
+	LastPassSeconds           *int64
+	ConfiguredIntervalSeconds *int64
 }
 
 // SweepGenerationRow reads engine's sweep_generations row.
 func SweepGenerationRow(ctx context.Context, q Querier, engine string) (SweepGenerationState, error) {
 	var s SweepGenerationState
 	var opened, completed pgtype.Timestamptz
-	var lastPass pgtype.Int8
+	var lastPass, configured pgtype.Int8
 	err := q.QueryRow(ctx,
-		`SELECT current_generation, opened_at, completed_at, last_pass_seconds
+		`SELECT current_generation, opened_at, completed_at, last_pass_seconds, configured_interval_seconds
 		 FROM sweep_generations WHERE engine = $1`, engine).
-		Scan(&s.CurrentGeneration, &opened, &completed, &lastPass)
+		Scan(&s.CurrentGeneration, &opened, &completed, &lastPass, &configured)
 	if err == pgx.ErrNoRows {
 		return SweepGenerationState{}, nil
 	}
@@ -857,6 +864,10 @@ func SweepGenerationRow(ctx context.Context, q Querier, engine string) (SweepGen
 	if lastPass.Valid {
 		v := lastPass.Int64
 		s.LastPassSeconds = &v
+	}
+	if configured.Valid {
+		v := configured.Int64
+		s.ConfiguredIntervalSeconds = &v
 	}
 	return s, nil
 }

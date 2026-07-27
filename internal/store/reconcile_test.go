@@ -156,12 +156,13 @@ func TestQuerierContractPoolAndTx(t *testing.T) {
 // TestSchemaVersionMatchesEmbeddedExpectation pins the Phase-0 schema gate's
 // two halves against each other: after Migrate, the database's max applied
 // goose version equals ExpectedSchemaVersion (derived from the embedded
-// migrations — currently 8).
+// migrations — currently 9, since 00009 added the daemon's durable
+// configured sweep cadence, round-14 F4).
 func TestSchemaVersionMatchesEmbeddedExpectation(t *testing.T) {
 	s := testDeriveStore(t)
 	expected, err := ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.EqualValues(t, 8, expected, "wave-10 brief: embedded expected is currently 8")
+	require.EqualValues(t, 9, expected, "embedded expected is currently 9 (migration 00009, round-14 F4)")
 	got, err := SchemaVersion(context.Background(), s.pool)
 	require.NoError(t, err)
 	require.Equal(t, expected, got)

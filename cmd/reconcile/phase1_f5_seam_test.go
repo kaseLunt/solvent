@@ -37,8 +37,8 @@ import (
 // check behind the dial machinery panics on nil here instead of returning
 // the violation.
 func TestSnapshotGateBlocksReadersWhileOpen(t *testing.T) {
-	snapshotdb.Gate.Enter()
-	defer snapshotdb.Gate.Exit()
+	snapshotdb.Gate().Enter()
+	defer snapshotdb.Gate().Exit()
 
 	r := &pinnedReader{name: "op"}
 	ctx := context.Background()
@@ -64,7 +64,7 @@ func TestSnapshotGateBlocksReadersWhileOpen(t *testing.T) {
 // the RPC surface (Stage B and the phase-2/3 welds run AFTER the snapshot
 // committed and closed, and must not inherit a stuck-closed gate).
 func TestSnapshotGateReopensAfterExit(t *testing.T) {
-	snapshotdb.Gate.Enter()
-	snapshotdb.Gate.Exit()
-	require.NoError(t, snapshotdb.Gate.Violation("headerHash"), "after exit the gate must be open again")
+	snapshotdb.Gate().Enter()
+	snapshotdb.Gate().Exit()
+	require.NoError(t, snapshotdb.Gate().Violation("headerHash"), "after exit the gate must be open again")
 }

@@ -36,8 +36,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -69,6 +71,11 @@ type phase1Data struct {
 
 	freshBound       time.Duration
 	freshBoundInputs map[string]string
+	// cadenceTaints are the round-14 F4 DB-aware taints: env-vs-persisted
+	// cadence mismatch, or a looser-than-default env claim with no persisted
+	// daemon interval to verify it against. Appended to the run's ONE taint
+	// set by execute after Phase 1 (they need the snapshot's SweepGen row).
+	cadenceTaints []string
 }
 
 type replayTarget struct {
@@ -122,8 +129,18 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 	for _, b := range vec.Borrowers {
 		spec.Borrowers = append(spec.Borrowers, common.HexToAddress(b.Address))
 	}
+	// Config-sha provenance is computed HERE, outside snapshotdb, so the
+	// snapshot package needs no `os` import at all (round-14 F3: an import
+	// allowlist is a capability boundary only if every entry's full
+	// capability set is acceptable — `os` for one file read granted
+	// StartProcess too). Read-failure semantics unchanged: empty hash.
+	var configSHA string
+	if raw, err := os.ReadFile(o.configPath); err == nil {
+		sum := sha256.Sum256(raw)
+		configSHA = hex.EncodeToString(sum[:])
+	}
 	snap, err := snapshotdb.Collect(ctx, snapshotdb.Params{
-		ConfigPath:       o.configPath,
+		ConfigSHA:        configSHA,
 		PinOP:            o.pinOP,
 		PinETH:           o.pinETH,
 		CollateralReplay: o.collateralReplay,
@@ -231,17 +248,22 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		}
 	}
 
-	// Freshness bound (§7 / F7: labeled policy) — env/flag facts, no DB.
-	// Round-13 F1: the interval input comes through the ONE resolver the env
-	// taint generator also judges (env.go) — an extreme
-	// SOLVENT_SNAPSHOT_INTERVAL still widens the recorded bound (no silent
-	// clamp), but the SAME value taints the run, so the verdict is
-	// structurally non-pass; the legitimate widening channel is the durable
-	// sweep_generations.last_pass_seconds read inside the snapshot.
+	// Freshness bound (§7 / F7: labeled policy). Round-14 F4: the bound is
+	// evaluated from the DAEMON'S PERSISTED cadence
+	// (sweep_generations.configured_interval_seconds, written by the daemon
+	// every round, read inside this run's snapshot) with the daemon's REAL
+	// rule 2×(interval+lastPass); the env var is demoted to a cross-check
+	// whose mismatch taints. Rows predating migration 00009 fall back to the
+	// wave-15 1h-default bound and keep the wave-15 env cap (fail-closed,
+	// never fail-forever, never silently widened). The taints are computed by
+	// the SAME evaluation that computes the bound, so the two cannot drift —
+	// and they are computed on EVERY path (explicit -snapshot-max-age
+	// included): an env claim that contradicts the daemon's durable state is
+	// a lie about the deployment whichever bound this run gates with.
+	bound, inputs, taints := sweepCadenceEvaluation(p.SweepGen)
+	p.cadenceTaints = taints
 	if o.snapshotMaxAge == "auto" || o.snapshotMaxAge == "" {
-		snapshotInterval, intervalSource := resolveSnapshotInterval()
-		p.freshBound, p.freshBoundInputs = freshnessBound(snapshotInterval, p.SweepGen.LastPassSeconds)
-		p.freshBoundInputs["snapshot_interval_source"] = intervalSource
+		p.freshBound, p.freshBoundInputs = bound, inputs
 	} else {
 		d, err := time.ParseDuration(o.snapshotMaxAge)
 		if err != nil {

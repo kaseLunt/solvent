@@ -1,0 +1,46 @@
+-- +goose Up
+-- FORWARD migration for round 14's fail-forever finding (task 9, reconcile):
+-- "the 1h cap creates a permanent failure for a supported daemon cadence".
+-- Nothing in 00001-00008 is edited — those versions are pushed and goose
+-- tracks applied versions by NUMBER only, so an in-place edit would silently
+-- never run on a database that already recorded the version (the 00003
+-- incident, corrected by 00004). Everything this wave needs lands here as
+-- version 9.
+--
+-- WHAT WAS MISSING. The daemon's collateral staleness rule is
+-- 2*(interval + lastPass): the ACHIEVED pass duration became durable in
+-- 00008 (last_pass_seconds), but the CONFIGURED interval existed only in the
+-- daemon's environment. Reconcile cannot observe the daemon's environment,
+-- so wave 15 capped the env-asserted interval at the 1h default — which
+-- permanently tainted every legitimately-configured wider cadence (a 2h
+-- interval is accepted daemon configuration), because lastPass alone cannot
+-- reproduce the additive interval term. The honest fix is the same one 00008
+-- made for the pass duration: the daemon WRITES its configured cadence to
+-- the durable surface that already carries the sweep evidence, and reconcile
+-- evaluates the daemon's real rule FROM THE PERSISTED ROW. The env variable
+-- demotes to a cross-check (mismatch taints); it never widens a bound again.
+--
+-- WHY THIS TABLE AND THIS SHAPE. sweep_generations is the one-row-per-engine
+-- durable sweep state the bound already hydrates from (00004 created it,
+-- 00006/00008 grew it) — the interval is a fact about the same sweeping
+-- daemon, written by the same writer. SECONDS, like last_pass_seconds, for
+-- the same reason: consumed as a Go time.Duration, whole-second resolution
+-- is far finer than anything a doubled bound can distinguish.
+--
+-- NULLABLE, NO BACKFILL, and that is load-bearing: no historical record of
+-- the configured interval exists to recover (it lived in process
+-- environments), and inventing one — e.g. assuming the 1h default — would
+-- manufacture exactly the unverifiable operator assertion this column
+-- exists to replace. NULL means "no daemon has written its cadence yet";
+-- reconcile treats NULL as the pre-migration state and falls back to the
+-- wave-15 1h-default bound (fail-closed). The daemon writes the value every
+-- round once restarted on the new binary, so the NULL window ends at the
+-- first post-upgrade daemon round — never forever.
+--
+-- Nothing that OPENS a generation names this column (OpenSweepGeneration,
+-- RewindDerived's bump), so the value survives every open/rewind exactly as
+-- last_pass_seconds does: a new generation does not un-configure the daemon.
+ALTER TABLE sweep_generations ADD COLUMN configured_interval_seconds BIGINT;
+
+-- +goose Down
+ALTER TABLE sweep_generations DROP COLUMN configured_interval_seconds;

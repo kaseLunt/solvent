@@ -12,6 +12,8 @@ import (
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,20 +90,154 @@ func scanEnvReads(t *testing.T, dir string) (literals map[string]bool, dynamic [
 	return literals, dynamic
 }
 
+// pgxModuleEnvReads enumerates the env surface of the LINKED pgx module from
+// its ACTUAL source in the module cache (round-14 F1): (a) the
+// parseEnvSettings nameMap keys in pgconn/config.go — pgx's connect-time
+// PG* lookup is a DYNAMIC os.Getenv(envname) over that map (line 429), so a
+// literal scan alone cannot see it — and (b) every LITERAL os.Getenv /
+// os.LookupEnv argument in the module's non-test, non-example sources
+// (catches pgconn/defaults_windows.go's APPDATA read). A pgx upgrade that
+// grows either set fails the closure test until the table is re-closed.
+func pgxModuleEnvReads(t *testing.T) (nameMapKeys, literals map[string]bool) {
+	t.Helper()
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/jackc/pgx/v5").Output()
+	require.NoError(t, err, "locate the pgx module in the module cache")
+	modDir := strings.TrimSpace(string(out))
+	require.NotEmpty(t, modDir)
+
+	nameMapKeys = map[string]bool{}
+	literals = map[string]bool{}
+	fset := token.NewFileSet()
+	walkErr := filepath.WalkDir(modDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			// examples/ are package main and never linked; testdata is not code.
+			if d.Name() == "examples" || d.Name() == "testdata" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			x, ok := sel.X.(*ast.Ident)
+			if !ok || x.Name != "os" || (sel.Sel.Name != "Getenv" && sel.Sel.Name != "LookupEnv") || len(call.Args) != 1 {
+				return true
+			}
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				literals[strings.Trim(lit.Value, `"`)] = true
+			}
+			return true
+		})
+		// The nameMap: inside parseEnvSettings, a map literal whose keys are
+		// the PG* env names (pgconn/config.go:408-425 in v5.5.1).
+		ast.Inspect(f, func(n ast.Node) bool {
+			fd, ok := n.(*ast.FuncDecl)
+			if !ok || fd.Name.Name != "parseEnvSettings" {
+				return true
+			}
+			ast.Inspect(fd, func(m ast.Node) bool {
+				cl, ok := m.(*ast.CompositeLit)
+				if !ok {
+					return true
+				}
+				for _, elt := range cl.Elts {
+					kv, ok := elt.(*ast.KeyValueExpr)
+					if !ok {
+						continue
+					}
+					if k, ok := kv.Key.(*ast.BasicLit); ok && k.Kind == token.STRING {
+						if name := strings.Trim(k.Value, `"`); strings.HasPrefix(name, "PG") {
+							nameMapKeys[name] = true
+						}
+					}
+				}
+				return true
+			})
+			return false
+		})
+		return nil
+	})
+	require.NoError(t, walkErr)
+	require.True(t, nameMapKeys["PGHOST"] && nameMapKeys["PGDATABASE"],
+		"sanity: the pgx enumeration must have found parseEnvSettings' nameMap")
+	require.True(t, literals["APPDATA"],
+		"sanity: the pgx enumeration must have seen pgconn/defaults_windows.go's APPDATA read")
+	return nameMapKeys, literals
+}
+
 // TestEnvSurfaceClosed is the env twin of TestFlagSurfaceClosed (round-11
-// F1 → round-13 F1): the generator must be closed over the ENTIRE env
-// surface of the binary's first-party source closure.
+// F1 → round-13 F1), extended by round-14 F1 to the LINKED-LIBRARY surface:
+// the generator must be closed over the entire env surface of the binary's
+// first-party source closure AND over everything pgx reads at connect time,
+// enumerated from pgx's own source rather than asserted from memory.
 func TestEnvSurfaceClosed(t *testing.T) {
 	classified := map[string]envSpec{}
+	var linkedRows []string
 	for _, spec := range reconEnvSurface {
 		require.NotContains(t, classified, spec.Name, "env var %s classified twice", spec.Name)
 		require.NotEmpty(t, spec.Why, "env var %s carries no justification", spec.Name)
-		if spec.Class == envTaints {
+		switch spec.Class {
+		case envTaints:
 			require.NotNil(t, spec.Taint, "env var %s is class taints but has no taint judge", spec.Name)
-		} else {
+		case envLinkedLibrary:
+			linkedRows = append(linkedRows, spec.Name)
+			if spec.Name == "APPDATA" {
+				// The ONE justified verdict-free linked row (Windows default
+				// passfile path — subject-inert, unconditionally set on
+				// Windows; see the table row's Why).
+				require.Nil(t, spec.Taint)
+			} else {
+				require.NotNil(t, spec.Taint, "linked-library env var %s must presence-taint (round-14 F1)", spec.Name)
+			}
+		default:
 			require.Nil(t, spec.Taint, "env var %s is class %s but carries a taint judge", spec.Name, spec.Class)
 		}
 		classified[spec.Name] = spec
+	}
+
+	// (0) LINKED-LIBRARY closure, BOTH directions, against pgx's real source:
+	// every env name pgx can read is classified, and every linked-library
+	// row corresponds to a read that actually exists in the linked module.
+	nameMapKeys, pgxLiterals := pgxModuleEnvReads(t)
+	pgxReads := map[string]bool{}
+	for n := range nameMapKeys {
+		pgxReads[n] = true
+	}
+	for n := range pgxLiterals {
+		pgxReads[n] = true
+	}
+	for name := range pgxReads {
+		require.Contains(t, classified, name,
+			"pgx reads env %q (module source scan) and the table does not classify it — the linked-library surface grew (round-14 F1); close the table over it", name)
+		require.Equal(t, envLinkedLibrary, classified[name].Class,
+			"env %q is read by pgx and must be classified linked-library", name)
+	}
+	for _, name := range linkedRows {
+		require.True(t, pgxReads[name],
+			"table classifies %s as linked-library but no pgx source reads it (stale row)", name)
+	}
+	// And the code's own name list (pgxEnvSurface, which builds the taint
+	// rows) must equal the nameMap exactly — the generator and the
+	// enumeration can never disagree.
+	require.Len(t, pgxEnvSurface, len(nameMapKeys), "pgxEnvSurface must mirror pgx's nameMap exactly")
+	for _, n := range pgxEnvSurface {
+		require.True(t, nameMapKeys[n], "pgxEnvSurface lists %s, which is not in pgx's parseEnvSettings nameMap", n)
 	}
 
 	// (1) FORWARD closure: every literal os.Getenv in the binary's
@@ -160,9 +296,13 @@ func TestEnvSurfaceClosed(t *testing.T) {
 	}
 
 	// (3) REVERSE closure: every table row corresponds to a real read —
-	// a literal scan hit or a canonical rpcEnv key. A stale row is a claim
-	// about a read that no longer exists.
+	// a literal scan hit, a canonical rpcEnv key, or (linked-library rows)
+	// a read in pgx's own source, already verified both ways in step (0).
+	// A stale row is a claim about a read that no longer exists.
 	for name := range classified {
+		if classified[name].Class == envLinkedLibrary {
+			continue
+		}
 		require.True(t, found[name] || rpcEnvNames[name],
 			"env-surface table classifies %s but no source reads it (stale table)", name)
 	}
@@ -193,9 +333,10 @@ func TestEnvSurfaceClosed(t *testing.T) {
 
 	// (5) Drive the taint rows through the REAL generator — the SAME
 	// acceptanceTaints call execute() makes — and the verdict.
+	clearPgxEnv(t)
 	var errBuf bytes.Buffer
-	mustTaint := []string{"1000000h", "61m", "2h", "24h", "bogus", "-5m", "0s"}
-	for _, v := range mustTaint {
+	// Pre-DB (syntax) taints: values no daemon state could ever legitimize.
+	for _, v := range []string{"bogus", "-5m", "0s"} {
 		t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", v)
 		o, err := parseFlags(nil, &errBuf)
 		require.NoError(t, err)
@@ -207,6 +348,22 @@ func TestEnvSurfaceClosed(t *testing.T) {
 		require.NotEqual(t, "pass", result, "SOLVENT_SNAPSHOT_INTERVAL=%s can never produce pass", v)
 		require.NotEqual(t, exitPass, code)
 	}
+	// Round-14 F4: syntactically-valid over-default values are NOT judged
+	// pre-DB any more — they are judged against the daemon-persisted cadence
+	// inside Phase 1 (sweepCadenceEvaluation): with no persisted interval
+	// the wave-15 cap still refuses them; with a MATCHING persisted interval
+	// they are clean (the fail-forever posture died — see cadence_f4_test).
+	for _, v := range []string{"1000000h", "61m", "2h", "24h"} {
+		t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", v)
+		o, err := parseFlags(nil, &errBuf)
+		require.NoError(t, err)
+		require.Empty(t, acceptanceTaints(o),
+			"SOLVENT_SNAPSHOT_INTERVAL=%q is judged against the persisted daemon cadence in Phase 1, not pre-DB (round-14 F4)", v)
+		_, _, taints := sweepCadenceEvaluation(store.SweepGenerationState{}) // no persisted row: wave-15 law
+		require.NotEmpty(t, taints, "with NO persisted daemon cadence, SOLVENT_SNAPSHOT_INTERVAL=%s must still taint (fallback keeps the wave-15 1h cap)", v)
+		result, _ := computeResult(0, 0, taints)
+		require.NotEqual(t, "pass", result)
+	}
 	// Canonical/tighter values do not taint: unset, the default restated,
 	// and tighter-than-default (which can only strengthen the bound).
 	for _, v := range []string{"", "1h", "60m", "30m", "1s"} {
@@ -215,6 +372,42 @@ func TestEnvSurfaceClosed(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, acceptanceTaints(o), "SOLVENT_SNAPSHOT_INTERVAL=%q weakens nothing and must not taint", v)
 	}
+
+	// (6) Round-14 F1: every pgx-read PG* variable presence-taints through
+	// the SAME generator, and the taint reaches the verdict. Empty-string
+	// values do NOT taint — that mirrors pgx's own emptiness rule
+	// (pgconn/config.go:429-431), so neutralizing == unsetting.
+	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "")
+	for _, name := range pgxEnvSurface {
+		t.Setenv(name, "surprise-value")
+		o, err := parseFlags(nil, &errBuf)
+		require.NoError(t, err)
+		taints := acceptanceTaints(o)
+		require.NotEmpty(t, taints, "%s present must taint acceptance (round-14 F1)", name)
+		require.Contains(t, strings.Join(taints, "\n"), name, "the taint must name %s", name)
+		result, code := computeResult(0, 0, taints)
+		require.NotEqual(t, "pass", result, "%s present can never produce pass", name)
+		require.NotEqual(t, exitPass, code)
+		t.Setenv(name, "")
+		o, err = parseFlags(nil, &errBuf)
+		require.NoError(t, err)
+		require.Empty(t, acceptanceTaints(o), "%s empty is absent under pgx's own rule and must not taint", name)
+	}
+	// APPDATA: classified, deliberately verdict-free (see the table row).
+	t.Setenv("APPDATA", `C:\Users\example\AppData\Roaming`)
+	o, err := parseFlags(nil, &errBuf)
+	require.NoError(t, err)
+	require.Empty(t, acceptanceTaints(o), "APPDATA is subject-inert and must not taint (Windows sets it unconditionally)")
+}
+
+// clearPgxEnv neutralizes every pgx-read variable for the duration of a
+// test, using pgx's own emptiness rule (empty == absent) so assertions about
+// OTHER taints are hermetic on machines that happen to export PG*.
+func clearPgxEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range pgxEnvSurface {
+		t.Setenv(name, "")
+	}
 }
 
 // TestExtremeSnapshotIntervalEnvIsNonPass is the round-13 F1 BINDING
@@ -222,10 +415,15 @@ func TestEnvSurfaceClosed(t *testing.T) {
 // interval. It first demonstrates the hole the finding names — under the
 // inflated bound, a snapshot refreshed YEARS ago classifies "fresh" and
 // contributes zero gate failures — and then proves the verdict chain refuses
-// anyway: the same env value taints through the real generator, and
-// computeResult makes the run structurally non-pass. Mutation W15M1
+// anyway. Since round-14 F4 the refusal runs through sweepCadenceEvaluation
+// (the same evaluation runPhase1 wires into execute's taint set): with NO
+// persisted daemon cadence the wave-15 1h cap holds unchanged, and no
+// persisted cadence can ever equal 1000000h anyway (config.Load would have
+// refused... nothing legitimizes it: a mismatch taints, a match cannot
+// exist because the daemon itself validated its interval). Mutation W15M1
 // (acceptance cap removed) must die here.
 func TestExtremeSnapshotIntervalEnvIsNonPass(t *testing.T) {
+	clearPgxEnv(t)
 	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "1000000h")
 
 	// The REAL resolver (the one runPhase1 feeds freshnessBound).
@@ -248,12 +446,13 @@ func TestExtremeSnapshotIntervalEnvIsNonPass(t *testing.T) {
 	require.Equal(t, 0, res.GateFailures, "the inflated bound really is vacuous — that is the finding")
 	require.Equal(t, "fresh", res.Sampled[0].Verdict)
 
-	// And the verdict chain refuses regardless: same env, real pipeline —
-	// parseFlags → acceptanceTaints (flag + env, one set) → computeResult.
-	var errBuf bytes.Buffer
-	o, err := parseFlags(nil, &errBuf)
-	require.NoError(t, err)
-	taints := acceptanceTaints(o)
+	// And the verdict chain refuses regardless: the SAME evaluation
+	// runPhase1 performs (bound and taints from one judgment), fed to the
+	// SAME computeResult execute() uses. No persisted daemon cadence exists
+	// here — the wave-15 fallback law refuses the loose env claim.
+	evalBound, evalInputs, taints := sweepCadenceEvaluation(store.SweepGenerationState{})
+	require.Equal(t, bound, evalBound, "no silent clamp in the fallback — the recorded bound tells the whole story")
+	require.Contains(t, evalInputs, "fallback")
 	require.NotEmpty(t, taints)
 	joined := strings.Join(taints, "\n")
 	require.Contains(t, joined, "SOLVENT_SNAPSHOT_INTERVAL=1000000h", "the taint names the env var and value")
@@ -262,10 +461,22 @@ func TestExtremeSnapshotIntervalEnvIsNonPass(t *testing.T) {
 	require.Equal(t, "tainted", result, "zero gated failures + the env taint is STILL not a pass — structurally (round-10 F2)")
 	require.Equal(t, exitVerdictFail, code)
 
+	// And a PERSISTED cadence cannot legitimize it either: any persisted
+	// value ≠ 1000000h makes the env claim a MISMATCH taint, and the bound
+	// comes from the persisted value — never widened by the env claim.
+	persisted := int64(7200)
+	pBound, _, pTaints := sweepCadenceEvaluation(store.SweepGenerationState{Found: true, ConfiguredIntervalSeconds: &persisted})
+	require.Equal(t, 4*time.Hour, pBound, "bound = 2×(2h+0) from the PERSISTED row — the 1000000h env claim never touches it")
+	require.NotEmpty(t, pTaints, "env-vs-persisted mismatch must taint")
+	result, _ = computeResult(0, 0, pTaints)
+	require.NotEqual(t, "pass", result)
+
 	// The resolver and the taint judge see ONE value: tightening the env to
-	// the canonical default clears both.
+	// the canonical default clears both (fallback path, no persisted row).
 	t.Setenv("SOLVENT_SNAPSHOT_INTERVAL", "1h")
 	interval, _ = resolveSnapshotInterval()
 	require.Equal(t, time.Hour, interval)
 	require.Empty(t, envAcceptanceTaints())
+	_, _, clean := sweepCadenceEvaluation(store.SweepGenerationState{})
+	require.Empty(t, clean)
 }
