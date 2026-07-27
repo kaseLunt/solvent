@@ -85,12 +85,24 @@ type walkerEndpointView struct {
 	errAt map[uint64]error
 	// readCost is the wall time ONE attempt against this endpoint costs,
 	// charged to the chain's advanceClock hook (wave 14, the latency-lease
-	// schedules). It models the posture Codex round 12 named: an endpoint
+	// schedules) — success and FAILURE alike (spend charges before the down
+	// check: a hung-to-timeout endpoint is `down` with readCost=T, a
+	// fast-failing one is `down` with readCost=0; both are real provider
+	// postures). It models the posture Codex round 12 named: an endpoint
 	// whose reads SUCCEED just below the chain layer's per-attempt bound, so
 	// no error and no timeout ever fires — a real state a degraded provider
 	// is in (fixture-realism law: slow-but-successful is a documented
 	// degraded posture in this repo, not an invented one). Zero costs
 	// nothing, so every pre-wave test is untouched.
+	//
+	// Since wave 17 the SAME scripted value is what the timed From methods
+	// return as the serving attempt's own elapsed (chain-truth round-15
+	// consult, Q3 fixture-realism): wall time accumulates EVERY attempt's
+	// readCost while servedElapsed carries only the SERVING endpoint's, so a
+	// schedule can make whole-Step wall and per-witness Σ DIVERGE — the
+	// divergence that makes the adjudicate-on-wall mutant killable. A fake
+	// deriving servedElapsed from wall or read count would be a fixture that
+	// cannot fail.
 	readCost time.Duration
 }
 
@@ -121,7 +133,7 @@ func (v *walkerEndpointView) headerHash(n uint64) (common.Hash, error) {
 	return common.Hash{}, fmt.Errorf("header %d not found on this endpoint", n)
 }
 
-// fakeHeaderAsk records one HeaderHashFrom call: the start the walker asked
+// fakeHeaderAsk records one HeaderHashFromTimed call: the start the walker asked
 // for, the height, and the endpoint that served it (-1 when all failed).
 type fakeHeaderAsk struct {
 	start  int
@@ -129,7 +141,7 @@ type fakeHeaderAsk struct {
 	served int
 }
 
-// fakeLogsAsk records one LogsFrom call the same way.
+// fakeLogsAsk records one LogsFromTimed call the same way.
 type fakeLogsAsk struct {
 	start    int
 	from, to uint64
@@ -154,7 +166,7 @@ type fakeEndpointChain struct {
 	advanceClock func(time.Duration)
 
 	// Recorded asks: the routing evidence the regressions assert on.
-	// blockStarts is each BlockNumberFrom's REQUESTED start — the walker's
+	// blockStarts is each BlockNumberFromTimed's REQUESTED start — the walker's
 	// routing decision, before any rotation; blockServed the endpoint that
 	// answered (-1 when all failed).
 	blockStarts []int
@@ -271,10 +283,14 @@ func (c *fakeEndpointChain) ActiveEndpoint() int { return c.active }
 
 func (c *fakeEndpointChain) EndpointCount() int { return c.count() }
 
-// BlockNumberFrom walks endpoints from start exactly as Failover.doFrom does
-// and returns the first scripted head, stamping the token with the endpoint
-// that answered. The shared hint is not read and not written.
-func (c *fakeEndpointChain) BlockNumberFrom(_ context.Context, start int) (uint64, chain.EndpointToken, error) {
+// BlockNumberFromTimed walks endpoints from start exactly as
+// Failover.doFromTimed does and returns the first scripted head, stamping
+// the token with the endpoint that answered and the SERVING endpoint's own
+// scripted readCost as servedElapsed — the same value spend charged to the
+// wall clock for that attempt, and ONLY that attempt's (failed attempts'
+// costs hit the wall but never the measurement, exactly like production).
+// The shared hint is not read and not written.
+func (c *fakeEndpointChain) BlockNumberFromTimed(_ context.Context, start int) (uint64, chain.EndpointToken, time.Duration, error) {
 	c.blockStarts = append(c.blockStarts, start)
 	n := c.count()
 	first := c.normalizeStart(start)
@@ -296,16 +312,17 @@ func (c *fakeEndpointChain) BlockNumberFrom(_ context.Context, start int) (uint6
 			continue
 		}
 		c.blockServed = append(c.blockServed, idx)
-		return v.head, chain.EndpointToken{Index: idx}, nil
+		return v.head, chain.EndpointToken{Index: idx}, v.readCost, nil
 	}
 	c.blockServed = append(c.blockServed, -1)
-	return 0, chain.EndpointToken{Index: -1}, fmt.Errorf("all rpc endpoints failed (blockNumber): %w", lastErr)
+	return 0, chain.EndpointToken{Index: -1}, 0, fmt.Errorf("all rpc endpoints failed (blockNumber): %w", lastErr)
 }
 
-// HeaderHashFrom walks endpoints from start; a view that does not carry the
-// height fails the attempt honestly and the walk rotates — the real
-// adapter's not-found behavior (chain_rawjson_test.go pins it).
-func (c *fakeEndpointChain) HeaderHashFrom(_ context.Context, start int, height uint64) (common.Hash, chain.EndpointToken, error) {
+// HeaderHashFromTimed walks endpoints from start; a view that does not carry
+// the height fails the attempt honestly and the walk rotates — the real
+// adapter's not-found behavior (chain_rawjson_test.go pins it). servedElapsed
+// is the serving endpoint's own readCost (see BlockNumberFromTimed).
+func (c *fakeEndpointChain) HeaderHashFromTimed(_ context.Context, start int, height uint64) (common.Hash, chain.EndpointToken, time.Duration, error) {
 	n := c.count()
 	first := c.normalizeStart(start)
 	var lastErr error
@@ -318,16 +335,18 @@ func (c *fakeEndpointChain) HeaderHashFrom(_ context.Context, start int, height 
 			continue
 		}
 		c.headerAsks = append(c.headerAsks, fakeHeaderAsk{start: start, height: height, served: idx})
-		return h, chain.EndpointToken{Index: idx}, nil
+		return h, chain.EndpointToken{Index: idx}, c.view(idx).readCost, nil
 	}
 	c.headerAsks = append(c.headerAsks, fakeHeaderAsk{start: start, height: height, served: -1})
-	return common.Hash{}, chain.EndpointToken{Index: -1}, fmt.Errorf("all rpc endpoints failed (headerHash %d): %w", height, lastErr)
+	return common.Hash{}, chain.EndpointToken{Index: -1}, 0, fmt.Errorf("all rpc endpoints failed (headerHash %d): %w", height, lastErr)
 }
 
-// LogsFrom walks endpoints from start and serves the window from the FIRST
-// endpoint whose getLogs answers, concatenating that one endpoint's view of
-// [from, to] — one witness per response, exactly like a real getLogs.
-func (c *fakeEndpointChain) LogsFrom(_ context.Context, start int, from, to uint64, _ []common.Address) ([]types.Log, chain.EndpointToken, error) {
+// LogsFromTimed walks endpoints from start and serves the window from the
+// FIRST endpoint whose getLogs answers, concatenating that one endpoint's
+// view of [from, to] — one witness per response, exactly like a real
+// getLogs. servedElapsed is the serving endpoint's own readCost (see
+// BlockNumberFromTimed).
+func (c *fakeEndpointChain) LogsFromTimed(_ context.Context, start int, from, to uint64, _ []common.Address) ([]types.Log, chain.EndpointToken, time.Duration, error) {
 	n := c.count()
 	first := c.normalizeStart(start)
 	var lastErr error
@@ -348,10 +367,10 @@ func (c *fakeEndpointChain) LogsFrom(_ context.Context, start int, from, to uint
 			out = append(out, v.logs[b]...)
 		}
 		c.logsAsks = append(c.logsAsks, fakeLogsAsk{start: start, from: from, to: to, served: idx})
-		return out, chain.EndpointToken{Index: idx}, nil
+		return out, chain.EndpointToken{Index: idx}, v.readCost, nil
 	}
 	c.logsAsks = append(c.logsAsks, fakeLogsAsk{start: start, from: from, to: to, served: -1})
-	return nil, chain.EndpointToken{Index: -1}, fmt.Errorf("all rpc endpoints failed (getLogs [%d,%d]): %w", from, to, lastErr)
+	return nil, chain.EndpointToken{Index: -1}, 0, fmt.Errorf("all rpc endpoints failed (getLogs [%d,%d]): %w", from, to, lastErr)
 }
 
 // The blind shared-hint bridge methods (BlockNumber/HeaderHash/Logs mirroring

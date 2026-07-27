@@ -23,6 +23,17 @@ import (
 // hung endpoint rotates to the next instead of stalling the walker forever.
 const defaultAttemptTimeout = 30 * time.Second
 
+// AttemptTimeout is the EXPORTED identity of defaultAttemptTimeout. It exists
+// for exactly one purpose: cross-package derivation binding. internal/ingest's
+// latency-lease budget is derived from this bound, and until Task 9 wave 17 it
+// RESTATED the literal (30s) with a citation comment — a mirror that could
+// drift silently (Codex round-15 finding 5: chain dropping to 5s while ingest
+// held 30s would open a new blind spot under ingest's stale budget). The
+// wave-14 report promised this export for the next chain-open wave; binding by
+// compile-time alias (`const chainAttemptTimeout = chain.AttemptTimeout`)
+// makes drift unrepresentable, which is stronger than any restate-and-assert.
+const AttemptTimeout = defaultAttemptTimeout
+
 type rpcClient interface {
 	BlockNumber(ctx context.Context) (uint64, error)
 	// ReportedHeaderByNumber returns the block's PROVIDER-REPORTED identity —
@@ -859,6 +870,40 @@ func (f *Failover) doFrom(ctx context.Context, op string, start int, fn func(ctx
 	return -1, fmt.Errorf("all rpc endpoints failed (%s): %w", op, lastErr)
 }
 
+// doFromTimed is doFrom's exact walk — the same rotation, the same
+// per-attempt timeout, the same abort-on-context behavior — with ONE
+// addition: the wall time of the SERVING attempt alone, measured around
+// exactly that attempt, is returned alongside its index. Foreign failed
+// attempts earlier in the walk (a hung endpoint spending its full
+// attemptTimeout before the walk rotates on) are deliberately OUTSIDE the
+// measurement: the elapsed value is evidence about the endpoint that
+// answered, never about the walk that found it. It exists for the timed From
+// variants below (Task 9 wave 17, Codex round-15 finding 3): the walker
+// adjudicates endpoint retention on the serving witness's own cost, and a
+// whole-walk wall would inherit other endpoints' timeouts into that
+// evidence. Every other caller keeps doFrom, so no existing path changes.
+func (f *Failover) doFromTimed(ctx context.Context, op string, start int, fn func(ctx context.Context, c rpcClient) error) (int, time.Duration, error) {
+	var lastErr error
+	for i := 0; i < len(f.clients); i++ {
+		if err := ctx.Err(); err != nil {
+			return -1, 0, fmt.Errorf("%s aborted: %w", op, err)
+		}
+		idx := (start + i) % len(f.clients)
+		attemptCtx, cancel := context.WithTimeout(ctx, f.attemptTimeout)
+		attemptBegan := time.Now()
+		err := fn(attemptCtx, f.clients[idx])
+		attemptElapsed := time.Since(attemptBegan)
+		cancel()
+		if err != nil {
+			lastErr = err
+			slog.Warn("rpc endpoint failed, rotating", "op", op, "endpoint", idx, "err", err)
+			continue
+		}
+		return idx, attemptElapsed, nil
+	}
+	return -1, 0, fmt.Errorf("all rpc endpoints failed (%s): %w", op, lastErr)
+}
+
 // AttemptError is ONE endpoint's own failure inside the pinned-call walk
 // (CallAtHashFrom), named by the endpoint that produced it — the token
 // discipline mirrored onto failures: EndpointToken names the endpoint that
@@ -1010,6 +1055,34 @@ func (f *Failover) BlockNumberFrom(ctx context.Context, startIndex int) (uint64,
 		return 0, EndpointToken{Index: -1}, err
 	}
 	return out, EndpointToken{Index: idx}, nil
+}
+
+// BlockNumberFromTimed is BlockNumberFrom plus the SERVING attempt's own
+// elapsed wall time (doFromTimed). The timed variants exist so the walker's
+// latency lease adjudicates on per-witness evidence — the Σ over a Step's
+// reads of the serving attempt's own cost — instead of a whole-walk wall
+// that inherits foreign endpoints' timeouts (Codex round-15 finding 3). The
+// signature FORCES population at every call site the walker consumes, which
+// is why the elapsed value is a return and not an EndpointToken field: a
+// field is forgettable at every producer site, a return is not (chain-truth
+// round-15 consult, Q3). Same wire question, same strict gates, same
+// caller-scoped routing as BlockNumberFrom.
+func (f *Failover) BlockNumberFromTimed(ctx context.Context, startIndex int) (uint64, EndpointToken, time.Duration, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out uint64
+	idx, served, err := f.doFromTimed(ctx, "blockNumber", start, func(ctx context.Context, c rpcClient) error {
+		v, err := c.BlockNumber(ctx)
+		if err != nil {
+			return err
+		}
+		out = v
+		return nil
+	})
+	if err != nil {
+		return 0, EndpointToken{Index: -1}, 0, err
+	}
+	return out, EndpointToken{Index: idx}, served, nil
 }
 
 // HeaderHash returns the PROVIDER-REPORTED hash of block n, under ordinary
@@ -1193,6 +1266,32 @@ func (f *Failover) HeaderHashFrom(ctx context.Context, startIndex int, n uint64)
 		return common.Hash{}, EndpointToken{Index: -1}, err
 	}
 	return out, EndpointToken{Index: idx}, nil
+}
+
+// HeaderHashFromTimed is HeaderHashFrom plus the SERVING attempt's own
+// elapsed wall time (doFromTimed) — see BlockNumberFromTimed for why the
+// timed variants exist and why the elapsed value is a return, not a token
+// field. Untimed HeaderHashFrom stays untouched: it has consumers outside
+// the walker (prices, reconcile), and a signature change there is forbidden.
+func (f *Failover) HeaderHashFromTimed(ctx context.Context, startIndex int, n uint64) (common.Hash, EndpointToken, time.Duration, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out common.Hash
+	idx, served, err := f.doFromTimed(ctx, "headerHash", start, func(ctx context.Context, c rpcClient) error {
+		rh, err := c.ReportedHeaderByNumber(ctx, new(big.Int).SetUint64(n))
+		if err != nil {
+			return err
+		}
+		if err := validateReportedHeader(rh, fmt.Sprintf("%d", n), &n); err != nil {
+			return err
+		}
+		out = *rh.Hash
+		return nil
+	})
+	if err != nil {
+		return common.Hash{}, EndpointToken{Index: -1}, 0, err
+	}
+	return out, EndpointToken{Index: idx}, served, nil
 }
 
 // HeaderTimeFrom is HeaderTime with a CALLER-SCOPED starting endpoint and an
@@ -1438,4 +1537,28 @@ func (f *Failover) LogsFrom(ctx context.Context, startIndex int, from, to uint64
 		return nil, EndpointToken{Index: -1}, err
 	}
 	return out, EndpointToken{Index: idx}, nil
+}
+
+// LogsFromTimed is LogsFrom plus the SERVING attempt's own elapsed wall time
+// (doFromTimed) — see BlockNumberFromTimed for the timed variants' contract.
+func (f *Failover) LogsFromTimed(ctx context.Context, startIndex int, from, to uint64, addrs []common.Address) ([]types.Log, EndpointToken, time.Duration, error) {
+	count := len(f.clients)
+	start := ((startIndex % count) + count) % count
+	var out []types.Log
+	idx, served, err := f.doFromTimed(ctx, "getLogs", start, func(ctx context.Context, c rpcClient) error {
+		logs, err := c.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: new(big.Int).SetUint64(from),
+			ToBlock:   new(big.Int).SetUint64(to),
+			Addresses: addrs,
+		})
+		if err != nil {
+			return err
+		}
+		out = logs
+		return nil
+	})
+	if err != nil {
+		return nil, EndpointToken{Index: -1}, 0, err
+	}
+	return out, EndpointToken{Index: idx}, served, nil
 }

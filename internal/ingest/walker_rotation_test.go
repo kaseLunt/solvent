@@ -361,9 +361,13 @@ func TestGenuineReorgRewindsAndReingestsFromTheSameStart(t *testing.T) {
 }
 
 // The resolution-failure edge: when EVERY endpoint fails the head read there
-// is no serving endpoint to route past — the seam is installed only after a
-// resolution exists (the poller's shape). The error posture carries the
-// outage; the preference is untouched.
+// is no serving endpoint to route past — since Task 9 wave 17 the Step still
+// FLOWS THROUGH the deferred seam, as its witness-less arm (R15-2b): the
+// round-2 law's antecedent is unsatisfied, so startPref AND the lease state
+// are preserved, structurally inside the one handler rather than by a return
+// that bypasses it. The error posture carries the outage; the preference is
+// untouched. (The lease-preservation half is pinned by the wave-17
+// witness-less regressions.)
 func TestResolutionFailureLeavesRoutingUntouched(t *testing.T) {
 	ch := newFakeEndpointChain(2)
 	ch.view(0).down = errors.New("dial refused")

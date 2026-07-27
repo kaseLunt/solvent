@@ -15,6 +15,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -34,6 +35,14 @@ type fakeStore struct {
 	saveErr     error
 	rewound     *rewindCall
 	highestLogs map[uint64][]byte // stored raw_logs: block -> block hash
+
+	// saveCost / clock script a SLOW STORE (Task 9 wave 17, R-E): each
+	// SaveBatch charges saveCost to the same fake wall clock the chain's
+	// reads charge, success and failure alike — a slow Postgres commit is a
+	// real posture (Codex round-15 finding 4). The lease must never see it:
+	// store time is outside the Σ-attempts measure by construction.
+	saveCost time.Duration
+	clock    func(time.Duration)
 }
 
 func (f *fakeStore) Cursor(ctx context.Context, stream string) (*store.CursorPos, error) {
@@ -41,6 +50,9 @@ func (f *fakeStore) Cursor(ctx context.Context, stream string) (*store.CursorPos
 }
 
 func (f *fakeStore) SaveBatch(ctx context.Context, stream string, chainID uint64, logs []store.RawLog, tipBlock uint64, tipHash []byte) error {
+	if f.clock != nil && f.saveCost > 0 {
+		f.clock(f.saveCost)
+	}
 	if f.saveErr != nil {
 		return f.saveErr
 	}
