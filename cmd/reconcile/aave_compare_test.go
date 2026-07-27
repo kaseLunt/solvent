@@ -1,5 +1,5 @@
-// Aave comparison-semantics tests (brief §10: rayMulHalfUp round-trip
-// against internal/derive's cases; scaled comparison; welds).
+// Aave comparison-semantics tests (brief §10: ray-math pinned to the
+// DEPLOYED token's ceiling rounding; scaled comparison; welds).
 package main
 
 import (
@@ -12,20 +12,26 @@ import (
 	"github.com/kaselunt/solvent/internal/store"
 )
 
-// TestRayMulHalfUp pins the §3.4(b) identity's one arithmetic operation to
-// WadRayMath.rayMul's half-up rounding: c = (a×b + RAY/2) / RAY. The
-// boundary case distinguishes half-up from floor.
-func TestRayMulHalfUp(t *testing.T) {
-	require.Equal(t, "2", rayMulHalfUp(big.NewInt(2), rayUnit).String())
-	// a=1, b=RAY/2: floor gives 0; HALF-UP gives 1 — the discriminating case.
-	require.Equal(t, "1", rayMulHalfUp(big.NewInt(1), halfRay).String())
-	// Just below the rounding boundary: a=1, b=RAY/2−1 → 0.
-	require.Equal(t, "0", rayMulHalfUp(big.NewInt(1), new(big.Int).Sub(halfRay, big.NewInt(1))).String())
+// TestRayMulCeil pins the §3.4(b) identity's one arithmetic operation to
+// the DEPLOYED debt token's CEILING rounding: c = ceil(a×b / RAY). The
+// below-half boundary case discriminates ceil from BOTH floor and
+// WadRayMath half-up (the rounding the harness wrongly assumed until the
+// 2026-07-27 acceptance run refuted it on-chain).
+func TestRayMulCeil(t *testing.T) {
+	// Exact multiple: no spurious +1 (kills an always-increment mutant).
+	require.Equal(t, "2", rayMulCeil(big.NewInt(2), rayUnit).String())
+	// Smallest nonzero fraction rounds UP: floor and half-up both give 0.
+	require.Equal(t, "1", rayMulCeil(big.NewInt(1), big.NewInt(1)).String())
+	// Below the half boundary: a=1, b=RAY/2−1 → ceil 1; half-up gives 0 —
+	// THE discriminating case against the refuted half-up assumption.
+	halfMinusOne := new(big.Int).Sub(new(big.Int).Rsh(rayUnit, 1), big.NewInt(1))
+	require.Equal(t, "1", rayMulCeil(big.NewInt(1), halfMinusOne).String())
 	// Fixture-scale sanity: scaled 125415 at index exactly RAY is itself.
-	require.Equal(t, "125415", rayMulHalfUp(big.NewInt(125415), rayUnit).String())
-	// Compounded index: scaled × 1.05e27 half-up.
+	require.Equal(t, "125415", rayMulCeil(big.NewInt(125415), rayUnit).String())
+	// Compounded index: 125415 × 1.05 = 131685.75 → 131686 (ceil; half-up
+	// agrees here — the below-half case above is the separator).
 	idx := new(big.Int).Mul(big.NewInt(105), new(big.Int).Exp(big.NewInt(10), big.NewInt(25), nil))
-	require.Equal(t, "131686", rayMulHalfUp(big.NewInt(125415), idx).String()) // 125415×1.05 = 131685.75 → 131686 half-up
+	require.Equal(t, "131686", rayMulCeil(big.NewInt(125415), idx).String())
 }
 
 func TestCompareScaledBitExact(t *testing.T) {
@@ -35,14 +41,27 @@ func TestCompareScaledBitExact(t *testing.T) {
 	require.Equal(t, verdictDrift, compareScaled(nil, big.NewInt(1)))
 }
 
+// TestLiveValueIdentity pins the identity to TWO REAL ON-CHAIN VECTORS
+// (ETH pin 25,627,125, hash 0x538c27da…, replayed via cast on 2026-07-27):
+// the expected values are HARD-CODED chain balanceOf reads, never computed
+// from the helper under test (the old self-referential fixture is exactly
+// how the half-up assumption survived eleven review rounds). Half-up
+// yields 137215/83 and floor the same — both false-drift these rows.
 func TestLiveValueIdentity(t *testing.T) {
-	scaled := big.NewInt(125415)
-	normalized := new(big.Int).Mul(big.NewInt(109386), new(big.Int).Exp(big.NewInt(10), big.NewInt(22), nil)) // ≈1.09386e27
-	expected := rayMulHalfUp(scaled, normalized)
-	computed, verdict := liveValueIdentity(scaled, normalized, expected)
-	require.Equal(t, expected.String(), computed)
+	// USDC leg, golden borrower 0x70daaac…: frac ≈ .235 — chain rounds UP.
+	nUSDC, ok := new(big.Int).SetString("1094089501745475497022017896", 10)
+	require.True(t, ok)
+	computed, verdict := liveValueIdentity(big.NewInt(125415), nUSDC, big.NewInt(137216))
+	require.Equal(t, "137216", computed)
 	require.Equal(t, verdictExact, verdict)
-	_, verdict = liveValueIdentity(scaled, normalized, new(big.Int).Add(expected, big.NewInt(1)))
+	// PYUSD leg, borrower 0xe649a39…: frac ≈ .043 — dust still rounds UP.
+	nPYUSD, ok := new(big.Int).SetString("1000520158840839583052050491", 10)
+	require.True(t, ok)
+	computed, verdict = liveValueIdentity(big.NewInt(83), nPYUSD, big.NewInt(84))
+	require.Equal(t, "84", computed)
+	require.Equal(t, verdictExact, verdict)
+	// One unit of disagreement stays drift — zero tolerance.
+	_, verdict = liveValueIdentity(big.NewInt(83), nPYUSD, big.NewInt(85))
 	require.Equal(t, verdictDrift, verdict)
 }
 

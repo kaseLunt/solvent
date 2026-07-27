@@ -186,7 +186,12 @@ v3.3-line deployment: the Pool ABI carries `DeficitCreated`/`DeficitCovered` and
   `−= rayDiv(amount, variableBorrowIndex)` on `Repay(reserve*, user*, repayer*, amount, useATokens)`,
   `LiquidationCall(collateralAsset*, debtAsset*, user*, debtToCover, liquidatedCollateralAmount,
   liquidator, receiveAToken)` (debt side = `debtToCover`), and `DeficitCreated(user*, debtAsset*,
-  amountCreated)` (bad-debt burn). Live debt = `rayMul(scaledDebt, variableBorrowIndex_now)`.
+  amountCreated)` (bad-debt burn). Live debt = `ceil(scaledDebt × variableBorrowIndex_now / RAY)`
+  — the DEPLOYED debt token rounds the scaled→live projection **UP** (aave-v3-origin lineage:
+  debt is never understated), NOT classic WadRayMath half-up. Proven on-chain 2026-07-27 at ETH
+  pin 25,627,125: scaled 125415 × n 1094089501745475497022017896 (frac ≈ .235) → `balanceOf`
+  137216; scaled 83 × n 1000520158840839583052050491 (frac ≈ .043) → `balanceOf` 84. Any
+  consumer replicating live debt (reconcile §3.4(b), future P3 risk math) MUST use ceiling.
 - **The index comes from `ReserveDataUpdated(reserve*, liquidityRate, stableBorrowRate,
   variableBorrowRate, liquidityIndex, variableBorrowIndex)`**, emitted by `updateState` in the same
   tx *before* the Borrow/Repay/etc. event; between updates the index compounds per-second at

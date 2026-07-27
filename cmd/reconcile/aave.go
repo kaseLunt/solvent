@@ -20,17 +20,24 @@ const aaveEngine = snapshotdb.AaveEngine
 // rayUnit is WadRayMath.RAY = 1e27.
 var rayUnit = new(big.Int).Exp(big.NewInt(10), big.NewInt(27), nil)
 
-var halfRay = new(big.Int).Rsh(rayUnit, 1) // RAY/2 (RAY is even)
-
-// rayMulHalfUp is WadRayMath.rayMul: c = (a×b + RAY/2) / RAY — the SAME
-// half-up rounding the deployed token math applies, replicated on the same
-// inputs at the same pin so the §3.4(b) live-value identity is
-// deterministic with a ZERO bound (the contract does the compounding; we do
-// one multiplication).
-func rayMulHalfUp(a, b *big.Int) *big.Int {
+// rayMulCeil replicates the DEPLOYED variable-debt token's scaled→live
+// projection: c = ceil(a×b / RAY). The pool's debt token rounds UP
+// (aave-v3-origin lineage: debt is never understated), NOT WadRayMath
+// half-up — proven on-chain at ETH pin 25,627,125 (2026-07-27 acceptance
+// run): scaled 125415 × n 1094089501745475497022017896 (frac ≈ .235) →
+// balanceOf 137216, and scaled 83 × n 1000520158840839583052050491
+// (frac ≈ .043) → balanceOf 84; half-up yields 137215 and 83 and
+// false-fails the §3.4(b) identity on exact derived state. Same QuoRem
+// shape as internal/derive's rayMulCeil. Replicated on the same inputs at
+// the same pin, the identity stays deterministic with a ZERO bound (the
+// contract does the compounding; we do one multiplication).
+func rayMulCeil(a, b *big.Int) *big.Int {
 	out := new(big.Int).Mul(a, b)
-	out.Add(out, halfRay)
-	return out.Quo(out, rayUnit)
+	q, r := new(big.Int).QuoRem(out, rayUnit, new(big.Int))
+	if r.Sign() != 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q
 }
 
 // aaveRowResult is one gated (or labeled-supplementary) Aave comparison.
@@ -69,7 +76,7 @@ func compareScaled(derived, chain *big.Int) string {
 
 // liveValueIdentity evaluates the §3.4(b) leg on already-fetched values.
 func liveValueIdentity(derivedScaled, normalizedDebt, chainBalance *big.Int) (computed string, verdict string) {
-	c := rayMulHalfUp(derivedScaled, normalizedDebt)
+	c := rayMulCeil(derivedScaled, normalizedDebt)
 	if c.Cmp(chainBalance) == 0 {
 		return c.String(), verdictExact
 	}
