@@ -41,3 +41,16 @@ Comment-only fix applied same-session: the rayMulCeil header now states the evid
 as two empirical vectors at one pin (refutes half-up/floor; consistent with ceiling +
 lineage; NOT source-level or exhaustive), and the `aaveRowResult` field comment names
 rayMulCeil. gofmt(blob)/vet/suite green. Returned for the D-006 closing review.
+
+## Closing review (same round, comment-only diff)
+
+- **Target:** `8e33a04..3101df8`, `cmd/reconcile/aave.go` only (SDD docs excluded per scope).
+- **Verdict: SHIP (approve) — no material findings.** Session
+  `019fa5e1-f023-7280-a32e-34d3cf9a310c`; job `review-ms3up2go-2lr5gn`.
+- Reviewer confirmations: diff genuinely comment-only ("ignoring comment lines leaves
+  an empty diff" — no signature/runtime/whitespace-disguised changes); all references
+  name rayMulCeil, no stale rayMulHalfUp; evidence wording accurately limited to two
+  vectors at ETH pin 25,627,125 with consistency-vs-proof correctly distinguished;
+  floor/half-up/ceiling results recompute correctly for both vectors.
+- **RECONCILE RE-CLOSED at 3101df8.** Task 9 review program complete with the W1
+  acceptance evidence run PASSING behind it (87/87, acceptance:true).
