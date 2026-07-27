@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "wave": "task-9 wave 18 (round-17 fix, surgical: a probe Step NEVER rewinds - R15-6 restored unqualified)",
+    "brief": "task-9-wave18-brief.md + task-9-codex-round17.md (BINDING adjudication: wave 17's witness-scoped deviation REVERSED; the consult's unqualified R15-6 sentence implemented verbatim). One guard, one regression, ONE mutant by design.",
+    "applier": "wave16-mutations/mutate.py (exactly-one-occurrence, in-memory restores, byte-level; historical Task-8 name, shared applier since round 11P)",
+    "note": "The search pattern is the guard line WITH its trailing comment because the bare three-tab 'if probing {' occurs TWICE in walker.go (the deferred handler's caught-up probe-rejection arm uses the identical line at the same depth); the trailing comment makes the occurrence unique, which apply_edit asserts. The replacement restores wave 17's exact conjunct, so the mutant COMPILES (both identifiers in scope at the guard) and dies on BEHAVIOR: the round-17 regression scripts the reviewer's exact combination - probe target B fails the head read, the failover walk wraps to incumbent A, A reports a genuine cursor mismatch - and under the restored conjunct the probe Step executes store.Rewind, observed by the Rewind-recording fakeStore (require.Nil(st.rewound) plus the DiscardError posture both break). The two wave-17 R-F regressions are NOT listed as killers on purpose: the witness-scoped conjunct still discards for a probed-witness mismatch, so those tests PASS under this mutant - which is exactly why round 17 demanded a dedicated fall-through regression.",
+    "tested_sha_expected": "the commit that lands this spec (parent implementation 3dedcae) or a docs-only descendant"
+  },
+  "mutations": [
+    {
+      "id": "W18M1",
+      "property": "R15-6 UNQUALIFIED (the round-17 adjudication, wave 18's one fix): a cursor mismatch on a probe Step is a DISCARD regardless of which endpoint served it - the refusal applies whenever probing is true, full stop. Restoring wave 17's 'servedBy.Index != incumbent' conjunct re-opens the reviewer's exact fall-through path: the probe target fails the head read, resolution wraps to the incumbent, probing remains true yet the conjunct is false, and the Step calls rewindToVerifiedAncestor / store.Rewind - the destructive probe-Step path (delete + re-ingest a suffix, derived reorg churn) that the adjudication closed without exception.",
+      "description": "the servedBy != incumbent conjunct restored (revert to the wave-17 witness-scoped deviation)",
+      "test": ["go", "test", "./internal/ingest/", "-count=1", "-run", "TestFallThroughProbeMismatchDiscardsAndTheRewindDefersToTheNextStep"],
+      "edits": [
+        {
+          "file": "internal/ingest/walker.go",
+          "search": "\t\t\tif probing { // no exceptions, no witness attribution (round 17)",
+          "replace": "\t\t\tif probing && servedBy.Index != incumbent { // W18M1: the wave-17 witness-scoped refusal restored"
+        }
+      ],
+      "expect": "KILLED"
+    }
+  ]
+}
