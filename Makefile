@@ -4,7 +4,7 @@
 -include .env
 export
 
-.PHONY: db-up db-down test test-acceptance fmt vet run-indexer reconcile
+.PHONY: db-up db-down test test-acceptance test-fork-replay fmt vet run-indexer reconcile
 
 # db-up brings up Postgres AND provisions the physical DB split (Task 9
 # wave 10): db-init idempotently creates solvent_test, the destructive test
@@ -63,3 +63,11 @@ run-indexer:
 # make reconcile RECONCILE_FLAGS="-preflight-only".
 reconcile:
 	go run ./cmd/reconcile $(RECONCILE_FLAGS)
+
+# test-fork-replay runs the OPT-IN Task 10 anvil-fork replay test with .env
+# exported (it needs ANVIL_BIN + ANVIL_FORK_RPC — unset means the test SKIPS
+# — and SOLVENT_DATABASE_URL, opened strictly read-only; safe while the
+# daemon runs). Forks OP at the hash-bound W1 acceptance pin 154,796,552 by
+# default; once the ANVIL vars opt in, any problem FAILS, never skips.
+test-fork-replay:
+	go test ./internal/forkreplay -run TestForkReplay -count=1 -v
