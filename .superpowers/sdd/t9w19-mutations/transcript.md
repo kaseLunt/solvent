@@ -2,8 +2,8 @@
 
 - spec: `mutations.json`
 - repo: `C:\Users\kasel\source\repos\etherfi\Solvent`
-- **tested SHA: `0efec5190e0cdc1ff1a09a40c2b51337ef726883`**  (test(sdd): task-9 wave-19 mutation spec committed BEFORE the loop (9 mutants across M1-M4: path-only guard revert, informational mismatch, inert APPDATA, store.Open under the gate, aliased pgx.Connect, prior-generation read, fallback restored in both halves, frozen generation stamp))
-- started (UTC): 2026-07-27T16:46:47+00:00
+- **tested SHA: `10761f84b281bb63e460260cc46fc0cf4d137458`**  (docs(reconcile): pin the client cert/key citation exactly (pgconn/config.go pair-required check :702-704, loading :706-755) - comment-only; the round-16 law is citation-exact or it is not a citation)
+- started (UTC): 2026-07-27T16:51:55+00:00
 - applier: `mutate.py`, exactly-one-occurrence assertion in `apply_edit`
 
 ## W19M1 — guard reverted to path-only semantics: empty query values no longer override (the round-16 reversal)
@@ -48,11 +48,11 @@ Killed by:
 **Property under attack:** M2: APPDATA is verdict-bearing whenever it can select TLS trust material for the connection (pgconn defaults_windows.go:20-44 -> config.go:685-699) - appdataTrustTaint must taint a set APPDATA unless the DSN pins sslrootcert+sslcert+sslkey or sslmode=disable. Reclassifying it inert restores the wave-16 subject-inert claim round 16 disproved.
 
 ```diff
---- cmd/reconcile/env.go:289
+--- cmd/reconcile/env.go:290
 -	if os.Getenv("APPDATA") == "" {
 +	if true || os.Getenv("APPDATA") == "" {
 ```
-APPLIED at cmd/reconcile/env.go:289 (1 occurrence, asserted)
+APPLIED at cmd/reconcile/env.go:290 (1 occurrence, asserted)
 
 `go test ./cmd/reconcile/ -run TestAppdataTrustMaterialTaint -count=1`
 
@@ -122,11 +122,11 @@ Killed by:
 **Property under attack:** M4: absent/NULL cadence in acceptance IS a taint - an acceptance verdict never rests on an unverified cadence, and the recorded bound is advisory-under-taint, never clean. Popping the unconditional taint restores the fallback's verdict half: NULL is clean again and the advisory bound silently backs a pass.
 
 ```diff
---- cmd/reconcile/env.go:397
+--- cmd/reconcile/env.go:398
 -		sweep.CurrentGeneration))
 +		sweep.CurrentGeneration)); taints = taints[:len(taints)-1]
 ```
-APPLIED at cmd/reconcile/env.go:397 (1 occurrence, asserted)
+APPLIED at cmd/reconcile/env.go:398 (1 occurrence, asserted)
 
 `go test ./cmd/reconcile/ -run TestUnverifiedCadenceTaintsAcceptance|TestExtremeSnapshotIntervalEnvIsNonPass -count=1`
 
@@ -141,11 +141,11 @@ Killed by:
 **Property under attack:** M4: SOLVENT_SNAPSHOT_INTERVAL never feeds a bound on ANY path - the advisory bound is the canonical default shape only. Feeding the env value back into the advisory bound restores the fallback's width half: a 1000000h env claim inflates the recorded bound exactly like wave 15's max(2xenv, ...) arm.
 
 ```diff
---- cmd/reconcile/env.go:377
+--- cmd/reconcile/env.go:378
 -	bound = 2 * (canonicalSnapshotInterval + lastPass)
 +	if d, err := time.ParseDuration(envRaw); err == nil && d > 0 { bound = 2 * (d + lastPass) } else { bound = 2 * (canonicalSnapshotInterval + lastPass) }
 ```
-APPLIED at cmd/reconcile/env.go:377 (1 occurrence, asserted)
+APPLIED at cmd/reconcile/env.go:378 (1 occurrence, asserted)
 
 `go test ./cmd/reconcile/ -run TestUnverifiedCadenceTaintsAcceptance|TestExtremeSnapshotIntervalEnvIsNonPass -count=1`
 
@@ -176,7 +176,7 @@ Killed by:
 
 ## restore verification
 
-`git status --porcelain` over the 6 mutated file(s) is EMPTY: every file is byte-identical to `0efec51`. Restores came from in-memory copies taken before each edit; `git checkout` is never used.
+`git status --porcelain` over the 6 mutated file(s) is EMPTY: every file is byte-identical to `10761f8`. Restores came from in-memory copies taken before each edit; `git checkout` is never used.
 
 ## summary
 
