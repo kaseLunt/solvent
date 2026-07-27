@@ -407,6 +407,62 @@ func TestGenuineReorgRewindsOnTheIncumbentStepNotTheProbeStep(t *testing.T) {
 	require.Equal(t, []int{0, 0, 0, 1, 0}, ch.blockStarts)
 }
 
+// R-F (round-17 fall-through leg) — CODEX ROUND 17, THE REVIEWER'S EXACT
+// COMBINATION: the lease is spent, probe target B fails the HEAD read, the
+// failover walk wraps to incumbent A, and A reports a genuine cursor
+// mismatch. Wave 17 scoped the rewind refusal to the probed witness
+// (`servedBy.Index != incumbent`), so exactly this Step — probing, served by
+// the incumbent — kept rewind authority and executed store.Rewind. The
+// round-17 adjudication REVERSED that deviation: A PROBE STEP NEVER REWINDS,
+// no exceptions, no witness attribution. The Step DISCARDS (store.Rewind
+// never called, no landing), the seam advances past the serving witness, the
+// lease dissolves — and the NEXT Step, a non-probe, performs the IDENTICAL
+// rewind through the normal arm: the reorg response is deferred one Step,
+// never lost.
+func TestFallThroughProbeMismatchDiscardsAndTheRewindDefersToTheNextStep(t *testing.T) {
+	slowRead := chainAttemptTimeout - time.Second
+	ch, st, w, _ := probeHarness(t, slowRead, 0)
+
+	landSteps(t, w, 3, "lease spend")
+	require.Equal(t, uint64(249), st.cursor.Block)
+	require.Equal(t, 3, w.slowLandings, "the lease is spent: the next Step probes")
+
+	// The compound posture: B's head probe is broken (its header path still
+	// answers — a degraded provider, not a dead node), AND the chain has
+	// genuinely reorged below the cursor on EVERY view; block 150 is the
+	// verified ancestor (stored hash == live hash).
+	ch.view(1).headErr = errors.New("head probe broken on the probe target")
+	ch.setHashAll(249, common.HexToHash("0xdead"))
+	st.highestLogs = map[uint64][]byte{150: blockHashAt(150).Bytes()}
+
+	// Step 4: the probe. Resolution starts at B, B fails the head read, the
+	// walk wraps to incumbent A — and A reports the mismatch. probing is
+	// true, so the Step DISCARDS: no landing, store.Rewind NEVER called.
+	advanced, err := w.Step(context.Background())
+	var discard *DiscardError
+	require.ErrorAs(t, err, &discard)
+	require.Contains(t, discard.Reason, "no rewind authority")
+	require.False(t, advanced, "a discard is a non-landing")
+	require.Nil(t, st.rewound, "store.Rewind is NEVER called on a probe Step — the incumbent-served fall-through included")
+	require.Equal(t, uint64(249), st.cursor.Block, "nothing destructive happened: the cursor stands")
+	require.Equal(t, 1, w.startPref, "the seam advanced past the Step's serving witness (the incumbent)")
+	require.Equal(t, 0, w.slowLandings, "the lease dissolved with the witnessed non-landing")
+
+	// Step 5: NON-probe (the lease just dissolved). It starts at B (the
+	// seam's advance), B's head read still fails, the walk wraps to A again —
+	// and A performs the IDENTICAL rewind through the normal arm, to the same
+	// verified-ancestor target the probe Step refused: deferred, never lost.
+	advanced, err = w.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "rewind is a durable write: advanced=true")
+	require.NotNil(t, st.rewound, "the reorg response arrives exactly one Step late")
+	require.Equal(t, uint64(150), st.rewound.toBlock, "the identical rewind: same verified ancestor")
+	require.Equal(t, blockHashAt(150).Bytes(), st.rewound.hash)
+	require.Equal(t, []int{0, 0, 0, 1, 1}, ch.blockStarts,
+		"step 4 asked for the probe target; step 5 asked for the seam's advance — same start index, different law")
+	require.Equal(t, 0, ch.active, "the shared hint is neither consulted nor written")
+}
+
 // R-G — R15-7: THE n>=3 PROBE SHIELD. A is slow, B lands but always SLOWER
 // than A's baseline (rejected every lease, never failing), C is fast. With
 // the probe target a pure function of startPref, B would shield C forever —

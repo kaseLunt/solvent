@@ -679,9 +679,12 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 			// A witnessed non-landing breaks the lease's consecutive-landings
 			// chain and dissolves any armed probe: the seam's advance has
 			// already moved routing (a FAILED or DISCARDED probe is exactly
-			// this arm — a non-landing that advances past the probed witness,
-			// which at n=2 IS the return to the incumbent and at n>=3 is the
-			// escape route past a content-broken neighbour, R15-2c), and the
+			// this arm — a non-landing that advances past the Step's SERVING
+			// witness: past the probed neighbour usually, which at n=2 IS
+			// the return to the incumbent and at n>=3 is the escape route
+			// past a content-broken neighbour, R15-2c; past the incumbent
+			// itself when an R15-6 discard's resolution had fallen through
+			// to it), and the
 			// lease re-arms from zero wherever the stream next lands. The
 			// probe-target cursor resets with it: routing moved, so the
 			// cycle's frame of reference moved.
@@ -733,35 +736,35 @@ func (w *Walker) Step(ctx context.Context) (bool, error) {
 			return false, err
 		}
 		if !bytes.Equal(chainHash.Bytes(), cur.Hash) {
-			if probing && servedBy.Index != incumbent {
-				// R15-6: A PROBE STEP CARRIES NO REWIND AUTHORITY. The
-				// serving witness here is a probed neighbour the stream
-				// holds ZERO landing evidence for — on a stale or minority
-				// view below finality (annex S3: same height, two truths)
-				// its word alone would authorize a DESTRUCTIVE rewind,
-				// count as a fast landing (:rewind-is-landing), and let the
-				// neighbour be ADOPTED off the churn it caused. Mismatch-
-				// while-probing is therefore a DISCARD: non-landing, the
-				// seam advances past the probed witness, the lease
-				// dissolves. If the reorg is REAL the incumbent sees the
-				// same mismatch on its next Step and rewinds with retained-
-				// witness authority — cost: one Step of delay on a genuine
-				// reorg that lands inside a probe Step. The refusal is
-				// scoped to the probed WITNESS (servedBy != incumbent): a
-				// probe Step whose resolution FELL THROUGH to the incumbent
-				// rewinds exactly as any ordinary Step would — the incumbent
-				// is the retained witness, its rewind authority is the
-				// standing pre-lease behavior, and refusing IT would advance
-				// routing past the healthy incumbent onto the unvetted
-				// neighbour as next Step's ORDINARY witness — recreating the
-				// exact exposure this arm closes, one Step later. (This does
-				// NOT implement F3 — second-witness corroboration before any
-				// rewind stays its own future ratified clause.)
-				slog.Warn("cursor mismatch reported by a probed witness: discarding, not rewinding",
+			if probing { // no exceptions, no witness attribution (round 17)
+				// A PROBE STEP NEVER REWINDS. R15-6 restored UNQUALIFIED —
+				// the Codex round-17 adjudication REVERSED wave 17's
+				// witness-scoped exception (`servedBy.Index != incumbent`),
+				// because the binding consult's sentence already covers every
+				// case: "a probe Step refuses the rewind arm — a cursor-hash
+				// mismatch while probing is a DISCARD (non-landing; the seam
+				// advances past the probe witness; lease dissolves). If the
+				// reorg is real, the incumbent's next Step sees it and
+				// rewinds with retained-witness authority; cost = one Step of
+				// delay on a genuine reorg that lands inside a probe Step."
+				// No witness qualifier appears there and none applies here: a
+				// cursor mismatch on a probe Step DISCARDS no matter who
+				// served it — the probed neighbour on its minority view, or
+				// the incumbent a failed probe target's resolution fell
+				// through to. Total refusal strictly dominates the exception:
+				// the invariant is simple, testable without witness-
+				// attribution edge cases, and it costs one Step of delay in
+				// a rare compound posture — after the discard the seam
+				// advances, the lease dissolves, and the next (non-probe)
+				// Step performs the identical rewind through the normal arm
+				// below. (This does NOT implement F3 — second-witness
+				// corroboration before any rewind stays its own future
+				// ratified clause.)
+				slog.Warn("cursor mismatch on a probe Step: discarding, not rewinding",
 					"stream", w.cfg.Stream, "block", cur.Block,
-					"probe", servedBy.Index, "incumbent", incumbent)
+					"servedBy", servedBy.Index, "incumbent", incumbent)
 				return false, &DiscardError{Stream: w.cfg.Stream,
-					Reason: fmt.Sprintf("cursor hash mismatch at %d reported by probed endpoint %d: a probe carries no rewind authority", cur.Block, servedBy.Index)}
+					Reason: fmt.Sprintf("cursor hash mismatch at %d on a probe Step (served by endpoint %d): a probe carries no rewind authority", cur.Block, servedBy.Index)}
 			}
 			adv, err := w.rewindToVerifiedAncestor(ctx, cur, servedBy, &served)
 			if err == nil {
