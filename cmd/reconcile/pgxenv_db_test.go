@@ -43,11 +43,11 @@ import (
 // before any connection exists.
 func TestPartialDSNIsRejected(t *testing.T) {
 	for _, dsn := range []string{
-		"postgres:///solvent?sslmode=disable",                        // no host: ambient PGHOST would choose the server
-		"postgres://solvent:pw@localhost:5432/?sslmode=disable",      // no database: ambient PGDATABASE would choose the subject
-		"postgres://solvent:pw@localhost:5432?sslmode=disable",       // no path at all
-		"postgres:///?sslmode=disable",                               // neither
-		"postgres://:5432/solvent?sslmode=disable",                   // empty host, port only
+		"postgres:///solvent?sslmode=disable",                   // no host: ambient PGHOST would choose the server
+		"postgres://solvent:pw@localhost:5432/?sslmode=disable", // no database: ambient PGDATABASE would choose the subject
+		"postgres://solvent:pw@localhost:5432?sslmode=disable",  // no path at all
+		"postgres:///?sslmode=disable",                          // neither
+		"postgres://:5432/solvent?sslmode=disable",              // empty host, port only
 	} {
 		_, err := readOnlyDSN(dsn)
 		require.Error(t, err, "partial DSN %q must be refused (round-14 F1)", dsn)
