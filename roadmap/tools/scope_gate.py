@@ -970,11 +970,25 @@ def main() -> int:
             expired_after = parse_frontmatter(
                 staged.read_text(authority.claim_path), authority.claim_path, required=True
             )
-            if scalar(
+            after_status = scalar(
                 expired_after, "status", authority.claim_path, required=True
-            ) not in TERMINAL_CLAIM_STATUSES:
+            )
+            # D-008 serial-writer hardening (owner-approved 2026-07-27): a
+            # SAME-IDENTITY renewal -- immutable fields unchanged, staged
+            # lease live (validate_staged_claim_transition enforced both
+            # above) -- is the serial writer's routine recovery from its own
+            # expired lease, never a takeover. Terminal-then-reopen is
+            # unreachable here: the doctor's exactly-one-active-claim
+            # invariant forbids the transitional terminal commit, so without
+            # this arm the enforcement pair deadlocks every commit forever.
+            renewed_same_identity = after_status == "active" and not any(
+                _field(authority.claim, key) != _field(expired_after, key)
+                for key in IMMUTABLE_CLAIM_FIELDS
+            )
+            if after_status not in TERMINAL_CLAIM_STATUSES and not renewed_same_identity:
                 raise ControlPlaneError(
-                    "expired claim must transition to released, failed, or abandoned"
+                    "expired claim must transition to released, failed, or abandoned "
+                    "(or be renewed in place with identity fields unchanged)"
                 )
 
     if protected_acknowledged and protected:

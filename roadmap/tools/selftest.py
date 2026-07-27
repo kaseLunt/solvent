@@ -551,7 +551,15 @@ def test_doctor_and_gate(root: Path) -> None:
     must(git(repo, "add", "src/allowed.txt"), "stage expired output")
     blocked = tool(repo, "scope_gate.py")
     reset(repo, expired_head)
+    # D-008 serial-writer hardening: same-identity renewal of an expired
+    # lease is routine recovery (never a takeover) — renew succeeds, and the
+    # gate accepts the isolated in-place renewal commit. Product output under
+    # an expired lease stays blocked (asserted above); terminal cleanup stays
+    # available (asserted below from a clean tree).
     renewal = tool(repo, "claim.py", "renew", "synthetic")
+    must(git(repo, "add", "roadmap/claims/CLAIM-synthetic.md"), "stage renewed lease")
+    renewed_gate = tool(repo, "scope_gate.py")
+    reset(repo, expired_head)
     released = tool(repo, "claim.py", "release", "synthetic")
     set_work_state(repo, "candidate", ["src/**"])
     must(git(repo, "add", "roadmap"), "stage expired cleanup")
@@ -561,12 +569,13 @@ def test_doctor_and_gate(root: Path) -> None:
         env={"CONTROL_PLANE_OWNER_REVIEWED": "1"},
     )
     check(
-        "lease:expired-output-blocked-cleanup-allowed",
+        "lease:expired-output-blocked-renewal-and-cleanup-allowed",
         blocked.returncode == 1
-        and renewal.returncode == 1
+        and renewal.returncode == 0
+        and renewed_gate.returncode == 0
         and released.returncode == 0
         and cleanup.returncode == 0,
-        "\n".join(map(output, (blocked, renewal, released, cleanup))),
+        "\n".join(map(output, (blocked, renewal, renewed_gate, released, cleanup))),
     )
     reset(repo, active)
 

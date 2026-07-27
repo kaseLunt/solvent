@@ -358,7 +358,13 @@ def renew_claim(args: argparse.Namespace) -> int:
         now,
         check_local_binding=True,
         descendant="HEAD",
-        check_expiry=True,
+        # D-008 serial-writer hardening (owner-approved 2026-07-27): renewal
+        # by the SAME agent on the SAME branch/worktree is routine recovery
+        # of an expired lease, never a takeover -- check_local_binding above
+        # is the real authority test. A lease that strands its own renewal
+        # is the timed-lease failure mode this removes; rebind and rescope
+        # keep their stricter postures.
+        check_expiry=False,
     )
     data["lease_expires"] = iso(now + dt.timedelta(hours=args.hours))
     data["updated_at"] = iso(now)

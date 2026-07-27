@@ -26,8 +26,8 @@ allowed_paths:
   - docs/specs/**
 scope_hash: sha256:e17b8d8812489d3c394443d98816ab1967782c3a631d3dfa0f5502f92e6d6ba4
 issued_at: 2026-07-26T22:04:35Z
-lease_expires: 2026-07-27T22:04:35Z
-updated_at: 2026-07-26T22:04:35Z
+lease_expires: 2026-07-28T10:53:31Z
+updated_at: 2026-07-27T22:53:31Z
 ---
 
 # Claim: claude-integrator -> W1
