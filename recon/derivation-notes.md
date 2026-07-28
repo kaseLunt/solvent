@@ -163,15 +163,20 @@ at block 149,985,787 — a block whose only Debt Manager log is topic0
 present in the current `recon/cash-v3` source — it belonged to an earlier implementation; the proxy
 emitted `Upgraded` at deployment 149,521,228 and again at 149,558,074, its first day — later
 upgrades were not enumerated). These are
-LayerZero-delivered batches (`commitAndExecute(...,(address,uint256)[])` calldata carries the
-per-user amounts) migrating positions from the previous cash deployment:
+LayerZero-delivered batches (the `commitAndExecute(...)` / `execute302(...)` calldata carries the
+per-user amounts inside the LayerZero `message`, which is `abi.encode(address[],uint256[])` —
+two PARALLEL dynamic arrays, NOT an interleaved `(address,uint256)[]` tuple array [ERRATUM
+2026-07-27: originally recorded as a tuple array; parallel arrays confirmed empirically by the
+validated parser `internal/decode.DecodeMigrationCalldata` against the real migration
+transactions]) migrating positions from the previous cash deployment:
 
 - **80 batches, 7,337 borrower positions, blocks 149,985,513 → 149,986,254** — all seeded directly
   into `userNormalizedBorrowings` with **no `Borrowed`/`Supplied` events**.
 - 7,337 migrated positions vs 5,223 borrowers ever seen in `Borrowed` logs: **the majority of debt
   genesis is event-invisible on the Debt Manager log stream.**
 - Consequence: exact debt derivation requires a **genesis snapshot** at block 149,986,254 (poll
-  `borrowingOf` per migrated Safe, or decode the 80 migration txs' calldata `(address,uint256)[]`),
+  `borrowingOf` per migrated Safe, or decode the 80 migration txs' calldata — the
+  `abi.encode(address[],uint256[])` parallel-array message per the erratum above),
   after which the validated normalized replay is exact. Deriving from logs alone is exact only for
   Safes created after the migration window (verified: all three validation borrowers).
 
@@ -198,8 +203,13 @@ v3.3-line deployment: the Pool ABI carries `DeficitCreated`/`DeficitCovered` and
   `variableBorrowRate` (ray, per-second compounding `calculateCompoundedInterest` — Aave's binomial
   3-term approximation), so head-of-stream values need either the approximation replicated or a
   poll of `getReserveNormalizedVariableDebt`.
-- **Expected precision:** Aave's `rayDiv`/`rayMul` round **half-up** (WadRayMath), not floor/ceil;
-  replicating them bit-exactly reproduces scaled balances exactly as long as every debt-touching
+- **Expected precision:** TWO fold regimes [ERRATUM 2026-07-27: originally recorded as uniformly
+  half-up; the regime split was established during Task 5-8 implementation and is normative in
+  `internal/derive/aave.go`'s header]. Regime A (blocks < 23,088,584): `rayDiv`/`rayMul` round
+  **half-up** (WadRayMath). Regime B (from block 23,088,584 log 542 — the weETH aToken `Upgraded`
+  cut — onward): TokenMath DIRECTIONAL rounding (vToken mint `rayDivCeil`, burn `rayDivFloor`;
+  aToken balance `rayMulFloor`, vToken balance `rayMulCeil`). Replicating the active regime
+  bit-exactly reproduces scaled balances exactly as long as every debt-touching
   event is processed. Residual risk: `repayWithATokens`, isolated `Repay` with `useATokens=true`
   behaves identically on the debt side. Supply-side (aToken/collateral) balances additionally move
   on **aToken ERC20 transfers and `BalanceTransfer`**, which do NOT emit Pool events — Pool-log-only
