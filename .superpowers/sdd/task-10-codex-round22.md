@@ -50,3 +50,17 @@ recommendations as the work order: nonempty-set + gating exact tokenAsserts + Ne
 cross-check; default-pin account/strata constants pinned, override refused without an
 explicit expected fixture; sanitize-before-log with userinfo/query redaction + a
 secret-bearing synthetic regression. Returns for the D-006 closing review.
+
+## Closing review
+
+- **Target:** `b313772..f74ef23`, `fork_replay_test.go` only. Worktree pinned at `f74ef23`.
+- **Verdict: SHIP (approve) — no material findings.** Session
+  `019fa60e-7d2c-7ae2-8aae-ebac9fbf8f0d`; job `review-ms3wfnci-jlsimm`.
+- Reviewer confirmations: F1 guarantees nonempty DB and chain token sets per borrower,
+  cross-checks retained sums against Net, and gates the default fixture at exactly
+  three token comparisons; F2 pins all three default accounts and strata and fails
+  every partial override; F3 sanitizes all identified fork-output sinks with an
+  env-free regression using independent literal expectations. No new material
+  vacuous-green, panic, or process-hygiene path; the two disclosed unexercised failure
+  arms accepted for this demo-grade opt-in test.
+- **TASK 10 TEST HALF CLOSED at f74ef23** (waves 1 + 1b, rounds 22 + closing).
