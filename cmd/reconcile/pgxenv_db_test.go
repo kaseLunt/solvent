@@ -100,7 +100,7 @@ func TestAmbientPGHostTaintsAcceptance(t *testing.T) {
 func TestConnectedIdentityRecordsServerTruth(t *testing.T) {
 	clearPgxEnv(t)
 	ctx := context.Background()
-	gateDSN := ensureGateDB(t, ctx, gateTestBaseDSN(t))
+	gateDSN := ensureDerivedDB(t, ctx, gateTestBaseDSN(t), "_recongate")
 	u, err := url.Parse(gateDSN)
 	require.NoError(t, err)
 	gateDB := strings.TrimPrefix(u.Path, "/")

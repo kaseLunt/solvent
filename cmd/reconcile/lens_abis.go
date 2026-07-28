@@ -131,8 +131,10 @@ var aaveScaledTotalSupplyABI = mustParseABI(`[{
 }]`)
 
 // erc20BalanceOfABI: balanceOf(user) → uint256. Provenance: ERC-20; on the
-// variable debt token this is the LIVE debt value (scaled × index, half-up)
-// — the right side of the §3.4(b) live-value identity. Selector 0x70a08231.
+// variable debt token this is the LIVE debt value (scaled × index, CEILING —
+// the deployed-token law per the two-vector empirical evidence at pin
+// 25,627,125, see rayMulCeil in aave.go; not a source-level proof) — the
+// right side of the §3.4(b) live-value identity. Selector 0x70a08231.
 var erc20BalanceOfABI = mustParseABI(`[{
 	"type": "function", "name": "balanceOf", "stateMutability": "view",
 	"inputs": [{"name": "user", "type": "address"}],

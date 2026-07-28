@@ -485,12 +485,19 @@ func summarizeSecondOpinionErr(err error) string {
 // post-run connection.
 
 // rewindMoved is the end-of-run re-check: per engine, acked_epoch UNCHANGED
-// and last_block ≥ P. It reads acked_epoch, NEVER MAX(reorg_epochs.epoch):
+// and last_block ≥ P — and, for the engines this run PINNED, acked_epoch ≥
+// the chain's CURRENT MAX(reorg_epochs.epoch) (exit finding H1). The
+// movement leg reads acked_epoch, NEVER only MAX(reorg_epochs.epoch):
 // PruneAckedReorgEpochs deletes acked epochs, so a rewind+ack+prune cycle
 // completing mid-run leaves MAX unchanged, while RewindDerived always bumps
 // acked_epoch and acks are monotone (derive.go) — the prune-immune signal
-// (mutation target 10).
-func rewindMoved(baseline snapshotdb.RewindBaseline, current []store.DeriveCursorState, pins map[string]uint64) []string {
+// (mutation target 10). The MAX leg is the complementary check: a walker
+// rewind committed mid-run whose ack has NOT landed yet moves neither
+// acked_epoch nor last_block, but its epoch row sits above the engine's ack
+// — the same unacked window the snapshot-time gate refuses at the start.
+// Together the two legs leave no path: acked-and-pruned trips the movement
+// leg, recorded-but-unacked trips the MAX leg.
+func rewindMoved(baseline snapshotdb.RewindBaseline, current []store.DeriveCursorState, pins map[string]uint64, maxEpochs map[int64]int64) []string {
 	var reasons []string
 	byEngine := map[string]store.DeriveCursorState{}
 	for _, c := range current {
@@ -512,6 +519,11 @@ func rewindMoved(baseline snapshotdb.RewindBaseline, current []store.DeriveCurso
 		}
 		if pin, ok := pins[e]; ok && cur.LastBlock < pin {
 			reasons = append(reasons, fmt.Sprintf("engine %s: last_block %d fell below pin %d (rewind during run)", e, cur.LastBlock, pin))
+		}
+		if _, pinned := pins[e]; pinned {
+			if maxE := maxEpochs[cur.ChainID]; cur.AckedEpoch < maxE {
+				reasons = append(reasons, fmt.Sprintf("engine %s: chain %d carries unacknowledged reorg epoch %d (acked %d) at end of run — a raw rewind landed whose derived ack has not", e, cur.ChainID, maxE, cur.AckedEpoch))
+			}
 		}
 	}
 	return reasons
@@ -971,11 +983,17 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		return finish(abort(exitRetryable, "aborted: recheck", "fresh connection for rewind re-check: %v", err))
 	}
 	currentCursors, err := store.DeriveCursorStates(ctx, fresh)
+	var currentMaxEpochs map[int64]int64
+	if err == nil {
+		// H1 recheck input: the CURRENT chain-max epochs, read over the same
+		// fresh connection as the cursors.
+		currentMaxEpochs, err = store.MaxReorgEpochs(ctx, fresh)
+	}
 	fresh.Close(ctx)
 	if err != nil {
-		return finish(abort(exitRetryable, "aborted: recheck", "re-read derive cursors: %v", err))
+		return finish(abort(exitRetryable, "aborted: recheck", "re-read derive cursors / reorg epochs: %v", err))
 	}
-	if reasons := rewindMoved(p1.Baseline, currentCursors, p1.Pins); len(reasons) > 0 {
+	if reasons := rewindMoved(p1.Baseline, currentCursors, p1.Pins, currentMaxEpochs); len(reasons) > 0 {
 		return finish(abort(exitRetryable, "aborted: rewind during run", "%s", strings.Join(reasons, "; ")))
 	}
 	for i := range rep.Pins {

@@ -255,31 +255,45 @@ func TestRewindMovedIsPruneImmune(t *testing.T) {
 		MaxEpoch:   map[int64]int64{10: 4, 1: 2}, // informational — and UNCHANGED below
 	}
 	pins := map[string]uint64{"debt_manager": 1000, "aave_v3_etherfi": 500}
+	// Current chain-max epochs, re-read at end of run (H1 recheck input):
+	// quiet run — every epoch acked.
+	maxEpochs := map[int64]int64{10: 4, 1: 2}
 
 	// Quiet run: nothing moved.
 	current := []store.DeriveCursorState{
 		{Engine: "debt_manager", ChainID: 10, LastBlock: 1010, AckedEpoch: 4},
 		{Engine: "aave_v3_etherfi", ChainID: 1, LastBlock: 500, AckedEpoch: 2},
 	}
-	require.Empty(t, rewindMoved(baseline, current, pins))
+	require.Empty(t, rewindMoved(baseline, current, pins, maxEpochs))
 
 	// The prune hole: acked_epoch bumped (RewindDerived always bumps it),
 	// MAX(reorg_epochs.epoch) pruned back to the baseline value.
 	current[0].AckedEpoch = 5
 	current[0].LastBlock = 1010 // even ahead of the pin — the epoch alone convicts
-	reasons := rewindMoved(baseline, current, pins)
+	reasons := rewindMoved(baseline, current, pins, maxEpochs)
 	require.Len(t, reasons, 1)
 	require.Contains(t, reasons[0], "acked_epoch moved 4 → 5")
 
 	// last_block below the pin is independently fatal.
 	current[0].AckedEpoch = 4
 	current[0].LastBlock = 900
-	reasons = rewindMoved(baseline, current, pins)
+	reasons = rewindMoved(baseline, current, pins, maxEpochs)
 	require.Len(t, reasons, 1)
 	require.Contains(t, reasons[0], "fell below pin")
 
+	// The H1 hole (complement of the prune hole): a walker rewind lands
+	// MID-RUN and its ack has NOT — acked_epoch UNCHANGED, last_block at the
+	// pin, but the chain's current MAX epoch sits above the ack. The movement
+	// leg is silent by construction; the MAX leg must convict.
+	current[0].AckedEpoch = 4
+	current[0].LastBlock = 1010
+	reasons = rewindMoved(baseline, current, pins, map[int64]int64{10: 5, 1: 2})
+	require.Len(t, reasons, 1)
+	require.Contains(t, reasons[0], "unacknowledged reorg epoch 5")
+
 	// A vanished cursor is fatal, not ignored.
-	reasons = rewindMoved(baseline, current[:1], pins)
+	current[0].LastBlock = 900
+	reasons = rewindMoved(baseline, current[:1], pins, maxEpochs)
 	require.NotEmpty(t, reasons)
 }
 

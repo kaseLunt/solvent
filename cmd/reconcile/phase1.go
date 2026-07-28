@@ -38,6 +38,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -146,6 +147,13 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		CollateralReplay: o.collateralReplay,
 	}, cfg, roDSN, spec, wantDM, wantAave, extras)
 	if err != nil {
+		if errors.Is(err, store.ErrUnackedReorgEpoch) {
+			// Exit finding H1: an unacknowledged reorg epoch at snapshot time
+			// is a STALE-EVIDENCE precondition — retryable (exit 3), never a
+			// silent pass, never a permanent fail: the daemon's next Step
+			// acks the epoch (RewindDerived) and re-derives.
+			return nil, abort(exitRetryable, "aborted: unacked reorg epoch", "%v", err)
+		}
 		return nil, err
 	}
 	p := &phase1Data{Data: *snap}

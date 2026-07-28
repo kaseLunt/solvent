@@ -450,6 +450,56 @@ func (r *Runner) rewind(ctx context.Context) error {
 	if !found {
 		return fmt.Errorf("runner %q: derive cursor missing after RewindDerived — store contract violated", r.spec.Engine)
 	}
+	// Pending-queue hygiene, same rewind (exit finding L1): RewindDerived
+	// just deleted the WHOLE snapshots history of every account left with no
+	// surviving debt-side event (reorg-orphan invalidation), but the pending
+	// FIFO may still hold such accounts from batches the rewind erased — and
+	// a later flush would insert an EMPTY debt document, recreating history
+	// for a phantom. Revalidate every pending against post-rewind committed
+	// truth: keep an account iff BalancesFor still shows a debt-side row.
+	// This provably cannot drop a LEGITIMATE pending: the rewind's rebuild
+	// inserts a debt-side balance row for exactly the accounts with a
+	// surviving delta-bearing debt event — zero-net groups keep their row
+	// (store contract, "position closed" stays distinguishable) — which is
+	// the same predicate the orphan deletions used; and no writer interleaves
+	// between the rewind commit and this read (single-writer, D-004). A read
+	// failure aborts BEFORE any drop (nothing is mutated until every pending
+	// has been classified) and surfaces as the Step's error — dropping on an
+	// unclassified read could shed a legitimate pending, which is the one
+	// outcome this filter must never produce. Residual (accepted,
+	// best-effort history): the ack is already durable by then, so the
+	// filter does not re-run, and a later successful flush of an unfiltered
+	// orphan would still write its empty document.
+	if len(r.pendingOrder) > 0 {
+		kept := make([][]byte, 0, len(r.pendingOrder))
+		var orphaned [][]byte
+		for _, account := range r.pendingOrder {
+			bals, err := r.store.BalancesFor(ctx, r.spec.Engine, account)
+			if err != nil {
+				return fmt.Errorf("runner %q: revalidate pending snapshot account %x after rewind: %w", r.spec.Engine, account, err)
+			}
+			hasDebt := false
+			for _, sides := range bals {
+				if _, ok := sides[sideDebt]; ok {
+					hasDebt = true
+					break
+				}
+			}
+			if hasDebt {
+				kept = append(kept, account)
+			} else {
+				orphaned = append(orphaned, account)
+			}
+		}
+		for _, account := range orphaned {
+			delete(r.pendingSet, string(account))
+		}
+		r.pendingOrder = kept
+		if len(orphaned) > 0 {
+			slog.Warn("dropped reorg-orphaned accounts from the pending snapshot queue (the rewind deleted their history; flushing would recreate an empty document)",
+				"engine", r.spec.Engine, "dropped", len(orphaned))
+		}
+	}
 	slog.Warn("derived state rewound after reorg epoch",
 		"engine", r.spec.Engine, "requestedTarget", target, "cursor", newCursor)
 	if r.onRewind != nil {

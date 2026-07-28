@@ -869,6 +869,60 @@ func TestRunnerSnapshotCarryOverBoundedFIFO(t *testing.T) {
 	require.Empty(t, filterCalls(h.log.since(mark), "SaveSnapshots"))
 }
 
+// TestRunnerRewindDropsOrphanedPendingSnapshots — exit finding L1: a rewind
+// that orphans an account (RewindDerived deletes its whole snapshots history
+// because no debt-side event survives) must also drop that account from the
+// pending snapshot FIFO — otherwise the next flush would insert an EMPTY debt
+// document, recreating history for a phantom the store just invalidated. The
+// revalidation must be exact: a NON-orphaned pending account (surviving
+// debt-side balance row, zero-net included) still flushes.
+func TestRunnerRewindDropsOrphanedPendingSnapshots(t *testing.T) {
+	warnings := captureWarnings(t)
+	h := newRunnerHarness(t, testRunnerSpec())
+	h.st.ingest["s1"] = &store.CursorPos{Block: 100}
+	h.st.logs = []store.RawLog{rlog(100, 0), rlog(100, 1)}
+	h.dec.events["100/0"] = stubEvent{name: "x"}
+	h.dec.events["100/1"] = stubEvent{name: "y"}
+	h.eng.processFn = debtEventFn(0xAA, 0xBB)
+	// The flush fails once so BOTH accounts stay pending across the rewind.
+	h.st.snapshotsErr = errors.New("history write refused: keep aa and bb pending")
+
+	advanced, err := h.r.Step(context.Background())
+	require.Error(t, err)
+	require.True(t, advanced, "the window committed — flush failure retains the pendings")
+	require.Len(t, h.r.pendingOrder, 2)
+
+	// The reorg: aa loses its every debt event — RewindDerived's orphan
+	// invalidation deletes its history and rebuilds NO debt balance row for
+	// it. bb survives with a ZERO-NET debt row (the rebuild keeps zero-net
+	// groups — "position closed" is still a legitimate history subject).
+	h.st.balances = map[string]map[string]map[string]*big.Int{
+		"bb": {"bb": {"debt": big.NewInt(0)}},
+	}
+	h.st.unacked = true
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced, "the rewind Step")
+	require.Equal(t, 1, h.rewinds)
+	require.Len(t, h.r.pendingOrder, 1, "the orphan must leave the FIFO at rewind time")
+	require.Equal(t, []byte{0xBB}, h.r.pendingOrder[0], "the legitimate pending must be KEPT")
+	require.False(t, h.r.pendingSet[string([]byte{0xAA})], "the orphan must leave the membership index too")
+	require.Contains(t, fmt.Sprint(*warnings), "reorg-orphaned", "the drop must be surfaced as a WARN")
+
+	// Caught-up drain: exactly ONE document — bb's, non-empty — and no
+	// empty-history document for aa, ever.
+	advanced, err = h.r.Step(context.Background())
+	require.NoError(t, err)
+	require.True(t, advanced)
+	require.Len(t, h.st.snapDocs, 1)
+	require.Len(t, h.st.snapDocs[0], 1)
+	doc, ok := h.st.snapDocs[0]["bb"]
+	require.True(t, ok, "the surviving pending account still flushes")
+	require.NotEmpty(t, doc.Balances, "the survivor's document carries its (zero-net) debt row — never empty")
+	_, orphanWritten := h.st.snapDocs[0]["aa"]
+	require.False(t, orphanWritten, "no snapshot document may be recreated for the orphaned account")
+}
+
 // captureWarnings routes slog through a collector for the duration of the
 // test, returning the collected Warn+ messages.
 func captureWarnings(t *testing.T) *[]string {

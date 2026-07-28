@@ -73,19 +73,22 @@ func gateTestBaseDSN(t *testing.T) string {
 	return dsn
 }
 
-// ensureGateDB derives a package-exclusive database ("<scratch>_recongate")
+// ensureDerivedDB derives a test-exclusive database ("<scratch><suffix>")
 // from the scratch DSN, creates it if missing, and migrates it. A DERIVED
 // database, not TEST_DATABASE_URL itself: `go test ./...` runs packages in
 // parallel processes, and internal/store's destructive helpers own the
 // shared scratch DB — two packages migrating/truncating one database
-// concurrently is the wave-13 deviation-1 collision all over again.
-func ensureGateDB(t *testing.T, ctx context.Context, baseDSN string) string {
+// concurrently is the wave-13 deviation-1 collision all over again. Each
+// test family in THIS package passes its own suffix ("_recongate" for the
+// gate lifecycle, "_reconepoch" for the reorg-epoch gate) for the same
+// reason, one level down.
+func ensureDerivedDB(t *testing.T, ctx context.Context, baseDSN, suffix string) string {
 	t.Helper()
 	u, err := url.Parse(baseDSN)
 	require.NoError(t, err)
 	baseName := strings.TrimPrefix(u.Path, "/")
 	require.NotEmpty(t, baseName)
-	name := baseName + "_recongate"
+	name := baseName + suffix
 	require.NotEqual(t, "solvent", name)
 
 	admin, err := pgx.Connect(ctx, baseDSN)
@@ -148,7 +151,7 @@ func waitForParkedLock(t *testing.T, ctx context.Context, control *pgx.Conn, tab
 // toggled by this test — only observed.
 func TestProductionGateActiveThroughSnapshotLifecycle(t *testing.T) {
 	ctx := context.Background()
-	gateDSN := ensureGateDB(t, ctx, gateTestBaseDSN(t))
+	gateDSN := ensureDerivedDB(t, ctx, gateTestBaseDSN(t), "_recongate")
 	roDSN, err := readOnlyDSN(gateDSN)
 	require.NoError(t, err)
 

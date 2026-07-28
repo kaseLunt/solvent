@@ -294,7 +294,10 @@ type IdxObs struct {
 type RewindBaseline struct {
 	AckedEpoch map[string]int64
 	LastBlock  map[string]uint64
-	MaxEpoch   map[int64]int64 // INFORMATIONAL ONLY — prune-defeated (§8)
+	// MaxEpoch is consumed by the snapshot-time reorg-epoch gate (exit
+	// finding H1); for the §8 movement detector it stays INFORMATIONAL
+	// (prune-defeated — the detector's baseline is AckedEpoch).
+	MaxEpoch map[int64]int64
 }
 
 func baselineFromCursors(cursors []store.DeriveCursorState, maxEpochs map[int64]int64) RewindBaseline {
@@ -714,6 +717,31 @@ func Collect(ctx context.Context, prm Params, cfg *config.Config, roDSN string, 
 		return nil, err
 	}
 	p.Baseline = baselineFromCursors(p.DeriveCursors, maxEpochs)
+	// Reorg-epoch gate (exit finding H1), INSIDE the snapshot: a raw rewind
+	// deletes logs and records a chain-wide epoch atomically, and the derive
+	// WRITER refuses to advance until the engine acks — but the derive cursor
+	// itself is untouched in the window between the walker's rewind commit
+	// and the runner's ack (a durable window when a crash lands between).
+	// Pinning from that cursor would certify derived state the raw layer
+	// already invalidated. Epochs are chain-scoped and acks engine-scoped
+	// (migration 00002), so the gate is per PINNED engine: acked_epoch >=
+	// MAX(reorg_epochs.epoch) on the engine's chain, both read in THIS
+	// repeatable-read transaction. The refusal wraps
+	// store.ErrUnackedReorgEpoch and the caller classifies it RETRYABLE
+	// (exit 3, stale-evidence class) — never a silent pass, never a permanent
+	// fail: the daemon's next Step acks and re-derives. The §8 end-of-run
+	// movement check stays alongside: it covers the ack-and-prune cycle a
+	// MAX-based read cannot see.
+	for _, engine := range []string{DMEngine, AaveEngine} {
+		if _, pinned := p.Pins[engine]; !pinned {
+			continue
+		}
+		c := cursorByEngine[engine] // present: resolvePin succeeded above
+		if maxE := maxEpochs[c.ChainID]; c.AckedEpoch < maxE {
+			return nil, fmt.Errorf("engine %q: chain %d carries %w %d (engine acked %d) — the raw layer invalidated derived state this snapshot would certify; wait for the daemon's ack (RewindDerived) and retry",
+				engine, c.ChainID, store.ErrUnackedReorgEpoch, maxE, c.AckedEpoch)
+		}
+	}
 	engineOfChain := map[string]string{}
 	for e, c := range p.ChainFor {
 		engineOfChain[c] = e
