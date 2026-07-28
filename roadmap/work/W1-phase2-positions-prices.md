@@ -27,15 +27,22 @@ allowed_paths:
   - docs/specs/**
   - .github/workflows/ci.yml
 deliverables:
-  - docs/plans/*solvent-phase2*.md
-  - internal decode/position/price packages per that plan
+  - docs/plans/2026-07-22-solvent-phase2-positions-prices.md
+  - internal/decode/decode.go
+  - internal/derive/aave.go
+  - internal/derive/runner.go
+  - internal/prices/poller.go
+  - internal/store/derive.go
+  - internal/forkreplay/fork_replay_test.go
+  - cmd/indexer/main.go
+  - cmd/reconcile/main.go
 evidence_receipts: []
 invalidated_by:
   - recon/abis/**
   - recon/contracts.json
   - internal/store/migrations/**
 review_when: phase:P2:entry
-updated: 2026-07-25
+updated: 2026-07-27
 ---
 
 # W1 — Phase 2: positions & prices (plan + execution)
@@ -49,7 +56,12 @@ direct contract reads.
 Author the Phase 2 implementation plan (same writing-plans rigor as Phase 1), then execute it:
 abigen decoding for both engines from `recon/abis/` allowlists, `positions`/`position_events`/
 `snapshots` schema with the `lending_engine` discriminator, RedStone/Chainlink price ingestion,
-full-history backfill of both engines, anvil-fork integration test replaying a real block range.
+full-history backfill of both engines, opt-in anvil-fork integration test asserting derived
+borrower state against direct view calls through a fork pinned at a hash-bound block
+[criterion AMENDED 2026-07-27, owner-delegated decision, P2 exit review C2: the delivered
+derived-vs-fork comparison proves output correctness at the pin; the ingestion mechanism was
+exercised by Task 9's from-scratch full-history backfill; a hermetic walker/runner-vs-fork
+pipeline-replay harness is deferred to the P3 backlog as a named item].
 
 ## Acceptance
 
@@ -75,34 +87,48 @@ full-history backfill of both engines, anvil-fork integration test replaying a r
 ## Canonical commands
 
 ```text
-export TEST_DATABASE_URL='postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable'
+# TEST_DATABASE_URL must name the blessed destructive-test database
+# (solvent_test) — the wave-10 split guard FATALS on the live name, by design
+# [corrected 2026-07-27, P2 exit review C3: the original text pointed at
+# /solvent and failed by construction]. SOLVENT_DATABASE_URL identifies the
+# live DB so the guard can prove test != live.
+export SOLVENT_DATABASE_URL='postgres://solvent:solvent@localhost:5432/solvent?sslmode=disable'
+export TEST_DATABASE_URL='postgres://solvent:solvent@localhost:5432/solvent_test?sslmode=disable'
 make db-up && go test ./...
 go vet ./... && gofmt -l .
-# backfill + cross-check commands to be pinned by the Phase 2 plan itself
+# acceptance evidence (read-only vs the live DB; daemon may be running):
+make reconcile
+# opt-in fork replay (needs ANVIL_BIN + ANVIL_FORK_RPC in .env):
+make test-fork-replay
 ```
 
 ## Evidence
 
-No attained evidence yet. First commit and verify the deliverable while this work remains active.
-Then record the tested commit, environment, commands, and result in a receipt; change this work to
-`achieved`, add each staged receipt path to `evidence_receipts`, and run `doctor.py --stamp W1`.
-Restage the stamped work object. Stamping binds the staged contract/proof/input snapshot and does
-not run the commands for you. Calculate the receipt's `input_fingerprint` and
-`contract_fingerprint` with `doctor.py --receipt-basis W1 --snapshot <tested-commit>`.
+Attained 2026-07-27 (receipt: `roadmap/evidence/receipts/E-w1-acceptance.md`; artifacts:
+`roadmap/evidence/artifacts/w1-reconcile/`). The `cmd/reconcile` acceptance run passes with the
+DEFAULT posture (any flag deviation self-taints `acceptance:false`): all gated comparisons exact —
+golden vector borrower at ETH 25,584,990 plus live-pin sampled borrowers vs direct pinned contract
+reads, aggregate completeness welds, collateral replay, six evidence scans. The opt-in fork replay
+passes at the acceptance run's hash-bound OP pin with a census-gated fixture (3 borrowers incl. a
+migration-genesis account, identity+stratum pinned). Full suite green with live-db store tests
+running and the fork test opted in. Review provenance: ~23 adversarial rounds across Tasks 8-10
+plus the whole-branch P2 exit review (final verdict SHIP) — session IDs in
+`.superpowers/sdd/progress-phase2.md`. Disclosed limitations are carried in the round archives
+(non-honest-actor classes: round 20 TLS-trust/hostile-context; round 22 unexercised failure arms;
+exit-train identifier-laundering tail).
 
 ## Handoff
 
-- next: **Task 8 is CLOSED under D-006 (2026-07-26)** — full stack senior-approved: decode
-  `d8c462b`, derive `3b864ac`, runner `d1e7d54`, health `ff42a80`, prices `fb28061`; 16 waves,
-  14 Codex rounds, governing decision D-012 (supersedes D-011/D-010), addenda ADD-1/ADD-2,
-  migrations 00005–00008, controller merged-HEAD verification 577/674/0/0. Immediate step is
-  **Task 9**: full backfill from scratch + `cmd/reconcile` + invariant scans — this produces W1's
-  actual acceptance evidence. **Start with the R-001 live throughput probe** (the paper analysis
-  and levers are in the `r001_input` ledger entry in `.superpowers/sdd/progress-phase2.md`: ~152k
-  RPC calls total, 42/N hours at N req/s, one keyed free-tier endpoint likely suffices; the gate
-  requires OBSERVED numbers, then the owner decides free-vs-paid). Then **Task 10** (anvil-fork
-  replay + phase gate). Finally the P2 exit review per D-006 clause 2 (whole-branch Codex review),
-  stamp receipts, populate `evidence_receipts`, flip to `achieved` via `doctor.py --stamp W1`.
+- next: **PHASE 2 COMPLETE (2026-07-27)** — Tasks 8/9/10 all closed under D-006 (~23 adversarial
+  rounds; Task 9 arc rounds 4-21, Task 10 round 22, P2 exit whole-branch round 23 + a four-round
+  fix train ending SHIP with zero material findings). Acceptance evidence attained and stamped
+  (see Evidence). Immediate step is **P3 entry**: author the Phase 3 plan (risk math, stress
+  scenarios, API surface) with its own work object; note W1's `invalidated_by` covers
+  `internal/store/migrations/**`, so P3's first migration will correctly flag this work's
+  evidence for re-verification or archival — handle W1 (archive or re-stamp) in the P3-entry
+  transition. P3 backlog carries: the hermetic walker/runner-vs-fork pipeline-replay harness
+  (C2 amendment, 2026-07-27), the L1 flush-time empty-doc backstop residual, and the
+  identifier-laundering tail on the recheck wiring guard (all disclosed, none honest-use-blocking).
 - read_first: `.superpowers/sdd/progress-phase2.md` — the execution ledger, and the single most
   important file for a cold start (nine Task 7 review waves, 21 Codex session IDs, every design
   decision and erratum). Then `recon/derivation-notes.md` (**NORMATIVE** for Tasks 4–10, including
