@@ -497,6 +497,30 @@ func summarizeSecondOpinionErr(err error) string {
 // — the same unacked window the snapshot-time gate refuses at the start.
 // Together the two legs leave no path: acked-and-pruned trips the movement
 // leg, recorded-but-unacked trips the MAX leg.
+// readRecheckState reads the Phase-3 recheck pair — derive cursors and
+// chain-max reorg epochs — inside ONE repeatable-read read-only transaction,
+// so both views come from a single database snapshot. Read the comment at
+// the call site for why two autocommit statements are not equivalent.
+func readRecheckState(ctx context.Context, conn *pgx.Conn) ([]store.DeriveCursorState, map[int64]int64, error) {
+	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin recheck tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	cursors, err := store.DeriveCursorStates(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	maxEpochs, err := store.MaxReorgEpochs(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit recheck tx: %w", err)
+	}
+	return cursors, maxEpochs, nil
+}
+
 func rewindMoved(baseline snapshotdb.RewindBaseline, current []store.DeriveCursorState, pins map[string]uint64, maxEpochs map[int64]int64) []string {
 	var reasons []string
 	byEngine := map[string]store.DeriveCursorState{}
@@ -982,13 +1006,15 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	if err != nil {
 		return finish(abort(exitRetryable, "aborted: recheck", "fresh connection for rewind re-check: %v", err))
 	}
-	currentCursors, err := store.DeriveCursorStates(ctx, fresh)
-	var currentMaxEpochs map[int64]int64
-	if err == nil {
-		// H1 recheck input: the CURRENT chain-max epochs, read over the same
-		// fresh connection as the cursors.
-		currentMaxEpochs, err = store.MaxReorgEpochs(ctx, fresh)
-	}
+	// H1 recheck inputs: cursors AND chain-max epochs must come from ONE
+	// database snapshot. Two autocommit statements on the same connection do
+	// NOT share one: an ack+prune landing between them presents the OLD
+	// cursor (still at the pin) alongside a PRUNED epoch view, and both
+	// rewindMoved legs stay silent over invalidated state (exit-review
+	// re-verification finding, session 019fa68e). A repeatable-read
+	// read-only transaction pins both reads to a single snapshot: whichever
+	// side of the ack it lands on, the pair is coherent and one leg fires.
+	currentCursors, currentMaxEpochs, err := readRecheckState(ctx, fresh)
 	fresh.Close(ctx)
 	if err != nil {
 		return finish(abort(exitRetryable, "aborted: recheck", "re-read derive cursors / reorg epochs: %v", err))

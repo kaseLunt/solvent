@@ -105,3 +105,69 @@ func TestSnapshotGatePassesWhenEpochAcked(t *testing.T) {
 	require.NoError(t, err, "an ACKED epoch is consistent state — the gate must not refuse it")
 	require.Equal(t, uint64(1000), snap.Pins[snapshotdb.DMEngine])
 }
+
+// TestRecheckStateIsOneSnapshot is the re-verification round's choreography
+// regression (session 019fa68e): the Phase-3 recheck pair must come from ONE
+// database snapshot. Two autocommit reads on one connection do not — an
+// ack+prune landing BETWEEN them yields old-cursor + pruned-MAX and both
+// rewindMoved legs stay silent over invalidated state. The test replays that
+// exact interleaving against readRecheckState's transaction shape: begin the
+// recheck read, take the cursor view, THEN (from the admin connection) ack,
+// lower the cursor, and prune the epoch — and require the pair the recheck
+// returns to be coherent, i.e. rewindMoved convicts.
+func TestRecheckStateIsOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	roDSN, admin, _ := epochGateSetup(t, ctx)
+
+	// Baseline as Phase 1 recorded it: cursor 1000, acked 0, no epochs.
+	baseline := snapshotdb.RewindBaseline{
+		AckedEpoch: map[string]int64{snapshotdb.DMEngine: 0},
+		LastBlock:  map[string]uint64{snapshotdb.DMEngine: 1000},
+	}
+	pins := map[string]uint64{snapshotdb.DMEngine: 1000}
+
+	// The reorg lands AFTER phase 1: epoch recorded, not yet acked.
+	_, err := admin.Exec(ctx, `INSERT INTO reorg_epochs (chain_id, rewound_to) VALUES (10, 900)`)
+	require.NoError(t, err)
+
+	fresh, err := pgx.Connect(ctx, roDSN)
+	require.NoError(t, err)
+	defer fresh.Close(context.Background())
+
+	// Replicate readRecheckState's shape with the hostile interleaving
+	// injected between its two logical reads.
+	tx, err := fresh.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	require.NoError(t, err)
+	cursors, err := store.DeriveCursorStates(ctx, tx)
+	require.NoError(t, err)
+
+	// The daemon's next pass, in full, between the two reads: ack, lower the
+	// cursor below the pin, prune the epoch.
+	_, err = admin.Exec(ctx,
+		`UPDATE derive_cursors SET acked_epoch = (SELECT MAX(epoch) FROM reorg_epochs WHERE chain_id = 10),
+		 last_block = 900 WHERE engine = $1`, snapshotdb.DMEngine)
+	require.NoError(t, err)
+	_, err = admin.Exec(ctx, `DELETE FROM reorg_epochs WHERE chain_id = 10`)
+	require.NoError(t, err)
+
+	maxEpochs, err := store.MaxReorgEpochs(ctx, tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+
+	// The RR snapshot pins both reads before the interleaving: the pair is
+	// pre-ack cursors WITH the pre-prune epoch — the MAX leg convicts. Under
+	// autocommit reads the pair would be pre-ack cursor + pruned MAX: silent.
+	reasons := rewindMoved(baseline, cursors, pins, maxEpochs)
+	require.NotEmpty(t, reasons, "one-snapshot pair must convict the mid-recheck ack+prune")
+
+	// And on a quiescent database readRecheckState itself returns the same
+	// pair a direct read does — the wiring leg.
+	gotCursors, gotMax, err := readRecheckState(ctx, fresh)
+	require.NoError(t, err)
+	directCursors, err := store.DeriveCursorStates(ctx, fresh)
+	require.NoError(t, err)
+	directMax, err := store.MaxReorgEpochs(ctx, fresh)
+	require.NoError(t, err)
+	require.Equal(t, directCursors, gotCursors)
+	require.Equal(t, directMax, gotMax)
+}
