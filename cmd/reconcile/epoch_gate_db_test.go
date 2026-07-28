@@ -129,13 +129,17 @@ func TestRecheckStateIsOneSnapshot(t *testing.T) {
 	}
 	pins := map[string]uint64{snapshotdb.DMEngine: 1000}
 
-	// The reorg lands AFTER phase 1: epoch recorded, not yet acked.
-	_, err := admin.Exec(ctx, `INSERT INTO reorg_epochs (chain_id, rewound_to) VALUES (10, 900)`)
+	// The reorg lands AFTER phase 1: epoch recorded, not yet acked. The
+	// epoch value is captured so the conviction can be asserted EXACTLY.
+	var epochVal int64
+	err := admin.QueryRow(ctx,
+		`INSERT INTO reorg_epochs (chain_id, rewound_to) VALUES (10, 900) RETURNING epoch`).Scan(&epochVal)
 	require.NoError(t, err)
 
 	fresh, err := pgx.Connect(ctx, roDSN)
 	require.NoError(t, err)
 	defer fresh.Close(context.Background())
+	helperPID := fresh.PgConn().PID()
 
 	// Writer holds the epoch table so the helper's SECOND read must block.
 	writerTx, err := admin.Begin(ctx)
@@ -157,8 +161,11 @@ func TestRecheckStateIsOneSnapshot(t *testing.T) {
 		resCh <- recheckResult{cursors, maxEpochs, err}
 	}()
 
-	// Deterministic rendezvous: wait until the helper's epoch read is
-	// visibly lock-waiting (bounded), via an independent connection.
+	// Deterministic rendezvous, bound to the HELPER's backend: wait until
+	// THAT pid holds an ungranted lock request on reorg_epochs specifically
+	// (closing-round finding: an unbound pg_stat_activity text match can
+	// false-positive on any cluster session and let the writer commit before
+	// the helper's first read).
 	poll, err := pgx.Connect(ctx, roDSN)
 	require.NoError(t, err)
 	defer poll.Close(context.Background())
@@ -166,8 +173,9 @@ func TestRecheckStateIsOneSnapshot(t *testing.T) {
 	for range 100 { // ~5s bound
 		var n int
 		err = poll.QueryRow(ctx,
-			`SELECT count(*) FROM pg_stat_activity
-			 WHERE wait_event_type = 'Lock' AND query ILIKE '%reorg_epochs%'`).Scan(&n)
+			`SELECT count(*) FROM pg_locks
+			 WHERE pid = $1 AND NOT granted AND relation = 'reorg_epochs'::regclass`,
+			int32(helperPID)).Scan(&n)
 		require.NoError(t, err)
 		if n >= 1 {
 			blocked = true
@@ -175,7 +183,7 @@ func TestRecheckStateIsOneSnapshot(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	require.True(t, blocked, "the helper's MAX read must park on the writer's lock")
+	require.True(t, blocked, "the helper's MAX read must park on the writer's reorg_epochs lock")
 
 	// The daemon's next pass, in full, between the helper's two reads: ack,
 	// lower the cursor below the pin, prune the epoch — then release.
@@ -190,11 +198,19 @@ func TestRecheckStateIsOneSnapshot(t *testing.T) {
 	res := <-resCh
 	require.NoError(t, res.err)
 
-	// The helper's RR snapshot predates the interleaving: pre-ack cursors
-	// WITH the pre-prune epoch — the MAX leg convicts. An autocommit
-	// implementation returns the pruned (empty) MAX here and stays silent.
+	// The helper's RR snapshot predates the interleaving. Assert the EXACT
+	// coherent pre-commit pair (closing-round finding: a bare any-reason
+	// check could pass for the WRONG reason — e.g. a writer that committed
+	// early makes acked/last_block movement fire instead), then require the
+	// specific MAX-leg conviction.
+	require.Len(t, res.cursors, 1)
+	require.Equal(t, int64(0), res.cursors[0].AckedEpoch, "cursor view must be PRE-ack")
+	require.Equal(t, uint64(1000), res.cursors[0].LastBlock, "cursor view must be PRE-lower")
+	require.Equal(t, epochVal, res.max[10], "epoch view must be PRE-prune")
 	reasons := rewindMoved(baseline, res.cursors, pins, res.max)
-	require.NotEmpty(t, reasons, "the production helper's pair must convict the mid-recheck ack+prune")
+	require.Len(t, reasons, 1, "exactly the MAX leg must convict — no movement-leg noise")
+	require.Contains(t, reasons[0], "unacknowledged reorg epoch",
+		"the conviction must be the MAX leg (recorded-but-unacked), not cursor movement")
 
 	// And on a quiescent database readRecheckState itself returns the same
 	// pair a direct read does — the wiring leg.
