@@ -3,7 +3,7 @@ id: W1
 type: work
 title: "Phase 2: positions & prices (plan + execution)"
 phase: P2
-status: active
+status: achieved
 evidence_target: Suite green live-db; backfilled positions cross-checked on-chain
 priority: 1
 depends_on: []
@@ -36,13 +36,15 @@ deliverables:
   - internal/forkreplay/fork_replay_test.go
   - cmd/indexer/main.go
   - cmd/reconcile/main.go
-evidence_receipts: []
+evidence_receipts:
+  - roadmap/evidence/receipts/E-w1-acceptance.md
 invalidated_by:
   - recon/abis/**
   - recon/contracts.json
   - internal/store/migrations/**
 review_when: phase:P2:entry
 updated: 2026-07-27
+evidence_fingerprint: sha256:a76ce7591aafd04dddf8c88f2e2677ee7a472bb51e349daf618488b317b3a3a0
 ---
 
 # W1 — Phase 2: positions & prices (plan + execution)

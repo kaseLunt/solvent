@@ -9,8 +9,8 @@
 | ID | Phase | Goal | State |
 | --- | --- | --- | --- |
 | P1 | Foundation | Recon-verified contracts + reorg-safe indexer ingesting live OP+ETH mainnet | Done |
-| P2 | Positions & prices | Decode both engines into a two-engine position schema; oracle price ingestion; full backfill | **In progress** |
-| P3 | Risk engine + API | Health-factor math proven against chain; stress engine; public REST/SSE API + npm client | Planned |
+| P2 | Positions & prices | Decode both engines into a two-engine position schema; oracle price ingestion; full backfill | Done |
+| P3 | Risk engine + API | Health-factor math proven against chain; stress engine; public REST/SSE API + npm client | **In progress** |
 | P4 | Watch & alerts | Threshold registrations with Telegram/email delivery | Planned |
 | P5 | Web + launch | Next.js product (book, inspector, Observatory, watch); deploys; README landing; demo | Planned — **MVP line** |
 | P6 | Post-launch | Adoption, writeup circulation, optional weETH watch module | Parked |
@@ -26,7 +26,7 @@ claim the gate is automated unless a validator actually enforces it.
 
 | ID | Work item | Phase | Depends on | Evidence target | Status |
 | --- | --- | --- | --- | --- | --- |
-| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | active |
+| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | achieved |
 
 The row above projects `work/W1-phase2-positions-prices.md`. A work object may not appear here
 before its file exists, and a hand-maintained status mismatch is an error.

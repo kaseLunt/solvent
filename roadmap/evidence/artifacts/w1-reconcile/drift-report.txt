@@ -1,0 +1,55 @@
+solvent reconcile drift report (solvent.reconcile.drift-report/v1)
+status: completed
+result: pass
+comparison sha256: 88c7ef7246c4d61b88dcbb0d2e34bb50f543562647af4a3f19364259b9a441d2
+
+pins:
+  eth            block 25628676     hash 0xd0cf3c6e189c1755f8874adfa2b342410ed83b4bf209b567357c82a39cb419d5 weld[before=ok after=ok]
+  op             block 154805582    hash 0xed6a2a85e1d195c69f04e7f10f56d6de9aa43c80fddce2c465b50ad409bb8d08 weld[before=ok after=ok]
+  eth:golden-A   block 25584990     hash 0xf77c8574ff657c558955daa4b64d59ffcc9272bee37b287b15d0967f3a6ce501 weld[before= after=ok]
+  eth:golden-B   block 25593800     hash 0x1e05479958146ec18305fcd96a407f05f239f66bc45266d0f901fbd75c05a379 weld[before= after=ok]
+
+dm rows: 29/29 exact
+dm aggregate weld:
+  0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C exact derivedΣ=0 chain=0 (sample coverage 0)
+  0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85 exact derivedΣ=21200450860762 chain=21200450860762 (sample coverage 43481101652)
+  0x80Eede496655FB9047dd39d9f418d5483ED600df exact derivedΣ=0 chain=0 (sample coverage 0)
+  0x94b008aA00579c1307B0EF2c499aD98a8ce58e58 exact derivedΣ=0 chain=0 (sample coverage 0)
+  0xDCB612005417Dc906fF72c87DF732e5a90D49e11 exact derivedΣ=0 chain=0 (sample coverage 0)
+  0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a exact derivedΣ=0 chain=0 (sample coverage 0)
+  0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13 exact derivedΣ=0 chain=0 (sample coverage 0)
+  0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898 exact derivedΣ=0 chain=0 (sample coverage 0)
+dm index integrity (separate verdict class):
+  0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C no-iiu-history (gated=false)
+  0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85 exact (gated=true)
+  0x80Eede496655FB9047dd39d9f418d5483ED600df no-iiu-history (gated=false)
+  0x94b008aA00579c1307B0EF2c499aD98a8ce58e58 no-iiu-history (gated=false)
+  0xDCB612005417Dc906fF72c87DF732e5a90D49e11 no-iiu-history (gated=false)
+  0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a no-iiu-history (gated=false)
+  0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13 no-iiu-history (gated=false)
+  0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898 no-iiu-history (gated=false)
+aave rows: 14/14 exact
+aave aggregate weld:
+  debt 0x6c3ea9036406852006290770BEdFcAbA0e23A0e8 exact derivedΣ=83 chain=83 gated=true
+  debt 0x853d955aCEf822Db058eb8505911ED77F175b99e exact derivedΣ=246190954939422183220 chain=246190954939422183220 gated=true
+  debt 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 exact derivedΣ=2349861906 chain=2349861906 gated=true
+  debt 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee exact derivedΣ=0 chain=0 gated=true
+  collateral 0x6c3ea9036406852006290770BEdFcAbA0e23A0e8 exact derivedΣ=111558743 chain=111558743 gated=false
+  collateral 0x853d955aCEf822Db058eb8505911ED77F175b99e exact derivedΣ=14826994890933562476818 chain=14826994890933562476818 gated=false
+  collateral 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 exact derivedΣ=8201158073 chain=8201158073 gated=false
+  collateral 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee exact derivedΣ=3985193280972107362 chain=3985193280972107362 gated=false
+golden rows:
+  row A 0x70daaac436465a0d03e45916fa68ddee6086e5fe debt pin 25584990: exact
+  row A 0x70daaac436465a0d03e45916fa68ddee6086e5fe collateral pin 25584990: exact
+  row A 0xe649a394fb16b58ee2e59feb2ea571e7733c812a debt pin 25584990: exact
+  row A 0xe649a394fb16b58ee2e59feb2ea571e7733c812a collateral pin 25584990: exact
+  row B 0x70daaac436465a0d03e45916fa68ddee6086e5fe debt pin 25593800: exact
+  row B 0x70daaac436465a0d03e45916fa68ddee6086e5fe collateral pin 25593800: exact
+  row B 0xe649a394fb16b58ee2e59feb2ea571e7733c812a debt pin 25593800: exact
+  row B 0xe649a394fb16b58ee2e59feb2ea571e7733c812a collateral pin 25593800: exact
+  row C   pin 25593800: exact
+freshness: 0 sampled gate failures; fleet fresh 1.000 (advisory threshold 0.95)
+invariants: scan1=0 scan2=0 scan3=0 scan4=0 scan5=0 advisory_aave=0
+rpc: 57 logged operations
+
+(this .txt is a rendering of drift-report.json — the JSON is the artifact)
