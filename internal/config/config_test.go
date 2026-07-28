@@ -51,7 +51,11 @@ func TestLoadSnapshotInterval(t *testing.T) {
 
 func TestLoadFailsWhenRPCEnvMissing(t *testing.T) {
 	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
-	// SOLVENT_RPC_OP deliberately unset
+	// Explicitly EMPTY, not assumed-absent: `make test` exports the whole
+	// .env (that is how the fork-replay and reconcile vars flow), so on any
+	// dev box with a populated .env this test would false-fail if it relied
+	// on ambient absence. Load treats empty as unset (config.go:162).
+	t.Setenv("SOLVENT_RPC_OP", "")
 	_, err := Load("testdata/contracts.json")
 	require.ErrorContains(t, err, "SOLVENT_RPC_OP")
 }
