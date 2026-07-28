@@ -117,3 +117,70 @@ surfaces fit (see decision 2).
    run's 408 failure proved the RPC-error arm fails loudly as specified.
 4. `gofmt -l .` (`make fmt`) lists many PRE-EXISTING files on this CRLF working
    tree — unchanged by this wave; the new file is not among them.
+
+---
+
+# Wave 1b — Codex round-22 fixes (1 high, 2 medium, all ACCEPTED)
+
+Base: HEAD 7f8c42e (wave 1 landed). All three findings fixed inside
+`internal/forkreplay/fork_replay_test.go` only; nothing else touched, nothing
+committed or staged.
+
+## F1 [high] — vacuous token comparisons → now structurally impossible
+
+- **Nonempty-set gates:** every selected borrower must have a NONEMPTY derived
+  nonzero-debt token set AND a nonempty chain `borrowingOf` set before any
+  comparison counts; an empty union fails by name instead of comparing two nil
+  sets equal.
+- **Net cross-check:** per borrower, Σ retained per-asset as-of sums must equal
+  the sampled row's own `Net` — a Live row whose deltas were discarded by the
+  per-asset retention (empty asset / wrong side) FAILS instead of vanishing.
+- **Gating census:** under the default pin, `tokenAsserts` must equal the
+  fixture's `defaultExpectedTokenAsserts = 3` via `require.Equal` — gating, no
+  longer merely logged. (Override path: census not pinned, but the nonempty-set
+  gates still force ≥1 token assertion per borrower.)
+
+## F2 [medium] — DB can no longer select its own subjects
+
+- **Default pin fixture:** `defaultExpectedBorrowers` pins the three account
+  hexes AND strata from the verified wave-1 runs — `0003d7bf…c3b5:migrated`,
+  `00075e7f…faae:post_migration`, `000a46d0…e153:post_migration` — and the
+  sample must resolve to exactly those accounts with those strata, rank by
+  rank. A migration_genesis regression that evicts an expected borrower now
+  fails by name instead of silently re-picking.
+- **Override path:** `ANVIL_FORK_PIN_BLOCK` + `ANVIL_FORK_PIN_HASH` +
+  `ANVIL_FORK_EXPECT` (acct:stratum,×3) are required as a TRIPLE; any partial
+  override is refused — never silently sampled.
+
+## F3 [medium] — fork credential can no longer leak through anvil output
+
+- `sanitizeForkOutput(s, forkURL)`: exact fork-URL replacement first (covers
+  anvil's Endpoint banner), then regex redaction of URL userinfo
+  (`scheme://user:pass@` → `scheme://<redacted>@`), credential-shaped query
+  params (`api[-_]?key|apikey|dkey|key|token|secret|auth|password`), and long
+  opaque path segments (Alchemy-style `/v2/<key>`, ≥20 chars).
+- Wired into EVERY sink: both startAnvilFork Fatals (early-exit incl. the exit
+  error itself, startup timeout) and callView's retry Logf/Fatalf (anvil relays
+  upstream provider errors verbatim — the observed 408 path).
+- **Regression test `TestSanitizeForkOutputRedactsSecrets`:** pure unit, NOT
+  opt-in-gated, runs in every `go test ./...` — synthetic secret in banner,
+  userinfo, opaque-path, query-param and prefix-extended forms must not
+  survive, in both the known-URL and empty-URL arms.
+
+## Wave-1b verification
+
+- `tr -d '\r' < fork_replay_test.go | gofmt -d` → empty; `go vet ./...` clean.
+- Env-free run: `TestForkReplayDMBorrowers` SKIPS with the named reason;
+  `TestSanitizeForkOutputRedactsSecrets` PASSES (proving it is not gated).
+  Full `go test ./...` green (all 12 packages).
+- **Opted-in live run via `make test-fork-replay`** (ANVIL vars from .env):
+  **PASS in 50.18s** (one 408 retry absorbed; its logged error text passed
+  through the sanitizer). Assertion census, all gating:
+  **3 borrowers, 3 token equalities (census-gated: 3), 3 set equalities,
+  3 sum-vs-total equalities, 6 fixture account+stratum equalities, 3 net
+  cross-checks, 1 pin-hash assertion** — fixture matched exactly
+  (0003d7bf…/migrated, 00075e7f…/post_migration, 000a46d0…/post_migration;
+  totals 1, 1, 10,400,057 USD-6dec, unchanged from wave 1).
+- Unverified: the override-triple refusal arm and the selection-drift failure
+  arm are code-reviewed, not live-exercised (exercising them needs a second
+  hash-bound pin fixture).

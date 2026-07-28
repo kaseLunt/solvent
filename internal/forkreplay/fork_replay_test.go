@@ -54,6 +54,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,7 +139,7 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 	// ---- From here on, EVERY problem is a FAILURE, never a skip. ----------
 
 	ctx := context.Background()
-	pinBlock, pinHash := resolvePin(t)
+	pinBlock, pinHash, expected, exactTokenAsserts := resolvePin(t)
 	dmProxy := common.HexToAddress(dmProxyHex)
 
 	// 1. Spawn anvil forked at the pin; bounded startup wait; cleanup kill.
@@ -165,6 +166,18 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 	require.GreaterOrEqualf(t, len(live), borrowerSample,
 		"need >= %d live DM borrowers as-of pin %d, DB has %d — wrong or empty database", borrowerSample, pinBlock, len(live))
 	picked := live[:borrowerSample]
+
+	// Round-22 F2: the deterministic sample is asserted against the pin's
+	// FIXTURE — the DB under test never selects its own subjects. A shifted
+	// sample (e.g. a migration_genesis derivation regression evicting an
+	// expected borrower) FAILS by name instead of silently re-picking
+	// borrowers that still happen to pass.
+	for i, p := range picked {
+		require.Equalf(t, expected[i].acctHex, p.AccountHex,
+			"selection drift at rank %d of pin %d: sampled borrower %s, fixture pins %s — the sample shifted under an immutable pin, which is a derivation regression, not a re-pick", i, pinBlock, p.AccountHex, expected[i].acctHex)
+		require.Equalf(t, expected[i].stratum, p.Stratum,
+			"stratum drift for borrower %s at pin %d: sampled %q, fixture pins %q", p.AccountHex, pinBlock, p.Stratum, expected[i].stratum)
+	}
 
 	accounts := make([][]byte, 0, len(picked))
 	for _, p := range picked {
@@ -204,7 +217,7 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 			return v
 		}
 		ret := callView(t, ctx, ec, dmProxy, packCall(t, getCurrentIndex, tok), pinBlock,
-			fmt.Sprintf("getCurrentIndex(%s)", tok.Hex()))
+			fmt.Sprintf("getCurrentIndex(%s)", tok.Hex()), forkRPC)
 		v := unpackUint256(t, getCurrentIndex, ret)
 		idxCache[tok] = v
 		return v
@@ -217,10 +230,21 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 		acct := p.AccountHex
 		user := common.HexToAddress("0x" + acct)
 		ret := callView(t, ctx, ec, dmProxy, packCall(t, borrowingOfAll, user), pinBlock,
-			fmt.Sprintf("borrowingOf(%s)", user.Hex()))
+			fmt.Sprintf("borrowingOf(%s)", user.Hex()), forkRPC)
 		chainByToken, chainTotal := unpackBorrowingOf(t, borrowingOfAll, ret)
 
 		dbByToken := derived[acct]
+		// Round-22 F1: a Live sample row whose deltas were discarded by the
+		// per-asset retention (side != debt, empty asset) must FAIL, never
+		// vanish into an empty union — Σ retained per-asset sums must equal
+		// the sampled row's own net.
+		assetSum := new(big.Int)
+		for _, n := range dbByToken {
+			assetSum.Add(assetSum, n)
+		}
+		require.Zerof(t, assetSum.Cmp(p.Net),
+			"borrower %s at pin %d: Σ retained per-asset as-of sums %s != sampled net %s — rows outside the retained shape (side=debt, nonempty asset) fed the sample", acct, pinBlock, assetSum, p.Net)
+
 		union := map[common.Address]bool{}
 		var dbSet, chainSet []string
 		for tok, n := range dbByToken {
@@ -233,6 +257,14 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 			union[tok] = true
 			chainSet = append(chainSet, tok.Hex())
 		}
+		// Round-22 F1: an EMPTY union executes zero token assertions and
+		// compares two nil sets equal — both sides must be nonempty for
+		// every selected borrower before any comparison counts.
+		require.NotEmptyf(t, dbSet,
+			"borrower %s: zero derived nonzero-debt tokens as-of pin %d — an empty union would make every comparison vacuous", acct, pinBlock)
+		require.NotEmptyf(t, chainSet,
+			"borrower %s: borrowingOf returned zero tokens at pin %d — an empty union would make every comparison vacuous", acct, pinBlock)
+
 		tokens := make([]common.Address, 0, len(union))
 		for tok := range union {
 			tokens = append(tokens, tok)
@@ -280,21 +312,59 @@ func TestForkReplayDMBorrowers(t *testing.T) {
 		t.Logf("borrower %s (%s): %d token(s) exact, total %s USD-6dec", acct, p.Stratum, len(tokens), chainTotal)
 	}
 
-	t.Logf("fork replay PASS at pin %d (%s): %d borrowers, %d token equalities, %d set equalities, %d sum-vs-total equalities, 1 pin-hash assertion",
-		pinBlock, pinHash.Hex(), len(picked), tokenAsserts, setAsserts, sumAsserts)
+	// Round-22 F1: the token-assertion census GATES (not just logs) under
+	// the default pin — the fixture demands exactly this many per-token
+	// equalities, so a silently shrunken comparison surface fails by name.
+	if exactTokenAsserts > 0 {
+		require.Equalf(t, exactTokenAsserts, tokenAsserts,
+			"token-equality census at pin %d: executed %d per-token assertions, the fixture demands exactly %d — the comparison surface changed shape", pinBlock, tokenAsserts, exactTokenAsserts)
+	}
+
+	t.Logf("fork replay PASS at pin %d (%s): %d borrowers, %d token equalities (census-gated: %d), %d set equalities, %d sum-vs-total equalities, %d fixture account+stratum equalities, %d net cross-checks, 1 pin-hash assertion",
+		pinBlock, pinHash.Hex(), len(picked), tokenAsserts, exactTokenAsserts, setAsserts, sumAsserts, 2*len(picked), len(picked))
 }
 
-// resolvePin returns the hash-bound pin: the hardcoded default, or the
-// ANVIL_FORK_PIN_BLOCK + ANVIL_FORK_PIN_HASH override pair.
-func resolvePin(t *testing.T) (uint64, common.Hash) {
+// expectedBorrower pins one sampled subject — account (lowercase hex, no
+// 0x) and stratum — so the DB under test cannot select its own subjects
+// (round-22 F2): if a derivation regression (e.g. migration_genesis) shifts
+// the deterministic sample, the run FAILS instead of silently re-picking
+// borrowers that still happen to pass.
+type expectedBorrower struct {
+	acctHex string
+	stratum string
+}
+
+// defaultExpectedBorrowers / defaultExpectedTokenAsserts are the DEFAULT
+// pin's sample fixture, taken from the verified wave-1 live runs at pin
+// 154,796,552: the three lexicographically-smallest live borrowers, their
+// strata, and the exact number of per-token equality assertions the run
+// executes (each borrower holds exactly one nonzero debt token — USDC).
+var defaultExpectedBorrowers = []expectedBorrower{
+	{acctHex: "0003d7bf094b6b4db60d41aa2b41d2b70be0c3b5", stratum: "migrated"},
+	{acctHex: "00075e7f1fb542f84a0bddf1ee63b5a27b12faae", stratum: "post_migration"},
+	{acctHex: "000a46d01968219b34e1e28c88c71cf82d58e153", stratum: "post_migration"},
+}
+
+const defaultExpectedTokenAsserts = 3
+
+// resolvePin returns the hash-bound pin plus its pinned sample fixture: the
+// hardcoded defaults, or the ANVIL_FORK_PIN_BLOCK + ANVIL_FORK_PIN_HASH +
+// ANVIL_FORK_EXPECT override TRIPLE — all three together. An override
+// without its own hash bound cannot be hash-verified (chain-truth
+// discipline), and one without its own borrower fixture would let the DB
+// under test select its own subjects (round-22 F2) — both are refused.
+// exactTokenAsserts is 0 on the override path: only the default pin's
+// fixture pins a token-assertion census.
+func resolvePin(t *testing.T) (uint64, common.Hash, []expectedBorrower, int) {
 	t.Helper()
 	blockEnv := os.Getenv("ANVIL_FORK_PIN_BLOCK")
 	hashEnv := os.Getenv("ANVIL_FORK_PIN_HASH")
-	if (blockEnv == "") != (hashEnv == "") {
-		t.Fatal("ANVIL_FORK_PIN_BLOCK and ANVIL_FORK_PIN_HASH must be overridden TOGETHER — a block pin without its own hash pin cannot be hash-verified (chain-truth discipline)")
+	expectEnv := os.Getenv("ANVIL_FORK_EXPECT")
+	if blockEnv == "" && hashEnv == "" && expectEnv == "" {
+		return defaultPinBlock, common.HexToHash(defaultPinHash), defaultExpectedBorrowers, defaultExpectedTokenAsserts
 	}
-	if blockEnv == "" {
-		return defaultPinBlock, common.HexToHash(defaultPinHash)
+	if blockEnv == "" || hashEnv == "" || expectEnv == "" {
+		t.Fatal("ANVIL_FORK_PIN_BLOCK, ANVIL_FORK_PIN_HASH and ANVIL_FORK_EXPECT must be overridden TOGETHER — a block pin without its own hash bound cannot be hash-verified, and a pin without its own acct:stratum fixture would let the DB under test select its own subjects (round-22 F2); an override without a fixture is refused, never silently sampled")
 	}
 	n, err := strconv.ParseUint(blockEnv, 10, 64)
 	require.NoError(t, err, "ANVIL_FORK_PIN_BLOCK must be a decimal block number")
@@ -302,7 +372,85 @@ func resolvePin(t *testing.T) (uint64, common.Hash) {
 	// HexToHash silently pads/truncates; the round-trip check refuses a
 	// malformed override instead of verifying against garbage.
 	require.Equalf(t, h.Hex(), strings.ToLower(hashEnv), "ANVIL_FORK_PIN_HASH must be a 0x-prefixed 32-byte hash")
-	return n, h
+	return n, h, parseExpectedBorrowers(t, expectEnv), 0
+}
+
+// parseExpectedBorrowers parses ANVIL_FORK_EXPECT: exactly borrowerSample
+// comma-separated acct:stratum entries (account = 40 hex chars, 0x
+// optional), returned sorted by account hex ascending — the same order the
+// deterministic selection rule produces.
+func parseExpectedBorrowers(t *testing.T, raw string) []expectedBorrower {
+	t.Helper()
+	parts := strings.Split(raw, ",")
+	require.Lenf(t, parts, borrowerSample,
+		"ANVIL_FORK_EXPECT must pin exactly %d comma-separated acct:stratum entries", borrowerSample)
+	out := make([]expectedBorrower, 0, borrowerSample)
+	for _, part := range parts {
+		acct, stratum, ok := strings.Cut(strings.TrimSpace(part), ":")
+		require.Truef(t, ok, "ANVIL_FORK_EXPECT entry %q is not acct:stratum", part)
+		acct = strings.ToLower(strings.TrimPrefix(acct, "0x"))
+		b, err := hex.DecodeString(acct)
+		require.NoErrorf(t, err, "ANVIL_FORK_EXPECT account %q is not hex", acct)
+		require.Lenf(t, b, 20, "ANVIL_FORK_EXPECT account %q is not a 20-byte address", acct)
+		require.NotEmptyf(t, stratum, "ANVIL_FORK_EXPECT entry %q carries no stratum", part)
+		out = append(out, expectedBorrower{acctHex: acct, stratum: stratum})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].acctHex < out[j].acctHex })
+	return out
+}
+
+// Round-22 F3: anvil's banner prints its fork Endpoint and provider errors
+// can embed the fork URL — captured output and relayed RPC errors are
+// SANITIZED before any logging, so the fork credential never lands in
+// console/CI logs. Exact-URL replacement first (covers the banner), then
+// URL userinfo, then credential-shaped query parameters, then long opaque
+// path segments (Alchemy-style /v2/<key>). Over-redaction of diagnostics is
+// acceptable; a leaked key is not.
+var (
+	urlUserinfoRe  = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@`)
+	urlCredQueryRe = regexp.MustCompile(`(?i)\b((?:api[-_]?key|apikey|dkey|key|token|secret|auth|password)=)[^&\s"']+`)
+	urlKeyPathRe   = regexp.MustCompile(`(://[^\s"']+/)[A-Za-z0-9_-]{20,}`)
+)
+
+func sanitizeForkOutput(s, forkURL string) string {
+	if forkURL != "" {
+		s = strings.ReplaceAll(s, forkURL, "<fork-url redacted>")
+	}
+	s = urlUserinfoRe.ReplaceAllString(s, "${1}<redacted>@")
+	s = urlCredQueryRe.ReplaceAllString(s, "${1}<redacted>")
+	s = urlKeyPathRe.ReplaceAllString(s, "${1}<redacted>")
+	return s
+}
+
+// TestSanitizeForkOutputRedactsSecrets is the round-22 F3 regression: a
+// synthetic credential-bearing fork URL embedded in synthetic anvil output
+// — banner echo, userinfo form, opaque-path form, query-parameter form, and
+// a prefix-extended variant — must never survive sanitization. PURE UNIT:
+// no env gate, runs in every `go test ./...`.
+func TestSanitizeForkOutputRedactsSecrets(t *testing.T) {
+	// Deliberately NOT shaped like any real provider's key prefix (e.g. no
+	// sk_live_) — GitHub push protection pattern-matches those shapes and
+	// blocks the push even for synthetic fixtures. The sanitizer keys on
+	// parameter names, userinfo, and opaque-segment length, never prefixes.
+	const secret = "FAKESECRETTOKEN1234567890abcdefFAKE"
+	forkURL := "https://lb.example.org/ogrpc?network=optimism&dkey=" + secret
+	out := strings.Join([]string{
+		"Fork", "Endpoint:       " + forkURL, // anvil banner shape
+		"error: request to https://user:" + secret + "@rpc.example.com/ failed",
+		"upstream https://opt-mainnet.g.example.com/v2/" + secret + " returned 429",
+		"retrying " + forkURL + "&x=1 after backoff",
+		`{"error":"apikey=` + secret + ` rejected"}`,
+	}, "\n")
+
+	got := sanitizeForkOutput(out, forkURL)
+	require.NotContains(t, got, secret, "the credential must never survive sanitization")
+	require.Contains(t, got, "<fork-url redacted>", "the exact fork URL is replaced wholesale")
+	require.Contains(t, got, "https://<redacted>@rpc.example.com/", "userinfo credentials are redacted, host preserved for diagnostics")
+
+	// The empty-forkURL arm (defensive: sanitize must not require the URL
+	// to be known) still catches every regex-shaped credential.
+	got = sanitizeForkOutput(out, "")
+	require.NotContains(t, got, secret, "regex redaction alone must also remove the credential")
 }
 
 // syncBuffer is a mutex-guarded buffer for anvil's combined output: exec
@@ -368,7 +516,11 @@ func startAnvilFork(t *testing.T, bin, forkURL string, pinBlock uint64) (string,
 	for {
 		select {
 		case err := <-exited:
-			t.Fatalf("anvil exited before serving the fork (%v) — opted-in runs FAIL, never skip; anvil output:\n%s", err, out.String())
+			// Both the exit error and the captured output are sanitized
+			// (round-22 F3): the banner and provider errors can carry the
+			// fork URL's credential.
+			t.Fatalf("anvil exited before serving the fork (%s) — opted-in runs FAIL, never skip; anvil output:\n%s",
+				sanitizeForkOutput(fmt.Sprintf("%v", err), forkURL), sanitizeForkOutput(out.String(), forkURL))
 		default:
 		}
 		if h, ok := reportedPinHash(endpoint, pinBlock); ok {
@@ -376,7 +528,7 @@ func startAnvilFork(t *testing.T, bin, forkURL string, pinBlock uint64) (string,
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("anvil did not serve pinned block %d within %s (startup timeout) — opted-in runs FAIL, never skip; anvil output:\n%s",
-				pinBlock, anvilStartupTimeout, out.String())
+				pinBlock, anvilStartupTimeout, sanitizeForkOutput(out.String(), forkURL))
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
@@ -475,9 +627,11 @@ func packCall(t *testing.T, m abi.Method, args ...any) []byte {
 // retry (callAttempts): anvil caches each fork slot it fetched before an
 // upstream hiccup, so retries advance monotonically through free-tier
 // upstream timeouts; exhausting the bound FAILS — opted-in runs never skip.
-func callView(t *testing.T, ctx context.Context, ec *ethclient.Client, to common.Address, data []byte, block uint64, what string) []byte {
+// Error text is sanitized before logging (round-22 F3): anvil relays
+// upstream provider errors verbatim, and those can embed the fork URL.
+func callView(t *testing.T, ctx context.Context, ec *ethclient.Client, to common.Address, data []byte, block uint64, what, forkURL string) []byte {
 	t.Helper()
-	var lastErr error
+	var lastErr string
 	for attempt := 1; attempt <= callAttempts; attempt++ {
 		cctx, cancel := context.WithTimeout(ctx, callTimeout)
 		ret, err := ec.CallContract(cctx, ethereum.CallMsg{To: &to, Data: data}, new(big.Int).SetUint64(block))
@@ -485,11 +639,11 @@ func callView(t *testing.T, ctx context.Context, ec *ethclient.Client, to common
 		if err == nil {
 			return ret
 		}
-		lastErr = err
-		t.Logf("%s attempt %d/%d failed (%v) — retrying: the fork caches fetched slots, so progress is monotonic", what, attempt, callAttempts, err)
+		lastErr = sanitizeForkOutput(err.Error(), forkURL)
+		t.Logf("%s attempt %d/%d failed (%s) — retrying: the fork caches fetched slots, so progress is monotonic", what, attempt, callAttempts, lastErr)
 		time.Sleep(callBackoff)
 	}
-	t.Fatalf("%s through the fork at block %d failed after %d attempts — opted-in RPC errors FAIL, never skip: %v", what, block, callAttempts, lastErr)
+	t.Fatalf("%s through the fork at block %d failed after %d attempts — opted-in RPC errors FAIL, never skip: %s", what, block, callAttempts, lastErr)
 	return nil
 }
 
