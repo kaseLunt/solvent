@@ -464,3 +464,40 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   standing: the requirement set belongs in the REAL watermark reader itself, not just
   in what tests it. NEXT: Codex round 2 on delta 79f19c4..cce2cf1 — approve closes
   Tasks 2+3 jointly.
+- **TASKS 2+3 CLOSED — SHIP** (Codex round 2, session 019fb007-f18d-7ef3-92f5-
+  dd969dfbff33, ~4min, worktree t3r2 @ cce2cf1): "commit cce2cf1 closes the round-1
+  HIGH. The required-engine gate is strictly per engine/chain; the constructed
+  missing-param and lagging-param windows are fail-loud; exact blocking comparisons
+  are sorted, order-independent, and do not mask duplicates. The four claimed mutants
+  are discriminated by the seven verdict sequence. APPROVED: this clears the joint
+  Tasks 2+3 closure gate. No material findings." Harness program: 1 round + 1 fix
+  wave + 1 clean round. t3r2 joins the inert locked-dir list.
+- **WAVE 5 (riskd) LANDED — 2cd01d4** (2026-07-29 15:55, 24 files, +7297). cmd/riskd
+  (pass loop, schema-13 refusal smoke vs live v12, purity via go list -deps link-graph)
+  + internal/riskfeed SEPARATE package (fold/gate have Task 6/7 consumers) + store
+  risk.go/migration 00013. FOUR OWED OBLIGATIONS all addressed: (1) FoldParams
+  per-field last-non-nil, LiqBonus proven to storage (10600 read back from
+  risk_position_legs) w/ masking fixture asserting its own non-vacuity; (2)
+  engine-aware Marks (Aave Balances+Params, DM +per-account last_success_block),
+  cold-start refusal names the missing stamp; (3) three-state sweep law exact
+  (refused/refused/computed+flagged-at-last-success); (4) adapter-output-only Aave
+  STRUCTURAL (uncapped rows never enter the key set; welded to committed feeds.json).
+  Deviations accepted: deferred FKs (orphan aborts at COMMIT — proven); DMParamsAsOf
+  new public (DM params not in param_history; synthesized from custodied
+  position_events, zero RPC, chain-truth R3); CollateralTokenRemoved DROPS row
+  (delisted → refuse, not stale-threshold false safety); pg_notify in-tx (delivers at
+  commit iff batch landed); risk_scenarios/risk_waterfall UNPOPULATED by design (owed
+  w/ ProjectDMDebt Marks leg); NOLOGIN role, exception-guarded GRANTs. DISCLOSED
+  LIMITATION (new, honest): aave_collateral_flag_unwitnessed on every Aave position —
+  isUsingAsCollateral has no indexed witness, error direction false safety, closable
+  via ReserveUsedAsCollateralEnabled/Disabled already in raw_logs (deriver work,
+  candidate micro-task). WAVE FINDINGS: (1) .env lacked TEST_DATABASE_URL → local
+  full-suite greens were partially VACUOUS (live-DB tests silently skipping) — FIXED:
+  var added to .env (gitignored) + documented in .env.example; (2) -race still owed
+  (no CGO); (3) parallel-package DB collision found+fixed with package-exclusive
+  solvent_test_riskd (single-package green cannot detect this class). INTEGRATOR
+  RE-VERIFIED: build/vet exit 0, FULL suite exit 0 with both DSNs (16/16 ok — my
+  earlier TEST-only-DSN run correctly failed CLOSED on the destructive-split guard,
+  the guard working as designed). OWED: promote harness riskGate → riskfeed.GateEpochs
+  import (plan's Task-5 promotion; one-line per the wave; do with/after the riskd
+  Codex round). NEXT: Codex round on 74e0309..2cd01d4.
