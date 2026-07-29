@@ -31,6 +31,7 @@ allowed_paths:
 deliverables:
   - docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md
   - docs/specs/2026-07-28-solvent-phase3-risk-engine-api-design.md
+  - recon/p3-probes.md
   - .superpowers/sdd/p3-consults/risk-quant-p3-design.md
   - .superpowers/sdd/p3-consults/oracle-sentinel-p3-design.md
   - .superpowers/sdd/p3-consults/chain-truth-p3-design.md

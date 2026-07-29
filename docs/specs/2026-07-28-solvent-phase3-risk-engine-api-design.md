@@ -110,15 +110,23 @@ is amended by this document: exact-at-pin / watermarked-live, no tolerance carpe
 2. live debt: `rayMulCeil(scaled, normalizedDebt@pin)` — the ceiling law. Tests hard-code the
    two on-chain vectors (125415 × 1.094089…RAY → 137216; 83 × 1.000520…RAY → 84); expectations
    never computed from the helper under test;
-3. live collateral: floor per regime-B TokenMath (half-up regime A for pins < 23,088,584) —
-   **proof obligation P-1:** the floor law gets the same two-vector empirical pin proof the
-   ceiling law got, before the gate ships;
+3. live collateral: **pure floor — P-1 DISCHARGED** (probe pack, 15/15 exact at pin
+   25,635,618 with super-half refutations of half-up AND ceil; vectors F-A/F-B in
+   `recon/p3-probes.md`, hard-coded in the unit layer). Regime-A half-up applies only to
+   historical pins < 23,088,584 (the probe sweep independently confirmed that boundary is a
+   Pool impl upgrade);
 4. per-reserve base value: `balance × AaveOracle.getAssetPrice@pin / 10^dec` — read the **cap
    adapter's own output** at the pin, never compose raw feed × ratio;
 5. base totals vs `getUserAccountData@pin`: exact sums;
 6. avg liquidation threshold: single floor division, exact;
-7. healthFactor: `wadDiv(percentMul(...))` — **proof obligation P-2:** cite deployed
-   PercentageMath/WadRayMath lines and pin one rounding-boundary vector before gating.
+7. healthFactor: **a single fused floor division — P-2 DISCHARGED BY FALSIFICATION** (probe
+   pack): `HF = floor(totalCollateralBase × LT_bps × 1e18 / (10000 × totalDebtBase))`,
+   12/12 exact at the pin with six last-digit discriminators; the previously-drafted
+   `wadDiv(percentMul(...))` two-step matches ZERO borrowers under any rounding convention
+   (v3.5-style precision-preserving math — no intermediate rounding). `internal/risk`
+   implements the fused form over the exact weighted sum Σ(Cᵢ·LTᵢ); disclosed caveat: the
+   live book's uniform LT=8100 cannot distinguish weighted-sum from aggregate-LT fusion, so
+   a synthetic mixed-LT unit vector pins it and the #5/#6 gates isolate any divergence.
 
 Declared-input honesty: prices, reserve params, eMode, `isUsingAsCollateral` flags are
 `input:pinned-read` (`getUserConfiguration@pin`, `getUserEMode@pin`, `getConfiguration@pin`),
@@ -138,8 +146,11 @@ reads drift) + `PriceProviderV2.price@pin` + param table, floor sites cited, vs
 `debt > maxBorrowLT` equals `liquidatable(user)@pin` per sampled borrower (strict inequality;
 equality is healthy); (4) empty-set probes; (5) the backtest below.
 
-**Realized-liquidation backtest (named acceptance item):** sample N ≥ 25 of the 763 historical
-`Liquidated` events (the plan fixes N against archive-read budget); recompute state at liq-block−1 and liq-block from archive reads + param
+**Realized-liquidation backtest (named acceptance item):** **N=31, frame fixed by probe** —
+5 uniform-random per 500k-block bucket (six near-uniform buckets over 150.06M–153.0M) + the
+153,399,414 singleton, force-including each bucket's max-collateral-fan-out event; all 763
+events sit in a single DM implementation era (both day-1 upgrades precede the first
+liquidation), so no regime stratification; recompute state at liq-block−1 and liq-block from archive reads + param
 table; assert `liquidatable == true` at execution. One table: N replayed, N agreeing, 0
 tolerance.
 
@@ -180,7 +191,8 @@ list):
 - **DM rate horizon projection** — +200bps as closed-form debt(t) at 30d/90d +
   time-to-liquidatable, labeled PROJECTION (prices held flat, admin-set APY); no spot-HF rate
   shock; Aave engine excluded (utilization-driven, residual dust book) and disclosed.
-- BTC leg added iff the census shows material weight (checked during implementation).
+- **BTC leg (liquidBTC/eBTC −20%)** — CONFIRMED IN by census: BTC-denominated collateral is
+  4.11% of the book ($4.14M), above the 2% materiality bar (`recon/p3-probes.md`).
 
 **Liquidation price:** headline = factor-level closed-form solve
 (`s* = (debt − Σ_{i∉F} cᵢLTᵢ) / (Σ_{i∈F} cᵢLTᵢ)`, P* = s*·P_now); per-asset ceteris-paribus

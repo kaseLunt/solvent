@@ -94,3 +94,53 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   commit-A enumeration now names both tool files; RewindParams regression re-specified with
   the discriminating derive_test.go:618-642 geometry (unacked targets 50/80, rows 60/90, call
   with SHALLOW 80, assert row-60 deletion + cursor 50 + acked==MAX). Round 4 dispatched.
+- CODEX PLAN REVIEW ROUND 4 — SHIP (session 019fabd2-90a2-7e32-bc4d-b870956a66ad, verdict
+  approve, "No material findings"): H2 VERIFIED-FIXED with the reviewer independently
+  confirming (a) tested-commit-internal checks preserved, (b) historical derived from the
+  referenced work's status with the exact {archived, superseded} set, (c) all other
+  validate_evidence_receipt callers retain full checks, (d) both selftest directions present
+  and registered; H3 VERIFIED-FIXED (geometry mirrors derive_test.go:618-657 and
+  distinguishes deepest-unacked lowering). PLAN REVIEW PROGRAM CLOSED: 4 rounds,
+  7H/1M → 5 → 2 → 0, every finding adopted, zero hostile-actor findings across all rounds
+  (D-013 brief calibration held end-to-end).
+- P3 ENTRY TRAIN LANDED (2026-07-28 20:10 local): commit A ff7eccf (roadmap-only bootstrap,
+  scope-gate "claim bootstrap, 8 paths", CONTROL_PLANE_OWNER_REVIEWED under the recorded
+  conditional delegation — condition met at SHIP): D-013 accepted, W2 active, integrator
+  claim opened (claim.py open claude-integrator W2 --integrator --owner-reviewed), W1
+  achieved→archived with archival note (receipt untouched), ROADMAP dual-row projection,
+  STATUS active_task W2, doctor+selftest archived-evidence policy. Commit B 1edf6dd (under
+  claim): plan, spec, three consult archives (ls-files gate passed), this ledger, gitignore
+  re-inclusion. doctor OK 0 errors after each commit; pushed 99bc309..1edf6dd; CI watcher
+  running. TASK 1 DISPATCHED: three parallel read-only probe agents (A: DB censuses —
+  collateral weights/backtest frame/eMode+topic0 inventory; B: pinned vector hunts —
+  floor-law pair, percentMul boundary, eMode reads; C: configurator topic0 sweep + provider
+  posture). Integrator writes recon/p3-probes.md from their reports; agents commit nothing.
+- CI GREEN on the entry train (run 30418816205, 1m55s, completed success).
+- TASK 1 COMPLETE (2026-07-28/29): all six probes landed; recon/p3-probes.md committed
+  (NORMATIVE for Tasks 2–6) and added to W2 deliverables; spec + plan amended in the same
+  commit. HEADLINES: (1) **P-2 FALSIFIED THE DRAFTED HF MODEL** — wadDiv(percentMul(C,LT),D)
+  matches ZERO of 12 borrowers under any rounding convention (one chain value strictly
+  between the all-floor/all-half-up composites); the deployed law is a SINGLE FUSED FLOOR
+  DIVISION floor(C·LT·1e18/(10000·D)), 12/12 exact with six last-digit discriminators —
+  spec §5.1 #7 corrected pre-code (acceptance-run-#1 class catch moved to probe time);
+  uniform-LT caveat disclosed, synthetic mixed-LT vector obligated. (2) P-1: collateral law
+  = PURE FLOOR, 15/15, vectors F-A/F-B hard-code-ready. (3) eMode settled 0 both witnesses.
+  (4) Book: $100.72M collateral 99.97% DM, DM debt $22.22M single-reserve, BTC leg IN at
+  4.11%, THREE sub-1.0-HF dust positions (0.496/0.726/0.843) — bad-debt line has day-one
+  members. (5) Backtest: exactly 763 events, SINGLE implementation era (both day-1 upgrades
+  precede first liquidation), zero liquidations in ~33 days, frame fixed N=31. (6)
+  Configurator 0x8438F4D2…E65d: 20 topic0s, ZERO unknowns, dual-channel byte-verified;
+  CollateralConfigurationChanged emitted exactly ONCE ever (weETH 7800/8100/10600) — the
+  pinned weld is the load-bearing param guard, history is nearly static; caps slashed to 1
+  at 22,124,166 (2025-03-25) = deliberate market WIND-DOWN (explains the dust book;
+  Observatory narrative). (7) A1 CRITICAL decode trap: ReserveInitialized has canonical
+  topic0 but a 3-word body (no stableDebtToken) — canonical ABI decode misaligns; Task 2
+  decodes deployment-verified shapes. (8) Pool impl timeline: 8 generations; 23,088,584
+  regime boundary independently confirmed as a Pool impl upgrade. (9) Provider posture:
+  Alchemy free 10-block cap + SHARED KEY starves the daemon (A3, observed) → Task 2 backfill
+  dRPC-primary 10k windows, Alchemy targeted fallback only. Free extra: all sampled DB
+  scaled balances matched chain exactly at the pin (mini-reconcile PASS). Probe-agent
+  self-correction recorded (early "dRPC lied" was the agent's own hex bug — retracted; no
+  provider dishonesty observed). NEXT: Task 2+3 wave briefs (param + adapter-price custody;
+  pipeline-replay harness) — chain-truth pre-dispatch sharpening per its standing charter,
+  then Opus implementation waves under D-006 with D-013 quoted.
