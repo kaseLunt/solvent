@@ -830,6 +830,60 @@ def test_evidence_round_trip(root: Path) -> None:
     )
 
 
+def test_archived_evidence_policy(root: Path) -> None:
+    print("Archived-work receipts are historical records, not revalidated claims")
+    repo = root / "archived-evidence"
+    baseline = build_candidate(repo)
+    set_work_state(repo, "achieved", ["src/**"])
+    receipt = "roadmap/evidence/E-SYNTHETIC.md"
+    work_path = repo / "roadmap" / "work" / "W0.md"
+    write(
+        work_path,
+        read(work_path).replace(
+            "evidence_receipts: []", f"evidence_receipts:\n  - {receipt}"
+        ),
+    )
+    write(repo / receipt, evidence_text(baseline, *receipt_basis(repo, baseline)))
+    must(git(repo, "add", "roadmap"), "stage achieved contract and receipt")
+    stamped = tool(
+        repo, "doctor.py", "--stamp", "W0", "--now", "2030-01-02T00:00:00Z"
+    )
+    must(git(repo, "add", "roadmap/work/W0.md"), "stage evidence fingerprint")
+
+    # Direction 1: mutate an invalidated_by input while the work is still ACHIEVED —
+    # doctor must refuse (both the work-level fingerprint and the receipt's
+    # current-snapshot comparison are live).
+    write(repo / "src" / "allowed.txt", "mutated input content after the stamp\n")
+    must(git(repo, "add", "src/allowed.txt"), "stage input mutation")
+    achieved_result = tool(
+        repo, "doctor.py", "--snapshot", "index", "--now", "2030-01-02T00:00:00Z"
+    )
+    check(
+        "evidence:achieved-input-mutation-still-errors",
+        stamped.returncode == 0 and achieved_result.returncode == 1,
+        output(stamped) + "\n" + output(achieved_result),
+    )
+
+    # Direction 2: archive the work (work file + ROADMAP projection, receipt UNTOUCHED)
+    # — the receipt becomes a historical record and doctor must go green even though an
+    # invalidated_by input changed after the stamp.
+    write(work_path, read(work_path).replace("status: achieved", "status: archived"))
+    roadmap_path = repo / "roadmap" / "ROADMAP.md"
+    write(
+        roadmap_path,
+        read(roadmap_path).replace("| Correct | achieved |", "| Correct | archived |"),
+    )
+    must(git(repo, "add", "roadmap"), "stage archival transition")
+    archived_result = tool(
+        repo, "doctor.py", "--snapshot", "index", "--now", "2030-01-02T00:00:00Z"
+    )
+    check(
+        "evidence:archived-work-receipt-is-historical",
+        archived_result.returncode == 0,
+        output(archived_result),
+    )
+
+
 def test_enforcement_posture(root: Path) -> None:
     print("Evidence-backed enforcement posture")
     repo = root / "enforcement-posture"
@@ -1684,6 +1738,7 @@ def main() -> int:
         test_doctor_and_gate(root)
         test_reviewer_core_rules(root)
         test_evidence_round_trip(root)
+        test_archived_evidence_policy(root)
         test_enforcement_posture(root)
         test_project_completion(root)
         test_owner_semantics_and_immutability(root)

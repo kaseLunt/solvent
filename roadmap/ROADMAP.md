@@ -26,10 +26,14 @@ claim the gate is automated unless a validator actually enforces it.
 
 | ID | Work item | Phase | Depends on | Evidence target | Status |
 | --- | --- | --- | --- | --- | --- |
-| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | achieved |
+| W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | archived |
+| W2 | Phase 3: risk engine + API (plan + execution) | P3 | — | HF math exact vs chain at pins (both engines); suite green live-db; API contract tests green; pipeline-replay harness green | active |
 
-The row above projects `work/W1-phase2-positions-prices.md`. A work object may not appear here
-before its file exists, and a hand-maintained status mismatch is an error.
+The rows above project `work/W1-phase2-positions-prices.md` and
+`work/W2-phase3-risk-engine-api.md`. A work object may not appear here before its file exists,
+and a hand-maintained status mismatch is an error. (W1 was archived at P3 entry — attainment
+record intact in its receipt; the archival is the designed handling of P3 migrations tripping
+its invalidation scopes.)
 
 ## Evidence model
 

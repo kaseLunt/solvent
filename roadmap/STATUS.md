@@ -1,12 +1,12 @@
 ---
 active_phase: P3
-active_task: none
+active_task: W2
 project_state: active
 writer_mode: serial
 parallel_readers: allowed
 enforcement: bootstrap
 enforcement_evidence: []
-updated: 2026-07-27
+updated: 2026-07-28
 ---
 
 # STATUS — integration pointer
@@ -27,7 +27,7 @@ drift without changing authority.
 ## Current integration task
 
 Read `active_task` above. Its work object under `roadmap/work/` defines scope, acceptance, and
-handoff; the Phase 2 implementation plan is that work's first deliverable.
+handoff; the Phase 3 implementation plan and design spec are that work's first deliverables.
 
 ## Blockers
 

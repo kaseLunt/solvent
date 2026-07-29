@@ -291,6 +291,7 @@ def validate_evidence_receipt(
     now: dt.datetime,
     *,
     require_pass: bool = True,
+    historical: bool = False,
 ) -> None:
     if not receipt.startswith("roadmap/evidence/") or not snapshot.exists(receipt):
         raise ControlPlaneError(
@@ -330,29 +331,46 @@ def validate_evidence_receipt(
     scalar(data, "environment", receipt, required=True)
     tested_snapshot = Snapshot(REPO, tested_commit)
     tested_path, tested_work = find_work_record(tested_snapshot, work_id)
-    current_path, current_work = find_work_record(snapshot, work_id)
     tested_contract = verification_contract_fingerprint(
         tested_snapshot, tested_path, tested_work
     )
-    current_contract = verification_contract_fingerprint(
-        snapshot, current_path, current_work
-    )
     recorded_contract = scalar(data, "contract_fingerprint", receipt, required=True)
-    if recorded_contract != tested_contract or current_contract != tested_contract:
+    if recorded_contract != tested_contract:
         raise ControlPlaneError(
             f"{receipt}: verification contract differs from the tested commit"
         )
     tested_inputs = verification_input_fingerprint(
         tested_snapshot, tested_path, tested_work
     )
-    current_inputs = verification_input_fingerprint(snapshot, current_path, current_work)
     recorded_inputs = scalar(data, "input_fingerprint", receipt, required=True)
-    if recorded_inputs != tested_inputs or current_inputs != tested_inputs:
+    if recorded_inputs != tested_inputs:
         raise ControlPlaneError(
-            f"{receipt}: current inputs/deliverables differ from the tested commit"
+            f"{receipt}: recorded inputs/deliverables differ from the tested commit"
         )
     if not string_list(data, "commands", receipt):
         raise ControlPlaneError(f"{receipt}: evidence receipt must list commands")
+    if historical:
+        # Receipts of archived/superseded work are HISTORICAL records: everything above
+        # binds the receipt to its tested_commit and stays verifiable forever, but the
+        # current snapshot has moved on by design — a successor work's changes to the
+        # recorded invalidation scopes would otherwise fail a record that no longer
+        # asserts current validity. Skipping the current-snapshot drift comparisons is
+        # the archival contract, not a loophole: the work cannot return to achieved
+        # without a fresh stamp under the full checks below.
+        return
+    current_path, current_work = find_work_record(snapshot, work_id)
+    current_contract = verification_contract_fingerprint(
+        snapshot, current_path, current_work
+    )
+    if current_contract != tested_contract:
+        raise ControlPlaneError(
+            f"{receipt}: verification contract differs from the tested commit"
+        )
+    current_inputs = verification_input_fingerprint(snapshot, current_path, current_work)
+    if current_inputs != tested_inputs:
+        raise ControlPlaneError(
+            f"{receipt}: current inputs/deliverables differ from the tested commit"
+        )
 
 
 def validate_enforcement_record(
@@ -793,8 +811,18 @@ def main() -> int:
                 referenced_work = scalar(data, "work", path, required=True)
                 if referenced_work not in objects:
                     errors.append(f"{path}: evidence work -> missing id '{referenced_work}'")
+                referenced_status = (
+                    str(objects[referenced_work][1].get("status", ""))
+                    if referenced_work in objects
+                    else ""
+                )
                 validate_evidence_receipt(
-                    snapshot, path, referenced_work, now, require_pass=False
+                    snapshot,
+                    path,
+                    referenced_work,
+                    now,
+                    require_pass=False,
+                    historical=referenced_status in {"archived", "superseded"},
                 )
             elif object_type in TYPE_STATUSES and object_status not in TYPE_STATUSES[object_type]:
                 errors.append(f"{path}: invalid {object_type} status '{object_status}'")

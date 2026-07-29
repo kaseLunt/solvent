@@ -3,7 +3,7 @@ id: W1
 type: work
 title: "Phase 2: positions & prices (plan + execution)"
 phase: P2
-status: achieved
+status: archived
 evidence_target: Suite green live-db; backfilled positions cross-checked on-chain
 priority: 1
 depends_on: []
@@ -43,9 +43,16 @@ invalidated_by:
   - recon/contracts.json
   - internal/store/migrations/**
 review_when: phase:P2:entry
-updated: 2026-07-27
+updated: 2026-07-28
 evidence_fingerprint: sha256:a76ce7591aafd04dddf8c88f2e2677ee7a472bb51e349daf618488b317b3a3a0
 ---
+
+> **ARCHIVED at P3 entry (2026-07-28).** Mechanical transition, not a retraction: P3's
+> migrations would otherwise trip this work's `invalidated_by` fingerprint on every commit.
+> The attainment record is intact — receipt `roadmap/evidence/receipts/E-w1-acceptance.md`
+> (tested_commit acd3f41, result: pass, 87/87 exact) remains an immutable historical record
+> validated against its tested commit under doctor's archived-evidence policy (landed in this
+> same commit, selftest-covered). Successor: W2.
 
 # W1 — Phase 2: positions & prices (plan + execution)
 
