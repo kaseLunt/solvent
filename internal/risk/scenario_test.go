@@ -202,7 +202,7 @@ func TestParseScenarioIsStrict(t *testing.T) {
 		{"unknown axis in responds_to", strings.Replace(good, `"responds_to":[{"axis":"eth_usd"}]`, `"responds_to":[{"axis":"moon"}]`, 1), "unknown axis"},
 		{"unknown axis in shock", strings.Replace(good, `{"axis":"eth_usd","factor_num"`, `{"axis":"moon","factor_num"`, 1), "unknown axis"},
 		{"zero denominator", strings.Replace(good, `"factor_den":100`, `"factor_den":0`, 1), "factor_den must be positive"},
-		{"negative numerator", strings.Replace(good, `"factor_num":80`, `"factor_num":-1`, 1), "factor_num must not be negative"},
+		{"negative numerator", strings.Replace(good, `"factor_num":80`, `"factor_num":-1`, 1), "factor_num must be positive"},
 		{"global axis carrying an asset", strings.Replace(good,
 			`"responds_to":[{"axis":"eth_usd"}]`,
 			`"responds_to":[{"axis":"eth_usd","asset":"0x4200000000000000000000000000000000000006"}]`, 1),
@@ -340,6 +340,7 @@ func dmStressPosition(t *testing.T) PositionInput {
 	return PositionInput{
 		Engine: DMEngine,
 		DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, "1000000000"), // $1,000
 			Collateral: []DMCollateral{
@@ -364,7 +365,7 @@ func dmStressPosition(t *testing.T) PositionInput {
 				enginePrice(dLiqBTC, "95000000000"),
 			},
 		},
-		Marks: Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848114, SweepBlock: 154840000},
+		Marks: testDMMarks,
 	}
 }
 
@@ -522,6 +523,7 @@ func TestApplyScenarioCapBindsUpwardOnly(t *testing.T) {
 	price.CapValue = mustBig(t, "102000000")   // adapter caps at 1.02
 
 	pos := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "100000000", "0", true)},
 		Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
@@ -559,6 +561,7 @@ func TestApplyScenarioIsExactIntegerArithmetic(t *testing.T) {
 		OutOfModel: []string{"synthetic"},
 	}
 	pos := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		Collateral: []DMCollateral{{Asset: dWETH, Amount: mustBig(t, "1"), Decimals: 18}},
 		Params:     []ParamRow{dmParam(dWETH, "80000000000000000000", "2000000000000000000")},
@@ -586,6 +589,7 @@ func TestApplyScenarioComposesMultipleAxes(t *testing.T) {
 		OutOfModel: []string{"synthetic"},
 	}
 	pos := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		Collateral: []DMCollateral{{Asset: dWeETH, Amount: mustBig(t, "1000000000000000000"), Decimals: 18}},
 		Params:     []ParamRow{dmParam(dWeETH, "80000000000000000000", "2000000000000000000")},
@@ -622,6 +626,7 @@ func TestApplyScenarioAaveSide(t *testing.T) {
 	sc, err := LoadScenario("eth_minus_10")
 	require.NoError(t, err)
 	pos := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "100000000", "0", true),
@@ -731,6 +736,7 @@ func TestApplyScenarioAaveStableSnapScaleError(t *testing.T) {
 		OutOfModel: []string{"synthetic: the Aave base currency is 8-decimal, not 6"},
 	}
 	pos := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aUSDC, 8, "0", "1", false)},
 		Prices:   []PriceInput{adapterPrice(aUSDC, "100000000")},
@@ -802,6 +808,7 @@ func dmStableBasePosition(t *testing.T) PositionInput {
 	return PositionInput{
 		Engine: DMEngine,
 		DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: acctB,
 			DebtUSD: mustBig(t, "1000000000"),
 			Collateral: []DMCollateral{
@@ -1050,4 +1057,79 @@ func TestBaseStableSnapIsANoOpWhenItsAxisIsUnshocked(t *testing.T) {
 			require.True(t, a.BaseSnapped, "the unshocked base is still at par, which IS in band")
 		}
 	}
+}
+
+// TestParseScenarioRefusesAbsentAndZeroFactors is M4's regression.
+//
+// With plain int64 fields an OMITTED factor_num decodes to 0, and a validator
+// that only rejected negatives would accept it — a config typo becomes a
+// silent total-loss shock that prices the axis at zero and reports the whole
+// book liquidatable. Absent keys are refused BY NAME, separately from
+// present-but-invalid values.
+func TestParseScenarioRefusesAbsentAndZeroFactors(t *testing.T) {
+	tmpl := `{"id":"x","version":"v1","label":"L","description":"D","path_assumption":"P",
+      "engines":["debt_manager"],
+      "shocks":[{"axis":"eth_usd"%s}],
+      "propagation":[{"asset":"0x4200000000000000000000000000000000000006","chain_id":10,
+                      "responds_to":[{"axis":"eth_usd"}]}],
+      "out_of_model":["x"]}`
+
+	cases := []struct{ name, fields, want string }{
+		{"both factors present", `,"factor_num":80,"factor_den":100`, ""},
+		{"factor_num omitted", `,"factor_den":100`, `omits factor_num`},
+		{"factor_den omitted", `,"factor_num":80`, `omits factor_den`},
+		{"both omitted", ``, `omits factor_num`},
+		{"factor_num explicitly zero", `,"factor_num":0,"factor_den":100`, `factor_num must be positive`},
+		{"factor_num negative", `,"factor_num":-1,"factor_den":100`, `factor_num must be positive`},
+		{"factor_den zero", `,"factor_num":80,"factor_den":0`, `factor_den must be positive`},
+		{"unknown field INSIDE the shock stays refused", `,"factor_num":80,"factor_den":100,"factor":0.8`, `unknown field`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseScenario([]byte(fmt.Sprintf(tmpl, tc.fields)))
+			if tc.want == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			require.ErrorIs(t, err, ErrScenarioInvalid)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
+}
+
+// TestApplyScenarioReturnsAFullyIndependentPosition is H1's scenario arm:
+// mutating anything on the returned position must not reach the input, and the
+// input must still compute identically afterwards.
+func TestApplyScenarioReturnsAFullyIndependentPosition(t *testing.T) {
+	sc, err := LoadScenario("eth_minus_20")
+	require.NoError(t, err)
+	pos := dmStressPosition(t)
+
+	firstDebt := pos.DM.DebtUSD.String()
+	firstAmount := pos.DM.Collateral[0].Amount.String()
+	firstLT := pos.DM.Params[0].LiqThreshold.String()
+	firstPrice := pos.DM.Prices[0].Value.String()
+	before, err := ComputeDMHealth(*pos.DM)
+	require.NoError(t, err)
+
+	out, err := ApplyScenario(pos, sc)
+	require.NoError(t, err)
+
+	// Scribble on every *big.Int the returned position exposes.
+	out.DM.DebtUSD.SetInt64(-1)
+	out.DM.Collateral[0].Amount.SetInt64(-1)
+	out.DM.Params[0].LiqThreshold.SetInt64(-1)
+	out.DM.Prices[0].Value.SetInt64(-1)
+
+	require.Equal(t, firstDebt, pos.DM.DebtUSD.String())
+	require.Equal(t, firstAmount, pos.DM.Collateral[0].Amount.String())
+	require.Equal(t, firstLT, pos.DM.Params[0].LiqThreshold.String())
+	require.Equal(t, firstPrice, pos.DM.Prices[0].Value.String())
+
+	after, err := ComputeDMHealth(*pos.DM)
+	require.NoError(t, err)
+	require.Equal(t, before.MaxBorrowLT.String(), after.MaxBorrowLT.String(),
+		"a second computation over the same input must be bit-identical")
+	require.Equal(t, before.CollateralValueUSD.String(), after.CollateralValueUSD.String())
 }

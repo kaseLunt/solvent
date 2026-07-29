@@ -30,8 +30,9 @@ import (
 func TestComputeLiquidationPriceFactorLevelClosedForm(t *testing.T) {
 	pos := PositionInput{
 		Engine: DMEngine,
-		Marks:  Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848000, SweepBlock: 154840000},
+		Marks:  testDMMarks,
 		DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, "2000000000"),
 			Collateral: []DMCollateral{
@@ -102,6 +103,7 @@ func TestComputeLiquidationPriceMultiAssetFactor(t *testing.T) {
 	pos := PositionInput{
 		Engine: DMEngine,
 		DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, "1000000000"), // $1,000
 			Collateral: []DMCollateral{
@@ -133,6 +135,7 @@ func TestComputeLiquidationPriceMultiAssetFactor(t *testing.T) {
 func TestComputeLiquidationPriceDegenerateCases(t *testing.T) {
 	build := func(debt string, includeWeETH bool) PositionInput {
 		dm := &DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, debt),
 			Collateral: []DMCollateral{
@@ -214,6 +217,7 @@ func TestComputeLiquidationPriceAaveSurface(t *testing.T) {
 	pos := PositionInput{
 		Engine: AaveEngine,
 		Aave: &AaveInput{
+			Marks:   testAaveMarks,
 			Account: acctA,
 			Reserves: []AaveReserve{
 				simpleReserve(aWeETH, 8, "200000000", "0", true),
@@ -262,6 +266,7 @@ func TestComputeLiquidationPriceRefusals(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineMismatch)
 
 	bad := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		Collateral: []DMCollateral{{Asset: dUSDC, Amount: big.NewInt(1), Decimals: 6}},
 	}}
@@ -269,6 +274,7 @@ func TestComputeLiquidationPriceRefusals(t *testing.T) {
 	require.ErrorIs(t, err, ErrMissingPrice)
 
 	badAave := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "1", "0", true)},
 	}}
@@ -281,6 +287,7 @@ func TestComputeLiquidationPriceRefusals(t *testing.T) {
 // factor split.
 func TestComputeLiquidationPriceSkipsZeroValueLegs(t *testing.T) {
 	pos := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:   testDMMarks,
 		Account: acctA,
 		DebtUSD: mustBig(t, "1000000000"),
 		Collateral: []DMCollateral{
@@ -301,6 +308,7 @@ func TestComputeLiquidationPriceSkipsZeroValueLegs(t *testing.T) {
 
 	// Same on the Aave surface: a reserve with zero base value is skipped.
 	aavePos := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aPYUSD, 8, "0", "0", true),

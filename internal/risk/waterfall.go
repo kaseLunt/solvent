@@ -41,6 +41,26 @@ var ErrNonMonotone = errors.New("risk: cumulative debt-eligible series is not mo
 // descending sequence of positive factors.
 var ErrGridNotDescending = errors.New("risk: waterfall grid must be strictly descending positive factors")
 
+// ErrNonPriceAxis is returned when a waterfall grid walks an axis that does
+// not move prices.
+//
+// The committed dm_rate_horizon_plus_200bps scenario declares exactly one
+// shock, so the one-shock check alone admits it — and ApplyScenario
+// DELIBERATELY skips AxisBorrowAPY (a rate moves debt over a horizon, not a
+// spot mark). The result would be a perfectly flat series labeled as a rate
+// waterfall: a false-safe, which is the worst shape a risk surface can take.
+// Route rate scenarios to ProjectDMDebt instead.
+var ErrNonPriceAxis = errors.New("risk: waterfall grid axis does not move prices")
+
+// priceAxes are the axes ApplyScenario actually propagates into a mark. Any
+// axis outside this set cannot drive a waterfall.
+var priceAxes = map[Axis]bool{
+	AxisETHUSD:    true,
+	AxisWeETHRate: true,
+	AxisStableUSD: true,
+	AxisAssetUSD:  true,
+}
+
 // NonMonotoneError names the grid point at which monotonicity broke.
 type NonMonotoneError struct {
 	Index    int
@@ -143,6 +163,10 @@ func Waterfall(book []PositionInput, grid []*big.Int, gridScenario Scenario) (Wa
 	if len(gridScenario.Shocks) != 1 {
 		return WaterfallSeries{}, fmt.Errorf("%w: waterfall needs exactly one shocked axis, %s declares %d",
 			ErrScenarioInvalid, gridScenario.ID, len(gridScenario.Shocks))
+	}
+	if !priceAxes[gridScenario.Shocks[0].Axis] {
+		return WaterfallSeries{}, fmt.Errorf("%w: %s walks axis %q, which ApplyScenario does not propagate into a price — the series would be flat and labeled as a shock",
+			ErrNonPriceAxis, gridScenario.ID, gridScenario.Shocks[0].Axis)
 	}
 	if len(grid) == 0 {
 		return WaterfallSeries{}, fmt.Errorf("%w: empty grid", ErrGridNotDescending)

@@ -35,6 +35,7 @@ import (
 // The ASSERTION — 726460718055075032 — is the chain's own healthFactor.
 func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			{
@@ -106,6 +107,7 @@ func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 // indexes RAY, both prices 1e8 at 8 decimals, so base value == token amount).
 func TestComputeAaveHealthSecondGoldenVector(t *testing.T) {
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctC,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "10000153", "0", true),
@@ -189,6 +191,7 @@ func TestComputeAaveHealthMixedLTUsesWeightedSum(t *testing.T) {
 			// Both prices are 1e8 at 8 decimals, so base value == amount and
 			// the test is purely about the threshold fusion.
 			in := AaveInput{
+				Marks:   testAaveMarks,
 				Account: acctA,
 				Reserves: []AaveReserve{
 					simpleReserve(aWeETH, 8, tc.c1, "0", true),
@@ -231,6 +234,7 @@ func TestComputeAaveHealthMixedLTUsesWeightedSum(t *testing.T) {
 // cannot discriminate: with one LT the two forms are equal by construction.
 func TestComputeAaveHealthUniformLTFusionFormsCoincide(t *testing.T) {
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "12305519", "0", true),
@@ -256,6 +260,7 @@ func TestComputeAaveHealthUniformLTFusionFormsCoincide(t *testing.T) {
 // type(uint256).max; this package returns a typed marker and a nil value.
 func TestComputeAaveHealthZeroDebtIsInfiniteNotABigNumber(t *testing.T) {
 	in := AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "100000000", "0", true)},
 		Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
@@ -276,7 +281,7 @@ func TestComputeAaveHealthZeroDebtIsInfiniteNotABigNumber(t *testing.T) {
 // TestComputeAaveHealthEmptyPosition covers the empty-set probe class: an
 // account with no reserves at all, and one whose reserves are all zero.
 func TestComputeAaveHealthEmptyPosition(t *testing.T) {
-	h, err := ComputeAaveHealth(AaveInput{Account: acctA})
+	h, err := ComputeAaveHealth(AaveInput{Marks: testAaveMarks, Account: acctA})
 	require.NoError(t, err)
 	require.True(t, h.IsInfinite)
 	requireBig(t, "0", h.TotalCollateralBase)
@@ -288,6 +293,7 @@ func TestComputeAaveHealthEmptyPosition(t *testing.T) {
 
 	// Zero balances, and therefore no price or param needed at all.
 	h, err = ComputeAaveHealth(AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aWeETH, 18, "0", "0", true)},
 	})
@@ -299,6 +305,7 @@ func TestComputeAaveHealthEmptyPosition(t *testing.T) {
 
 	// Nil balances behave as zero, not as an error.
 	h, err = ComputeAaveHealth(AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{{Asset: aWeETH, Decimals: 18, UsedAsCollateral: true}},
 	})
@@ -321,6 +328,7 @@ func TestComputeAaveHealthStaleIndexIntervalSurfacesItsAsOf(t *testing.T) {
 	indexTime := fixedTime.Add(-19 * time.Hour)
 
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			{
@@ -341,10 +349,16 @@ func TestComputeAaveHealthStaleIndexIntervalSurfacesItsAsOf(t *testing.T) {
 		Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
 		Prices: []PriceInput{adapterPrice(aWeETH, "100000000"), adapterPrice(aUSDC, "100000000")},
 	}
+	require.Equal(t, balancesBlock, in.Marks.BalancesBlock,
+		"the fixture's balances block is the one the assertion below uses")
+
 	h, err := ComputeAaveHealth(in)
 	require.NoError(t, err)
-	h.Marks = Watermarks{BalancesBlock: balancesBlock, ParamsBlock: 25635618}
 
+	// The marks come from the SOURCE, threaded through the computation. An
+	// earlier revision assigned h.Marks after the call, which made this test
+	// pass while the package served zeros.
+	require.Equal(t, in.Marks, h.Marks, "marks are threaded, not assigned by the test")
 	require.Greater(t, h.Marks.BalancesBlock-h.Reserves[0].IndexBlock, uint64(1000),
 		"the fixture must actually exercise a badly trailing index")
 	for _, r := range h.Reserves {
@@ -365,6 +379,7 @@ func TestComputeAaveHealthStaleFlagPropagates(t *testing.T) {
 	stale.AsOf = old
 
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "20000000", "0", true),
@@ -395,6 +410,7 @@ func TestComputeAaveHealthStaleFlagPropagates(t *testing.T) {
 func TestComputeAaveHealthRefusals(t *testing.T) {
 	base := func() AaveInput {
 		return AaveInput{
+			Marks:   testAaveMarks,
 			Account: acctA,
 			Reserves: []AaveReserve{
 				simpleReserve(aWeETH, 8, "20000000", "0", true),
@@ -567,6 +583,7 @@ func TestAssetErrorShape(t *testing.T) {
 // exactly as the protocol treats it — and needs no param row.
 func TestComputeAaveHealthNonCollateralBalanceIsExcluded(t *testing.T) {
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "20000000", "0", true),
@@ -598,6 +615,7 @@ func TestComputeAaveHealthNonCollateralBalanceIsExcluded(t *testing.T) {
 // aliasing bug: a computed row must never share storage with its input.
 func TestComputeAaveHealthDoesNotMutateInput(t *testing.T) {
 	in := AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "20000000", "0", true),
@@ -627,7 +645,7 @@ func TestComputeAaveHealthDoesNotMutateInput(t *testing.T) {
 // order, so a serialized batch is deterministic.
 func TestComputeAaveHealthReservesAreOrderStable(t *testing.T) {
 	order := []common.Address{aFRAX, aWeETH, aPYUSD, aUSDC}
-	in := AaveInput{Account: acctA}
+	in := AaveInput{Marks: testAaveMarks, Account: acctA}
 	for _, a := range order {
 		in.Reserves = append(in.Reserves, simpleReserve(a, 8, "0", "0", false))
 	}
@@ -654,6 +672,7 @@ func TestComputeAaveHealthValuationFloorsSuperHalf(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.balance, func(t *testing.T) {
 			in := AaveInput{
+				Marks:    testAaveMarks,
 				Account:  acctA,
 				Reserves: []AaveReserve{simpleReserve(aWeETH, 8, tc.balance, "0", true)},
 				Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
@@ -675,4 +694,81 @@ func TestComputeAaveHealthValuationFloorsSuperHalf(t *testing.T) {
 			requireBig(t, tc.refutedHalfUp, halfUp.Div(halfUp, den))
 		})
 	}
+}
+
+// TestComputeAaveHealthThreadsAndRequiresWatermarks is M3's regression.
+//
+// A row that serialized with block 0 would claim to be as-of genesis, so an
+// input without a balances block is REFUSED rather than served with zeros —
+// the same refuse-don't-pick posture as an unpriced asset.
+func TestComputeAaveHealthThreadsAndRequiresWatermarks(t *testing.T) {
+	in := AaveInput{
+		Marks:    Watermarks{BalancesBlock: 25635618, ParamsBlock: 25635610, SweepBlock: 0},
+		Account:  acctA,
+		Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "20000000", "0", true)},
+		Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+		Prices:   []PriceInput{adapterPrice(aWeETH, "100000000")},
+	}
+	h, err := ComputeAaveHealth(in)
+	require.NoError(t, err)
+	require.Equal(t, uint64(25635618), h.Marks.BalancesBlock)
+	require.Equal(t, uint64(25635610), h.Marks.ParamsBlock)
+
+	in.Marks = Watermarks{}
+	_, err = ComputeAaveHealth(in)
+	require.ErrorIs(t, err, ErrMissingWatermark)
+	require.Contains(t, err.Error(), "Marks.BalancesBlock is zero")
+
+	// A params block without a balances block is still a refusal: the
+	// balances block is the one every row is anchored on.
+	in.Marks = Watermarks{ParamsBlock: 25635610}
+	_, err = ComputeAaveHealth(in)
+	require.ErrorIs(t, err, ErrMissingWatermark)
+}
+
+// TestComputeAaveHealthResultDoesNotAliasCallerPrices is H1's Aave arm.
+//
+// A returned reserve row used to expose the CALLER'S *big.Int for Value and
+// CapValue. An honest caller rescaling a returned price in place would have
+// mutated its own input and corrupted the next computation over it.
+func TestComputeAaveHealthResultDoesNotAliasCallerPrices(t *testing.T) {
+	price := adapterPrice(aWeETH, "100000000")
+	price.CapValue = mustBig(t, "102000000")
+	in := AaveInput{
+		Marks:   testAaveMarks,
+		Account: acctA,
+		Reserves: []AaveReserve{
+			simpleReserve(aWeETH, 8, "20000000", "0", true),
+			simpleReserve(aUSDC, 8, "0", "10000000", false),
+		},
+		Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+		Prices: []PriceInput{price, adapterPrice(aUSDC, "100000000")},
+	}
+	first, err := ComputeAaveHealth(in)
+	require.NoError(t, err)
+	requireBig(t, "20000000", first.TotalCollateralBase)
+	requireBig(t, "100000000", first.Reserves[0].Price.Value)
+	requireBig(t, "102000000", first.Reserves[0].Price.CapValue)
+
+	// Rescale the RETURNED price rows in place, as an honest caller might.
+	first.Reserves[0].Price.Value.SetInt64(1)
+	first.Reserves[0].Price.CapValue.SetInt64(1)
+	first.Reserves[1].Price.Value.SetInt64(1)
+
+	requireBig(t, "100000000", in.Prices[0].Value, "the caller's input must be untouched")
+	requireBig(t, "102000000", in.Prices[0].CapValue)
+	requireBig(t, "100000000", in.Prices[1].Value)
+
+	second, err := ComputeAaveHealth(in)
+	require.NoError(t, err)
+	require.Equal(t, first.TotalCollateralBase.String(), second.TotalCollateralBase.String(),
+		"a second computation over the same input must be bit-identical")
+	require.Equal(t, first.WeightedLTSum.String(), second.WeightedLTSum.String())
+	requireBig(t, "100000000", second.Reserves[0].Price.Value)
+	requireBig(t, "102000000", second.Reserves[0].Price.CapValue)
+
+	// And the reverse direction: mutating the INPUT must not move an
+	// already-returned result.
+	in.Prices[0].Value.SetInt64(7)
+	requireBig(t, "100000000", second.Reserves[0].Price.Value)
 }

@@ -166,6 +166,17 @@ var (
 	ErrEngineMismatch = errors.New("risk: position engine tag does not match its payload")
 	// ErrNoDebt: an operation that is undefined without debt.
 	ErrNoDebt = errors.New("risk: position carries no debt")
+	// ErrMissingWatermark: an input with no balances block. Every served
+	// number carries its as-ofs (design spec §5: "never an epsilon, always
+	// watermarks"), and a row that serialized with block 0 would claim to be
+	// as-of genesis. Refusing is the same posture as refusing an unpriced
+	// asset: this package does not pick a watermark, and it does not serve a
+	// number without one.
+	ErrMissingWatermark = errors.New("risk: input carries no balances-block watermark")
+	// ErrWatermarkMismatch: a PositionInput whose Marks disagree with the
+	// engine input's Marks. The engine input is authoritative; a disagreement
+	// means the caller built the two from different reads.
+	ErrWatermarkMismatch = errors.New("risk: position marks disagree with the engine input's marks")
 )
 
 // AssetError binds a sentinel to the asset that triggered it, so a refusal
@@ -296,6 +307,78 @@ func (r Rational) String() string {
 // Inputs.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Deep copies — results never alias a caller's storage.
+// ---------------------------------------------------------------------------
+//
+// EVERY *big.Int that crosses this package's boundary is copied, in both
+// directions. A result row holding the caller's pointer is a live wire: an
+// honest caller rescaling a returned price in place would silently mutate the
+// input and corrupt the NEXT computation over it. The rule is uniform so no
+// site has to be reasoned about individually.
+
+// copyBig returns a fresh copy of v, preserving nil (unlike orZero, which
+// turns nil into a zero — the distinction between "absent" and "zero" is
+// load-bearing on optional fields such as CapValue).
+func copyBig(v *big.Int) *big.Int {
+	if v == nil {
+		return nil
+	}
+	return new(big.Int).Set(v)
+}
+
+func (p PriceInput) clone() PriceInput {
+	out := p
+	out.Value = copyBig(p.Value)
+	out.CapValue = copyBig(p.CapValue)
+	return out
+}
+
+func (p ParamRow) clone() ParamRow {
+	out := p
+	out.LTV = copyBig(p.LTV)
+	out.LiqThreshold = copyBig(p.LiqThreshold)
+	out.LiqBonus = copyBig(p.LiqBonus)
+	return out
+}
+
+func (r AaveReserve) clone() AaveReserve {
+	out := r
+	out.ScaledDebt = copyBig(r.ScaledDebt)
+	out.ScaledCollateral = copyBig(r.ScaledCollateral)
+	out.DebtIndex = copyBig(r.DebtIndex)
+	out.CollateralIndex = copyBig(r.CollateralIndex)
+	return out
+}
+
+func (c DMCollateral) clone() DMCollateral {
+	out := c
+	out.Amount = copyBig(c.Amount)
+	return out
+}
+
+func clonePrices(in []PriceInput) []PriceInput {
+	if in == nil {
+		return nil
+	}
+	out := make([]PriceInput, len(in))
+	for i, p := range in {
+		out[i] = p.clone()
+	}
+	return out
+}
+
+func cloneParams(in []ParamRow) []ParamRow {
+	if in == nil {
+		return nil
+	}
+	out := make([]ParamRow, len(in))
+	for i, p := range in {
+		out[i] = p.clone()
+	}
+	return out
+}
+
 // Watermarks are the per-row as-ofs every served number carries. Per-asset
 // rate-index as-ofs live on AaveReserve (IndexBlock/IndexTime) because
 // rate_indexes updates only on ReserveDataUpdated and can trail the derive
@@ -397,6 +480,11 @@ type AaveInput struct {
 	EMode    uint8
 	Prices   []PriceInput
 	Regime   Regime
+	// Marks are this input's as-ofs and are AUTHORITATIVE: ComputeAaveHealth
+	// copies them onto the result, and refuses an input whose BalancesBlock is
+	// zero (ErrMissingWatermark). PositionInput.Marks is a mirror, checked for
+	// agreement rather than trusted.
+	Marks Watermarks
 }
 
 // DMCollateral is one collateral leg of a Debt Manager position, as returned
@@ -416,6 +504,12 @@ type DMInput struct {
 	Collateral []DMCollateral
 	Params     []ParamRow
 	Prices     []PriceInput
+	// Marks are this input's as-ofs and are AUTHORITATIVE — see
+	// AaveInput.Marks. SweepBlock matters here in particular: DM collateral is
+	// sweep-dominated (~1h worst case) while prices are 60s, and a row that
+	// did not carry the sweep block would let a 60s-fresh badge sit over
+	// hour-stale collateral.
+	Marks Watermarks
 }
 
 // PositionInput is the engine-tagged union consumed by the liquidation-price,
@@ -436,17 +530,26 @@ type PositionInput struct {
 
 // Validate checks the engine tag against the populated payload.
 func (p PositionInput) Validate() error {
+	var engineMarks Watermarks
 	switch p.Engine {
 	case AaveEngine:
 		if p.Aave == nil || p.DM != nil {
 			return fmt.Errorf("%w: engine %q with Aave=%v DM=%v", ErrEngineMismatch, p.Engine, p.Aave != nil, p.DM != nil)
 		}
+		engineMarks = p.Aave.Marks
 	case DMEngine:
 		if p.DM == nil || p.Aave != nil {
 			return fmt.Errorf("%w: engine %q with Aave=%v DM=%v", ErrEngineMismatch, p.Engine, p.Aave != nil, p.DM != nil)
 		}
+		engineMarks = p.DM.Marks
 	default:
 		return fmt.Errorf("%w: unknown engine %q", ErrEngineMismatch, p.Engine)
+	}
+	// The engine input owns the marks; this mirror may be left empty, but a
+	// mirror that DISAGREES means the caller built the two from different
+	// reads, and one of the two numbers it will publish is wrong.
+	if p.Marks != (Watermarks{}) && p.Marks != engineMarks {
+		return fmt.Errorf("%w: position %+v vs engine input %+v", ErrWatermarkMismatch, p.Marks, engineMarks)
 	}
 	return nil
 }

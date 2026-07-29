@@ -40,6 +40,15 @@ var (
 	acctC = common.HexToAddress("0x849b5e5100000000000000000000000000000001")
 )
 
+// Shared watermarks. Every engine input must carry a balances block —
+// ComputeAaveHealth/ComputeDMHealth refuse an input without one — so the
+// fixtures state real block numbers rather than zeros: the ETH probe pin
+// 25,635,618 and the OP cursor 154,848,114 (recon/p3-probes.md).
+var (
+	testAaveMarks = Watermarks{BalancesBlock: 25635618, ParamsBlock: 25635610}
+	testDMMarks   = Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848114, SweepBlock: 154840000}
+)
+
 // fixedTime is the only clock this suite has. Nothing in the package reads a
 // real clock, and nothing in the tests may either.
 var fixedTime = time.Date(2026, 7, 29, 3, 16, 0, 0, time.UTC)

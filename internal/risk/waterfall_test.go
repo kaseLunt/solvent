@@ -19,6 +19,7 @@ func waterfallBook(t *testing.T) []PositionInput {
 	t.Helper()
 	mk := func(acct string, debt string) PositionInput {
 		return PositionInput{Engine: DMEngine, DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: mustAddr(acct),
 			DebtUSD: mustBig(t, debt),
 			Collateral: []DMCollateral{
@@ -144,6 +145,7 @@ func TestWaterfallNonMonotoneIsSurfacedNeverSmoothed(t *testing.T) {
 	// C = 1e8 at LT 8100 ⇒ weighted 8.1e11; D = 1e8 ⇒ HF = 0.81 < 1, so the
 	// account is eligible from the very first grid point and stays latched.
 	book := []PositionInput{{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "100000000", "0", true),
@@ -249,6 +251,7 @@ func TestWaterfallEnginesReportedSeparately(t *testing.T) {
 
 	book := waterfallBook(t)
 	book = append(book, PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctC,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "100000000", "0", true),
@@ -303,13 +306,13 @@ func TestWaterfallPointEngineLookupMiss(t *testing.T) {
 
 // TestEngineDecimalsHintFallbacks covers the priceless-position paths.
 func TestEngineDecimalsHintFallbacks(t *testing.T) {
-	require.Equal(t, uint8(0), engineDecimalsHint(PositionInput{Engine: AaveEngine, Aave: &AaveInput{}}))
-	require.Equal(t, uint8(0), engineDecimalsHint(PositionInput{Engine: DMEngine, DM: &DMInput{}}))
+	require.Equal(t, uint8(0), engineDecimalsHint(PositionInput{Engine: AaveEngine, Aave: &AaveInput{Marks: testAaveMarks}}))
+	require.Equal(t, uint8(0), engineDecimalsHint(PositionInput{Engine: DMEngine, DM: &DMInput{Marks: testDMMarks}}))
 	require.Equal(t, uint8(0), engineDecimalsHint(PositionInput{Engine: "other"}))
 	require.Equal(t, uint8(8), engineDecimalsHint(PositionInput{Engine: AaveEngine,
-		Aave: &AaveInput{Prices: []PriceInput{adapterPrice(aWeETH, "1")}}}))
+		Aave: &AaveInput{Marks: testAaveMarks, Prices: []PriceInput{adapterPrice(aWeETH, "1")}}}))
 	require.Equal(t, uint8(6), engineDecimalsHint(PositionInput{Engine: DMEngine,
-		DM: &DMInput{Prices: []PriceInput{enginePrice(dWeETH, "1")}}}))
+		DM: &DMInput{Marks: testDMMarks, Prices: []PriceInput{enginePrice(dWeETH, "1")}}}))
 }
 
 // TestBadDebtFromIsZeroForHealthyAccounts: presenting a healthy account's
@@ -342,6 +345,7 @@ func TestWaterfallPropagatesPerPositionErrors(t *testing.T) {
 		p := enginePrice(dUSDC, "1000000")
 		p.Decimals = 8
 		book := []PositionInput{{Engine: DMEngine, DM: &DMInput{
+			Marks:      testDMMarks,
 			Account:    acctA,
 			Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "1"), Decimals: 6}},
 			Params:     []ParamRow{dmParam(dUSDC, "95000000000000000000", "0")},
@@ -358,6 +362,7 @@ func TestWaterfallPropagatesPerPositionErrors(t *testing.T) {
 		// Collateral with no price at all: ApplyScenario has nothing to shock,
 		// and the valuation refuses rather than dropping the asset.
 		book := []PositionInput{{Engine: DMEngine, DM: &DMInput{
+			Marks:      testDMMarks,
 			Account:    acctA,
 			Collateral: []DMCollateral{{Asset: dWeETH, Amount: mustBig(t, "1"), Decimals: 18}},
 		}}}
@@ -366,6 +371,7 @@ func TestWaterfallPropagatesPerPositionErrors(t *testing.T) {
 		require.Contains(t, err.Error(), "grid[0] book[0]")
 
 		aaveBook := []PositionInput{{Engine: AaveEngine, Aave: &AaveInput{
+			Marks:    testAaveMarks,
 			Account:  acctA,
 			Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "1", "0", true)},
 		}}}
@@ -394,7 +400,7 @@ func TestWaterfallDoesNotMislabelUsdDecimals(t *testing.T) {
 
 	book := waterfallBook(t)
 	// A never-seen account: no collateral, no debt, no prices.
-	book = append(book, PositionInput{Engine: DMEngine, DM: &DMInput{Account: mustAddr(
+	book = append(book, PositionInput{Engine: DMEngine, DM: &DMInput{Marks: testDMMarks, Account: mustAddr(
 		"0x00000000000000000000000000000000000000ff")}})
 
 	series, err := Waterfall(book, wadGrid(t, "1000000000000000000", "500000000000000000"), sc)
@@ -437,5 +443,32 @@ func TestWaterfallAtRiskColumnIsMeasuredAtPointAndMayFall(t *testing.T) {
 		cur, _ := series.Points[i].Engine(DMEngine)
 		require.GreaterOrEqual(t, cur.CumulativeDebtEligibleUSD.Cmp(prev.CumulativeDebtEligibleUSD), 0,
 			"the DEBT series, by contrast, carries the invariant")
+	}
+}
+
+// TestWaterfallRefusesANonPriceAxis is H2's regression, pinned with the
+// COMMITTED rate scenario rather than a synthetic one.
+//
+// dm_rate_horizon_plus_200bps declares exactly one shock, so the one-shock
+// check alone admits it — and ApplyScenario deliberately skips AxisBorrowAPY,
+// because a rate moves debt over a horizon, not a spot mark. Walking it would
+// produce a perfectly flat series labeled as a rate waterfall: a false-safe.
+func TestWaterfallRefusesANonPriceAxis(t *testing.T) {
+	sc, err := LoadScenario("dm_rate_horizon_plus_200bps")
+	require.NoError(t, err)
+	require.Len(t, sc.Shocks, 1, "it passes the one-shock check, which is the point")
+	require.Equal(t, AxisBorrowAPY, sc.Shocks[0].Axis)
+
+	_, err = Waterfall(waterfallBook(t), wadGrid(t, "1000000000000000000", "800000000000000000"), sc)
+	require.ErrorIs(t, err, ErrNonPriceAxis)
+	require.Contains(t, err.Error(), "dm_rate_horizon_plus_200bps")
+	require.Contains(t, err.Error(), string(AxisBorrowAPY))
+
+	// Every price axis is still accepted.
+	for _, id := range []string{"eth_minus_20", "weeth_rate_minus_5", "ethfi_minus_50", "btc_leg_minus_20"} {
+		ok, err := LoadScenario(id)
+		require.NoError(t, err)
+		_, err = Waterfall(waterfallBook(t), wadGrid(t, "1000000000000000000"), ok)
+		require.NoError(t, err, id)
 	}
 }

@@ -44,11 +44,21 @@ var aavePriceClasses = map[string]bool{
 func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 	const op = "aave health"
 
+	// Watermarks first: a number without an as-of is not servable at all, and
+	// finding that out after computing it would only make the refusal later.
+	if in.Marks.BalancesBlock == 0 {
+		return AaveHealth{}, &AssetError{
+			Op: op, Engine: AaveEngine, Asset: in.Account,
+			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
+		}
+	}
+
 	out := AaveHealth{
 		Account:      in.Account,
 		Regime:       in.Regime,
 		HealthFactor: InfiniteRational(),
 		IsInfinite:   true,
+		Marks:        in.Marks,
 	}
 
 	// eMode. The probe settled category 0 for every borrower on both
@@ -121,7 +131,7 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 		rv.DebtBase = new(big.Int)
 		rv.CollateralBase = new(big.Int)
 		if hasPrice {
-			rv.Price = p
+			rv.Price = p.clone()
 			den := pow10(r.Decimals)
 			// Component 4: one integer division per reserve, floor.
 			rv.DebtBase = MulDivFloor(rv.LiveDebt, p.Value, den)

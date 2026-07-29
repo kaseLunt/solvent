@@ -46,10 +46,18 @@ var dmPriceClasses = map[string]bool{
 func ComputeDMHealth(in DMInput) (DMHealth, error) {
 	const op = "dm health"
 
+	if in.Marks.BalancesBlock == 0 {
+		return DMHealth{}, &AssetError{
+			Op: op, Engine: DMEngine, Asset: in.Account,
+			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
+		}
+	}
+
 	out := DMHealth{
 		Account:      in.Account,
 		HealthFactor: InfiniteRational(),
 		IsInfinite:   true,
+		Marks:        in.Marks,
 	}
 
 	prices, usdDecimals, err := indexPrices(op, DMEngine, in.Prices, dmPriceClasses)
@@ -91,7 +99,7 @@ func ComputeDMHealth(in DMInput) (DMHealth, error) {
 			if !ok {
 				return DMHealth{}, assetErr(op, DMEngine, c.Asset, ErrMissingPrice, "")
 			}
-			cv.Price = p
+			cv.Price = p.clone()
 			cv.ValueUSD = MulDivFloor(amount, p.Value, pow10(c.Decimals))
 
 			pr, ok := params[c.Asset]
@@ -174,6 +182,13 @@ func ComputeDMHealth(in DMInput) (DMHealth, error) {
 func ProjectDMDebt(in DMInput, apy100e18 *big.Int, apyObservedBlock uint64, horizonSeconds int64) (DMProjection, error) {
 	const op = "dm projection"
 
+	if in.Marks.BalancesBlock == 0 {
+		return DMProjection{}, &AssetError{
+			Op: op, Engine: DMEngine, Asset: in.Account,
+			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
+		}
+	}
+
 	debt0 := orZero(in.DebtUSD)
 	if debt0.Sign() < 0 {
 		return DMProjection{}, assetErr(op, DMEngine, in.Account, ErrNegativeAmount, "debt")
@@ -201,6 +216,7 @@ func ProjectDMDebt(in DMInput, apy100e18 *big.Int, apyObservedBlock uint64, hori
 		HorizonSeconds: horizonSeconds,
 		Label:          "PROJECTION",
 		PricesHeldFlat: true,
+		Marks:          in.Marks,
 	}, nil
 }
 

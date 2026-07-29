@@ -159,7 +159,7 @@ func weightsFor(pos PositionInput) (positionWeights, error) {
 		}
 		w := positionWeights{
 			engine: AaveEngine, account: h.Account,
-			debt: h.TotalDebtBase, denom: BpsUnit(), marks: pos.Marks,
+			debt: h.TotalDebtBase, denom: BpsUnit(), marks: h.Marks,
 		}
 		for _, r := range h.Reserves {
 			if r.CollateralBase == nil || r.CollateralBase.Sign() == 0 || r.LiquidationThresholdBps == nil {
@@ -179,7 +179,7 @@ func weightsFor(pos PositionInput) (positionWeights, error) {
 		}
 		w := positionWeights{
 			engine: DMEngine, account: h.Account,
-			debt: h.Borrowings, denom: HundredPercentUnit(), marks: pos.Marks,
+			debt: h.Borrowings, denom: HundredPercentUnit(), marks: h.Marks,
 			perTokenFloor: true,
 		}
 		for _, c := range h.Collateral {

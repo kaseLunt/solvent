@@ -18,6 +18,7 @@ func depegBook(t *testing.T) []PositionInput {
 	t.Helper()
 	mk := func(account, debt string) PositionInput {
 		return PositionInput{Engine: DMEngine, DM: &DMInput{
+			Marks:   testDMMarks,
 			Account: mustAddr(account),
 			DebtUSD: mustBig(t, debt),
 			Collateral: []DMCollateral{
@@ -156,6 +157,7 @@ func TestExecutionShortfallUnrealizedAssetsKeepFullValue(t *testing.T) {
 func TestExecutionShortfallEnginesAreNeverBlended(t *testing.T) {
 	dm := depegBook(t)
 	aave := PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctC,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "100000000", "0", true),
@@ -196,7 +198,7 @@ func TestExecutionShortfallEnginesAreNeverBlended(t *testing.T) {
 // on the pro-rata blend.
 func TestExecutionShortfallZeroCollateralPosition(t *testing.T) {
 	res, err := ExecutionShortfall([]PositionInput{
-		{Engine: DMEngine, DM: &DMInput{Account: acctA, DebtUSD: mustBig(t, "1000000")}},
+		{Engine: DMEngine, DM: &DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: mustBig(t, "1000000")}},
 	}, []MarketRealization{
 		{Asset: dWeETH, ChainID: 10, MarketOverOracle: mustBig(t, "950000000000000000")},
 	})
@@ -242,6 +244,7 @@ func TestExecutionShortfallRefusals(t *testing.T) {
 
 	_, err = ExecutionShortfall([]PositionInput{
 		{Engine: DMEngine, DM: &DMInput{
+			Marks:      testDMMarks,
 			Account:    acctA,
 			Collateral: []DMCollateral{{Asset: dUSDC, Amount: big.NewInt(1), Decimals: 6}},
 		}},
@@ -250,6 +253,7 @@ func TestExecutionShortfallRefusals(t *testing.T) {
 
 	_, err = ExecutionShortfall([]PositionInput{
 		{Engine: AaveEngine, Aave: &AaveInput{
+			Marks:    testAaveMarks,
 			Account:  acctA,
 			Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "1", "0", true)},
 		}},
@@ -306,6 +310,7 @@ func TestExecutionShortfallDetectsAMovedOracle(t *testing.T) {
 // in the pro-rata blend.
 func TestExecutionShortfallSkipsZeroValueLegs(t *testing.T) {
 	pos := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:   testDMMarks,
 		Account: acctA,
 		DebtUSD: mustBig(t, "1900000000"),
 		Collateral: []DMCollateral{
@@ -349,6 +354,7 @@ func TestExecutionShortfallPropagatesRealizedPassErrors(t *testing.T) {
 	require.ErrorIs(t, err, ErrMissingPrice)
 
 	_, err = ExecutionShortfall([]PositionInput{{Engine: AaveEngine, Aave: &AaveInput{
+		Marks:    testAaveMarks,
 		Account:  acctA,
 		Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "100000000", "0", true)},
 		Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
@@ -369,6 +375,7 @@ func TestExecutionShortfallPropagatesRealizedPassErrors(t *testing.T) {
 // retire, which is the direction that hides bad debt.
 func TestAaveSeizableUsesEachTokensOwnBonus(t *testing.T) {
 	h, err := ComputeAaveHealth(AaveInput{
+		Marks:   testAaveMarks,
 		Account: acctA,
 		Reserves: []AaveReserve{
 			simpleReserve(aWeETH, 8, "100000000", "0", true),
@@ -412,6 +419,7 @@ func TestAaveSeizableUsesEachTokensOwnBonus(t *testing.T) {
 func TestAaveEligibilityIsStrictAtExactlyOne(t *testing.T) {
 	build := func(debt string) PositionInput {
 		return PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+			Marks:   testAaveMarks,
 			Account: acctA,
 			Reserves: []AaveReserve{
 				simpleReserve(aWeETH, 8, "100000000", "0", true),

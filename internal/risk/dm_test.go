@@ -25,6 +25,7 @@ import (
 // inside the loop, so 1900000 is the chain's answer and 1900001 is the bug.
 func TestComputeDMHealthFloorsPerTokenThenSums(t *testing.T) {
 	in := DMInput{
+		Marks:   testDMMarks,
 		Account: acctA,
 		DebtUSD: big.NewInt(0),
 		Collateral: []DMCollateral{
@@ -64,6 +65,7 @@ func TestComputeDMHealthFloorsPerTokenThenSums(t *testing.T) {
 func TestComputeDMHealthStrictInequalityBoundary(t *testing.T) {
 	build := func(debt string) DMInput {
 		return DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, debt),
 			Collateral: []DMCollateral{
@@ -118,6 +120,7 @@ func TestComputeDMHealthStrictInequalityBoundary(t *testing.T) {
 // is 95%, not 95e18%.
 func TestComputeDMHealthRealParamTuples(t *testing.T) {
 	in := DMInput{
+		Marks:   testDMMarks,
 		Account: acctB,
 		DebtUSD: mustBig(t, "50000000"), // $50
 		Collateral: []DMCollateral{
@@ -171,6 +174,7 @@ func TestComputeDMHealthRealParamTuples(t *testing.T) {
 
 func TestComputeDMHealthZeroDebtIsInfinite(t *testing.T) {
 	in := DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		DebtUSD:    big.NewInt(0),
 		Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
@@ -196,7 +200,7 @@ func TestComputeDMHealthZeroDebtIsInfinite(t *testing.T) {
 // accounts. Half the evidence is the empty set.
 func TestComputeDMHealthEmptySetProbes(t *testing.T) {
 	// Never seen: nothing at all.
-	h, err := ComputeDMHealth(DMInput{Account: acctA})
+	h, err := ComputeDMHealth(DMInput{Marks: testDMMarks, Account: acctA})
 	require.NoError(t, err)
 	require.True(t, h.IsInfinite)
 	require.False(t, h.Liquidatable)
@@ -208,6 +212,7 @@ func TestComputeDMHealthEmptySetProbes(t *testing.T) {
 
 	// Zero-amount collateral legs need neither a price nor a param.
 	h, err = ComputeDMHealth(DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		Collateral: []DMCollateral{{Asset: dUSDC, Amount: big.NewInt(0), Decimals: 6}, {Asset: dUSDT, Decimals: 6}},
 	})
@@ -216,7 +221,7 @@ func TestComputeDMHealthEmptySetProbes(t *testing.T) {
 	requireBig(t, "0", h.CollateralValueUSD)
 
 	// Debt with NO collateral: liquidatable against a zero threshold.
-	h, err = ComputeDMHealth(DMInput{Account: acctA, DebtUSD: big.NewInt(1)})
+	h, err = ComputeDMHealth(DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: big.NewInt(1)})
 	require.NoError(t, err)
 	require.True(t, h.Liquidatable)
 	requireBig(t, "0", h.MaxBorrowLT)
@@ -232,6 +237,7 @@ func TestComputeDMHealthEmptySetProbes(t *testing.T) {
 func TestComputeDMHealthRefusals(t *testing.T) {
 	base := func() DMInput {
 		return DMInput{
+			Marks:      testDMMarks,
 			Account:    acctA,
 			DebtUSD:    mustBig(t, "50000000"),
 			Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
@@ -333,6 +339,7 @@ func TestComputeDMHealthStaleFlagAndOldestInput(t *testing.T) {
 	stale.AsOf = old
 
 	in := DMInput{
+		Marks:   testDMMarks,
 		Account: acctA,
 		DebtUSD: mustBig(t, "1"),
 		Collateral: []DMCollateral{
@@ -354,6 +361,7 @@ func TestComputeDMHealthStaleFlagAndOldestInput(t *testing.T) {
 // TestComputeDMHealthDoesNotMutateInput guards the defensive copies.
 func TestComputeDMHealthDoesNotMutateInput(t *testing.T) {
 	in := DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		DebtUSD:    mustBig(t, "50000000"),
 		Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
@@ -389,7 +397,7 @@ func TestProjectDMDebtLinearIndex(t *testing.T) {
 		new(big.Int).Add(mustBig(t, "317097919837"), mustBig(t, "63419583967")).String(),
 		"10%/yr + 200bps")
 
-	in := DMInput{Account: acctA, DebtUSD: debt0}
+	in := DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: debt0}
 
 	p30, err := ProjectDMDebt(in, apy, 154848114, 2592000)
 	require.NoError(t, err)
@@ -418,7 +426,7 @@ func TestProjectDMDebtLinearIndex(t *testing.T) {
 	requireBig(t, "22220000000000", p0.ProjectedUSD)
 
 	// No debt: nothing accrues.
-	p0, err = ProjectDMDebt(DMInput{Account: acctA}, apy, 1, 7776000)
+	p0, err = ProjectDMDebt(DMInput{Marks: testDMMarks, Account: acctA}, apy, 1, 7776000)
 	require.NoError(t, err)
 	requireBig(t, "0", p0.ProjectedUSD)
 	requireBig(t, "0", p0.InterestUSD)
@@ -452,7 +460,7 @@ func TestProjectDMDebtDivergesFromExactTwoFloorPath(t *testing.T) {
 	requireBig(t, "25536527842459", exact)
 
 	// The shipped closed form.
-	p, err := ProjectDMDebt(DMInput{Account: acctA, DebtUSD: debt0}, apy, 154848114, dt)
+	p, err := ProjectDMDebt(DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: debt0}, apy, 154848114, dt)
 	require.NoError(t, err)
 	requireBig(t, "25536527842458", p.ProjectedUSD)
 
@@ -463,13 +471,13 @@ func TestProjectDMDebtDivergesFromExactTwoFloorPath(t *testing.T) {
 }
 
 func TestProjectDMDebtRefusals(t *testing.T) {
-	_, err := ProjectDMDebt(DMInput{Account: acctA, DebtUSD: big.NewInt(-1)}, big.NewInt(1), 1, 1)
+	_, err := ProjectDMDebt(DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: big.NewInt(-1)}, big.NewInt(1), 1, 1)
 	require.ErrorIs(t, err, ErrNegativeAmount)
 
-	_, err = ProjectDMDebt(DMInput{Account: acctA, DebtUSD: big.NewInt(1)}, big.NewInt(-1), 1, 1)
+	_, err = ProjectDMDebt(DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: big.NewInt(1)}, big.NewInt(-1), 1, 1)
 	require.ErrorIs(t, err, ErrNegativeAmount)
 
-	_, err = ProjectDMDebt(DMInput{Account: acctA, DebtUSD: big.NewInt(1)}, big.NewInt(1), 1, -1)
+	_, err = ProjectDMDebt(DMInput{Marks: testDMMarks, Account: acctA, DebtUSD: big.NewInt(1)}, big.NewInt(1), 1, -1)
 	require.ErrorIs(t, err, ErrNegativeAmount)
 }
 
@@ -534,14 +542,14 @@ func TestRationalSurface(t *testing.T) {
 
 // TestPositionInputValidate covers the engine-tag union.
 func TestPositionInputValidate(t *testing.T) {
-	require.NoError(t, PositionInput{Engine: AaveEngine, Aave: &AaveInput{}}.Validate())
-	require.NoError(t, PositionInput{Engine: DMEngine, DM: &DMInput{}}.Validate())
+	require.NoError(t, PositionInput{Engine: AaveEngine, Aave: &AaveInput{Marks: testAaveMarks}}.Validate())
+	require.NoError(t, PositionInput{Engine: DMEngine, DM: &DMInput{Marks: testDMMarks}}.Validate())
 
 	require.ErrorIs(t, PositionInput{Engine: AaveEngine}.Validate(), ErrEngineMismatch)
 	require.ErrorIs(t, PositionInput{Engine: DMEngine}.Validate(), ErrEngineMismatch)
-	require.ErrorIs(t, PositionInput{Engine: AaveEngine, Aave: &AaveInput{}, DM: &DMInput{}}.Validate(), ErrEngineMismatch)
-	require.ErrorIs(t, PositionInput{Engine: DMEngine, Aave: &AaveInput{}, DM: &DMInput{}}.Validate(), ErrEngineMismatch)
-	require.ErrorIs(t, PositionInput{Engine: "aave_param", Aave: &AaveInput{}}.Validate(), ErrEngineMismatch)
+	require.ErrorIs(t, PositionInput{Engine: AaveEngine, Aave: &AaveInput{Marks: testAaveMarks}, DM: &DMInput{Marks: testDMMarks}}.Validate(), ErrEngineMismatch)
+	require.ErrorIs(t, PositionInput{Engine: DMEngine, Aave: &AaveInput{Marks: testAaveMarks}, DM: &DMInput{Marks: testDMMarks}}.Validate(), ErrEngineMismatch)
+	require.ErrorIs(t, PositionInput{Engine: "aave_param", Aave: &AaveInput{Marks: testAaveMarks}}.Validate(), ErrEngineMismatch)
 	require.ErrorIs(t, PositionInput{}.Validate(), ErrEngineMismatch)
 }
 
@@ -569,6 +577,7 @@ func TestRationalValid(t *testing.T) {
 // conditional rational this package returns.
 func TestLiquidationPriceScaleFactorIsInvalidWhenUnset(t *testing.T) {
 	pos := PositionInput{Engine: DMEngine, DM: &DMInput{
+		Marks:      testDMMarks,
 		Account:    acctA,
 		DebtUSD:    big.NewInt(0),
 		Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "1000000"), Decimals: 6}},
@@ -598,6 +607,7 @@ func TestLiquidationPriceScaleFactorIsInvalidWhenUnset(t *testing.T) {
 func TestPerTokenBonusLawVsMinBonusCollapse(t *testing.T) {
 	build := func(debt string) DMInput {
 		return DMInput{
+			Marks:   testDMMarks,
 			Account: acctA,
 			DebtUSD: mustBig(t, debt),
 			Collateral: []DMCollateral{
@@ -736,6 +746,7 @@ func TestComputeDMHealthValuationFloorsSuperHalf(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.amount, func(t *testing.T) {
 			in := DMInput{
+				Marks:      testDMMarks,
 				Account:    acctA,
 				Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, tc.amount), Decimals: 6}},
 				Params:     []ParamRow{dmParam(dUSDC, "100000000000000000000", "0")},
@@ -756,4 +767,94 @@ func TestComputeDMHealthValuationFloorsSuperHalf(t *testing.T) {
 			requireBig(t, tc.refutedHalfUp, halfUp.Div(halfUp, den))
 		})
 	}
+}
+
+// TestComputeDMHealthThreadsAndRequiresWatermarks is M3's Debt Manager arm.
+// SweepBlock matters here in particular: DM collateral is sweep-dominated
+// (~1h worst case) while prices are 60s, and a row that dropped the sweep
+// block would let a 60s-fresh badge sit over hour-stale collateral.
+func TestComputeDMHealthThreadsAndRequiresWatermarks(t *testing.T) {
+	in := DMInput{
+		Marks:      Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848000, SweepBlock: 154840000},
+		Account:    acctA,
+		DebtUSD:    mustBig(t, "50000000"),
+		Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
+		Params:     []ParamRow{dmParam(dUSDC, "95000000000000000000", "1000000000000000000")},
+		Prices:     []PriceInput{enginePrice(dUSDC, "1000000")},
+	}
+	h, err := ComputeDMHealth(in)
+	require.NoError(t, err)
+	require.Equal(t, uint64(154848114), h.Marks.BalancesBlock)
+	require.Equal(t, uint64(154848000), h.Marks.ParamsBlock)
+	require.Equal(t, uint64(154840000), h.Marks.SweepBlock)
+
+	in.Marks = Watermarks{}
+	_, err = ComputeDMHealth(in)
+	require.ErrorIs(t, err, ErrMissingWatermark)
+
+	// ProjectDMDebt carries them too — a projection without an as-of is a
+	// number with no shelf life.
+	in.Marks = testDMMarks
+	p, err := ProjectDMDebt(in, mustBig(t, "380517503804"), 154848114, 2592000)
+	require.NoError(t, err)
+	require.Equal(t, testDMMarks, p.Marks)
+	require.Equal(t, uint64(154848114), p.APYObservedAt)
+
+	in.Marks = Watermarks{}
+	_, err = ProjectDMDebt(in, mustBig(t, "380517503804"), 154848114, 2592000)
+	require.ErrorIs(t, err, ErrMissingWatermark)
+}
+
+// TestComputeDMHealthResultDoesNotAliasCallerPrices is H1's Debt Manager arm.
+func TestComputeDMHealthResultDoesNotAliasCallerPrices(t *testing.T) {
+	price := enginePrice(dUSDC, "1000000")
+	price.CapValue = mustBig(t, "1010000")
+	in := DMInput{
+		Marks:      testDMMarks,
+		Account:    acctA,
+		DebtUSD:    mustBig(t, "50000000"),
+		Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
+		Params:     []ParamRow{dmParam(dUSDC, "95000000000000000000", "1000000000000000000")},
+		Prices:     []PriceInput{price},
+	}
+	first, err := ComputeDMHealth(in)
+	require.NoError(t, err)
+	requireBig(t, "95000000", first.MaxBorrowLT)
+	requireBig(t, "1000000", first.Collateral[0].Price.Value)
+	requireBig(t, "1010000", first.Collateral[0].Price.CapValue)
+
+	first.Collateral[0].Price.Value.SetInt64(1)
+	first.Collateral[0].Price.CapValue.SetInt64(1)
+
+	requireBig(t, "1000000", in.Prices[0].Value, "the caller's input must be untouched")
+	requireBig(t, "1010000", in.Prices[0].CapValue)
+
+	second, err := ComputeDMHealth(in)
+	require.NoError(t, err)
+	require.Equal(t, first.MaxBorrowLT.String(), second.MaxBorrowLT.String(),
+		"a second computation over the same input must be bit-identical")
+	requireBig(t, "1000000", second.Collateral[0].Price.Value)
+
+	in.Prices[0].Value.SetInt64(7)
+	requireBig(t, "1000000", second.Collateral[0].Price.Value)
+}
+
+// TestPositionInputRefusesMarksDisagreement: PositionInput.Marks is a mirror of
+// the engine input's, and a mirror that DISAGREES means the caller built the
+// two from different reads — one of the two numbers it will publish is wrong.
+func TestPositionInputRefusesMarksDisagreement(t *testing.T) {
+	dm := &DMInput{Marks: testDMMarks, Account: acctA}
+	require.NoError(t, PositionInput{Engine: DMEngine, DM: dm, Marks: testDMMarks}.Validate())
+	require.NoError(t, PositionInput{Engine: DMEngine, DM: dm}.Validate(),
+		"an empty mirror is allowed; the engine input owns the marks")
+
+	other := testDMMarks
+	other.SweepBlock++
+	err := PositionInput{Engine: DMEngine, DM: dm, Marks: other}.Validate()
+	require.ErrorIs(t, err, ErrWatermarkMismatch)
+
+	av := &AaveInput{Marks: testAaveMarks, Account: acctA}
+	require.NoError(t, PositionInput{Engine: AaveEngine, Aave: av, Marks: testAaveMarks}.Validate())
+	err = PositionInput{Engine: AaveEngine, Aave: av, Marks: testDMMarks}.Validate()
+	require.ErrorIs(t, err, ErrWatermarkMismatch)
 }

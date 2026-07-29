@@ -117,6 +117,41 @@ type Shock struct {
 	FactorDen int64  `json:"factor_den"`
 }
 
+// UnmarshalJSON decodes a shock PRESENCE-AWARE.
+//
+// With plain int64 fields an omitted `factor_num` decodes to 0, and a
+// validator that only rejects NEGATIVE numerators would accept it — turning a
+// config typo into a silent total-loss shock that prices the whole axis at
+// zero and reports a book-wide liquidation. Absent keys are refused by name,
+// separately from present-but-invalid values.
+//
+// This also RE-ASSERTS strictness: the outer decoder's DisallowUnknownFields
+// does not reach inside a type that implements json.Unmarshaler, so the shadow
+// decoder sets it again. Without that line, adding this method would have
+// quietly opened a hole for unknown fields inside a shock object.
+func (s *Shock) UnmarshalJSON(b []byte) error {
+	type wire struct {
+		Axis      Axis   `json:"axis"`
+		Asset     string `json:"asset,omitempty"`
+		FactorNum *int64 `json:"factor_num"`
+		FactorDen *int64 `json:"factor_den"`
+	}
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	var w wire
+	if err := dec.Decode(&w); err != nil {
+		return fmt.Errorf("%w: %v", ErrScenarioInvalid, err)
+	}
+	if w.FactorNum == nil {
+		return fmt.Errorf("%w: shock on axis %q omits factor_num", ErrScenarioInvalid, w.Axis)
+	}
+	if w.FactorDen == nil {
+		return fmt.Errorf("%w: shock on axis %q omits factor_den", ErrScenarioInvalid, w.Axis)
+	}
+	*s = Shock{Axis: w.Axis, Asset: w.Asset, FactorNum: *w.FactorNum, FactorDen: *w.FactorDen}
+	return nil
+}
+
 func (s Shock) ref() AxisRef { return AxisRef{Axis: s.Axis, Asset: s.Asset} }
 
 // AssetResponse is one row of the propagation matrix: which primitive axes an
@@ -394,8 +429,12 @@ func (s Scenario) Validate() error {
 		if sh.FactorDen <= 0 {
 			return bad("%s: shocks[%d]: factor_den must be positive", s.ID, i)
 		}
-		if sh.FactorNum < 0 {
-			return bad("%s: shocks[%d]: factor_num must not be negative", s.ID, i)
+		if sh.FactorNum <= 0 {
+			// Zero is not "no shock", it is a TOTAL-LOSS shock: it prices the
+			// axis at zero and reports the whole book liquidatable. That is
+			// not a supported scenario, and it is exactly what an omitted or
+			// mistyped factor_num would produce.
+			return bad("%s: shocks[%d]: factor_num must be positive (0 is a total-loss shock, not a no-op)", s.ID, i)
 		}
 		// AxisBorrowAPY is consumed by ProjectDMDebt, not by price
 		// propagation, so it is exempt from the referenced-by-matrix rule.
@@ -495,8 +534,8 @@ func (s Scenario) WithSingleShockFactor(num, den *big.Int) (Scenario, error) {
 	if len(s.Shocks) != 1 {
 		return Scenario{}, fmt.Errorf("%w: %s declares %d shocks, want exactly 1", ErrScenarioInvalid, s.ID, len(s.Shocks))
 	}
-	if num == nil || den == nil || den.Sign() <= 0 || num.Sign() < 0 {
-		return Scenario{}, fmt.Errorf("%w: %s: bad grid factor", ErrScenarioInvalid, s.ID)
+	if num == nil || den == nil || den.Sign() <= 0 || num.Sign() <= 0 {
+		return Scenario{}, fmt.Errorf("%w: %s: grid factor must be a positive rational", ErrScenarioInvalid, s.ID)
 	}
 	if !num.IsInt64() || !den.IsInt64() {
 		return Scenario{}, fmt.Errorf("%w: %s: grid factor does not fit the scenario schema's int64 fields", ErrScenarioInvalid, s.ID)
@@ -556,11 +595,13 @@ type ScenarioApplication struct {
 
 // ApplyScenario returns a copy of the position with its price inputs shocked
 // through the scenario's propagation matrix and the engines' own transforms.
-// The input is never mutated: the price slice and every *big.Int in it are
-// fresh. The reserve/collateral/param slices are SHARED with the input because
-// no shock touches them and a grid walk over a book of ~10k accounts would
-// otherwise copy them at every point; nothing in this package writes through
-// them.
+//
+// The returned position is FULLY INDEPENDENT of the input: every slice and
+// every *big.Int in it is fresh, so neither side can mutate the other. An
+// earlier revision shared the reserve/collateral/param slices to save
+// allocations on a grid walk and documented the sharing as safe-by-convention;
+// a convention a caller has to read is not a guarantee, and this is the money
+// path.
 //
 // The scenario's market_realizations and projection legs are NOT applied here:
 // a market realization is not an oracle mark (feeding it into a price would be
@@ -592,11 +633,8 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 	shock := func(engine string, prices []PriceInput) ([]PriceInput, error) {
 		out := make([]PriceInput, len(prices))
 		for i, p := range prices {
-			cp := p
+			cp := p.clone()
 			cp.Value = orZero(p.Value)
-			if p.CapValue != nil {
-				cp.CapValue = new(big.Int).Set(p.CapValue)
-			}
 			r, ok := responses[responseKey(p.ChainID, p.Asset)]
 			if !ok {
 				app.HeldFlat = append(app.HeldFlat, HeldFlatInput{
@@ -679,6 +717,13 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 			return PositionInput{}, err
 		}
 		cp.Prices = ps
+		cp.Params = cloneParams(in.Aave.Params)
+		if in.Aave.Reserves != nil {
+			cp.Reserves = make([]AaveReserve, len(in.Aave.Reserves))
+			for i, r := range in.Aave.Reserves {
+				cp.Reserves[i] = r.clone()
+			}
+		}
 		out.Aave = &cp
 	case DMEngine:
 		cp := *in.DM
@@ -687,6 +732,14 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 			return PositionInput{}, err
 		}
 		cp.Prices = ps
+		cp.Params = cloneParams(in.DM.Params)
+		cp.DebtUSD = copyBig(in.DM.DebtUSD)
+		if in.DM.Collateral != nil {
+			cp.Collateral = make([]DMCollateral, len(in.DM.Collateral))
+			for i, c := range in.DM.Collateral {
+				cp.Collateral[i] = c.clone()
+			}
+		}
 		out.DM = &cp
 	}
 	return out, nil

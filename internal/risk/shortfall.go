@@ -135,20 +135,23 @@ func ExecutionShortfall(book []PositionInput, real []MarketRealization) (Shortfa
 // Nothing outside the test binary reassigns it.
 var marketRealizationPass = applyMarketRealization
 
-// applyMarketRealization is the market-value pass. It returns a copy of the
-// position with the ORACLE INPUTS DELIBERATELY UNTOUCHED — a market
-// realization is not a price. The copy exists so ExecutionShortfall can
+// applyMarketRealization is the market-value pass. It returns a DEEP copy of
+// the position with the ORACLE INPUTS DELIBERATELY UNTOUCHED — a market
+// realization is not a price. The copy is deep so the two health computations
+// below cannot share storage: a shallow slice copy would leave both sides
+// pointing at the same *big.Int values, and "bit-identical" would then be a
+// property of aliasing rather than of the arithmetic. The copy exists so ExecutionShortfall can
 // recompute health from it and prove bit-identity rather than assume it.
 func applyMarketRealization(pos PositionInput) PositionInput {
 	out := pos
 	switch pos.Engine {
 	case AaveEngine:
 		cp := *pos.Aave
-		cp.Prices = append([]PriceInput(nil), pos.Aave.Prices...)
+		cp.Prices = clonePrices(pos.Aave.Prices)
 		out.Aave = &cp
 	case DMEngine:
 		cp := *pos.DM
-		cp.Prices = append([]PriceInput(nil), pos.DM.Prices...)
+		cp.Prices = clonePrices(pos.DM.Prices)
 		out.DM = &cp
 	}
 	return out

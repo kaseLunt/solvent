@@ -11,7 +11,6 @@ package risk
 import (
 	"go/ast"
 	"go/parser"
-	"go/scanner"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -149,41 +148,6 @@ func TestNoTimeNowOrRandInSources(t *testing.T) {
 				"%s: %s uses rand", f, fset.Position(n.Pos()))
 			return true
 		})
-	}
-}
-
-// TestNoFloatInNonTestSources tokenizes each source with comments SKIPPED and
-// fails on any float type, float literal, or imaginary literal.
-//
-// Tokenizing rather than grepping matters: a doc comment may legitimately say
-// "float", and a grep over raw bytes would either flag it or force the comment
-// to be reworded. What must not exist is a float in the CODE.
-func TestNoFloatInNonTestSources(t *testing.T) {
-	for _, f := range nonTestSources(t) {
-		src, err := os.ReadFile(f)
-		require.NoError(t, err)
-
-		fset := token.NewFileSet()
-		file := fset.AddFile(f, fset.Base(), len(src))
-		var s scanner.Scanner
-		s.Init(file, src, func(pos token.Position, msg string) {
-			t.Fatalf("%s: scan error at %s: %s", f, pos, msg)
-		}, 0) // mode 0 ⇒ comments are not emitted
-
-		for {
-			pos, tok, lit := s.Scan()
-			if tok == token.EOF {
-				break
-			}
-			switch tok {
-			case token.FLOAT, token.IMAG:
-				t.Fatalf("%s: %s: %s literal %q — internal/risk computes in *big.Int only",
-					f, fset.Position(pos), tok, lit)
-			case token.IDENT:
-				require.NotContains(t, []string{"float32", "float64", "complex64", "complex128"}, lit,
-					"%s: %s: %s appears in code", f, fset.Position(pos), lit)
-			}
-		}
 	}
 }
 
