@@ -501,3 +501,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   the guard working as designed). OWED: promote harness riskGate → riskfeed.GateEpochs
   import (plan's Task-5 promotion; one-line per the wave; do with/after the riskd
   Codex round). NEXT: Codex round on 74e0309..2cd01d4.
+- CODEX ROUND 1 ON RISKD (session 019fb014-3039-7bf2-883a-fbf4368eee9a, ~11.5min,
+  worktree t5 @ 2cd01d4): **needs-attention — 3 HIGH + 2 MEDIUM, ALL adjudicated
+  fix-worthy** (every one is wrong-answer-in-honest-use). (H1) GateEpochs REGRESSES
+  THE BINDING LAW — missing cursor appends to Missing but OK stays true, no ChainID
+  binding (wrong-chain cursor judged against the wrong chain's epochs → compute on an
+  unproven param head). The cross-pollination worry materialized in the REAL gate;
+  vindicates recording it as binding. (H2) sweep mutations invisible to the polling
+  vector (derive cursors + reorg epochs only) → SWEEP_NEVER refusal survives first
+  success; unflagged result survives post-success failure, until an unrelated cursor
+  moves. (H3) conflicted accounts VANISH (riskBalances deletes the account's rows,
+  Assemble enumerates only Balances) — false-safe "no position" instead of the
+  promised G3 refusal. (M4) ambiguous commit + retry rebaselines previousPrices →
+  G5 large-step flag erased on the duplicate batch. (M5) NewestCompleteBatch accepts
+  position-count + any-one-stamp — a torn/partial restore serves HF without input
+  evidence; the guard doesn't guard its own premise. FIX WAVE dispatched to the wave
+  agent with all five + Codex's demanded test shapes (missing/wrong-chain gate
+  mutants; sweep transitions with all derive cursors held fixed; conflict e2e to
+  refusal row; commit-indeterminacy G5 retention; per-relation completeness
+  negatives). AUTHORIZED: edit migration 00013 IN PLACE (never applied to a durable
+  DB — live is v12, test DBs recreated per run); harness promotion stays a separate
+  micro-wave AFTER the gate fix. t5 joins the locked-dir list.
