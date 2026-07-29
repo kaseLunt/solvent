@@ -339,6 +339,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   snap(base_now·f)/base_now); (3) the joint base+rate shock is the known guard refusal
   requiring a factor-composition schema extension — refuse-loud until then, BY DESIGN.
   After 4c: Codex round on the full Task 4 range (a5d82a9^..HEAD).
+- **TASK 4 CLOSED — SHIP** (2026-07-29 12:06, closing session 019faf40-9500-7e83-aa31-
+  be0e9fa11467, verdict approve, no material findings). Full program: Wave 4 (Opus build,
+  99.1%, five authority contradictions surfaced) → risk-quant fable re-derivation (2
+  arithmetic blockers: liquidUSD base-snap, per-token bonus law → 4b fixed → re-read
+  NUMBERS HOLD, blocking list empty) → 4c verdict-note docs → Codex round 1 (2H/4M:
+  *big.Int aliasing incl. one beyond the finding, non-price-axis waterfall false-safe,
+  watermark threading with the masking test, presence-aware loader, go/types float gate
+  proven by injection, stale plan line) → 4d fixed → Codex round 2 (1M: partial-watermark
+  acceptance) → 4e engine-aware requireWatermarks → **closing APPROVE**. Final state:
+  internal/risk at 8a56e16, 99.2% coverage, 135 top-level tests, arithmetic
+  triple-witnessed. Commits: a5d82a9 / 0d204fa / 618279d / e20dfda / 8a56e16 (+ lease
+  renewal 49eed1b-adjacent). Owed forward (named): store→risk ParamRow adapter with
+  LiqBonus passthrough (Task 5), tokenConfig REQUIRED sweep (Task 6), -race on a
+  CGO-capable runner (W2 acceptance), OpenAPI SeizureModel enum token (Task 7). Inert
+  locked worktree dirs accumulating for bulk cleanup: C:\wtclose\{w2a,w2b,w4,w4d,w4e},
+  scratchpad\wave2a-review.
+- BACKFILL: cursor 24.05M at 11:45 (+1.97M/h on the Infura lane) — completion imminent;
+  harness milestone LONG passed; custody of both Task 3 leg regions verified against the
+  probe record (46 cluster logs = getBlockReceipts count; 3+3 Pool logs at the
+  LiquidationCall pair). NEXT: Task 3 (harness) + Task 5 (riskd) waves dispatched in
+  parallel on Opus — disjoint trees (internal/pipelinereplay+Makefile vs cmd/riskd+store).
 - SCOPE GAP CAUGHT BY THE GATE (2026-07-29 00:40): recon/feeds.json is NOT in W2
   allowed_paths (W1 had it; W2 authoring missed the price-registry mirror) — pre-commit
   correctly BLOCKED the 2b commit. Fix: W2 allowed_paths += recon/feeds.json (durable
