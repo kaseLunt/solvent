@@ -396,3 +396,36 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   store risk surfaces (untracked trees: internal/pipelinereplay/, internal/riskfeed/,
   cmd/riskd/, migration 00013, store/risk.go — both agents editing MAIN tree on disjoint
   paths per dispatch). NEXT: wave reports → per-wave verify/commit/Codex to SHIP.
+- OUTAGE INTERLUDE (12:50–14:58): upstream API 500s/529s killed both wave agents
+  repeatedly mid-response; owner called the pause ("status says its down, pause if we
+  have another issue"). Both agents parked with work intact on disk, resumed from
+  transcripts on owner "continue" — ZERO work lost across 4 terminations. Daemon
+  unaffected (PID 32100). **/readyz FLIPPED TRUE on its own** post-backfill
+  ({"ready":true,"live":true}) — the frontier-lag disclosure resolved exactly as
+  designed, no intervention.
+- **WAVE 3 (harness) LANDED — 4c638da** (2026-07-29 15:12). internal/pipelinereplay
+  (harness_test.go 690 + pipeline_replay_test.go 1043, TEST-ONLY package — no non-test
+  files, nothing can import it), Makefile test-pipeline-replay target, .env.example
+  ANVIL_FORK_RPC_ETH block. Three legs on hash-pinned anvil forks (20,714,020 /
+  21,469,984): leg 1 raw_logs == fork getLogs == 22 fixture byte-identities + runtime
+  genesis proof + 9 scaled + 8 rayMulHalfUp welds (FRAX non-trivial 1e18→1.00000006e18)
+  + 4 param welds + 4 registry welds; leg 2 two-door custody (getLogs+receipts), 14/14
+  gated decode, 2 LiquidationCall parser differentials, derive_cursors asserted empty;
+  leg 3 full reorg choreography (ACL on-chain, anvil_reorg(3), gate refused→both engines
+  acked→allowed, 1 row 0 orphans old-LTV). INTEGRATOR RE-VERIFIED: opted-in 3/3 PASS
+  17.96s in MY hands, non-opted 3 SKIPs + sanitizer PASS, vet/gofmt clean (gopls
+  "undefined: weETH" diagnostics were stale AGAIN — compiler-truth rule holds). Wave
+  deviations ACCEPTED (5, all disclosed w/ justification): no-mining all legs;
+  confirmations=2 on non-advancing fork; leg-3 spacer blocks after NEW PROBED FINDING
+  (forked anvil cannot anvil_reorg to its own fork base — v1.7.1 depth-5-of-5 → -32001;
+  encoded as runtime guard); param weld widened 2→4 reserves (census was fixture-sample
+  count, chain has 4 — initializedInRange guard keeps R5 scope); contracts.json read
+  directly (production registry, not transcription). CONTRADICTION HANDLED RIGHT: my
+  unblock note said derive-expected-from-DB-ledger; wave kept brief R5 (chain as
+  expected side — else one witness through two doors) and ran the live-ledger agreement
+  OUT-OF-BAND instead: **92/92 logs in the leg-1 range, replay custody == live ledger
+  across two providers AND two window sizes (10 vs 2000)** — strongest number in the
+  report. Declined promoting it in-harness (would couple opt-in harness to
+  SOLVENT_DATABASE_URL). Ops note: TEST_DATABASE_URL not in .env — export inline for
+  opted-in runs (harness FAILS loud when opted-in without it, by design; verified).
+  NEXT: Codex round on 4c638da = the joint Task 2+3 closure gate.
