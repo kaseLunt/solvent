@@ -22,3 +22,9 @@
 !*-probe/*.py
 !*-probe/*.json
 !*-probe/*.go
+
+# Persona consult archives are BINDING RULINGS the P3 design/plan cite as authority
+# (Codex P3 plan-review round 2 [NEW-M]: the `*` above excluded the directory, and
+# `!*.md` cannot re-include descendants of an excluded directory — the archives were
+# silently untracked). Re-include the directory; `!*.md` then covers its files.
+!p3-consults/
