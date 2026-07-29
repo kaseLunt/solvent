@@ -253,3 +253,22 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   contract change under the standing owner delegation), claim.py rescope, commit under
   ack. NEXT: commit 2b, Codex round, ONE daemon restart (00011+00012 + configurator
   backfill + healing pass — watch stamped/unstamped and behind-frontier honesty).
+- WAVE 2b SHIP (round 1, session 019facd3-ae7c-7c53-a529-2188d9ae7b93, verdict approve,
+  ZERO material findings): "chain-time as-of threading, healing identity/scoping/
+  idempotency, shared poll-round anchoring, registry collision gates, migration, and read
+  surfaces satisfy the binding requirements"; 49eed1b verified metadata-only. TASK 2 CLOSED
+  under D-006: Wave 2a two rounds (1 doc-only medium), Wave 2b one round clean.
+- DAEMON RESTARTED (2026-07-29 00:57, build-next-then-swap, old PID 46964 killed, binary
+  swapped, prev kept as solvent-indexer-prev.exe): goose v10→12 (00011+00012 applied);
+  eth:aave-param stream live (start 20,625,519, window 2000, confirmations 5); backfill
+  opened and immediately exhibited the PREDICTED A2 posture (dRPC non-landing → publicnode
+  archive-wall 403 → loud 29s backoff, self-healing). **HEALING PASS COMPLETE ON FIRST
+  STEP: 51,954/51,954 pre-00012 feed rows stamped (0 unstamped, candidates=51,954, ~22s),
+  strict-decoder replay, no value columns touched.** First adapter-output rows landing:
+  4 aaveoracle: rows/round with source_as_of populated. /readyz honestly FALSE while
+  aave_param walks the year of history (frontier-lag recoverable class — designed
+  disclosure, not a fault); /healthz live. Backfill monitor armed (15-min cursor polls,
+  stall alarms, completion event unblocks Task 3 pin freeze). NEXT (on backfill
+  completion): freeze Task 3 pins from raw_logs, dispatch the harness wave (Opus); Task 4
+  (internal/risk money code) HELD for the morning fable-vs-opus conversation with the
+  owner per the standing model-split note.
