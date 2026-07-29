@@ -447,3 +447,20 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   its Codex brief.** Codex sandbox couldn't run Go (temp-dir denial) — integrator's
   opted-in runs remain the execution evidence; re-run owed after the fix lands.
   Worktree t3 joins the inert locked-dir cleanup list.
+- HARNESS FIX WAVE LANDED — cce2cf1 (2026-07-29 15:37). Wave confirmed the finding
+  ("my leg 3 did mask it"). riskGate rewritten: required (engine,chain) set, blocks on
+  MISSING / WRONG-CHAIN / LAGGING with Blocking[] naming every one; no-cursors =
+  degenerate case; empty requirement set = hard error ("a gate that can only say yes
+  isn't a gate"). Wrong-chain clause is one step past the finding (disclosed +
+  justified: ParamHead distinguishes no-custody from other-chain custody). Leg 3 →
+  SEVEN exact-set verdicts; step 2 ({aave_param} MISSING alone) constructs its window
+  with a NotContains guard that fails loud if the window disappears; step 6 (position
+  acked alone → {aave_param} LAGGING) is the one-at-a-time discriminator. MUTATION
+  PROOF 4/4 KILLED at exactly the designed steps — incl. mutant D (wrong aggregate
+  "has ANY engine acked", survives 1-5, dies only at step 6). Integrator re-verified:
+  opted-in 3/3 PASS 18.3s (legs 1-2 byte-counts unchanged), non-opted 3 SKIPs +
+  sanitizer PASS, vet/gofmt clean. .env.example NOT staged (its pending diff is now
+  the sibling wave's SOLVENT_RISKD_DATABASE_URL block). Wave's Task-5 note, now
+  standing: the requirement set belongs in the REAL watermark reader itself, not just
+  in what tests it. NEXT: Codex round 2 on delta 79f19c4..cce2cf1 — approve closes
+  Tasks 2+3 jointly.
