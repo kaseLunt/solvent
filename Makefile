@@ -4,7 +4,7 @@
 -include .env
 export
 
-.PHONY: db-up db-down test test-acceptance test-fork-replay fmt vet run-indexer reconcile
+.PHONY: db-up db-down test test-acceptance test-fork-replay test-pipeline-replay fmt vet run-indexer reconcile
 
 # db-up brings up Postgres AND provisions the physical DB split (Task 9
 # wave 10): db-init idempotently creates solvent_test, the destructive test
@@ -71,3 +71,22 @@ reconcile:
 # default; once the ANVIL vars opt in, any problem FAILS, never skips.
 test-fork-replay:
 	go test ./internal/forkreplay -run TestForkReplay -count=1 -v
+
+# test-pipeline-replay runs the OPT-IN P3 Task 3 pipeline-replay harness with
+# .env exported. It needs ANVIL_BIN + ANVIL_FORK_RPC_ETH (an ARCHIVE-capable
+# ETH mainnet RPC — unset means the legs SKIP) and TEST_DATABASE_URL, from
+# which each leg DERIVES its own scratch database (solvent_test_p3replay1/2/3)
+# and migrates+truncates it. TEST_DATABASE_URL semantics are the suite's: it
+# must resolve to a physically different database than SOLVENT_DATABASE_URL
+# (store.VerifyDestructiveSplit), so the live backfill can never be the target
+# — but unlike `make test`, an UNSET TEST_DATABASE_URL is FATAL here rather
+# than a skip, because exporting the ANVIL pair is already the opt-in and
+# after opt-in every problem FAILS, never skips.
+#
+# Three legs, three anvil forks, three derived databases: leg 1 walks the
+# genesis cluster at hash-pinned 20,714,020; leg 2 the liquidation window at
+# 21,469,984; leg 3 manufactures a governance change above the leg-1 pin and
+# reorgs it. Runtime is dominated by the ~100 proxied upstream eth_getLogs
+# calls of legs 1-2; leg 3 is entirely local to anvil.
+test-pipeline-replay:
+	go test ./internal/pipelinereplay -run TestPipelineReplay -count=1 -v -timeout 30m
