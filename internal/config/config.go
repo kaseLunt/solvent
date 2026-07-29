@@ -14,6 +14,13 @@ var KnownEngines = map[string]bool{
 	"debt_manager":    true,
 	"aave_v3_etherfi": true,
 	"chainlink_feed":  true,
+	// aave_param is the Aave v3 ether.fi-market PoolConfigurator stream (P3
+	// Task 2). It is a SEPARATE engine identity from aave_v3_etherfi on
+	// purpose: the configurator's topic0 space is disjoint from the Pool's,
+	// and routing configurator logs into aave_v3_etherfi would hand the
+	// AaveEngine events it has no arm for. Its deriver is
+	// derive.ParamRunner (param_history), not a derive.Engine.
+	"aave_param": true,
 }
 
 type Chain struct {

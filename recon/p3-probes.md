@@ -143,12 +143,20 @@ starts there, not 20,625,519.
 
 ## ANOMALIES (binding on Task 2)
 
-- **A1 (CRITICAL, decode):** `ReserveInitialized` on THIS configurator carries the canonical
-  5-address topic0 but a **3-word data body** — no stableDebtToken slot: (asset indexed;
-  aToken, variableDebtToken, interestRateStrategy). A canonical-ABI decoder silently
-  misaligns (strategy read as variableDebtToken, then off the end). Decode by
-  deployment-verified shape, per topic0; all other 19 shapes audited canonical. Corroborates
-  `internal/derive/aave.go:131`'s unverified-source note.
+- **A1 (CRITICAL, decode) — CORRECTED 2026-07-28 by the Wave 2a implementation (four
+  witnesses: wire topics, on-chain `symbol()` reads, verified genesis-impl ABI, Pool state
+  getters).** The original probe reading ("3-word body, no stableDebtToken slot: aToken,
+  variableDebtToken, strategy in data") was WRONG in interpretation: the event has **TWO
+  indexed args** — `topics[1]`=asset, `topics[2]`=aToken — and the 96-byte body is
+  **(stableDebtToken, variableDebtToken, interestRateStrategy)**; a canonical 5-address event
+  with two indexed args produces exactly this shape. `symbol()` on body word 0 reads
+  "stableDebtEthEtherFiweETH"; `topics[2]` equals the aToken proxy 4/4. Implementing the
+  original reading would have written the stable-debt token into the aToken registry column.
+  The STRICT-READER prescription stands unchanged (canonical topic0 registration + hand-read
+  `len(data)==96` + dirty-padding checks — a 4-word body is still rejected); only the field
+  assignment was corrected. Landed as such in `internal/decode/configurator.go` (evidence
+  trail in its header). The probes' 20-topic0 inventory and all counts were independently
+  re-verified during the wave (Blockscout + Alchemy, 110/110 byte-identical).
 - **A2:** dRPC free-tier archive getLogs is nondeterministically available (same query flips
   between exact data and loud E:12/E:15) and degrades under sustained load; it NEVER returned
   false/partial data when it answered — but treat a dRPC "0 logs" as a claim, not a fact.

@@ -27,7 +27,7 @@ func testDeriveStore(t *testing.T) *Store {
 	require.NoError(t, err)
 	t.Cleanup(s.Close)
 	_, err = s.pool.Exec(context.Background(),
-		"TRUNCATE position_events, position_balances, derive_cursors, prices, price_poll_anchors, snapshots, snapshot_sweeps, sweep_generations, rate_indexes, reorg_epochs, raw_logs, ingest_cursors")
+		"TRUNCATE position_events, position_balances, derive_cursors, prices, price_poll_anchors, snapshots, snapshot_sweeps, sweep_generations, rate_indexes, reorg_epochs, raw_logs, ingest_cursors, param_history")
 	require.NoError(t, err)
 	return s
 }

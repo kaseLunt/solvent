@@ -206,6 +206,11 @@ Probed this session (anvil v1.7.1 commit 4072e48):
    dirty-padding checks per the house strict-parse style (unpackAddressUint256Arrays,
    decode.go:993 precedent). abi.JSON + unpackNonIndexed on this event ships the silent
    misalignment.
+   > **CORRECTION (2026-07-28, Wave 2a, four-witness proof — see recon/p3-probes.md A1
+   > as corrected):** the MECHANISM of this ruling stands (canonical-ID registration +
+   > strict 96-byte hand reader); the FIELD ORDER was refuted: the event has two indexed
+   > args (asset, aToken in topics) and the body is (stableDebtToken, variableDebtToken,
+   > interestRateStrategy). Implemented with the corrected assignment.
 3. **[should] source_as_of zero-call fact** (R3): head.Time is already in hand at
    poller.go:928/950; PollChain (prices.go:768-774) stays untouched.
 4. **[blocking] The walker has NO adaptive halving** (ingest/walker.go:789-793 fixed window;

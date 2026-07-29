@@ -138,3 +138,48 @@ func TestProductionContractsJSONParses(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, cfg.Streams)
 }
+
+// TestKnownEnginesAcceptsAaveParam pins the P3 Task 2 engine identity on BOTH
+// sides: the enum admits aave_param, and it still rejects an engine nobody
+// wired (the accept half alone would pass against an enum that accepted
+// everything).
+func TestKnownEnginesAcceptsAaveParam(t *testing.T) {
+	require.True(t, KnownEngines["aave_param"])
+	require.False(t, KnownEngines["aave_params"], "the enum is a closed set, not a prefix match")
+}
+
+// TestProductionConfiguratorStreamShape pins the shipped aave_param stream
+// against the values the Task-1 probe and the chain-truth consult fixed:
+// the PoolConfigurator PROXY (never the implementation, never the addresses
+// provider), the Pool deploy block, window 2000 (consult R6.4: the walker has
+// NO adaptive halving, so a 10k window would wedge on the dRPC archive flap),
+// and confirmations matching the other ETH streams.
+func TestProductionConfiguratorStreamShape(t *testing.T) {
+	t.Setenv("SOLVENT_RPC_OP", "https://a.example")
+	t.Setenv("SOLVENT_RPC_ETH", "https://b.example")
+	t.Setenv("SOLVENT_DATABASE_URL", "postgres://x")
+	cfg, err := Load("../../config/contracts.json")
+	require.NoError(t, err)
+
+	var param *Stream
+	ethConfirmations := map[uint64]bool{}
+	for i := range cfg.Streams {
+		s := &cfg.Streams[i]
+		if s.Chain == "eth" {
+			ethConfirmations[s.Confirmations] = true
+		}
+		if s.Engine == "aave_param" {
+			require.Nil(t, param, "exactly one aave_param stream")
+			param = s
+		}
+	}
+	require.NotNil(t, param, "config/contracts.json must carry the aave_param stream")
+	require.Equal(t, "eth:aave-param", param.Name)
+	require.Equal(t, "eth", param.Chain)
+	require.Len(t, param.Addresses, 1, "singleton address — the decode registry keys address-blind")
+	require.Equal(t, "0x8438F4D29D895d75C86BDC25360c25eF0607E65d", param.Addresses[0].Hex())
+	require.Equal(t, uint64(20625519), param.StartBlock)
+	require.Equal(t, uint64(2000), param.Window)
+	require.Len(t, ethConfirmations, 1, "every ETH stream shares one confirmations depth")
+	require.Equal(t, uint64(5), param.Confirmations)
+}

@@ -23,6 +23,15 @@
       "confirmations": 5
     },
     {
+      "name": "eth:aave-param",
+      "chain": "eth",
+      "engine": "aave_param",
+      "addresses": ["0x8438F4D29D895d75C86BDC25360c25eF0607E65d"],
+      "startBlock": 20625519,
+      "window": 2000,
+      "confirmations": 5
+    },
+    {
       "name": "eth:atoken-weeth",
       "chain": "eth",
       "engine": "aave_v3_etherfi",

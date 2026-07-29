@@ -195,6 +195,10 @@ var engineTopics = map[string]map[common.Hash]decodeFn{
 	"debt_manager":    debtManagerTopics,
 	"aave_v3_etherfi": aaveTopics,
 	"chainlink_feed":  chainlinkTopics,
+	// aave_param is the PoolConfigurator stream (P3 Task 2). Its table is a
+	// CLOSED inventory and the param deriver refuses loudly on any topic0
+	// outside it -- see configurator.go's header and internal/derive/params.go.
+	"aave_param": configuratorTopics,
 }
 
 // ChainlinkAnswerUpdatedTopic0 is the topic0 of

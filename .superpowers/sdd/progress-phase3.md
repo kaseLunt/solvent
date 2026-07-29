@@ -174,3 +174,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   an OPUS implementation agent — brief = plan Task 2 + the consult's blocking list + D-013
   adjudication line quoted; then Wave 2b (adapter-output poller + source_as_of + healing
   pass), then Task 3 harness legs, Codex per wave to SHIP.
+- WAVE 2a LANDED (2026-07-28 ~23:30, Opus serena-coder implementation agent): param custody
+  core complete and suite-green (1063 PASS / 0 FAIL / 1 pre-existing SKIP; build+vet clean;
+  gofmt verified on CRLF-stripped content). Delivered: aave_param engine end-to-end (config
+  enum + eth:aave-param stream window-2000, configurator strict decode of all 20 topic0s
+  with REAL-bytes fixtures independently re-verified Blockscout+Alchemy 110/110, migration
+  00011 param_history + ApplyParamEvents full two-arm gate + ParamsAsOf/(block,logIndex)
+  ordering + RewindParams as rewindTarget's fourth consumer, ParamRunner with the four
+  Runner rules + refuse-loud unknown-topic0 + deriveWorker wiring). Discriminating tests
+  all present incl. the stacked-epoch 50/80 shallow-call regression + replaced-not-appended
+  proof + canonical-4-word-body REJECTION. **WAVE REFUTED PROBE A1's FIELD ORDER with four
+  witnesses** (wire topics: 3 not 2; symbol() reads "stableDebtEthEtherFiweETH" on word 0;
+  verified genesis ABI declares asset+aToken indexed; Pool state getters match): body =
+  (stableDebtToken, variableDebtToken, strategy), aToken lives in topics[2] — implementing
+  the brief verbatim would have corrupted the aToken registry column. Strict-reader
+  mechanism unchanged; probes A1 + consult R6.2 + plan CORRECTED with annotations this
+  commit. Ten deviations reported, ALL justified and accepted by the integrator (notable:
+  uniform strict hand-readers for all 20 bodies; ParamsAsOf returns the ordered ledger
+  prefix with the per-field fold deferred to internal/risk; ingestFrontier body lifted to
+  package-level ingestFrontierOf with Runner delegating — behavior byte-identical;
+  stable_debt_token decoded but not columned). Integrator verification: build EXIT=0
+  independently confirmed (stale gopls DuplicateDecl diagnostics disregarded — compiler
+  clean), git status matches the manifest exactly, rewindTarget consumption confirmed at
+  params.go:476. OWED: store package under -race (no C toolchain on this box — cgo requires
+  gcc; CI does not run -race either) — carried as an open verification item for the Codex
+  round / a toolchain session. NEXT: commit wave + doc corrections, dispatch Codex round on
+  the wave diff, then live backfill (operator step: daemon restart; ~2.5k windows,
+  aave_param consumer will honestly report behind-frontier during it), then Wave 2b.

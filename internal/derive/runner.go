@@ -514,11 +514,27 @@ func (r *Runner) rewind(ctx context.Context) error {
 // address set would silently drop events. ok=false when any stream has no
 // cursor yet.
 func (r *Runner) ingestFrontier(ctx context.Context) (uint64, bool, error) {
+	return ingestFrontierOf(ctx, r.store, r.spec.Engine, r.spec.Streams)
+}
+
+// cursorReader is the one store method ingestFrontierOf needs. It exists so the
+// frontier rule has exactly ONE implementation shared by the position Runner
+// and the param ParamRunner: "derive only through the block every input stream
+// has ingested" is a correctness rule about incomplete windows, and a second
+// copy is a second thing to get wrong.
+type cursorReader interface {
+	Cursor(ctx context.Context, stream string) (*store.CursorPos, error)
+}
+
+// ingestFrontierOf is Runner.ingestFrontier's body, verbatim, lifted to package
+// scope (behaviour unchanged: same min-over-cursors, same ok=false on any
+// stream with no cursor, same error text keyed on the engine name).
+func ingestFrontierOf(ctx context.Context, st cursorReader, engine string, streams []string) (uint64, bool, error) {
 	var frontier uint64
-	for i, stream := range r.spec.Streams {
-		cur, err := r.store.Cursor(ctx, stream)
+	for i, stream := range streams {
+		cur, err := st.Cursor(ctx, stream)
 		if err != nil {
-			return 0, false, fmt.Errorf("runner %q: read ingest cursor %q: %w", r.spec.Engine, stream, err)
+			return 0, false, fmt.Errorf("runner %q: read ingest cursor %q: %w", engine, stream, err)
 		}
 		if cur == nil {
 			return 0, false, nil

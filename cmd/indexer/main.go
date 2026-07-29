@@ -112,8 +112,13 @@ type snapshotWorker interface {
 }
 
 var (
-	_ ingestWorker   = (*ingest.Walker)(nil)
-	_ deriveWorker   = (*derive.Runner)(nil)
+	_ ingestWorker = (*ingest.Walker)(nil)
+	_ deriveWorker = (*derive.Runner)(nil)
+	// The P3 param deriver rides the SAME worker family rather than becoming a
+	// fourth one: satisfying deriveWorker is exactly what earns it step/backoff,
+	// step_error, no_progress and the frontier gate for free (see the
+	// "aave_param" arm of the wiring switch).
+	_ deriveWorker   = (*derive.ParamRunner)(nil)
 	_ snapshotWorker = (*snapshot.Snapshotter)(nil)
 )
 
@@ -1327,6 +1332,24 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			// prices.FeedDeriver, built below — it writes prices rows under its
 			// own pseudo-engine cursor and holds no per-account state, so it is
 			// deliberately not a derive.Engine. Skipped here on purpose.
+			continue
+		case derive.ParamEngineName:
+			// P3 Task 2: the PoolConfigurator stream derives risk PARAMETERS,
+			// not positions — no accounts, no balances, no batch lifecycle — so
+			// it is a derive.ParamRunner rather than a derive.Engine ridden by
+			// derive.Runner. It nonetheless satisfies the SAME deriveWorker
+			// interface (Name/Step/Health), which is the whole reason it joins
+			// `runners` and `consumers` right here instead of becoming a fourth
+			// worker family: step/backoff, step_error, no_progress, terminal
+			// health and the raw-log frontier gate are all inherited unchanged.
+			pr, err := derive.NewParamRunner(st, registry, spec)
+			if err != nil {
+				return err
+			}
+			runners = append(runners, &runnerState{r: pr})
+			consumers = append(consumers, frontierWatch{worker: pr.Name(), streams: spec.Streams, chainID: spec.ChainID})
+			slog.Info("param derivation runner configured", "engine", spec.Engine,
+				"streams", len(spec.Streams), "startBlock", spec.StartBlock, "window", spec.Window)
 			continue
 		default:
 			return fmt.Errorf("no deriver wired for engine %q", spec.Engine)
