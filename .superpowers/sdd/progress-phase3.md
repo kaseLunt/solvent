@@ -522,3 +522,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   negatives). AUTHORIZED: edit migration 00013 IN PLACE (never applied to a durable
   DB — live is v12, test DBs recreated per run); harness promotion stays a separate
   micro-wave AFTER the gate fix. t5 joins the locked-dir list.
+- RISKD FIX WAVE LANDED — 6cb5c71 (2026-07-29 16:55, 16 files +2255/−318). All five
+  findings fixed with per-fix revert-discrimination proof. (1) GateEpochs →
+  []RequiredCursor{Engine,ChainID}, (verdict,error); missing_cursor / chain_mismatch /
+  unacked_epoch all named refusals, Missing list DELETED (no reported-but-passing
+  state); wrong-chain fixture acked-on-its-own-chain so a chain-blind gate all-clears
+  exactly the must-refuse input. (2) sweep state in the vector as durable 4-part key
+  (rows, failed, SUM(last_success_block), MAX(updated_at)) + generation/open, stamped;
+  SUM-not-MAX (lagging account behind higher peer — pinned); live tests hold ALL
+  cursors/epochs fixed (asserted) while sweep transitions force batches; Aave gets NO
+  sweep stamp BY DESIGN (no-sweeper ≠ swept-nothing); errVectorDrift caught the
+  poll/snapshot set mismatch in development — assertion earning its keep. (3)
+  BalanceConflicts carries engine+account; Assemble seeds from UNION → conflicted
+  account = counted G3 refusal row. (4) idempotency_key UNIQUE per prepared pass,
+  reconciled on BOTH interruption paths (commit error AND 23505 insert collision —
+  wave initially handled only commit; ITS OWN TEST caught the gap); G5 retention
+  pinned. (5) completeness = declared cardinalities + required_engines[] +
+  aggregates-cover-positions + composite FKs; 7 negatives (6 kill pre-fix predicate,
+  position-count one already held). BEHAVIOR CHANGE accepted: riskd refuses to
+  publish until EVERY claimed engine has proven custody — 7 fixtures gained real
+  cursors, gate NOT loosened. Integrator: build/vet 0, full suite 16/16 both DSNs;
+  23 files of whitespace-only gofmt/CRLF churn REVERTED pre-commit (diff -w proven
+  empty; keeps the Codex delta surgical). NEXT (parallel): Codex round 2 on
+  a0e37e5..6cb5c71; promotion micro-wave (harness riskGate → riskfeed.GateEpochs,
+  signature (cursors, maxEpochs, []RequiredCursor) → (verdict, error)).
