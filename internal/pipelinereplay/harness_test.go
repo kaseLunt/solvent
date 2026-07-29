@@ -841,25 +841,60 @@ func rayMulHalfUp(a, b *big.Int) *big.Int {
 // The thin risk-gate consumer (leg 3)
 // ---------------------------------------------------------------------------
 
+// requiredCursor names one (engine, chain) whose derived state a consumer MUST
+// have before it may serve anything. It is the gate's REQUIREMENT SET, and it
+// has to be explicit: a gate that evaluates only the cursors it happens to find
+// cannot distinguish "this engine is safe" from "this engine has not started",
+// and the second one is served as a green light.
+type requiredCursor struct {
+	Engine  string
+	ChainID int64
+}
+
 // gateVerdict is what a riskd-shaped reader concludes about whether derived
-// state is safe to serve.
+// state is safe to serve. Blocking names EVERY required engine that is missing
+// or unsafe — the verdict is a SET, not a boolean, because "refuses" and
+// "refuses for the right reasons" are different facts and only the second one
+// is worth asserting.
 type gateVerdict struct {
-	Allowed bool
-	Reason  string
+	Allowed  bool
+	Blocking []string
+	Reason   string
 }
 
 // riskGate is the THIN test consumer standing in for Task 5's watermark
 // reader, per the plan: same predicate, same two store surfaces
 // (store.DeriveCursorStates + store.MaxReorgEpochs), promoted to the real
-// reader in Task 5's wave. An engine may be served only when its cursor has
-// ACKNOWLEDGED every reorg epoch recorded on its chain — acked_epoch >=
-// max_epoch. A cursor lagging its chain's newest epoch is deriving from
-// blocks that were rewound out from under it, and the gate must REFUSE.
+// reader in Task 5's wave.
+//
+// THE LAW, in one sentence: a consumer may serve only when EVERY REQUIRED
+// (engine, chain) has a cursor that exists, is bound to the required chain, and
+// has ACKNOWLEDGED every reorg epoch recorded on that chain (acked_epoch >=
+// max_epoch). Any required engine failing any clause blocks, and the verdict
+// names it.
+//
+// THE REQUIREMENT SET IS THE WHOLE POINT, and it is a fix for a real
+// false-green found in review. The earlier version refused only when NO
+// cursors existed at all and otherwise looped over whichever rows came back.
+// During honest startup — the position cursor written, aave_param not yet — it
+// therefore returned ALLOWED while parameter state did not exist, which for a
+// liquidation-facing consumer means serving health factors computed against
+// absent liquidation thresholds. Worse, a gate that ignored aave_param
+// ENTIRELY would still have satisfied the closure harness, because leg 3 only
+// checked a boolean at a moment when both cursors lagged. Missing is now a
+// first-class refusal, the no-cursors case is its degenerate form (every
+// required engine missing), and leg 3 asserts the refusal SET.
 //
 // Deliberately NOT a fixture of expected numbers: it reads the same durable
-// rows the daemon does, so leg 3's refusal is the real predicate firing on
+// rows the daemon does, so leg 3's refusals are the real predicate firing on
 // real state rather than a re-assertion of what the test just did.
-func riskGate(ctx context.Context, q store.Querier) (gateVerdict, error) {
+func riskGate(ctx context.Context, q store.Querier, required []requiredCursor) (gateVerdict, error) {
+	if len(required) == 0 {
+		// A gate with an empty requirement set can only ever say yes, which is
+		// not a gate. Refusing to construct one is cheaper than debugging why
+		// a consumer never blocked.
+		return gateVerdict{}, fmt.Errorf("riskGate: no required cursors given — a gate with an empty requirement set can only ever allow")
+	}
 	cursors, err := store.DeriveCursorStates(ctx, q)
 	if err != nil {
 		return gateVerdict{}, fmt.Errorf("read derive cursors: %w", err)
@@ -868,23 +903,47 @@ func riskGate(ctx context.Context, q store.Querier) (gateVerdict, error) {
 	if err != nil {
 		return gateVerdict{}, fmt.Errorf("read reorg epochs: %w", err)
 	}
-	if len(cursors) == 0 {
-		return gateVerdict{Allowed: false, Reason: "no derive cursors exist — nothing has been derived"}, nil
-	}
-	var refusals []string
+	byEngine := make(map[string]store.DeriveCursorState, len(cursors))
 	for _, c := range cursors {
-		maxEpoch, ok := maxEpochs[c.ChainID]
+		byEngine[c.Engine] = c
+	}
+
+	blocking := map[string]bool{}
+	var reasons []string
+	block := func(engine, reason string) {
+		blocking[engine] = true
+		reasons = append(reasons, reason)
+	}
+	for _, req := range required {
+		c, ok := byEngine[req.Engine]
 		if !ok {
-			continue // no epoch ever recorded on this chain
+			// MISSING, not merely lagging: the engine has never applied a
+			// window, so there is no derived state to serve at any height.
+			block(req.Engine, fmt.Sprintf("engine %q has NO derive cursor on chain %d — it has never applied a window, so its derived state does not exist at any height",
+				req.Engine, req.ChainID))
+			continue
 		}
-		if c.AckedEpoch < maxEpoch {
-			refusals = append(refusals, fmt.Sprintf("engine %q on chain %d: acked_epoch %d < max reorg epoch %d",
-				c.Engine, c.ChainID, c.AckedEpoch, maxEpoch))
+		if c.ChainID != req.ChainID {
+			// "No custody here" and "custody of another chain" are different
+			// facts, and conflating them is how a consumer reads one chain's
+			// parameters onto another's positions.
+			block(req.Engine, fmt.Sprintf("engine %q is bound to chain %d, not the required chain %d",
+				req.Engine, c.ChainID, req.ChainID))
+			continue
+		}
+		if maxEpoch, ok := maxEpochs[req.ChainID]; ok && c.AckedEpoch < maxEpoch {
+			block(req.Engine, fmt.Sprintf("engine %q on chain %d: acked_epoch %d < max reorg epoch %d",
+				req.Engine, req.ChainID, c.AckedEpoch, maxEpoch))
 		}
 	}
-	if len(refusals) > 0 {
-		sort.Strings(refusals)
-		return gateVerdict{Allowed: false, Reason: strings.Join(refusals, "; ")}, nil
+	if len(blocking) > 0 {
+		names := make([]string, 0, len(blocking))
+		for e := range blocking {
+			names = append(names, e)
+		}
+		sort.Strings(names)
+		sort.Strings(reasons)
+		return gateVerdict{Allowed: false, Blocking: names, Reason: strings.Join(reasons, "; ")}, nil
 	}
 	return gateVerdict{Allowed: true}, nil
 }

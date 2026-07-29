@@ -704,6 +704,31 @@ func allZero(b []byte) bool {
 // leaving the reorged-away one behind still "contains the right answer", and
 // every as-of read below the new row's height silently returns the wrong one.
 //
+// # The gate is asserted as a SEQUENCE OF NAMED SETS, not a boolean
+//
+// Six gate reads, each demanding the exact set of engines that must block:
+//
+//  1. empty database                      → {aave_v3_etherfi, aave_param} MISSING
+//  2. position cursor written, param not   → {aave_param} MISSING
+//  3. both cursors, no epoch               → ALLOW
+//  4. governance change derived            → ALLOW
+//  5. after the rewind, nothing acked      → {aave_v3_etherfi, aave_param} LAGGING
+//  6. position engine acked ALONE          → {aave_param} LAGGING
+//  7. param engine acked too               → ALLOW
+//
+// Steps 2 and 6 exist because a boolean check cannot tell "blocked on
+// parameters" from "blocked on positions, parameters never considered". While
+// several required cursors lag at once, a gate that ignores aave_param
+// entirely still returns "refused" — so the earlier boolean form of this leg
+// passed for a reason unrelated to the engine under test, and a false green
+// for the custody pipeline went unnoticed until review. Step 2 also covers the
+// honest-startup direction: a required engine with NO cursor row at all is a
+// refusal by name, not silence. Verified by mutation — a gate exempting
+// aave_param from the missing-cursor clause dies at step 2, one exempting it
+// from the epoch-lag clause dies at step 5, and one asking "has ANY engine
+// acked?" instead of "has EVERY required engine acked?" survives 1-5 and dies
+// at step 6.
+//
 // WHY SYNTHETIC. Pre-fork history cannot be reorged: anvil proxies it. So the
 // subject has to be built above the fork block. Everything about it is real
 // except that it happened on a private chain: a real PoolConfigurator call by
@@ -757,6 +782,24 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	})
 	require.NoError(t, err, "build the aave_param runner")
 	runners := []namedStepper{{derive.AaveEngineName, aaveRunner}, {derive.ParamEngineName, paramRunner}}
+
+	// THE GATE'S REQUIREMENT SET. A liquidation-facing consumer needs BOTH:
+	// positions without parameters cannot produce a health factor, and
+	// parameters without positions cannot either. Naming both explicitly is
+	// what makes "aave_param has no cursor yet" a refusal rather than silence.
+	required := []requiredCursor{
+		{Engine: derive.AaveEngineName, ChainID: int64(ethChainID)},
+		{Engine: derive.ParamEngineName, ChainID: int64(ethChainID)},
+	}
+
+	// ---- 0. STARTUP DIRECTION, part one: nothing derived at all. ----------
+	// The database is freshly migrated and truncated, so neither cursor
+	// exists. Both required engines must be named as missing. This is the
+	// degenerate case of the same law, asserted explicitly rather than left
+	// incidental.
+	requireGateRefuses(t, ctx, dsn, required,
+		[]string{derive.AaveEngineName, derive.ParamEngineName},
+		"on a freshly truncated database, before anything has been derived")
 
 	// ---- 1. Resolve the risk admin ON the fork. ---------------------------
 	poolABI := loadArtifactABI(t, "AaveV3Pool.json")
@@ -825,6 +868,27 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	// fails by name instead of as an opaque RPC error.
 	fork.mine(reorgSpacerBlocks)
 
+	// ---- 1b. STARTUP DIRECTION, part two: THE false green under review. ---
+	// Ingest the spacer blocks, then step ONLY the position runner. That
+	// reproduces the exact honest-startup window the review named: the
+	// aave_v3_etherfi cursor now exists and is perfectly safe (no epoch has
+	// ever been recorded), while aave_param has still never applied a window.
+	// A gate reading "whichever cursors happen to exist" ALLOWS here — and
+	// would be serving positions with no liquidation thresholds behind them.
+	// The requirement set must refuse, naming aave_param ALONE.
+	for _, w := range walkers {
+		drain(t, ctx, w.s, "walker "+w.name)
+	}
+	drain(t, ctx, aaveRunner, "runner "+derive.AaveEngineName+" (startup, alone)")
+	require.NotContainsf(t, readDeriveCursors(t, ctx, dsn), derive.ParamEngineName,
+		"the param engine already has a cursor — this assertion needs the window where it does NOT, or it proves nothing")
+	requireGateRefuses(t, ctx, dsn, required, []string{derive.ParamEngineName},
+		"after the position cursor exists but before aave_param has ever applied a window")
+
+	// Once the param engine catches up, the same gate allows.
+	drain(t, ctx, paramRunner, "runner "+derive.ParamEngineName+" (startup)")
+	requireGateAllows(t, ctx, dsn, required, "once BOTH required engines have cursors and no epoch exists")
+
 	// ---- 2. Emit the FIRST parameter tuple and derive it. -----------------
 	const (
 		ltv1, lt1, bonus1 = 7700, 8000, 10500
@@ -843,8 +907,8 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	requireTuple(t, rows[0], ltv1, lt1, bonus1, "first (pre-reorg) tuple")
 	require.Equalf(t, emit1, rows[0].EffectiveBlock, "the derived row is effective at block %d, the event was emitted at %d", rows[0].EffectiveBlock, emit1)
 
-	// The gate is OPEN here: no epoch has ever been recorded.
-	requireGate(t, ctx, dsn, true, "before any reorg")
+	// The gate is OPEN here: both cursors exist and no epoch has been recorded.
+	requireGateAllows(t, ctx, dsn, required, "before any reorg")
 	require.Zerof(t, countReorgEpochs(t, ctx, dsn), "a reorg epoch exists before any reorg happened")
 
 	// ---- 3. Reorg the parameter change away. ------------------------------
@@ -885,14 +949,29 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 
 	// ---- 6. THE GATE REFUSES while the epoch is unacknowledged. -----------
 	// Thin stand-in for Task 5's watermark reader, same predicate, same two
-	// store surfaces (see riskGate).
-	requireGate(t, ctx, dsn, false, "after the rewind, before any engine acknowledges the epoch")
+	// store surfaces (see riskGate). BOTH engines lag the new epoch, and the
+	// refusal must name BOTH — not merely be false.
+	requireGateRefuses(t, ctx, dsn, required,
+		[]string{derive.AaveEngineName, derive.ParamEngineName},
+		"after the rewind, before any engine acknowledges the epoch")
 
-	// ---- 7. The derivers acknowledge (RewindDerived + RewindParams). ------
-	for _, r := range runners {
-		drain(t, ctx, r.s, "runner "+r.name)
-	}
-	requireGate(t, ctx, dsn, true, "after both engines acknowledged the epoch")
+	// ---- 7. The derivers acknowledge, ONE AT A TIME. ----------------------
+	// THIS ORDERING IS THE ASSERTION, not an implementation detail. Draining
+	// both runners together and then checking a boolean is exactly what let a
+	// gate ignoring aave_param pass review: with both cursors lagging, the
+	// position engine alone produced the expected refusal.
+	//
+	// So the position engine acknowledges FIRST (RewindDerived), and the gate
+	// is re-read while the param engine is still behind. A gate that does not
+	// consider aave_param ALLOWS at this point and fails here. Only after the
+	// param engine's own rewind (RewindParams) and re-derivation may the gate
+	// open.
+	drain(t, ctx, aaveRunner, "runner "+derive.AaveEngineName+" (acknowledge alone)")
+	requireGateRefuses(t, ctx, dsn, required, []string{derive.ParamEngineName},
+		"after ONLY the position engine acknowledged — parameter state is still stale")
+
+	drain(t, ctx, paramRunner, "runner "+derive.ParamEngineName+" (acknowledge)")
+	requireGateAllows(t, ctx, dsn, required, "after BOTH engines acknowledged the epoch")
 
 	// ---- 8. Recompute and prove REPLACED, NOT ORPHANED. -------------------
 	runPipeline(t, ctx, walkers, runners)
@@ -917,7 +996,7 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	require.Equal(t, chainCfg.LiqThreshold.String(), rows[0].LiqThreshold.String(), "derived liquidation threshold vs getConfiguration on the re-mined chain")
 	require.Equal(t, chainCfg.LiqBonus.String(), rows[0].LiqBonus.String(), "derived liquidation bonus vs getConfiguration on the re-mined chain")
 
-	t.Logf("leg 3 PASS: admin %s resolved on-chain, tuple %d/%d/%d emitted at %d, anvil_reorg(depth=%d) same-height/different-hash, %d durable epoch(s), gate refused then allowed, tuple %d/%d/%d re-derived at %d, %d orphan rows",
+	t.Logf("leg 3 PASS: admin %s resolved on-chain, tuple %d/%d/%d emitted at %d, anvil_reorg(depth=%d) same-height/different-hash, %d durable epoch(s), 7 gate verdicts asserted as NAMED SETS (missing×2 → allow×2 → lagging×2 → allow, incl. the param-alone refusals at startup and after the position engine acked alone), tuple %d/%d/%d re-derived at %d, %d orphan rows",
 		aclAdmin.Hex(), ltv1, lt1, bonus1, emit1, depth, epochs, ltv2, lt2, bonus2, emit2, orphans)
 }
 
@@ -986,18 +1065,47 @@ func requireTuple(t *testing.T, r store.ParamRow, ltv, lt, bonus int64, what str
 	require.Equalf(t, fmt.Sprint(bonus), r.LiqBonus.String(), "%s: liquidation bonus", what)
 }
 
-// requireGate runs the thin consumer and asserts its verdict, quoting the
-// refusal reason on failure so a wrong verdict is diagnosable.
-func requireGate(t *testing.T, ctx context.Context, dsn string, wantAllowed bool, when string) {
+// requireGateRefuses runs the thin consumer and asserts it refuses naming
+// EXACTLY the given engines — set equality, never a boolean.
+//
+// The boolean form is what let a false green through review: while several
+// required cursors lag at once, a gate that ignores one of them entirely still
+// returns "refused", so the assertion passes for a reason that has nothing to
+// do with the engine under test. Naming the set makes the refusal discriminate
+// between "blocked on parameters" and "blocked on positions, parameters never
+// considered".
+func requireGateRefuses(t *testing.T, ctx context.Context, dsn string, required []requiredCursor, wantBlocking []string, when string) {
+	t.Helper()
+	v := readGate(t, ctx, dsn, required)
+	want := append([]string(nil), wantBlocking...)
+	sort.Strings(want)
+	require.NotEmptyf(t, want, "requireGateRefuses called with no expected blocking engines — use requireGateAllows")
+	require.Falsef(t, v.Allowed,
+		"gate %s ALLOWED, but %v must block it (reason: %s)", when, want, v.Reason)
+	require.Equalf(t, want, v.Blocking,
+		"gate %s named blocking engines %v, want exactly %v — a gate that refuses while never considering a required engine is a false green (reason: %s)",
+		when, v.Blocking, want, v.Reason)
+	t.Logf("gate %s: REFUSED, blocking=%v — %s", when, v.Blocking, v.Reason)
+}
+
+// requireGateAllows asserts the gate permits service and names nothing.
+func requireGateAllows(t *testing.T, ctx context.Context, dsn string, required []requiredCursor, when string) {
+	t.Helper()
+	v := readGate(t, ctx, dsn, required)
+	require.Truef(t, v.Allowed,
+		"gate %s REFUSED, blocking=%v — %s", when, v.Blocking, v.Reason)
+	require.Emptyf(t, v.Blocking, "gate %s allowed yet named blocking engines %v", when, v.Blocking)
+	t.Logf("gate %s: allowed", when)
+}
+
+func readGate(t *testing.T, ctx context.Context, dsn string, required []requiredCursor) gateVerdict {
 	t.Helper()
 	conn, err := pgx.Connect(ctx, dsn)
 	require.NoError(t, err, "connect for the gate read")
 	defer conn.Close(ctx)
-	v, err := riskGate(ctx, conn)
+	v, err := riskGate(ctx, conn, required)
 	require.NoError(t, err, "gate read")
-	require.Equalf(t, wantAllowed, v.Allowed,
-		"gate verdict %s: allowed=%v, want %v (reason: %s)", when, v.Allowed, wantAllowed, v.Reason)
-	t.Logf("gate %s: allowed=%v %s", when, v.Allowed, v.Reason)
+	return v
 }
 
 // ===========================================================================
