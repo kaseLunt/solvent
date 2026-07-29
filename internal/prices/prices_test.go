@@ -57,6 +57,8 @@ var (
 	priceProviderV2 = common.HexToAddress("0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB")
 	weethETH        = common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee")
 	usdcETH         = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+	pyusdETH        = common.HexToAddress("0x6c3ea9036406852006290770BEdFcAbA0e23A0e8")
+	fraxETH         = common.HexToAddress("0x853d955aCEf822Db058eb8505911ED77F175b99e")
 	aggWeETH        = common.HexToAddress("0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5")
 	aggUSDC         = common.HexToAddress("0xc9E1a09622afdB659913fefE800fEaE5DBbFe9d7")
 	aggPYUSD        = common.HexToAddress("0x39E31761911b9aaBAEF5fb81B18Fd1C24a60E884")
@@ -64,6 +66,11 @@ var (
 	proxyWeETH      = common.HexToAddress("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419")
 	proxyUSDC       = common.HexToAddress("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6")
 )
+
+// aaveOracleETH is the ether.fi-market AaveOracle: the ADAPTER-OUTPUT source,
+// i.e. the price the Aave pool itself charges against once every price cap has
+// been applied (P3 Task 2).
+var aaveOracleETH = common.HexToAddress("0x43b64f28A678944E0655404B0B98E443851cC34F")
 
 // answerUpdatedTopic0 is the AnswerUpdated signature hash recon recorded
 // independently (recon/derivation-notes.md "Oracle wiring").
@@ -113,11 +120,23 @@ type fakeRow struct {
 	// 11/11 mutation matrix could not see the arm. A fake that models a rule the
 	// store does not have certifies behaviour nothing implements.
 	anchorBlock *uint64
+	// sourceAsOf is prices.source_as_of — the CHAIN's own as-of, with the zero
+	// time standing for NULL (migration 00012). Modelled because the healing
+	// pass's whole contract is "fill only where NULL, never overwrite a stamp,
+	// never touch a value, never leave the owner's rows", and a fake without the
+	// column could not tell a row that was stamped from one that was left alone.
+	sourceAsOf time.Time
 }
 
 // key is the row's primary-key identity, the same one the real
 // (chain_id, asset, source, block_number) unique index enforces.
-func (r fakeRow) key() string { return fmt.Sprintf("%x/%s/%d", r.asset, r.source, r.block) }
+func (r fakeRow) key() string { return fakeRowKey(r.asset, r.source, r.block) }
+
+// fakeRowKey builds that identity from parts, so a test can address a row it
+// did not construct without duplicating the encoding.
+func fakeRowKey(asset []byte, source string, block uint64) string {
+	return fmt.Sprintf("%x/%s/%d", asset, source, block)
+}
 
 // fakePriceStore models the durable surface both workers drive: a single
 // pseudo-engine cursor, the unacked-epoch flag, owner-scoped price rows with
@@ -215,6 +234,10 @@ type fakePriceStore struct {
 	logsWithoutIngestionTime bool
 
 	rawLogsCalls [][2]uint64
+
+	// missingSpanErr fails the source_as_of healing guard, so a test can prove
+	// the pass propagates that failure rather than silently marking itself done.
+	missingSpanErr error
 }
 
 func newFakePriceStore() *fakePriceStore {
@@ -322,6 +345,7 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 		row := fakeRow{
 			owner: engine, asset: o.Asset, source: o.Source, block: o.BlockNumber,
 			observedAt: at, valid: valid, invalidReason: reason, anchorBlock: binding,
+			sourceAsOf: o.SourceAsOf,
 		}
 		if existing[row.key()] {
 			// A NEUTRALIZED row is SUPERSEDED by a fresh observation at the same
@@ -343,8 +367,12 @@ func (f *fakePriceStore) commit(engine string, obs []store.PriceObservation, thr
 				// observed_at is and for the same reason: this is a new durable
 				// observation, so its provenance is THIS round's anchor — or NULL
 				// again when the superseding round recorded none.
+				// source_as_of moves with them for the same reason: the row now
+				// holds THIS observation, so it must carry this observation's
+				// chain-asserted as-of (migration 00012).
 				ex.valid, ex.invalidReason, ex.observedAt = valid, reason, at
 				ex.anchorBlock = binding
+				ex.sourceAsOf = o.SourceAsOf
 				superseded = true
 				break
 			}
@@ -929,6 +957,69 @@ func (f *fakePriceStore) RawLogsInRange(_ context.Context, _ uint64, _ [][]byte,
 	return out, nil
 }
 
+// ---------------------------------------------------------------------------
+// source_as_of healing surface (migration 00012).
+// ---------------------------------------------------------------------------
+//
+// These three model the REAL store's predicates, not the healing pass's
+// intentions — owner scoping and the IS-NULL guard live HERE, exactly as they
+// live in SQL there. A fake that filled whatever key it was handed would let a
+// pass that ignored ownership or overwrote existing stamps go green.
+
+func (f *fakePriceStore) MissingSourceAsOfSpan(_ context.Context, engine string, _ uint64) (store.MissingSourceAsOfSpan, error) {
+	if f.missingSpanErr != nil {
+		return store.MissingSourceAsOfSpan{}, f.missingSpanErr
+	}
+	var out store.MissingSourceAsOfSpan
+	for _, r := range f.rows {
+		if r.owner != engine || !r.sourceAsOf.IsZero() {
+			continue
+		}
+		if out.Rows == 0 || r.block < out.MinBlock {
+			out.MinBlock = r.block
+		}
+		if r.block > out.MaxBlock {
+			out.MaxBlock = r.block
+		}
+		out.Rows++
+	}
+	return out, nil
+}
+
+func (f *fakePriceStore) PricesMissingSourceAsOf(_ context.Context, engine string, _ uint64, from, to uint64) ([]store.PriceRowKey, error) {
+	var out []store.PriceRowKey
+	for _, r := range f.rows {
+		if r.owner != engine || !r.sourceAsOf.IsZero() || r.block < from || r.block > to {
+			continue
+		}
+		out = append(out, store.PriceRowKey{Asset: r.asset, Source: r.source, BlockNumber: r.block})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].BlockNumber < out[j].BlockNumber })
+	return out, nil
+}
+
+func (f *fakePriceStore) FillPriceSourceAsOf(_ context.Context, engine string, _ uint64, fills []store.SourceAsOfFill) (int64, error) {
+	var filled int64
+	for _, fill := range fills {
+		if fill.SourceAsOf.IsZero() {
+			return 0, fmt.Errorf("fill source_as_of %s/%x@%d: zero timestamp",
+				fill.Source, fill.Asset, fill.BlockNumber)
+		}
+		key := fmt.Sprintf("%x/%s/%d", fill.Asset, fill.Source, fill.BlockNumber)
+		for i := range f.rows {
+			r := &f.rows[i]
+			// Owner scoping and the IS-NULL guard, both in the predicate — the
+			// same two clauses the real UPDATE carries.
+			if r.owner != engine || r.key() != key || !r.sourceAsOf.IsZero() {
+				continue
+			}
+			r.sourceAsOf = fill.SourceAsOf
+			filled++
+		}
+	}
+	return filled, nil
+}
+
 // lastBatch returns the most recent ApplyPrices call.
 func (f *fakePriceStore) lastBatch(t *testing.T) appliedBatch {
 	t.Helper()
@@ -1055,6 +1146,29 @@ type fakePollChain struct {
 	// endpoint failed). Paired with hashCalls it is the record of which chain
 	// view each proof came from, which is the whole subject of D-010 clause 2.
 	hashServed []int
+
+	// headTime is the HEADER TIMESTAMP every scripted head reports, in unix
+	// seconds. UNSET (nil) reports 1, so every pre-existing test keeps the head
+	// shape it was written against; a test about the chain-asserted as-of
+	// (migration 00012) scripts a real one through setHeadTime — INCLUDING zero,
+	// which is a provider protocol violation the poller has to handle and which
+	// a plain uint64 field could not express distinctly from "unset".
+	//
+	// It lives on the CHAIN, not on the clock, because that is the whole claim
+	// under test: source_as_of comes from the block the round pinned to, and is
+	// unrelated to when this process happened to write the row.
+	headTime *uint64
+}
+
+// setHeadTime scripts the header timestamp every head read reports.
+func (c *fakePollChain) setHeadTime(unixSeconds uint64) { c.headTime = &unixSeconds }
+
+// headTimeOrDefault is the header timestamp the fake reports on a head read.
+func (c *fakePollChain) headTimeOrDefault() uint64 {
+	if c.headTime == nil {
+		return 1
+	}
+	return *c.headTime
 }
 
 func (c *fakePollChain) ActiveEndpoint() int { return c.active }
@@ -1094,7 +1208,7 @@ func (c *fakePollChain) HeadFrom(_ context.Context, start int) (chain.Head, chai
 			continue
 		}
 		c.headServed = append(c.headServed, idx)
-		return chain.Head{Number: v.head, Time: 1, Hash: h}, chain.EndpointToken{Index: idx}, nil
+		return chain.Head{Number: v.head, Time: c.headTimeOrDefault(), Hash: h}, chain.EndpointToken{Index: idx}, nil
 	}
 	c.headServed = append(c.headServed, -1)
 	return chain.Head{}, chain.EndpointToken{Index: -1}, lastErr
@@ -1570,6 +1684,12 @@ func TestSelectors(t *testing.T) {
 		{"price(address)", priceProviderABI.Methods["price"].ID, "0xaea91078"},
 		// recon "Oracle wiring": accountant lenses, calldata 0x679aefce = getRate()
 		{"getRate()", rateProviderABI.Methods["getRate"].ID, "0x679aefce"},
+		// AaveOracle.getAssetPrice — the ADAPTER OUTPUT (P3 Task 2). Deliberately
+		// a separate ABI from price(address) despite the identical shape: they
+		// are different contracts on different chains with different scales, and
+		// sharing one would make this pin assert a property of a shape rather
+		// than of a named function.
+		{"getAssetPrice(address)", aaveOracleABI.Methods["getAssetPrice"].ID, "0xb3596f07"},
 		{"aggregator()", chainlinkProxyABI.Methods["aggregator"].ID, "0x245a7bfc"},
 		// internal/snapshot pins the same multicall3 selector against `cast sig`.
 		{"tryBlockAndAggregate(bool,(address,bytes)[])",
@@ -1596,9 +1716,19 @@ func TestSourceNaming(t *testing.T) {
 	require.Equal(t, "chainlink:0x7d4e742018fb52e48b08be73d041c18b21de6fb5", ChainlinkSource(aggWeETH))
 	require.Equal(t, "ratio:getrate:0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
 		RatioSource("getRate()", weethETH))
+	// ADDRESS-QUALIFIED, unlike the flat priceproviderv2 literal: the ETH round
+	// reads several contracts, so an unqualified name would conflate witnesses.
+	require.Equal(t, "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+		AaveOracleSource(aaveOracleETH))
 	// Case-insensitive input, identical output.
 	require.Equal(t, ChainlinkSource(aggWeETH),
 		ChainlinkSource(common.HexToAddress("0x7D4E742018FB52E48B08BE73D041C18B21DE6FB5")))
+	require.Equal(t, AaveOracleSource(aaveOracleETH),
+		AaveOracleSource(common.HexToAddress("0x43B64F28A678944E0655404B0B98E443851CC34F")))
+	// The three mechanism names are structurally distinct prefixes, so no two
+	// can ever collide even on one asset.
+	require.NotEqual(t, AaveOracleSource(aaveOracleETH), ChainlinkSource(aaveOracleETH))
+	require.NotEqual(t, AaveOracleSource(aaveOracleETH), SourcePriceProviderV2)
 }
 
 // Cursor keys are colon-namespaced and chain-id-qualified, so they can never
@@ -1672,12 +1802,38 @@ func TestBuildPollTargetsFromRealRegistry(t *testing.T) {
 
 	eth, err := buildPollTargets(feeds, 1)
 	require.NoError(t, err)
-	require.Len(t, eth, 1, "only the weETH ratio is polled on ETH")
+	// FIVE ETH obligations in ONE round: the weETH getRate() ratio, plus the
+	// four AaveOracle.getAssetPrice adapter-output reads (P3 Task 2). They share
+	// the round, the multicall, the EIP-1898 pin and the anchor — one round, one
+	// anchor, N sources — which is why there is no second poller and no second
+	// anchor family.
+	require.Len(t, eth, 5)
 	require.Equal(t, "weETH", eth[0].Symbol)
 	require.Equal(t, weethETH, eth[0].Asset)
 	require.Equal(t, "getRate()", eth[0].Method)
 	require.Equal(t, int32(18), eth[0].Decimals)
 	require.Equal(t, RatioSource("getRate()", weethETH), eth[0].Source)
+
+	adapters := eth[1:]
+	wantAssets := []common.Address{weethETH, usdcETH, pyusdETH, fraxETH}
+	for i, tg := range adapters {
+		require.Equal(t, aaveOracleETH, tg.Contract, tg.Symbol)
+		require.Equal(t, "getAssetPrice(address)", tg.Method, tg.Symbol)
+		require.Equal(t, int32(8), tg.Decimals, tg.Symbol)
+		require.Equal(t, wantAssets[i], tg.Asset, tg.Symbol)
+		// ADDRESS-QUALIFIED, lowercase, no EIP-55 checksum — the same
+		// deterministic encoding ChainlinkSource and RatioSource use, so the
+		// string is a function of the address BYTES and a casing variant can
+		// never split one oracle's history into two sources.
+		require.Equal(t, "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f", tg.Source, tg.Symbol)
+	}
+	// The ratio and the adapter output BOTH read weETH and are still distinct
+	// obligations, because the source names them apart.
+	require.NotEqual(t, eth[0].Source, adapters[0].Source)
+	require.Equal(t, []string{
+		RatioSource("getRate()", weethETH),
+		AaveOracleSource(aaveOracleETH),
+	}, sourcesOf(eth), "two mechanisms on ETH, each naming its own contract")
 }
 
 // An unsupported oracle method is a CONSTRUCTION refusal, not a runtime skip: a

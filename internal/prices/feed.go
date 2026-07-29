@@ -173,12 +173,21 @@ const reResolveInterval = time.Hour
 // else; this deriver's rows are decoded from `raw_logs`, which the walker retains,
 // so a rewind here costs a re-derivation rather than the fact itself. That is why
 // RewindPrices sits here and not on PriceStore — see the note there.
+// IT ALSO CARRIES THE source_as_of HEALING SURFACE (migration 00012), and it
+// carries it HERE for the same reason RewindPrices is here: only this writer's
+// rows are repairable. The three methods are a lookup, a bounded read and a
+// write scoped to the calling engine's own un-stamped rows — the decoding that
+// turns a raw log into a timestamp deliberately stays in this package, where the
+// strict decoder and the deriver's own fold order already live.
 type FeedStore interface {
 	PriceStore
 	RewindPrices(ctx context.Context, engine string, chainID uint64, toBlock uint64, verifiedFloor uint64) error
 	Cursor(ctx context.Context, stream string) (*store.CursorPos, error)
 	RawLogsInRange(ctx context.Context, chainID uint64, addresses [][]byte, fromBlock, toBlock uint64) ([]store.RawLog, error)
 	LatestLogsByTopic(ctx context.Context, chainID uint64, addresses [][]byte, topic0 []byte, throughBlock uint64) ([]store.RawLog, error)
+	MissingSourceAsOfSpan(ctx context.Context, engine string, chainID uint64) (store.MissingSourceAsOfSpan, error)
+	PricesMissingSourceAsOf(ctx context.Context, engine string, chainID, fromBlock, toBlock uint64) ([]store.PriceRowKey, error)
+	FillPriceSourceAsOf(ctx context.Context, engine string, chainID uint64, fills []store.SourceAsOfFill) (int64, error)
 }
 
 var _ FeedStore = (*store.Store)(nil)
@@ -274,6 +283,12 @@ type FeedDeriver struct {
 	// deriver has current evidence that it can see a live head. It is reported
 	// as its own condition, never folded into feed staleness.
 	lagReason string
+	// healedSourceAsOf records that the one-time source_as_of backfill
+	// (migration 00012) has run to completion in THIS process. It is process
+	// state rather than durable state on purpose: the pass is idempotent and
+	// its own guard is a durable count, so the worst a restart can cost is one
+	// cheap indexed count that returns zero.
+	healedSourceAsOf bool
 }
 
 // NewFeedDeriver builds a FeedDeriver. The configured address set and the
@@ -460,6 +475,14 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 		return true, nil // rewound; the next Step derives from the fresh cursor
 	}
 
+	// ONE-TIME PROVENANCE COMPLETION (migration 00012), placed AFTER the reorg
+	// gate so a pending epoch is always answered first — stamping rows a rewind
+	// is about to delete would be wasted work, and the pass must never look like
+	// it is competing with the repair protocol for the same rows.
+	if err := f.healSourceAsOfOnce(ctx); err != nil {
+		return false, err
+	}
+
 	frontier, ok, err := f.ingestFrontier(ctx)
 	if err != nil {
 		return false, err
@@ -549,6 +572,15 @@ func (f *FeedDeriver) Step(ctx context.Context) (bool, error) {
 			Price:       answer.Current,
 			Decimals:    b.Decimals,
 			BlockNumber: l.BlockNumber,
+			// The aggregator's OWN statement of when this answer was agreed
+			// (migration 00012). VERBATIM, and deliberately not the value
+			// classifyUpdatedAt produces: that one is capped at the log's
+			// ingestion time and withheld entirely for implausible values,
+			// because it feeds a HEALTH verdict about whether this stream is
+			// still alive. source_as_of is a different claim — what the chain
+			// said — and it must be reproducible from the log bytes alone, or
+			// the healing pass below could not reproduce it.
+			SourceAsOf: answerAsOf(answer),
 		})
 		f.stageObservation(staged, agg, answer, l.IngestedAt)
 	}
@@ -1183,4 +1215,204 @@ func (f *FeedDeriver) reResolveAggregator(ctx context.Context, b feedBinding) {
 	slog.Warn("feed staleness: the chainlink proxy has RE-POINTED to a new aggregator — the configured stream is on a dead phase. Update config/contracts.json AND recon/feeds.json manually; automatic re-pointing is a deliberate deferral",
 		"engine", f.engine, "symbol", b.Symbol, "asset", b.Asset.Hex(), "proxy", b.Proxy.Hex(),
 		"configuredAggregator", b.Aggregator.Hex(), "resolvedAggregator", resolved.Hex())
+}
+
+// ---------------------------------------------------------------------------
+// source_as_of healing: one-time provenance completion for pre-00012 feed rows.
+// ---------------------------------------------------------------------------
+
+// answerAsOf is the CHAIN-ASSERTED as-of of one decoded AnswerUpdated: the
+// aggregator's own updatedAt, verbatim.
+//
+// ONE FUNCTION, TWO CALLERS, AND THAT IS THE WHOLE POINT. Step uses it when it
+// writes a row and the healing pass uses it when it repairs one, so a healed row
+// and a freshly-derived row carry the SAME value by construction rather than by
+// two implementations happening to agree. If the heal ever produced a different
+// number from derivation, the column would silently mean two things.
+//
+// The only rejected shape is a value beyond int64 range, which would wrap
+// negative and read as a pre-1970 publication; the strict decoder already
+// refuses anything outside uint64. A rejected value yields the zero time, which
+// the store writes as NULL — an honest "this log names no usable time" — and
+// never a substituted clock. (classifyUpdatedAt applies a stricter, HEALTH-side
+// judgement to the same field, capping it at the log's ingestion time and
+// refusing implausible futures; that verdict deliberately does not govern here,
+// because this column records what the chain SAID, not what we conclude about
+// it — and because a health rule that changes would otherwise silently change
+// the meaning of stored provenance.)
+func answerAsOf(answer decode.ChainlinkAnswerUpdated) time.Time {
+	if answer.UpdatedAt > math.MaxInt64 {
+		return time.Time{}
+	}
+	return time.Unix(int64(answer.UpdatedAt), 0).UTC()
+}
+
+// healSourceAsOfOnce runs the migration-00012 backfill at most once per process,
+// behind a durable, indexed count that is zero on an already-healed database.
+//
+// ERRORS PROPAGATE. Every failure this can raise — a store read, a decode of a
+// log this deriver's own Step would decode moments later, a write of one column
+// — is a failure the ordinary derivation path would hit immediately afterwards,
+// so swallowing it here would only delay the same error while making the heal's
+// outcome unobservable. The daemon's backoff and step_error condition are the
+// right place for it. Rows the pass CANNOT fill (no surviving witness) are not
+// an error; they are counted, logged and left NULL.
+func (f *FeedDeriver) healSourceAsOfOnce(ctx context.Context) error {
+	if f.healedSourceAsOf {
+		return nil
+	}
+	if _, err := f.HealSourceAsOf(ctx); err != nil {
+		return fmt.Errorf("feed deriver %q: heal source_as_of: %w", f.engine, err)
+	}
+	f.healedSourceAsOf = true
+	return nil
+}
+
+// HealSourceAsOf fills prices.source_as_of for this deriver's OWN rows that
+// carry none, by REPLAYING THE STRICT GO DECODER over the raw_logs those rows
+// were derived from. It returns the number of rows it stamped.
+//
+// WHY A DECODER REPLAY AND NOT A MIGRATION. The obvious backfill is one UPDATE
+// with a substring() over `raw_logs.data`. That would be a SECOND decoder for
+// AnswerUpdated — written in SQL, unreviewed, and sitting beside
+// decode.decodeChainlinkAnswerUpdated including its uint64-range check, which
+// SQL numerics would not reproduce. A parser differential between the path that
+// WROTE the price and the path that stamps its as-of is precisely how a column
+// comes to disagree with the value it describes. So the repair goes through the
+// same decoder, over the same address set, in the same order.
+//
+// THE FOLD IS THE DERIVER'S OWN, REPLICATED EXACTLY. Step accumulates a window
+// through priceSet, which is keyed (asset, source, block) with LAST-WINS over
+// logs in ascending (block_number, log_index) — so when an aggregator publishes
+// TWICE IN ONE BLOCK, the row that exists holds the SECOND update's value, and
+// its as-of must therefore be the SECOND update's updatedAt. A pass that took
+// the first log in the block, or the largest updatedAt, would stamp the row with
+// a timestamp belonging to a value that was overwritten. RawLogsInRange returns
+// the chain's own total order, so replaying the same last-wins fold reproduces
+// the same witness derivation chose.
+//
+// WHAT IT WILL NOT DO:
+//
+//   - touch a row it does not own, or a row that already carries a stamp — both
+//     are enforced in the store's UPDATE predicate, not by care taken here;
+//   - touch a VALUE. Only source_as_of is written;
+//   - fill a POLL row. Poll rows belong to another engine and their witness (a
+//     block header's timestamp) is not in raw_logs at all; migration 00012
+//     records that population as permanently NULL, forward-only;
+//   - invent a stamp for a row whose witness no longer exists.
+//
+// IDEMPOTENT: a second run finds no un-stamped rows and returns 0 without
+// reading a single log.
+func (f *FeedDeriver) HealSourceAsOf(ctx context.Context) (int64, error) {
+	span, err := f.store.MissingSourceAsOfSpan(ctx, f.engine, f.cfg.ChainID)
+	if err != nil {
+		return 0, err
+	}
+	if span.Rows == 0 {
+		return 0, nil
+	}
+	slog.Info("backfilling prices.source_as_of for this deriver's pre-00012 rows by replaying the strict AnswerUpdated decoder over raw_logs; no value column is touched",
+		"engine", f.engine, "rows", span.Rows, "fromBlock", span.MinBlock, "toBlock", span.MaxBlock)
+
+	var filled, unwitnessed int64
+	for from := span.MinBlock; ; {
+		to := span.MaxBlock
+		// Overflow-safe window cap, the same idiom Step uses (MaxBlock >= from
+		// holds here; Window >= 1 is enforced by NewFeedDeriver).
+		if delta := span.MaxBlock - from; delta > f.cfg.Window-1 {
+			to = from + f.cfg.Window - 1
+		}
+		n, missed, err := f.healSourceAsOfWindow(ctx, from, to)
+		filled += n
+		unwitnessed += missed
+		if err != nil {
+			return filled, err
+		}
+		if to >= span.MaxBlock {
+			break
+		}
+		from = to + 1
+	}
+	if unwitnessed > 0 {
+		// NOT an error: a row can outlive its witness — a raw log deleted by a
+		// rewind the walker has not re-ingested yet, or one belonging to an
+		// aggregator this deriver's registry no longer names. Reporting it is
+		// better than a silently partial pass, and NULL stays the honest value.
+		slog.Warn("source_as_of backfill left rows unstamped: no surviving AnswerUpdated in raw_logs witnesses them, so they keep a NULL as-of rather than a guessed one",
+			"engine", f.engine, "stamped", filled, "unstamped", unwitnessed)
+	}
+	slog.Info("source_as_of backfill complete", "engine", f.engine,
+		"stamped", filled, "unstamped", unwitnessed, "candidates", span.Rows)
+	return filled, nil
+}
+
+// healSourceAsOfWindow heals one bounded block window, returning the rows
+// stamped and the rows whose witness could not be found.
+func (f *FeedDeriver) healSourceAsOfWindow(ctx context.Context, from, to uint64) (int64, int64, error) {
+	keys, err := f.store.PricesMissingSourceAsOf(ctx, f.engine, f.cfg.ChainID, from, to)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(keys) == 0 {
+		return 0, 0, nil
+	}
+	logs, err := f.store.RawLogsInRange(ctx, f.cfg.ChainID, f.cfg.Addresses, from, to)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read raw logs [%d,%d]: %w", from, to, err)
+	}
+
+	// THE DERIVER'S OWN FOLD: ascending (block, log_index) from the store, plain
+	// assignment per key, so the LAST log for a key in a block wins — exactly
+	// what priceSet does when Step builds the row this is stamping.
+	witness := map[string]time.Time{}
+	for _, l := range logs {
+		ev, known, err := f.dec.Decode(decodeEngineChainlinkFeed, l)
+		if err != nil {
+			return 0, 0, fmt.Errorf("decode log %x/%d at block %d: %w", l.TxHash, l.LogIndex, l.BlockNumber, err)
+		}
+		if !known {
+			continue // unallowlisted topic (e.g. NewRound): routine skip
+		}
+		answer, ok := ev.(decode.ChainlinkAnswerUpdated)
+		if !ok {
+			continue // a decoded aggregator event that carries no price
+		}
+		if len(l.Address) != common.AddressLength {
+			return 0, 0, fmt.Errorf("stored log %x/%d has a %d-byte address", l.TxHash, l.LogIndex, len(l.Address))
+		}
+		b, bound := f.byAggregator[common.BytesToAddress(l.Address)]
+		if !bound {
+			continue // outside this deriver's registry: not its row to stamp
+		}
+		at := answerAsOf(answer)
+		if at.IsZero() {
+			continue // the log names no usable time; the row keeps its NULL
+		}
+		witness[priceRowKeyOf(b.Asset.Bytes(), b.Source, l.BlockNumber)] = at
+	}
+
+	fills := make([]store.SourceAsOfFill, 0, len(keys))
+	var unwitnessed int64
+	for _, k := range keys {
+		at, ok := witness[priceRowKeyOf(k.Asset, k.Source, k.BlockNumber)]
+		if !ok {
+			unwitnessed++
+			continue
+		}
+		fills = append(fills, store.SourceAsOfFill{PriceRowKey: k, SourceAsOf: at})
+	}
+	filled, err := f.store.FillPriceSourceAsOf(ctx, f.engine, f.cfg.ChainID, fills)
+	if err != nil {
+		return 0, 0, err
+	}
+	return filled, unwitnessed, nil
+}
+
+// priceRowKeyOf renders the ROW identity (asset, source, block) — the `prices`
+// primary key minus the chain, which the whole batch shares. One function builds
+// it, so the witness map and the row lookup can never disagree about the
+// encoding; the same reason freshnessKey exists for the (asset, source) pair it
+// extends.
+func priceRowKeyOf(asset []byte, source string, block uint64) string {
+	return fmt.Sprintf("%s/%d", freshnessKey(asset, source), block)
 }

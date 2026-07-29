@@ -312,6 +312,18 @@ behaviour, or read the adapter's own output, before claiming adapter equivalence
 proxies re-point `aggregator()` on phase changes; the recorded aggregator covers the current phase
 only — a walker should re-resolve `aggregator()` on staleness.
 
+> **P3 STATUS (2026-07-29, Wave 2b — the "read the adapter's own output" arm was built):**
+> the ETH poller now polls `AaveOracle.getAssetPrice(asset)` per reserve at the 60s cadence,
+> EIP-1898 anchor-pinned in the same round/anchor as the ratio poll, source
+> `aaveoracle:<oracle>` with provenance class `adapter-output` — the pool's actual charging
+> price including cap behavior. riskd's Aave valuation consumes ONLY this class; the
+> AnswerUpdated stream remains the uncapped reference for observatory/provenance surfaces.
+> `prices.source_as_of` (migration 00012) carries the truthful chain-time per row: anchor
+> block header time for poll rows, the round's `updatedAt` for feed rows (backfilled once
+> for historical feed rows by the FeedDeriver's decoder-replay healing pass — never SQL
+> byte-slicing). The stream caveats above remain true for the FEED rows; they no longer
+> describe the only ETH price source.
+
 ### Per-feed staleness thresholds — and exactly how well each value is evidenced
 
 `recon/feeds.json` records `oracle.heartbeatSeconds` and `oracle.graceSeconds` per

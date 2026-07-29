@@ -72,10 +72,14 @@ const maxHeartbeatSeconds = 7 * 24 * 60 * 60
 // liquidation engine cares most about — so the divergence appears exactly when
 // it is most expensive to be wrong about.
 //
-// CONSEQUENCE FOR P3: before any claim of adapter equivalence, P3 must either
-// implement the growth-cap behaviour itself or read the adapter's own output
-// directly. Until it does, these two rows are a reference input, not engine
-// truth. Ingest deliberately records them side by side and composes nothing
+// RESOLVED IN P3 TASK 2, BY THE SECOND OPTION: the registry now also declares a
+// `poll` entry per ether.fi Aave reserve reading
+// AaveOracle.getAssetPrice(asset) — the adapter's own output, caps included —
+// so nothing has to reconstruct it. These two rows remain exactly what they
+// were, a reference input rather than engine truth, and keeping them alongside
+// the adapter output is what makes a BINDING CAP visible as a divergence
+// instead of invisible. Ingest deliberately records them side by side and
+// composes nothing
 // (plan Task 8: "record BOTH the ETH/USD stream price and a polled getRate()
 // ratio row"); composing at ingest time would additionally bake one particular
 // pairing of two independently-timed observations into storage.
@@ -260,9 +264,30 @@ func LoadFeeds(path string, chains map[string]Chain) (*Feeds, error) {
 	}
 
 	feeds := &Feeds{}
-	// (chainID, asset) must be unique: the prices PK is
-	// (chain_id, asset, source, block_number), so two registry entries for one
-	// asset on one chain under the same mechanism would collide row-for-row.
+	// (chainID, asset, MECHANISM) must be unique, where the mechanism is the
+	// (kind, contract, method) triple the entry declares. The prices PK is
+	// (chain_id, asset, source, block_number), and `source` is a function of the
+	// mechanism — so it is two entries naming the SAME mechanism for one asset
+	// that would collide row-for-row, not two entries naming one asset.
+	//
+	// THE KEY WAS THE ASSET ALONE UNTIL P3 TASK 2, and that was strictly
+	// stronger than the collision it was protecting against. One asset genuinely
+	// has SEVERAL independent oracle readings, and custodying them separately is
+	// the point: an ether.fi Aave reserve is observed both through its raw
+	// Chainlink aggregator (the UNCAPPED feed, an observatory reference) and
+	// through AaveOracle.getAssetPrice (the CAPPED adapter output the pool
+	// actually charges against). Those are different numbers whenever a cap
+	// binds — the depeg and exploit scenarios a liquidation engine exists for —
+	// so collapsing them to one entry per asset would have forced a choice
+	// between valuing collateral off a price the protocol does not use and
+	// losing the feed's provenance history.
+	//
+	// The row-collision guarantee is unweakened, by three independent gates:
+	// this key refuses a duplicated mechanism outright; seenAggregator below
+	// still refuses one aggregator serving two assets; and prices.buildPollTargets
+	// refuses a duplicated (asset, source) pair AND any source string bound to
+	// more than one contract, which is what catches two DIFFERENT mechanisms that
+	// happen to resolve to the same source name.
 	seenAsset := map[string]string{}
 	// (chainID, stream aggregator) must be unique: the feed deriver maps a log's
 	// emitting address to exactly one asset.
@@ -394,10 +419,10 @@ func LoadFeeds(path string, chains map[string]Chain) (*Feeds, error) {
 			ratio = &FeedRatio{Contract: ratioAddr, Method: fa.Ratio.Method, Decimals: fa.Ratio.Decimals}
 		}
 
-		assetKey := fmt.Sprintf("%d/%x", chain.ChainID, addr)
+		assetKey := fmt.Sprintf("%d/%x/%s/%x/%s", chain.ChainID, addr, o.Kind, oracleAddr, o.Method)
 		if prev, dup := seenAsset[assetKey]; dup {
-			return nil, fmt.Errorf("%s: asset %s on chain %d already declared as %s",
-				where, addr, chain.ChainID, prev)
+			return nil, fmt.Errorf("%s: asset %s on chain %d is already read through %s on %s by %s — one asset may carry several oracle mechanisms, but not the same one twice",
+				where, addr, chain.ChainID, o.Kind, oracleAddr, prev)
 		}
 		seenAsset[assetKey] = fa.Symbol
 

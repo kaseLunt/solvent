@@ -1237,14 +1237,24 @@ func TestPollerRefusesZeroHeaderHash(t *testing.T) {
 	})
 }
 
-// The ETH poller's only obligation is the weETH getRate() ratio — recorded as
-// its OWN row at 18 decimals, never composed with the stream price.
+// The ETH round carries the weETH getRate() ratio — its OWN row at 18 decimals,
+// never composed with the stream price — AND the four AaveOracle adapter-output
+// reads, in ONE multicall (P3 Task 2). The ratio assertions are the original
+// test's, unchanged; what is new is that they now hold while four other
+// obligations share the round.
 func TestPollerETHRatioRow(t *testing.T) {
 	st := newFakePriceStore()
 	rate := new(big.Int)
 	rate.SetString("1069000000000000000", 10)
+	adapterPrice := big.NewInt(4_012_345_678) // 8-dec USD, the adapter's own scale
 	ch := &fakePollChain{endpoints: 1, respond: func(int, common.Address, []byte) ([]byte, error) {
-		return encodeMulticall(t, 900, []mcRet{{Success: true, ReturnData: encodeUint256(t, rate)}}), nil
+		return encodeMulticall(t, 900, []mcRet{
+			{Success: true, ReturnData: encodeUint256(t, rate)},
+			{Success: true, ReturnData: encodeUint256(t, adapterPrice)},
+			{Success: true, ReturnData: encodeUint256(t, adapterPrice)},
+			{Success: true, ReturnData: encodeUint256(t, adapterPrice)},
+			{Success: true, ReturnData: encodeUint256(t, adapterPrice)},
+		}), nil
 	}}
 	ch.setHead(900)
 	p, _ := newTestPoller(t, st, ch, 1)
@@ -1252,19 +1262,41 @@ func TestPollerETHRatioRow(t *testing.T) {
 	_, err := p.Step(context.Background())
 	require.NoError(t, err)
 
+	require.Len(t, ch.calls, 1, "one multicall: every ETH row is as-of one block")
 	_, calls := decodeMulticallCalls(t, ch.calls[0].data)
-	require.Len(t, calls, 1)
+	require.Len(t, calls, 5)
 	require.Equal(t, weethETH, calls[0].Target, "getRate() is read on the weETH contract itself")
 	wantData, err := rateProviderABI.Pack("getRate")
 	require.NoError(t, err)
 	require.Equal(t, wantData, calls[0].CallData)
 
+	// The four adapter reads target the ORACLE and pass the ASSET as an
+	// argument — a different contract from the ratio's, in the same batch.
+	for i, asset := range []common.Address{weethETH, usdcETH, pyusdETH, fraxETH} {
+		require.Equal(t, aaveOracleETH, calls[i+1].Target, "call %d targets the AaveOracle", i+1)
+		want, err := aaveOracleABI.Pack("getAssetPrice", asset)
+		require.NoError(t, err)
+		require.Equal(t, want, calls[i+1].CallData, "call %d prices %s", i+1, asset)
+	}
+
 	batch := st.lastBatch(t)
-	require.Len(t, batch.obs, 1)
+	require.Len(t, batch.obs, 5)
 	require.Equal(t, weethETH.Bytes(), batch.obs[0].Asset)
 	require.Equal(t, RatioSource("getRate()", weethETH), batch.obs[0].Source)
 	require.Equal(t, int32(18), batch.obs[0].Decimals)
 	require.Equal(t, rate.String(), batch.obs[0].Price.String())
+	for _, o := range batch.obs[1:] {
+		require.Equal(t, "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f", o.Source)
+		require.Equal(t, int32(8), o.Decimals)
+		require.Equal(t, adapterPrice.String(), o.Price.String())
+		require.Equal(t, uint64(900), o.BlockNumber)
+	}
+	// ONE ROUND, ONE ANCHOR, N SOURCES: the adapter rows joined the ratio row's
+	// anchor rather than opening a second anchor family.
+	require.NotNil(t, batch.anchor)
+	require.Equal(t, uint64(900), batch.anchor.BlockNumber)
+	require.Equal(t, uint64(900), batch.through)
+	require.Equal(t, PollCursorEngine(1), batch.engine)
 }
 
 // An individual revert is a per-asset skip, not a round failure: the other 19

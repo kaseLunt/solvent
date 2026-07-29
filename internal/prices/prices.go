@@ -32,25 +32,64 @@
 // committed raw logs, not a new walker — and records one row per update under
 // source "chainlink:<aggregator-address>".
 //
-// KNOWN LIMITATION, STATED PLAINLY: this stream reproduces the UNCAPPED FEED,
-// not the price Aave actually uses. AaveOracle.getSourceOfAsset returns
-// price-CAP ADAPTERS: the stable adapters return min(feed, priceCap) and the
-// weETH adapter is getRate() x ETH/USD with a GROWTH-CAPPED rate. The rows this
-// package writes therefore equal the adapter output only while no cap binds —
-// which is the normal case, since caps bind in depeg and exploit scenarios,
-// exactly the scenarios a liquidation engine cares most about. Nothing here
-// claims stream == adapter price; a cap-aware read is out of scope for Task 8.
+// WHAT THE STREAM IS, STATED PLAINLY: it reproduces the UNCAPPED FEED, not the
+// price Aave actually uses. AaveOracle.getSourceOfAsset returns price-CAP
+// ADAPTERS: the stable adapters return min(feed, priceCap) and the weETH adapter
+// is getRate() x ETH/USD with a GROWTH-CAPPED rate. Stream rows therefore equal
+// the adapter output only while no cap binds — the normal case, since caps bind
+// in depeg and exploit scenarios, exactly the ones a liquidation engine cares
+// most about. Nothing here claims stream == adapter price.
 //
-// weETH gets BOTH rows and NO composition: the ETH/USD stream row (from the
-// aggregator behind the adapter) and a POLLED getRate() ratio row under source
-// "ratio:getrate:<contract>". Multiplying them yields an UNCAPPED REFERENCE
-// VALUE and never the adapter's guaranteed output — the growth cap above applies
-// to the rate the adapter uses, so the product tracks the adapter only while the
-// cap is slack. P3 must implement the growth-cap behaviour, or read the
-// adapter's own output, before claiming adapter equivalence. Composing at ingest
-// time is refused for a second, independent reason: it would bake one particular
-// pairing of two independently-timed observations into storage and lose the
-// ability to re-time it.
+// # ETH / Aave — THE ADAPTER OUTPUT ITSELF (P3 Task 2)
+//
+// The gap above is now closed by CUSTODY rather than by arithmetic. The ETH poll
+// round reads AaveOracle.getAssetPrice(asset) per reserve — the price the pool
+// itself charges against at borrow, liquidation and health-factor time, with
+// every cap already applied — and records it under the ADDRESS-QUALIFIED source
+// "aaveoracle:<oracle>" at 8 decimals. Those rows are the ADAPTER-OUTPUT class,
+// and they are what a risk read valuing Aave collateral must consume. The stream
+// rows remain a provenance/observatory reference: keeping both is what makes a
+// binding cap VISIBLE (the two diverge) instead of invisible.
+//
+// It is the SAME ETH POLLER, not a second one. The new calls join the existing
+// round's single Multicall3 batch, its EIP-1898 hash pin, its cursor and its one
+// price_poll_anchors row — one round, one anchor, N sources — so every D-012
+// structural protection (poll-owned namespace, RewindPrices refusal, anchor
+// retention, neutralization) covers them unchanged.
+//
+// weETH ALSO gets its two older rows, and still NO composition: the ETH/USD
+// stream row (from the aggregator behind the adapter) and a POLLED getRate()
+// ratio row under source "ratio:getrate:<contract>". Multiplying those two
+// yields an UNCAPPED REFERENCE VALUE and never the adapter's guaranteed output —
+// the growth cap applies to the rate the adapter uses, so the product tracks the
+// adapter only while the cap is slack. That is precisely why the adapter is now
+// read directly rather than reconstructed. Composing at ingest time stays
+// refused for a second, independent reason: it would bake one particular pairing
+// of two independently-timed observations into storage and lose the ability to
+// re-time it.
+//
+// # WHEN A ROW WAS TRUE, VS WHEN IT WAS WRITTEN (migration 00012)
+//
+// `observed_at` is DATABASE INSERTION TIME. It answers "is this writer still
+// writing", and it is the wrong clock for "how old is this number" — the two
+// diverge exactly when ingestion lags, which is when the question matters. Every
+// row therefore also carries `source_as_of`, the CHAIN's own statement:
+//
+//   - a POLL row carries the header timestamp of the block its round pinned to,
+//     taken from the head read that already resolved the round's endpoint, so it
+//     costs no extra RPC. It is round-scoped: one pinned execution, one as-of,
+//     every row.
+//   - a FEED row carries the aggregator's own AnswerUpdated.updatedAt, decoded
+//     from the log by the strict decoder.
+//
+// NULL means "no chain-asserted as-of is known" and must never be read as "fall
+// back to observed_at" — that substitution is the defect the column exists to
+// prevent. Pre-00012 FEED rows are filled once by FeedDeriver.HealSourceAsOf,
+// which replays the same strict decoder over raw_logs with the deriver's own
+// last-in-block-wins fold, so a healed row is indistinguishable from a freshly
+// derived one. Pre-00012 POLL rows stay NULL permanently: their witness was a
+// header read that nothing on disk reproduces (an anchor records the block's
+// HASH, not its timestamp), and inventing one is exactly what NULL refuses.
 //
 // PHASE CHANGES: a Chainlink PROXY re-points aggregator() on a phase change, so
 // the raw aggregator recorded in the registry covers the CURRENT PHASE ONLY —
@@ -291,6 +330,33 @@ func ChainlinkSource(aggregator common.Address) string {
 	return "chainlink:0x" + hex.EncodeToString(aggregator.Bytes())
 }
 
+// AaveOracleSource is the mechanism name for an ADAPTER-OUTPUT poll:
+// "aaveoracle:<contract>", lowercase 0x-prefixed hex, the same deterministic
+// address encoding ChainlinkSource and RatioSource use.
+//
+// IT IS ADDRESS-QUALIFIED, unlike the flat SourcePriceProviderV2 literal, and
+// the difference is not cosmetic. buildPollTargets can enforce "one contract per
+// source" for a flat name only because the OP poll set reads ONE oracle; the ETH
+// poll set now reads several contracts in one round (the weETH RATIO_PROVIDER
+// and this oracle), and an unqualified name in that setting conflates witnesses
+// — two different contracts' answers landing under one provenance string, with
+// no way to tell them apart after the fact. Qualifying by contract makes the
+// source identify the reading on its own, which is what a provenance string is
+// for.
+//
+// WHAT THE ROWS MEAN (recon/derivation-notes.md, "Oracle wiring", Aave side, is
+// normative): AaveOracle.getAssetPrice(asset) is the ADAPTER OUTPUT — the price
+// the Aave pool itself charges against at borrow, liquidation and health-factor
+// time — with every price cap already applied. It is therefore NOT the same
+// number as the "chainlink:<aggregator>" rows, which reproduce the UNCAPPED
+// feed: the two agree only while no cap binds, and caps bind precisely in the
+// depeg and exploit scenarios a liquidation engine cares most about. A risk read
+// valuing Aave collateral must consume these rows; the feed rows remain a
+// provenance/observatory reference.
+func AaveOracleSource(contract common.Address) string {
+	return "aaveoracle:0x" + hex.EncodeToString(contract.Bytes())
+}
+
 // RatioSource is the mechanism name for a polled exchange-ratio view:
 // "ratio:<method>:<contract>" with the method lowercased and stripped of its
 // argument list ("getRate()" -> "getrate"). The METHOD is part of the name
@@ -332,6 +398,24 @@ var rateProviderABI = mustParseABI(`[{
 	"name": "getRate",
 	"stateMutability": "view",
 	"inputs": [],
+	"outputs": [{"name": "", "type": "uint256"}]
+}]`)
+
+// aaveOracleABI carries AaveOracle.getAssetPrice(address) -> uint256, the
+// ADAPTER OUTPUT the Aave pool charges against (8 decimals, USD per whole
+// token, per the registry's declared priceDecimals). Selector 0xb3596f07,
+// pinned by TestSelectors.
+//
+// It is a SEPARATE abi from priceProviderABI even though both are
+// (address)->uint256: the two are different contracts on different chains with
+// different scales and different semantics (engine-exact Debt Manager price vs
+// capped Aave adapter output), and sharing one abi definition would make the
+// selector pin assert a property of a shape rather than of a named function.
+var aaveOracleABI = mustParseABI(`[{
+	"type": "function",
+	"name": "getAssetPrice",
+	"stateMutability": "view",
+	"inputs": [{"name": "asset", "type": "address"}],
 	"outputs": [{"name": "", "type": "uint256"}]
 }]`)
 
@@ -385,6 +469,18 @@ var pollViews = map[string]pollView{
 			return unpackUint256("getRate", rateProviderABI, ret)
 		},
 		source: func(contract common.Address) string { return RatioSource("getRate()", contract) },
+	},
+	"getAssetPrice(address)": {
+		pack: func(asset common.Address) ([]byte, error) {
+			return aaveOracleABI.Pack("getAssetPrice", asset)
+		},
+		unpack: func(ret []byte) (*big.Int, error) {
+			return unpackUint256("getAssetPrice", aaveOracleABI, ret)
+		},
+		// ADDRESS-QUALIFIED, like RatioSource and unlike the priceproviderv2
+		// literal: the ETH poll set reads more than one contract per round, so a
+		// flat name would conflate witnesses. See AaveOracleSource.
+		source: func(contract common.Address) string { return AaveOracleSource(contract) },
 	},
 }
 

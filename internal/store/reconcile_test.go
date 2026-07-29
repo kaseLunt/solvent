@@ -156,13 +156,14 @@ func TestQuerierContractPoolAndTx(t *testing.T) {
 // TestSchemaVersionMatchesEmbeddedExpectation pins the Phase-0 schema gate's
 // two halves against each other: after Migrate, the database's max applied
 // goose version equals ExpectedSchemaVersion (derived from the embedded
-// migrations — currently 11, since 00011 added param_history, the risk-
-// parameter ledger of the aave_param engine, P3 Task 2).
+// migrations — currently 12, since 00012 added prices.source_as_of, the
+// chain-asserted as-of that keeps a P3 risk read from mistaking database
+// insertion time for the age of a price).
 func TestSchemaVersionMatchesEmbeddedExpectation(t *testing.T) {
 	s := testDeriveStore(t)
 	expected, err := ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.EqualValues(t, 11, expected, "embedded expected is currently 11 (migration 00011, param_history)")
+	require.EqualValues(t, 12, expected, "embedded expected is currently 12 (migration 00012, prices.source_as_of)")
 	got, err := SchemaVersion(context.Background(), s.pool)
 	require.NoError(t, err)
 	require.Equal(t, expected, got)

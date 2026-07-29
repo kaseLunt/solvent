@@ -219,3 +219,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Alchemy manual-targeted only); returning for the doc-only D-006 re-review. Reviewer
   worktree note: detached-pin worktree cleaned at git level; OS directory lock leaves an
   inert scratchpad dir (kwt-class leftover, harmless).
+- WAVE 2a SHIP (closing review session 019faca5-19f9-7f40-85b7-c51088eaec94, verdict
+  approve, zero material findings): doc-only range af99384..63e09da verified; "all
+  previously approved Wave 2a custody invariants untouched." WAVE 2a CLOSED under D-006 —
+  two rounds (1 medium doc-only, fixed same session). DAEMON RESTART DELIBERATELY HELD
+  until Wave 2b commits: one restart from a fully-committed tree applies 00011+00012 +
+  starts the configurator backfill together (building the daemon from a tree carrying 2b's
+  in-progress edits would run unreviewed code live). Inert locked worktree dirs for morning
+  cleanup: C:\wtclose\w2a, scratchpad\wave2a-review (git-level clean; OS handles held).
+- WAVE 2b LANDED (2026-07-29 00:35, Opus serena-coder): adapter-output + source_as_of
+  complete and suite-green (854 PASS / 0 FAIL / 1 pre-existing SKIP; integrator
+  INDEPENDENTLY re-ran vet + prices/store/config suites — all ok incl. the 106s live-db
+  store pass; stale-gopls phantom compile errors disregarded a second time, compiler
+  clean). Delivered: four aaveoracle feeds.json poll entries + pollViews
+  "getAssetPrice(address)" (selector 0xb3596f07 keccak-pinned) with address-qualified
+  source; head.Time threaded pin-site → pollRound → every observation (ZERO new RPC);
+  migration 00012 prices.source_as_of + partial NULL index; feed-derive stamps updatedAt;
+  FeedDeriver decoder-replay healing pass (NULL-only, feed-owned-only, last-in-block-wins
+  proven against a discriminating fixture where last-in-block ≠ largest-timestamp,
+  idempotent-with-zero-reads on rerun, once-per-process through Step, failure propagates).
+  Five deviations ALL justified and accepted (notable: config/feeds.go uniqueness key
+  relaxed to (chainID,asset,kind,contract,method) — the brief was UNLOADABLE as written,
+  all four reserves already exist as chainlink_stream entries; three-gate collision
+  argument + pinned test. Malformed header time → NULL-as-of, never a discarded round.
+  Heal errors → step_error.). Authority-vs-reality catches: internal/prices package doc +
+  FeedRatio doc rewritten (asserted adapter-output out of scope — now false);
+  ExpectedSchemaVersion is derived, only the test constant bumps. Integrator follow-up:
+  derivation-notes oracle-wiring gains the dated P3 STATUS addendum (proactive fix of the
+  stale-normative-doc class Codex flagged on 2a). -race still owed (toolchain gap).
+- SCOPE GAP CAUGHT BY THE GATE (2026-07-29 00:40): recon/feeds.json is NOT in W2
+  allowed_paths (W1 had it; W2 authoring missed the price-registry mirror) — pre-commit
+  correctly BLOCKED the 2b commit. Fix: W2 allowed_paths += recon/feeds.json (durable
+  contract change under the standing owner delegation), claim.py rescope, commit under
+  ack. NEXT: commit 2b, Codex round, ONE daemon restart (00011+00012 + configurator
+  backfill + healing pass — watch stamped/unstamped and behind-frontier honesty).

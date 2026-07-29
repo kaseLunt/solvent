@@ -34,9 +34,36 @@ func TestLoadRealFeedRegistry(t *testing.T) {
 	eth := feeds.StreamAssets(1)
 	require.Len(t, op, 20, "20 OP poll assets")
 	require.Len(t, eth, 4, "4 ETH chainlink_stream assets")
-	require.Len(t, feeds.Assets, 24)
+	require.Len(t, feeds.Assets, 28)
 	require.Empty(t, feeds.StreamAssets(10), "OP is poll-only: no stream reproduces the engine price")
-	require.Empty(t, feeds.PollAssets(1), "the ETH assets' primary oracle is the stream")
+
+	// ADAPTER-OUTPUT CUSTODY (P3 Task 2): each of the four ETH reserves is ALSO
+	// declared as a poll of AaveOracle.getAssetPrice — the CAPPED price the Aave
+	// pool charges against, which is a different number from the uncapped stream
+	// above whenever a cap binds. Both readings are custodied; neither replaces
+	// the other, and the registry is what says so.
+	ethPolls := feeds.PollAssets(1)
+	require.Len(t, ethPolls, 4, "one adapter-output poll per ether.fi Aave reserve")
+	gotPolled := map[string]bool{}
+	for _, a := range ethPolls {
+		require.Equal(t, "0x43b64f28A678944E0655404B0B98E443851cC34F", a.Oracle.Contract.Hex(), a.Symbol)
+		require.Equal(t, "getAssetPrice(address)", a.Oracle.Method, a.Symbol)
+		require.Equal(t, int32(8), a.Oracle.PriceDecimals, a.Symbol)
+		require.Equal(t, "aave_v3_etherfi", a.Engine, a.Symbol)
+		require.Zero(t, a.Oracle.StartBlock, a.Symbol)
+		require.Equal(t, common.Address{}, a.Oracle.Proxy, a.Symbol)
+		require.Nil(t, a.Ratio, "%s: the adapter-output entry declares no secondary ratio", a.Symbol)
+		gotPolled[a.Symbol] = true
+	}
+	require.Equal(t, map[string]bool{"weETH": true, "USDC": true, "PYUSD": true, "FRAX": true}, gotPolled)
+	// The two readings of one asset are DISTINCT entries, not a replacement: the
+	// stream set is unchanged and every polled reserve still has its stream.
+	streamSymbols := map[string]bool{}
+	for _, a := range eth {
+		streamSymbols[a.Symbol] = true
+	}
+	require.Equal(t, streamSymbols, gotPolled,
+		"every adapter-output reserve keeps its uncapped stream, and vice versa")
 
 	// Every OP asset polls the SAME PriceProviderV2 for USD at 6 decimals — the
 	// exact function DebtManagerCore calls at borrow/repay/liquidation.
@@ -223,11 +250,17 @@ func TestLoadFeedsRefusals(t *testing.T) {
 		{"ratio missing contract", func(r map[string]any) {
 			asset(r, 1)["ratio"].(map[string]any)["contract"] = ""
 		}, "ratio.contract is required"},
-		{"duplicate asset on one chain", func(r map[string]any) {
-			asset(r, 1)["chain"] = "op"
+		// The uniqueness key is (chain, asset, MECHANISM), so the duplicate this
+		// refuses is the same asset read the same WAY twice — that is the pair
+		// that would collide on the prices PK. Making asset 1 a byte-identical
+		// copy of asset 0 (chain, address, oracle block and all) is what
+		// reproduces it.
+		{"duplicate asset+mechanism on one chain", func(r map[string]any) {
+			asset(r, 1)["chain"] = asset(r, 0)["chain"]
 			asset(r, 1)["address"] = asset(r, 0)["address"]
-			// keep it a stream so only the duplicate rule can fire
-		}, "already declared as"},
+			asset(r, 1)["oracle"] = asset(r, 0)["oracle"]
+			delete(asset(r, 1), "ratio")
+		}, "not the same one twice"},
 		{"unknown field", func(r map[string]any) { asset(r, 0)["_note"] = "provenance" }, "unknown field"},
 		{"no assets", func(r map[string]any) { r["assets"] = []any{} }, "declares no assets"},
 	}
@@ -239,6 +272,44 @@ func TestLoadFeedsRefusals(t *testing.T) {
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
+}
+
+// ONE ASSET, SEVERAL MECHANISMS, and the loader accepts them (P3 Task 2).
+//
+// The uniqueness key was the asset alone until adapter-output custody landed,
+// which was strictly stronger than the collision it guarded: an ether.fi Aave
+// reserve is legitimately observed through BOTH its raw Chainlink aggregator
+// (the uncapped feed) and AaveOracle.getAssetPrice (the capped price the pool
+// charges against), and those are different numbers exactly when a cap binds.
+// The rows do not collide, because `source` differs — which is what the key now
+// keys on.
+func TestLoadFeedsAcceptsOneAssetReadThroughSeveralMechanisms(t *testing.T) {
+	root := baseFeedRegistry()
+	// The SAME asset as the template's stream entry (weETH on eth), read through
+	// the Aave adapter instead of the aggregator.
+	adapter := map[string]any{
+		"chain": "eth", "engine": "aave_v3_etherfi",
+		"address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+		"symbol":  "weETH", "decimals": 18, "roles": []any{"collateral"},
+		"oracle": map[string]any{
+			"kind": "poll", "contract": "0x43b64f28A678944E0655404B0B98E443851cC34F",
+			"method": "getAssetPrice(address)", "priceDecimals": 8,
+		},
+	}
+	root["assets"] = append(root["assets"].([]any), adapter)
+	feeds, err := LoadFeeds(writeFeedRegistry(t, root), testFeedChains)
+	require.NoError(t, err)
+	require.Len(t, feeds.Assets, 3)
+	require.Len(t, feeds.StreamAssets(1), 1, "the stream reading survives")
+	require.Len(t, feeds.PollAssets(1), 1, "the adapter-output reading joins it")
+	require.Equal(t, feeds.StreamAssets(1)[0].Address, feeds.PollAssets(1)[0].Address,
+		"both readings describe the same token")
+
+	// ...but the SAME mechanism twice is still refused, because those two WOULD
+	// collide row-for-row.
+	root["assets"] = append(root["assets"].([]any), adapter)
+	_, err = LoadFeeds(writeFeedRegistry(t, root), testFeedChains)
+	require.ErrorContains(t, err, "not the same one twice")
 }
 
 // Two stream assets naming ONE aggregator is refused: the feed deriver maps a

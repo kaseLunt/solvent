@@ -227,6 +227,15 @@ const pollAnchorRetention = 4096
 //     Chainlink aggregators, 18 for the weETH getRate() ratio). It is part of
 //     the row's identity for divergence purposes: the same block reporting the
 //     same digits at a different scale is a DIFFERENT price.
+//   - SourceAsOf is the CHAIN's own statement of when this observation was true
+//     — the anchor block's header timestamp for a polled row, the aggregator's
+//     AnswerUpdated.updatedAt for a feed row. The zero value stores NULL, which
+//     means "no chain-asserted as-of is known" and must never be read as "fall
+//     back to observed_at": observed_at is DATABASE INSERTION TIME, so
+//     substituting it reports a stale price as fresh exactly when ingestion
+//     lagged (migration 00012). It is deliberately NOT part of the row's
+//     divergence identity — see insertPrice — because a pre-00012 row carries
+//     NULL and a replay supplying the value must not abort a batch over it.
 //
 // There is deliberately no ChainID field: the chain comes from the batch, so a
 // cross-chain observation is structurally impossible rather than validated.
@@ -238,6 +247,7 @@ type PriceObservation struct {
 	Price       *big.Int
 	Decimals    int32
 	BlockNumber uint64
+	SourceAsOf  time.Time
 }
 
 // PriceInsert is one row an apply ACTUALLY INSERTED, carrying the timestamp the
@@ -357,6 +367,21 @@ type PriceFreshness struct {
 	HasValid         bool
 	ValidBlockNumber uint64
 	ValidObservedAt  time.Time
+	// SourceAsOf / ValidSourceAsOf are the CHAIN-ASSERTED as-ofs of the same two
+	// rows (prices.source_as_of, migration 00012), reported alongside the
+	// insertion times rather than instead of them because they answer a
+	// different question: observed_at says when THIS WRITER last landed a row
+	// (a writer-liveness signal), source_as_of says how old the NUMBER is (a
+	// valuation signal). A poller answering every interval off a frozen oracle
+	// has a current observed_at and an ageing source_as_of, and a health
+	// surface that could only see the first would call that green.
+	//
+	// Has* is false when the row carries NULL, which means no chain-asserted
+	// as-of is known. It is NOT a licence to substitute ObservedAt.
+	HasSourceAsOf      bool
+	SourceAsOf         time.Time
+	HasValidSourceAsOf bool
+	ValidSourceAsOf    time.Time
 }
 
 // UsablePrice is the result of a latest-USABLE-price read: a price that has
@@ -371,6 +396,19 @@ type UsablePrice struct {
 	Decimals    int32
 	BlockNumber uint64
 	ObservedAt  time.Time
+	// SourceAsOf is the CHAIN's own as-of for this price (migration 00012):
+	// the anchor block's header timestamp for a polled row, the aggregator's
+	// AnswerUpdated.updatedAt for a feed row. HasSourceAsOf is false when the
+	// row carries NULL.
+	//
+	// THIS IS THE FIELD AN AS-OF JUDGEMENT MUST USE, and ObservedAt is not a
+	// fallback for it. ObservedAt is database insertion time: for a row landed
+	// out of a backfill it can be years after the price was true, so a consumer
+	// substituting it would rate an ancient number as seconds old. A consumer
+	// that needs an as-of and finds HasSourceAsOf false has a MISSING INPUT and
+	// must handle it as one.
+	HasSourceAsOf bool
+	SourceAsOf    time.Time
 }
 
 // ApplyPrices persists obs and advances engine's derive cursor to throughBlock
@@ -650,12 +688,12 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 	}
 	var observedAt time.Time
 	err = tx.QueryRow(ctx, `INSERT INTO prices
-		(chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, invalid_reason, anchor_block)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		(chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, invalid_reason, anchor_block, source_as_of)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (chain_id, asset, source, block_number) DO NOTHING
 		RETURNING observed_at`,
 		chainID, o.Asset, o.Source, pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals,
-		o.BlockNumber, ownerEngine, valid, reason, anchorBlock).Scan(&observedAt)
+		o.BlockNumber, ownerEngine, valid, reason, anchorBlock, nullableTime(o.SourceAsOf)).Scan(&observedAt)
 	if err == nil {
 		// Fresh insert. The asset is copied so the returned fact cannot alias a
 		// caller's buffer that may be reused after the apply.
@@ -695,14 +733,20 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 		// is THIS round's anchor rather than whatever the superseded row carried. When
 		// the superseding round recorded no anchor the binding goes back to NULL — the
 		// honest answer, since a row that has just been overwritten by an unanchored
-		// observation is no longer vouched for by anything.
+		// observation is no longer vouched for by anything. source_as_of moves with
+		// them, for the third time the same reason: the row now holds THIS
+		// observation, so it must hold this observation's chain-asserted as-of and
+		// not the replaced one's. A superseding writer with none writes NULL rather
+		// than inheriting a timestamp that describes a value no longer stored.
 		var observedAt time.Time
 		if err := tx.QueryRow(ctx, `UPDATE prices
-			SET price = $5, price_decimals = $6, valid = $7, invalid_reason = $8, anchor_block = $9, observed_at = now()
+			SET price = $5, price_decimals = $6, valid = $7, invalid_reason = $8, anchor_block = $9,
+			    source_as_of = $10, observed_at = now()
 			WHERE chain_id = $1 AND asset = $2 AND source = $3 AND block_number = $4
 			RETURNING observed_at`,
 			chainID, o.Asset, o.Source, o.BlockNumber,
-			pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals, valid, reason, anchorBlock).Scan(&observedAt); err != nil {
+			pgtype.Numeric{Int: o.Price, Exp: 0, Valid: true}, o.Decimals, valid, reason, anchorBlock,
+			nullableTime(o.SourceAsOf)).Scan(&observedAt); err != nil {
 			return PriceInsert{}, false, false, fmt.Errorf("supersede neutralized price %s/%x@%d: %w", o.Source, o.Asset, o.BlockNumber, err)
 		}
 		slog.Warn("re-observed a price at a height whose earlier row had been NEUTRALIZED as unverifiable after a reorg; the fresh observation supersedes it",
@@ -727,7 +771,34 @@ func insertPrice(ctx context.Context, tx pgx.Tx, chainID uint64, ownerEngine str
 		return PriceInsert{}, false, false, fmt.Errorf("price divergence: %s/%x@%d is owned by %q, refusing a replay from %q — aborting batch",
 			o.Source, o.Asset, o.BlockNumber, existingOwner, ownerEngine)
 	}
+	// IDEMPOTENT REPLAY, AND IT WRITES NOTHING — source_as_of INCLUDED. The
+	// replay arm exists so a frozen endpoint re-reporting the same execution
+	// block every interval is a no-op, and an UPDATE here would make it a write
+	// again. Two consequences are deliberate:
+	//
+	//   * a pre-00012 row stays NULL even though this replay could supply a
+	//     value. That is the forward-only rule migration 00012 states: poll
+	//     history is not repaired opportunistically by whichever round happens
+	//     to re-execute at an old height, and the feed side is repaired by ONE
+	//     reviewed decoder-replay pass instead.
+	//   * source_as_of is NOT compared, so it can never abort a batch. It is a
+	//     disclosure column, not part of the row's identity: aborting a live
+	//     round because a legacy row lacks the stamp would convert provenance
+	//     completion into an ingestion outage.
 	return PriceInsert{}, false, false, nil
+}
+
+// nullableTime renders a Go zero time as SQL NULL. The zero value of a
+// chain-asserted timestamp means "the chain asserted none", and storing it as
+// 0001-01-01 would make an ABSENT fact indistinguishable from a fact about the
+// year zero — which a reader would then compare against and treat as
+// infinitely stale rather than as missing.
+func nullableTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	utc := t.UTC()
+	return &utc
 }
 
 // insertPollAnchor records one round's (block, hash) anchor with the same
@@ -1708,16 +1779,16 @@ func (s *Store) LatestPriceFreshness(ctx context.Context, chainID uint64, ownerE
 	rows, err := s.pool.Query(ctx,
 		`WITH newest AS (
 		     SELECT DISTINCT ON (asset, source)
-		            asset, source, block_number, observed_at, valid, invalid_reason
+		            asset, source, block_number, observed_at, valid, invalid_reason, source_as_of
 		     FROM prices WHERE chain_id = $1 AND owner_engine = $2
 		     ORDER BY asset, source, block_number DESC
 		 ), newest_valid AS (
-		     SELECT DISTINCT ON (asset, source) asset, source, block_number, observed_at
+		     SELECT DISTINCT ON (asset, source) asset, source, block_number, observed_at, source_as_of
 		     FROM prices WHERE chain_id = $1 AND owner_engine = $2 AND valid
 		     ORDER BY asset, source, block_number DESC
 		 )
-		 SELECT n.asset, n.source, n.block_number, n.observed_at, n.valid, n.invalid_reason,
-		        v.block_number, v.observed_at
+		 SELECT n.asset, n.source, n.block_number, n.observed_at, n.valid, n.invalid_reason, n.source_as_of,
+		        v.block_number, v.observed_at, v.source_as_of
 		 FROM newest n
 		 LEFT JOIN newest_valid v ON v.asset = n.asset AND v.source = n.source
 		 ORDER BY n.asset, n.source`,
@@ -1731,14 +1802,25 @@ func (s *Store) LatestPriceFreshness(ctx context.Context, chainID uint64, ownerE
 		var f PriceFreshness
 		var validBlock *int64
 		var validAt *time.Time
+		var asOf, validAsOf *time.Time
 		if err := rows.Scan(&f.Asset, &f.Source, &f.BlockNumber, &f.ObservedAt,
-			&f.Valid, &f.InvalidReason, &validBlock, &validAt); err != nil {
+			&f.Valid, &f.InvalidReason, &asOf, &validBlock, &validAt, &validAsOf); err != nil {
 			return nil, fmt.Errorf("scan price freshness row: %w", err)
 		}
 		if validBlock != nil && validAt != nil {
 			f.HasValid = true
 			f.ValidBlockNumber = uint64(*validBlock)
 			f.ValidObservedAt = *validAt
+		}
+		// The two as-ofs are scanned as pointers and only promoted when
+		// non-NULL, so an absent chain timestamp stays absent rather than
+		// becoming the Go zero time — which a reader comparing against would
+		// take for a real (and infinitely stale) instant.
+		if asOf != nil {
+			f.HasSourceAsOf, f.SourceAsOf = true, asOf.UTC()
+		}
+		if validAsOf != nil {
+			f.HasValidSourceAsOf, f.ValidSourceAsOf = true, validAsOf.UTC()
 		}
 		out = append(out, f)
 	}
@@ -1761,12 +1843,13 @@ func (s *Store) LatestPriceFreshness(ctx context.Context, chainID uint64, ownerE
 func (s *Store) LatestUsablePrice(ctx context.Context, chainID uint64, asset []byte, source string) (UsablePrice, bool, error) {
 	var p UsablePrice
 	var priceText string
+	var asOf *time.Time
 	err := s.pool.QueryRow(ctx,
-		`SELECT asset, source, price::text, price_decimals, block_number, observed_at
+		`SELECT asset, source, price::text, price_decimals, block_number, observed_at, source_as_of
 		 FROM prices
 		 WHERE chain_id = $1 AND asset = $2 AND source = $3 AND valid
 		 ORDER BY block_number DESC LIMIT 1`,
-		chainID, asset, source).Scan(&p.Asset, &p.Source, &priceText, &p.Decimals, &p.BlockNumber, &p.ObservedAt)
+		chainID, asset, source).Scan(&p.Asset, &p.Source, &priceText, &p.Decimals, &p.BlockNumber, &p.ObservedAt, &asOf)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return UsablePrice{}, false, nil
 	}
@@ -1785,7 +1868,152 @@ func (s *Store) LatestUsablePrice(ctx context.Context, chainID uint64, asset []b
 			source, asset, chainID, v)
 	}
 	p.Price = v
+	// A NULL source_as_of is reported as ABSENT, never coerced to a zero time
+	// and never quietly filled from ObservedAt: the caller has to see that the
+	// as-of is missing in order to treat it as a missing input.
+	if asOf != nil {
+		p.HasSourceAsOf, p.SourceAsOf = true, asOf.UTC()
+	}
 	return p, true, nil
+}
+
+// ---------------------------------------------------------------------------
+// source_as_of healing (migration 00012).
+// ---------------------------------------------------------------------------
+//
+// THREE NARROW METHODS, AND THE NARROWNESS IS THE SAFETY. Migration 00012 added
+// a disclosure column that pre-existing rows cannot carry, and exactly one
+// population is repairable: the Chainlink feed rows, whose witness
+// (AnswerUpdated) is still in raw_logs. The repair therefore does not belong in
+// SQL — a substring() over `data` would be a SECOND, unreviewed decoder sitting
+// beside decode.decodeChainlinkAnswerUpdated, and a parser differential in a
+// money-adjacent column is the class this repo refuses. So the store offers a
+// LOOKUP (what is un-stamped), a READ (which rows, in a bounded block range),
+// and a WRITE (fill these exact keys), and the DECODING lives with the worker
+// that owns those rows, holds the topic0 and knows the fold order.
+//
+// What the write CANNOT do, structurally rather than by convention:
+//
+//   - touch a row another engine owns — owner_engine is in the predicate, not
+//     in the caller's hands;
+//   - overwrite a stamp — `source_as_of IS NULL` is in the predicate, so a
+//     second run fills nothing and reports zero;
+//   - change a value — the UPDATE names one column, and it is not a price,
+//     scale, validity, owner or anchor binding.
+
+// PriceRowKey identifies one price row within a chain: the (asset, source,
+// block) triple that, with chain_id, is the `prices` primary key.
+type PriceRowKey struct {
+	Asset       []byte
+	Source      string
+	BlockNumber uint64
+}
+
+// SourceAsOfFill is one healing instruction: stamp this row with this
+// chain-asserted as-of, if and only if it currently has none.
+type SourceAsOfFill struct {
+	PriceRowKey
+	SourceAsOf time.Time
+}
+
+// MissingSourceAsOfSpan describes an engine's un-stamped population on one
+// chain: how many rows, and the block range they occupy. The range is what lets
+// a healing pass walk raw_logs in bounded windows instead of reading all of
+// history — and Rows==0 is the cheap guard that makes a healed database skip
+// the pass entirely.
+type MissingSourceAsOfSpan struct {
+	Rows     int64
+	MinBlock uint64
+	MaxBlock uint64
+}
+
+// MissingSourceAsOfSpan reports the rows engine owns on chainID that carry no
+// source_as_of. Served by migration 00012's partial index, which is why this is
+// cheap enough to run on every worker startup.
+func (s *Store) MissingSourceAsOfSpan(ctx context.Context, engine string, chainID uint64) (MissingSourceAsOfSpan, error) {
+	var out MissingSourceAsOfSpan
+	var minBlock, maxBlock *int64
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*), min(block_number), max(block_number) FROM prices
+		 WHERE chain_id = $1 AND owner_engine = $2 AND source_as_of IS NULL`,
+		chainID, engine).Scan(&out.Rows, &minBlock, &maxBlock); err != nil {
+		return MissingSourceAsOfSpan{}, fmt.Errorf("count prices missing source_as_of for %q (chain %d): %w", engine, chainID, err)
+	}
+	if minBlock != nil && maxBlock != nil {
+		out.MinBlock, out.MaxBlock = uint64(*minBlock), uint64(*maxBlock)
+	}
+	return out, nil
+}
+
+// PricesMissingSourceAsOf returns the keys of engine's un-stamped rows on
+// chainID within [fromBlock, toBlock], in block order. The range is inclusive
+// and is the caller's paging mechanism.
+func (s *Store) PricesMissingSourceAsOf(ctx context.Context, engine string, chainID, fromBlock, toBlock uint64) ([]PriceRowKey, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT asset, source, block_number FROM prices
+		 WHERE chain_id = $1 AND owner_engine = $2 AND source_as_of IS NULL
+		   AND block_number BETWEEN $3 AND $4
+		 ORDER BY block_number, asset, source`,
+		chainID, engine, fromBlock, toBlock)
+	if err != nil {
+		return nil, fmt.Errorf("read prices missing source_as_of for %q [%d,%d]: %w", engine, fromBlock, toBlock, err)
+	}
+	defer rows.Close()
+	var out []PriceRowKey
+	for rows.Next() {
+		var k PriceRowKey
+		if err := rows.Scan(&k.Asset, &k.Source, &k.BlockNumber); err != nil {
+			return nil, fmt.Errorf("scan price key missing source_as_of: %w", err)
+		}
+		out = append(out, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate prices missing source_as_of for %q: %w", engine, err)
+	}
+	return out, nil
+}
+
+// FillPriceSourceAsOf stamps source_as_of on engine's OWN rows that currently
+// have none, in one transaction, and reports how many rows it actually changed.
+//
+// A zero SourceAsOf is REFUSED rather than skipped: it would be a silent no-op
+// that the return value reports as "nothing needed doing", which is how a
+// caller with a broken decode convinces itself the heal succeeded.
+func (s *Store) FillPriceSourceAsOf(ctx context.Context, engine string, chainID uint64, fills []SourceAsOfFill) (int64, error) {
+	if len(fills) == 0 {
+		return 0, nil
+	}
+	for _, f := range fills {
+		if f.SourceAsOf.IsZero() {
+			return 0, fmt.Errorf("fill source_as_of %s/%x@%d: zero timestamp — a heal must write a chain-asserted time or write nothing",
+				f.Source, f.Asset, f.BlockNumber)
+		}
+		if len(f.Asset) != 20 {
+			return 0, fmt.Errorf("fill source_as_of %s/%x@%d: asset is %d bytes, want a 20-byte address",
+				f.Source, f.Asset, f.BlockNumber, len(f.Asset))
+		}
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin fill source_as_of for %q: %w", engine, err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op after a successful commit
+	var filled int64
+	for _, f := range fills {
+		tag, err := tx.Exec(ctx,
+			`UPDATE prices SET source_as_of = $5
+			 WHERE chain_id = $1 AND asset = $2 AND source = $3 AND block_number = $4
+			   AND owner_engine = $6 AND source_as_of IS NULL`,
+			chainID, f.Asset, f.Source, f.BlockNumber, f.SourceAsOf.UTC(), engine)
+		if err != nil {
+			return 0, fmt.Errorf("fill source_as_of %s/%x@%d: %w", f.Source, f.Asset, f.BlockNumber, err)
+		}
+		filled += tag.RowsAffected()
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit fill source_as_of for %q: %w", engine, err)
+	}
+	return filled, nil
 }
 
 // LatestLogsByTopic returns, for each of addresses, the single newest stored log

@@ -159,6 +159,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -171,8 +172,9 @@ import (
 )
 
 // maxPollTargets bounds a round's fan-out into ONE multicall. The registry
-// carries 21 obligations today (20 OP PriceProviderV2 assets + the ETH weETH
-// getRate() ratio); 100 keeps a round comfortably inside node eth_call gas caps
+// carries 25 obligations today (20 OP PriceProviderV2 assets + the ETH weETH
+// getRate() ratio + the four ETH AaveOracle.getAssetPrice adapter-output reads,
+// P3 Task 2); 100 keeps a round comfortably inside node eth_call gas caps
 // — some OP assets are accountant-lens reads, which are not cheap — while
 // leaving room for the registry to grow.
 //
@@ -813,13 +815,50 @@ func (p *Poller) rehydrateAfterUncertainty(ctx context.Context, why string) {
 // endpoint: N (that endpoint's head, the anchor height and every
 // observation's as-of block), HeaderHash(N) as read from it before the
 // multicall — the EIP-1898 pin the multicall executed under, and the anchor
-// hash — re-verified unchanged after it, the deduped observations, and the
-// token naming the endpoint that served every read.
+// hash — re-verified unchanged after it, N's own HEADER TIMESTAMP, the deduped
+// observations, and the token naming the endpoint that served every read.
+//
+// asOf IS THE ROUND'S CHAIN-ASSERTED AS-OF, AND IT COSTS NOTHING (migration
+// 00012). The head read that resolves the serving endpoint already returns
+// chain.Head{Number, Time, Hash} — the same eth_getBlockByNumber response the
+// pin hash comes from — so the block's own timestamp was being decoded and then
+// discarded. Threading it here instead is what lets every row the round writes
+// carry when it was TRUE rather than only when it was INSERTED. A round that
+// re-fetched the header for this would be paying an RPC call for a value it
+// already held.
+//
+// It is ROUND-SCOPED on purpose: one round is one hash-pinned execution at one
+// block, so every observation it produced — whatever mechanism produced it — is
+// as-of exactly that block. Stamping the rows individually would invent a
+// per-row distinction the round does not have.
 type pollRound struct {
 	block    uint64
 	hash     []byte
+	asOf     time.Time
 	obs      []store.PriceObservation
 	servedBy chain.EndpointToken
+}
+
+// headTimestamp converts a head header's own `timestamp` field into the
+// chain-asserted as-of every row of the round carries.
+//
+// A HEADER THAT NAMES NO USABLE TIME YIELDS NO STAMP, and the round still
+// lands. Two shapes cannot be taken at face value — a value beyond int64 range
+// (it would wrap negative and read as a pre-1970 observation) and a zero
+// timestamp, which no post-genesis header on either production chain has. Both
+// mean the provider handed us a malformed header, and the honest answer is to
+// record the prices with a NULL as-of — "we cannot say how old this is" — rather
+// than to fabricate a time or to throw away a round of real oracle answers over
+// a disclosure column. The WARN is what makes the degradation visible; a
+// consumer needing an as-of then sees a missing input, which is the fail-closed
+// direction.
+func (p *Poller) headTimestamp(head chain.Head) time.Time {
+	if head.Time == 0 || head.Time > math.MaxInt64 {
+		slog.Warn("chain head reports an unusable header timestamp; this round's rows will carry NO chain-asserted as-of (source_as_of NULL) rather than a fabricated one — the prices themselves still land",
+			"engine", p.engine, "block", head.Number, "reportedTimestamp", head.Time)
+		return time.Time{}
+	}
+	return time.Unix(int64(head.Time), 0).UTC()
 }
 
 // readRound performs one ENDPOINT-COHERENT, HASH-PINNED round — the walker's
@@ -948,6 +987,10 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	}()
 
 	pin, hashBefore := head.Number, head.Hash
+	// The header's own timestamp, taken from the SAME response as the pin hash.
+	// Captured here rather than at the end so it is unmistakably a property of
+	// the block this round pinned to, not of whenever the round finished.
+	asOf := p.headTimestamp(head)
 	// THE ZERO-HASH REFUSAL, moved here from the multicall decoder: the header
 	// path is what the anchor rests on now, and a header whose hash is zero is
 	// a provider protocol violation — an anchor holding it would "verify"
@@ -1087,6 +1130,10 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 			Price:       value,
 			Decimals:    t.Decimals,
 			BlockNumber: pin,
+			// The pinned block's OWN header timestamp, already in hand from the
+			// head read that resolved this endpoint — never a process clock, and
+			// never an extra RPC call.
+			SourceAsOf: asOf,
 		})
 	}
 	if skipped := reverted + undecodable; skipped == len(p.targets) {
@@ -1100,7 +1147,7 @@ func (p *Poller) readRound(ctx context.Context) (pollRound, bool, error) {
 	}
 	// THE ONE LANDED RETURN — the only exit that keeps the starting point.
 	landed = true
-	return pollRound{block: pin, hash: hashBefore.Bytes(), obs: set.observations(), servedBy: servedBy}, true, nil
+	return pollRound{block: pin, hash: hashBefore.Bytes(), asOf: asOf, obs: set.observations(), servedBy: servedBy}, true, nil
 }
 
 // routeNextRoundPastNonLanding is the routing half of the round's one seam —

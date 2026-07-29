@@ -352,6 +352,62 @@
         "heartbeatSeconds": 86400,
         "graceSeconds": 3600
       }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "decimals": 18,
+      "roles": ["collateral"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x43b64f28A678944E0655404B0B98E443851cC34F",
+        "method": "getAssetPrice(address)",
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "symbol": "USDC",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x43b64f28A678944E0655404B0B98E443851cC34F",
+        "method": "getAssetPrice(address)",
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0x6c3ea9036406852006290770BEdFcAbA0e23A0e8",
+      "symbol": "PYUSD",
+      "decimals": 6,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x43b64f28A678944E0655404B0B98E443851cC34F",
+        "method": "getAssetPrice(address)",
+        "priceDecimals": 8
+      }
+    },
+    {
+      "chain": "eth",
+      "engine": "aave_v3_etherfi",
+      "address": "0x853d955aCEf822Db058eb8505911ED77F175b99e",
+      "symbol": "FRAX",
+      "decimals": 18,
+      "roles": ["collateral", "debt"],
+      "oracle": {
+        "kind": "poll",
+        "contract": "0x43b64f28A678944E0655404B0B98E443851cC34F",
+        "method": "getAssetPrice(address)",
+        "priceDecimals": 8
+      }
     }
   ]
 }
