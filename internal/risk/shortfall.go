@@ -42,7 +42,7 @@ import (
 )
 
 // SeizureModelProRata names the seizure assumption on the wire.
-const SeizureModelProRata = "pro-rata over counted collateral"
+const SeizureModelProRata = "pro-rata-over-counted-collateral"
 
 // ExecutionShortfall quantifies the gap between oracle marks and market
 // realization across a book, with oracles held.
@@ -63,6 +63,7 @@ func ExecutionShortfall(book []PositionInput, real []MarketRealization) (Shortfa
 
 	out := ShortfallResult{
 		HFsUnchanged: true,
+		SeizureModel: SeizureModelProRata,
 		PerEngine:    map[string]EngineShortfall{},
 	}
 	engines := map[string]*EngineShortfall{}
@@ -184,7 +185,10 @@ func shortfallForPosition(oracle, realized PositionInput, ratios map[string]*big
 		res.usdDecimals = h1.BaseDecimals
 		collat = h1.TotalCollateralBase
 		debt = h1.TotalDebtBase
-		seizable = aaveSeizableBase(h1)
+		seizable = seizableValue(h1.TotalDebtBase, aaveBonusLegs(h1))
+		// STRICT: Aave liquidates only BELOW a health factor of exactly 1e18,
+		// so HF == 1e18 is healthy — the same boundary discipline as the Debt
+		// Manager's `debt > maxBorrowLT`.
 		res.out = PositionShortfall{
 			Engine: AaveEngine, Account: h1.Account,
 			Liquidatable: !h1.IsInfinite && h1.HealthFactorWad.Cmp(wadUnit) < 0,
@@ -209,7 +213,7 @@ func shortfallForPosition(oracle, realized PositionInput, ratios map[string]*big
 		res.usdDecimals = h1.UsdDecimals
 		collat = h1.CollateralValueUSD
 		debt = h1.Borrowings
-		seizable = dmSeizableUSD(h1)
+		seizable = seizableValue(h1.Borrowings, dmBonusLegs(h1))
 		res.out = PositionShortfall{
 			Engine: DMEngine, Account: h1.Account, Liquidatable: h1.Liquidatable,
 		}

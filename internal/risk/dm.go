@@ -217,55 +217,125 @@ func APYPerSecondFromAnnual(annual100e18 *big.Int) *big.Int {
 	return new(big.Int).Div(new(big.Int).Set(annual100e18), secondsPerYear)
 }
 
-// dmSeizableUSD is the collateral a liquidator takes for covering debtUSD at
-// this position's bonus, capped by the collateral actually held:
+// ---------------------------------------------------------------------------
+// Seizure and recovery — EACH TOKEN'S OWN BONUS, on both engines.
+// ---------------------------------------------------------------------------
 //
-//	min(collateralUSD, floor(debtUSD × (HUNDRED_PERCENT + bonus) / HUNDRED_PERCENT))
+// # Why a single position-wide bonus is wrong
 //
-// The bonus is looked up per collateral token; where a position holds several
-// tokens with different bonuses the SMALLEST is used, because the liquidator
-// chooses the preference order and Solvent must not overstate what is at
-// risk. Positions with no bonus row fall back to no bonus (1.0×).
-func dmSeizableUSD(h DMHealth) *big.Int {
-	num := new(big.Int).Set(hundredPercentUnit)
-	den := new(big.Int).Set(hundredPercentUnit)
-	first := true
-	for _, c := range h.Collateral {
-		if c.LiquidationBonus == nil || c.Amount.Sign() == 0 {
-			continue
-		}
-		n, d, ok := LiquidationBonusMultiplier(DMEngine, c.LiquidationBonus)
-		if !ok {
-			continue
-		}
-		if first || new(big.Int).Mul(n, den).Cmp(new(big.Int).Mul(num, d)) < 0 {
-			num, den = n, d
-			first = false
-		}
-	}
-	gross := MulDivFloor(h.Borrowings, num, den)
-	return minBig(h.CollateralValueUSD, gross)
+// The deployed loop (DebtManagerCore.sol:625,
+// _getCollateralTokensForDebtAmount) walks collateral token by token and
+// applies THAT token's `liquidationBonus`:
+//
+//	netCollateralRepayValue = totalCollateral × HUNDRED_PERCENT
+//	                          / (HUNDRED_PERCENT + $.collateralTokenConfig[tok].liquidationBonus)
+//
+// An earlier revision of this file collapsed a mixed-bonus position onto the
+// SMALLEST bonus. That maximizes recoverable debt and therefore UNDERSTATES
+// bad debt — the one direction a solvency census must never err in. On two
+// equal $1,000 legs at 1% and 4%:
+//
+//	min-bonus:  floor(2000000000 × 100/101)                     = 1980198019
+//	per-token:  floor(1e9 × 100/101) + floor(1e9 × 100/104)     = 1951637470
+//
+// a 28560549 (~$28.56) overstatement of what the collateral can retire, which
+// is bad debt reported as solvency.
+//
+// # The two columns, and the direction each one moves
+//
+//   - recoverableDebt is the debt this collateral can actually retire. It uses
+//     each token's own bonus, so it NEVER OVERSTATES recovery and therefore
+//     never understates bad debt.
+//   - seizableValue is the collateral a liquidator takes. Seizure is modeled
+//     PRO-RATA over counted collateral (the assumption ExecutionShortfall
+//     already declares): token i retires dᵢ = debt × vᵢ/V and hands over
+//     dᵢ × (1+bᵢ), capped at vᵢ. On a single-bonus position this reduces
+//     EXACTLY to min(V, floor(debt × (1+b))) — risk-quant R4's formula — so no
+//     single-bonus number moved when this law replaced the old one. On a
+//     mixed-bonus position it is LARGER than the min-bonus collapse, because
+//     retiring a dollar of debt with a high-bonus token costs more collateral.
+//     A real liquidator picks a preference order and would take the
+//     lowest-bonus token first, so the min-bonus collapse is the true lower
+//     bound and this is the pro-rata central case — disclosed, not silent.
+//
+// A leg whose param row carries no usable bonus falls back to 1.00×. That is
+// the only honest default (inventing a bonus is fabrication), and it biases
+// recoverable upward for that leg; it is disclosed here rather than hidden.
+
+// bonusLeg is one counted-collateral leg with its OWN liquidation-bonus
+// multiplier already resolved to (num, den).
+type bonusLeg struct {
+	value *big.Int
+	num   *big.Int
+	den   *big.Int
 }
 
-// aaveSeizableBase mirrors dmSeizableUSD on the Aave surface, where the bonus
-// is a basis-point MULTIPLIER (10600 = 1.06×), not an additive term.
-func aaveSeizableBase(h AaveHealth) *big.Int {
-	num := new(big.Int).Set(bpsUnit)
-	den := new(big.Int).Set(bpsUnit)
-	first := true
-	for _, r := range h.Reserves {
-		if r.LiquidationBonusBps == nil || r.CollateralBase.Sign() == 0 {
+// dmBonusLegs extracts a Debt Manager position's counted collateral.
+func dmBonusLegs(h DMHealth) []bonusLeg {
+	out := make([]bonusLeg, 0, len(h.Collateral))
+	for _, c := range h.Collateral {
+		if c.ValueUSD == nil || c.ValueUSD.Sign() == 0 {
 			continue
 		}
-		n, d, ok := LiquidationBonusMultiplier(AaveEngine, r.LiquidationBonusBps)
-		if !ok {
+		out = append(out, bonusLeg{value: c.ValueUSD, num: hundredPercentUnit, den: hundredPercentUnit})
+		if c.LiquidationBonus == nil {
 			continue
 		}
-		if first || new(big.Int).Mul(n, den).Cmp(new(big.Int).Mul(num, d)) < 0 {
-			num, den = n, d
-			first = false
+		if n, d, ok := LiquidationBonusMultiplier(DMEngine, c.LiquidationBonus); ok {
+			out[len(out)-1].num, out[len(out)-1].den = n, d
 		}
 	}
-	gross := MulDivFloor(h.TotalDebtBase, num, den)
-	return minBig(h.TotalCollateralBase, gross)
+	return out
+}
+
+// aaveBonusLegs extracts an Aave position's counted collateral. The Aave bonus
+// is a basis-point MULTIPLIER (10600 = 1.06×), not an additive term.
+func aaveBonusLegs(h AaveHealth) []bonusLeg {
+	out := make([]bonusLeg, 0, len(h.Reserves))
+	for _, r := range h.Reserves {
+		if r.CollateralBase == nil || r.CollateralBase.Sign() == 0 {
+			continue
+		}
+		out = append(out, bonusLeg{value: r.CollateralBase, num: bpsUnit, den: bpsUnit})
+		if r.LiquidationBonusBps == nil {
+			continue
+		}
+		if n, d, ok := LiquidationBonusMultiplier(AaveEngine, r.LiquidationBonusBps); ok {
+			out[len(out)-1].num, out[len(out)-1].den = n, d
+		}
+	}
+	return out
+}
+
+// recoverableDebt is Σᵢ floor(vᵢ × denᵢ / numᵢ) — the debt this collateral can
+// retire, each leg net of ITS OWN liquidation bonus, floored per leg exactly as
+// the deployed loop does.
+func recoverableDebt(legs []bonusLeg) *big.Int {
+	out := new(big.Int)
+	for _, l := range legs {
+		out.Add(out, MulDivFloor(l.value, l.den, l.num))
+	}
+	return out
+}
+
+// seizableValue is Σᵢ min(vᵢ, floor(debt × vᵢ × numᵢ / (V × denᵢ))) — the
+// collateral handed to a liquidator under pro-rata seizure, per leg at its own
+// bonus and capped by the leg's own balance. Zero when the position holds no
+// counted collateral.
+func seizableValue(debt *big.Int, legs []bonusLeg) *big.Int {
+	total := new(big.Int)
+	for _, l := range legs {
+		total.Add(total, l.value)
+	}
+	out := new(big.Int)
+	if total.Sign() == 0 {
+		return out
+	}
+	for _, l := range legs {
+		n := new(big.Int).Mul(debt, l.value)
+		n.Mul(n, l.num)
+		d := new(big.Int).Mul(total, l.den)
+		out.Add(out, minBig(l.value, n.Div(n, d)))
+	}
+	return out
 }

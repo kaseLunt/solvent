@@ -105,7 +105,10 @@ func TestExecutionShortfallOraclesHeldHFsBitIdentical(t *testing.T) {
 	require.Equal(t, 1, res.PerEngine[DMEngine].LiquidatablePositions)
 	require.Equal(t, 0, res.PerEngine[DMEngine].InsolventPositions)
 	require.Equal(t, uint8(6), res.PerEngine[DMEngine].UsdDecimals)
-	require.Equal(t, SeizureModelProRata, "pro-rata over counted collateral")
+	// The seizure assumption is stamped ON THE WIRE: a shortfall number is
+	// only interpretable next to the model that produced it.
+	require.Equal(t, "pro-rata-over-counted-collateral", SeizureModelProRata)
+	require.Equal(t, SeizureModelProRata, res.SeizureModel)
 }
 
 // TestExecutionShortfallProducesBadDebt: push the depeg deep enough that the
@@ -263,35 +266,6 @@ func TestSameWadHealth(t *testing.T) {
 	require.False(t, sameWadHealth(big.NewInt(1), big.NewInt(2)))
 }
 
-// TestAaveSeizableBaseUsesTheSmallestBonus mirrors the DM-side check.
-func TestAaveSeizableBaseUsesTheSmallestBonus(t *testing.T) {
-	h, err := ComputeAaveHealth(AaveInput{
-		Account: acctA,
-		Reserves: []AaveReserve{
-			simpleReserve(aWeETH, 8, "100000000", "0", true),
-			simpleReserve(aPYUSD, 8, "100000000", "0", true),
-			simpleReserve(aUSDC, 8, "0", "100000000", false),
-		},
-		Params: []ParamRow{
-			aaveParam(aWeETH, "8100", "10600"),
-			aaveParam(aPYUSD, "7500", "10500"),
-		},
-		Prices: []PriceInput{
-			adapterPrice(aWeETH, "100000000"),
-			adapterPrice(aPYUSD, "100000000"),
-			adapterPrice(aUSDC, "100000000"),
-		},
-	})
-	require.NoError(t, err)
-	// debt 1e8 × min(1.06, 1.05) = 105000000, below the 2e8 of collateral.
-	requireBig(t, "105000000", aaveSeizableBase(h))
-
-	// An unusable bonus is skipped rather than crashing the multiplier.
-	h.Reserves[0].LiquidationBonusBps = big.NewInt(1) // below 1.00× ⇒ rejected
-	h.Reserves[1].LiquidationBonusBps = nil
-	requireBig(t, "100000000", aaveSeizableBase(h), "falls back to 1.00×")
-}
-
 // TestExecutionShortfallDetectsAMovedOracle proves the HFsUnchanged guard is
 // LIVE. Through the public API the market-realization pass never touches a
 // price, so the false branch is unreachable and indistinguishable from a
@@ -350,29 +324,6 @@ func TestExecutionShortfallSkipsZeroValueLegs(t *testing.T) {
 		"the zero-amount leg contributes nothing and does not dilute the blend")
 }
 
-// TestDMSeizableUSDSkipsUnusableBonusRows covers the per-leg guards.
-func TestDMSeizableUSDSkipsUnusableBonusRows(t *testing.T) {
-	h := DMHealth{
-		Borrowings:         mustBig(t, "1000000"),
-		CollateralValueUSD: mustBig(t, "5000000"),
-		Collateral: []DMCollateralValue{
-			{Asset: dUSDC, Amount: big.NewInt(1), LiquidationBonus: nil},
-			{Asset: dUSDT, Amount: big.NewInt(0), LiquidationBonus: mustBig(t, "50000000000000000000")},
-			{Asset: dWeETH, Amount: big.NewInt(1), LiquidationBonus: big.NewInt(-1)},
-		},
-	}
-	requireBig(t, "1000000", dmSeizableUSD(h), "every bonus row is unusable ⇒ 1.00×")
-
-	h.Collateral = append(h.Collateral, DMCollateralValue{
-		Asset: dETHFI, Amount: big.NewInt(1), LiquidationBonus: mustBig(t, "4000000000000000000"),
-	})
-	requireBig(t, "1040000", dmSeizableUSD(h), "1.04×")
-
-	// Capped by the collateral actually held.
-	h.CollateralValueUSD = mustBig(t, "1000000")
-	requireBig(t, "1000000", dmSeizableUSD(h))
-}
-
 // TestExecutionShortfallPropagatesRealizedPassErrors covers the second health
 // computation's failure path, reachable only through the seam.
 func TestExecutionShortfallPropagatesRealizedPassErrors(t *testing.T) {
@@ -404,4 +355,98 @@ func TestExecutionShortfallPropagatesRealizedPassErrors(t *testing.T) {
 		Prices:   []PriceInput{adapterPrice(aWeETH, "100000000")},
 	}}}, nil)
 	require.ErrorIs(t, err, ErrMissingPrice)
+}
+
+// TestAaveSeizableUsesEachTokensOwnBonus is BLOCKER-2's Aave arm. Two equal
+// 1e8 collateral legs at bonuses 10600 and 10500 bps against 1e8 of debt:
+//
+//	per-token: min(1e8, floor(1e8 x 1e8 x 10600 / (2e8 x 1e4)))   = 53000000
+//	         + min(1e8, floor(1e8 x 1e8 x 10500 / (2e8 x 1e4)))   = 52500000
+//	                                                              = 105500000
+//	min-bonus collapse: min(2e8, floor(1e8 x 10500/1e4))          = 105000000
+//
+// and on the recovery side the collapse OVERSTATES what the collateral can
+// retire, which is the direction that hides bad debt.
+func TestAaveSeizableUsesEachTokensOwnBonus(t *testing.T) {
+	h, err := ComputeAaveHealth(AaveInput{
+		Account: acctA,
+		Reserves: []AaveReserve{
+			simpleReserve(aWeETH, 8, "100000000", "0", true),
+			simpleReserve(aPYUSD, 8, "100000000", "0", true),
+			simpleReserve(aUSDC, 8, "0", "100000000", false),
+		},
+		Params: []ParamRow{
+			aaveParam(aWeETH, "8100", "10600"),
+			aaveParam(aPYUSD, "7500", "10500"),
+		},
+		Prices: []PriceInput{
+			adapterPrice(aWeETH, "100000000"),
+			adapterPrice(aPYUSD, "100000000"),
+			adapterPrice(aUSDC, "100000000"),
+		},
+	})
+	require.NoError(t, err)
+
+	legs := aaveBonusLegs(h)
+	require.Len(t, legs, 2)
+	requireBig(t, "105500000", seizableValue(h.TotalDebtBase, legs))
+	requireBig(t, "189577717", recoverableDebt(legs),
+		"floor(1e8 x 1e4/10600) + floor(1e8 x 1e4/10500)")
+
+	// The REFUTED min-bonus collapse, computed here from the same totals.
+	requireBig(t, "105000000", minBig(h.TotalCollateralBase,
+		MulDivFloor(h.TotalDebtBase, big.NewInt(10500), BpsUnit())))
+	collapsed := MulDivFloor(h.TotalCollateralBase, BpsUnit(), big.NewInt(10500))
+	requireBig(t, "190476190", collapsed)
+	require.Equal(t, 1, collapsed.Cmp(recoverableDebt(legs)),
+		"the collapse OVERSTATES recovery, which understates bad debt")
+}
+
+// TestAaveEligibilityIsStrictAtExactlyOne: Aave liquidates only BELOW a health
+// factor of exactly 1e18, so HF == 1e18 is HEALTHY. Kills a `<` to `<=`
+// mutation on both the waterfall and shortfall eligibility tests; the Debt
+// Manager analog is TestComputeDMHealthStrictInequalityBoundary.
+//
+//	C = 1e8, LT = 8100 bps, D = 81000000
+//	HF = floor(1e8 x 8100 x 1e18 / (1e4 x 81000000)) = 1000000000000000000 exactly
+func TestAaveEligibilityIsStrictAtExactlyOne(t *testing.T) {
+	build := func(debt string) PositionInput {
+		return PositionInput{Engine: AaveEngine, Aave: &AaveInput{
+			Account: acctA,
+			Reserves: []AaveReserve{
+				simpleReserve(aWeETH, 8, "100000000", "0", true),
+				simpleReserve(aUSDC, 8, "0", debt, false),
+			},
+			Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+			Prices: []PriceInput{adapterPrice(aWeETH, "100000000"), adapterPrice(aUSDC, "100000000")},
+		}}
+	}
+
+	at := build("81000000")
+	h, err := ComputeAaveHealth(*at.Aave)
+	require.NoError(t, err)
+	requireBig(t, "1000000000000000000", h.HealthFactorWad, "exactly 1.0")
+
+	m, err := measurePosition(at)
+	require.NoError(t, err)
+	require.False(t, m.eligible, "HF == 1e18 is HEALTHY: the protocol liquidates strictly below")
+	requireBig(t, "0", m.badDebt)
+
+	res, err := ExecutionShortfall([]PositionInput{at}, nil)
+	require.NoError(t, err)
+	require.False(t, res.Positions[0].Liquidatable)
+	require.Equal(t, 0, res.PerEngine[AaveEngine].LiquidatablePositions)
+
+	// One unit of debt more and it crosses.
+	over := build("81000001")
+	h, err = ComputeAaveHealth(*over.Aave)
+	require.NoError(t, err)
+	requireBig(t, "999999987654321140", h.HealthFactorWad)
+	m, err = measurePosition(over)
+	require.NoError(t, err)
+	require.True(t, m.eligible)
+
+	res, err = ExecutionShortfall([]PositionInput{over}, nil)
+	require.NoError(t, err)
+	require.True(t, res.Positions[0].Liquidatable)
 }

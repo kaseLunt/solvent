@@ -282,6 +282,49 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   inferred not read (Task 6 probe candidate); waterfall grid WAD-scaled; -race still owed.
   NEXT: commit → FABLE ADVERSARIAL RE-DERIVATION (independent recomputation, per the
   standing money-code protocol) → Codex round.
+- FABLE RE-DERIVATION VERDICT (risk-quant, ~19min): **NUMBERS DO NOT HOLD — two blocking
+  arithmetic defects that 103 passing tests could not see**, found by source reads + LIVE
+  tokenConfig probes the wave skipped. (1) liquidUSD (27.1% of book) is rate × snap(USDC):
+  the stable snap applies to the BASE inside PriceProviderV2's composition (:268-271; live
+  read: baseAsset=USDC, isStableToken false on the composite, true on the base) — the
+  in-band control scenario moved an asset the chain provably holds flat, breaking its own
+  declared zero-change invariant. (2) the bad-debt/recoverable leg used the MIN bonus
+  multiplier — maximizing recoverable, UNDERSTATING insolvency ≤~3% on mixed-bonus books —
+  under a docstring claiming conservatism; correct law is the chain's per-token form
+  Σ floor(vᵢ·100e18/(100e18+bᵢ)) (DebtManagerCore.sol:625). Also: three mutation-survivable
+  laws named with exact discriminators (component-4 floor vs half-up both engines; Aave
+  HF==1e18 eligibility strictness; the mixed-bonus insolvency vector); D10/D11/D8/pro-rata
+  ACCEPTED (D11 verified at the boundary integers both engines); inferred lens composition
+  REJECTED as standing state → tokenConfig probe PROMOTED TO REQUIRED in plan Task 6 (this
+  commit); the wave's snap-band correction CONFIRMED against both deployed sources ("my
+  R3(d) was false at exactly its named point"). Every other law reproduced EXACTLY under
+  independent recomputation with integers shown, incl. the full waterfall bad-debt column
+  and both liquidation-price boundary directions. THE MODEL-SPLIT PROTOCOL VALIDATED: Opus
+  transcribed every pinned law perfectly; both failures lived in the UNPINNED corners where
+  only re-derivation looks. Fix wave 4b dispatched to the original wave agent (both
+  blockers + three should-fixes + cosmetics); Codex round follows the fix.
+- WAVE 4b LANDED (2026-07-29 10:54): both blockers fixed with the wave INDEPENDENTLY
+  RE-VERIFYING the ruling's arithmetic before implementing (PriceProviderV2.sol:260-277
+  quoted — the base IS snapped inside composition, and :354 proves composite≠stable, so the
+  old note was exactly half-right). Blocker 1: base_stable_snap transform (three-way switch,
+  never multiplies raw factor; loader guards mirror chain invariants incl. the XOR at :354);
+  liquidUSD rows corrected in all three stable JSONs; regression fixture holds liquidUSD +
+  USDC side-by-side with BIT-IDENTITY asserted on the in-band control. Blocker 2: per-token
+  bonus law (recoverableDebt = Σ floor(vᵢ·denᵢ/numᵢ) chain-shaped; both collapse helpers
+  DELETED); mixed-bonus vector pins the $28.56 understatement on a $2k position; reduction
+  proof shows single-bonus positions byte-identical (no prior number moved). DISAGREEMENT-
+  BY-GOING-FURTHER accepted: min-bonus removed from at-risk too (one law on one page;
+  collapse direction not obviously safe for cascade figures; direction-split docstring +
+  preference-order disclosure). Should-fixes: exactly-half AND super-half valuation vectors
+  BOTH engines; HF==1e18 strictness pinned both call sites (D+1 eligible). Cosmetics incl.
+  SeizureModel on the wire (hyphenated token — Task 7 OpenAPI enum note). 113 tests / 99
+  subtests, coverage 99.1% held, integrator re-verified (build/vet/test/gofmt clean).
+  SHARPENED OPEN ITEM: the 1.00× bonus fallback is now load-bearing on recovery — Task 5's
+  ParamRow adapter MUST carry LiqBonus through or Aave bad-debt silently uses par (deriver
+  populates it per Wave 2a; the adapter is the remaining link). base_stable_snap applied to
+  liquidUSD only — the REQUIRED Task 6 tokenConfig sweep closes the class by enumeration.
+  NEXT: commit → risk-quant re-read for the verdict flip → Codex round on the full Task 4
+  range.
 - SCOPE GAP CAUGHT BY THE GATE (2026-07-29 00:40): recon/feeds.json is NOT in W2
   allowed_paths (W1 had it; W2 authoring missed the price-registry mirror) — pre-commit
   correctly BLOCKED the 2b commit. Fix: W2 allowed_paths += recon/feeds.json (durable

@@ -151,9 +151,18 @@ func TestComputeDMHealthRealParamTuples(t *testing.T) {
 	require.True(t, ok)
 	requireBig(t, "1919500000000000000", v, "1.9195")
 
-	// The seizable amount uses the SMALLEST bonus held (EURC-class 1%), so
-	// collateral at risk is never overstated.
-	requireBig(t, "50500000", dmSeizableUSD(h), "$50 debt × 1.01")
+	// Seizure is pro-rata over counted collateral with EACH TOKEN'S OWN
+	// bonus (see the seizure/recovery block in dm.go):
+	//   V   = 101500000
+	//   USDC leg  min(100000000, floor(50000000 x 100000000 x 101 / (101500000 x 100))) = 49753694
+	//   ETHFI leg min(  1500000, floor(50000000 x   1500000 x 104 / (101500000 x 100))) =   768472
+	legs := dmBonusLegs(h)
+	requireBig(t, "50522166", seizableValue(h.Borrowings, legs))
+	// The REFUTED min-bonus collapse, computed here from the same totals.
+	requireBig(t, "50500000", MulDivFloor(h.Borrowings,
+		new(big.Int).Add(HundredPercentUnit(), mustBig(t, "1000000000000000000")), HundredPercentUnit()))
+	// Recoverable is per token too: floor(1e8 x 100/101) + floor(1500000 x 100/104).
+	requireBig(t, "100452207", recoverableDebt(legs))
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +221,8 @@ func TestComputeDMHealthEmptySetProbes(t *testing.T) {
 	require.True(t, h.Liquidatable)
 	requireBig(t, "0", h.MaxBorrowLT)
 	require.True(t, h.HealthFactor.IsZero())
-	requireBig(t, "0", dmSeizableUSD(h), "nothing to seize")
+	requireBig(t, "0", seizableValue(h.Borrowings, dmBonusLegs(h)), "nothing to seize")
+	requireBig(t, "0", recoverableDebt(dmBonusLegs(h)))
 }
 
 // ---------------------------------------------------------------------------
@@ -571,4 +581,179 @@ func TestLiquidationPriceScaleFactorIsInvalidWhenUnset(t *testing.T) {
 	require.False(t, lp.ScaleFactor.Valid())
 	_, ok := lp.ScaleFactor.FloorScaled(WadUnit())
 	require.False(t, ok)
+}
+
+// TestPerTokenBonusLawVsMinBonusCollapse is BLOCKER-2's regression vector.
+//
+// Two equal $1,000 Debt Manager legs at bonuses 1e18 (1%) and 4e18 (4%), both
+// material. An earlier revision collapsed the position onto the SMALLEST bonus,
+// which maximizes recoverable debt and therefore UNDERSTATES bad debt:
+//
+//	min-bonus collapse: floor(2000000000 x 100/101)                 = 1980198019
+//	per-token (chain):  floor(1e9 x 100/101) + floor(1e9 x 100/104)
+//	                    =        990099009   +        961538461     = 1951637470
+//
+// a 28560549 (~$28.56) overstatement of recovery — bad debt reported as
+// solvency. Both integers are hard-coded here so the collapse cannot come back.
+func TestPerTokenBonusLawVsMinBonusCollapse(t *testing.T) {
+	build := func(debt string) DMInput {
+		return DMInput{
+			Account: acctA,
+			DebtUSD: mustBig(t, debt),
+			Collateral: []DMCollateral{
+				{Asset: dUSDC, Amount: mustBig(t, "1000000000"), Decimals: 6},
+				{Asset: dETHFI, Amount: mustBig(t, "1000000000000000000000"), Decimals: 18},
+			},
+			Params: []ParamRow{
+				dmParam(dUSDC, "95000000000000000000", "1000000000000000000"),
+				dmParam(dETHFI, "65000000000000000000", "4000000000000000000"),
+			},
+			// 1000 ETHFI at $1.00 == 1000000000 USD 6-dec, matching the USDC leg.
+			Prices: []PriceInput{enginePrice(dUSDC, "1000000"), enginePrice(dETHFI, "1000000")},
+		}
+	}
+
+	h, err := ComputeDMHealth(build("2000000000"))
+	require.NoError(t, err)
+	requireBig(t, "1000000000", h.Collateral[0].ValueUSD)
+	requireBig(t, "1000000000", h.Collateral[1].ValueUSD)
+	requireBig(t, "2000000000", h.CollateralValueUSD)
+	require.True(t, h.Liquidatable)
+
+	legs := dmBonusLegs(h)
+	require.Len(t, legs, 2)
+
+	// The shipped law, per token.
+	requireBig(t, "1951637470", recoverableDebt(legs))
+	requireBig(t, "990099009", MulDivFloor(mustBig(t, "1000000000"), HundredPercentUnit(),
+		new(big.Int).Add(HundredPercentUnit(), mustBig(t, "1000000000000000000"))))
+	requireBig(t, "961538461", MulDivFloor(mustBig(t, "1000000000"), HundredPercentUnit(),
+		new(big.Int).Add(HundredPercentUnit(), mustBig(t, "4000000000000000000"))))
+
+	// The REFUTED min-bonus collapse, computed here.
+	collapsed := MulDivFloor(h.CollateralValueUSD, HundredPercentUnit(),
+		new(big.Int).Add(HundredPercentUnit(), mustBig(t, "1000000000000000000")))
+	requireBig(t, "1980198019", collapsed)
+	require.NotEqual(t, recoverableDebt(legs).String(), collapsed.String(),
+		"the vector must actually separate the two laws")
+
+	// Bad debt: the collapse understates it by exactly the difference.
+	requireBig(t, "48362530", badDebtFrom(h.Borrowings, recoverableDebt(legs), true))
+	requireBig(t, "19801981", badDebtFrom(h.Borrowings, collapsed, true))
+	requireBig(t, "28560549", new(big.Int).Sub(
+		badDebtFrom(h.Borrowings, recoverableDebt(legs), true),
+		badDebtFrom(h.Borrowings, collapsed, true)))
+
+	// Seizure also separates, at a debt below total recoverable.
+	h2, err := ComputeDMHealth(build("500000000"))
+	require.NoError(t, err)
+	legs2 := dmBonusLegs(h2)
+	requireBig(t, "512500000", seizableValue(h2.Borrowings, legs2))
+	requireBig(t, "505000000", MulDivFloor(h2.Borrowings,
+		new(big.Int).Add(HundredPercentUnit(), mustBig(t, "1000000000000000000")), HundredPercentUnit()),
+		"the min-bonus collapse understates seized collateral too")
+	require.False(t, h2.Liquidatable)
+	requireBig(t, "0", badDebtFrom(h2.Borrowings, recoverableDebt(legs2), h2.Liquidatable))
+}
+
+// TestSeizableValueReducesToTheSingleBonusFormula: on a position with one
+// bonus the pro-rata per-token law must equal risk-quant R4's
+// min(collateral, debt x (1+bonus)) EXACTLY — which is why replacing the old
+// law moved no single-bonus number in this suite.
+func TestSeizableValueReducesToTheSingleBonusFormula(t *testing.T) {
+	bonus := mustBig(t, "2000000000000000000") // 2%
+	num := new(big.Int).Add(HundredPercentUnit(), bonus)
+	for _, tc := range []struct{ v, d string }{
+		{"1800000000", "1500000000"},
+		{"1200000000", "1500000000"},
+		{"2000000000", "1900000000"},
+		{"1000000000", "1"},
+		{"1", "1000000000"},
+	} {
+		v, d := mustBig(t, tc.v), mustBig(t, tc.d)
+		legs := []bonusLeg{{value: v, num: num, den: HundredPercentUnit()}}
+		want := minBig(v, MulDivFloor(d, num, HundredPercentUnit()))
+		require.Equal(t, want.String(), seizableValue(d, legs).String(),
+			"v=%s d=%s", tc.v, tc.d)
+	}
+}
+
+// TestBonusLegsFallBackToParOnUnusableRows: a leg whose param row carries no
+// usable bonus falls back to 1.00x. Inventing a bonus would be fabrication;
+// the fallback biases recoverable UPWARD for that leg and is disclosed.
+func TestBonusLegsFallBackToParOnUnusableRows(t *testing.T) {
+	h := DMHealth{
+		Borrowings:         mustBig(t, "1000000"),
+		CollateralValueUSD: mustBig(t, "5000000"),
+		Collateral: []DMCollateralValue{
+			{Asset: dUSDT, ValueUSD: big.NewInt(0), LiquidationBonus: mustBig(t, "50000000000000000000")},
+			{Asset: dUSDC, ValueUSD: mustBig(t, "5000000"), LiquidationBonus: nil},
+		},
+	}
+	legs := dmBonusLegs(h)
+	require.Len(t, legs, 1, "a zero-value leg carries nothing")
+	require.Equal(t, 0, legs[0].num.Cmp(legs[0].den), "no usable bonus => 1.00x")
+	requireBig(t, "5000000", recoverableDebt(legs))
+	requireBig(t, "1000000", seizableValue(h.Borrowings, legs))
+
+	h.Collateral[1].LiquidationBonus = big.NewInt(-1) // rejected by the multiplier
+	legs = dmBonusLegs(h)
+	require.Equal(t, 0, legs[0].num.Cmp(legs[0].den))
+
+	h.Collateral[1].LiquidationBonus = mustBig(t, "4000000000000000000")
+	legs = dmBonusLegs(h)
+	requireBig(t, "104000000000000000000", legs[0].num)
+	requireBig(t, "100000000000000000000", legs[0].den)
+
+	a := AaveHealth{Reserves: []AaveReserveValue{
+		{Asset: aUSDC, CollateralBase: big.NewInt(0), LiquidationBonusBps: big.NewInt(11000)},
+		{Asset: aWeETH, CollateralBase: mustBig(t, "100000000"), LiquidationBonusBps: nil},
+		{Asset: aFRAX, CollateralBase: mustBig(t, "100000000"), LiquidationBonusBps: big.NewInt(1)},
+	}}
+	alegs := aaveBonusLegs(a)
+	require.Len(t, alegs, 2)
+	for _, l := range alegs {
+		require.Equal(t, 0, l.num.Cmp(l.den), "no usable bonus => 1.00x")
+	}
+	requireBig(t, "200000000", recoverableDebt(alegs))
+	requireBig(t, "100000000", seizableValue(mustBig(t, "100000000"), alegs))
+}
+
+// TestComputeDMHealthValuationFloorsSuperHalf pins component 4 on the Debt
+// Manager against half-up. The earlier fixtures all had sub-half remainders,
+// which floor and half-up agree on.
+//
+//	1500000 x 1000001 / 1e6 = 1500001.5 exactly  -> floor 1500001, half-up 1500002
+//	1500001 x 1000001 / 1e6 = 1500002.500001     -> floor 1500002, half-up 1500003
+func TestComputeDMHealthValuationFloorsSuperHalf(t *testing.T) {
+	cases := []struct {
+		amount, want, refutedHalfUp string
+		remainder                   string
+	}{
+		{"1500000", "1500001", "1500002", "500000"},
+		{"1500001", "1500002", "1500003", "500001"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.amount, func(t *testing.T) {
+			in := DMInput{
+				Account:    acctA,
+				Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, tc.amount), Decimals: 6}},
+				Params:     []ParamRow{dmParam(dUSDC, "100000000000000000000", "0")},
+				Prices:     []PriceInput{enginePrice(dUSDC, "1000001")},
+			}
+			h, err := ComputeDMHealth(in)
+			require.NoError(t, err)
+			requireBig(t, tc.want, h.Collateral[0].ValueUSD, "convertCollateralTokenToUsd truncates")
+
+			prod := new(big.Int).Mul(mustBig(t, tc.amount), mustBig(t, "1000001"))
+			den := pow10(6)
+			q, rem := new(big.Int).QuoRem(prod, den, new(big.Int))
+			requireBig(t, tc.want, q)
+			requireBig(t, tc.remainder, rem)
+			require.GreaterOrEqual(t, rem.Cmp(new(big.Int).Div(den, big.NewInt(2))), 0,
+				"the remainder must be at or above half, or the vector proves nothing")
+			halfUp := new(big.Int).Add(prod, new(big.Int).Div(den, big.NewInt(2)))
+			requireBig(t, tc.refutedHalfUp, halfUp.Div(halfUp, den))
+		})
+	}
 }

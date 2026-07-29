@@ -126,10 +126,32 @@ type AssetResponse struct {
 	ChainID    uint64    `json:"chain_id"`
 	Symbol     string    `json:"symbol,omitempty"`
 	RespondsTo []AxisRef `json:"responds_to"`
-	// StableSnap applies PriceProviderV2's stable snap after shocking. Only
-	// meaningful for DM prices, which are 6-decimal.
-	StableSnap bool   `json:"stable_snap,omitempty"`
-	Note       string `json:"note,omitempty"`
+	// StableSnap marks an `isStableToken` config: PriceProviderV2 snaps this
+	// token's OWN output to exactly 1e6 inside the open band. Only meaningful
+	// for DM prices, which are 6-decimal.
+	StableSnap bool `json:"stable_snap,omitempty"`
+	// BaseStableSnap marks a token that is NOT itself a stable but whose
+	// price is COMPOSED over a stable base — `rate × price(baseAsset)` with
+	// baseAsset an `isStableToken` config.
+	//
+	// PriceProviderV2.price() snaps the BASE before multiplying
+	// (PriceProviderV2.sol:268-271):
+	//
+	//	if (baseConfig.isStableToken) {
+	//	    basePrice = _getStablePrice(basePrice, basePriceDecimals);
+	//	    basePriceDecimals = decimals();
+	//	}
+	//
+	// so a shock to the base's USD axis reaches this token only through the
+	// snap: its effective factor is snap(1e6 × f) / 1e6. An in-band base
+	// shock therefore holds this token EXACTLY, and modeling it as a linear
+	// ×f is wrong on every in-band scenario.
+	//
+	// Mutually exclusive with StableSnap, matching the chain: a config with a
+	// baseAsset may not also be isStableToken (PriceProviderV2.sol:354,
+	// StableTokenCannotHaveBaseAsset).
+	BaseStableSnap bool   `json:"base_stable_snap,omitempty"`
+	Note           string `json:"note,omitempty"`
 }
 
 // MarketRealizationSpec is the market-value axis carried as scenario data. It
@@ -332,6 +354,17 @@ func (s Scenario) Validate() error {
 		if len(r.RespondsTo) == 0 {
 			return bad("%s: propagation[%d] (%s): responds_to is empty", s.ID, i, r.Asset)
 		}
+		if r.StableSnap && r.BaseStableSnap {
+			return bad("%s: propagation[%d] (%s): stable_snap and base_stable_snap are mutually exclusive — on chain a config with a baseAsset may not be isStableToken (PriceProviderV2 StableTokenCannotHaveBaseAsset)", s.ID, i, r.Asset)
+		}
+		if r.BaseStableSnap {
+			// The base snap is a transform of ONE stable base's price. A row
+			// responding to several axes has no unambiguous base factor to
+			// snap, so the schema refuses it rather than guessing.
+			if len(r.RespondsTo) != 1 || r.RespondsTo[0].Axis != AxisStableUSD {
+				return bad("%s: propagation[%d] (%s): base_stable_snap requires exactly one responds_to entry on the %s axis (the stable base)", s.ID, i, r.Asset, AxisStableUSD)
+			}
+		}
 		for j, a := range r.RespondsTo {
 			if err := validateAxisRef(s.ID, fmt.Sprintf("propagation[%d].responds_to[%d]", i, j), a); err != nil {
 				return err
@@ -476,6 +509,12 @@ func (s Scenario) WithSingleShockFactor(num, den *big.Int) (Scenario, error) {
 // ---------------------------------------------------------------------------
 
 // AppliedShock records what happened to one price input.
+//
+// FactorNum/FactorDen are the RAW product of the shocked axes this asset
+// responds to — what the scenario declared. Before/After are the realized
+// move, which differs from the raw factor whenever a transform fired: read
+// Snapped (this token's own output snapped), BaseSnapped (its stable BASE
+// snapped, so an in-band shock did not reach it at all), or CapBound.
 type AppliedShock struct {
 	Asset     common.Address
 	ChainID   uint64
@@ -485,7 +524,10 @@ type AppliedShock struct {
 	Before    *big.Int
 	After     *big.Int
 	Snapped   bool
-	CapBound  bool
+	// BaseSnapped: the token's stable BASE snapped back to par inside the
+	// composition, so the declared factor did not reach this price.
+	BaseSnapped bool
+	CapBound    bool
 }
 
 // HeldFlatInput records a price the scenario did not describe.
@@ -569,16 +611,31 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 			}
 
 			before := orZero(p.Value)
-			after := MulDivFloor(before, num, den)
+			var after *big.Int
+			snapped, baseSnapped := false, false
 
-			snapped := false
-			if r.StableSnap {
+			switch {
+			case r.BaseStableSnap:
+				// price = rate × snap(base). The rate is held, so the shock
+				// reaches this token only through the base's snap: the
+				// effective factor is snap(1e6 × f) / 1e6.
+				if p.Decimals != 6 {
+					return nil, assetErr("apply scenario", engine, p.Asset, ErrMixedPriceDecimals,
+						fmt.Sprintf("base_stable_snap needs a 6-decimal price, got %d", p.Decimals))
+				}
+				base, bs := ApplyDMStableSnap(MulDivFloor(stablePrice, num, den))
+				baseSnapped = bs
+				after = MulDivFloor(before, base, stablePrice)
+			case r.StableSnap:
 				if p.Decimals != 6 {
 					return nil, assetErr("apply scenario", engine, p.Asset, ErrMixedPriceDecimals,
 						fmt.Sprintf("stable_snap needs a 6-decimal price, got %d", p.Decimals))
 				}
-				after, snapped = ApplyDMStableSnap(after)
+				after, snapped = ApplyDMStableSnap(MulDivFloor(before, num, den))
+			default:
+				after = MulDivFloor(before, num, den)
 			}
+
 			capBound := false
 			if cp.CapValue != nil {
 				after, capBound = ApplyPriceCap(after, cp.CapValue)
@@ -590,7 +647,7 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 				Asset: p.Asset, ChainID: p.ChainID, Source: p.Source,
 				FactorNum: num, FactorDen: den,
 				Before: before, After: new(big.Int).Set(after),
-				Snapped: snapped, CapBound: capBound,
+				Snapped: snapped, BaseSnapped: baseSnapped, CapBound: capBound,
 			})
 		}
 		return out, nil

@@ -77,7 +77,8 @@
           "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
         }
       ],
-      "note": "accountant lens with a USDC base composition; it is NOT an isStableToken config (it marks around 1.168), so no snap applies"
+      "note": "accountant lens COMPOSED over a USDC base (baseAsset=USDC, isStableToken=FALSE on liquidUSD itself, TRUE on the base). PriceProviderV2.price() snaps the BASE before multiplying (PriceProviderV2.sol:268-271), so liquidUSD = rate x snap(USDC/USD): its effective factor is snap(1e6 x f)/1e6, NOT f. An in-band base shock holds liquidUSD exactly; only a shock that leaves the open band reaches it. Its own output is never snapped (a config with a baseAsset may not be isStableToken - PriceProviderV2.sol:354)",
+      "base_stable_snap": true
     }
   ],
   "out_of_model": [
@@ -88,7 +89,9 @@
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
     "the Debt Manager's debt leg is USD-NORMALIZED, so a stable depeg re-prices stable COLLATERAL but not outstanding debt - the asymmetry is the point of this scenario",
     "the Aave-side stables sit behind cap adapters (min(feed, cap)) with no snap; the Aave book is residual dust (about 2.8k USD of debt at the probe pin) so they are excluded here",
-    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read",
-    "the plus/minus 1 percent phrasing in prose is a CLOSED-band paraphrase of an OPEN-band contract; this scenario is the discriminator between the two readings"
+    "the plus/minus 1 percent phrasing in prose is a CLOSED-band paraphrase of an OPEN-band contract; this scenario is the discriminator between the two readings",
+    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read; the liquidUSD->USDC and eUSD->none bases below ARE verified against PriceProviderV2 tokenConfig",
+    "liquidUSD is 27.1 percent of book collateral and is COMPOSED over a snapped USDC base, so it moves by snap(1e6 x f)/1e6 rather than by f; the lens rate itself is held flat",
+    "eUSD is verified baseAsset=0 (a direct USD accountant lens, not composed over a stable) and is therefore correctly HELD FLAT by this scenario; it appears in the held-flat disclosure rather than the propagation matrix"
   ]
 }

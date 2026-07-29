@@ -638,3 +638,41 @@ func TestComputeAaveHealthReservesAreOrderStable(t *testing.T) {
 		require.Equal(t, a, h.Reserves[i].Asset)
 	}
 }
+
+// TestComputeAaveHealthValuationFloorsSuperHalf pins component 4 on the Aave
+// surface against half-up, the mirror of the Debt Manager vector.
+//
+//	150000000 x 100000001 / 1e8 = 150000001.5      -> floor 150000001, half-up 150000002
+//	150000001 x 100000001 / 1e8 = 150000002.50000001 -> floor 150000002, half-up 150000003
+func TestComputeAaveHealthValuationFloorsSuperHalf(t *testing.T) {
+	cases := []struct {
+		balance, want, refutedHalfUp, remainder string
+	}{
+		{"150000000", "150000001", "150000002", "50000000"},
+		{"150000001", "150000002", "150000003", "50000001"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.balance, func(t *testing.T) {
+			in := AaveInput{
+				Account:  acctA,
+				Reserves: []AaveReserve{simpleReserve(aWeETH, 8, tc.balance, "0", true)},
+				Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+				Prices:   []PriceInput{adapterPrice(aWeETH, "100000001")},
+			}
+			h, err := ComputeAaveHealth(in)
+			require.NoError(t, err)
+			requireBig(t, tc.want, h.Reserves[0].CollateralBase, "component 4 truncates")
+			requireBig(t, tc.want, h.TotalCollateralBase)
+
+			prod := new(big.Int).Mul(mustBig(t, tc.balance), mustBig(t, "100000001"))
+			den := pow10(8)
+			q, rem := new(big.Int).QuoRem(prod, den, new(big.Int))
+			requireBig(t, tc.want, q)
+			requireBig(t, tc.remainder, rem)
+			require.GreaterOrEqual(t, rem.Cmp(new(big.Int).Div(den, big.NewInt(2))), 0,
+				"the remainder must be at or above half, or the vector proves nothing")
+			halfUp := new(big.Int).Add(prod, new(big.Int).Div(den, big.NewInt(2)))
+			requireBig(t, tc.refutedHalfUp, halfUp.Div(halfUp, den))
+		})
+	}
+}

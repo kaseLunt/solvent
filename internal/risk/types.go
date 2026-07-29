@@ -623,6 +623,12 @@ type ShortfallResult struct {
 	// PerEngine.
 	SingleEngineScale string
 
+	// SeizureModel stamps the seizure assumption ON THE WIRE
+	// (SeizureModelProRata). A shortfall number is only interpretable next to
+	// the model that produced it, and a modeling assumption that lives only in
+	// a package comment does not survive the trip to JSON.
+	SeizureModel string
+
 	Positions []PositionShortfall
 }
 

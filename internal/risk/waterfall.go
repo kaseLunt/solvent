@@ -103,6 +103,14 @@ func (p WaterfallPoint) Engine(name string) (EngineWaterfall, bool) {
 }
 
 // WaterfallSeries is the full grid walk plus its disclosures.
+//
+// THE INVARIANT COVERS THE DEBT SERIES ONLY. CumulativeDebtEligibleUSD must
+// not fall on a single-factor down-grid, and Waterfall refuses the series if it
+// does. CumulativeCollateralAtRiskUSD carries NO such invariant: it is measured
+// at each grid point, and collateral value falls as the factor falls, so it
+// legitimately decreases once the accounts that have already crossed are worth
+// less than they were. A renderer must not present the at-risk column as a
+// monotone accumulation.
 type WaterfallSeries struct {
 	ScenarioID      string
 	ScenarioVersion string
@@ -273,13 +281,19 @@ type positionMeasure struct {
 }
 
 // measurePosition evaluates eligibility, collateral at risk and the
-// insolvency census for one (already shocked) position.
+// insolvency census for one (already shocked) position. Both bonus-dependent
+// columns use EACH TOKEN'S OWN bonus — see the seizure/recovery block in
+// dm.go for the law and the direction each column moves:
 //
-//	collateral at risk = min(collateral, debt × (1 + bonus))
-//	recoverable debt   = collateral ÷ (1 + bonus)
+//	collateral at risk = Σᵢ min(vᵢ, floor(debt × vᵢ × (1+bᵢ) / V))
+//	recoverable debt   = Σᵢ floor(vᵢ / (1+bᵢ))
 //	bad debt           = max(0, debt − recoverable), counted only for
 //	                     accounts that are eligible (risk-quant R4's two-leg
 //	                     insolvent-if-liquidated flag)
+//
+// Aave eligibility is STRICT: the protocol liquidates only BELOW a health
+// factor of exactly 1e18, so HF == 1e18 is healthy — the same boundary
+// discipline as the Debt Manager's `debt > maxBorrowLT`.
 func measurePosition(pos PositionInput) (positionMeasure, error) {
 	var m positionMeasure
 	switch pos.Engine {
@@ -288,77 +302,37 @@ func measurePosition(pos PositionInput) (positionMeasure, error) {
 		if err != nil {
 			return m, err
 		}
+		legs := aaveBonusLegs(h)
 		m.engine = AaveEngine
 		m.usdDecimals = h.BaseDecimals
 		m.eligible = !h.IsInfinite && h.HealthFactorWad.Cmp(wadUnit) < 0
 		m.debt = orZero(h.TotalDebtBase)
-		m.collateralAtRisk = aaveSeizableBase(h)
-		num, den := aaveBonusMultiplier(h)
-		m.badDebt = badDebtFrom(m.debt, orZero(h.TotalCollateralBase), num, den, m.eligible)
+		m.collateralAtRisk = seizableValue(m.debt, legs)
+		m.badDebt = badDebtFrom(m.debt, recoverableDebt(legs), m.eligible)
 	default:
 		h, err := ComputeDMHealth(*pos.DM)
 		if err != nil {
 			return m, err
 		}
+		legs := dmBonusLegs(h)
 		m.engine = DMEngine
 		m.usdDecimals = h.UsdDecimals
 		m.eligible = h.Liquidatable
 		m.debt = orZero(h.Borrowings)
-		m.collateralAtRisk = dmSeizableUSD(h)
-		num, den := dmBonusMultiplier(h)
-		m.badDebt = badDebtFrom(m.debt, orZero(h.CollateralValueUSD), num, den, m.eligible)
+		m.collateralAtRisk = seizableValue(m.debt, legs)
+		m.badDebt = badDebtFrom(m.debt, recoverableDebt(legs), m.eligible)
 	}
 	return m, nil
 }
 
-// badDebtFrom is max(0, debt − collateral÷(1+bonus)) for an eligible account,
-// zero otherwise. Presenting underwater debt as recoverable is spreadsheet
+// badDebtFrom is max(0, debt − recoverable) for an eligible account, zero
+// otherwise. Presenting underwater debt as recoverable is spreadsheet
 // solvency; presenting a healthy account's headroom as bad debt is noise.
-func badDebtFrom(debt, collateral, bonusNum, bonusDen *big.Int, eligible bool) *big.Int {
+func badDebtFrom(debt, recoverable *big.Int, eligible bool) *big.Int {
 	if !eligible {
 		return new(big.Int)
 	}
-	recoverable := MulDivFloor(collateral, bonusDen, bonusNum)
 	return maxZero(new(big.Int).Sub(debt, recoverable))
-}
-
-// dmBonusMultiplier / aaveBonusMultiplier return the position's effective
-// liquidation-bonus multiplier — the SMALLEST across held collateral, so
-// collateral at risk is never overstated.
-func dmBonusMultiplier(h DMHealth) (num, den *big.Int) {
-	num, den = HundredPercentUnit(), HundredPercentUnit()
-	first := true
-	for _, c := range h.Collateral {
-		if c.LiquidationBonus == nil || c.Amount.Sign() == 0 {
-			continue
-		}
-		n, d, ok := LiquidationBonusMultiplier(DMEngine, c.LiquidationBonus)
-		if !ok {
-			continue
-		}
-		if first || new(big.Int).Mul(n, den).Cmp(new(big.Int).Mul(num, d)) < 0 {
-			num, den, first = n, d, false
-		}
-	}
-	return num, den
-}
-
-func aaveBonusMultiplier(h AaveHealth) (num, den *big.Int) {
-	num, den = BpsUnit(), BpsUnit()
-	first := true
-	for _, r := range h.Reserves {
-		if r.LiquidationBonusBps == nil || r.CollateralBase.Sign() == 0 {
-			continue
-		}
-		n, d, ok := LiquidationBonusMultiplier(AaveEngine, r.LiquidationBonusBps)
-		if !ok {
-			continue
-		}
-		if first || new(big.Int).Mul(n, den).Cmp(new(big.Int).Mul(num, d)) < 0 {
-			num, den, first = n, d, false
-		}
-	}
-	return num, den
 }
 
 // engineDecimalsHint reads a position's USD scale from its first price input

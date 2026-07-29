@@ -789,3 +789,265 @@ func TestAssembleScenariosSetLevelRules(t *testing.T) {
 	require.ErrorIs(t, err, ErrScenarioInvalid)
 	require.Contains(t, err.Error(), "no scenario definitions are embedded")
 }
+
+// dmStableBasePosition holds a stable (USDC, output-snapped) AND a
+// stable-BASED composite (liquidUSD, base-snapped) side by side. liquidUSD is
+// 27.1% of book collateral at the probe census, so getting its transform wrong
+// is a wrong answer on more than a quarter of the book.
+//
+//	liquidUSD: 1000.000000 units at $1.168000 -> 1168000000 USD 6-dec
+//	USDC:      1000.000000 units at $1.000000 -> 1000000000 USD 6-dec
+func dmStableBasePosition(t *testing.T) PositionInput {
+	t.Helper()
+	return PositionInput{
+		Engine: DMEngine,
+		DM: &DMInput{
+			Account: acctB,
+			DebtUSD: mustBig(t, "1000000000"),
+			Collateral: []DMCollateral{
+				{Asset: dLiqUSD, Amount: mustBig(t, "1000000000"), Decimals: 6},
+				{Asset: dUSDC, Amount: mustBig(t, "1000000000"), Decimals: 6},
+			},
+			Params: []ParamRow{
+				dmParam(dLiqUSD, "90000000000000000000", "1000000000000000000"),
+				dmParam(dUSDC, "95000000000000000000", "1000000000000000000"),
+			},
+			Prices: []PriceInput{
+				enginePrice(dLiqUSD, "1168000"),
+				enginePrice(dUSDC, "1000000"),
+			},
+		},
+	}
+}
+
+// TestApplyScenarioBaseStableSnapOnComposite is BLOCKER-1's regression.
+//
+// liquidUSD is an accountant lens COMPOSED over a USDC base: baseAsset=USDC,
+// isStableToken=FALSE on liquidUSD, TRUE on the base. PriceProviderV2.price()
+// snaps the BASE before multiplying (PriceProviderV2.sol:268-271):
+//
+//	if (baseConfig.isStableToken) {
+//	    basePrice = _getStablePrice(basePrice, basePriceDecimals);
+//	    basePriceDecimals = decimals();
+//	}
+//
+// so liquidUSD = rate x snap(USDC/USD) and its effective factor is
+// snap(1e6 x f)/1e6, NOT f. Modeling it as a linear x f made the in-band
+// CONTROL scenario move 27.1% of book collateral while the chain holds it
+// flat — the scenario broke its own declared zero-change invariant.
+func TestApplyScenarioBaseStableSnapOnComposite(t *testing.T) {
+	cases := []struct {
+		id string
+		// liquidUSD: composed over the snapped base
+		wantLiqUSD  string
+		baseSnapped bool
+		// USDC: its own output snapped
+		wantUSDC  string
+		ownSnap   bool
+		wantHeld  bool
+		wantMaxLT string
+	}{
+		{
+			id: "stable_depeg_0995_in_band",
+			// base 1e6 x 995/1000 = 995000, strictly inside (990000, 1010000)
+			// -> snaps to 1000000 -> effective factor 1.000000 -> HELD EXACTLY
+			wantLiqUSD: "1168000", baseSnapped: true,
+			wantUSDC: "1000000", ownSnap: true, wantHeld: true,
+			wantMaxLT: "2001200000",
+		},
+		{
+			id: "stable_depeg_099_boundary",
+			// base 990000 is EXACTLY the open edge -> no snap -> factor 0.99
+			// liquidUSD 1168000 x 990000/1e6 = 1156320
+			wantLiqUSD: "1156320", baseSnapped: false,
+			wantUSDC: "990000", ownSnap: false, wantHeld: false,
+			wantMaxLT: "1981188000",
+		},
+		{
+			id: "stable_depeg_098_unsnapped",
+			// base 980000 outside -> factor 0.98
+			// liquidUSD 1168000 x 980000/1e6 = 1144640
+			wantLiqUSD: "1144640", baseSnapped: false,
+			wantUSDC: "980000", ownSnap: false, wantHeld: false,
+			wantMaxLT: "1961176000",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			sc, err := LoadScenario(tc.id)
+			require.NoError(t, err)
+			pos := dmStableBasePosition(t)
+
+			before, err := ComputeDMHealth(*pos.DM)
+			require.NoError(t, err)
+			requireBig(t, "1168000000", before.Collateral[0].ValueUSD)
+			requireBig(t, "1000000000", before.Collateral[1].ValueUSD)
+			requireBig(t, "2001200000", before.MaxBorrowLT,
+				"floor(1168000000 x 90/100) + floor(1000000000 x 95/100)")
+
+			out, err := ApplyScenario(pos, sc)
+			require.NoError(t, err)
+			require.Empty(t, out.Scenario.HeldFlat, "both assets are in the stable matrix")
+
+			applied := map[string]AppliedShock{}
+			for _, a := range out.Scenario.Applied {
+				applied[a.Asset.Hex()] = a
+			}
+			liq := applied[dLiqUSD.Hex()]
+			usdc := applied[dUSDC.Hex()]
+
+			requireBig(t, "1168000", liq.Before)
+			requireBig(t, tc.wantLiqUSD, liq.After)
+			require.Equal(t, tc.baseSnapped, liq.BaseSnapped, "liquidUSD base snap")
+			require.False(t, liq.Snapped, "liquidUSD's OWN output is never snapped")
+
+			requireBig(t, "1000000", usdc.Before)
+			requireBig(t, tc.wantUSDC, usdc.After)
+			require.Equal(t, tc.ownSnap, usdc.Snapped, "USDC output snap")
+			require.False(t, usdc.BaseSnapped, "USDC is a base, not base-composed")
+
+			after, err := ComputeDMHealth(*out.DM)
+			require.NoError(t, err)
+			requireBig(t, tc.wantMaxLT, after.MaxBorrowLT)
+
+			if tc.wantHeld {
+				// The CONTROL scenario's declared invariant: bit-identical.
+				require.Equal(t, before.MaxBorrowLT.String(), after.MaxBorrowLT.String())
+				require.Equal(t, before.CollateralValueUSD.String(), after.CollateralValueUSD.String())
+				require.Equal(t, before.Liquidatable, after.Liquidatable)
+				require.Equal(t, 0, before.HealthFactor.Cmp(after.HealthFactor))
+				for i := range before.Collateral {
+					require.Equal(t, before.Collateral[i].ValueUSD.String(),
+						after.Collateral[i].ValueUSD.String(), "leg %d must be untouched", i)
+				}
+			} else {
+				require.Equal(t, 1, before.MaxBorrowLT.Cmp(after.MaxBorrowLT),
+					"an out-of-band base shock DOES reach the composite")
+			}
+		})
+	}
+}
+
+// TestCommittedStableScenariosDeclareTheRightTransforms pins the schema on the
+// three shipped stable definitions, so a future edit cannot quietly turn the
+// base-snap composite back into a linear scale.
+func TestCommittedStableScenariosDeclareTheRightTransforms(t *testing.T) {
+	for _, id := range []string{
+		"stable_depeg_0995_in_band", "stable_depeg_099_boundary", "stable_depeg_098_unsnapped",
+	} {
+		t.Run(id, func(t *testing.T) {
+			sc, err := LoadScenario(id)
+			require.NoError(t, err)
+			seen := map[string]AssetResponse{}
+			for _, r := range sc.Propagation {
+				seen[strings.ToLower(r.Asset)] = r
+			}
+			for _, a := range []common.Address{dUSDC, dUSDT, dFrxUSD} {
+				r, ok := seen[strings.ToLower(a.Hex())]
+				require.True(t, ok, a.Hex())
+				require.True(t, r.StableSnap, "%s is an isStableToken config", r.Symbol)
+				require.False(t, r.BaseStableSnap)
+			}
+			r, ok := seen[strings.ToLower(dLiqUSD.Hex())]
+			require.True(t, ok)
+			require.False(t, r.StableSnap, "liquidUSD's own output is never snapped")
+			require.True(t, r.BaseStableSnap, "liquidUSD composes over a snapped USDC base")
+			require.Len(t, r.RespondsTo, 1)
+			require.Equal(t, AxisStableUSD, r.RespondsTo[0].Axis)
+			require.Equal(t, strings.ToLower(dUSDC.Hex()), strings.ToLower(r.RespondsTo[0].Asset))
+			require.Contains(t, r.Note, "PriceProviderV2.sol:268-271")
+
+			// eUSD is baseAsset=0 (a direct USD lens) and is correctly absent
+			// from the matrix; the out-of-model list says so rather than
+			// leaving a reader to infer it from silence.
+			joined := strings.Join(sc.OutOfModel, " | ")
+			require.Contains(t, joined, "eUSD")
+			require.Contains(t, joined, "baseAsset=0")
+		})
+	}
+}
+
+// TestParseScenarioBaseStableSnapRules covers the schema guards that keep the
+// base-snap transform unambiguous — including one that mirrors a real chain
+// invariant.
+func TestParseScenarioBaseStableSnapRules(t *testing.T) {
+	tmpl := `{"id":"x","version":"v1","label":"L","description":"D","path_assumption":"P",
+      "engines":["debt_manager"],
+      "shocks":[{"axis":"stable_usd","asset":"%s","factor_num":98,"factor_den":100}],
+      "propagation":[{"asset":"%s","chain_id":10,%s"responds_to":%s}],
+      "out_of_model":["x"]}`
+	usdc := dUSDC.Hex()
+	liq := dLiqUSD.Hex()
+	one := `[{"axis":"stable_usd","asset":"` + usdc + `"}]`
+
+	// Valid.
+	_, err := ParseScenario([]byte(fmt.Sprintf(tmpl, usdc, liq, `"base_stable_snap":true,`, one)))
+	require.NoError(t, err)
+
+	// Mutually exclusive with stable_snap — the chain forbids the combination
+	// outright (PriceProviderV2 StableTokenCannotHaveBaseAsset).
+	_, err = ParseScenario([]byte(fmt.Sprintf(tmpl, usdc, liq,
+		`"base_stable_snap":true,"stable_snap":true,`, one)))
+	require.ErrorIs(t, err, ErrScenarioInvalid)
+	require.Contains(t, err.Error(), "mutually exclusive")
+
+	// Two axes: no unambiguous base factor to snap.
+	two := `[{"axis":"stable_usd","asset":"` + usdc + `"},{"axis":"eth_usd"}]`
+	_, err = ParseScenario([]byte(fmt.Sprintf(tmpl, usdc, liq, `"base_stable_snap":true,`, two)))
+	require.ErrorIs(t, err, ErrScenarioInvalid)
+	require.Contains(t, err.Error(), "exactly one responds_to entry")
+
+	// A non-stable axis is not a stable base.
+	_, err = ParseScenario([]byte(fmt.Sprintf(tmpl, usdc, liq,
+		`"base_stable_snap":true,`, `[{"axis":"eth_usd"}]`)))
+	require.ErrorIs(t, err, ErrScenarioInvalid)
+	require.Contains(t, err.Error(), "exactly one responds_to entry")
+}
+
+// TestApplyScenarioBaseStableSnapRequiresSixDecimals: the base snap is a
+// PriceProviderV2 transform on a 6-decimal price. Applying it to an 8-decimal
+// Aave adapter mark would be modeling the wrong engine.
+func TestApplyScenarioBaseStableSnapRequiresSixDecimals(t *testing.T) {
+	sc := Scenario{
+		ID: "base_snap_wrong_scale", Version: "test", Label: "L", Description: "D",
+		PathAssumption: "P", Engines: []string{DMEngine},
+		Shocks: []Shock{{Axis: AxisStableUSD, Asset: dUSDC.Hex(), FactorNum: 98, FactorDen: 100}},
+		Propagation: []AssetResponse{{
+			Asset: dLiqUSD.Hex(), ChainID: 10, BaseStableSnap: true,
+			RespondsTo: []AxisRef{{Axis: AxisStableUSD, Asset: dUSDC.Hex()}},
+		}},
+		OutOfModel: []string{"synthetic"},
+	}
+	pos := dmStableBasePosition(t)
+	pos.DM.Prices[0].Decimals = 8
+	_, err := ApplyScenario(pos, sc)
+	require.ErrorIs(t, err, ErrMixedPriceDecimals)
+	require.Contains(t, err.Error(), "base_stable_snap needs a 6-decimal price, got 8")
+}
+
+// TestBaseStableSnapIsANoOpWhenItsAxisIsUnshocked: a base-composed asset in a
+// scenario that does not move its base must come out untouched.
+func TestBaseStableSnapIsANoOpWhenItsAxisIsUnshocked(t *testing.T) {
+	sc := Scenario{
+		ID: "unrelated", Version: "test", Label: "L", Description: "D",
+		PathAssumption: "P", Engines: []string{DMEngine},
+		Shocks: []Shock{{Axis: AxisStableUSD, Asset: dUSDT.Hex(), FactorNum: 98, FactorDen: 100}},
+		Propagation: []AssetResponse{
+			{Asset: dUSDT.Hex(), ChainID: 10, StableSnap: true,
+				RespondsTo: []AxisRef{{Axis: AxisStableUSD, Asset: dUSDT.Hex()}}},
+			{Asset: dLiqUSD.Hex(), ChainID: 10, BaseStableSnap: true,
+				RespondsTo: []AxisRef{{Axis: AxisStableUSD, Asset: dUSDC.Hex()}}},
+		},
+		OutOfModel: []string{"synthetic"},
+	}
+	pos := dmStableBasePosition(t)
+	out, err := ApplyScenario(pos, sc)
+	require.NoError(t, err)
+	for _, a := range out.Scenario.Applied {
+		if a.Asset == dLiqUSD {
+			requireBig(t, "1168000", a.After, "an unshocked base leaves the composite alone")
+			require.True(t, a.BaseSnapped, "the unshocked base is still at par, which IS in band")
+		}
+	}
+}

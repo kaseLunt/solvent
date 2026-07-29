@@ -317,37 +317,10 @@ func TestEngineDecimalsHintFallbacks(t *testing.T) {
 // recoverable would be spreadsheet solvency.
 func TestBadDebtFromIsZeroForHealthyAccounts(t *testing.T) {
 	debt := mustBig(t, "1000")
-	collateral := mustBig(t, "500")
-	num, den := HundredPercentUnit(), HundredPercentUnit()
-	requireBig(t, "0", badDebtFrom(debt, collateral, num, den, false))
-	requireBig(t, "500", badDebtFrom(debt, collateral, num, den, true))
-	requireBig(t, "0", badDebtFrom(debt, mustBig(t, "2000"), num, den, true))
-}
-
-// TestBonusMultiplierFallbacksOnUnusableRows.
-func TestBonusMultiplierFallbacksOnUnusableRows(t *testing.T) {
-	h := DMHealth{Collateral: []DMCollateralValue{
-		{Asset: dUSDC, Amount: big.NewInt(1), LiquidationBonus: nil},
-		{Asset: dUSDT, Amount: big.NewInt(0), LiquidationBonus: mustBig(t, "5000000000000000000")},
-		{Asset: dWeETH, Amount: big.NewInt(1), LiquidationBonus: big.NewInt(-1)},
-	}}
-	num, den := dmBonusMultiplier(h)
-	require.Equal(t, 0, num.Cmp(den), "no usable bonus ⇒ 1.00×")
-
-	h.Collateral = append(h.Collateral, DMCollateralValue{
-		Asset: dETHFI, Amount: big.NewInt(1), LiquidationBonus: mustBig(t, "4000000000000000000"),
-	})
-	num, den = dmBonusMultiplier(h)
-	requireBig(t, "104000000000000000000", num)
-	requireBig(t, "100000000000000000000", den)
-
-	a := AaveHealth{Reserves: []AaveReserveValue{
-		{Asset: aWeETH, CollateralBase: big.NewInt(1), LiquidationBonusBps: nil},
-		{Asset: aUSDC, CollateralBase: big.NewInt(0), LiquidationBonusBps: big.NewInt(11000)},
-		{Asset: aFRAX, CollateralBase: big.NewInt(1), LiquidationBonusBps: big.NewInt(1)},
-	}}
-	num, den = aaveBonusMultiplier(a)
-	require.Equal(t, 0, num.Cmp(den), "no usable bonus ⇒ 1.00×")
+	requireBig(t, "0", badDebtFrom(debt, mustBig(t, "500"), false))
+	requireBig(t, "500", badDebtFrom(debt, mustBig(t, "500"), true))
+	requireBig(t, "0", badDebtFrom(debt, mustBig(t, "2000"), true))
+	requireBig(t, "0", badDebtFrom(debt, mustBig(t, "1000"), true), "exactly covered is not bad debt")
 }
 
 // TestWaterfallPropagatesPerPositionErrors: a book position that cannot be
@@ -431,5 +404,38 @@ func TestWaterfallDoesNotMislabelUsdDecimals(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, uint8(6), e.UsdDecimals,
 			"the empty position must not stamp 0 over the engine's real scale")
+	}
+}
+
+// TestWaterfallAtRiskColumnIsMeasuredAtPointAndMayFall documents on the suite
+// what WaterfallSeries documents on the wire: the monotonicity invariant
+// covers the DEBT series only. Collateral at risk is measured at each grid
+// point, and it legitimately falls once the already-crossed accounts are worth
+// less than they were.
+func TestWaterfallAtRiskColumnIsMeasuredAtPointAndMayFall(t *testing.T) {
+	sc, err := LoadScenario("eth_minus_20")
+	require.NoError(t, err)
+	grid := wadGrid(t,
+		"1000000000000000000", "900000000000000000", "800000000000000000",
+		"700000000000000000", "600000000000000000")
+
+	series, err := Waterfall(waterfallBook(t), grid, sc)
+	require.NoError(t, err, "the DEBT series is monotone, so the walk completes")
+
+	atRisk := make([]*big.Int, len(series.Points))
+	for i, pt := range series.Points {
+		e, ok := pt.Engine(DMEngine)
+		require.True(t, ok)
+		atRisk[i] = e.CumulativeCollateralAtRiskUSD
+	}
+	// 2856000000 -> 2726000000 between grid points 2 and 3: a real decrease,
+	// and NOT a violation of anything.
+	require.Equal(t, -1, atRisk[3].Cmp(atRisk[2]),
+		"the at-risk column falls here, which is correct and must not be smoothed")
+	for i := 1; i < len(series.Points); i++ {
+		prev, _ := series.Points[i-1].Engine(DMEngine)
+		cur, _ := series.Points[i].Engine(DMEngine)
+		require.GreaterOrEqual(t, cur.CumulativeDebtEligibleUSD.Cmp(prev.CumulativeDebtEligibleUSD), 0,
+			"the DEBT series, by contrast, carries the invariant")
 	}
 }
