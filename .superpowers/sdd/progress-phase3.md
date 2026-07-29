@@ -201,3 +201,21 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   round / a toolchain session. NEXT: commit wave + doc corrections, dispatch Codex round on
   the wave diff, then live backfill (operator step: daemon restart; ~2.5k windows,
   aave_param consumer will honestly report behind-frontier during it), then Wave 2b.
+- WAVE 2b DISPATCHED (2026-07-28 23:47, Opus serena-coder, parallel with 2a's Codex round —
+  disjoint files): adapter-output polling (feeds.json aaveoracle entries, address-qualified
+  pollViews getAssetPrice(address), same-round Multicall3 + anchor), migration 00012
+  prices.source_as_of, zero-extra-RPC head.Time threading, feed-derive updatedAt stamping,
+  FeedDeriver Go-decoder healing pass (idempotent, NULL-only, last-in-block-wins). Owner
+  signed off for the night ("keep moving in parallel as appropriate... God speed") —
+  autonomous night loop: adjudicate/fix/iterate each wave to SHIP, commit serially, daemon
+  restart + backfill after Task 2 ships.
+- CODEX WAVE-2a ROUND 1 (session 019fac95-27cb-79a1-ac5f-fecb7a0eb340, ~12m30s):
+  needs-attention, ONE medium, DOC-ONLY — the custody code passed every reviewed invariant
+  verbatim ("gate, rewind, runner, decode, wiring, and migration invariants"). Finding:
+  recon/p3-probes.md A3 still carried the stale "10k windows + adaptive halving" sentence
+  (I corrected A1 but missed A3) — an operator following the NORMATIVE doc could wedge the
+  backfill. ADJUDICATED FIX-NOW under D-013 (honest-operator wrong-path class). Fixed to
+  the authoritative posture (fixed window 2000, no halving, walker.go:791-793 cited,
+  Alchemy manual-targeted only); returning for the doc-only D-006 re-review. Reviewer
+  worktree note: detached-pin worktree cleaned at git level; OS directory lock leaves an
+  inert scratchpad dir (kwt-class leftover, harmless).

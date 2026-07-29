@@ -163,8 +163,12 @@ starts there, not 20,625,519.
 - **A3 (operational):** the Alchemy key in .env is FREE TIER (hard 10-block getLogs cap) and
   is SHARED with the live indexer — bulk probe/backfill traffic on it 429-starves the daemon
   (observed twice). Task 2's configurator backfill (5M blocks) runs through the walker on the
-  dRPC-primary posture (10k windows ≈ 501 requests when served; adaptive halving; Alchemy
-  window-10 only as targeted fallback) — never bulk on the shared key.
+  dRPC-primary posture at **FIXED window 2000** (the walker has NO adaptive halving —
+  `internal/ingest/walker.go:791-793` uses the configured window as-is; corrected 2026-07-28
+  per the chain-truth consult R6.4 and Codex Wave-2a round: 10k can wedge into a permanent
+  backoff loop under the dRPC/publicnode posture). ≈2.5k getLogs one-time, jagged under A2
+  flapping but loud and self-healing. Alchemy window-10 is a MANUAL operator playbook for
+  targeted ranges only — never automatic, never bulk on the shared key.
 - **A6 (curio):** provider registry contains an ASCII `MOCK_STABLE_DEBT` AddressSet
   (20,977,092) pointing at the weETH aToken — upgrade-script artifact, harmless, recorded.
 - Probe-agent self-correction recorded in the transcript (an early "dRPC lied" claim was the
