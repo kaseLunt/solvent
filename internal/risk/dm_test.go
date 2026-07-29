@@ -656,11 +656,11 @@ func TestPerTokenBonusLawVsMinBonusCollapse(t *testing.T) {
 	requireBig(t, "0", badDebtFrom(h2.Borrowings, recoverableDebt(legs2), h2.Liquidatable))
 }
 
-// TestSeizableValueReducesToTheSingleBonusFormula: on a position with one
+// TestSeizableValueReducesToTheSingleBonusFormulaPerLeg: on a position with one
 // bonus the pro-rata per-token law must equal risk-quant R4's
 // min(collateral, debt x (1+bonus)) EXACTLY — which is why replacing the old
 // law moved no single-bonus number in this suite.
-func TestSeizableValueReducesToTheSingleBonusFormula(t *testing.T) {
+func TestSeizableValueReducesToTheSingleBonusFormulaPerLeg(t *testing.T) {
 	bonus := mustBig(t, "2000000000000000000") // 2%
 	num := new(big.Int).Add(HundredPercentUnit(), bonus)
 	for _, tc := range []struct{ v, d string }{

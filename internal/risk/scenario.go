@@ -361,6 +361,13 @@ func (s Scenario) Validate() error {
 			// The base snap is a transform of ONE stable base's price. A row
 			// responding to several axes has no unambiguous base factor to
 			// snap, so the schema refuses it rather than guessing.
+			//
+			// KNOWN LEGITIMATE CASE THIS REFUSES: a JOINT shock of the stable
+			// base AND the composite's own lens rate is coherent on chain and
+			// would need rate_f × snap(1e6 × f_base)/1e6 — i.e. a schema
+			// extension that composes per-axis factors and marks which one is
+			// the snapped base. Until that exists the guard refuses loud, BY
+			// DESIGN, rather than silently snapping the whole product.
 			if len(r.RespondsTo) != 1 || r.RespondsTo[0].Axis != AxisStableUSD {
 				return bad("%s: propagation[%d] (%s): base_stable_snap requires exactly one responds_to entry on the %s axis (the stable base)", s.ID, i, r.Asset, AxisStableUSD)
 			}
@@ -619,6 +626,15 @@ func ApplyScenario(in PositionInput, sc Scenario) (PositionInput, error) {
 				// price = rate × snap(base). The rate is held, so the shock
 				// reaches this token only through the base's snap: the
 				// effective factor is snap(1e6 × f) / 1e6.
+				//
+				// PRECONDITION: testing the band at 1e6 × f presumes the
+				// stored base is CURRENTLY snapped at par, which holds for
+				// this instrument's entire life (every archive spot-check of
+				// price(USDC) returned exactly 1000000 —
+				// recon/derivation-notes.md:112-113). Run against an
+				// already-depegged era the correct test would be
+				// snap(base_now × f) / base_now, and this form would shock
+				// from the wrong starting point.
 				if p.Decimals != 6 {
 					return nil, assetErr("apply scenario", engine, p.Asset, ErrMixedPriceDecimals,
 						fmt.Sprintf("base_stable_snap needs a 6-decimal price, got %d", p.Decimals))

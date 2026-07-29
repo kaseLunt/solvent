@@ -325,6 +325,20 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   liquidUSD only — the REQUIRED Task 6 tokenConfig sweep closes the class by enumeration.
   NEXT: commit → risk-quant re-read for the verdict flip → Codex round on the full Task 4
   range.
+- RISK-QUANT RE-READ: **NUMBERS HOLD, blocking list EMPTY** (verdict flipped at 0d204fa).
+  The re-read verified the reduction proof on ITS OWN integers (single-leg algebraic
+  cancellation confirmed; mixed-bonus pins reproduced to the digit), ruled the wave's
+  go-further at-risk unification "arithmetically right" (the collapse understated the
+  seized-slice on mixed books — wrong direction for a cascade input), and verified the
+  base-snap transform arithmetic bit-for-bit (in-band identity by construction; boundary
+  1156320 / unsnapped 1144640 match the chain composition). Three NON-BLOCKING doc notes
+  (micro-wave 4c dispatched): (1) "reduces EXACTLY" qualified — per-leg exact, multi-leg
+  single-bonus ≤(n−1) ULP low in the safe direction (counterexample: two legs v=d=
+  1000000001 @2% → 1020000000 vs 1020000001); (2) base-snap arm presumes snapped-par
+  stored base (true for the instrument's life; the depegged-era form is
+  snap(base_now·f)/base_now); (3) the joint base+rate shock is the known guard refusal
+  requiring a factor-composition schema extension — refuse-loud until then, BY DESIGN.
+  After 4c: Codex round on the full Task 4 range (a5d82a9^..HEAD).
 - SCOPE GAP CAUGHT BY THE GATE (2026-07-29 00:40): recon/feeds.json is NOT in W2
   allowed_paths (W1 had it; W2 authoring missed the price-registry mirror) — pre-commit
   correctly BLOCKED the 2b commit. Fix: W2 allowed_paths += recon/feeds.json (durable

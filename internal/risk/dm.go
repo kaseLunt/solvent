@@ -249,14 +249,23 @@ func APYPerSecondFromAnnual(annual100e18 *big.Int) *big.Int {
 //   - seizableValue is the collateral a liquidator takes. Seizure is modeled
 //     PRO-RATA over counted collateral (the assumption ExecutionShortfall
 //     already declares): token i retires dᵢ = debt × vᵢ/V and hands over
-//     dᵢ × (1+bᵢ), capped at vᵢ. On a single-bonus position this reduces
-//     EXACTLY to min(V, floor(debt × (1+b))) — risk-quant R4's formula — so no
-//     single-bonus number moved when this law replaced the old one. On a
-//     mixed-bonus position it is LARGER than the min-bonus collapse, because
-//     retiring a dollar of debt with a high-bonus token costs more collateral.
-//     A real liquidator picks a preference order and would take the
-//     lowest-bonus token first, so the min-bonus collapse is the true lower
-//     bound and this is the pro-rata central case — disclosed, not silent.
+//     dᵢ × (1+bᵢ), capped at vᵢ. On a single-bonus position this reduces to
+//     min(V, floor(debt × (1+b))) — risk-quant R4's formula — exactly PER LEG
+//     and exactly in the fully-capped region, but NOT in general across legs:
+//     a multi-leg single-bonus position in the uncapped region computes
+//     Σᵢ floor(xᵢ) rather than floor(Σᵢ xᵢ), which is up to (n−1) units of
+//     last place LOW (two legs of v = debt = 1000000001 at 2% give 1020000000
+//     against the single-formula 1020000001). Per-leg flooring is nonetheless
+//     the chain-shaped choice — the deployed loop floors the bonus inside the
+//     per-token body (DebtManagerCore.sol:636) — and the same (n−1)-ulp
+//     downward bias applies to recoverableDebt, where it is the SAFE
+//     direction: recovery is never overstated, so bad debt is never
+//     understated. On a mixed-bonus position seizableValue is LARGER than the
+//     min-bonus collapse, because retiring a dollar of debt with a high-bonus
+//     token costs more collateral. A real liquidator picks a preference order
+//     and would take the lowest-bonus token first, so the min-bonus collapse
+//     is the true lower bound and this is the pro-rata central case —
+//     disclosed, not silent.
 //
 // A leg whose param row carries no usable bonus falls back to 1.00×. That is
 // the only honest default (inventing a bonus is fabrication), and it biases
