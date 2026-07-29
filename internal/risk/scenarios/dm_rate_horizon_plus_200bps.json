@@ -1,0 +1,38 @@
+{
+  "id": "dm_rate_horizon_plus_200bps",
+  "version": "v1",
+  "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+  "description": "A rate change does not move a spot health factor, so this ships as a closed-form HORIZON PROJECTION, never as a spot shock. The Debt Manager's interest index is linear per second and borrowApy is admin-set, so debt(t) is closed-form: debt0 + floor(debt0 x apy x dt / 100e18). Collateral prices are held flat. The Aave engine is excluded: its rates are utilization-driven and its book is residual dust.",
+  "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+  "engines": [
+    "debt_manager"
+  ],
+  "shocks": [
+    {
+      "axis": "borrow_apy",
+      "factor_num": 1,
+      "factor_den": 1
+    }
+  ],
+  "propagation": [],
+  "projection": {
+    "annual_delta_bps": 200,
+    "apy_delta_per_second_100e18": "63419583967",
+    "horizons_seconds": [
+      2592000,
+      7776000
+    ],
+    "note": "200 bps = 2 percent = 2e18 in the HUNDRED_PERCENT convention; per second over a 365-day year that is floor(2e18 / 31536000) = 63419583967, the same scaling the deployed contract's own fixture uses (317097919837 = 10 percent / 365 days)"
+  },
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "borrower behaviour: no repayment, no top-up, no new borrowing over the horizon",
+    "the closed form floors ONCE on the debt, while the chain floors the INDEX and then the debt - the two differ by at most a couple of units of USD 6-dec, which is why this result is labeled PROJECTION and never gated exact",
+    "the Aave engine is excluded (utilization-driven rates over a residual dust book)",
+    "governance behaviour: the APY is admin-set and could move again inside the horizon"
+  ]
+}

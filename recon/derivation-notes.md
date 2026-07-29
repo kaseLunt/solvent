@@ -81,7 +81,9 @@ Brief's explicit questions:
 Derivation caveats for Tasks 4–6:
 
 1. `Borrowed` needs a token→USD conversion at emit-time oracle price. For `isStableToken` tokens
-   (USDC/USDT/frxUSD) the PriceProviderV2 snaps to exactly 1e6 within a ±1% band, so
+   (USDC/USDT/frxUSD) the PriceProviderV2 snaps to exactly 1e6 within a ±1% band (**P3
+   Wave-4 precision, source-read PriceProvider.sol:307-310: the band is OPEN —
+   `(990000, 1010000)` exclusive; exactly 990000/1010000 do NOT snap**), so
    `usd = amount` (6-dec tokens) / `amount/1e12` (18-dec) is exact while in band — and 100% of the
    305,045 historical `Borrowed` events are USDC. For non-stable borrow tokens (liquidUSD @1.168,
    EURC @1.14, weEUR, liquidRESERVE — all currently configured borrow tokens with zero borrow

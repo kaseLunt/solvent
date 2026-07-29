@@ -186,7 +186,11 @@ list):
   bad-debt-at-liquidation ("the protocol keeps pricing weETH at the rate; here is the gap it
   is not seeing"). Its pinned test asserts HFs bit-identical AND shortfall > 0 — the forbidden
   implementation is an HF shock wearing a depeg label.
-- **Stable depeg crossing the snap band** — 0.99 (no-op) vs 0.98 (unsnap step), per stable.
+- **Stable depeg crossing the snap band** — CORRECTED by Wave 4 against `PriceProvider.sol`
+  source (:307-310): the band is **OPEN** — `(990000, 1010000)` exclusive — so exactly-0.99
+  (990000) does NOT snap; it is a real price move. Three scenarios ship: 0.995 (true
+  in-band no-op), 0.99 (the boundary discriminator — the original "0.99 no-op" claim was
+  arithmetically false at exactly this point), 0.98 (unsnapped).
 - **ETHFI −50%** — idiosyncratic own-ecosystem-token scenario.
 - **DM rate horizon projection** — +200bps as closed-form debt(t) at 30d/90d +
   time-to-liquidatable, labeled PROJECTION (prices held flat, admin-set APY); no spot-HF rate

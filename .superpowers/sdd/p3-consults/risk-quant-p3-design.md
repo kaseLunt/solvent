@@ -120,7 +120,11 @@ horizon UI doesn't fit v1, cut the rate shock entirely; a fake spot-shock is wor
 **(d) Additions the actual book demands** (census-check weights first):
 - **Stable-collateral depeg with the snap-band discontinuity**: PriceProviderV2 snaps stables to
   exactly 1e6 inside ±1% (derivation-notes :274-276) — at 0.99 nothing happens, at 0.98 the
-  price unsnaps to market. Model the step. Disclose the DM asymmetry: existing debt is
+  price unsnaps to market. Model the step.
+  > **CORRECTION (2026-07-29, Wave 4, source-read proof — PriceProvider.sol:307-310):** the
+  > band is OPEN (`> low && < high`), so exactly-0.99 (990000) does NOT snap — "at 0.99
+  > nothing happens" is false at precisely that point. The step is modeled from source; a
+  > third boundary scenario carries the discriminator. Disclose the DM asymmetry: existing debt is
   USD-normalized, so a USDC depeg re-prices USDC collateral but not outstanding debt.
 - **ETHFI −50% (idiosyncratic)**: own-ecosystem-token collateral, correlated with exactly the
   stress states in which liquidations happen.

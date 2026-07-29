@@ -1,0 +1,57 @@
+{
+  "id": "weeth_rate_minus_5",
+  "version": "v1",
+  "label": "weETH redemption rate -5 percent",
+  "description": "The slashing / exploit counterfactual. This is the axis both engines' oracles actually read: the Debt Manager composite follows the weETH/ETH exchange-rate feed and the Aave cap adapter passes a rate DROP straight through (its growth cap binds upward only). This is the weETH scenario that produces liquidations; a secondary-market depeg does not - see weeth_market_depeg_oracles_held.",
+  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+  "engines": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "shocks": [
+    {
+      "axis": "weeth_eth_rate",
+      "factor_num": 95,
+      "factor_den": 100
+    }
+  ],
+  "propagation": [
+    {
+      "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+      "chain_id": 10,
+      "symbol": "weETH",
+      "responds_to": [
+        {
+          "axis": "eth_usd"
+        },
+        {
+          "axis": "weeth_eth_rate"
+        }
+      ],
+      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283)"
+    },
+    {
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "chain_id": 1,
+      "symbol": "weETH",
+      "responds_to": [
+        {
+          "axis": "eth_usd"
+        },
+        {
+          "axis": "weeth_eth_rate"
+        }
+      ],
+      "note": "AaveOracle cap adapter 'Capped weETH / eETH(ETH) / USD' = ETH/USD x RATIO_PROVIDER getRate(); the growth cap binds upward only, so a down-shock passes through"
+    }
+  ],
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "the mechanism that would cause a 5 percent rate drop (slashing, an exploit, a withdrawal-queue discount) is not modeled; only its mark effect is",
+    "eETH/weETH withdrawal-queue behaviour and any redemption gating"
+  ]
+}

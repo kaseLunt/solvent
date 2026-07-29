@@ -247,6 +247,41 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   ExpectedSchemaVersion is derived, only the test constant bumps. Integrator follow-up:
   derivation-notes oracle-wiring gains the dated P3 STATUS addendum (proactive fix of the
   stale-normative-doc class Codex flagged on 2a). -race still owed (toolchain gap).
+- ENDPOINT UPGRADE SESSION (2026-07-29 morning, owner-executed signups, integrator-wired):
+  publicnode personal token → SOLVENT_RPC_ETH (token recognized; archive NOT included in
+  free tier — proven by direct test; value = rate-lifted near-head lane). NEW Alchemy key →
+  ANVIL_FORK_RPC_ETH (proven serving deep archive at the genesis cluster; free tier getLogs
+  hard-capped at 10 blocks on ANY key — probed on both). INFURA free key → SOLVENT_RPC_ETH
+  position 2 (proven serving 2000-block deep-archive getLogs — THE backfill fix). Daemon
+  bounced twice; **measured backfill rate after Infura: +64,000 blocks in 3 min ≈ 1.28M
+  blocks/hour (~85× speedup)** — harness milestone ~30min, full backfill ~4h.
+- WAVE 4 LANDED (2026-07-29 10:13, Opus serena-coder — the money code): internal/risk
+  complete, 3,065 src + 4,084 test lines, 103 tests + 89 subtests, **99.1% coverage with
+  all 8 uncovered blocks enumerated-and-justified** (structurally unreachable); build/vet/
+  gofmt/suite clean, INTEGRATOR INDEPENDENTLY VERIFIED (coverage 99.1% reproduced). FIVE
+  CONTRADICTIONS found against authority (reported, not improvised): (1) BLOCKING-CLASS —
+  the DM stable snap band is OPEN (PriceProvider.sol:307-310 source read: strict
+  inequalities, band (990000,1010000) exclusive) so the spec's "0.99 no-op" was false at
+  exactly its named point — implemented source law, THREE stable scenarios incl. the
+  boundary discriminator, both edges pinned; spec §6 + risk-quant consult + derivation-notes
+  CORRECTED this commit. (2) plan interface block uncompilable (type/func name collisions)
+  → Compute* prefixes. (3) the wave brief's ray values were MY approximations — file won
+  (as instructed), laws unchanged, recorded so they don't propagate. (4) store.ParamRow ≠
+  plan sketch; internal/risk defines its own + engine/chain tags — **store→risk ParamRow
+  adapter is UNWRITTEN, owed to Task 5**. (5) ProjectDMDebt closed form diverges from the
+  chain's two-floor path (unreachable from the plan's signature) — divergence PINNED with
+  integers at exactly 1 USD-6-dec unit; result labeled PROJECTION, never gated exact.
+  FOURTEEN deviations, all justified, ALL ACCEPTED (headlines: D3 engine-tagged ParamRow
+  refusals block a silent 1e16× threshold error; D11 LowestHealthyPrice — floor(P*) is
+  already a liquidating price, off-by-one in the dangerous direction, pinned; D13 the
+  marketRealizationPass seam proves HFsUnchanged isn't hardcoded; D8 engines never blended
+  in aggregates — per-engine rows with declared scales, flat sums nil for mixed books; D14
+  refuse-don't-pick posture incl. provenance-class refusals per spec §7). Open items owed
+  forward: ParamRow adapter (Task 5); Aave LiqBonus deriver-population confirmation; pro-
+  rata seizure model disclosed (conservative variant on request); lens baseAsset composition
+  inferred not read (Task 6 probe candidate); waterfall grid WAD-scaled; -race still owed.
+  NEXT: commit → FABLE ADVERSARIAL RE-DERIVATION (independent recomputation, per the
+  standing money-code protocol) → Codex round.
 - SCOPE GAP CAUGHT BY THE GATE (2026-07-29 00:40): recon/feeds.json is NOT in W2
   allowed_paths (W1 had it; W2 authoring missed the price-registry mirror) — pre-commit
   correctly BLOCKED the 2b commit. Fix: W2 allowed_paths += recon/feeds.json (durable

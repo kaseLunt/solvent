@@ -1,0 +1,94 @@
+{
+  "id": "stable_depeg_098_unsnapped",
+  "version": "v1",
+  "label": "Stable depeg to 0.98 (outside the band - unsnapped)",
+  "description": "Every configured Debt Manager stable is marked 2 percent below par. 980000 sits outside the snap band, so PriceProviderV2 returns the market value and stable collateral re-prices. This is the step half of the snap-band pair.",
+  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+  "engines": [
+    "debt_manager"
+  ],
+  "shocks": [
+    {
+      "axis": "stable_usd",
+      "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "factor_num": 98,
+      "factor_den": 100
+    },
+    {
+      "axis": "stable_usd",
+      "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+      "factor_num": 98,
+      "factor_den": 100
+    },
+    {
+      "axis": "stable_usd",
+      "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+      "factor_num": 98,
+      "factor_den": 100
+    }
+  ],
+  "propagation": [
+    {
+      "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "chain_id": 10,
+      "symbol": "USDC",
+      "responds_to": [
+        {
+          "axis": "stable_usd",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+        }
+      ],
+      "stable_snap": true,
+      "note": "PriceProviderV2 isStableToken: the shocked market value passes through _getStablePrice, which pins it to exactly 1e6 STRICTLY INSIDE the open interval (990000, 1010000)"
+    },
+    {
+      "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+      "chain_id": 10,
+      "symbol": "USDT",
+      "responds_to": [
+        {
+          "axis": "stable_usd",
+          "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58"
+        }
+      ],
+      "stable_snap": true,
+      "note": "PriceProviderV2 isStableToken: the shocked market value passes through _getStablePrice, which pins it to exactly 1e6 STRICTLY INSIDE the open interval (990000, 1010000)"
+    },
+    {
+      "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+      "chain_id": 10,
+      "symbol": "frxUSD",
+      "responds_to": [
+        {
+          "axis": "stable_usd",
+          "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df"
+        }
+      ],
+      "stable_snap": true,
+      "note": "PriceProviderV2 isStableToken: the shocked market value passes through _getStablePrice, which pins it to exactly 1e6 STRICTLY INSIDE the open interval (990000, 1010000)"
+    },
+    {
+      "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+      "chain_id": 10,
+      "symbol": "liquidUSD",
+      "responds_to": [
+        {
+          "axis": "stable_usd",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85"
+        }
+      ],
+      "note": "accountant lens with a USDC base composition; it is NOT an isStableToken config (it marks around 1.168), so no snap applies"
+    }
+  ],
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "the Debt Manager's debt leg is USD-NORMALIZED, so a stable depeg re-prices stable COLLATERAL but not outstanding debt - the asymmetry is the point of this scenario",
+    "the Aave-side stables sit behind cap adapters (min(feed, cap)) with no snap; the Aave book is residual dust (about 2.8k USD of debt at the probe pin) so they are excluded here",
+    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read",
+    "recovery dynamics: a stable that re-pegs snaps back discontinuously, and this single-step scenario models neither direction's path"
+  ]
+}
