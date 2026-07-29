@@ -385,3 +385,14 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   completion): freeze Task 3 pins from raw_logs, dispatch the harness wave (Opus); Task 4
   (internal/risk money code) HELD for the morning fable-vs-opus conversation with the
   owner per the standing model-split note.
+- **BACKFILL COMPLETE** (2026-07-29 12:45, monitor event): eth:aave-param cursor
+  25,640,662 — past head target 25.6M. Full param custody genesis-cluster (20,713,917)
+  → head; ParamsAsOf authoritative at any block. Task 3 pin freeze UNBLOCKED — relayed
+  to the in-flight harness wave agent (finalize pins against the live DB ledger, expected
+  params from the (block,logIndex)-ordered prefix, NOT chain re-reads). Infura lane did
+  the 5M-block year in ~half a day vs the projected weeks on dRPC. Monitor bfrhep6he
+  retired (stream ended on completion). State at this event: HEAD=origin/main=925790e;
+  Wave 3 (pipelinereplay) mid-probe on the liquidation range; Wave 5 (riskd) writing
+  store risk surfaces (untracked trees: internal/pipelinereplay/, internal/riskfeed/,
+  cmd/riskd/, migration 00013, store/risk.go — both agents editing MAIN tree on disjoint
+  paths per dispatch). NEXT: wave reports → per-wave verify/commit/Codex to SHIP.
