@@ -46,11 +46,16 @@ var dmPriceClasses = map[string]bool{
 func ComputeDMHealth(in DMInput) (DMHealth, error) {
 	const op = "dm health"
 
-	if in.Marks.BalancesBlock == 0 {
-		return DMHealth{}, &AssetError{
-			Op: op, Engine: DMEngine, Asset: in.Account,
-			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
-		}
+	// SweepBlock is REQUIRED here. DM collateral is read by a ~1h sweep while
+	// prices are 60s; a never-swept or failed-sweep account carrying
+	// SweepBlock 0 would otherwise serve a liquidatable verdict over
+	// collateral whose freshness is unknown.
+	if err := requireWatermarks(op, DMEngine, in.Account,
+		watermarkCheck{"Marks.BalancesBlock", in.Marks.BalancesBlock},
+		watermarkCheck{"Marks.ParamsBlock", in.Marks.ParamsBlock},
+		watermarkCheck{"Marks.SweepBlock", in.Marks.SweepBlock},
+	); err != nil {
+		return DMHealth{}, err
 	}
 
 	out := DMHealth{
@@ -182,11 +187,15 @@ func ComputeDMHealth(in DMInput) (DMHealth, error) {
 func ProjectDMDebt(in DMInput, apy100e18 *big.Int, apyObservedBlock uint64, horizonSeconds int64) (DMProjection, error) {
 	const op = "dm projection"
 
-	if in.Marks.BalancesBlock == 0 {
-		return DMProjection{}, &AssetError{
-			Op: op, Engine: DMEngine, Asset: in.Account,
-			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
-		}
+	// A projection stamps the block its APY was observed at; without one the
+	// result cannot say what rate it projected from, and the PROJECTION label
+	// would be undisclosable. SweepBlock is NOT required — this projects DEBT
+	// and touches no collateral.
+	if err := requireWatermarks(op, DMEngine, in.Account,
+		watermarkCheck{"Marks.BalancesBlock", in.Marks.BalancesBlock},
+		watermarkCheck{"apyObservedBlock", apyObservedBlock},
+	); err != nil {
+		return DMProjection{}, err
 	}
 
 	debt0 := orZero(in.DebtUSD)

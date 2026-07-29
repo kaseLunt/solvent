@@ -139,7 +139,7 @@ Then: `python roadmap/tools/doctor.py` 0 errors after EACH commit → push → C
 type Watermarks struct{ BalancesBlock uint64; ParamsBlock uint64; SweepBlock uint64 } // per-row as-ofs; per-asset index as-ofs live on AaveReserve/DMInput (Codex round 1 [H5])
 type PriceInput struct{ ChainID uint64; Asset common.Address; Source string; Block uint64; AsOf time.Time; Value *big.Int; Decimals uint8; BudgetSeconds int64; Provenance string; Fresh bool }
 type AaveReserve struct{ Asset common.Address; ScaledDebt, ScaledCollateral *big.Int; DebtIndex, CollateralIndex *big.Int; IndexBlock uint64; IndexTime time.Time; UsedAsCollateral bool } // IndexBlock/IndexTime = rate_indexes as-of, stamped + disclosed per row — indexes update only on ReserveDataUpdated and can trail the derive cursor badly
-type AaveInput struct{ Account common.Address; Reserves []AaveReserve; Params []ParamRow; EMode uint8; Prices []PriceInput /* adapter-output rows ONLY (Task 2) */ }
+type AaveInput struct{ Account common.Address; Reserves []AaveReserve; Params []ParamRow; EMode uint8; Prices []PriceInput /* adapter-output rows ONLY (Task 2) */; Marks Watermarks /* AUTHORITATIVE; engine-aware completeness REQUIRED (Codex Task-4 rounds): Aave needs Balances+Params blocks, DM additionally Sweep, projections the APY-observation block — zero = ErrMissingWatermark, never served */ }
 func AaveHealth(in AaveInput) (AaveHealth, error)   // integer pipeline per spec §5.1; HF as (Num, Den *big.Int)
 type DMInput struct{ Account common.Address; DebtUSD *big.Int; Collateral []DMCollateral; Params []ParamRow; Prices []PriceInput }
 func DMHealth(in DMInput) (DMHealth, error)          // MaxBorrowLT, Borrowings (USD 6-dec), Liquidatable bool (strict >)

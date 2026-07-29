@@ -772,3 +772,48 @@ func TestComputeAaveHealthResultDoesNotAliasCallerPrices(t *testing.T) {
 	in.Prices[0].Value.SetInt64(7)
 	requireBig(t, "100000000", second.Reserves[0].Price.Value)
 }
+
+// TestComputeAaveHealthRequiresEngineRelevantWatermarks: the Aave surface
+// depends on balances and params, and on nothing else. Each required stamp is
+// zeroed INDEPENDENTLY with the others valid, so the table cannot pass by
+// accident of a single BalancesBlock check.
+func TestComputeAaveHealthRequiresEngineRelevantWatermarks(t *testing.T) {
+	full := Watermarks{BalancesBlock: 25635618, ParamsBlock: 25635610, SweepBlock: 25635600}
+	build := func(m Watermarks) AaveInput {
+		return AaveInput{
+			Marks:    m,
+			Account:  acctA,
+			Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "20000000", "0", true)},
+			Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+			Prices:   []PriceInput{adapterPrice(aWeETH, "100000000")},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(*Watermarks)
+		wantField string
+	}{
+		{"all present", func(*Watermarks) {}, ""},
+		{"balances block zero", func(m *Watermarks) { m.BalancesBlock = 0 }, "Marks.BalancesBlock is zero"},
+		{"params block zero", func(m *Watermarks) { m.ParamsBlock = 0 }, "Marks.ParamsBlock is zero"},
+		// The Aave engine has no collateral sweep, so demanding one would
+		// refuse every honest input.
+		{"sweep block zero is FINE on Aave", func(m *Watermarks) { m.SweepBlock = 0 }, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := full
+			tc.mutate(&m)
+			h, err := ComputeAaveHealth(build(m))
+			if tc.wantField == "" {
+				require.NoError(t, err)
+				require.Equal(t, m, h.Marks, "the accepted marks are threaded onto the result")
+				return
+			}
+			require.ErrorIs(t, err, ErrMissingWatermark)
+			require.Contains(t, err.Error(), tc.wantField)
+			require.Contains(t, err.Error(), acctA.Hex(), "the refusal names the account")
+		})
+	}
+}

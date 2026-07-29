@@ -46,11 +46,13 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 
 	// Watermarks first: a number without an as-of is not servable at all, and
 	// finding that out after computing it would only make the refusal later.
-	if in.Marks.BalancesBlock == 0 {
-		return AaveHealth{}, &AssetError{
-			Op: op, Engine: AaveEngine, Asset: in.Account,
-			Wrapped: ErrMissingWatermark, Detail: "Marks.BalancesBlock is zero",
-		}
+	// SweepBlock is deliberately NOT required — the Aave engine has no
+	// collateral sweep, so demanding one would refuse every honest input.
+	if err := requireWatermarks(op, AaveEngine, in.Account,
+		watermarkCheck{"Marks.BalancesBlock", in.Marks.BalancesBlock},
+		watermarkCheck{"Marks.ParamsBlock", in.Marks.ParamsBlock},
+	); err != nil {
+		return AaveHealth{}, err
 	}
 
 	out := AaveHealth{

@@ -858,3 +858,99 @@ func TestPositionInputRefusesMarksDisagreement(t *testing.T) {
 	err = PositionInput{Engine: AaveEngine, Aave: av, Marks: testDMMarks}.Validate()
 	require.ErrorIs(t, err, ErrWatermarkMismatch)
 }
+
+// TestComputeDMHealthRequiresEngineRelevantWatermarks: the Debt Manager
+// surface additionally depends on the collateral SWEEP block. DM collateral is
+// sweep-dominated (~1h worst case) while prices are 60s, so a never-swept
+// account carrying SweepBlock 0 would otherwise serve a liquidatable verdict
+// over collateral of unknown freshness.
+func TestComputeDMHealthRequiresEngineRelevantWatermarks(t *testing.T) {
+	full := Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848000, SweepBlock: 154840000}
+	build := func(m Watermarks) DMInput {
+		return DMInput{
+			Marks:      m,
+			Account:    acctA,
+			DebtUSD:    mustBig(t, "96000000"),
+			Collateral: []DMCollateral{{Asset: dUSDC, Amount: mustBig(t, "100000000"), Decimals: 6}},
+			Params:     []ParamRow{dmParam(dUSDC, "95000000000000000000", "1000000000000000000")},
+			Prices:     []PriceInput{enginePrice(dUSDC, "1000000")},
+		}
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(*Watermarks)
+		wantField string
+	}{
+		{"all present", func(*Watermarks) {}, ""},
+		{"balances block zero", func(m *Watermarks) { m.BalancesBlock = 0 }, "Marks.BalancesBlock is zero"},
+		{"params block zero", func(m *Watermarks) { m.ParamsBlock = 0 }, "Marks.ParamsBlock is zero"},
+		{"sweep block zero", func(m *Watermarks) { m.SweepBlock = 0 }, "Marks.SweepBlock is zero"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := full
+			tc.mutate(&m)
+			h, err := ComputeDMHealth(build(m))
+			if tc.wantField == "" {
+				require.NoError(t, err)
+				require.Equal(t, m, h.Marks)
+				require.True(t, h.Liquidatable, "the fixture is a real verdict, not a trivially empty one")
+				return
+			}
+			require.ErrorIs(t, err, ErrMissingWatermark)
+			require.Contains(t, err.Error(), tc.wantField)
+			require.Contains(t, err.Error(), acctA.Hex())
+		})
+	}
+
+	// The specific defect this closes: a never-swept account would have served
+	// `Liquidatable: true` with SweepBlock 0.
+	neverSwept := full
+	neverSwept.SweepBlock = 0
+	_, err := ComputeDMHealth(build(neverSwept))
+	require.ErrorIs(t, err, ErrMissingWatermark)
+	require.Contains(t, err.Error(), "Marks.SweepBlock is zero")
+}
+
+// TestProjectDMDebtRequiresAPYObservationBlock: a projection stamps the block
+// its APY was observed at; without one the result cannot say what rate it
+// projected from, and its PROJECTION label would be undisclosable.
+func TestProjectDMDebtRequiresAPYObservationBlock(t *testing.T) {
+	full := Watermarks{BalancesBlock: 154848114, ParamsBlock: 154848000, SweepBlock: 154840000}
+	apy := mustBig(t, "380517503804")
+	build := func(m Watermarks) DMInput {
+		return DMInput{Marks: m, Account: acctA, DebtUSD: mustBig(t, "22220000000000")}
+	}
+
+	cases := []struct {
+		name      string
+		mutate    func(*Watermarks)
+		obsBlock  uint64
+		wantField string
+	}{
+		{"all present", func(*Watermarks) {}, 154848114, ""},
+		{"balances block zero", func(m *Watermarks) { m.BalancesBlock = 0 }, 154848114, "Marks.BalancesBlock is zero"},
+		{"apy observation block zero", func(*Watermarks) {}, 0, "apyObservedBlock is zero"},
+		// A projection moves DEBT and touches no collateral or thresholds, so
+		// neither the sweep nor the params block is required here.
+		{"sweep block zero is FINE for a projection", func(m *Watermarks) { m.SweepBlock = 0 }, 154848114, ""},
+		{"params block zero is FINE for a projection", func(m *Watermarks) { m.ParamsBlock = 0 }, 154848114, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := full
+			tc.mutate(&m)
+			p, err := ProjectDMDebt(build(m), apy, tc.obsBlock, 2592000)
+			if tc.wantField == "" {
+				require.NoError(t, err)
+				require.Equal(t, m, p.Marks)
+				require.Equal(t, tc.obsBlock, p.APYObservedAt)
+				requireBig(t, "22439156164382", p.ProjectedUSD, "30d at 12%/yr on $22.22M")
+				return
+			}
+			require.ErrorIs(t, err, ErrMissingWatermark)
+			require.Contains(t, err.Error(), tc.wantField)
+		})
+	}
+}

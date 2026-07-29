@@ -166,13 +166,21 @@ var (
 	ErrEngineMismatch = errors.New("risk: position engine tag does not match its payload")
 	// ErrNoDebt: an operation that is undefined without debt.
 	ErrNoDebt = errors.New("risk: position carries no debt")
-	// ErrMissingWatermark: an input with no balances block. Every served
-	// number carries its as-ofs (design spec §5: "never an epsilon, always
-	// watermarks"), and a row that serialized with block 0 would claim to be
-	// as-of genesis. Refusing is the same posture as refusing an unpriced
-	// asset: this package does not pick a watermark, and it does not serve a
-	// number without one.
-	ErrMissingWatermark = errors.New("risk: input carries no balances-block watermark")
+	// ErrMissingWatermark: an input missing a watermark the surface consuming
+	// it actually depends on. Every served number carries its as-ofs (design
+	// spec §5: "never an epsilon, always watermarks"), and a row that
+	// serialized with block 0 would claim to be as-of genesis. Refusing is the
+	// same posture as refusing an unpriced asset: this package does not pick a
+	// watermark, and it does not serve a number without one.
+	//
+	// The requirement is ENGINE-AWARE, because the legs differ. The Aave
+	// surface needs balances and params. The Debt Manager surface additionally
+	// needs the collateral SWEEP block: DM collateral is sweep-dominated (~1h
+	// worst case) while prices are 60s, so a never-swept or failed-sweep
+	// account carrying SweepBlock 0 would otherwise serve a liquidatable
+	// verdict over collateral of unknown freshness — the 0xe957…bf20 posture
+	// the design forbids. The error NAMES the missing field.
+	ErrMissingWatermark = errors.New("risk: input is missing a required watermark")
 	// ErrWatermarkMismatch: a PositionInput whose Marks disagree with the
 	// engine input's Marks. The engine input is authoritative; a disagreement
 	// means the caller built the two from different reads.
@@ -202,6 +210,27 @@ func (e *AssetError) Unwrap() error { return e.Wrapped }
 
 func assetErr(op, engine string, asset common.Address, sentinel error, detail string) error {
 	return &AssetError{Op: op, Engine: engine, Asset: asset, Wrapped: sentinel, Detail: detail}
+}
+
+// watermarkCheck is one required as-of, carrying the field name that goes into
+// the refusal so an operator is told WHICH stamp is missing rather than that
+// something is.
+type watermarkCheck struct {
+	name  string
+	value uint64
+}
+
+// requireWatermarks refuses the first missing as-of, naming it. Each caller
+// passes only the stamps ITS OWN computation depends on — demanding a sweep
+// block from the Aave surface, which has no sweep, would refuse every honest
+// input.
+func requireWatermarks(op, engine string, account common.Address, checks ...watermarkCheck) error {
+	for _, c := range checks {
+		if c.value == 0 {
+			return assetErr(op, engine, account, ErrMissingWatermark, c.name+" is zero")
+		}
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -481,9 +510,11 @@ type AaveInput struct {
 	Prices   []PriceInput
 	Regime   Regime
 	// Marks are this input's as-ofs and are AUTHORITATIVE: ComputeAaveHealth
-	// copies them onto the result, and refuses an input whose BalancesBlock is
-	// zero (ErrMissingWatermark). PositionInput.Marks is a mirror, checked for
-	// agreement rather than trusted.
+	// copies them onto the result, and refuses an input missing BalancesBlock
+	// or ParamsBlock (ErrMissingWatermark, naming the field). SweepBlock is
+	// NOT required here — the Aave engine has no collateral sweep.
+	// PositionInput.Marks is a mirror, checked for agreement rather than
+	// trusted.
 	Marks Watermarks
 }
 
@@ -505,10 +536,12 @@ type DMInput struct {
 	Params     []ParamRow
 	Prices     []PriceInput
 	// Marks are this input's as-ofs and are AUTHORITATIVE — see
-	// AaveInput.Marks. SweepBlock matters here in particular: DM collateral is
-	// sweep-dominated (~1h worst case) while prices are 60s, and a row that
-	// did not carry the sweep block would let a 60s-fresh badge sit over
-	// hour-stale collateral.
+	// AaveInput.Marks. ComputeDMHealth requires BalancesBlock, ParamsBlock AND
+	// SweepBlock: DM collateral is sweep-dominated (~1h worst case) while
+	// prices are 60s, so a row without the sweep block would let a 60s-fresh
+	// badge sit over hour-stale collateral. ProjectDMDebt requires only
+	// BalancesBlock plus a nonzero APY observation block — it projects DEBT
+	// and touches no collateral.
 	Marks Watermarks
 }
 
