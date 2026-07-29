@@ -1,18 +1,19 @@
 ---
-claim_id: 440898b3-5d50-494e-a734-7ca244745fd8
-generation: 10
+claim_id: 6fe2b79d-8fc8-4721-b521-0dbcbdd24dca
+generation: 11
 agent: claude-integrator
 task: W2
 status: active
 integrator: true
 branch: main
 worktree_id: 391b6a12-eb13-597c-bc9a-37240d9dfd29
-base_commit: 99bc3094e6fe0480197c3f821547752ded369167
+base_commit: 63e09da3f44317905cbec8c08a21dd53d45c1487
 allowed_paths:
   - docs/plans/**
   - docs/specs/**
   - recon/derivation-notes.md
   - recon/p3-probes.md
+  - recon/feeds.json
   - internal/**
   - cmd/**
   - config/**
@@ -27,10 +28,10 @@ allowed_paths:
   - .env.example
   - .github/workflows/ci.yml
   - .gitignore
-scope_hash: sha256:91e40a19324c1045b687ea98a2600f80e87d2d63da1cf1d7dd0bd23f6eb9e7cc
-issued_at: 2026-07-29T03:08:05Z
-lease_expires: 2026-07-29T11:08:05Z
-updated_at: 2026-07-29T03:08:05Z
+scope_hash: sha256:6932c55c31a894b5c9a343b32bf541bf51eb0597329670d1404ecb2b11c817c0
+issued_at: 2026-07-29T07:40:40Z
+lease_expires: 2026-07-29T15:40:40Z
+updated_at: 2026-07-29T07:40:40Z
 ---
 
 # Claim: claude-integrator -> W2

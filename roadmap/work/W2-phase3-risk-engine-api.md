@@ -14,6 +14,7 @@ allowed_paths:
   - docs/specs/**
   - recon/derivation-notes.md
   - recon/p3-probes.md
+  - recon/feeds.json
   - internal/**
   - cmd/**
   - config/**
