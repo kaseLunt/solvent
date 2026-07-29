@@ -429,3 +429,21 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   SOLVENT_DATABASE_URL). Ops note: TEST_DATABASE_URL not in .env — export inline for
   opted-in runs (harness FAILS loud when opted-in without it, by design; verified).
   NEXT: Codex round on 4c638da = the joint Task 2+3 closure gate.
+- CODEX ROUND 1 ON HARNESS (session 019faff2-9678-7871-8746-24b7a9307996, ~9min,
+  worktree C:\wtclose\t3 pinned at 4c638da, sibling wave's untracked files confirmed
+  NOT leaked): **needs-attention, 1 HIGH** — riskGate has no required-engine set
+  (refuses only when NO cursors exist, then judges whichever cursors are returned), so
+  honest startup with a position cursor but no aave_param cursor ALLOWS with params
+  unavailable; leg 3's refusal assertion is a boolean the Aave cursor alone satisfies,
+  and it drains both runners before checking Allow — a gate ignoring aave_param
+  entirely would PASS the closure harness. Adjudication: FIX-WORTHY (honest-use false
+  green — the exact D-013 class). Fix wave dispatched to the original harness agent:
+  required (engine,chain) set in riskGate refusing every missing cursor BY NAME;
+  leg-3 ordering assertions (refusal set == exactly both engines → ack Aave first →
+  still refuses naming aave_param ALONE → param rewind+rederive → only then Allow);
+  explicit no-cursor-row startup refusal. **CROSS-POLLINATION (binding on Task 5):
+  the REAL gate in cmd/riskd must satisfy the same law — required-engine set, refuse
+  by name, never allow on partial cursor presence. Goes in Wave 5's verification and
+  its Codex brief.** Codex sandbox couldn't run Go (temp-dir denial) — integrator's
+  opted-in runs remain the execution evidence; re-run owed after the fix lands.
+  Worktree t3 joins the inert locked-dir cleanup list.
