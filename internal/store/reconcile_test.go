@@ -156,14 +156,22 @@ func TestQuerierContractPoolAndTx(t *testing.T) {
 // TestSchemaVersionMatchesEmbeddedExpectation pins the Phase-0 schema gate's
 // two halves against each other: after Migrate, the database's max applied
 // goose version equals ExpectedSchemaVersion (derived from the embedded
-// migrations — currently 12, since 00012 added prices.source_as_of, the
-// chain-asserted as-of that keeps a P3 risk read from mistaking database
-// insertion time for the age of a price).
+// migrations — currently 13, since 00013 added the P3 risk-materialization
+// tables cmd/riskd writes, on top of 00012's prices.source_as_of, the
+// chain-asserted as-of that keeps a risk read from mistaking database insertion
+// time for the age of a price).
+//
+// The literal below is deliberately duplicated with migrate_upgrade_test.go's
+// currentSchemaVersion rather than shared: the two exist to catch DIFFERENT
+// mistakes. That one asserts an upgrade PATH reaches the head; this one asserts
+// the reconcile gate's expectation IS the head. A single constant would let one
+// edit satisfy both, and the reason both are hard-coded is that a migration must
+// not be able to land by moving a number the tests read.
 func TestSchemaVersionMatchesEmbeddedExpectation(t *testing.T) {
 	s := testDeriveStore(t)
 	expected, err := ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.EqualValues(t, 12, expected, "embedded expected is currently 12 (migration 00012, prices.source_as_of)")
+	require.EqualValues(t, 13, expected, "embedded expected is currently 13 (migration 00013, the risk tables)")
 	got, err := SchemaVersion(context.Background(), s.pool)
 	require.NoError(t, err)
 	require.Equal(t, expected, got)
