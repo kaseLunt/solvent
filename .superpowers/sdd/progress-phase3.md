@@ -144,3 +144,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   provider dishonesty observed). NEXT: Task 2+3 wave briefs (param + adapter-price custody;
   pipeline-replay harness) — chain-truth pre-dispatch sharpening per its standing charter,
   then Opus implementation waves under D-006 with D-013 quoted.
+- CI GREEN on Task 1 (run 30420460474, 1m55s).
+- CHAIN-TRUTH TASK 2+3 PRE-DISPATCH CONSULT LANDED (archived VERBATIM-CONDENSED at
+  .superpowers/sdd/p3-consults/chain-truth-task2-brief.md — NORMATIVE for the wave briefs,
+  6-item blocking list gates wave acceptance). Headlines: ParamRunner is a NEW thin runner
+  (NOT derive.Engine) copying exactly four Runner rules, refuse-loud on unknown topic0 lives
+  in the runner not the Registry; ApplyParamEvents mirrors the FULL two-arm gate block
+  (derive.go:198-230/263-273/306-335); RewindParams = fourth consumer of rewindTarget
+  (derive.go:351-382), modeled on RewindPrices' lean shape, RewindDerived untouched;
+  adapter-output polling EXTENDS the existing ETH poller (feeds.json registry entries +
+  address-qualified pollViews "getAssetPrice(address)"), source_as_of costs ZERO extra RPC
+  (head.Time already in hand at poller.go:928); source_as_of backfill for feed rows is
+  RECOMMENDED provenance completion via a FeedDeriver Go-decoder healing pass (never SQL
+  byte-slicing; D-012 governs poll rows, not feed rows); harness is THREE legs (the
+  one-range sketch REFUTED — first liquidation 313k blocks after the only config event;
+  genesis invariant forbids mid-history welds): genesis-cluster leg fork ~20,714,020 walking
+  20,713,910→20,714,007 w/ committed-fixture second witness, liquidation custody-only leg
+  21,469,973–21,469,982, synthetic post-fork reorg leg via anvil_reorg (probed working on
+  v1.7.1, positional params; pre-fork getLogs PROXIES to upstream caps; needs new
+  ANVIL_FORK_RPC_ETH on the Alchemy key — the sanctioned targeted carve-out); walker has NO
+  adaptive halving (probe-pack phrase corrected) → stream window 2000 on the existing daemon
+  endpoint posture. Plan Task 2/3 amended to match. Consult also live-probed anvil and
+  recorded one self-correction (its own hex bug, retracted — probe-pack tradition holds).
+- SESSION PAUSE (2026-07-28 ~21:15 local): usage limit until 22:40 — owner directed no
+  further agent spawns. CLEAN HANDOFF STATE: HEAD pushed + CI green through Task 1; consult
+  archive + plan corrections committed in this entry's commit. NEXT ACTION ON RESUME:
+  dispatch Wave 2a (param custody core: config enum, configurator decode w/ A1 strict
+  3-word reader, ParamRunner, ApplyParamEvents/RewindParams + migrations, indexer wiring) to
+  an OPUS implementation agent — brief = plan Task 2 + the consult's blocking list + D-013
+  adjudication line quoted; then Wave 2b (adapter-output poller + source_as_of + healing
+  pass), then Task 3 harness legs, Codex per wave to SHIP.
