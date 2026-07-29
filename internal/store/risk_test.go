@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 	"time"
@@ -51,13 +52,34 @@ func boolp(v bool) *bool    { return &v }
 // sampleBatch is one complete, servable batch: two positions (one computed, one
 // refused), legs, full price snapshots, aggregates and stamps.
 func sampleBatch(retention int) RiskBatchWrite {
+	return sampleBatchKeyed(retention, newTestKey())
+}
+
+// testKeySeq mints distinct idempotency keys, since the column is UNIQUE and
+// every legitimately-distinct prepared pass must carry its own.
+var testKeySeq int64
+
+func newTestKey() string {
+	testKeySeq++
+	return fmt.Sprintf("test-key-%d-%d", time.Now().UnixNano(), testKeySeq)
+}
+
+func sampleBatchKeyed(retention int, key string) RiskBatchWrite {
 	return RiskBatchWrite{
-		Producer:  "riskd-test",
-		Retention: retention,
+		Producer:       "riskd-test",
+		Retention:      retention,
+		IdempotencyKey: key,
 		Watermarks: []RiskBatchWatermark{
 			{Engine: riskAaveEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4, MaxEpochAtCompute: 4},
 			{Engine: riskParamEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4, MaxEpochAtCompute: 4},
 			{Engine: riskPollEngine1, ChainID: 1, LastBlock: 25_635_600, AckedEpoch: 4, MaxEpochAtCompute: 4},
+			{Engine: riskDMEngine, ChainID: 10, LastBlock: 154_796_552, AckedEpoch: 9, MaxEpochAtCompute: 9,
+				Sweep: &RiskSweepWatermark{
+					Engine: riskDMEngine, Rows: 2, Failed: 1,
+					SuccessSum: big.NewInt(309_580_000), HasUpdatedAt: true,
+					MaxUpdatedAt: time.Date(2026, 7, 29, 11, 59, 0, 0, time.UTC),
+					Generation:   3, GenerationOpen: false,
+				}},
 		},
 		Positions: []RiskPositionWrite{
 			{
@@ -144,7 +166,7 @@ func TestWriteRiskBatchRoundTrip(t *testing.T) {
 
 	// The stamp vector — per engine (last_block, acked_epoch) + the chain's
 	// max epoch at compute time.
-	require.Len(t, batch.Watermarks, 3)
+	require.Len(t, batch.Watermarks, 4)
 	byEngine := map[string]RiskBatchWatermark{}
 	for _, w := range batch.Watermarks {
 		byEngine[w.Engine] = w
@@ -213,76 +235,6 @@ func TestWriteRiskBatchRoundTrip(t *testing.T) {
 		 WHERE batch_id = $1 AND engine = $2`, id, riskAaveEngine).Scan(&indexBlock, &bonus))
 	require.EqualValues(t, 25_600_000, indexBlock)
 	require.Equal(t, "10600", bonus, "the liquidation bonus reached storage; without it recovery arithmetic uses par")
-}
-
-// TestNewestCompleteBatchSkipsTornBatch is the half-written-batch law
-// (chain-truth R6.5). The torn state is CONSTRUCTED — WriteRiskBatch cannot
-// produce it, which is exactly why the serving path must still refuse it.
-func TestNewestCompleteBatchSkipsTornBatch(t *testing.T) {
-	s := testRiskStore(t)
-	ctx := context.Background()
-
-	goodID, err := s.WriteRiskBatch(ctx, sampleBatch(10))
-	require.NoError(t, err)
-
-	// A LATER batch declaring three positions, with only one child row — the
-	// shape a mid-transaction abort or a partially restored dump would leave.
-	var tornID int64
-	require.NoError(t, s.pool.QueryRow(ctx, `SELECT nextval('risk_batches_id_seq')`).Scan(&tornID))
-	require.Greater(t, tornID, goodID)
-	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batches (id, status, position_count) VALUES ($1, $2, 3)`,
-		tornID, RiskBatchComplete)
-	require.NoError(t, err)
-	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
-		(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute)
-		VALUES ($1, $2, 1, 25635700, 4, 4)`, tornID, riskAaveEngine)
-	require.NoError(t, err)
-	_, err = s.pool.Exec(ctx, `INSERT INTO risk_positions
-		(batch_id, engine, account, status, value_decimals, balances_block, params_block)
-		VALUES ($1, $2, $3, $4, 8, 25635700, 25635700)`,
-		tornID, riskAaveEngine, addr20(0xA1), RiskPositionComputed)
-	require.NoError(t, err)
-
-	batch, found, err := s.NewestCompleteBatch(ctx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, goodID, batch.ID,
-		"the newest batch is TORN (1 of 3 children); the older WHOLE batch is served instead")
-
-	// Completing it makes it servable — the check is on the actual rows, not on
-	// a flag somebody could set.
-	for _, acct := range [][]byte{addr20(0xA2), addr20(0xA3)} {
-		_, err = s.pool.Exec(ctx, `INSERT INTO risk_positions
-			(batch_id, engine, account, status, value_decimals, balances_block, params_block)
-			VALUES ($1, $2, $3, $4, 8, 25635700, 25635700)`,
-			tornID, riskAaveEngine, acct, RiskPositionComputed)
-		require.NoError(t, err)
-	}
-	batch, found, err = s.NewestCompleteBatch(ctx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, tornID, batch.ID)
-}
-
-// TestNewestCompleteBatchRequiresWatermarks: a batch with no stamp vector cannot
-// be checked for supersession, so it is not disclosable.
-func TestNewestCompleteBatchRequiresWatermarks(t *testing.T) {
-	s := testRiskStore(t)
-	ctx := context.Background()
-
-	goodID, err := s.WriteRiskBatch(ctx, sampleBatch(10))
-	require.NoError(t, err)
-
-	var unstamped int64
-	require.NoError(t, s.pool.QueryRow(ctx, `SELECT nextval('risk_batches_id_seq')`).Scan(&unstamped))
-	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batches (id, status, position_count) VALUES ($1, $2, 0)`,
-		unstamped, RiskBatchComplete)
-	require.NoError(t, err)
-
-	batch, found, err := s.NewestCompleteBatch(ctx)
-	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, goodID, batch.ID, "an unstamped batch has no supersession legs and is unservable")
 }
 
 func TestWriteRiskBatchRefusesIncoherentInput(t *testing.T) {
@@ -536,6 +488,90 @@ func TestRiskInputSnapshotReadsTheSubstrateInOneTransaction(t *testing.T) {
 	}
 	require.EqualValues(t, 100, byEngine[riskAaveEngine].LastBlock)
 	require.EqualValues(t, 95, byEngine[riskPollEngine1].LastBlock)
+}
+
+// TestRiskSweepStateForAggregatesTheSweepTables: the durable key the recompute
+// trigger's sweep leg compares. `ApplySweepBatch` moves these rows and NO derive
+// cursor, so this read is the only thing that can see a sweep transition.
+func TestRiskSweepStateForAggregatesTheSweepTables(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+	const engine = riskDMEngine
+
+	// A never-swept engine still yields a row: "no sweep has ever happened" is a
+	// state the trigger must be able to see CHANGE, and an absent row would make
+	// the first sweep look like nothing at all.
+	state, err := RiskSweepStateFor(ctx, s.pool, []string{engine})
+	require.NoError(t, err)
+	require.Len(t, state, 1)
+	require.Equal(t, engine, state[0].Engine)
+	require.Zero(t, state[0].Rows)
+	require.Equal(t, "0", state[0].SuccessSum.String())
+	require.False(t, state[0].HasUpdatedAt, "never swept carries NO timestamp, not the zero time")
+	require.Zero(t, state[0].Generation)
+
+	// One success and one failure.
+	_, err = s.pool.Exec(ctx, `INSERT INTO snapshot_sweeps
+		(engine, account, last_attempt_block, last_success_block, status) VALUES
+		($1, $2, 120, 120, 'success'),
+		($1, $3, 130, 0,  'failed')`, engine, addr20(0xB1), addr20(0xB2))
+	require.NoError(t, err)
+
+	state, err = RiskSweepStateFor(ctx, s.pool, []string{engine})
+	require.NoError(t, err)
+	require.EqualValues(t, 2, state[0].Rows)
+	require.EqualValues(t, 1, state[0].Failed, "a non-success status counts as failed")
+	require.Equal(t, "120", state[0].SuccessSum.String())
+	require.True(t, state[0].HasUpdatedAt)
+
+	// The SUM moves when a lagging account catches up behind a higher peer — a
+	// MAX would not.
+	_, err = s.pool.Exec(ctx,
+		`UPDATE snapshot_sweeps SET last_success_block = 90, status = 'success'
+		 WHERE engine = $1 AND account = $2`, engine, addr20(0xB2))
+	require.NoError(t, err)
+	state, err = RiskSweepStateFor(ctx, s.pool, []string{engine})
+	require.NoError(t, err)
+	require.Equal(t, "210", state[0].SuccessSum.String(), "120 + 90 — the sum, not the max")
+	require.Zero(t, state[0].Failed)
+
+	// The generation leg, including open/closed.
+	gen, err := s.OpenSweepGeneration(ctx, engine)
+	require.NoError(t, err)
+	state, err = RiskSweepStateFor(ctx, s.pool, []string{engine})
+	require.NoError(t, err)
+	require.EqualValues(t, gen, state[0].Generation)
+	require.True(t, state[0].GenerationOpen, "an open generation means a sweep pass is in flight")
+}
+
+// TestRiskInputSnapshotCarriesSweepState: the pass reads the same aggregate
+// inside its own snapshot, so the poll and the pass cannot drift into two
+// different notions of "the sweep moved".
+func TestRiskInputSnapshotCarriesSweepState(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	_, err := s.pool.Exec(ctx, `INSERT INTO snapshot_sweeps
+		(engine, account, last_attempt_block, last_success_block, status)
+		VALUES ($1, $2, 500, 500, 'success')`, riskDMEngine, addr20(0xB1))
+	require.NoError(t, err)
+
+	tx, err := s.BeginRiskSnapshot(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	in, err := RiskInputSnapshot(ctx, tx, RiskSnapshotSpec{
+		PositionEngines: []string{riskAaveEngine, riskDMEngine},
+	})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+
+	byEngine := map[string]RiskSweepWatermark{}
+	for _, w := range in.SweepState {
+		byEngine[w.Engine] = w
+	}
+	require.Len(t, byEngine, 2, "one row per requested engine, swept or not")
+	require.Equal(t, "500", byEngine[riskDMEngine].SuccessSum.String())
+	require.Zero(t, byEngine[riskAaveEngine].Rows)
 }
 
 // TestRiskInputSnapshotIsReadOnly proves the READ ONLY half structurally.

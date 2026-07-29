@@ -60,7 +60,26 @@ CREATE TABLE risk_batches (
     -- producer can mark a batch it deliberately abandoned without deleting the
     -- evidence; NewestCompleteBatch requires it AND the count check.
     status         TEXT   NOT NULL,
-    position_count INT    NOT NULL,
+
+    -- DECLARED CARDINALITIES FOR EVERY MANDATORY CHILD RELATION.
+    --
+    -- position_count alone was not enough, and the gap was a false pass: a
+    -- partial restore holding every position header but no price snapshots and
+    -- no aggregates satisfied a positions-only check, so a stored health factor
+    -- could be served with NO input evidence behind it and a book total could
+    -- read empty. A guard that does not guard its own premise is worse than no
+    -- guard, because it is believed. NewestCompleteBatch now validates ALL of
+    -- these against the actual rows.
+    position_count      INT NOT NULL,
+    leg_count           INT NOT NULL DEFAULT 0,
+    price_input_count   INT NOT NULL DEFAULT 0,
+    aggregate_count     INT NOT NULL DEFAULT 0,
+    -- The engines whose stamps MUST be present for this batch to be servable.
+    -- "any one watermark exists" was the same false-pass shape: supersession is
+    -- checked per engine, so a batch missing one engine's stamp cannot be judged
+    -- for that engine and must not be served at all.
+    required_engines    TEXT[] NOT NULL DEFAULT '{}',
+
     -- Counts are DECLARED here and recomputed per engine in
     -- risk_batch_aggregates. They are the batch-level rollup a book endpoint
     -- reads without touching the position rows.
@@ -68,7 +87,22 @@ CREATE TABLE risk_batches (
     flagged_count  INT    NOT NULL DEFAULT 0,
     -- The riskd build that produced the batch, so a number can be traced to the
     -- code that computed it.
-    producer       TEXT   NOT NULL DEFAULT ''
+    producer       TEXT   NOT NULL DEFAULT '',
+
+    -- IDEMPOTENCY KEY FOR THE INDETERMINATE COMMIT.
+    --
+    -- A lost commit acknowledgement is not a rollback: PostgreSQL may have
+    -- committed and the reply may have died on the wire. A producer that simply
+    -- retried would write the batch TWICE, and the duplicate is not harmless —
+    -- the first (committed) attempt becomes the step-comparison baseline, so a
+    -- 100→200 price move that the first attempt correctly FLAGGED is re-judged
+    -- as 200→200 on the retry, and the newest batch silently loses the
+    -- large-step warning an operator was supposed to see.
+    --
+    -- The key is generated once per PREPARED pass and reused across retries, so
+    -- the UNIQUE constraint turns a double-write into a detectable no-op that
+    -- WriteRiskBatch reconciles instead of recomputing.
+    idempotency_key TEXT NOT NULL UNIQUE
 );
 CREATE INDEX risk_batches_newest_idx ON risk_batches (id DESC);
 
@@ -83,6 +117,22 @@ CREATE INDEX risk_batches_newest_idx ON risk_batches (id DESC);
 -- chain it names. Two engines on one chain therefore carry the same
 -- max_epoch_at_compute, and that redundancy is the point — the stamp is readable
 -- from any engine's row without a join.
+--
+-- THE SWEEP COLUMNS ARE PART OF THE WATERMARK, not decoration. Debt Manager
+-- collateral is produced by the ~1h snapshot sweep, and `ApplySweepBatch` moves
+-- `snapshot_sweeps` and the snapshot-sourced balances WITHOUT touching any
+-- derive cursor or reorg epoch. A recompute trigger watching only cursors is
+-- therefore blind to the two transitions that matter most:
+--
+--   * a first SUCCESSFUL sweep, after which a published SWEEP_NEVER refusal is
+--     stale and wrong — the account's collateral is now known;
+--   * a FAILED sweep after a prior success, after which the previously
+--     published unflagged result is stale and carries no staleness flag.
+--
+-- Either could stand until some unrelated cursor happened to move. So the sweep
+-- state joins the vector, and the state a batch CONSUMED is stamped here — the
+-- same reason the cursor pair is stamped: a serving surface has to be able to
+-- ask "is what I am about to serve still current?".
 CREATE TABLE risk_batch_watermarks (
     batch_id             BIGINT NOT NULL REFERENCES risk_batches(id) ON DELETE CASCADE
                                   DEFERRABLE INITIALLY DEFERRED,
@@ -91,6 +141,20 @@ CREATE TABLE risk_batch_watermarks (
     last_block           BIGINT NOT NULL,
     acked_epoch          BIGINT NOT NULL,
     max_epoch_at_compute BIGINT NOT NULL,
+
+    -- Per-engine sweep state at compute time; NULL for engines that have no
+    -- collateral sweep (the Aave engine, the param engine, the price pollers).
+    -- Absence is meaningful and must stay distinguishable from "zero rows".
+    sweep_rows           BIGINT,
+    sweep_failed         BIGINT,
+    -- The SUM of last_success_block over all swept accounts. A sum moves
+    -- whenever any single account's last success moves, which a MAX would miss
+    -- when a lagging account catches up behind an already-higher peer.
+    sweep_success_sum    NUMERIC,
+    sweep_max_updated_at TIMESTAMPTZ,
+    sweep_generation     BIGINT,
+    sweep_generation_open BOOLEAN,
+
     PRIMARY KEY (batch_id, engine)
 );
 
@@ -223,7 +287,14 @@ CREATE TABLE risk_position_legs (
     liq_threshold NUMERIC,
     liq_bonus     NUMERIC,
 
-    PRIMARY KEY (batch_id, engine, account, asset)
+    PRIMARY KEY (batch_id, engine, account, asset),
+    -- A leg belongs to a POSITION, and the composite FK says so structurally: a
+    -- leg whose position row is absent cannot exist, so "positions restored but
+    -- legs orphaned" is not a reachable state rather than a state a serving
+    -- predicate has to remember to check.
+    FOREIGN KEY (batch_id, engine, account)
+        REFERENCES risk_positions(batch_id, engine, account) ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 -- ---------------------------------------------------------------------------
@@ -274,7 +345,12 @@ CREATE TABLE risk_price_inputs (
     verdict        TEXT   NOT NULL,
     age_seconds    BIGINT,
 
-    PRIMARY KEY (batch_id, engine, account, asset, source)
+    PRIMARY KEY (batch_id, engine, account, asset, source),
+    -- Same law as the legs: a price disclosure exists only as evidence FOR a
+    -- position, so it cannot outlive or precede one.
+    FOREIGN KEY (batch_id, engine, account)
+        REFERENCES risk_positions(batch_id, engine, account) ON DELETE CASCADE
+        DEFERRABLE INITIALLY DEFERRED
 );
 
 -- ---------------------------------------------------------------------------

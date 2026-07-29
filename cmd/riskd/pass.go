@@ -18,6 +18,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -77,12 +79,24 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	if err != nil {
 		return res, err
 	}
-	vector := newWatermarkVector(cursors, maxEpochs, cfg.consumedEngines())
+	// The sweep aggregate is read here too, in the SAME snapshot, because it is
+	// part of the vector: Debt Manager collateral moves without any cursor
+	// moving. It is a fixed-size two-table aggregate, so it costs the same as the
+	// cursor read it sits beside.
+	sweeps, err := store.RiskSweepStateFor(ctx, tx, cfg.sweptEngines())
+	if err != nil {
+		return res, err
+	}
+	vector := newWatermarkVector(cursors, maxEpochs, sweeps, cfg.consumedEngines())
 	res.Vector = vector
 
-	// Step 2 — the gate. Position and param engines only; price engines are
-	// gated per position by G2.
-	if g := gatePass(vector, cfg.gatedEngines()); !g.OK {
+	// Step 2 — the gate. Position and param engines, as (engine, chain) pairs;
+	// price engines are gated per position by G2.
+	g, err := gatePass(vector, cfg.gatedEngines())
+	if err != nil {
+		return res, err
+	}
+	if !g.OK {
 		res.Gated, res.GateErr = true, g.Err()
 		return res, nil
 	}
@@ -96,7 +110,7 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	// The snapshot re-read the vector; under REPEATABLE READ it must be the one
 	// the gate judged. Proving it costs nothing and turns an isolation
 	// regression from a silent wrong stamp into a loud refusal.
-	reread := newWatermarkVector(inputs.Cursors, inputs.MaxEpochs, cfg.consumedEngines())
+	reread := newWatermarkVector(inputs.Cursors, inputs.MaxEpochs, inputs.SweepState, cfg.consumedEngines())
 	if reread.Changed(vector) {
 		return res, fmt.Errorf("%w: gated %s, snapshot %s", errVectorDrift, vector, reread)
 	}
@@ -121,13 +135,26 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 
 	// Step 5 — one write transaction: batch + every child row + retention prune
 	// + the doorbell.
+	//
+	// The idempotency key is minted HERE, once, for this PREPARED pass, and is
+	// what makes an ambiguous commit reconcilable instead of double-written. See
+	// store.RiskBatchWrite.IdempotencyKey: a blind retry after a lost commit
+	// acknowledgement would make the first (committed) attempt the step
+	// baseline, and a large price move it correctly flagged would be re-judged
+	// against its own post-move value — silently losing the warning.
+	key, err := newIdempotencyKey()
+	if err != nil {
+		return res, err
+	}
 	batchID, err := s.WriteRiskBatch(ctx, store.RiskBatchWrite{
-		Producer:   cfg.Producer,
-		Watermarks: stampsFor(vector),
-		Positions:  assembled.Positions,
-		Aggregates: assembled.Aggregates,
-		Retention:  cfg.Retention,
-		Notify:     notifyChannel,
+		Producer:        cfg.Producer,
+		Watermarks:      stampsFor(vector),
+		Positions:       assembled.Positions,
+		Aggregates:      assembled.Aggregates,
+		RequiredEngines: cfg.requiredStampEngines(vector),
+		Retention:       cfg.Retention,
+		Notify:          notifyChannel,
+		IdempotencyKey:  key,
 	})
 	if err != nil {
 		return res, err
@@ -144,6 +171,23 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 		}
 	}
 	return res, nil
+}
+
+// newIdempotencyKey mints the identity of ONE prepared pass.
+//
+// It is random rather than derived from the vector, deliberately. A
+// vector-derived key would collide across two legitimately distinct passes that
+// happened to read the same watermarks — which is exactly what a quiet chain
+// produces — and the collision would be silently swallowed as "already
+// committed", skipping a batch that should have been written. Randomness makes
+// the key mean "this attempt", which is the only thing a retry needs to be able
+// to say.
+func newIdempotencyKey() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("mint risk batch idempotency key: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 // previousPrices reads the price values the newest COMPLETE batch disclosed,

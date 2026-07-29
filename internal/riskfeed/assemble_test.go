@@ -95,8 +95,7 @@ func baseInputs() store.RiskInputs {
 			{Engine: "prices:poll:1", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 0},
 			{Engine: "prices:poll:10", ChainID: 10, LastBlock: 154_796_552, AckedEpoch: 0},
 		},
-		MaxEpochs:        map[int64]int64{},
-		BalanceConflicts: map[string]string{},
+		MaxEpochs: map[int64]int64{},
 	}
 }
 
@@ -568,15 +567,84 @@ func TestAssembleEnginesAreNeverBlended(t *testing.T) {
 	require.EqualValues(t, 6, byEngine[risk.DMEngine].ValueDecimals)
 }
 
+// TestAssembleConflictedAccountWithNoRowsStillLandsAsARefusal is the THIRD high
+// finding, pinned at the seam where it actually bit.
+//
+// MUTANT THIS KILLS: enumerating accounts from the balances map alone
+// (`sortedAccounts(balances[engine])` instead of `accountSet(..., conflicts)`).
+// `store.riskBalances` withholds EVERY row of a conflicted account — correctly —
+// so under that code the account has no rows to be discovered from, produces no
+// position at all, and the recorded conflict is never visited. The batch then
+// contains no evidence the account exists, which downstream reads as "no
+// position here": the false-safe direction, and the exact opposite of the G3
+// refusal the withholding exists to produce.
+//
+// The fixture therefore supplies NO balance rows for the conflicted account —
+// which is what the store really hands over — and still demands a refused row.
+func TestAssembleConflictedAccountWithNoRowsStillLandsAsARefusal(t *testing.T) {
+	in := baseInputs()
+	// Exactly the store's output shape: rows withheld, conflict recorded.
+	in.Balances = nil
+	in.BalanceConflicts = []store.RiskBalanceConflict{{
+		Engine:  risk.DMEngine,
+		Account: acctB.Bytes(),
+		Detail:  "event/snapshot balance conflict: engine \"debt_manager\" account b2 asset c1 side \"collateral\" has both event- and snapshot-sourced rows",
+	}}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+
+	p := findPosition(t, res, risk.DMEngine, acctB)
+	require.Equal(t, store.RiskPositionRefused, p.Status,
+		"a conflicted account must land as a REFUSAL, never vanish from the batch")
+	require.Equal(t, GateStoreUnreadable, p.RefusalCode)
+	require.Contains(t, p.RefusalDetail, "both event- and snapshot-sourced rows")
+	require.Nil(t, p.Liquidatable, "a refusal asserts no verdict")
+	require.Nil(t, p.CollateralValueUSD)
+
+	// And it is COUNTED — an aggregate that omitted it would report a clean book
+	// over an account nobody could evaluate.
+	agg := findAggregate(t, res, risk.DMEngine)
+	require.Equal(t, 1, agg.Positions)
+	require.Equal(t, 1, agg.RefusedPositions)
+	require.Equal(t, 0, agg.ComputedPositions)
+}
+
+// TestAssembleConflictOnBothEnginesIsSeededPerEngine: the union seed is
+// per-engine, so a conflict on one engine must not create a phantom position on
+// the other.
+func TestAssembleConflictOnBothEnginesIsSeededPerEngine(t *testing.T) {
+	in := baseInputs()
+	in.Balances = nil
+	in.BalanceConflicts = []store.RiskBalanceConflict{
+		{Engine: risk.AaveEngine, Account: acctA.Bytes(), Detail: "aave conflict"},
+		{Engine: risk.DMEngine, Account: acctB.Bytes(), Detail: "dm conflict"},
+	}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	require.Len(t, res.Positions, 2)
+
+	aave := findPosition(t, res, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionRefused, aave.Status)
+	require.Equal(t, GateStoreUnreadable, aave.RefusalCode)
+	dm := findPosition(t, res, risk.DMEngine, acctB)
+	require.Equal(t, store.RiskPositionRefused, dm.Status)
+
+	require.Equal(t, 1, findAggregate(t, res, risk.AaveEngine).RefusedPositions)
+	require.Equal(t, 1, findAggregate(t, res, risk.DMEngine).RefusedPositions)
+}
+
 func TestAssembleBalanceConflictRefusesTheAccount(t *testing.T) {
 	in := dmInputs()
 	in.Sweeps = []store.RiskSweepRow{{
 		Engine: risk.DMEngine, Account: acctA.Bytes(), Status: "success",
 		LastSuccessBlock: 154_790_000, UpdatedAt: fixtureTime,
 	}}
-	in.BalanceConflicts = map[string]string{
-		risk.DMEngine + "/" + accountKey(acctA.Bytes()): "event/snapshot balance conflict",
-	}
+	in.BalanceConflicts = []store.RiskBalanceConflict{{
+		Engine: risk.DMEngine, Account: acctA.Bytes(),
+		Detail: "event/snapshot balance conflict",
+	}}
 
 	res, err := Assemble(in, fixtureConfig(t))
 	require.NoError(t, err)

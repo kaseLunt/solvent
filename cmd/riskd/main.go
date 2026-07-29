@@ -35,6 +35,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"syscall"
 	"time"
@@ -121,16 +122,65 @@ func (c *daemonConfig) consumedEngines() []string {
 //
 // The Debt Manager's param engine IS its position engine (its params are a view
 // over its own position_events), so the list deduplicates naturally.
-func (c *daemonConfig) gatedEngines() []string {
+//
+// The requirements are (engine, chain_id) PAIRS, not names. A name alone let an
+// ABSENT cursor pass the gate and gave a WRONG-CHAIN cursor nothing to be checked
+// against — so an ETH parameter query could be bounded by an OP cursor's height.
+// riskfeed.GateEpochs refuses all three failure modes by name.
+func (c *daemonConfig) gatedEngines() []riskfeed.RequiredCursor {
+	seen := map[riskfeed.RequiredCursor]bool{}
+	var out []riskfeed.RequiredCursor
+	for _, r := range []riskfeed.RequiredCursor{
+		{Engine: c.Aave.Engine, ChainID: int64(c.Aave.ChainID)},
+		{Engine: c.Aave.ParamEngine, ChainID: int64(c.Aave.ChainID)},
+		{Engine: c.DM.Engine, ChainID: int64(c.DM.ChainID)},
+		{Engine: c.DM.ParamEngine, ChainID: int64(c.DM.ChainID)},
+	} {
+		if r.Engine == "" || seen[r] {
+			continue
+		}
+		seen[r] = true
+		out = append(out, r)
+	}
+	return out
+}
+
+// sweptEngines are the engines whose collateral is produced by the SNAPSHOT
+// SWEEP, and therefore the only ones whose sweep state belongs in the vector or
+// on a batch stamp.
+//
+// Today that is the Debt Manager alone: `internal/snapshot` sweeps OP collateral
+// through the CashLens, while Aave collateral is event-derived from aToken
+// transfers and has no sweep at all. Returning the Aave engine here would stamp
+// it with an all-zero sweep row, and an all-zero row is NOT the same statement as
+// "this engine has no sweep" — migration 00013 keeps those distinguishable
+// precisely so a reader cannot mistake one for the other. If an Aave-side sweeper
+// ever exists, it is added here.
+func (c *daemonConfig) sweptEngines() []string {
+	return []string{c.DM.Engine}
+}
+
+// requiredStampEngines is the engine set whose watermark stamps must be present
+// for a batch to be servable — every engine the pass consumes, price pollers
+// included, because supersession is judged per engine.
+func (c *daemonConfig) requiredStampEngines(v watermarkVector) []string {
 	seen := map[string]bool{}
 	var out []string
-	for _, e := range []string{c.Aave.Engine, c.Aave.ParamEngine, c.DM.Engine, c.DM.ParamEngine} {
+	for _, e := range c.consumedEngines() {
 		if e == "" || seen[e] {
+			continue
+		}
+		// Only engines that actually HAVE a cursor get stamped, so only those may
+		// be required. A missing position/param cursor has already refused the
+		// pass at the gate; a missing price cursor is reported per position as an
+		// absent input.
+		if _, ok := v.Engines[e]; !ok {
 			continue
 		}
 		seen[e] = true
 		out = append(out, e)
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -140,6 +190,9 @@ func (c *daemonConfig) gatedEngines() []string {
 func (c *daemonConfig) snapshotSpec(v watermarkVector) store.RiskSnapshotSpec {
 	spec := store.RiskSnapshotSpec{
 		PositionEngines: []string{c.Aave.Engine, c.DM.Engine},
+		// The SAME set the cheap poll uses, so the gated vector and the
+		// in-snapshot re-read cannot differ.
+		SweptEngines:    c.sweptEngines(),
 		IndexBounds:     map[string]uint64{},
 		AaveParamEngine: c.Aave.ParamEngine,
 		AaveParamChain:  c.Aave.ChainID,
@@ -383,10 +436,14 @@ func vectorChanged(ctx context.Context, s *store.Store, cfg *daemonConfig, last 
 	if err != nil {
 		return false, watermarkVector{}, err
 	}
+	sweeps, err := store.RiskSweepStateFor(ctx, tx, cfg.sweptEngines())
+	if err != nil {
+		return false, watermarkVector{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, watermarkVector{}, fmt.Errorf("commit watermark poll: %w", err)
 	}
-	v := newWatermarkVector(cursors, maxEpochs, cfg.consumedEngines())
+	v := newWatermarkVector(cursors, maxEpochs, sweeps, cfg.consumedEngines())
 	return v.Changed(last), v, nil
 }
 

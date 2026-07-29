@@ -163,18 +163,37 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 	priceRows := indexPriceRows(in.Prices)
 	balances := indexBalances(in.Balances)
 
+	// CONFLICTED ACCOUNTS ARE SEEDED EXPLICITLY, because they have NO balance
+	// rows to be discovered from. `store.riskBalances` withholds every row of an
+	// account whose (asset, side) exists under both sources — the correct
+	// posture — which means enumerating accounts from `Balances` alone makes the
+	// account vanish from the batch entirely. A vanished position reads
+	// downstream as "no position here": the false-safe direction, and the exact
+	// opposite of the G3 refusal the withholding exists to produce. So the
+	// account set is the UNION of "has rows" and "has a conflict".
+	conflicts := map[string]string{}
+	conflictAccounts := map[string][][]byte{}
+	for _, c := range in.BalanceConflicts {
+		key := c.Engine + "/" + accountKey(c.Account)
+		if _, dup := conflicts[key]; dup {
+			continue
+		}
+		conflicts[key] = c.Detail
+		conflictAccounts[c.Engine] = append(conflictAccounts[c.Engine], c.Account)
+	}
+
 	res := AssembleResult{}
 
 	// --- Aave -------------------------------------------------------------
 	aaveCursor := cursors[cfg.Aave.Engine]
 	aaveParamCursor := cursors[cfg.Aave.ParamEngine]
-	for _, account := range sortedAccounts(balances[cfg.Aave.Engine]) {
+	for _, account := range accountSet(balances[cfg.Aave.Engine], conflictAccounts[cfg.Aave.Engine]) {
 		p, book, err := assembleAave(assembleArgs{
 			cfg:        cfg,
 			now:        now,
 			account:    account,
 			assets:     balances[cfg.Aave.Engine][accountKey(account)],
-			conflicts:  in.BalanceConflicts,
+			conflicts:  conflicts,
 			indexes:    indexes,
 			priceRows:  priceRows,
 			params:     aaveParamByAsset,
@@ -196,13 +215,13 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 
 	// --- Debt Manager -----------------------------------------------------
 	dmCursor := cursors[cfg.DM.Engine]
-	for _, account := range sortedAccounts(balances[cfg.DM.Engine]) {
+	for _, account := range accountSet(balances[cfg.DM.Engine], conflictAccounts[cfg.DM.Engine]) {
 		p, book, err := assembleDM(assembleArgs{
 			cfg:        cfg,
 			now:        now,
 			account:    account,
 			assets:     balances[cfg.DM.Engine][accountKey(account)],
-			conflicts:  in.BalanceConflicts,
+			conflicts:  conflicts,
 			indexes:    indexes,
 			priceRows:  priceRows,
 			params:     dmParamByAsset,
@@ -748,14 +767,27 @@ func indexKey(engine string, asset common.Address, kind string) string {
 
 func accountKey(account []byte) string { return hex.EncodeToString(account) }
 
-func sortedAccounts(byAcct map[string]map[common.Address]map[string]store.RiskBalanceRow) [][]byte {
-	keys := make([]string, 0, len(byAcct))
+// accountSet is the UNION of the accounts that have balance rows and the
+// accounts that have a withheld-rows conflict, deduplicated and ordered.
+//
+// The union is the fix for a false-safe disappearance: a conflicted account has
+// no rows by construction, so an enumeration over `byAcct` alone would drop it
+// from the batch instead of refusing it.
+func accountSet(byAcct map[string]map[common.Address]map[string]store.RiskBalanceRow, extra [][]byte) [][]byte {
+	keys := make(map[string]bool, len(byAcct)+len(extra))
 	for k := range byAcct {
-		keys = append(keys, k)
+		keys[k] = true
 	}
-	sort.Strings(keys)
-	out := make([][]byte, 0, len(keys))
-	for _, k := range keys {
+	for _, a := range extra {
+		keys[accountKey(a)] = true
+	}
+	ordered := make([]string, 0, len(keys))
+	for k := range keys {
+		ordered = append(ordered, k)
+	}
+	sort.Strings(ordered)
+	out := make([][]byte, 0, len(ordered))
+	for _, k := range ordered {
 		b, err := hex.DecodeString(k)
 		if err != nil {
 			continue

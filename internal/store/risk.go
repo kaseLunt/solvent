@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,18 @@ type RiskSnapshotSpec struct {
 	// PositionEngines are the engines whose position_balances and
 	// snapshot_sweeps rows are truth for this pass.
 	PositionEngines []string
+	// SweptEngines are the engines whose collateral comes from the snapshot
+	// sweep, and therefore the engines whose sweep AGGREGATE is part of the
+	// watermark vector. Defaults to PositionEngines when empty.
+	//
+	// It is separate from PositionEngines because not every position engine has
+	// a sweep — Aave collateral is event-derived — and an all-zero aggregate row
+	// for an engine with no sweeper is not the same statement as "no sweeper".
+	// The daemon must pass the SAME set here that it passes to
+	// RiskSweepStateFor for its cheap poll, or the vector it gates on and the
+	// vector it re-reads inside the snapshot will differ in length and the
+	// drift assertion will (correctly) fire.
+	SweptEngines []string
 	// IndexBounds caps each engine's rate_indexes read at that engine's own
 	// derive cursor. An index above the cursor describes a block the engine has
 	// not claimed custody of.
@@ -147,6 +160,53 @@ type RiskSweepRow struct {
 	UpdatedAt        time.Time
 }
 
+// RiskSweepWatermark is one engine's DURABLE sweep state, aggregated — the
+// recompute trigger's sweep leg and the batch's sweep stamp.
+//
+// # Why the derive cursors are not sufficient
+//
+// `ApplySweepBatch` writes `snapshot_sweeps` and the snapshot-sourced
+// `position_balances` rows, and moves NO derive cursor and NO reorg epoch. Debt
+// Manager collateral is exactly those rows. So a trigger watching only cursors is
+// blind to both directions that matter:
+//
+//   - a first SUCCESSFUL sweep leaves a published `SWEEP_NEVER` refusal standing
+//     even though the account's collateral is now known;
+//   - a FAILED sweep after a prior success leaves the previously published,
+//     UNFLAGGED result standing with no staleness disclosure on it.
+//
+// Either could persist until some unrelated cursor happened to move — up to a
+// full poll cadence of published wrongness, or indefinitely on a quiet chain.
+//
+// # Why these four aggregates
+//
+// The key has to change on every transition an operator would care about, while
+// staying a fixed-size read:
+//
+//   - Rows — a first-ever attempt creates a row (0 → 1), which is the
+//     never-swept → swept transition.
+//   - Failed — a success→failure or failure→success flip moves this even when no
+//     block and no row count changed.
+//   - SuccessSum — the SUM (not MAX) of `last_success_block`, so a lagging
+//     account catching up behind an already-higher peer still moves the key; a
+//     MAX would silently miss it.
+//   - MaxUpdatedAt — the database's own stamp on the most recent write, which
+//     catches a re-attempt that changed nothing else.
+//
+// Generation/GenerationOpen come from `sweep_generations` and additionally
+// distinguish "a sweep pass is in flight" from "the pass completed", which is
+// what a freshness disclosure needs.
+type RiskSweepWatermark struct {
+	Engine         string
+	Rows           int64
+	Failed         int64
+	SuccessSum     *big.Int
+	MaxUpdatedAt   time.Time
+	HasUpdatedAt   bool
+	Generation     uint64
+	GenerationOpen bool
+}
+
 // RiskPriceRow is one usable price witness with its full disclosure, read
 // through the same predicate as LatestUsablePrice: newest VALID row for the
 // key, positive by migration 00005's CHECK.
@@ -180,14 +240,28 @@ type RiskInputs struct {
 
 	Balances []RiskBalanceRow
 	// BalanceConflicts names accounts holding the same (asset, side) under BOTH
-	// 'event' and 'snapshot' sources, keyed by lowercase hex account. Their
-	// rows are WITHHELD from Balances: the same per-account source-exclusivity
-	// posture Store.BalancesFor and ReconBalancesForAccounts enforce. A
-	// conflicted account is refused, never silently resolved by picking.
-	BalanceConflicts map[string]string
+	// 'event' and 'snapshot' sources. Their rows are WITHHELD from Balances: the
+	// same per-account source-exclusivity posture Store.BalancesFor and
+	// ReconBalancesForAccounts enforce. A conflicted account is refused, never
+	// silently resolved by picking.
+	//
+	// IT IS A TYPED LIST, NOT A KEYED MAP, AND THE CONSUMER MUST ENUMERATE IT.
+	// The first version keyed conflicts by a composite string while the assembler
+	// enumerated accounts from `Balances` alone — so withholding the rows made the
+	// account VANISH from the batch entirely, and the recorded conflict was never
+	// visited. A disappeared position reads downstream as "no position here",
+	// which is the false-safe direction and precisely the opposite of the refusal
+	// the withholding was supposed to produce. Carrying engine and account as
+	// FIELDS makes the conflicted set independently iterable, so the assembler can
+	// seed from the union of "has rows" and "has a conflict".
+	BalanceConflicts []RiskBalanceConflict
 
 	Indexes []RiskRateIndexRow
 	Sweeps  []RiskSweepRow
+	// SweepState is the per-engine DURABLE AGGREGATE of the sweep tables — the
+	// recompute trigger's sweep leg. See RiskSweepWatermark for why the cursor
+	// pair alone is not enough.
+	SweepState []RiskSweepWatermark
 	// AaveParams and DMParams are LEDGER PREFIXES in (block, log_index) order,
 	// not folded views. The fold is last-non-nil PER FIELD and lives in
 	// internal/riskfeed — see ParamsAsOf's doc comment for why a last-row-wins
@@ -277,6 +351,13 @@ func RiskInputSnapshot(ctx context.Context, q Querier, spec RiskSnapshotSpec) (R
 	if in.Sweeps, err = riskSweeps(ctx, q, spec.PositionEngines); err != nil {
 		return RiskInputs{}, err
 	}
+	swept := spec.SweptEngines
+	if len(swept) == 0 {
+		swept = spec.PositionEngines
+	}
+	if in.SweepState, err = riskSweepState(ctx, q, swept); err != nil {
+		return RiskInputs{}, err
+	}
 	if spec.AaveParamEngine != "" {
 		if in.AaveParams, err = ParamsAsOfQ(ctx, q, spec.AaveParamEngine, spec.AaveParamChain, spec.AaveParamBlock); err != nil {
 			return RiskInputs{}, err
@@ -291,9 +372,19 @@ func RiskInputSnapshot(ctx context.Context, q Querier, spec RiskSnapshotSpec) (R
 	return in, nil
 }
 
-func riskBalances(ctx context.Context, q Querier, engines []string) ([]RiskBalanceRow, map[string]string, error) {
+// RiskBalanceConflict is one account whose balance rows were withheld because
+// the same (asset, side) exists under BOTH the event- and snapshot-derived
+// sources. It carries its own engine and account so a consumer can produce a
+// refusal ROW for it rather than merely knowing a conflict happened.
+type RiskBalanceConflict struct {
+	Engine  string
+	Account []byte
+	Detail  string
+}
+
+func riskBalances(ctx context.Context, q Querier, engines []string) ([]RiskBalanceRow, []RiskBalanceConflict, error) {
 	if len(engines) == 0 {
-		return nil, map[string]string{}, nil
+		return nil, nil, nil
 	}
 	rows, err := q.Query(ctx,
 		`SELECT engine, account, asset, side, source, amount::text, updated_block
@@ -305,7 +396,8 @@ func riskBalances(ctx context.Context, q Querier, engines []string) ([]RiskBalan
 	defer rows.Close()
 
 	var out []RiskBalanceRow
-	conflicts := map[string]string{}
+	conflictAt := map[string]RiskBalanceConflict{}
+	var conflictOrder []string
 	seen := map[string]string{} // engine/acct/asset/side → source
 	for rows.Next() {
 		var r RiskBalanceRow
@@ -322,9 +414,14 @@ func riskBalances(ctx context.Context, q Querier, engines []string) ([]RiskBalan
 		acct := r.Engine + "/" + hex.EncodeToString(r.Account)
 		key := acct + "/" + hex.EncodeToString(r.Asset) + "/" + r.Side
 		if prev, dup := seen[key]; dup && prev != r.Source {
-			if _, done := conflicts[acct]; !done {
-				conflicts[acct] = fmt.Sprintf("%v: engine %q account %x asset %x side %q has both event- and snapshot-sourced rows",
-					ErrBalanceSourceConflict, r.Engine, r.Account, r.Asset, r.Side)
+			if _, done := conflictAt[acct]; !done {
+				conflictAt[acct] = RiskBalanceConflict{
+					Engine:  r.Engine,
+					Account: append([]byte(nil), r.Account...),
+					Detail: fmt.Sprintf("%v: engine %q account %x asset %x side %q has both event- and snapshot-sourced rows",
+						ErrBalanceSourceConflict, r.Engine, r.Account, r.Asset, r.Side),
+				}
+				conflictOrder = append(conflictOrder, acct)
 			}
 			continue
 		}
@@ -334,17 +431,21 @@ func riskBalances(ctx context.Context, q Querier, engines []string) ([]RiskBalan
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("iterate risk balance rows: %w", err)
 	}
-	if len(conflicts) > 0 {
-		kept := out[:0]
-		for _, r := range out {
-			if _, bad := conflicts[r.Engine+"/"+hex.EncodeToString(r.Account)]; bad {
-				continue // a conflicted account reports the conflict, never rows
-			}
-			kept = append(kept, r)
-		}
-		out = kept
+	if len(conflictAt) == 0 {
+		return out, nil, nil
 	}
-	return out, conflicts, nil
+	kept := out[:0]
+	for _, r := range out {
+		if _, bad := conflictAt[r.Engine+"/"+hex.EncodeToString(r.Account)]; bad {
+			continue // a conflicted account reports the conflict, never rows
+		}
+		kept = append(kept, r)
+	}
+	conflicts := make([]RiskBalanceConflict, 0, len(conflictOrder))
+	for _, acct := range conflictOrder {
+		conflicts = append(conflicts, conflictAt[acct])
+	}
+	return kept, conflicts, nil
 }
 
 func riskRateIndexes(ctx context.Context, q Querier, bounds map[string]uint64) ([]RiskRateIndexRow, error) {
@@ -412,6 +513,71 @@ func riskSweeps(ctx context.Context, q Querier, engines []string) ([]RiskSweepRo
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate risk sweep rows: %w", err)
+	}
+	return out, nil
+}
+
+// RiskSweepStateFor is the exported sweep-aggregate read, so the daemon's
+// cheap watermark POLL can take the sweep leg without pulling the whole
+// substrate. `RiskInputSnapshot` calls the same implementation, so the poll and
+// the pass cannot drift into two different notions of "the sweep moved".
+//
+// Call it inside the pass's snapshot transaction.
+func RiskSweepStateFor(ctx context.Context, q Querier, engines []string) ([]RiskSweepWatermark, error) {
+	return riskSweepState(ctx, q, engines)
+}
+
+// riskSweepState aggregates the sweep tables per engine, INSIDE the pass's
+// snapshot. One row per requested engine is always returned — including an
+// all-zero row for an engine that has never swept, because "no sweep has ever
+// happened" is a state the trigger must be able to see CHANGE, and an absent row
+// would make the first sweep look like nothing at all.
+func riskSweepState(ctx context.Context, q Querier, engines []string) ([]RiskSweepWatermark, error) {
+	if len(engines) == 0 {
+		return nil, nil
+	}
+	rows, err := q.Query(ctx,
+		`SELECT e.engine,
+		        COALESCE(s.rows, 0), COALESCE(s.failed, 0),
+		        COALESCE(s.success_sum, 0)::text, s.max_updated_at,
+		        COALESCE(g.current_generation, 0),
+		        (g.engine IS NOT NULL AND g.completed_at IS NULL)
+		 FROM unnest($1::text[]) AS e(engine)
+		 LEFT JOIN (
+		     SELECT engine,
+		            count(*)                                        AS rows,
+		            count(*) FILTER (WHERE status <> 'success')      AS failed,
+		            sum(last_success_block)                         AS success_sum,
+		            max(updated_at)                                 AS max_updated_at
+		     FROM snapshot_sweeps GROUP BY engine
+		 ) s ON s.engine = e.engine
+		 LEFT JOIN sweep_generations g ON g.engine = e.engine
+		 ORDER BY e.engine`, engines)
+	if err != nil {
+		return nil, fmt.Errorf("query risk sweep state: %w", err)
+	}
+	defer rows.Close()
+	var out []RiskSweepWatermark
+	for rows.Next() {
+		var w RiskSweepWatermark
+		var sum string
+		var updatedAt *time.Time
+		if err := rows.Scan(&w.Engine, &w.Rows, &w.Failed, &sum, &updatedAt,
+			&w.Generation, &w.GenerationOpen); err != nil {
+			return nil, fmt.Errorf("scan risk sweep state: %w", err)
+		}
+		v, ok := new(big.Int).SetString(sum, 10)
+		if !ok {
+			return nil, fmt.Errorf("risk sweep state %s: success sum %q is not an integer", w.Engine, sum)
+		}
+		w.SuccessSum = v
+		if updatedAt != nil {
+			w.HasUpdatedAt, w.MaxUpdatedAt = true, updatedAt.UTC()
+		}
+		out = append(out, w)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate risk sweep state: %w", err)
 	}
 	return out, nil
 }
@@ -693,6 +859,11 @@ type RiskBatchWatermark struct {
 	LastBlock         uint64
 	AckedEpoch        int64
 	MaxEpochAtCompute int64
+	// Sweep is the engine's sweep state at compute time, set only for engines
+	// that actually have a collateral sweep. Absence stays distinguishable from
+	// "zero rows": nil means this engine has no sweep, not that its sweep is
+	// empty.
+	Sweep *RiskSweepWatermark
 }
 
 // RiskPositionWrite is one account's verdict. Engine-specific fields are
@@ -805,6 +976,24 @@ type RiskBatchWrite struct {
 	Watermarks []RiskBatchWatermark
 	Positions  []RiskPositionWrite
 	Aggregates []RiskEngineAggregate
+	// RequiredEngines are the engines whose stamps MUST be present for the batch
+	// to be servable. Persisted so NewestCompleteBatch can check the stamp SET
+	// rather than merely that some stamp exists — supersession is judged per
+	// engine, so a batch missing one engine's pair cannot be judged for it.
+	// Defaults to the engines in Watermarks when empty.
+	RequiredEngines []string
+	// IdempotencyKey identifies this PREPARED pass, and must be reused verbatim
+	// across retries of it.
+	//
+	// It exists because a Commit error is AMBIGUOUS: PostgreSQL may have
+	// committed and lost the acknowledgement. A blind retry then writes the batch
+	// twice, and the duplicate is not benign — the committed first attempt
+	// becomes the step-comparison baseline, so a large price move the first
+	// attempt correctly flagged is re-judged against its own post-move value and
+	// the newest batch silently loses the warning. With a stable key, the UNIQUE
+	// constraint makes the second write detectable and WriteRiskBatch reconciles
+	// it instead of recomputing. Required.
+	IdempotencyKey string
 	// Retention keeps the newest N batches; older ones and their children are
 	// deleted in the SAME transaction (plan Task 5: SOLVENT_RISK_RETENTION,
 	// default 5000). Pruning outside the write would leave a window in which
@@ -845,6 +1034,38 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	if len(w.Watermarks) == 0 {
 		return 0, fmt.Errorf("%w: a batch with no watermark stamps cannot be checked for supersession", ErrRiskBatchIncomplete)
 	}
+	if w.IdempotencyKey == "" {
+		return 0, fmt.Errorf("%w: an idempotency key is required — without one an ambiguous commit cannot be reconciled and a retry silently double-writes the batch", ErrRiskBatchIncomplete)
+	}
+	// The required stamp set defaults to what is actually being stamped; an
+	// explicit set that names an unstamped engine is a caller bug, refused here
+	// rather than producing a batch that can never be served.
+	required := w.RequiredEngines
+	if len(required) == 0 {
+		for _, m := range w.Watermarks {
+			required = append(required, m.Engine)
+		}
+	}
+	stamped := map[string]bool{}
+	for _, m := range w.Watermarks {
+		stamped[m.Engine] = true
+	}
+	for _, e := range required {
+		if !stamped[e] {
+			return 0, fmt.Errorf("%w: engine %q is required but carries no watermark stamp", ErrRiskBatchIncomplete, e)
+		}
+	}
+	// Aggregates must account for every position, or a book total silently omits
+	// one. Checked here so the disagreement is a loud refusal at write time
+	// rather than a batch NewestCompleteBatch will skip forever in silence.
+	aggPositions := 0
+	for _, a := range w.Aggregates {
+		aggPositions += a.Positions
+	}
+	if aggPositions != len(w.Positions) {
+		return 0, fmt.Errorf("%w: aggregates account for %d positions but the batch carries %d",
+			ErrRiskBatchIncomplete, aggPositions, len(w.Positions))
+	}
 	seen := map[string]bool{}
 	for _, p := range w.Positions {
 		if p.Engine == "" || len(p.Account) == 0 {
@@ -869,10 +1090,25 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	}
 
 	for _, m := range w.Watermarks {
+		var rows, failed, gen any
+		var sum any
+		var updatedAt any
+		var open any
+		if m.Sweep != nil {
+			rows, failed, gen = m.Sweep.Rows, m.Sweep.Failed, int64(m.Sweep.Generation)
+			sum = numericParam(orZeroBig(m.Sweep.SuccessSum))
+			open = m.Sweep.GenerationOpen
+			if m.Sweep.HasUpdatedAt {
+				updatedAt = m.Sweep.MaxUpdatedAt
+			}
+		}
 		if _, err := tx.Exec(ctx, `INSERT INTO risk_batch_watermarks
-			(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute)
-			VALUES ($1,$2,$3,$4,$5,$6)`,
-			batchID, m.Engine, m.ChainID, int64(m.LastBlock), m.AckedEpoch, m.MaxEpochAtCompute); err != nil {
+			(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+			 sweep_rows, sweep_failed, sweep_success_sum, sweep_max_updated_at,
+			 sweep_generation, sweep_generation_open)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			batchID, m.Engine, m.ChainID, int64(m.LastBlock), m.AckedEpoch, m.MaxEpochAtCompute,
+			rows, failed, sum, updatedAt, gen, open); err != nil {
 			return 0, fmt.Errorf("insert risk watermark %s: %w", m.Engine, err)
 		}
 	}
@@ -958,11 +1194,36 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		}
 	}
 
+	legCount, priceCount := 0, 0
+	for _, p := range w.Positions {
+		legCount += len(p.Legs)
+		priceCount += len(p.Prices)
+	}
+
 	// The batch row lands LAST: a visible id already has its children.
 	if _, err := tx.Exec(ctx, `INSERT INTO risk_batches
-		(id, computed_at, status, position_count, refused_count, flagged_count, producer)
-		VALUES ($1, now(), $2, $3, $4, $5, $6)`,
-		batchID, RiskBatchComplete, len(w.Positions), refused, flagged, w.Producer); err != nil {
+		(id, computed_at, status, position_count, leg_count, price_input_count,
+		 aggregate_count, required_engines, refused_count, flagged_count, producer,
+		 idempotency_key)
+		VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		batchID, RiskBatchComplete, len(w.Positions), legCount, priceCount,
+		len(w.Aggregates), required, refused, flagged, w.Producer,
+		w.IdempotencyKey); err != nil {
+		// A UNIQUE violation on the idempotency key means THIS PREPARED PASS
+		// ALREADY LANDED — the ordinary shape of a retry after a lost commit
+		// acknowledgement, where the first attempt committed and said otherwise.
+		// It is reconciled to the committed batch rather than reported, for the
+		// same reason the commit path reconciles: recomputing instead would write
+		// a duplicate whose step-comparison baseline is the first attempt's own
+		// post-move price, silently erasing a large-step warning.
+		//
+		// The collision can surface HERE or at COMMIT depending on where the
+		// retry was interrupted, so both paths reconcile. Any other error is real.
+		if isUniqueViolation(err) {
+			if id, found, lookupErr := s.riskBatchIDByKey(ctx, w.IdempotencyKey); lookupErr == nil && found {
+				return id, nil
+			}
+		}
 		return 0, fmt.Errorf("insert risk batch: %w", err)
 	}
 
@@ -978,10 +1239,63 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	// THE COMMIT IS THE AMBIGUOUS STEP, AND IT IS RECONCILED RATHER THAN TRUSTED.
+	//
+	// A Commit error does not mean "not committed". The transaction may have
+	// landed and the acknowledgement died on the wire, and the two outcomes are
+	// indistinguishable from here. Returning the error and letting the daemon
+	// retry would then double-write the batch — and the duplicate is the harm:
+	// the committed first attempt becomes the step-comparison baseline, so a
+	// large price move it correctly flagged is re-judged against its own
+	// post-move value, and the newest batch loses a warning an operator was
+	// meant to see.
+	//
+	// So on ANY commit error the idempotency key is looked up on a FRESH
+	// connection (the tx's own is not trustworthy — it just failed). If the key
+	// is there, the write landed: report it as the success it was. If it is not,
+	// the transaction genuinely rolled back and the error is real.
+	if err := commitRiskBatchTx(ctx, tx); err != nil {
+		id, found, lookupErr := s.riskBatchIDByKey(ctx, w.IdempotencyKey)
+		if lookupErr != nil {
+			return 0, fmt.Errorf("commit risk batch: %w (and the idempotency-key reconciliation also failed: %v)", err, lookupErr)
+		}
+		if found {
+			return id, nil
+		}
 		return 0, fmt.Errorf("commit risk batch: %w", err)
 	}
 	return batchID, nil
+}
+
+// isUniqueViolation reports whether err is PostgreSQL's unique-constraint
+// violation (SQLSTATE 23505). Matched on the CODE, never on the message: an
+// error string is a presentation detail that changes between server versions
+// and locales, and a reconciliation that fires on a substring would eventually
+// either miss a real collision or swallow an unrelated failure.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// commitRiskBatchTx is a seam so a test can produce the one state that cannot be
+// provoked honestly: a commit that SUCCEEDED and reported failure. Everything
+// downstream of it — the reconciliation, the no-duplicate guarantee, the retained
+// flag — is unreachable without being able to simulate that.
+var commitRiskBatchTx = func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) }
+
+// riskBatchIDByKey resolves a batch by its idempotency key. Used only by the
+// commit reconciliation, on the pool rather than the failed transaction.
+func (s *Store) riskBatchIDByKey(ctx context.Context, key string) (int64, bool, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx,
+		`SELECT id FROM risk_batches WHERE idempotency_key = $1`, key).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("resolve risk batch by idempotency key: %w", err)
+	}
+	return id, true, nil
 }
 
 // Risk batch/position status vocabularies. Closed sets, so a typo is a compile
@@ -1022,8 +1336,28 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer
 		FROM risk_batches b
 		WHERE b.status = $1
-		  AND EXISTS (SELECT 1 FROM risk_batch_watermarks w WHERE w.batch_id = b.id)
-		  AND (SELECT count(*) FROM risk_positions p WHERE p.batch_id = b.id) = b.position_count
+		  -- Every mandatory child relation is checked against its DECLARED
+		  -- cardinality. A positions-only check passed a batch holding position
+		  -- headers with no price disclosures and no aggregates, which serves a
+		  -- health factor with no input evidence and a book total that reads
+		  -- empty.
+		  AND (SELECT count(*) FROM risk_positions    p WHERE p.batch_id = b.id) = b.position_count
+		  AND (SELECT count(*) FROM risk_position_legs l WHERE l.batch_id = b.id) = b.leg_count
+		  AND (SELECT count(*) FROM risk_price_inputs  i WHERE i.batch_id = b.id) = b.price_input_count
+		  AND (SELECT count(*) FROM risk_batch_aggregates a WHERE a.batch_id = b.id) = b.aggregate_count
+		  -- The REQUIRED STAMP SET, not merely "some stamp exists": supersession
+		  -- is judged per engine, so a batch missing one engine's pair cannot be
+		  -- judged for that engine and must not be served at all.
+		  AND NOT EXISTS (
+		      SELECT 1 FROM unnest(b.required_engines) AS r(engine)
+		      WHERE NOT EXISTS (
+		          SELECT 1 FROM risk_batch_watermarks w
+		          WHERE w.batch_id = b.id AND w.engine = r.engine))
+		  AND cardinality(b.required_engines) > 0
+		  -- Aggregates must account for every position, or a book total silently
+		  -- omits one.
+		  AND COALESCE((SELECT sum(a.positions) FROM risk_batch_aggregates a
+		                WHERE a.batch_id = b.id), 0) = b.position_count
 		ORDER BY b.id DESC LIMIT 1`, RiskBatchComplete).
 		Scan(&b.ID, &b.ComputedAt, &b.Status, &b.PositionCount, &b.RefusedCount, &b.FlaggedCount, &b.Producer)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1035,7 +1369,9 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 	b.ComputedAt = b.ComputedAt.UTC()
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT engine, chain_id, last_block, acked_epoch, max_epoch_at_compute
+		`SELECT engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+		        sweep_rows, sweep_failed, sweep_success_sum::text, sweep_max_updated_at,
+		        sweep_generation, sweep_generation_open
 		 FROM risk_batch_watermarks WHERE batch_id = $1 ORDER BY engine`, b.ID)
 	if err != nil {
 		return RiskBatch{}, false, fmt.Errorf("read risk batch watermarks: %w", err)
@@ -1043,8 +1379,39 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 	defer rows.Close()
 	for rows.Next() {
 		var m RiskBatchWatermark
-		if err := rows.Scan(&m.Engine, &m.ChainID, &m.LastBlock, &m.AckedEpoch, &m.MaxEpochAtCompute); err != nil {
+		var sweepRows, sweepFailed, sweepGen *int64
+		var sweepSum *string
+		var sweepUpdated *time.Time
+		var sweepOpen *bool
+		if err := rows.Scan(&m.Engine, &m.ChainID, &m.LastBlock, &m.AckedEpoch, &m.MaxEpochAtCompute,
+			&sweepRows, &sweepFailed, &sweepSum, &sweepUpdated, &sweepGen, &sweepOpen); err != nil {
 			return RiskBatch{}, false, fmt.Errorf("scan risk batch watermark: %w", err)
+		}
+		// The sweep stamp is present only for engines that HAVE a sweep; a nil
+		// stays nil rather than becoming an all-zero row a reader would take for
+		// "swept nothing".
+		if sweepRows != nil {
+			sw := &RiskSweepWatermark{Engine: m.Engine, Rows: *sweepRows}
+			if sweepFailed != nil {
+				sw.Failed = *sweepFailed
+			}
+			if sweepSum != nil {
+				v, ok := new(big.Int).SetString(*sweepSum, 10)
+				if !ok {
+					return RiskBatch{}, false, fmt.Errorf("risk batch %d sweep sum %q is not an integer", b.ID, *sweepSum)
+				}
+				sw.SuccessSum = v
+			}
+			if sweepUpdated != nil {
+				sw.HasUpdatedAt, sw.MaxUpdatedAt = true, sweepUpdated.UTC()
+			}
+			if sweepGen != nil {
+				sw.Generation = uint64(*sweepGen)
+			}
+			if sweepOpen != nil {
+				sw.GenerationOpen = *sweepOpen
+			}
+			m.Sweep = sw
 		}
 		b.Watermarks = append(b.Watermarks, m)
 	}

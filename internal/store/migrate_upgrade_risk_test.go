@@ -129,7 +129,7 @@ func TestMigrateUpgradesV12BaselineWithRiskTables(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, id, batch.ID)
-	require.Len(t, batch.Watermarks, 3)
+	require.Len(t, batch.Watermarks, 4)
 
 	positions, err := s.RiskBatchPositions(ctx, id)
 	require.NoError(t, err)

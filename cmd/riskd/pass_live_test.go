@@ -93,10 +93,11 @@ type riskdFixture struct {
 }
 
 var (
-	fxAave   = common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") // weETH (ETH)
-	fxAaveDb = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") // USDC (ETH)
-	fxOracle = common.HexToAddress("0x43b64f28A678944E0655404B0B98E443851cC34F")
-	fxAcct   = common.HexToAddress("0xAAaa0000000000000000000000000000000000A1")
+	fxAave          = common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") // weETH (ETH)
+	fxAaveDb        = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") // USDC (ETH)
+	fxOracle        = common.HexToAddress("0x43b64f28A678944E0655404B0B98E443851cC34F")
+	fxPriceProvider = common.HexToAddress("0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB")
+	fxAcct          = common.HexToAddress("0xAAaa0000000000000000000000000000000000A1")
 )
 
 const (
@@ -135,11 +136,20 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 		{Chain: "eth", ChainID: 1, Engine: risk.AaveEngine, Address: fxAaveDb, Symbol: "USDC", Decimals: 6,
 			Oracle: config.FeedOracle{Kind: config.FeedKindPoll, Contract: fxOracle,
 				Method: "getAssetPrice(address)", PriceDecimals: 8}},
+		// The OP / Debt Manager side, valued from PriceProviderV2 (engine-exact).
+		{Chain: "op", ChainID: 10, Engine: risk.DMEngine,
+			Address: common.BytesToAddress(common20(fxDMCollateral)), Symbol: "weETH", Decimals: 18,
+			Oracle: config.FeedOracle{Kind: config.FeedKindPoll, Contract: fxPriceProvider,
+				Method: "price(address)", PriceDecimals: 6}},
+		{Chain: "op", ChainID: 10, Engine: risk.DMEngine,
+			Address: common.BytesToAddress(common20(fxDMDebtToken)), Symbol: "USDC", Decimals: 6,
+			Oracle: config.FeedOracle{Kind: config.FeedKindPoll, Contract: fxPriceProvider,
+				Method: "price(address)", PriceDecimals: 6}},
 	}}
 	registry, err := riskfeed.NewRegistry(feeds)
 	require.NoError(t, err)
 
-	return &riskdFixture{
+	f := &riskdFixture{
 		store: s, admin: admin, ctx: ctx,
 		cfg: &daemonConfig{
 			Registry: registry,
@@ -154,6 +164,27 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 			Producer:     "riskd-live-test",
 		},
 	}
+	f.seedRequiredCursors(t)
+	return f
+}
+
+// seedRequiredCursors gives EVERY engine the pass gate requires a derive cursor
+// on its own chain, with no rows behind it.
+//
+// This is not fixture convenience — it is the gate's contract made explicit. A
+// missing required cursor now REFUSES the pass, and rightly: a batch computed
+// while `debt_manager` has never proven custody would omit that entire engine
+// while presenting itself as the book, which reads downstream as "no Debt Manager
+// risk exists". An empty batch on an engine with custody is a different and
+// honest statement, and that is what these cursors establish.
+//
+// An empty event batch legitimately advances a cursor — a window containing no
+// activity still extends custody — so this is the production path, not a poke.
+func (f *riskdFixture) seedRequiredCursors(t *testing.T) {
+	t.Helper()
+	require.NoError(t, f.store.ApplyDerived(f.ctx, risk.AaveEngine, 1, nil, fxAaveBlock))
+	require.NoError(t, f.store.ApplyParamEvents(f.ctx, risk.AaveParamEngine, 1, nil, fxParamBlock))
+	require.NoError(t, f.store.ApplyDerived(f.ctx, risk.DMEngine, 10, nil, fxDMBlock))
 }
 
 // seedHealthyAavePosition lands one borrower whose numbers are hand-computed in

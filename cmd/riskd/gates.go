@@ -22,16 +22,25 @@ import (
 type watermarkVector struct {
 	Engines   map[string]store.DeriveCursorState
 	MaxEpochs map[int64]int64
+	// Sweep is the per-engine durable sweep aggregate. It is part of the vector
+	// because `ApplySweepBatch` moves Debt Manager collateral WITHOUT moving any
+	// derive cursor or reorg epoch — see store.RiskSweepWatermark for the two
+	// stale-publication directions a cursor-only trigger misses.
+	Sweep map[string]store.RiskSweepWatermark
 }
 
-func newWatermarkVector(cursors []store.DeriveCursorState, maxEpochs map[int64]int64, consumed []string) watermarkVector {
+func newWatermarkVector(cursors []store.DeriveCursorState, maxEpochs map[int64]int64, sweeps []store.RiskSweepWatermark, consumed []string) watermarkVector {
 	want := map[string]bool{}
 	for _, e := range consumed {
 		if e != "" {
 			want[e] = true
 		}
 	}
-	v := watermarkVector{Engines: map[string]store.DeriveCursorState{}, MaxEpochs: map[int64]int64{}}
+	v := watermarkVector{
+		Engines:   map[string]store.DeriveCursorState{},
+		MaxEpochs: map[int64]int64{},
+		Sweep:     map[string]store.RiskSweepWatermark{},
+	}
 	for _, c := range cursors {
 		if want[c.Engine] {
 			v.Engines[c.Engine] = c
@@ -40,7 +49,35 @@ func newWatermarkVector(cursors []store.DeriveCursorState, maxEpochs map[int64]i
 	for chain, epoch := range maxEpochs {
 		v.MaxEpochs[chain] = epoch
 	}
+	for _, s := range sweeps {
+		v.Sweep[s.Engine] = s
+	}
 	return v
+}
+
+// sweepEqual compares two sweep aggregates by VALUE. *big.Int needs Cmp (a
+// pointer comparison would report every read as a change and recompute forever),
+// and the timestamp needs its presence flag so "never swept" stays distinct from
+// "swept at the zero time".
+func sweepEqual(a, b store.RiskSweepWatermark) bool {
+	if a.Rows != b.Rows || a.Failed != b.Failed ||
+		a.Generation != b.Generation || a.GenerationOpen != b.GenerationOpen ||
+		a.HasUpdatedAt != b.HasUpdatedAt {
+		return false
+	}
+	if a.HasUpdatedAt && !a.MaxUpdatedAt.Equal(b.MaxUpdatedAt) {
+		return false
+	}
+	switch {
+	case a.SuccessSum == nil && b.SuccessSum == nil:
+	case a.SuccessSum == nil || b.SuccessSum == nil:
+		return false
+	default:
+		if a.SuccessSum.Cmp(b.SuccessSum) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Changed reports whether this vector differs from the previous one.
@@ -74,6 +111,19 @@ func (v watermarkVector) Changed(prev watermarkVector) bool {
 	}
 	for chain, epoch := range v.MaxEpochs {
 		if prev.MaxEpochs[chain] != epoch {
+			return true
+		}
+	}
+	// THE SWEEP LEG. A sweep transition moves no cursor and no epoch, so without
+	// this a first successful sweep leaves a published SWEEP_NEVER refusal
+	// standing, and a post-success failure leaves the previous UNFLAGGED result
+	// standing — each until some unrelated cursor happened to move.
+	if len(v.Sweep) != len(prev.Sweep) {
+		return true
+	}
+	for engine, cur := range v.Sweep {
+		old, ok := prev.Sweep[engine]
+		if !ok || !sweepEqual(cur, old) {
 			return true
 		}
 	}
@@ -156,13 +206,18 @@ func (g gateResult) Err() error {
 // caller to write a lookalike, and a lookalike that passes while the original is
 // wrong is the whole hazard. This function keeps the daemon-shaped signature and
 // owns none of the arithmetic.
-func gatePass(v watermarkVector, gated []string) gateResult {
+func gatePass(v watermarkVector, gated []riskfeed.RequiredCursor) (gateResult, error) {
 	cursors := make([]store.DeriveCursorState, 0, len(v.Engines))
 	for _, c := range v.Engines {
 		cursors = append(cursors, c)
 	}
-	verdict := riskfeed.GateEpochs(cursors, v.MaxEpochs, gated)
-	return gateResult{OK: verdict.OK, Reasons: verdict.Reasons()}
+	verdict, err := riskfeed.GateEpochs(cursors, v.MaxEpochs, gated)
+	if err != nil {
+		// An empty requirement set is a PROGRAMMING error, not a gated pass: the
+		// daemon must not proceed on a gate that could only ever have allowed.
+		return gateResult{}, err
+	}
+	return gateResult{OK: verdict.OK, Reasons: verdict.Reasons()}, nil
 }
 
 // stampsFor renders the vector as the per-engine batch stamps (design spec §4).
@@ -179,13 +234,22 @@ func stampsFor(v watermarkVector) []store.RiskBatchWatermark {
 	out := make([]store.RiskBatchWatermark, 0, len(engines))
 	for _, e := range engines {
 		c := v.Engines[e]
-		out = append(out, store.RiskBatchWatermark{
+		m := store.RiskBatchWatermark{
 			Engine:            c.Engine,
 			ChainID:           c.ChainID,
 			LastBlock:         c.LastBlock,
 			AckedEpoch:        c.AckedEpoch,
 			MaxEpochAtCompute: v.MaxEpochs[c.ChainID],
-		})
+		}
+		// The sweep state the batch CONSUMED is stamped alongside the cursor
+		// pair, for the same reason the pair is stamped: a serving surface has to
+		// be able to ask whether what it is about to serve is still current, and
+		// for Debt Manager collateral the sweep IS the freshness.
+		if s, ok := v.Sweep[c.Engine]; ok {
+			sw := s
+			m.Sweep = &sw
+		}
+		out = append(out, m)
 	}
 	return out
 }
