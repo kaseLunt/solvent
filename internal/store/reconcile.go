@@ -214,12 +214,23 @@ type DeriveCursorState struct {
 	ChainID    int64
 	LastBlock  uint64
 	AckedEpoch int64
+	// CoveredFromBlock and DecoderRevision are the DERIVATION-COVERAGE provenance
+	// of the current derived state (migration 00014): where the walk that produced
+	// it began, and which decode registry it ran under.
+	//
+	// They exist because a cursor at head does not prove that a law reading
+	// ABSENCE as chain truth may do so — see DerivationCoverage. CoveredFromBlock
+	// is nil and DecoderRevision is 0 when the provenance is UNKNOWN, which every
+	// consumer must read as unproven rather than as coverage from genesis.
+	CoveredFromBlock *uint64
+	DecoderRevision  int32
 }
 
 // DeriveCursorStates reads every derive cursor, ordered by engine.
 func DeriveCursorStates(ctx context.Context, q Querier) ([]DeriveCursorState, error) {
 	rows, err := q.Query(ctx,
-		`SELECT engine, chain_id, last_block, acked_epoch FROM derive_cursors ORDER BY engine`)
+		`SELECT engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision
+		 FROM derive_cursors ORDER BY engine`)
 	if err != nil {
 		return nil, fmt.Errorf("query derive cursors: %w", err)
 	}
@@ -227,8 +238,14 @@ func DeriveCursorStates(ctx context.Context, q Querier) ([]DeriveCursorState, er
 	var out []DeriveCursorState
 	for rows.Next() {
 		var s DeriveCursorState
-		if err := rows.Scan(&s.Engine, &s.ChainID, &s.LastBlock, &s.AckedEpoch); err != nil {
+		var coveredFrom *int64
+		if err := rows.Scan(&s.Engine, &s.ChainID, &s.LastBlock, &s.AckedEpoch,
+			&coveredFrom, &s.DecoderRevision); err != nil {
 			return nil, fmt.Errorf("scan derive cursor: %w", err)
+		}
+		if coveredFrom != nil {
+			b := uint64(*coveredFrom)
+			s.CoveredFromBlock = &b
 		}
 		out = append(out, s)
 	}

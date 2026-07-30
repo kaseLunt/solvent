@@ -186,9 +186,26 @@ func ComputeMaterializationIdentity(
 	ordered := make([]store.DeriveCursorState, len(cursors))
 	copy(ordered, cursors)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Engine < ordered[j].Engine })
+	// DERIVATION COVERAGE RIDES IN THE CURSOR LINE, because it is a watermark
+	// fact: it describes the state a cursor points at, and it changes what the
+	// pass DOES with that state — an unproven Aave coverage turns the whole Aave
+	// book from computed into refused (GateFlagCustodyUnproven). Per the standing
+	// law that every input the output depends on is in the identity, it must be
+	// here; and the cursor section is the honest home, so it is covered by the
+	// same ordering and determinism the rest of the vector already has rather than
+	// needing a section of its own.
+	//
+	// It is in the VECTOR rather than the substrate digest deliberately: the
+	// vector is the human-readable "what was this batch computed from", and
+	// "cov=none/rev0" is exactly what an operator needs to see on a refused book.
 	b.WriteString("cursors:")
 	for _, c := range ordered {
-		fmt.Fprintf(&b, "%s@%d/%d/ack%d;", c.Engine, c.ChainID, c.LastBlock, c.AckedEpoch)
+		covered := "none"
+		if c.CoveredFromBlock != nil {
+			covered = fmt.Sprintf("%d", *c.CoveredFromBlock)
+		}
+		fmt.Fprintf(&b, "%s@%d/%d/ack%d/cov%s/rev%d;",
+			c.Engine, c.ChainID, c.LastBlock, c.AckedEpoch, covered, c.DecoderRevision)
 	}
 	b.WriteByte('\n')
 

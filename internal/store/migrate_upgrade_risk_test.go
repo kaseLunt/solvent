@@ -56,7 +56,7 @@ func TestMigrateUpgradesV12BaselineWithRiskTables(t *testing.T) {
 
 	// (b) Pre-existing P2 data that riskd will read: a derived Aave position,
 	// its rate index, a param row and a polled price.
-	require.NoError(t, s.ApplyDerivedWithRates(ctx, engine, 1,
+	seedDerivedPre00014(t, s, engine, 1,
 		[]PositionEvent{{
 			ChainID: 1, Engine: engine, BlockNumber: 100, TxHash: []byte{0x01}, LogIndex: 0,
 			EventType: "atoken_mint", Account: addr20(0xA1), Asset: addr20(0xC1),
@@ -64,7 +64,7 @@ func TestMigrateUpgradesV12BaselineWithRiskTables(t *testing.T) {
 		}},
 		[]RateObservation{{Asset: addr20(0xC1), Block: 90, Kind: "liquidity_index",
 			Value: bigStr("1000000000000000000000000000")}},
-		100))
+		100)
 	require.NoError(t, s.ApplyParamEvents(ctx, riskParamEngine, 1, []ParamRow{{
 		Engine: riskParamEngine, ChainID: 1, Asset: addr20(0xC1),
 		LTV: big.NewInt(7800), LiqThreshold: big.NewInt(8100), LiqBonus: big.NewInt(10600),

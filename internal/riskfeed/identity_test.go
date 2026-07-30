@@ -32,9 +32,14 @@ func idPolicy() IdentityPolicy {
 
 var idTime = time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
 
+// idCoveredFrom is the Aave engine's genesis in these fixtures — the coverage the
+// flag-custody precondition requires.
+var idCoveredFrom = uint64(20_625_519)
+
 func idCursors() []store.DeriveCursorState {
 	return []store.DeriveCursorState{
-		{Engine: "aave_v3_etherfi", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4},
+		{Engine: "aave_v3_etherfi", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4,
+			CoveredFromBlock: &idCoveredFrom, DecoderRevision: 2},
 		{Engine: "aave_param", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4},
 		{Engine: "debt_manager", ChainID: 10, LastBlock: 154_796_552, AckedEpoch: 9},
 	}
@@ -483,6 +488,72 @@ func TestIdentityChangesWithTheRegistryFingerprint(t *testing.T) {
 	require.NotEqual(t, base.Key, got.Key)
 }
 
+// TestIdentityChangesWithDerivationCoverage is direction 5 of the round-1 fix: the
+// coverage stamp decides REFUSE-vs-COMPUTE for the entire Aave book, so it is an
+// input the output depends on and the standing law puts it in the identity.
+//
+// The hazard it closes is concrete and is the whole reason the stamp exists. A
+// rewind-and-rederive re-establishes coverage while ending at the SAME cursor it
+// started from: last_block, acked_epoch, epochs, sweeps and prices are all
+// byte-identical across it. Without coverage in the identity, the post-replay pass
+// — the one that finally computes the book instead of refusing it — would derive the
+// pre-replay key and ADOPT the refused batch, so the repaired numbers would never
+// be served.
+//
+// MUTANT THIS KILLS: drop cov/rev from the cursor line in the vector. Every subtest
+// below collides with the base key.
+func TestIdentityChangesWithDerivationCoverage(t *testing.T) {
+	base := computeID()
+
+	higher := uint64(20_625_520)
+	for name, mutate := range map[string]func(c *store.DeriveCursorState){
+		"coverage lost (pre-replay state)": func(c *store.DeriveCursorState) {
+			c.CoveredFromBlock, c.DecoderRevision = nil, 0
+		},
+		"coverage start moves":            func(c *store.DeriveCursorState) { c.CoveredFromBlock = &higher },
+		"decoder revision moves":          func(c *store.DeriveCursorState) { c.DecoderRevision++ },
+		"revision cleared but block kept": func(c *store.DeriveCursorState) { c.DecoderRevision = 0 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := idCursors()
+			mutate(&c[0])
+			got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9},
+				idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
+			require.NotEqual(t, base.Key, got.Key,
+				"derivation-coverage change %q must change the identity", name)
+		})
+	}
+
+	// AND THE NULL/ZERO STATE MUST BE DISTINGUISHABLE FROM A REAL ONE in the
+	// vector too, not merely in the hash — an operator reading a refused book has
+	// to be able to see why.
+	c := idCursors()
+	c[0].CoveredFromBlock, c[0].DecoderRevision = nil, 0
+	unproven := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
+	require.Contains(t, unproven.Vector, "/covnone/rev0;")
+}
+
+// TestIdentitySurvivesTheCoverageReplayChoreography is the operational twin of the
+// flag-backfill test below, on the OTHER half of the fix: the replay that restores
+// coverage must mint a new key even though every watermark it touches returns to
+// where it began.
+func TestIdentitySurvivesTheCoverageReplayChoreography(t *testing.T) {
+	preCursors := idCursors()
+	preCursors[0].CoveredFromBlock, preCursors[0].DecoderRevision = nil, 0
+
+	pre := ComputeMaterializationIdentity(preCursors, map[int64]int64{1: 4, 10: 9},
+		idSweeps(), func() store.RiskInputs { in := idInputs(); in.CollateralFlags = nil; return in }(),
+		idJudged(idTime), nil, idPolicy())
+	post := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
+
+	require.NotEqual(t, pre.Key, post.Key,
+		"the pass that computes the book must not adopt the batch that refused it")
+	require.NotEqual(t, pre.Vector, post.Vector,
+		"and the difference is VISIBLE in the vector, which is the operator's answer to 'why did this change'")
+}
+
 // ---------------------------------------------------------------------------
 // The collateral-flag input family in the identity.
 // ---------------------------------------------------------------------------
@@ -629,7 +700,9 @@ func TestIdentitySurvivesTheFlagBackfillChoreography(t *testing.T) {
 // answer to "what was this batch computed from", so it must not be an opaque blob.
 func TestIdentityVectorIsHumanReadable(t *testing.T) {
 	id := computeID()
-	require.Contains(t, id.Vector, "aave_v3_etherfi@1/25635618/ack4")
+	require.Contains(t, id.Vector, "aave_v3_etherfi@1/25635618/ack4/cov20625519/rev2",
+		"the cursor line carries the DERIVATION-COVERAGE provenance: an operator reading a "+
+			"refused Aave book needs to see cov/rev, not infer it")
 	require.Contains(t, id.Vector, "debt_manager=rows2/failed1/sum309580000")
 	require.Contains(t, id.Vector, "budget=180;step=2000")
 	require.Contains(t, id.Vector, "epochs:1=4;10=9;")

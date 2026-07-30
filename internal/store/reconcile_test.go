@@ -171,7 +171,8 @@ func TestSchemaVersionMatchesEmbeddedExpectation(t *testing.T) {
 	s := testDeriveStore(t)
 	expected, err := ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.EqualValues(t, 13, expected, "embedded expected is currently 13 (migration 00013, the risk tables)")
+	require.EqualValues(t, 14, expected,
+		"embedded expected is currently 14 (migration 00014, the derivation-coverage provenance columns)")
 	got, err := SchemaVersion(context.Background(), s.pool)
 	require.NoError(t, err)
 	require.Equal(t, expected, got)

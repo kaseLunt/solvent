@@ -158,21 +158,50 @@ func (s *Store) ApplyDerived(ctx context.Context, engine string, chainID uint64,
 	return s.ApplyDerivedWithRates(ctx, engine, chainID, events, nil, throughBlock)
 }
 
-// ApplyDerivedWithRates is ApplyDerived plus the window's rate observations,
-// in the SAME transaction: a window either lands with every rate value its
-// events carried, or not at all. This closes the crash hole of the old
-// persist-rates-then-apply sequence — a crash between the two could strand
-// rate rows for a window whose events never committed (or, worse ordering,
-// lose observations for a committed window forever once the cursor advanced).
+// ApplyDerivedWithRates applies a window WITHOUT asserting derivation coverage.
 //
-// Rate semantics inside the transaction mirror SaveRateIndex exactly: an
-// identical replay of an existing (engine, asset, block, kind) key is a
-// no-op; a DIVERGENT value under an existing key aborts the WHOLE batch
-// (events, balances, cursor and rates all roll back). The caller is expected
-// to have last-wins-deduped same-key observations within the batch (the
-// runner's rateSet does); intra-batch duplicates that survive to this call
-// hit the same divergence check via same-transaction visibility.
+// It is the entry point for every caller that is not a walker -- tools, fixtures,
+// upgrade paths -- and its coverage claim is deliberately EMPTY, which persists as
+// "provenance unknown" and reads downstream as UNPROVEN. That default is the
+// fail-closed direction and it is not an oversight: only code that actually knows
+// which range it walked, under which decoder, may claim to have walked it. See
+// ApplyDerivedWindow and DerivationCoverage.
+//
+// A window applied through here also CLEARS whatever coverage the engine had,
+// because afterwards the stored range is no longer wholly attributable to the walk
+// that claimed it.
 func (s *Store) ApplyDerivedWithRates(ctx context.Context, engine string, chainID uint64, events []PositionEvent, rates []RateObservation, throughBlock uint64) error {
+	return s.ApplyDerivedWindow(ctx, engine, chainID, events, rates, throughBlock, DerivationCoverage{})
+}
+
+// ApplyDerivedWindow is the FULL window write and the only entry point that can
+// assert provenance: events, balances, the window's rate observations, the cursor
+// move, AND the window's DERIVATION COVERAGE claim, all in ONE transaction.
+//
+// # Rate atomicity (unchanged from when this was ApplyDerivedWithRates)
+//
+// A window either lands with every rate value its events carried, or not at all.
+// This closes the crash hole of the old persist-rates-then-apply sequence — a
+// crash between the two could strand rate rows for a window whose events never
+// committed (or, worse ordering, lose observations for a committed window forever
+// once the cursor advanced).
+//
+// Rate semantics inside the transaction mirror SaveRateIndex exactly: an identical
+// replay of an existing (engine, asset, block, kind) key is a no-op; a DIVERGENT
+// value under an existing key aborts the WHOLE batch (events, balances, cursor and
+// rates all roll back). The caller is expected to have last-wins-deduped same-key
+// observations within the batch (the runner's rateSet does); intra-batch
+// duplicates that survive to this call hit the same divergence check via
+// same-transaction visibility.
+//
+// # Coverage atomicity, and why it is in THIS transaction
+//
+// The coverage stamp is a claim ABOUT the rows this transaction writes, so a stamp
+// that could commit apart from them would be a claim about rows that may not
+// exist — and in the direction that matters (stamp lands, rows do not) it would
+// assert coverage of a range never walked, which is exactly the false-custody
+// state the stamp exists to detect. See DerivationCoverage.
+func (s *Store) ApplyDerivedWindow(ctx context.Context, engine string, chainID uint64, events []PositionEvent, rates []RateObservation, throughBlock uint64, coverage DerivationCoverage) error {
 	for _, ev := range events {
 		if ev.ChainID != chainID {
 			return fmt.Errorf("event %x/%d/%d: chain id %d does not match batch chain id %d",
@@ -306,13 +335,38 @@ func (s *Store) ApplyDerivedWithRates(ctx context.Context, engine string, chainI
 	// acked_epoch is only ever SET on the insert arm (implicit first-write
 	// ack); the update arm leaves it alone — the gate above already proved
 	// the existing ack is current, and explicit acks belong to RewindDerived.
-	ct, err := tx.Exec(ctx, `INSERT INTO derive_cursors (engine, chain_id, last_block, acked_epoch, updated_at)
-		VALUES ($1,$2,$3,$4,now())
+	// THE COVERAGE MERGE RULE (migration 00014), inline because it IS the column's
+	// semantics and belongs where it is enforced:
+	//
+	//   - a window that ASSERTS NOTHING (revision 0) clears coverage -- afterwards
+	//     the stored range is no longer attributable to any known walk;
+	//   - a window under a DIFFERENT revision than the stored one RESTARTS coverage
+	//     at this window's own `from`, because the rows below it were decoded by a
+	//     registry that is not this one. This is the case that matters: it is what
+	//     makes a binary that newly decodes an event honestly report "I have only
+	//     covered from here" instead of inheriting the previous walk's reach;
+	//   - otherwise coverage EXTENDS, keeping the lowest `from` seen. The runner
+	//     walks contiguously upward from the cursor, so the low end is where the
+	//     current walk began.
+	var coveredParam any
+	if coverage.Asserts() {
+		coveredParam = int64(coverage.FromBlock)
+	}
+	ct, err := tx.Exec(ctx, `INSERT INTO derive_cursors
+		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,now())
 		ON CONFLICT (engine) DO UPDATE
-		SET last_block = EXCLUDED.last_block, updated_at = now()
+		SET last_block = EXCLUDED.last_block, updated_at = now(),
+		    covered_from_block = CASE
+		        WHEN EXCLUDED.decoder_revision = 0 THEN NULL
+		        WHEN derive_cursors.decoder_revision <> EXCLUDED.decoder_revision THEN EXCLUDED.covered_from_block
+		        WHEN derive_cursors.covered_from_block IS NULL THEN EXCLUDED.covered_from_block
+		        ELSE LEAST(derive_cursors.covered_from_block, EXCLUDED.covered_from_block)
+		    END,
+		    decoder_revision = EXCLUDED.decoder_revision
 		WHERE derive_cursors.chain_id = EXCLUDED.chain_id
 		  AND derive_cursors.last_block <= EXCLUDED.last_block`,
-		engine, chainID, throughBlock, maxEpoch)
+		engine, chainID, throughBlock, maxEpoch, coveredParam, coverage.DecoderRevision)
 	if err != nil {
 		return fmt.Errorf("upsert derive cursor: %w", err)
 	}
@@ -638,11 +692,35 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 
 	// The conflict arm never touches chain_id: the binding was verified above
 	// and must not be rewritable through a rewind.
-	if _, err := tx.Exec(ctx, `INSERT INTO derive_cursors (engine, chain_id, last_block, acked_epoch, updated_at)
-		VALUES ($1,$2,$3,$4,now())
+	// COVERAGE, REWOUND WITH THE ROWS IT DESCRIBES -- and this is the half that MUST
+	// live in this transaction rather than in a follow-up call.
+	//
+	// The stamp is a claim about rows the DELETEs above just removed. If it could
+	// survive them, a rewind to StartBlock-1 would leave a stamp asserting coverage
+	// from genesis over an EMPTY ledger: the exact false-custody state the stamp
+	// exists to detect, manufactured by the operation meant to repair it. So coverage
+	// whose low end no longer has surviving rows is cleared to unknown, and
+	// re-derivation re-establishes it from its own windows.
+	//
+	// Coverage whose low end DID survive is kept: the rewind removed only the top of a
+	// contiguous range, and re-derivation continues upward from the target, so the
+	// range stays contiguous and its origin is unchanged.
+	if _, err := tx.Exec(ctx, `INSERT INTO derive_cursors
+		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision, updated_at)
+		VALUES ($1,$2,$3,$4,NULL,0,now())
 		ON CONFLICT (engine) DO UPDATE
 		SET last_block = EXCLUDED.last_block,
-		    acked_epoch = EXCLUDED.acked_epoch, updated_at = now()`,
+		    acked_epoch = EXCLUDED.acked_epoch, updated_at = now(),
+		    covered_from_block = CASE
+		        WHEN derive_cursors.covered_from_block IS NULL
+		          OR derive_cursors.covered_from_block > EXCLUDED.last_block THEN NULL
+		        ELSE derive_cursors.covered_from_block
+		    END,
+		    decoder_revision = CASE
+		        WHEN derive_cursors.covered_from_block IS NULL
+		          OR derive_cursors.covered_from_block > EXCLUDED.last_block THEN 0
+		        ELSE derive_cursors.decoder_revision
+		    END`,
 		engine, chainID, effectiveTarget, maxEpoch); err != nil {
 		return fmt.Errorf("reset derive cursor: %w", err)
 	}

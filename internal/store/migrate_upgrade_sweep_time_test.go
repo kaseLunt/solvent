@@ -73,14 +73,14 @@ func TestMigrateUpgradesV5SweepBaselineFailClosed(t *testing.T) {
 
 	// (b) Pre-existing v5 data in the three shapes above, with DISTINCT updated_at
 	// values so the backfill's source is identifiable in the result.
-	require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{
+	seedDerivedPre00014(t, s, engine, 10, []PositionEvent{
 		{ChainID: 10, Engine: engine, Account: won, Asset: addr20(0xC0), Side: "debt",
 			EventType: "borrow", Delta: big.NewInt(1), BlockNumber: 100, TxHash: hash32(0xD0), LogIndex: 0},
 		{ChainID: 10, Engine: engine, Account: lost, Asset: addr20(0xC0), Side: "debt",
 			EventType: "borrow", Delta: big.NewInt(1), BlockNumber: 101, TxHash: hash32(0xD1), LogIndex: 1},
 		{ChainID: 10, Engine: engine, Account: never, Asset: addr20(0xC0), Side: "debt",
 			EventType: "borrow", Delta: big.NewInt(1), BlockNumber: 102, TxHash: hash32(0xD2), LogIndex: 2},
-	}, 200))
+	}, nil, 200)
 	wonAt := time.Now().Add(-90 * time.Minute).UTC().Truncate(time.Second)
 	lostAt := time.Now().Add(-3 * time.Minute).UTC().Truncate(time.Second)
 	_, err = s.pool.Exec(ctx, `INSERT INTO snapshot_sweeps

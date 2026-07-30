@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/config"
+	"github.com/kaselunt/solvent/internal/decode"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/store"
 )
@@ -57,7 +58,8 @@ func fixtureConfig(t *testing.T) AssembleConfig {
 	return AssembleConfig{
 		Registry: fixtureRegistry(t),
 		Aave: EngineBinding{Engine: risk.AaveEngine, ChainID: 1,
-			ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1"},
+			ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1",
+			GenesisBlock: fixtureAaveGenesis},
 		DM: EngineBinding{Engine: risk.DMEngine, ChainID: 10,
 			ParamEngine: risk.DMEngine, PriceEngine: "prices:poll:10"},
 		Budget:  PriceBudget{Seconds: 180},
@@ -74,6 +76,32 @@ func bal(engine string, acct common.Address, asset common.Address, side, source,
 
 func idx(engine string, asset common.Address, kind, value string, block uint64) store.RiskRateIndexRow {
 	return store.RiskRateIndexRow{Engine: engine, Asset: asset.Bytes(), Kind: kind, Value: bi(value), Block: block}
+}
+
+// fixtureAaveGenesis is the ether.fi Aave market's configured start block
+// (config/contracts.json, eth:aave-etherfi and its four aToken streams all begin
+// here). The flag-custody gate asks for coverage reaching at or below it.
+const fixtureAaveGenesis = 20_625_519
+
+// provenAaveCursor is the Aave derive cursor with PROVEN flag custody: walked from
+// the engine's genesis under a decode registry that includes the collateral-flag
+// pair. This is what a database that has completed the rewind-and-rederive looks
+// like.
+func provenAaveCursor(lastBlock uint64) store.DeriveCursorState {
+	from := uint64(fixtureAaveGenesis)
+	return store.DeriveCursorState{
+		Engine: risk.AaveEngine, ChainID: 1, LastBlock: lastBlock, AckedEpoch: 0,
+		CoveredFromBlock: &from, DecoderRevision: decode.RevisionAaveCollateralFlags,
+	}
+}
+
+// unprovenAaveCursor is the SAME cursor with no coverage provenance — precisely
+// the live database's state before the owner-gated replay: at head, and derived by
+// a binary that could not decode the flag events.
+func unprovenAaveCursor(lastBlock uint64) store.DeriveCursorState {
+	return store.DeriveCursorState{
+		Engine: risk.AaveEngine, ChainID: 1, LastBlock: lastBlock, AckedEpoch: 0,
+	}
 }
 
 // collFlag builds one latest-wins collateral-flag witness row.
@@ -106,7 +134,17 @@ func baseInputs() store.RiskInputs {
 	return store.RiskInputs{
 		ReadAt: fixtureTime,
 		Cursors: []store.DeriveCursorState{
-			{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 0},
+			// THE COLLATERAL LAW'S PRECONDITION, MADE EXPLICIT IN THE FIXTURE.
+			//
+			// Every Aave test below that expects a COMPUTED position needs derived
+			// state whose walk provably began at the engine's genesis under a decode
+			// registry that recognizes the flag events — otherwise the assembler
+			// refuses the whole book (GateFlagCustodyUnproven), and rightly so.
+			// Spelling it here rather than defaulting it means "genuine no-history
+			// under PROVEN custody" and "unproven custody" are different fixtures
+			// that cannot be confused, which is the distinction the round-1 finding
+			// turned on.
+			provenAaveCursor(25_635_618),
 			{Engine: risk.AaveParamEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 0},
 			{Engine: risk.DMEngine, ChainID: 10, LastBlock: 154_796_552, AckedEpoch: 0},
 			{Engine: "prices:poll:1", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 0},
@@ -717,6 +755,225 @@ func TestAssembleAaveStableReserveWithNoThresholdRowComputesOnlyOnceWitnessed(t 
 	require.Equal(t, 1, findAggregate(t, witnessed, risk.AaveEngine).ComputedPositions)
 }
 
+// ---------------------------------------------------------------------------
+// The collateral law's PRECONDITION: proven flag custody.
+// ---------------------------------------------------------------------------
+
+// TestAssembleRefusesTheAaveBookWhenFlagCustodyIsUnproven is the round-1 [high]
+// regression, at the unit level.
+//
+// THE SHAPE IT FORBIDS: an honest start of this code against a database whose Aave
+// cursor is at head but whose flag ledger was never derived (because the walking
+// binary predated the flag registration). The absence-is-truth law would read that
+// empty ledger as "nobody has ever used anything as collateral" and publish HF 0
+// over genuinely-enabled weETH collateral — a false liquidation alarm, and strictly
+// worse than the assume-true posture this wave retired.
+//
+// MUTANT THIS KILLS: delete the `if !a.flagCustody` block in assembleAave, or make
+// store.CoverageProvenBack return true for a nil covered-from. The position below
+// then computes HF 0 instead of refusing.
+func TestAssembleRefusesTheAaveBookWhenFlagCustodyIsUnproven(t *testing.T) {
+	in := flagLawInputs()
+	// The live pre-replay state, exactly: cursor at head, EMPTY flag ledger, no
+	// coverage provenance.
+	in.Cursors[0] = unprovenAaveCursor(25_635_618)
+	in.CollateralFlags = nil
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionRefused, p.Status,
+		"an unproven flag ledger must REFUSE the book, never read its emptiness as chain truth")
+	require.Equal(t, GateFlagCustodyUnproven, p.RefusalCode)
+	require.Contains(t, p.RefusalDetail, "rewind-and-rederive",
+		"the refusal must name the remedy, not merely the problem")
+	require.Contains(t, p.RefusalDetail, "20625519",
+		"and the coverage bar it actually applied")
+
+	// A REFUSAL IS THE ABSENCE OF A NUMBER. The HF-0 shape the finding described
+	// cannot be present in any form.
+	require.Nil(t, p.HFWad, "no health factor may be published over an unproven ledger")
+	require.Nil(t, p.TotalCollateralBase)
+	require.Nil(t, p.TotalDebtBase)
+	require.False(t, p.HFInfinite)
+	require.Empty(t, p.Legs, "no leg may claim a used_as_collateral verdict here")
+	require.Empty(t, res.Book, "and the refused position never reaches the stress/waterfall book")
+
+	// Nothing was folded, so nothing may enter the identity's flag section either.
+	require.Empty(t, res.ConsultedFlags)
+}
+
+// TestAssembleFlagCustodyRefusalIsWholeEngineNotPerPosition: the precondition is a
+// property of the LEDGER, so a partially-witnessed book refuses ENTIRELY. The
+// alternative — refusing only the rows that lack a witness — is what would have
+// published the 23 genuinely-enabled weETH legs as zero.
+func TestAssembleFlagCustodyRefusalIsWholeEngineNotPerPosition(t *testing.T) {
+	in := flagLawInputs()
+	in.Cursors[0] = unprovenAaveCursor(25_635_618)
+	// A SECOND Aave account, and a witness row that DOES exist for the first.
+	// Under an unproven ledger even a present witness proves nothing about the
+	// absences around it, so both accounts must refuse.
+	in.Balances = append(in.Balances,
+		bal(risk.AaveEngine, acctB, weETH, sideCollateral, sourceEvent, "5000000000000000000", 25_635_618))
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+
+	for _, acct := range []common.Address{acctA, acctB} {
+		p := findPosition(t, res, risk.AaveEngine, acct)
+		require.Equal(t, store.RiskPositionRefused, p.Status, "account %s", acct.Hex())
+		require.Equal(t, GateFlagCustodyUnproven, p.RefusalCode, "account %s", acct.Hex())
+	}
+
+	agg := findAggregate(t, res, risk.AaveEngine)
+	require.Equal(t, 2, agg.Positions)
+	require.Equal(t, 2, agg.RefusedPositions)
+	require.Equal(t, 0, agg.ComputedPositions)
+	require.Equal(t, "0", agg.TotalCollateral.String(),
+		"a refused book contributes nothing — it does not publish an understated total either")
+}
+
+// TestAssembleFlagCustodyIsAavePreciseAndDoesNotRefuseTheDebtManager: the gate is
+// scoped to the engine whose law depends on absence. The Debt Manager's params come
+// from its own position_events too, but a MISSING param row there already refuses
+// per position (a counting collateral token with no threshold is ErrMissingParam),
+// so it needs no coverage precondition — and inheriting one would refuse an
+// unrelated, correct book.
+func TestAssembleFlagCustodyIsAavePreciseAndDoesNotRefuseTheDebtManager(t *testing.T) {
+	in := dmInputs()
+	in.Cursors[0] = unprovenAaveCursor(25_635_618)
+	in.Sweeps = []store.RiskSweepRow{{
+		Engine: risk.DMEngine, Account: acctA.Bytes(), Status: "success",
+		LastAttemptBlock: 154_790_000, LastSuccessBlock: 154_790_000, UpdatedAt: fixtureTime,
+	}}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+
+	dm := findPosition(t, res, risk.DMEngine, acctA)
+	require.Equal(t, store.RiskPositionComputed, dm.Status,
+		"unproven AAVE flag custody must not refuse the OP book")
+	require.Equal(t, 1, findAggregate(t, res, risk.DMEngine).ComputedPositions)
+}
+
+// TestAssembleFlagCustodyRequiresBothLegs walks every way the precondition can
+// fail, one at a time. Each is a real database state, not a synthetic combination.
+func TestAssembleFlagCustodyRequiresBothLegs(t *testing.T) {
+	genesis := uint64(fixtureAaveGenesis)
+	tooHigh := uint64(fixtureAaveGenesis + 1)
+
+	cases := map[string]struct {
+		cursor store.DeriveCursorState
+		refuse bool
+		why    string
+	}{
+		"proven at genesis": {
+			cursor: provenAaveCursor(25_635_618), refuse: false,
+			why: "walked from genesis under the flag registry: the law is licensed",
+		},
+		"no coverage at all": {
+			cursor: unprovenAaveCursor(25_635_618), refuse: true,
+			why: "the live pre-replay state — a head cursor proves nothing about the flag ledger",
+		},
+		"coverage starts ABOVE genesis": {
+			cursor: store.DeriveCursorState{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618,
+				CoveredFromBlock: &tooHigh, DecoderRevision: decode.RevisionAaveCollateralFlags},
+			refuse: true,
+			why:    "a walk that began one block late may have missed the first enable, so absence is not truth",
+		},
+		"decoder revision too old": {
+			cursor: store.DeriveCursorState{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618,
+				CoveredFromBlock: &genesis, DecoderRevision: decode.RevisionAaveCollateralFlags - 1},
+			refuse: true,
+			why:    "walked from genesis, but by a registry that silently skipped the flag topics",
+		},
+		"revision zero with a covered-from": {
+			cursor: store.DeriveCursorState{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618,
+				CoveredFromBlock: &genesis, DecoderRevision: 0},
+			refuse: true,
+			why:    "revision 0 is 'no claim asserted', not 'revision new enough'",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := flagLawInputs()
+			in.Cursors[0] = tc.cursor
+			in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+			res, err := Assemble(in, fixtureConfig(t))
+			require.NoError(t, err)
+			p := findPosition(t, res, risk.AaveEngine, acctA)
+			if tc.refuse {
+				require.Equal(t, store.RiskPositionRefused, p.Status, tc.why)
+				require.Equal(t, GateFlagCustodyUnproven, p.RefusalCode, tc.why)
+				return
+			}
+			require.Equal(t, store.RiskPositionComputed, p.Status, tc.why)
+			require.Equal(t, "300000000000", p.TotalCollateralBase.String(), tc.why)
+		})
+	}
+}
+
+// TestAssembleFlagCustodyRefusesAnUnwiredGenesis is the fail-closed leg on the
+// CONFIG side: a binding that never wired GenesisBlock must refuse, not sail
+// through. A zero bar would be satisfied by every cursor, so the gate would exist
+// and enforce nothing — the most dangerous shape a gate can take.
+func TestAssembleFlagCustodyRefusesAnUnwiredGenesis(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+	cfg := fixtureConfig(t)
+	cfg.Aave.GenesisBlock = 0 // the field was declared and never wired
+
+	res, err := Assemble(in, cfg)
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionRefused, p.Status,
+		"an unconfigured genesis must fail CLOSED — otherwise the gate passes everything")
+	require.Equal(t, GateFlagCustodyUnproven, p.RefusalCode)
+}
+
+// TestAssembleFlagCustodyStillSkipsFullyClosedPositions: the whole-engine refusal
+// must not resurrect accounts that are not positions. Rewind rebuilds leave
+// amount=0 rows deliberately, and a refusal row for an empty account is noise that
+// would also inflate the refused count an operator reads as "this much is broken".
+func TestAssembleFlagCustodyStillSkipsFullyClosedPositions(t *testing.T) {
+	in := baseInputs()
+	in.Cursors[0] = unprovenAaveCursor(25_635_618)
+	in.Balances = []store.RiskBalanceRow{
+		bal(risk.AaveEngine, acctA, weETH, sideCollateral, sourceEvent, "0", 25_635_618),
+		bal(risk.AaveEngine, acctA, usdc, sideDebt, sourceEvent, "0", 25_635_618),
+	}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	require.Empty(t, res.Positions,
+		"an account whose every balance is zero is not a position, proven ledger or not")
+}
+
+// TestAssembleFlagCustodyRefusalStillReportsAConflict: a conflicted account has its
+// rows WITHHELD, so it must still surface as its own specific refusal rather than
+// being absorbed into the engine-wide one. Either way it is refused; reporting the
+// more specific fact is what keeps the G3 disclosure alive.
+func TestAssembleFlagCustodyRefusalStillReportsAConflict(t *testing.T) {
+	in := baseInputs()
+	in.Cursors[0] = unprovenAaveCursor(25_635_618)
+	in.Balances = nil
+	in.BalanceConflicts = []store.RiskBalanceConflict{{
+		Engine: risk.AaveEngine, Account: acctB.Bytes(), Detail: "both event- and snapshot-sourced rows",
+	}}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctB)
+	require.Equal(t, store.RiskPositionRefused, p.Status)
+	require.Equal(t, GateStoreUnreadable, p.RefusalCode,
+		"the conflict is the more specific unreadable-substrate fact and must not be masked")
+}
+
 // TestAssembleRefusesTwoFlagRowsForOnePair: the store's DISTINCT ON guarantees one
 // row per pair, so two rows mean the fold's uniqueness assumption broke. Silently
 // picking one of two contradictory collateral verdicts is the decision that
@@ -1089,7 +1346,11 @@ func TestAssembleRefusesWhenAWatermarkIsMissing(t *testing.T) {
 	// (a) Aave with NO param cursor: ParamsBlock is 0.
 	in := baseInputs()
 	in.Cursors = []store.DeriveCursorState{
-		{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618},
+		// Flag custody PROVEN, so the refusal this test is about — the missing
+		// ParamsBlock stamp — is the one that actually fires. A bare cursor here
+		// would refuse at FLAG_CUSTODY_UNPROVEN instead, and the test would go green
+		// while no longer exercising the watermark law at all.
+		provenAaveCursor(25_635_618),
 		// aave_param deliberately absent — the param deriver has never run.
 	}
 	in.Balances = []store.RiskBalanceRow{

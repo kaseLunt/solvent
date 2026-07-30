@@ -4,7 +4,7 @@ package derive
 // comment in this package refers to as "the runner" (engine.go's terminology
 // note). One Runner per engine drives the loop
 //
-//	raw_logs window → Decode → Engine.Process → store.ApplyDerivedWithRates
+//	raw_logs window → Decode → Engine.Process → store.ApplyDerivedWindow
 //
 // under the Engine batch lifecycle, and owns the obligations the engines
 // document but cannot enforce themselves:
@@ -15,7 +15,7 @@ package derive
 //     aTokens merge into ONE ordered feed). Windows are block-aligned, so a
 //     transaction's log run is never split across batches — the same-tx /
 //     same-block joins both engines rely on always see their whole run.
-//   - COMMIT-INDETERMINACY RULE: ANY ApplyDerivedWithRates error →
+//   - COMMIT-INDETERMINACY RULE: ANY ApplyDerivedWindow error →
 //     Engine.Reset(), never DiscardBatch (see engine.go). DiscardBatch is
 //     used only for failures that provably never reached the store (a decode
 //     or Process error mid-batch).
@@ -47,7 +47,7 @@ package derive
 //     deriver, and no in-process healthy transition exists. Health() exposes
 //     the state for the daemon's health surface.
 //   - RATE OBSERVATIONS are persisted ATOMICALLY with their window via
-//     store.ApplyDerivedWithRates (one transaction): a window lands with
+//     store.ApplyDerivedWindow (one transaction): a window lands with
 //     every rate value its events carried, or not at all — no crash window
 //     between rate persistence and the batch commit exists anymore.
 //   - SNAPSHOTS (best-effort history): after a committed batch, the batch's
@@ -112,7 +112,12 @@ const pendingCap = 10000
 type RunnerStore interface {
 	StateReader // BalancesFor — handed to Engine.BeginBatch and used for snapshots
 	DeriveCursor(ctx context.Context, engine string) (block uint64, found bool, err error)
-	ApplyDerivedWithRates(ctx context.Context, engine string, chainID uint64, events []store.PositionEvent, rates []store.RateObservation, throughBlock uint64) error
+	// ApplyDerivedWindow, not ApplyDerivedWithRates: the runner is the ONLY
+	// legitimate producer of a derivation-coverage claim, because it is the only
+	// thing that knows which range it actually walked under which decoder. The
+	// coverage-free entry points remain for tools and fixtures, and their
+	// omission reads downstream as UNPROVEN — see store.DerivationCoverage.
+	ApplyDerivedWindow(ctx context.Context, engine string, chainID uint64, events []store.PositionEvent, rates []store.RateObservation, throughBlock uint64, coverage store.DerivationCoverage) error
 	RewindDerived(ctx context.Context, engine string, chainID uint64, toBlock uint64) error
 	Cursor(ctx context.Context, stream string) (*store.CursorPos, error)
 	RawLogsInRange(ctx context.Context, chainID uint64, addresses [][]byte, fromBlock, toBlock uint64) ([]store.RawLog, error)
@@ -382,7 +387,15 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 	// One transaction: events, balances, cursor AND the window's rate
 	// observations land (or roll back) together — no separate rate pre-pass
 	// a crash could strand.
-	if err := r.store.ApplyDerivedWithRates(ctx, r.spec.Engine, r.spec.ChainID, events, rates.observations(), to); err != nil {
+	//
+	// The window's own COVERAGE CLAIM travels with it: `from` is where this walk
+	// stepped, and the revision is the decode registry this binary is actually
+	// running. Nothing here is operator-supplied or configurable, which is what
+	// makes the resulting stamp evidence rather than an assertion — and it makes a
+	// rewind-and-rederive re-establish coverage purely as a side effect of
+	// completing (see store.DerivationCoverage).
+	coverage := store.DerivationCoverage{FromBlock: from, DecoderRevision: decode.RegistryRevision}
+	if err := r.store.ApplyDerivedWindow(ctx, r.spec.Engine, r.spec.ChainID, events, rates.observations(), to, coverage); err != nil {
 		// COMMIT-INDETERMINACY RULE (derive.Engine): ANY store-apply error →
 		// Reset, never DiscardBatch. The commit may have landed with the ack
 		// lost; Reset re-hydrates from committed truth either way, and the
@@ -685,7 +698,7 @@ func (rs *rateSet) collect(l store.RawLog, ev decode.Event) {
 }
 
 // observations returns the batch's deduped rate observations in insertion
-// order, for atomic persistence with the window (ApplyDerivedWithRates).
+// order, for atomic persistence with the window (ApplyDerivedWindow).
 func (rs *rateSet) observations() []store.RateObservation {
 	out := make([]store.RateObservation, 0, len(rs.order))
 	for _, key := range rs.order {

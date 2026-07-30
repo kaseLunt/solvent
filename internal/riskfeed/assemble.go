@@ -17,6 +17,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 
+	"github.com/kaselunt/solvent/internal/decode"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/store"
 )
@@ -88,6 +89,20 @@ const (
 	// carried into refusal_detail verbatim, because it already names the asset
 	// and the reason.
 	GateEngine = "ENGINE"
+	// GateFlagCustodyUnproven — the Aave engine's derived state cannot be shown
+	// to have been walked from its start block under a decode registry that
+	// includes the collateral-flag events, so the collateral law's
+	// absence-is-truth reading is not licensed.
+	//
+	// IT IS WHOLE-ENGINE, NOT PER POSITION, and that is the finding it closes.
+	// The precondition is a property of the LEDGER, so if it fails, every Aave
+	// row is suspect — not the one that happens to be missing a witness. A
+	// per-position version would let 23 genuinely-enabled weETH legs be published
+	// as zero collateral (health factor zero, a false liquidation alarm) while the
+	// batch reported itself clean, which is exactly what an unbackfilled database
+	// would have produced. Refusing the book is the "cannot verify is never
+	// advisory" posture applied to derivation provenance.
+	GateFlagCustodyUnproven = "FLAG_CUSTODY_UNPROVEN"
 )
 
 // EngineBinding is one engine's identity across the tables it touches.
@@ -104,6 +119,16 @@ type EngineBinding struct {
 	// rows on this chain ("prices:poll:<chain>"). Its acked_epoch is what gate
 	// G2 reads.
 	PriceEngine string
+	// GenesisBlock is the engine's own start block — the lowest block its streams
+	// are configured to walk from.
+	//
+	// It is here because a law that reads ABSENCE as chain truth needs to know how
+	// far back the walk behind the current state must reach for that reading to be
+	// licensed, and "as far back as the engine begins" is the only honest answer.
+	// Zero is not "no requirement": store.CoverageProvenBack refuses a zero
+	// genesis outright, so an unwired binding fails CLOSED rather than declaring
+	// every engine proven. See GateFlagCustodyUnproven.
+	GenesisBlock uint64
 }
 
 // AssembleConfig is everything a pass needs that is not in the snapshot.
@@ -296,6 +321,22 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 	// --- Aave -------------------------------------------------------------
 	aaveCursor := cursors[cfg.Aave.Engine]
 	aaveParamCursor := cursors[cfg.Aave.ParamEngine]
+
+	// THE COLLATERAL LAW'S PRECONDITION, evaluated ONCE per pass because it is a
+	// property of the LEDGER rather than of any position.
+	//
+	// The law below reads a missing flag witness as the chain fact "never enabled".
+	// That is licensed only when the walk behind this derived state began at or
+	// below the engine's genesis AND ran under a decode registry that recognized
+	// the flag events. Neither is implied by a cursor at head: the registry's
+	// contract for an unknown topic0 is a silent skip, so a pre-flag binary leaves
+	// a head cursor over an EMPTY flag ledger — and reading that as truth zeroes
+	// the collateral of every genuinely-enabled position. Unproven ⇒ the whole Aave
+	// book refuses. See GateFlagCustodyUnproven.
+	aaveFlagCustodyProven := store.CoverageProvenBack(
+		aaveCursor.CoveredFromBlock, aaveCursor.DecoderRevision,
+		cfg.Aave.GenesisBlock, decode.RevisionAaveCollateralFlags)
+
 	for _, account := range accountSet(balances[cfg.Aave.Engine], conflictAccounts[cfg.Aave.Engine]) {
 		p, book, err := assembleAave(assembleArgs{
 			cfg:             cfg,
@@ -307,6 +348,7 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 			priceRows:       priceRows,
 			params:          aaveParamByAsset,
 			collateralFlags: collateralFlags,
+			flagCustody:     aaveFlagCustodyProven,
 			priceReorg:      priceReorg[cfg.Aave.PriceEngine],
 			balanceBlk:      aaveCursor.LastBlock,
 			paramBlk:        aaveParamCursor.LastBlock,
@@ -372,10 +414,13 @@ type assembleArgs struct {
 	// collateralFlagKey(reserve, user). A MISSING key is the chain fact "never
 	// enabled", never "unknown" — see assembleAave's collateral law.
 	collateralFlags map[string]store.CollateralFlagRow
-	sweeps          map[string]store.RiskSweepRow
-	priceReorg      bool
-	balanceBlk      uint64
-	paramBlk        uint64
+	// flagCustody is the pass-level verdict on whether the collateral law's
+	// absence-is-truth reading is licensed for this engine's ledger at all.
+	flagCustody bool
+	sweeps      map[string]store.RiskSweepRow
+	priceReorg  bool
+	balanceBlk  uint64
+	paramBlk    uint64
 	// consulted collects EVERY price witness the assembler consulted, in
 	// consultation order — the single output-relevant price set both projections of
 	// the materialization identity are built from. See ConsultedPrice.
@@ -467,6 +512,32 @@ func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput
 
 	if msg, bad := a.conflicts[engine+"/"+accountKey(a.account)]; bad {
 		return refuse(base, GateStoreUnreadable, msg, nil), nil, nil
+	}
+
+	// THE LEDGER PRECONDITION, before any per-asset reasoning.
+	//
+	// It is checked here rather than after the asset loop so an unproven ledger is
+	// reported as ITSELF, not as whichever per-asset problem happened to surface
+	// first — a G1 "missing price" on a book that should not be valued at all would
+	// send an operator after the wrong thing. It nonetheless applies the
+	// "is this a position at all" test FIRST (hasNonzeroBalance), so a fully-closed
+	// account is still not a position: a refusal row for an account holding nothing
+	// would be noise, and it would inflate the refused count an operator reads as
+	// "this much of the book is broken".
+	if !a.flagCustody {
+		if !hasNonzeroBalance(a.assets) {
+			return nil, nil, nil
+		}
+		return refuse(base, GateFlagCustodyUnproven,
+			fmt.Sprintf("engine %s cannot be valued: the derived flag ledger's coverage is UNPROVEN "+
+				"(needs a walk from block <= %d under decode registry revision >= %d). The collateral law reads a "+
+				"missing ReserveUsedAsCollateral* witness as \"never enabled as collateral\", which is chain-exact ONLY "+
+				"when the walk behind this state could decode those events — a pre-flag binary leaves a cursor at head "+
+				"over an empty flag ledger, and reading that as truth publishes zero collateral and health factor zero "+
+				"for healthy borrowers. Re-derive this engine from its start block (rewind-and-rederive) before serving "+
+				"its book.",
+				engine, a.cfg.Aave.GenesisBlock, decode.RevisionAaveCollateralFlags),
+			nil), nil, nil
 	}
 
 	var reserves []risk.AaveReserve
@@ -1008,6 +1079,24 @@ func indexCollateralFlags(rows []store.CollateralFlagRow) (map[string]store.Coll
 
 func collateralFlagKey(reserve, user common.Address) string {
 	return reserve.Hex() + "/" + user.Hex()
+}
+
+// hasNonzeroBalance reports whether the account holds anything at all on either
+// side, under the event source the Aave engine writes.
+//
+// It exists so the whole-engine custody refusal can preserve the "a fully closed
+// position is not a position" law: rewind rebuilds leave amount=0 rows behind
+// deliberately (so "closed" stays distinguishable from "never existed"), and an
+// account made only of those must not acquire a refusal row.
+func hasNonzeroBalance(byAsset map[common.Address]map[string]store.RiskBalanceRow) bool {
+	for _, sides := range byAsset {
+		for _, side := range []string{sideDebt, sideCollateral} {
+			if sideAmount(sides, side, sourceEvent).Sign() != 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func indexPriceRows(rows []store.RiskPriceRow) map[string]store.RiskPriceRow {

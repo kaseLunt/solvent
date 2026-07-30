@@ -42,8 +42,12 @@ import (
 // this shape one engine over: the Debt Manager writes
 // `collateral_token_added` / `collateral_token_removed` as two types for the
 // same reason. It also keeps `event_type` — a plain TEXT column with no enum
-// constraint (migration 00002) — doing the discriminating, so NO SCHEMA CHANGE
-// IS REQUIRED: there is no enum to extend and migration 00014 is not written.
+// constraint (migration 00002) — doing the discriminating, so THE EVENT LEDGER
+// NEEDS NO SCHEMA CHANGE: there is no enum to extend.
+//
+// (Migration 00014 does exist, but for an unrelated reason: the
+// derivation-coverage provenance columns below. Nothing about the two event
+// types required it.)
 const (
 	AaveCollateralEnabledEvent  = "aave_collateral_enabled"
 	AaveCollateralDisabledEvent = "aave_collateral_disabled"

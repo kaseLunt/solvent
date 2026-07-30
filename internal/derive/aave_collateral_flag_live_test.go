@@ -134,6 +134,28 @@ func cfFold(t *testing.T, s *store.Store, block uint64) map[string]store.Collate
 
 func cfKey(user common.Address) string { return cfWeETH.Hex() + "/" + user.Hex() }
 
+// cfCursor reads the Aave engine's derive cursor WITH its coverage provenance.
+func cfCursor(t *testing.T, s *store.Store) store.DeriveCursorState {
+	t.Helper()
+	states, err := store.DeriveCursorStates(context.Background(), s.Querier())
+	require.NoError(t, err)
+	for _, c := range states {
+		if c.Engine == AaveEngineName {
+			return c
+		}
+	}
+	return store.DeriveCursorState{}
+}
+
+// cfCoverageProven asks the SAME question riskfeed's gate asks, through the same
+// shared predicate — so this test cannot drift from the gate it is standing in for.
+func cfCoverageProven(t *testing.T, s *store.Store) bool {
+	t.Helper()
+	c := cfCursor(t, s)
+	return store.CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision,
+		cfStartBlock, decode.RevisionAaveCollateralFlags)
+}
+
 // TestAaveCollateralFlagsDeriveFromRealLogsEndToEnd is the machinery proof.
 //
 // MUTANT THIS KILLS: unregister either topic0 in internal/decode. The Registry's
@@ -230,6 +252,87 @@ func TestAaveCollateralFlagsRewindAndRederiveIsTheBackfillPath(t *testing.T) {
 	rebuilt := cfFold(t, s, cfThroughHead)
 	require.Equal(t, full, rebuilt,
 		"re-derivation over the same custody reproduces the fold EXACTLY — that is what makes the live window safe")
+}
+
+// TestAaveCollateralFlagCoverageIsSetByTheWalkNotAnOperator is the round-1 [high]
+// fix's other half, proven where the machinery lives.
+//
+// The custody marker must be EVIDENCE, not an attestation: there must be no way to
+// set it except by actually walking the range it claims. So this test never writes
+// a marker — it runs the real runner and watches the marker appear, then disappear
+// on a deep rewind, then reappear on re-derivation. If the marker could be set any
+// other way, riskfeed's gate would be a checkbox instead of a proof.
+func TestAaveCollateralFlagCoverageIsSetByTheWalkNotAnOperator(t *testing.T) {
+	s := cfLiveStore(t)
+	ctx := context.Background()
+	cfIngestFixture(t, s, cfThroughHead)
+
+	// Before any walk there is no cursor at all, so nothing is proven.
+	require.False(t, cfCoverageProven(t, s), "no walk, no claim")
+
+	// ---- The walk sets it, as a side effect of completing. Note what is NOT
+	// happening here: no test code stamps anything.
+	cfDeriveToHead(t, s)
+	require.True(t, cfCoverageProven(t, s),
+		"a walk from the engine's StartBlock under the current registry IS the proof")
+
+	c := cfCursor(t, s)
+	require.NotNil(t, c.CoveredFromBlock)
+	require.EqualValues(t, cfStartBlock, *c.CoveredFromBlock,
+		"coverage records where the walk actually began — the spec's StartBlock, not a constant")
+	require.EqualValues(t, decode.RegistryRevision, c.DecoderRevision,
+		"and the registry revision the running binary actually has")
+
+	// ---- The backfill's rewind clears it, ATOMICALLY with the rows it described.
+	// This is the state an operator is in mid-window, and it must read as unproven:
+	// the ledger is empty, and a surviving marker would license reading that
+	// emptiness as chain truth — the exact bug, produced by the repair.
+	require.NoError(t, s.RewindDerived(ctx, AaveEngineName, 1, cfStartBlock-1))
+	require.False(t, cfCoverageProven(t, s),
+		"mid-window the ledger is empty AND unproven — the two facts must never disagree")
+	require.Empty(t, cfFold(t, s, cfThroughHead))
+
+	// ---- And re-derivation restores it. Nothing in this test ever asserted
+	// custody; the walk did.
+	cfDeriveToHead(t, s)
+	require.True(t, cfCoverageProven(t, s))
+	require.Len(t, cfFold(t, s, cfThroughHead), 4,
+		"proven coverage and a populated ledger arrive together, from one operation")
+}
+
+// TestAaveCollateralFlagCoverageIsNotEstablishedByAMidHistoryWalk: a walk that
+// starts above the engine's genesis must NOT satisfy the gate, however far it
+// reaches. This is the shape a naive "has the new binary run?" marker would have
+// passed — and it is exactly the shape that misses the early enables.
+func TestAaveCollateralFlagCoverageIsNotEstablishedByAMidHistoryWalk(t *testing.T) {
+	s := cfLiveStore(t)
+	ctx := context.Background()
+	cfIngestFixture(t, s, cfThroughHead)
+
+	// Pre-position the cursor ABOVE the first flag log, the way a live database
+	// derived by an older binary sits: at head, with the flag history behind it.
+	require.NoError(t, s.ApplyDerivedWindow(ctx, AaveEngineName, 1, nil, nil, 21_000_000,
+		store.DerivationCoverage{}))
+	require.False(t, cfCoverageProven(t, s))
+
+	// Now the CURRENT binary walks forward from there. It decodes the flag events
+	// it sees — but it never saw the genesis cluster.
+	cfDeriveToHead(t, s)
+
+	c := cfCursor(t, s)
+	require.NotNil(t, c.CoveredFromBlock)
+	require.Greater(t, *c.CoveredFromBlock, uint64(cfStartBlock),
+		"the walk began above genesis and says so")
+	require.False(t, cfCoverageProven(t, s),
+		"a head cursor under the new registry is still NOT genesis coverage — the gate must refuse")
+
+	// And the ledger really is incomplete, which is why: the genesis-cluster
+	// enables are missing, so their users' absences are NOT chain truth.
+	fold := cfFold(t, s, cfThroughHead)
+	require.NotContains(t, fold, cfKey(cfUser1st),
+		"the first-ever enable is below the walk and was never derived")
+	require.Contains(t, fold, cfKey(cfUserDus),
+		"while a later disable WAS — a partially-witnessed ledger, which is the dangerous state")
 }
 
 // TestAaveCollateralFlagsReplayIsIdempotent: re-running the runner over an

@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/config"
+	"github.com/kaselunt/solvent/internal/decode"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/riskfeed"
 	"github.com/kaselunt/solvent/internal/store"
@@ -133,9 +134,12 @@ var (
 )
 
 const (
-	fxAaveBlock  = uint64(25_635_618)
-	fxParamBlock = uint64(25_635_618)
-	fxPriceBlock = uint64(25_635_600)
+	// fxAaveGenesis is the ether.fi Aave market's configured start block — the
+	// coverage the flag-custody gate requires a walk to reach back to.
+	fxAaveGenesis = uint64(20_625_519)
+	fxAaveBlock   = uint64(25_635_618)
+	fxParamBlock  = uint64(25_635_618)
+	fxPriceBlock  = uint64(25_635_600)
 )
 
 func newRiskdFixture(t *testing.T) *riskdFixture {
@@ -186,7 +190,8 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 		cfg: &daemonConfig{
 			Registry: registry,
 			Aave: riskfeed.EngineBinding{Engine: risk.AaveEngine, ChainID: 1,
-				ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1"},
+				ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1",
+				GenesisBlock: fxAaveGenesis},
 			DM: riskfeed.EngineBinding{Engine: risk.DMEngine, ChainID: 10,
 				ParamEngine: risk.DMEngine, PriceEngine: "prices:poll:10"},
 			PollInterval: time.Second,
@@ -214,7 +219,15 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 // activity still extends custody — so this is the production path, not a poke.
 func (f *riskdFixture) seedRequiredCursors(t *testing.T) {
 	t.Helper()
-	require.NoError(t, f.store.ApplyDerived(f.ctx, risk.AaveEngine, 1, nil, fxAaveBlock))
+	// The Aave cursor is established WITH DERIVATION COVERAGE from the engine's
+	// genesis, because that is what a database whose flag ledger has actually been
+	// walked looks like — and without it the assembler refuses the whole Aave book
+	// (GateFlagCustodyUnproven), correctly. Stating it here makes the precondition
+	// part of every Aave fixture's premise rather than an accident; the UNPROVEN
+	// state gets its own explicit fixture in
+	// TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger.
+	require.NoError(t, f.store.ApplyDerivedWindow(f.ctx, risk.AaveEngine, 1, nil, nil, fxAaveBlock,
+		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision}))
 	require.NoError(t, f.store.ApplyParamEvents(f.ctx, risk.AaveParamEngine, 1, nil, fxParamBlock))
 	require.NoError(t, f.store.ApplyDerived(f.ctx, risk.DMEngine, 10, nil, fxDMBlock))
 }
@@ -223,7 +236,13 @@ func (f *riskdFixture) seedRequiredCursors(t *testing.T) {
 // TestRiskdPassCommitsABatch's comment.
 func (f *riskdFixture) seedHealthyAavePosition(t *testing.T) {
 	t.Helper()
-	require.NoError(t, f.store.ApplyDerivedWithRates(f.ctx, risk.AaveEngine, 1,
+	// ApplyDerivedWindow, WITH coverage, because that is what a walker does — and
+	// because the coverage-free entry point deliberately CLEARS the stamp
+	// (store.ApplyDerivedWithRates: a window nobody vouched for makes the stored
+	// range unattributable). Seeding a position through it would leave the fixture
+	// unproven and refuse the very book these tests are about, which is the merge
+	// rule behaving correctly, not a workaround being needed.
+	require.NoError(t, f.store.ApplyDerivedWindow(f.ctx, risk.AaveEngine, 1,
 		[]store.PositionEvent{
 			{ChainID: 1, Engine: risk.AaveEngine, BlockNumber: fxAaveBlock, TxHash: []byte{0x01}, LogIndex: 0,
 				EventType: "atoken_mint", Account: fxAcct.Bytes(), Asset: fxAave.Bytes(),
@@ -246,7 +265,8 @@ func (f *riskdFixture) seedHealthyAavePosition(t *testing.T) {
 			{Asset: fxAave.Bytes(), Block: 25_600_000, Kind: "liquidity_index", Value: mustBig("1000000000000000000000000000")},
 			{Asset: fxAaveDb.Bytes(), Block: 25_610_000, Kind: "variable_borrow_index", Value: mustBig("1000000000000000000000000000")},
 		},
-		fxAaveBlock))
+		fxAaveBlock,
+		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision}))
 
 	require.NoError(t, f.store.ApplyParamEvents(f.ctx, risk.AaveParamEngine, 1, []store.ParamRow{
 		{Engine: risk.AaveParamEngine, ChainID: 1, Asset: fxAave.Bytes(),

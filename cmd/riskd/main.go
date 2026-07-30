@@ -197,6 +197,27 @@ func (c *daemonConfig) sweptEngines() []string {
 	return []string{c.DM.Engine}
 }
 
+// engineGenesisBlock is the lowest StartBlock across every stream of `engine` —
+// the block its derived history begins at.
+//
+// Returning 0 when the engine has no configured stream is deliberate and is NOT a
+// "no requirement" sentinel: store.CoverageProvenBack refuses a zero genesis, so a
+// misconfigured engine makes the flag-custody gate REFUSE rather than pass. That is
+// the fail-closed direction for a gate whose whole job is to withhold a book whose
+// provenance cannot be established.
+func engineGenesisBlock(cfg *config.Config, engine string) uint64 {
+	var lowest uint64
+	for _, s := range cfg.Streams {
+		if s.Engine != engine {
+			continue
+		}
+		if lowest == 0 || s.StartBlock < lowest {
+			lowest = s.StartBlock
+		}
+	}
+	return lowest
+}
+
 // requiredStampEngines is the engine set whose watermark stamps must be present
 // for a batch to be servable — every engine the pass consumes, price pollers
 // included, because supersession is judged per engine.
@@ -297,6 +318,11 @@ func loadConfig(configPath, feedsPath string) (*daemonConfig, error) {
 			ChainID:     ethChain.ChainID,
 			ParamEngine: risk.AaveParamEngine,
 			PriceEngine: store.PollOwnedEnginePrefix + strconv.FormatUint(ethChain.ChainID, 10),
+			// Read from the SAME config the walker walks from, never a literal: the
+			// flag-custody gate asks whether derived state was walked from this block,
+			// so a hard-coded copy that drifted from contracts.json would silently
+			// change the bar the gate applies. engineGenesisBlock refuses to guess.
+			GenesisBlock: engineGenesisBlock(cfg, risk.AaveEngine),
 		},
 		DM: riskfeed.EngineBinding{
 			Engine: risk.DMEngine,

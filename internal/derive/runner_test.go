@@ -41,15 +41,17 @@ type fakeRunnerStore struct {
 	logs        []store.RawLog
 	unacked     bool
 
-	// applyErr fails the next ApplyDerivedWithRates call (one-shot); when
+	// applyErr fails the next ApplyDerivedWindow call (one-shot); when
 	// applyAdvancesDespiteErr is set the cursor still advances — the
 	// commit-landed-with-lost-ack world.
 	applyErr                error
 	applyAdvancesDespiteErr bool
 
 	// lastRates captures the rate observations handed to the most recent
-	// ApplyDerivedWithRates call (atomicity assertions).
-	lastRates []store.RateObservation
+	// ApplyDerivedWindow call (atomicity assertions); lastCoverage captures the
+	// derivation-coverage claim that travelled with it.
+	lastRates    []store.RateObservation
+	lastCoverage store.DerivationCoverage
 
 	// rewindDeepTo, when set, lands the cursor at min(requested, rewindDeepTo)
 	// — RewindDerived's deepest-unacked-epoch lowering.
@@ -84,9 +86,10 @@ func (f *fakeRunnerStore) DeriveCursor(context.Context, string) (uint64, bool, e
 	return f.cursor, f.cursorFound, nil
 }
 
-func (f *fakeRunnerStore) ApplyDerivedWithRates(_ context.Context, _ string, _ uint64, events []store.PositionEvent, rates []store.RateObservation, throughBlock uint64) error {
+func (f *fakeRunnerStore) ApplyDerivedWindow(_ context.Context, _ string, _ uint64, events []store.PositionEvent, rates []store.RateObservation, throughBlock uint64, coverage store.DerivationCoverage) error {
 	f.log.add(fmt.Sprintf("ApplyDerived(events=%d,rates=%d,through=%d)", len(events), len(rates), throughBlock))
 	f.lastRates = rates
+	f.lastCoverage = coverage
 	if f.applyErr != nil {
 		err := f.applyErr
 		f.applyErr = nil

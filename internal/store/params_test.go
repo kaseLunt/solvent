@@ -391,9 +391,11 @@ func TestMigrateAddsParamHistoryOnTopOfV10(t *testing.T) {
 		WHERE table_schema = $1 AND table_name = 'param_history'`, schema).Scan(&n))
 	require.Zero(t, n, "param_history must not exist at the v10 baseline")
 
-	// (b) Pre-existing v10 data an upgrade must not disturb.
-	require.NoError(t, s.ApplyDerived(ctx, "debt_manager", 10,
-		[]PositionEvent{pe(50, 1, 0xA1, 0xBB, "debt", 40)}, 60))
+	// (b) Pre-existing v10 data an upgrade must not disturb, seeded the way a v10
+	// binary would — see seedDerivedPre00014 for why the CURRENT writer must not be
+	// used to fabricate an older era's rows.
+	seedDerivedPre00014(t, s, "debt_manager", 10,
+		[]PositionEvent{pe(50, 1, 0xA1, 0xBB, "debt", 40)}, nil, 60)
 
 	// (c) The forward upgrade, exactly as a restarted indexer would run it.
 	require.NoError(t, Migrate(ctx, scratch))

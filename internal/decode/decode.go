@@ -147,6 +147,40 @@ var (
 	}]`)
 )
 
+// RegistryRevision is the version of THE DECODED-EVENT SURFACE: which topic0s
+// this package recognizes, per engine.
+//
+// # BUMP THIS WHENEVER A TOPIC ENTERS OR LEAVES AN ENGINE'S ALLOWLIST
+//
+// It exists because the registry's contract for an unknown topic0 is a SILENT
+// skip, which makes "this event was never emitted" and "this binary could not
+// decode it" indistinguishable in the derived ledger. That is harmless while
+// every derived law reads only what is present — and load-bearing the moment a
+// law reads ABSENCE as chain truth, which `internal/riskfeed`'s collateral law
+// now does. Derived state carries this number (derive_cursors.decoder_revision,
+// migration 00014) so a consumer can tell "the walk behind this ledger could
+// decode the events I am about to interpret the absence of" from "it could not".
+//
+// A bump is NOT a schema change and NOT a math change; it does not invalidate
+// derived rows. It marks the point from which a re-derivation is required before
+// an absence-reading law may trust this engine's ledger.
+//
+// Revision log:
+//
+//	1 — P2 surface: Debt Manager, Aave Pool + aTokens, Chainlink aggregator,
+//	    PoolConfigurator.
+//	2 — added the Aave collateral-flag pair (ReserveUsedAsCollateralEnabled /
+//	    Disabled) to engine aave_v3_etherfi.
+const RegistryRevision = 2
+
+// RevisionAaveCollateralFlags is the revision at which the collateral-flag pair
+// entered the allowlist — the threshold a consumer of the FLAG LEDGER must
+// require of derived state before reading a missing flag as "never enabled".
+//
+// It is a separate constant from RegistryRevision on purpose: later bumps for
+// unrelated events must not raise this bar and force a needless re-derivation.
+const RevisionAaveCollateralFlags = 2
+
 // decodeFn decodes one log's topics (topics[0] is topic0) and non-indexed
 // data into a concrete Event.
 type decodeFn func(topics [][]byte, data []byte) (Event, error)

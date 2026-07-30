@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pressly/goose/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,72 @@ import (
 // currentSchemaVersion is the highest embedded migration. Bumping it is part of
 // adding a migration, and the upgrade-path tests below assert against it so a new
 // migration cannot land without its own upgrade proof.
-const currentSchemaVersion = 13
+const currentSchemaVersion = 14
+
+// seedDerivedPre00014 writes a derived window the way a PRE-00014 BINARY would:
+// raw SQL over the columns that existed before the derivation-coverage columns did.
+//
+// # Why not just call ApplyDerived, as these tests used to
+//
+// Because the compiled query layer is written against the CURRENT schema, and that
+// is not a defect — production never runs it against an older one (store.Migrate
+// runs at startup, and reconcile gates on an exact version match). An upgrade-path
+// test that seeds "data the old binary wrote" by calling the NEW writer is
+// therefore asserting a backward compatibility nobody promised, and it breaks the
+// first time a migration adds a column to a table the writer touches — which
+// 00014 does, to derive_cursors.
+//
+// Seeding the baseline era with era-appropriate SQL is the honest form of the same
+// test, and it is already the house pattern beside it: the v5 sweep proof seeds its
+// snapshot_sweeps rows with raw INSERTs for exactly this reason. The migration
+// assertions that follow are unchanged and now test what they say they test.
+//
+// It mirrors ApplyDerivedWindow's effects — events, event-sourced balances, rate
+// observations, cursor — MINUS any coverage claim, which is precisely the state a
+// pre-00014 database is in.
+func seedDerivedPre00014(t *testing.T, s *Store, engine string, chainID uint64, events []PositionEvent, rates []RateObservation, throughBlock uint64) {
+	t.Helper()
+	ctx := context.Background()
+	for _, ev := range events {
+		payload := ev.Payload
+		if payload == nil {
+			payload = map[string]string{}
+		}
+		var deltaParam any
+		if ev.Delta != nil {
+			deltaParam = pgtype.Numeric{Int: ev.Delta, Exp: 0, Valid: true}
+		}
+		_, err := s.pool.Exec(ctx, `INSERT INTO position_events
+			(chain_id, engine, block_number, tx_hash, log_index, seq, event_type, account, asset, side, delta, payload)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			ev.ChainID, ev.Engine, ev.BlockNumber, ev.TxHash, int32(ev.LogIndex), int32(ev.Seq),
+			ev.EventType, ev.Account, ev.Asset, ev.Side, deltaParam, payload)
+		require.NoError(t, err)
+		if ev.Side == "" || ev.Delta == nil {
+			continue // record-only, exactly as the real writer treats it
+		}
+		_, err = s.pool.Exec(ctx, `INSERT INTO position_balances
+			(engine, account, asset, side, source, amount, updated_block)
+			VALUES ($1,$2,$3,$4,'event',$5,$6)
+			ON CONFLICT (engine, account, asset, side, source) DO UPDATE
+			SET amount = position_balances.amount + EXCLUDED.amount,
+			    updated_block = GREATEST(position_balances.updated_block, EXCLUDED.updated_block)`,
+			ev.Engine, ev.Account, ev.Asset, ev.Side,
+			pgtype.Numeric{Int: ev.Delta, Exp: 0, Valid: true}, ev.BlockNumber)
+		require.NoError(t, err)
+	}
+	for _, o := range rates {
+		_, err := s.pool.Exec(ctx, `INSERT INTO rate_indexes (engine, asset, block_number, kind, value)
+			VALUES ($1,$2,$3,$4,$5) ON CONFLICT (engine, asset, block_number, kind) DO NOTHING`,
+			engine, o.Asset, o.Block, o.Kind, pgtype.Numeric{Int: o.Value, Exp: 0, Valid: true})
+		require.NoError(t, err)
+	}
+	_, err := s.pool.Exec(ctx, `INSERT INTO derive_cursors (engine, chain_id, last_block, acked_epoch, updated_at)
+		VALUES ($1,$2,$3,0,now())
+		ON CONFLICT (engine) DO UPDATE SET last_block = EXCLUDED.last_block, updated_at = now()`,
+		engine, chainID, throughBlock)
+	require.NoError(t, err)
+}
 
 // migrateUpTo applies the embedded migrations through version — the
 // test-only lever that reconstructs a historical schema baseline. Mirrors
@@ -107,10 +173,10 @@ func TestMigrateUpgradesV3BaselineWithoutDataLoss(t *testing.T) {
 		($1, $3, 80,  '{"legacy": "pre-side document"}')`,
 		engine, a1, a3)
 	require.NoError(t, err)
-	require.NoError(t, s.ApplyDerived(ctx, engine, 10, []PositionEvent{
+	seedDerivedPre00014(t, s, engine, 10, []PositionEvent{
 		pe(50, 1, 0xA1, 0xBB, "debt", 40),
 		pe(50, 2, 0xA2, 0xBB, "debt", 10),
-	}, 60))
+	}, nil, 60)
 
 	// (c) The forward upgrade — the production entry point, exactly as a
 	// restarted indexer at the new code would run it.
