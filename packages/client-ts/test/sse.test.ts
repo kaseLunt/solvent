@@ -251,7 +251,7 @@ describe("snapshot-on-connect", () => {
     expect(snapshots[1]?.connection).toBe(2);
   });
 
-  it("SURFACES a tick that arrives before any snapshot, and still delivers it", () => {
+  it("SURFACES a tick that arrives before any snapshot, and does NOT deliver it", () => {
     const h = harness();
     h.latest().emit("batch", fixtures.streamBatch);
 
@@ -261,9 +261,11 @@ describe("snapshot-on-connect", () => {
     expect(error.event).toBe("batch");
     expect(error.connection).toBe(1);
     expect(error.message).toContain("before a snapshot");
-    // Dropping the tick would hide the very thing worth knowing.
-    expect(h.events).toHaveLength(1);
-    expect(h.events[0]?.event).toBe("batch");
+    // A delta over a base this consumer never saw is wrong data, not data. The
+    // connection is dropped instead; the reconnect snapshot re-establishes
+    // state (see "no unbased delivery" below).
+    expect(h.events).toHaveLength(0);
+    expect(h.latest().closed).toBe(true);
   });
 
   it("accepts `unavailable` as a base — no batch is still a posture", () => {
@@ -433,13 +435,14 @@ describe("reconnect", () => {
     expect(h.scheduler.pendingDelays()).toEqual([800]);
   });
 
-  it("resets the backoff once a connection delivers a frame", () => {
+  it("resets the backoff once a connection delivers its BASE frame", () => {
     const h = harness({ reconnect: { minDelayMs: 200, jitter: 0 } });
     h.latest().fail();
     h.scheduler.advance(200);
     h.latest().fail();
     h.scheduler.advance(400);
-    // A healthy connection: snapshot arrives.
+    // A healthy connection: the snapshot (the base) arrives. An HTTP open
+    // alone would NOT have reset the history — see the M5 suite below.
     h.latest().emit("snapshot", fixtures.streamSnapshot);
     h.latest().fail();
     expect(h.scheduler.pendingDelays()).toEqual([200]);
@@ -568,6 +571,128 @@ describe("heartbeat timeout", () => {
     // It still counts as activity: the frame arrived.
     h.scheduler.advance(44_000);
     expect(h.errors).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-1 review fixes.
+//
+// H4: before a base (snapshot or unavailable) arrives on a connection, non-base
+//     events are NOT delivered — the connection is dropped and the guaranteed
+//     reconnect snapshot re-establishes state.
+// M5: retry history resets only on receipt of a valid base frame, never on the
+//     transport's HTTP `open`.
+// ---------------------------------------------------------------------------
+
+describe("no unbased delivery (round-1 H4)", () => {
+  it("REFUSES a batch before any snapshot: reported, NOT delivered, reconnected", () => {
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0 } });
+    const first = h.latest();
+    first.emit("batch", fixtures.streamBatch);
+
+    const error = h.errors[0] as StreamProtocolError;
+    expect(error).toBeInstanceOf(StreamProtocolError);
+    expect(error.event).toBe("batch");
+    expect(error.connection).toBe(1);
+    expect(error.message).toContain("before a snapshot");
+    // NOT delivered: a delta over a base this consumer never saw is wrong data.
+    expect(h.events).toEqual([]);
+    // The connection is dropped so the contract's snapshot-on-connect re-bases.
+    expect(first.closed).toBe(true);
+    expect(h.stream.currentState).toBe("waiting");
+
+    h.scheduler.advance(100);
+    h.latest().emit("snapshot", fixtures.streamSnapshot);
+    h.latest().emit("batch", fixtures.streamBatch);
+    expect(h.events.map((e) => e.event)).toEqual(["snapshot", "batch"]);
+    expect(h.events[0]?.connection).toBe(2);
+  });
+
+  it("REFUSES a degradation before any snapshot the same way", () => {
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().emit("degradation", fixtures.streamDegradation);
+    expect(h.events).toEqual([]);
+    expect(h.errors[0]).toBeInstanceOf(StreamProtocolError);
+    expect(h.stream.currentState).toBe("waiting");
+  });
+
+  it("is not SILENT corruption without onError: nothing delivered, visibly reconnecting", () => {
+    const scheduler = new FakeScheduler();
+    const events: StreamEvent[] = [];
+    const states: StreamState[] = [];
+    const sources: MockSource[] = [];
+    const stream = new SolventStream("http://localhost:8080/v1/stream", {
+      scheduler,
+      reconnect: { minDelayMs: 100, jitter: 0 },
+      eventSourceFactory: (url) => {
+        const source = new MockSource(url);
+        sources.push(source);
+        return source;
+      },
+      onEvent: (e) => events.push(e),
+      onStateChange: (s) => states.push(s),
+    });
+    sources[0]?.emit("batch", fixtures.streamBatch);
+    // No onError is registered, and still nothing corrupt happens: the tick is
+    // not delivered into unbased state, and the reconnect is observable.
+    expect(events).toEqual([]);
+    expect(states).toEqual(["connecting", "waiting"]);
+    scheduler.advance(100);
+    sources[1]?.emit("snapshot", fixtures.streamSnapshot);
+    expect(events.map((e) => e.event)).toEqual(["snapshot"]);
+    stream.close();
+  });
+
+  it("still accepts `unavailable` as a base — no batch is still a posture", () => {
+    const h = harness();
+    h.latest().emit("unavailable", fixtures.streamUnavailable);
+    h.latest().emit("batch", fixtures.streamBatch);
+    expect(h.errors).toEqual([]);
+    expect(h.events.map((e) => e.event)).toEqual(["unavailable", "batch"]);
+  });
+});
+
+describe("retry history resets only on a BASE frame (round-1 M5)", () => {
+  it("repeated open-then-close keeps growing the backoff and exhausts maxAttempts", () => {
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0, maxAttempts: 3 } });
+    h.latest().open();
+    h.latest().fail();
+    expect(h.scheduler.pendingDelays()).toEqual([100]);
+
+    h.scheduler.advance(100);
+    h.latest().open();
+    h.latest().fail();
+    // The delay GREW: an HTTP 200 alone is not evidence of a usable stream.
+    expect(h.scheduler.pendingDelays()).toEqual([200]);
+
+    h.scheduler.advance(200);
+    h.latest().open();
+    h.latest().fail();
+    expect(h.stream.currentState).toBe("closed");
+    expect((h.errors.at(-1) as StreamTransportError).message).toContain("giving up after 3");
+    expect(h.sources).toHaveLength(3);
+  });
+
+  it("a heartbeat alone does not reset retry history either", () => {
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().fail();
+    h.scheduler.advance(100);
+    h.latest().open();
+    h.latest().beat(1_800_000_000);
+    h.latest().fail();
+    // Two consecutive failures without a base: the next delay is 2x, not 1x.
+    expect(h.scheduler.pendingDelays()).toEqual([200]);
+  });
+
+  it("a base frame DOES reset it", () => {
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().fail();
+    h.scheduler.advance(100);
+    h.latest().fail();
+    h.scheduler.advance(200);
+    h.latest().emit("snapshot", fixtures.streamSnapshot);
+    h.latest().fail();
+    expect(h.scheduler.pendingDelays()).toEqual([100]);
   });
 });
 

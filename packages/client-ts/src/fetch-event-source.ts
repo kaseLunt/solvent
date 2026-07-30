@@ -138,22 +138,38 @@ class FetchEventSource implements EventSourceLike {
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
+    // A read that ends in `\r` is AMBIGUOUS: the `\n` completing a CRLF may be
+    // the first byte of the next read, and TCP/ReadableStream chunk boundaries
+    // are arbitrary. Normalizing that CR immediately would turn `...\r` + `\n...`
+    // into a fabricated blank line — a false frame boundary that dispatches a
+    // half frame and silently loses the event. So a trailing CR is HELD until
+    // the next chunk decides what it was.
+    let danglingCR = false;
+    const ingest = (chunk: string): void => {
+      let text = danglingCR ? `\r${chunk}` : chunk;
+      danglingCR = text.endsWith("\r");
+      if (danglingCR) text = text.slice(0, -1);
+
+      // Frames are separated by a blank line. `\r\n` is normalized so a proxy
+      // that rewrites line endings cannot hide a frame boundary — safe here
+      // only because a trailing CR never enters `text` unresolved.
+      buffer += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        this.dispatchFrame(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+    };
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (value !== undefined) buffer += decoder.decode(value, { stream: true });
-
-        // Frames are separated by a blank line. `\r\n` is normalized first so a
-        // proxy that rewrites line endings cannot hide a frame boundary.
-        buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-        let boundary = buffer.indexOf("\n\n");
-        while (boundary !== -1) {
-          this.dispatchFrame(buffer.slice(0, boundary));
-          buffer = buffer.slice(boundary + 2);
-          boundary = buffer.indexOf("\n\n");
-        }
+        if (value !== undefined) ingest(decoder.decode(value, { stream: true }));
       }
+      // At EOF a still-held CR is a real line terminator (SSE admits a bare
+      // CR); resolving it can complete the final frame's blank line.
+      if (danglingCR) ingest("\n");
       this.fail("the server closed the stream");
     } catch (cause) {
       if (this.closed) return;

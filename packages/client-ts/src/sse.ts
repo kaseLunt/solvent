@@ -237,7 +237,11 @@ export class SolventStream {
     source.addEventListener("heartbeat", (event) => this.onHeartbeatFrame(event, connection));
     source.addEventListener("open", () => {
       if (connection !== this.connectionCount || this.closed) return;
-      this.failedAttempts = 0;
+      // Deliberately NOT a reset of `failedAttempts`: an HTTP 200 is not
+      // evidence of a usable stream. A server or proxy that accepts and closes
+      // before its first frame would otherwise hold every failure at attempt
+      // one — backoff never grows and `maxAttempts` never terminates. Retry
+      // history resets only when a BASE frame arrives (see `onFrame`).
       this.touch();
       this.setState("open");
     });
@@ -258,10 +262,11 @@ export class SolventStream {
   // -------------------------------------------------------------------------
 
   private onFrame(name: StreamEventName, event: MessageLike, connection: number): void {
-    if (this.closed || connection !== this.connectionCount) return;
-    this.failedAttempts = 0;
+    // `this.source === null` covers a frame arriving from a connection this
+    // stream has already dropped (e.g. after a protocol violation) but not yet
+    // replaced — the connection counter alone cannot tell those apart.
+    if (this.closed || connection !== this.connectionCount || this.source === null) return;
     this.touch();
-    if (this.state !== "open") this.setState("open");
 
     const data = event.data;
     if (typeof data !== "string" || data.length === 0) {
@@ -288,10 +293,14 @@ export class SolventStream {
     }
 
     // SNAPSHOT-ON-CONNECT, enforced. `snapshot` and `unavailable` are the two
-    // frames that establish a base; anything else arriving first means the
-    // consumer would be merging a delta into state it never saw. The violation
-    // is REPORTED and the event is still delivered — silently dropping a tick
-    // would hide the very thing worth knowing.
+    // frames that establish a base; anything else arriving first is a delta
+    // over state this consumer never saw, and delivering it would render wrong
+    // data over a stale or absent base. The violation is REPORTED, the event is
+    // NOT delivered, and the connection is dropped — the contract guarantees a
+    // snapshot on every connection, so reconnecting is what re-establishes a
+    // true base. Even with no `onError` registered the failure is not silent:
+    // nothing corrupt reaches the data callbacks, and the reconnect is
+    // observable through `onStateChange` and the connection counter.
     const establishesBase = name === "snapshot" || name === "unavailable";
     if (!this.baseReceived && !establishesBase) {
       this.raise(
@@ -299,12 +308,22 @@ export class SolventStream {
           name,
           connection,
           `connection ${connection} delivered \`${name}\` before a snapshot: the contract ` +
-            `sends a snapshot on EVERY connection before any tick. The event is still ` +
-            `delivered, but it is a delta over a base this consumer never received`,
+            `sends a snapshot on EVERY connection before any tick. The event is NOT ` +
+            `delivered — it is a delta over a base this consumer never received — and the ` +
+            `connection is dropped so the guaranteed reconnect snapshot re-establishes state`,
         ),
       );
+      this.dropSource();
+      this.scheduleReconnect();
+      return;
     }
-    if (establishesBase) this.baseReceived = true;
+    if (establishesBase) {
+      this.baseReceived = true;
+      // The ONLY reset of retry history: a valid base frame is what proves the
+      // connection usable. Neither HTTP `open` nor a heartbeat comment does.
+      this.failedAttempts = 0;
+    }
+    if (this.state !== "open") this.setState("open");
 
     const delivered: StreamEvent = {
       event: name,
@@ -334,8 +353,10 @@ export class SolventStream {
   }
 
   private onHeartbeatFrame(event: MessageLike, connection: number): void {
-    if (this.closed || connection !== this.connectionCount) return;
-    this.failedAttempts = 0;
+    if (this.closed || connection !== this.connectionCount || this.source === null) return;
+    // Liveness only — a heartbeat is not a base frame and does not reset the
+    // retry history (a server heartbeating without ever sending its snapshot
+    // must not pin the backoff at attempt one).
     this.touch();
     const raw = (event.data ?? "").replace(/^heartbeat\s*/, "").trim();
     const unix = /^[0-9]+$/.test(raw) ? Number(raw) : null;
@@ -343,7 +364,9 @@ export class SolventStream {
   }
 
   private onTransportError(event: MessageLike, connection: number): void {
-    if (this.closed || connection !== this.connectionCount) return;
+    // The source-null guard stops a dropped connection's trailing error from
+    // scheduling (and counting) a second reconnect for the same failure.
+    if (this.closed || connection !== this.connectionCount || this.source === null) return;
     const detail = typeof event.data === "string" && event.data.length > 0 ? `: ${event.data}` : "";
     this.raise(new StreamTransportError(this.url, connection, `the event stream disconnected${detail}`));
     this.scheduleReconnect();

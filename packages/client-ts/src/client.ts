@@ -26,6 +26,7 @@ import {
   UnavailableError,
   type HttpErrorInit,
 } from "./errors.js";
+import { lookup, type AddressLookup, type StressLookup } from "./lookup.js";
 import { SolventStream, type StreamOptions } from "./sse.js";
 import {
   SEIZURE_MODEL,
@@ -148,27 +149,54 @@ export class SolventClient {
 
   /**
    * `GET /v1/address/{addr}` — one address's positions in the newest servable
-   * batch.
+   * batch, as a DISCRIMINATED LOOKUP.
    *
    * An address with no position answers 200, not 404: "no position in this
    * batch" is an ANSWER and arrives with the batch that answered it.
    *
-   * `found` is THREE-VALUED — `true`, `false`, or `null` when a withheld engine
-   * makes the answer unestablishable. Read it through `lookup()` rather than as
-   * a boolean; `!found` treats "cannot answer" as "no position", and the type
-   * system will not stop you.
+   * On the wire `found` is THREE-VALUED — `true`, `false`, or `null` when a
+   * withheld engine makes the answer unestablishable — and `!found` treats
+   * "cannot answer" as "no position". So this method does not hand back the
+   * raw body: it returns `lookup(body)`, whose `outcome` has three cases and
+   * whose `found` is each arm's literal, and it throws
+   * `ContractInvariantError` on a body that contradicts itself. The unrefined
+   * wire body is behind `addressRaw()`, whose name says what it is.
    */
-  async address(addr: string, signal?: AbortSignal): Promise<AddressResponse> {
+  async address(addr: string, signal?: AbortSignal): Promise<AddressLookup> {
+    return lookup(await this.addressRaw(addr, signal));
+  }
+
+  /**
+   * `GET /v1/address/{addr}` — the RAW wire body, unrefined and unenforced.
+   *
+   * `found` here is the contract's `boolean | null`, and no invariant is
+   * checked: this accessor exists for persistence, forensics and conformance
+   * tooling, where the wire bytes' own claims are the subject. Never branch a
+   * rendering decision on this body's `found` — use `address()` (or pass this
+   * body through `lookup()`), where "cannot answer" cannot read as "no
+   * position".
+   */
+  async addressRaw(addr: string, signal?: AbortSignal): Promise<AddressResponse> {
     return this.get<AddressResponse>(`/v1/address/${this.checkAddress(addr)}`, signal);
   }
 
   /**
    * `GET /v1/address/{addr}/stress` — the committed scenario set against one
-   * address.
+   * address, as a DISCRIMINATED LOOKUP.
    *
-   * `found` is three-valued here too, with the same contract. See `lookup()`.
+   * `found` is three-valued here too, with the same contract as `address()`,
+   * and the same enforcement: contradictory bodies throw
+   * `ContractInvariantError`. The raw wire body is behind `addressStressRaw()`.
    */
-  async addressStress(addr: string, signal?: AbortSignal): Promise<StressResponse> {
+  async addressStress(addr: string, signal?: AbortSignal): Promise<StressLookup> {
+    return lookup(await this.addressStressRaw(addr, signal));
+  }
+
+  /**
+   * `GET /v1/address/{addr}/stress` — the RAW wire body, unrefined and
+   * unenforced. The same caveats as `addressRaw()`.
+   */
+  async addressStressRaw(addr: string, signal?: AbortSignal): Promise<StressResponse> {
     return this.get<StressResponse>(`/v1/address/${this.checkAddress(addr)}/stress`, signal);
   }
 

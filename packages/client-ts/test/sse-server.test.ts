@@ -18,7 +18,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SolventStream, fetchEventSource } from "../src/index.js";
+import { SolventStream, StreamProtocolError, fetchEventSource } from "../src/index.js";
 import type { SolventError, StreamEvent, StreamOptions } from "../src/index.js";
 import * as fixtures from "./fixtures/index.js";
 import { PINNED } from "./fixtures/index.js";
@@ -267,6 +267,119 @@ describe("the wire parser against real SSE bytes", () => {
       }
       expect(c.errors[0]?.message).toContain("HTTP 429");
       expect(c.errors[0]?.message).toContain("rate_limited");
+    } finally {
+      c.stream.close();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Round-1 review fixes, proven over the real wire.
+  //
+  // H3: a CRLF split by a TCP read boundary exactly between \r and \n must not
+  //     fabricate a frame boundary and destroy the event.
+  // H4: a tick before the connection's snapshot is dropped, and the guaranteed
+  //     reconnect snapshot re-establishes state.
+  // M5: an HTTP 200 that closes before any frame is a FAILED attempt.
+  // -------------------------------------------------------------------------
+
+  const crlfCases = [
+    { name: "snapshot", payload: fixtures.streamSnapshot, id: 1 },
+    { name: "batch", payload: fixtures.streamBatch, id: 2 },
+    { name: "degradation", payload: fixtures.streamDegradation, id: 2 },
+  ] as const;
+
+  for (const { name, payload, id } of crlfCases) {
+    it(`survives a CRLF \`${name}\` frame split between \\r and \\n at EVERY line boundary`, async () => {
+      const server = await sseServer();
+      const c = collect(server.url);
+      try {
+        const conn = await server.next();
+        // A base first, so snapshot-ordering handling cannot mask the parser.
+        conn.write(frame("snapshot", fixtures.streamSnapshot, 1));
+        await c.waitFor(1, "the base snapshot");
+
+        const bytes = frame(name, payload, id).replace(/\n/g, "\r\n");
+        // Every \r|\n boundary in the frame: after the `event:` line, after the
+        // `id:` line, after the `data:` line, and inside the blank terminator.
+        const splits: number[] = [];
+        for (let i = 0; i < bytes.length - 1; i += 1) {
+          if (bytes[i] === "\r" && bytes[i + 1] === "\n") splits.push(i + 1);
+        }
+        expect(splits.length).toBeGreaterThanOrEqual(4);
+
+        let expected = 1;
+        for (const at of splits) {
+          conn.write(bytes.slice(0, at)); // this chunk ends exactly with "\r"
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          conn.write(bytes.slice(at)); //   this one begins with "\n"
+          expected += 1;
+          await c.waitFor(expected, `the ${name} frame split at byte ${at}`);
+          const event = c.events.at(-1);
+          expect(event?.event).toBe(name);
+          expect(event?.id).toBe(String(id));
+          expect(event?.payload).toEqual(payload);
+        }
+        expect(c.errors).toEqual([]);
+      } finally {
+        c.stream.close();
+      }
+    });
+  }
+
+  it("drops a pre-snapshot tick and recovers via the reconnect snapshot (H4)", async () => {
+    const server = await sseServer();
+    const c = collect(server.url, { reconnect: { minDelayMs: 10, maxDelayMs: 50, jitter: 0 } });
+    try {
+      const first = await server.next();
+      // Protocol violation: a tick with no snapshot before it.
+      first.write(frame("batch", fixtures.streamBatch, 2));
+
+      // The client must drop the connection and come back; the second
+      // connection's snapshot is the base, and ordering is clean from there.
+      const second = await server.next();
+      second.write(frame("snapshot", fixtures.streamSnapshot, 1));
+      second.write(frame("batch", fixtures.streamBatch, 2));
+      await c.waitFor(2, "the snapshot and batch on the second connection");
+
+      expect(c.events.map((e) => e.event)).toEqual(["snapshot", "batch"]);
+      expect(c.events[0]?.connection).toBe(2);
+      expect(c.events[0]?.isReconnect).toBe(true);
+      expect(c.errors.some((e) => e instanceof StreamProtocolError)).toBe(true);
+    } finally {
+      c.stream.close();
+    }
+  });
+
+  it("repeated HTTP 200s that close before any frame exhaust maxAttempts (M5)", async () => {
+    let connections = 0;
+    const server = createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-store",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders();
+      connections += 1;
+      // Accepted, opened... and closed before a single SSE frame.
+      res.end();
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const c = collect(`http://127.0.0.1:${port}/v1/stream`, {
+      reconnect: { minDelayMs: 10, maxDelayMs: 40, jitter: 0, maxAttempts: 3 },
+    });
+    try {
+      const deadline = Date.now() + 5000;
+      while (c.stream.currentState !== "closed" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      // Each open-then-close was a FAILED attempt: backoff grew and the policy
+      // terminated, rather than hammering attempt one forever.
+      expect(c.stream.currentState).toBe("closed");
+      expect(connections).toBe(3);
+      expect(c.errors.some((e) => e.message.includes("giving up after 3"))).toBe(true);
     } finally {
       c.stream.close();
     }

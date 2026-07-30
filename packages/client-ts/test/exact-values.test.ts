@@ -8,6 +8,11 @@
 // handling, real `JSON.parse` — over the committed fixture BYTES. What is being
 // tested is that the client hands a caller the server's digits unaltered, which
 // is the one job a risk client cannot get approximately right.
+//
+// The address routes are read through `addressRaw()` / `addressStressRaw()`:
+// this suite asserts WIRE truth, and the raw accessors are the surface whose
+// contract is "the body, exactly as served". The primary `address()` path
+// returns the discriminated lookup and is proven in `lookup.test.ts`.
 
 import { describe, expect, it } from "vitest";
 
@@ -292,7 +297,7 @@ describe("/v1/address serves one address's exact position", () => {
   const { client, mock } = clientFor({ [path]: FIXTURE_FILES.addressAave });
 
   it("requests the address verbatim and returns its single position", async () => {
-    const body = await client.address(PINNED.accounts.aave);
+    const body = await client.addressRaw(PINNED.accounts.aave);
     expect(mock.calls).toEqual([`${BASE}${path}`]);
     expect(body.found).toBe(true);
     expect(body.address).toBe(PINNED.accounts.aave);
@@ -300,7 +305,7 @@ describe("/v1/address serves one address's exact position", () => {
   });
 
   it("serves the health factor's three legs unaltered", async () => {
-    const p = (await client.address(PINNED.accounts.aave)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aave)).positions[0] as Position;
     expect(p.engine).toBe(PINNED.engines.aave);
     expect(p.status).toBe("computed");
     expect(p.health_factor?.wad).toBe(PINNED.aave.hfWad);
@@ -317,14 +322,14 @@ describe("/v1/address serves one address's exact position", () => {
   });
 
   it("carries the batch's durable as-ofs, never a request-time clock", async () => {
-    const p = (await client.address(PINNED.accounts.aave)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aave)).positions[0] as Position;
     expect(p.as_of.balances_block).toBe(PINNED.blocks.aave);
     expect(p.as_of.params_block).toBe(PINNED.blocks.aaveParam);
     expect(p.as_of.stale_price_inputs).toBe(true);
   });
 
   it("gives each leg its OWN rate-index as-of block", async () => {
-    const p = (await client.address(PINNED.accounts.aave)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aave)).positions[0] as Position;
     expect(p.legs).toHaveLength(2);
     const weeth = byKey(p.legs, "asset", PINNED.assets.weethEth);
     expect(weeth.live_collateral).toBe(PINNED.aave.weethAmount);
@@ -340,7 +345,7 @@ describe("/v1/address serves one address's exact position", () => {
   });
 
   it("discloses every price input the batch PERSISTED, with its own verdict", async () => {
-    const p = (await client.address(PINNED.accounts.aave)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aave)).positions[0] as Position;
     expect(p.price_inputs).toHaveLength(2);
     const weeth = byKey(p.price_inputs, "asset", PINNED.assets.weethEth);
     expect(weeth.value).toBe(PINNED.aave.weethPrice);
@@ -366,7 +371,7 @@ describe("/v1/address serves one address's exact position", () => {
   });
 
   it("solves the factor-level liquidation price and rounds it conservatively", async () => {
-    const p = (await client.address(PINNED.accounts.aave)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aave)).positions[0] as Position;
     const lp = p.liquidation_price;
     if (lp === null) throw new Error("the computed Aave position carries a solve");
     expect(lp.in_factor).toBe(true);
@@ -406,7 +411,7 @@ describe("/v1/address serves refusals WITH their reasons", () => {
   it("serves the G1 refusal naming the asset, and no health factor", async () => {
     const path = `/v1/address/${PINNED.accounts.aaveRefused}`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.addressAaveRefused });
-    const p = (await client.address(PINNED.accounts.aaveRefused)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.aaveRefused)).positions[0] as Position;
     expect(p.status).toBe("refused");
     expect(p.refusal?.code).toBe(PINNED.aave.refusedRefusalCode);
     expect(p.refusal?.asset).toBe(PINNED.assets.weethEth);
@@ -424,7 +429,7 @@ describe("/v1/address serves refusals WITH their reasons", () => {
   it("serves the never-swept refusal without a liquidatable verdict", async () => {
     const path = `/v1/address/${PINNED.accounts.dmRefused}`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.addressDMRefused });
-    const p = (await client.address(PINNED.accounts.dmRefused)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.dmRefused)).positions[0] as Position;
     expect(p.refusal?.code).toBe(PINNED.dm.refusedRefusalCode);
     expect(p.refusal?.note).toContain("UNKNOWN size");
     // HF near zero over unknown collateral is a false alarm, so no verdict at all.
@@ -438,7 +443,7 @@ describe("/v1/address answers found:false with the batch that answered it", () =
   it("is an ANSWER, not a 404", async () => {
     const path = `/v1/address/${PINNED.accounts.unknown}`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.addressNotFound });
-    const body = await client.address(PINNED.accounts.unknown);
+    const body = await client.addressRaw(PINNED.accounts.unknown);
     expect(body.found).toBe(false);
     expect(body.positions).toEqual([]);
     // It still says WHICH batch answered.
@@ -450,7 +455,7 @@ describe("the Debt Manager position uses its own comparator", () => {
   it("publishes a strict boolean and no health-factor wad", async () => {
     const path = `/v1/address/${PINNED.accounts.dm}`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.addressDM });
-    const p = (await client.address(PINNED.accounts.dm)).positions[0] as Position;
+    const p = (await client.addressRaw(PINNED.accounts.dm)).positions[0] as Position;
     expect(p.value_decimals).toBe(PINNED.dm.valueDecimals);
     expect(p.health_factor?.wad).toBeNull();
     expect(p.health_factor?.num).toBe(PINNED.dm.hfNum);
@@ -482,7 +487,7 @@ describe("/v1/address/{addr}/stress serves the recomputable values", () => {
   it("ETH −30%: 4000 x 70/100 propagates to a 0.756 health factor", async () => {
     const path = `/v1/address/${PINNED.accounts.aave}/stress`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.stressAave });
-    const body = await client.addressStress(PINNED.accounts.aave);
+    const body = await client.addressStressRaw(PINNED.accounts.aave);
     expect(body.scenario_config_version).toBe(PINNED.stress.configVersion);
 
     const scenario = scenarioById(body.scenarios, PINNED.stress.ethMinus30Id);
@@ -508,7 +513,7 @@ describe("/v1/address/{addr}/stress serves the recomputable values", () => {
   it("a market depeg with oracles held moves the health factor by not one wei", async () => {
     const path = `/v1/address/${PINNED.accounts.aave}/stress`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.stressAave });
-    const body = await client.addressStress(PINNED.accounts.aave);
+    const body = await client.addressStressRaw(PINNED.accounts.aave);
     const r = scenarioById(body.scenarios, PINNED.stress.depegId).results[0] as ScenarioResult;
     expect(r.applicable).toBe(true);
     expect(r.after?.health_factor_wad).toBe(PINNED.aave.hfWad);
@@ -521,7 +526,7 @@ describe("/v1/address/{addr}/stress serves the recomputable values", () => {
   it("says WHY a scenario does not cover an engine rather than omitting the result", async () => {
     const path = `/v1/address/${PINNED.accounts.aave}/stress`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.stressAave });
-    const body = await client.addressStress(PINNED.accounts.aave);
+    const body = await client.addressStressRaw(PINNED.accounts.aave);
     const r = scenarioById(body.scenarios, PINNED.stress.rateId).results[0] as ScenarioResult;
     expect(r.applicable).toBe(false);
     expect(r.reason).toContain(PINNED.stress.rateNotApplicableReason);
@@ -532,7 +537,7 @@ describe("/v1/address/{addr}/stress serves the recomputable values", () => {
   it("labels the rate axis a delta-only PROJECTION starting from the batch's own debt", async () => {
     const path = `/v1/address/${PINNED.accounts.dm}/stress`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.stressDM });
-    const body = await client.addressStress(PINNED.accounts.dm);
+    const body = await client.addressStressRaw(PINNED.accounts.dm);
     const r = scenarioById(body.scenarios, PINNED.stress.rateId).results[0] as ScenarioResult;
     expect(r.applicable).toBe(true);
     const projection = r.projection;
@@ -557,7 +562,7 @@ describe("/v1/address/{addr}/stress serves the recomputable values", () => {
   it("makes the in-band stable scenario a true no-op on a weETH-only position", async () => {
     const path = `/v1/address/${PINNED.accounts.dm}/stress`;
     const { client } = clientFor({ [path]: FIXTURE_FILES.stressDM });
-    const body = await client.addressStress(PINNED.accounts.dm);
+    const body = await client.addressStressRaw(PINNED.accounts.dm);
     const r = scenarioById(body.scenarios, PINNED.stress.inBandId).results[0] as ScenarioResult;
     expect(r.before?.collateral_usd).toBe(r.after?.collateral_usd);
     expect(r.after?.collateral_usd).toBe(PINNED.dm.collateralUSD);

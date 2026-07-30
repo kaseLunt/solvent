@@ -108,9 +108,11 @@ for (const engine of book.engines) {
   );
 }
 
-const { positions } = await client.address("0x70daaac436465a0d03e45916fa68ddee6086e5fe");
-for (const p of positions) {
-  console.log(p.engine, p.status, positionEligible(p), p.health_factor?.wad);
+const result = await client.address("0x70daaac436465a0d03e45916fa68ddee6086e5fe");
+if (result.outcome === "found") {
+  for (const p of result.response.positions) {
+    console.log(p.engine, p.status, positionEligible(p), p.health_factor?.wad);
+  }
 }
 ```
 
@@ -119,8 +121,9 @@ for (const p of positions) {
 | Method | Route |
 | --- | --- |
 | `client.book()` | `GET /v1/book` — aggregates, HF histogram, liquidation waterfall, bad-debt line |
-| `client.address(addr)` | `GET /v1/address/{addr}` — positions, as-ofs, per-input price disclosures |
-| `client.addressStress(addr)` | `GET /v1/address/{addr}/stress` — the committed scenario set |
+| `client.address(addr)` | `GET /v1/address/{addr}` — positions, as-ofs, per-input price disclosures, as a **discriminated lookup** |
+| `client.addressStress(addr)` | `GET /v1/address/{addr}/stress` — the committed scenario set, as a **discriminated lookup** |
+| `client.addressRaw(addr)` / `client.addressStressRaw(addr)` | The same routes' **raw wire bodies** — `found` still `boolean \| null`, no invariant enforcement. For persistence and forensics, never for rendering |
 | `client.observatory({ limit })` | `GET /v1/observatory` — per-engine TVL, counts, rate indexes |
 | `client.stream(opts)` | `GET /v1/stream` — SSE |
 | `client.meta()` | `GET /v1/meta` — watermark vector, reorg posture, price state, constants |
@@ -140,14 +143,18 @@ liquidation surface, which is the whole reason the third state exists.
 
 The nullable type is a deliberate breaking change, and on its own it protects
 nobody: `if (!found)` takes the same branch for `false` and `null`, and
-TypeScript raises nothing, because `!null` is legal. So read it through
-`lookup()`, which returns a discriminated union with three cases and no boolean
-anywhere:
+TypeScript raises nothing, because `!null` is legal. So the primary methods do
+not hand back the raw body at all: `address()` and `addressStress()` return a
+**sealed discriminated union**. `outcome` has three cases and no boolean
+anywhere; `found` is each arm's *literal* (`true`, `false`, `null`), so
+`result.found === false` narrows to the one arm where "no position" is true;
+and the wide `boolean | null` field is unreachable from every arm —
+`result.response` carries everything else the wire said, with `found` sealed
+off at the type level *and* at runtime. Branch on `outcome` or on
+`found === false`. Never on falsiness.
 
 ```ts
-import { lookup } from "@solvent/client";
-
-const result = lookup(await client.address(addr));
+const result = await client.address(addr);
 switch (result.outcome) {
   case "found":
     // `complete` false means the positions are a FLOOR, not a total —
@@ -166,12 +173,20 @@ switch (result.outcome) {
 Add a `default: const _: never = result` and the vocabulary growing again becomes
 a compile error rather than a silent fall-through. `isDefinitiveNegative(response)`
 is the one-line form for the only case in which "no position" is a true thing to
-render — deliberately not the negation of anything.
+render — deliberately not the negation of anything. The same machinery is
+available as the free function `lookup()` for a body obtained elsewhere — e.g.
+`lookup(await client.addressRaw(addr))`. The raw accessors are the only surface
+that exposes the unrefined three-valued `found`, and their names say so.
 
-`lookup()` also enforces the contract's own invariants and throws
-`ContractInvariantError` on a body that contradicts itself: a `found: false`
-carrying an incomplete lookup is exactly the definitive negative the service is
-not entitled to publish, and a client that accepted it would undo the fix.
+The lookup also enforces the contract's own invariants and throws
+`ContractInvariantError` on a body that contradicts itself. The completeness law
+runs *before* the `found` branch, on every outcome: `lookup_complete: true` with
+a non-empty `withheld_engines` is refused (a contradictory *positive* would
+render a floor as a total), `lookup_complete: false` naming no withheld engine
+is refused (the contract defines the list as the engines the lookup could not
+consult, so incompleteness must be attributed), and a `found: false` carrying an
+incomplete lookup is exactly the definitive negative the service is not entitled
+to publish.
 
 ## The event stream
 
@@ -205,14 +220,21 @@ Events are discriminated on the wire event names — `snapshot`, `batch`,
 number, whether that connection was a reconnect, and whether it is the
 connect-time snapshot. If a tick ever arrives *before* a snapshot on a
 connection, the violation is surfaced through `onError` as a
-`StreamProtocolError` **and the event is still delivered**: silently dropping it
-would hide the one thing worth knowing.
+`StreamProtocolError`, the event is **not** delivered, and the connection is
+dropped: a delta over a base this consumer never saw is wrong data, and the
+contract guarantees the reconnect's snapshot re-establishes true state. With no
+`onError` registered the failure is still not silent — nothing reaches the data
+callbacks, and the reconnect is observable through `onStateChange` and the
+connection counter.
 
 Reconnection is this client's, not `EventSource`'s. On error the source is closed
 (which stops the browser's own fixed-interval retry) and a new connection is
 scheduled after a jittered exponential delay — `min(maxDelay, minDelay × 2^n)`,
 then a uniform draw from `[base × (1 − jitter), base]`. `jitter: 1` is full
-jitter. The backoff resets once a connection delivers a frame.
+jitter. The backoff resets only once a connection delivers its **base frame**
+(the snapshot, or `unavailable`) — an HTTP 200 alone is not evidence of a usable
+stream, so a server that accepts and closes before its first frame cannot pin
+every failure at attempt one.
 
 ### Two transports, and the heartbeat caveat
 
@@ -310,12 +332,12 @@ client-ts:
 | Suite | Claim |
 | --- | --- |
 | `conformance.test.ts` + the `satisfies` clauses in `test/fixtures/data.ts` | The generated types accept every recorded response — checked by `tsc`. Seven `@ts-expect-error` cases (money as a number, an unknown field, a missing required field, a bad enum, a forbidden null, a nullable read as present, `found` read as a boolean) make the build fail if they *stop* being errors, so "the types compile" is not a statement about a type that accepts anything. |
-| `lookup.test.ts` | Three-valued `found` as **contract law**: `null` round-trips as null through the real client on both endpoints, the `!found` trap is demonstrated, all three outcomes discriminate, `found: true` under an incomplete lookup is a floor, and four self-contradicting bodies are refused. |
+| `lookup.test.ts` | Three-valued `found` as **contract law**: `null` round-trips as null through the raw accessors on both endpoints, the `!found` trap is demonstrated, all three outcomes discriminate, `found: true` under an incomplete lookup is a floor, the union is SEALED (literal `found` per arm, the wide field off the response), the primary `address()`/`addressStress()` return the discriminated lookup, and self-contradicting bodies — including the contradictory positive — are refused. |
 | `fixtures.test.ts` | Every fixture validates against `api/openapi.yaml` itself — `additionalProperties: false`, the `Decimal` pattern, required fields, enums, nullability. Seven negative controls prove the validator can reject. Plus: the committed `.json` bytes and the type-checked literals are the same response. |
 | `exact-values.test.ts` | The exact numbers, through the real client. Every asserted value is mirrored from `cmd/api`'s seeded Go suite, so client and server pin **the same** arithmetic. |
 | `decimal.test.ts` | Exact round trips, precision-loss refusal, and the negative / zero / max-uint256-scale cases. |
-| `sse.test.ts` | Connect, snapshot, tick, degradation, unavailable, reconnect backoff, heartbeat timeout — against a mock transport with injected timers, so the backoff is arithmetic rather than a race. |
-| `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, and a server that closes the connection. |
+| `sse.test.ts` | Connect, snapshot, tick, degradation, unavailable, reconnect backoff, heartbeat timeout — against a mock transport with injected timers, so the backoff is arithmetic rather than a race. Plus the round-1 laws: no unbased delivery (a pre-snapshot tick is reported, dropped, and reconnected), and retry history resets only on a base frame. |
+| `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, CRLF split **between `\r` and `\n`** at every line boundary for every event type, a pre-snapshot tick dropped and recovered over the wire, repeated 200-then-close connections exhausting `maxAttempts`, and a server that closes the connection. |
 | `errors.test.ts` | The whole taxonomy above. |
 | `drift.test.ts` | The contract-drift gate, plus package hygiene: zero runtime dependencies, exact dev-dependency pins, `private: true`, and the ESM exports map. |
 
