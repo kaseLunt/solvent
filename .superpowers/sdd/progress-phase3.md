@@ -1444,6 +1444,48 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (report, don't re-freeze). Wave runs on an ISOLATED scratch DB solvent_test_t6w5 —
   the sibling flag-custody wave holds solvent_test (two concurrent destructive
   live-db suites on one DB would race exactly like the pre--p1 cross-package runs).
+- **ROUND-7 FIX LANDED — 06d0a25** (8 files +381/−26; both-ways staging check
+  exact — the two cmd/reconcile modifications correctly excluded as wave-5
+  property). All three findings were the SAME completion the wave performed in
+  round 3 for covered_from_block/decoder_revision and failed to repeat for the
+  field it added itself. (H1) binding joins sameCoverage — forward AND reverse
+  flip tests pin a fingerprint of the other four provenance facts byte-identical,
+  mutate only the binding, require the trigger; stub-to-true kills both. (H2)
+  binding serializes UN-TRUNCATED into the identity cursor line (/cov/rev/walked
+  — deliberately distinct token from the policy line's demanded surface: walked
+  vs demanded are different facts the gate compares); decisive test = empty-book
+  binding-only repair mints a NEW key with refusedDigest == healedDigest (nothing
+  else could move it), refused batch not adopted. (H3) validateAaveGenesis
+  resolves every stream's chain, requires AuditedAaveChainID (new constant) BEFORE
+  hashing, compares RESOLVED ids not config keys (two keys naming one chain must
+  not false-refuse); chainIDOf deleted, 0 refs; divergence table 13 cases.
+  Completion rule recorded in the audited-premises comment: any field the
+  refuse-vs-compute decision reads joins Satisfies + sameCoverage + identity —
+  all three homes. Incidental: unprovenAaveCoverage now clears all three fields
+  (two-field variant modelled an impossible row). Wave: full -p 1 AND -race -p 1
+  exit 0, riskd -race -count=3, fork 3/3, live DB untouched. Integrator
+  independently re-ran vet/build/tests on both trees — green. ROUND 8 (TRUE
+  closing) dispatched: fcr8 @ 06d0a25, base df6e5f6, closing tasks = verify all
+  three + hunt a FOURTH field missing a home + spot-check test non-vacuity.
+- CODEX ROUND 1 ON TASK 8 (session 019fb36d-42b1-7351-bebb-a4a3a59b1adc, ~10min,
+  t8r1 @ f58bc48, base 9a80667, static review — read-only workspace had no npm
+  deps): needs-attention — 4H/1M, ALL honest-use classes, all adjudicated
+  FIX-WORTHY. (H1) union arms retain raw response so found stays boolean|null —
+  !found conflation COMPILES, and the primary address() bypasses discrimination
+  entirely (withheld engine → honest dashboard's false "no position"). (H2)
+  found:true branch skips lookup_complete⇄withheld_engines consistency —
+  contradictory positive renders a floor as a total. (H3) SSE parser normalizes
+  trailing \r immediately: a chunk boundary BETWEEN \r and \n forges a frame
+  boundary and silently destroys the named event (arbitrary TCP chunking = honest
+  condition). (H4) pre-snapshot ticks are DELIVERED into unbased state (onError
+  optional = silent). (M5) failedAttempts resets on HTTP open, so 200-then-close
+  loops never grow backoff and never exhaust maxAttempts. FIX WAVE 1 dispatched
+  (packages/client-ts only, disjoint from both sibling trees, npm-verified):
+  seal the union with literal-typed found per arm + raw behind an unsafe-named
+  accessor, completeness checked before branching on all outcomes, stateful CR
+  hold at chunk boundaries with per-event-type split tests, no unbased delivery
+  (bounded buffer or reconnect), retry reset only on valid base frame;
+  red-then-green required, mutation checks m1–m4.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
