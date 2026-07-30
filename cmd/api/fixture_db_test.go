@@ -123,15 +123,15 @@ func fxFeeds() *config.Feeds {
 			Oracle: config.FeedOracle{Kind: config.FeedKindPoll, Contract: fxPriceProvider,
 				Method: "price(address)", PriceDecimals: 6},
 		},
-		// Two stream entries, so the heartbeat-provenance surface has both grades on
-		// it: the ETH/USD leg whose 3600s heartbeat the repo's record calls
-		// evidence-backed, and one whose published parameter it explicitly does not.
+		// Three stream entries, one per grade the record can assign: the ETH/USD leg
+		// whose measured gap earns a QUALIFIER, USDC whose published budget is
+		// REFUTED, and one proxy the record has not judged at all.
 		{
 			Chain: "eth", ChainID: fxETHChain, Engine: risk.AaveEngine, Address: fxWeETHEth,
 			Symbol: "weETH", Decimals: 18,
 			Oracle: config.FeedOracle{
 				Kind: config.FeedKindChainlinkStream, Contract: fxAggVerified,
-				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyVerified,
+				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyQualified,
 				Heartbeat: 3600 * time.Second, Grace: 1800 * time.Second,
 			},
 		},
@@ -140,7 +140,20 @@ func fxFeeds() *config.Feeds {
 			Symbol: "USDC", Decimals: 6,
 			Oracle: config.FeedOracle{
 				Kind: config.FeedKindChainlinkStream, Contract: fxAggUnverified,
-				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyUnverified,
+				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyRefuted,
+				Heartbeat: 86400 * time.Second, Grace: 3600 * time.Second,
+			},
+		},
+		// A third stream whose proxy the record has NOT judged, so the default
+		// `published-not-verified` path is exercised alongside the two graded ones.
+		// Without it, "the refuted grade is reported" could be satisfied by a table
+		// that graded everything refuted.
+		{
+			Chain: "eth", ChainID: fxETHChain, Engine: risk.AaveEngine, Address: fxUSDCEth,
+			Symbol: "UNJUDGED", Decimals: 6,
+			Oracle: config.FeedOracle{
+				Kind: config.FeedKindChainlinkStream, Contract: fxAggUnverified,
+				PriceDecimals: 8, StartBlock: 20_000_000, Proxy: fxProxyUnjudged,
 				Heartbeat: 86400 * time.Second, Grace: 3600 * time.Second,
 			},
 		},
@@ -148,11 +161,18 @@ func fxFeeds() *config.Feeds {
 }
 
 var (
-	fxPriceProvider   = mustAddr("0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB")
-	fxProxyVerified   = mustAddr("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419")
-	fxAggVerified     = mustAddr("0x00c7A37B03690fb9f41b5C5AF8131735C7275446")
-	fxProxyUnverified = mustAddr("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6")
-	fxAggUnverified   = mustAddr("0x789190466E21a8b78b8027866CBBDc151542A26C")
+	fxPriceProvider = mustAddr("0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB")
+	// fxProxyQualified is the ETH/USD proxy behind the weETH cap adapter: the B3
+	// scan's 3,732s measured gap exceeds its published 3,600s heartbeat and survives
+	// only inside the 1,800s grace — a QUALIFIER, not a pass.
+	fxProxyQualified = mustAddr("0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419")
+	fxAggVerified    = mustAddr("0x00c7A37B03690fb9f41b5C5AF8131735C7275446")
+	// fxProxyRefuted is USDC's: a measured 248,460s interval FALSIFIES the 90,000s
+	// tested budget.
+	fxProxyRefuted = mustAddr("0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6")
+	// fxProxyUnjudged is not in the record's grade table at all.
+	fxProxyUnjudged = mustAddr("0x1234567890AbCdEf1234567890aBcDeF12345678")
+	fxAggUnverified = mustAddr("0x789190466E21a8b78b8027866CBBDc151542A26C")
 )
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -280,6 +300,31 @@ func (f *apiFixture) seedSubstrate(t *testing.T) {
 		require.NoError(t, err, "seeding price row %s/%x", r.source, r.asset)
 	}
 
+	// THE PARAM LEDGER — the independent witness every leg's liquidation threshold
+	// and bonus is welded against.
+	//
+	// Aave params live in `param_history` under the PoolConfigurator's own engine
+	// identity; the Debt Manager's ARE its own `position_events` (design spec §8,
+	// zero new RPC). Both rows sit BELOW the position's params_block, because a
+	// param is effective from the log that set it.
+	_, err := f.admin.Exec(f.ctx,
+		`INSERT INTO param_history (engine, chain_id, asset, ltv, liq_threshold, liq_bonus,
+		                            emode_category, effective_block, effective_log_index, source_event, tx_hash)
+		 VALUES ($1,$2,$3,$4::numeric,$5::numeric,$6::numeric,0,$7,0,$8,$9)`,
+		risk.AaveParamEngine, int64(fxETHChain), fxWeETHEth.Bytes(),
+		"8000", fxAaveLTBps, fxAaveBonusBps,
+		int64(fxParamEffectiveBlock), "CollateralConfigurationChanged", hash32(0x51))
+	require.NoError(t, err)
+
+	_, err = f.admin.Exec(f.ctx,
+		`INSERT INTO position_events (chain_id, engine, block_number, tx_hash, log_index, seq,
+		                              event_type, account, asset, side, payload)
+		 VALUES ($1,$2,$3,$4,0,0,'collateral_token_config_set',$5,$6,'',$7::jsonb)`,
+		int64(fxOPChain), risk.DMEngine, int64(fxDMParamEffectiveBlock), hash32(0x52),
+		fxWeETHOp.Bytes(), fxWeETHOp.Bytes(),
+		`{"ltv":"70000000000000000000","liquidation_threshold":"`+fxDMLiqThreshold+`","liquidation_bonus":"`+fxDMLiqBonus+`"}`)
+	require.NoError(t, err)
+
 	// Rate indexes: two heights for one key, so the observatory surface has to pick
 	// the newest and disclose ITS block rather than the cursor's.
 	for _, ix := range []struct {
@@ -304,6 +349,44 @@ const (
 	fxRateIndexValue      = "1023456789012345678901234567"
 	fxRateIndexBlock      = int64(fxAaveBlock - 900)
 )
+
+// hash32 is a deterministic 32-byte identifier for a fixture row.
+func hash32(b byte) []byte {
+	out := make([]byte, 32)
+	for i := range out {
+		out[i] = b
+	}
+	return out
+}
+
+// seedWithheldBatch writes a batch whose Aave engine is WITHHELD at the aggregate
+// level with zero positions behind it, and returns its id.
+//
+// `proven` selects the control: false writes the withheld batch, true writes an
+// identically-empty Aave engine carrying NO refusal code — a genuinely empty,
+// genuinely proven book.
+func (f *apiFixture) seedWithheldBatch(t *testing.T, key string, proven bool) int64 {
+	t.Helper()
+	aggs := fxWithheldAggregates()
+	if proven {
+		aggs = fxProvenEmptyAggregates()
+	}
+	id, err := f.store.WriteRiskBatch(f.ctx, fxWithheldBatchWrite(key, aggs))
+	require.NoError(t, err)
+	require.Positive(t, id)
+	batch, found, err := f.store.NewestCompleteBatch(f.ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, id, batch.ID)
+	if proven {
+		require.Empty(t, batch.RefusedEngines,
+			"the control must be PROVEN: an empty refusal_code is a genuinely empty book")
+	} else {
+		require.Equal(t, []string{risk.AaveEngine}, batch.RefusedEngines,
+			"the store must expose the engine-scoped refusal even with zero positions behind it")
+	}
+	return id
+}
 
 // seedBatch writes the fixture batch through store.WriteRiskBatch and returns its
 // id.

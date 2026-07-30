@@ -1738,6 +1738,48 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 	return b, true, nil
 }
 
+// CompleteBatchIDs returns the newest `limit` batch ids that satisfy THE SAME
+// completeness predicate NewestCompleteBatch applies, newest first.
+//
+// It exists so a caller that needs a SERIES of batches — `cmd/api`'s observatory
+// surface — can select them through this predicate instead of writing its own.
+// The api previously duplicated a WEAKER version (status, position count,
+// aggregate count, required-engine presence) which omitted the leg and
+// price-input cardinalities, the required watermark and sweep-payload sets, and
+// the aggregate-to-position sum. After an honest partial restore that duplicate
+// admitted a batch the serving path correctly refused, so a time series could
+// publish a point that `NewestCompleteBatch` would never serve. One predicate,
+// one answer (chain-truth R6.5).
+//
+// It takes a Querier rather than using the pool, so the caller decides the
+// transactional scope: a series read that must be coherent with a database clock
+// passes its own `REPEATABLE READ, READ ONLY` transaction.
+func CompleteBatchIDs(ctx context.Context, q Querier, limit int) ([]int64, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("complete batch ids: limit must be positive, got %d", limit)
+	}
+	rows, err := q.Query(ctx, `
+		SELECT b.id FROM risk_batches b
+		WHERE `+riskBatchCompleteConjuncts+`
+		ORDER BY b.id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read complete risk batch ids: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan complete risk batch id: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate complete risk batch ids: %w", err)
+	}
+	return out, nil
+}
+
 // RiskBatchPriceInputs reads back the FULL price snapshots a batch recorded,
 // ordered deterministically.
 //

@@ -51,6 +51,22 @@ type wireCount struct {
 	Count int    `json:"count"`
 }
 
+// wireEngineRefusal is an ENGINE-SCOPED refusal: the whole book for one engine is
+// withheld for a reason that is a property of the ledger rather than of any
+// account.
+//
+// It exists on the wire because such a refusal SURVIVES AN EMPTY ACCOUNT SET. The
+// deep rewind that opens the collateral-flag replay deletes every event-sourced
+// Aave balance, so a pass in that window has no position to hang a refusal on and
+// persists a zeroed rollup carrying only `refusal_code`. Without this type, that
+// honest maintenance state would serve as a clean, healthy, empty book.
+type wireEngineRefusal struct {
+	Engine string `json:"engine"`
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+	Note   string `json:"note"`
+}
+
 type wireAggregate struct {
 	Engine        string `json:"engine"`
 	ValueDecimals uint8  `json:"value_decimals"`
@@ -61,8 +77,17 @@ type wireAggregate struct {
 	FlaggedPositions      int `json:"flagged_positions"`
 	LiquidatablePositions int `json:"liquidatable_positions"`
 
-	TotalCollateral string `json:"total_collateral"`
-	TotalDebt       string `json:"total_debt"`
+	// Refused is true when the ENGINE's whole book is withheld, whatever the
+	// position counts say. A reader that branches on nothing else must still be
+	// unable to mistake this for a healthy engine.
+	Refused bool               `json:"refused"`
+	Refusal *wireEngineRefusal `json:"refusal"`
+
+	// TotalCollateral / TotalDebt are NULL on a refused engine, never "0". A
+	// refusal is the ABSENCE of a number, and zero is a number — serving zero
+	// here is what turned an explicitly unproven book into "nothing at risk".
+	TotalCollateral *string `json:"total_collateral"`
+	TotalDebt       *string `json:"total_debt"`
 
 	// Refusals and Flags break the counts down by named reason. A refusal count
 	// with no vocabulary behind it is not a disclosure.
@@ -71,6 +96,33 @@ type wireAggregate struct {
 	// UnitNote states the scale, because the two engines are never summed and a
 	// reader must not do it either.
 	UnitNote string `json:"unit_note"`
+}
+
+// engineRefusalNote explains an engine-scoped code on the wire.
+func engineRefusalNote(code string) string {
+	if code == riskfeed.GateFlagCustodyUnproven {
+		return "FLAG_CUSTODY_UNPROVEN, WHOLE-ENGINE: this engine's derived state cannot be shown to have been walked from its start block under a decode registry that includes the collateral-flag events, " +
+			"so reading flag ABSENCE as chain truth is not licensed. Its totals are WITHHELD (null, never zero) and it is absent from the waterfall series. The other engine serves normally."
+	}
+	return "the whole book for this engine is WITHHELD; its totals are null rather than zero. See `detail`."
+}
+
+// engineRefusals lists the engines whose whole book is withheld on this batch.
+func engineRefusals(v *batchView) []wireEngineRefusal {
+	out := []wireEngineRefusal{}
+	for _, a := range v.Aggregates {
+		if a.RefusalCode == "" {
+			continue
+		}
+		out = append(out, wireEngineRefusal{
+			Engine: a.Engine,
+			Code:   a.RefusalCode,
+			Detail: sanitize(a.RefusalDetail),
+			Note:   engineRefusalNote(a.RefusalCode),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Engine < out[j].Engine })
+	return out
 }
 
 type wireHistogramBucket struct {
@@ -86,7 +138,12 @@ type wireEngineHistogram struct {
 	Buckets       []wireHistogramBucket `json:"buckets"`
 	InfiniteCount int                   `json:"infinite_count"`
 	RefusedCount  int                   `json:"refused_count"`
-	Note          string                `json:"note"`
+	// Refused / Refusal carry the ENGINE-scoped withholding, so an all-zero
+	// histogram for a withheld engine cannot read as "no positions at any health
+	// factor".
+	Refused bool               `json:"refused"`
+	Refusal *wireEngineRefusal `json:"refusal"`
+	Note    string             `json:"note"`
 }
 
 type wireHistogram struct {
@@ -137,16 +194,25 @@ type wireWaterfall struct {
 	EligibilityNote string               `json:"eligibility_note"`
 	Monotonicity    wireMonotonicity     `json:"monotonicity"`
 	AtRiskNote      string               `json:"at_risk_note"`
+	// ExcludedEngines names every engine WITHHELD at the aggregate level. Such an
+	// engine contributes no positions, so it is absent from `points[].engines`
+	// entirely — and an absence with no name attached is exactly the silent hole
+	// this surface must not have.
+	ExcludedEngines []wireEngineRefusal `json:"excluded_engines"`
 }
 
 type wireBadDebt struct {
-	Engine              string `json:"engine"`
-	UsdDecimals         uint8  `json:"usd_decimals"`
-	CurrentBadDebtUSD   string `json:"current_bad_debt_usd"`
-	InsolventPositions  int    `json:"insolvent_positions"`
-	EligiblePositions   int    `json:"eligible_positions"`
-	EligibleDebtUSD     string `json:"eligible_debt_usd"`
-	CollateralAtRiskUSD string `json:"collateral_at_risk_usd"`
+	Engine      string `json:"engine"`
+	UsdDecimals uint8  `json:"usd_decimals"`
+	// Every figure is NULL on a withheld engine. A bad-debt line of "0" over a book
+	// nobody was allowed to compute is the most dangerous zero on this surface.
+	CurrentBadDebtUSD   *string            `json:"current_bad_debt_usd"`
+	InsolventPositions  *int               `json:"insolvent_positions"`
+	EligiblePositions   *int               `json:"eligible_positions"`
+	EligibleDebtUSD     *string            `json:"eligible_debt_usd"`
+	CollateralAtRiskUSD *string            `json:"collateral_at_risk_usd"`
+	Refused             bool               `json:"refused"`
+	Refusal             *wireEngineRefusal `json:"refusal"`
 }
 
 // wireExcluded names a position that is IN the batch but not in the book this
@@ -169,14 +235,19 @@ type wireBookCoverage struct {
 }
 
 type bookResponse struct {
-	ServedAt  time.Time        `json:"served_at"`
-	Batch     wireBatch        `json:"batch"`
-	Engines   []wireAggregate  `json:"engines"`
-	Histogram wireHistogram    `json:"hf_histogram"`
-	Waterfall *wireWaterfall   `json:"waterfall"`
-	BadDebt   []wireBadDebt    `json:"bad_debt"`
-	Coverage  wireBookCoverage `json:"coverage"`
-	Notes     []string         `json:"notes"`
+	ServedAt time.Time `json:"served_at"`
+	Batch    wireBatch `json:"batch"`
+	// RefusedEngines is the top-level, unmissable statement of which engines are
+	// withheld — repeated here (it is also on the batch envelope and on every
+	// per-engine row) because a consumer that reads only the head of this document
+	// must still be unable to conclude the book is whole.
+	RefusedEngines []wireEngineRefusal `json:"refused_engines"`
+	Engines        []wireAggregate     `json:"engines"`
+	Histogram      wireHistogram       `json:"hf_histogram"`
+	Waterfall      *wireWaterfall      `json:"waterfall"`
+	BadDebt        []wireBadDebt       `json:"bad_debt"`
+	Coverage       wireBookCoverage    `json:"coverage"`
+	Notes          []string            `json:"notes"`
 }
 
 // ---------------------------------------------------------------------------
@@ -190,13 +261,16 @@ func (s *server) handleBook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refused := engineRefusals(v)
 	out := bookResponse{
-		ServedAt: v.Now,
-		Batch:    batchEnvelope(v),
-		Engines:  s.aggregates(v),
+		ServedAt:       v.Now,
+		Batch:          batchEnvelope(v),
+		RefusedEngines: refused,
+		Engines:        s.aggregates(v),
 		Notes: []string{
 			"Aave base values are 8-decimal and Debt Manager USD is 6-decimal: the two engines are reported separately and are NEVER summed.",
 			"Refused positions are counted in `refused_positions` and broken down by code in `refusals`. The book is served with its refusals, never without the positions that produced them.",
+			"An ENGINE-scoped refusal withholds that engine's whole book: its totals are null (never zero), its histogram and bad-debt line are null, and it is named in `refused_engines` and in the waterfall's `excluded_engines`. A withheld engine is never representable as an empty healthy one.",
 		},
 	}
 	out.Histogram = s.histogram(v)
@@ -204,8 +278,9 @@ func (s *server) handleBook(w http.ResponseWriter, r *http.Request) {
 	b := book(v.Positions)
 	series, wferr := risk.Waterfall(b, s.cfg.WaterfallGrid, s.waterfallScenario)
 	wf := wireWaterfallFrom(series, wferr)
+	wf.ExcludedEngines = refused
 	out.Waterfall = &wf
-	out.BadDebt = badDebtLine(series)
+	out.BadDebt = badDebtLine(series, refused)
 	out.Coverage = coverage(v.Positions, len(b))
 
 	writeJSON(w, out)
@@ -241,7 +316,7 @@ func (s *server) aggregates(v *batchView) []wireAggregate {
 
 	out := make([]wireAggregate, 0, len(v.Aggregates))
 	for _, a := range v.Aggregates {
-		out = append(out, wireAggregate{
+		w := wireAggregate{
 			Engine:                a.Engine,
 			ValueDecimals:         a.ValueDecimals,
 			Positions:             a.Positions,
@@ -249,15 +324,40 @@ func (s *server) aggregates(v *batchView) []wireAggregate {
 			RefusedPositions:      a.RefusedPositions,
 			FlaggedPositions:      a.FlaggedPositions,
 			LiquidatablePositions: a.LiquidatablePositions,
-			TotalCollateral:       orZeroString(a.TotalCollateral),
-			TotalDebt:             orZeroString(a.TotalDebt),
 			Refusals:              counts(refusals[a.Engine]),
 			Flags:                 counts(flags[a.Engine]),
 			UnitNote: "values are integers at " + strconv.Itoa(int(a.ValueDecimals)) +
 				" decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)",
-		})
+		}
+		if a.RefusalCode != "" {
+			// WITHHELD. The totals stay NULL — the persisted sums are zero because a
+			// refusal is the absence of a number, and republishing that zero as a value
+			// is precisely how an explicitly unproven book became a healthy one.
+			w.Refused = true
+			w.Refusal = &wireEngineRefusal{
+				Engine: a.Engine,
+				Code:   a.RefusalCode,
+				Detail: sanitize(a.RefusalDetail),
+				Note:   engineRefusalNote(a.RefusalCode),
+			}
+			w.UnitNote = "WITHHELD: this engine's totals are not served on this batch. See `refusal`."
+		} else {
+			w.TotalCollateral = bigStr(orZeroBigInt(a.TotalCollateral))
+			w.TotalDebt = bigStr(orZeroBigInt(a.TotalDebt))
+		}
+		out = append(out, w)
 	}
 	return out
+}
+
+// orZeroBigInt normalizes an absent aggregate total to zero. It is used ONLY on
+// the non-refused path: a genuinely empty book legitimately totals zero, and a
+// withheld one is served as null instead.
+func orZeroBigInt(v *big.Int) *big.Int {
+	if v == nil {
+		return new(big.Int)
+	}
+	return v
 }
 
 func counts(m map[string]int) []wireCount {
@@ -363,6 +463,10 @@ func (s *server) histogram(v *batchView) wireHistogram {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	withheld := map[string]wireEngineRefusal{}
+	for _, r := range engineRefusals(v) {
+		withheld[r.Engine] = r
+	}
 	for _, n := range names {
 		a := byEngine[n]
 		eh := wireEngineHistogram{
@@ -372,6 +476,15 @@ func (s *server) histogram(v *batchView) wireHistogram {
 			RefusedCount:  a.refused,
 			Note:          a.note,
 			Buckets:       make([]wireHistogramBucket, 0, len(histogramEdges)),
+		}
+		if r, refusedEngine := withheld[n]; refusedEngine {
+			// An all-zero histogram for a WITHHELD engine must not read as "no
+			// positions at any health factor". The buckets are still emitted (the
+			// shape is stable) but the engine is marked refused and carries its reason.
+			eh.Refused = true
+			rc := r
+			eh.Refusal = &rc
+			eh.Note = "WITHHELD: this engine's book is not served on this batch, so every bucket is empty for that reason and NOT because no position sits there. See `refusal`."
 		}
 		var lower *string
 		for i, e := range histogramEdges {
@@ -491,7 +604,7 @@ func wireWaterfallFrom(series risk.WaterfallSeries, err error) wireWaterfall {
 // It is the grid's factor-1.0 point when the grid opens there (the default grid
 // does, deliberately). A grid configured without it gets an empty line rather
 // than the first shocked point relabelled as "current".
-func badDebtLine(series risk.WaterfallSeries) []wireBadDebt {
+func badDebtLine(series risk.WaterfallSeries, refused []wireEngineRefusal) []wireBadDebt {
 	out := []wireBadDebt{}
 	wad := risk.WaterfallGridScale()
 	for _, pt := range series.Points {
@@ -499,18 +612,29 @@ func badDebtLine(series risk.WaterfallSeries) []wireBadDebt {
 			continue
 		}
 		for _, e := range pt.Engines {
+			insolvent, eligible := e.InsolventIfLiquidatedAccounts, e.CumulativeEligibleAccounts
 			out = append(out, wireBadDebt{
 				Engine:              e.Engine,
 				UsdDecimals:         e.UsdDecimals,
-				CurrentBadDebtUSD:   orZeroString(e.CumulativeBadDebtUSD),
-				InsolventPositions:  e.InsolventIfLiquidatedAccounts,
-				EligiblePositions:   e.CumulativeEligibleAccounts,
-				EligibleDebtUSD:     orZeroString(e.CumulativeDebtEligibleUSD),
-				CollateralAtRiskUSD: orZeroString(e.CumulativeCollateralAtRiskUSD),
+				CurrentBadDebtUSD:   bigStr(orZeroBigInt(e.CumulativeBadDebtUSD)),
+				InsolventPositions:  &insolvent,
+				EligiblePositions:   &eligible,
+				EligibleDebtUSD:     bigStr(orZeroBigInt(e.CumulativeDebtEligibleUSD)),
+				CollateralAtRiskUSD: bigStr(orZeroBigInt(e.CumulativeCollateralAtRiskUSD)),
 			})
 		}
 		break
 	}
+	// A WITHHELD engine contributes no positions, so the series above has no row
+	// for it at all. Emitting nothing would leave the bad-debt line silently short
+	// one engine; emitting zeros would be worse. It gets a row with every figure
+	// NULL and its refusal attached.
+	for _, r := range refused {
+		out = append(out, wireBadDebt{Engine: r.Engine, Refused: true, Refusal: &wireEngineRefusal{
+			Engine: r.Engine, Code: r.Code, Detail: r.Detail, Note: r.Note,
+		}})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Engine < out[j].Engine })
 	return out
 }
 
@@ -1390,7 +1514,7 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 			Engines:    []wireAggregate{},
 		}
 		for _, a := range pt.Aggregates {
-			p.Engines = append(p.Engines, wireAggregate{
+			e := wireAggregate{
 				Engine:                a.Engine,
 				ValueDecimals:         a.ValueDecimals,
 				Positions:             a.Positions,
@@ -1398,13 +1522,26 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 				RefusedPositions:      a.RefusedPositions,
 				FlaggedPositions:      a.FlaggedPositions,
 				LiquidatablePositions: a.LiquidatablePositions,
-				TotalCollateral:       orZeroString(a.TotalCollateral),
-				TotalDebt:             orZeroString(a.TotalDebt),
 				Refusals:              []wireCount{},
 				Flags:                 []wireCount{},
 				UnitNote: "values are integers at " + strconv.Itoa(int(a.ValueDecimals)) +
 					" decimals in this engine's own unit",
-			})
+			}
+			// The SAME withholding rule as /v1/book. A time series is exactly where a
+			// withheld engine's zero would be least noticeable and most misleading: it
+			// would render as a book that fell to nothing and recovered.
+			if a.RefusalCode != "" {
+				e.Refused = true
+				e.Refusal = &wireEngineRefusal{
+					Engine: a.Engine, Code: a.RefusalCode,
+					Detail: sanitize(a.RefusalDetail), Note: engineRefusalNote(a.RefusalCode),
+				}
+				e.UnitNote = "WITHHELD: this engine's totals are not served for this batch. See `refusal`."
+			} else {
+				e.TotalCollateral = bigStr(orZeroBigInt(a.TotalCollateral))
+				e.TotalDebt = bigStr(orZeroBigInt(a.TotalDebt))
+			}
+			p.Engines = append(p.Engines, e)
 		}
 		out.Series = append(out.Series, p)
 	}

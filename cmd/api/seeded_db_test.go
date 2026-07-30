@@ -159,6 +159,11 @@ func assertBookExactValues(t jt, body map[string]any) {
 	require.False(t, boolAt(t, body, "batch", "supersession", "superseded"),
 		"the fixture's cursors sit exactly on the batch's stamps and no epoch is recorded, so no leg may fire")
 	require.Len(t, arr(t, body, "batch", "watermarks"), 5)
+	// Nothing is withheld in the healthy fixture — asserted so the withheld-engine
+	// test below is a genuine change of state rather than a difference nobody pinned.
+	require.Empty(t, arr(t, body, "batch", "refused_engines"))
+	require.Empty(t, arr(t, body, "refused_engines"))
+	require.Empty(t, arr(t, body, "waterfall", "excluded_engines"))
 
 	// Per-engine aggregates, in each engine's own scale, never summed.
 	engines := arr(t, body, "engines")
@@ -166,6 +171,8 @@ func assertBookExactValues(t jt, body map[string]any) {
 
 	aave := byKey(t, engines, "engine", risk.AaveEngine)
 	require.EqualValues(t, 8, num(t, aave, "value_decimals"))
+	require.False(t, boolAt(t, aave, "refused"))
+	require.Nil(t, at(t, aave, "refusal"))
 	require.Equal(t, fxAaveCollateralBase, str(t, aave, "total_collateral"))
 	require.Equal(t, fxAaveDebtBase, str(t, aave, "total_debt"))
 	require.EqualValues(t, 2, num(t, aave, "positions"))
@@ -371,15 +378,17 @@ func TestSeededSuiteRejectsEmptyButValid(t *testing.T) {
 			"id": float64(1), "computed_at": "2026-07-29T10:00:00Z", "age_seconds": float64(0),
 			"producer": "riskd", "status": "complete",
 			"position_count": float64(0), "refused_count": float64(0), "flagged_count": float64(0),
-			"watermarks": []any{},
+			"refused_engines": []any{},
+			"watermarks":      []any{},
 			"supersession": map[string]any{
 				"superseded": false, "legs": []any{}, "note": "n",
 			},
 		},
-		"engines":      []any{},
-		"hf_histogram": map[string]any{"wad_scale": "1000000000000000000", "engines": []any{}},
-		"waterfall":    nil,
-		"bad_debt":     []any{},
+		"refused_engines": []any{},
+		"engines":         []any{},
+		"hf_histogram":    map[string]any{"wad_scale": "1000000000000000000", "engines": []any{}},
+		"waterfall":       nil,
+		"bad_debt":        []any{},
 		"coverage": map[string]any{
 			"batch_positions": float64(0), "in_book": float64(0), "refused_in_batch": float64(0),
 			"excluded_by_this_layer": float64(0), "excluded": []any{},
@@ -411,13 +420,16 @@ func TestContractValidatorCanReject(t *testing.T) {
 					"id": float64(1), "computed_at": "2026-07-29T10:00:00Z", "age_seconds": float64(0),
 					"producer": "riskd", "status": "complete",
 					"position_count": float64(0), "refused_count": float64(0), "flagged_count": float64(0),
-					"watermarks":   []any{},
-					"supersession": map[string]any{"superseded": false, "legs": []any{}, "note": "n"},
+					"refused_engines": []any{},
+					"watermarks":      []any{},
+					"supersession":    map[string]any{"superseded": false, "legs": []any{}, "note": "n"},
 				},
+				"refused_engines": []any{},
 				"engines": []any{map[string]any{
 					"engine": "aave_v3_etherfi", "value_decimals": float64(8),
 					"positions": float64(1), "computed_positions": float64(1), "refused_positions": float64(0),
 					"flagged_positions": float64(0), "liquidatable_positions": float64(0),
+					"refused": false, "refusal": nil,
 					"total_collateral": float64(800000000000), // A NUMBER, not a decimal string.
 					"total_debt":       "0",
 					"refusals":         []any{}, "flags": []any{}, "unit_note": "n",
@@ -809,16 +821,53 @@ func TestMetaServesTheFullPosture(t *testing.T) {
 	require.EqualValues(t, 1, num(t, sweeps, "success"))
 	require.EqualValues(t, 1, num(t, body, "sweep_never_refusals_in_batch"))
 
-	// Heartbeat provenance: one verified, one published-not-verified.
+	// HEARTBEAT PROVENANCE — the three grades, each with the evidence behind it.
+	//
+	// A KNOWN-REFUTED budget must NOT be reported as merely awaiting confirmation:
+	// the measurement is in and it is negative, and grading it `published-not-verified`
+	// would overstate provenance while quietly keeping the friendlier published
+	// number (the silent-cap anti-canon with a nicer label).
 	hb := arr(t, body, "heartbeat_provenance")
-	require.Len(t, hb, 2)
-	verified := byKey(t, hb, "proxy", fxProxyVerified.Hex())
-	require.Equal(t, "verified", str(t, verified, "provenance_grade"))
-	require.EqualValues(t, 3600, num(t, verified, "heartbeat_seconds"))
-	require.EqualValues(t, 1800, num(t, verified, "grace_seconds"))
-	unverified := byKey(t, hb, "proxy", fxProxyUnverified.Hex())
-	require.Equal(t, "published-not-verified", str(t, unverified, "provenance_grade"))
-	require.Contains(t, str(t, unverified, "basis"), "NOT independently confirmed")
+	require.Len(t, hb, 3)
+
+	qualified := byKey(t, hb, "proxy", fxProxyQualified.Hex())
+	require.Equal(t, "empirical-historical-with-qualifier", str(t, qualified, "provenance_grade"))
+	require.EqualValues(t, 3600, num(t, qualified, "heartbeat_seconds"))
+	require.EqualValues(t, 1800, num(t, qualified, "grace_seconds"))
+	require.EqualValues(t, 3732, num(t, qualified, "observed_max_gap_seconds"),
+		"the measured gap exceeds the published 3600s heartbeat")
+	require.EqualValues(t, 5400, num(t, qualified, "tested_budget_seconds"),
+		"and survives only inside heartbeat + grace")
+	require.False(t, boolAt(t, qualified, "budget_refuted"))
+	require.Contains(t, str(t, qualified, "basis"), "never graded `verified`")
+
+	refuted := byKey(t, hb, "proxy", fxProxyRefuted.Hex())
+	require.Equal(t, "published-and-refuted", str(t, refuted, "provenance_grade"))
+	require.True(t, boolAt(t, refuted, "budget_refuted"))
+	require.EqualValues(t, 248460, num(t, refuted, "observed_max_gap_seconds"))
+	require.EqualValues(t, 90000, num(t, refuted, "tested_budget_seconds"))
+	require.Contains(t, str(t, refuted, "basis"), "FALSIFIED")
+	require.Contains(t, str(t, refuted, "basis"), "silent cap")
+
+	// The DISCRIMINATOR: a feed the record has NOT judged still reports
+	// published-not-verified with NO measurement attached. Without this, a table
+	// that graded everything refuted would pass the assertions above.
+	unjudged := byKey(t, hb, "proxy", fxProxyUnjudged.Hex())
+	require.Equal(t, "published-not-verified", str(t, unjudged, "provenance_grade"))
+	require.False(t, boolAt(t, unjudged, "budget_refuted"))
+	require.Nil(t, at(t, unjudged, "observed_max_gap_seconds"))
+	require.Nil(t, at(t, unjudged, "tested_budget_seconds"))
+	require.Contains(t, str(t, unjudged, "basis"), "NOT independently confirmed")
+
+	// And the refutation is loud in the standing disclosures, not only in a nested
+	// field a client might never enumerate.
+	var refutedDisclosure bool
+	for _, d := range arr(t, body, "disclosures") {
+		if s, _ := d.(string); s != "" && (containsAll(s, "REFUTED", "budget_refuted")) {
+			refutedDisclosure = true
+		}
+	}
+	require.True(t, refutedDisclosure, "the refuted budgets must be named in the standing disclosures")
 
 	// Published constants.
 	require.EqualValues(t, 5, num(t, body, "constants", "confirmation_blocks"))

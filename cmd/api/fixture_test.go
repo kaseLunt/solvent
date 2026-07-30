@@ -174,16 +174,24 @@ func fxAavePosition() *positionRow {
 		ParamsBlock:         fxAaveParamBlock,
 		OldestPriceInput:    timep(fxBase.Add(-time.Duration(fxAaveWeETHAge) * time.Second)),
 		StalePriceInputs:    true,
+		// EVERY leg column riskd writes is written here, ZEROS INCLUDED. riskd's
+		// mergeAaveLegs assigns the recomputation's non-nil zero to the legs an asset
+		// does not participate in, so a fixture leaving those NULL would not be the
+		// row the daemon produces — and the per-leg verification (which compares
+		// absent against zero as a genuine disagreement, because "not applicable" and
+		// "zero" are different statements) would refuse it.
 		Legs: []legRow{
 			{
 				Engine: risk.AaveEngine, Account: fxAcctAave.Bytes(), Asset: fxUSDCEth.Bytes(), Decimals: 6,
 				LiveDebt: bi(fxAaveUSDCDebt), DebtBase: bi(fxAaveUSDCDebtBase),
+				LiveCollateral: bi("0"), CollateralBase: bi("0"), WeightedLT: bi("0"),
 				UsedAsCollateral: boolp(false), DebtIndexBlock: u64p(fxAaveBlock),
 			},
 			{
 				Engine: risk.AaveEngine, Account: fxAcctAave.Bytes(), Asset: fxWeETHEth.Bytes(), Decimals: 18,
 				LiveCollateral: bi(fxAaveWeETHAmount), CollateralBase: bi(fxAaveWeETHCollBse),
-				WeightedLT:       bi(fxAaveWeightedLTSum),
+				WeightedLT: bi(fxAaveWeightedLTSum),
+				LiveDebt:   bi("0"), DebtBase: bi("0"),
 				UsedAsCollateral: boolp(true), CollateralIndexBlock: u64p(fxAaveBlock),
 				LiqThreshold: bi(fxAaveLTBps), LiqBonus: bi(fxAaveBonusBps),
 			},
@@ -291,6 +299,105 @@ func fxDMRefused() *positionRow {
 
 func fxPositions() []*positionRow {
 	return []*positionRow{fxAavePosition(), fxAaveRefused(), fxDMPosition(), fxDMRefused()}
+}
+
+// fxParamWitness is the PARAM LEDGER the fixture's legs are welded against —
+// the independent second witness for each leg's liquidation threshold and bonus.
+//
+// It matches what the seeded `param_history` (Aave) and `position_events` (Debt
+// Manager) rows fold to, so the pure tests and the live-database tests weld
+// against the same facts.
+func fxParamWitness() *paramWitness {
+	return &paramWitness{byEngineBlock: map[string]map[uint64]map[common.Address]risk.ParamRow{
+		risk.AaveEngine: {
+			fxAaveParamBlock: {
+				fxWeETHEth: {
+					Engine: risk.AaveParamEngine, ChainID: fxETHChain, Asset: fxWeETHEth,
+					LiqThreshold: bi(fxAaveLTBps), LiqBonus: bi(fxAaveBonusBps),
+					EffectiveBlock: fxParamEffectiveBlock, Source: "param_history",
+				},
+			},
+		},
+		risk.DMEngine: {
+			fxDMBlock: {
+				fxWeETHOp: {
+					Engine: risk.DMEngine, ChainID: fxOPChain, Asset: fxWeETHOp,
+					LiqThreshold: bi(fxDMLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
+					EffectiveBlock: fxDMParamEffectiveBlock, Source: "position_events",
+				},
+			},
+		},
+	}}
+}
+
+// fxParamEffectiveBlock / fxDMParamEffectiveBlock are where each engine's param
+// row sits. Both are BELOW the position's params_block, which is the whole point:
+// a param is effective from the log that set it.
+const (
+	fxParamEffectiveBlock   = fxAaveParamBlock - 1_000
+	fxDMParamEffectiveBlock = fxDMBlock - 5_000
+)
+
+// ---------------------------------------------------------------------------
+// The ENGINE-SCOPED refusal fixtures (Codex round 1 [critical]).
+// ---------------------------------------------------------------------------
+
+// fxWithheldAggregates is the honest maintenance state the collateral-flag replay
+// produces: the Aave engine's whole book is WITHHELD with ZERO positions behind
+// it, while the Debt Manager serves normally.
+//
+// This is the exact shape that used to serve as a clean, healthy, empty Aave book:
+// zero positions, zero totals, and — before the fix — no refusal anywhere on the
+// wire, because the refusal lives on the AGGREGATE rather than on any position row.
+func fxWithheldAggregates() []store.RiskEngineAggregate {
+	return []store.RiskEngineAggregate{
+		{
+			Engine: risk.AaveEngine, ValueDecimals: 8,
+			Positions: 0, ComputedPositions: 0, RefusedPositions: 0, FlaggedPositions: 0,
+			LiquidatablePositions: 0,
+			TotalCollateral:       new(big.Int), TotalDebt: new(big.Int),
+			RefusalCode:   riskfeed.GateFlagCustodyUnproven,
+			RefusalDetail: fxWithheldDetail,
+		},
+		{
+			Engine: risk.DMEngine, ValueDecimals: 6,
+			Positions: 1, ComputedPositions: 1, RefusedPositions: 0, FlaggedPositions: 0,
+			LiquidatablePositions: 1,
+			TotalCollateral:       bi(fxDMCollateralUSD), TotalDebt: bi(fxDMBorrowings),
+		},
+	}
+}
+
+// fxProvenEmptyAggregates is the DISCRIMINATING CONTROL: an Aave engine that is
+// byte-for-byte as empty as the withheld one — zero positions, zero totals — and
+// GENUINELY PROVEN, carrying no refusal code.
+//
+// It exists because "the withheld engine is served as refused" is only meaningful
+// if an identically-shaped PROVEN engine is served as an honest empty book. Without
+// it, a serving path that marked every empty engine refused would pass.
+func fxProvenEmptyAggregates() []store.RiskEngineAggregate {
+	out := fxWithheldAggregates()
+	out[0].RefusalCode, out[0].RefusalDetail = "", ""
+	return out
+}
+
+const fxWithheldDetail = "aave_v3_etherfi derived state is not proven to have been walked from block 20625519 under a decode registry including the collateral-flag events"
+
+// fxWithheldBatchWrite is a batch in which the Aave engine is withheld and only
+// the Debt Manager position is present.
+func fxWithheldBatchWrite(key string, aggregates []store.RiskEngineAggregate) store.RiskBatchWrite {
+	w := store.RiskBatchWrite{
+		Producer:             fxBatchProduce,
+		Watermarks:           fxWatermarks(),
+		Aggregates:           aggregates,
+		RequiredEngines:      fxRequiredEngines(),
+		RequiredSweepEngines: []string{risk.DMEngine},
+		Retention:            100,
+		MaterializationKey:   key,
+		Notify:               notifyChannel,
+		Positions:            []store.RiskPositionWrite{toWrite(fxDMPosition())},
+	}
+	return w
 }
 
 // fxAggregates are the per-engine rollups. They are the engine's own persisted

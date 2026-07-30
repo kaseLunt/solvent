@@ -95,16 +95,24 @@ type wireSupersession struct {
 }
 
 type wireBatch struct {
-	ID            int64            `json:"id"`
-	ComputedAt    time.Time        `json:"computed_at"`
-	AgeSeconds    int64            `json:"age_seconds"`
-	Producer      string           `json:"producer"`
-	Status        string           `json:"status"`
-	PositionCount int              `json:"position_count"`
-	RefusedCount  int              `json:"refused_count"`
-	FlaggedCount  int              `json:"flagged_count"`
-	Watermarks    []wireStamp      `json:"watermarks"`
-	Supersession  wireSupersession `json:"supersession"`
+	ID            int64     `json:"id"`
+	ComputedAt    time.Time `json:"computed_at"`
+	AgeSeconds    int64     `json:"age_seconds"`
+	Producer      string    `json:"producer"`
+	Status        string    `json:"status"`
+	PositionCount int       `json:"position_count"`
+	// RefusedCount counts refused POSITION ROWS, so it is ZERO when an engine is
+	// withheld with no accounts behind it — the empty-and-unproven state the
+	// collateral-flag replay's rewind window produces. RefusedEngines is what makes
+	// that state visible on the summary itself.
+	RefusedCount int `json:"refused_count"`
+	// RefusedEngines names every engine whose WHOLE book is withheld on this batch.
+	// It travels with the envelope, so no consumer of the envelope alone — REST or
+	// SSE — can mistake a withheld engine for a healthy one.
+	RefusedEngines []string         `json:"refused_engines"`
+	FlaggedCount   int              `json:"flagged_count"`
+	Watermarks     []wireStamp      `json:"watermarks"`
+	Supersession   wireSupersession `json:"supersession"`
 }
 
 // batchEnvelope renders the batch header, its stamps and the supersession
@@ -112,15 +120,16 @@ type wireBatch struct {
 // number can be read without the reorg posture that qualifies it.
 func batchEnvelope(v *batchView) wireBatch {
 	out := wireBatch{
-		ID:            v.Batch.ID,
-		ComputedAt:    v.Batch.ComputedAt.UTC(),
-		AgeSeconds:    ageSeconds(v.Now, v.Batch.ComputedAt),
-		Producer:      sanitize(v.Batch.Producer),
-		Status:        v.Batch.Status,
-		PositionCount: v.Batch.PositionCount,
-		RefusedCount:  v.Batch.RefusedCount,
-		FlaggedCount:  v.Batch.FlaggedCount,
-		Watermarks:    []wireStamp{},
+		ID:             v.Batch.ID,
+		ComputedAt:     v.Batch.ComputedAt.UTC(),
+		AgeSeconds:     ageSeconds(v.Now, v.Batch.ComputedAt),
+		Producer:       sanitize(v.Batch.Producer),
+		Status:         v.Batch.Status,
+		PositionCount:  v.Batch.PositionCount,
+		RefusedCount:   v.Batch.RefusedCount,
+		RefusedEngines: orEmpty(v.Batch.RefusedEngines),
+		FlaggedCount:   v.Batch.FlaggedCount,
+		Watermarks:     []wireStamp{},
 	}
 	for _, m := range v.Batch.Watermarks {
 		st := wireStamp{
@@ -317,7 +326,16 @@ type wireHeartbeat struct {
 	HeartbeatSeconds int64  `json:"heartbeat_seconds"`
 	GraceSeconds     int64  `json:"grace_seconds"`
 	ProvenanceGrade  string `json:"provenance_grade"`
-	Basis            string `json:"basis"`
+	// ObservedMaxGapSeconds and TestedBudgetSeconds are the empirical scan's own
+	// numbers, published so a reader can see WHY a grade was assigned rather than
+	// having to trust the label. Null when no scan has judged this feed.
+	ObservedMaxGapSeconds *int64 `json:"observed_max_gap_seconds"`
+	TestedBudgetSeconds   *int64 `json:"tested_budget_seconds"`
+	// BudgetRefuted is the one-bit form of `provenance_grade ==
+	// published-and-refuted`, so a consumer cannot miss a falsified budget by
+	// failing to enumerate the grade vocabulary.
+	BudgetRefuted bool   `json:"budget_refuted"`
+	Basis         string `json:"basis"`
 }
 
 type wireConstants struct {
@@ -394,35 +412,98 @@ func (s *server) standingDisclosures() []string {
 		"A price sample used by a batch and neutralized afterwards is invisible to the three supersession legs; the batch recomputes within one materializer cadence (design spec §4, D-012 class).",
 		"Aave base values are 8-decimal and Debt Manager USD is 6-decimal. The two engines are NEVER summed into one number.",
 		"Refused positions are served WITH their reason and are counted in every aggregate's refusal count. This surface never omits a position it could not compute.",
+		"An ENGINE-scoped refusal withholds that engine's whole book even when it has no positions at all: its totals are served as null, never zero, and it is named in `batch.refused_engines`. A withheld engine is never representable as an empty healthy one.",
+		"Three published feed heartbeats are REFUTED by empirical measurement, not merely unverified (see `heartbeat_provenance`: `budget_refuted`, with the observed maximum gap and the budget it was tested against). Their served freshness budgets must carry the OBSERVED bound; the published number is the friendlier one and using it would be a silent cap.",
 		"This service makes zero RPC calls. Every age is the database clock minus a durable stamp, so nothing here is measured against a chain head observed at request time.",
 	}
 }
 
-// heartbeatGrade is the per-stream provenance grade of design spec §7's BL-6.
+// Heartbeat provenance grades (design spec §7 BL-6). A closed vocabulary, and
+// the ORDER of severity is the order they are declared in.
+const (
+	// heartbeatVerified — the budget's own value is independently evidenced AND an
+	// empirical scan cleared it. NO FEED CURRENTLY HOLDS IT, deliberately: the
+	// repo's own law is that a complete ledger's max gap is exact HISTORY and
+	// cannot certify the future, so a scan never produces this grade on its own.
+	heartbeatVerified = "verified"
+	// heartbeatQualified — an empirical scan measured a maximum publication gap
+	// that EXCEEDS the published heartbeat but sits within the declared operator
+	// grace. The budget survives; the headroom does not.
+	heartbeatQualified = "empirical-historical-with-qualifier"
+	// heartbeatRefuted — an empirical scan measured a gap BEYOND heartbeat + grace.
+	// The published budget is FALSIFIED. Reporting such a feed as merely
+	// "awaiting confirmation" overstates provenance: the evidence is already in and
+	// it is negative.
+	heartbeatRefuted = "published-and-refuted"
+	// heartbeatNotVerified — the published feed parameter, taken on trust, with no
+	// scan behind it either way.
+	heartbeatNotVerified = "published-not-verified"
+)
+
+// heartbeatGrades is the per-stream provenance grade, as the repo's record stands
+// TODAY.
 //
-// The grades are COMMITTED FACTS OF THE REPO'S RECORD, not measurements this
-// binary can take: `recon/derivation-notes.md` §"heartbeat provenance" (the table
-// at :430-436) records which heartbeat was independently evidenced from deployed
-// bytecode and which are published feed parameters that this repo has not
-// confirmed. The B3 empirical scan in `cmd/reconcile` is what upgrades a grade,
-// and it writes an artifact rather than a table — so until that lands in the
-// database, serving anything other than the recorded grade would be a claim the
-// repo's own record refutes.
+// These are COMMITTED FACTS OF THAT RECORD, not measurements this binary can take:
+// the B3 empirical scan lives in `cmd/reconcile` and writes an ARTIFACT rather
+// than a database table, so a serving path can only republish what the record
+// says. What it must not do is round the record up. Three of these budgets are
+// KNOWN-REFUTED — the scan measured gaps of 170,712s (FRAX), 248,460s (USDC) and
+// 604,896s (PYUSD) against a tested budget of 90,000s — and grading them
+// `published-not-verified` would tell an operator the evidence is outstanding when
+// the evidence is in and it is negative. That is the silent-cap anti-canon with a
+// friendlier label.
+//
+// The weETH/ETH leg carries a QUALIFIER, not a clean pass: its measured 3,732s
+// maximum gap exceeds the published 3,600s heartbeat and survives only inside the
+// declared 1,800s operator grace. The constructor evidence for the VALUE 3600 is a
+// different claim from the scan's verdict on the BUDGET, and it is recorded in the
+// basis rather than promoted into the grade.
 //
 // Keyed by the PROXY address, lowercased: the proxy is the stream's stable
 // identity (Chainlink re-points aggregator() on phase changes).
+//
+// Owed forward, deliberately visible: the Task 6 acceptance run exits non-zero on
+// these three refutations and lands feeds.json budget corrections under owner ack.
+// When it does, the corrected budgets become the published ones and this table's
+// refutations are re-derived against them. Until then this is the honest state.
 var heartbeatGrades = map[string]struct {
 	grade string
-	basis string
+	// observedMaxGap is the scan's measured maximum publication interval, seconds.
+	observedMaxGap int64
+	// testedBudget is the budget the scan judged that gap against — heartbeat plus
+	// the declared operator grace, seconds.
+	testedBudget int64
+	basis        string
 }{
+	// weETH / the ETH-USD leg behind the cap adapter.
 	"0x5f4ec3df9cbd43714fe2740f5e3616155c5b8419": {
-		grade: "verified",
-		basis: "deployed code observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463); recon/derivation-notes.md heartbeat-provenance table",
+		grade: heartbeatQualified, observedMaxGap: 3732, testedBudget: 5400,
+		basis: "B3 empirical scan: measured maximum publication gap 3732s EXCEEDS the published 3600s heartbeat and sits within the declared 1800s operator grace (tested budget 5400s) — a QUALIFIER, not a pass. " +
+			"Separately, the VALUE 3600 is evidence-backed: deployed code was observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463). " +
+			"A complete ledger's max gap is exact HISTORY and cannot certify the future, so this is never graded `verified`.",
+	},
+	// USDC.
+	"0x8fffffd4afb6115b954bd326cbe7b4ba576818f6": {
+		grade: heartbeatRefuted, observedMaxGap: 248460, testedBudget: 90000,
+		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 248460s publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
+			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
+	},
+	// PYUSD — weekly publication observed Apr–Jun 2024.
+	"0x8f1df6d7f2db73eece86a18b4381f4707b918fb1": {
+		grade: heartbeatRefuted, observedMaxGap: 604896, testedBudget: 90000,
+		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 604896s (≈7 day) publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
+			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
+	},
+	// FRAX.
+	"0xb9e1e3a9feff48998e45fa90847ed4d467e8bcfd": {
+		grade: heartbeatRefuted, observedMaxGap: 170712, testedBudget: 90000,
+		basis: "B3 empirical scan: the published budget is FALSIFIED — a measured 170712s publication interval against a tested budget of 90000s (86400s heartbeat + 3600s grace). " +
+			"The served freshness budget must carry the OBSERVED bound; keeping the friendlier published number would be a silent cap.",
 	},
 }
 
-const heartbeatGradeDefault = "published-not-verified"
-const heartbeatBasisDefault = "the published Chainlink mainnet heartbeat for this feed; NOT independently confirmed from bytecode or from a consumer's constructor by this repo (recon/derivation-notes.md heartbeat-provenance table)"
+const heartbeatGradeDefault = heartbeatNotVerified
+const heartbeatBasisDefault = "the published Chainlink mainnet heartbeat for this feed; NOT independently confirmed from bytecode or from a consumer's constructor by this repo, and no empirical scan has judged it either way (recon/derivation-notes.md heartbeat-provenance table)"
 
 func (s *server) handleMeta(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -784,6 +865,9 @@ func (s *server) heartbeatProvenance() []wireHeartbeat {
 		}
 		if g, ok := heartbeatGrades[strings.ToLower(f.Oracle.Proxy.Hex())]; ok {
 			h.ProvenanceGrade, h.Basis = g.grade, g.basis
+			gap, budget := g.observedMaxGap, g.testedBudget
+			h.ObservedMaxGapSeconds, h.TestedBudgetSeconds = &gap, &budget
+			h.BudgetRefuted = g.grade == heartbeatRefuted
 		}
 		out = append(out, h)
 	}

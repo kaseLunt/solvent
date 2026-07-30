@@ -165,7 +165,11 @@ type wireDegradation struct {
 	Engines    []wireDegradationEngine `json:"engines"`
 	Superseded bool                    `json:"superseded"`
 	Legs       []string                `json:"supersession_legs"`
-	Note       string                  `json:"note"`
+	// RefusedEngines names every engine whose WHOLE book is withheld. It is part of
+	// the DEGRADATION POSTURE, so entering or leaving that state is a transition a
+	// stream client is told about rather than one it has to notice.
+	RefusedEngines []wireEngineRefusal `json:"refused_engines"`
+	Note           string              `json:"note"`
 }
 
 // degradationKeys is the posture flattened into a comparable map, so a
@@ -183,6 +187,12 @@ func degradationKeys(d wireDegradation) map[string]int {
 	}
 	for _, l := range d.Legs {
 		out["supersession|"+l] = 1
+	}
+	// An engine's whole book being withheld is a POSTURE FACT, so it gets a key: a
+	// stream that entered or left the withheld state must produce a transition, not
+	// merely a differently-shaped snapshot nobody re-read.
+	for _, r := range d.RefusedEngines {
+		out["engine_refused|"+r.Engine+"|"+r.Code] = 1
 	}
 	return out
 }
@@ -247,11 +257,12 @@ func degradation(v *batchView, env wireBatch) wireDegradation {
 	}
 
 	out := wireDegradation{
-		Engines:    []wireDegradationEngine{},
-		Superseded: env.Supersession.Superseded,
-		Legs:       []string{},
+		Engines:        []wireDegradationEngine{},
+		Superseded:     env.Supersession.Superseded,
+		Legs:           []string{},
+		RefusedEngines: engineRefusals(v),
 		Note: "a degradation event is a TRANSITION in this posture, not a new fact about the chain. " +
-			"Refusals are named, counted and served; the book is never published with a position quietly missing.",
+			"Refusals are named, counted and served; the book is never published with a position quietly missing, and an engine whose whole book is withheld appears in `refused_engines` rather than as a healthy empty one.",
 	}
 	names := map[string]bool{}
 	for _, a := range v.Aggregates {
@@ -309,6 +320,17 @@ type streamPayload struct {
 	ServedAt time.Time `json:"served_at"`
 	// Reason is set only on the `unavailable` event.
 	Reason string `json:"reason,omitempty"`
+	// StaleSinceSeconds is set on an `unavailable` event raised AFTER the stream had
+	// been healthy: how long the data a client is still holding has been the last
+	// good read. Without it a client cannot tell a momentary hiccup from an outage
+	// it has been rendering through.
+	StaleSinceSeconds *int64 `json:"stale_since_seconds,omitempty"`
+	// LastGoodBatchID is the batch the client's held state describes, if any.
+	LastGoodBatchID *int64 `json:"last_good_batch_id,omitempty"`
+	// Recovered marks the snapshot emitted when reads come back after a failure —
+	// the explicit stale-to-current transition, so recovery is not left to be
+	// inferred from whether the batch id happened to change.
+	Recovered bool `json:"recovered,omitempty"`
 
 	Batch       *wireBatch       `json:"batch"`
 	Engines     []wireAggregate  `json:"engines"`
@@ -355,7 +377,8 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 	// SNAPSHOT ON CONNECT, unconditionally — including on a reconnect. A client
 	// that resumed mid-stream and received only deltas would be rendering a
 	// posture it never saw the base of.
-	lastBatchID, lastKeys := s.emitSnapshot(ctx, w, flusher)
+	st := &streamState{}
+	s.emitSnapshot(ctx, w, flusher, st)
 
 	for {
 		select {
@@ -364,46 +387,61 @@ func (s *server) handleStream(w http.ResponseWriter, r *http.Request) {
 		case <-beat.C:
 			// A COMMENT frame: syntactically inert for every SSE client, and enough
 			// to keep an idle connection observably alive.
+			//
+			// IT IS NOT A HEALTH SIGNAL, and that distinction is why the read-health
+			// latch below exists: a heartbeat continuing through a database outage is
+			// what made an apparently-live stream over indefinitely stale data
+			// possible.
 			if !writeRaw(w, flusher, ": heartbeat "+strconv.FormatInt(time.Now().UTC().Unix(), 10)+"\n\n") {
 				return
 			}
 		case <-doorbell:
-			id, keys, ok := s.emitIfChanged(ctx, w, flusher, lastBatchID, lastKeys)
-			if !ok {
+			if !s.emitIfChanged(ctx, w, flusher, st) {
 				return
 			}
-			lastBatchID, lastKeys = id, keys
 		case <-poll.C:
-			id, keys, ok := s.emitIfChanged(ctx, w, flusher, lastBatchID, lastKeys)
-			if !ok {
+			if !s.emitIfChanged(ctx, w, flusher, st) {
 				return
 			}
-			lastBatchID, lastKeys = id, keys
 		}
 	}
 }
 
-// emitSnapshot writes the connect-time snapshot and returns the state it
+// streamState is one connection's carried state.
+type streamState struct {
+	batchID int64
+	keys    map[string]int
+
+	// unhealthy LATCHES on the first failed refresh, so a prolonged outage produces
+	// exactly ONE `unavailable` event rather than one per poll — and recovery
+	// produces exactly one `snapshot` marked `recovered`. Without the latch a client
+	// either drowns in events or, as before, hears nothing at all.
+	unhealthy bool
+	// lastGood is when the held state was last refreshed successfully, on the
+	// DATABASE clock, so `stale_since_seconds` is measured the same way every other
+	// age on this surface is.
+	lastGood time.Time
+}
+
+// emitSnapshot writes the connect-time snapshot and records the state it
 // describes.
-func (s *server) emitSnapshot(ctx context.Context, w http.ResponseWriter, f http.Flusher) (int64, map[string]int) {
-	v, err := s.readBatch(ctx, nil)
+func (s *server) emitSnapshot(ctx context.Context, w http.ResponseWriter, f http.Flusher, st *streamState) bool {
+	v, err := s.refresh(ctx)
 	if err != nil {
-		reason := sanitize(err.Error())
-		if errorsIsNoBatch(err) {
-			reason = "no complete risk batch is available yet: this is a statement about this service, not a claim that the book is empty"
-		}
-		writeEvent(w, f, eventUnavailable, 0, streamPayload{
+		st.unhealthy = true
+		st.keys = map[string]int{}
+		return writeEvent(w, f, eventUnavailable, 0, streamPayload{
 			ServedAt:            time.Now().UTC(),
-			Reason:              reason,
+			Reason:              unavailableReason(err),
 			ListenerConnected:   s.notifier.isListening(),
 			PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
 			Note:                streamNote,
 		})
-		return 0, map[string]int{}
 	}
 	env := batchEnvelope(v)
 	deg := degradation(v, env)
-	writeEvent(w, f, eventSnapshot, v.Batch.ID, streamPayload{
+	st.batchID, st.keys, st.unhealthy, st.lastGood = v.Batch.ID, degradationKeys(deg), false, v.Now
+	return writeEvent(w, f, eventSnapshot, v.Batch.ID, streamPayload{
 		ServedAt:            v.Now,
 		Batch:               &env,
 		Engines:             s.aggregates(v),
@@ -412,31 +450,91 @@ func (s *server) emitSnapshot(ctx context.Context, w http.ResponseWriter, f http
 		PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
 		Note:                streamNote,
 	})
-	return v.Batch.ID, degradationKeys(deg)
 }
 
-// emitIfChanged emits a batch tick when the servable batch moved, and a
-// degradation event when the posture changed. ok=false means the client is gone.
-func (s *server) emitIfChanged(ctx context.Context, w http.ResponseWriter, f http.Flusher,
-	lastID int64, lastKeys map[string]int) (int64, map[string]int, bool) {
+// unavailableReason renders a read failure for a client, sanitized.
+func unavailableReason(err error) string {
+	if errorsIsNoBatch(err) {
+		return "no complete risk batch is available yet: this is a statement about this service, not a claim that the book is empty"
+	}
+	return "the service could not read the risk tables: " + sanitize(err.Error()) +
+		". The state you are holding is the LAST GOOD read and is not being refreshed."
+}
 
-	v, err := s.readBatch(ctx, nil)
+// emitIfChanged refreshes and emits whatever the refresh implies. ok=false means
+// the client is gone.
+//
+// # The read-health latch
+//
+// A failed refresh used to be logged and nothing else, while the independent
+// heartbeat ticker kept writing comment frames — so a database outage left every
+// connected client with an apparently-live stream over indefinitely stale data.
+// Now the FIRST failure emits one `unavailable` event carrying how long the held
+// state has been stale and which batch it describes, and latches; subsequent
+// failures are silent (an event per poll would be a flood, not a signal); and the
+// first success after a failure emits a `snapshot` marked `recovered`, which is the
+// explicit stale-to-current transition rather than one a client has to infer from
+// whether the batch id happened to move.
+func (s *server) emitIfChanged(ctx context.Context, w http.ResponseWriter, f http.Flusher, st *streamState) bool {
+	v, err := s.refresh(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
-			return lastID, lastKeys, false
+			return false
 		}
-		// A transient read failure is not a stream-ending condition: the next tick
-		// tries again. It is logged, never silently swallowed.
-		if !errorsIsNoBatch(err) {
-			slog.Warn("api: stream read failed", "err", sanitize(err.Error()))
+		if st.unhealthy {
+			// Already latched: log and stay quiet.
+			slog.Warn("api: stream read still failing", "err", sanitize(err.Error()))
+			return true
 		}
-		return lastID, lastKeys, true
+		st.unhealthy = true
+		slog.Warn("api: stream read failed; clients notified", "err", sanitize(err.Error()))
+		p := streamPayload{
+			ServedAt:            time.Now().UTC(),
+			Reason:              unavailableReason(err),
+			ListenerConnected:   s.notifier.isListening(),
+			PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
+			Note:                streamNote,
+		}
+		if !st.lastGood.IsZero() {
+			// Measured from the DATABASE clock of the last good read — the same basis as
+			// every other age on this surface.
+			stale := int64(time.Since(st.lastGood) / time.Second)
+			if stale < 0 {
+				stale = 0
+			}
+			p.StaleSinceSeconds = &stale
+		}
+		if st.batchID > 0 {
+			id := st.batchID
+			p.LastGoodBatchID = &id
+		}
+		return writeEvent(w, f, eventUnavailable, st.batchID, p)
 	}
+
 	env := batchEnvelope(v)
 	deg := degradation(v, env)
 	keys := degradationKeys(deg)
+	recovered := st.unhealthy
+	st.unhealthy, st.lastGood = false, v.Now
 
-	if v.Batch.ID != lastID {
+	if recovered {
+		// RECOVERY IS ITS OWN EVENT. A fresh snapshot, marked, because the client's
+		// held state may be arbitrarily far behind and nothing about a resumed tick
+		// would tell it that.
+		st.batchID, st.keys = v.Batch.ID, keys
+		return writeEvent(w, f, eventSnapshot, v.Batch.ID, streamPayload{
+			ServedAt:            v.Now,
+			Batch:               &env,
+			Engines:             s.aggregates(v),
+			Degradation:         &deg,
+			Recovered:           true,
+			ListenerConnected:   s.notifier.isListening(),
+			PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
+			Note:                streamNote,
+		})
+	}
+
+	if v.Batch.ID != st.batchID {
 		if !writeEvent(w, f, eventBatch, v.Batch.ID, streamPayload{
 			ServedAt:            v.Now,
 			Batch:               &env,
@@ -446,14 +544,15 @@ func (s *server) emitIfChanged(ctx context.Context, w http.ResponseWriter, f htt
 			PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
 			Note:                streamNote,
 		}) {
-			return lastID, lastKeys, false
+			return false
 		}
 	}
 
 	// The degradation event is emitted on a TRANSITION — including a transition
 	// that happens without the batch id moving (a supersession leg firing against
-	// a live cursor read does exactly that).
-	if tr := transitions(lastKeys, keys); len(tr) > 0 {
+	// a live cursor read does exactly that, and so does an engine's book being
+	// withheld).
+	if tr := transitions(st.keys, keys); len(tr) > 0 {
 		if !writeEvent(w, f, eventDegradation, v.Batch.ID, streamPayload{
 			ServedAt:            v.Now,
 			Batch:               &env,
@@ -463,10 +562,11 @@ func (s *server) emitIfChanged(ctx context.Context, w http.ResponseWriter, f htt
 			PollIntervalSeconds: int64(s.cfg.SSEPoll / time.Second),
 			Note:                streamNote,
 		}) {
-			return lastID, lastKeys, false
+			return false
 		}
 	}
-	return v.Batch.ID, keys, true
+	st.batchID, st.keys = v.Batch.ID, keys
+	return true
 }
 
 // writeEvent emits one SSE frame. It returns false when the client is gone.

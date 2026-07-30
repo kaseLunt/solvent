@@ -358,12 +358,36 @@ components:
           items: { $ref: "#/components/schemas/SupersessionLeg" }
         note: { type: string }
 
+    EngineRefusal:
+      type: object
+      additionalProperties: false
+      required: [engine, code, detail, note]
+      description: |
+        An ENGINE-SCOPED refusal: the whole book for one engine is withheld for a
+        reason that is a property of the ledger rather than of any account.
+
+        Such a refusal **survives an empty account set**. The deep rewind that
+        opens the collateral-flag replay deletes every event-sourced Aave
+        balance, so a materializer pass in that window has no position to hang a
+        refusal on and persists a zeroed rollup carrying only the code. A
+        withheld engine is therefore NEVER representable as an empty healthy
+        one: its totals are null rather than zero, it is named here, and it is
+        named on the batch envelope, the histogram, the waterfall's
+        `excluded_engines`, the bad-debt line and the SSE degradation posture.
+      properties:
+        engine: { type: string }
+        code:
+          type: string
+          description: e.g. FLAG_CUSTODY_UNPROVEN.
+        detail: { type: string }
+        note: { type: string }
+
     Batch:
       type: object
       additionalProperties: false
       required:
         [id, computed_at, age_seconds, producer, status, position_count,
-         refused_count, flagged_count, watermarks, supersession]
+         refused_count, refused_engines, flagged_count, watermarks, supersession]
       properties:
         id: { type: integer, format: int64 }
         computed_at: { type: string, format: date-time }
@@ -374,7 +398,16 @@ components:
         producer: { type: string }
         status: { type: string, enum: [complete] }
         position_count: { type: integer }
-        refused_count: { type: integer }
+        refused_count:
+          type: integer
+          description: |
+            Refused POSITION ROWS. It is ZERO when an engine is withheld with no
+            accounts behind it, which is why `refused_engines` exists on the
+            summary itself.
+        refused_engines:
+          type: array
+          description: Engines whose WHOLE book is withheld on this batch.
+          items: { type: string }
         flagged_count: { type: integer }
         watermarks:
           type: array
@@ -397,8 +430,8 @@ components:
       additionalProperties: false
       required:
         [engine, value_decimals, positions, computed_positions, refused_positions,
-         flagged_positions, liquidatable_positions, total_collateral, total_debt,
-         refusals, flags, unit_note]
+         flagged_positions, liquidatable_positions, refused, refusal,
+         total_collateral, total_debt, refusals, flags, unit_note]
       properties:
         engine: { type: string }
         value_decimals: { type: integer }
@@ -407,8 +440,22 @@ components:
         refused_positions: { type: integer }
         flagged_positions: { type: integer }
         liquidatable_positions: { type: integer }
-        total_collateral: { $ref: "#/components/schemas/Decimal" }
-        total_debt: { $ref: "#/components/schemas/Decimal" }
+        refused:
+          type: boolean
+          description: |
+            True when this ENGINE's whole book is withheld, whatever the position
+            counts say. A reader that branches on nothing else must still be
+            unable to mistake this for a healthy engine.
+        refusal:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/EngineRefusal" }]
+        total_collateral:
+          allOf: [{ $ref: "#/components/schemas/NullableDecimal" }]
+          description: |
+            NULL on a refused engine, never "0". A refusal is the ABSENCE of a
+            number, and zero is a number — serving zero here is what turns an
+            explicitly unproven book into "nothing at risk".
+        total_debt: { $ref: "#/components/schemas/NullableDecimal" }
         refusals:
           type: array
           description: The refusal count broken down by named code. A count with no vocabulary behind it is not a disclosure.
@@ -434,8 +481,16 @@ components:
     EngineHistogram:
       type: object
       additionalProperties: false
-      required: [engine, comparator, buckets, infinite_count, refused_count, note]
+      required: [engine, comparator, buckets, infinite_count, refused_count, refused, refusal, note]
       properties:
+        refused:
+          type: boolean
+          description: |
+            True when the ENGINE's book is withheld. Its buckets are then empty
+            for that reason and NOT because no position sits there.
+        refusal:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/EngineRefusal" }]
         engine: { type: string }
         comparator:
           type: string
@@ -528,7 +583,7 @@ components:
       additionalProperties: false
       required:
         [scenario_id, scenario_version, axis, grid_scale, points, held_flat,
-         eligibility_note, monotonicity, at_risk_note]
+         eligibility_note, monotonicity, at_risk_note, excluded_engines]
       properties:
         scenario_id: { type: string }
         scenario_version: { type: string }
@@ -545,23 +600,39 @@ components:
         eligibility_note: { type: string }
         monotonicity: { $ref: "#/components/schemas/Monotonicity" }
         at_risk_note: { type: string }
+        excluded_engines:
+          type: array
+          description: |
+            Engines WITHHELD at the aggregate level. Such an engine contributes no
+            positions, so it is absent from `points[].engines` entirely — and an
+            absence with no name attached is exactly the silent hole this surface
+            must not have.
+          items: { $ref: "#/components/schemas/EngineRefusal" }
 
     BadDebt:
       type: object
       additionalProperties: false
       required:
         [engine, usd_decimals, current_bad_debt_usd, insolvent_positions,
-         eligible_positions, eligible_debt_usd, collateral_at_risk_usd]
+         eligible_positions, eligible_debt_usd, collateral_at_risk_usd,
+         refused, refusal]
       properties:
         engine: { type: string }
         usd_decimals: { type: integer }
         current_bad_debt_usd:
-          allOf: [{ $ref: "#/components/schemas/Decimal" }]
-          description: The standing census at the UNSHOCKED grid point, not a projection.
-        insolvent_positions: { type: integer }
-        eligible_positions: { type: integer }
-        eligible_debt_usd: { $ref: "#/components/schemas/Decimal" }
-        collateral_at_risk_usd: { $ref: "#/components/schemas/Decimal" }
+          allOf: [{ $ref: "#/components/schemas/NullableDecimal" }]
+          description: |
+            The standing census at the UNSHOCKED grid point, not a projection.
+            NULL on a withheld engine: a bad-debt line of "0" over a book nobody
+            was allowed to compute is the most dangerous zero on this surface.
+        insolvent_positions: { type: integer, nullable: true }
+        eligible_positions: { type: integer, nullable: true }
+        eligible_debt_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        collateral_at_risk_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        refused: { type: boolean }
+        refusal:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/EngineRefusal" }]
 
     Excluded:
       type: object
@@ -598,10 +669,18 @@ components:
     BookResponse:
       type: object
       additionalProperties: false
-      required: [served_at, batch, engines, hf_histogram, waterfall, bad_debt, coverage, notes]
+      required: [served_at, batch, refused_engines, engines, hf_histogram, waterfall, bad_debt, coverage, notes]
       properties:
         served_at: { type: string, format: date-time }
         batch: { $ref: "#/components/schemas/Batch" }
+        refused_engines:
+          type: array
+          description: |
+            The top-level, unmissable statement of which engines are withheld.
+            Repeated from the batch envelope and the per-engine rows so a consumer
+            that reads only the head of this document still cannot conclude the
+            book is whole.
+          items: { $ref: "#/components/schemas/EngineRefusal" }
         engines:
           type: array
           items: { $ref: "#/components/schemas/Aggregate" }
@@ -1203,7 +1282,10 @@ components:
     Heartbeat:
       type: object
       additionalProperties: false
-      required: [chain_id, symbol, proxy, aggregator, heartbeat_seconds, grace_seconds, provenance_grade, basis]
+      required:
+        [chain_id, symbol, proxy, aggregator, heartbeat_seconds, grace_seconds,
+         provenance_grade, observed_max_gap_seconds, tested_budget_seconds,
+         budget_refuted, basis]
       properties:
         chain_id: { type: integer, format: int64 }
         symbol: { type: string }
@@ -1213,8 +1295,43 @@ components:
         grace_seconds: { type: integer, format: int64 }
         provenance_grade:
           type: string
-          enum: [verified, published-not-verified]
-          description: Whether the BUDGET ITSELF was independently evidenced by this repo, or is the published feed parameter taken on trust.
+          enum:
+            - verified
+            - empirical-historical-with-qualifier
+            - published-and-refuted
+            - published-not-verified
+          description: |
+            What the repo's evidence says about THE BUDGET ITSELF.
+
+            - `verified` — value independently evidenced AND an empirical scan
+              cleared it. No feed currently holds it: a complete ledger's maximum
+              gap is exact HISTORY and cannot certify the future, so a scan never
+              produces this grade on its own.
+            - `empirical-historical-with-qualifier` — a scan measured a maximum
+              publication gap ABOVE the published heartbeat but within the declared
+              operator grace. The budget survives; the headroom does not.
+            - `published-and-refuted` — a scan measured a gap BEYOND heartbeat plus
+              grace. The published budget is FALSIFIED. Reporting such a feed as
+              merely awaiting confirmation would overstate provenance: the evidence
+              is in and it is negative.
+            - `published-not-verified` — the published parameter, taken on trust,
+              with no scan behind it either way.
+        observed_max_gap_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          description: The scan's measured maximum publication interval. Null when no scan has judged this feed.
+        tested_budget_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          description: The budget that gap was judged against — heartbeat plus the declared operator grace.
+        budget_refuted:
+          type: boolean
+          description: |
+            The one-bit form of `provenance_grade == published-and-refuted`, so a
+            consumer cannot miss a falsified budget by failing to enumerate the
+            grade vocabulary.
         basis: { type: string }
 
     Constants:
@@ -1293,6 +1410,24 @@ components:
       properties:
         served_at: { type: string, format: date-time }
         reason: { type: string }
+        stale_since_seconds:
+          type: integer
+          format: int64
+          description: |
+            On an `unavailable` event raised after the stream had been healthy: how
+            long the data the client is still holding has been the last good read.
+            Without it a client cannot tell a momentary hiccup from an outage it has
+            been rendering through.
+        last_good_batch_id:
+          type: integer
+          format: int64
+          description: The batch the client's held state describes, if any.
+        recovered:
+          type: boolean
+          description: |
+            Marks the `snapshot` emitted when reads come back after a failure — the
+            explicit stale-to-current transition, rather than one a client has to
+            infer from whether the batch id happened to move.
         batch:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Batch" }]
@@ -1331,7 +1466,7 @@ components:
     Degradation:
       type: object
       additionalProperties: false
-      required: [engines, superseded, supersession_legs, note]
+      required: [engines, superseded, supersession_legs, refused_engines, note]
       properties:
         engines:
           type: array
@@ -1340,6 +1475,14 @@ components:
         supersession_legs:
           type: array
           items: { type: string }
+        refused_engines:
+          type: array
+          description: |
+            Engines whose WHOLE book is withheld. Part of the degradation POSTURE,
+            so entering or leaving that state produces a `degradation` event with a
+            transition keyed `engine_refused|<engine>|<code>` rather than a silently
+            different-shaped snapshot.
+          items: { $ref: "#/components/schemas/EngineRefusal" }
         note: { type: string }
 
     Transition:

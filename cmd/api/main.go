@@ -51,6 +51,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -189,6 +190,10 @@ type server struct {
 
 	limiter *ipLimiter
 	mux     *http.ServeMux
+
+	// readFailure is a TEST-ONLY injected read error for the SSE read-health latch.
+	// Nil in production; see server.refresh.
+	readFailure *atomic.Pointer[error]
 }
 
 // apiDSN resolves the service's database URL.

@@ -99,7 +99,7 @@ func TestReconstructAaveReproducesThePersistedVerdict(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, risk.AaveEngine, in.Engine)
 	require.NotNil(t, in.Aave)
-	require.NoError(t, verifyReconstruction(p, in))
+	require.NoError(t, verifyReconstruction(p, in, fxParamWitness()))
 
 	h, err := risk.ComputeAaveHealth(*in.Aave)
 	require.NoError(t, err)
@@ -120,7 +120,7 @@ func TestReconstructDMReproducesThePersistedVerdict(t *testing.T) {
 	in, err := s.reconstruct(p)
 	require.NoError(t, err)
 	require.NotNil(t, in.DM)
-	require.NoError(t, verifyReconstruction(p, in))
+	require.NoError(t, verifyReconstruction(p, in, fxParamWitness()))
 
 	h, err := risk.ComputeDMHealth(*in.DM)
 	require.NoError(t, err)
@@ -160,7 +160,7 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				tamper(p)
 				in, err := s.reconstruct(p)
 				require.NoError(t, err, "reconstruction itself still succeeds; it is the VERIFICATION that must catch this")
-				require.Error(t, verifyReconstruction(p, in))
+				require.Error(t, verifyReconstruction(p, in, fxParamWitness()))
 			})
 		}
 	})
@@ -181,7 +181,7 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				tamper(p)
 				in, err := s.reconstruct(p)
 				require.NoError(t, err)
-				require.Error(t, verifyReconstruction(p, in))
+				require.Error(t, verifyReconstruction(p, in, fxParamWitness()))
 			})
 		}
 	})
@@ -198,7 +198,7 @@ func TestReconstructAllRefusesRatherThanDropping(t *testing.T) {
 	bad.HFWad = new(big.Int).Add(bad.HFWad, big.NewInt(7))
 
 	rows := []*positionRow{good, bad}
-	s.reconstructAll(rows)
+	s.reconstructAll(rows, fxParamWitness())
 
 	require.NotNil(t, good.input)
 	require.Empty(t, good.reconstructionErr)

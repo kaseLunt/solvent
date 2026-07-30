@@ -141,6 +141,136 @@ type batchView struct {
 
 	Positions  []*positionRow
 	Aggregates []store.RiskEngineAggregate
+
+	// Params is the INDEPENDENT param-ledger witness at each position's own
+	// params_block. See paramWitness.
+	Params *paramWitness
+}
+
+// paramWitness is the effective param set the CUSTODIED LEDGER asserts, folded
+// per (engine, params_block) — an independent witness against which a batch's
+// persisted leg thresholds and bonuses are welded.
+//
+// # Why a second witness is needed at all
+//
+// Reconstruction copies each leg's `liq_threshold` and `liq_bonus` into the pure
+// library's param rows, so recomputing and comparing the result against the same
+// row is TAUTOLOGICAL: a wrong or mis-mapped persisted bonus would echo back
+// unchanged and pass. That matters because the bonus is not decoration — it drives
+// collateral-at-risk and bad debt on the waterfall and every market-realization
+// number — and because dropping it is not a visible failure: `internal/risk` falls
+// back to a 1.00x seizure multiplier, which silently reports par recovery and
+// UNDERSTATES bad debt.
+//
+// The ledger is the honest second witness. Params are LEDGER DATA keyed on
+// (block_number, log_index) (design spec §8), the read is bounded by the batch's
+// OWN durable `params_block` stamp, and param history is append-only — so this is
+// not a serve-time re-derivation of a value that could have moved underneath the
+// batch (the thing design spec §7 forbids for PRICES, which are superseded in
+// place). It is the same weld discipline the reconcile extension applies at its
+// pins, run against the rows the batch itself was built from.
+//
+// The fold is `riskfeed.FoldParams` — the single implementation, last-non-nil PER
+// FIELD, so a registry row landing later cannot mask a live threshold.
+type paramWitness struct {
+	// byEngineBlock is keyed engine → params_block → asset.
+	byEngineBlock map[string]map[uint64]map[common.Address]risk.ParamRow
+}
+
+func (w *paramWitness) row(engine string, block uint64, asset common.Address) (risk.ParamRow, bool) {
+	if w == nil {
+		return risk.ParamRow{}, false
+	}
+	byBlock, ok := w.byEngineBlock[engine]
+	if !ok {
+		return risk.ParamRow{}, false
+	}
+	byAsset, ok := byBlock[block]
+	if !ok {
+		return risk.ParamRow{}, false
+	}
+	r, ok := byAsset[asset]
+	return r, ok
+}
+
+// readParamWitness folds the ledger once per (engine, params_block) actually
+// present in the batch.
+//
+// It is keyed on the position's OWN params_block rather than on a single
+// batch-wide height, because that stamp is what the position's numbers claim to
+// have been computed at; welding against a different height would compare a
+// threshold to one that was not in force.
+func (s *server) readParamWitness(ctx context.Context, q store.Querier, positions []*positionRow) (*paramWitness, error) {
+	w := &paramWitness{byEngineBlock: map[string]map[uint64]map[common.Address]risk.ParamRow{}}
+	needed := map[string]map[uint64]bool{}
+	for _, p := range positions {
+		if p.Status != store.RiskPositionComputed {
+			continue
+		}
+		if _, ok := needed[p.Engine]; !ok {
+			needed[p.Engine] = map[uint64]bool{}
+		}
+		needed[p.Engine][p.ParamsBlock] = true
+	}
+
+	for engine, blocks := range needed {
+		for block := range blocks {
+			var ledger []store.ParamRow
+			var err error
+			var foldEngine string
+			var chainID uint64
+			switch engine {
+			case risk.AaveEngine:
+				// Aave params are the PoolConfigurator stream's own engine identity.
+				foldEngine, chainID = s.cfg.Aave.ParamEngine, s.cfg.Aave.ChainID
+				ledger, err = store.ParamsAsOfQ(ctx, q, foldEngine, chainID, block)
+			case risk.DMEngine:
+				// The Debt Manager's params ARE its own position_events (design spec §8,
+				// zero new RPC), and DMParamsAsOf already returns them folded per asset.
+				foldEngine, chainID = risk.DMEngine, s.cfg.DM.ChainID
+				ledger, err = store.DMParamsAsOf(ctx, q, block)
+			default:
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			folded, err := riskfeed.FoldParams(foldEngine, chainID, ledger)
+			if err != nil {
+				return nil, fmt.Errorf("fold %s param ledger at block %d: %w", engine, block, err)
+			}
+			byAsset := make(map[common.Address]risk.ParamRow, len(folded))
+			for _, r := range folded {
+				byAsset[r.Asset] = r
+			}
+			if _, ok := w.byEngineBlock[engine]; !ok {
+				w.byEngineBlock[engine] = map[uint64]map[common.Address]risk.ParamRow{}
+			}
+			w.byEngineBlock[engine][block] = byAsset
+		}
+	}
+	return w, nil
+}
+
+// refresh is the SSE loop's read, routed through a seam.
+//
+// `readFailure` is nil in production and exists only so a test can drive the
+// read-health latch DETERMINISTICALLY. The alternative — closing the pool or
+// dropping the table under a running stream — makes the failure real but also
+// makes it unrecoverable and untimed, so the recovery half of the latch could not
+// be exercised at all. Time and failure are the variables under test here, so they
+// have to be inputs.
+//
+// It is an ATOMIC because the test sets it while the stream goroutine is reading
+// it; a plain field would be a data race. It is unexported with no configuration
+// path, so production cannot reach a non-nil value.
+func (s *server) refresh(ctx context.Context) (*batchView, error) {
+	if s.readFailure != nil {
+		if p := s.readFailure.Load(); p != nil && *p != nil {
+			return nil, *p
+		}
+	}
+	return s.readBatch(ctx, nil)
 }
 
 // readBatch reads the newest complete batch and everything needed to serve it.
@@ -191,6 +321,11 @@ func (s *server) readBatch(ctx context.Context, account []byte) (*batchView, err
 	if v.Aggregates, err = readAggregates(ctx, tx, batch.ID); err != nil {
 		return nil, err
 	}
+	// The param-ledger witness, read in the SAME snapshot as the rows it welds
+	// against so the two describe one instant of the database.
+	if v.Params, err = s.readParamWitness(ctx, tx, v.Positions); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit read snapshot: %w", err)
 	}
@@ -198,7 +333,7 @@ func (s *server) readBatch(ctx context.Context, account []byte) (*batchView, err
 	// Reconstruction happens AFTER the snapshot is released: it is pure CPU work
 	// over rows already in memory, and holding a transaction open across it would
 	// pin xmin for no reason (round-10 M5).
-	s.reconstructAll(v.Positions)
+	s.reconstructAll(v.Positions, v.Params)
 	return v, nil
 }
 
@@ -356,10 +491,22 @@ func attachPrices(ctx context.Context, q store.Querier, batchID int64, account [
 	return nil
 }
 
+// readAggregates reads a batch's per-engine rollups INCLUDING the engine-scoped
+// refusal.
+//
+// `refusal_code` / `refusal_detail` (migration 00014) are not optional colour.
+// An engine's book can be withheld for a reason that is a property of the LEDGER
+// rather than of any account — unproven derivation coverage is the case that
+// forced the columns — and such a refusal SURVIVES AN EMPTY ACCOUNT SET. The deep
+// rewind that opens the collateral-flag replay deletes every event-sourced Aave
+// balance, so a pass in that window has no position row to hang a refusal on and
+// persists a zeroed rollup carrying only the code. Omitting these two columns is
+// therefore exactly how a withheld engine gets served as "nothing at risk here".
 func readAggregates(ctx context.Context, q store.Querier, batchID int64) ([]store.RiskEngineAggregate, error) {
 	rows, err := q.Query(ctx,
 		`SELECT engine, value_decimals, positions, computed_positions, refused_positions,
-		        flagged_positions, liquidatable_positions, total_collateral::text, total_debt::text
+		        flagged_positions, liquidatable_positions, total_collateral::text, total_debt::text,
+		        refusal_code, refusal_detail
 		   FROM risk_batch_aggregates WHERE batch_id = $1 ORDER BY engine`, batchID)
 	if err != nil {
 		return nil, fmt.Errorf("read risk batch aggregates: %w", err)
@@ -371,7 +518,8 @@ func readAggregates(ctx context.Context, q store.Querier, batchID int64) ([]stor
 		var dec int16
 		var tc, td string
 		if err := rows.Scan(&a.Engine, &dec, &a.Positions, &a.ComputedPositions, &a.RefusedPositions,
-			&a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td); err != nil {
+			&a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td,
+			&a.RefusalCode, &a.RefusalDetail); err != nil {
 			return nil, fmt.Errorf("scan risk batch aggregate: %w", err)
 		}
 		a.ValueDecimals = uint8(dec)
@@ -436,7 +584,7 @@ func scanBigs(engine string, subject []byte, fields []bigField) error {
 // totals, and the Debt Manager's strict boolean. A disagreement makes the
 // position a REFUSED row naming `API_RECONSTRUCTION_MISMATCH`; it is never
 // dropped, and it never reaches the book.
-func (s *server) reconstructAll(positions []*positionRow) {
+func (s *server) reconstructAll(positions []*positionRow, w *paramWitness) {
 	for _, p := range positions {
 		if p.Status != store.RiskPositionComputed {
 			continue
@@ -446,7 +594,7 @@ func (s *server) reconstructAll(positions []*positionRow) {
 			p.reconstructionErr = err.Error()
 			continue
 		}
-		if err := verifyReconstruction(p, in); err != nil {
+		if err := verifyReconstruction(p, in, w); err != nil {
 			p.reconstructionErr = err.Error()
 			continue
 		}
@@ -615,7 +763,31 @@ func reconstructPrices(p *positionRow) ([]risk.PriceInput, error) {
 
 // verifyReconstruction re-runs the pure function riskd ran and demands exact
 // agreement with the persisted row.
-func verifyReconstruction(p *positionRow, in risk.PositionInput) error {
+//
+// # The surface it covers, and why each part is on it
+//
+// EVERY DIRECTLY SERVED HEALTH DISCLOSURE is compared, not just the headline: the
+// health-factor wad, the EXACT RATIONAL behind it (`hf_num`/`hf_den`, which the
+// address surface publishes and every liquidation-price solve consumes), the
+// AVERAGE LIQUIDATION THRESHOLD (`avg_lt_bps`, published as a disclosure), the
+// totals, and the Debt Manager's strict boolean. A disclosure that is served but
+// not verified is a number this layer could get wrong without noticing.
+//
+// PER-LEG OUTPUTS are compared too — live amounts, base values, the weighted
+// threshold contribution, the Debt Manager's per-token value and threshold
+// contribution — because the address surface publishes each of them and because
+// they are the only place a mis-scaled decimals or a mis-mapped threshold shows up
+// as arithmetic rather than as a label.
+//
+// PER-LEG THRESHOLDS AND BONUSES are welded against the PARAM LEDGER, not against
+// the recomputation. Comparing them to the recomputation would be tautological —
+// reconstruction feeds them IN, so a wrong value echoes back unchanged — and the
+// bonus is precisely the input whose corruption is otherwise invisible: it moves
+// collateral-at-risk, bad debt and every market-realization number, and dropping
+// it makes `internal/risk` fall back to a 1.00x seizure multiplier that reports par
+// recovery and UNDERSTATES bad debt. See paramWitness for why the ledger is a
+// legitimate second witness rather than a serve-time re-derivation.
+func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness) error {
 	switch p.Engine {
 	case risk.AaveEngine:
 		h, err := risk.ComputeAaveHealth(*in.Aave)
@@ -631,17 +803,44 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput) error {
 		if !h.IsInfinite && !eqBig(h.HealthFactorWad, p.HFWad) {
 			return fmt.Errorf("reconstructed health factor wad %s, the batch persisted %s", showBig(h.HealthFactorWad), showBig(p.HFWad))
 		}
-		for _, c := range []struct {
-			name string
-			got  *big.Int
-			want *big.Int
-		}{
+		checks := []bigCheck{
 			{"total_collateral_base", h.TotalCollateralBase, p.TotalCollateralBase},
 			{"total_debt_base", h.TotalDebtBase, p.TotalDebtBase},
 			{"weighted_lt_sum", h.WeightedLTSum, p.WeightedLTSum},
-		} {
-			if !eqBig(c.got, c.want) {
-				return fmt.Errorf("reconstructed %s %s, the batch persisted %s", c.name, showBig(c.got), showBig(c.want))
+			{"avg_lt_bps", h.AvgLiquidationThresholdBps, p.AvgLTBps},
+		}
+		if !h.IsInfinite {
+			// The exact rational is a SERVED disclosure and the input to every
+			// liquidation-price solve, so it is verified alongside the wad.
+			checks = append(checks,
+				bigCheck{"hf_num", h.HealthFactor.Num, p.HFNum},
+				bigCheck{"hf_den", h.HealthFactor.Den, p.HFDen})
+		}
+		if err := runBigChecks(checks); err != nil {
+			return err
+		}
+
+		byAsset := map[common.Address]risk.AaveReserveValue{}
+		for _, rv := range h.Reserves {
+			byAsset[rv.Asset] = rv
+		}
+		for _, l := range p.Legs {
+			asset := common.BytesToAddress(l.Asset)
+			rv, ok := byAsset[asset]
+			if !ok {
+				return fmt.Errorf("leg %s is absent from the recomputation", asset.Hex())
+			}
+			if err := runBigChecks([]bigCheck{
+				{"leg " + asset.Hex() + " live_debt", rv.LiveDebt, l.LiveDebt},
+				{"leg " + asset.Hex() + " live_collateral", rv.LiveCollateral, l.LiveCollateral},
+				{"leg " + asset.Hex() + " debt_base", rv.DebtBase, l.DebtBase},
+				{"leg " + asset.Hex() + " collateral_base", rv.CollateralBase, l.CollateralBase},
+				{"leg " + asset.Hex() + " weighted_lt", rv.WeightedLT, l.WeightedLT},
+			}); err != nil {
+				return err
+			}
+			if err := weldLegParams(w, risk.AaveEngine, p.ParamsBlock, asset, l); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -657,22 +856,92 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput) error {
 		if h.Liquidatable != *p.Liquidatable {
 			return fmt.Errorf("reconstructed liquidatable=%v, the batch persisted %v", h.Liquidatable, *p.Liquidatable)
 		}
-		for _, c := range []struct {
-			name string
-			got  *big.Int
-			want *big.Int
-		}{
+		checks := []bigCheck{
 			{"collateral_value_usd", h.CollateralValueUSD, p.CollateralValueUSD},
 			{"max_borrow_lt", h.MaxBorrowLT, p.MaxBorrowLT},
 			{"borrowings", h.Borrowings, p.Borrowings},
-		} {
-			if !eqBig(c.got, c.want) {
-				return fmt.Errorf("reconstructed %s %s, the batch persisted %s", c.name, showBig(c.got), showBig(c.want))
+		}
+		if !h.IsInfinite {
+			checks = append(checks,
+				bigCheck{"hf_num", h.HealthFactor.Num, p.HFNum},
+				bigCheck{"hf_den", h.HealthFactor.Den, p.HFDen})
+		}
+		if err := runBigChecks(checks); err != nil {
+			return err
+		}
+
+		byAsset := map[common.Address]risk.DMCollateralValue{}
+		for _, cv := range h.Collateral {
+			byAsset[cv.Asset] = cv
+		}
+		for _, l := range p.Legs {
+			asset := common.BytesToAddress(l.Asset)
+			cv, ok := byAsset[asset]
+			if !ok {
+				return fmt.Errorf("leg %s is absent from the recomputation", asset.Hex())
+			}
+			if err := runBigChecks([]bigCheck{
+				{"leg " + asset.Hex() + " value_usd", cv.ValueUSD, l.ValueUSD},
+				{"leg " + asset.Hex() + " max_borrow_contribution", cv.MaxBorrowContribution, l.MaxBorrowContribution},
+			}); err != nil {
+				return err
+			}
+			if err := weldLegParams(w, risk.DMEngine, p.ParamsBlock, asset, l); err != nil {
+				return err
 			}
 		}
 		return nil
 	}
 	return fmt.Errorf("engine %q has no verification", p.Engine)
+}
+
+type bigCheck struct {
+	name string
+	got  *big.Int
+	want *big.Int
+}
+
+func runBigChecks(checks []bigCheck) error {
+	for _, c := range checks {
+		if !eqBig(c.got, c.want) {
+			return fmt.Errorf("reconstructed %s %s, the batch persisted %s", c.name, showBig(c.got), showBig(c.want))
+		}
+	}
+	return nil
+}
+
+// weldLegParams compares one leg's persisted risk parameters against the
+// custodied ledger at the position's own params_block.
+//
+// A leg carrying a liquidation threshold is a leg that COUNTED as collateral, and
+// riskd only writes that threshold because the ledger asserted one. So a threshold
+// with NO ledger row behind it is refused: "a gap is a wrong liquidation
+// threshold" (design spec §8), and a threshold nobody custodied is exactly that
+// gap. A leg with no threshold — a pure debt leg, or collateral that does not
+// count — has nothing to weld.
+func weldLegParams(w *paramWitness, engine string, paramsBlock uint64, asset common.Address, l legRow) error {
+	if l.LiqThreshold == nil {
+		return nil
+	}
+	row, ok := w.row(engine, paramsBlock, asset)
+	if !ok {
+		return fmt.Errorf("leg %s carries a liquidation threshold (%s) that NO custodied param row asserts at params_block %d — a param gap is a wrong liquidation threshold",
+			asset.Hex(), showBig(l.LiqThreshold), paramsBlock)
+	}
+	if !eqBig(row.LiqThreshold, l.LiqThreshold) {
+		return fmt.Errorf("leg %s liquidation threshold %s disagrees with the param ledger's %s at params_block %d",
+			asset.Hex(), showBig(l.LiqThreshold), showBig(row.LiqThreshold), paramsBlock)
+	}
+	// THE BONUS IS WELDED TOO, and it is the reason this function exists. It never
+	// reaches a health factor, so nothing above would notice a wrong one — while it
+	// drives collateral-at-risk, bad debt and every market-realization number, and
+	// its ABSENCE silently becomes a 1.00x seizure multiplier that reports par
+	// recovery.
+	if !eqBig(row.LiqBonus, l.LiqBonus) {
+		return fmt.Errorf("leg %s liquidation bonus %s disagrees with the param ledger's %s at params_block %d — the bonus drives collateral-at-risk and bad debt, and a wrong one moves no health factor to signal it",
+			asset.Hex(), showBig(l.LiqBonus), showBig(row.LiqBonus), paramsBlock)
+	}
+	return nil
 }
 
 // eqBig compares two optionally-absent integers. Absent equals absent; absent
@@ -734,11 +1003,16 @@ type rateIndexRow struct {
 // readObservatory reads the newest `limit` COMPLETE batches' aggregates plus the
 // current rate indexes, in one snapshot with the database clock.
 //
-// Completeness is applied by joining on the same header fields
-// `NewestCompleteBatch` requires and then filtering to batch ids whose declared
-// child cardinalities are met — expressed here as a subquery over the ids the
-// store's predicate would admit. A series that quietly included torn batches
-// would show a book that dropped and recovered for no reason on the chain.
+// SELECTION GOES THROUGH `store.CompleteBatchIDs`, which applies the store's own
+// completeness predicate — the same one `NewestCompleteBatch` applies. This file
+// previously spelled a WEAKER version of that predicate inline (status, position
+// count, aggregate count, required-engine presence), omitting the leg and
+// price-input cardinalities, the required watermark and sweep-payload sets, and
+// the aggregate-to-position sum. After an honest partial restore that duplicate
+// admitted a batch the serving path refused, so the series could publish a point
+// no route would serve — and a series that quietly includes torn batches shows a
+// book dropping and recovering for a reason that is not on the chain. There is one
+// completeness authority, and this is now behind it.
 func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time, out []observatoryBatch, indexes []rateIndexRow, err error) {
 	tx, err := s.store.BeginRiskSnapshot(ctx)
 	if err != nil {
@@ -751,22 +1025,25 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 	}
 	now = now.UTC()
 
+	ids, err := store.CompleteBatchIDs(ctx, tx, limit)
+	if err != nil {
+		return time.Time{}, nil, nil, err
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return time.Time{}, nil, nil, fmt.Errorf("commit observatory snapshot: %w", err)
+		}
+		return now, nil, nil, nil
+	}
+
 	rows, err := tx.Query(ctx, `
-		WITH servable AS (
-		  SELECT b.id, b.computed_at
-		    FROM risk_batches b
-		   WHERE b.status = 'complete'
-		     AND (SELECT count(*) FROM risk_positions p WHERE p.batch_id = b.id) = b.position_count
-		     AND (SELECT count(*) FROM risk_batch_aggregates a WHERE a.batch_id = b.id) = b.aggregate_count
-		     AND cardinality(b.required_engines) > 0
-		   ORDER BY b.id DESC
-		   LIMIT $1)
-		SELECT s.id, s.computed_at, a.engine, a.value_decimals, a.positions, a.computed_positions,
+		SELECT b.id, b.computed_at, a.engine, a.value_decimals, a.positions, a.computed_positions,
 		       a.refused_positions, a.flagged_positions, a.liquidatable_positions,
-		       a.total_collateral::text, a.total_debt::text
-		  FROM servable s
-		  JOIN risk_batch_aggregates a ON a.batch_id = s.id
-		 ORDER BY s.id DESC, a.engine`, limit)
+		       a.total_collateral::text, a.total_debt::text, a.refusal_code, a.refusal_detail
+		  FROM risk_batches b
+		  JOIN risk_batch_aggregates a ON a.batch_id = b.id
+		 WHERE b.id = ANY($1::bigint[])
+		 ORDER BY b.id DESC, a.engine`, ids)
 	if err != nil {
 		return time.Time{}, nil, nil, fmt.Errorf("read observatory series: %w", err)
 	}
@@ -780,7 +1057,8 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 		var dec int16
 		var tc, td string
 		if err := rows.Scan(&id, &computedAt, &a.Engine, &dec, &a.Positions, &a.ComputedPositions,
-			&a.RefusedPositions, &a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td); err != nil {
+			&a.RefusedPositions, &a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td,
+			&a.RefusalCode, &a.RefusalDetail); err != nil {
 			return time.Time{}, nil, nil, fmt.Errorf("scan observatory row: %w", err)
 		}
 		a.ValueDecimals = uint8(dec)
