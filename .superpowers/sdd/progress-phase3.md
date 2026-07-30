@@ -626,6 +626,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   the load-bearing 5s-sleep elapsed-time test; hardening owed if it recurs;
   disclosed to Codex round 4 for a ruling on the test's timing assumptions.
   NEXT: Codex round 4 on 789a19e..906af58 — approve closes Task 5.
+- CODEX ROUND 4 ON RISKD (session 019fb0a9-7610-7723-8677-34947f4ec8e9, ~10min, t5r4
+  @ 906af58): **needs-attention — 1H/1M/1L, all freshness; rounds 3 F1/F3/F4 judged
+  CLOSED; AlgorithmRevision convention ACCEPTED under D-013.** (H) freshness never
+  wakes a steady-state daemon — vectorChanged covers cursors/epochs/sweep only, so
+  an honest ingestion outage leaves a persisted-"fresh" batch published INDEFINITELY
+  (no G4/G1 transition); the elapsed-time test called runPass directly and bypassed
+  the loop. (M) identity phases over-scoped to ALL fetched registry prices —
+  Assemble judges only position-referenced assets (and can return at G2 before
+  freshness), so an UNUSED registered asset crossing a phase + restart re-creates
+  the warning-erasure through yet another door. (L) the elapsed-time test's
+  2-SECOND fresh window is a real load-dependent race — **plausibly explains our
+  disclosed transient** (Codex explicitly declined to dismiss it as one-off; the
+  lost output prevents attribution — the discard-first-run-output lesson compounds).
+  FIX WAVE 4 dispatched: freshness deadline as scheduler input (force pass at next
+  output-relevant phase boundary; REAL-loop test, no manual runPass; forced pass
+  materializes-not-adopts asserted); identity phases scoped to output-relevant
+  judgments incl. gate ordering (adopt-with-G5-retained regression + judged-asset
+  counterweight); deterministic DB-clock seam replacing the 2s window (closes the
+  hardening-owed item if it lands). Round-4 pattern: the erasure class keeps
+  re-entering through unscoped inputs — round 3 unconsumed CURSORS, round 4 unjudged
+  PRICES; same law, narrower each time. Task 5 open, round 5 pending.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
