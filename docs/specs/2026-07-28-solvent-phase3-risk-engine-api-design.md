@@ -133,6 +133,14 @@ Declared-input honesty: prices, reserve params, eMode, `isUsingAsCollateral` fla
 labeled as such in the gate schema — the gate proves derived balances + the math pipeline.
 Empty-set probes included (accounts with zero on-chain debt, accounts never seen in events).
 
+> **Amended 2026-07-29 (collateral-flag micro-task, 62c6196):** `isUsingAsCollateral` now has
+> an event-derived witness in custody (`ReserveUsedAsCollateralEnabled/Disabled` folded into
+> `position_events`; law: witnessed-true / witnessed-false / no-history ⇒ false). Per
+> chain-truth R5.5, the pinned `getUserConfiguration@pin` read stays authoritative for the
+> Task 6 gate AND becomes the WELD PARTNER for the event-derived flag: the gate now proves the
+> derived flag against the chain bitmap rather than trusting either alone. riskd's former
+> assume-true posture (`aave_collateral_flag_unwitnessed`) is retired.
+
 ### 5.2 Debt Manager engine
 
 `HF_dm := getMaxBorrowAmount(user, false) / borrowingOf(user)` (both USD 6-dec). The view

@@ -738,6 +738,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   1d46925 / 906af58 / b399ea2 / 4c10793. NEXT: Task 6 wave + collateral-flag
   micro-wave dispatch IN PARALLEL (disjoint trees: cmd/reconcile vs
   decode/derive/store/riskfeed).
+- **COLLATERAL-FLAG MICRO-WAVE LANDED — 62c6196** (2026-07-29 21:05, 19 files
+  +2130/−82). Decode: ABI-derived IDs (literals only in the triple-witness pin
+  test); strict reader w/ 16 malformed-shape refusals + canonical-zero
+  counterweight; census re-verified read-only (98/75, zero dirty). Derive:
+  record-only fold, DM precedent, NO migration (event_type is unconstrained TEXT);
+  constants in internal/store (riskd purity gate forbids linking derive; shared
+  constant closes spelling-drift-reads-empty). Store: CollateralFlagsAsOf with
+  (block, logIndex DESC) tie law + RewindDerived-following pinned. Riskfeed:
+  witness law (no-history⇒FALSE, conservative); FlagCollateralFlagUnwitnessed →
+  FlagCollateralOptedOut/NeverEnabled (fire only on positive-balance exclusion,
+  naming the witness state); AlgorithmRevision 1→2; identity gains consultedFlags
+  scoped to CONSULTED set, absence deliberately not recorded (asymmetry with
+  prices argued in code: absent price = G1 substrate fact, absent flag = the law,
+  owned by the revision); backfill-choreography hazard pinned (pre.Vector ==
+  post.Vector, pre.Key != post.Key). **FINDING REVISING THE CONSULT'S FRAMING:
+  stables' folded threshold is ABSENT (only weETH ever got CollateralConfiguration
+  Changed), so assume-true would have REFUSED all 31 stable-collateral accounts on
+  the first live pass (internal/risk refuses counting-reserve-no-threshold) — not
+  merely overstated collateral. The witness converts refusals into computed
+  positions; both directions pinned.** Live impact reproduced at 25,643,063:
+  58 → 23 unchanged / 1 witnessed-disabled / 34 no-history (USDC 25, FRAX 6,
+  PYUSD 3). Design doc §declared-input AMENDED (pinned read = weld partner now).
+  LIVE REWIND still owner-gated: RewindDerived to 20,625,518 + runner re-steps
+  (~2,509 windows, zero RPC), riskd/api supersession legs fire honestly during and
+  self-heal, post-rewind pass mints a NEW key by construction (revision 2 + flags
+  in digest). Integrator: build/vet clean (scoped around sibling's in-flight
+  cmd/reconcile), 6 packages green both DSNs, opted-in pipelinereplay 3/3 (leg 1
+  now derives the flag logs). NEXT: Codex round on 5f584e2..62c6196; Task 6 wave
+  still in flight.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
