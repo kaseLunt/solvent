@@ -172,13 +172,72 @@ func Waterfall(book []PositionInput, grid []*big.Int) (WaterfallSeries, error) /
 
 **Files:** Modify `cmd/reconcile/` (new files `hf_gate.go`, `dm_gate.go`, `param_weld.go`, `backtest.go` + tests); reuse pins/sampling/report machinery; fold into `make reconcile` gated set.
 
-**Gates (all EXACT, spec §5):** **REQUIRED tokenConfig evidence probe** (risk-quant Wave-4 re-derivation ruling, promoted from "candidate": one pinned `PriceProviderV2.tokenConfig(address)` read per configured DM token — all ~20 — recording baseAsset + isStableToken as committed evidence; the liquidUSD base-snap defect was exactly the failure class the inferred composition hid; 3 of ~20 already read during the consult); Aave 7-component table incl. adapter-output price reads at pin, declared `input:pinned-read` schema fields; DM legs 1–4 (index replay, lens-based collateral recompute, boolean weld vs `liquidatable@pin`, empty-set probes over never-seen + zero-debt accounts); param weld (event-derived head vs `getConfiguration`/`collateralTokenConfig@pin`, divergence ⇒ gated FAIL refusing param serving); realized-liquidation backtest (N per Task-1 frame, `liquidatable==true` at execution, one table in the drift report); B3 heartbeat scan (empirical inter-update gaps from raw_logs AnswerUpdated history vs published budgets → upgrades meta provenance grades or records the qualifier).
-**Cohort floors (Codex round 1 [H7] — anti-vacuous-green):** the run FAILS (gated) unless every
-required cohort is populated at its floor: Aave HF-gated borrowers ≥ 20, DM HF-gated borrowers
-≥ 25, empty-set probes ≥ 10 per class (zero-debt, never-seen), backtest N ≥ 25, param weld
-covering ALL configured reserves/collateral tokens (count asserted against config), adapter-
-output weld ≥ 1 row per ETH reserve. Empty arrays are failures, never passes.
-**Acceptance:** `make reconcile` result: pass, 0 gated failures, cohort counts printed and at floor, report carries the new sections + backtest table.
+> **AMENDED 2026-07-29 per the two Task 6 pre-brief consults** (both archived verbatim and
+> **NORMATIVE for the wave**: `.superpowers/sdd/p3-consults/risk-quant-task6-brief.md` — 5
+> blockers, 3 named tolerances; `.superpowers/sdd/p3-consults/chain-truth-task6-brief.md` — 6
+> blockers, weld semantics). Original text had: an infeasible Aave floor (≥20 vs the chain's 12
+> finite-HF borrowers), a self-referential param-weld target, a tautology-shaped backtest clause,
+> a B3 scan with no failure mode, and no derived-vs-pinned input-frame declaration. Corrected
+> below; the consults control on any conflict.
+
+**Input-frame law (risk-quant R1/R5-5 — governs every gate):** each gate declares an exhaustive
+`derived-under-test` list (what our custody chain produced: scaled balances, UserConfiguration
+bits, param folds) and a `pinned-read` list (chain reads at pin: indexes, prices, eMode); the
+report FAILS if any component consumes an undeclared source. **Exactly three tolerances are
+permitted in the whole run** (≤1 normalized wei residue on fully-liquidated accounts, citing the
+silent zeroing at DebtManagerCore.sol:549-553; ≤1 token-wei seizure round-trip per element; the
+disclosed intra-block marginality band). Any other epsilon in the diff is tolerance-as-carpet
+and blocks. All new gates run INSIDE the existing before/after weld bracket and join the
+existing verdict machinery (`computeResult`/taint/`tallyTotals`) — never a side-channel exit.
+
+**Gates:** **REQUIRED tokenConfig sweep** (chain-truth R3: swept set = chain∪registry union,
+labeled `input:pinned-read` sample with provider impl-slot recorded at pin, revert/zero
+classified by chain-universe membership, **baseAsset transitive closure** cycle-guarded; stable
+set + base composition + scenario-flag invariants + DM param weld per risk-quant R4; mismatch on
+any served-surface field = gated FAIL); Aave HF gate (**exact, zero units** — indexes and gate
+prices are pinned reads; HF/totalCollateralBase/totalDebtBase bit-exact; zero-debt marker↔max
+mapping explicit; eMode `getUserEMode@pin==0` gated; `currentLiquidationThreshold` law-derived
+then exact; `availableBorrowsBase` = evidence column, NOT a gate; **component-4 sharpness
+clause**: run FAILS unless ≥1 cohort account×reserve has a nonzero `balance×price mod 10^dec`
+remainder); adapter-output weld (**each row at its OWN stored anchor hash**, never the run pin —
+≥3 rows per reserve across distinct anchors, exact); DM legs 1–4 (index replay; lens-based
+collateral recompute; boolean weld vs `liquidatable@pin`; empty-set probes with **archive-served-
+zero proof** — every all-zero multicall chunk carries ≥1 known-nonzero control, every new
+unpacker refuses `len(returndata)==0`); param weld (**A vs B**: event-derived custody vs
+`getConfiguration`/`collateralTokenConfig` + chain enumeration `getReservesList()`/
+`getCollateralTokens()∪getBorrowTokens()` **at pin** — the CHAIN is the expected side;
+`recon/feeds.json` is the CLAIM, gated both directions against the chain list with direction
+classified, role-level equality included; divergence ⇒ gated FAIL refusing param serving);
+realized-liquidation backtest (**frozen frame: the 31 tx hashes committed to the repo BEFORE the
+wave**, pins = stored `raw_logs.block_hash`, never re-resolved live; per case: (1) derived-debt
+weld bit-exact vs the event's own `beforeDebtAmount`, (2) OUR eligibility boolean at N−1 with
+the three-state intra-block law — `true-at-parent` / `flipped-in-block-with-custodied-witness` /
+`UNEXPLAINED`=gated fail — and marginal cases listed individually with margins printed, (3)
+seizure reconstruction exact per deployed branch, (4) residue weld; composition asserted by
+identity: the 153,399,414 singleton, each bucket's max-fanout case, ≥1 two-pass case if any
+exists; `state-pruned` at a backtest pin = preflight exit, never a shrunk N); B3 heartbeat scan
+(**refute-or-grade, with teeth**: full AnswerUpdated history per raw aggregator over the
+custody-bounded domain, gap arithmetic on `source_as_of`; max gap ≤ heartbeat ⇒ provenance
+upgrade; ∈(heartbeat, heartbeat+grace] ⇒ qualifier; > heartbeat+grace ⇒ budget FALSIFIED =
+gated FAIL with budget raised and provenance downgraded; open-ended or >2× gaps require the
+pinned `proxy.aggregator()` phase-change check first — mismatch = "stream requires
+re-resolution", its own failure class).
+**Cohort floors (population-derived, census-welded — both consults concur the fixed ≥20 was
+infeasible):** floors assert against an independent CHAIN census at the run's own pin, never
+against our registry and never as bare constants: Aave = ALL finite-HF borrowers with the census
+itself welded (DB debt>0 count == chain sweep; backstop ≥10 finite; the finite/infinite split
+printed) + ≥10 zero-debt + ≥10 never-seen (both sides clean: absent from raw_logs AND zero chain
+state); DM = ALL live liquidatable accounts (== liquidatable census; the three sub-1.0 dust
+positions are mandatory members) + ≥10 healthy debtors + ≥5 multi-collateral (≥3 tokens) + ≥1
+liquidUSD holder + the nearest-boundary account force-included with margin printed + committed-
+seed sampled remainder; backtest = the frozen 31 (hard backstop ≥25 with every skip named by its
+RPC failure); param weld + tokenConfig sweep = set equality vs the chain enumeration at pin,
+both directions; adapter-output ≥3 rows per reserve. Empty arrays are failures, never passes.
+Every sampled cohort reproducible from committed inputs (frame hashes + sampling seed in repo,
+printed in the report).
+**Acceptance:** `make reconcile` result: pass, 0 gated failures, cohort counts printed and at
+their census-derived floors, input-frame declarations present per gate, report carries the new
+sections + backtest table + tokenConfig composition trees + B3 verdicts.
 
 ---
 
