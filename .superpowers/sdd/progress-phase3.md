@@ -1587,6 +1587,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   path (the round-5 lesson: hand-fed booleans let composition defects hide);
   mutants m1 predicate-reverts / m2 latch-restored / m3 partial-apply /
   m4 flag-ignored (m3/m4 must kill DISTINCTLY).
+- CODEX ROUND 2 ON TASK 8 (job review-ms7nylje-osrknx, ~8min, t8r2 @ 053b29a,
+  base 865fa1c): needs-attention — 2H, BOTH the wave-1 disclosed residuals
+  promoted with concrete mechanisms; everything else HELD (completeness law,
+  CR hold, retry reset, reconnect ordering, m1–m4, exact-values migration not
+  weakened). (H1) top-level found on every arm means an UNNARROWED
+  result.found is still boolean|null — !result.found compiles and maps
+  unknowable to a definitive negative; NOT a language limit: drop found from
+  the union entirely, outcome is the sole discriminant (string literals cannot
+  falsiness-conflate). INTEGRATOR NOTE, honest: the per-arm literal found was
+  the ROUND-1 BRIEF'S OWN DESIGN — Codex completed the wave's logic where the
+  brief stopped short. (H2) onHeartbeatFrame ignores baseReceived: a comment-
+  only replacement connection stays open forever — watchdog refreshed,
+  onHeartbeat surfacing healthy liveness, failedAttempts never counted — while
+  the consumer retains connection N's stale data. FIX WAVE 2 dispatched:
+  outcome-only union + permanent @ts-expect-error on result.found; pre-base
+  heartbeats invisible to the consumer AND a base-frame deadline heartbeats
+  cannot refresh (honest-proxy slow starts stay legal: comments never fail a
+  connection instantly, they just never extend the deadline); regressions =
+  comment-only exhausts maxAttempts with zero onHeartbeat + slow-but-honest
+  guard; mutants m1 found-restored / m2 pre-base-surfaced / m3 deadline-
+  refreshed (distinct kills). Reviewer ops: two dead-pid wedges from
+  foreground dispatch (operator error, no side effects, stale job records
+  disregarded); third dispatch backgrounded correctly and completed.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
