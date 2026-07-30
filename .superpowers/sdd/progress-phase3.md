@@ -2148,6 +2148,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (wrong-irrelevant hunt, never-emitted greps, artifact exhaustiveness),
   refusal-arm reachability incl. lifecycle-as-only-witness, the two
   judgment calls, regression fidelity, no-prior-law-regressed.
+- CODEX ROUND 11 ON TASK 6 (session 019fb4e2-29e6-78f1-9e17-c9829de9b4d2,
+  ~19min, t6r11 @ 16b0a5d, base 07e8a70): needs-attention — 1H/2M. THE
+  INVENTORY HELD: all 21 dispositions checked out, all three never-emitted
+  claims verified zero emit-sites, lifecycle refusal correct (topic0s,
+  decode paths, Complete(), the SQL bound), cross-token tick accepted as the
+  frozen-frame limitation. (H) event-semantics provenance NOT structurally
+  closed: DebtManagerCore.setAdminImpl writes ADMIN_IMPL_POSITION with NO
+  Upgraded event; the proxy fallback delegatecalls that implementation, so
+  the two-Upgraded census proves only the UUPS core era — a pre-boundary
+  admin swap + admin write could change event semantics with zero refusal.
+  (M2) the lifecycle regression narrates tokB's harm but never instantiates
+  it (no balance/price — green even if tokB couldn't affect eligibility).
+  (M3) the emitted input_frames text still asserts the sufficiency premise
+  the round-trip disproved. PROVENANCE FIX WAVE dispatched with the
+  INTEGRATOR'S D-013 ADJUDICATION on H1's remedy: trace-scanning is
+  disproportionate (debug_trace plumbing, demo-grade bar) — instead a
+  TWO-PIN SLOT READ (eth_getStorageAt ADMIN_IMPL_POSITION @ both pins,
+  slot derived from source with a pinning test, == a newly-audited admin
+  impl constant established with the same provenance discipline as the
+  core pins; wave-8 decode law applies; mismatch = frame refusal; STOP on
+  any real historical epoch found). The RESIDUAL — within-block swap-and-
+  revert between the two reads — is ACCEPTED-AND-DISCLOSED per D-013
+  (honest governance has no swap-back motive; the choreography is
+  evasion-shaped), recorded in code + evidence + carried to round 12
+  explicitly. M2: instantiate the arithmetic (replay-internal/counterfactual
+  assertions prove the harm is real while the verdict stays conservative).
+  M3: text sync w/ STOP-if-digest-bearing guard.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
