@@ -2077,6 +2077,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   supported collateral, so a firing belt means the supported-set premise
   broke) plus the per-case address-list-length diff in the re-capture
   report. No separate fix wave needed — the lanes merged.
+- **ADJUSTMENT WAVE LANDED — 5f18f28** (37 files +715/−81: code delta in
+  backtest.go + basket_continuity.go + new adjustment test file; 31 fixtures
+  re-captured; both-ways exact; integrator independently re-ran — green).
+  (Adj 1) getCollateralTokens in BOTH frames through the shared wave-8 loop
+  (degraded read ⇒ frame UNREAD, pinned both frames — a narrower sweep from
+  a failed read is unrepresentable); swept list = supported@N-1 ∪
+  supported@N; old endpoint union KEPT as a MINIMALITY refusal; round-9
+  verbatim regression REFUSED (token absent from all three endpoint sets,
+  both exit shapes incl. post-L liquidation); m1 kill includes a WITNESSED
+  behavioural false-pass under the reverted sweep (proven=true, empty
+  refusals — the exact round-9 harm). Netting-token belt landed (event
+  post-boundary so the belt is the only defense). (Adj 2) ALREADY CORRECT —
+  the custody filter makes emitter events structurally unreachable in the
+  replay; basket = netted-parent ± seizures only; CancelledPreBoundary feeds
+  evidence exclusively; invariant now explicit + composition-layer pinned
+  (maxBorrowLT@exec stays NETTED at 70000000, marginal verdict survives);
+  m2 (netting re-applied) kills with the exact predicted regression.
+  RE-CAPTURE: address lists 1-17 → 16-20 per case; ALL transfer envelopes
+  byte-identical — the empirical answer to round 9's "captures cannot
+  disprove" (no supported token beyond the old union touched any Safe
+  in-block); 31/31 proven, refusal sets byte-stable; old captures refuse
+  LOUDLY, never fall back. Parent and exec supported sets equal in all 31
+  (no mid-block config change in any case block). ROUND 10 (TRUE FINAL)
+  dispatched: t6r10 @ 5f18f28, base 0e06a7a — sufficiency of the supported
+  universe vs the maxBorrowAtFrame config dependency, third premise-break
+  hunt beyond the two belts, regression fidelity, adjustment-2 structural
+  verification, capture honesty. On SHIP: 4 of 4 → maintenance window.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
