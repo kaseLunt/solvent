@@ -1108,6 +1108,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Task 7 dispatched. REMAINING to SHIP: flag-custody round 4 (wave mid-edit),
   Task 6 round 2 (wave mid-edit), Task 7 round 1 (running), rev-3-docs re-check
   (fold into whichever round confirms closure). Then: maintenance window.
+- **TASK 6 ROUND-1 FIXES LANDED — 9751414** (2026-07-30 00:50, 20 files
+  +2,068/−339). All ten: closed verdict sets w/ one tally predicate (artifact
+  and exit code cannot diverge); toleranceID enum (fourth epsilon = COMPILE
+  error) + typed backtestView accessors (the getter IS the read); independent
+  Aave candidate universe from raw_logs user slots w/ dropped/phantom-borrower
+  rows; -dm-full-census defaults TRUE, disabling TAINTS; carried-repay-budget
+  seizure law (found EXTRA defect during fix: liquidatedAmt==0 must route
+  ALL-PARTIAL or the dominant shape goes vacuous); residueWeld → EXEC frame +
+  two-pass first-passes weld against the NEXT pass's beforeDebtAmount;
+  classifyIntraBlock pure w/ REQUIRED reproduced flip; chain-time head gaps
+  (cross-feed endpoint so a stopped feed can't zero itself; unmeasurable =
+  GATED); scenario base claims loaded from internal/risk/scenarios/*.json
+  (the files ApplyScenario consumes) exact both directions; three-anchor floor
+  extracted and HARD. Mutation 5/5 behavioural; the wave DISCLOSED two weak
+  first-kills (F6/F7) and hardened them (extraction; go/ast call-site pin) —
+  the third straight wave to catch its own tests lying. Wave reports the
+  first fully-green full-repo run of its session (17 packages incl. cmd/api).
+  Integrator re-verified: build/vet/gofmt clean, both packages green. NEXT:
+  Task 6 round 2 after the flag-custody wave lands (bundle review timing);
+  Task 8 wave running; Codex on Task 7 round 1.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
