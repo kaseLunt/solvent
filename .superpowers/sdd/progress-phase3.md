@@ -787,6 +787,42 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   BOOK: a derived-input law whose exactness depends on custody completeness must
   carry a CUSTODY-COMPLETENESS WITNESS in the same commit — this class recurs for
   every future decoder addition behind a live cursor.
+- **TASK 6 WAVE REPORTED** (2026-07-29 21:45; 6,334 lines + 78 tests, all
+  cmd/reconcile/**; NOT YET COMMITTED — tree shared with the in-flight micro-fix
+  wave). Nine gates w/ exhaustive declared input frames + a consumption LEDGER
+  gating undeclared-consumed, declared-unconsumed, AND unregistered epsilons;
+  exactly-three-tolerances pinned at compile AND run time; census-welded cohorts
+  (12 finite-HF; component-4 sharpness witness found live: remainder
+  805661632746216530); frozen frame digest re-verified. **INCIDENT (21:27:59):
+  the wave ran `git checkout -- .` from repo root, reverting ALL tracked-unstaged
+  files incl. the sibling micro-fix wave's in-flight edits.** Wave's own files
+  recovered (diff verified vs intent); the parallel P2 session's pgxdsn work was
+  safe (committed f62aee8, verified ancestor of HEAD); micro-fix wave WARNED and
+  ordered a post-incident audit + full re-verification before reporting. LESSON:
+  wave briefs must BAN repo-root git checkout/restore — cleanup is file-scoped.
+  **make reconcile = EXIT 2 PRECONDITION (honest):** live DB v12, binary expects
+  14 (00013 + in-flight 00014); reconcile never migrates → NO Task 6 acceptance
+  evidence exists yet; needs daemon restart AFTER 00014 finalizes, then the real
+  run. THREE LIVE FINDINGS from the wave's opt-in production-ABI smoke: **(F1)
+  internal/risk component-4 DEBT-leg law WRONG — we FLOOR the base conversion,
+  the deployed Pool CEILS: totalDebtBase EXACT 0/12 as written, 12/12 under
+  ceiling (golden: 137231×99981000/10^6 → chain 13720493 = ceil); collateral +
+  currentLiquidationThreshold EXACT 12/12; direction FALSE SAFETY, magnitude
+  ~1/totalDebtBase (7.3e-11 golden → ~1.8e-4 dust). The vToken-ceil/aToken-floor
+  asymmetry carries into base currency. Task 4 surface — risk-quant consult
+  dispatched; then internal/risk fix + revision bump + Codex.** (F2) DM boolean
+  FALSE POSITIVE: 0x9fd6c4da…0747 — sweep holds 0 collateral legs, CashLens@pin
+  shows 3/$69.07 → chain healthy, we'd alert liquidatable; sweeper gap, probe
+  dispatched. (F3) B3 WILL REFUTE three published heartbeat budgets (FRAX
+  170,712s / USDC 248,460s / PYUSD 604,896s vs 90,000; PYUSD weekly Apr–Jun
+  2024; weETH/ETH qualifier 3,732s; phase-change check DONE, all 4 proxies still
+  on walked aggregators) → expect exit 1 + feeds.json meta updates under ack.
+  Deviations: impl-slot read substituted w/ raw-returndata sha256 (chain.Failover
+  lacks StorageAtHash — follow-up); DM full-book census opt-in (verdictFree);
+  backtest obligation-2 collateral = declared pinned read (no derived historical
+  collateral exists). NEXT: micro-fix lands → post-incident verify EVERYTHING →
+  commit micro-fix → commit Task 6 → Codex rounds → daemon restart (13+14) →
+  make reconcile = the acceptance run.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
