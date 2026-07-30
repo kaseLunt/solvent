@@ -546,3 +546,19 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   empty; keeps the Codex delta surgical). NEXT (parallel): Codex round 2 on
   a0e37e5..6cb5c71; promotion micro-wave (harness riskGate → riskfeed.GateEpochs,
   signature (cursors, maxEpochs, []RequiredCursor) → (verdict, error)).
+- PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
+  harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
+  deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
+  inputs read inside one store.BeginRiskSnapshot per the production contract, not
+  hand-fed structs. The two independently-derived laws mapped with NO contradiction
+  (wrong-chain/chain_mismatch convergent, not copied); seven verdicts unchanged, now
+  also pinning WHICH refusal class fired (missing_cursor 1-2 / ALLOW 3,4,7 /
+  unacked_epoch 5-6); step-3 empty-epochs semantics verified identical (map-miss zero
+  == COALESCE). Added TestGateEpochsRefusesAnEmptyRequirementSet (pure unit — the
+  clause stopping a mis-computed requirement list from rubber-stamping was otherwise
+  untouched by harness calls). Mutation retargeted to what stays harness-owned: drop
+  aave_param from the requirement set → dies at step 1 naming it. Integrator:
+  opted-in 3/3 PASS 18.7s (legs 1-2 unchanged), non-opted 3 SKIPs + 2 unit PASS,
+  build/vet/gofmt clean. From here the closure harness and riskd share ONE gate law —
+  the round-1 defect class cannot silently recur in either. NEXT: riskd Codex round 2
+  verdict → Task 5 close (promotion delta offered for coverage if Codex flags it).
