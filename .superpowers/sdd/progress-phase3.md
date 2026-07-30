@@ -1503,6 +1503,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   repo pre-dispatch, removed it, and the integrator verified the main tree
   clean (only wave-5 property + untracked log). t6r4 worktree administratively
   removed; fcr8 + t8r1 remain registered for the locked-dir cleanup batch.
+- **WAVE-5 FIX LANDED — 2aa714d** (5 files +1,074/−156; both-ways exact, the
+  client-ts modifications correctly excluded as T8-wave property). Proven now
+  means THE REPLAY CROSSED THE THRESHOLD: stateful directional replay from
+  parent-block state (new NormalizedAtParent fold — Σ deltas strictly below N,
+  same srcBTDeltaFold source so the frame declaration is unchanged), witnesses
+  applied in log-index order (collector bounds log_index < L structurally;
+  replay defensively sorts), eligibility recomputed after each write via the
+  EXISTING proven functions. Parent-boundary index EVENT-SOURCED (an earlier
+  tick's decoded oldIndex supersedes the liquidation-time snapshot). No class
+  special-cased — Repaid floors down, Borrowed ceils up under stable-snap,
+  Liquidated bonus-inclusive (fixture identity cross-checked), config swaps the
+  decoded tuple; ARITHMETIC decides directionality (counterexample TESTS prove
+  it, per the brief's no-blocklist rule). No price events in the witness class
+  set (PriceProviderV2 outside the walked DM surface) — prices parent-frame
+  throughout; block-end prices remain corroboration only. Undecodable/unknown-
+  decimals/cross-token DISCLOSED in causeReplay.Notes → UNEXPLAINED, never
+  proven (cross-token = named model limit; multi-token debt legs would be a
+  design change, flagged not smuggled). Red-then-green real (counterexamples
+  failed under the m1-shaped signature change); mutants m1/m2/m2b/m3 all
+  behaviourally cut and killed (first m1 cut was a compile error, re-cut per
+  spec); sha256-verified restores, no git ops. 209/0/5-opt-in on isolated
+  solvent_test_t6w5. Integrator independently re-ran gofmt/vet/build/tests —
+  green. Live-run consequence acknowledged: contact-only marginal-disclosed
+  cases will now honestly fail UNEXPLAINED — that is the law correcting, not a
+  frame change (digest untouched; acceptance-run expectations updated
+  accordingly). ROUND 5 (closing) dispatched: t6r5 @ 2aa714d, base 3c59286 —
+  verify apply-site crossings, parent-fold scope, oldIndex supersession choice
+  among multiple ticks, rounding directions vs deployed source, Notes-path
+  honesty, positive-control knife-edges computed not hardcoded.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
