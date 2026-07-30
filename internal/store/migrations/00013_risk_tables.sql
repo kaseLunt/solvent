@@ -244,9 +244,11 @@ CREATE TABLE risk_batch_watermarks (
 -- nullable rather than shared.
 --
 -- HF IS STORED AS AN EXACT RATIONAL (hf_num/hf_den) *and* as the chain-identical
--- wad. The wad is the single fused floor division the deployed contract performs
--- (P-2); the rational is what downstream exact arithmetic (liquidation price,
--- waterfall crossings) needs, and a wad cannot be un-rounded back into it.
+-- wad. The wad is the wadDiv half-up composite the deployed contract performs
+-- (rev-3, p3-consults/risk-quant-component4-7-ruling.md — supersedes P-2's fused
+-- floor, which no pin count could separate from the composite); the rational is
+-- what downstream exact arithmetic (liquidation price, waterfall crossings)
+-- needs, and a wad cannot be un-rounded back into it.
 -- hf_infinite is a TYPED MARKER for zero debt — undefined-because-unbounded —
 -- never a large number standing in for infinity, because a comparison against a
 -- threshold would silently succeed against the stand-in.
