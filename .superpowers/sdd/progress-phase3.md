@@ -1336,6 +1336,19 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   codex-reviewer with the operational pattern re-briefed. Remaining Codex
   queue: Task 6 r3 (running) → flag-custody r6 (stream-binding fix, wave
   mid-work) → Task 7 r3 (da5ed0a) → Task 8 r1 (d664886+f58bc48).
+- CODEX ROUND 3 ON TASK 6 (session 019fb251-3a66-7ac0-810e-5e7025d3184d,
+  ~10min, fresh reviewer, t6r3 @ ba72022): needs-attention — 1H/1M, BOTH
+  ABI-level defects in H2's witness replay; H1/H3/M4/M5/M6 ALL HELD. (H)
+  InterestIndexUpdated topic0 derived from a NONEXISTENT two-arg signature
+  (real ABI is three-arg, fixture topic0 c6ecd996…) — genuine witnesses
+  invisible → honest runs FALSELY FAIL as UNEXPLAINED. (M) Repaid indexes
+  user=topic1/payer=topic2 but the branch accepts either slot — third-party
+  repayment marks the PAYER as the debtor → FALSE marginal PASS. The pair
+  brackets both failure directions, which is exactly why witness predicates
+  need FIXTURE-BACKED regressions, not signature transcriptions. Fix wave 4
+  dispatched (ABI-derived topic0s + the real dm_interest_index_updated.json
+  fixture + an audit of all five witness topic0s; Borrowed/Repaid split with
+  topic1-only matching + the payer-slot negative).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
