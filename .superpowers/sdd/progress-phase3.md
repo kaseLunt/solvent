@@ -1971,6 +1971,31 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (expected FINAL for T8) dispatched: t8r7 @ 15becd9, base f3e400c —
   Record/tuple/readonly evasion hunt, sentinel fail-closed verification,
   margin-count check, disclosed-item adjudication.
+- **TASK 8 CLOSED — SHIP** (round 7, session 019fb431-48bd-7920-9a7e-
+  2d95806d3ef1, ~8min, t8r7 @ 15becd9): "approve — SHIP. The recursive sweep
+  distributes through nullable unions, normalizes optional properties under
+  both exactOptionalPropertyTypes modes, handles nested objects, arrays,
+  tuples, readonly shapes, and Records without a silent bypass, and preserves
+  fail-closed exhaustion. Independent depth analysis confirmed the maximum
+  chain is exactly 8; a ninth-level in-memory mutant failed only the margin
+  probe while the 13-level sweep remained complete. mA/mB/mC and prior
+  missing/stale-name mutants were killed as claimed. The optional mutants and
+  flat refined-shape residual are acceptable disclosed limitations. The range
+  is exactly one file with no drift. No material findings." Program: wave
+  (d664886, 202 tests) → regen (f58bc48) → r1 4H/1M → fw1 053b29a (sealed
+  union, law-before-branch, CR hold, drop-and-reconnect, base-frame reset) →
+  r2 2H → fw2 d5a62ad (outcome-only union, base deadline) → r3 1H → fw3
+  e073cbe (the CLASS sealed, refine.ts) → r4 1H docs → fw4 e437ae0 (README a
+  compiled surface) → r5 1M → fw5 714c1f6 (vocabulary derived) → r6 1M → fw6
+  15becd9 (recursive fail-closed sweep) → r7 SHIP. Seven rounds, six fix
+  waves, 292/292, drift gate green throughout, zero runtime deps preserved.
+  **SHIP 3 of 4.** Reviewer ops note: one foreground-dispatch wedge
+  (orphaned job never touched, fresh backgrounded dispatch per protocol).
+  REMAINING: Task 6's L2 wave (running) → round 9 → SHIP 4 of 4 →
+  maintenance window + acceptance. The cmd/riskd genesis-test diagnostics
+  appearing in-stream are STALE gopls (that signature landed at 06d0a25,
+  suite + -race green, CI green) — eleventh occurrence, compiler remains the
+  authority.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
