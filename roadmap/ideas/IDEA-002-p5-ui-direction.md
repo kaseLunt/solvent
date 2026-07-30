@@ -30,8 +30,9 @@ What the mockup pins down (the parts the owner reacted to):
    provenance lines under every number in the Inspector; PROJECTION labels on
    projected values; refusals counted in the aggregates row.
 4. **The Inspector shows its work**: the HF derivation written out with the actual
-   fused-floor law, param provenance with (block, logIndex), price anchors with
-   source_as_of.
+   deployed law (rev-3: the wadDiv half-up composite over ceil-summed debt — the
+   mockup's formula panel carries it), param provenance with (block, logIndex),
+   price anchors with source_as_of.
 5. **Watch = the SSE stream with a face**: typed event feed (HF CROSS / PARAM /
    REFUSAL / ORACLE / BATCH), each row carrying its block reference.
 
