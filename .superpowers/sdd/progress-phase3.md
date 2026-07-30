@@ -1084,6 +1084,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   rev-3 wave for derivation-notes + aave_test + liqprice; **assemble.go's
   revision-log wording gets the same M/R correction AT INTEGRATION (third
   deferred assemble.go item — flag-custody wave mid-edit there again).**
+- **TASK 7 (cmd/api) LANDED — 328bd0f** (2026-07-30 00:42, 20 files +9,177).
+  openapi.yaml the contract (additionalProperties:false, money as decimal
+  STRINGS, SeizureModel enum); six endpoints verbatim; SSE with poll-is-the-
+  mechanism doorbell; meta with three-leg supersession + a disclosed FOURTH
+  condition cursor_absent (fail-closed); per-(asset,source) price state incl.
+  valid=false quarantine. Anti-vacuity: fixture written THROUGH
+  store.WriteRiskBatch (cannot fabricate unwritable states), 5 schema-valid-
+  but-wrong mutations each pass-contract-AND-fail-values, validator proven
+  able to reject, 9 tampered-reconstruction refusals. Purity: no chain client,
+  no writing SQL (AST literal scan w/ self-test), never migrates; schema gate
+  expects 14, live smoke logged the honest v12 refusal. Serve-time stress =
+  identity-index reconstruction of the batch's OWN rows verified back through
+  the pure function riskd ran (mismatch = API_RECONSTRUCTION_MISMATCH refused
+  row — never TOCTOU re-derivation). Deviations accepted incl.: cmd/api owns
+  its SQL (Querier-scoped store readers owed forward); NO time-to-liquidatable
+  (would be optimistic without a borrow-APY observation); DM histogram on the
+  exact rational, Aave on hf_wad (rev-3 consumer warning); kin-openapi pinned
+  0.128.0 (0.145 forces go 1.25). 60 tests 0 skips; -race owed to the CI lane
+  for this env. M/R notation fix landed d64c9cb (equality derived: ΔD = R;
+  impossibility claim conceded — GenericLogic MANDATES per-reserve ceil, the
+  arithmetic permits both shapes, hence read-from-source). Codex round on
+  Task 7 dispatched. REMAINING to SHIP: flag-custody round 4 (wave mid-edit),
+  Task 6 round 2 (wave mid-edit), Task 7 round 1 (running), rev-3-docs re-check
+  (fold into whichever round confirms closure). Then: maintenance window.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
