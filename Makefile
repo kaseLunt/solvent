@@ -21,8 +21,13 @@ db-down:
 # than SOLVENT_DATABASE_URL (pg_control system_identifier + database OID +
 # name — alias spellings cannot fool it), or the suite fails closed before
 # any Migrate/TRUNCATE. Dev-mode results are NEVER acceptance evidence.
+# -p 1 is load-bearing, not caution: internal/store and internal/prices both
+# operate on solvent_test's public schema, and prices writes reorg_epochs while
+# store's epoch-gated writers run — under default package parallelism a green
+# run is timing luck (measured: -p 1 → 0 failures, default → 27). Remove -p 1
+# only after those two packages get separate databases (owed micro-task).
 test:
-	go test ./...
+	go test -p 1 ./...
 
 # test-acceptance is ACCEPTANCE MODE — the only mode whose suite-green output
 # may back a W1 receipt (round-10 F1). SOLVENT_ACCEPTANCE=1 makes an unset
