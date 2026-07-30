@@ -24,6 +24,13 @@
 //     snapshot rather than merging a fresh snapshot into stale state.
 //  3. Watch for silence. A stalled TCP connection looks identical to an idle
 //     one; the configurable frame timeout is what distinguishes them.
+//  4. Refuse comment-carried limbo. The contract sends a base frame (snapshot
+//     or `unavailable`) on every connection before anything else. A connection
+//     that heartbeats without ever delivering its base is transport-alive and
+//     UNUSABLE — so a hard base-frame deadline, which heartbeat comments
+//     cannot extend, fails the attempt and reconnects under backoff; and
+//     `onHeartbeat` never fires before the base, because a pre-base comment is
+//     not consumer-visible liveness.
 //
 // # The heartbeat caveat, stated plainly
 //
@@ -124,7 +131,16 @@ export interface StreamOptions {
   onBatch?: (payload: StreamPayload, event: StreamEvent) => void;
   onDegradation?: (payload: StreamPayload, event: StreamEvent) => void;
   onUnavailable?: (payload: StreamPayload, event: StreamEvent) => void;
-  /** A heartbeat comment. The unix second the server stamped, or null if unparsable. */
+  /**
+   * A heartbeat comment. The unix second the server stamped, or null if
+   * unparsable.
+   *
+   * Fires only AFTER the connection's base frame (the snapshot, or
+   * `unavailable`). A pre-base comment proves the transport is alive, not that
+   * the connection is usable — surfacing it would hand a consumer an
+   * "apparently healthy" liveness signal for a stream that has delivered
+   * nothing — so it is never surfaced (see `baseFrameTimeoutMs`).
+   */
   onHeartbeat?: (unixSeconds: number | null) => void;
   /** Every failure. The stream keeps running unless `close()` is called. */
   onError?: (error: SolventError) => void;
@@ -138,11 +154,40 @@ export interface StreamOptions {
    * the heartbeat caveat at the top of this file).
    */
   heartbeatTimeoutMs?: number;
+  /**
+   * Fail a connection that has not delivered its BASE frame (the connect-time
+   * `snapshot`, or `unavailable`) within this many ms of connecting.
+   * 0 disables.
+   *
+   * Heartbeat comments do NOT extend this deadline. A comment is a legitimate
+   * keepalive during a slow start — an honest proxy can emit them while its
+   * upstream stalls — so one is never an INSTANT failure; but a comment is not
+   * the contract's snapshot-on-connect, and a connection that heartbeats
+   * forever without its base is unusable. On expiry the connection is dropped,
+   * the attempt counts as FAILED (backoff grows, `maxAttempts` terminates),
+   * and the stream reconnects.
+   *
+   * Default: `heartbeatTimeoutMs` when that is set (> 0) — a connection gets
+   * the same window to prove itself usable as it gets to prove itself alive —
+   * else `DEFAULT_BASE_FRAME_TIMEOUT_MS` (45s, three times the server's 15s
+   * heartbeat cadence). Unlike `heartbeatTimeoutMs`, this needs no
+   * transport-dependent opt-in: the base is a NAMED event, visible on every
+   * transport, and the contract sends it on every connection before anything
+   * else.
+   */
+  baseFrameTimeoutMs?: number;
   reconnect?: ReconnectPolicy;
   scheduler?: StreamScheduler;
   /** Connect on construction. Default true. */
   autoConnect?: boolean;
 }
+
+/**
+ * The base-frame deadline used when neither `baseFrameTimeoutMs` nor
+ * `heartbeatTimeoutMs` is set: three times the server's 15s heartbeat cadence,
+ * and the same value the README recommends for the frame watchdog.
+ */
+export const DEFAULT_BASE_FRAME_TIMEOUT_MS = 45_000;
 
 const defaultScheduler: StreamScheduler = {
   setTimeout: (handler, ms) => setTimeout(handler, ms),
@@ -167,6 +212,8 @@ export class SolventStream {
   private baseReceived = false;
   private lastFrameAt = 0;
   private watchdog: unknown = null;
+  /** The base-frame deadline. Armed per connection; NOTHING refreshes it. */
+  private baseDeadline: unknown = null;
   private retryTimer: unknown = null;
   private closed = false;
 
@@ -248,6 +295,7 @@ export class SolventStream {
     source.addEventListener("error", (event) => this.onTransportError(event, connection));
 
     this.touch();
+    this.armBaseDeadline();
   }
 
   /** Close the stream permanently. Idempotent; no further callbacks fire. */
@@ -319,6 +367,8 @@ export class SolventStream {
     }
     if (establishesBase) {
       this.baseReceived = true;
+      // The ONLY thing that disarms the base deadline: the base arriving.
+      this.clearBaseDeadline();
       // The ONLY reset of retry history: a valid base frame is what proves the
       // connection usable. Neither HTTP `open` nor a heartbeat comment does.
       this.failedAttempts = 0;
@@ -354,10 +404,16 @@ export class SolventStream {
 
   private onHeartbeatFrame(event: MessageLike, connection: number): void {
     if (this.closed || connection !== this.connectionCount || this.source === null) return;
-    // Liveness only — a heartbeat is not a base frame and does not reset the
-    // retry history (a server heartbeating without ever sending its snapshot
-    // must not pin the backoff at attempt one).
+    // TRANSPORT liveness only: the comment proves bytes still flow, so it may
+    // feed the frame watchdog. It is not a base frame, it does not reset the
+    // retry history, and it NEVER extends the base-frame deadline (a bound
+    // that liveness signals can extend is not a bound).
     this.touch();
+    // Nor is it CONSUMER-visible liveness before the base: surfacing a
+    // pre-base comment through `onHeartbeat` is exactly the "apparently
+    // healthy" signal that would let a consumer keep rendering the previous
+    // connection's stale data over a reconnect that has delivered nothing.
+    if (!this.baseReceived) return;
     const raw = (event.data ?? "").replace(/^heartbeat\s*/, "").trim();
     const unix = /^[0-9]+$/.test(raw) ? Number(raw) : null;
     this.options.onHeartbeat?.(unix);
@@ -410,6 +466,57 @@ export class SolventStream {
     }
   }
 
+  /**
+   * Arm the base-frame deadline for the connection just opened.
+   *
+   * Deliberately NOTHING refreshes this timer — not a heartbeat comment, not
+   * the transport's `open`, not the watchdog's `touch()`. It is disarmed by
+   * exactly one thing: the base frame arriving (`onFrame`). Unlike the
+   * watchdog there is no elapsed-time re-check on expiry, because no
+   * intervening activity is allowed to move the deadline.
+   */
+  private armBaseDeadline(): void {
+    this.clearBaseDeadline();
+    const timeout = this.resolveBaseFrameTimeout();
+    if (timeout <= 0 || this.closed) return;
+    const connection = this.connectionCount;
+    this.baseDeadline = this.scheduler.setTimeout(() => {
+      this.baseDeadline = null;
+      if (this.closed || connection !== this.connectionCount || this.source === null) return;
+      if (this.baseReceived) return;
+      this.raise(
+        new StreamProtocolError(
+          "snapshot",
+          connection,
+          `connection ${connection} delivered no base frame within ${timeout}ms: the contract ` +
+            `sends a snapshot (or \`unavailable\`) on EVERY connection before anything else. ` +
+            `Heartbeat comments do not extend this deadline — a connection that heartbeats ` +
+            `without its base is transport-alive and unusable, and holding it open would let ` +
+            `a consumer keep rendering the previous connection's stale data behind an ` +
+            `apparently healthy liveness signal. The attempt counts as FAILED and the stream ` +
+            `reconnects under backoff`,
+        ),
+      );
+      this.dropSource();
+      this.scheduleReconnect();
+    }, timeout);
+  }
+
+  /** The effective base-frame deadline. See `StreamOptions.baseFrameTimeoutMs`. */
+  private resolveBaseFrameTimeout(): number {
+    const configured = this.options.baseFrameTimeoutMs;
+    if (configured !== undefined) return configured;
+    const heartbeat = this.options.heartbeatTimeoutMs ?? 0;
+    return heartbeat > 0 ? heartbeat : DEFAULT_BASE_FRAME_TIMEOUT_MS;
+  }
+
+  private clearBaseDeadline(): void {
+    if (this.baseDeadline !== null) {
+      this.scheduler.clearTimeout(this.baseDeadline);
+      this.baseDeadline = null;
+    }
+  }
+
   private clearRetryTimer(): void {
     if (this.retryTimer !== null) {
       this.scheduler.clearTimeout(this.retryTimer);
@@ -421,6 +528,7 @@ export class SolventStream {
     const source = this.source;
     this.source = null;
     this.clearWatchdog();
+    this.clearBaseDeadline();
     if (source !== null) {
       try {
         source.close();

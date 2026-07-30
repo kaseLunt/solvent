@@ -269,29 +269,26 @@ describe("lookup() refuses a body that contradicts itself", () => {
 // ---------------------------------------------------------------------------
 // Round-1 review fixes.
 //
-// H1: the union is SEALED — each arm carries `found` as its literal, the
-//     three-valued field is off the discriminated response, and the primary
-//     address methods return the lookup rather than the raw wire body.
+// H1: the union is SEALED — the three-valued field is off the discriminated
+//     response, and the primary address methods return the lookup rather than
+//     the raw wire body. (Round 1 also gave each arm `found` as its literal;
+//     round 2 removed the field from every arm — any top-level `found`
+//     presents `boolean | null` on an unnarrowed result — so `outcome` is now
+//     the sole discriminant. See the round-2 H1 suite at the end of this
+//     file.)
 // H2: the lookup_complete <-> withheld_engines consistency check runs BEFORE
 //     the found branch, on all three outcomes.
 // ---------------------------------------------------------------------------
 
 describe("the union is SEALED (round-1 H1)", () => {
-  it("each arm carries `found` as its literal — a second discriminant", () => {
-    expect(lookup(fixtures.addressAave).found).toBe(true);
-    expect(lookup(fixtures.addressNotFound).found).toBe(false);
-    expect(lookup(fixtures.addressUnknowable).found).toBeNull();
-  });
-
-  it("narrowing on `found === false` reaches the definitive-negative arm alone", () => {
+  it("narrowing on `outcome === \"not-found\"` reaches the definitive-negative arm alone", () => {
     const result = lookup(fixtures.addressNotFound);
-    if (result.found === false) {
+    if (result.outcome === "not-found") {
       // Compile-level proof: `complete` narrows to the literal `true`.
       const complete: true = result.complete;
       expect(complete).toBe(true);
-      expect(result.outcome).toBe("not-found");
     } else {
-      throw new Error("the definitive-negative fixture must narrow to found === false");
+      throw new Error("the definitive-negative fixture must narrow to outcome === 'not-found'");
     }
   });
 
@@ -300,8 +297,8 @@ describe("the union is SEALED (round-1 H1)", () => {
     expect(Object.hasOwn(result.response, "found")).toBe(false);
     // @ts-expect-error — `found` does not exist on the sealed response: the
     // wide `boolean | null` is unreachable from a Lookup without a type
-    // assertion. Read the arm's literal `found`, or go through an accessor
-    // whose name declares the hazard (`addressRaw`).
+    // assertion. Branch on `outcome`, or go through an accessor whose name
+    // declares the hazard (`addressRaw`).
     expect(result.response.found).toBeUndefined();
     // The data a consumer renders is still all there.
     expect(result.response.positions).toHaveLength(1);
@@ -314,7 +311,6 @@ describe("the PRIMARY address paths return the discriminated lookup (round-1 H1)
     const path = `/v1/address/${PINNED.accounts.aave}`;
     const result = await clientFor(path, FIXTURE_FILES.addressUnknowable).address(PINNED.accounts.aave);
     expect(result.outcome).toBe("unknowable");
-    expect(result.found).toBeNull();
     expect(result.complete).toBe(false);
     expect(result.withheldEngines).toHaveLength(1);
     expect(Object.hasOwn(result.response, "found")).toBe(false);
@@ -324,7 +320,6 @@ describe("the PRIMARY address paths return the discriminated lookup (round-1 H1)
     const path = `/v1/address/${PINNED.accounts.aave}/stress`;
     const result = await clientFor(path, FIXTURE_FILES.stressUnknowable).addressStress(PINNED.accounts.aave);
     expect(result.outcome).toBe("unknowable");
-    expect(result.found).toBeNull();
     expect(result.response.scenarios).toEqual([]);
   });
 
@@ -418,5 +413,107 @@ describe("coverage is now a BOOK-WIDE claim", () => {
     expect(book.coverage.withheld_engines).toHaveLength(1);
     expect(book.coverage.withheld_engines[0]?.engine).toBe(PINNED.engines.aave);
     expect(book.coverage.stress_coverage_is_full).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-2 review fix (H1): `outcome` is the ONLY discriminant.
+//
+// Wave 1 sealed `response` but left each arm a top-level literal `found`.
+// Round 2 correctly observed that ANY top-level `found`, literal or not,
+// presents `boolean | null` on an UNNARROWED result — so
+// `if (!result.found) renderNoPosition()` still compiled and mapped
+// `unknowable` to a definitive negative through the primary methods
+// themselves. Removing the field completes wave 1's own logic rather than
+// reversing it: a non-empty string literal cannot be falsiness-conflated
+// (`!result.outcome` is dead code), and narrowing it requires `===`.
+//
+// The @ts-expect-error directives below are PERMANENT enforcement, the same
+// pattern as the response-seal test above: if `found` ever returns to any arm,
+// the directive goes unused and `npm run typecheck` fails.
+// ---------------------------------------------------------------------------
+
+describe("`outcome` is the SOLE discriminant — no arm carries `found` (round-2 H1)", () => {
+  it("PERMANENT: `result.found` does not exist on an unnarrowed lookup", () => {
+    const result = lookup(fixtures.addressUnknowable);
+    // @ts-expect-error — no top-level `found` on the Lookup union: the field
+    // whose falsiness conflated "cannot answer" with "no position" is not on
+    // the public surface at all. Branch on `outcome`.
+    const trapped = result.found;
+    expect(trapped).toBeUndefined();
+    expect(result.outcome).toBe("unknowable");
+  });
+
+  it("PERMANENT: the reviewer's exact line — `if (!result.found)` — no longer compiles", () => {
+    const result = lookup(fixtures.addressUnknowable);
+    let rendered = "";
+    // @ts-expect-error — the falsiness trap is closed at the type level. This
+    // is the exact consumer line round 2 flagged; were the type not refusing
+    // it, the runtime WOULD take the false-negative branch (asserted below),
+    // which is precisely why the field cannot exist.
+    if (!result.found) rendered = "no position";
+    expect(rendered).toBe("no position"); // the branch a compiling `!found` takes
+    expect(result.outcome).toBe("unknowable"); // on an answer that is NOT "no position"
+  });
+
+  it("PERMANENT: `found` is absent from every NARROWED arm too", () => {
+    // Restoring the literal on ANY single arm re-opens the unnarrowed
+    // `boolean | null` presentation, so each arm is pinned separately.
+    const positive = lookup(fixtures.addressAave);
+    if (positive.outcome !== "found") throw new Error("fixture must discriminate to found");
+    // @ts-expect-error — no `found` on the "found" arm.
+    expect(positive.found).toBeUndefined();
+
+    const negative = lookup(fixtures.addressNotFound);
+    if (negative.outcome !== "not-found") throw new Error("fixture must discriminate to not-found");
+    // @ts-expect-error — no `found` on the "not-found" arm.
+    expect(negative.found).toBeUndefined();
+
+    const unknowable = lookup(fixtures.addressUnknowable);
+    if (unknowable.outcome !== "unknowable") throw new Error("fixture must discriminate to unknowable");
+    // @ts-expect-error — no `found` on the "unknowable" arm.
+    expect(unknowable.found).toBeUndefined();
+  });
+
+  it("no arm carries `found` at RUNTIME either", () => {
+    for (const result of [
+      lookup(fixtures.addressAave),
+      lookup(fixtures.addressNotFound),
+      lookup(fixtures.addressUnknowable),
+      lookup(fixtures.addressPartial),
+      lookup(fixtures.stressAave),
+      lookup(fixtures.stressUnknowable),
+    ]) {
+      expect(Object.hasOwn(result, "found")).toBe(false);
+    }
+  });
+
+  it("PERMANENT: the direct primary-method path is closed — client.address()", async () => {
+    const path = `/v1/address/${PINNED.accounts.aave}`;
+    const result = await clientFor(path, FIXTURE_FILES.addressUnknowable).address(PINNED.accounts.aave);
+    // @ts-expect-error — an unnarrowed result from the PRIMARY method exposes
+    // no `found`: this is the direct path round 2 showed the response-seal
+    // alone could not close.
+    expect(result.found).toBeUndefined();
+    expect(Object.hasOwn(result, "found")).toBe(false);
+    expect(result.outcome).toBe("unknowable");
+  });
+
+  it("PERMANENT: and client.addressStress()", async () => {
+    const path = `/v1/address/${PINNED.accounts.aave}/stress`;
+    const result = await clientFor(path, FIXTURE_FILES.stressUnknowable).addressStress(PINNED.accounts.aave);
+    // @ts-expect-error — same law on the stress lookup.
+    expect(result.found).toBeUndefined();
+    expect(Object.hasOwn(result, "found")).toBe(false);
+    expect(result.outcome).toBe("unknowable");
+  });
+
+  it("the wire-level `found` stays where its name declares the hazard: the RAW surface", async () => {
+    const path = `/v1/address/${PINNED.accounts.aave}`;
+    const body = await clientFor(path, FIXTURE_FILES.addressUnknowable).addressRaw(PINNED.accounts.aave);
+    // Unchanged by this fix: the raw accessors carry the contract's
+    // three-valued field, and `response` remains Omit'd/sealed (wave 1).
+    expect(body.found).toBeNull();
+    expect(Object.hasOwn(body, "found")).toBe(true);
   });
 });

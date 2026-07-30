@@ -22,18 +22,23 @@
 // the one line of code that gets it wrong.
 //
 // So the fix is an AFFIRMATIVE api: `lookup()` returns a discriminated union
-// whose tags are safe to branch on. `outcome` has three cases and no boolean
-// anywhere; `found` is carried as each arm's LITERAL (`true`, `false`, `null`),
-// so comparing it with `===` narrows the whole result. A consumer that switches
-// on `outcome` cannot fall into the "no position" branch by accident, and one
-// that adds a `default: assertNever` gets a compile error if the vocabulary
-// ever grows again.
+// whose SOLE discriminant is `outcome` — three string literals and no boolean
+// anywhere. A non-empty string literal cannot be falsiness-conflated
+// (`!result.outcome` is dead code) and narrowing it requires `===`, so a
+// consumer that switches on `outcome` cannot fall into the "no position"
+// branch by accident, and one that adds a `default: assertNever` gets a
+// compile error if the vocabulary ever grows again.
 //
-// The union is SEALED: the wide `boolean | null` field is not reachable from
-// any arm — `response` carries everything else the wire said, with `found`
-// removed at the type level AND at runtime. The unrefined wire body stays
-// available where its name declares the hazard: `SolventClient.addressRaw()` /
-// `addressStressRaw()`, or whatever body the caller handed to `lookup()`.
+// The union is SEALED, and no arm carries a top-level `found` AT ALL. Round 1
+// gave each arm `found` as its literal (`true`/`false`/`null`) as a second
+// discriminant; round 2 established that ANY top-level `found`, literal or
+// not, presents `boolean | null` on an UNNARROWED result — so
+// `if (!result.found)` still compiled through the primary methods themselves.
+// Removing the field completes the seal: `response` carries everything else
+// the wire said, with `found` removed at the type level AND at runtime, on
+// every arm. The unrefined wire body stays available where its name declares
+// the hazard: `SolventClient.addressRaw()` / `addressStressRaw()`, or whatever
+// body the caller handed to `lookup()`.
 
 import { ContractInvariantError } from "./errors.js";
 import type { AddressResponse, EngineRefusal, StressResponse } from "./types.js";
@@ -50,18 +55,23 @@ export interface LookupBearing {
 }
 
 /**
- * A lookup, discriminated on `outcome` (and equally on the literal `found`).
+ * A lookup, discriminated on `outcome` — the SOLE discriminant.
+ *
+ * No arm carries a top-level `found`: any such field, literal or not, would
+ * present `boolean | null` on an unnarrowed result and let `if (!result.found)`
+ * compile — the exact falsiness trap this union exists to close. The wire's
+ * three-valued `found` lives only on the RAW surface (`addressRaw()` /
+ * `addressStressRaw()`).
  *
  * `response` is the whole body MINUS the three-valued `found` field: everything
  * a consumer renders is there, and the one field that conflates "no position"
- * with "cannot answer" under a `!` is not. Branch on `outcome`, or on
- * `found === false` — never on falsiness.
+ * with "cannot answer" under a `!` is not. Branch on `outcome`, with `===` or
+ * a `switch` — falsiness has nothing to grab.
  */
 export type Lookup<T extends LookupBearing> =
   | {
+      /** A positive existence claim: at least one position was found. */
       outcome: "found";
-      /** The literal `true`: a positive existence claim. */
-      found: true;
       /**
        * Whether every engine could be consulted. When false, the positions on
        * the response are a FLOOR: more may exist behind a withheld engine.
@@ -73,9 +83,8 @@ export type Lookup<T extends LookupBearing> =
       response: Omit<T, "found">;
     }
   | {
+      /** The definitive negative: the ONLY state in which "no position" is true. */
       outcome: "not-found";
-      /** The literal `false`: the only state in which "no position" is true. */
-      found: false;
       /** Necessarily true: a definitive negative requires a complete lookup. */
       complete: true;
       /** Necessarily empty: a complete lookup withheld nothing. */
@@ -85,9 +94,8 @@ export type Lookup<T extends LookupBearing> =
       response: Omit<T, "found">;
     }
   | {
+      /** The answer cannot be established. NEVER "no position". */
       outcome: "unknowable";
-      /** The literal `null`: the answer cannot be established. NEVER "no position". */
-      found: null;
       /** Necessarily false: that is what makes the answer unestablishable. */
       complete: false;
       /** The engines that could not be consulted. Never empty in this case. */
@@ -149,7 +157,7 @@ export function lookup<T extends LookupBearing>(response: T): Lookup<T> {
   }
 
   if (found === true) {
-    return { outcome: "found", found: true, complete, withheldEngines: withheld, note, response: sealed };
+    return { outcome: "found", complete, withheldEngines: withheld, note, response: sealed };
   }
 
   if (found === false) {
@@ -167,7 +175,7 @@ export function lookup<T extends LookupBearing>(response: T): Lookup<T> {
           `the false certainty this surface refuses to publish`,
       );
     }
-    return { outcome: "not-found", found: false, complete: true, withheldEngines: withheld, note, response: sealed };
+    return { outcome: "not-found", complete: true, withheldEngines: withheld, note, response: sealed };
   }
 
   // found === null.
@@ -179,7 +187,7 @@ export function lookup<T extends LookupBearing>(response: T): Lookup<T> {
         `engine(s). Null must name what prevented the answer`,
     );
   }
-  return { outcome: "unknowable", found: null, complete: false, withheldEngines: withheld, note, response: sealed };
+  return { outcome: "unknowable", complete: false, withheldEngines: withheld, note, response: sealed };
 }
 
 /**

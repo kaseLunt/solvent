@@ -157,8 +157,9 @@ export class SolventClient {
    * On the wire `found` is THREE-VALUED — `true`, `false`, or `null` when a
    * withheld engine makes the answer unestablishable — and `!found` treats
    * "cannot answer" as "no position". So this method does not hand back the
-   * raw body: it returns `lookup(body)`, whose `outcome` has three cases and
-   * whose `found` is each arm's literal, and it throws
+   * raw body: it returns `lookup(body)`, whose SOLE discriminant `outcome` has
+   * three string-literal cases and which carries no top-level `found` at all
+   * (`if (!result.found)` does not compile), and it throws
    * `ContractInvariantError` on a body that contradicts itself. The unrefined
    * wire body is behind `addressRaw()`, whose name says what it is.
    */

@@ -16,7 +16,7 @@ export type {
   StreamResponseLike,
 } from "./fetch-event-source.js";
 
-export { SolventStream, STREAM_EVENTS } from "./sse.js";
+export { DEFAULT_BASE_FRAME_TIMEOUT_MS, SolventStream, STREAM_EVENTS } from "./sse.js";
 export type {
   EventSourceFactory,
   EventSourceLike,

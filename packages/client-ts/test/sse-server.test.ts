@@ -385,6 +385,49 @@ describe("the wire parser against real SSE bytes", () => {
     }
   });
 
+  it("comment-only connections exhaust maxAttempts over the real wire (round-2 H2)", async () => {
+    let connections = 0;
+    const timers: NodeJS.Timeout[] = [];
+    const server = createServer((_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-store",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders();
+      connections += 1;
+      // Bytes forever, base never: the transport looks perfectly healthy.
+      const timer = setInterval(() => res.write(heartbeat(1_800_000_000)), 5);
+      timers.push(timer);
+      res.on("close", () => clearInterval(timer));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    const c = collect(`http://127.0.0.1:${port}/v1/stream`, {
+      baseFrameTimeoutMs: 60,
+      reconnect: { minDelayMs: 10, maxDelayMs: 40, jitter: 0, maxAttempts: 3 },
+    });
+    try {
+      const deadline = Date.now() + 5000;
+      while (c.stream.currentState !== "closed" && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      // Each comment-only connection was a FAILED attempt: the policy
+      // terminated instead of holding an unusable stream "open" forever.
+      expect(c.stream.currentState).toBe("closed");
+      expect(connections).toBe(3);
+      // Not one comment surfaced as liveness, and nothing was delivered.
+      expect(c.beats).toEqual([]);
+      expect(c.events).toEqual([]);
+      expect(c.errors.some((e) => e.message.includes("giving up after 3"))).toBe(true);
+    } finally {
+      for (const timer of timers) clearInterval(timer);
+      c.stream.close();
+    }
+  });
+
   it("stops reading the socket on close()", async () => {
     const server = await sseServer();
     const c = collect(server.url);

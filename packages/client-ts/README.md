@@ -145,13 +145,16 @@ The nullable type is a deliberate breaking change, and on its own it protects
 nobody: `if (!found)` takes the same branch for `false` and `null`, and
 TypeScript raises nothing, because `!null` is legal. So the primary methods do
 not hand back the raw body at all: `address()` and `addressStress()` return a
-**sealed discriminated union**. `outcome` has three cases and no boolean
-anywhere; `found` is each arm's *literal* (`true`, `false`, `null`), so
-`result.found === false` narrows to the one arm where "no position" is true;
-and the wide `boolean | null` field is unreachable from every arm —
-`result.response` carries everything else the wire said, with `found` sealed
-off at the type level *and* at runtime. Branch on `outcome` or on
-`found === false`. Never on falsiness.
+**sealed discriminated union** whose *sole* discriminant is `outcome` — three
+string literals and no boolean anywhere. A non-empty string literal cannot be
+falsiness-conflated (`!result.outcome` is dead code) and narrowing it requires
+`===`. No arm carries a top-level `found` at all — any such field, literal or
+not, would present `boolean | null` on an unnarrowed result and let
+`if (!result.found)` compile — so that line is now a **compile error**, and a
+permanent `@ts-expect-error` test keeps it one. `result.response` carries
+everything else the wire said, with `found` sealed off at the type level *and*
+at runtime. Branch on `outcome`, with `===` or a `switch`. Never on falsiness —
+there is nothing left for falsiness to grab.
 
 ```ts
 const result = await client.address(addr);
@@ -196,6 +199,7 @@ import { fetchEventSource } from "@solvent/client";
 const stream = client.stream({
   eventSourceFactory: fetchEventSource(),   // see the heartbeat note below
   heartbeatTimeoutMs: 45_000,
+  baseFrameTimeoutMs: 45_000,               // the default follows heartbeatTimeoutMs; see below
   reconnect: { minDelayMs: 500, maxDelayMs: 30_000, jitter: 0.5 },
 
   onSnapshot: (payload, e) => {
@@ -235,6 +239,25 @@ jitter. The backoff resets only once a connection delivers its **base frame**
 (the snapshot, or `unavailable`) — an HTTP 200 alone is not evidence of a usable
 stream, so a server that accepts and closes before its first frame cannot pin
 every failure at attempt one.
+
+Each connection also gets a hard **base-frame deadline** (`baseFrameTimeoutMs`):
+if the base has not arrived within it, the connection is dropped, the attempt
+counts as *failed* (backoff grows, `maxAttempts` terminates), and the stream
+reconnects. Heartbeat comments **cannot extend this deadline**. A comment is a
+legitimate keepalive during a slow start — an honest proxy can emit them while
+its upstream stalls — so one is never an *instant* failure; but a connection
+that heartbeats forever without its base is transport-alive and unusable, and
+holding it open would let a consumer keep rendering the previous connection's
+stale data behind an apparently healthy liveness signal. For the same reason
+`onHeartbeat` fires only **after** the base: a pre-base comment is transport
+liveness, not consumer-visible liveness. The deadline defaults to
+`heartbeatTimeoutMs` when that is set — a connection gets the same window to
+prove itself usable as it gets to prove itself alive — else to 45s
+(`DEFAULT_BASE_FRAME_TIMEOUT_MS`, three times the server's 15s heartbeat
+cadence), and `0` disables it. Unlike `heartbeatTimeoutMs` it is **on by
+default**, because it needs no transport-dependent tuning: the base is a named
+event, visible on every transport, and the contract sends it on every
+connection before anything else.
 
 ### Two transports, and the heartbeat caveat
 
@@ -332,12 +355,12 @@ client-ts:
 | Suite | Claim |
 | --- | --- |
 | `conformance.test.ts` + the `satisfies` clauses in `test/fixtures/data.ts` | The generated types accept every recorded response — checked by `tsc`. Seven `@ts-expect-error` cases (money as a number, an unknown field, a missing required field, a bad enum, a forbidden null, a nullable read as present, `found` read as a boolean) make the build fail if they *stop* being errors, so "the types compile" is not a statement about a type that accepts anything. |
-| `lookup.test.ts` | Three-valued `found` as **contract law**: `null` round-trips as null through the raw accessors on both endpoints, the `!found` trap is demonstrated, all three outcomes discriminate, `found: true` under an incomplete lookup is a floor, the union is SEALED (literal `found` per arm, the wide field off the response), the primary `address()`/`addressStress()` return the discriminated lookup, and self-contradicting bodies — including the contradictory positive — are refused. |
+| `lookup.test.ts` | Three-valued `found` as **contract law**: `null` round-trips as null through the raw accessors on both endpoints, the `!found` trap is demonstrated, all three outcomes discriminate, a found-outcome under an incomplete lookup is a floor, the union is SEALED (`outcome` the sole discriminant, NO top-level `found` on any arm — permanent `@ts-expect-error` proof, unnarrowed and per arm — and the wide field off the response), the primary `address()`/`addressStress()` return the discriminated lookup, and self-contradicting bodies — including the contradictory positive — are refused. |
 | `fixtures.test.ts` | Every fixture validates against `api/openapi.yaml` itself — `additionalProperties: false`, the `Decimal` pattern, required fields, enums, nullability. Seven negative controls prove the validator can reject. Plus: the committed `.json` bytes and the type-checked literals are the same response. |
 | `exact-values.test.ts` | The exact numbers, through the real client. Every asserted value is mirrored from `cmd/api`'s seeded Go suite, so client and server pin **the same** arithmetic. |
 | `decimal.test.ts` | Exact round trips, precision-loss refusal, and the negative / zero / max-uint256-scale cases. |
-| `sse.test.ts` | Connect, snapshot, tick, degradation, unavailable, reconnect backoff, heartbeat timeout — against a mock transport with injected timers, so the backoff is arithmetic rather than a race. Plus the round-1 laws: no unbased delivery (a pre-snapshot tick is reported, dropped, and reconnected), and retry history resets only on a base frame. |
-| `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, CRLF split **between `\r` and `\n`** at every line boundary for every event type, a pre-snapshot tick dropped and recovered over the wire, repeated 200-then-close connections exhausting `maxAttempts`, and a server that closes the connection. |
+| `sse.test.ts` | Connect, snapshot, tick, degradation, unavailable, reconnect backoff, heartbeat timeout — against a mock transport with injected timers, so the backoff is arithmetic rather than a race. Plus the round-1 laws: no unbased delivery (a pre-snapshot tick is reported, dropped, and reconnected), and retry history resets only on a base frame. Plus the round-2 law: `onHeartbeat` never fires pre-base, the base-frame deadline is un-extendable by comments (proven to the exact ms), comment-only connections exhaust `maxAttempts` with zero liveness surfaced, and a slow-but-honest server (comments, then base within the deadline) connects fine. |
+| `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, CRLF split **between `\r` and `\n`** at every line boundary for every event type, a pre-snapshot tick dropped and recovered over the wire, repeated 200-then-close connections exhausting `maxAttempts`, comment-only connections exhausting `maxAttempts` without surfacing liveness, and a server that closes the connection. |
 | `errors.test.ts` | The whole taxonomy above. |
 | `drift.test.ts` | The contract-drift gate, plus package hygiene: zero runtime dependencies, exact dev-dependency pins, `private: true`, and the ESM exports map. |
 

@@ -241,7 +241,10 @@ describe("snapshot-on-connect", () => {
     const h = harness();
     h.latest().emit("snapshot", fixtures.streamSnapshot);
     h.latest().fail();
-    h.scheduler.advance(60_000);
+    // Just past the first (jittered) retry delay — NOT far past the base-frame
+    // deadline, which would rightly fail the new connection for never
+    // delivering the snapshot this test is about to send (round-2 H2).
+    h.scheduler.advance(500);
     h.latest().emit("snapshot", fixtures.streamSnapshot);
 
     const snapshots = h.events.filter((e) => e.isSnapshot);
@@ -737,5 +740,167 @@ describe("state transitions are observable", () => {
     } finally {
       if (saved !== undefined) (globalThis as { EventSource?: unknown }).EventSource = saved;
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round-2 review fix (H2): pre-base heartbeats must not mask an unusable
+// connection.
+//
+// Two teeth, both required:
+//  (a) `onHeartbeat` is NOT invoked before the connection's base arrives — a
+//      pre-base comment is transport liveness, never consumer-visible
+//      liveness. Surfacing it is exactly the "apparently healthy" signal that
+//      lets a consumer retain connection N's stale data while connection N+1
+//      heartbeats forever.
+//  (b) A connection that never delivers its base within `baseFrameTimeoutMs`
+//      is a FAILED attempt: dropped, counted, reconnected under the wave-1
+//      backoff law. Heartbeats may keep the frame watchdog fed — an SSE
+//      comment is a legitimate keepalive during a slow start — but they NEVER
+//      extend the base deadline.
+// ---------------------------------------------------------------------------
+
+describe("pre-base heartbeats cannot keep an unusable connection alive (round-2 H2)", () => {
+  it("comment-only connections EXHAUST maxAttempts without a single onHeartbeat", () => {
+    const h = harness({
+      heartbeatTimeoutMs: 45_000,
+      reconnect: { minDelayMs: 100, jitter: 0, maxAttempts: 3 },
+    });
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      expect(h.sources).toHaveLength(attempt);
+      h.latest().open();
+      // A comment every 15s: bytes flow, the watchdog stays fed, and the base
+      // never comes.
+      h.scheduler.advance(15_000);
+      h.latest().beat(1_800_000_015);
+      h.scheduler.advance(15_000);
+      h.latest().beat(1_800_000_030);
+      // 45s after connect: the base deadline fires DESPITE the comment 15s ago.
+      h.scheduler.advance(15_000);
+      if (attempt < 3) h.scheduler.advance(100 * 2 ** (attempt - 1));
+    }
+    expect(h.stream.currentState).toBe("closed");
+    expect(h.sources).toHaveLength(3);
+    // NOT ONE consumer-visible liveness signal from three unusable connections.
+    expect(h.beats).toEqual([]);
+    const protocol = h.errors.filter((e) => e instanceof StreamProtocolError);
+    expect(protocol).toHaveLength(3);
+    expect(protocol[0]?.message).toContain("no base frame");
+    expect((h.errors.at(-1) as StreamTransportError).message).toContain("giving up after 3");
+  });
+
+  it("a slow-but-honest server — comments, then the base within the deadline — connects fine and surfaces liveness only after the base", () => {
+    const h = harness({ heartbeatTimeoutMs: 45_000 });
+    h.latest().open();
+    // An honest proxy keeps the connection warm while its upstream starts slowly.
+    h.scheduler.advance(15_000);
+    h.latest().beat(1_800_000_015); // pre-base: NOT consumer-visible liveness
+    h.scheduler.advance(15_000);
+    h.latest().emit("snapshot", fixtures.streamSnapshot); // 30s < the 45s deadline
+    h.scheduler.advance(15_000);
+    h.latest().beat(1_800_000_045); // post-base: surfaces
+
+    expect(h.errors).toEqual([]);
+    expect(h.sources).toHaveLength(1);
+    expect(h.stream.currentState).toBe("open");
+    expect(h.events.map((e) => e.event)).toEqual(["snapshot"]);
+    // Only the post-base comment reached the consumer.
+    expect(h.beats).toEqual([1_800_000_045]);
+    // And the connection is genuinely usable: a later tick delivers.
+    h.latest().emit("batch", fixtures.streamBatch);
+    expect(h.events.map((e) => e.event)).toEqual(["snapshot", "batch"]);
+  });
+
+  it("a pre-base comment NEVER extends the base deadline — expiry lands exactly on schedule", () => {
+    // Deliberately NO onHeartbeat handler: this test discriminates the
+    // deadline-refresh mutation from the pre-base-surfacing mutation — its
+    // outcome must be identical whether or not pre-base comments would have
+    // been surfaced, and turn ONLY on whether the deadline moved.
+    const scheduler = new FakeScheduler();
+    const errors: SolventError[] = [];
+    const sources: MockSource[] = [];
+    const stream = new SolventStream("http://localhost:8080/v1/stream", {
+      scheduler,
+      heartbeatTimeoutMs: 45_000,
+      reconnect: { minDelayMs: 100, jitter: 0 },
+      eventSourceFactory: (url) => {
+        const source = new MockSource(url);
+        sources.push(source);
+        return source;
+      },
+      onError: (e) => errors.push(e),
+    });
+    try {
+      sources[0]?.open();
+      scheduler.advance(20_000);
+      sources[0]?.beat(1_800_000_020);
+      scheduler.advance(20_000);
+      sources[0]?.beat(1_800_000_040);
+      // One ms shy of the deadline armed at connect: still open.
+      scheduler.advance(4_999);
+      expect(errors).toEqual([]);
+      expect(stream.currentState).toBe("open");
+      // 45_000ms after connect: the deadline fires — the comment 5s ago bought
+      // the connection NOTHING.
+      scheduler.advance(1);
+      expect(errors[0]).toBeInstanceOf(StreamProtocolError);
+      expect(errors[0]?.message).toContain("no base frame");
+      expect(sources[0]?.closed).toBe(true);
+      expect(stream.currentState).toBe("waiting");
+    } finally {
+      stream.close();
+    }
+  });
+
+  it("the deadline defaults to `heartbeatTimeoutMs` when heartbeat monitoring is on", () => {
+    const h = harness({ heartbeatTimeoutMs: 20_000, reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().open();
+    h.scheduler.advance(15_000);
+    h.latest().beat(1_800_000_015); // keeps the WATCHDOG fed; the deadline is unmoved
+    h.scheduler.advance(4_999);
+    expect(h.errors).toEqual([]);
+    h.scheduler.advance(1); // 20_000ms after connect
+    expect(h.errors[0]).toBeInstanceOf(StreamProtocolError);
+    expect(h.errors[0]?.message).toContain("20000ms");
+  });
+
+  it("the deadline holds by DEFAULT even with heartbeat monitoring off (45s)", () => {
+    // `heartbeatTimeoutMs` is opt-in because its right value depends on whether
+    // the transport can see comment frames. The base frame is a NAMED event,
+    // visible on every transport, and the contract sends it on every connection
+    // before anything else — so the base deadline needs no such opt-in.
+    const h = harness({ reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().open();
+    h.scheduler.advance(44_999);
+    expect(h.errors).toEqual([]);
+    h.scheduler.advance(1);
+    expect(h.errors[0]).toBeInstanceOf(StreamProtocolError);
+    expect(h.errors[0]?.message).toContain("45000ms");
+    expect(h.stream.currentState).toBe("waiting");
+  });
+
+  it("baseFrameTimeoutMs: 0 disables the deadline explicitly", () => {
+    const h = harness({ baseFrameTimeoutMs: 0 });
+    h.latest().open();
+    h.scheduler.advance(10 * 60 * 1000);
+    expect(h.errors).toEqual([]);
+    expect(h.sources).toHaveLength(1);
+  });
+
+  it("an expiry is a FAILED attempt under the wave-1 backoff law", () => {
+    const h = harness({ baseFrameTimeoutMs: 1_000, reconnect: { minDelayMs: 100, jitter: 0 } });
+    h.latest().open();
+    h.scheduler.advance(1_000);
+    expect(h.scheduler.pendingDelays()).toEqual([100]);
+    h.scheduler.advance(100);
+    h.latest().open();
+    h.scheduler.advance(1_000);
+    // The delay GREW: an expired base deadline counts exactly like any failure.
+    expect(h.scheduler.pendingDelays()).toEqual([200]);
+    // And a connection that DOES deliver its base resets the history (M5 law).
+    h.scheduler.advance(200);
+    h.latest().emit("snapshot", fixtures.streamSnapshot);
+    h.latest().fail();
+    expect(h.scheduler.pendingDelays()).toEqual([100]);
   });
 });
