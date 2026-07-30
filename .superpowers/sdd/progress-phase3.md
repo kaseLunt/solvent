@@ -1366,6 +1366,19 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Fixture-backed-over-transcribed is now the RULE for anything ABI-shaped in
   the gate. NEXT: Task 6 round 4 (should be closing) queues behind Task 7
   round 3 (running).
+- CODEX ROUND 3 ON TASK 7 (session 019fb265-225c-78b2-afee-f09b3f777ffc,
+  ~8min, fresh reviewer, t7r3 @ da5ed0a): needs-attention — 1H: 'the claimed
+  regression evidence is absent from the reviewed tree' (fix code judged
+  coherent). **FOURTH STAGING MISS, same class**: cmd/api/round2_db_test.go
+  (9 tests, +229 — the withheld-lookup/coverage/rate-index regressions the
+  six mutants were killed against) sat UNTRACKED. Committed bc0c703, verified
+  green (cmd/api 122 tests). Four misses, one root cause: git-add lists built
+  from modified files while NEW test files sit untracked; the both-ways rule
+  is now applied MECHANICALLY (git status including ?? on the wave's trees
+  before every wave commit). Task 7 round 4 (closing confirmation) dispatched
+  on 1ebe6b6..bc0c703. Reviewer ops note carried forward: strip trailing '*'
+  from ls glob + native Windows path for the companion script (MODULE_NOT_
+  FOUND otherwise).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
