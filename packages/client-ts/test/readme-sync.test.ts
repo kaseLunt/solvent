@@ -41,9 +41,10 @@
 //
 // Both are legal TypeScript, so the TYPE system cannot kill a README that
 // teaches them; this lint can. A type-level coverage law below DERIVES the
-// sealed-field inventory from the generated contract and the refined shapes
-// and holds `SEALED_FIELD_NAMES` to it both ways, so a future sealed field
-// the vocabulary forgets is a compile error, not a docs gap. It remains a
+// sealed-field inventory from the generated contract (recursively — optional,
+// nested-anonymous and array-contained nullable booleans all count) and the
+// refined shapes and holds `SEALED_FIELD_NAMES` to it both ways, so a future
+// sealed field the vocabulary forgets is a compile error, not a docs gap. It remains a
 // DOCS lint, not a semantic guarantee: it scans only the README's fenced
 // blocks, it matches names rather than types, an alias
 // (`const r = result; if (!r)`) evades it, and a chain broken by index access
@@ -156,32 +157,112 @@ const suspect = new RegExp(HAZARDOUS_NAMES.join("|"), "iu");
 
 // The type-level coverage law. This file fails to COMPILE — `npm run verify`
 // dies in typecheck, before any test runs — the day the contract grows a
-// nullable-boolean verdict field (any schema, any name) or the refined shapes
-// grow a sealed-union field that `SEALED_FIELD_NAMES` does not list, and the
-// day the list names a field the contract no longer seals.
+// nullable-boolean verdict field that `SEALED_FIELD_NAMES` does not list —
+// any schema, any name, any DEPTH: required or optional, directly on a named
+// schema, nested inside an anonymous inline object, or inside an array's
+// element type — or the refined shapes grow a sealed-union field the list
+// misses, and the day the list names a field the contract no longer seals.
 
-/** Keys of `T` whose (required-made) value type is exactly `boolean | null`. */
-type NullableBooleanKeys<T> = T extends readonly unknown[]
-  ? never
+/**
+ * The sweep's structural-recursion budget: one unit is spent entering an
+ * object's properties or an array's element type; primitives terminate for
+ * free. 13 units covers 13 nesting levels. Today's deepest chain is 8
+ * (StressResponse → scenarios[] → Scenario → results[] → ScenarioResult →
+ * projection → horizons[] → ProjectionHorizon), asserted WITH MARGIN by the
+ * probe constants below, which fail to compile — naming this tuple — the day
+ * the contract outgrows them. Maintenance: grow this tuple (and the probe)
+ * when that happens; never shrink it below the probe.
+ */
+type SweepBudget = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+
+/**
+ * Today's exact need — 8 levels. The margin probe re-runs the sweep on this
+ * budget, so a NINTH nesting level fails compilation as a maintenance ping
+ * while the real sweep still has five spare levels — never a coverage hole.
+ */
+type MarginProbeBudget = [1, 1, 1, 1, 1, 1, 1, 1];
+
+/**
+ * What the sweep yields when it must ENTER an object or array with an empty
+ * budget — a poisoned inventory member instead of a silently dropped
+ * subtree. It can never be listed in `SEALED_FIELD_NAMES`, so an
+ * under-budgeted sweep is a compile error (the probe constants below name
+ * the cause first), never a quietly narrower law.
+ */
+type SweepBudgetExhausted =
+  "the nullable-boolean sweep's recursion budget ran out before the contract's leaves — grow SweepBudget in test/readme-sync.test.ts";
+
+/**
+ * Keys at ANY depth under `T` whose value type is exactly `boolean | null`.
+ * The round-6 review showed the one-level predecessor missed three common
+ * shapes — each confirmed by compiler mutants as a silent bypass of the
+ * vocabulary seal. This sweep closes all three:
+ *
+ * - OPTIONAL properties: `field?: boolean | null` reads back as
+ *   `boolean | null | undefined`; `Required<T>[K]` strips the optionality
+ *   before both the exact-type check and the recursion.
+ * - NESTED objects: every property value is recursed into, named schema and
+ *   anonymous inline shape alike (the `ErrorBody.error` class).
+ * - ARRAYS: the element type is recursed into via `infer E`; the array's own
+ *   keys (`length`, methods) are never inspected, so an array contributes
+ *   nothing but its elements' findings.
+ *
+ * Unions distribute (a `Schema | null` value recurses into the schema and
+ * drops the null), and recursion is bounded by `Budget` — see
+ * `SweepBudgetExhausted` for the fail-closed behavior at the bound.
+ */
+type DeepNullableBooleanKeys<T, Budget extends readonly unknown[]> = T extends readonly (infer E)[]
+  ? Budget extends readonly [unknown, ...infer Rest]
+    ? DeepNullableBooleanKeys<E, Rest>
+    : SweepBudgetExhausted
   : T extends object
-    ? {
-        [K in keyof T]-?: [T[K]] extends [boolean | null]
-          ? [null] extends [T[K]]
-            ? K
-            : never
-          : never;
-      }[keyof T]
+    ? Budget extends readonly [unknown, ...infer Rest]
+      ? {
+          [K in keyof T]-?:
+            | ([Required<T>[K]] extends [boolean | null]
+                ? [null] extends [Required<T>[K]]
+                  ? K
+                  : never
+                : never)
+            | DeepNullableBooleanKeys<Required<T>[K], Rest>;
+        }[keyof T]
+      : SweepBudgetExhausted
     : never;
 
 /**
- * Every `boolean | null` field of EVERY named schema in the generated
- * contract — the source of truth, swept programmatically. (Honest limit: a
- * nullable boolean nested in an inline anonymous object would be missed;
- * today every object shape in the contract is a named schema.)
+ * Every `boolean | null` field reachable ANYWHERE under ANY named schema in
+ * the generated contract — the source of truth, swept recursively. (This
+ * comment previously claimed every object shape in the contract is a named
+ * schema; the round-6 review refuted that — `ErrorBody.error` is an
+ * anonymous inline object. The true current inventory: `ErrorBody.error` is
+ * the contract's one anonymous object shape, holding no nullable boolean
+ * today, and every nullable-boolean field today sits required on a named
+ * schema — `found` on AddressResponse/StressResponse, `liquidatable` on
+ * Position/StressState, `used_as_collateral` on Leg, `becomes_liquidatable`
+ * on ProjectionHorizon. The sweep no longer depends on any of that staying
+ * true.)
  */
-type WireNullableVerdictFields = {
-  [S in keyof components["schemas"]]: NullableBooleanKeys<components["schemas"][S]>;
+type DeepSchemaSweep<Budget extends readonly unknown[]> = {
+  [S in keyof components["schemas"]]: DeepNullableBooleanKeys<components["schemas"][S], Budget>;
 }[keyof components["schemas"]];
+
+type WireNullableVerdictFields = DeepSchemaSweep<SweepBudget>;
+
+// The budget probes. If the sweep ever bottomed out, the sentinel would join
+// the inventory and the coverage law below would fail too — but blaming the
+// vocabulary. These two fail FIRST, naming the budget. The margin probe
+// fails the day the contract grows its ninth structural level, while the
+// real sweep still covers thirteen — a maintenance warning, never a gap.
+const sweepBudgetCoversTheContract: [
+  Extract<WireNullableVerdictFields, SweepBudgetExhausted>,
+] extends [never]
+  ? true
+  : "the nullable-boolean sweep exhausted SweepBudget before the contract's leaves — grow SweepBudget in test/readme-sync.test.ts" = true;
+const sweepBudgetHasMargin: [
+  Extract<DeepSchemaSweep<MarginProbeBudget>, SweepBudgetExhausted>,
+] extends [never]
+  ? true
+  : "the generated contract now nests deeper than the 8 structural levels the margin probe assumes — grow MarginProbeBudget (and keep SweepBudget comfortably above it) in test/readme-sync.test.ts" = true;
 
 /** Keys of `T` whose value type is exactly `V` (mutual assignability). */
 type KeysWithExactValue<T, V> = {
@@ -327,14 +408,19 @@ describe("the README's fenced TypeScript is compiled documentation", () => {
 
   it("the lint vocabulary covers the sealed-field inventory (coverage law)", () => {
     // The load-bearing law is TYPE-LEVEL and lives at module scope: the two
-    // constants only compile while SEALED_FIELD_NAMES matches — both ways —
-    // the inventory derived from the generated contract (every `boolean |
-    // null` field of every schema) and from the refined shapes (every
-    // sealed-union verdict field). A future sealed field the lint would
-    // forget is a compile error `npm run verify` hits before any test runs;
-    // this test is the runtime witness that the law is in force.
+    // law constants only compile while SEALED_FIELD_NAMES matches — both
+    // ways — the inventory derived from the generated contract (every
+    // `boolean | null` field reachable ANYWHERE under every schema —
+    // optional, nested-anonymous and array-contained shapes included) and
+    // from the refined shapes (every sealed-union verdict field). The two
+    // budget probes keep the recursive sweep itself honest: it cannot run
+    // out of depth silently. A future sealed field the lint would forget is
+    // a compile error `npm run verify` hits before any test runs; this test
+    // is the runtime witness that the law is in force.
     expect(everySealedFieldIsListed).toBe(true);
     expect(everyListedFieldIsSealed).toBe(true);
+    expect(sweepBudgetCoversTheContract).toBe(true);
+    expect(sweepBudgetHasMargin).toBe(true);
     // And the vocabulary actually reaches the regex: every name — sealed
     // field or chain heuristic — triggers the lint on a minimal chain.
     for (const name of HAZARDOUS_NAMES) {
