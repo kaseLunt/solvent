@@ -334,10 +334,15 @@ func (r Rational) CmpScaled(v, scale *big.Int) int {
 	return l.Cmp(rr)
 }
 
-// FloorScaled returns floor(Num × scale / Den), the single fused floor
-// division. ok is false when the rational is infinite OR invalid — a renderer
-// asking for a display value from a quantity that has none gets nothing, never
-// a zero that looks like a number.
+// FloorScaled returns floor(Num × scale / Den) — one exact multiplication and
+// one truncating division, for rendering an exact ratio at a fixed scale. ok is
+// false when the rational is infinite OR invalid — a renderer asking for a
+// display value from a quantity that has none gets nothing, never a zero that
+// looks like a number.
+//
+// This is NOT the Aave component-7 law. That law is the wadDiv half-up composite
+// (AaveHealthFactorWad) and can sit one wad ULP ABOVE this value; use
+// AaveHealth.HealthFactorWad when the question is "what does the chain say".
 func (r Rational) FloorScaled(scale *big.Int) (v *big.Int, ok bool) {
 	if r.Infinite || !r.Valid() {
 		return nil, false
@@ -650,13 +655,15 @@ type AaveHealth struct {
 
 	TotalCollateralBase *big.Int
 	TotalDebtBase       *big.Int
-	// WeightedLTSum is Σ(CollateralBaseᵢ × LT_bpsᵢ), the EXACT weighted sum
-	// the fused health-factor division consumes. It is not divided down.
+	// WeightedLTSum is Σ(CollateralBaseᵢ × LT_bpsᵢ), the EXACT weighted sum the
+	// health-factor division consumes. It is not divided down, and it is not
+	// pre-rounded into base units.
 	WeightedLTSum *big.Int
 	// AvgLiquidationThresholdBps is component 6:
 	// floor(WeightedLTSum / TotalCollateralBase). nil when there is no
-	// collateral. It is a DISCLOSURE, not an input to the health factor —
-	// the deployed law fuses over WeightedLTSum directly (P-2).
+	// collateral. It is a DISCLOSURE, not an input to the health factor — the
+	// deployed law divides WeightedLTSum directly (P-2), and the source computes
+	// this average AFTER the health factor (GenericLogic.sol:167-173 vs :160-164).
 	AvgLiquidationThresholdBps *big.Int
 
 	// HealthFactorWad is the chain-identical value: the wadDiv HALF-UP

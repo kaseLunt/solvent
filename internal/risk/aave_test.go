@@ -311,6 +311,187 @@ func TestComputeAaveHealthComponent4LegsRoundOppositeWaysOnOneVector(t *testing.
 		"exactly one base unit apart: one ceiling step")
 }
 
+// TestComputeAaveHealthDebtCeilAccumulatesPerReserve is the CODEX-DEMANDED
+// regression vector for the multi-reserve bound.
+//
+// The rev-3 note originally claimed the rev-2 → rev-3 debt move was bounded by
+// ONE base unit. That is false, and this test is why: `mulDivCeil` is applied
+// per reserve inside `_getUserDebtInBaseCurrency` and the results are SUMMED
+// (GenericLogic.sol:141), so each debt-bearing reserve whose conversion leaves a
+// nonzero remainder contributes its own +1. The true bound is
+//
+//	0 ≤ D_rev3 − D_rev2 ≤ N,   N = debt-bearing reserves with a nonzero remainder
+//
+// and this market's registry lists THREE borrowables (USDC, PYUSD, FRAX), so N
+// reaches 3 on a fully-diversified borrower.
+//
+// The per-reserve structure is not a rounding preference — it is forced. Each
+// reserve divides by its OWN assetUnit (10^decimals), so for a book mixing 6-
+// and 18-decimal debt there is no single denominator a "sum the products, divide
+// once" form could even use. The two-reserve case below happens to share
+// decimals, which lets it ALSO refute that strawman with a distinct third value.
+func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
+	// One collateral leg, held constant: C = 20000000, LT = 8100 ⇒ Σ = 162000000000.
+	collateral := simpleReserve(aWeETH, 8, "20000000", "0", true)
+
+	// Each debt leg's integers, spelled out. Both remainder characters are
+	// represented, which shows the per-leg increment is 1 regardless of how big
+	// the remainder is — a pure ceiling does not care.
+	type debtLeg struct {
+		reserve               AaveReserve
+		price                 string
+		product, remainder    string
+		floorBase, halfUpBase string
+		ceilBase              string
+	}
+	usdc := debtLeg{
+		reserve: simpleReserve(aUSDC, 6, "0", "137216", false), price: "99992603",
+		product: "13720585013248", remainder: "13248", // sub-half
+		floorBase: "13720585", halfUpBase: "13720585", ceilBase: "13720586",
+	}
+	pyusd := debtLeg{
+		reserve: simpleReserve(aPYUSD, 6, "0", "137231", false), price: "99981000",
+		product: "13720492611000", remainder: "611000", // super-half
+		floorBase: "13720492", halfUpBase: "13720493", ceilBase: "13720493",
+	}
+	frax := debtLeg{
+		reserve: simpleReserve(aFRAX, 18, "0", "1000000000000000001", false), price: "99990000",
+		product: "99990000000000000099990000", remainder: "99990000", // sub-half, 18-dec
+		floorBase: "99990000", halfUpBase: "99990000", ceilBase: "99990001",
+	}
+
+	// run returns the pipeline's result plus the rev-2 (per-leg floor) and rev-3
+	// (per-leg ceil) debt totals, each ACCUMULATED from the per-leg integers
+	// rather than restated as a literal.
+	run := func(t *testing.T, legs []debtLeg) (h AaveHealth, rev2D, rev3D *big.Int) {
+		t.Helper()
+		in := AaveInput{
+			Marks:    testAaveMarks,
+			Account:  acctA,
+			Reserves: []AaveReserve{collateral},
+			Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+			Prices:   []PriceInput{adapterPrice(aWeETH, "100000000")},
+		}
+		for _, l := range legs {
+			in.Reserves = append(in.Reserves, l.reserve)
+			in.Prices = append(in.Prices, adapterPrice(l.reserve.Asset, l.price))
+		}
+		h, err := ComputeAaveHealth(in)
+		require.NoError(t, err)
+
+		// Per-leg: derive all three conventions from the leg's OWN inputs, check
+		// them against the recorded integers, and confirm the pipeline produced
+		// the ceiling.
+		rev2D, rev3D = new(big.Int), new(big.Int)
+		for i, l := range legs {
+			den := pow10(l.reserve.Decimals)
+			prod := new(big.Int).Mul(orZero(l.reserve.ScaledDebt), mustBig(t, l.price))
+			requireBig(t, l.product, prod, "leg %d product", i)
+
+			q, rem := new(big.Int).QuoRem(prod, den, new(big.Int))
+			requireBig(t, l.floorBase, q, "leg %d floor", i)
+			requireBig(t, l.remainder, rem, "leg %d remainder", i)
+
+			hu := new(big.Int).Add(prod, new(big.Int).Div(new(big.Int).Set(den), big.NewInt(2)))
+			requireBig(t, l.halfUpBase, hu.Div(hu, den), "leg %d half-up", i)
+
+			ceil := new(big.Int).Set(q)
+			if rem.Sign() != 0 {
+				ceil.Add(ceil, big.NewInt(1))
+			}
+			requireBig(t, l.ceilBase, ceil, "leg %d ceil", i)
+			requireBig(t, l.ceilBase, h.Reserves[i+1].DebtBase, "leg %d: the pipeline CEILS this leg", i)
+
+			rev2D.Add(rev2D, q)
+			rev3D.Add(rev3D, ceil)
+		}
+
+		// The accumulation: one +1 PER LEG with a nonzero remainder, not one overall.
+		requireBig(t, rev3D.String(), h.TotalDebtBase, "component 5 sums the per-reserve ceilings")
+		return h, rev2D, rev3D
+	}
+
+	t.Run("two debt reserves move total debt by +2", func(t *testing.T) {
+		h, rev2D, rev3D := run(t, []debtLeg{usdc, pyusd})
+
+		requireBig(t, "27441077", rev2D, "rev-2: floor 13720585 + floor 13720492")
+		requireBig(t, "27441079", rev3D, "rev-3: ceil 13720586 + ceil 13720493")
+		requireBig(t, "2", new(big.Int).Sub(rev3D, rev2D),
+			"TWO base units, not one — this is the assertion that makes the old bound false")
+		requireBig(t, "27441079", h.TotalDebtBase)
+		requireBig(t, "162000000000", h.WeightedLTSum)
+
+		// THE REFUTED THIRD FORM, available here because both legs are 6-decimal:
+		// sum the products and ceil ONCE. It lands between the two per-leg forms,
+		// so this vector separates all three at the same time.
+		totalProduct := new(big.Int).Add(mustBig(t, usdc.product), mustBig(t, pyusd.product))
+		requireBig(t, "27441077624248", totalProduct)
+		q, rem := new(big.Int).QuoRem(totalProduct, pow10(6), new(big.Int))
+		requireBig(t, "27441077", q)
+		requireBig(t, "624248", rem)
+		sumThenCeil := new(big.Int).Add(q, big.NewInt(1))
+		requireBig(t, "27441078", sumThenCeil, "REFUTED: one ceiling over the summed products")
+		require.Equal(t, 1, h.TotalDebtBase.Cmp(sumThenCeil),
+			"per-reserve ceilings sum HIGHER than a single ceiling over the sum — "+
+				"27441077 (rev-2) < 27441078 (sum-then-ceil) < 27441079 (deployed)")
+
+		// And the health factor separates on all three, in the safe direction:
+		// more debt ⇒ lower health factor.
+		requireBig(t, "590355794682854854", h.HealthFactorWad)
+		rev2, ok := AaveHealthFactorWad(mustBig(t, "162000000000"), rev2D)
+		require.True(t, ok)
+		requireBig(t, "590355837710014078", rev2, "what rev 2 published")
+		mid, ok := AaveHealthFactorWad(mustBig(t, "162000000000"), sumThenCeil)
+		require.True(t, ok)
+		requireBig(t, "590355816196433682", mid)
+		require.Equal(t, -1, h.HealthFactorWad.Cmp(mid))
+		require.Equal(t, -1, mid.Cmp(rev2), "strictly ordered: deployed < sum-then-ceil < rev-2")
+	})
+
+	t.Run("all three borrowables move total debt by +3, which is this market's N", func(t *testing.T) {
+		h, rev2D, rev3D := run(t, []debtLeg{usdc, pyusd, frax})
+
+		requireBig(t, "127431077", rev2D, "rev-2: 13720585 + 13720492 + 99990000")
+		requireBig(t, "127431080", rev3D, "rev-3: 13720586 + 13720493 + 99990001")
+		requireBig(t, "3", new(big.Int).Sub(rev3D, rev2D),
+			"THREE base units — the bound is N, and N = 3 is this market's whole borrowable set")
+		requireBig(t, "127431080", h.TotalDebtBase)
+		requireBig(t, "127127542197711892", h.HealthFactorWad)
+		rev2, ok := AaveHealthFactorWad(mustBig(t, "162000000000"), rev2D)
+		require.True(t, ok)
+		requireBig(t, "127127545190566034", rev2)
+		require.Equal(t, -1, h.HealthFactorWad.Cmp(rev2), "safe direction")
+
+		// The mixed 6/18-decimal book is exactly the case where a single fused
+		// ceiling is not even expressible: there is no shared assetUnit.
+		require.NotEqual(t, usdc.reserve.Decimals, frax.reserve.Decimals,
+			"the point of including FRAX: 18-dec debt alongside 6-dec debt")
+	})
+
+	t.Run("legs that divide exactly contribute nothing, so the bound's floor is 0", func(t *testing.T) {
+		// The LOWER end of 0..N, through the same harness: two debt reserves, both
+		// exactly dividing, delta 0. This is why the bound is a range and not a
+		// count of reserves — and it is why every survivor vector in this suite
+		// (whose debt legs all divide exactly) came through rev 3 unmoved.
+		_, rev2D, rev3D := run(t, []debtLeg{
+			{
+				reserve: simpleReserve(aUSDC, 8, "0", "10000000", false), price: "100000000",
+				product: "1000000000000000", remainder: "0",
+				floorBase: "10000000", halfUpBase: "10000000", ceilBase: "10000000",
+			},
+			{
+				reserve: simpleReserve(aPYUSD, 8, "0", "20000000", false), price: "100000000",
+				product: "2000000000000000", remainder: "0",
+				floorBase: "20000000", halfUpBase: "20000000", ceilBase: "20000000",
+			},
+		})
+		requireBig(t, "30000000", rev2D)
+		requireBig(t, "30000000", rev3D)
+		requireBig(t, "0", new(big.Int).Sub(rev3D, rev2D),
+			"delta 0 despite N = 2: the bound is 0..N, not exactly N")
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Rev-3 component 7: the half-up composite, end to end.
 // ---------------------------------------------------------------------------

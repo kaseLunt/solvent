@@ -36,10 +36,23 @@ package risk
 // # The Aave arm under the rev-3 laws
 //
 // D is now the CEIL-summed debt base (component 4's debt leg is mulDivCeil), so
-// P* rises by at most one base unit of debt's worth versus rev 2. That is the
-// SAFE direction — the old floor-summed D biased P* LOW, i.e. it published a
-// liquidation price below the true one, which was the dangerous residue of the
-// component-4 bug. No boundary flips: the Aave vectors' debt legs divide exactly.
+// P* rises versus rev 2 — the SAFE direction, because the old floor-summed D
+// biased P* LOW, i.e. it published a liquidation price below the true one, which
+// was the dangerous residue of the component-4 bug.
+//
+// The size of that rise, stated correctly: mulDivCeil is applied PER RESERVE and
+// the results are summed (GenericLogic.sol:141), so
+//
+//	0 ≤ D_rev3 − D_rev2 ≤ N,  N = debt-bearing reserves whose conversion
+//	                              leaves a nonzero remainder
+//
+// and P* moves by that many debt base units' worth, i.e. ΔD × W × price / Σ_in.
+// An earlier revision of this comment said "at most one base unit", which is
+// wrong for any multi-reserve borrower: this market's registry lists THREE
+// borrowables (USDC, PYUSD, FRAX), so N reaches 3. Pinned by
+// TestComputeAaveHealthDebtCeilAccumulatesPerReserve, which exhibits +2 and +3
+// deltas and the 0 case. No boundary flips in the shipped vectors: their debt
+// legs all divide exactly, which is the ΔD = 0 end of that range.
 //
 // Component 7's half-up sliver does not reach this file at all. The solve runs on
 // the exact rational, and the chain's inner wadDiv can only round the published

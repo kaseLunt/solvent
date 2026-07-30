@@ -296,8 +296,46 @@ The un-rounded rational (`AaveHealth.HealthFactor`) is rounding-law-free and rem
 authoritative quantity for a boundary comparison; the liquidation-price solve runs on it, so the
 half-up sliver never propagates. `LowestHealthyPrice = ceil(P*)` therefore stays conservative: the
 chain's inner half-up step can only make the chain MORE generous than the rational boundary, and the
-grace band lies strictly below `ceil(P*)`. The ceil-summed `D` raises `P*` by at most one debt base
-unit's worth versus rev 2 — the **safe** direction, since the old floor-summed `D` biased `P*` low.
+grace band lies strictly below `ceil(P*)`. The ceil-summed `D` raises `P*` versus rev 2 — the **safe**
+direction, since the old floor-summed `D` biased `P*` low.
+
+**The rev-2 → rev-3 debt bound is PER RESERVE, not one unit** [correction, Codex round on 559828c].
+`mulDivCeil` is applied inside `_getUserDebtInBaseCurrency` per borrowed reserve and the results are
+summed (`GenericLogic.sol:141`), so each debt-bearing reserve whose conversion leaves a nonzero
+remainder contributes its own `+1`:
+
+```
+0 ≤ D_rev3 − D_rev2 ≤ N,    N = debt-bearing reserves with a nonzero conversion remainder
+```
+
+An earlier draft of this section, and of `internal/risk/liqprice.go`, stated the bound as "at most
+one debt base unit". That is false for any multi-reserve borrower. This market's registry lists
+**three** borrowables (USDC, PYUSD, FRAX — see the Aave reserve table below), so `N` reaches 3, and
+`P*` moves by `ΔD × W × price / Σ_in`, i.e. up to N debt base units' worth. The structure is forced
+rather than chosen: each reserve divides by its own `assetUnit = 10^decimals`, so for a book mixing
+6-decimal and 18-decimal debt there is no single denominator that a "sum the products, divide once"
+form could use at all.
+
+Regression vector (`TestComputeAaveHealthDebtCeilAccumulatesPerReserve`), which separates the
+deployed law from BOTH the rev-2 law and the single-fused-ceiling strawman:
+
+| leg | product | rem | floor | half-up | **ceil** |
+|---|---|---|---|---|---|
+| USDC 6-dec, debt 137216 @ 99992603 | 13720585013248 | 13248 (sub-half) | 13720585 | 13720585 | **13720586** |
+| PYUSD 6-dec, debt 137231 @ 99981000 | 13720492611000 | 611000 (super-half) | 13720492 | 13720493 | **13720493** |
+| FRAX 18-dec, debt 1000000000000000001 @ 99990000 | 99990000000000000099990000 | 99990000 | 99990000 | 99990000 | **99990001** |
+
+- Two reserves (USDC + PYUSD): `D_rev2 = 27441077`, **`D_rev3 = 27441079`** — delta **+2**. Both legs
+  share 6 decimals here, so the strawman is expressible and also refuted: summing the products
+  (27441077624248, remainder 624248) and ceiling ONCE gives 27441078, strictly between the two. All
+  three health factors are distinct and correctly ordered:
+  `590355794682854854` (deployed) < `590355816196433682` (sum-then-ceil) < `590355837710014078` (rev 2)
+  — more debt, lower health factor, the conservative direction.
+- All three reserves: `D_rev2 = 127431077`, **`D_rev3 = 127431080`** — delta **+3**, this market's
+  full `N`. HF `127127542197711892` vs rev-2 `127127545190566034`.
+- Two exactly-dividing legs: delta **0** despite `N = 2` — which is why the bound is a range, and why
+  every survivor vector in the suite (all of whose debt legs divide exactly) came through rev 3
+  unmoved.
 
 **Regime scope — both corrections are proven for the CURRENT implementation ONLY.** The regime split
 above (A/B at block 23,088,584) covers components 2 and 3, the scaled→live ray projections. Nobody
