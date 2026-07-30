@@ -562,3 +562,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   build/vet/gofmt clean. From here the closure harness and riskd share ONE gate law —
   the round-1 defect class cannot silently recur in either. NEXT: riskd Codex round 2
   verdict → Task 5 close (promotion delta offered for coverage if Codex flags it).
+- CODEX ROUND 2 ON RISKD (session 019fb050-44f5-7ff1-a06a-bd0084795f29, ~11min,
+  worktree t5r2 @ 6cb5c71): **needs-attention — 2 MEDIUM residuals; gate, sweep-
+  trigger, and conflict fixes ACCEPTED as sound.** (M1) idempotency key is
+  attempt-scoped — discarded when WriteRiskBatch errors, so commit-lands-then-
+  reconciliation-ALSO-fails → next tick mints a NEW random key, rebaselines on the
+  committed post-move price, writes an unflagged duplicate (round-1 M4 harm survives
+  outside the happy reconciliation path); same harm from a second honest instance.
+  (M2) completeness proves a watermark ROW per required engine but sweep columns are
+  all nullable and no sweep-applicability set is persisted — a restored DM stamp with
+  only cursor fields passes, reader leaves Watermark.Sweep nil, swept engine becomes
+  indistinguishable from no-sweeper, stale DM risk served as current. Both
+  adjudicated FIX-WORTHY (crash/restart/restore are honest ops). FIX WAVE 2
+  dispatched: (1) DETERMINISTIC materialization identity (full vector + sweep state
+  + policy/config + payload identity — not random), any honest process derives the
+  same key and adopts-after-identity-verify or declines; (2) pg_advisory_lock
+  single-writer at startup (structural exclusion, not disclaimer); (3) Codex's
+  commit-lands/reconcile-fails/G5-survives e2e; (4) sweep applicability persisted
+  structurally (required set or NOT NULL flag) + CHECK all-or-nothing sweep column
+  group + completeness negatives incl. partial-null, with Aave no-sweeper positive
+  control preserved. t5r2 → locked-dir list. Task 5 stays OPEN pending round 3.
