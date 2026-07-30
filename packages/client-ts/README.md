@@ -37,15 +37,19 @@ them, and the helpers in `src/decimal.ts` are opt-in and refuse on loss:
 ```ts
 import { formatUnits, toNumber, parseDecimal, PrecisionLossError } from "@solvent/client";
 
-const hf = "1080000000000000000";        // 1.08, 18-decimal
+const hf = "1080000000000000000";         // 1.08, 18-decimal
 
 parseDecimal(hf);                         // 1080000000000000000n — exact
 formatUnits(hf, 18);                      // "1.080000000000000000"
 formatUnits(hf, 18, { trim: true });      // "1.08"
-toNumber(hf);                             // throws PrecisionLossError
+try {
+  toNumber(hf);                           // refuses: money never becomes a number
+} catch (error) {
+  console.assert(error instanceof PrecisionLossError);
+}
 ```
 
-That last line is the point, and the reason is subtler than it looks:
+That refusal is the point, and the reason is subtler than it looks:
 `1080000000000000000` *is* exactly representable as a double. But it sits above
 `Number.MAX_SAFE_INTEGER`, so `x + 1 === x` — handing it back as a `number` would
 be rounding one step later. `toNumber` therefore admits only the safe-integer
@@ -63,11 +67,15 @@ returns `null` for `null`; `requireDecimal` throws `AbsentQuantityError` rather
 than substituting `0n`. A withheld engine serves `total_collateral: null` — never
 `"0"` — and nothing here turns that into a number.
 
-`positionEligible(position)` returns `boolean | null`, using each engine's own
-comparator and never blending them: the Debt Manager's strict `liquidatable`
-boolean, or Aave's `health_factor.wad < 1e18` on the wad. A refused or
-never-swept position returns `null`, because the service withheld a verdict and
-this client does not invent one.
+The same discipline governs verdicts. `positionVerdict(position)` returns a
+sealed `LiquidationVerdict` — `"liquidatable"`, `"not-liquidatable"`, or
+`"unknowable"` — using each engine's own comparator and never blending them:
+the Debt Manager's strict boolean, or Aave's `health_factor.wad < 1e18` on the
+wad (`aaveVerdictFromWad`). A refused or never-swept position is
+`"unknowable"`, because the service withheld a verdict and this client does
+not invent one — and a non-empty string literal gives `!` nothing to grab, so
+the withheld case cannot be read as "safe". See
+[the verdict class](#the-verdict-class-liquidation_verdict-and-collateral_use).
 
 ## Quickstart against a local `cmd/api`
 
@@ -86,7 +94,7 @@ npm run verify             # typecheck + tests + build
 ```
 
 ```ts
-import { SolventClient, formatUnits, positionEligible } from "@solvent/client";
+import { SolventClient, formatUnits, positionVerdict } from "@solvent/client";
 
 const client = new SolventClient({
   baseUrl: "http://localhost:8080",
@@ -95,23 +103,25 @@ const client = new SolventClient({
   expectedScenarioConfigVersion: "v1",
 });
 
-const book = await client.book();
-for (const engine of book.engines) {
-  if (engine.refused) {
-    console.log(`${engine.engine}: WITHHELD — ${engine.refusal?.code}`);
-    continue;                                     // totals are null, not zero
+async function main(): Promise<void> {
+  const book = await client.book();
+  for (const engine of book.engines) {
+    if (engine.refused === true) {
+      console.log(`${engine.engine}: WITHHELD — ${engine.refusal?.code}`);
+      continue;                                   // totals are null, not zero
+    }
+    console.log(
+      engine.engine,
+      formatUnits(engine.total_collateral!, engine.value_decimals),
+      `(${engine.refused_positions} refused)`,
+    );
   }
-  console.log(
-    engine.engine,
-    formatUnits(engine.total_collateral!, engine.value_decimals),
-    `(${engine.refused_positions} refused)`,
-  );
-}
 
-const result = await client.address("0x70daaac436465a0d03e45916fa68ddee6086e5fe");
-if (result.outcome === "found") {
-  for (const p of result.response.positions) {
-    console.log(p.engine, p.status, positionEligible(p), p.health_factor?.wad);
+  const result = await client.address("0x70daaac436465a0d03e45916fa68ddee6086e5fe");
+  if (result.outcome === "found") {
+    for (const p of result.response.positions) {
+      console.log(p.engine, p.status, positionVerdict(p), p.health_factor?.wad);
+    }
   }
 }
 ```
@@ -123,7 +133,7 @@ if (result.outcome === "found") {
 | `client.book()` | `GET /v1/book` — aggregates, HF histogram, liquidation waterfall, bad-debt line |
 | `client.address(addr)` | `GET /v1/address/{addr}` — positions, as-ofs, per-input price disclosures, as a **discriminated lookup** |
 | `client.addressStress(addr)` | `GET /v1/address/{addr}/stress` — the committed scenario set, as a **discriminated lookup** |
-| `client.addressRaw(addr)` / `client.addressStressRaw(addr)` | The same routes' **raw wire bodies** — `found` still `boolean \| null`, no invariant enforcement. For persistence and forensics, never for rendering |
+| `client.addressRaw(addr)` / `client.addressStressRaw(addr)` | The same routes' **raw wire bodies** — the ONLY surface carrying the unrefined verdict keys: `found` still `boolean \| null`, and `liquidatable` / `used_as_collateral` / `becomes_liquidatable` still nullable booleans. No invariant enforcement. For persistence and forensics, never for rendering |
 | `client.observatory({ limit })` | `GET /v1/observatory` — per-engine TVL, counts, rate indexes |
 | `client.stream(opts)` | `GET /v1/stream` — SSE |
 | `client.meta()` | `GET /v1/meta` — watermark vector, reorg posture, price state, constants |
@@ -153,23 +163,28 @@ not, would present `boolean | null` on an unnarrowed result and let
 `if (!result.found)` compile — so that line is now a **compile error**, and a
 permanent `@ts-expect-error` test keeps it one. `result.response` carries
 everything else the wire said, with `found` sealed off at the type level *and*
-at runtime. Branch on `outcome`, with `===` or a `switch`. Never on falsiness —
-there is nothing left for falsiness to grab.
+at runtime — and **refined**: the wire's other nullable-boolean verdict fields
+are sealed away too (see
+[the verdict class](#the-verdict-class-liquidation_verdict-and-collateral_use)).
+Branch on `outcome`, with `===` or a `switch`. Never on falsiness — there is
+nothing left for falsiness to grab.
 
 ```ts
-const result = await client.address(addr);
-switch (result.outcome) {
-  case "found":
-    // `complete` false means the positions are a FLOOR, not a total —
-    // another engine may hold more and could not be consulted.
-    render(result.response.positions, { atLeast: !result.complete });
-    break;
-  case "not-found":
-    renderNoPosition();                        // the only state where this is true
-    break;
-  case "unknowable":
-    renderCannotAnswer(result.withheldEngines); // never "no position"
-    break;
+async function renderAddress(addr: string): Promise<void> {
+  const result = await client.address(addr);
+  switch (result.outcome) {
+    case "found":
+      // `complete` false means the positions are a FLOOR, not a total —
+      // another engine may hold more and could not be consulted.
+      render(result.response.positions, { atLeast: result.complete === false });
+      break;
+    case "not-found":
+      renderNoPosition();                        // the only state where this is true
+      break;
+    case "unknowable":
+      renderCannotAnswer(result.withheldEngines); // never "no position"
+      break;
+  }
 }
 ```
 
@@ -179,7 +194,8 @@ is the one-line form for the only case in which "no position" is a true thing to
 render — deliberately not the negation of anything. The same machinery is
 available as the free function `lookup()` for a body obtained elsewhere — e.g.
 `lookup(await client.addressRaw(addr))`. The raw accessors are the only surface
-that exposes the unrefined three-valued `found`, and their names say so.
+that exposes the unrefined three-valued `found` — and the rest of the raw
+verdict keys — and their names say so.
 
 The lookup also enforces the contract's own invariants and throws
 `ContractInvariantError` on a body that contradicts itself. The completeness law
@@ -191,32 +207,97 @@ consult, so incompleteness must be attributed), and a `found: false` carrying an
 incomplete lookup is exactly the definitive negative the service is not entitled
 to publish.
 
+### The verdict class: `liquidation_verdict` and `collateral_use`
+
+`found` was not the only nullable boolean. The contract publishes four verdict
+fields whose `null` means **a statement is withheld**, never "no":
+`Position.liquidatable` (null on Aave, which publishes a continuous health
+factor instead of a strict boolean — or on a refused position),
+`StressState.liquidatable`, `ProjectionHorizon.becomes_liquidatable`, and
+`Leg.used_as_collateral`. Under any of them the honest consumer line —
+`if (!position.liquidatable) renderSafe()` — compiles, and labels a withheld
+liquidation verdict definitively safe: the same falsiness class, one field
+over.
+
+So the refined bodies the primary methods return seal the whole class. On
+everything `address()` and `addressStress()` serve, positions, stress states
+and projection horizons carry `liquidation_verdict`, and legs carry
+`collateral_use` — sealed string-literal unions with one total mapping each:
+
+| Wire value | `liquidation_verdict` | `collateral_use` |
+| --- | --- | --- |
+| `true` | `"liquidatable"` | `"counted"` |
+| `false` | `"not-liquidatable"` | `"not-counted"` |
+| `null` | `"unknowable"` — never a definitive token | `"unknowable"` |
+
+The raw verdict keys — `found`, `liquidatable`, `used_as_collateral`,
+`becomes_liquidatable` — exist **only** through `addressRaw()` /
+`addressStressRaw()`. On every primary response they are absent at the type
+level *and* at runtime, so neither `if (!p.liquidatable)` nor
+`Object.hasOwn(p, "liquidatable")` can resurrect the trap. (`eligible` on a
+stress state survives untouched: on the wire it is a *total* boolean whose
+`false` genuinely means "not eligible", so it was never in the class.)
+
+`positionVerdict()` is the cross-engine helper — the Debt Manager's strict
+boolean, or Aave's own `hf_wad < 1e18` test (`aaveVerdictFromWad()`), never a
+blend — and `"unknowable"` is reached by `===`, never by `!`:
+
+```ts
+import { aaveVerdictFromWad, positionVerdict } from "@solvent/client";
+import type { RefinedPosition } from "@solvent/client";
+
+function riskLabel(p: RefinedPosition): string {
+  switch (positionVerdict(p)) {                  // each engine's own comparator
+    case "liquidatable":
+      return "at risk";
+    case "not-liquidatable":
+      return "healthy";
+    case "unknowable":
+      return "verdict withheld";                 // NEVER rendered as "healthy"
+  }
+}
+
+function legLabels(p: RefinedPosition): string[] {
+  return p.legs.map((leg) => {
+    if (leg.collateral_use === "counted") return `${leg.asset} backs the debt`;
+    if (leg.collateral_use === "not-counted") return `${leg.asset} is idle`;
+    return `${leg.asset}: the engine publishes no statement`;
+  });
+}
+
+// Aave's own test, on the wad the pool computed. Absent is never healthy.
+aaveVerdictFromWad("990000000000000000");        // "liquidatable" — 0.99 < 1
+aaveVerdictFromWad("1000000000000000000");       // "not-liquidatable" — exactly 1e18 is healthy
+aaveVerdictFromWad(null);                        // "unknowable"
+```
+
 ## The event stream
 
 ```ts
 import { fetchEventSource } from "@solvent/client";
 
-const stream = client.stream({
-  eventSourceFactory: fetchEventSource(),   // see the heartbeat note below
-  heartbeatTimeoutMs: 45_000,
-  baseFrameTimeoutMs: 45_000,               // the default follows heartbeatTimeoutMs; see below
-  reconnect: { minDelayMs: 500, maxDelayMs: 30_000, jitter: 0.5 },
+function watchBook(): () => void {
+  const stream = client.stream({
+    eventSourceFactory: fetchEventSource(),   // see the heartbeat note below
+    heartbeatTimeoutMs: 45_000,
+    baseFrameTimeoutMs: 45_000,               // the default follows heartbeatTimeoutMs; see below
+    reconnect: { minDelayMs: 500, maxDelayMs: 30_000, jitter: 0.5 },
 
-  onSnapshot: (payload, e) => {
-    // Sent on EVERY connection, including a reconnect, before any tick.
-    if (e.isReconnect) resetView();           // never merge a fresh snapshot into stale state
-    if (e.recovered) noteRecovery();          // the server's explicit stale-to-current transition
-    render(payload);
-  },
-  onBatch: (payload) => render(payload),      // "a new batch at watermark vector V" — never "a new block"
-  onDegradation: (payload) => showTransitions(payload.transitions ?? []),
-  onUnavailable: (payload) => showOutage(payload.reason, payload.stale_since_seconds),
-  onHeartbeat: (unix) => (lastSeen = unix),
-  onError: (error) => console.warn(error.name, error.message),
-});
+    onSnapshot: (payload, e) => {
+      // Sent on EVERY connection, including a reconnect, before any tick.
+      if (e.isReconnect === true) resetView();  // never merge a fresh snapshot into stale state
+      if (e.recovered === true) noteRecovery(); // the server's explicit stale-to-current transition
+      render(payload);
+    },
+    onBatch: (payload) => render(payload),      // "a new batch at watermark vector V" — never "a new block"
+    onDegradation: (payload) => showTransitions(payload.transitions ?? []),
+    onUnavailable: (payload) => showOutage(payload.reason, payload.stale_since_seconds),
+    onHeartbeat: (unix) => noteHeartbeat(unix),
+    onError: (error) => console.warn(error.name, error.message),
+  });
 
-// later
-stream.close();
+  return () => stream.close();                  // tear down when the view goes away
+}
 ```
 
 Events are discriminated on the wire event names — `snapshot`, `batch`,
@@ -315,8 +396,10 @@ const client = new SolventClient({
   expectedScenarioConfigVersion: "v1",
 });
 
-await client.meta();                  // throws SchemaVersionMismatchError on any mismatch
-await client.assertServerCompatible(); // explicit check; enforces even if refuseOnSchemaMismatch is off
+async function checkServer(): Promise<void> {
+  await client.meta();                   // throws SchemaVersionMismatchError on any mismatch
+  await client.assertServerCompatible(); // explicit check; enforces even if refuseOnSchemaMismatch is off
+}
 ```
 
 `seizure_model` is checked **unconditionally**: the contract's enum admits exactly
@@ -328,7 +411,7 @@ not this contract. No option switches that off.
 ```bash
 npm install          # exact versions from package-lock.json
 npm run gen          # regenerate src/generated/schema.ts from ../../api/openapi.yaml
-npm run typecheck    # tsc --noEmit over src AND test (this is where type-level conformance runs)
+npm run typecheck    # tsc --noEmit over src, test AND examples/ (type-level conformance + the compiled README examples)
 npm test             # vitest
 npm run build        # tsc emit -> dist/ (the exports map's targets)
 npm run verify       # typecheck + test + build
@@ -340,6 +423,14 @@ the two have drifted — a checked-in generated file is only trustworthy if
 something breaks when it stops matching its source. That is also why every dev
 dependency is pinned to an exact version with no `^`: a floating codegen range
 would let the same contract produce different types on a different machine.
+
+The fenced TypeScript in this README is **compiled documentation**. Every
+fenced `ts` block appears verbatim in a file under `examples/`, those files
+are part of `npm run typecheck` and import `@solvent/client` resolved to the
+package's real public surface, and `test/readme-sync.test.ts` fails if either
+side is edited without the other — or if any fence demonstrates the
+`!`-falsiness trap the sealed unions exist to close. A README that teaches a
+removed export is a build failure, not a latent lie.
 
 There is no `client-ts` target in the root `Makefile`. The package is
 self-contained; the commands above are the whole interface. A future wave that
@@ -361,8 +452,10 @@ client-ts:
 | `decimal.test.ts` | Exact round trips, precision-loss refusal, and the negative / zero / max-uint256-scale cases. |
 | `sse.test.ts` | Connect, snapshot, tick, degradation, unavailable, reconnect backoff, heartbeat timeout — against a mock transport with injected timers, so the backoff is arithmetic rather than a race. Plus the round-1 laws: no unbased delivery (a pre-snapshot tick is reported, dropped, and reconnected), and retry history resets only on a base frame. Plus the round-2 law: `onHeartbeat` never fires pre-base, the base-frame deadline is un-extendable by comments (proven to the exact ms), comment-only connections exhaust `maxAttempts` with zero liveness surfaced, and a slow-but-honest server (comments, then base within the deadline) connects fine. |
 | `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, CRLF split **between `\r` and `\n`** at every line boundary for every event type, a pre-snapshot tick dropped and recovered over the wire, repeated 200-then-close connections exhausting `maxAttempts`, comment-only connections exhausting `maxAttempts` without surfacing liveness, and a server that closes the connection. |
+| `refine.test.ts` | The verdict class as contract law: both mappings are TOTAL (`null` → `unknowable`, never a definitive token; a contract-impossible value is refused), every refined shape drops its raw key at the type level AND at runtime on every fixture, the primary paths serve refined bodies while the total boolean `eligible` passes through untouched, the round-3 trap lines no longer compile (permanent `@ts-expect-error`), `positionVerdict` agrees between a raw wire position and its refined image, and the raw accessors alone still carry the nullable booleans. |
 | `errors.test.ts` | The whole taxonomy above. |
 | `drift.test.ts` | The contract-drift gate, plus package hygiene: zero runtime dependencies, exact dev-dependency pins, `private: true`, and the ESM exports map. |
+| `readme-sync.test.ts` | This README's fenced TypeScript is compiled documentation: every `ts` fence appears verbatim (modulo trailing whitespace) between markers in `examples/` — files the typecheck compiles against the real public surface — and every marked region appears here, so editing either side alone fails the suite; a regex-level docs lint (its scope stated honestly in the test) rejects `!`-falsiness on lookup/verdict values inside the fences, with its own anti-vacuity control. |
 
 `test/fixtures/index.ts` carries the **fixture provenance record**: which values
 are mirrored from the Go suite, which are derived by the same hand-derivation,

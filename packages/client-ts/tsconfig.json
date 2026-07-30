@@ -27,7 +27,16 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "declaration": true,
-    "noEmit": true
+    "noEmit": true,
+
+    // The compiled README examples import "@solvent/client" exactly as the
+    // README shows; typecheck resolves that name to the package's real public
+    // surface, so a documented import that stops existing is a BUILD failure,
+    // not a docs footnote. (Build is unaffected: tsconfig.build.json includes
+    // src only, and src never imports its own package name.)
+    "paths": {
+      "@solvent/client": ["./src/index.ts"]
+    }
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "examples/**/*.ts", "vitest.config.ts"]
 }
