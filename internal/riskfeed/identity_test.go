@@ -72,20 +72,132 @@ func idInputs() store.RiskInputs {
 	}
 }
 
-// idJudged is the fixture's OUTPUT-RELEVANT judged set: the prices Assemble would
-// actually have consulted freshness for. It is derived from the fixture inputs at a
-// given clock so the phase assertions below exercise the real classifier.
-func idJudged(now time.Time) []JudgedPrice {
+// idJudged is the fixture's OUTPUT-RELEVANT consulted set: every witness Assemble
+// would have consulted, carrying the value fields the digest hashes and the phase the
+// classifier assigns at the given clock. Both identity projections read it.
+func idJudged(now time.Time) []ConsultedPrice {
+	return idJudgedFrom(idInputs(), now)
+}
+
+// idJudgedFrom derives the consulted set from GIVEN inputs, so a test that mutates a
+// price row also moves the record of what the assembler consulted. Passing a mutated
+// `inputs` with an unmutated consulted set would be modelling a repair the assembler
+// never saw, which is not a state the pipeline can be in.
+func idJudgedFrom(in store.RiskInputs, now time.Time) []ConsultedPrice {
 	budget := PriceBudget{Seconds: idPolicy().BudgetSeconds}
-	var out []JudgedPrice
-	for _, p := range idInputs().Prices {
-		out = append(out, JudgedPrice{
+	var out []ConsultedPrice
+	for _, p := range in.Prices {
+		out = append(out, ConsultedPrice{
 			ChainID: p.ChainID, Asset: p.Asset, Source: p.Source,
-			Phase: PriceFreshnessPhase(p, budget, now),
-			AsOf:  p.SourceAsOf.UTC(), HasAsOf: p.HasSourceAsOf,
+			Present: true, Value: p.Value, Decimals: p.Decimals, BlockNumber: p.BlockNumber,
+			Phase:         PriceFreshnessPhase(p, budget, now),
+			PhaseRelevant: true,
+			AsOf:          p.SourceAsOf.UTC(), HasAsOf: p.HasSourceAsOf,
 		})
 	}
 	return out
+}
+
+// TestIdentityPriceDigestIsScopedToTheConsultedSet is the round-5 finding.
+//
+// Only the phase section was restricted to the consulted set; the substrate digest
+// still hashed every FETCHED row. An honest D-012 repair can neutralize or supersede
+// an UNRELATED registered asset in place at an unchanged vector — so the row's value
+// changes, no cursor moves, and the restart never consults that asset. The digest
+// nonetheless minted a new key, and a clean recomputation was written over a
+// large-step warning.
+//
+// MUTANT THIS KILLS: hash inputs.Prices in substrateDigest instead of the consulted
+// set. The two identities below stop being equal.
+func TestIdentityPriceDigestIsScopedToTheConsultedSet(t *testing.T) {
+	base := computeID()
+
+	// An UNRELATED fetched row changes in place: same key set consulted, different
+	// unconsulted row. Nothing the batch depends on moved.
+	withUnused := idInputs()
+	withUnused.Prices = append(withUnused.Prices, store.RiskPriceRow{
+		ChainID: 10, Asset: []byte{0xEE}, Source: "priceproviderv2",
+		Value: big.NewInt(4242), Decimals: 6, BlockNumber: 999,
+		HasSourceAsOf: true, SourceAsOf: idTime,
+	})
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), withUnused, idJudged(idTime), idPolicy())
+	require.Equal(t, base.Key, got.Key,
+		"an UNCONSULTED fetched row must not change the identity, however it mutates")
+
+	// And the same row mutating again still changes nothing.
+	withUnused.Prices[len(withUnused.Prices)-1].Value = big.NewInt(9999)
+	again := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), withUnused, idJudged(idTime), idPolicy())
+	require.Equal(t, base.Key, again.Key)
+}
+
+// TestIdentityPriceDigestMovesWithAConsultedRow is the counterweight: scoping must
+// not make a CONSULTED witness stop mattering.
+func TestIdentityPriceDigestMovesWithAConsultedRow(t *testing.T) {
+	base := computeID()
+
+	consulted := idJudged(idTime)
+	consulted[0].Value = big.NewInt(1) // the in-place repair landed on a USED asset
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), consulted, idPolicy())
+	require.NotEqual(t, base.Key, got.Key,
+		"a CONSULTED witness changing value IS a new materialization")
+
+	// Block and as-of likewise.
+	consulted = idJudged(idTime)
+	consulted[0].BlockNumber++
+	got = ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), consulted, idPolicy())
+	require.NotEqual(t, base.Key, got.Key)
+}
+
+// TestIdentityRecordsAConsultedAbsence: absence is output-relevant — it is what
+// produces a G1 refusal — so a consulted witness with no usable row must be
+// distinguishable from one that was never consulted, and from a present one.
+func TestIdentityRecordsAConsultedAbsence(t *testing.T) {
+	present := computeID()
+
+	absent := idJudged(idTime)
+	absent[0].Present = false
+	absent[0].Value = nil
+	absent[0].PhaseRelevant = false // no row, so no phase was consulted
+	gotAbsent := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), absent, idPolicy())
+	require.NotEqual(t, present.Key, gotAbsent.Key,
+		"a consulted witness that was ABSENT is a different materialization from a present one")
+
+	// Dropping it entirely (never consulted) is different again from consulting it
+	// and finding nothing.
+	notConsulted := idJudged(idTime)[1:]
+	gotDropped := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), notConsulted, idPolicy())
+	require.NotEqual(t, gotAbsent.Key, gotDropped.Key,
+		"consulted-and-absent must not collide with never-consulted")
+}
+
+// TestIdentityG2ConsultationEntersTheDigestWithoutAPhase: a witness consulted on the
+// way to a G2 refusal has no phase, but it WAS consulted, so it belongs in the digest.
+func TestIdentityG2ConsultationEntersTheDigestWithoutAPhase(t *testing.T) {
+	withPhase := computeID()
+
+	g2 := idJudged(idTime)
+	g2[0].PhaseRelevant = false // refused at G2 before freshness was consulted
+	g2[0].Phase = ""
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), g2, idPolicy())
+	require.NotEqual(t, withPhase.Key, got.Key,
+		"dropping the phase changes the identity...")
+	require.Contains(t, got.Vector, "freshness:",
+		"...and the phase section still exists for the witnesses that do have one")
+
+	// The row's VALUE still binds even with no phase — that is the digest half.
+	g2b := g2
+	g2b[0].Value = big.NewInt(7777)
+	got2 := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), g2b, idPolicy())
+	require.NotEqual(t, got.Key, got2.Key,
+		"a G2-consulted witness's value still enters the digest")
 }
 
 func computeID() MaterializationIdentity {
@@ -213,7 +325,10 @@ func TestIdentityChangesWhenAPriceIsNeutralizedInPlace(t *testing.T) {
 	in.Prices[0].Value = big.NewInt(99000000)
 	in.Prices[0].BlockNumber = 25_635_500
 
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idJudged(idTime), idPolicy())
+	// The repaired row is a CONSULTED witness, so the consulted set is derived from
+	// the mutated inputs — that is what the assembler would have seen.
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), in, idJudgedFrom(in, idTime), idPolicy())
 	require.NotEqual(t, base.Key, got.Key,
 		"the same cursors over DIFFERENT prices is a different materialization")
 }
@@ -236,7 +351,8 @@ func TestIdentityChangesWithSubstrateRows(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := idInputs()
 			mutate(&in)
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idJudged(idTime), idPolicy())
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+				idSweeps(), in, idJudgedFrom(in, idTime), idPolicy())
 			require.NotEqual(t, base.Key, got.Key, "substrate change %q must change the identity", name)
 		})
 	}

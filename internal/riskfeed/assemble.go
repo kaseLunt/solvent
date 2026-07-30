@@ -126,11 +126,11 @@ type AssembleResult struct {
 	// re-assemble the book from the persisted rows — which would be a second
 	// assembly, and a second place for it to be wrong.
 	Book []risk.PositionInput
-	// Judged is every price witness whose freshness actually influenced this
-	// batch, with the phase it was judged under. It feeds BOTH the materialization
-	// identity (so only output-relevant phases can change a key) and the
-	// scheduler's next-boundary deadline (so a crossing wakes the daemon).
-	Judged []JudgedPrice
+	// Consulted is every price witness the assembler consulted — the single
+	// output-relevant price set. It feeds the materialization identity (BOTH the
+	// freshness-phase section and the price half of the substrate digest) and the
+	// scheduler's next-boundary deadline. See ConsultedPrice.
+	Consulted []ConsultedPrice
 }
 
 // PriceKeyID is the stable identity of one price witness, used for the
@@ -236,7 +236,7 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 			priceReorg: priceReorg[cfg.Aave.PriceEngine],
 			balanceBlk: aaveCursor.LastBlock,
 			paramBlk:   aaveParamCursor.LastBlock,
-			judged:     &res.Judged,
+			consulted:  &res.Consulted,
 		})
 		if err != nil {
 			return AssembleResult{}, err
@@ -266,7 +266,7 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 			priceReorg: priceReorg[cfg.DM.PriceEngine],
 			balanceBlk: dmCursor.LastBlock,
 			paramBlk:   dmCursor.LastBlock,
-			judged:     &res.Judged,
+			consulted:  &res.Consulted,
 		})
 		if err != nil {
 			return AssembleResult{}, err
@@ -297,10 +297,10 @@ type assembleArgs struct {
 	priceReorg bool
 	balanceBlk uint64
 	paramBlk   uint64
-	// judged collects the price witnesses that ACTUALLY influenced this batch's
-	// output, in judging order. Only these enter the materialization identity —
-	// see JudgedPrice.
-	judged *[]JudgedPrice
+	// consulted collects EVERY price witness the assembler consulted, in
+	// consultation order — the single output-relevant price set both projections of
+	// the materialization identity are built from. See ConsultedPrice.
+	consulted *[]ConsultedPrice
 }
 
 // assembleAave builds one Aave position, or a refusal.
@@ -658,18 +658,27 @@ func judge(a assembleArgs, spec AssetSpec) (PriceJudgement, error) {
 	if err != nil {
 		return j, err
 	}
-	// Record it only when freshness was CONSULTED. A G2 return, or an absent row,
-	// consulted no phase — and a phase that influenced nothing must not be able to
-	// change the identity of an output-identical batch.
-	if j.PhaseRelevant && a.judged != nil {
-		*a.judged = append(*a.judged, JudgedPrice{
-			ChainID: spec.Key.ChainID,
-			Asset:   spec.Key.Asset,
-			Source:  spec.Key.Source,
-			Phase:   j.Phase,
-			AsOf:    j.AsOf,
-			HasAsOf: !j.AsOf.IsZero(),
-		})
+	// EVERY consultation is recorded, including the ones that consulted no phase.
+	// A G2 return and an absent row still influenced the output — the first by
+	// refusing, the second by being missing — so both belong in the digest. Only
+	// PhaseRelevant entries contribute a freshness phase.
+	if a.consulted != nil {
+		c := ConsultedPrice{
+			ChainID:       spec.Key.ChainID,
+			Asset:         spec.Key.Asset,
+			Source:        spec.Key.Source,
+			Present:       row != nil,
+			Phase:         j.Phase,
+			PhaseRelevant: j.PhaseRelevant,
+			AsOf:          j.AsOf,
+			HasAsOf:       !j.AsOf.IsZero(),
+		}
+		if row != nil {
+			c.Value = new(big.Int).Set(row.Value)
+			c.Decimals = row.Decimals
+			c.BlockNumber = row.BlockNumber
+		}
+		*a.consulted = append(*a.consulted, c)
 	}
 	return j, nil
 }

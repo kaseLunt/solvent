@@ -35,8 +35,9 @@ package riskfeed
 //     Debt Manager collateral WITHOUT moving any cursor;
 //   - the policy that shapes the judgement: price budget, step bound, the
 //     engine bindings, the required stamp set;
-//   - a SUBSTRATE DIGEST over the rows actually read;
-//   - a FRESHNESS PHASE per consumed price — fresh / stale / over-ceiling /
+//   - a SUBSTRATE DIGEST over the rows actually read — with its PRICE half
+//     restricted to the CONSULTED witnesses, for the same reason the phases are;
+//   - a FRESHNESS PHASE per CONSULTED price — fresh / stale / over-ceiling /
 //     no-as-of. The raw clock stays out (see below), but the phase cannot: it is
 //     what `Assemble` classifies each price by, so crossing a budget or ceiling
 //     changes a verdict from "fresh" to a stale flag or a G1 refusal. Without the
@@ -122,12 +123,34 @@ type IdentityPolicy struct {
 // It is a PURE function of its arguments — no clock, no randomness, no process
 // state — because that is exactly the property the fix depends on. Anything
 // non-deterministic in here silently reopens the duplicate-batch hole.
+//
+// # WHERE "OUTPUT-RELEVANT PRICE SET" LIVES: the `consulted` argument, and only there
+//
+// This function builds TWO sections from prices, and they must never be scoped
+// differently again:
+//
+//   - the FRESHNESS section, projecting the PhaseRelevant subset of `consulted`;
+//   - the PRICE half of the SUBSTRATE DIGEST, projecting all of `consulted`.
+//
+// Both read the SAME slice — `riskfeed.ConsultedPrice`, reported by `Assemble`, which
+// is the one place that knows which witnesses a batch actually depended on. Neither
+// section may read `inputs.Prices`, which is the FETCHED set and strictly larger.
+//
+// That split is exactly how the last two findings happened: the phases were scoped to
+// the consulted set while the digest still hashed every fetched row, so an unrelated
+// registered asset could mint a new key — by crossing a freshness boundary in one
+// round, and by being repaired in place in the next. Two projections of one reported
+// set cannot drift apart; two independently-scoped derivations did, twice.
+//
+// `inputs` is still passed because the NON-price sections of the digest (balances,
+// indexes, sweeps, params, conflicts) are read from it. If a future section needs
+// prices, it takes `consulted`.
 func ComputeMaterializationIdentity(
 	cursors []store.DeriveCursorState,
 	maxEpochs map[int64]int64,
 	sweeps []store.RiskSweepWatermark,
 	inputs store.RiskInputs,
-	judged []JudgedPrice,
+	consulted []ConsultedPrice,
 	policy IdentityPolicy,
 ) MaterializationIdentity {
 	var b strings.Builder
@@ -197,8 +220,11 @@ func ComputeMaterializationIdentity(
 	// for an output-identical batch. A restart would then decline to adopt, compute
 	// against the post-move baseline, and write an unflagged newer batch over a
 	// large-step warning.
-	phases := make([]string, 0, len(judged))
-	for _, p := range judged {
+	phases := make([]string, 0, len(consulted))
+	for _, p := range consulted {
+		if !p.PhaseRelevant {
+			continue // G2 or absent: no phase was consulted, so none may bind
+		}
 		phases = append(phases, fmt.Sprintf("%d/%x/%s=%s",
 			p.ChainID, p.Asset, p.Source, p.Phase))
 	}
@@ -211,7 +237,7 @@ func ComputeMaterializationIdentity(
 	b.WriteByte('\n')
 
 	vector := b.String()
-	digest := substrateDigest(inputs)
+	digest := substrateDigest(inputs, consulted)
 
 	sum := sha256.Sum256([]byte(vector + "substrate:" + digest))
 	return MaterializationIdentity{
@@ -227,7 +253,7 @@ func ComputeMaterializationIdentity(
 // different data — the D-012 in-place price neutralization being the case that
 // matters. Without it, such a pass would adopt the earlier batch and the
 // corrected prices would never be published.
-func substrateDigest(in store.RiskInputs) string {
+func substrateDigest(in store.RiskInputs, consulted []ConsultedPrice) string {
 	h := sha256.New()
 
 	balances := make([]string, 0, len(in.Balances))
@@ -268,13 +294,29 @@ func substrateDigest(in store.RiskInputs) string {
 	}
 	writeSorted(h, "params", params)
 
-	// Prices carry their VALUE and their as-of, so an in-place neutralization
-	// that swaps which row is usable changes this digest.
-	prices := make([]string, 0, len(in.Prices))
-	for _, p := range in.Prices {
+	// PRICES — OVER THE CONSULTED SET ONLY, and this is the second projection of
+	// the same ConsultedPrice slice the phase section above reads.
+	//
+	// Hashing every FETCHED row instead was the last door on the scoping law. An
+	// honest D-012 repair can neutralize or supersede an UNRELATED registered
+	// asset in place, moving no cursor: the restart then never consults that asset,
+	// recomputes the used price against its already-published value (so no G5
+	// flag), and yet the unused row's changed digest mints a new key — writing a
+	// clean batch over the flagged one. Restricting the digest to what was
+	// consulted closes it.
+	//
+	// ABSENCE IS RECORDED, not skipped: a consulted witness with no usable row is
+	// what produces a G1 refusal, so its absence must be able to change the
+	// identity exactly as a value change would.
+	prices := make([]string, 0, len(consulted))
+	for _, p := range consulted {
+		if !p.Present {
+			prices = append(prices, fmt.Sprintf("%d/%x/%s=absent", p.ChainID, p.Asset, p.Source))
+			continue
+		}
 		asOf := "none"
-		if p.HasSourceAsOf {
-			asOf = p.SourceAsOf.UTC().Format("2006-01-02T15:04:05.000000000Z")
+		if p.HasAsOf {
+			asOf = p.AsOf.UTC().Format("2006-01-02T15:04:05.000000000Z")
 		}
 		prices = append(prices, fmt.Sprintf("%d/%x/%s=%s/%d@%d/%s",
 			p.ChainID, p.Asset, p.Source, amountOf(p.Value), p.Decimals, p.BlockNumber, asOf))
@@ -330,10 +372,10 @@ func sortedCopy(in []string) []string {
 //
 // The returned deadline is strictly AFTER now, so an armed pass cannot re-fire on
 // the same boundary forever.
-func NextFreshnessDeadline(judged []JudgedPrice, budget PriceBudget, now time.Time) (time.Time, bool) {
+func NextFreshnessDeadline(consulted []ConsultedPrice, budget PriceBudget, now time.Time) (time.Time, bool) {
 	var best time.Time
-	for _, p := range judged {
-		if !p.HasAsOf {
+	for _, p := range consulted {
+		if !p.PhaseRelevant || !p.HasAsOf {
 			continue // no as-of, no crossing
 		}
 		for _, bound := range []int64{budget.Seconds, budget.Ceiling()} {

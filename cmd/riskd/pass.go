@@ -171,7 +171,7 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	// which is exactly how a restart erases a large-step flag.
 	identity := riskfeed.ComputeMaterializationIdentity(
 		vector.consumedCursors(), vector.MaxEpochs, vector.consumedSweeps(), inputs,
-		assembled.Judged,
+		assembled.Consulted,
 		riskfeed.IdentityPolicy{
 			BudgetSeconds:       cfg.Budget.Seconds,
 			StepBps:             cfg.StepBps,
@@ -202,7 +202,7 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 		return res, err
 	}
 
-	if deadline, ok := riskfeed.NextFreshnessDeadline(assembled.Judged, cfg.Budget, inputs.ReadAt); ok {
+	if deadline, ok := riskfeed.NextFreshnessDeadline(assembled.Consulted, cfg.Budget, inputs.ReadAt); ok {
 		res.FreshnessDeadline = deadline
 	}
 

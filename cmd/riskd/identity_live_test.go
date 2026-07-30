@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/risk"
@@ -557,4 +559,153 @@ func priceRowFingerprint(t *testing.T, f *riskdFixture) string {
 		     '|' ORDER BY asset, source, block_number), '')
 		 FROM prices WHERE chain_id = 1`).Scan(&out))
 	return out
+}
+
+// TestRiskdUnusedRowNeutralizedInPlaceDoesNotChangeTheIdentity is the round-5
+// [medium] finding: the last door on the scoping law.
+//
+// Round 4 restricted the freshness PHASES to the consulted set but left the substrate
+// digest hashing every FETCHED row. An honest D-012 repair can neutralize or supersede
+// an UNRELATED registered asset in place, moving no cursor — so on restart the
+// assembler never consults that asset, recomputes the used price against its
+// already-published value (producing no G5 flag), and yet the unused row's changed
+// digest mints a new key. A clean batch then lands over the flagged one.
+//
+// This is deliberately the variant the round-4 test could not see: that one moved only
+// elapsed time and left every fetched row byte-identical, so the digest never entered
+// the picture. Here the row's VALUE and VALIDITY change on disk and the vector does
+// not move at all.
+//
+// MUTANT THIS KILLS: hash inputs.Prices in substrateDigest instead of the consulted
+// set. The restart derives a different key, declines to adopt, and writes an unflagged
+// batch — the FlagLargeStep assertion at the end fails.
+func TestRiskdUnusedRowNeutralizedInPlaceDoesNotChangeTheIdentity(t *testing.T) {
+	f := newRiskdFixture(t)
+	f.seedFreshPrices(t)
+
+	// A REGISTERED but unheld asset: an OP Debt Manager collateral token, while the
+	// only position in this fixture is on Aave. It is FETCHED every pass and
+	// CONSULTED by none.
+	unusedAsset := common20(fxDMCollateral)
+	_, err := f.store.ApplyPolledPrices(f.ctx, "prices:poll:10", 10, []store.PriceObservation{
+		{Asset: unusedAsset, Source: "priceproviderv2", Price: mustBig("3000000000"), Decimals: 6,
+			BlockNumber: 154790000, SourceAsOf: time.Now().UTC()},
+	}, 154790000, store.PollAnchor{BlockNumber: 154790000, BlockHash: hash32(0x78)})
+	require.NoError(t, err)
+
+	// Baseline, then a large downward move on the USED asset so the next pass flags it.
+	baseline, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+
+	f.seedPricesAt(t, fxPriceBlock+10, "180000000000", "100000000")
+	_, err = f.admin.Exec(f.ctx, `UPDATE prices SET source_as_of = now() WHERE chain_id = 1`)
+	require.NoError(t, err)
+
+	flagged, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+	require.Greater(t, flagged.BatchID, baseline.BatchID)
+	require.Equal(t, 1, flagged.Flagged)
+	require.Contains(t, aavePositionOf(t, f, flagged.BatchID).Flags, riskfeed.FlagLargeStep)
+
+	// PROVE the premise: fetched, never consulted.
+	require.True(t, f.registryDeclares(unusedAsset), "asset B must be in the FETCHED key set")
+	require.False(t, f.judgedInBatch(t, flagged.BatchID, unusedAsset),
+		"and it must NOT appear as a consulted disclosure on the batch")
+
+	cursorsBefore := cursorSnapshot(t, f)
+	usedRowsBefore := priceRowFingerprint(t, f)
+
+	// THE IN-PLACE D-012 REPAIR on the unused row: validity flipped and a superseding
+	// row landed. No cursor moves; the used asset's rows are untouched.
+	_, err = f.admin.Exec(f.ctx,
+		`UPDATE prices SET valid = false, invalid_reason = 'unverifiable after a reorg: no surviving poll anchor covers this observation'
+		 WHERE chain_id = 10 AND asset = $1`, unusedAsset)
+	require.NoError(t, err)
+	_, err = f.admin.Exec(f.ctx,
+		`INSERT INTO prices (chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, source_as_of)
+		 VALUES (10, $1, 'priceproviderv2', 999999, 6, 154790001, 'prices:poll:10', true, now())`,
+		unusedAsset)
+	require.NoError(t, err)
+
+	require.Equal(t, cursorsBefore, cursorSnapshot(t, f),
+		"NOT ONE cursor moved — the repair is in place")
+	require.Equal(t, usedRowsBefore, priceRowFingerprint(t, f),
+		"and the USED asset's rows are byte-identical")
+
+	// THE RESTART. Its own recomputation is re-baselined and therefore UNFLAGGED, so
+	// if it writes a batch the warning is gone.
+	restarted := f.restartedConfig(t)
+	afterRestart, err := runPass(f.ctx, f.store, restarted)
+	require.NoError(t, err)
+	require.Equal(t, flagged.MaterializationKey, afterRestart.MaterializationKey,
+		"an UNCONSULTED row repaired in place must not change the materialization identity")
+	require.Equal(t, flagged.BatchID, afterRestart.BatchID, "so the restart ADOPTS")
+
+	var n int
+	require.NoError(t, f.admin.QueryRow(f.ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 2, n, "no third batch — the restart adopted instead of writing")
+
+	batch, found, err := f.store.NewestCompleteBatch(f.ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, flagged.BatchID, batch.ID)
+	require.Equal(t, 1, batch.FlaggedCount)
+	require.Contains(t, aavePositionOf(t, f, batch.ID).Flags, riskfeed.FlagLargeStep,
+		"the large-step warning SURVIVES an in-place repair of an unrelated row")
+}
+
+// TestRiskdConsumedRowNeutralizedInPlaceChangesTheIdentity is the counterweight
+// demanded alongside: the SAME in-place mutation on a CONSULTED witness must change
+// the key AND the verdict. Scoping the digest must not make a real repair invisible.
+func TestRiskdConsumedRowNeutralizedInPlaceChangesTheIdentity(t *testing.T) {
+	f := newRiskdFixture(t)
+	f.seedFreshPrices(t)
+
+	first, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+	before, err := f.store.RiskBatchPriceInputs(f.ctx, first.BatchID)
+	require.NoError(t, err)
+	require.NotEmpty(t, before)
+	collateralBefore := priceOfAsset(t, before, fxAave)
+	require.Equal(t, "300000000000", collateralBefore)
+
+	cursorsBefore := cursorSnapshot(t, f)
+
+	// The same repair shape, on the CONSUMED collateral witness: the row the batch
+	// actually valued is neutralized and superseded in place.
+	_, err = f.admin.Exec(f.ctx,
+		`UPDATE prices SET valid = false, invalid_reason = 'unverifiable after a reorg: no surviving poll anchor covers this observation'
+		 WHERE chain_id = 1 AND asset = $1`, fxAave.Bytes())
+	require.NoError(t, err)
+	_, err = f.admin.Exec(f.ctx,
+		`INSERT INTO prices (chain_id, asset, source, price, price_decimals, block_number, owner_engine, valid, source_as_of)
+		 VALUES (1, $1, $2, 250000000000, 8, $3, 'prices:poll:1', true, now())`,
+		fxAave.Bytes(), "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f", fxPriceBlock+1)
+	require.NoError(t, err)
+
+	require.Equal(t, cursorsBefore, cursorSnapshot(t, f),
+		"the repair is in place: no cursor moved here either")
+
+	second, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+	require.NotEqual(t, first.MaterializationKey, second.MaterializationKey,
+		"a CONSUMED witness repaired in place IS a new materialization")
+	require.Greater(t, second.BatchID, first.BatchID)
+
+	after, err := f.store.RiskBatchPriceInputs(f.ctx, second.BatchID)
+	require.NoError(t, err)
+	require.Equal(t, "250000000000", priceOfAsset(t, after, fxAave),
+		"and the repaired value is what gets served")
+}
+
+// priceOfAsset pulls one asset's disclosed price value out of a batch's snapshots.
+func priceOfAsset(t *testing.T, rows []store.RiskBatchPriceInput, asset common.Address) string {
+	t.Helper()
+	for _, r := range rows {
+		if common.BytesToAddress(r.Asset) == asset && r.Value != nil {
+			return r.Value.String()
+		}
+	}
+	t.Fatalf("no disclosed price for %s", asset.Hex())
+	return ""
 }

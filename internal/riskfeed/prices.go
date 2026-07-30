@@ -204,22 +204,47 @@ type PriceJudgement struct {
 	AsOf time.Time
 }
 
-// JudgedPrice is one price witness that ACTUALLY INFLUENCED a batch's output,
-// with the freshness phase it was judged under.
+// ConsultedPrice is one price witness the assembler ACTUALLY CONSULTED — the
+// single record of "this witness influenced the output", whether it did so by
+// being fresh, by being stale, by being absent, or by being refused at G2.
 //
-// Only these belong in the materialization identity. `snapshotSpec` fetches every
-// witness the registry declares, but `Assemble` judges only the assets referenced
-// by current positions — and stops early on a refusal. A registered asset with no
-// position affects no persisted position, disclosure or aggregate, so letting its
-// boundary crossings change the identity reintroduces exactly the
-// warning-erasure the consumed-input scoping exists to prevent.
-type JudgedPrice struct {
+// # THE SINGLE SOURCE OF TRUTH FOR THE OUTPUT-RELEVANT PRICE SET
+//
+// `snapshotSpec` FETCHES every witness the registry declares. `Assemble` CONSULTS
+// only the ones the current positions actually need, and stops early on a refusal.
+// Those are different sets, and the materialization identity must be built from the
+// second one — a registered asset with no position affects no persisted position,
+// disclosure or aggregate, so letting it move the key means a restart declines to
+// adopt, recomputes against an already-published price, and writes a clean batch
+// over a large-step warning.
+//
+// This type is that set. `ComputeMaterializationIdentity` takes it and applies TWO
+// PROJECTIONS of it — the freshness-phase section and the price half of the
+// substrate digest — so the two cannot drift apart the way they did when one was
+// scoped to judged witnesses and the other still hashed every fetched row.
+// Anything that needs "which prices were output-relevant" reads this and nothing
+// else.
+type ConsultedPrice struct {
 	ChainID uint64
 	Asset   []byte
 	Source  string
-	Phase   string
-	AsOf    time.Time
-	HasAsOf bool
+	// Present reports whether a usable row existed for the key. ABSENCE IS
+	// OUTPUT-RELEVANT — it is what produces a G1 refusal — so a consulted witness
+	// with no row still belongs in the digest, recorded as absent.
+	Present bool
+	// Value/Decimals/BlockNumber are the row's value-bearing fields as consulted,
+	// so the digest is built from what the assembler actually saw. Zero when
+	// !Present.
+	Value       *big.Int
+	Decimals    int32
+	BlockNumber uint64
+	// Phase is the freshness phase, and PhaseRelevant reports whether freshness was
+	// CONSULTED at all. A G2 return and an absent row consult no phase; the witness
+	// is still consulted, so it enters the digest but contributes no phase.
+	Phase         string
+	PhaseRelevant bool
+	AsOf          time.Time
+	HasAsOf       bool
 }
 
 // JudgePriceInput evaluates one candidate price against its budget at the
