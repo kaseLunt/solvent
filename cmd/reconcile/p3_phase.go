@@ -37,6 +37,11 @@ type p3Ctx struct {
 	reg  *registryView
 	opR  *pinnedReader
 	ethR *pinnedReader
+	// logsR is the raw eth_getLogs surface for the L2 basket-continuity
+	// sweeps (blockHash-pinned; basket-continuity ruling L2/L6). Nil means no
+	// surface is configured and every continuity proof REFUSES — disclosed,
+	// never skipped.
+	logsR rawLogsBackend
 
 	pinOP, pinETH   uint64
 	hashOP, hashETH common.Hash
@@ -79,12 +84,12 @@ type p3Result struct {
 // that makes further reads meaningless (the existing dmPhaseErr / aavePhaseErr
 // classification decides which).
 func runP3Phase(ctx context.Context, o *options, p1 *phase1Data, reg *registryView,
-	opR, ethR *pinnedReader, dmProxy, aavePool common.Address, wantDM, wantAave bool) (*p3Result, error) {
+	opR, ethR *pinnedReader, opLogs rawLogsBackend, dmProxy, aavePool common.Address, wantDM, wantAave bool) (*p3Result, error) {
 	if p1.Task6 == nil {
 		return nil, fmt.Errorf("P3 gate set enabled but the Phase-1 snapshot collected no Task-6 derived side — the two are wired from ONE flag, so this is a wiring bug, not a data condition")
 	}
 	c := &p3Ctx{
-		o: o, p1: p1, t6: p1.Task6, reg: reg, opR: opR, ethR: ethR,
+		o: o, p1: p1, t6: p1.Task6, reg: reg, opR: opR, ethR: ethR, logsR: opLogs,
 		pinOP: p1.Pins[dmEngine], pinETH: p1.Pins[aaveEngine],
 		hashOP: p1.pinHashes["op"], hashETH: p1.pinHashes["eth"],
 		dmProxy: dmProxy, aavePool: aavePool,

@@ -87,6 +87,12 @@ func backtestFrame_() *gateFrame {
 			"the 10^dec conversion denominator (immutable, so the run pin is the cheapest honest place to read it)"),
 		pinned("DebtManager.borrowingOf(user, borrowToken)@pinHash(N)",
 			"the post-liquidation residue: obligation 4's chain side, read at the liquidation block itself"),
+		pinned(srcBTExecCollateralOf,
+			"the exec-frame leg read — L2(a) of the basket-continuity ruling: leg@N is one side of the per-token closure identity leg@N − leg@N-1 == Σ signed Transfers − Δpending"),
+		pinned(srcBTTransferSweep,
+			"the L2(b) Transfer sweep, EIP-234 blockHash-pinned at the case's STORED raw_logs hash (probed 2026-07-30, recon/p3-probes.md): the raw balance channel of the closure identity, validated per L6 (pin echo, address ∈ set, topic count exactly 3, data exactly 32 bytes)"),
+		pinned(srcBTNettingSweep,
+			"the L2(c) netting sweep on the CashEventEmitter singleton (recon/report.md:15 — NOT a walked stream, which is why the netting term is outside custody): Δpending decoded from the withdrawal lifecycle closes the second eventless channel (CashLens.sol:544-546)"),
 		committed("the frozen 31-case frame (recon/p3-probes.md), digest 0x740ac240…f0fbf3",
 			"tx hashes, log indexes, stored block hashes, accounts, fan-out counts and selection reasons — the FLOOR is the frame itself"),
 		committed("backtest frame seed "+backtestFrameSeed,
@@ -122,6 +128,11 @@ const (
 	srcBTStoredHash = "raw_logs.block_hash for the case's own (tx, log_index)"
 	srcBTWitnesses  = "raw_logs same-block rows with a LOWER log_index"
 	srcBTNextPass   = "position_events(event_type=liquidation).payload.before_debt_usd of the NEXT pass (same tx, account, debt token)"
+
+	// The L2 basket-continuity sources (chain-truth basket-continuity ruling).
+	srcBTExecCollateralOf = "DebtManager.collateralOf(user)@pinHash(N)"
+	srcBTTransferSweep    = "eth_getLogs@pinHash(N) (EIP-234 blockHash form; address=basket-token union, topics=[Transfer, safe|·, ·|safe]) — two calls"
+	srcBTNettingSweep     = "eth_getLogs@pinHash(N) (EIP-234 blockHash form; address=CashEventEmitter, topics=[[WithdrawalRequested,WithdrawalAmountUpdated,WithdrawalCancelled,WithdrawalProcessed],[safe]])"
 )
 
 func newBacktestView(row snapshotdb.T6BacktestRow, f *gateFrame) *backtestView {
@@ -441,13 +452,24 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 		return rows, res, nil
 	}
 
+	// ---- the L2 continuity sweep (basket-continuity ruling) ----------------
+	// Issued for EVERY evaluated case ("per case" is the ruling's own scope):
+	// the proof outcome discharges — or refuses to discharge — L1's conjunct,
+	// and sweep (c) feeds the L5 over-seizure discrimination. A missing
+	// backend refuses rather than skips.
+	cont := refusedSweep("no eth_getLogs surface is configured for this run — the continuity sweeps (ruling L2 b/c) cannot be taken, so continuity is unproven by refusal")
+	if c.logsR != nil {
+		cont = assembleContinuitySweep(ctx, c.logsR, f, key, pinHash, fc.Block, fc.LogIndex,
+			common.HexToHash(fc.TxHash), account, parent.st.collateral, exec.st.collateral, db.Seizures)
+	}
+
 	// ---- OBLIGATION 2: our eligibility boolean, three-state law -----------
 	// The whole composition — parent predicate, causation replay, block-end
 	// recomputation, classification — lives in obligation2Eligibility so the
 	// EXACT production path is drivable by tests from fixtures/DB rows
 	// (Codex round 5: isolated classifier calls with hand-fed booleans let
 	// composition defects hide).
-	o2 := obligation2Eligibility(key, v, parent, exec, c.dmProxy, account, debtToken, ourBefore, decimals, f)
+	o2 := obligation2Eligibility(key, v, parent, exec, c.dmProxy, account, debtToken, ourBefore, decimals, cont, f)
 	res.MarginUSD6 = o2.marginUSD6
 	res.PriceDeltaNote = o2.priceNote
 	res.EligibilityState = o2.eligState
@@ -487,7 +509,7 @@ type obl2Outcome struct {
 // intra-block recomputation a causation test rather than a label.
 func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exec execFrame,
 	dmProxy, account, debtToken common.Address, eventDebt *big.Int,
-	decimals map[common.Address]uint8, f *gateFrame) obl2Outcome {
+	decimals map[common.Address]uint8, cont *continuitySweep, f *gateFrame) obl2Outcome {
 	var out obl2Outcome
 	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.st.collateral, parent.st.prices, parent.st.configs, decimals)
 
@@ -552,13 +574,36 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 	margin.Abs(margin)
 	out.marginUSD6 = margin.String()
 
+	// L2 — THE ONLY SANCTIONED DISCHARGER of L1's conjunct (chain-truth
+	// basket-continuity ruling): the per-token closure identity over the two
+	// leg frames plus the blockHash-pinned Transfer and CashEventEmitter
+	// netting sweeps, with the pre-boundary attribution law. A sweep that
+	// could not be taken, did not validate (L6), or does not close REFUSES —
+	// the conjunct stays false and the marginal candidate stays UNEXPLAINED.
+	proof := proveBasketContinuity(cont, v.seizures(), v.sameBlockWitnesses())
+	basketContinuityProven := proof.Proven
+
 	// THE CAUSATION TEST (round-1 finding 7). The old code labelled a case
 	// "flipped-with-witness" whenever ANY earlier log existed or ANY price
 	// differed — it never checked that the witness actually flipped the boolean,
 	// so an unrelated log in a busy block excused a genuine false negative. Now
 	// the boolean is RECOMPUTED in the execution frame, and the flip must be
 	// REPRODUCED: eligible-at-exec is required, not inferred.
-	execMaxBorrow, execPriced := maxBorrowAtFrame(parent.st.collateral, exec.st.prices, parent.st.configs, decimals)
+	//
+	// L3 (basket-continuity ruling): with continuity PROVEN, the recomputation
+	// runs over the REPLAYED BOUNDARY BASKET (causeReplay.BoundaryCollateral —
+	// the wave-7 seam), not parent.st.collateral: the boundary is mid-block,
+	// so the parent basket is the wrong surface the moment the replay applied
+	// a write, and without L2 the recomputation over ANY basket is theater —
+	// both prongs together, or neither. While continuity is unproven the
+	// parent basket stands (and the marginal arm is gated anyway).
+	execBasket := parent.st.collateral
+	execBasketNote := "parent collateralOf legs at exec prices (continuity UNPROVEN: the replayed boundary basket certifies nothing the proof cannot back — ruling L3 activates only with L2)"
+	if basketContinuityProven && cause.BoundaryCollateral != nil {
+		execBasket = cause.BoundaryCollateral
+		execBasketNote = "REPLAYED BOUNDARY BASKET (causeReplay.BoundaryCollateral) at exec prices — ruling L3: continuity is proven, so the classifier consults the basket the proof certified"
+	}
+	execMaxBorrow, execPriced := maxBorrowAtFrame(execBasket, exec.st.prices, parent.st.configs, decimals)
 	execEligible := eventDebt.Cmp(execMaxBorrow) > 0
 	allPriced := parentPriced && execPriced
 
@@ -585,7 +630,18 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 			"same_block_replay_reversals":       fmt.Sprintf("%d", cause.Reversals),
 			"eligible_at_liquidation_boundary":  fmt.Sprintf("%v", cause.BoundaryEligible),
 			"parent_basket_complete":            fmt.Sprintf("%v", parentBasketNote == ""),
+			"exec_eligibility_basket":           execBasketNote,
 		},
+	}
+	// L5 wiring (ruling): sweep (c) now DISCRIMINATES the two honest
+	// over-seizure explanations — (a) unseen inbound vs (b) netting release —
+	// whenever the replay refused an over-seizing write. Evidence only; the
+	// refusal itself (note → Complete()==false → UNEXPLAINED) is unchanged.
+	for _, n := range cause.Notes {
+		if strings.Contains(n, "OVER-SEIZES") {
+			oblRow.Evidence["over_seizure_discrimination"] = overSeizureDiscrimination(proof, cont != nil && cont.Refusal == "")
+			break
+		}
 	}
 	if parentBasketNote != "" {
 		// The round-7 disclosure: WHICH parent-basket input degraded (the
@@ -605,11 +661,10 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 	}
 
 	// L1 (chain-truth basket-continuity ruling, NORMATIVE): the continuity
-	// conjunct on the marginal arm. FALSE by law in this wave — no code path
-	// may set it true until the L2 boundary-basket continuity proof (new
-	// exec-frame collateralOf reads plus blockHash-pinned Transfer and
-	// CashEventEmitter netting sweeps closing the per-token identity) lands.
-	const basketContinuityProven = false
+	// conjunct on the marginal arm, discharged EXCLUSIVELY by the L2 proof
+	// above (basketContinuityProven = proof.Proven — nothing else may set
+	// it). While the proof refuses, every marginal candidate resolves
+	// UNEXPLAINED with the basket_continuity disclosure.
 	verdict := classifyIntraBlock(ourEligible, cause.ParentComplete, execEligible, allPriced,
 		cause.Proven, cause.Complete(), basketContinuityProven)
 	// The L4 disclosure for the unproven state: a marginal CANDIDATE is a
@@ -620,7 +675,16 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 		classifyIntraBlock(ourEligible, cause.ParentComplete, execEligible, allPriced,
 			cause.Proven, cause.Complete(), true) == eligFlippedWithWitness
 	if continuityGated {
+		// The unproven text is VERBATIM-STABLE (tests pin it literally); the
+		// per-case refusal reasons travel under their own key so the stable
+		// disclosure never absorbs case detail.
 		oblRow.Evidence["basket_continuity"] = basketContinuityUnproven
+		oblRow.Evidence["basket_continuity_refusals"] = strings.Join(proof.Refusals, " | ")
+	}
+	if verdict == eligFlippedWithWitness {
+		// The proven outcome REPLACES the unproven text on the discharged
+		// path — the evidence key's text is the proof's own statement.
+		oblRow.Evidence["basket_continuity"] = proof.Outcome
 	}
 	switch verdict {
 	case eligTrueAtParent:
@@ -638,7 +702,7 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 		out.eligState = "flipped-in-block-with-custodied-witness"
 		oblRow.Verdict = verdictMarginal
 		oblRow.Class = verdictMarginal
-		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION REPLAYED FROM PRE-LIQUIDATION STATE: false at the parent boundary (maxBorrowLT %s), and a CUSTODIED earlier log's DECODED write, applied to the parent state in log order, itself produces the false→true transition AND holds to the liquidation boundary — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
+		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION REPLAYED FROM PRE-LIQUIDATION STATE: false at the parent boundary (maxBorrowLT %s), and a CUSTODIED earlier log's DECODED write, applied to the parent state in log order, itself produces the false→true transition AND holds to the liquidation boundary — %s. BASKET CONTINUITY to the boundary is PROVEN (ruling L2, evidence key basket_continuity): the per-token closure identity closed both eventless channels — raw transfers and the netting term — from blockHash-pinned sweeps, and every pre-boundary movement attributed to a custodied witness's tx. The recomputation at execution-frame prices, run over the REPLAYED BOUNDARY BASKET (ruling L3), corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
 			ourMaxBorrow, strings.Join(cause.Causes, "; "), execMaxBorrow)
 		f.cite(tolIntraBlockMarginality)
 	default:
@@ -782,12 +846,13 @@ func (tg backtestFrameTag) name() string {
 
 // buildBacktestFrameCalls packs the frame's subcalls in their canonical order:
 // the frame-defining read first (collateralOf for the full/parent frame,
-// borrowingOf for the execution frame), then per token in address order:
-// price, and — full frames only — config and Safe balance. A token with no
-// pinned decimals gets NO subcalls; for a seized token the caller's trailing
-// price check refuses the frame, and for a basket-only token the parent
-// valuation-completeness conjunct does (Codex round 7, H1) — never a silent
-// drop.
+// borrowingOf THEN collateralOf for the execution frame — the L2(a) exec-frame
+// leg read the basket-continuity ruling adds: leg@N is one side of the closure
+// identity), then per token in address order: price, and — full frames only —
+// config and Safe balance. A token with no pinned decimals gets NO subcalls;
+// for a seized token the caller's trailing price check refuses the frame, and
+// for a basket-only token the parent valuation-completeness conjunct does
+// (Codex round 7, H1) — never a silent drop.
 func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bool,
 	tokens map[common.Address]bool, decimals map[common.Address]uint8) ([]multicallCall, []backtestFrameTag, error) {
 	var calls []multicallCall
@@ -804,6 +869,11 @@ func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bo
 			return nil, nil, err
 		}
 		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{kind: "borrowingOf"})
+		d, err = dmCollateralOfABI.Pack("collateralOf", account)
+		if err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{kind: "collateralOf"})
 	}
 	for _, tok := range sortedAddrs(tokens) {
 		dec, ok := decimals[tok]
@@ -872,7 +942,13 @@ func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFram
 			for _, l := range list {
 				st.collateral = append(st.collateral, collateralLeg{token: l.Token, amount: l.Amount})
 			}
-			f.use("DebtManager.collateralOf(user)@parentHash(N-1)")
+			if st.pricesOnly {
+				// The exec frame's leg read is the L2(a) source — the leg@N
+				// side of the continuity closure identity.
+				f.use(srcBTExecCollateralOf)
+			} else {
+				f.use("DebtManager.collateralOf(user)@parentHash(N-1)")
+			}
 		case "borrowingOf":
 			v, err := unpackUint256Strict(dmBorrowingOfOneABI, "borrowingOf", res[i].ReturnData)
 			if err != nil {
@@ -1651,10 +1727,10 @@ type causeReplay struct {
 	BoundaryEligible bool
 	// BoundaryCollateral is the replayed basket AFTER the last applied
 	// pre-liquidation write — the boundary-basket surface L3 (chain-truth
-	// basket-continuity ruling) will recompute execEligible against once
-	// L2's continuity proof lands. Exposed now because the replay already
-	// holds it; NOTHING consumes it for classification in this wave, and it
-	// is nil when the replay refused its parent-state inputs.
+	// basket-continuity ruling) recomputes execEligible against WHEN the L2
+	// continuity proof is proven (obligation2Eligibility's basket switch —
+	// the wave-9 discharge of the wave-7 seam). Nil when the replay refused
+	// its parent-state inputs.
 	BoundaryCollateral []collateralLeg
 	// Reversals counts true→false transitions during the replay; each one
 	// invalidates (clears) any earlier proven cause.
@@ -2258,11 +2334,12 @@ const basketContinuityUnproven = "unproven: Safe collateral moves without DM eve
 //
 // L1 (chain-truth basket-continuity ruling, NORMATIVE — archived verbatim at
 // .superpowers/sdd/p3-consults/chain-truth-basket-continuity-ruling.md): the
-// marginal arm carries a basketContinuityProven conjunct. Default false, and
-// NO code path sets it true in this wave — only the L2 boundary-basket
-// continuity proof (the designed next wave) may. While false, every marginal
-// candidate resolves UNEXPLAINED with the basket_continuity disclosure.
-// True-at-parent, unpriced-leg, and UNEXPLAINED are NOT gated on it.
+// marginal arm carries a basketContinuityProven conjunct. Default false; the
+// ONLY discharger is the L2 boundary-basket continuity proof
+// (proveBasketContinuity in basket_continuity.go — landed wave 9). While the
+// proof refuses, every marginal candidate resolves UNEXPLAINED with the
+// basket_continuity disclosure. True-at-parent, unpriced-leg, and UNEXPLAINED
+// are NOT gated on it.
 func classifyIntraBlock(parentEligible, parentComplete, execEligible, allPriced, causeProven, replayComplete, basketContinuityProven bool) string {
 	switch {
 	case parentComplete && parentEligible:

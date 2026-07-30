@@ -548,3 +548,34 @@ SELECT l.bucket_start AS bucket, l.block_number, l.log_index,
 FROM frame f JOIN liq l ON l.tx_hash=f.tx_hash AND l.log_index=f.log_index
 ORDER BY l.block_number, l.log_index;
 ```
+
+## Task 6 L6 probe — EIP-234 blockHash-form eth_getLogs at frame-era depth (2026-07-30)
+
+Ruling precondition discharged (chain-truth basket-continuity ruling, L6: the range form
+was ledger-proven by the backfill; the blockHash form was UNPROBED and no getLogs helper
+existed in cmd/reconcile). Probe: `TestLiveL6BlockHashGetLogsProbe`
+(cmd/reconcile/p3_continuity_live_test.go, opt-in via SOLVENT_P3_LIVE=1) — each configured
+endpoint asked SEPARATELY (production failover would mask a one-endpoint capability hole),
+endpoints named by env var + ordinal only, never by URL.
+
+Method, per endpoint × per case: (q1) `eth_getLogs{blockHash: storedPin, address: [DM proxy
+0x0078c5a4…9553]}`; (q2) the equivalent single-block range form, compared log-by-log on
+(logIndex, address, topics, data); (q3) blockHash + `topics:[[Liquidated]]` — the case's own
+event must be present at its stored log_index; (q4) blockHash form at the CashEventEmitter
+(`0x380B2e96…1acB`, recon/report.md:15) with its range twin. Pins are the frozen frame's
+STORED raw_logs hashes — never a number→hash resolution.
+
+| endpoint | block (stored pin) | q1 hash-form | q2 range-form | q3 Liquidated-topic | q4 emitter hash/range | echo |
+|---|---|---|---|---|---|---|
+| SOLVENT_RECON_RPC_OP[0] | 150,057,202 (0x9e536de1…f8e5) | 4 logs | 4 logs, identical set | 2 (log_index 187 present) | 4 / 4 | == pin, all logs |
+| SOLVENT_RECON_RPC_OP[0] | 152,007,376 (0x60a1dc49…caf7) | 3 logs | 3 logs, identical set | 2 (log_index 157 present — the two-pass pair) | 5 / 5 | == pin, all logs |
+| SOLVENT_RECON_RPC_OP[1] | 150,057,202 (0x9e536de1…f8e5) | 4 logs | 4 logs, identical set | 2 (log_index 187 present) | 4 / 4 | == pin, all logs |
+| SOLVENT_RECON_RPC_OP[1] | 152,007,376 (0x60a1dc49…caf7) | 3 logs | 3 logs, identical set | 2 (log_index 157 present) | 5 / 5 | == pin, all logs |
+
+VERDICT: the blockHash form IS served, with topics composition and correct pin echo, by
+BOTH configured SOLVENT_RECON_RPC_OP endpoints at the deepest frame pin (150.06M) and at
+the two-pass block. Zero disagreements between forms. The L2 wave's sweeps (b)/(c) are
+serveable as the ruling writes them. (A2 caveat stands: dRPC archive routing is
+nondeterministic — production issues these sweeps through the shared runner's bounded
+retry/failover, and a sweep that cannot be taken REFUSES the continuity proof for that
+case, never fabricates.)

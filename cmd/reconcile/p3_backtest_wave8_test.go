@@ -115,7 +115,11 @@ func wave8Plan(t *testing.T, full bool) []backtestFrameTag {
 		require.Equal(t, []string{"collateralOf", "price", "config", "balanceOf"}, kinds,
 			"the parent frame's canonical subcall order — the SUBCALL INVENTORY this wave's law covers")
 	} else {
-		require.Equal(t, []string{"borrowingOf", "price"}, kinds,
+		// The exec inventory gained collateralOf in the L2 wave (basket-
+		// continuity ruling L2(a): leg@N is one side of the closure identity).
+		// The wave-8 decode law covers the new subcall automatically — same
+		// loop, same per-subcall refusal.
+		require.Equal(t, []string{"borrowingOf", "collateralOf", "price"}, kinds,
 			"the execution frame's canonical subcall order — the same decode path, the same law")
 	}
 	return tags
@@ -363,10 +367,26 @@ func TestWave8ExecFrameSharesTheDecodeLaw(t *testing.T) {
 	t.Run("price empty return is unread", func(t *testing.T) {
 		tags := wave8Plan(t, false)
 		res := wave8Honest(t, tags, 100_000_000)
-		res[1] = multicallResult{Success: true, ReturnData: []byte{}}
+		for i, tg := range tags {
+			if tg.kind == "price" {
+				res[i] = multicallResult{Success: true, ReturnData: []byte{}}
+			}
+		}
 		st := wave8Decode(t, false, tags, res)
 		require.NotEmpty(t, st.unread, "an exec-frame price that answers no bytes is UNREAD, never a silently unpriced token")
 		require.Contains(t, st.unread, "convertCollateralTokenToUsd", "the refusal names the failed subcall")
+	})
+	t.Run("exec collateralOf failure is unread (the L2(a) subcall joins the law)", func(t *testing.T) {
+		tags := wave8Plan(t, false)
+		res := wave8Honest(t, tags, 100_000_000)
+		for i, tg := range tags {
+			if tg.kind == "collateralOf" {
+				res[i] = multicallResult{Success: false}
+			}
+		}
+		st := wave8Decode(t, false, tags, res)
+		require.NotEmpty(t, st.unread, "a failed exec-frame collateralOf is UNREAD — leg@N is one side of the closure identity and must never be a silently empty basket")
+		require.Contains(t, st.unread, "collateralOf", "the refusal names the failed subcall")
 	})
 	t.Run("honest exec frame decodes cleanly", func(t *testing.T) {
 		tags := wave8Plan(t, false)

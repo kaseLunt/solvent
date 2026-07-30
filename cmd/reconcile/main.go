@@ -1058,7 +1058,22 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	// failure reaches the exit code through exactly the path a DM row drift
 	// reaches it by (chain-truth R5.4: never a side-channel exit).
 	if o.p3Gates && reg != nil {
-		p3, perr := runP3Phase(ctx, o, p1, reg, opReader, ethReader, dmProxy, aavePool, wantDM, wantAave)
+		// The L2 continuity sweeps need a raw eth_getLogs surface (basket-
+		// continuity ruling L6: new plumbing — the pinned reader's chain
+		// interface has no blockHash-form getLogs). Dialed from the SAME URL
+		// list as the OP pinned reader, walked under the SAME shared runner.
+		// A dial failure does NOT abort the phase: the sweeps then refuse per
+		// case (continuity unproven, disclosed) rather than killing every
+		// other gate.
+		var opLogs rawLogsBackend
+		if wantDM {
+			if lr, lerr := dialPinnedLogs(ctx, "op", opURLs, runner); lerr == nil {
+				opLogs = lr
+			} else {
+				fmt.Fprintf(os.Stderr, "reconcile: continuity getLogs surface unavailable (%v) — L2 proofs will refuse per case\n", lerr)
+			}
+		}
+		p3, perr := runP3Phase(ctx, o, p1, reg, opReader, ethReader, opLogs, dmProxy, aavePool, wantDM, wantAave)
 		if p3 != nil {
 			rep.P3 = p3
 			gatedFailures += tallyP3(p3.Rows)

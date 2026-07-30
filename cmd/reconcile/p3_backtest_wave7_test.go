@@ -152,20 +152,19 @@ func TestParentIneligibleIncompleteReplayStaysUnexplained(t *testing.T) {
 
 // --- L1: the continuity conjunct gates every marginal candidate -------------
 
-// TestProvenCrossingIsContinuityGatedUnexplained is the L1 posture: a
-// crossing the replay genuinely PROVES (an earlier InterestIndexUpdated whose
-// decoded move crosses the threshold), holding to the boundary, with a fully
-// complete replay and corroborating recomputation — the pre-ruling
-// marginal-disclosed shape. Under L1 the marginal arm additionally requires
-// basketContinuityProven, which NOTHING sets true in this wave: Safe
-// collateral moves without DM events (derivation-notes caveat 4) and the
-// netting term moves without transfers (CashLens.sol:544-546), so an unseen
-// same-block basket move could be the actual cause and the attribution is
-// uncertifiable. The verdict must be UNEXPLAINED with the disclosure carried
-// under the basket_continuity evidence key. Kills m2.
+// TestProvenCrossingIsContinuityGatedUnexplained is the L1 posture, RETAINED
+// after L2 landed as the REFUSAL-POLARITY pin: a crossing the replay
+// genuinely PROVES (an earlier InterestIndexUpdated whose decoded move
+// crosses the threshold), holding to the boundary, with a fully complete
+// replay and corroborating recomputation — but NO continuity sweep
+// (driveObligation2 hands obligation2Eligibility a nil sweep, so the L2
+// proof REFUSES and the conjunct stays false). The verdict must be
+// UNEXPLAINED with the verbatim disclosure under the basket_continuity
+// evidence key. Kills m2.
 //
-// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
-// chain-truth-basket-continuity-ruling.md).
+// The FLIPPED-BACK positive control — the same fixture WITH a synthesized
+// continuity proof asserting marginal-disclosed — is wave 9's
+// TestIndexTickCrossingWithProvenContinuityIsMarginalDisclosed.
 func TestProvenCrossingIsContinuityGatedUnexplained(t *testing.T) {
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
 	usdcHex := hexLower(replayTestUSDC.Hex())

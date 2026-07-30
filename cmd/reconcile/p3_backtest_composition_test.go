@@ -105,16 +105,28 @@ func compositionRow(normalizedAtParent, normalizedBefore, indexAtBlock *big.Int,
 
 // driveObligation2 runs the case through the REAL production composition:
 // the same accessors, the same event-time fold (obligation 1's bridge), the
-// same obligation2Eligibility call runBacktestCase makes.
+// same obligation2Eligibility call runBacktestCase makes. The nil continuity
+// sweep is the REFUSAL posture (no sweep taken → the L2 proof refuses → L1's
+// conjunct stays false), so every pre-L2 refusal-polarity pin in this suite
+// keeps meaning exactly what it says.
 func driveObligation2(t *testing.T, row snapshotdb.T6BacktestRow, parent parentFrame, exec execFrame,
 	account common.Address) (obl2Outcome, *gateFrame) {
+	t.Helper()
+	return driveObligation2WithSweep(t, row, parent, exec, account, nil)
+}
+
+// driveObligation2WithSweep is driveObligation2 with an explicit continuity
+// sweep — the L2-era positive controls hand a synthesized (or captured) sweep
+// through the SAME production composition.
+func driveObligation2WithSweep(t *testing.T, row snapshotdb.T6BacktestRow, parent parentFrame, exec execFrame,
+	account common.Address, cont *continuitySweep) (obl2Outcome, *gateFrame) {
 	t.Helper()
 	f := newGateFrame(gateBacktest)
 	v := newBacktestView(row, f)
 	eventDebt := mulDivFloor(v.normalizedBefore(), v.indexAtBlock())
 	decs := map[common.Address]uint8{tokA: 6}
 	o2 := obligation2Eligibility("composition-case", v, parent, exec,
-		replayTestDM, account, replayTestUSDC, eventDebt, decs, f)
+		replayTestDM, account, replayTestUSDC, eventDebt, decs, cont, f)
 	return o2, f
 }
 
@@ -133,12 +145,11 @@ func idxOnePlusTick() *big.Int { return big.NewInt(1_000_000_010_000_000_000) }
 // true-at-parent EXACT and the required marginal disclosure is lost. The
 // composed verdict must NOT be true-at-parent. Kills m1.
 //
-// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
-// chain-truth-basket-continuity-ruling.md): while basket continuity is
-// unproven the crossing stays replay-PROVEN (asserted below — the machinery
-// the L2 wave certifies) but the composed verdict is UNEXPLAINED with the
-// basket_continuity disclosure, never a marginal pass and still never
-// true-at-parent.
+// Post-L2 note (wave 9): this drive hands obligation2Eligibility NO
+// continuity sweep, so the L2 proof refuses and the composed verdict stays
+// UNEXPLAINED-with-disclosure — the refusal polarity, kept pinned. The
+// flipped-back positive control (same crossing + a proven sweep ⇒
+// marginal-disclosed) is TestIndexTickCrossingWithProvenContinuityIsMarginalDisclosed.
 func TestIndexCausedCrossingIsMarginalNotTrueAtParent(t *testing.T) {
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
 	usdcHex := hexLower(replayTestUSDC.Hex())

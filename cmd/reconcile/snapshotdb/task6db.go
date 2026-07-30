@@ -168,6 +168,11 @@ type T6Witness struct {
 	LogIndex uint32 `json:"log_index"`
 	Address  string `json:"address"`
 	Topic0   string `json:"topic0"`
+	// TxHash is the witness's transaction hash, hex without 0x. Added for the
+	// L2 basket-continuity proof (chain-truth basket-continuity ruling): the
+	// attribution law joins swept Transfer/netting logs to a custodied
+	// witness's TX, so a witnessed Liquidated must carry its tx identity.
+	TxHash string `json:"tx_hash"`
 	// Topic1Addr / Topic2Addr / Topic3Addr are the low-20-byte address payloads of
 	// the indexed slots, empty when the slot is absent. The DM events this run
 	// cares about carry the account and the token in these positions.
@@ -761,7 +766,8 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			       COALESCE(encode(substring(r.topics[2] FROM 13 FOR 20),'hex'),''),
 			       COALESCE(encode(substring(r.topics[3] FROM 13 FOR 20),'hex'),''),
 			       COALESCE(encode(substring(r.topics[4] FROM 13 FOR 20),'hex'),''),
-			       COALESCE(encode(r.data,'hex'),'')
+			       COALESCE(encode(r.data,'hex'),''),
+			       encode(r.tx_hash,'hex')
 			FROM raw_logs r
 			WHERE r.chain_id = 10 AND r.block_number = $1 AND r.log_index < $2
 			ORDER BY r.log_index`, blockNumber, int32(logIdx))
@@ -770,15 +776,15 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 		}
 		for wrows.Next() {
 			var li int32
-			var addr, topic, t1, t2, t3, data string
-			if err := wrows.Scan(&li, &addr, &topic, &t1, &t2, &t3, &data); err != nil {
+			var addr, topic, t1, t2, t3, data, wtx string
+			if err := wrows.Scan(&li, &addr, &topic, &t1, &t2, &t3, &data, &wtx); err != nil {
 				wrows.Close()
 				return fmt.Errorf("scan case %s witness: %w", key, err)
 			}
 			row.SameBlockEarlier = append(row.SameBlockEarlier,
 				fmt.Sprintf("log_index %d address 0x%s topic0 0x%s", li, addr, topic))
 			row.SameBlockWitnesses = append(row.SameBlockWitnesses, T6Witness{
-				LogIndex: uint32(li), Address: addr, Topic0: topic,
+				LogIndex: uint32(li), Address: addr, Topic0: topic, TxHash: wtx,
 				Topic1Addr: t1, Topic2Addr: t2, Topic3Addr: t3, Data: data,
 			})
 		}

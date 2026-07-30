@@ -99,7 +99,9 @@ func TestP3PhaseDriverWiresEveryGateAndTheFrameLedger(t *testing.T) {
 	}
 	o := &options{p3Gates: true}
 
-	out, err := runP3Phase(context.Background(), o, p1, reg, reader, reader, w.dm, w.pool, true, true)
+	// nil logs backend: the L2 continuity sweeps REFUSE per case (disclosed),
+	// which is exactly the posture a run without the getLogs surface owes.
+	out, err := runP3Phase(context.Background(), o, p1, reg, reader, reader, nil, w.dm, w.pool, true, true)
 	// A fake that serves NOTHING makes the FIRST pinned read of each engine fail,
 	// which the gates classify through the existing aavePhaseErr/dmPhaseErr
 	// mapping. Either the driver returns that classified abort (fine — it is the
