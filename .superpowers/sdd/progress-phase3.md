@@ -849,6 +849,56 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   riskfeed is mid-flight with the sibling wave). Ruling's meta-note for the
   pattern book: the EXACT-EQUALITY gate posture is what caught F1 — ±1 tolerance
   on totalDebtBase would have carpeted a real law error 12/12.
+- **SWEEP-GAP PROBE REPORT (F2 root-caused — TWO defects, and F2's subject was a
+  timing artifact).** The named account is NOW swept byte-exact with chain (3
+  legs, $69.07, verified at its own block AND the pin); its "0 legs" was a
+  LITERAL frozen during a 15m19s new-borrower blind window and welded against a
+  pin ~40-55 min later — a cross-time comparison. (DEFECT 1, structural,
+  FAIL-CLOSED in prod): sweep universe is debt-event-gated and generations open
+  only on cadence (3600s) or rewind — a first-time borrower has debt derivable in
+  ~33s but collateral unknowable until the next generation (worst case ~1h);
+  production paths REFUSE via GateSweepNever, so the cost is refused coverage,
+  never false alerts. Fast-lane remediation designed (due-predicate EXISTS probe
+  over never-swept accounts + runner hook, ordering already optimal — 0.59s
+  pickup proven). (DEFECT 2, LIVE, NOT FAIL-CLOSED, in the Task 6 gate's OWN
+  UNCOMMITTED CODE): task6db.go filters collateral legs at updated_block<=pin
+  but reads sweep watermarks UNFILTERED; sweeps execute at HEAD>cursor and
+  ApplySweepBatch replaces legs wholesale → mid-generation (~34% duty cycle) an
+  account's only legs sit above the pin, get discarded, while SweepBlock still
+  certifies them → zero collateral + valid watermark + debt>0 = liquidatable
+  TRUE. **199/9722 accounts (~2%) right now; 5/5 chain-verified HEALTHY incl.
+  $100,120 collateral.** riskd NOT exposed (riskBalances has no block filter).
+  FIX ROUTED to the Task 6 wave (its uncommitted tree): pin discipline on
+  collectSweepBlocks (last_success_block<=pin → else SweepBlock=0 → honest
+  refusal) + the legs-above-pin-never-with-nonzero-SweepBlock regression + the
+  frozen-literal smoke methodology fix. DEFERRED (post-current-waves): sweeper
+  fast lane (P2) + per-account sweep-staleness flag (P3 — 118 accounts, 1.2%,
+  have debt newer than last sweep; error BIDIRECTIONAL and the false-negative
+  direction is worse for an alert product; the 9,242 record-only
+  liquidation_collateral events are the cheapest collateral-reduction signal,
+  currently unused).
+- **MICRO-FIX WAVE (flag custody) REPORTED — commit PENDING one joint
+  verification** (rev-3 wave is mid-edit in internal/risk, which riskfeed
+  imports; my instant-verification hit that known race — decode/derive/store
+  green, build+vet green pre-race, wave's own from-scratch post-audit full suite
+  exit 0 incl. opted-in pipelinereplay 3/3). POST-INCIDENT AUDIT done properly:
+  17 round-1 anchors verified in HEAD and tree; 38 round-2 anchors exactly-once;
+  TWO silently-compiling revert defects found+fixed (orphaned doc block fused
+  onto the wrong function; a stale comment). Design as directed: migration 00014
+  adds derive_cursors.covered_from_block + decoder_revision, **defaults ARE the
+  mechanism** (existing rows = NULL/0 = their true provenance → live DB comes out
+  UNPROVEN, refuses with no operator action; a coverage-claiming default would
+  have made the migration the bug); coverage set ONLY by ApplyDerivedWindow from
+  the window's own from + decode.RegistryRevision (nothing configurable);
+  revision-change RESTARTS coverage at this window's from; RewindDerived clears
+  it atomically (else a rewind manufactures false genesis custody).
+  GateFlagCustodyUnproven refuses WHOLE-ENGINE with rows naming bar+remedy,
+  placed in Assemble so no caller can bypass; genesis from config.Streams, zero
+  genesis fails closed. Identity: coverage rides the cursor line of the vector
+  (…/cov20625519/rev2); replay choreography pinned (pre.Key != post.Key though
+  every watermark returns). Schema pins → 14 both sites. DEPLOY-RISK INVERSION
+  confirmed: pre-replay state is now SAFE BY REFUSING — the binary can ship
+  before the maintenance window.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
