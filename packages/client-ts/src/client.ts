@@ -160,8 +160,14 @@ export class SolventClient {
    * raw body: it returns `lookup(body)`, whose SOLE discriminant `outcome` has
    * three string-literal cases and which carries no top-level `found` at all
    * (`if (!result.found)` does not compile), and it throws
-   * `ContractInvariantError` on a body that contradicts itself. The unrefined
-   * wire body is behind `addressRaw()`, whose name says what it is.
+   * `ContractInvariantError` on a body that contradicts itself.
+   *
+   * The same law covers the rest of the verdict class (round 3): the positions
+   * on `response` are REFINED — `liquidatable` and `used_as_collateral` are
+   * absent, replaced by the sealed `liquidation_verdict` / `collateral_use`
+   * unions (`src/refine.ts`) — so no nullable-boolean verdict survives on this
+   * surface either. The unrefined wire body is behind `addressRaw()`, whose
+   * name says what it is.
    */
   async address(addr: string, signal?: AbortSignal): Promise<AddressLookup> {
     return lookup(await this.addressRaw(addr, signal));
@@ -170,12 +176,14 @@ export class SolventClient {
   /**
    * `GET /v1/address/{addr}` — the RAW wire body, unrefined and unenforced.
    *
-   * `found` here is the contract's `boolean | null`, and no invariant is
-   * checked: this accessor exists for persistence, forensics and conformance
+   * `found` here is the contract's `boolean | null` — and so are the other
+   * nullable-boolean verdicts (`positions[].liquidatable`,
+   * `legs[].used_as_collateral`). No invariant is checked and nothing is
+   * refined: this accessor exists for persistence, forensics and conformance
    * tooling, where the wire bytes' own claims are the subject. Never branch a
-   * rendering decision on this body's `found` — use `address()` (or pass this
-   * body through `lookup()`), where "cannot answer" cannot read as "no
-   * position".
+   * rendering decision on this body's `found` or verdict fields — use
+   * `address()` (or pass this body through `lookup()`), where a withheld
+   * answer cannot read as a definitive one.
    */
   async addressRaw(addr: string, signal?: AbortSignal): Promise<AddressResponse> {
     return this.get<AddressResponse>(`/v1/address/${this.checkAddress(addr)}`, signal);
@@ -187,7 +195,10 @@ export class SolventClient {
    *
    * `found` is three-valued here too, with the same contract as `address()`,
    * and the same enforcement: contradictory bodies throw
-   * `ContractInvariantError`. The raw wire body is behind `addressStressRaw()`.
+   * `ContractInvariantError`. The scenarios on `response` are REFINED —
+   * stress-state `liquidatable` and horizon `becomes_liquidatable` are absent,
+   * replaced by the sealed `liquidation_verdict` union — and the raw wire body
+   * is behind `addressStressRaw()`.
    */
   async addressStress(addr: string, signal?: AbortSignal): Promise<StressLookup> {
     return lookup(await this.addressStressRaw(addr, signal));

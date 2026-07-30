@@ -11,7 +11,7 @@ import {
   DecimalFormatError,
   PrecisionLossError,
   WAD,
-  aaveEligibleFromWad,
+  aaveVerdictFromWad,
   compareRatio,
   formatDecimal,
   formatUnits,
@@ -296,14 +296,16 @@ describe("comparisons stay exact — no division anywhere", () => {
     expect(() => compareRatio(1n, 1n, 1n, -1n)).toThrow(DecimalFormatError);
   });
 
-  it("applies Aave's STRICT test on the wad", () => {
-    expect(aaveEligibleFromWad(PINNED.aave.hfWad)).toBe(false);
-    expect(aaveEligibleFromWad(PINNED.aave.shockedHFWad)).toBe(true);
+  it("applies Aave's STRICT test on the wad, as a SEALED verdict", () => {
+    expect(aaveVerdictFromWad(PINNED.aave.hfWad)).toBe("not-liquidatable");
+    expect(aaveVerdictFromWad(PINNED.aave.shockedHFWad)).toBe("liquidatable");
     // Exactly 1e18 is HEALTHY — the boundary the contract calls out.
-    expect(aaveEligibleFromWad(WAD.toString())).toBe(false);
-    expect(aaveEligibleFromWad((WAD - 1n).toString())).toBe(true);
-    // Absent is never reported as healthy.
-    expect(aaveEligibleFromWad(null)).toBeNull();
+    expect(aaveVerdictFromWad(WAD.toString())).toBe("not-liquidatable");
+    expect(aaveVerdictFromWad((WAD - 1n).toString())).toBe("liquidatable");
+    // Absent is never reported as healthy — and, round 3's point, can no
+    // longer be READ as healthy: `!"unknowable"` is dead code, where the
+    // predecessor's `!null` took the "safe" branch.
+    expect(aaveVerdictFromWad(null)).toBe("unknowable");
   });
 
   it("exposes a health factor's exact rational, or nothing", () => {

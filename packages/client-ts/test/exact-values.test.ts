@@ -19,11 +19,11 @@ import { describe, expect, it } from "vitest";
 import {
   AbsentQuantityError,
   SolventClient,
-  aaveEligibleFromWad,
+  aaveVerdictFromWad,
   compareRatio,
   parseDecimal,
   parseNullableDecimal,
-  positionEligible,
+  positionVerdict,
   requireDecimal,
 } from "../src/index.js";
 import type { Position, Scenario, ScenarioResult } from "../src/index.js";
@@ -317,8 +317,8 @@ describe("/v1/address serves one address's exact position", () => {
     expect(p.avg_lt_bps).toBe(PINNED.aave.avgLTBps);
     expect(p.flags).toEqual([PINNED.aave.flag]);
     // Healthy at 1.08, and one 10% ETH step from eligible.
-    expect(aaveEligibleFromWad(p.health_factor?.wad ?? null)).toBe(false);
-    expect(positionEligible(p)).toBe(false);
+    expect(aaveVerdictFromWad(p.health_factor?.wad ?? null)).toBe("not-liquidatable");
+    expect(positionVerdict(p)).toBe("not-liquidatable");
   });
 
   it("carries the batch's durable as-ofs, never a request-time clock", async () => {
@@ -423,7 +423,7 @@ describe("/v1/address serves refusals WITH their reasons", () => {
     expect(p.price_inputs[0]?.verdict).toBe("missing");
     expect(p.price_inputs[0]?.value).toBeNull();
     // And the client withholds a verdict rather than inventing one.
-    expect(positionEligible(p)).toBeNull();
+    expect(positionVerdict(p)).toBe("unknowable");
   });
 
   it("serves the never-swept refusal without a liquidatable verdict", async () => {
@@ -432,9 +432,11 @@ describe("/v1/address serves refusals WITH their reasons", () => {
     const p = (await client.addressRaw(PINNED.accounts.dmRefused)).positions[0] as Position;
     expect(p.refusal?.code).toBe(PINNED.dm.refusedRefusalCode);
     expect(p.refusal?.note).toContain("UNKNOWN size");
-    // HF near zero over unknown collateral is a false alarm, so no verdict at all.
+    // HF near zero over unknown collateral is a false alarm, so no verdict at
+    // all — on the wire it is null, and the helper's sealed vocabulary says
+    // `unknowable` rather than anything `!` could read as safe.
     expect(p.liquidatable).toBeNull();
-    expect(positionEligible(p)).toBeNull();
+    expect(positionVerdict(p)).toBe("unknowable");
     expect(p.borrowings).toBe(PINNED.dm.refusedBorrowings);
   });
 });
@@ -465,7 +467,7 @@ describe("the Debt Manager position uses its own comparator", () => {
     expect(p.max_borrow_lt).toBe(PINNED.dm.maxBorrowLT);
     expect(p.borrowings).toBe(PINNED.dm.borrowings);
     // Eligibility comes from the boolean, never from the disclosure ratio.
-    expect(positionEligible(p)).toBe(true);
+    expect(positionVerdict(p)).toBe("liquidatable");
     const leg = p.legs[0];
     expect(leg?.amount).toBe(PINNED.dm.weethAmount);
     expect(leg?.value_usd).toBe(PINNED.dm.collateralUSD);

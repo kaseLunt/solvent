@@ -20,6 +20,7 @@ import {
   DecimalFormatError,
   PrecisionLossError,
 } from "./errors.js";
+import { liquidationVerdict, type LiquidationVerdict, type RefinedPosition } from "./refine.js";
 import type { HealthFactor, Position } from "./types.js";
 import { WAD } from "./types.js";
 
@@ -244,32 +245,47 @@ export function compareRatio(aNum: bigint, aDen: bigint, bNum: bigint, bDen: big
 }
 
 /**
- * Aave's own liquidation test, on the wad the pool computes: eligible when
- * `hf_wad < 1e18`, STRICTLY. Exactly 1e18 is healthy.
+ * Aave's own liquidation test, on the wad the pool computes, as a SEALED
+ * verdict: `liquidatable` when `hf_wad < 1e18`, STRICTLY. Exactly 1e18 is
+ * healthy — `not-liquidatable`.
  *
- * Returns `null` when the wad is absent — a refused position, or the Debt
- * Manager, which publishes no wad at all. Absent is never reported as healthy.
+ * An absent wad — a refused position, or the Debt Manager, which publishes no
+ * wad at all — is `unknowable`. Absent is never reported as healthy, and
+ * (round 3's point) can no longer be READ as healthy: this helper's
+ * predecessor, `aaveEligibleFromWad`, returned `boolean | null`, under which
+ * `if (!eligible)` labelled a withheld verdict definitively safe. A non-empty
+ * string literal gives `!` nothing to grab.
  */
-export function aaveEligibleFromWad(hfWad: string | null): boolean | null {
-  if (hfWad === null) return null;
-  return parseDecimal(hfWad) < WAD;
+export function aaveVerdictFromWad(hfWad: string | null): LiquidationVerdict {
+  if (hfWad === null) return "unknowable";
+  return parseDecimal(hfWad) < WAD ? "liquidatable" : "not-liquidatable";
 }
 
 /**
- * Whether a served position is eligible for liquidation, using each engine's
- * OWN comparator and never blending them.
+ * A served position's liquidation verdict, using each engine's OWN comparator
+ * and never blending them.
  *
- * - Debt Manager: the strict boolean `liquidatable` the engine publishes.
+ * - Debt Manager: the strict boolean `liquidatable` the engine publishes,
+ *   refined to the sealed vocabulary.
  * - Aave: `health_factor.wad < 1e18`, on the wad, never a re-derived float.
- * - Refused, or never-swept: `null`. The service withheld a verdict and this
- *   helper does not invent one.
+ * - Refused, or never-swept: `unknowable`. The service withheld a verdict and
+ *   this helper does not invent one — and unlike its predecessor
+ *   `positionEligible` (which returned `boolean | null`), the withheld case
+ *   cannot be `!`-read as "safe".
+ *
+ * Accepts both the RAW wire position (`addressRaw()`) and the refined position
+ * the primary `address()` path serves; the verdict is the same either way.
  */
-export function positionEligible(position: Position): boolean | null {
-  if (position.liquidatable !== null) return position.liquidatable;
+export function positionVerdict(position: Position | RefinedPosition): LiquidationVerdict {
+  const strict =
+    "liquidation_verdict" in position
+      ? position.liquidation_verdict
+      : liquidationVerdict(position.liquidatable);
+  if (strict !== "unknowable") return strict;
   const hf: HealthFactor | null = position.health_factor;
-  if (hf === null) return null;
-  if (hf.infinite) return false;
-  return aaveEligibleFromWad(hf.wad);
+  if (hf === null) return "unknowable";
+  if (hf.infinite) return "not-liquidatable";
+  return aaveVerdictFromWad(hf.wad);
 }
 
 /**

@@ -33,6 +33,30 @@ export { isDefinitiveNegative, lookup } from "./lookup.js";
 export type { AddressLookup, Lookup, LookupBearing, LookupOutcome, StressLookup } from "./lookup.js";
 
 export {
+  collateralUse,
+  liquidationVerdict,
+  refineLeg,
+  refinePosition,
+  refineProjection,
+  refineProjectionHorizon,
+  refineScenario,
+  refineScenarioResult,
+  refineStressState,
+} from "./refine.js";
+export type {
+  CollateralUse,
+  LiquidationVerdict,
+  RefinedBody,
+  RefinedLeg,
+  RefinedPosition,
+  RefinedProjection,
+  RefinedProjectionHorizon,
+  RefinedScenario,
+  RefinedScenarioResult,
+  RefinedStressState,
+} from "./refine.js";
+
+export {
   AbsentQuantityError,
   BadRequestError,
   ContractInvariantError,
@@ -55,7 +79,7 @@ export {
 export type { HttpErrorInit, SchemaMismatchField } from "./errors.js";
 
 export {
-  aaveEligibleFromWad,
+  aaveVerdictFromWad,
   compareRatio,
   formatDecimal,
   formatUnits,
@@ -64,7 +88,7 @@ export {
   parseDecimal,
   parseNullableDecimal,
   parseUnits,
-  positionEligible,
+  positionVerdict,
   requireDecimal,
   rescale,
   toNumber,
