@@ -1814,6 +1814,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   completeness, restated-test strength for L2 inheritance, ADJUDICATE the
   interim posture's shippability (SHIP closes round-6 findings; L2/L3/L6/L7
   remain the ruling's committed obligation).
+- **T8 FIX WAVE 4 LANDED — e437ae0** (9 files +594/−67: README + tsconfig M,
+  sync test + six examples/readme-*.ts NEW; both-ways exact; verify
+  independently re-run exit 0, 291/291). THE README IS A COMPILED SURFACE:
+  every ts fence lives verbatim in an example file between markers, compiled
+  by the verify typecheck against the REAL public surface (tsconfig paths
+  @solvent/client → src/index.ts; build config unaffected);
+  readme-sync.test.ts enforces bidirectional multiset equality + a docs
+  falsiness-lint (name-based, limits honest in-header — the type seal stays
+  load-bearing) with anti-vacuity controls BOTH directions. Full-file sweep:
+  verdict-class section w/ total-mapping table, raw-keys-only-via-raw-
+  accessors at every site, === on every discriminant, function-shaped blocks,
+  refine.test.ts finally documented. Red = the finding verbatim (TS2305 on
+  the stale fence) + lint catching the stale !result.complete. Mutants: m1
+  typecheck-kill, m2 sync-kill both directions, m3 THE SHARP ONE — falsiness
+  branch inserted identically both sides, typecheck GREEN, lint-only kill:
+  proves the compiler cannot catch string falsiness and the lint is the sole
+  working guard. ROUND 5 (expected FINAL — implementation adjudicated correct
+  in r4) dispatched: t8r5 @ e437ae0, base b9c2a10 — README-vs-surface
+  accuracy, sync normalization soundness, paths-mapping leak check, lint-
+  limit adjudication.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
