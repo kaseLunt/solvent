@@ -70,6 +70,18 @@ const (
 //
 // Each constant names the mechanism, the direction and the bound, because a
 // tolerance without all three is a carpet with a label on it.
+// toleranceID is the CLOSED tolerance enum.
+//
+// THE DEFECT THIS REPLACES (Codex round 1, finding 2): tolerances were cited by
+// STRING, so a fourth epsilon could be applied and simply not cited — the row
+// would return exact and the ledger would never see it. The law said "exactly
+// three" and the mechanism could not enforce it.
+//
+// As a typed enum with three unexported constants and no exported constructor, a
+// fourth tolerance is now a COMPILE error rather than a runtime row: there is no
+// value of this type that is not one of the three, and `cite` takes nothing else.
+type toleranceID int
+
 const (
 	// tolResidueWei — ≤1 NORMALIZED WEI, one direction (derived-high only),
 	// ONLY on fully-liquidated accounts. Mechanism: DebtManagerCore.sol:549-553
@@ -77,7 +89,7 @@ const (
 	// SECOND Liquidated of a tx, without emitting anything. The deriver models
 	// it with an explicit residue_zeroed event, so this tolerance applies only
 	// where that model did NOT fire.
-	tolResidueWei = "residue-1-normalized-wei(DebtManagerCore.sol:549-553; fully-liquidated only; derived-high direction only)"
+	tolResidueWei toleranceID = iota + 1
 
 	// tolSeizureTokenWei — ≤1 WEI OF THE COLLATERAL TOKEN per
 	// userCollateralLiquidated element, one direction (credited-USD deficit).
@@ -88,7 +100,7 @@ const (
 	// 8-dec token at P≈1.18e11 that is ≈1,180 USD-6 units (≈$0.0012); for
 	// 18-dec and stables it is ≤1 unit. The TOKEN-UNIT comparison itself stays
 	// EXACT; this tolerance exists only on the USD re-derivation leg.
-	tolSeizureTokenWei = "seizure-1-token-wei-round-trip(DebtManagerStorageContract.sol:517-521 truncation; credited-USD deficit direction only; per element)"
+	tolSeizureTokenWei
 
 	// tolIntraBlockMarginality — NOT a numeric epsilon: a DISCLOSURE BAND.
 	// `liquidatable(user)` is evaluable only at block boundaries, but the
@@ -99,17 +111,36 @@ const (
 	// price delta printed. It never absorbs a row into a pass: the three-state
 	// law (true-at-parent / flipped-in-block-with-custodied-witness /
 	// UNEXPLAINED) still gates the third state.
-	tolIntraBlockMarginality = "intra-block-marginality-band(chain-truth R1 three-state law; DISCLOSURE, never absorption; margins printed per case)"
+	tolIntraBlockMarginality
 )
 
-// permittedTolerances is the closed set. TestExactlyThreeTolerances asserts
-// len == 3 and that every tolerance a gate cites is a member, so a fourth
-// epsilon cannot enter without failing the suite.
-var permittedTolerances = map[string]string{
+// String is the artifact spelling: mechanism, direction and bound, because a
+// tolerance without all three is a carpet with a label on it.
+func (t toleranceID) String() string {
+	switch t {
+	case tolResidueWei:
+		return "residue-1-normalized-wei(DebtManagerCore.sol:549-553; fully-liquidated only; derived-high direction only)"
+	case tolSeizureTokenWei:
+		return "seizure-1-token-wei-round-trip(DebtManagerStorageContract.sol:517-521 truncation; credited-USD deficit direction only; per element)"
+	case tolIntraBlockMarginality:
+		return "intra-block-marginality-band(chain-truth R1 three-state law; DISCLOSURE, never absorption; margins printed per case)"
+	}
+	// Unreachable through the type system; kept loud rather than empty so a
+	// future constant added without a String arm cannot render as "".
+	return fmt.Sprintf("UNREGISTERED-TOLERANCE(%d)", int(t))
+}
+
+// permittedTolerances is the closed set, keyed by the ENUM.
+// TestExactlyThreeTolerancesArePermitted asserts len == 3 and that every member
+// renders its mechanism/direction/bound.
+var permittedTolerances = map[toleranceID]string{
 	tolResidueWei:            "risk-quant R2 obligation 4 — the single legitimate standing tolerance in Task 6",
 	tolSeizureTokenWei:       "risk-quant R2 obligation 3 — the only derived slack in the seizure recompute, stated with its mechanics",
 	tolIntraBlockMarginality: "risk-quant R2 obligation 2 / chain-truth R1 — a disclosed frame caveat, not a numeric allowance",
 }
+
+// allTolerances is the enumeration order the report prints in.
+var allTolerances = []toleranceID{tolResidueWei, tolSeizureTokenWei, tolIntraBlockMarginality}
 
 // --- the ledger -------------------------------------------------------------
 
@@ -130,6 +161,8 @@ type gateFrame struct {
 	used map[string]bool
 	// declared indexes Sources by name for O(1) use() checks.
 	declared map[string]string // name → kind
+	// cited is the typed citation record; Tolerances is its artifact rendering.
+	cited []toleranceID
 }
 
 // newGateFrame declares a gate's exhaustive input frame. Callers list every
@@ -165,20 +198,20 @@ func (f *gateFrame) use(name string) {
 	f.used[name] = true
 }
 
-// cite records a tolerance appearance. A tolerance outside permittedTolerances
-// is recorded as-is so violations() can name it; the closed-set assertion lives
-// in the test suite AND in violations() below, so a run cannot pass while
-// citing an unregistered epsilon.
-func (f *gateFrame) cite(tolerance string) {
+// cite records a tolerance appearance. It takes the ENUM, so there is no way to
+// cite something outside the closed set — and no way to apply a fourth tolerance
+// silently, because there is no fourth value to apply.
+func (f *gateFrame) cite(tolerance toleranceID) {
 	if f == nil {
 		return
 	}
-	for _, t := range f.Tolerances {
+	for _, t := range f.cited {
 		if t == tolerance {
 			return
 		}
 	}
-	f.Tolerances = append(f.Tolerances, tolerance)
+	f.cited = append(f.cited, tolerance)
+	f.Tolerances = append(f.Tolerances, tolerance.String())
 }
 
 // violations returns this gate's frame failures, deterministically ordered.
@@ -215,7 +248,10 @@ func (f *gateFrame) violations() []string {
 			out = append(out, fmt.Sprintf("gate %s DECLARED source %q but never consumed it — a stale declaration is how a gate silently stops testing what it claims to test", f.Gate, n))
 		}
 	}
-	for _, t := range f.Tolerances {
+	// A citation outside the closed set is now UNREPRESENTABLE (cite takes the
+	// enum), so this arm is a belt on the type system rather than the mechanism:
+	// it catches a future constant added without a permittedTolerances entry.
+	for _, t := range f.cited {
 		if _, ok := permittedTolerances[t]; !ok {
 			out = append(out, fmt.Sprintf("gate %s cites tolerance %q, which is NOT one of the three permitted tolerances — any other epsilon is tolerance-as-carpet and blocks (risk-quant R5-5)", f.Gate, t))
 		}
@@ -313,12 +349,13 @@ func (fs *frameSet) section() []map[string]any {
 // a finding, and so is "we needed it everywhere".
 func (fs *frameSet) toleranceAppearances() map[string][]string {
 	out := map[string][]string{}
-	for t := range permittedTolerances {
-		out[t] = []string{}
+	for _, t := range allTolerances {
+		out[t.String()] = []string{}
 	}
 	for _, f := range fs.frames {
-		for _, t := range f.Tolerances {
-			out[t] = append(out[t], f.Gate)
+		for _, t := range f.cited {
+			key := t.String()
+			out[key] = append(out[key], f.Gate)
 		}
 	}
 	for t := range out {

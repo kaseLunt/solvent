@@ -14,18 +14,18 @@ import (
 func TestExactlyThreeTolerancesArePermitted(t *testing.T) {
 	require.Len(t, permittedTolerances, 3,
 		"exactly three tolerances are permitted in the whole run; a fourth is tolerance-as-carpet")
-	for _, want := range []string{tolResidueWei, tolSeizureTokenWei, tolIntraBlockMarginality} {
+	for _, want := range allTolerances {
 		_, ok := permittedTolerances[want]
 		require.True(t, ok, "the registry must carry %q", want)
 	}
 	// Each constant must name its MECHANISM, its DIRECTION and its BOUND — a
 	// tolerance missing any of the three is a carpet with a label on it.
-	require.Contains(t, tolResidueWei, "DebtManagerCore.sol:549-553", "mechanism cited")
-	require.Contains(t, tolResidueWei, "fully-liquidated only", "scope")
-	require.Contains(t, tolResidueWei, "derived-high direction only", "direction")
-	require.Contains(t, tolSeizureTokenWei, "truncation", "mechanism")
-	require.Contains(t, tolSeizureTokenWei, "per element", "bound scope")
-	require.Contains(t, tolIntraBlockMarginality, "DISCLOSURE, never absorption", "it is not a numeric allowance")
+	require.Contains(t, tolResidueWei.String(), "DebtManagerCore.sol:549-553", "mechanism cited")
+	require.Contains(t, tolResidueWei.String(), "fully-liquidated only", "scope")
+	require.Contains(t, tolResidueWei.String(), "derived-high direction only", "direction")
+	require.Contains(t, tolSeizureTokenWei.String(), "truncation", "mechanism")
+	require.Contains(t, tolSeizureTokenWei.String(), "per element", "bound scope")
+	require.Contains(t, tolIntraBlockMarginality.String(), "DISCLOSURE, never absorption", "it is not a numeric allowance")
 }
 
 // TestFrameLedgerFailsOnAnUndeclaredConsumption is the R5-5 laundering shape: a
@@ -66,7 +66,13 @@ func TestFrameLedgerFailsOnADeclaredButUnconsumedSource(t *testing.T) {
 func TestFrameLedgerRefusesAnUnregisteredTolerance(t *testing.T) {
 	f := newGateFrame("test_gate", derived("s", ""))
 	f.use("s")
-	f.cite("within-one-percent(because-it-looked-close)")
+	// A citation outside the closed set is UNREPRESENTABLE since round 1's
+	// finding 2: cite takes toleranceID, and there is no fourth value of that
+	// type. The line below does not compile, which IS the enforcement:
+	//   f.cite("within-one-percent(because-it-looked-close)")
+	// What remains checkable at run time is a constant added without a
+	// permittedTolerances entry, so that is what this asserts.
+	f.cited = append(f.cited, toleranceID(99))
 	v := f.violations()
 	require.Len(t, v, 1)
 	require.Contains(t, v[0], "NOT one of the three permitted tolerances")
@@ -78,6 +84,7 @@ func TestFrameLedgerRefusesAnUnregisteredTolerance(t *testing.T) {
 	g.cite(tolResidueWei)
 	g.cite(tolResidueWei)
 	require.Empty(t, g.violations())
+	require.Len(t, g.cited, 1, "citing twice must not duplicate")
 	require.Len(t, g.Tolerances, 1)
 }
 
@@ -177,7 +184,7 @@ func TestToleranceAppearancesAlwaysReportAllThree(t *testing.T) {
 	f.cite(tolResidueWei)
 	app := fs.toleranceAppearances()
 	require.Len(t, app, 3)
-	require.Equal(t, []string{gateBacktest}, app[tolResidueWei])
-	require.Empty(t, app[tolSeizureTokenWei])
-	require.Empty(t, app[tolIntraBlockMarginality])
+	require.Equal(t, []string{gateBacktest}, app[tolResidueWei.String()])
+	require.Empty(t, app[tolSeizureTokenWei.String()])
+	require.Empty(t, app[tolIntraBlockMarginality.String()])
 }

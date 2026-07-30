@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -44,6 +45,19 @@ type p3Ctx struct {
 
 	frames *frameSet
 	now    time.Time
+	// scenarioRoot is where internal/risk/scenarios lives relative to the process
+	// CWD. Empty means the repo root (the acceptance posture, since `make reconcile`
+	// runs there); tests point it at their own relative path.
+	scenarioRoot string
+}
+
+// scenarioDir resolves the committed scenario definitions the base-composition
+// weld loads its EXPECTED side from.
+func (c *p3Ctx) scenarioDir() string {
+	if c.scenarioRoot == "" {
+		return canonicalScenarioDir
+	}
+	return filepath.Join(c.scenarioRoot, canonicalScenarioDir)
 }
 
 // p3Result is everything the phase produces for the artifact.

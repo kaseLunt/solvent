@@ -130,7 +130,7 @@ func TestP3PhaseDriverWiresEveryGateAndTheFrameLedger(t *testing.T) {
 	require.Contains(t, text, "P3 Task 6")
 	require.Contains(t, text, "THE THREE PERMITTED TOLERANCES")
 	require.Contains(t, text, "INPUT-FRAME DECLARATIONS")
-	require.Contains(t, text, tolResidueWei)
+	require.Contains(t, text, tolResidueWei.String())
 
 	// And the artifact must serialize (the canonical JSON path the comparison
 	// hash runs over).

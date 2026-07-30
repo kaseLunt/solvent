@@ -22,12 +22,127 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 )
+
+// --- the scenario base-composition claim (Codex round 1, finding 9) ---------
+//
+// THE DEFECT THIS CLOSES: the sweep followed baseAsset transitively and printed
+// the composition tree, but it never compared the OBSERVED mapping against the
+// model's claim. risk-quant R4.2 is explicit that the base-composition EQUALITY is
+// what closes the lens-composition class — the enumeration alone only proves the
+// provider answered, not that our valuation composes the same way. Without the
+// comparison, liquidUSD could silently stop being USDC-based and every downstream
+// scenario would keep shocking the wrong axis.
+//
+// The expected mapping is LOADED FROM THE SCENARIO DEFINITIONS rather than
+// restated here, so the weld's expected side and the model's actual behaviour
+// cannot drift: internal/risk/scenarios/*.json is what ApplyScenario consumes.
+//
+//   - a propagation row with base_stable_snap ⇒ baseAsset MUST be the named
+//     responds_to asset (liquidUSD → USDC: rate × snap(USDC), the exact defect
+//     class the sweep exists for);
+//   - a row with stable_snap ⇒ the token is priced in USD directly, so
+//     baseAsset MUST be the ZERO address;
+//   - every other DM asset the scenarios name ⇒ baseAsset MUST be ZERO
+//     (USD-terminal). The expected-zero direction is asserted too, because a
+//     token that quietly ACQUIRES a base is the same class in reverse.
+type scenarioPropagation struct {
+	Asset          string `json:"asset"`
+	ChainID        uint64 `json:"chain_id"`
+	Symbol         string `json:"symbol"`
+	StableSnap     bool   `json:"stable_snap"`
+	BaseStableSnap bool   `json:"base_stable_snap"`
+	RespondsTo     []struct {
+		Axis  string `json:"axis"`
+		Asset string `json:"asset"`
+	} `json:"responds_to"`
+}
+
+type scenarioFile struct {
+	ID          string                `json:"id"`
+	Propagation []scenarioPropagation `json:"propagation"`
+}
+
+// scenarioBaseClaim is one asset's expected composition, with the scenario that
+// asserted it so a failure names its source.
+type scenarioBaseClaim struct {
+	Base        common.Address
+	Stable      bool
+	FromID      string
+	Explanation string
+}
+
+// loadScenarioBaseClaims builds the canonical expected mapping. A CONFLICT between
+// two scenarios is a precondition error, not a gate row: two different claims
+// about one asset's composition cannot both be the model's behaviour.
+func loadScenarioBaseClaims(dir string) (map[common.Address]scenarioBaseClaim, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read scenario definitions at %s (the base-composition weld's EXPECTED side): %w", dir, err)
+	}
+	out := map[common.Address]scenarioBaseClaim{}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read scenario %s: %w", e.Name(), err)
+		}
+		var sf scenarioFile
+		if err := json.Unmarshal(raw, &sf); err != nil {
+			return nil, fmt.Errorf("parse scenario %s: %w", e.Name(), err)
+		}
+		for _, pr := range sf.Propagation {
+			if pr.ChainID != 10 {
+				continue // the provider swept here is the OP Debt Manager's
+			}
+			asset := common.HexToAddress(pr.Asset)
+			claim := scenarioBaseClaim{FromID: sf.ID, Stable: pr.StableSnap}
+			switch {
+			case pr.BaseStableSnap:
+				var named common.Address
+				for _, r := range pr.RespondsTo {
+					if r.Asset != "" {
+						named = common.HexToAddress(r.Asset)
+					}
+				}
+				if named == (common.Address{}) {
+					return nil, fmt.Errorf("scenario %s: asset %s declares base_stable_snap with no responds_to asset, so the composition claim names no base", sf.ID, pr.Asset)
+				}
+				claim.Base = named
+				claim.Explanation = "base_stable_snap: the model values this asset as rate x snap(base), so the provider must name that base"
+			case pr.StableSnap:
+				claim.Explanation = "stable_snap: the model snaps this asset's own price, so it must be USD-denominated (baseAsset = 0)"
+			default:
+				claim.Explanation = "no base claim in the scenario matrices, so the model values this asset directly in USD (baseAsset = 0)"
+			}
+			if prev, ok := out[asset]; ok {
+				if prev.Base != claim.Base || prev.Stable != claim.Stable {
+					return nil, fmt.Errorf("scenario definitions CONFLICT on %s: %s claims base %s (stable %v) and %s claims base %s (stable %v) — two different composition claims about one asset cannot both be the model's behaviour",
+						pr.Asset, prev.FromID, prev.Base.Hex(), prev.Stable, claim.FromID, claim.Base.Hex(), claim.Stable)
+				}
+				continue
+			}
+			out[asset] = claim
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("scenario definitions at %s declare no OP propagation rows — the base-composition weld would be vacuous", dir)
+	}
+	return out, nil
+}
+
+// canonicalScenarioDir is where ApplyScenario's committed configs live.
+const canonicalScenarioDir = "internal/risk/scenarios"
 
 // dmStableSnapSet is the model's snap set — the assets internal/risk applies
 // the stable 1e6 snap to. Stable-set equality is asserted in BOTH directions
@@ -55,8 +170,8 @@ func tokenConfigFrame() *gateFrame {
 			"the DISCLOSED SUBSTITUTE for chain-truth R3.2's eth_getStorageAt(EIP-1967 impl slot) read — see implWitnessDeviation"),
 		committed("recon/feeds.json DM asset set, symbols, decimals, provider address",
 			"the registry half of the swept union, and the stable-set / composition claims the invariants are judged against"),
-		committed("internal/risk scenario snap set {USDC, USDT, frxUSD} and the base-composition claims",
-			"the MODEL's claims. R4.1/R4.2 make them chain-welded rather than author-asserted"),
+		committed("internal/risk/scenarios/*.json propagation rows (stable_snap, base_stable_snap, responds_to)",
+			"the MODEL's OWN claims, loaded from the files ApplyScenario consumes rather than restated here. R4.1/R4.2 make them chain-welded rather than author-asserted, and the base-composition EQUALITY is what closes the lens-composition class"),
 	)
 }
 
@@ -360,6 +475,71 @@ func runTokenConfigSweep(ctx context.Context, c *p3Ctx, chainUniverse []common.A
 		}
 	}
 
+	// ---- R4.2 base-composition EQUALITY vs the scenario claims -------------
+	claims, cerr := loadScenarioBaseClaims(c.scenarioDir())
+	if cerr != nil {
+		rows = append(rows, p3Row{
+			Gate: gateTokenConfig, Subject: "scenario-base-claims", Leg: "expected mapping",
+			Expected: "a loadable, conflict-free expected asset->base mapping from the scenario definitions",
+			Actual:   cerr.Error(),
+			Verdict:  verdictWeldUnread, Gated: true, Class: "scenario-claims-unreadable",
+			Note: "without the model's own claims there is no expected side for the base-composition weld, and printing the observed tree alone is exactly the enumeration-without-comparison the round-1 finding named",
+		})
+	} else {
+		f.use("internal/risk/scenarios/*.json propagation rows (stable_snap, base_stable_snap, responds_to)")
+		claimed := map[common.Address]bool{}
+		for a := range claims {
+			claimed[a] = true
+		}
+		observed := map[common.Address]bool{}
+		for t := range configs {
+			observed[t] = true
+		}
+		for _, t := range sortedAddrs(unionAddrSets(claimed, observed)) {
+			claim, hasClaim := claims[t]
+			cfg, hasCfg := configs[t]
+			label := t.Hex()
+			if reg := c.reg.DM[t]; reg != nil {
+				label = reg.Symbol + " " + t.Hex()
+			}
+			switch {
+			case hasClaim && !hasCfg:
+				// A model claim about a token the provider does not configure. If the
+				// chain universe does not carry it either, the claim is stale rather
+				// than a chain disagreement — still gated, with the direction named.
+				rows = append(rows, p3Row{
+					Gate: gateTokenConfig, Subject: label, Leg: "base-composition(model vs chain)",
+					Expected: "a readable tokenConfig for an asset the scenario matrices make claims about",
+					Actual:   "no readable config at the pin",
+					Verdict:  verdictOnlyInRegistry, Gated: true, Class: "scenario-claims-unconfigured-asset",
+					Note: "the model shocks this asset's composition but the provider has no config for it at the pin, so the scenario would apply a transform the engine cannot price (claim from " + claim.FromID + ")",
+				})
+			case hasCfg && !hasClaim:
+				rows = append(rows, p3Row{
+					Gate: gateTokenConfig, Subject: label, Leg: "base-composition(model vs chain)",
+					Expected: "a scenario propagation row for every configured DM asset",
+					Actual:   "configured on chain, but NO scenario claim",
+					Verdict:  verdictOnlyInChain, Gated: true, Class: "scenario-missing-claim",
+					Note: "the provider prices this asset and no scenario names it, so a stress run would hold it FLAT by omission — oracle-sentinel R4's named failure ('the waterfall silently holds a chunk of TVL at pre-shock prices')",
+				})
+			default:
+				row := compareExact(gateTokenConfig, label, "base-composition: tokenConfig.baseAsset == the scenario claim",
+					addrStringer(cfg.BaseAsset), addrStringer(claim.Base), "base-composition-difference")
+				row.Note = claim.Explanation + ". " + row.Note
+				row.Evidence = map[string]string{
+					"claim_from_scenario": claim.FromID,
+					"expected_base":       baseLabel(claim.Base),
+					"observed_base":       baseLabel(cfg.BaseAsset),
+					"law":                 "risk-quant R4.2: the base-composition equality IS the lens-composition class closure; the enumeration alone only proves the provider answered",
+				}
+				rows = append(rows, row)
+				// The stable flag travels with the claim, both directions.
+				rows = append(rows, compareExact(gateTokenConfig, label, "base-composition: isStableToken == the scenario claim",
+					boolStringer(cfg.IsStableToken), boolStringer(claim.Stable), "scenario-stable-flag-difference"))
+			}
+		}
+	}
+
 	// ---- R4.3 scenario-flag invariants, mechanical ------------------------
 	// For every token whose config names a baseAsset, that baseAsset must
 	// itself be configured; and a base-stable-snap composition requires the
@@ -535,4 +715,44 @@ func minInt(a, b int) int {
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return "0x" + hex.EncodeToString(sum[:])
+}
+
+// unionAddrSets is the deterministic union used by the base-composition weld.
+func unionAddrSets(a, b map[common.Address]bool) map[common.Address]bool {
+	out := map[common.Address]bool{}
+	for k, v := range a {
+		if v {
+			out[k] = true
+		}
+	}
+	for k, v := range b {
+		if v {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+// addrStringer / boolStringer adapt values to compareExact's fmt.Stringer side so
+// the base-composition weld reads exactly like every other row.
+type addrStringer common.Address
+
+func (a addrStringer) String() string { return baseLabel(common.Address(a)) }
+
+type boolStringer bool
+
+func (b boolStringer) String() string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// baseLabel renders the zero address as the USD terminal it means, so a reviewer
+// never has to decide whether 0x0 was "unset" or "USD".
+func baseLabel(a common.Address) string {
+	if a == (common.Address{}) {
+		return "USD(terminal, baseAsset=0x0)"
+	}
+	return a.Hex()
 }

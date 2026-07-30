@@ -109,6 +109,7 @@ func TestFlagSurfaceClosed(t *testing.T) {
 		"collateral-replay": {args: []string{"-collateral-replay", "1"}, nameHint: "-collateral-replay"},
 		"max-head-lag":      {args: []string{"-max-head-lag", "2562047h"}, nameHint: "-max-head-lag"},
 		"p3-gates":          {args: []string{"-p3-gates=false"}, nameHint: "-p3-gates"},
+		"dm-full-census":    {args: []string{"-dm-full-census=false"}, nameHint: "-dm-full-census"},
 	}
 	// verdictFree flags CANNOT weaken a required bound; each carries its
 	// justification (the report's flag-surface table mirrors this map).
@@ -119,7 +120,6 @@ func TestFlagSurfaceClosed(t *testing.T) {
 		"out":            "artifact destination only: a failed write is a loud abort, never a pass",
 		"timeout":        "whole-run deadline: expiry aborts loudly, and waiting longer only makes the wall-clock staleness gates STRICTER",
 		"preflight-only": "exits after Phase 0 with no artifact and no verdict — there is no receipt to launder",
-		"dm-full-census": "STRENGTHENER, default OFF: it extends the DM boolean weld from the census-derived cohort to EVERY derived borrower, so it can only ADD gated rows. Enabling it cannot weaken a bound; leaving it off is the canonical default whose coverage residual the census row discloses in the artifact",
 	}
 
 	var errBuf bytes.Buffer

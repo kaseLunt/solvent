@@ -121,6 +121,16 @@ type T6BacktestRow struct {
 	Seizures          []T6Seizure `json:"seizures"`
 	SameBlockEarlier  []string    `json:"same_block_earlier_custodied_witnesses"`
 	PriorPassLogIndex *uint32     `json:"prior_pass_log_index,omitempty"`
+	// NextPassLogIndex / NextPassBeforeDebtUSD describe the NEXT Liquidated for the
+	// same (tx, account, debt token). They exist for obligation 4's frame: a FIRST
+	// pass's after-state cannot be welded against block-end borrowingOf, because
+	// the SECOND pass moves the debt again before the block closes. The honest
+	// expected value for a first pass is the next pass's OWN beforeDebtAmount —
+	// the chain's own statement of the state between them. Block-end borrowingOf
+	// is reserved for the FINAL pass.
+	NextPassLogIndex      *uint32  `json:"next_pass_log_index,omitempty"`
+	NextPassBeforeDebtUSD *big.Int `json:"-"`
+	NextPassBeforeText    string   `json:"next_pass_before_debt_usd,omitempty"`
 }
 
 // T6Seizure is one userCollateralLiquidated element as the deriver recorded it
@@ -169,6 +179,11 @@ type T6FeedScan struct {
 	RawLastBlock      uint64 `json:"raw_last_block"`
 	// Rounds is the per-block round list, ordered by block.
 	Rounds []T6FeedRound `json:"-"`
+	// DomainEndTime is the CHAIN-TIME endpoint of the custody domain: the newest
+	// source_as_of any walked feed on this chain asserts at or below the domain
+	// upper bound. It bounds the head interval in chain time so the B3 scan never
+	// measures the head against the process wall clock (Codex round 1, finding 8).
+	DomainEndTime int64 `json:"domain_end_chain_time"`
 	// MissingAsOf counts domain rows with NULL source_as_of — UNSCANNABLE, never
 	// extrapolated over (chain-truth R4.1).
 	MissingAsOf int64 `json:"rows_missing_source_as_of"`
@@ -203,7 +218,12 @@ type Task6Data struct {
 	// positive debt leg.
 	AaveBorrowerCensus []string
 	AaveZeroDebtCensus []string
-	AaveNeverSeen      []T6NeverSeen
+	// AaveCandidates is the INDEPENDENT candidate universe from custodied raw
+	// events (collectAaveCandidates). The gate classifies every candidate with
+	// pinned chain reads and asserts set equality against the two censuses above,
+	// so an account the derived fold dropped cannot vanish from both sides.
+	AaveCandidates []string
+	AaveNeverSeen  []T6NeverSeen
 	// AaveParams is the aave_param ledger prefix at P_eth — folded by
 	// riskfeed.FoldParams in cmd/reconcile (ONE implementation of "what is the
 	// effective parameter set", shared with riskd).
@@ -251,6 +271,11 @@ func collectTask6(ctx context.Context, q store.Querier, prm Params, cfg FeedRegi
 			return nil, err
 		}
 		t.AaveBorrowerCensus, t.AaveZeroDebtCensus = censusFromLegs(t.AaveLegs)
+		// The candidate universe is read from raw_logs over the SAME walked
+		// addresses the Aave engine derives from, so it is independent of the fold.
+		if t.AaveCandidates, err = collectAaveCandidates(ctx, q, 1, prm.AaveAddresses, pinETH); err != nil {
+			return nil, err
+		}
 		if t.AaveNeverSeen, err = collectNeverSeen(ctx, q, AaveEngine, 1, prm.NeverSeenProbe); err != nil {
 			return nil, err
 		}
@@ -342,10 +367,62 @@ func collectLegsSide(ctx context.Context, q store.Querier, engine, source, side 
 	return out, rows.Err()
 }
 
-// censusFromLegs derives the two Aave censuses from the legs, in deterministic
-// order. Doing it here rather than in SQL keeps ONE definition of "borrower"
-// (a positive debt leg) that the cohort builder and the census assertion both
-// read — a second SQL predicate would be a second definition.
+// collectAaveCandidates builds the INDEPENDENT candidate universe: every account
+// that has ever appeared as the `user` of a custodied Aave position event, taken
+// from raw_logs rather than from the derived fold.
+//
+// THE DEFECT THIS CLOSES (Codex round 1, finding 3): the cohort and the "census"
+// it was welded against were BOTH computed from position_balances — the state
+// under test. The floor therefore compared the cohort to itself, and an account
+// the fold DROPPED vanished from both sides simultaneously, so the census could
+// never notice it. A census that cannot disagree with the thing it certifies is
+// not a census.
+//
+// The candidate universe is deliberately WIDE (any account named as a user in any
+// custodied Pool/aToken event) and deliberately NOT classified here: the gate
+// classifies each candidate with PINNED CHAIN READS and then asserts set equality
+// against the derived census. A candidate the chain says is a borrower but our
+// fold does not is then a gated failure instead of an invisible omission.
+//
+// topics[2] is the `user`/`onBehalfOf` slot on the Aave events this instance
+// emits (Supply/Withdraw/Borrow/Repay/ReserveUsedAsCollateral*), and topics[3] is
+// the user on LiquidationCall; both are scanned, low-20-bytes.
+func collectAaveCandidates(ctx context.Context, q store.Querier, chainID int64, addresses [][]byte, pin uint64) ([]string, error) {
+	rows, err := q.Query(ctx, `
+		WITH cand AS (
+		  SELECT DISTINCT substring(r.topics[3] FROM 13 FOR 20) AS acct
+		  FROM raw_logs r
+		  WHERE r.chain_id = $1 AND r.address = ANY($2) AND r.block_number <= $3
+		    AND array_length(r.topics, 1) >= 3
+		  UNION
+		  SELECT DISTINCT substring(r.topics[4] FROM 13 FOR 20) AS acct
+		  FROM raw_logs r
+		  WHERE r.chain_id = $1 AND r.address = ANY($2) AND r.block_number <= $3
+		    AND array_length(r.topics, 1) >= 4
+		)
+		SELECT encode(acct,'hex') FROM cand
+		WHERE acct IS NOT NULL AND octet_length(acct) = 20 AND acct <> '\x0000000000000000000000000000000000000000'::bytea
+		ORDER BY 1`, chainID, addresses, int64(pin))
+	if err != nil {
+		return nil, fmt.Errorf("aave candidate universe from raw_logs: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, fmt.Errorf("scan aave candidate: %w", err)
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// censusFromLegs derives the DERIVED-SIDE censuses from the legs, in
+// deterministic order. It is one HALF of the comparison: the independent
+// candidate universe above supplies the other, and the gate welds them against
+// pinned chain classification. Doing it here rather than in SQL keeps ONE
+// definition of "borrower" (a positive debt leg) on the derived side.
 func censusFromLegs(legs []T6Leg) (borrowers, zeroDebt []string) {
 	hasDebt := map[string]bool{}
 	hasColl := map[string]bool{}
@@ -654,6 +731,30 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			v := uint32(*priorLog)
 			row.PriorPassLogIndex = &v
 		}
+
+		// NEXT PASS: the immediately following Liquidated for the same (account,
+		// debt token) in the same tx, with ITS OWN beforeDebtAmount. That value is
+		// the chain's statement of the state BETWEEN the two passes, and it is the
+		// only honest expected value for a first pass's after-state — block-end
+		// borrowingOf has already been moved again by the second pass.
+		var nextLog *int32
+		var nextBefore *string
+		if err := q.QueryRow(ctx, `
+			SELECT log_index, payload->>'before_debt_usd' FROM position_events
+			WHERE engine = 'debt_manager' AND chain_id = 10 AND tx_hash = $1
+			  AND event_type = 'liquidation' AND account = $2 AND asset = $3
+			  AND log_index > $4
+			ORDER BY log_index
+			LIMIT 1`, raw, account, asset, int32(logIdx)).Scan(&nextLog, &nextBefore); err == nil && nextLog != nil {
+			v := uint32(*nextLog)
+			row.NextPassLogIndex = &v
+			if nextBefore != nil {
+				row.NextPassBeforeText = *nextBefore
+				if row.NextPassBeforeDebtUSD, err = numericText(*nextBefore); err != nil {
+					return fmt.Errorf("case %s next-pass beforeDebtAmount: %w", key, err)
+				}
+			}
+		}
 		out[key] = row
 	}
 	return nil
@@ -815,6 +916,20 @@ func collectFeedScans(ctx context.Context, q store.Querier, cfg FeedRegistry, pi
 		prows.Close()
 		if err := prows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate feed %s rounds: %w", f.Stream, err)
+		}
+		// The custody domain's CHAIN-TIME endpoint: the newest source_as_of any
+		// walked feed on this chain asserts within the domain. It is chain testimony
+		// (an aggregator's own updatedAt), so the head interval can be measured
+		// without ever consulting the process clock. Taken across ALL feeds rather
+		// than this one, deliberately: a feed that has STOPPED has no recent round
+		// of its own, and its own newest round would make its head interval zero.
+		var endTime *int64
+		if err := q.QueryRow(ctx, `
+			SELECT EXTRACT(EPOCH FROM max(source_as_of))::bigint
+			FROM prices
+			WHERE chain_id = 1 AND owner_engine = $1 AND source_as_of IS NOT NULL
+			  AND block_number <= $2`, cfg.FeedEngine, int64(upper)).Scan(&endTime); err == nil && endTime != nil {
+			scan.DomainEndTime = *endTime
 		}
 		out = append(out, scan)
 	}

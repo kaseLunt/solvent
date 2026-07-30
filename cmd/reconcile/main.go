@@ -121,6 +121,12 @@ const (
 	// deep-archive budget; turning it OFF bypasses required checks and taints,
 	// exactly like -collateral-replay 0.
 	canonicalP3Gates = true
+	// canonicalDMFullCensus: the DM chain-side liquidatable census is MANDATORY
+	// (Codex round 1, finding 4). It was opt-in on cost grounds; that acceptance
+	// was withdrawn because a self-derived census cannot detect the account it
+	// omitted. It remains a flag only so an operator can bisect, and turning it
+	// off taints.
+	canonicalDMFullCensus = true
 	// canonicalFeedsPath is the committed registry the registry-consistency gate
 	// judges against the chain. A CONSTANT, not a flag: acceptance evidence is
 	// defined over the canonical registry, and an operator-chosen one would
@@ -158,7 +164,7 @@ func reconFlagSet(o *options, stderr io.Writer) *flag.FlagSet {
 	fs.DurationVar(&o.maxHeadLag, "max-head-lag", canonicalMaxHeadLag, "staleness QUALITY gate on the pin's header time (daemon stalled ⇒ evidence stale; exit 3) — never a serveability inference; loosening or disabling taints acceptance:false")
 	fs.BoolVar(&o.preflightOnly, "preflight-only", false, "run Phase 0 only and exit (the smoke mode; never touches Phase 1)")
 	fs.BoolVar(&o.p3Gates, "p3-gates", canonicalP3Gates, "run the P3 Task-6 gate set (HF gate, DM boolean weld, param welds, registry-consistency gate, tokenConfig sweep, realized-liquidation backtest, B3 heartbeat scan); DISABLING it bypasses required checks and taints acceptance:false")
-	fs.BoolVar(&o.dmFullCensus, "dm-full-census", false, "STRENGTHENER (default off): weld liquidatable(user) against the chain for EVERY derived DM borrower instead of the cohort. Costs one multicall chunk per 15 accounts; it can only ADD gated rows, never weaken a bound")
+	fs.BoolVar(&o.dmFullCensus, "dm-full-census", canonicalDMFullCensus, "MANDATORY for acceptance (default true): weld liquidatable(user) against the chain for EVERY evaluable DM borrower, so the census side is not self-derived. Disabling it leaves the false-negative direction undetectable outside the sample and TAINTS acceptance:false")
 	return fs
 }
 
@@ -243,6 +249,9 @@ func acceptanceTaints(o *options) []string {
 		taints = append(taints, fmt.Sprintf("-max-head-lag %s disables the staleness quality gate (a required check)", o.maxHeadLag))
 	} else if o.maxHeadLag > canonicalMaxHeadLag {
 		taints = append(taints, fmt.Sprintf("-max-head-lag %s looser than the canonical %s weakens the staleness quality gate — positive-but-loose is the same class as disabled (round 11)", o.maxHeadLag, canonicalMaxHeadLag))
+	}
+	if !o.dmFullCensus {
+		taints = append(taints, "-dm-full-census=false makes the DM liquidatable census SELF-DERIVED: the mandatory population falls back to our own liquidatable set, so a chain-liquidatable account we misclassify as healthy never enters the sample and the FALSE-NEGATIVE direction — the alert product's worst failure — becomes undetectable (Codex round 1, finding 4)")
 	}
 	if !o.p3Gates {
 		taints = append(taints, "-p3-gates=false disables the WHOLE P3 Task-6 gate set (Aave HF gate, DM boolean weld, param welds, registry-consistency gate, tokenConfig sweep, realized-liquidation backtest, B3 heartbeat scan) — a required-check bypass, the same class as -collateral-replay 0")
@@ -1308,7 +1317,13 @@ func (r *driftReport) tallyTotals() verdictTotals {
 	add := func(gated bool, verdict string) {
 		if gated {
 			t.GatedRows++
-			if verdict == verdictExact || verdict == "ok" || verdict == "fresh" {
+			// The pre-existing row families use "ok"/"fresh" as their success
+			// spellings; the P3 families use the closed passingVerdicts set (which
+			// includes the richer B3 and intra-block successes). Routing both
+			// through ONE predicate keeps the artifact's exact/drift split and
+			// computeResult's exit code telling the same story — the round-1
+			// finding was exactly that they had drifted apart.
+			if verdict == "ok" || verdict == "fresh" || !verdictIsFailure(verdict) {
 				t.GatedExact++
 			} else {
 				t.GatedDrift++

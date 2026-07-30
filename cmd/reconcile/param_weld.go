@@ -464,14 +464,7 @@ func runAdapterOutputWeld(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	}
 	for _, a := range sortedStrings(assets) {
 		pop := int(c.t6.AdapterAnchorTotals[a])
-		want := adapterRowsPerReserve
-		if pop < want {
-			want = pop
-		}
-		rows = append(rows, cohortFloorRow(gateAaveAdapterWeld, "adapter-rows:0x"+a,
-			perAsset[a], want, 1,
-			fmt.Sprintf("risk-quant R3 strengthens the plan's >=1 row per reserve to >=%d rows across DISTINCT anchors, each exact at its own anchor. Distinct-anchor population at the pin: %d; exact so far: %d",
-				adapterRowsPerReserve, pop, exactPerAsset[a])))
+		rows = append(rows, adapterAnchorFloorRow(a, perAsset[a], pop, exactPerAsset[a]))
 	}
 	return rows, nil
 }
@@ -484,4 +477,32 @@ func sortedStrings(in []string) []string {
 		}
 	}
 	return out
+}
+
+// adapterAnchorFloorRow decides ONE reserve's adapter-anchor floor.
+//
+// THE FLOOR STAYS THREE (Codex round 1, finding 10). It used to be lowered to the
+// DB's own anchor population whenever that was smaller — the
+// floor-follows-the-evidence shape, in which a reserve with a single anchor
+// silently satisfied a "three distinct anchors" requirement. risk-quant R3 raised
+// the plan's >=1 to >=3 deliberately, so insufficient history is a GATED floor
+// miss whose remediation is to accumulate anchors, never to reduce the bar.
+//
+// It is a named function so the DECISION is unit-testable on its own: the
+// round-1 defect lived at the call site, and a floor computed inline can only be
+// tested through the whole gate.
+func adapterAnchorFloorRow(assetHex string, got, anchorPopulation, exactSoFar int) p3Row {
+	row := cohortFloorRow(gateAaveAdapterWeld, "adapter-rows:0x"+assetHex,
+		got, adapterRowsPerReserve, adapterRowsPerReserve,
+		fmt.Sprintf("risk-quant R3 strengthens the plan's >=1 row per reserve to >=%d rows across DISTINCT anchors, each exact at its own anchor. Distinct-anchor population at the pin: %d; exact so far: %d",
+			adapterRowsPerReserve, anchorPopulation, exactSoFar))
+	if anchorPopulation < adapterRowsPerReserve {
+		row.Evidence = map[string]string{
+			"distinct_anchor_population": fmt.Sprintf("%d", anchorPopulation),
+			"required":                   fmt.Sprintf("%d", adapterRowsPerReserve),
+			"why_not_lowered":            "lowering the requirement to the observed population would make the floor follow the evidence it exists to test: a reserve with one anchor would then satisfy a three-anchor rule",
+			"remediation":                "let the adapter poller accumulate more anchors at or below the pin, or re-pin above them — never reduce the floor",
+		}
+	}
+	return row
 }

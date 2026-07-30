@@ -239,6 +239,11 @@ type Params struct {
 	// Feeds is the parsed feed registry (recon/feeds.json + the configurator
 	// streams) the B3 scan and the adapter weld read.
 	Feeds FeedRegistry
+	// AaveAddresses are the walked contract addresses the Aave engine derives
+	// from (the Pool and its aTokens), passed in as plain bytes so the INDEPENDENT
+	// candidate universe can be read from raw_logs over exactly the custodied
+	// surface rather than from the derived fold (Codex round 1, finding 3).
+	AaveAddresses [][]byte
 }
 
 // GoldenSpec is the golden-vector slice of Collect's read set: the dual pins

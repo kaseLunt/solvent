@@ -38,6 +38,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -230,26 +231,35 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 
 	// ---- cohort assembly ---------------------------------------------------
 	cohort, comp := buildDMCohort(c, ourLiquidatable, healthByAccount, marginByAccount, collByAccount, allBorrowers)
-	// -dm-full-census is a STRENGTHENER (default off): it extends the boolean
-	// weld from the cohort to EVERY derived borrower, closing the residual the
-	// census row discloses — the direction where the chain calls an account
-	// liquidatable and we call it healthy outside the cohort. It only ever adds
-	// gated rows, so it cannot weaken a bound; it costs one multicall chunk per
-	// 15 accounts, which is why it is not the default.
+	// THE CHAIN-SIDE CENSUS IS MANDATORY (Codex round 1, finding 4).
+	//
+	// It used to be opt-in (-dm-full-census, default off) on cost grounds, with the
+	// residual disclosed on the census row. Codex withdrew that: the census side
+	// must not be SELF-DERIVED. With the mandatory population taken from
+	// ourLiquidatable — the implementation under test — a chain-liquidatable account
+	// we misclassify as healthy simply never entered the sample, so the FALSE
+	// NEGATIVE direction (the alert product's worst failure) could not be detected
+	// at all. That is a vacuous green, not a coverage trade-off.
+	//
+	// Every evaluable borrower is therefore welded against pinned
+	// liquidatable(user), and the cohort is the UNION of chain-true and derived-true
+	// plus the composition force-includes. -dm-full-census survives only as an
+	// explicit opt-OUT for bisecting, and disabling it TAINTS.
+	inCohort := map[string]bool{}
+	for _, s := range cohort {
+		inCohort[hex.EncodeToString(s.Account.Bytes())] = true
+	}
 	if c.o.dmFullCensus {
-		inCohort := map[string]bool{}
-		for _, s := range cohort {
-			inCohort[hex.EncodeToString(s.Account.Bytes())] = true
-		}
-		for _, acct := range allBorrowers {
+		for _, acct := range evaluable {
 			if inCohort[acct] {
 				continue
 			}
+			inCohort[acct] = true
 			cohort = append(cohort, dmSubject{
 				Account: common.HexToAddress(acct),
 				Health:  healthByAccount[acct],
 				Margin:  marginByAccount[acct],
-				Reasons: []string{"-dm-full-census: whole-book chain liquidatable census"},
+				Reasons: []string{"mandatory chain-side census: every evaluable borrower is welded against pinned liquidatable(user)"},
 			})
 		}
 	}
@@ -264,8 +274,9 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 	// ---- cohort floors, census-welded --------------------------------------
 	rows = append(rows, cohortFloorRow(gateDMBoolean, "dm-live-liquidatable(ALL)",
 		comp.liquidatable, len(ourLiquidatable), 0,
-		fmt.Sprintf("ALL live liquidatable accounts are mandatory members (risk-quant R3): our full-book computation over %d derived borrowers found %d. COVERAGE RESIDUAL, stated rather than implied: the chain-side liquidatable census over the WHOLE book would be %d multicall chunks at this run's pacing, so the FALSE-side direction (an account the chain calls liquidatable that we call healthy) is welded over the cohort only — with the nearest-boundary account force-included and its margin printed. Enable -dm-full-census to weld the entire book",
-			len(allBorrowers), len(ourLiquidatable), (len(allBorrowers)+multicallChunkSize-1)/multicallChunkSize)))
+		fmt.Sprintf("ALL live liquidatable accounts are mandatory members (risk-quant R3): our full-book computation over %d evaluable borrowers found %d. The CHAIN-SIDE census is mandatory too (Codex round 1, finding 4): every evaluable borrower is welded against pinned liquidatable(user), so the union of chain-true and derived-true is covered and a chain-liquidatable account we call healthy CANNOT escape by falling outside a sample. Cost at this pacing: %d multicall chunks",
+			len(allBorrowers), len(ourLiquidatable), (len(allBorrowers)*3+multicallChunkSize-1)/multicallChunkSize)))
+	rows = append(rows, dmCensusCoverageRow(evaluable, cohort))
 	rows = append(rows, cohortFloorRow(gateDMBoolean, "dm-healthy-debtors",
 		comp.healthy, dmHealthyFloor, dmHealthyFloor,
 		"healthy accounts carrying debt — the FALSE side of the boolean"))
@@ -433,6 +444,47 @@ func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[st
 		rows[len(rows)-1].Class = "exclusion-discards-evidence"
 	}
 	return rows, excluded
+}
+
+// dmCensusCoverageRow asserts that the chain-side census actually covered every
+// evaluable borrower. It is the row that makes finding 4's fix checkable rather
+// than aspirational: if the cohort is a strict subset of the evaluable universe,
+// some account's chain boolean was never read, and the FALSE-NEGATIVE direction is
+// open again for exactly those accounts.
+func dmCensusCoverageRow(evaluable []string, cohort []dmSubject) p3Row {
+	inCohort := map[string]bool{}
+	for _, s := range cohort {
+		inCohort[hex.EncodeToString(s.Account.Bytes())] = true
+	}
+	var missing []string
+	for _, a := range evaluable {
+		if !inCohort[a] {
+			missing = append(missing, "0x"+a)
+		}
+	}
+	row := p3Row{
+		Gate: gateDMBoolean, Subject: "census:dm-chain-liquidatable", Leg: "coverage(every evaluable borrower welded)",
+		Expected: fmt.Sprintf("%d evaluable borrowers", len(evaluable)),
+		Actual:   fmt.Sprintf("%d welded against pinned liquidatable(user)", len(evaluable)-len(missing)),
+		Gated:    true,
+		Note:     "the census side must not be SELF-DERIVED (Codex round 1, finding 4): with the mandatory population taken from our own liquidatable set, an account the chain calls liquidatable that we call healthy never entered the sample, so the alert product's worst failure direction was undetectable. Every evaluable borrower is now read at the pin",
+	}
+	if len(missing) == 0 {
+		row.Verdict = verdictExact
+		return row
+	}
+	row.Verdict = verdictCohortFloor
+	row.Class = "chain-census-incomplete"
+	capped := missing
+	if len(capped) > 20 {
+		capped = capped[:20]
+	}
+	row.Evidence = map[string]string{
+		"unwelded_count":  fmt.Sprintf("%d", len(missing)),
+		"unwelded_sample": strings.Join(capped, ","),
+		"remediation":     "run without -dm-full-census=false; disabling the mandatory chain-side census taints the run",
+	}
+	return row
 }
 
 // dmComposition records how the cohort was assembled, for the report.

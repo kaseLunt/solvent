@@ -112,11 +112,61 @@ func compareExact(gate, subject, leg string, chain, ours fmt.Stringer, class str
 	return driftRow(gate, subject, leg, c, o, class, "bit-exact comparison, tolerance ZERO: this leg's inputs are declared in the gate's input frame, so a divergence is an input-frame inconsistency or a bug, never rounding (risk-quant R1)")
 }
 
+// failingVerdicts is the CLOSED SET of verdicts that constitute a gated
+// failure. Everything else is a successful or informational outcome.
+//
+// THE DEFECT THIS REPLACES (Codex round 1, finding 1): tallyP3 previously
+// counted "gated AND not exact" as failure, which swept in every richer verdict
+// the gate set deliberately introduced — a provenance UPGRADE (the best possible
+// B3 outcome), a within-grace QUALIFIER, and a disclosed intra-block MARGINAL
+// case. Those are not failures; treating them as such made exit 0 unreachable
+// on an honest book, which is the deterministic false-failure class. A gate that
+// cannot pass is as useless as one that cannot fail.
+//
+// The set is CLOSED and asserted complete by TestEveryVerdictHasATallyClass, so
+// a new verdict cannot be introduced without a deliberate decision about which
+// side of the line it falls on.
+var failingVerdicts = map[string]bool{
+	verdictDrift:           true, // a numeric or boolean disagreement with the chain
+	verdictWeldUnread:      true, // "cannot verify" is never advisory (round-11 F2)
+	verdictCohortFloor:     true, // a cohort below its census-derived floor
+	verdictOnlyInChain:     true, // registry coverage gap, both directions gate
+	verdictOnlyInRegistry:  true, // stale registry entry, both directions gate
+	verdictAnomaly:         true, // a successful read where the chain predicts none
+	verdictBudgetFalsified: true, // the published freshness budget is refuted
+	verdictReResolution:    true, // the walked stream no longer serves the feed
+	verdictUnscannable:     true, // no custody domain / no measurable interval
+	verdictUnexplained:     true, // the third state of the intra-block law
+}
+
+// passingVerdicts is the complementary CLOSED SET: gated outcomes that are
+// SUCCESSES. Each is a real verdict the run wants to be able to reach.
+var passingVerdicts = map[string]bool{
+	verdictExact:             true, // bit-exact agreement
+	verdictProvenanceUpgrade: true, // B3's BEST outcome: max gap within the heartbeat
+	verdictQualifier:         true, // within the declared operator grace, disclosed
+	verdictMarginal:          true, // intra-block flip WITH a proven custodied witness
+}
+
+// verdictIsFailure decides one row. Gated is a separate axis: an ungated row is
+// evidence and never counts, whatever its verdict.
+//
+// An UNRECOGNISED verdict counts as a FAILURE, deliberately: a verdict nobody
+// classified is a verdict nobody reasoned about, and failing closed is the only
+// safe default. TestEveryVerdictHasATallyClass makes that path unreachable in
+// practice by asserting the two sets cover the vocabulary.
+func verdictIsFailure(v string) bool {
+	if passingVerdicts[v] {
+		return false
+	}
+	return true
+}
+
 // tallyP3 counts the gated failures across a row set.
 func tallyP3(rows []p3Row) int {
 	n := 0
 	for _, r := range rows {
-		if r.Gated && r.Verdict != verdictExact {
+		if r.Gated && verdictIsFailure(r.Verdict) {
 			n++
 		}
 	}

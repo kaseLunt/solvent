@@ -77,29 +77,38 @@ type feedGap struct {
 
 // heartbeatVerdict is one feed's scan result, for the artifact.
 type heartbeatVerdict struct {
-	Stream          string   `json:"stream"`
-	Symbol          string   `json:"symbol"`
-	Aggregator      string   `json:"aggregator"`
-	Proxy           string   `json:"proxy"`
-	Heartbeat       int64    `json:"heartbeat_seconds"`
-	Grace           int64    `json:"grace_seconds"`
-	DomainFromBlock uint64   `json:"domain_from_block"`
-	DomainToBlock   uint64   `json:"domain_to_block"`
-	DomainCitation  string   `json:"domain_citation"`
-	Updates         int      `json:"updates_in_domain"`
-	RawLogs         int64    `json:"raw_answerupdated_logs"`
-	RawBlocks       int64    `json:"raw_answerupdated_distinct_blocks"`
-	MissingAsOf     int64    `json:"rows_missing_source_as_of"`
-	MaxGapSeconds   int64    `json:"max_gap_seconds"`
-	P99GapSeconds   int64    `json:"p99_gap_seconds"`
-	MaxGapDetail    string   `json:"max_gap_detail,omitempty"`
-	HeadGapSeconds  int64    `json:"head_gap_seconds"`
-	PhaseChecked    bool     `json:"phase_change_checked"`
-	PhaseAggregator string   `json:"proxy_aggregator_at_pin,omitempty"`
-	Verdict         string   `json:"verdict"`
-	ProvenanceGrade string   `json:"provenance_grade"`
-	BudgetSeconds   int64    `json:"budget_seconds_after_scan"`
-	TopGaps         []string `json:"top_gaps"`
+	Stream          string `json:"stream"`
+	Symbol          string `json:"symbol"`
+	Aggregator      string `json:"aggregator"`
+	Proxy           string `json:"proxy"`
+	Heartbeat       int64  `json:"heartbeat_seconds"`
+	Grace           int64  `json:"grace_seconds"`
+	DomainFromBlock uint64 `json:"domain_from_block"`
+	DomainToBlock   uint64 `json:"domain_to_block"`
+	DomainCitation  string `json:"domain_citation"`
+	Updates         int    `json:"updates_in_domain"`
+	RawLogs         int64  `json:"raw_answerupdated_logs"`
+	RawBlocks       int64  `json:"raw_answerupdated_distinct_blocks"`
+	MissingAsOf     int64  `json:"rows_missing_source_as_of"`
+	MaxGapSeconds   int64  `json:"max_gap_seconds"`
+	P99GapSeconds   int64  `json:"p99_gap_seconds"`
+	MaxGapDetail    string `json:"max_gap_detail,omitempty"`
+	// HeadGapSeconds is the CHAIN-TIME interval from the newest custodied round to
+	// the custody domain's chain-time endpoint. -1 means unmeasurable. It is NEVER
+	// the process wall clock (Codex round 1, finding 8).
+	HeadGapSeconds     int64 `json:"head_gap_seconds_chain_time"`
+	HeadGapIsChainTime bool  `json:"head_gap_is_chain_time"`
+	// JudgedMaxGapSeconds is max(between-round gaps, head interval) — the value the
+	// budget ladder judges, so a STALLED feed can no longer receive a provenance
+	// upgrade just because it has no further round to close its final interval.
+	JudgedMaxGapSeconds int64    `json:"judged_max_gap_seconds"`
+	JudgedMaxIsHead     bool     `json:"judged_max_is_head_interval"`
+	PhaseChecked        bool     `json:"phase_change_checked"`
+	PhaseAggregator     string   `json:"proxy_aggregator_at_pin,omitempty"`
+	Verdict             string   `json:"verdict"`
+	ProvenanceGrade     string   `json:"provenance_grade"`
+	BudgetSeconds       int64    `json:"budget_seconds_after_scan"`
+	TopGaps             []string `json:"top_gaps"`
 }
 
 // runHeartbeatScan executes B3.
@@ -193,15 +202,52 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 				sorted[i].GapSeconds, sorted[i].FromBlock, sorted[i].ToBlock,
 				sorted[i].FromAsOf.Format(time.RFC3339), sorted[i].ToAsOf.Format(time.RFC3339)))
 		}
-		// The HEAD gap: now − the newest custodied round. An open-ended gap at
-		// the scan head is one of the two triggers for the phase-change check.
+		// THE HEAD INTERVAL, in CHAIN time (Codex round 1, finding 8).
+		//
+		// THREE DEFECTS THIS REPLACES. (a) The head gap was measured against the
+		// process WALL CLOCK, which is not chain testimony and makes the number
+		// unreproducible. (b) It only ever gated the phase check, never the budget —
+		// so a feed that STOPPED PUBLISHING could still receive a provenance
+		// UPGRADE, because the upgrade looked only at gaps BETWEEN rounds and a
+		// stalled feed has no further round to close the interval. (c) The residual
+		// interval at the head was excluded from the judged maximum entirely.
+		//
+		// The honest measure is chain-to-chain: from the newest custodied round's
+		// own source_as_of to the DOMAIN ENDPOINT's header time — the chain's
+		// statement of how far custody reaches. That interval is a real lower bound
+		// on the feed's current silence, so it joins the judged maximum.
 		last := scan.Rounds[len(scan.Rounds)-1]
 		if last.HasAsOf {
-			v.HeadGapSeconds = int64(now.Sub(last.SourceAsOf).Seconds())
+			if scan.DomainEndTime > 0 {
+				headSeconds := int64(scan.DomainEndTime) - last.SourceAsOf.Unix()
+				if headSeconds < 0 {
+					headSeconds = 0
+				}
+				v.HeadGapSeconds = headSeconds
+				v.HeadGapIsChainTime = true
+			} else {
+				// No domain-endpoint header time: the head interval is UNMEASURABLE in
+				// chain time, and substituting the wall clock would fabricate chain
+				// testimony. Recorded as such; the feed cannot be upgraded on a head
+				// interval nobody measured.
+				v.HeadGapSeconds = -1
+			}
+		}
+		// The JUDGED maximum includes the head interval: a stalled feed's silence is
+		// exactly the thing a freshness budget claims cannot happen.
+		v.JudgedMaxGapSeconds = v.MaxGapSeconds
+		if v.HeadGapIsChainTime && v.HeadGapSeconds > v.JudgedMaxGapSeconds {
+			v.JudgedMaxGapSeconds = v.HeadGapSeconds
+			v.JudgedMaxIsHead = true
 		}
 
-		needPhaseCheck := v.MaxGapSeconds > 2*scan.Heartbeat ||
-			(scan.Heartbeat > 0 && v.HeadGapSeconds > scan.Heartbeat+scan.Grace)
+		// An OPEN-ENDED gap at the scan head ALWAYS consults the phase check: a
+		// permanently quiet walked aggregator is indistinguishable from a re-pointed
+		// proxy without it (chain-truth R4.2), and that is precisely the case where
+		// guessing wrong is worst.
+		headOpenEnded := !v.HeadGapIsChainTime ||
+			(scan.Heartbeat > 0 && v.HeadGapSeconds > scan.Heartbeat)
+		needPhaseCheck := v.JudgedMaxGapSeconds > 2*scan.Heartbeat || headOpenEnded
 		phaseMismatch := false
 		if needPhaseCheck && scan.ProxyHex != "" {
 			v.PhaseChecked = true
@@ -240,38 +286,55 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 				Note:     "STREAM REQUIRES RE-RESOLUTION — a CUSTODY-CONFIG fact, gated as its own failure class. It is NOT a heartbeat violation (our aggregator went quiet because the proxy re-pointed, and the feed lives on at a new address) and it is NOT a pass (we are walking an address that no longer serves the feed). Config repair stays MANUAL",
 				Evidence: map[string]string{"max_gap_seconds": fmt.Sprintf("%d", v.MaxGapSeconds), "head_gap_seconds": fmt.Sprintf("%d", v.HeadGapSeconds)},
 			})
-		case v.MaxGapSeconds <= scan.Heartbeat:
+		case !v.HeadGapIsChainTime:
+			// The head interval could not be measured in chain time, so the feed's
+			// CURRENT silence is unknown. "Cannot verify" is never advisory.
+			v.Verdict = verdictUnscannable
+			v.ProvenanceGrade = "published-not-verified (the head interval is unmeasurable in chain time: no domain-endpoint header)"
+			v.BudgetSeconds = scan.Heartbeat + scan.Grace
+			rows = append(rows, p3Row{
+				Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "head interval",
+				Expected: "a chain-time interval from the newest round to the custody-domain endpoint",
+				Actual:   "unmeasurable (no header time for the domain endpoint)",
+				Verdict:  verdictUnscannable, Gated: true, Class: verdictUnscannable,
+				Note: "the head interval is what catches a feed that STOPPED, and measuring it against the process wall clock would fabricate chain testimony (Codex round 1, finding 8). Unmeasurable therefore gates rather than defaulting to an upgrade",
+			})
+		case v.JudgedMaxGapSeconds <= scan.Heartbeat:
 			v.Verdict = verdictProvenanceUpgrade
-			v.ProvenanceGrade = fmt.Sprintf("empirical-historical (%d updates, max gap %ds, domain [%d,%d]) — NEVER 'verified': a complete ledger's max gap is exact HISTORY and cannot certify the future",
-				v.Updates, v.MaxGapSeconds, v.DomainFromBlock, v.DomainToBlock)
+			v.ProvenanceGrade = fmt.Sprintf("empirical-historical (%d updates, judged max gap %ds incl. the %ds chain-time head interval, domain [%d,%d]) — NEVER 'verified': a complete ledger's max gap is exact HISTORY and cannot certify the future",
+				v.Updates, v.JudgedMaxGapSeconds, v.HeadGapSeconds, v.DomainFromBlock, v.DomainToBlock)
 			v.BudgetSeconds = scan.Heartbeat + scan.Grace
 			rows = append(rows, p3Row{
 				Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "heartbeat budget",
-				Expected: fmt.Sprintf("max gap <= published heartbeat %ds", scan.Heartbeat),
-				Actual:   fmt.Sprintf("%ds", v.MaxGapSeconds),
+				Expected: fmt.Sprintf("judged max gap (incl. the head interval) <= published heartbeat %ds", scan.Heartbeat),
+				Actual:   fmt.Sprintf("%ds", v.JudgedMaxGapSeconds),
 				Verdict:  verdictProvenanceUpgrade, Gated: true, Note: v.ProvenanceGrade,
 			})
-		case v.MaxGapSeconds <= scan.Heartbeat+scan.Grace:
+		case v.JudgedMaxGapSeconds <= scan.Heartbeat+scan.Grace:
 			v.Verdict = verdictQualifier
-			v.ProvenanceGrade = fmt.Sprintf("empirical-historical WITH QUALIFIER (%d updates, max gap %ds exceeds the published heartbeat %ds but sits within the declared operator grace %ds, domain [%d,%d])",
-				v.Updates, v.MaxGapSeconds, scan.Heartbeat, scan.Grace, v.DomainFromBlock, v.DomainToBlock)
+			v.ProvenanceGrade = fmt.Sprintf("empirical-historical WITH QUALIFIER (%d updates, judged max gap %ds — incl. the %ds chain-time head interval — exceeds the published heartbeat %ds but sits within the declared operator grace %ds, domain [%d,%d])",
+				v.Updates, v.JudgedMaxGapSeconds, v.HeadGapSeconds, scan.Heartbeat, scan.Grace, v.DomainFromBlock, v.DomainToBlock)
 			v.BudgetSeconds = scan.Heartbeat + scan.Grace
 			rows = append(rows, p3Row{
 				Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "heartbeat budget",
-				Expected: fmt.Sprintf("max gap <= published heartbeat %ds", scan.Heartbeat),
-				Actual:   fmt.Sprintf("%ds (within heartbeat+grace %ds)", v.MaxGapSeconds, scan.Heartbeat+scan.Grace),
+				Expected: fmt.Sprintf("judged max gap (incl. the head interval) <= published heartbeat %ds", scan.Heartbeat),
+				Actual:   fmt.Sprintf("%ds (within heartbeat+grace %ds)", v.JudgedMaxGapSeconds, scan.Heartbeat+scan.Grace),
 				Verdict:  verdictQualifier, Gated: true, Note: v.ProvenanceGrade,
 				Evidence: map[string]string{"max_gap_detail": v.MaxGapDetail},
 			})
 		default:
 			v.Verdict = verdictBudgetFalsified
-			v.BudgetSeconds = v.MaxGapSeconds
-			v.ProvenanceGrade = fmt.Sprintf("DOWNGRADED — published-and-REFUTED: the published %ds heartbeat is falsified by an observed %ds gap over the custody domain [%d,%d]; the served freshness budget must carry the OBSERVED bound %ds, because keeping the friendlier published number is the silent-cap anti-canon",
-				scan.Heartbeat, v.MaxGapSeconds, v.DomainFromBlock, v.DomainToBlock, v.MaxGapSeconds)
+			v.BudgetSeconds = v.JudgedMaxGapSeconds
+			headNote := ""
+			if v.JudgedMaxIsHead {
+				headNote = " The refuting interval is the OPEN-ENDED HEAD interval: the feed has not published since its newest custodied round, which is a stall rather than a historical gap."
+			}
+			v.ProvenanceGrade = fmt.Sprintf("DOWNGRADED — published-and-REFUTED: the published %ds heartbeat is falsified by an observed %ds interval over the custody domain [%d,%d]; the served freshness budget must carry the OBSERVED bound %ds, because keeping the friendlier published number is the silent-cap anti-canon.%s",
+				scan.Heartbeat, v.JudgedMaxGapSeconds, v.DomainFromBlock, v.DomainToBlock, v.JudgedMaxGapSeconds, headNote)
 			rows = append(rows, p3Row{
 				Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "heartbeat budget",
-				Expected: fmt.Sprintf("max gap <= heartbeat+grace = %ds (the published budget)", scan.Heartbeat+scan.Grace),
-				Actual:   fmt.Sprintf("%ds", v.MaxGapSeconds),
+				Expected: fmt.Sprintf("judged max gap (incl. the head interval) <= heartbeat+grace = %ds (the published budget)", scan.Heartbeat+scan.Grace),
+				Actual:   fmt.Sprintf("%ds", v.JudgedMaxGapSeconds),
 				Verdict:  verdictBudgetFalsified, Gated: true, Class: verdictBudgetFalsified,
 				Note: "BUDGET FALSIFIED — gated FAIL. The scan is a COMPLETE event ledger over its custody domain, so this max gap is exact history and it REFUTES the published heartbeat. Remediation is to raise the served budget to the observed bound and downgrade the provenance grade; it is NOT to widen the gate. " + v.ProvenanceGrade,
 				Evidence: map[string]string{

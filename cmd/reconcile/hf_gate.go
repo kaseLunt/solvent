@@ -110,6 +110,8 @@ func aaveGateFrame() *gateFrame {
 			"the scaled aToken balance our DB fold produced — component 1, the thing under test"),
 		derived("param_history(engine=aave_param, chain=1) ledger prefix <= P_eth, folded by riskfeed.FoldParams",
 			"the liquidation thresholds our PoolConfigurator custody produced, folded by the SAME function riskd folds with (one implementation of 'what is the effective parameter set')"),
+		derived("raw_logs candidate universe (walked Aave addresses, user slots topics[3]/topics[4], <= P_eth)",
+			"the INDEPENDENT census side: every account custody has ever seen as an Aave user, taken from raw events rather than from the fold under test. Codex round 1 finding 3 - a census computed from position_balances compared the cohort to itself, so an account the fold dropped vanished from BOTH sides at once"),
 		derived("position_events+position_balances absence for the never-seen subjects",
 			"the DB half of the phantom-debt probe: risk-quant R3 requires BOTH sides clean"),
 		derived("raw_logs absence for the never-seen subjects (chain 1, wide predicate: address, any topic's low 20 bytes, anywhere in data)",
@@ -144,6 +146,14 @@ type aaveCohort struct {
 	Finite    []common.Address
 	ZeroDebt  []common.Address
 	NeverSeen []common.Address
+	// Candidates is the INDEPENDENT universe every account-level read is issued
+	// for: custody's own raw-event user set, unioned with the derived census so
+	// both directions of a disagreement are measured (Codex round 1, finding 3).
+	Candidates []common.Address
+	// DerivedFinite / DerivedZeroDebt are the FOLD's classification, kept separate
+	// from the chain's so the two can actually disagree.
+	DerivedFinite   map[common.Address]bool
+	DerivedZeroDebt map[common.Address]bool
 	// Control is a known-NONZERO subject included in every all-zero multicall
 	// chunk (chain-truth R1.4): a chunk of all zeros with no nonzero control is
 	// testimony indistinguishable from a lying default.
@@ -153,17 +163,42 @@ type aaveCohort struct {
 	CensusZero   int
 }
 
-// buildAaveCohort assembles the cohort from the derived census. Membership is
-// ALL finite-HF borrowers (never a sample of them — the population is 12), the
-// first aaveZeroDebtFloor+ zero-debt subjects in census order, and the
-// committed never-seen list. Order is the census's own deterministic order, so
-// the cohort is reproducible without a seed.
+// buildAaveCohort assembles the MEASURED cohort from the INDEPENDENT candidate
+// universe, not from the derived fold.
+//
+// Membership is every candidate custody has ever seen as an Aave user, so an
+// account the fold dropped is still measured at the pin — which is what lets the
+// census weld below notice the omission. The committed never-seen list is added
+// unchanged.
 func buildAaveCohort(t6 *snapshotdb.Task6Data) aaveCohort {
 	c := aaveCohort{CensusFinite: len(t6.AaveBorrowerCensus), CensusZero: len(t6.AaveZeroDebtCensus)}
+	seen := map[common.Address]bool{}
+	for _, a := range t6.AaveCandidates {
+		addr := common.HexToAddress(a)
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		c.Candidates = append(c.Candidates, addr)
+	}
+	// The derived census members join the candidate set too: an account the fold
+	// believes in but raw custody never named is the OTHER direction of the same
+	// disagreement, and it must be measured rather than dropped.
+	for _, a := range append(append([]string{}, t6.AaveBorrowerCensus...), t6.AaveZeroDebtCensus...) {
+		addr := common.HexToAddress(a)
+		if !seen[addr] {
+			seen[addr] = true
+			c.Candidates = append(c.Candidates, addr)
+		}
+	}
+	c.DerivedFinite = map[common.Address]bool{}
 	for _, a := range t6.AaveBorrowerCensus {
+		c.DerivedFinite[common.HexToAddress(a)] = true
 		c.Finite = append(c.Finite, common.HexToAddress(a))
 	}
+	c.DerivedZeroDebt = map[common.Address]bool{}
 	for _, a := range t6.AaveZeroDebtCensus {
+		c.DerivedZeroDebt[common.HexToAddress(a)] = true
 		c.ZeroDebt = append(c.ZeroDebt, common.HexToAddress(a))
 	}
 	for _, s := range neverSeenSubjects {
@@ -173,6 +208,85 @@ func buildAaveCohort(t6 *snapshotdb.Task6Data) aaveCohort {
 		c.Control, c.HasControl = c.Finite[0], true
 	}
 	return c
+}
+
+// censusWeldRows welds the DERIVED census against the PINNED chain classification
+// of every independent candidate, both directions.
+//
+// chainHasDebt / chainHasCollateral come from getUserAccountData at the pin — the
+// chain's own answer, not ours. A candidate the chain calls a borrower that our
+// fold does not is a DROPPED BORROWER, and it is exactly the account the old
+// self-derived census could never see.
+func censusWeldRows(c aaveCohort, chainDebt, chainColl map[common.Address]bool,
+	measured map[common.Address]bool) []p3Row {
+	var rows []p3Row
+	onlyChainBorrower, onlyDerivedBorrower, agreeBorrower := 0, 0, 0
+	onlyChainZero, onlyDerivedZero := 0, 0
+	for _, a := range c.Candidates {
+		if !measured[a] {
+			// Unmeasurable candidates are already reported as account-state
+			// weld-unread rows by the caller; classifying them here would invent an
+			// answer for a read that did not happen.
+			continue
+		}
+		chainBorrower := chainDebt[a]
+		ourBorrower := c.DerivedFinite[a]
+		switch {
+		case chainBorrower && !ourBorrower:
+			onlyChainBorrower++
+			rows = append(rows, p3Row{
+				Gate: gateAaveHF, Subject: a.Hex(), Leg: "census(borrower): chain vs derived",
+				Expected: "borrower (nonzero totalDebtBase at the pin)",
+				Actual:   "NOT in the derived finite-HF census",
+				Verdict:  verdictDrift, Gated: true, Class: "dropped-borrower",
+				Note: "the chain carries debt for a candidate our derived fold does not count as a borrower. This is the account the old self-derived census could never see, because it was absent from BOTH sides at once (Codex round 1, finding 3): the cohort was built from position_balances and then compared to position_balances",
+			})
+		case ourBorrower && !chainBorrower:
+			onlyDerivedBorrower++
+			rows = append(rows, p3Row{
+				Gate: gateAaveHF, Subject: a.Hex(), Leg: "census(borrower): chain vs derived",
+				Expected: "no debt at the pin",
+				Actual:   "counted as a finite-HF borrower by the derived fold",
+				Verdict:  verdictDrift, Gated: true, Class: "phantom-borrower",
+				Note: "our fold believes this account carries debt and the chain does not — phantom debt, the direction that inflates the served book",
+			})
+		case chainBorrower && ourBorrower:
+			agreeBorrower++
+		}
+		// The zero-debt census: positive collateral, no debt.
+		chainZero := chainColl[a] && !chainDebt[a]
+		ourZero := c.DerivedZeroDebt[a]
+		if chainZero != ourZero {
+			if chainZero {
+				onlyChainZero++
+			} else {
+				onlyDerivedZero++
+			}
+			rows = append(rows, p3Row{
+				Gate: gateAaveHF, Subject: a.Hex(), Leg: "census(zero-debt): chain vs derived",
+				Expected: fmt.Sprintf("zero-debt collateral holder = %v (chain)", chainZero),
+				Actual:   fmt.Sprintf("%v (derived)", ourZero),
+				Verdict:  verdictDrift, Gated: true, Class: "zero-debt-census-difference",
+				Note: "the zero-debt cohort is the marker<->max-uint mapping's population, so a membership difference means the mapping is being asserted over a different set than the chain has",
+			})
+		}
+	}
+	summary := p3Row{
+		Gate: gateAaveHF, Subject: "census:aave-borrowers", Leg: "set-equality(independent candidates vs derived fold)",
+		Expected: fmt.Sprintf("%d candidates from custodied raw events, classified by pinned chain reads", len(c.Candidates)),
+		Actual: fmt.Sprintf("agree %d, only-chain %d, only-derived %d; zero-debt only-chain %d only-derived %d",
+			agreeBorrower, onlyChainBorrower, onlyDerivedBorrower, onlyChainZero, onlyDerivedZero),
+		Gated: true,
+		Note:  "the census side is INDEPENDENT of the state under test: candidates come from raw_logs over the walked Aave addresses and are classified by getUserAccountData at the pin. A borrower the fold dropped therefore shows up here instead of vanishing from both sides (Codex round 1, finding 3)",
+	}
+	if onlyChainBorrower == 0 && onlyDerivedBorrower == 0 && onlyChainZero == 0 && onlyDerivedZero == 0 {
+		summary.Verdict = verdictExact
+	} else {
+		summary.Verdict = verdictDrift
+		summary.Class = "census-set-difference"
+	}
+	rows = append(rows, summary)
+	return rows
 }
 
 // zeroControlChunks builds a call list in which position i ≡ 0 (mod
@@ -320,7 +434,9 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	// ---- per-account pinned reads ------------------------------------------
 	// Cohort accounts (finite + zero-debt) go in one batch; the never-seen
 	// subjects go in their OWN batch, chunk-aligned with a nonzero control.
-	measured := append(append([]common.Address{}, cohort.Finite...), cohort.ZeroDebt...)
+	// EVERY candidate is read, not just the fold's own members: that is what makes
+	// the census weld below independent of the state under test.
+	measured := cohort.Candidates
 	accountData, userConfig, userEMode, accountNotes, err := readAaveAccountLegs(ctx, c, f, measured, "p3:aave:accounts")
 	if err != nil {
 		return nil, err
@@ -355,6 +471,13 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	sharpnessWitness := ""
 	priceDecimals := aavePriceDecimalsFromRegistry(c)
 	f.use("recon/feeds.json aaveoracle priceDecimals")
+	f.use("raw_logs candidate universe (walked Aave addresses, user slots topics[3]/topics[4], <= P_eth)")
+
+	// The CHAIN's own classification of every candidate, kept separate from the
+	// fold's so the two can disagree (Codex round 1, finding 3).
+	chainHasDebt := map[common.Address]bool{}
+	chainHasCollateral := map[common.Address]bool{}
+	measuredOK := map[common.Address]bool{}
 
 	for _, acct := range measured {
 		key := hex.EncodeToString(acct.Bytes())
@@ -365,6 +488,9 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 		}
 		chainData := accountData[acct]
 		cfgBits := userConfig[acct]
+		measuredOK[acct] = true
+		chainHasDebt[acct] = chainData.TotalDebtBase.Sign() > 0
+		chainHasCollateral[acct] = chainData.TotalCollateralBase.Sign() > 0
 
 		// eMode is GATED == 0.
 		emode := userEMode[acct]
@@ -468,6 +594,9 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 			}
 		}
 	}
+
+	// ---- the census weld: INDEPENDENT candidates vs the derived fold -------
+	rows = append(rows, censusWeldRows(cohort, chainHasDebt, chainHasCollateral, measuredOK)...)
 
 	// ---- cohort floors, census-welded --------------------------------------
 	rows = append(rows, cohortFloorRow(gateAaveHF, "aave-finite-hf-borrowers",

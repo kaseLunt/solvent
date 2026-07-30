@@ -157,6 +157,16 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		prm.BacktestKeys = backtestFrameKeys()
 		prm.AdapterRowsPerReserve = adapterRowsPerReserve
 		prm.Feeds = reg.FeedRegistry
+		// The walked Aave addresses: the Pool plus its aTokens. They bound the
+		// INDEPENDENT candidate universe the census weld needs (Codex round 1,
+		// finding 3), so it is read over exactly the custodied surface.
+		for _, st := range cfg.Streams {
+			if st.Engine == aaveEngine {
+				for _, a := range st.Addresses {
+					prm.AaveAddresses = append(prm.AaveAddresses, a.Bytes())
+				}
+			}
+		}
 	}
 	snap, err := snapshotdb.Collect(ctx, prm, cfg, roDSN, spec, wantDM, wantAave, extras)
 	if err != nil {

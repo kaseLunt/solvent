@@ -193,28 +193,75 @@ func TestCompareExactPutsTheChainOnTheExpectedSide(t *testing.T) {
 	require.True(t, same.Gated)
 }
 
-// TestTallyP3CountsOnlyGatedNonExactRows keeps the P3 accounting identical to the
-// pre-existing families': evidence rows never move the exit code, and every
-// gated non-exact verdict does.
-func TestTallyP3CountsOnlyGatedNonExactRows(t *testing.T) {
+// TestTallyP3CountsOnlyGatedFailingVerdicts is the round-1 finding-1 regression.
+//
+// WHAT IT KILLS: tallyP3 previously counted "gated AND not exact" as failure,
+// which swept in every richer verdict this gate set deliberately introduced — a
+// provenance UPGRADE (B3's BEST outcome), a within-grace QUALIFIER, and a
+// causation-proven intra-block MARGINAL case. exit 0 was therefore unreachable on
+// an honest book. A gate that cannot pass is as useless as one that cannot fail.
+func TestTallyP3CountsOnlyGatedFailingVerdicts(t *testing.T) {
 	rows := []p3Row{
 		{Gated: true, Verdict: verdictExact},
-		{Gated: true, Verdict: verdictDrift},
-		{Gated: true, Verdict: verdictWeldUnread},
-		{Gated: true, Verdict: verdictBudgetFalsified},
-		{Gated: true, Verdict: verdictMarginal},
-		{Gated: false, Verdict: verdictEvidence},
-		{Gated: false, Verdict: verdictDrift}, // ungated: recorded, not gating
+		{Gated: true, Verdict: verdictProvenanceUpgrade}, // SUCCESS
+		{Gated: true, Verdict: verdictQualifier},         // SUCCESS
+		{Gated: true, Verdict: verdictMarginal},          // SUCCESS (causation proven)
+		{Gated: true, Verdict: verdictDrift},             // failure
+		{Gated: true, Verdict: verdictWeldUnread},        // failure
+		{Gated: true, Verdict: verdictBudgetFalsified},   // failure
+		{Gated: false, Verdict: verdictEvidence},         // never counts
+		{Gated: false, Verdict: verdictDrift},            // ungated: recorded, not gating
 	}
-	require.Equal(t, 4, tallyP3(rows))
+	require.Equal(t, 3, tallyP3(rows),
+		"only the three FAILING gated verdicts count; the upgrade, the qualifier and the marginal case are successes")
 }
 
-// TestMarginalIsGatedBecauseItIsDisclosedNotAbsorbed states the intra-block
-// band's SEMANTICS as a test: a marginal row is listed individually and DOES
-// reach the verdict, because "disclosed" must not become "absorbed". The band is
-// a disclosure obligation, not permission to pass.
-func TestMarginalIsGatedBecauseItIsDisclosedNotAbsorbed(t *testing.T) {
-	require.Equal(t, 1, tallyP3([]p3Row{{Gated: true, Verdict: verdictMarginal}}),
-		"a marginal case must remain visible in the exit code; risk-quant R2 requires it listed individually, never absorbed")
-	require.Contains(t, tolIntraBlockMarginality, "never absorption")
+// TestEveryVerdictHasATallyClass is the completeness assertion the closed set
+// needs: every verdict the gate set can emit must be classified on exactly one
+// side of the pass/fail line, so a new verdict cannot slip in unclassified and be
+// silently treated as a failure (or, worse, as a pass).
+func TestEveryVerdictHasATallyClass(t *testing.T) {
+	all := []string{
+		verdictExact, verdictDrift, verdictWeldUnread, verdictCohortFloor,
+		verdictOnlyInChain, verdictOnlyInRegistry, verdictAnomaly, verdictEvidence,
+		verdictProvenanceUpgrade, verdictQualifier, verdictBudgetFalsified,
+		verdictReResolution, verdictUnscannable, verdictUnexplained, verdictMarginal,
+	}
+	for _, v := range all {
+		inFail := failingVerdicts[v]
+		inPass := passingVerdicts[v]
+		if v == verdictEvidence {
+			// Evidence rows are never gated, so they are outside both sets by
+			// construction; asserting that keeps the exemption explicit.
+			require.False(t, inFail, "%s must not be classified as failing", v)
+			require.False(t, inPass, "%s is ungated evidence and needs no pass class", v)
+			continue
+		}
+		require.NotEqual(t, inFail, inPass,
+			"verdict %q must be in EXACTLY one of failingVerdicts / passingVerdicts", v)
+	}
+	// And the predicate agrees with the sets, for every verdict.
+	for _, v := range all {
+		if passingVerdicts[v] {
+			require.False(t, verdictIsFailure(v), "%s is a success", v)
+		} else {
+			require.True(t, verdictIsFailure(v), "%s is a failure", v)
+		}
+	}
+	// An UNRECOGNISED verdict fails closed: a verdict nobody classified is a
+	// verdict nobody reasoned about.
+	require.True(t, verdictIsFailure("some-verdict-nobody-classified"))
+}
+
+// TestMarginalIsDisclosedNotAbsorbedAndNotAFailure states the intra-block band's
+// corrected semantics. "Disclosed, not absorbed" means the case is listed
+// INDIVIDUALLY with its margin and its causation evidence — it does NOT mean the
+// run fails. The gated third state (UNEXPLAINED) is what fails, and it is a
+// separate verdict.
+func TestMarginalIsDisclosedNotAbsorbedAndNotAFailure(t *testing.T) {
+	require.Zero(t, tallyP3([]p3Row{{Gated: true, Verdict: verdictMarginal}}),
+		"a causation-PROVEN intra-block flip is a success: the boolean was reproduced in the execution frame")
+	require.Equal(t, 1, tallyP3([]p3Row{{Gated: true, Verdict: verdictUnexplained}}),
+		"the UNEXPLAINED third state is the one that fails — a false negative the block's own witnesses do not explain")
+	require.Contains(t, tolIntraBlockMarginality.String(), "never absorption")
 }

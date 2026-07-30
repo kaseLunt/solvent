@@ -2,6 +2,7 @@ package main
 
 import (
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -43,84 +44,151 @@ func parentFrame(bal, price map[common.Address]*big.Int, bonus *big.Int, tokens 
 	return st
 }
 
-// TestSeizureFinalBranchIsExactAndFalsifiable pins obligation 3's FINAL branch:
-// bonus == floor(collateralAmountForDebt × b / HUNDRED_PERCENT), where
-// collateralAmountForDebt is inverted from the recorded amount. Inverting and
-// re-deriving is what makes the check falsifiable rather than circular — an
-// amount and a bonus that do not satisfy the branch's own algebra cannot both be
-// right.
-func TestSeizureFinalBranchIsExactAndFalsifiable(t *testing.T) {
-	// cAFD = 1,000,000 (1.0 liquidUSD at 6 dec); b = 2e18 / 100e18 = 2%.
+// TestSeizureIsAnchoredToLiquidatedUSD is the round-1 finding-5 regression.
+//
+// WHAT IT KILLS: the previous reconstruction inverted collateralAmountForDebt from
+// the OBSERVED amount-minus-bonus and re-derived the bonus from that same inverted
+// value, so any PROPORTIONALLY wrong pair satisfied it and LiquidatedUSD was never
+// consumed. The MUTATION subtest scales amount and bonus together by 2x - which the
+// old check accepted - and requires the new one to reject it.
+func TestSeizureIsAnchoredToLiquidatedUSD(t *testing.T) {
+	// One 6-dec token at P = 1.0 USD, 2% bonus. Budget u0 = 1,000,000 (=$1.00).
+	// cAFD = floor(1e6 * 1e6 / 1e6) = 1,000,000 ; bonus = 2% = 20,000 ;
+	// amount = 1,020,000. The Safe holds far more, so the FINAL branch applies.
+	u0 := big.NewInt(1_000_000)
 	cAFD := big.NewInt(1_000_000)
-	wantBonus := new(big.Int).Mul(cAFD, bonus2Pct)
-	wantBonus.Quo(wantBonus, hundredPercentDM)
-	require.Equal(t, "20000", wantBonus.String(), "2% of 1,000,000")
-	amount := new(big.Int).Add(cAFD, wantBonus) // 1,020,000
+	bonus := new(big.Int).Mul(cAFD, bonus2Pct)
+	bonus.Quo(bonus, hundredPercentDM)
+	require.Equal(t, "20000", bonus.String())
+	amount := new(big.Int).Add(cAFD, bonus)
 
-	db := snapshotdb.T6BacktestRow{
-		Seizures:        []snapshotdb.T6Seizure{seizure(1, tokA, amount.String(), wantBonus.String())},
-		NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
-	}
-	// The Safe holds MORE than the seizure, so the partial branch cannot apply.
 	parent := parentFrame(
 		map[common.Address]*big.Int{tokA: big.NewInt(50_000_000)},
 		map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)},
 		bonus2Pct, tokA)
-	f := newGateFrame(gateBacktest)
-	rows := reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokA: 6}, f)
-	require.Len(t, rows, 1)
-	require.Equal(t, verdictExact, rows[0].Verdict)
-	require.Contains(t, rows[0].Leg, "final branch")
-	require.Contains(t, rows[0].Evidence["branch"], "FINAL")
-	require.Equal(t, tolSeizureTokenWei, rows[0].Evidence["tolerance"],
-		"the round-trip slack must be the NAMED tolerance, not an anonymous epsilon")
-	require.Equal(t, []string{tolSeizureTokenWei}, f.Tolerances)
+	decs := map[common.Address]uint8{tokA: 6}
 
-	// MUTATION: a bonus one wei off must FAIL. The token-unit comparison is
-	// exact — the one-token-wei slack lives on the USD leg only.
-	bad := new(big.Int).Add(wantBonus, big.NewInt(1))
-	db.Seizures = []snapshotdb.T6Seizure{seizure(1, tokA, amount.String(), bad.String())}
-	rows = reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokA: 6}, newGateFrame(gateBacktest))
-	require.Equal(t, verdictDrift, rows[0].Verdict,
-		"the FINAL branch's bonus is recomputed EXACTLY; one wei off is drift, because the token-unit leg carries no tolerance")
+	mkRow := func(amt, bns *big.Int) snapshotdb.T6BacktestRow {
+		return snapshotdb.T6BacktestRow{
+			Seizures:        []snapshotdb.T6Seizure{seizure(1, tokA, amt.String(), bns.String())},
+			LiquidatedUSD:   new(big.Int).Set(u0),
+			NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
+		}
+	}
+
+	t.Run("the honest pair passes and spends the budget exactly", func(t *testing.T) {
+		f := newGateFrame(gateBacktest)
+		rows := reconstructSeizures("case", newBacktestView(mkRow(amount, bonus), f), parent, decs, f)
+		require.Zero(t, tallyP3(rows), "an exactly-reconstructed FINAL element must not gate")
+		var sawBudget, sawPredicate bool
+		for _, r := range rows {
+			if strings.Contains(r.Leg, "carried repay budget fully spent") {
+				sawBudget = true
+				require.Equal(t, verdictExact, r.Verdict)
+				require.Equal(t, u0.String(), r.Evidence["u0"], "the budget IS liquidatedAmt")
+			}
+			if strings.Contains(r.Leg, "branch predicate") {
+				sawPredicate = true
+				require.Equal(t, "FINAL", r.Expected)
+			}
+		}
+		require.True(t, sawBudget, "the budget must be asserted, not merely carried")
+		require.True(t, sawPredicate, "the branch PREDICATE must be welded at the carried budget")
+		require.Equal(t, []toleranceID{tolSeizureTokenWei}, f.cited)
+	})
+
+	t.Run("MUTATION: a PROPORTIONALLY wrong pair is rejected", func(t *testing.T) {
+		// Scale amount and bonus together. amount-bonus = 2x cAFD and
+		// bonus = 2% of that, so the OLD inverted check was satisfied exactly.
+		badCAFD := new(big.Int).Mul(cAFD, big.NewInt(2))
+		badBonus := new(big.Int).Mul(badCAFD, bonus2Pct)
+		badBonus.Quo(badBonus, hundredPercentDM)
+		badAmount := new(big.Int).Add(badCAFD, badBonus)
+		// Prove the old check would have passed: bonus == floor((amount-bonus)*b/HP).
+		inverted := new(big.Int).Sub(badAmount, badBonus)
+		check := new(big.Int).Mul(inverted, bonus2Pct)
+		check.Quo(check, hundredPercentDM)
+		require.Equal(t, badBonus.String(), check.String(),
+			"the mutated pair satisfies the OLD inverted-cAFD identity, which is why that check could not catch it")
+
+		f := newGateFrame(gateBacktest)
+		rows := reconstructSeizures("case", newBacktestView(mkRow(badAmount, badBonus), f), parent, decs, f)
+		require.Positive(t, tallyP3(rows),
+			"a pair that does not follow from the CARRIED liquidatedAmt budget must gate: this is the finding-5 kill")
+	})
+
+	t.Run("MUTATION: a wrong budget is rejected", func(t *testing.T) {
+		// The elements are internally perfect; only liquidatedAmt disagrees.
+		row := mkRow(amount, bonus)
+		row.LiquidatedUSD = big.NewInt(500_000)
+		f := newGateFrame(gateBacktest)
+		rows := reconstructSeizures("case", newBacktestView(row, f), parent, decs, f)
+		require.Positive(t, tallyP3(rows),
+			"LiquidatedUSD is now CONSUMED, so a budget that does not produce the observed elements must gate")
+	})
+
+	t.Run("an absent budget is weld-unread, never inverted from the elements", func(t *testing.T) {
+		row := mkRow(amount, bonus)
+		row.LiquidatedUSD = nil
+		f := newGateFrame(gateBacktest)
+		rows := reconstructSeizures("case", newBacktestView(row, f), parent, decs, f)
+		require.Equal(t, verdictWeldUnread, rows[len(rows)-1].Verdict)
+		require.Positive(t, tallyP3(rows))
+	})
 }
 
-// TestSeizurePartialBranchUsesTheSafeBalance pins the PARTIAL branch: amount ==
-// the Safe's whole balance, bonus == totalCollateral −
-// floor(totalCollateral·HP/(HP+b)).
-func TestSeizurePartialBranchUsesTheSafeBalance(t *testing.T) {
+// TestSeizureAllPartialShapeTiesEveryElementToTheBudget covers the other
+// determinate shape: the preference array ran out, so liquidatedAmt is the SUM of
+// the credited USD over every element - one exact equation across the fan-out.
+func TestSeizureAllPartialShapeTiesEveryElementToTheBudget(t *testing.T) {
+	// The Safe holds exactly 777,777 of a 6-dec token at P = 1.0, 2% bonus, and the
+	// debt exceeds it, so the PARTIAL branch takes the whole balance.
 	bal := big.NewInt(777_777)
 	net := new(big.Int).Mul(bal, hundredPercentDM)
 	net.Quo(net, new(big.Int).Add(hundredPercentDM, bonus2Pct))
 	wantBonus := new(big.Int).Sub(bal, net)
+	credited := new(big.Int).Sub(bal, wantBonus)
+	credited.Mul(credited, big.NewInt(1_000_000))
+	credited.Quo(credited, pow10Big(6))
 
-	db := snapshotdb.T6BacktestRow{
-		Seizures:        []snapshotdb.T6Seizure{seizure(1, tokA, bal.String(), wantBonus.String())},
-		NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
-	}
 	parent := parentFrame(
 		map[common.Address]*big.Int{tokA: bal},
 		map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)},
 		bonus2Pct, tokA)
-	rows := reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokA: 6}, newGateFrame(gateBacktest))
-	require.Len(t, rows, 1)
-	require.Equal(t, verdictExact, rows[0].Verdict)
-	require.Contains(t, rows[0].Leg, "partial branch")
-	require.Equal(t, bal.String(), rows[0].Evidence["total_collateral"])
+	decs := map[common.Address]uint8{tokA: 6}
+	row := snapshotdb.T6BacktestRow{
+		Seizures:        []snapshotdb.T6Seizure{seizure(1, tokA, bal.String(), wantBonus.String())},
+		LiquidatedUSD:   credited,
+		NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
+	}
+	f := newGateFrame(gateBacktest)
+	rows := reconstructSeizures("case", newBacktestView(row, f), parent, decs, f)
+	require.Zero(t, tallyP3(rows), "the all-partial shape must reconcile exactly")
+	var sawSum bool
+	for _, r := range rows {
+		if strings.Contains(r.Leg, "sum of credited USD over ALL elements") {
+			sawSum = true
+			require.Equal(t, verdictExact, r.Verdict)
+			require.Equal(t, credited.String(), r.Actual)
+		}
+	}
+	require.True(t, sawSum, "the all-partial shape must assert the budget equation")
 
-	// MUTATION: the same amount with a WRONG bonus must fail.
-	db.Seizures = []snapshotdb.T6Seizure{seizure(1, tokA, bal.String(), "0")}
-	rows = reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokA: 6}, newGateFrame(gateBacktest))
-	require.Equal(t, verdictDrift, rows[0].Verdict)
+	// MUTATION: a bonus one wei off breaks both the element check and the sum.
+	row.Seizures = []snapshotdb.T6Seizure{seizure(1, tokA, bal.String(), new(big.Int).Add(wantBonus, big.NewInt(1)).String())}
+	f2 := newGateFrame(gateBacktest)
+	require.Positive(t, tallyP3(reconstructSeizures("case", newBacktestView(row, f2), parent, decs, f2)))
 }
 
-// TestZeroAmountSeizureAssertsTheSafeReallyHeldNone is the DOMINANT shape on
-// this population (269 of 9,242 fan-out elements carry a nonzero amount, so most
-// elements are zero): the liquidator named a preference token the account did
-// not hold. The falsifiable content is that the Safe balance REALLY was zero.
+// TestZeroAmountSeizureAssertsTheSafeReallyHeldNone is the DOMINANT shape on this
+// population (269 of 9,242 fan-out elements carry a nonzero amount): the
+// liquidator named a preference token the account did not hold. The falsifiable
+// content is that the Safe balance REALLY was zero.
 func TestZeroAmountSeizureAssertsTheSafeReallyHeldNone(t *testing.T) {
-	db := snapshotdb.T6BacktestRow{
+	decs := map[common.Address]uint8{tokB: 8}
+	row := snapshotdb.T6BacktestRow{
 		Seizures:        []snapshotdb.T6Seizure{seizure(1, tokB, "0", "0")},
+		LiquidatedUSD:   big.NewInt(0),
 		NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
 	}
 	// Safe really held none: exact.
@@ -128,30 +196,30 @@ func TestZeroAmountSeizureAssertsTheSafeReallyHeldNone(t *testing.T) {
 		map[common.Address]*big.Int{tokB: big.NewInt(0)},
 		map[common.Address]*big.Int{tokB: mustBig("118000000000")},
 		bonus2Pct, tokB)
-	rows := reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokB: 8}, newGateFrame(gateBacktest))
-	require.Len(t, rows, 1)
-	require.Equal(t, verdictExact, rows[0].Verdict)
+	f := newGateFrame(gateBacktest)
+	require.Zero(t, tallyP3(reconstructSeizures("case", newBacktestView(row, f), parent, decs, f)))
 
-	// The Safe DID hold some but the event seized zero: that is a real
-	// disagreement, not a vacuous pass.
+	// The Safe DID hold some but the event seized zero: a real disagreement.
 	parent.balances[tokB] = big.NewInt(12345)
-	rows = reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{tokB: 8}, newGateFrame(gateBacktest))
-	require.Equal(t, verdictDrift, rows[0].Verdict,
-		"a zero-amount element over a NONZERO Safe balance must fail — otherwise the whole zero population would be a vacuous pass")
+	f2 := newGateFrame(gateBacktest)
+	require.Positive(t, tallyP3(reconstructSeizures("case", newBacktestView(row, f2), parent, decs, f2)),
+		"a zero-amount element over a NONZERO Safe balance must fail - otherwise the whole zero population is a vacuous pass")
 }
 
 // TestSeizureInputsUnreadIsGatedNotSkipped: a missing pinned input makes the
 // element weld-unread (gated), never silently exact.
 func TestSeizureInputsUnreadIsGatedNotSkipped(t *testing.T) {
-	db := snapshotdb.T6BacktestRow{
-		Seizures: []snapshotdb.T6Seizure{seizure(1, tokA, "1000", "20")},
+	row := snapshotdb.T6BacktestRow{
+		Seizures:      []snapshotdb.T6Seizure{seizure(1, tokA, "1000", "20")},
+		LiquidatedUSD: big.NewInt(1000),
 	}
 	parent := &frameState{
 		prices:   map[common.Address]*big.Int{},
 		balances: map[common.Address]*big.Int{},
 		configs:  map[common.Address]collateralTokenConfigResult{},
 	}
-	rows := reconstructSeizures("case", db, parent, parent, map[common.Address]uint8{}, newGateFrame(gateBacktest))
+	f := newGateFrame(gateBacktest)
+	rows := reconstructSeizures("case", newBacktestView(row, f), parent, map[common.Address]uint8{}, f)
 	require.Len(t, rows, 1)
 	require.Equal(t, verdictWeldUnread, rows[0].Verdict)
 	require.True(t, rows[0].Gated)
@@ -169,7 +237,7 @@ func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) 
 
 	t.Run("exact: no tolerance spent", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, exec(0), f)
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, f), exec(0), f)
 		require.Equal(t, verdictExact, rows[0].Verdict)
 		require.Empty(t, f.Tolerances, "an exact row must not cite a tolerance it did not need")
 	})
@@ -177,23 +245,23 @@ func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) 
 	t.Run("1 wei high on a fully-liquidated account: the tolerance", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
 		// NormalizedAfter 1 -> our USD 1; chain says 0 (the silent zeroing).
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(1), IndexAtBlock: idx}, exec(0), f)
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(1), IndexAtBlock: idx}, f), exec(0), f)
 		require.Equal(t, verdictExact, rows[0].Verdict)
 		require.Equal(t, "residue-1-wei-tolerance-spent", rows[0].Class)
-		require.Equal(t, []string{tolResidueWei}, f.Tolerances)
-		require.Equal(t, tolResidueWei, rows[0].Evidence["tolerance"])
+		require.Equal(t, []toleranceID{tolResidueWei}, f.cited)
+		require.Equal(t, tolResidueWei.String(), rows[0].Evidence["tolerance"])
 	})
 
 	t.Run("2 wei high: outside the bound, drift", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(2), IndexAtBlock: idx}, exec(0), f)
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(2), IndexAtBlock: idx}, f), exec(0), f)
 		require.Equal(t, verdictDrift, rows[0].Verdict)
 		require.Empty(t, f.Tolerances)
 	})
 
 	t.Run("1 wei LOW: wrong direction, drift", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, exec(1), f)
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, f), exec(1), f)
 		require.Equal(t, verdictDrift, rows[0].Verdict,
 			"the tolerance is derived-HIGH only: the contract zeroes what we kept, never the other way")
 		require.Empty(t, f.Tolerances)
@@ -201,17 +269,17 @@ func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) 
 
 	t.Run("not fully liquidated: drift", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(1000), IndexAtBlock: idx}, exec(999), f)
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(1000), IndexAtBlock: idx}, f), exec(999), f)
 		require.Equal(t, verdictDrift, rows[0].Verdict)
 		require.Empty(t, f.Tolerances)
 	})
 
 	t.Run("residue already MODELLED: the tolerance is unavailable", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{
 			NormalizedAfter: big.NewInt(1), IndexAtBlock: idx,
 			ResidueZeroed: true, ResidueText: "1",
-		}, exec(0), f)
+		}, f), exec(0), f)
 		require.Equal(t, verdictDrift, rows[0].Verdict,
 			"the deriver already emitted a residue_zeroed event, so the drift is something else and the tolerance must not be spent twice")
 		require.Equal(t, "residue-modelled-yet-drifting", rows[0].Class)
@@ -220,7 +288,7 @@ func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) 
 
 	t.Run("chain leg unread: weld-unread, gated", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
-		rows := residueWeld("c", snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx},
+		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, f),
 			&frameState{}, f)
 		require.Equal(t, verdictWeldUnread, rows[0].Verdict)
 		require.True(t, rows[0].Gated)
