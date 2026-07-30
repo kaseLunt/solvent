@@ -28,8 +28,11 @@ export const FIXTURE_FILES = {
   addressDM: "address-dm.json",
   addressDMRefused: "address-dm-refused.json",
   addressNotFound: "address-not-found.json",
+  addressUnknowable: "address-unknowable.json",
+  addressPartial: "address-partial.json",
   stressAave: "stress-aave.json",
   stressDM: "stress-dm.json",
+  stressUnknowable: "stress-unknowable.json",
   observatory: "observatory.json",
   meta: "meta.json",
   metaNoBatch: "meta-no-batch.json",
@@ -495,6 +498,7 @@ export const book = {
     "refused_in_batch": 2,
     "excluded_by_this_layer": 0,
     "excluded": [],
+    "withheld_engines": [],
     "stress_coverage_is_full": true,
     "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
   },
@@ -919,7 +923,15 @@ export const bookEngineRefused = {
     "refused_in_batch": 1,
     "excluded_by_this_layer": 0,
     "excluded": [],
-    "stress_coverage_is_full": true,
+    "withheld_engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      }
+    ],
+    "stress_coverage_is_full": false,
     "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
   },
   "notes": [
@@ -1130,6 +1142,9 @@ export const addressAave = {
     }
   ],
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
@@ -1278,6 +1293,9 @@ export const addressAaveRefused = {
     }
   ],
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
@@ -1453,6 +1471,9 @@ export const addressDM = {
     }
   ],
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
@@ -1565,6 +1586,9 @@ export const addressDMRefused = {
     }
   ],
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
@@ -1644,6 +1668,287 @@ export const addressNotFound = {
   "address": "0xEeEE000000000000000000000000000000000005",
   "positions": [],
   "found": false,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
+  "notes": [
+    "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
+    "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
+    "Debt Manager collateral comes from a sweep with a worst case of 5580 seconds; its prices are 60-second samples. Read `sweep_block` for the collateral as-of, never the price age.",
+    "The two engines are never blended: Aave publishes a continuous health factor, the Debt Manager a strict liquidatable boolean."
+  ]
+} satisfies AddressResponse;
+
+export const addressUnknowable = {
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xAAaA000000000000000000000000000000000001",
+  "positions": [],
+  "found": null,
+  "lookup_complete": false,
+  "withheld_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "lookup_complete_note": "one or more engines are withheld and could not be consulted, so this lookup is INCOMPLETE. `found: null` means the answer cannot be established — never that no position exists; `found: true` under an incomplete lookup is a FLOOR, not a total.",
+  "notes": [
+    "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
+    "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
+    "Debt Manager collateral comes from a sweep with a worst case of 5580 seconds; its prices are 60-second samples. Read `sweep_block` for the collateral as-of, never the price age.",
+    "The two engines are never blended: Aave publishes a continuous health factor, the Debt Manager a strict liquidatable boolean."
+  ]
+} satisfies AddressResponse;
+
+export const addressPartial = {
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xccCc000000000000000000000000000000000003",
+  "positions": [
+    {
+      "engine": "debt_manager",
+      "account": "0xccCc000000000000000000000000000000000003",
+      "status": "computed",
+      "value_decimals": 6,
+      "refusal": null,
+      "flags": [],
+      "health_factor": {
+        "wad": null,
+        "num": "3200000000",
+        "den": "4200000000",
+        "infinite": false,
+        "note": "the Debt Manager has no on-chain health factor: `num/den` is the exact ratio maxBorrowLT/borrowings, a disclosure. The liquidation test is the strict boolean `liquidatable`."
+      },
+      "liquidatable": true,
+      "total_collateral_base": null,
+      "total_debt_base": null,
+      "weighted_lt_sum": null,
+      "avg_lt_bps": null,
+      "collateral_value_usd": "4000000000",
+      "max_borrow_lt": "3200000000",
+      "borrowings": "4200000000",
+      "legs": [
+        {
+          "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+          "symbol": "weETH",
+          "decimals": 18,
+          "live_debt": null,
+          "live_collateral": null,
+          "debt_base": null,
+          "collateral_base": null,
+          "weighted_lt": null,
+          "used_as_collateral": null,
+          "debt_index_block": null,
+          "collateral_index_block": null,
+          "amount": "1000000000000000000",
+          "value_usd": "4000000000",
+          "max_borrow_contribution": "3200000000",
+          "liq_threshold": "80000000000000000000",
+          "liq_bonus": "1000000000000000000"
+        }
+      ],
+      "price_inputs": [
+        {
+          "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+          "chain_id": 10,
+          "source": "priceproviderv2",
+          "provenance": "engine-exact",
+          "value": "4000000000",
+          "decimals": 6,
+          "block_number": 154796540,
+          "source_as_of": "2026-07-29T09:59:30Z",
+          "budget_seconds": 180,
+          "verdict": "fresh",
+          "age_seconds": 30,
+          "fresh": true,
+          "note": "within this input's own budget at compute time."
+        }
+      ],
+      "as_of": {
+        "balances_block": 154796552,
+        "params_block": 154796552,
+        "sweep_block": 154796500,
+        "oldest_price_input": "2026-07-29T09:59:30Z",
+        "stale_price_inputs": false,
+        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      },
+      "liquidation_price": {
+        "in_factor": true,
+        "never_liquidatable": false,
+        "scale_factor_num": "4200000000",
+        "scale_factor_den": "3200000000",
+        "already_breached": true,
+        "prices": [
+          {
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "current_price": "4000000000",
+            "price_decimals": 6,
+            "price_floor": "5250000000",
+            "lowest_healthy_price": "5250000000"
+          }
+        ],
+        "factor_assets": [
+          "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+        ],
+        "held_assets": [
+          "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+        ],
+        "boundary_is_healthy": true,
+        "per_token_floor_omitted": false,
+        "diagnostic": false,
+        "axis": "eth_usd",
+        "note": "at exactly this price the position is HEALTHY on both engines — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
+      }
+    }
+  ],
+  "found": true,
+  "lookup_complete": false,
+  "withheld_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "lookup_complete_note": "one or more engines are withheld and could not be consulted, so this lookup is INCOMPLETE. `found: null` means the answer cannot be established — never that no position exists; `found: true` under an incomplete lookup is a FLOOR, not a total.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
@@ -1723,6 +2028,9 @@ export const stressAave = {
   "address": "0xAAaA000000000000000000000000000000000001",
   "scenario_config_version": "v1",
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "scenarios": [
     {
       "id": "eth_minus_30",
@@ -1981,6 +2289,9 @@ export const stressDM = {
   "address": "0xccCc000000000000000000000000000000000003",
   "scenario_config_version": "v1",
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "scenarios": [
     {
       "id": "dm_rate_horizon_plus_200bps",
@@ -2123,6 +2434,96 @@ export const stressDM = {
       ]
     }
   ],
+  "notes": [
+    "Shocks are EXACT rationals applied to primitive axes and propagated through each engine's actual pricing transforms.",
+    "Assets the propagation matrix does not cover are named in `held_flat` rather than silently held at their pre-shock price."
+  ]
+} satisfies StressResponse;
+
+export const stressUnknowable = {
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xAAaA000000000000000000000000000000000001",
+  "scenario_config_version": "v1",
+  "found": null,
+  "lookup_complete": false,
+  "withheld_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "lookup_complete_note": "one or more engines are withheld and could not be consulted, so this lookup is INCOMPLETE. `found: null` means the answer cannot be established — never that no position exists; `found: true` under an incomplete lookup is a FLOOR, not a total.",
+  "scenarios": [],
   "notes": [
     "Shocks are EXACT rationals applied to primitive axes and propagated through each engine's actual pricing transforms.",
     "Assets the propagation matrix does not cover are named in `held_flat` rather than silently held at their pre-shock price."

@@ -29,9 +29,13 @@ export type {
   StreamState,
 } from "./sse.js";
 
+export { isDefinitiveNegative, lookup } from "./lookup.js";
+export type { AddressLookup, Lookup, LookupBearing, LookupOutcome, StressLookup } from "./lookup.js";
+
 export {
   AbsentQuantityError,
   BadRequestError,
+  ContractInvariantError,
   DecimalFormatError,
   HeartbeatTimeoutError,
   InternalError,

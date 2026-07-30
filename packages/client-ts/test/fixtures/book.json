@@ -447,6 +447,7 @@
     "refused_in_batch": 2,
     "excluded_by_this_layer": 0,
     "excluded": [],
+    "withheld_engines": [],
     "stress_coverage_is_full": true,
     "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
   },

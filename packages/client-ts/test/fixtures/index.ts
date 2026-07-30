@@ -32,15 +32,34 @@
 //   consistency and contract invariants (monotonicity, engine comparators), and
 //   they are NOT asserted as server-pinned values.
 //
-// SHAPE-ONLY — `book-engine-refused.json` and the two extra stream payloads
-//   (`snapshot-recovered`, `unavailable-stale`) cover contract surfaces added
-//   AFTER commit 328bd0f by an in-flight review train: whole-engine refusals
-//   (`refused_engines` / `EngineRefusal`), the richer heartbeat provenance
-//   grades, and the stream's staleness fields. `cmd/api` has no committed Go
-//   expectations for them yet, so NO number in those fixtures is asserted as a
-//   server value. What is asserted is the RULE the surface exists for: a
-//   withheld engine's totals are null rather than zero, it is named at every
-//   level of the document, and nothing in this client turns that null into a 0.
+// SHAPE-ONLY — the fixtures covering contract surfaces added AFTER commit
+//   328bd0f by the Task-7 review train, for which `cmd/api` has no committed Go
+//   expectations yet. NO number in them is asserted as a server value; what is
+//   asserted is the RULE each surface exists for.
+//
+//     `book-engine-refused.json` — whole-engine refusals (`refused_engines`,
+//       `EngineRefusal`, per-engine `refused`/`refusal`, `excluded_engines`,
+//       nullable totals). Rule: a withheld engine's totals are NULL rather than
+//       zero, it is named at every level of the document, and nothing in this
+//       client turns that null into a 0. Round-2 additionally made
+//       `coverage.stress_coverage_is_full` the book-wide claim its name promises,
+//       with `coverage.withheld_engines[]` beside it — so this fixture reports
+//       coverage NOT full even though nothing failed to rebuild.
+//
+//     `stream/snapshot-recovered.json`, `stream/unavailable-stale.json` — the
+//       stream's `recovered` / `stale_since_seconds` / `last_good_batch_id`.
+//
+//     `address-unknowable.json`, `address-partial.json`,
+//       `stress-unknowable.json` — `lookup_complete`, `withheld_engines[]` and
+//       `lookup_complete_note` are shape-only.
+//
+//   ONE EXCEPTION, and it is deliberate: the SEMANTICS of three-valued `found`
+//   are asserted as CONTRACT LAW in `test/lookup.test.ts`, not as fixture shape.
+//   `null` means the answer cannot be established and must never render as "no
+//   position"; `false` is a definitive negative and requires a complete lookup;
+//   `true` under an incomplete lookup is a floor, not a total. Those are rules
+//   the contract states in prose and a client can get catastrophically wrong
+//   without any number being involved, so they are tested rather than trusted.
 //
 // ILLUSTRATIVE — deployment policy or prose the client has no business pinning:
 //   `service.version`, `service.registry_fingerprint`, `decoder_revision`,
@@ -62,10 +81,11 @@
 // drifted — which is the only thing that makes a checked-in generated file
 // trustworthy.
 //
-// That file moved after 328bd0f while this package was being written (the
-// whole-engine-refusal surface above). If it moves again, the drift test is what
-// says so, and the fix is `npm run gen` plus whatever new required fields the
-// fixtures need.
+// That file has moved twice while this package was being written — the
+// whole-engine-refusal surface, then round-2's three-valued `found` and book-wide
+// coverage claim (commit da5ed0a). Both times the drift test is what said so, and
+// both times the fix was `npm run gen` plus the new required fixture fields.
+// That loop working twice is the gate earning its place.
 //
 // ---------------------------------------------------------------------------
 // Why the fixture is not a recorded HTTP capture
@@ -273,6 +293,16 @@ export const PINNED = {
       priceCeilingSeconds: 360,
     },
     minDisclosures: 8,
+  },
+
+  /**
+   * Three-valued `found` (contract round-2, commit da5ed0a). The VOCABULARY is
+   * contract law; see the SHAPE-ONLY exception in the header.
+   */
+  lookup: {
+    definitiveNegative: false,
+    unknowable: null,
+    outcomes: ["found", "not-found", "unknowable"],
   },
 
   /** `/v1/address/{addr}/stress`, from the two stress tests. */

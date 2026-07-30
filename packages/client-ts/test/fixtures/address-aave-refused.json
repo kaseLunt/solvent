@@ -138,6 +138,9 @@
     }
   ],
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",

@@ -90,6 +90,13 @@ const badNull = {
 // @ts-expect-error — health_factor is `HealthFactor | null`.
 const forcedHF: components["schemas"]["HealthFactor"] = position.health_factor;
 
+// `found` is THREE-VALUED. Assigning it to a boolean is how "cannot answer"
+// becomes "no position", so the type must refuse it. This is the compile-time
+// half of the round-2 breaking change; `test/lookup.test.ts` carries the
+// semantics.
+// @ts-expect-error — found is `boolean | null`.
+const foundAsBoolean: boolean = fixtures.addressUnknowable.found;
+
 // ---------------------------------------------------------------------------
 // Runtime echoes, so the suite reports what was checked.
 // ---------------------------------------------------------------------------
@@ -106,9 +113,17 @@ describe("type-level conformance", () => {
     expect(viaAlias).toBe(viaGenerated);
   });
 
-  it("six contract violations are compile errors (see the @ts-expect-error markers)", () => {
+  it("seven contract violations are compile errors (see the @ts-expect-error markers)", () => {
     // tsc has already proven each of these is rejected. The runtime values are
     // referenced so `noUnusedLocals` keeps the checks in the file.
-    expect([moneyAsNumber, unknownField, missingRequired, badEnum, badNull, forcedHF]).toHaveLength(6);
+    expect([
+      moneyAsNumber,
+      unknownField,
+      missingRequired,
+      badEnum,
+      badNull,
+      forcedHF,
+      foundAsBoolean,
+    ]).toHaveLength(7);
   });
 });

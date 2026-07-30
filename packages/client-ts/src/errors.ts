@@ -204,6 +204,26 @@ export class SchemaVersionMismatchError extends SolventError {
   }
 }
 
+/**
+ * A response is schema-valid but contradicts itself.
+ *
+ * Distinct from `MalformedResponseError`, which is about a body that is not the
+ * contract's shape at all. This one fires when the shape is right and the
+ * CLAIMS inside it cannot both be true — the case that matters today being a
+ * `found: false` (a definitive "no position") carried by a lookup that admits it
+ * could not consult every engine.
+ */
+export class ContractInvariantError extends SolventError {
+  override readonly name = "ContractInvariantError";
+  /** Short name of the violated invariant, for branching and metrics. */
+  readonly invariant: string;
+
+  constructor(invariant: string, detail: string) {
+    super(`${invariant}: ${detail}`);
+    this.invariant = invariant;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Exact-number failures.
 // ---------------------------------------------------------------------------

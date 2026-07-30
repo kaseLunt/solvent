@@ -69,6 +69,9 @@
   "address": "0xccCc000000000000000000000000000000000003",
   "scenario_config_version": "v1",
   "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
   "scenarios": [
     {
       "id": "dm_rate_horizon_plus_200bps",

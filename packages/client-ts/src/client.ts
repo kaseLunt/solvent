@@ -150,15 +150,24 @@ export class SolventClient {
    * `GET /v1/address/{addr}` — one address's positions in the newest servable
    * batch.
    *
-   * An address with no position answers 200 with `found: false`. That is an
-   * ANSWER and arrives with the batch that answered it; it is not an error and
-   * this method does not turn it into one.
+   * An address with no position answers 200, not 404: "no position in this
+   * batch" is an ANSWER and arrives with the batch that answered it.
+   *
+   * `found` is THREE-VALUED — `true`, `false`, or `null` when a withheld engine
+   * makes the answer unestablishable. Read it through `lookup()` rather than as
+   * a boolean; `!found` treats "cannot answer" as "no position", and the type
+   * system will not stop you.
    */
   async address(addr: string, signal?: AbortSignal): Promise<AddressResponse> {
     return this.get<AddressResponse>(`/v1/address/${this.checkAddress(addr)}`, signal);
   }
 
-  /** `GET /v1/address/{addr}/stress` — the committed scenario set against one address. */
+  /**
+   * `GET /v1/address/{addr}/stress` — the committed scenario set against one
+   * address.
+   *
+   * `found` is three-valued here too, with the same contract. See `lookup()`.
+   */
   async addressStress(addr: string, signal?: AbortSignal): Promise<StressResponse> {
     return this.get<StressResponse>(`/v1/address/${this.checkAddress(addr)}/stress`, signal);
   }

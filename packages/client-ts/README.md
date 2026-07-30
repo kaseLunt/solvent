@@ -125,9 +125,53 @@ for (const p of positions) {
 | `client.stream(opts)` | `GET /v1/stream` — SSE |
 | `client.meta()` | `GET /v1/meta` — watermark vector, reorg posture, price state, constants |
 
-An address with no position answers `200` with `found: false`. That is an
-**answer**, not an error, and it arrives with the batch that answered it — this
-client does not turn it into a rejection.
+An address with no position answers `200`, not `404`: "no position in this batch"
+is an **answer**, and it arrives with the batch that answered it.
+
+### `found` is three-valued, and `!found` is a bug
+
+On `/v1/address/{addr}` and its `/stress` sibling, `found` is `true`, `false`, **or
+`null`**. `true` is a positive existence claim. `false` is a *definitive* negative
+— no position exists, and every engine was available to be asked. `null` means
+**the answer cannot be established**, because a relevant engine's whole book is
+withheld; `withheld_engines` names which, and `lookup_complete` is the one-bit
+form. Rendering `null` as "no position" publishes a false negative on a
+liquidation surface, which is the whole reason the third state exists.
+
+The nullable type is a deliberate breaking change, and on its own it protects
+nobody: `if (!found)` takes the same branch for `false` and `null`, and
+TypeScript raises nothing, because `!null` is legal. So read it through
+`lookup()`, which returns a discriminated union with three cases and no boolean
+anywhere:
+
+```ts
+import { lookup } from "@solvent/client";
+
+const result = lookup(await client.address(addr));
+switch (result.outcome) {
+  case "found":
+    // `complete` false means the positions are a FLOOR, not a total —
+    // another engine may hold more and could not be consulted.
+    render(result.response.positions, { atLeast: !result.complete });
+    break;
+  case "not-found":
+    renderNoPosition();                        // the only state where this is true
+    break;
+  case "unknowable":
+    renderCannotAnswer(result.withheldEngines); // never "no position"
+    break;
+}
+```
+
+Add a `default: const _: never = result` and the vocabulary growing again becomes
+a compile error rather than a silent fall-through. `isDefinitiveNegative(response)`
+is the one-line form for the only case in which "no position" is a true thing to
+render — deliberately not the negation of anything.
+
+`lookup()` also enforces the contract's own invariants and throws
+`ContractInvariantError` on a body that contradicts itself: a `found: false`
+carrying an incomplete lookup is exactly the definitive negative the service is
+not entitled to publish, and a client that accepted it would undo the fix.
 
 ## The event stream
 
@@ -207,6 +251,7 @@ act on:
 | `InternalError` (500) | |
 | `UnavailableError` (503) | No complete risk batch. A statement about the **service**, never a claim that the book is empty. |
 | `MalformedResponseError` | A body that is not the contract's — a proxy's HTML error page, or a 200 that is not JSON. Retains the (truncated) raw body. |
+| `ContractInvariantError` | A schema-valid body whose claims contradict each other — a `found: false` over an incomplete lookup. |
 | `SchemaVersionMismatchError` | The server's published identity is not the one this client was built against. |
 | `PrecisionLossError` / `DecimalFormatError` / `AbsentQuantityError` | From the decimal helpers. |
 | `StreamProtocolError` / `HeartbeatTimeoutError` / `StreamTransportError` | From the stream. |
@@ -264,7 +309,8 @@ client-ts:
 
 | Suite | Claim |
 | --- | --- |
-| `conformance.test.ts` + the `satisfies` clauses in `test/fixtures/data.ts` | The generated types accept every recorded response — checked by `tsc`. Six `@ts-expect-error` cases (money as a number, an unknown field, a missing required field, a bad enum, a forbidden null, a nullable read as present) make the build fail if they *stop* being errors, so "the types compile" is not a statement about a type that accepts anything. |
+| `conformance.test.ts` + the `satisfies` clauses in `test/fixtures/data.ts` | The generated types accept every recorded response — checked by `tsc`. Seven `@ts-expect-error` cases (money as a number, an unknown field, a missing required field, a bad enum, a forbidden null, a nullable read as present, `found` read as a boolean) make the build fail if they *stop* being errors, so "the types compile" is not a statement about a type that accepts anything. |
+| `lookup.test.ts` | Three-valued `found` as **contract law**: `null` round-trips as null through the real client on both endpoints, the `!found` trap is demonstrated, all three outcomes discriminate, `found: true` under an incomplete lookup is a floor, and four self-contradicting bodies are refused. |
 | `fixtures.test.ts` | Every fixture validates against `api/openapi.yaml` itself — `additionalProperties: false`, the `Decimal` pattern, required fields, enums, nullability. Seven negative controls prove the validator can reject. Plus: the committed `.json` bytes and the type-checked literals are the same response. |
 | `exact-values.test.ts` | The exact numbers, through the real client. Every asserted value is mirrored from `cmd/api`'s seeded Go suite, so client and server pin **the same** arithmetic. |
 | `decimal.test.ts` | Exact round trips, precision-loss refusal, and the negative / zero / max-uint256-scale cases. |

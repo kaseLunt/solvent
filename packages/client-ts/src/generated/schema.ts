@@ -402,9 +402,10 @@ export interface components {
         };
         /**
          * @description The audit of what reached the derived arithmetic. It exists so an
-         *     exclusion can never be silent: a position the service could not rebuild
-         *     into the pure library's input form is NAMED here and is absent from the
-         *     stress and waterfall numbers.
+         *     exclusion can never be silent, in EITHER of the two ways one can happen: a
+         *     position the service could not rebuild into the pure library's input form
+         *     (`excluded`), or an ENGINE whose whole book is withheld and is therefore
+         *     absent from every scenario (`withheld_engines`).
          */
         BookCoverage: {
             batch_positions: number;
@@ -412,6 +413,13 @@ export interface components {
             refused_in_batch: number;
             excluded_by_this_layer: number;
             excluded: components["schemas"]["Excluded"][];
+            withheld_engines: components["schemas"]["EngineRefusal"][];
+            /**
+             * @description A BOOK-WIDE claim: false if any position could not be rebuilt OR any
+             *     engine is withheld. It is not a per-position predicate — a
+             *     reconstruction-only reading would stay green while an entire engine was
+             *     missing from the stress and waterfall arithmetic.
+             */
             stress_coverage_is_full: boolean;
             note: string;
         };
@@ -589,7 +597,26 @@ export interface components {
             batch: components["schemas"]["Batch"];
             address: components["schemas"]["Address"];
             positions: components["schemas"]["Position"][];
-            found: boolean;
+            /**
+             * @description THREE-VALUED.
+             *
+             *     - `true` — at least one position was found. A positive existence claim,
+             *       safe to assert whatever else is withheld (but see `lookup_complete`:
+             *       it may be a floor rather than a total).
+             *     - `false` — a DEFINITIVE negative: no position exists in this batch, and
+             *       every engine was available to be asked.
+             *     - `null` — the answer CANNOT BE ESTABLISHED, because an engine's whole
+             *       book is withheld. A withheld engine has zero position rows, so a
+             *       `false` derived from the row count would publish a definitive negative
+             *       exactly where the service cannot determine one. **Never render null as
+             *       "no position".**
+             */
+            found: boolean | null;
+            /** @description Whether every engine could be consulted for this lookup. */
+            lookup_complete: boolean;
+            /** @description Engines whose whole book is withheld, and which this lookup therefore could not consult. */
+            withheld_engines: components["schemas"]["EngineRefusal"][];
+            lookup_complete_note: string;
             notes: string[];
         };
         Shock: {
@@ -706,7 +733,15 @@ export interface components {
             batch: components["schemas"]["Batch"];
             address: components["schemas"]["Address"];
             scenario_config_version: string;
-            found: boolean;
+            /**
+             * @description THREE-VALUED, with the same contract as `/v1/address`. A withheld engine
+             *     has no positions to stress, so `null` means the answer could not be
+             *     established — never that no position exists.
+             */
+            found: boolean | null;
+            lookup_complete: boolean;
+            withheld_engines: components["schemas"]["EngineRefusal"][];
+            lookup_complete_note: string;
             scenarios: components["schemas"]["Scenario"][];
             notes: string[];
         };

@@ -6,10 +6,12 @@
     "age_seconds": 0,
     "producer": "riskd",
     "status": "complete",
-    "position_count": 4,
-    "refused_count": 2,
-    "refused_engines": [],
-    "flagged_count": 1,
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
     "watermarks": [
       {
         "engine": "aave_v3_etherfi",
@@ -165,9 +167,16 @@
     }
   ],
   "found": true,
-  "lookup_complete": true,
-  "withheld_engines": [],
-  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
+  "lookup_complete": false,
+  "withheld_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "lookup_complete_note": "one or more engines are withheld and could not be consulted, so this lookup is INCOMPLETE. `found: null` means the answer cannot be established — never that no position exists; `found: true` under an incomplete lookup is a FLOOR, not a total.",
   "notes": [
     "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
     "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",

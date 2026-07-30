@@ -413,7 +413,15 @@
     "refused_in_batch": 1,
     "excluded_by_this_layer": 0,
     "excluded": [],
-    "stress_coverage_is_full": true,
+    "withheld_engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      }
+    ],
+    "stress_coverage_is_full": false,
     "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
   },
   "notes": [
