@@ -1128,6 +1128,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Integrator re-verified: build/vet/gofmt clean, both packages green. NEXT:
   Task 6 round 2 after the flag-custody wave lands (bundle review timing);
   Task 8 wave running; Codex on Task 7 round 1.
+- **FLAG-CUSTODY ROUND-4 FIX LANDED — 60d44c5** (2026-07-30 00:55, 5 files;
+  incl. the thrice-deferred assemble.go M/R wording, applied at last). Rev
+  3→4 (the adoption hole named in the log); the legacy-adoption regression
+  built HONESTLY (production-path batch rewritten to legacy shape; the
+  legacy-key formula asserted to reproduce production's stored key; the
+  hazard asserted LIVE before the fix acts; current-revision adoption
+  counterweight). GenesisBlock in the identity w/ 4 policy mutations (and a
+  fixture-honesty fix: idPolicy() left it 0 — the unset mutation would have
+  been a vacuous no-op). Legacy fail-closed via BACKFILL scoped to
+  aave_v3_etherfi (unservable would withhold the DM book + conflate honest
+  legacy with corruption); SQL-literal-to-Go-constant pin test (a rename
+  cannot silently revert legacy batches to healthy); era-appropriate raw SQL
+  at the v13 baseline. Full suite + full -race suite exit 0 (wave); store
+  green fresh 131.6s (integrator). **PRE-EXISTING FRAGILITY FLAGGED (not
+  fixed, out of scope): internal/store scratch runs leak 3 chain-10
+  reorg_epochs rows → next same-DB run fails ~34 tests on unacked epochs;
+  workaround TRUNCATE reorg_epochs; MICRO-TASK OWED.** NEXT: Codex
+  flag-custody round 4 (closing) queues behind the Task 7 round in flight;
+  then Task 6 round 2.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
