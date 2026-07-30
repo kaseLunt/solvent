@@ -952,6 +952,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   SHIP verdicts; nothing touches live custody before that. Task 7 (cmd/api)
   wave DISPATCHED in parallel (disjoint tree; depends only on Task-5-shipped
   surfaces).
+- **FIRST -RACE RUN IN REPO HISTORY (local WinLibs gcc 16.1.0): 15/16 packages
+  RACE-CLEAN — one REAL race found**, exactly where predicted (the riskd
+  scheduler loop): cmd/riskd/main.go:139 setSkew lazily initializes the
+  *atomic.Int64 POINTER while skew() reads it from the running loop goroutine
+  via pollTrigger — the atomic value was atomic, the pointer to it was not;
+  fix wave 4's safety comment claimed correctness one indirection too high.
+  Both loop tests fail under -race; store (advisory lock) + anvil legs clean.
+  Integrator's value-field fix reverted after copylocks revealed fixtures COPY
+  daemonConfig — routed to the owning wave with both fix shapes.
+- CODEX ROUND 2 ON FLAG-CUSTODY (session 019fb191-921f-7f82-893c-a4dabedcd5d3,
+  ~16min, cfr2 @ 0df42da): **needs-attention — 1H/1M, both in the replay window
+  the fix protects; migration defaults + merge rules judged SOUND.** (H) the
+  whole-engine refusal is enforced only inside the account loop — RewindDerived
+  (StartBlock−1) EMPTIES the account set, the loop runs zero times, aggregate()
+  emits positions=0/refused=0, WriteRiskBatch accepts → a valid-looking EMPTY
+  Aave book supersedes the refusal DURING the repair window (vacuous green
+  where it matters most). (M) watermarkVector.Changed ignores CoveredFromBlock/
+  DecoderRevision — a coverage-only transition (endpoint heights unchanged
+  across maintenance) never wakes pollTrigger, so the identity's cov/rev
+  distinction never gets to run; both directions. FIX WAVE dispatched (one
+  wave, all three: engine-scoped custody refusal that survives an empty account
+  set — empty-and-unproven must be UNREPRESENTABLE as complete-healthy, with
+  the run-riskd-mid-replay regression; coverage joins Changed with the
+  endpoint-ABA coverage-flip test both directions; the skew race fixed and
+  -race-verified with the new local toolchain). go.mod/go.sum churn identified
+  as the Task 7 wave's dependencies (kin-openapi) — its commit, not touched.
+  PATTERN: rounds keep converging on 'the refusal must be as durable as the
+  thing it refuses' — first per-position, then per-batch, now per-ENGINE
+  across an empty set.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
