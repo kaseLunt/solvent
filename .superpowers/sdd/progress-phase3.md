@@ -715,6 +715,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   round 6 = CLOSING review on 564020d..4c10793 (depth: ConsultedPrice completeness
   across all gate paths; G2-exit phase joins; one last unscoped-input sweep; full
   round-2-M1 harm walk end-to-end across rounds 1-5 combined). SHIP closes Task 5.
+- **TASK 5 CLOSED — SHIP** (2026-07-29 20:02, closing session 019fb0f0-3222-7b53-
+  8ad1-411a4936121c, verdict approve, NO material findings). Verbatim: "Assemble
+  records every successfully consulted witness before any refusal or computed
+  return, including phase-less G2 and absent witnesses. Both price identity
+  projections now consume the same ConsultedPrice slice; identity.go no longer
+  reads inputs.Prices. G2 exit changes the consumed cursor/epoch vector and
+  introduces relevant phases, preventing stale pre-G2 adoption... In the original
+  round-2 M1 sequence... restart derives the same key, and adoption verifies
+  vector, digest, and completeness before preserving the flagged batch. No material
+  honest-use failure remains." Full program: initial wave (four owed obligations) →
+  round 1 (3H/2M: gate law, sweep vector, vanishing conflicts, retry rebaseline,
+  hollow completeness) → fw1 → round 2 (2M: attempt-scoped key, nullable sweep
+  disclosure) → fw2 (deterministic materialization identity) → round 3 (4M:
+  unconsumed cursors, ReadAt, namespace, adoption) → fw3 → round 4 (1H/1M/1L:
+  no steady-state wake-up, over-scoped phases, test race → root-caused our
+  transient) → fw4 (freshness as scheduler input) → round 5 (1M: digest scoping) →
+  fw5 (ConsultedPrice single source of truth) → **round 6 SHIP**. Six rounds, five
+  fix waves, 170 top-level tests, 0 skips. Codex's non-blocking note: -race on a
+  CGO-capable runner before next wave's acceptance (the standing owed item; extra
+  valuable now a test drives a concurrent loop). Commits: 2cd01d4 / 6cb5c71 /
+  1d46925 / 906af58 / b399ea2 / 4c10793. NEXT: Task 6 wave + collateral-flag
+  micro-wave dispatch IN PARALLEL (disjoint trees: cmd/reconcile vs
+  decode/derive/store/riskfeed).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
