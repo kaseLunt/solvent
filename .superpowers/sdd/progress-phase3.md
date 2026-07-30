@@ -1170,6 +1170,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   PATTERN NOTE: parallel waves that both touch one contract (writer adds a
   field; reader built before it) need a SEAM CHECK at integration — added
   to the standing integration checklist.
+- CODEX ROUND 4 ON FLAG-CUSTODY (session 019fb20a-3726-70a2-bc00-270045b8eb33,
+  ~8min, cfr4 @ 60d44c5): needs-attention — 1H/3M, decomposing into: (H) the
+  API refusal-propagation gap = the Task 7 wave's in-flight [critical], same
+  finding from the other direction — NOT double-routed. (M×2 "absent/vacuous
+  regressions") = **MY SECOND STAGING ERROR: both test files EXISTED but were
+  untracked, and my status filter (grep -v '^??') hid them from the git-add
+  list — committed now as fac5168, verified green** (legacy-adoption
+  regression with the live-hazard assertion + current-revision counterweight;
+  the cross-package vocabulary weld). Standing rule added: diff the staged
+  list against the report's file list BOTH WAYS before committing. (M
+  genuinely new) per-stream genesis typos can mint false coverage —
+  engineGenesisBlock min-collapses Aave streams while walkers honor
+  per-stream starts; no startup invariant ties production streams to the
+  audited genesis. (M still-open half) the DM migration control inserts
+  AFTER Migrate — a WHERE-clause deletion would pass. Both routed to the
+  flag-custody wave (genesis startup invariant + config-coupled fixture;
+  control-before-Migrate ordering). Round 5 will be the true closing.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
