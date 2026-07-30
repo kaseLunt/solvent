@@ -2033,6 +2033,31 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   adjudicated. CHAIN-TRUTH ACK requested in parallel (same standing
   instance) for the two refusal-widening sharpenings — Codex judges
   honest-use, chain-truth judges chain-reality.
+- **CHAIN-TRUTH ACK/ADJUST LANDED** (addendum archived NORMATIVE in the
+  ruling file, e2ea9db): CUSTODY HOLDS with two adjustments. (Adj 1) union
+  widening ACKED in motive, ADJUSTED to the complete form — the three-way
+  union still misses a supported token inbound-then-fully-outbound WITHIN
+  block N (zero at both edges, invisible to parent∪seized∪exec, raises
+  boundary maxBorrowLT exactly like H2's top-up — the same class one gap
+  deeper); the swept list becomes the DM's SUPPORTED-COLLATERAL SET at both
+  pins (getCollateralTokens@parentHash ∪ @pinHash — the provably-sufficient
+  universe since only configured tokens move maxBorrowAtFrame; mid-block
+  Added/Removed is DM-custodied and covered by the both-pins union). (Adj 2)
+  netting modeled-iff-final-pass ACKED conditional on the invariant being
+  EXPLICIT: the own-pass cancellation must NEVER enter the boundary-
+  eligibility basket (eligibility judged NETTED at :526/:544 BEFORE :568's
+  cancel — own-pass is post-check: attributed for closure, available to
+  seizure/L5, but the crossing evaluates against the netted basket); if the
+  implementation adds freed amounts to the eligibility basket, INVERT (error
+  direction over-refusal, should-fix not custody-break); fixture-pin both
+  arms. Record items: WithdrawalAmountUpdated refuse-on-sight right;
+  opposite-direction mutation pair = the L7 floor; zero-element skipping
+  chain-faithful (observed, not assumed). ADJUSTMENT WAVE dispatched
+  (surgical: the two supported-set reads through the shared decode loop w/
+  wave-8 law coverage pinned, minimality-check decision, in-and-out refusal
+  fixture as the m1 killer, netted-boundary assertion on the own-pass arm,
+  31/31 re-capture w/ STOP-on-flip). Round 9 runs in parallel on PINNED
+  639d7eb — its findings and the adjustments merge at the next landing.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
