@@ -1871,6 +1871,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (identical insertion both sides — typecheck green, sync green, lint kills),
   expanded lint run against the actual README (violation-or-explicit-none).
   Then round 6 final.
+- **T8 FIX WAVE 5 LANDED — 714c1f6** (ONE file, test/readme-sync.test.ts
+  +170/−13; both-ways exact — cmd/reconcile edits = live wave-8 property;
+  verify independently re-run exit 0, 292/292; the wave survived a mid-flight
+  SESSION-LIMIT kill and SendMessage-resume with zero work lost). The
+  vocabulary is DERIVED, not remembered: SEALED_FIELD_NAMES + HEURISTIC_
+  CHAIN_NAMES → the regex, no second list; the cross-check is a TYPE-LEVEL
+  law both directions (mapped sweep of every named schema for boolean|null +
+  every refined shape for the exact union types, held via non-distributing
+  conditional-typed constants — a forgotten future field is a COMPILE ERROR
+  with a self-describing message; a stale name fails the reverse). Red
+  reproduced the finding exactly (four fields genuinely uncovered;
+  liquidation_verdict was already substring-caught). Mutant 0 const-name-
+  removed = typecheck kill; Mutant A (reviewer-required, identical both
+  sides) = LINT-ONLY kill; Mutant B original class still dies. Actual README:
+  no real violation (postfix total_collateral! correctly unflagged).
+  Disclosed regex limits (index-broken chains, aliasing, anonymous nesting —
+  none exist today) in the honest-scope comment; AST lint = escalation path.
+  ROUND 6 (expected FINAL for the T8 train) dispatched: t8r6 @ 714c1f6, base
+  b3f4e2e, single-file diff — verify the mapped-type sweep's schema coverage,
+  both-directions law, regex composition, mutant plausibility, no smuggled
+  drift.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
