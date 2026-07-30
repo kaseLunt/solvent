@@ -1743,6 +1743,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   not deleted (replay internals still asserted; verdict reflects L1; each
   marked "flips back when L2 lands"); mutants m1 parent-gate-restored / m2
   conjunct-deleted / m3 clamp-restored.
+- **T8 FIX WAVE 3 LANDED — e073cbe** (8 files +808/−59, refine.ts +
+  refine.test.ts NEW; both-ways exact incl. the two untracked files; verify
+  independently re-run exit 0, 286/286 — the decimal.ts diagnostic was stale
+  tsserver, again). The CLASS sealed, not the instance: sweep-first inventory,
+  11 entries dispositioned — SEALED: the three reviewer-named generated fields
+  + sweep-found Leg.used_as_collateral (null on DM legs = engine publishes no
+  statement) + both helpers REMOVED for verdict-union successors
+  (positionVerdict/aaveVerdictFromWad); NOT-A-VERDICT justified:
+  StreamPayload.recovered (marker — absence ≡ false per contract), config
+  options; RAW INPUT: the wire found lookup() consumes; NOT IN CLASS: total
+  booleans. refine.ts = ONE module holding both vocabularies
+  (LiquidationVerdict/CollateralUse — 'counted' is the contract's own phrase),
+  TOTAL mapping (null → 'unknowable' never definitive; invariant error only on
+  contract-impossible values), destructure-rest mappers (raw keys absent at
+  runtime), lookup() refines AFTER the completeness invariants → both primary
+  methods serve refined bodies; raw only on the Raw accessors. Fields RENAMED
+  (liquidation_verdict/collateral_use) because the pin battery needs runtime
+  hasOwn absence. Red 17 typecheck + 24 tests; mutants m1 raw-key-kept (dual
+  kill: typecheck pins + runtime), m2 mapper-smuggles-null→definitive (killed
+  by the withheld-refines-to-unknowable law), m3 helper-regrows (killed by
+  exactly its pin). ROUND 4 (closing) dispatched: t8r4 @ e073cbe, base
+  bee4946 — reviewer re-runs the sweep independently, verifies mapping
+  totality + nesting coverage, checks the SSE-payload surface for raw-field
+  leakage (integrator-added: stream events were NOT touched by the wave),
+  adjudicates the three disclosed items (leg sealing scope, uniform field
+  name, recovered disposition).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
