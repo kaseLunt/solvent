@@ -664,6 +664,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   in B1/B2 (all events tie at 15 — disclosed so nobody over-reads it); global-max
   17 x3 and fan-out-1 x3 both in frame. Task 6 pre-wave deliverables now ALL
   present: amended plan (cf5faed) + two normative consults + frozen frame.
+- FIX WAVE 4 LANDED — b399ea2 (2026-07-29 19:20, 10 files +730/−112). (H) freshness
+  is a scheduler input: Assemble reports JUDGED prices + as-ofs; NextFreshnessDeadline
+  computes earliest budget/ceiling crossing; runLoop (extracted so tests drive the
+  REAL loop) forces a pass on freshnessDue measured on the DB clock; forced pass
+  materializes-not-adopts, asserted; counterweights LoopDoesNotSpinWithinAPhase +
+  LoopStillRecomputesOnVectorMovement. (M) identity ← assembled.Judged only;
+  PhaseRelevant=false on G2/absent (absence lives in the substrate digest);
+  unused-asset-crossing adopts w/ G5 retained, judged-asset counterweight. (L) 5s
+  sleep GONE — DB-anchored as-ofs, asserted premise, atomic clock-skew seam;
+  -count=5 wave + -count=3 integrator green — **the disclosed-transient hardening
+  item is CLOSED with a root-caused deterministic fix**. Wave self-caught TWO more
+  lying tests: the stop/restart loop test (mandatory startup pass fakes the signal —
+  mutant A survived; rewritten to ONE continuous loop w/ live clock; mutant now
+  times out) and FlaggedCount==1 passing because flag_unwitnessed is never zero
+  (retargeted FlagStalePrice + clean baseline). Wave restored its own CRLF churn.
+  Integrator: build/vet 0, full suite 16/16 both DSNs, timing tests -count=3.
+  NEXT: Codex round 5 on e926b36..b399ea2 — SHIP closes Task 5; round-5 depth asks
+  probe deadline/poll interplay, refusal-state re-arming, G2-exit identity joins.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
