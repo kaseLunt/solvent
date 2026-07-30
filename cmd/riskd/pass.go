@@ -151,16 +151,23 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	// to prevent. See riskfeed's identity.go.
 	stamps := stampsFor(vector)
 	requiredStamps := cfg.requiredStampEngines(vector)
+	// The identity takes the FILTERED vector — vector.consumedCursors(), the same
+	// filter the recompute trigger uses — not the raw DeriveCursorStates output.
+	// An unconsumed cursor in the identity (the live indexer keeps several) lets an
+	// unrelated advance mint a new key for an otherwise-identical materialization,
+	// which is exactly how a restart erases a large-step flag.
 	identity := riskfeed.ComputeMaterializationIdentity(
-		cursors, maxEpochs, sweeps, inputs,
+		vector.consumedCursors(), vector.MaxEpochs, vector.consumedSweeps(), inputs,
 		riskfeed.IdentityPolicy{
-			BudgetSeconds:   cfg.Budget.Seconds,
-			StepBps:         cfg.StepBps,
-			AaveEngine:      cfg.Aave,
-			DMEngine:        cfg.DM,
-			RequiredEngines: requiredStamps,
-			SweptEngines:    cfg.sweptEngines(),
-			Producer:        cfg.Producer,
+			BudgetSeconds:       cfg.Budget.Seconds,
+			StepBps:             cfg.StepBps,
+			AaveEngine:          cfg.Aave,
+			DMEngine:            cfg.DM,
+			RequiredEngines:     requiredStamps,
+			SweptEngines:        cfg.sweptEngines(),
+			Producer:            cfg.Producer,
+			AlgorithmRevision:   riskfeed.AlgorithmRevision,
+			RegistryFingerprint: cfg.Registry.Fingerprint(),
 		})
 	res.MaterializationKey = identity.Key
 

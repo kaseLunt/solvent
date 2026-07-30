@@ -46,13 +46,51 @@ func newWatermarkVector(cursors []store.DeriveCursorState, maxEpochs map[int64]i
 			v.Engines[c.Engine] = c
 		}
 	}
+	// Epochs are kept only for the chains a CONSUMED engine is bound to. An epoch
+	// on a chain this pass reads nothing from cannot change any number it
+	// publishes, and letting it into the vector would make an unrelated chain's
+	// reorg both trigger a recompute and change the materialization identity.
+	consumedChains := map[int64]bool{}
+	for _, c := range v.Engines {
+		consumedChains[c.ChainID] = true
+	}
 	for chain, epoch := range maxEpochs {
-		v.MaxEpochs[chain] = epoch
+		if consumedChains[chain] {
+			v.MaxEpochs[chain] = epoch
+		}
 	}
 	for _, s := range sweeps {
 		v.Sweep[s.Engine] = s
 	}
 	return v
+}
+
+// consumedCursors returns the FILTERED cursor set, ordered by engine.
+//
+// This is the single source of truth for "which cursors this pass depends on", and
+// both the recompute trigger and the materialization identity take it from here.
+// The identity previously serialized every row DeriveCursorStates returned, which
+// included cursors riskd never values from — `prices:chainlink_feed:1` among them.
+// An unrelated feed cursor advancing then gave a restart a NEW key, so its
+// post-move-baselined, unflagged computation wrote a newer batch and erased a
+// large-step warning. Same vector, one filter.
+func (v watermarkVector) consumedCursors() []store.DeriveCursorState {
+	out := make([]store.DeriveCursorState, 0, len(v.Engines))
+	for _, c := range v.Engines {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Engine < out[j].Engine })
+	return out
+}
+
+// consumedSweeps returns the sweep aggregates in the vector, ordered by engine.
+func (v watermarkVector) consumedSweeps() []store.RiskSweepWatermark {
+	out := make([]store.RiskSweepWatermark, 0, len(v.Sweep))
+	for _, s := range v.Sweep {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Engine < out[j].Engine })
+	return out
 }
 
 // sweepEqual compares two sweep aggregates by VALUE. *big.Int needs Cmp (a

@@ -144,6 +144,35 @@ type PriceBudget struct {
 // Ceiling is the refusal bound: twice the budget.
 func (b PriceBudget) Ceiling() int64 { return 2 * b.Seconds }
 
+// PriceFreshnessPhase classifies a price row's age into the buckets that CHANGE A
+// VERDICT: no-as-of, over-ceiling, stale, fresh.
+//
+// It is exported and shared because two callers must agree exactly. JudgePriceInput
+// uses it to produce the served verdict; ComputeMaterializationIdentity uses it so
+// the identity moves when the verdict would. If they ever disagreed, a pass whose
+// prices had crossed the staleness threshold would derive the identity of the
+// batch computed BEFORE the crossing, adopt it, and leave a "fresh" disclosure
+// standing over an input that is no longer fresh — suppressing a stale flag or a
+// G1 refusal it had just computed.
+//
+// The PHASE is what enters the identity, never the raw clock: two reads seconds
+// apart inside the same phase are the same materialization, and the moment either
+// threshold is crossed they stop being one.
+func PriceFreshnessPhase(row store.RiskPriceRow, budget PriceBudget, now time.Time) string {
+	if !row.HasSourceAsOf {
+		return VerdictNoAsOf
+	}
+	age := int64(now.Sub(row.SourceAsOf.UTC()) / time.Second)
+	switch {
+	case age > budget.Ceiling():
+		return VerdictOverCeiling
+	case age > budget.Seconds:
+		return VerdictStale
+	default:
+		return VerdictFresh
+	}
+}
+
 // PriceJudgement is one input, judged, with everything the disclosure needs.
 //
 // Input is the risk.PriceInput to hand the math (zero-valued when Usable is
@@ -223,7 +252,14 @@ func JudgePriceInput(
 	j.Snapshot.Decimals = &dec
 	j.Snapshot.BlockNumber = &block
 
-	if !row.HasSourceAsOf {
+	// ONE CLASSIFICATION, shared with the materialization identity. If these two
+	// ever diverged, a pass whose prices had crossed a threshold would derive the
+	// identity of the batch computed before the crossing, adopt it, and leave a
+	// "fresh" disclosure standing over the stale flag or G1 refusal it had just
+	// computed.
+	phase := PriceFreshnessPhase(*row, budget, now)
+
+	if phase == VerdictNoAsOf {
 		j.Gate, j.Snapshot.Verdict = GateMissingInput, VerdictNoAsOf
 		return j, nil
 	}
@@ -233,12 +269,12 @@ func JudgePriceInput(
 	age := int64(now.Sub(asOf) / time.Second)
 	j.Snapshot.AgeSeconds = &age
 
-	if age > budget.Ceiling() {
+	if phase == VerdictOverCeiling {
 		j.Gate, j.Snapshot.Verdict = GateMissingInput, VerdictOverCeiling
 		return j, nil
 	}
 
-	fresh := age <= budget.Seconds
+	fresh := phase == VerdictFresh
 	j.Snapshot.Verdict = VerdictFresh
 	if !fresh {
 		// G4: computed and flagged. The flag propagates to every aggregate

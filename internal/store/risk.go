@@ -1134,11 +1134,16 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	// waiting for a constraint violation — and, more importantly, without doing
 	// the work twice. The verification inside adoptRiskBatch is what keeps this
 	// from being a silent shortcut.
-	if id, adopted, err := s.adoptRiskBatch(ctx, w); err != nil {
+	existingID, adopted, err := s.adoptRiskBatch(ctx, w)
+	if err != nil {
 		return 0, err
-	} else if adopted {
-		return id, nil
 	}
+	if adopted {
+		return existingID, nil
+	}
+	// Non-zero here means "this identity already has an UNSERVABLE batch": replace
+	// it rather than livelock behind it. See adoptRiskBatch for why that is safe.
+	replaceID := existingID
 
 	// The sweep-disclosure requirement defaults to the engines actually carrying
 	// one, so a producer cannot forget to declare what it just stamped.
@@ -1324,6 +1329,14 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		priceCount += len(p.Prices)
 	}
 
+	// Replace an unservable batch for this same identity, inside THIS transaction,
+	// so there is never an instant with neither batch present. Children cascade.
+	if replaceID != 0 {
+		if _, err := tx.Exec(ctx, `DELETE FROM risk_batches WHERE id = $1`, replaceID); err != nil {
+			return 0, fmt.Errorf("replace incomplete risk batch %d: %w", replaceID, err)
+		}
+	}
+
 	// The batch row lands LAST: a visible id already has its children.
 	if _, err := tx.Exec(ctx, `INSERT INTO risk_batches
 		(id, computed_at, status, position_count, leg_count, price_input_count,
@@ -1349,6 +1362,11 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 			// A concurrent or racing producer landed this exact materialization
 			// between our pre-flight lookup and here. Adopt it — with the same
 			// identity verification, so a colliding key still refuses loudly.
+			// This transaction is already aborted, so an incomplete existing batch
+			// cannot be replaced from here. Adoption is the only in-place
+			// recovery; otherwise the error stands and the NEXT pass — which
+			// derives the same deterministic key — heals it through the
+			// pre-flight replace path above.
 			if id, adopted, adoptErr := s.adoptRiskBatch(ctx, w); adoptErr != nil {
 				return 0, adoptErr
 			} else if adopted {
@@ -1416,10 +1434,15 @@ var ErrRiskMaterializationConflict = errors.New("risk batch refused: materializa
 var adoptLookupHook = func() error { return nil }
 
 // adoptRiskBatch resolves an existing batch for w's materialization key, verifying
-// that the identity behind the key matches before adopting it.
+// both the identity behind the key AND that the batch clears the serving bar.
 //
-// adopted=false with a nil error means "no batch exists for this key" — the
-// ordinary path, proceed with the write.
+// THREE OUTCOMES, distinguished by the pair it returns:
+//
+//	(0,  false, nil) — no batch for this key. The ordinary path: write it.
+//	(id, true,  nil) — a complete batch for this identity exists. Adopt it.
+//	(id, false, nil) — a batch exists for this identity but is INCOMPLETE and
+//	                   therefore unservable. Its id must be REPLACED (deleted
+//	                   inside the write transaction, then written afresh).
 func (s *Store) adoptRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, bool, error) {
 	// adoptLookupHook is a seam for the one scenario that cannot be provoked
 	// honestly: the reconciliation lookup failing on the SAME network event that
@@ -1444,6 +1467,40 @@ func (s *Store) adoptRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, bo
 	if vector != w.MaterializationVector || digest != w.SubstrateDigest {
 		return 0, false, fmt.Errorf("%w: key %s is batch %d, whose vector/substrate differ from this pass's",
 			ErrRiskMaterializationConflict, w.MaterializationKey, id)
+	}
+
+	// ADOPTION MUST CLEAR THE SERVING BAR, NOT JUST THE HEADER.
+	//
+	// A matching header proves the batch describes this materialization. It does
+	// NOT prove the batch is servable: an honest partial restore can leave the
+	// header with children missing, and adopting that id would report a successful
+	// materialization for a batch the reader then refuses — so the daemon records
+	// the vector as handled and NO current complete result exists anywhere. The
+	// same predicate the serving path applies is applied here.
+	var complete bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM risk_batches b WHERE b.id = $1 AND `+
+			riskBatchCompleteConjuncts+`)`, id).Scan(&complete); err != nil {
+		return 0, false, fmt.Errorf("verify adopted risk batch %d is complete: %w", id, err)
+	}
+	if !complete {
+		// REPLACE, not refuse — and the choice is deliberate.
+		//
+		// Refusing would be loud, but it would also LIVELOCK: the same
+		// materialization is derived on every subsequent pass, so the same
+		// incomplete header would be found and refused forever, leaving the system
+		// with no current batch until a human deleted a row.
+		//
+		// Replacing is safe here for three reasons that hold together, and only
+		// together: (a) the batch is UNSERVABLE by exactly the predicate above, so
+		// nothing was ever disclosed from it and no consumer can have depended on
+		// it; (b) the identity is VERIFIED equal, so the replacement describes the
+		// same materialization rather than a different one wearing its name; and
+		// (c) the delete happens inside the write transaction below, so there is no
+		// instant with neither batch present. The advisory lock plus
+		// single-transaction writes mean a visible incomplete batch cannot be a
+		// concurrent writer mid-flight — only restore or manual damage.
+		return id, false, nil
 	}
 	return id, true, nil
 }
@@ -1473,35 +1530,21 @@ const (
 	RiskPositionRefused  = "refused"
 )
 
-// RiskBatch is a served batch header with its stamp vector.
-type RiskBatch struct {
-	ID            int64
-	ComputedAt    time.Time
-	Status        string
-	PositionCount int
-	RefusedCount  int
-	FlaggedCount  int
-	Producer      string
-	Watermarks    []RiskBatchWatermark
-}
-
-// NewestCompleteBatch returns the newest batch that is actually whole, or
-// found=false when none is.
+// riskBatchCompleteConjuncts is THE completeness predicate, in one place, so the
+// SERVING path and the ADOPTION path cannot drift apart.
 //
-// COMPLETENESS IS VERIFIED, NOT TRUSTED. The predicate requires status
-// 'complete', at least one watermark stamp (without one no supersession check
-// can run, so the batch is undisclosable), and the ACTUAL `risk_positions` count
-// to equal the declared `position_count`. A batch missing children is SKIPPED
-// and an older whole batch is served instead — never a torn aggregate
-// (chain-truth R6.5). WriteRiskBatch cannot produce that state; a restored dump,
-// a manual delete or a hand-written row can, and this is what stands between
-// those and a served number.
-func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error) {
-	var b RiskBatch
-	err := s.pool.QueryRow(ctx, `
-		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer
-		FROM risk_batches b
-		WHERE b.status = $1
+// They must be identical. Adoption previously verified only the header's vector and
+// substrate digest, so after an honest partial restore left a matching header with
+// missing children, riskd adopted that id and reported a SUCCESSFUL materialization
+// — while the reader, applying these checks, rejected the very same batch. The
+// daemon logged success, recorded the vector as handled, and no current complete
+// result existed anywhere.
+//
+// The fragment expects the batch aliased as `b` and takes no parameters; the status
+// literal is asserted against RiskBatchComplete by
+// TestCompletenessPredicateStatusLiteralMatchesTheConstant.
+const riskBatchCompleteConjuncts = `
+		  b.status = 'complete'
 		  -- Every mandatory child relation is checked against its DECLARED
 		  -- cardinality. A positions-only check passed a batch holding position
 		  -- headers with no price disclosures and no aggregates, which serves a
@@ -1546,8 +1589,38 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 		  -- Aggregates must account for every position, or a book total silently
 		  -- omits one.
 		  AND COALESCE((SELECT sum(a.positions) FROM risk_batch_aggregates a
-		                WHERE a.batch_id = b.id), 0) = b.position_count
-		ORDER BY b.id DESC LIMIT 1`, RiskBatchComplete).
+		                WHERE a.batch_id = b.id), 0) = b.position_count`
+
+// RiskBatch is a served batch header with its stamp vector.
+type RiskBatch struct {
+	ID            int64
+	ComputedAt    time.Time
+	Status        string
+	PositionCount int
+	RefusedCount  int
+	FlaggedCount  int
+	Producer      string
+	Watermarks    []RiskBatchWatermark
+}
+
+// NewestCompleteBatch returns the newest batch that is actually whole, or
+// found=false when none is.
+//
+// COMPLETENESS IS VERIFIED, NOT TRUSTED. The predicate requires status
+// 'complete', at least one watermark stamp (without one no supersession check
+// can run, so the batch is undisclosable), and the ACTUAL `risk_positions` count
+// to equal the declared `position_count`. A batch missing children is SKIPPED
+// and an older whole batch is served instead — never a torn aggregate
+// (chain-truth R6.5). WriteRiskBatch cannot produce that state; a restored dump,
+// a manual delete or a hand-written row can, and this is what stands between
+// those and a served number.
+func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error) {
+	var b RiskBatch
+	err := s.pool.QueryRow(ctx, `
+		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer
+		FROM risk_batches b
+		WHERE `+riskBatchCompleteConjuncts+`
+		ORDER BY b.id DESC LIMIT 1`).
 		Scan(&b.ID, &b.ComputedAt, &b.Status, &b.PositionCount, &b.RefusedCount, &b.FlaggedCount, &b.Producer)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RiskBatch{}, false, nil

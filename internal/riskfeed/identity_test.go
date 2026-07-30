@@ -22,9 +22,11 @@ func idPolicy() IdentityPolicy {
 			ParamEngine: "aave_param", PriceEngine: "prices:poll:1"},
 		DMEngine: EngineBinding{Engine: "debt_manager", ChainID: 10,
 			ParamEngine: "debt_manager", PriceEngine: "prices:poll:10"},
-		RequiredEngines: []string{"aave_v3_etherfi", "aave_param", "debt_manager"},
-		SweptEngines:    []string{"debt_manager"},
-		Producer:        "riskd",
+		RequiredEngines:     []string{"aave_v3_etherfi", "aave_param", "debt_manager"},
+		SweptEngines:        []string{"debt_manager"},
+		Producer:            "riskd",
+		AlgorithmRevision:   AlgorithmRevision,
+		RegistryFingerprint: "registry-fingerprint-fixture",
 	}
 }
 
@@ -251,11 +253,81 @@ func TestIdentityDistinguishesAbsentFromZero(t *testing.T) {
 func TestIdentityIgnoresTheStepBaselineAndTheClock(t *testing.T) {
 	base := computeID()
 
+	// +30s: still inside the FRESH phase (budget 180s).
 	later := idInputs()
-	later.ReadAt = idTime.Add(37 * time.Minute)
+	later.ReadAt = idTime.Add(30 * time.Second)
 	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), later, idPolicy())
 	require.Equal(t, base.Key, got.Key,
 		"the snapshot CLOCK must not enter the identity — otherwise every recomputation is a new materialization")
+
+	// AND THE COLLISION MUST BE SAFE, not merely present. Equal keys are only
+	// honest if the two reads would produce the SAME OUTPUT; asserting key equality
+	// alone would pin exactly the unsafe collision this test used to permit. So the
+	// verdicts are compared too.
+	budget := PriceBudget{Seconds: idPolicy().BudgetSeconds}
+	for _, row := range idInputs().Prices {
+		require.Equal(t,
+			PriceFreshnessPhase(row, budget, idTime),
+			PriceFreshnessPhase(row, budget, later.ReadAt),
+			"within one phase the verdict is identical, which is what makes the shared key safe")
+	}
+}
+
+// TestIdentityChangesWhenAPriceCrossesAFreshnessThreshold is the OTHER half, and
+// the finding it closes: a poller stops, database time crosses the budget or the
+// ceiling, and the daemon restarts. The pass now computes a stale flag or a G1
+// refusal — and it must NOT derive the pre-crossing key, because adopting that
+// batch would leave its "fresh" disclosure standing and suppress the refusal.
+func TestIdentityChangesWhenAPriceCrossesAFreshnessThreshold(t *testing.T) {
+	budget := PriceBudget{Seconds: idPolicy().BudgetSeconds} // 180s, ceiling 360s
+
+	at := func(offset time.Duration) MaterializationIdentity {
+		in := idInputs()
+		in.ReadAt = idTime.Add(offset)
+		return ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+			idSweeps(), in, idPolicy())
+	}
+
+	fresh := at(30 * time.Second)
+	stillFresh := at(180 * time.Second)
+	stale := at(181 * time.Second)
+	stillStale := at(360 * time.Second)
+	overCeiling := at(361 * time.Second)
+
+	require.Equal(t, fresh.Key, stillFresh.Key, "the whole fresh phase is one materialization")
+	require.NotEqual(t, stillFresh.Key, stale.Key,
+		"crossing the BUDGET changes the verdict, so it must change the materialization")
+	require.Equal(t, stale.Key, stillStale.Key, "the whole stale phase is one materialization")
+	require.NotEqual(t, stillStale.Key, overCeiling.Key,
+		"crossing the CEILING turns a flag into a refusal, so it must change the materialization")
+
+	// The phases really are what moved — the fixture is not passing by accident.
+	row := idInputs().Prices[0]
+	require.Equal(t, VerdictFresh, PriceFreshnessPhase(row, budget, idTime.Add(180*time.Second)))
+	require.Equal(t, VerdictStale, PriceFreshnessPhase(row, budget, idTime.Add(181*time.Second)))
+	require.Equal(t, VerdictOverCeiling, PriceFreshnessPhase(row, budget, idTime.Add(361*time.Second)))
+}
+
+// TestIdentityChangesWithTheAlgorithmRevision: an upgraded binary with changed math
+// must NOT adopt the old code's batch.
+func TestIdentityChangesWithTheAlgorithmRevision(t *testing.T) {
+	base := computeID()
+	pol := idPolicy()
+	pol.AlgorithmRevision = AlgorithmRevision + 1
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), pol)
+	require.NotEqual(t, base.Key, got.Key,
+		"a revision bump is a new set of laws and therefore a new materialization")
+}
+
+// TestIdentityChangesWithTheRegistryFingerprint: a configuration change that moves
+// a NUMBER without moving any input row — corrected token decimals being the sharp
+// case — must not adopt the mis-scaled prior result.
+func TestIdentityChangesWithTheRegistryFingerprint(t *testing.T) {
+	base := computeID()
+	pol := idPolicy()
+	pol.RegistryFingerprint = "a-corrected-registry"
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), pol)
+	require.NotEqual(t, base.Key, got.Key)
 }
 
 // TestIdentityVectorIsHumanReadable: the persisted vector is also the operational

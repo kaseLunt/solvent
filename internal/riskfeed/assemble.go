@@ -21,6 +21,37 @@ import (
 	"github.com/kaselunt/solvent/internal/store"
 )
 
+// AlgorithmRevision is the version of THE LAWS IN THIS FILE and everything they
+// call. It is part of the materialization identity, and it lives here — at the top
+// of the assembler, not in some config package — so that anyone editing the
+// arithmetic below sees it in the same diff.
+//
+// # BUMP THIS WHENEVER THE MATH OR THE REFUSAL RULES CHANGE
+//
+// Changing what a number MEANS without bumping this is a silent correctness bug,
+// and a specific one: an upgraded binary computing over unchanged state derives the
+// OLD key, adopts the OLD-code batch, and publishes the previous release's numbers
+// under the new release's name. The corrected arithmetic never reaches anyone.
+//
+// It must be bumped for a change to any of:
+//
+//   - this file — assembly, refusal codes, gate ordering, aggregation;
+//   - prices.go — provenance classification, freshness phases, budget/ceiling law;
+//   - params.go — the per-field fold, engine/chain tagging, eMode handling;
+//   - registry.go — how a valuation witness is chosen;
+//   - internal/risk — any health-factor, valuation, or rounding change. That
+//     package carries no revision constant of its own, so this one stands in for
+//     it: a math change there REQUIRES a bump here.
+//
+// It must NOT be bumped for comments, logging, test-only changes, or refactors that
+// provably preserve every output — those are the same laws, and a bump would
+// pointlessly re-materialize the entire book.
+//
+// Revision log:
+//
+//	1 — P3 Task 5 initial materializer (assembly, G1-G5, per-field param fold).
+const AlgorithmRevision = 1
+
 // Balance sides and sources, as internal/derive writes them.
 const (
 	sideDebt       = "debt"

@@ -23,19 +23,37 @@ package riskfeed
 //
 // COVERED — everything that determines the substrate a pass reads:
 //
-//   - the watermark vector: per engine (chain, last_block, acked_epoch) and the
-//     per-chain max epoch at compute time;
+//   - the CONSUMED watermark vector: per engine (chain, last_block, acked_epoch)
+//     and the per-chain max epoch, for the engines this pass actually reads. It
+//     must be the FILTERED set: the live indexer maintains cursors riskd never
+//     values from (`prices:chainlink_feed:1` among them), and letting one of those
+//     into the identity means an unrelated cursor advancing gives a restart a NEW
+//     key — so its post-move-baselined, unflagged computation writes a newer batch
+//     and erases the warning. The filtered set has ONE source of truth, the
+//     daemon's own watermark vector;
 //   - the sweep aggregate per swept engine — because `ApplySweepBatch` moves
 //     Debt Manager collateral WITHOUT moving any cursor;
 //   - the policy that shapes the judgement: price budget, step bound, the
 //     engine bindings, the required stamp set;
-//   - a SUBSTRATE DIGEST over the rows actually read.
+//   - a SUBSTRATE DIGEST over the rows actually read;
+//   - a FRESHNESS PHASE per consumed price — fresh / stale / over-ceiling /
+//     no-as-of. The raw clock stays out (see below), but the phase cannot: it is
+//     what `Assemble` classifies each price by, so crossing a budget or ceiling
+//     changes a verdict from "fresh" to a stale flag or a G1 refusal. Without the
+//     phase, a poller that stopped while the daemon restarted would compute the
+//     refusal and then adopt the pre-crossing batch, leaving its "fresh"
+//     disclosure standing and suppressing the refusal it had just derived;
+//   - the ALGORITHM REVISION and the REGISTRY FINGERPRINT — see IdentityPolicy.
 //
 // The substrate digest is not redundant with the vector, and the reason is
 // D-012: a price row can be NEUTRALIZED IN PLACE without any cursor moving. Two
 // passes at identical cursors can therefore read genuinely different prices, and
 // they must not share an identity — that is a new materialization and deserves
 // its own batch.
+//
+// NOT COVERED — the raw snapshot clock, which is why the phase above is a PHASE
+// and not a timestamp: two reads seconds apart inside one phase are the same
+// materialization, and a clock in the key would make every recomputation a new one.
 //
 // NOT COVERED — the previous batch's disclosed prices (the G5 step baseline).
 // This is the subtle part and it is deliberate. The baseline is not substrate; it
@@ -81,9 +99,21 @@ type IdentityPolicy struct {
 	DMEngine        EngineBinding
 	RequiredEngines []string
 	SweptEngines    []string
-	// Producer identifies the build. A different producer is a different set of
-	// laws, so it must not adopt another build's batch.
+	// Producer identifies the deployment role. It is NOT a version — production
+	// hard-codes it — so it must never be relied on to separate builds. That is
+	// AlgorithmRevision's job.
 	Producer string
+	// AlgorithmRevision is riskfeed.AlgorithmRevision, the version of the laws that
+	// produced the numbers. An upgraded binary with changed math MUST derive a
+	// different identity, or it adopts the old code's batch and the corrected
+	// arithmetic never reaches a served number.
+	AlgorithmRevision int
+	// RegistryFingerprint is Registry.Fingerprint(): the canonical identity of the
+	// valuation configuration. It catches the changes that move a NUMBER without
+	// moving any input row — a corrected token `decimals` being the sharp one,
+	// since Assemble divides by 10^decimals while every hashed price row stays
+	// byte-identical.
+	RegistryFingerprint string
 }
 
 // ComputeMaterializationIdentity derives the identity of one pass.
@@ -104,7 +134,9 @@ func ComputeMaterializationIdentity(
 
 	// --- policy -----------------------------------------------------------
 	b.WriteString("policy:")
-	fmt.Fprintf(&b, "budget=%d;step=%d;producer=%s;", policy.BudgetSeconds, policy.StepBps, policy.Producer)
+	fmt.Fprintf(&b, "rev=%d;budget=%d;step=%d;producer=%s;registry=%s;",
+		policy.AlgorithmRevision, policy.BudgetSeconds, policy.StepBps,
+		policy.Producer, policy.RegistryFingerprint)
 	for _, e := range []EngineBinding{policy.AaveEngine, policy.DMEngine} {
 		fmt.Fprintf(&b, "bind=%s/%d/%s/%s;", e.Engine, e.ChainID, e.ParamEngine, e.PriceEngine)
 	}
@@ -150,6 +182,22 @@ func ComputeMaterializationIdentity(
 		}
 		fmt.Fprintf(&b, "%s=rows%d/failed%d/sum%s/at%s/gen%d/open%t;",
 			s.Engine, s.Rows, s.Failed, sum, at, s.Generation, s.GenerationOpen)
+	}
+	b.WriteByte('\n')
+
+	// FRESHNESS PHASES, from the same classifier Assemble uses. Keyed by witness
+	// so the section is stable regardless of read order.
+	phases := make([]string, 0, len(inputs.Prices))
+	budget := PriceBudget{Seconds: policy.BudgetSeconds}
+	for _, p := range inputs.Prices {
+		phases = append(phases, fmt.Sprintf("%d/%x/%s=%s",
+			p.ChainID, p.Asset, p.Source, PriceFreshnessPhase(p, budget, inputs.ReadAt)))
+	}
+	sort.Strings(phases)
+	b.WriteString("freshness:")
+	for _, p := range phases {
+		b.WriteString(p)
+		b.WriteByte(';')
 	}
 	b.WriteByte('\n')
 

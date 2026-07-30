@@ -406,6 +406,121 @@ func TestWriteRiskBatchRefusesUnstampedRequiredEngine(t *testing.T) {
 	require.Contains(t, err.Error(), "an_engine_nobody_stamped")
 }
 
+// TestCompletenessPredicateStatusLiteralMatchesTheConstant guards the one thing
+// the shared SQL fragment cannot express in Go: it hard-codes 'complete', and if
+// RiskBatchComplete were ever renamed the predicate would silently match nothing
+// and NewestCompleteBatch would report "no batch" forever.
+func TestCompletenessPredicateStatusLiteralMatchesTheConstant(t *testing.T) {
+	require.Equal(t, "complete", RiskBatchComplete)
+	require.Contains(t, riskBatchCompleteConjuncts, "b.status = 'complete'")
+}
+
+// TestAdoptionRejectsAnIncompleteRestoredBatch is the round-3 [medium] #4 finding.
+//
+// An honest partial restore leaves a batch header whose materialization identity
+// MATCHES, with children missing. Adoption used to verify only the header, so riskd
+// reported a successful materialization for a batch the reader then refused — the
+// vector recorded as handled, and no current complete result anywhere.
+//
+// The chosen remedy is REPLACE rather than refuse, because refusing livelocks: the
+// same deterministic identity is derived on every subsequent pass, so the same
+// incomplete header would be refused forever until a human deleted a row. Replacing
+// is safe because the batch is unservable (nothing was disclosed from it), the
+// identity is verified equal (same materialization), and the delete happens inside
+// the write transaction (no instant with neither batch).
+//
+// MUTANT THIS KILLS: drop the completeness check from adoptRiskBatch. The write
+// then returns the incomplete id as a success, the batch count stays at the damaged
+// one, and NewestCompleteBatch still finds nothing servable.
+func TestAdoptionRejectsAnIncompleteRestoredBatch(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	key := newTestKey()
+	original, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+
+	// THE PARTIAL RESTORE: the header survives, its price disclosures do not.
+	_, err = s.pool.Exec(ctx, `DELETE FROM risk_price_inputs WHERE batch_id = $1`, original)
+	require.NoError(t, err)
+
+	_, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.False(t, found, "the damaged batch is correctly unservable")
+
+	// The next pass derives the SAME identity and must heal rather than adopt.
+	healed, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+	require.NotEqual(t, original, healed,
+		"the unservable batch is REPLACED, so the healed batch has a new id")
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 1, n, "the damaged batch is gone, not accumulated beside its replacement")
+
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found, "a COMPLETE, servable batch now exists — the daemon healed itself")
+	require.Equal(t, healed, batch.ID)
+
+	prices, err := s.RiskBatchPriceInputs(ctx, healed)
+	require.NoError(t, err)
+	require.NotEmpty(t, prices, "and its disclosures are back")
+}
+
+// TestAdoptionOfACompleteBatchStillAdopts is the control: the replace path must not
+// fire on a healthy batch, or every pass would rewrite the book.
+func TestAdoptionOfACompleteBatchStillAdopts(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	key := newTestKey()
+	first, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+	second, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+	require.Equal(t, first, second, "a COMPLETE batch is adopted, never replaced")
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 1, n)
+}
+
+// TestAdoptionRejectsEachIncompleteRelation: the adoption path applies the WHOLE
+// serving predicate, not a subset of it.
+func TestAdoptionRejectsEachIncompleteRelation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		damage string
+	}{
+		{"positions", `DELETE FROM risk_positions WHERE batch_id = $1`},
+		{"legs", `DELETE FROM risk_position_legs WHERE batch_id = $1`},
+		{"price disclosures", `DELETE FROM risk_price_inputs WHERE batch_id = $1`},
+		{"aggregates", `DELETE FROM risk_batch_aggregates WHERE batch_id = $1`},
+		{"watermark stamps", `DELETE FROM risk_batch_watermarks WHERE batch_id = $1`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testRiskStore(t)
+			ctx := context.Background()
+
+			key := newTestKey()
+			original, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+			require.NoError(t, err)
+			_, err = s.pool.Exec(ctx, tc.damage, original)
+			require.NoError(t, err)
+
+			healed, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+			require.NoError(t, err)
+			require.NotEqual(t, original, healed,
+				"a batch missing its %s is unservable and must be replaced, not adopted", tc.name)
+
+			_, found, err := s.NewestCompleteBatch(ctx)
+			require.NoError(t, err)
+			require.True(t, found, "and the replacement is servable")
+		})
+	}
+}
+
 // TestWriteRiskBatchRequiresAnIdempotencyKey: without one, an ambiguous commit
 // cannot be reconciled and a retry silently double-writes.
 func TestWriteRiskBatchRequiresAnIdempotencyKey(t *testing.T) {

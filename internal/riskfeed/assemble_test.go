@@ -256,6 +256,66 @@ func TestRealFeedRegistryValuesAaveFromAdapterOutputOnly(t *testing.T) {
 	require.EqualValues(t, 18, spec.Decimals)
 }
 
+// TestRegistryFingerprintMovesWithTokenDecimals is the sharp case behind the
+// registry fingerprint: `Assemble` divides by 10^decimals, so a corrected
+// `decimals` changes every value that asset contributes — while every `prices` row,
+// balance and cursor stays byte-identical.
+//
+// MUTANT THIS KILLS: drop Decimals from Registry.Fingerprint (or drop the
+// fingerprint from the identity). The corrected configuration then derives the old
+// materialization key and ADOPTS the incorrectly-scaled prior batch, so the fix
+// never reaches a served number.
+func TestRegistryFingerprintMovesWithTokenDecimals(t *testing.T) {
+	build := func(decimals uint8) *Registry {
+		feeds := &config.Feeds{Assets: []config.Feed{
+			{Chain: "eth", ChainID: 1, Engine: risk.AaveEngine, Address: weETH, Symbol: "weETH", Decimals: decimals,
+				Oracle: config.FeedOracle{Kind: config.FeedKindPoll, Contract: aaveOracle,
+					Method: "getAssetPrice(address)", PriceDecimals: 8}},
+		}}
+		r, err := NewRegistry(feeds)
+		require.NoError(t, err)
+		return r
+	}
+
+	correct := build(18)
+	wrong := build(8)
+	require.NotEqual(t, correct.Fingerprint(), wrong.Fingerprint(),
+		"a token-decimals-only change must move the fingerprint")
+
+	// Same configuration twice is the same fingerprint — otherwise every restart
+	// would be a new materialization and nothing would ever adopt.
+	require.Equal(t, correct.Fingerprint(), build(18).Fingerprint())
+
+	// And it really does move the arithmetic, so the fingerprint is guarding
+	// something real rather than a label.
+	require.EqualValues(t, 18, mustSpec(t, correct, weETH).Decimals)
+	require.EqualValues(t, 8, mustSpec(t, wrong, weETH).Decimals)
+}
+
+// TestRegistryFingerprintMovesWithSourceAndProvenance: the other fields that can
+// change which number is consumed.
+func TestRegistryFingerprintMovesWithSourceAndProvenance(t *testing.T) {
+	base := fixtureRegistry(t)
+
+	otherOracle := &config.Feeds{Assets: []config.Feed{
+		{Chain: "eth", ChainID: 1, Engine: risk.AaveEngine, Address: weETH, Symbol: "weETH", Decimals: 18,
+			Oracle: config.FeedOracle{Kind: config.FeedKindPoll,
+				Contract: common.HexToAddress("0x00000000000000000000000000000000DEADBEEF"),
+				Method:   "getAssetPrice(address)", PriceDecimals: 8}},
+	}}
+	moved, err := NewRegistry(otherOracle)
+	require.NoError(t, err)
+	require.NotEqual(t, base.Fingerprint(), moved.Fingerprint(),
+		"a different oracle contract is a different price witness")
+}
+
+func mustSpec(t *testing.T, r *Registry, asset common.Address) AssetSpec {
+	t.Helper()
+	s, ok := r.Spec(risk.AaveEngine, asset)
+	require.True(t, ok)
+	return s
+}
+
 func TestAssembleAaveMissingPriceRefusesAndNamesTheAsset(t *testing.T) {
 	in := baseInputs()
 	in.Balances = []store.RiskBalanceRow{

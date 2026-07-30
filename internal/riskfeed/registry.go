@@ -4,9 +4,12 @@ package riskfeed
 // through which price witness.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -135,6 +138,33 @@ func (r *Registry) PriceKeys() []store.RiskPriceKey {
 		return out[i].Source < out[j].Source
 	})
 	return out
+}
+
+// Fingerprint is the canonical identity of the loaded valuation configuration.
+//
+// It exists because the registry can change a NUMBER without changing any hashed
+// input row. The sharp case is token decimals: `Assemble` divides by 10^decimals,
+// so correcting a wrong `decimals` in the feed registry changes every value that
+// asset contributes — while the `prices` rows, the balances and the cursors are all
+// byte-identical. Without this in the materialization identity, a corrected
+// configuration would derive the old key and ADOPT the incorrectly-scaled result,
+// so the fix would never reach a served number.
+//
+// Every field that can move a value is included: engine, asset, decimals, the
+// (chain, asset, source) price key, and the provenance class. Symbol is included
+// too — it is a disclosure, and a batch whose labels changed is a different
+// disclosure even at identical arithmetic.
+func (r *Registry) Fingerprint() string {
+	lines := make([]string, 0, 32)
+	for engine, assets := range r.byEngine {
+		for _, s := range assets {
+			lines = append(lines, fmt.Sprintf("%s|%s|dec=%d|chain=%d|src=%s|prov=%s|sym=%s",
+				engine, s.Asset.Hex(), s.Decimals, s.Key.ChainID, s.Key.Source, s.Provenance, s.Symbol))
+		}
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 // Engines lists the engines the registry can value for, sorted.
