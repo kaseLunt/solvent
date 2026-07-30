@@ -1247,6 +1247,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (49861dc, owner-reviewed); store/prices DB split stays the owed micro-task.
   NEXT: Codex queue = Task 7 round 2 (running) → flag-custody CLOSING round
   (fac5168+31c08c2) → Task 8 round 1 → Task 6 round 3 (wave mid-fix).
+- **THIRD STAGING MISS, caught by the sibling's tree report — dc2b739**: the
+  round-5 discrimination tests (genesis 7-case table, config coupling, the
+  max-stamp runner proof) were untracked NEW files absent from 31c08c2.
+  Three data points, one shape: untracked new TEST files are what the '^??'
+  filter hides. The both-ways rule now has teeth in the ledger.
+- **TASK 6 ROUND-2 FIXES LANDED — ba72022** (8 files +991/−213). All six:
+  ledgered next-pass accessor (hasNextPass records NOTHING by design — a
+  conditional source must not read consumed where it's absent; AST guard on
+  direct row reads); causation from CUSTODIED pre-liquidation writes walked
+  in log order (execEligible = corroboration only; disclosed consequence
+  pinned: PriceProviderV2 isn't walked, so genuinely price-driven intra-block
+  flips now classify UNEXPLAINED — correct under the law); head endpoint =
+  header timestamp at min(cursor,pin) as a DISTINCT TYPE (substitution is a
+  compile error); renderer AND p3Counts through verdictIsFailure + GATED
+  SUCCESSES section; two-HYPOTHESIS branch resolution (both-holding = the
+  true boundary, emitted once as ungated ambiguity — never an asserted
+  undetermined label; u0==0 refused by the CONTRACT per DebtManagerCore:567);
+  parentFrame/execFrame distinct types (exec := parent is a COMPILE error,
+  probe transcript kept). Mutation 7/7 behavioural, three mutants RE-CUT
+  because compile-error kills prove nothing about assertions. WAVE'S
+  CALIBRATION NOTE, kept: two of six were its own round-1 fix INCOMPLETE
+  (p3Counts half; the u0 seed), both surfaced by the sweep, not re-reading.
+  NEXT: Task 6 round 3 joins the Codex queue.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
