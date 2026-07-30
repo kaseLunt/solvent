@@ -4,7 +4,7 @@
 -include .env
 export
 
-.PHONY: db-up db-down test test-acceptance test-fork-replay test-pipeline-replay fmt vet run-indexer reconcile
+.PHONY: db-up db-down test test-acceptance test-fork-replay test-pipeline-replay fmt vet run-indexer run-api reconcile
 
 # db-up brings up Postgres AND provisions the physical DB split (Task 9
 # wave 10): db-init idempotently creates solvent_test, the destructive test
@@ -55,6 +55,20 @@ vet:
 
 run-indexer:
 	go run ./cmd/indexer
+
+# run-api starts the public REST + SSE read surface with .env exported. It needs
+# SOLVENT_API_DATABASE_URL (preferred — the SELECT-only role) or
+# SOLVENT_DATABASE_URL, and nothing else: cmd/api makes ZERO RPC calls, so no
+# SOLVENT_RPC_* variable is consulted and none is required.
+#
+# It NEVER migrates and REFUSES to start unless the database's goose version
+# equals the one this build's queries were written against. Against a database
+# behind that version the correct outcome is the refusal, not a served number —
+# migrate (or deploy the matching build) first.
+#
+# Extra flags: make run-api API_FLAGS="-config config/contracts.json".
+run-api:
+	go run ./cmd/api $(API_FLAGS)
 
 # reconcile runs the W1 acceptance-evidence harness with .env exported (it
 # needs SOLVENT_DATABASE_URL, SOLVENT_RPC_*, and — for the archive-capable

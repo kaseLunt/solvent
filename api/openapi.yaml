@@ -1,0 +1,1352 @@
+openapi: 3.0.3
+
+# THIS FILE IS THE CONTRACT.
+#
+# `cmd/api`'s handlers are contract-tested against it (every response of every
+# route, in the seeded suite), and `packages/client-ts` is generated from it.
+# Where a handler and this file disagree, the disagreement is a FAILURE — not a
+# documentation lag.
+#
+# Two conventions run through the whole document and are load-bearing:
+#
+#  1. EVERY MONEY QUANTITY IS A DECIMAL STRING, never a JSON number. Health
+#     factors are 18-decimal integers, Aave base values 8-decimal, Debt Manager
+#     USD 6-decimal; several are wider than an IEEE-754 double can carry
+#     losslessly. A risk number that silently loses its low digits in a browser
+#     is a wrong number wearing a plausible shape.
+#  2. `additionalProperties: false` ON EVERY OBJECT. A contract test that admits
+#     unknown fields cannot detect drift, and a client generated from a permissive
+#     schema silently ignores the field that was added to tell it something.
+
+info:
+  title: Solvent Risk API
+  version: "1.0.0"
+  description: |
+    A read-only public view of ether.fi lending risk across two engines: the Aave
+    v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
+
+    ## What this service is, and is not
+
+    It serves numbers materialized by `riskd` from durably custodied chain state.
+    It makes **zero RPC calls**: every age is the database clock minus a durable
+    stamp, so nothing here is measured against a chain head observed at request
+    time, and nothing is measured against the server's wall clock.
+
+    ## The two engines are never blended
+
+    Aave publishes a continuous health factor in the pool's 8-decimal base
+    currency. The Debt Manager publishes a strict `liquidatable` boolean over
+    6-decimal USD, with no liquidation bonus in the health test. Every aggregate
+    is per engine, states its own `value_decimals`, and is never summed across
+    engines.
+
+    ## Refusals are rows, not errors
+
+    When an input cannot honestly value a position, the position is served as a
+    **refused row naming its reason** and is counted in every containing
+    aggregate's refusal count. A whole-engine refusal serves as refused rows for
+    that engine while the other engine serves normally. This surface never omits
+    a position it could not compute.
+
+    ## Superseded batches are still served
+
+    A batch is flagged `superseded` when any of three legs fires against a live
+    read of the cursor and epoch tables. At this grade the flag is the contract:
+    the batch is served with it, and it heals at the next materializer pass.
+
+    ## Freshness is per input, against that input's own budget
+
+    Every served number carries the full snapshot of every price input behind it —
+    value, decimals, block, chain-asserted as-of, source, provenance class,
+    budget and verdict — as **persisted by the batch**. Nothing is re-read or
+    re-judged at request time: a poll superseding a price key between the batch
+    and this request must not change what the batch is disclosed to have used.
+
+    Database insert time is never substituted for a chain-asserted as-of. An
+    input with no as-of is refused rather than dated from when it was stored.
+  license:
+    name: See repository LICENSE
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: book
+  - name: address
+  - name: observatory
+  - name: stream
+  - name: meta
+
+paths:
+  /v1/book:
+    get:
+      tags: [book]
+      operationId: getBook
+      summary: Book-wide aggregates, the health-factor histogram and the liquidation waterfall
+      description: |
+        Per-engine aggregates with named refusal and flag breakdowns, a
+        health-factor histogram bucketed on each engine's OWN comparator, and a
+        single-factor down-grid waterfall whose first point is the UNSHOCKED book
+        (which is where the standing bad-debt census comes from).
+      responses:
+        "200":
+          description: The newest servable batch's book.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BookResponse" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/NoBatch" }
+
+  /v1/address/{addr}:
+    get:
+      tags: [address]
+      operationId: getAddress
+      summary: One address's per-engine positions, with as-ofs and per-input price disclosures
+      parameters:
+        - $ref: "#/components/parameters/Addr"
+      responses:
+        "200":
+          description: |
+            The address's positions in the newest servable batch. An address with
+            no position answers 200 with `found: false` — "no position in this
+            batch" is an ANSWER, and it arrives with the batch that answered it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AddressResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/NoBatch" }
+
+  /v1/address/{addr}/stress:
+    get:
+      tags: [address]
+      operationId: getAddressStress
+      summary: The committed scenario set evaluated against one address
+      description: |
+        Every scenario in the committed set, evaluated from THIS BATCH's persisted
+        rows so the results describe the same materialization as `/v1/book`.
+        Shocks are applied to primitive axes and propagated through each engine's
+        actual pricing transforms; assets the propagation matrix does not cover
+        are named in `held_flat` rather than silently held at their pre-shock
+        price.
+      parameters:
+        - $ref: "#/components/parameters/Addr"
+      responses:
+        "200":
+          description: Scenario results, with the scenario config version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StressResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/NoBatch" }
+
+  /v1/observatory:
+    get:
+      tags: [observatory]
+      operationId: getObservatory
+      summary: Per-engine TVL, counts and rate indexes across recent batches
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Number of batches to return, newest first.
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        "200":
+          description: The migration time series.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ObservatoryResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/stream:
+    get:
+      tags: [stream]
+      operationId: getStream
+      summary: Server-Sent Events — snapshot on connect, batch ticks, degradation transitions, heartbeats
+      description: |
+        Event names: `snapshot` (sent on every connection, including a reconnect,
+        before any tick), `batch` (a new servable batch at a watermark vector —
+        never "a new block"), `degradation` (a transition in the refusal / flag /
+        supersession posture), `unavailable` (no servable batch). Heartbeats are
+        SSE comment frames (`: heartbeat <unix>`) and carry no data.
+
+        Every `data:` payload conforms to `StreamPayload`.
+      responses:
+        "200":
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/meta:
+    get:
+      tags: [meta]
+      operationId: getMeta
+      summary: Watermark vector, reorg posture, price state, sweep census, published constants
+      description: |
+        The status surface. It answers 200 even when no batch is servable — a
+        status surface that goes dark exactly when something is wrong is not a
+        status surface — and says so in `batch_unavailable_reason`.
+      responses:
+        "200":
+          description: Service and data posture.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MetaResponse" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+components:
+  parameters:
+    Addr:
+      name: addr
+      in: path
+      required: true
+      description: A 0x-prefixed 20-byte address. Validated strictly; a malformed address is a 400, never a silently different account.
+      schema:
+        type: string
+        pattern: "^0[xX][0-9a-fA-F]{40}$"
+
+  responses:
+    BadRequest:
+      description: The request was malformed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+    NotFound:
+      description: No such route.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+    RateLimited:
+      description: The per-client token bucket is empty.
+      headers:
+        Retry-After:
+          description: Seconds to wait.
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+    InternalError:
+      description: The service failed to build the response. The message is sanitized of endpoint URLs and DSNs.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+    NoBatch:
+      description: |
+        No complete risk batch is available. This is a statement about the
+        SERVICE, not a claim that the book is empty.
+      headers:
+        Retry-After:
+          schema: { type: string }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+
+  schemas:
+    # -----------------------------------------------------------------------
+    # Errors
+    # -----------------------------------------------------------------------
+    ErrorBody:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [bad_request, not_found, rate_limited, unavailable, internal]
+            message: { type: string }
+            retry_after_seconds: { type: integer, format: int64 }
+
+    # -----------------------------------------------------------------------
+    # Shared scalars
+    # -----------------------------------------------------------------------
+    Decimal:
+      type: string
+      description: An exact integer as a decimal string. NEVER a JSON number.
+      pattern: "^-?[0-9]+$"
+    NullableDecimal:
+      type: string
+      nullable: true
+      description: An exact integer as a decimal string, or null when the quantity is not applicable on this engine. Absent and zero are different statements.
+      pattern: "^-?[0-9]+$"
+    Address:
+      type: string
+      pattern: "^0[xX][0-9a-fA-F]{40}$"
+
+    # -----------------------------------------------------------------------
+    # Batch envelope + supersession
+    # -----------------------------------------------------------------------
+    SweepStamp:
+      type: object
+      additionalProperties: false
+      required: [rows, failed, success_sum, max_updated_at, age_seconds, generation, generation_open]
+      properties:
+        rows: { type: integer, format: int64 }
+        failed: { type: integer, format: int64 }
+        success_sum: { $ref: "#/components/schemas/Decimal" }
+        max_updated_at: { type: string, format: date-time, nullable: true }
+        age_seconds: { type: integer, format: int64, nullable: true }
+        generation: { type: integer, format: int64 }
+        generation_open: { type: boolean }
+
+    Stamp:
+      type: object
+      additionalProperties: false
+      required: [engine, chain_id, last_block, acked_epoch, max_epoch_at_compute, sweep]
+      properties:
+        engine: { type: string }
+        chain_id: { type: integer, format: int64 }
+        last_block: { type: integer, format: int64 }
+        acked_epoch: { type: integer, format: int64 }
+        max_epoch_at_compute: { type: integer, format: int64 }
+        sweep:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SweepStamp" }]
+          description: |
+            null means the engine HAS no collateral sweep — not that its sweep is
+            empty. Those are different statements and the schema keeps them
+            distinguishable.
+
+    SupersessionLeg:
+      type: object
+      additionalProperties: false
+      required:
+        [leg, engine, chain_id, stamped_last_block, current_last_block,
+         stamped_acked_epoch, current_acked_epoch, current_max_epoch, detail]
+      properties:
+        leg:
+          type: string
+          enum: [acked_epoch_moved, last_block_rewound, unacked_epoch_recorded, cursor_absent]
+          description: |
+            The three legs of the design's supersession check, plus
+            `cursor_absent` — the fail-closed answer for a stamped engine whose
+            cursor no longer exists, which is not a rewind and is never reported
+            as one.
+        engine: { type: string }
+        chain_id: { type: integer, format: int64 }
+        stamped_last_block: { type: integer, format: int64 }
+        current_last_block: { type: integer, format: int64, nullable: true }
+        stamped_acked_epoch: { type: integer, format: int64 }
+        current_acked_epoch: { type: integer, format: int64, nullable: true }
+        current_max_epoch: { type: integer, format: int64, nullable: true }
+        detail: { type: string }
+
+    Supersession:
+      type: object
+      additionalProperties: false
+      required: [superseded, legs, note]
+      properties:
+        superseded: { type: boolean }
+        legs:
+          type: array
+          items: { $ref: "#/components/schemas/SupersessionLeg" }
+        note: { type: string }
+
+    Batch:
+      type: object
+      additionalProperties: false
+      required:
+        [id, computed_at, age_seconds, producer, status, position_count,
+         refused_count, flagged_count, watermarks, supersession]
+      properties:
+        id: { type: integer, format: int64 }
+        computed_at: { type: string, format: date-time }
+        age_seconds:
+          type: integer
+          format: int64
+          description: Database clock minus `computed_at`, floored at zero. Never the server's wall clock.
+        producer: { type: string }
+        status: { type: string, enum: [complete] }
+        position_count: { type: integer }
+        refused_count: { type: integer }
+        flagged_count: { type: integer }
+        watermarks:
+          type: array
+          items: { $ref: "#/components/schemas/Stamp" }
+        supersession: { $ref: "#/components/schemas/Supersession" }
+
+    # -----------------------------------------------------------------------
+    # Aggregates
+    # -----------------------------------------------------------------------
+    Count:
+      type: object
+      additionalProperties: false
+      required: [key, count]
+      properties:
+        key: { type: string }
+        count: { type: integer }
+
+    Aggregate:
+      type: object
+      additionalProperties: false
+      required:
+        [engine, value_decimals, positions, computed_positions, refused_positions,
+         flagged_positions, liquidatable_positions, total_collateral, total_debt,
+         refusals, flags, unit_note]
+      properties:
+        engine: { type: string }
+        value_decimals: { type: integer }
+        positions: { type: integer }
+        computed_positions: { type: integer }
+        refused_positions: { type: integer }
+        flagged_positions: { type: integer }
+        liquidatable_positions: { type: integer }
+        total_collateral: { $ref: "#/components/schemas/Decimal" }
+        total_debt: { $ref: "#/components/schemas/Decimal" }
+        refusals:
+          type: array
+          description: The refusal count broken down by named code. A count with no vocabulary behind it is not a disclosure.
+          items: { $ref: "#/components/schemas/Count" }
+        flags:
+          type: array
+          items: { $ref: "#/components/schemas/Count" }
+        unit_note: { type: string }
+
+    # -----------------------------------------------------------------------
+    # Histogram
+    # -----------------------------------------------------------------------
+    HistogramBucket:
+      type: object
+      additionalProperties: false
+      required: [label, lower_wad, upper_wad, count]
+      properties:
+        label: { type: string }
+        lower_wad: { $ref: "#/components/schemas/NullableDecimal" }
+        upper_wad: { $ref: "#/components/schemas/NullableDecimal" }
+        count: { type: integer }
+
+    EngineHistogram:
+      type: object
+      additionalProperties: false
+      required: [engine, comparator, buckets, infinite_count, refused_count, note]
+      properties:
+        engine: { type: string }
+        comparator:
+          type: string
+          enum: [hf_wad, hf_num/hf_den]
+          description: |
+            Which quantity the buckets are computed on. Aave uses the pool's own
+            health-factor WAD, because that is the chain's comparator. The Debt
+            Manager has no wad at all — its buckets are the exact rational
+            maxBorrowLT/borrowings, a disclosure only, and its eligibility comes
+            from `liquidatable`.
+        buckets:
+          type: array
+          items: { $ref: "#/components/schemas/HistogramBucket" }
+        infinite_count: { type: integer }
+        refused_count: { type: integer }
+        note: { type: string }
+
+    Histogram:
+      type: object
+      additionalProperties: false
+      required: [wad_scale, engines]
+      properties:
+        wad_scale: { $ref: "#/components/schemas/Decimal" }
+        engines:
+          type: array
+          items: { $ref: "#/components/schemas/EngineHistogram" }
+
+    # -----------------------------------------------------------------------
+    # Waterfall
+    # -----------------------------------------------------------------------
+    HeldFlat:
+      type: object
+      additionalProperties: false
+      required: [asset, chain_id, source, value]
+      properties:
+        asset: { $ref: "#/components/schemas/Address" }
+        chain_id: { type: integer, format: int64 }
+        source: { type: string }
+        value: { $ref: "#/components/schemas/Decimal" }
+
+    WaterfallEngine:
+      type: object
+      additionalProperties: false
+      required:
+        [engine, usd_decimals, newly_eligible_accounts, cumulative_eligible_accounts,
+         cumulative_debt_eligible_usd, cumulative_collateral_at_risk_usd,
+         insolvent_if_liquidated_accounts, cumulative_bad_debt_usd]
+      properties:
+        engine: { type: string }
+        usd_decimals: { type: integer }
+        newly_eligible_accounts: { type: integer }
+        cumulative_eligible_accounts: { type: integer }
+        cumulative_debt_eligible_usd:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: Debt ELIGIBLE for liquidation, measured at this grid point. Realized is less than or equal to eligible.
+        cumulative_collateral_at_risk_usd: { $ref: "#/components/schemas/Decimal" }
+        insolvent_if_liquidated_accounts: { type: integer }
+        cumulative_bad_debt_usd: { $ref: "#/components/schemas/Decimal" }
+
+    WaterfallPoint:
+      type: object
+      additionalProperties: false
+      required: [index, factor, engines]
+      properties:
+        index: { type: integer }
+        factor:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: The grid factor, WAD-scaled (1e18 = 1.0, unshocked).
+        engines:
+          type: array
+          items: { $ref: "#/components/schemas/WaterfallEngine" }
+
+    Monotonicity:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      description: |
+        The standing invariant on the debt-eligible series. A violation is
+        SURFACED with the offending grid point named — never smoothed away — and
+        the points computed so far are still served.
+      properties:
+        ok: { type: boolean }
+        engine: { type: string }
+        index: { type: integer }
+        factor: { type: string }
+        detail: { type: string }
+
+    Waterfall:
+      type: object
+      additionalProperties: false
+      required:
+        [scenario_id, scenario_version, axis, grid_scale, points, held_flat,
+         eligibility_note, monotonicity, at_risk_note]
+      properties:
+        scenario_id: { type: string }
+        scenario_version: { type: string }
+        axis: { type: string }
+        axis_asset: { type: string }
+        grid_scale: { $ref: "#/components/schemas/Decimal" }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/WaterfallPoint" }
+        held_flat:
+          type: array
+          description: Every price input no propagation row described. Empty is the claim that the matrix covered the whole book.
+          items: { $ref: "#/components/schemas/HeldFlat" }
+        eligibility_note: { type: string }
+        monotonicity: { $ref: "#/components/schemas/Monotonicity" }
+        at_risk_note: { type: string }
+
+    BadDebt:
+      type: object
+      additionalProperties: false
+      required:
+        [engine, usd_decimals, current_bad_debt_usd, insolvent_positions,
+         eligible_positions, eligible_debt_usd, collateral_at_risk_usd]
+      properties:
+        engine: { type: string }
+        usd_decimals: { type: integer }
+        current_bad_debt_usd:
+          allOf: [{ $ref: "#/components/schemas/Decimal" }]
+          description: The standing census at the UNSHOCKED grid point, not a projection.
+        insolvent_positions: { type: integer }
+        eligible_positions: { type: integer }
+        eligible_debt_usd: { $ref: "#/components/schemas/Decimal" }
+        collateral_at_risk_usd: { $ref: "#/components/schemas/Decimal" }
+
+    Excluded:
+      type: object
+      additionalProperties: false
+      required: [engine, account, code, reason]
+      properties:
+        engine: { type: string }
+        account: { $ref: "#/components/schemas/Address" }
+        code: { type: string, enum: [API_RECONSTRUCTION_MISMATCH] }
+        reason: { type: string }
+
+    BookCoverage:
+      type: object
+      additionalProperties: false
+      required:
+        [batch_positions, in_book, refused_in_batch, excluded_by_this_layer,
+         excluded, stress_coverage_is_full, note]
+      description: |
+        The audit of what reached the derived arithmetic. It exists so an
+        exclusion can never be silent: a position the service could not rebuild
+        into the pure library's input form is NAMED here and is absent from the
+        stress and waterfall numbers.
+      properties:
+        batch_positions: { type: integer }
+        in_book: { type: integer }
+        refused_in_batch: { type: integer }
+        excluded_by_this_layer: { type: integer }
+        excluded:
+          type: array
+          items: { $ref: "#/components/schemas/Excluded" }
+        stress_coverage_is_full: { type: boolean }
+        note: { type: string }
+
+    BookResponse:
+      type: object
+      additionalProperties: false
+      required: [served_at, batch, engines, hf_histogram, waterfall, bad_debt, coverage, notes]
+      properties:
+        served_at: { type: string, format: date-time }
+        batch: { $ref: "#/components/schemas/Batch" }
+        engines:
+          type: array
+          items: { $ref: "#/components/schemas/Aggregate" }
+        hf_histogram: { $ref: "#/components/schemas/Histogram" }
+        waterfall:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Waterfall" }]
+        bad_debt:
+          type: array
+          items: { $ref: "#/components/schemas/BadDebt" }
+        coverage: { $ref: "#/components/schemas/BookCoverage" }
+        notes:
+          type: array
+          items: { type: string }
+
+    # -----------------------------------------------------------------------
+    # Address
+    # -----------------------------------------------------------------------
+    Refusal:
+      type: object
+      additionalProperties: false
+      required: [code, detail, note]
+      properties:
+        code:
+          type: string
+          description: |
+            G1 missing/over-ceiling input, G2 unacked price reorg epoch, G3 store
+            unreadable, SWEEP_NEVER, ENGINE, FLAG_CUSTODY_UNPROVEN, or
+            API_RECONSTRUCTION_MISMATCH.
+        detail: { type: string }
+        asset: { $ref: "#/components/schemas/Address" }
+        note: { type: string }
+
+    HealthFactor:
+      type: object
+      additionalProperties: false
+      required: [wad, num, den, infinite, note]
+      properties:
+        wad:
+          allOf: [{ $ref: "#/components/schemas/NullableDecimal" }]
+          description: |
+            The pool's own health factor, 18-decimal. Present on Aave only.
+            Compare against 1e18 ON THE WAD; do not re-derive a float from
+            num/den to decide eligibility.
+        num: { $ref: "#/components/schemas/NullableDecimal" }
+        den: { $ref: "#/components/schemas/NullableDecimal" }
+        infinite:
+          type: boolean
+          description: >-
+            No debt — the ratio is unbounded rather than a large number.
+        note: { type: string }
+
+    Leg:
+      type: object
+      additionalProperties: false
+      required:
+        [asset, decimals, live_debt, live_collateral, debt_base, collateral_base,
+         weighted_lt, used_as_collateral, debt_index_block, collateral_index_block,
+         amount, value_usd, max_borrow_contribution, liq_threshold, liq_bonus]
+      properties:
+        asset: { $ref: "#/components/schemas/Address" }
+        symbol: { type: string }
+        decimals: { type: integer }
+        live_debt: { $ref: "#/components/schemas/NullableDecimal" }
+        live_collateral: { $ref: "#/components/schemas/NullableDecimal" }
+        debt_base: { $ref: "#/components/schemas/NullableDecimal" }
+        collateral_base: { $ref: "#/components/schemas/NullableDecimal" }
+        weighted_lt: { $ref: "#/components/schemas/NullableDecimal" }
+        used_as_collateral: { type: boolean, nullable: true }
+        debt_index_block:
+          type: integer
+          format: int64
+          nullable: true
+          description: This leg's OWN rate-index as-of. It can trail the balances cursor badly, so it travels with the leg rather than borrowing the position's watermark.
+        collateral_index_block: { type: integer, format: int64, nullable: true }
+        amount: { $ref: "#/components/schemas/NullableDecimal" }
+        value_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        max_borrow_contribution: { $ref: "#/components/schemas/NullableDecimal" }
+        liq_threshold: { $ref: "#/components/schemas/NullableDecimal" }
+        liq_bonus: { $ref: "#/components/schemas/NullableDecimal" }
+
+    PriceInput:
+      type: object
+      additionalProperties: false
+      required:
+        [asset, chain_id, source, provenance, value, decimals, block_number,
+         source_as_of, budget_seconds, verdict, age_seconds, fresh, note]
+      description: |
+        The FULL snapshot the batch persisted for one price input — never an
+        identity reference resolved at request time.
+      properties:
+        asset: { $ref: "#/components/schemas/Address" }
+        chain_id: { type: integer, format: int64 }
+        source: { type: string }
+        provenance:
+          type: string
+          description: |
+            engine-exact, adapter-output, uncapped-feed or ratio-reference. Only
+            the first two may value an Aave position: the uncapped feed equals the
+            adapter's output exactly while no price cap binds, and caps bind in
+            the very scenarios a liquidation engine cares most about.
+        value: { $ref: "#/components/schemas/NullableDecimal" }
+        decimals: { type: integer, nullable: true }
+        block_number: { type: integer, format: int64, nullable: true }
+        source_as_of:
+          type: string
+          format: date-time
+          nullable: true
+          description: The chain-asserted as-of. Database insert time is never substituted; an input with none is refused.
+        budget_seconds: { type: integer, format: int64 }
+        verdict:
+          type: string
+          enum: [fresh, stale, over-ceiling, missing, no-as-of, reorg-unacked]
+        age_seconds: { type: integer, format: int64, nullable: true }
+        fresh: { type: boolean }
+        note: { type: string }
+
+    AsOf:
+      type: object
+      additionalProperties: false
+      required: [balances_block, params_block, sweep_block, oldest_price_input, stale_price_inputs, note]
+      properties:
+        balances_block: { type: integer, format: int64 }
+        params_block: { type: integer, format: int64 }
+        sweep_block:
+          type: integer
+          format: int64
+          description: The account's own last successful collateral sweep. On the Debt Manager this is the collateral as-of and is worst-case ~1.5h behind, while prices are 60s samples.
+        oldest_price_input: { type: string, format: date-time, nullable: true }
+        stale_price_inputs: { type: boolean }
+        note: { type: string }
+
+    FactorPrice:
+      type: object
+      additionalProperties: false
+      required: [asset, current_price, price_decimals, price_floor, lowest_healthy_price]
+      properties:
+        asset: { $ref: "#/components/schemas/Address" }
+        current_price: { $ref: "#/components/schemas/Decimal" }
+        price_decimals: { type: integer }
+        price_floor: { $ref: "#/components/schemas/NullableDecimal" }
+        lowest_healthy_price:
+          allOf: [{ $ref: "#/components/schemas/NullableDecimal" }]
+          description: ceil(P*) — the conservative number to render. At exactly this price the position is still healthy.
+
+    LiquidationPrice:
+      type: object
+      additionalProperties: false
+      required:
+        [in_factor, never_liquidatable, scale_factor_num, scale_factor_den,
+         already_breached, prices, factor_assets, held_assets,
+         boundary_is_healthy, per_token_floor_omitted, diagnostic, axis, note]
+      description: |
+        The FACTOR-LEVEL closed-form solve: all assets that move together with the
+        axis move together here. A single-asset solve on a position holding other
+        counted collateral is the ceteris-paribus variant and is flagged
+        `diagnostic`.
+      properties:
+        in_factor: { type: boolean }
+        never_liquidatable: { type: boolean }
+        reason: { type: string }
+        scale_factor_num: { $ref: "#/components/schemas/NullableDecimal" }
+        scale_factor_den: { $ref: "#/components/schemas/NullableDecimal" }
+        already_breached: { type: boolean }
+        prices:
+          type: array
+          items: { $ref: "#/components/schemas/FactorPrice" }
+        factor_assets:
+          type: array
+          items: { $ref: "#/components/schemas/Address" }
+        held_assets:
+          type: array
+          items: { $ref: "#/components/schemas/Address" }
+        boundary_is_healthy: { type: boolean }
+        per_token_floor_omitted: { type: boolean }
+        diagnostic: { type: boolean }
+        axis: { type: string }
+        note: { type: string }
+
+    Position:
+      type: object
+      additionalProperties: false
+      required:
+        [engine, account, status, value_decimals, refusal, flags, health_factor,
+         liquidatable, total_collateral_base, total_debt_base, weighted_lt_sum,
+         avg_lt_bps, collateral_value_usd, max_borrow_lt, borrowings, legs,
+         price_inputs, as_of, liquidation_price]
+      properties:
+        engine: { type: string }
+        account: { $ref: "#/components/schemas/Address" }
+        status: { type: string, enum: [computed, refused] }
+        value_decimals: { type: integer }
+        refusal:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Refusal" }]
+        flags:
+          type: array
+          items: { type: string }
+        health_factor:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/HealthFactor" }]
+        liquidatable:
+          type: boolean
+          nullable: true
+          description: The Debt Manager's strict test (`debt > maxBorrowLT`; equality is healthy). Null on Aave, which publishes a continuous health factor instead.
+        total_collateral_base: { $ref: "#/components/schemas/NullableDecimal" }
+        total_debt_base: { $ref: "#/components/schemas/NullableDecimal" }
+        weighted_lt_sum: { $ref: "#/components/schemas/NullableDecimal" }
+        avg_lt_bps:
+          allOf: [{ $ref: "#/components/schemas/NullableDecimal" }]
+          description: DISCLOSURE ONLY. It is not an input to the health factor; the pool divides after computing it.
+        collateral_value_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        max_borrow_lt: { $ref: "#/components/schemas/NullableDecimal" }
+        borrowings: { $ref: "#/components/schemas/NullableDecimal" }
+        legs:
+          type: array
+          items: { $ref: "#/components/schemas/Leg" }
+        price_inputs:
+          type: array
+          items: { $ref: "#/components/schemas/PriceInput" }
+        as_of: { $ref: "#/components/schemas/AsOf" }
+        liquidation_price:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/LiquidationPrice" }]
+
+    AddressResponse:
+      type: object
+      additionalProperties: false
+      required: [served_at, batch, address, positions, found, notes]
+      properties:
+        served_at: { type: string, format: date-time }
+        batch: { $ref: "#/components/schemas/Batch" }
+        address: { $ref: "#/components/schemas/Address" }
+        positions:
+          type: array
+          items: { $ref: "#/components/schemas/Position" }
+        found: { type: boolean }
+        notes:
+          type: array
+          items: { type: string }
+
+    # -----------------------------------------------------------------------
+    # Stress
+    # -----------------------------------------------------------------------
+    Shock:
+      type: object
+      additionalProperties: false
+      required: [axis, factor_num, factor_den]
+      properties:
+        axis:
+          type: string
+          enum: [eth_usd, weeth_eth_rate, stable_usd, asset_usd, borrow_apy]
+        asset: { type: string }
+        factor_num:
+          type: integer
+          format: int64
+          description: An EXACT rational. -20% is 80/100, never 0.8 — there are no floats in this pipeline.
+        factor_den: { type: integer, format: int64 }
+
+    AppliedShock:
+      type: object
+      additionalProperties: false
+      required: [asset, chain_id, source, factor_num, factor_den, before, after, snapped, base_snapped, cap_bound]
+      properties:
+        asset: { $ref: "#/components/schemas/Address" }
+        chain_id: { type: integer, format: int64 }
+        source: { type: string }
+        factor_num: { $ref: "#/components/schemas/Decimal" }
+        factor_den: { $ref: "#/components/schemas/Decimal" }
+        before: { $ref: "#/components/schemas/Decimal" }
+        after: { $ref: "#/components/schemas/Decimal" }
+        snapped:
+          type: boolean
+          description: The Debt Manager's stable snap band swallowed the move. The band is OPEN — (990000, 1010000) exclusive — so exactly 0.99 does NOT snap.
+        base_snapped: { type: boolean }
+        cap_bound: { type: boolean }
+
+    StressState:
+      type: object
+      additionalProperties: false
+      required:
+        [health_factor_wad, health_factor_num, health_factor_den, infinite,
+         liquidatable, eligible, collateral_usd, debt_usd, max_borrow_lt]
+      properties:
+        health_factor_wad: { $ref: "#/components/schemas/NullableDecimal" }
+        health_factor_num: { $ref: "#/components/schemas/NullableDecimal" }
+        health_factor_den: { $ref: "#/components/schemas/NullableDecimal" }
+        infinite: { type: boolean }
+        liquidatable: { type: boolean, nullable: true }
+        eligible:
+          type: boolean
+          description: Eligible for liquidation. Aave is strictly below 1e18 on the wad; the Debt Manager is its strict boolean.
+        collateral_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        debt_usd: { $ref: "#/components/schemas/NullableDecimal" }
+        max_borrow_lt: { $ref: "#/components/schemas/NullableDecimal" }
+
+    Shortfall:
+      type: object
+      additionalProperties: false
+      required: [hfs_unchanged, execution_shortfall_usd, bad_debt_at_liquidation_usd, usd_decimals, seizure_model, note]
+      description: |
+        The market-realization axis. Market value is NOT an oracle mark, so this
+        scenario moves no health factor — `hfs_unchanged` asserts it — and the
+        output is the gap the protocol is not seeing.
+      properties:
+        hfs_unchanged: { type: boolean }
+        execution_shortfall_usd: { $ref: "#/components/schemas/Decimal" }
+        bad_debt_at_liquidation_usd: { $ref: "#/components/schemas/Decimal" }
+        usd_decimals: { type: integer }
+        seizure_model:
+          type: string
+          enum: [pro-rata-over-counted-collateral]
+          description: The disclosed seizure assumption behind the shortfall arithmetic.
+        note: { type: string }
+
+    ProjectionHorizon:
+      type: object
+      additionalProperties: false
+      required: [horizon_seconds, debt_usd, projected_usd, additional_interest_usd, becomes_liquidatable]
+      properties:
+        horizon_seconds: { type: integer, format: int64 }
+        debt_usd: { $ref: "#/components/schemas/Decimal" }
+        projected_usd: { $ref: "#/components/schemas/Decimal" }
+        additional_interest_usd: { $ref: "#/components/schemas/Decimal" }
+        becomes_liquidatable: { type: boolean, nullable: true }
+
+    Projection:
+      type: object
+      additionalProperties: false
+      required: [label, basis, annual_delta_bps, apy_observed_at_block, prices_held_flat, horizons, note]
+      description: |
+        The rate axis is a PROJECTION over time, never a spot health-factor shock.
+        `basis: delta-only` means the numbers are the rate change's OWN
+        contribution: a batch carries no borrow-APY observation and this service
+        makes no chain calls, so the base accrual is absent — and no
+        time-to-liquidatable is published from a path that would understate debt
+        growth.
+      properties:
+        label: { type: string, enum: [PROJECTION] }
+        basis: { type: string, enum: [delta-only] }
+        annual_delta_bps: { type: integer, format: int64 }
+        apy_observed_at_block: { type: integer, format: int64 }
+        prices_held_flat: { type: boolean }
+        horizons:
+          type: array
+          items: { $ref: "#/components/schemas/ProjectionHorizon" }
+        note: { type: string }
+
+    ScenarioResult:
+      type: object
+      additionalProperties: false
+      required: [engine, account, applicable, before, after, applied_shocks, held_flat, market_realization, projection]
+      properties:
+        engine: { type: string }
+        account: { $ref: "#/components/schemas/Address" }
+        applicable: { type: boolean }
+        reason:
+          type: string
+          description: Why a result is absent — the scenario does not cover this engine, the batch refused the position, or the service could not rebuild it. Never silence.
+        before:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/StressState" }]
+        after:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/StressState" }]
+        applied_shocks:
+          type: array
+          items: { $ref: "#/components/schemas/AppliedShock" }
+        held_flat:
+          type: array
+          items: { $ref: "#/components/schemas/HeldFlat" }
+        market_realization:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Shortfall" }]
+        projection:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Projection" }]
+
+    Scenario:
+      type: object
+      additionalProperties: false
+      required: [id, version, label, description, path_assumption, engines, shocks, out_of_model, results]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        label: { type: string }
+        description: { type: string }
+        path_assumption: { type: string }
+        engines:
+          type: array
+          items: { type: string }
+        shocks:
+          type: array
+          items: { $ref: "#/components/schemas/Shock" }
+        out_of_model:
+          type: array
+          items: { type: string }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/ScenarioResult" }
+
+    StressResponse:
+      type: object
+      additionalProperties: false
+      required: [served_at, batch, address, scenario_config_version, found, scenarios, notes]
+      properties:
+        served_at: { type: string, format: date-time }
+        batch: { $ref: "#/components/schemas/Batch" }
+        address: { $ref: "#/components/schemas/Address" }
+        scenario_config_version: { type: string }
+        found: { type: boolean }
+        scenarios:
+          type: array
+          items: { $ref: "#/components/schemas/Scenario" }
+        notes:
+          type: array
+          items: { type: string }
+
+    # -----------------------------------------------------------------------
+    # Observatory
+    # -----------------------------------------------------------------------
+    ObservatoryPoint:
+      type: object
+      additionalProperties: false
+      required: [batch_id, computed_at, age_seconds, engines]
+      properties:
+        batch_id: { type: integer, format: int64 }
+        computed_at: { type: string, format: date-time }
+        age_seconds: { type: integer, format: int64 }
+        engines:
+          type: array
+          items: { $ref: "#/components/schemas/Aggregate" }
+
+    RateIndex:
+      type: object
+      additionalProperties: false
+      required: [engine, asset, kind, value, as_of_block, note]
+      properties:
+        engine: { type: string }
+        asset: { $ref: "#/components/schemas/Address" }
+        symbol: { type: string }
+        kind: { type: string }
+        value: { $ref: "#/components/schemas/Decimal" }
+        as_of_block:
+          type: integer
+          format: int64
+          description: The index's OWN as-of. It updates only on ReserveDataUpdated and can trail the derive cursor.
+        note: { type: string }
+
+    ObservatoryResponse:
+      type: object
+      additionalProperties: false
+      required: [served_at, limit, series, rate_indexes, notes]
+      properties:
+        served_at: { type: string, format: date-time }
+        limit: { type: integer }
+        series:
+          type: array
+          items: { $ref: "#/components/schemas/ObservatoryPoint" }
+        rate_indexes:
+          type: array
+          items: { $ref: "#/components/schemas/RateIndex" }
+        notes:
+          type: array
+          items: { type: string }
+
+    # -----------------------------------------------------------------------
+    # Meta
+    # -----------------------------------------------------------------------
+    Service:
+      type: object
+      additionalProperties: false
+      required:
+        [name, version, schema_version, algorithm_revision,
+         scenario_config_version, registry_fingerprint, seizure_model]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        schema_version:
+          type: integer
+          format: int64
+          description: The goose migration version this build's queries were written against. The service refuses to start against anything else, and never migrates.
+        algorithm_revision: { type: integer }
+        scenario_config_version: { type: string }
+        registry_fingerprint: { type: string }
+        seizure_model: { type: string, enum: [pro-rata-over-counted-collateral] }
+
+    Cursor:
+      type: object
+      additionalProperties: false
+      required: [engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision, consumed_by_risk]
+      properties:
+        engine: { type: string }
+        chain_id: { type: integer, format: int64 }
+        last_block: { type: integer, format: int64 }
+        acked_epoch: { type: integer, format: int64 }
+        covered_from_block:
+          type: integer
+          format: int64
+          nullable: true
+          description: Where the walk that produced the current derived state began. Null means UNPROVEN provenance — never "covered from genesis".
+        decoder_revision: { type: integer }
+        consumed_by_risk: { type: boolean }
+
+    ChainEpoch:
+      type: object
+      additionalProperties: false
+      required: [chain_id, max_epoch]
+      properties:
+        chain_id: { type: integer, format: int64 }
+        max_epoch: { type: integer, format: int64 }
+
+    ReorgPosture:
+      type: object
+      additionalProperties: false
+      required: [max_epochs, superseded, legs, leg_names, note]
+      properties:
+        max_epochs:
+          type: array
+          items: { $ref: "#/components/schemas/ChainEpoch" }
+        superseded: { type: boolean }
+        legs:
+          type: array
+          items: { $ref: "#/components/schemas/SupersessionLeg" }
+        leg_names:
+          type: array
+          items: { type: string }
+        note: { type: string }
+
+    PriceState:
+      type: object
+      additionalProperties: false
+      required:
+        [chain_id, asset, symbol, source, owner_engine, provenance, value,
+         decimals, block_number, anchor_block, observed_at, source_as_of,
+         age_seconds, valid, invalid_reason, quarantined_rows,
+         highest_quarantined_block, is_valuation_witness]
+      properties:
+        chain_id: { type: integer, format: int64 }
+        asset: { $ref: "#/components/schemas/Address" }
+        symbol: { type: string }
+        source: { type: string }
+        owner_engine: { type: string }
+        provenance: { type: string }
+        value: { $ref: "#/components/schemas/NullableDecimal" }
+        decimals: { type: integer }
+        block_number: { type: integer, format: int64 }
+        anchor_block: { type: integer, format: int64, nullable: true }
+        observed_at:
+          type: string
+          format: date-time
+          description: DATABASE INSERT TIME. It is published for operational visibility and is NEVER an as-of.
+        source_as_of: { type: string, format: date-time, nullable: true }
+        age_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          description: Database clock minus `source_as_of`. Null when the row carries no chain-asserted as-of; `observed_at` is never substituted.
+        valid: { type: boolean }
+        invalid_reason: { type: string }
+        quarantined_rows:
+          type: integer
+          format: int64
+          description: Rows for this key carrying valid=false at ANY height, so a quarantine stays visible after a newer valid poll lands above it. Those rows are retained, never deleted.
+        highest_quarantined_block: { type: integer, format: int64, nullable: true }
+        is_valuation_witness: { type: boolean }
+        valuation_witness_note: { type: string }
+
+    Neutralized:
+      type: object
+      additionalProperties: false
+      required: [owner_engine, chain_id, rows, oldest_observed_at, newest_observed_at, highest_block]
+      properties:
+        owner_engine: { type: string }
+        chain_id: { type: integer, format: int64 }
+        rows:
+          type: integer
+          format: int64
+          description: The retained-but-unusable backlog. -1 means the counter itself could not be read.
+        oldest_observed_at: { type: string, format: date-time, nullable: true }
+        newest_observed_at: { type: string, format: date-time, nullable: true }
+        highest_block: { type: integer, format: int64 }
+
+    SweepCounts:
+      type: object
+      additionalProperties: false
+      required: [engine, rows, never_swept, failed_since_success, success, note]
+      properties:
+        engine: { type: string }
+        rows: { type: integer, format: int64 }
+        never_swept:
+          type: integer
+          format: int64
+          description: Collateral of UNKNOWN size, never zero. Serving a health factor near zero over it would be a false liquidation alarm.
+        failed_since_success: { type: integer, format: int64 }
+        success: { type: integer, format: int64 }
+        note: { type: string }
+
+    Heartbeat:
+      type: object
+      additionalProperties: false
+      required: [chain_id, symbol, proxy, aggregator, heartbeat_seconds, grace_seconds, provenance_grade, basis]
+      properties:
+        chain_id: { type: integer, format: int64 }
+        symbol: { type: string }
+        proxy: { $ref: "#/components/schemas/Address" }
+        aggregator: { $ref: "#/components/schemas/Address" }
+        heartbeat_seconds: { type: integer, format: int64 }
+        grace_seconds: { type: integer, format: int64 }
+        provenance_grade:
+          type: string
+          enum: [verified, published-not-verified]
+          description: Whether the BUDGET ITSELF was independently evidenced by this repo, or is the published feed parameter taken on trust.
+        basis: { type: string }
+
+    Constants:
+      type: object
+      additionalProperties: false
+      required:
+        [confirmation_blocks, price_poll_seconds, dm_sweep_interval_seconds,
+         dm_sweep_pass_seconds, dm_sweep_worst_case_seconds, price_budget_seconds,
+         price_ceiling_seconds, large_price_step_bps,
+         rate_limit_requests_per_second, rate_limit_burst, sse_heartbeat_seconds, note]
+      properties:
+        confirmation_blocks: { type: integer, format: int64 }
+        price_poll_seconds: { type: integer, format: int64 }
+        dm_sweep_interval_seconds: { type: integer, format: int64 }
+        dm_sweep_pass_seconds: { type: integer, format: int64 }
+        dm_sweep_worst_case_seconds: { type: integer, format: int64 }
+        price_budget_seconds: { type: integer, format: int64 }
+        price_ceiling_seconds:
+          type: integer
+          format: int64
+          description: Twice the budget. An input past it is REFUSED rather than served stale.
+        large_price_step_bps: { type: integer, format: int64 }
+        rate_limit_requests_per_second: { type: number }
+        rate_limit_burst: { type: integer }
+        sse_heartbeat_seconds: { type: integer, format: int64 }
+        note: { type: string }
+
+    MetaResponse:
+      type: object
+      additionalProperties: false
+      required:
+        [served_at, service, batch, watermark_vector, reorg_posture, prices,
+         neutralized_prices, sweeps, sweep_never_refusals_in_batch,
+         heartbeat_provenance, constants, disclosures]
+      properties:
+        served_at: { type: string, format: date-time }
+        service: { $ref: "#/components/schemas/Service" }
+        batch:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Batch" }]
+        batch_unavailable_reason: { type: string }
+        watermark_vector:
+          type: array
+          items: { $ref: "#/components/schemas/Cursor" }
+        reorg_posture: { $ref: "#/components/schemas/ReorgPosture" }
+        prices:
+          type: array
+          items: { $ref: "#/components/schemas/PriceState" }
+        neutralized_prices:
+          type: array
+          items: { $ref: "#/components/schemas/Neutralized" }
+        sweeps:
+          type: array
+          items: { $ref: "#/components/schemas/SweepCounts" }
+        sweep_never_refusals_in_batch: { type: integer }
+        heartbeat_provenance:
+          type: array
+          items: { $ref: "#/components/schemas/Heartbeat" }
+        constants: { $ref: "#/components/schemas/Constants" }
+        disclosures:
+          type: array
+          items: { type: string }
+
+    # -----------------------------------------------------------------------
+    # SSE payload
+    # -----------------------------------------------------------------------
+    StreamPayload:
+      type: object
+      additionalProperties: false
+      required: [served_at, batch, listener_connected, poll_interval_seconds, note]
+      description: |
+        The `data:` field of every non-heartbeat SSE frame. `engines`,
+        `degradation` and `transitions` are present according to the event:
+        `snapshot` and `batch` carry engines and degradation; `degradation`
+        carries the transition list; `unavailable` carries only a reason.
+      properties:
+        served_at: { type: string, format: date-time }
+        reason: { type: string }
+        batch:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Batch" }]
+        engines:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Aggregate" }
+        degradation:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Degradation" }]
+        transitions:
+          type: array
+          items: { $ref: "#/components/schemas/Transition" }
+        listener_connected:
+          type: boolean
+          description: Whether the LISTEN doorbell is up. When false the stream runs on its poll fallback and ticks are up to `poll_interval_seconds` late.
+        poll_interval_seconds: { type: integer, format: int64 }
+        note: { type: string }
+
+    DegradationEngine:
+      type: object
+      additionalProperties: false
+      required: [engine, refused_positions, flagged_positions, liquidatable_positions, refusals, flags]
+      properties:
+        engine: { type: string }
+        refused_positions: { type: integer }
+        flagged_positions: { type: integer }
+        liquidatable_positions: { type: integer }
+        refusals:
+          type: array
+          items: { $ref: "#/components/schemas/Count" }
+        flags:
+          type: array
+          items: { $ref: "#/components/schemas/Count" }
+
+    Degradation:
+      type: object
+      additionalProperties: false
+      required: [engines, superseded, supersession_legs, note]
+      properties:
+        engines:
+          type: array
+          items: { $ref: "#/components/schemas/DegradationEngine" }
+        superseded: { type: boolean }
+        supersession_legs:
+          type: array
+          items: { type: string }
+        note: { type: string }
+
+    Transition:
+      type: object
+      additionalProperties: false
+      required: [key, from, to]
+      properties:
+        key: { type: string }
+        from: { type: integer }
+        to: { type: integer }
