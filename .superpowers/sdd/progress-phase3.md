@@ -1687,6 +1687,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   @ts-expect-error pins on the reviewer's exact traps + per-field battery,
   mutants incl. the mapper smuggling null→'not-liquidatable'. Wave-1/2 laws
   must stay green.
+- CODEX ROUND 6 ON TASK 6 (session 019fb3c0-b5eb-7cf1-a25a-18dd44cf309f,
+  ~10.5min, t6r6 @ 1bc660e, base 821991e): needs-attention — 2H; the H1/H2/M3
+  regressions and mutants adjudicated structurally non-vacuous, frame/registry
+  unchanged. (H1) the routed WIDENING ADJUDICATED AGAINST THE WAVE: a later
+  replay refusal must NOT override the independently-pinned parent fact —
+  InitialEligible is established from N-1 state BEFORE witnesses apply, and
+  the binding gate rule says parent-true = exact pass; cross-token refusal
+  currently converts a valid true-at-parent into UNEXPLAINED = false failures
+  on honest multi-token activity. Law: SPLIT parent-state completeness (parent
+  fold + parent index reconstruction) from boundary-replay completeness (only
+  gates crossing-based verdicts). (H2) boundary held-ness ignores EVENTLESS
+  Safe collateral changes: execEligible revalues the PARENT basket; repo
+  authority says collateral moves through Safe ERC20 balances with NO DM
+  event; unseen top-up reverses eligibility + later price move satisfies
+  execEligible on the stale basket = false marginal pass on a stale cause.
+  Compounding: the Liquidated arm silently CLAMPS over-seized replay balances
+  to zero without a refusal note (Complete stays true) — the no-silent-caps
+  law violated inside the fix that made refusal structural. H2's remedy forks
+  on a chain-reality question (taint-everything guts the marginal class —
+  eventless transfers are invisible in EVERY case; archive balanceOf/Transfer-
+  sweep continuity proof may be sound and proportionate): CHAIN-TRUTH CONSULT
+  dispatched — premise verification (where the Safe-balance authority is
+  recorded; DM-mediated vs direct top-up paths), the A/B/C fork (structural
+  taint / archive-read continuity with fixture posture / disclosed qualifier),
+  directional laws (top-up reverses, unseen withdrawal fabricates), seizure-
+  insufficiency semantics. Wave 7 cuts AFTER the ruling; H1 split + silent-
+  clamp refusal are uncontested and join it.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
