@@ -1001,6 +1001,34 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   down both build waves once (~23:20); both resumed from durable state; owner
   directive recorded: 20-minute heartbeat intervals, never quit — ScheduleWakeup
   armed at 1200s.
+- **FLAG-CUSTODY ROUND-3 FIX LANDED — 631d295** (2026-07-29 23:55, 11 files
+  +701/−45; incl. integration comment fixes: assemble.go revision-log 0..N
+  bound + 00013 HF comment → rev-3 composite). (H) engine refusals computed
+  INDEPENDENTLY of the account set: aggregates carry refusal_code/detail
+  (00014 in-place), NewestCompleteBatch gains RefusedEngines[] because
+  refused_count counts POSITION rows and is honestly 0 mid-replay — regression
+  pins BOTH signals; engine-representation chosen over refuse-the-pass (would
+  withhold DM for an Aave gap); mid-replay walk regression + genuinely-empty-
+  book-not-refused counterweight; fixture-honesty note (first draft's healthy
+  step-0 made the pass correctly ADOPT — the fixture lied, corrected). (M)
+  sameCoverage in Changed (nil≠zero; equal-values-different-pointers not a
+  change); endpoint-ABA both directions. (race) value atomic.Int64 — class
+  closed by construction; copylocks exposed the predicted second bug (copied
+  configs SHARED ONE CLOCK across 'independent' daemons) → configWithSkew +
+  field-by-field clone + reflect clone-surface-closed guard. -race: riskd
+  -count=3 clean; **FULL SUITE under -race exit 0 — first fully race-verified
+  state of the repo.** All 8 scratch DBs cycled for the in-place amendment.
+- **REV-3 DOC-FIX LANDED — c680f78** (4 files). types.go fused-authority text
+  neutralized incl. FloorScaled (found BEYOND Codex's list — the exact function
+  a consumer would reach for to re-derive an HF); 0..N bound corrected both
+  places with the old claim called out; structural point recorded (per-reserve
+  ceil is FORCED — a mixed-decimals book has no single denominator); the
+  accumulation vector: +2 two-reserve (sum-then-ceil strawman refuted in-vector
+  with three ordered HFs), +3 three-reserve w/ 18-dec leg, delta-0 lower-bound
+  case. Every authoritative surface Codex named now carries rev-3 (8bb043d +
+  631d295 + c680f78). NEXT: Codex re-rounds on 631d295 (flag-custody round 3)
+  and c680f78 (rev-3 docs) once the Task 6 round frees the reviewer; Task 7
+  wave mid-build (cmd/api WIP untracked, its go.mod deps held for its commit).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
