@@ -1563,6 +1563,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   weakening, mutant non-vacuity. Wave ops notes: Serena indexes Go only in
   this repo (.serena/project.yml languages omits TypeScript — one-line fix
   OWED); wave used Read/Edit per documented fallback.
+- CODEX ROUND 5 ON TASK 6 (session 019fb391-c30e-7420-81f4-68729fd3e247, ~14min,
+  t6r5 @ 2aa714d, base 3c59286): needs-attention — 2H/1M, ALL in the PRODUCTION
+  COMPOSITION around the replay (the replay core itself HELD: parent folding,
+  bounds/order, index selection, arithmetic, ABI pinning, frame digest, registry
+  all verified). (H1 conf .99) parent predicate still computed from ourBefore —
+  liquidation-time debt — not the parent fold: an index-caused crossing emits
+  EXACT true-at-parent instead of marginal-disclosed; the tests hand-fed false
+  to classifyIntraBlock so the composition was never exercised. (H2 conf .99)
+  Proven LATCHES across a reversed transition: index-tick crossing → Repaid
+  restores health → uncustodied price move → liquidation = stale cause + block-
+  end execEligible = passing marginal-disclosed though the real cause was the
+  unproven price move. (M3 conf .96) cross-token liquidation PARTIALLY applied
+  (refusal noted, other-token debt leg omitted, seized collateral still removed)
+  and can set Proven — Notes are evidence-only, so the declared unreplayable⇒
+  UNEXPLAINED rule had no structural teeth. All three FIX-WORTHY (false-verdict
+  classes in honest use). FIX WAVE 6 dispatched: ONE source of parent truth
+  (replay exposes initial eligibility; classifier consumes it by construction),
+  eligibility required AT the liquidation boundary (reversal invalidates the
+  cause), all-or-nothing witness application with a typed completeness flag the
+  CLASSIFIER consumes (any relevant refusal forces UNEXPLAINED; Notes demoted
+  to evidence), and PRODUCTION-COMPOSITION regressions through the real caller
+  path (the round-5 lesson: hand-fed booleans let composition defects hide);
+  mutants m1 predicate-reverts / m2 latch-restored / m3 partial-apply /
+  m4 flag-ignored (m3/m4 must kill DISTINCTLY).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
