@@ -85,6 +85,36 @@ import (
 //	    adoption path rather than through the account loop.
 const AlgorithmRevision = 4
 
+// THE AUDITED PREMISES OF THE COLLATERAL LAW.
+//
+// The law reads a missing ReserveUsedAsCollateral* witness as the chain fact "never
+// enabled as collateral". That is exact under GENESIS-COMPLETE CUSTODY, and the
+// custody argument was made about two specific values — the ether.fi Aave market's
+// Pool address and the block its streams walk from. They are recorded here, beside
+// the law they license, because a law whose premises live only in a config file can
+// have those premises edited without anyone re-examining the law.
+//
+// From the chain-truth consult's completeness assessment: the `eth:aave-etherfi`
+// stream's startBlock 20,625,519 sits BELOW the first collateral-flag event ever
+// emitted (20,713,917), so every flag log is inside the walk. Move the configured
+// start block above 20,713,917 and the argument collapses; move it anywhere at all
+// and the derived lineage is no longer the audited one.
+//
+// `cmd/riskd` validates the production config against these at STARTUP and refuses
+// to run on divergence — so an honest typo cannot mint false coverage, and an
+// intentional correction has to update this constant and its fixture, which is
+// precisely the re-examination the law deserves.
+const (
+	// AuditedAaveGenesisBlock is the block every aave_v3_etherfi stream is audited
+	// to walk from.
+	AuditedAaveGenesisBlock = 20_625_519
+	// AuditedAavePoolAddress is the FLAG-BEARING contract. Its absence from the
+	// engine's stream set would mean no flag event is ingested at all — a state in
+	// which every account's flag reads as absent and the whole book is silently
+	// wrong rather than loudly refused.
+	AuditedAavePoolAddress = "0x0AA97c284e98396202b6A04024F5E2c65026F3c0"
+)
+
 // Balance sides and sources, as internal/derive writes them.
 const (
 	sideDebt       = "debt"

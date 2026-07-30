@@ -289,12 +289,19 @@ func TestBuildRunnerSpecs(t *testing.T) {
 		Streams:    []string{"eth:pool", "eth:atoken"},
 		Addresses:  [][]byte{a1.Bytes(), a2.Bytes()}, // a1 deduped across streams
 		StartBlock: 400, Window: 3000,
+		// This fixture's two streams start at 500 and 400, so it already exercises
+		// the divergent case: the WALK floor is the min (400) and the COVERAGE floor
+		// is the max (500) — the block from which the engine's joint ledger is
+		// actually complete. See RunnerSpec.CoverageFromBlock.
+		CoverageFromBlock: 500,
 	}, specs[0])
 	require.Equal(t, RunnerSpec{
 		Engine: "debt_manager", Chain: "op", ChainID: 10,
 		Streams:    []string{"op:dm"},
 		Addresses:  [][]byte{a3.Bytes()},
 		StartBlock: 900, Window: 1000,
+		// A single-stream engine: the two floors necessarily coincide.
+		CoverageFromBlock: 900,
 	}, specs[1])
 
 	// One engine spanning two chains is refused: a serial (block, logIndex)

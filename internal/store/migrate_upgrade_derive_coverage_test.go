@@ -93,6 +93,28 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 	require.Equal(t, declaredPositions, actualPositions, "declared == actual: the batch is not torn")
 	require.Positive(t, aggregates, "and it carries the Aave rollup the backfill must reach")
 
+	// A LEGACY DEBT-MANAGER ROLLUP, INSERTED **BEFORE** Migrate.
+	//
+	// Ordering is the entire point of this row, and the first version of this test got
+	// it wrong: inserting it AFTER Migrate meant the UPDATE had already run, so
+	// deleting the SQL WHERE clause and blanket-refusing every engine would have left
+	// this row untouched and the "scoping" assertion would still have passed. A
+	// control that the mutation cannot reach proves nothing.
+	//
+	// Inserted here it is a genuine subject of the backfill: if the predicate is
+	// dropped, this row comes out refused and the assertion below fails.
+	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_aggregates
+		(batch_id, engine, value_decimals, positions, computed_positions,
+		 refused_positions, flagged_positions, liquidatable_positions, total_collateral, total_debt)
+		VALUES ($1,$2,6,0,0,0,0,0,0,0)`, legacyBatch, riskDMEngine)
+	require.NoError(t, err)
+	// The batch declared ONE aggregate; it now has two, and a count mismatch would
+	// make it torn and unservable — which would silently defeat the post-upgrade
+	// serving assertions. Declared and actual are kept equal.
+	_, err = s.pool.Exec(ctx,
+		`UPDATE risk_batches SET aggregate_count = 2 WHERE id = $1`, legacyBatch)
+	require.NoError(t, err)
+
 	// (c) The forward upgrade — the production entry point, exactly as a restarted
 	// daemon at the new code would run it.
 	require.NoError(t, Migrate(ctx, scratch))
@@ -157,24 +179,28 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 		}
 	}
 
-	// (e3) SCOPING, asserted rather than trusted: a legacy DEBT MANAGER rollup is
-	// untouched by the backfill. Blanket-refusing every engine would withhold a book
-	// whose correctness never depended on flag coverage.
-	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_aggregates
-		(batch_id, engine, value_decimals, positions, computed_positions,
-		 refused_positions, flagged_positions, liquidatable_positions, total_collateral, total_debt)
-		VALUES ($1,$2,6,1,1,0,0,0,0,0)`, legacyBatch, riskDMEngine)
-	require.NoError(t, err)
-	dmAggs, err := s.RiskBatchAggregates(ctx, legacyBatch)
-	require.NoError(t, err)
+	// (e3) SCOPING, asserted rather than trusted — and the assertion is now REACHABLE
+	// by the mutation it guards, because the DM row existed before Migrate ran.
+	//
+	// MUTANT THIS KILLS: delete the `WHERE engine = 'aave_v3_etherfi'` predicate from
+	// migration 00014's backfill. The DM rollup below then comes out refused, and a
+	// book whose correctness never depended on flag coverage would be withheld.
 	var sawDM bool
-	for _, a := range dmAggs {
+	for _, a := range legacyAggs {
 		if a.Engine == riskDMEngine {
-			require.Empty(t, a.RefusalCode, "the Debt Manager is deliberately out of the backfill's scope")
+			require.Empty(t, a.RefusalCode,
+				"the Debt Manager is deliberately out of the backfill's scope: a missing param row "+
+					"there already refuses per position, so its legacy rollups are not unproven")
+			require.Empty(t, a.RefusalDetail)
 			sawDM = true
 		}
 	}
-	require.True(t, sawDM)
+	require.True(t, sawDM,
+		"the DM control row must be present in the POST-MIGRATION read, or the scoping proof is vacuous")
+
+	// And the batch is still servable with both rollups — the extra aggregate did not
+	// tear it, so the serving assertions above were about a whole batch.
+	require.Len(t, legacyAggs, 2)
 
 	// (f) And the upgrade did not merely add columns nothing can write: a walking
 	// window through the new entry point establishes coverage on the SAME row.

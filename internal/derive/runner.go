@@ -145,6 +145,26 @@ type RunnerSpec struct {
 	Addresses  [][]byte // the engine's full address set (raw 20-byte), deduped
 	StartBlock uint64   // engine genesis: min StartBlock across its streams
 	Window     uint64   // blocks per derivation batch: max Window across its streams
+	// CoverageFromBlock is the MAX StartBlock across the engine's streams — the
+	// lowest block from which the engine's JOINT ledger is actually complete.
+	//
+	// It is deliberately NOT StartBlock, and the difference is the whole point. The
+	// walk must BEGIN at the minimum, or the earliest stream's events are never
+	// read. But the ingest walkers honour each stream's OWN StartBlock, so a stream
+	// configured to start later has no logs below its own start — and the engine's
+	// interleaved feed is therefore complete only from the HIGHEST of them.
+	//
+	// Stamping coverage from the minimum would OVERCLAIM exactly when it matters:
+	// an honest typo moving only the flag-bearing Pool stream later leaves the
+	// aToken streams at genesis, so the minimum is still genesis, and derivation
+	// would vouch for a range whose Pool logs were never ingested. A collateral-flag
+	// event in that gap then reads as absent — which the collateral law reads as
+	// "never enabled" — and the health factor is wrong. Claiming the maximum makes
+	// that configuration fail CLOSED at riskfeed's coverage gate instead.
+	//
+	// Zero means "unset" and the runner falls back to StartBlock (hand-built specs
+	// in tests); it is never allowed to claim BELOW StartBlock.
+	CoverageFromBlock uint64
 }
 
 // BuildRunnerSpecs groups cfg's streams by engine into derivation bindings.
@@ -168,6 +188,7 @@ func BuildRunnerSpecs(cfg *config.Config) ([]RunnerSpec, error) {
 			spec = &RunnerSpec{
 				Engine: s.Engine, Chain: s.Chain, ChainID: chain.ChainID,
 				StartBlock: s.StartBlock, Window: s.Window,
+				CoverageFromBlock: s.StartBlock,
 			}
 			byEngine[s.Engine] = spec
 			addrSeen[s.Engine] = map[string]bool{}
@@ -180,6 +201,18 @@ func BuildRunnerSpecs(cfg *config.Config) ([]RunnerSpec, error) {
 		spec.Streams = append(spec.Streams, s.Name)
 		if s.StartBlock < spec.StartBlock {
 			spec.StartBlock = s.StartBlock
+		}
+		// The coverage floor is the MAX, while the walk floor above is the MIN. See
+		// RunnerSpec.CoverageFromBlock for why the two must differ.
+		//
+		// A blanket REFUSAL of divergent stream starts was considered and rejected:
+		// it is legitimate for one engine's streams to begin at different blocks —
+		// `chainlink_feed` walks four aggregators deployed at four different times,
+		// and no derived law there reads absence as truth. Refusing divergence would
+		// break that honest configuration; claiming the honest floor instead makes
+		// the dangerous case fail closed without forbidding the safe one.
+		if s.StartBlock > spec.CoverageFromBlock {
+			spec.CoverageFromBlock = s.StartBlock
 		}
 		if s.Window > spec.Window {
 			spec.Window = s.Window
@@ -250,6 +283,25 @@ func NewRunner(st RunnerStore, dec Decoder, engine Engine, spec RunnerSpec, onRe
 		store: st, dec: dec, engine: engine, spec: spec, onRewind: onRewind,
 		pendingSet: map[string]bool{}, snapCap: snapshotBatchCap, pendingMax: pendingCap,
 	}, nil
+}
+
+// coverageFrom is the honest low end of the coverage claim for a window that began
+// at `from`: never below the engine's own walk floor, and never below the block from
+// which the JOINT ledger is complete (RunnerSpec.CoverageFromBlock).
+//
+// Taking the maximum of the three is what makes the claim a floor rather than a
+// wish: a window resuming mid-history claims from where it resumed, and a
+// misconfigured engine whose streams disagree claims from the highest stream start
+// — which is exactly where its interleaved feed actually becomes complete.
+func (r *Runner) coverageFrom(from uint64) uint64 {
+	floor := r.spec.CoverageFromBlock
+	if floor < r.spec.StartBlock {
+		floor = r.spec.StartBlock
+	}
+	if from > floor {
+		return from
+	}
+	return floor
 }
 
 // Name returns the engine identifier, for log attribution.
@@ -394,7 +446,10 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 	// makes the resulting stamp evidence rather than an assertion — and it makes a
 	// rewind-and-rederive re-establish coverage purely as a side effect of
 	// completing (see store.DerivationCoverage).
-	coverage := store.DerivationCoverage{FromBlock: from, DecoderRevision: decode.RegistryRevision}
+	coverage := store.DerivationCoverage{
+		FromBlock:       r.coverageFrom(from),
+		DecoderRevision: decode.RegistryRevision,
+	}
 	if err := r.store.ApplyDerivedWindow(ctx, r.spec.Engine, r.spec.ChainID, events, rates.observations(), to, coverage); err != nil {
 		// COMMIT-INDETERMINACY RULE (derive.Engine): ANY store-apply error →
 		// Reset, never DiscardBatch. The commit may have landed with the ack

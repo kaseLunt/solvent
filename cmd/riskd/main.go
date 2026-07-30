@@ -41,6 +41,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/kaselunt/solvent/internal/config"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/riskfeed"
@@ -214,25 +216,72 @@ func (c *daemonConfig) sweptEngines() []string {
 	return []string{c.DM.Engine}
 }
 
-// engineGenesisBlock is the lowest StartBlock across every stream of `engine` —
-// the block its derived history begins at.
+// validateAaveGenesis ties the PRODUCTION Aave stream configuration to the AUDITED
+// genesis the collateral law's completeness argument was made about, and returns the
+// bar the flag-custody gate must apply.
 //
-// Returning 0 when the engine has no configured stream is deliberate and is NOT a
-// "no requirement" sentinel: store.CoverageProvenBack refuses a zero genesis, so a
-// misconfigured engine makes the flag-custody gate REFUSE rather than pass. That is
-// the fail-closed direction for a gate whose whole job is to withhold a book whose
-// provenance cannot be established.
-func engineGenesisBlock(cfg *config.Config, engine string) uint64 {
-	var lowest uint64
+// # Why a minimum was not enough, and why this refuses instead of adapting
+//
+// The first version returned the MINIMUM StartBlock across the engine's streams.
+// That is the block derivation begins at, but it is not what the gate needed to
+// know, because the ingest walkers honour each stream's OWN start. An honest typo
+// moving only the flag-bearing Pool stream later leaves the aToken streams at
+// genesis, so the minimum is unchanged — and derivation would stamp coverage over a
+// range whose Pool logs were never ingested. A collateral-flag event in that gap
+// then reads as absent, the law reads absent as "never enabled", and the health
+// factor is wrong with nothing refusing. Moving EVERY start later instead produces
+// no typo at all: it silently establishes a NEW LINEAGE whose coverage trivially
+// satisfies its own lowered bar.
+//
+// Neither failure is detectable from the config alone unless the config is compared
+// against something outside it. So it is compared against riskfeed's audited
+// constants, and divergence is FATAL AT STARTUP rather than adapted to. An
+// intentional correction must therefore update riskfeed.AuditedAaveGenesisBlock and
+// the fixture in TestProductionAaveStreamsMatchTheAuditedGenesis — which is the
+// re-examination of the completeness argument that such a change requires.
+//
+// The complementary half lives in internal/derive: RunnerSpec.CoverageFromBlock
+// claims the MAXIMUM stream start, so even a database derived by a binary that never
+// ran this check fails the coverage gate rather than passing it.
+func validateAaveGenesis(cfg *config.Config, engine string) (uint64, error) {
+	var streams int
+	var sawPool bool
+	pool := common.HexToAddress(riskfeed.AuditedAavePoolAddress)
+
 	for _, s := range cfg.Streams {
 		if s.Engine != engine {
 			continue
 		}
-		if lowest == 0 || s.StartBlock < lowest {
-			lowest = s.StartBlock
+		streams++
+		if s.StartBlock != riskfeed.AuditedAaveGenesisBlock {
+			return 0, fmt.Errorf(
+				"riskd: stream %q of engine %q starts at block %d, but the collateral law's "+
+					"completeness argument is audited at %d. A stream that starts later has NO logs below "+
+					"its own start, so the engine's joint ledger is incomplete there and a missing "+
+					"collateral-flag event would be read as \"never enabled\" — a wrong health factor with "+
+					"nothing refusing. Correct the stream, or update riskfeed.AuditedAaveGenesisBlock and "+
+					"its fixture after re-examining the custody argument",
+				s.Name, engine, s.StartBlock, uint64(riskfeed.AuditedAaveGenesisBlock))
+		}
+		for _, a := range s.Addresses {
+			if a == pool {
+				sawPool = true
+			}
 		}
 	}
-	return lowest
+
+	if streams == 0 {
+		return 0, fmt.Errorf("riskd: engine %q has NO configured stream: nothing would be ingested, "+
+			"and every collateral flag would read as absent", engine)
+	}
+	if !sawPool {
+		return 0, fmt.Errorf(
+			"riskd: engine %q does not walk the flag-bearing Pool %s. Without it NO "+
+				"ReserveUsedAsCollateral* log is ingested, so every account's flag reads as absent and the "+
+				"whole book is silently wrong instead of loudly refused",
+			engine, riskfeed.AuditedAavePoolAddress)
+	}
+	return riskfeed.AuditedAaveGenesisBlock, nil
 }
 
 // requiredStampEngines is the engine set whose watermark stamps must be present
@@ -319,6 +368,15 @@ func loadConfig(configPath, feedsPath string) (*daemonConfig, error) {
 		return nil, err
 	}
 
+	// The audited-genesis invariant runs BEFORE any binding is built: if the Aave
+	// stream configuration has drifted from the value the collateral law's
+	// completeness argument was made about, riskd must not start at all. Serving a
+	// book over an unexamined lineage is the failure this refuses.
+	aaveGenesis, err := validateAaveGenesis(cfg, risk.AaveEngine)
+	if err != nil {
+		return nil, err
+	}
+
 	ethChain, ok := cfg.Chains["eth"]
 	if !ok {
 		return nil, errors.New("riskd: contracts config declares no `eth` chain")
@@ -335,11 +393,16 @@ func loadConfig(configPath, feedsPath string) (*daemonConfig, error) {
 			ChainID:     ethChain.ChainID,
 			ParamEngine: risk.AaveParamEngine,
 			PriceEngine: store.PollOwnedEnginePrefix + strconv.FormatUint(ethChain.ChainID, 10),
-			// Read from the SAME config the walker walks from, never a literal: the
-			// flag-custody gate asks whether derived state was walked from this block,
-			// so a hard-coded copy that drifted from contracts.json would silently
-			// change the bar the gate applies. engineGenesisBlock refuses to guess.
-			GenesisBlock: engineGenesisBlock(cfg, risk.AaveEngine),
+			// The AUDITED genesis, returned by validateAaveGenesis only after it has
+			// proved the production config agrees with it.
+			//
+			// An earlier version read the minimum StartBlock straight out of the config
+			// on the reasoning that a literal could drift from contracts.json. The
+			// reasoning was half right and the conclusion was wrong: config is where
+			// drift HAPPENS, so deriving the bar from it means the bar moves with the
+			// drift and the gate silently measures against whatever was committed. The
+			// bar is now the audited constant, and the config is checked AGAINST it.
+			GenesisBlock: aaveGenesis,
 		},
 		DM: riskfeed.EngineBinding{
 			Engine: risk.DMEngine,
