@@ -546,6 +546,41 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   empty; keeps the Codex delta surgical). NEXT (parallel): Codex round 2 on
   a0e37e5..6cb5c71; promotion micro-wave (harness riskGate → riskfeed.GateEpochs,
   signature (cursors, maxEpochs, []RequiredCursor) → (verdict, error)).
+- **TASK 6 PRE-BRIEF CONSULTS ARCHIVED** (both verbatim in p3-consults/, NORMATIVE
+  for the Task 6 wave): risk-quant-task6-brief.md (60ed4bf) — VERDICT on plan Task 6
+  text as acceptance: NUMBERS DO NOT HOLD, 5 blockers (infeasible ≥20 floor vs the
+  chain's 12 finite-HF borrowers; self-referential param weld; tautology backtest
+  clause → 4 per-case obligations incl. bit-exact beforeDebtAmount replay + frozen
+  committed 31-tx frame; toothless B3 → refute-or-grade with phase-boundary split;
+  missing derived-vs-pinned input-frame declaration); EXACTLY THREE tolerances
+  permitted (1-wei residue on full liquidation; one-token-wei seizure round-trip;
+  disclosed intra-block marginality band) — any other epsilon = tolerance-as-carpet,
+  blocks. chain-truth-task6-brief.md — VERDICT: CUSTODY HOLDS conditional on 6
+  blockers (population-derived census-welded floor; adapter weld at STORED anchor
+  hash + backtest at STORED raw_logs.block_hash, never re-resolved live; archive-
+  served-zero proof w/ nonzero control in all-zero chunks + len==0 refused by every
+  new unpacker; param weld A-vs-B with feeds.json as CLAIM gated both directions
+  against chain; tokenConfig sweep = pinned-read SAMPLE over chain∪registry union w/
+  impl-slot record + baseAsset transitive closure; heartbeat gaps attributed only
+  after custody-domain bounding + proxy aggregator() phase check). The two consults
+  AGREE on the ≥20-floor blocker independently.
+- **COLLATERAL-FLAG MICRO-TASK SIZED: GO + material finding** (chain-truth probe,
+  read-only RR snapshot): topic0s independently re-derived and matched; census 98
+  Enabled + 75 Disabled = 173 logs, 94 users, ONE reserve (weETH), all in custody
+  with four agreeing completeness witnesses (coherent-window law, dual-witnessed
+  census match, state-machine closure Enabled⊇Disabled users, LTV-0 source-law).
+  FINDING: riskd's assume-true collateral posture is wrong for 35/58 (60%) of
+  positive collateral rows — 34 stables (USDC/FRAX/PYUSD) have flag=false BY
+  CONSTRUCTION (never configured as collateral, auto-enable never fired) + 1 real
+  opt-out (0x2c64…0649, weETH dust). HF right BY ACCIDENT (their LT=0 zeroes the
+  numerator term) but totalCollateralBase-class outputs (served collateral USD,
+  avgLT, waterfall collateral-at-risk) are WRONG today. Law for the fix:
+  witnessed-true / witnessed-false / no-history⇒false (conservative direction).
+  Backfill mechanism BINDING: rewind-and-rederive (the leg-3-proven machinery),
+  NEVER out-of-band inserts beneath a live cursor; maintenance-window choreography.
+  Micro-wave surfaces: decode (2 topics, strict empty-data reader), derive/aave
+  (record-only fold), store (CollateralFlagsAsOf), riskfeed/assemble (retire
+  FlagCollateralFlagUnwitnessed). Sequence: before or alongside Task 6.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
