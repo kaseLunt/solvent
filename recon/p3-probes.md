@@ -37,6 +37,19 @@ PYUSD, FRAX). Debt side remains CEILING per the P2-proven law (derivation-notes.
 
 ## P-2 DISCHARGED BY FALSIFICATION — healthFactor is a SINGLE FUSED FLOOR DIVISION
 
+> **⚠ SUPERSEDED 2026-07-29 (rev-3).** The deployed law is the **wadDiv HALF-UP composite**
+> `HF = floor(floor((Σ(Cᵢ·LT_bpsᵢ)·1e18 + ⌊D/2⌋)/D)/1e4)` with **D ceil-summed**
+> (`MulDivCeil(liveDebt, price, 10^dec)` per debt leg) — verified deployed source, ruling
+> archived at `.superpowers/sdd/p3-consults/risk-quant-component4-7-ruling.md`
+> (GenericLogic.sol:160-164/:229, WadRayMath.sol:53-62, MathUtils.sol:100-115). The fused
+> floor below was an undetectably-good approximation: it differs from the composite only when
+> the half-up carry fires AND the inner quotient ≡ 9999 (mod 10⁴) — ~5×10⁻⁵ incidence, which
+> the 12/12 pin evidence could never separate. **Do NOT implement the fused form**;
+> `internal/risk` rev-3 implements the composite. The section below stands as the honest
+> record of what this probe could and could not establish: it correctly refuted the two-step
+> draft and correctly identified no-intermediate-rounding-at-percentMul; it could not see the
+> final-division rounding mode. Its refutation of the two-step remains valid.
+
 The spec's pre-probe model `wadDiv(percentMul(C, LT), D)` matches the chain healthFactor for
 **ZERO of 12 live borrowers under all four rounding-convention combinations** (percentMul
 {half-up, floor} × wadDiv {half-up, floor}). One borrower's chain value lies strictly BETWEEN

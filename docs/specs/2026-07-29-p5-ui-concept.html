@@ -393,9 +393,9 @@
               <div><span class="k">Collateral flag</span><span class="v okt">witnessed · Enabled @ 21,204,551</span></div>
               <div><span class="k">Liquidation price</span><span class="v">$4,005.87 <span class="dim">· lowest healthy — floor(P*) already liquidates</span></span></div>
             </div>
-            <pre class="formula"><b>HF</b> = floor( Σ(Cᵢ · LT_bpsᵢ) × 1e18 / (10000 × D) )
-   = floor( 1,904,112,602,113 · 8100 × 1e18 / (10000 × 1,478,220,021,554) )
-   = <b>1.043810…e18</b>   <span class="dim">// single fused floor — two-step refuted 0/12 at chain</span></pre>
+            <pre class="formula"><b>HF</b> = floor( floor( (Σ(Cᵢ · LT_bpsᵢ) × 1e18 + ⌊D/2⌋) / D ) / 10⁴ )
+   D = Σ ceil(debtᵢ · priceᵢ / 10^decᵢ)   <span class="dim">// debt never understated — ceil per leg</span>
+   = <b>1.043810…e18</b>   <span class="dim">// wadDiv half-up composite — rev-3, deployed-source-proven</span></pre>
           </div>
           <div class="card">
             <h4>Proof of inputs</h4>

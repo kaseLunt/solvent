@@ -119,14 +119,19 @@ is amended by this document: exact-at-pin / watermarked-live, no tolerance carpe
    adapter's own output** at the pin, never compose raw feed × ratio;
 5. base totals vs `getUserAccountData@pin`: exact sums;
 6. avg liquidation threshold: single floor division, exact;
-7. healthFactor: **a single fused floor division — P-2 DISCHARGED BY FALSIFICATION** (probe
-   pack): `HF = floor(totalCollateralBase × LT_bps × 1e18 / (10000 × totalDebtBase))`,
-   12/12 exact at the pin with six last-digit discriminators; the previously-drafted
-   `wadDiv(percentMul(...))` two-step matches ZERO borrowers under any rounding convention
-   (v3.5-style precision-preserving math — no intermediate rounding). `internal/risk`
-   implements the fused form over the exact weighted sum Σ(Cᵢ·LTᵢ); disclosed caveat: the
-   live book's uniform LT=8100 cannot distinguish weighted-sum from aggregate-LT fusion, so
-   a synthetic mixed-LT unit vector pins it and the #5/#6 gates isolate any divergence.
+7. healthFactor: **SUPERSEDED 2026-07-29 (rev-3) — the deployed law is the wadDiv HALF-UP
+   COMPOSITE, not a single fused floor.** The authoritative law (verified deployed source,
+   `.superpowers/sdd/p3-consults/risk-quant-component4-7-ruling.md`; GenericLogic.sol:160-164,
+   WadRayMath.sol:53-62):
+   `HF = floor( floor((Σ(Cᵢ·LT_bpsᵢ)·1e18 + ⌊D/2⌋) / D) / 1e4 )`, with **D the CEIL-summed
+   debt** (component 4's debt leg is `MulDivCeil(liveDebt, price, 10^dec)` per reserve —
+   GenericLogic.sol:229; the collateral leg stays floor). `internal/risk` rev-3 implements
+   this composite. Historical record, kept for honesty: the probe pack's P-2 fused floor
+   `floor(Σ·1e18/(10000·D))` was 12/12 exact at its pin and refuted the two-step draft — but
+   it differs from the composite on ~5×10⁻⁵ of evaluations (half-up carry AND quotient ≡ 9999
+   mod 10⁴), which no pin count could separate; only the source read could. Do NOT implement
+   the fused form. The weighted-sum caveat stands: a synthetic mixed-LT vector pins
+   weighted-sum vs aggregate-LT fusion, and the #5/#6 gates isolate divergence.
 
 Declared-input honesty: prices, reserve params, eMode, `isUsingAsCollateral` flags are
 `input:pinned-read` (`getUserConfiguration@pin`, `getUserEMode@pin`, `getConfiguration@pin`),
