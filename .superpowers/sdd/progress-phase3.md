@@ -2203,6 +2203,36 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (honest-scenario hunt), M2 arithmetic recompute, M3 grep, no-regression.
   Brief carries the foreground-wedge warning prominently (two jobs wedged
   last round by tool-level foregrounding).
+- CODEX ROUND 12 ON TASK 6 (session 019fb52c-0eb3-7ec2-a5a2-82e7a394744e,
+  ~3min active, t6r12 @ ea25975, base 253a22a; reviewer discovered and fixed
+  the gitignored-cash-v3-absent-from-worktree gap by copying src/+scripts/
+  in — add to future briefs): needs-attention — 2H/1M. Two-frame wiring,
+  wave-8 decoding, M2 arithmetic, fixture preservation, digest all HELD.
+  (H1b) the audited ADDRESS is never bound to audited BYTECODE — CREATE3
+  addresses derive from factory+salt not creation code, so honest version
+  skew (v1 deployed, source checkout advances to v2, same salt) passes
+  every slot/accessor check while decoding v1 events under v2 semantics.
+  (H2b) THE D-013 ADJUDICATION REFUTED with a concrete honest scenario: an
+  atomic install-migrate-restore governance bundle (one-off migration
+  admin, invoke, restore, all in one bundle to remove the temporary
+  entrypoint) is least-privilege hygiene, not evasion — both endpoint slots
+  equal the audited address while the migration write falls between the
+  reads; "if trace coverage cannot be established, do not classify the
+  two-pin residual as adversary-only." Integrator ACCEPTS the refutation —
+  the prior adjudication was wrong; the reviewer's honest scenario is real.
+  (M3b) the NORMATIVE ruling file still declares "provably-sufficient
+  universe" — conflicting durable authority; superseding addendum owed.
+  CHAIN-TRUTH CONSULTED (standing instance) on the two remedy forks:
+  fork 1 bytecode binding = compile-and-compare (heavy; no committed
+  artifacts; immutable normalization its own defect surface) vs CODE-HASH
+  CONSTANCY PIN (eth_getCode at head+all pins, one audited hash; decode
+  semantics anchored by the captured-fixture record, not a compile bridge —
+  disclosure-explicit); fork 2 migration detection for the 31 frozen
+  blocks = one-time trace evidence (endpoint support unknown) vs
+  CALLDATA-SCAN refuse-on-sight (setAdminImpl selector bytes as substring;
+  honest governance doesn't obfuscate — byte-substring completeness across
+  the ether.fi Safe/timelock stack is exactly the chain-reality question)
+  vs probe-then-fallback. Wave cuts on the ruling.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
