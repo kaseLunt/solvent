@@ -18,8 +18,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -50,6 +48,10 @@ type passResult struct {
 	Refused   int
 	Flagged   int
 	Vector    watermarkVector
+	// MaterializationKey is the deterministic identity of this pass, exposed so a
+	// test (and an operator reading logs) can see that two computations of the
+	// same materialization really do derive the same name.
+	MaterializationKey string
 }
 
 // runPass executes one materialization pass.
@@ -136,25 +138,44 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	// Step 5 — one write transaction: batch + every child row + retention prune
 	// + the doorbell.
 	//
-	// The idempotency key is minted HERE, once, for this PREPARED pass, and is
-	// what makes an ambiguous commit reconcilable instead of double-written. See
-	// store.RiskBatchWrite.IdempotencyKey: a blind retry after a lost commit
-	// acknowledgement would make the first (committed) attempt the step
-	// baseline, and a large price move it correctly flagged would be re-judged
-	// against its own post-move value — silently losing the warning.
-	key, err := newIdempotencyKey()
-	if err != nil {
-		return res, err
-	}
+	// The materialization identity is DERIVED, not minted: it is a pure function
+	// of the vector, the sweep aggregate, the policy and the substrate actually
+	// read. Any honest process computing this same materialization — a retry
+	// whose reconciliation also failed, a restart, a second instance — derives
+	// the SAME key and therefore ADOPTS the committed batch instead of writing an
+	// unflagged duplicate over it.
+	//
+	// Note what it deliberately EXCLUDES: the previous batch's prices (the G5
+	// baseline). Including them would give a fresh pass and its own post-restart
+	// recomputation two different identities, which is the duplicate this is here
+	// to prevent. See riskfeed's identity.go.
+	stamps := stampsFor(vector)
+	requiredStamps := cfg.requiredStampEngines(vector)
+	identity := riskfeed.ComputeMaterializationIdentity(
+		cursors, maxEpochs, sweeps, inputs,
+		riskfeed.IdentityPolicy{
+			BudgetSeconds:   cfg.Budget.Seconds,
+			StepBps:         cfg.StepBps,
+			AaveEngine:      cfg.Aave,
+			DMEngine:        cfg.DM,
+			RequiredEngines: requiredStamps,
+			SweptEngines:    cfg.sweptEngines(),
+			Producer:        cfg.Producer,
+		})
+	res.MaterializationKey = identity.Key
+
 	batchID, err := s.WriteRiskBatch(ctx, store.RiskBatchWrite{
-		Producer:        cfg.Producer,
-		Watermarks:      stampsFor(vector),
-		Positions:       assembled.Positions,
-		Aggregates:      assembled.Aggregates,
-		RequiredEngines: cfg.requiredStampEngines(vector),
-		Retention:       cfg.Retention,
-		Notify:          notifyChannel,
-		IdempotencyKey:  key,
+		Producer:              cfg.Producer,
+		Watermarks:            stamps,
+		Positions:             assembled.Positions,
+		Aggregates:            assembled.Aggregates,
+		RequiredEngines:       requiredStamps,
+		RequiredSweepEngines:  cfg.sweptEngines(),
+		Retention:             cfg.Retention,
+		Notify:                notifyChannel,
+		MaterializationKey:    identity.Key,
+		MaterializationVector: identity.Vector,
+		SubstrateDigest:       identity.SubstrateDigest,
 	})
 	if err != nil {
 		return res, err
@@ -171,23 +192,6 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 		}
 	}
 	return res, nil
-}
-
-// newIdempotencyKey mints the identity of ONE prepared pass.
-//
-// It is random rather than derived from the vector, deliberately. A
-// vector-derived key would collide across two legitimately distinct passes that
-// happened to read the same watermarks — which is exactly what a quiet chain
-// produces — and the collision would be silently swallowed as "already
-// committed", skipping a batch that should have been written. Randomness makes
-// the key mean "this attempt", which is the only thing a retry needs to be able
-// to say.
-func newIdempotencyKey() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("mint risk batch idempotency key: %w", err)
-	}
-	return hex.EncodeToString(b[:]), nil
 }
 
 // previousPrices reads the price values the newest COMPLETE batch disclosed,

@@ -66,9 +66,14 @@ func newTestKey() string {
 
 func sampleBatchKeyed(retention int, key string) RiskBatchWrite {
 	return RiskBatchWrite{
-		Producer:       "riskd-test",
-		Retention:      retention,
-		IdempotencyKey: key,
+		Producer:  "riskd-test",
+		Retention: retention,
+		// The identity travels WITH the key, so adoption can verify rather than
+		// assume. Derived from the key here so two fixtures with the same key
+		// carry the same identity and two with different keys do not.
+		MaterializationKey:    key,
+		MaterializationVector: "vector(" + key + ")",
+		SubstrateDigest:       "substrate(" + key + ")",
 		Watermarks: []RiskBatchWatermark{
 			{Engine: riskAaveEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4, MaxEpochAtCompute: 4},
 			{Engine: riskParamEngine, ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4, MaxEpochAtCompute: 4},

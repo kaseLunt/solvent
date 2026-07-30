@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -275,6 +276,81 @@ type RiskInputs struct {
 	// is measured against this, never against a process clock (chain-truth
 	// R4.1).
 	ReadAt time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Single-writer enforcement for the materializer.
+// ---------------------------------------------------------------------------
+
+// The advisory-lock coordinates for the risk materializer role.
+//
+// pg_advisory_lock's two-int form takes a (classid, objid) pair, which is used
+// here as a NAMESPACE plus a ROLE so the numbers are readable rather than magic:
+//
+//	classid 0x536F6C76 = ASCII "Solv"  — this repo's advisory-lock namespace
+//	objid   1                          — the risk materializer
+//
+// The key is spelled out here, in the code that takes it, because a lock constant
+// that lives only in a migration comment is a constant nobody checks against the
+// caller.
+const (
+	riskLockNamespace    int32 = 0x536F6C76 // "Solv"
+	riskLockMaterializer int32 = 1
+)
+
+// ErrRiskMaterializerLocked is returned when another process already holds the
+// materializer lock.
+var ErrRiskMaterializerLocked = errors.New("risk materializer lock is already held by another process")
+
+// AcquireRiskMaterializerLock takes the session-scoped advisory lock that makes
+// riskd a structural single writer, and returns the release function.
+//
+// # Why a lock at all, when the key is already deterministic
+//
+// The deterministic materialization key is what makes CORRECTNESS independent of
+// how many processes run: two instances computing the same materialization collide
+// and the second adopts. The lock is the complementary statement — concurrent
+// honest instances are EXCLUDED rather than merely handled — so the wasted work,
+// the duplicated NOTIFY doorbells, and the interleaved retention pruning do not
+// happen either. It is defence in depth, and the key remains the guarantee.
+//
+// # What it does NOT promise, stated plainly
+//
+// The lock is SESSION-scoped: it lives on the connection this call holds and is
+// released automatically if that connection drops. A network partition can
+// therefore let a second instance acquire while the first still believes it holds
+// — the standard limitation of advisory locks used as leases, and the reason the
+// deterministic key rather than this lock is where correctness rests.
+//
+// The returned release closes over the held connection and must be called on
+// shutdown; it is idempotent.
+func (s *Store) AcquireRiskMaterializerLock(ctx context.Context) (release func(), err error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire connection for materializer lock: %w", err)
+	}
+	var got bool
+	if err := conn.QueryRow(ctx,
+		`SELECT pg_try_advisory_lock($1, $2)`, riskLockNamespace, riskLockMaterializer).Scan(&got); err != nil {
+		conn.Release()
+		return nil, fmt.Errorf("take materializer advisory lock: %w", err)
+	}
+	if !got {
+		conn.Release()
+		return nil, fmt.Errorf("%w: namespace %d object %d — refusing to start a second materializer",
+			ErrRiskMaterializerLocked, riskLockNamespace, riskLockMaterializer)
+	}
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			// Best effort: the lock also dies with the session, so a failure to
+			// unlock cleanly is not a correctness problem.
+			_, _ = conn.Exec(context.Background(),
+				`SELECT pg_advisory_unlock($1, $2)`, riskLockNamespace, riskLockMaterializer)
+			conn.Release()
+		})
+	}, nil
 }
 
 // Querier exposes the store's pool as the shared read surface, so a caller
@@ -982,18 +1058,33 @@ type RiskBatchWrite struct {
 	// engine, so a batch missing one engine's pair cannot be judged for it.
 	// Defaults to the engines in Watermarks when empty.
 	RequiredEngines []string
-	// IdempotencyKey identifies this PREPARED pass, and must be reused verbatim
-	// across retries of it.
+	// MaterializationKey identifies WHAT IS BEING MATERIALIZED — deterministically,
+	// so that ANY honest process computing the same thing derives the same key.
+	// Required.
 	//
-	// It exists because a Commit error is AMBIGUOUS: PostgreSQL may have
-	// committed and lost the acknowledgement. A blind retry then writes the batch
-	// twice, and the duplicate is not benign — the committed first attempt
-	// becomes the step-comparison baseline, so a large price move the first
-	// attempt correctly flagged is re-judged against its own post-move value and
-	// the newest batch silently loses the warning. With a stable key, the UNIQUE
-	// constraint makes the second write detectable and WriteRiskBatch reconciles
-	// it instead of recomputing. Required.
-	IdempotencyKey string
+	// A per-attempt key is not sufficient, and assuming otherwise was the earlier
+	// mistake: it only covers a lost commit acknowledgement whose reconciliation
+	// lookup then succeeds. A reconciliation that fails on the same network event,
+	// a restart, or a second instance each re-read the committed post-move price
+	// as their baseline, mint a fresh key, and write an UNFLAGGED DUPLICATE. With
+	// a deterministic key the second computation collides with the first and
+	// ADOPTS it, so the duplicate cannot be created at all.
+	//
+	// Build it with riskfeed.ComputeMaterializationIdentity.
+	MaterializationKey string
+	// MaterializationVector and SubstrateDigest are the identity BEHIND the key,
+	// persisted so adoption can be VERIFIED. A key that matches while the identity
+	// differs is a refusal, never a silent adoption — the same
+	// refuse-don't-pick discipline the divergent-replay guards use.
+	MaterializationVector string
+	SubstrateDigest       string
+	// RequiredSweepEngines are the engines whose watermark row MUST carry a
+	// complete sweep disclosure. Without recording this, a restored batch could
+	// omit the Debt Manager's sweep payload entirely and still satisfy every
+	// count and required-engine check, leaving a swept engine indistinguishable
+	// from one with no sweeper. Defaults to the engines whose stamps carry a
+	// non-nil Sweep.
+	RequiredSweepEngines []string
 	// Retention keeps the newest N batches; older ones and their children are
 	// deleted in the SAME transaction (plan Task 5: SOLVENT_RISK_RETENTION,
 	// default 5000). Pruning outside the write would leave a window in which
@@ -1034,8 +1125,41 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	if len(w.Watermarks) == 0 {
 		return 0, fmt.Errorf("%w: a batch with no watermark stamps cannot be checked for supersession", ErrRiskBatchIncomplete)
 	}
-	if w.IdempotencyKey == "" {
-		return 0, fmt.Errorf("%w: an idempotency key is required — without one an ambiguous commit cannot be reconciled and a retry silently double-writes the batch", ErrRiskBatchIncomplete)
+	if w.MaterializationKey == "" {
+		return 0, fmt.Errorf("%w: a materialization key is required — without one an ambiguous commit cannot be reconciled and a retry silently double-writes the batch", ErrRiskBatchIncomplete)
+	}
+
+	// ADOPT BEFORE WRITING. The key is deterministic in the materialization, so a
+	// pre-flight lookup catches the restart and second-instance cases without
+	// waiting for a constraint violation — and, more importantly, without doing
+	// the work twice. The verification inside adoptRiskBatch is what keeps this
+	// from being a silent shortcut.
+	if id, adopted, err := s.adoptRiskBatch(ctx, w); err != nil {
+		return 0, err
+	} else if adopted {
+		return id, nil
+	}
+
+	// The sweep-disclosure requirement defaults to the engines actually carrying
+	// one, so a producer cannot forget to declare what it just stamped.
+	requiredSweep := w.RequiredSweepEngines
+	if requiredSweep == nil {
+		for _, m := range w.Watermarks {
+			if m.Sweep != nil {
+				requiredSweep = append(requiredSweep, m.Engine)
+			}
+		}
+	}
+	sweepStamped := map[string]bool{}
+	for _, m := range w.Watermarks {
+		if m.Sweep != nil {
+			sweepStamped[m.Engine] = true
+		}
+	}
+	for _, e := range requiredSweep {
+		if !sweepStamped[e] {
+			return 0, fmt.Errorf("%w: engine %q requires a sweep disclosure but its stamp carries none", ErrRiskBatchIncomplete, e)
+		}
 	}
 	// The required stamp set defaults to what is actually being stamped; an
 	// explicit set that names an unstamped engine is a caller bug, refused here
@@ -1105,10 +1229,10 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		if _, err := tx.Exec(ctx, `INSERT INTO risk_batch_watermarks
 			(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
 			 sweep_rows, sweep_failed, sweep_success_sum, sweep_max_updated_at,
-			 sweep_generation, sweep_generation_open)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			 sweep_generation, sweep_generation_open, sweep_applicable)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 			batchID, m.Engine, m.ChainID, int64(m.LastBlock), m.AckedEpoch, m.MaxEpochAtCompute,
-			rows, failed, sum, updatedAt, gen, open); err != nil {
+			rows, failed, sum, updatedAt, gen, open, m.Sweep != nil); err != nil {
 			return 0, fmt.Errorf("insert risk watermark %s: %w", m.Engine, err)
 		}
 	}
@@ -1204,11 +1328,13 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	if _, err := tx.Exec(ctx, `INSERT INTO risk_batches
 		(id, computed_at, status, position_count, leg_count, price_input_count,
 		 aggregate_count, required_engines, refused_count, flagged_count, producer,
-		 idempotency_key)
-		VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		 materialization_key, materialization_vector, substrate_digest,
+		 required_sweep_engines)
+		VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		batchID, RiskBatchComplete, len(w.Positions), legCount, priceCount,
 		len(w.Aggregates), required, refused, flagged, w.Producer,
-		w.IdempotencyKey); err != nil {
+		w.MaterializationKey, w.MaterializationVector, w.SubstrateDigest,
+		nonNilStrings(requiredSweep)); err != nil {
 		// A UNIQUE violation on the idempotency key means THIS PREPARED PASS
 		// ALREADY LANDED — the ordinary shape of a retry after a lost commit
 		// acknowledgement, where the first attempt committed and said otherwise.
@@ -1220,7 +1346,12 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		// The collision can surface HERE or at COMMIT depending on where the
 		// retry was interrupted, so both paths reconcile. Any other error is real.
 		if isUniqueViolation(err) {
-			if id, found, lookupErr := s.riskBatchIDByKey(ctx, w.IdempotencyKey); lookupErr == nil && found {
+			// A concurrent or racing producer landed this exact materialization
+			// between our pre-flight lookup and here. Adopt it — with the same
+			// identity verification, so a colliding key still refuses loudly.
+			if id, adopted, adoptErr := s.adoptRiskBatch(ctx, w); adoptErr != nil {
+				return 0, adoptErr
+			} else if adopted {
 				return id, nil
 			}
 		}
@@ -1255,16 +1386,66 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 	// is there, the write landed: report it as the success it was. If it is not,
 	// the transaction genuinely rolled back and the error is real.
 	if err := commitRiskBatchTx(ctx, tx); err != nil {
-		id, found, lookupErr := s.riskBatchIDByKey(ctx, w.IdempotencyKey)
-		if lookupErr != nil {
-			return 0, fmt.Errorf("commit risk batch: %w (and the idempotency-key reconciliation also failed: %v)", err, lookupErr)
-		}
-		if found {
+		// The reconciliation is a best-effort SHORTCUT, not the safety net. If it
+		// also fails — one network event commonly kills both — the error is
+		// returned and the NEXT pass recomputes the same materialization, derives
+		// the SAME deterministic key, and adopts whatever landed. That is why the
+		// key had to stop being per-attempt: correctness must not depend on this
+		// lookup succeeding.
+		if id, adopted, adoptErr := s.adoptRiskBatch(ctx, w); adoptErr == nil && adopted {
 			return id, nil
 		}
 		return 0, fmt.Errorf("commit risk batch: %w", err)
 	}
 	return batchID, nil
+}
+
+// ErrRiskMaterializationConflict is raised when a batch already exists under this
+// materialization key but the identity BEHIND that key differs.
+//
+// It is a loud refusal rather than an adoption because the two possible causes are
+// both serious: a SHA-256 collision (astronomically unlikely, and if it happened
+// we would want to know), or an identity function that is not actually
+// deterministic — a map iteration, a clock, a locale-dependent format leaking into
+// the key. Silently adopting would serve one materialization's numbers under
+// another's name, which is the precise failure the key exists to prevent.
+var ErrRiskMaterializationConflict = errors.New("risk batch refused: materialization key already exists with a DIFFERENT identity")
+
+// adoptLookupHook lets a test fail the adoption lookup. Production always returns
+// nil; see adoptRiskBatch for why the seam has to exist.
+var adoptLookupHook = func() error { return nil }
+
+// adoptRiskBatch resolves an existing batch for w's materialization key, verifying
+// that the identity behind the key matches before adopting it.
+//
+// adopted=false with a nil error means "no batch exists for this key" — the
+// ordinary path, proceed with the write.
+func (s *Store) adoptRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, bool, error) {
+	// adoptLookupHook is a seam for the one scenario that cannot be provoked
+	// honestly: the reconciliation lookup failing on the SAME network event that
+	// swallowed the commit acknowledgement. Correctness must not depend on this
+	// lookup succeeding, and the only way to prove that is to break it.
+	if err := adoptLookupHook(); err != nil {
+		return 0, false, fmt.Errorf("resolve risk batch by materialization key: %w", err)
+	}
+	var id int64
+	var vector, digest string
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, materialization_vector, substrate_digest
+		 FROM risk_batches WHERE materialization_key = $1`, w.MaterializationKey).
+		Scan(&id, &vector, &digest)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("resolve risk batch by materialization key: %w", err)
+	}
+	// VERIFY, don't assume. The key is a digest; the identity is the thing.
+	if vector != w.MaterializationVector || digest != w.SubstrateDigest {
+		return 0, false, fmt.Errorf("%w: key %s is batch %d, whose vector/substrate differ from this pass's",
+			ErrRiskMaterializationConflict, w.MaterializationKey, id)
+	}
+	return id, true, nil
 }
 
 // isUniqueViolation reports whether err is PostgreSQL's unique-constraint
@@ -1282,21 +1463,6 @@ func isUniqueViolation(err error) bool {
 // downstream of it — the reconciliation, the no-duplicate guarantee, the retained
 // flag — is unreachable without being able to simulate that.
 var commitRiskBatchTx = func(ctx context.Context, tx pgx.Tx) error { return tx.Commit(ctx) }
-
-// riskBatchIDByKey resolves a batch by its idempotency key. Used only by the
-// commit reconciliation, on the pool rather than the failed transaction.
-func (s *Store) riskBatchIDByKey(ctx context.Context, key string) (int64, bool, error) {
-	var id int64
-	err := s.pool.QueryRow(ctx,
-		`SELECT id FROM risk_batches WHERE idempotency_key = $1`, key).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("resolve risk batch by idempotency key: %w", err)
-	}
-	return id, true, nil
-}
 
 // Risk batch/position status vocabularies. Closed sets, so a typo is a compile
 // error rather than a row nothing will ever select.
@@ -1354,6 +1520,29 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 		          SELECT 1 FROM risk_batch_watermarks w
 		          WHERE w.batch_id = b.id AND w.engine = r.engine))
 		  AND cardinality(b.required_engines) > 0
+		  -- EVERY ENGINE THAT REQUIRES A SWEEP DISCLOSURE MUST CARRY A COMPLETE
+		  -- ONE. Existence of the watermark row was not enough: the sweep columns
+		  -- are nullable by necessity (Aave has no sweeper), so a restored batch
+		  -- could hold a debt_manager stamp with cursor fields only, pass every
+		  -- count and required-engine check, and read back with Sweep nil — making
+		  -- a swept engine indistinguishable from an unswept one and letting
+		  -- hour-stale collateral be served as current.
+		  --
+		  -- The row-level CHECK already forbids a PARTIAL payload, so
+		  -- sweep_applicable is the whole test here; the explicit column checks
+		  -- are belt-and-braces against a constraint being dropped out from under
+		  -- this predicate.
+		  AND NOT EXISTS (
+		      SELECT 1 FROM unnest(b.required_sweep_engines) AS r(engine)
+		      WHERE NOT EXISTS (
+		          SELECT 1 FROM risk_batch_watermarks w
+		          WHERE w.batch_id = b.id AND w.engine = r.engine
+		            AND w.sweep_applicable
+		            AND w.sweep_rows IS NOT NULL
+		            AND w.sweep_failed IS NOT NULL
+		            AND w.sweep_success_sum IS NOT NULL
+		            AND w.sweep_generation IS NOT NULL
+		            AND w.sweep_generation_open IS NOT NULL))
 		  -- Aggregates must account for every position, or a book total silently
 		  -- omits one.
 		  AND COALESCE((SELECT sum(a.positions) FROM risk_batch_aggregates a
@@ -1371,7 +1560,7 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 	rows, err := s.pool.Query(ctx,
 		`SELECT engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
 		        sweep_rows, sweep_failed, sweep_success_sum::text, sweep_max_updated_at,
-		        sweep_generation, sweep_generation_open
+		        sweep_generation, sweep_generation_open, sweep_applicable
 		 FROM risk_batch_watermarks WHERE batch_id = $1 ORDER BY engine`, b.ID)
 	if err != nil {
 		return RiskBatch{}, false, fmt.Errorf("read risk batch watermarks: %w", err)
@@ -1383,14 +1572,18 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 		var sweepSum *string
 		var sweepUpdated *time.Time
 		var sweepOpen *bool
+		var sweepApplicable bool
 		if err := rows.Scan(&m.Engine, &m.ChainID, &m.LastBlock, &m.AckedEpoch, &m.MaxEpochAtCompute,
-			&sweepRows, &sweepFailed, &sweepSum, &sweepUpdated, &sweepGen, &sweepOpen); err != nil {
+			&sweepRows, &sweepFailed, &sweepSum, &sweepUpdated, &sweepGen, &sweepOpen,
+			&sweepApplicable); err != nil {
 			return RiskBatch{}, false, fmt.Errorf("scan risk batch watermark: %w", err)
 		}
-		// The sweep stamp is present only for engines that HAVE a sweep; a nil
-		// stays nil rather than becoming an all-zero row a reader would take for
-		// "swept nothing".
-		if sweepRows != nil {
+		// APPLICABILITY IS THE ROW'S OWN STATEMENT, not an inference from which
+		// columns happen to be non-null. Inferring it from `sweep_rows != nil`
+		// silently reclassified a partially-filled row as "no sweeper", which is
+		// the confusion the whole distinction exists to prevent. A nil Sweep now
+		// means the engine HAS no sweeper, and nothing else.
+		if sweepApplicable {
 			sw := &RiskSweepWatermark{Engine: m.Engine, Rows: *sweepRows}
 			if sweepFailed != nil {
 				sw.Failed = *sweepFailed
@@ -1606,6 +1799,15 @@ func nullableBlock(v *uint64) any {
 		return nil
 	}
 	return int64(*v)
+}
+
+// nonNilStrings turns a nil slice into an empty one, because the columns these
+// feed are NOT NULL arrays and pgx encodes a nil slice as NULL.
+func nonNilStrings(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
 }
 
 func orZeroBig(v *big.Int) *big.Int {

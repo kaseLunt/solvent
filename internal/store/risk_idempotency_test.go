@@ -1,6 +1,6 @@
 package store
 
-// The indeterminate commit, and why it needs a key.
+// The indeterminate commit, and why the key must be DETERMINISTIC.
 //
 // A Commit error does NOT mean "not committed". PostgreSQL may have committed and
 // the acknowledgement may have died on the wire, and from the client the two
@@ -13,7 +13,17 @@ package store
 //	         move reads 200→200 and the flag DISAPPEARS from the newest batch
 //
 // An operator who was supposed to see a 100% single-interval price move sees
-// nothing. The key turns the second write into a detectable no-op.
+// nothing.
+//
+// A per-ATTEMPT key only covers the narrowest version of this: the commit's
+// acknowledgement is lost AND the immediate reconciliation lookup succeeds. It does
+// nothing when that lookup fails too (one network event kills both), when the
+// process restarts first, or when a second instance starts. In all three the next
+// pass mints a fresh key and the duplicate lands anyway.
+//
+// So the key is a function of WHAT IS BEING MATERIALIZED. The second computation
+// of the same materialization collides with the first and adopts it, and the
+// duplicate becomes unrepresentable rather than merely detected.
 
 import (
 	"context"
@@ -90,10 +100,10 @@ func TestWriteRiskBatchRetryWithTheSameKeyDoesNotDoubleWrite(t *testing.T) {
 	require.Equal(t, 1, n, "no duplicate batch")
 }
 
-// TestDistinctPassesGetDistinctBatches is the guard against over-correcting: two
-// legitimately different prepared passes must BOTH land. A vector-derived key
-// would collide on a quiet chain and silently skip the second.
-func TestDistinctPassesGetDistinctBatches(t *testing.T) {
+// TestDistinctMaterializationsGetDistinctBatches is the guard against
+// over-correcting: two genuinely DIFFERENT materializations must both land. The
+// identity is what separates them, so distinct identities must never collide.
+func TestDistinctMaterializationsGetDistinctBatches(t *testing.T) {
 	s := testRiskStore(t)
 	ctx := context.Background()
 
@@ -176,6 +186,170 @@ func priceBaselineOf(t *testing.T, s *Store, batchID int64) *big.Int {
 	require.Len(t, rows, 1)
 	require.NotNil(t, rows[0].Value)
 	return rows[0].Value
+}
+
+// TestAdoptionVerifiesTheIdentityBehindTheKey: a key that matches while the
+// identity behind it differs is refused LOUDLY, never silently adopted.
+//
+// The two causes are both serious — a SHA-256 collision, or an identity function
+// that is not actually deterministic (a map iteration, a clock, a locale-dependent
+// format leaking in). Adopting anyway would serve one materialization's numbers
+// under another's name, which is the exact failure the key exists to prevent.
+func TestAdoptionVerifiesTheIdentityBehindTheKey(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	key := newTestKey()
+	first, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+
+	// Same key, DIFFERENT identity behind it.
+	forged := sampleBatchKeyed(10, key)
+	forged.SubstrateDigest = "a-different-substrate"
+	_, err = s.WriteRiskBatch(ctx, forged)
+	require.ErrorIs(t, err, ErrRiskMaterializationConflict)
+	require.Contains(t, err.Error(), "DIFFERENT identity")
+
+	forged = sampleBatchKeyed(10, key)
+	forged.MaterializationVector = "a-different-vector"
+	_, err = s.WriteRiskBatch(ctx, forged)
+	require.ErrorIs(t, err, ErrRiskMaterializationConflict)
+
+	// The refusal changed nothing.
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 1, n)
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, first, batch.ID)
+}
+
+// TestSameIdentityAdoptsWithoutRewriting: the ordinary restart / second-instance
+// path. No commit failure is simulated at all — the second call simply recognises
+// the materialization and adopts it.
+func TestSameIdentityAdoptsWithoutRewriting(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	key := newTestKey()
+	first, err := s.WriteRiskBatch(ctx, sampleBatchKeyed(10, key))
+	require.NoError(t, err)
+
+	// A DIFFERENT process, same materialization: distinct flags, distinct
+	// producer string — but the identity is the identity.
+	second := sampleBatchKeyed(10, key)
+	second.Positions[0].Flags = nil // the re-baselined, UNFLAGGED computation
+	adopted, err := s.WriteRiskBatch(ctx, second)
+	require.NoError(t, err)
+	require.Equal(t, first, adopted, "the same materialization adopts, it does not compete")
+
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 1, n)
+
+	// And the ORIGINAL — flagged — batch is what stands. This is the whole point:
+	// the unflagged recomputation cannot overwrite the warning.
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, 1, batch.FlaggedCount,
+		"the ORIGINAL flagged batch stands; the re-baselined unflagged one was never written")
+}
+
+// TestWriteRiskBatchSurvivesReconciliationFailureItself is CODEX'S DEMANDED SHAPE:
+// the commit lands, and the reconciliation lookup ALSO fails. The write returns an
+// error — honestly, because from here it cannot know — and the NEXT pass over the
+// same materialization must NOT create a newer unflagged batch.
+//
+// MUTANT THIS KILLS: revert the key to per-attempt randomness. The next pass then
+// mints a different key, does not adopt, and writes exactly the unflagged
+// duplicate — the flag assertion at the end fails.
+func TestWriteRiskBatchSurvivesReconciliationFailureItself(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	// Pass N: the baseline, price 100, unflagged.
+	base := sampleBatchKeyed(10, newTestKey())
+	base.Positions[0].Prices[0].Value = big.NewInt(100)
+	base.Positions[0].Flags = nil
+	baseID, err := s.WriteRiskBatch(ctx, base)
+	require.NoError(t, err)
+
+	// Pass N+1: price moved 100→200, FLAGGED. Its identity is deterministic.
+	movedKey := "materialization-of-the-moved-pass"
+	moved := sampleBatchKeyed(10, movedKey)
+	moved.Positions[0].Prices[0].Value = big.NewInt(200)
+	moved.Positions[0].Flags = []string{"large_price_step"}
+
+	// The commit lands and BOTH the acknowledgement and the reconciliation fail.
+	original := commitRiskBatchTx
+	fired := false
+	commitRiskBatchTx = func(ctx context.Context, tx pgx.Tx) error {
+		if fired {
+			return original(ctx, tx)
+		}
+		fired = true
+		if err := original(ctx, tx); err != nil { // REALLY commits
+			return err
+		}
+		// Poison the pool so the reconciliation lookup cannot succeed either.
+		return errors.New("simulated lost commit acknowledgement")
+	}
+	// The lookup fails only AFTER the commit, which is the honest shape: the
+	// pre-flight adoption ran on a healthy connection, then the network died
+	// during commit and took the reconciliation with it. (A pre-flight lookup
+	// failure is a different and safer case — it refuses the pass before writing
+	// anything, so no duplicate is possible there either.)
+	lookups := 0
+	originalAdopt := adoptLookupHook
+	adoptLookupHook = func() error {
+		lookups++
+		if lookups == 2 {
+			return errors.New("simulated reconciliation lookup failure (same network event)")
+		}
+		return nil
+	}
+	t.Cleanup(func() { commitRiskBatchTx = original; adoptLookupHook = originalAdopt })
+
+	_, err = s.WriteRiskBatch(ctx, moved)
+	require.Error(t, err, "with the reconciliation ALSO failing, the write must report honestly")
+
+	// The batch nevertheless landed, flagged.
+	var n int
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 2, n)
+
+	// THE NEXT PASS. Same materialization ⇒ same deterministic key. Its own
+	// computation is re-baselined (200 vs 200) and therefore UNFLAGGED — exactly
+	// the duplicate that used to erase the warning.
+	rebaselined := sampleBatchKeyed(10, movedKey)
+	rebaselined.Positions[0].Prices[0].Value = big.NewInt(200)
+	rebaselined.Positions[0].Flags = nil
+
+	adopted, err := s.WriteRiskBatch(ctx, rebaselined)
+	require.NoError(t, err, "the next pass adopts the committed batch")
+	require.Greater(t, adopted, baseID)
+
+	require.NoError(t, s.pool.QueryRow(ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 2, n, "NO newer batch was created")
+
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, adopted, batch.ID)
+	require.Equal(t, 1, batch.FlaggedCount,
+		"the large-step warning SURVIVES a reconciliation that failed — the harm this fix closes")
+
+	positions, err := s.RiskBatchPositions(ctx, batch.ID)
+	require.NoError(t, err)
+	var flags []string
+	for _, p := range positions {
+		if p.Engine == riskAaveEngine {
+			flags = p.Flags
+		}
+	}
+	require.Contains(t, flags, "large_price_step")
 }
 
 // TestWriteRiskBatchSurfacesAGenuineRollback: when the transaction really did NOT

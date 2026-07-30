@@ -348,6 +348,25 @@ func run(ctx context.Context, configPath, feedsPath string, once bool) error {
 		return err
 	}
 
+	// SINGLE WRITER, STRUCTURALLY. A session-scoped advisory lock held for this
+	// process's lifetime means a second honest riskd instance is EXCLUDED rather
+	// than merely tolerated: no duplicated work, no duplicated doorbells, no two
+	// retention prunes interleaving.
+	//
+	// It is defence in depth and not the correctness argument. That rests on the
+	// DETERMINISTIC materialization key (riskfeed's identity.go): two processes
+	// computing the same materialization collide and the second adopts, which is
+	// what actually protects a published large-step flag from being overwritten.
+	// The lock is session-scoped and dies with its connection, so a partition can
+	// still let a second instance in — which is precisely why correctness may not
+	// depend on it. The lock coordinates are documented at
+	// store.riskLockNamespace.
+	releaseLock, err := s.AcquireRiskMaterializerLock(ctx)
+	if err != nil {
+		return err
+	}
+	defer releaseLock()
+
 	slog.Info("riskd started",
 		"poll_interval", cfg.PollInterval,
 		"retention", cfg.Retention,

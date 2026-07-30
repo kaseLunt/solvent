@@ -99,10 +99,48 @@ CREATE TABLE risk_batches (
     -- as 200→200 on the retry, and the newest batch silently loses the
     -- large-step warning an operator was supposed to see.
     --
-    -- The key is generated once per PREPARED pass and reused across retries, so
-    -- the UNIQUE constraint turns a double-write into a detectable no-op that
-    -- WriteRiskBatch reconciles instead of recomputing.
-    idempotency_key TEXT NOT NULL UNIQUE
+    -- AN ATTEMPT-SCOPED KEY IS NOT ENOUGH, and that was the first attempt's
+    -- mistake. A key minted per pass invocation and discarded on error protects
+    -- only the path where the reconciliation lookup ITSELF succeeds. Three
+    -- ordinary histories walk straight past it:
+    --
+    --   * the commit lands and the reconciliation lookup also fails (one network
+    --     event kills both);
+    --   * the process restarts before it reconciles;
+    --   * a second honest riskd instance starts after the flagged batch
+    --     committed.
+    --
+    -- In every one of them the next pass re-reads the committed POST-MOVE price
+    -- as its baseline, mints a FRESH key, and writes an unflagged duplicate —
+    -- the original harm, untouched.
+    --
+    -- So the key is DETERMINISTIC IN WHAT IS BEING MATERIALIZED, never in who is
+    -- materializing it or when: any process that reads the same substrate at the
+    -- same watermarks under the same policy derives the SAME key, and therefore
+    -- ADOPTS the committed batch instead of duplicating it. The re-baselining
+    -- hole closes as a consequence rather than as a second guard.
+    --
+    -- materialization_vector and substrate_digest are persisted ALONGSIDE the key
+    -- so adoption is VERIFIED rather than assumed: a key that matches while the
+    -- identity behind it differs is refused LOUDLY, never silently adopted. The
+    -- vector string is deliberately human-readable — it is also the operational
+    -- answer to "what was this batch computed from".
+    materialization_key    TEXT NOT NULL UNIQUE,
+    materialization_vector TEXT NOT NULL DEFAULT '',
+    substrate_digest       TEXT NOT NULL DEFAULT '',
+
+    -- The engines for which a SWEEP DISCLOSURE is MANDATORY on this batch.
+    --
+    -- Without it, "every required engine has a watermark row" was satisfiable by
+    -- a debt_manager row carrying only cursor fields. The sweep columns must stay
+    -- nullable — the Aave engine genuinely has no sweeper — so a restored or
+    -- hand-inserted batch could omit the sweep payload entirely, pass every count
+    -- and required-engine check, and read back with Sweep nil. A swept engine
+    -- then becomes indistinguishable from an engine with NO sweeper, a serving
+    -- consumer cannot compare the batch against later sweep movement, and
+    -- hour-stale Debt Manager collateral becomes presentable as current.
+    -- Recording the requirement is what makes the absence detectable.
+    required_sweep_engines TEXT[] NOT NULL DEFAULT '{}'
 );
 CREATE INDEX risk_batches_newest_idx ON risk_batches (id DESC);
 
@@ -155,7 +193,43 @@ CREATE TABLE risk_batch_watermarks (
     sweep_generation     BIGINT,
     sweep_generation_open BOOLEAN,
 
-    PRIMARY KEY (batch_id, engine)
+    -- sweep_applicable is the ROW'S OWN statement about whether this engine has a
+    -- collateral sweep at all, and it is NOT NULL so the statement cannot be
+    -- omitted. Together with the CHECK below it makes the sweep payload
+    -- ALL-OR-NOTHING: an applicable row carries every sweep column, a
+    -- non-applicable row carries none.
+    --
+    -- The distinction it protects is load-bearing: "this engine has no sweeper"
+    -- (Aave, whose collateral is event-derived from aToken transfers) and "this
+    -- engine swept and found nothing" are different facts, and a reader that
+    -- confused them would treat hour-stale collateral as freshly confirmed. A
+    -- nullable-everything shape let a partially-filled row assert neither.
+    sweep_applicable BOOLEAN NOT NULL DEFAULT false,
+
+    PRIMARY KEY (batch_id, engine),
+
+    -- ALL-OR-NOTHING on the sweep column group. A partial sweep payload is not a
+    -- degraded disclosure, it is an uninterpretable one: a consumer cannot tell
+    -- whether a NULL means "no sweeper", "not recorded", or "zero", and each of
+    -- those licenses a different conclusion about freshness.
+    --
+    -- sweep_max_updated_at is deliberately EXCLUDED from the NOT NULL side: a
+    -- swept engine with zero attempted accounts legitimately has no most-recent
+    -- write, and forcing a timestamp there would mean inventing one.
+    CONSTRAINT risk_batch_watermarks_sweep_all_or_nothing CHECK (
+        (sweep_applicable AND sweep_rows IS NOT NULL
+                          AND sweep_failed IS NOT NULL
+                          AND sweep_success_sum IS NOT NULL
+                          AND sweep_generation IS NOT NULL
+                          AND sweep_generation_open IS NOT NULL)
+        OR
+        (NOT sweep_applicable AND sweep_rows IS NULL
+                              AND sweep_failed IS NULL
+                              AND sweep_success_sum IS NULL
+                              AND sweep_max_updated_at IS NULL
+                              AND sweep_generation IS NULL
+                              AND sweep_generation_open IS NULL)
+    )
 );
 
 -- ---------------------------------------------------------------------------

@@ -37,6 +37,10 @@ type syntheticBatch struct {
 	declaredPrices     int
 	declaredAggregates int
 	declaredAggPos     int
+	// requiredSweepEngines are the engines whose stamp MUST carry a complete sweep
+	// payload; sweepEngines are the ones that actually get one.
+	requiredSweepEngines []string
+	sweepEngines         []string
 	// actual* are what is really inserted.
 	actualPositions  int
 	actualLegs       int
@@ -65,16 +69,29 @@ func insertSyntheticBatch(t *testing.T, s *Store, spec syntheticBatch) int64 {
 	// deferred FKs permit.
 	_, err := s.pool.Exec(ctx, `INSERT INTO risk_batches
 		(id, status, position_count, leg_count, price_input_count, aggregate_count,
-		 required_engines, idempotency_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		 required_engines, materialization_key, required_sweep_engines)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 		id, RiskBatchComplete, spec.declaredPositions, spec.declaredLegs,
-		spec.declaredPrices, spec.declaredAggregates, required, newTestKey())
+		spec.declaredPrices, spec.declaredAggregates, required, newTestKey(),
+		nonNilStrings(spec.requiredSweepEngines))
 	require.NoError(t, err)
 
+	sweepy := map[string]bool{}
+	for _, e := range spec.sweepEngines {
+		sweepy[e] = true
+	}
 	for _, e := range spec.stampEngines {
-		_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
-			(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute)
-			VALUES ($1,$2,1,25635700,4,4)`, id, e)
+		if sweepy[e] {
+			_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
+				(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+				 sweep_rows, sweep_failed, sweep_success_sum, sweep_generation,
+				 sweep_generation_open, sweep_applicable)
+				VALUES ($1,$2,10,154796552,4,4, 1, 0, 154790000, 3, false, true)`, id, e)
+		} else {
+			_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
+				(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute)
+				VALUES ($1,$2,1,25635700,4,4)`, id, e)
+		}
 		require.NoError(t, err)
 	}
 
@@ -215,6 +232,129 @@ func TestNewestCompleteBatchDisqualifiesEachBrokenRelation(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Sweep applicability: a required sweep disclosure cannot be absent or partial.
+// ---------------------------------------------------------------------------
+//
+// The gap this closes: "every required engine has a watermark row" was satisfied
+// by a debt_manager row carrying ONLY cursor fields. The sweep columns must stay
+// nullable — Aave genuinely has no sweeper — so a restored batch could omit the
+// sweep payload, pass every count and required-engine check, and read back with
+// Sweep nil. A swept engine then looks exactly like an unswept one, no consumer
+// can compare the batch against later sweep movement, and hour-stale Debt Manager
+// collateral becomes servable as current.
+
+// TestNewestCompleteBatchRejectsMissingRequiredSweepDisclosure: the DM engine is
+// declared to require a sweep disclosure and its stamp carries none.
+//
+// MUTANT THIS KILLS: drop the required_sweep_engines conjunct from
+// NewestCompleteBatch. The batch below then passes every other check — counts,
+// required engines, aggregates — and is served with a DM stamp that cannot be
+// compared against later sweep movement.
+func TestNewestCompleteBatchRejectsMissingRequiredSweepDisclosure(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	goodID, err := s.WriteRiskBatch(ctx, sampleBatch(10))
+	require.NoError(t, err)
+
+	spec := wholeSynthetic()
+	spec.stampEngines = append(spec.stampEngines, riskDMEngine)
+	spec.requiredEngines = append(spec.requiredEngines, riskDMEngine)
+	// DM is DECLARED to require a sweep disclosure...
+	spec.requiredSweepEngines = []string{riskDMEngine}
+	// ...but is NOT given one.
+	spec.sweepEngines = nil
+	brokenID := insertSyntheticBatch(t, s, spec)
+	require.Greater(t, brokenID, goodID)
+
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, goodID, batch.ID,
+		"a required sweep disclosure that is ABSENT must disqualify the batch")
+}
+
+// TestRiskBatchWatermarkRejectsPartialSweepPayload: the row-level CHECK makes a
+// half-filled sweep payload unrepresentable, so the "partial columns" shape
+// cannot even be stored.
+//
+// A partial payload is not a degraded disclosure — it is an uninterpretable one:
+// a NULL could mean "no sweeper", "not recorded", or "zero", and each licenses a
+// different conclusion about freshness.
+func TestRiskBatchWatermarkRejectsPartialSweepPayload(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	id, err := s.WriteRiskBatch(ctx, sampleBatch(10))
+	require.NoError(t, err)
+
+	// applicable=true with only SOME sweep columns present.
+	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
+		(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+		 sweep_rows, sweep_applicable)
+		VALUES ($1, 'partial_engine', 10, 1, 0, 0, 1, true)`, id)
+	require.Error(t, err, "an applicable row missing sweep columns must be refused by the CHECK")
+	require.Contains(t, err.Error(), "sweep_all_or_nothing")
+
+	// The mirror image: not applicable, yet carrying sweep data.
+	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_watermarks
+		(batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+		 sweep_rows, sweep_failed, sweep_success_sum, sweep_generation,
+		 sweep_generation_open, sweep_applicable)
+		VALUES ($1, 'contradictory_engine', 10, 1, 0, 0, 1, 0, 5, 1, false, false)`, id)
+	require.Error(t, err, "a non-applicable row carrying sweep data is equally uninterpretable")
+	require.Contains(t, err.Error(), "sweep_all_or_nothing")
+}
+
+// TestNewestCompleteBatchAcceptsNoSweeperStamp is the POSITIVE CONTROL, and the
+// reason the tightening above had to be scoped rather than blanket: the Aave
+// engine has NO collateral sweeper, its stamp legitimately carries no sweep
+// payload, and that must remain servable. "No sweeper" and "swept nothing" stay
+// different facts.
+func TestNewestCompleteBatchAcceptsNoSweeperStamp(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	spec := wholeSynthetic()
+	spec.stampEngines = append(spec.stampEngines, riskDMEngine)
+	spec.requiredEngines = append(spec.requiredEngines, riskDMEngine)
+	spec.requiredSweepEngines = []string{riskDMEngine}
+	spec.sweepEngines = []string{riskDMEngine} // only DM gets one
+	id := insertSyntheticBatch(t, s, spec)
+
+	batch, found, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, id, batch.ID,
+		"Aave's sweeper-less stamp must NOT disqualify a batch — it is not a missing disclosure")
+
+	var dmSweep, aaveSweep *RiskSweepWatermark
+	for _, w := range batch.Watermarks {
+		switch w.Engine {
+		case riskDMEngine:
+			dmSweep = w.Sweep
+		case riskAaveEngine:
+			aaveSweep = w.Sweep
+		}
+	}
+	require.NotNil(t, dmSweep, "the swept engine reads back WITH its disclosure")
+	require.Nil(t, aaveSweep, "and the sweeper-less engine reads back with none — a real distinction, preserved")
+}
+
+// TestWriteRiskBatchRefusesUndisclosedRequiredSweep: the same law at WRITE time,
+// so a producer cannot create the state in the first place.
+func TestWriteRiskBatchRefusesUndisclosedRequiredSweep(t *testing.T) {
+	s := testRiskStore(t)
+	ctx := context.Background()
+
+	b := sampleBatch(10)
+	b.RequiredSweepEngines = []string{riskAaveEngine} // Aave has no sweeper to disclose
+	_, err := s.WriteRiskBatch(ctx, b)
+	require.ErrorIs(t, err, ErrRiskBatchIncomplete)
+	require.Contains(t, err.Error(), "requires a sweep disclosure")
+}
+
 // TestNewestCompleteBatchRequiresWatermarks: a batch with no stamp vector at all
 // cannot be checked for supersession, so it is not disclosable.
 func TestNewestCompleteBatchRequiresWatermarks(t *testing.T) {
@@ -273,8 +413,8 @@ func TestWriteRiskBatchRequiresAnIdempotencyKey(t *testing.T) {
 	ctx := context.Background()
 
 	b := sampleBatch(10)
-	b.IdempotencyKey = ""
+	b.MaterializationKey = ""
 	_, err := s.WriteRiskBatch(ctx, b)
 	require.ErrorIs(t, err, ErrRiskBatchIncomplete)
-	require.Contains(t, err.Error(), "idempotency key")
+	require.Contains(t, err.Error(), "materialization key")
 }

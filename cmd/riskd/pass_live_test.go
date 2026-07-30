@@ -90,6 +90,38 @@ type riskdFixture struct {
 	admin *pgx.Conn
 	cfg   *daemonConfig
 	ctx   context.Context
+	dsn   string
+	feeds *config.Feeds
+}
+
+// restartedConfig is a FRESH daemonConfig over the same database — a restarted
+// process, for every purpose that matters here: no in-memory watermark baseline,
+// so its first pass is mandatory, and its G5 baseline comes from whatever the
+// newest committed batch disclosed.
+//
+// It deliberately reuses the same policy values, because a restart of the SAME
+// build must derive the SAME materialization identity. (A policy change is a
+// different materialization, and identity_test.go pins that separately.)
+func (f *riskdFixture) restartedConfig(t *testing.T) *daemonConfig {
+	t.Helper()
+	registry, err := riskfeed.NewRegistry(f.feeds)
+	require.NoError(t, err)
+	fresh := *f.cfg
+	fresh.Registry = registry
+	return &fresh
+}
+
+// secondInstance is a separate store handle plus config over the same database —
+// a second honest riskd process.
+func (f *riskdFixture) secondInstance(t *testing.T) *riskdFixture {
+	t.Helper()
+	s, err := store.Open(f.ctx, f.dsn)
+	require.NoError(t, err)
+	t.Cleanup(s.Close)
+	return &riskdFixture{
+		store: s, admin: f.admin, ctx: f.ctx, dsn: f.dsn, feeds: f.feeds,
+		cfg: f.restartedConfig(t),
+	}
 }
 
 var (
@@ -150,7 +182,7 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 	require.NoError(t, err)
 
 	f := &riskdFixture{
-		store: s, admin: admin, ctx: ctx,
+		store: s, admin: admin, ctx: ctx, dsn: dsn, feeds: feeds,
 		cfg: &daemonConfig{
 			Registry: registry,
 			Aave: riskfeed.EngineBinding{Engine: risk.AaveEngine, ChainID: 1,
@@ -493,12 +525,20 @@ func TestRiskdRetentionHoldsAcrossPasses(t *testing.T) {
 	f.seedHealthyAavePosition(t)
 	f.cfg.Retention = 2
 
+	// Each pass must be a genuinely DIFFERENT materialization, or they all adopt
+	// the first and there is nothing to prune. That is not a fixture workaround —
+	// it is the daemon's real behaviour: it recomputes only when the vector moves,
+	// and a pass over unchanged state now correctly resolves to the batch that
+	// already describes it.
 	var ids []int64
 	for i := 0; i < 4; i++ {
+		f.seedPricesAt(t, fxPriceBlock+uint64(10*(i+1)),
+			"30000000000"+string(rune('0'+i)), "100000000")
 		res, err := runPass(f.ctx, f.store, f.cfg)
 		require.NoError(t, err)
 		ids = append(ids, res.BatchID)
 	}
+	require.Len(t, uniqueInt64(ids), 4, "four distinct materializations, four distinct batches")
 	var count int
 	require.NoError(t, f.admin.QueryRow(f.ctx, `SELECT count(*) FROM risk_batches`).Scan(&count))
 	require.Equal(t, 2, count)
@@ -563,6 +603,18 @@ func TestRiskdG5FlagsALargeStepAgainstThePreviousBatch(t *testing.T) {
 			require.Equal(t, 1, a.FlaggedPositions, "the flag propagates into the aggregate")
 		}
 	}
+}
+
+func uniqueInt64(in []int64) []int64 {
+	seen := map[int64]bool{}
+	var out []int64
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func (f *riskdFixture) seedPricesAt(t *testing.T, block uint64, collateral, debt string) {
