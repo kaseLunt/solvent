@@ -33,7 +33,7 @@ func renderP3Text(p *p3Result) string {
 	// finding stops being reportable.
 	var failures []p3Row
 	for _, r := range p.Rows {
-		if r.Gated && r.Verdict != verdictExact {
+		if r.Gated && verdictIsFailure(r.Verdict) {
 			failures = append(failures, r)
 		}
 	}
@@ -50,6 +50,24 @@ func renderP3Text(p *p3Result) string {
 			}
 			for _, k := range sortedMapKeys(r.Evidence) {
 				fmt.Fprintf(&b, "      %s = %s\n", k, r.Evidence[k])
+			}
+		}
+	}
+
+	// The gated SUCCESSES that are not plain `exact` — printed in their own section
+	// so they are visible without being counted as failures.
+	var notable []p3Row
+	for _, r := range p.Rows {
+		if r.Gated && !verdictIsFailure(r.Verdict) && r.Verdict != verdictExact {
+			notable = append(notable, r)
+		}
+	}
+	if len(notable) > 0 {
+		b.WriteString("\n  GATED SUCCESSES (not failures; richer verdicts than plain exact):\n")
+		for _, r := range notable {
+			fmt.Fprintf(&b, "  - [%s] %s / %s: %s\n", r.Verdict, r.Gate, r.Leg, r.Subject)
+			if r.Note != "" {
+				fmt.Fprintf(&b, "      %s\n", r.Note)
 			}
 		}
 	}

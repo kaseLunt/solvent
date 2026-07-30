@@ -108,19 +108,23 @@ type T6BacktestRow struct {
 	// ResidueZeroed is true when the deriver emitted a residue_zeroed event at
 	// this (tx, log_index) — meaning DebtManagerCore.sol:549-553's silent
 	// zeroing was MODELLED, so the residue tolerance must not also be spent.
-	ResidueZeroed     bool        `json:"residue_zeroed"`
-	ResidueAmount     *big.Int    `json:"-"`
-	BeforeDebtText    string      `json:"before_debt_usd"`
-	LiquidatedText    string      `json:"liquidated_usd"`
-	IndexText         string      `json:"index_at_block"`
-	NormBeforeText    string      `json:"normalized_before"`
-	NormDeltaText     string      `json:"normalized_delta"`
-	NormAfterText     string      `json:"normalized_after"`
-	ResidueText       string      `json:"residue,omitempty"`
-	LiquidatorHex     string      `json:"liquidator"`
-	Seizures          []T6Seizure `json:"seizures"`
-	SameBlockEarlier  []string    `json:"same_block_earlier_custodied_witnesses"`
-	PriorPassLogIndex *uint32     `json:"prior_pass_log_index,omitempty"`
+	ResidueZeroed    bool        `json:"residue_zeroed"`
+	ResidueAmount    *big.Int    `json:"-"`
+	BeforeDebtText   string      `json:"before_debt_usd"`
+	LiquidatedText   string      `json:"liquidated_usd"`
+	IndexText        string      `json:"index_at_block"`
+	NormBeforeText   string      `json:"normalized_before"`
+	NormDeltaText    string      `json:"normalized_delta"`
+	NormAfterText    string      `json:"normalized_after"`
+	ResidueText      string      `json:"residue,omitempty"`
+	LiquidatorHex    string      `json:"liquidator"`
+	Seizures         []T6Seizure `json:"seizures"`
+	SameBlockEarlier []string    `json:"same_block_earlier_custodied_witnesses"`
+	// SameBlockWitnesses is the STRUCTURED form of the same list. The formatted
+	// strings above are for the artifact; causation cannot be judged from prose, so
+	// the gate replays THESE (Codex round 2, finding H2).
+	SameBlockWitnesses []T6Witness `json:"-"`
+	PriorPassLogIndex  *uint32     `json:"prior_pass_log_index,omitempty"`
 	// NextPassLogIndex / NextPassBeforeDebtUSD describe the NEXT Liquidated for the
 	// same (tx, account, debt token). They exist for obligation 4's frame: a FIRST
 	// pass's after-state cannot be welded against block-end borrowingOf, because
@@ -142,6 +146,26 @@ type T6Seizure struct {
 	Bonus      *big.Int `json:"-"`
 	AmountText string   `json:"amount"`
 	BonusText  string   `json:"bonus"`
+}
+
+// T6Witness is one same-block earlier custodied log, decomposed far enough for the
+// gate to decide whether it could have moved THIS account's eligibility.
+//
+// WHY THE STRUCTURE MATTERS (Codex round 2, finding H2): the intra-block classifier
+// used to accept "some earlier log exists" as proof that a flip was caused
+// in-block. On this population a busy block is the norm, so that excused genuine
+// false negatives. Judging causation needs to know WHICH log, WHAT it wrote, and
+// WHETHER it concerns this account or a token it holds — which prose cannot answer.
+type T6Witness struct {
+	LogIndex uint32 `json:"log_index"`
+	Address  string `json:"address"`
+	Topic0   string `json:"topic0"`
+	// Topic1Addr / Topic2Addr / Topic3Addr are the low-20-byte address payloads of
+	// the indexed slots, empty when the slot is absent. The DM events this run
+	// cares about carry the account and the token in these positions.
+	Topic1Addr string `json:"topic1_addr,omitempty"`
+	Topic2Addr string `json:"topic2_addr,omitempty"`
+	Topic3Addr string `json:"topic3_addr,omitempty"`
 }
 
 // T6FeedRound is one aggregator round as CUSTODY holds it: the block, and the
@@ -179,11 +203,12 @@ type T6FeedScan struct {
 	RawLastBlock      uint64 `json:"raw_last_block"`
 	// Rounds is the per-block round list, ordered by block.
 	Rounds []T6FeedRound `json:"-"`
-	// DomainEndTime is the CHAIN-TIME endpoint of the custody domain: the newest
-	// source_as_of any walked feed on this chain asserts at or below the domain
-	// upper bound. It bounds the head interval in chain time so the B3 scan never
-	// measures the head against the process wall clock (Codex round 1, finding 8).
-	DomainEndTime int64 `json:"domain_end_chain_time"`
+	// DomainBoundaryBlock is the domain's upper boundary: min(ingest cursor, pin).
+	// Its HEADER TIMESTAMP — read at a hash-bound pin in Stage B — is the chain-time
+	// endpoint the head interval is measured to. A header time keeps advancing even
+	// when every feed has stopped, which the feed population's own last write does
+	// not (Codex round 2, finding H3).
+	DomainBoundaryBlock uint64 `json:"domain_boundary_block"`
 	// MissingAsOf counts domain rows with NULL source_as_of — UNSCANNABLE, never
 	// extrapolated over (chain-truth R4.1).
 	MissingAsOf int64 `json:"rows_missing_source_as_of"`
@@ -697,7 +722,10 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 		// address is a walked DM/oracle address. These are the only witnesses
 		// permitted to explain an eligibility flip; anything else is UNEXPLAINED.
 		wrows, err := q.Query(ctx, `
-			SELECT r.log_index, encode(r.address,'hex'), encode(r.topics[1],'hex')
+			SELECT r.log_index, encode(r.address,'hex'), encode(r.topics[1],'hex'),
+			       COALESCE(encode(substring(r.topics[2] FROM 13 FOR 20),'hex'),''),
+			       COALESCE(encode(substring(r.topics[3] FROM 13 FOR 20),'hex'),''),
+			       COALESCE(encode(substring(r.topics[4] FROM 13 FOR 20),'hex'),'')
 			FROM raw_logs r
 			WHERE r.chain_id = 10 AND r.block_number = $1 AND r.log_index < $2
 			ORDER BY r.log_index`, blockNumber, int32(logIdx))
@@ -706,13 +734,17 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 		}
 		for wrows.Next() {
 			var li int32
-			var addr, topic string
-			if err := wrows.Scan(&li, &addr, &topic); err != nil {
+			var addr, topic, t1, t2, t3 string
+			if err := wrows.Scan(&li, &addr, &topic, &t1, &t2, &t3); err != nil {
 				wrows.Close()
 				return fmt.Errorf("scan case %s witness: %w", key, err)
 			}
 			row.SameBlockEarlier = append(row.SameBlockEarlier,
 				fmt.Sprintf("log_index %d address 0x%s topic0 0x%s", li, addr, topic))
+			row.SameBlockWitnesses = append(row.SameBlockWitnesses, T6Witness{
+				LogIndex: uint32(li), Address: addr, Topic0: topic,
+				Topic1Addr: t1, Topic2Addr: t2, Topic3Addr: t3,
+			})
 		}
 		wrows.Close()
 		if err := wrows.Err(); err != nil {
@@ -917,20 +949,19 @@ func collectFeedScans(ctx context.Context, q store.Querier, cfg FeedRegistry, pi
 		if err := prows.Err(); err != nil {
 			return nil, fmt.Errorf("iterate feed %s rounds: %w", f.Stream, err)
 		}
-		// The custody domain's CHAIN-TIME endpoint: the newest source_as_of any
-		// walked feed on this chain asserts within the domain. It is chain testimony
-		// (an aggregator's own updatedAt), so the head interval can be measured
-		// without ever consulting the process clock. Taken across ALL feeds rather
-		// than this one, deliberately: a feed that has STOPPED has no recent round
-		// of its own, and its own newest round would make its head interval zero.
-		var endTime *int64
-		if err := q.QueryRow(ctx, `
-			SELECT EXTRACT(EPOCH FROM max(source_as_of))::bigint
-			FROM prices
-			WHERE chain_id = 1 AND owner_engine = $1 AND source_as_of IS NOT NULL
-			  AND block_number <= $2`, cfg.FeedEngine, int64(upper)).Scan(&endTime); err == nil && endTime != nil {
-			scan.DomainEndTime = *endTime
-		}
+		// The domain's upper BOUNDARY BLOCK is recorded here; its header TIME is read
+		// in Stage B through the pinned reader (chain-truth: a header time is a chain
+		// read, and Stage A takes none).
+		//
+		// THE DEFECT THIS REPLACES (Codex round 2, finding H3): the endpoint used to be
+		// the newest source_as_of across the SAME Chainlink feed population. If every
+		// feed stops together while the chain and the ingest cursors keep advancing,
+		// that maximum stops too — so the most recent feed's head interval stays zero
+		// and a chain-wide oracle outage could still be handed a provenance upgrade.
+		// The header timestamp at the custody boundary keeps advancing regardless of
+		// whether any feed publishes, which is exactly the property the measurement
+		// needs.
+		scan.DomainBoundaryBlock = upper
 		out = append(out, scan)
 	}
 	return out, nil

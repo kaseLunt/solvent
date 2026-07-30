@@ -28,7 +28,7 @@ func seizure(seq uint16, tok common.Address, amount, bonus string) snapshotdb.T6
 	}
 }
 
-func parentFrame(bal, price map[common.Address]*big.Int, bonus *big.Int, tokens ...common.Address) *frameState {
+func testParentFrame(bal, price map[common.Address]*big.Int, bonus *big.Int, tokens ...common.Address) parentFrame {
 	st := &frameState{
 		prices:   price,
 		balances: bal,
@@ -41,7 +41,7 @@ func parentFrame(bal, price map[common.Address]*big.Int, bonus *big.Int, tokens 
 			LiquidationBonus:     bonus,
 		}
 	}
-	return st
+	return parentFrame{st: st}
 }
 
 // TestSeizureIsAnchoredToLiquidatedUSD is the round-1 finding-5 regression.
@@ -62,7 +62,7 @@ func TestSeizureIsAnchoredToLiquidatedUSD(t *testing.T) {
 	require.Equal(t, "20000", bonus.String())
 	amount := new(big.Int).Add(cAFD, bonus)
 
-	parent := parentFrame(
+	parent := testParentFrame(
 		map[common.Address]*big.Int{tokA: big.NewInt(50_000_000)},
 		map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)},
 		bonus2Pct, tokA)
@@ -151,7 +151,7 @@ func TestSeizureAllPartialShapeTiesEveryElementToTheBudget(t *testing.T) {
 	credited.Mul(credited, big.NewInt(1_000_000))
 	credited.Quo(credited, pow10Big(6))
 
-	parent := parentFrame(
+	parent := testParentFrame(
 		map[common.Address]*big.Int{tokA: bal},
 		map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)},
 		bonus2Pct, tokA)
@@ -192,7 +192,7 @@ func TestZeroAmountSeizureAssertsTheSafeReallyHeldNone(t *testing.T) {
 		NormalizedAfter: big.NewInt(0), IndexAtBlock: big.NewInt(1e18),
 	}
 	// Safe really held none: exact.
-	parent := parentFrame(
+	parent := testParentFrame(
 		map[common.Address]*big.Int{tokB: big.NewInt(0)},
 		map[common.Address]*big.Int{tokB: mustBig("118000000000")},
 		bonus2Pct, tokB)
@@ -200,7 +200,7 @@ func TestZeroAmountSeizureAssertsTheSafeReallyHeldNone(t *testing.T) {
 	require.Zero(t, tallyP3(reconstructSeizures("case", newBacktestView(row, f), parent, decs, f)))
 
 	// The Safe DID hold some but the event seized zero: a real disagreement.
-	parent.balances[tokB] = big.NewInt(12345)
+	parent.st.balances[tokB] = big.NewInt(12345)
 	f2 := newGateFrame(gateBacktest)
 	require.Positive(t, tallyP3(reconstructSeizures("case", newBacktestView(row, f2), parent, decs, f2)),
 		"a zero-amount element over a NONZERO Safe balance must fail - otherwise the whole zero population is a vacuous pass")
@@ -213,11 +213,11 @@ func TestSeizureInputsUnreadIsGatedNotSkipped(t *testing.T) {
 		Seizures:      []snapshotdb.T6Seizure{seizure(1, tokA, "1000", "20")},
 		LiquidatedUSD: big.NewInt(1000),
 	}
-	parent := &frameState{
+	parent := parentFrame{st: &frameState{
 		prices:   map[common.Address]*big.Int{},
 		balances: map[common.Address]*big.Int{},
 		configs:  map[common.Address]collateralTokenConfigResult{},
-	}
+	}}
 	f := newGateFrame(gateBacktest)
 	rows := reconstructSeizures("case", newBacktestView(row, f), parent, map[common.Address]uint8{}, f)
 	require.Len(t, rows, 1)
@@ -231,8 +231,8 @@ func TestSeizureInputsUnreadIsGatedNotSkipped(t *testing.T) {
 // drift.
 func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) {
 	idx := big.NewInt(1e18)
-	exec := func(chainDebt int64) *frameState {
-		return &frameState{chainDebt: big.NewInt(chainDebt)}
+	exec := func(chainDebt int64) execFrame {
+		return execFrame{st: &frameState{chainDebt: big.NewInt(chainDebt)}}
 	}
 
 	t.Run("exact: no tolerance spent", func(t *testing.T) {
@@ -289,7 +289,7 @@ func TestResidueWeldSpendsTheToleranceOnlyUnderAllThreeConditions(t *testing.T) 
 	t.Run("chain leg unread: weld-unread, gated", func(t *testing.T) {
 		f := newGateFrame(gateBacktest)
 		rows := residueWeld("c", newBacktestView(snapshotdb.T6BacktestRow{NormalizedAfter: big.NewInt(0), IndexAtBlock: idx}, f),
-			&frameState{}, f)
+			execFrame{st: &frameState{}}, f)
 		require.Equal(t, verdictWeldUnread, rows[0].Verdict)
 		require.True(t, rows[0].Gated)
 	})
@@ -317,20 +317,20 @@ func TestObligation1IsTheP2Identity(t *testing.T) {
 // a price that differs between the parent and execution frames makes the case
 // marginal, and the note names the token and both values.
 func TestPriceFrameDeltaDetectsAnIntraBlockMove(t *testing.T) {
-	parent := &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}
-	same := &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}
+	parent := parentFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}}
+	same := execFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}}
 	moved, note := priceFrameDelta(parent, same)
 	require.False(t, moved)
 	require.Contains(t, note, "IDENTICAL")
 
-	execMoved := &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(999_000)}}
+	execMoved := execFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(999_000)}}}
 	moved, note = priceFrameDelta(parent, execMoved)
 	require.True(t, moved)
 	require.Contains(t, note, "1000000")
 	require.Contains(t, note, "999000")
 
 	// A frame whose price is unread is NOT silently "unchanged".
-	moved, note = priceFrameDelta(parent, &frameState{prices: map[common.Address]*big.Int{}})
+	moved, note = priceFrameDelta(parent, execFrame{st: &frameState{prices: map[common.Address]*big.Int{}}})
 	require.False(t, moved)
 	require.Contains(t, note, "one frame's price is unread")
 }

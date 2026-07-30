@@ -45,6 +45,9 @@ type p3Ctx struct {
 
 	frames *frameSet
 	now    time.Time
+	// boundaryTimes memoises hash-bound header timestamps at custody-domain
+	// boundaries (several feeds share one boundary).
+	boundaryTimes map[uint64]chainHeaderTime
 	// scenarioRoot is where internal/risk/scenarios lives relative to the process
 	// CWD. Empty means the repo root (the acceptance posture, since `make reconcile`
 	// runs there); tests point it at their own relative path.
@@ -205,7 +208,13 @@ func p3Counts(rows []p3Row) map[string][3]int {
 		c := out[r.Gate]
 		if r.Gated {
 			c[0]++
-			if r.Verdict != verdictExact {
+			// THE SAME predicate the JSON tally and the exit code use (Codex round 2,
+			// finding M4). This counter feeds the human artifact's per-gate "failed"
+			// column and its total; counting every gated non-exact verdict here put a
+			// provenance UPGRADE, a QUALIFIER and a causation-proven MARGINAL case in
+			// the failure column while the JSON and the exit code passed — two
+			// acceptance artifacts giving an operator contradictory answers.
+			if verdictIsFailure(r.Verdict) {
 				c[1]++
 			}
 		} else {

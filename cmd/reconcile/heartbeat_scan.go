@@ -59,6 +59,8 @@ func heartbeatFrame() *gateFrame {
 			"the completeness witness the price rows are welded against: a price row per DISTINCT round block, so a missing round would shorten history and lengthen a gap"),
 		derived("ingest_cursors.last_block for the aggregator's own stream",
 			"the UPPER bound of the custody domain. Above the cursor there is no testimony at all, so a gap there is unscannable rather than a violation"),
+		pinned("header time @pinHash(custody-domain boundary block = min(ingest cursor, P_eth))",
+			"the CHAIN-TIME endpoint the head interval is measured to. A header advances with the chain even when every feed has stopped, which the feed population's own newest write does not — so a chain-wide oracle outage cannot receive a provenance upgrade (Codex round 2, finding H3)"),
 		pinned("Chainlink proxy.aggregator()@pinHash(P_eth)",
 			"the phase-change check, consulted FIRST for any gap open-ended at the scan head or > 2x the published heartbeat"),
 		committed("recon/feeds.json heartbeatSeconds, graceSeconds, startBlock, proxy per stream",
@@ -101,8 +103,12 @@ type heartbeatVerdict struct {
 	// JudgedMaxGapSeconds is max(between-round gaps, head interval) — the value the
 	// budget ladder judges, so a STALLED feed can no longer receive a provenance
 	// upgrade just because it has no further round to close its final interval.
-	JudgedMaxGapSeconds int64    `json:"judged_max_gap_seconds"`
-	JudgedMaxIsHead     bool     `json:"judged_max_is_head_interval"`
+	JudgedMaxGapSeconds int64 `json:"judged_max_gap_seconds"`
+	JudgedMaxIsHead     bool  `json:"judged_max_is_head_interval"`
+	// DomainBoundaryBlock / DomainBoundaryTime are the hash-bound header the head
+	// interval is measured to (Codex round 2, finding H3).
+	DomainBoundaryBlock uint64   `json:"domain_boundary_block"`
+	DomainBoundaryTime  int64    `json:"domain_boundary_header_time"`
 	PhaseChecked        bool     `json:"phase_change_checked"`
 	PhaseAggregator     string   `json:"proxy_aggregator_at_pin,omitempty"`
 	Verdict             string   `json:"verdict"`
@@ -117,6 +123,7 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 	var rows []p3Row
 	var verdicts []heartbeatVerdict
 	f.use("recon/feeds.json heartbeatSeconds, graceSeconds, startBlock, proxy per stream")
+	f.use("header time @pinHash(custody-domain boundary block = min(ingest cursor, P_eth))")
 
 	for _, scan := range c.t6.Feeds {
 		v := heartbeatVerdict{
@@ -218,28 +225,29 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 		// on the feed's current silence, so it joins the judged maximum.
 		last := scan.Rounds[len(scan.Rounds)-1]
 		if last.HasAsOf {
-			if scan.DomainEndTime > 0 {
-				headSeconds := int64(scan.DomainEndTime) - last.SourceAsOf.Unix()
-				if headSeconds < 0 {
-					headSeconds = 0
-				}
-				v.HeadGapSeconds = headSeconds
-				v.HeadGapIsChainTime = true
-			} else {
-				// No domain-endpoint header time: the head interval is UNMEASURABLE in
-				// chain time, and substituting the wall clock would fabricate chain
-				// testimony. Recorded as such; the feed cannot be upgraded on a head
-				// interval nobody measured.
-				v.HeadGapSeconds = -1
+			// The endpoint is the HEADER TIMESTAMP at the domain's upper boundary,
+			// read at a hash-bound pin. A header time advances with the chain whether
+			// or not any feed publishes, so a chain-wide outage cannot hide behind a
+			// stalled feed population (Codex round 2, finding H3).
+			boundaryTime, boundaryErr := c.domainBoundaryTime(ctx, scan.DomainBoundaryBlock)
+			if boundaryErr != nil {
+				rows = append(rows, unreadRow(gateHeartbeat, v.Aggregator, "domain-boundary header time",
+					fmt.Sprintf("the header at the custody boundary block %d did not read, so the head interval cannot be measured in chain time: %v", scan.DomainBoundaryBlock, boundaryErr)))
+			}
+			v.DomainBoundaryBlock = scan.DomainBoundaryBlock
+			v.DomainBoundaryTime = int64(boundaryTime)
+			v.HeadGapSeconds, v.HeadGapIsChainTime = headInterval(last.SourceAsOf.Unix(), boundaryTime)
+			if !v.HeadGapIsChainTime {
+				// No boundary header time: the head interval is UNMEASURABLE in chain
+				// time, and substituting the wall clock would fabricate chain testimony.
+				// Recorded as such; the feed cannot be upgraded on a head interval
+				// nobody measured.
+				_ = boundaryErr
 			}
 		}
 		// The JUDGED maximum includes the head interval: a stalled feed's silence is
 		// exactly the thing a freshness budget claims cannot happen.
-		v.JudgedMaxGapSeconds = v.MaxGapSeconds
-		if v.HeadGapIsChainTime && v.HeadGapSeconds > v.JudgedMaxGapSeconds {
-			v.JudgedMaxGapSeconds = v.HeadGapSeconds
-			v.JudgedMaxIsHead = true
-		}
+		v.JudgedMaxGapSeconds, v.JudgedMaxIsHead = judgedMaxGap(v.MaxGapSeconds, v.HeadGapSeconds, v.HeadGapIsChainTime)
 
 		// An OPEN-ENDED gap at the scan head ALWAYS consults the phase check: a
 		// permanently quiet walked aggregator is indistinguishable from a re-pointed
@@ -417,4 +425,60 @@ func readProxyAggregator(ctx context.Context, c *p3Ctx, proxy common.Address) (c
 		return common.Address{}, err.Error(), nil
 	}
 	return agg, "", nil
+}
+
+// chainHeaderTime is a unix timestamp that CAME FROM A BLOCK HEADER at a hash-bound
+// pin, and nothing else.
+//
+// THE DEFECT THIS CLOSES (Codex round 2, finding H3): the head interval was measured
+// to the newest source_as_of across the Chainlink feed population. When every feed
+// stops together that maximum stops too, so the head interval stays zero and a
+// chain-wide oracle outage could still be handed a provenance upgrade. A distinct
+// type makes the substitution a COMPILE error: only domainBoundaryTime produces one,
+// and it only produces one from headerTime.
+type chainHeaderTime int64
+
+// domainBoundaryTime reads the header timestamp at a domain boundary block through
+// the pinned reader, memoised per run (several feeds share a boundary).
+func (c *p3Ctx) domainBoundaryTime(ctx context.Context, block uint64) (chainHeaderTime, error) {
+	if block == 0 {
+		return 0, fmt.Errorf("no custody-domain boundary block was recorded")
+	}
+	if c.boundaryTimes == nil {
+		c.boundaryTimes = map[uint64]chainHeaderTime{}
+	}
+	if t, ok := c.boundaryTimes[block]; ok {
+		return t, nil
+	}
+	t, _, err := c.ethR.headerTime(ctx, block)
+	if err != nil {
+		return 0, err
+	}
+	c.boundaryTimes[block] = chainHeaderTime(t)
+	return chainHeaderTime(t), nil
+}
+
+// headInterval is the head measurement, as a pure function of the two chain facts
+// it is allowed to see: the newest custodied round own as-of, and the HEADER time at
+// the custody boundary. chainTime is false when the boundary header is unavailable,
+// and the caller then gates rather than substituting anything.
+func headInterval(lastRoundAsOf int64, boundary chainHeaderTime) (seconds int64, chainTime bool) {
+	if boundary <= 0 {
+		return -1, false
+	}
+	s := int64(boundary) - lastRoundAsOf
+	if s < 0 {
+		s = 0
+	}
+	return s, true
+}
+
+// judgedMaxGap folds the head interval into the maximum the budget ladder judges. A
+// stalled feed has no further round to close its final interval, so excluding the
+// head is what let an outage pass (Codex round 1, finding 8).
+func judgedMaxGap(maxBetweenRounds, head int64, headIsChainTime bool) (int64, bool) {
+	if headIsChainTime && head > maxBetweenRounds {
+		return head, true
+	}
+	return maxBetweenRounds, false
 }

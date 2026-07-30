@@ -58,7 +58,7 @@ func backtestFrame_() *gateFrame {
 			"obligation 1's EXPECTED value: the event's own beforeDebtAmount. It was CONSUMED UNDECLARED before Codex round 1 — the most load-bearing number in the gate, absent from its own frame"),
 		derived(srcBTLiquidated,
 			"obligation 3's repay BUDGET: the USD the contract actually liquidated. Carried across the ordered elements so the seizure reconstruction is anchored to it rather than inverted from the elements themselves"),
-		derived("position_events(event_type=liquidation).payload.before_debt_usd of the NEXT pass (same tx, account, debt token)",
+		derived(srcBTNextPass,
 			"obligation 4's expected value for a FIRST pass: the chain's own statement of the between-passes state. Block-end borrowingOf is wrong there, because the second pass moves the debt again before the block closes"),
 		derived(srcBTIndex,
 			"the index our fold used. Obligation 1 multiplies OUR normalized balance by it and compares against the event's own beforeDebtAmount"),
@@ -118,6 +118,7 @@ const (
 	srcBTResidue    = "position_events(event_type=residue_zeroed).payload.residue"
 	srcBTStoredHash = "raw_logs.block_hash for the case's own (tx, log_index)"
 	srcBTWitnesses  = "raw_logs same-block rows with a LOWER log_index"
+	srcBTNextPass   = "position_events(event_type=liquidation).payload.before_debt_usd of the NEXT pass (same tx, account, debt token)"
 )
 
 func newBacktestView(row snapshotdb.T6BacktestRow, f *gateFrame) *backtestView {
@@ -164,7 +165,39 @@ func (v *backtestView) sameBlockEarlier() []string {
 	return v.row.SameBlockEarlier
 }
 
+// sameBlockWitnesses is the STRUCTURED witness list the causation replay consumes.
+func (v *backtestView) sameBlockWitnesses() []snapshotdb.T6Witness {
+	v.f.use(srcBTWitnesses)
+	return v.row.SameBlockWitnesses
+}
+
 func (v *backtestView) priorPassLogIndex() *uint32 { return v.row.PriorPassLogIndex }
+
+// nextPass is obligation 4's expected value for a FIRST pass. It is an ACCESSOR
+// (Codex round 2, finding H1) because residueWeld previously copied v.row and read
+// these fields directly: the frame declared the source, nothing consumed it, and
+// the deferred validator therefore added a gated failure on every run — a
+// deterministic false failure created by the round-1 fix itself.
+//
+// present is false when there is no following pass, and in that case NOTHING is
+// recorded: a conditional source must not be marked consumed on cases that do not
+// have it, or the ledger would stop being able to tell the two situations apart.
+func (v *backtestView) nextPass() (logIndex uint32, beforeDebt *big.Int, beforeText string, present bool) {
+	if v.row.NextPassLogIndex == nil {
+		return 0, nil, "", false
+	}
+	v.f.use(srcBTNextPass)
+	return *v.row.NextPassLogIndex, v.row.NextPassBeforeDebtUSD, v.row.NextPassBeforeText, true
+}
+
+// hasNextPass reports whether a following pass exists WITHOUT recording a
+// consumption: the residue weld needs the shape question answered before it
+// decides which expected value applies.
+func (v *backtestView) hasNextPass() bool { return v.row.NextPassLogIndex != nil }
+
+// residueModelled / normalizedAfterText are the remaining row fields the residue
+// weld needs, behind accessors for the same reason.
+func (v *backtestView) normalizedAfterText() string { return v.row.NormalizedAfter.String() }
 
 // backtestCaseResult is one case's four-obligation outcome.
 type backtestCaseResult struct {
@@ -362,12 +395,12 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	f.use("Multicall3.getBlockHash(N-1)@pinHash(N)")
 
 	// ---- parent-frame reads ------------------------------------------------
-	parent, err := readBacktestFrameState(ctx, c, f, account, debtToken, db, decimals, fc.Block-1, parentHash, true)
+	parent, err := readParentFrame(ctx, c, f, account, debtToken, db, decimals, fc.Block-1, parentHash)
 	if err != nil {
 		return rows, res, err
 	}
-	if parent.unread != "" {
-		rows = append(rows, unreadRow(gateBacktest, key, "parent-frame state", parent.unread))
+	if parent.st.unread != "" {
+		rows = append(rows, unreadRow(gateBacktest, key, "parent-frame state", parent.st.unread))
 		res.SkipClass = "parent-frame-unread"
 		return rows, res, nil
 	}
@@ -377,11 +410,11 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	// whole collateral basket at execution-frame prices, and a token whose price is
 	// unread there cannot be silently held flat.
 	f.use("ERC20.decimals(token)@pinHash(P_op)") // the 10^dec denominator every conversion below divides by
-	execWant := make([]common.Address, 0, len(parent.collateral))
-	for _, leg := range parent.collateral {
+	execWant := make([]common.Address, 0, len(parent.st.collateral))
+	for _, leg := range parent.st.collateral {
 		execWant = append(execWant, leg.token)
 	}
-	exec, err := readBacktestFrameState(ctx, c, f, account, debtToken, db, decimals, fc.Block, pinHash, false, execWant...)
+	exec, err := readExecFrame(ctx, c, f, account, debtToken, db, decimals, fc.Block, pinHash, execWant...)
 	if err != nil {
 		return rows, res, err
 	}
@@ -391,7 +424,7 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	// per-token floor, then sum (DebtManagerCore.sol:139-165) — so the ONLY
 	// difference between them is the engine-exact price. That is what makes the
 	// intra-block recomputation a causation test rather than a label.
-	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.collateral, parent.prices, parent.configs, decimals)
+	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.st.collateral, parent.st.prices, parent.st.configs, decimals)
 	ourDebt := ourBefore
 	ourEligible := ourDebt.Cmp(ourMaxBorrow) > 0
 	margin := new(big.Int).Sub(ourDebt, ourMaxBorrow)
@@ -401,6 +434,11 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	priceMoved, moveNote := priceFrameDelta(parent, exec)
 	res.PriceDeltaNote = moveNote
 	witnesses := v.sameBlockEarlier()
+	held := map[common.Address]bool{}
+	for _, leg := range parent.st.collateral {
+		held[leg.token] = true
+	}
+	cause := replaySameBlockCauses(v.sameBlockWitnesses(), c.dmProxy, account, debtToken, held)
 
 	// THE CAUSATION TEST (round-1 finding 7). The old code labelled a case
 	// "flipped-with-witness" whenever ANY earlier log existed or ANY price
@@ -408,7 +446,7 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	// so an unrelated log in a busy block excused a genuine false negative. Now
 	// the boolean is RECOMPUTED in the execution frame, and the flip must be
 	// REPRODUCED: eligible-at-exec is required, not inferred.
-	execMaxBorrow, execPriced := maxBorrowAtFrame(parent.collateral, exec.prices, parent.configs, decimals)
+	execMaxBorrow, execPriced := maxBorrowAtFrame(parent.st.collateral, exec.st.prices, parent.st.configs, decimals)
 	execEligible := ourDebt.Cmp(execMaxBorrow) > 0
 	allPriced := parentPriced && execPriced
 
@@ -429,7 +467,7 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 			"same_block_witness_detail":    strings.Join(witnesses, "; "),
 		},
 	}
-	switch classifyIntraBlock(ourEligible, execEligible, allPriced, priceMoved, len(witnesses)) {
+	switch classifyIntraBlock(ourEligible, execEligible, allPriced, cause.Proven) {
 	case eligTrueAtParent:
 		res.EligibilityState = "true-at-parent"
 		oblRow.Verdict = verdictExact
@@ -445,15 +483,15 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 		res.EligibilityState = "flipped-in-block-with-custodied-witness"
 		oblRow.Verdict = verdictMarginal
 		oblRow.Class = verdictMarginal
-		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION PROVEN: false at the parent frame (maxBorrowLT %s) and TRUE when the SAME deployed loop is recomputed at execution-frame prices (maxBorrowLT %s). The flip is REPRODUCED, not inferred from the presence of a log — this is the intra-block mechanism the Debt Manager's push-price design allows. Disclosed as marginal with the margin printed, never absorbed",
-			ourMaxBorrow, execMaxBorrow)
+		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION PROVEN FROM PRE-LIQUIDATION STATE: false at the parent frame (maxBorrowLT %s), and a CUSTODIED earlier log in this block moved an input to this account's boolean — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
+			ourMaxBorrow, strings.Join(cause.Causes, "; "), execMaxBorrow)
 		f.cite(tolIntraBlockMarginality)
 	default:
 		res.EligibilityState = verdictUnexplained
 		oblRow.Verdict = verdictUnexplained
 		oblRow.Class = verdictUnexplained
-		oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent frame AND still false when recomputed at execution-frame prices (maxBorrowLT %s -> %s). Earlier same-block logs present: %d; price moved: %v. The gated third state of chain-truth R1's law — a false negative in the alert product that the block's own custodied witnesses do NOT explain",
-			ourMaxBorrow, execMaxBorrow, len(witnesses), priceMoved)
+		oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent frame with NO custodied pre-liquidation cause. maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (of which %d touch neither this account nor a token it holds); price moved between frames: %v. A post-block price difference is NOT proof of a pre-liquidation flip and an unrelated log is not a witness, so this is the gated third state of chain-truth R1's law — a false negative the block's own custody does not explain",
+			ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, priceMoved)
 	}
 	rows = append(rows, oblRow)
 
@@ -499,6 +537,21 @@ func maxBorrowAtFrame(collateral []struct {
 	return total, allPriced
 }
 
+// parentFrame and execFrame are DISTINCT TYPES over the same reads.
+//
+// THE DEFECT THIS CLOSES (Codex round 2, finding M6 — and the round-1 finding 6 it
+// re-armed): the two frames were both *frameState, so passing the wrong one was a
+// plain argument mistake that shipped once and that a name-based AST pin could not
+// reliably catch (`exec := parent` would have satisfied it). With separate types,
+// `residueWeld(key, v, parent, f)` and `exec := parent` are both COMPILE ERRORS.
+// The bug is unrepresentable rather than tested for.
+//
+// The constructors are separate too (readParentFrame / readExecFrame), so a frame
+// cannot acquire the wrong type by assignment either.
+type parentFrame struct{ st *frameState }
+
+type execFrame struct{ st *frameState }
+
 // frameState is one block frame's pinned reads.
 type frameState struct {
 	block      uint64
@@ -513,6 +566,25 @@ type frameState struct {
 	chainDebt  *big.Int
 	unread     string
 	pricesOnly bool
+}
+
+// readParentFrame reads the PRE-LIQUIDATION frame: the collateral basket,
+// per-token thresholds, Safe balances and engine-exact prices the deployed seizure
+// branch used. Typed distinctly from the execution frame (see parentFrame).
+func readParentFrame(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtToken common.Address,
+	db snapshotdb.T6BacktestRow, decimals map[common.Address]uint8, block uint64, hash common.Hash) (parentFrame, error) {
+	st, err := readBacktestFrameState(ctx, c, f, account, debtToken, db, decimals, block, hash, true)
+	return parentFrame{st: st}, err
+}
+
+// readExecFrame reads the EXECUTION-BLOCK frame: the post-liquidation residue leg
+// (borrowingOf) plus the prices the caller asks for. It is the ONLY frame that
+// reads borrowingOf, which is why obligation 4 must receive this type.
+func readExecFrame(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtToken common.Address,
+	db snapshotdb.T6BacktestRow, decimals map[common.Address]uint8, block uint64, hash common.Hash,
+	alsoPrice ...common.Address) (execFrame, error) {
+	st, err := readBacktestFrameState(ctx, c, f, account, debtToken, db, decimals, block, hash, false, alsoPrice...)
+	return execFrame{st: st}, err
 }
 
 // readBacktestFrameState reads one frame's state at a hash-bound pin. When
@@ -642,11 +714,11 @@ func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account
 
 // priceFrameDelta reports whether any seized token's engine-exact price differs
 // between the parent and execution frames — risk-quant R2's detector (b).
-func priceFrameDelta(parent, exec *frameState) (bool, string) {
+func priceFrameDelta(parent parentFrame, exec execFrame) (bool, string) {
 	moved := false
 	var notes []string
-	for _, tok := range sortedAddrs(addrSetFromPrices(parent.prices)) {
-		p, e := parent.prices[tok], exec.prices[tok]
+	for _, tok := range sortedAddrs(addrSetFromPrices(parent.st.prices)) {
+		p, e := parent.st.prices[tok], exec.st.prices[tok]
 		if p == nil || e == nil {
 			notes = append(notes, tok.Hex()+": one frame's price is unread")
 			continue
@@ -668,6 +740,30 @@ func addrSetFromPrices(m map[common.Address]*big.Int) map[common.Address]bool {
 		out[a] = true
 	}
 	return out
+}
+
+// preparedSeizure is one fan-out element with the pinned parent-frame inputs the
+// deployed branch used. Package-level so the branch classifier can be tested with
+// Codex's boundary integers directly.
+type preparedSeizure struct {
+	s     snapshotdb.T6Seizure
+	tok   common.Address
+	cfg   collateralTokenConfigResult
+	bal   *big.Int
+	price *big.Int
+	dec   uint8
+}
+
+// deployedTakesPartial is the contract's own branch predicate, exported for tests:
+// totalCollateral - maxBonus < collateralAmountForDebt selects PARTIAL, and the
+// comparison is STRICT, so equality selects FINAL (DebtManagerCore.sol:625-638).
+func deployedTakesPartial(e preparedSeizure, u *big.Int) bool {
+	cAFD := new(big.Int).Mul(u, pow10Big(e.dec))
+	cAFD.Quo(cAFD, e.price)
+	net := new(big.Int).Mul(e.bal, hundredPercentDM)
+	net.Quo(net, new(big.Int).Add(hundredPercentDM, e.cfg.LiquidationBonus))
+	maxBonus := new(big.Int).Sub(e.bal, net)
+	return new(big.Int).Sub(e.bal, maxBonus).Cmp(cAFD) < 0
 }
 
 // reconstructSeizures recomputes every userCollateralLiquidated element under
@@ -705,34 +801,26 @@ func addrSetFromPrices(m map[common.Address]*big.Int) map[common.Address]bool {
 //   - every element took the PARTIAL branch (the preference array ran out) =>
 //     liquidatedAmt == sum of floor((amount-bonus) x P / 10^dec), one exact
 //     equation over all elements that a proportionally-wrong pair cannot satisfy.
-func reconstructSeizures(key string, v *backtestView, parent *frameState,
+func reconstructSeizures(key string, v *backtestView, parent parentFrame,
 	decimals map[common.Address]uint8, f *gateFrame) []p3Row {
 	var rows []p3Row
 	seizures := v.seizures()
 	liquidated := v.liquidatedUSD()
 
-	type prepared struct {
-		s     snapshotdb.T6Seizure
-		tok   common.Address
-		cfg   collateralTokenConfigResult
-		bal   *big.Int
-		price *big.Int
-		dec   uint8
-	}
-	var elems []prepared
+	var elems []preparedSeizure
 	for _, s := range seizures {
 		tok := common.HexToAddress(s.AssetHex)
 		subject := fmt.Sprintf("%s element %d %s", key, s.Seq, tok.Hex())
-		cfg, okCfg := parent.configs[tok]
-		bal, okBal := parent.balances[tok]
-		price := parent.prices[tok]
+		cfg, okCfg := parent.st.configs[tok]
+		bal, okBal := parent.st.balances[tok]
+		price := parent.st.prices[tok]
 		dec, okDec := decimals[tok]
 		if !okCfg || !okBal || price == nil || !okDec || cfg.LiquidationBonus == nil {
 			rows = append(rows, unreadRow(gateBacktest, subject, "obligation3: seizure inputs",
 				"one or more of {collateralTokenConfig, balanceOf, engine-exact price, decimals} did not read at the parent frame"))
 			continue
 		}
-		elems = append(elems, prepared{s: s, tok: tok, cfg: cfg, bal: bal, price: price, dec: dec})
+		elems = append(elems, preparedSeizure{s: s, tok: tok, cfg: cfg, bal: bal, price: price, dec: dec})
 	}
 	if len(elems) != len(seizures) {
 		// An unread input means the budget walk cannot be closed. The unread rows
@@ -749,7 +837,7 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 			"the event's own liquidatedAmt did not decode, so the seizure reconstruction has no budget to carry across the elements"))
 	}
 
-	partialOf := func(e prepared) (amount, bonus, credited *big.Int) {
+	partialOf := func(e preparedSeizure) (amount, bonus, credited *big.Int) {
 		net := new(big.Int).Mul(e.bal, hundredPercentDM)
 		net.Quo(net, new(big.Int).Add(hundredPercentDM, e.cfg.LiquidationBonus))
 		bonus = new(big.Int).Sub(e.bal, net)
@@ -759,7 +847,7 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 		credited.Quo(credited, pow10Big(e.dec))
 		return amount, bonus, credited
 	}
-	finalOf := func(e prepared, u *big.Int) (amount, bonus, cAFD *big.Int) {
+	finalOf := func(e preparedSeizure, u *big.Int) (amount, bonus, cAFD *big.Int) {
 		cAFD = new(big.Int).Mul(u, pow10Big(e.dec))
 		cAFD.Quo(cAFD, e.price)
 		bonus = new(big.Int).Mul(cAFD, e.cfg.LiquidationBonus)
@@ -768,68 +856,140 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 		return amount, bonus, cAFD
 	}
 	// The branch predicate, on the contract's own terms.
-	takesPartial := func(e prepared, u *big.Int) bool {
-		_, _, cAFD := finalOf(e, u)
-		net := new(big.Int).Mul(e.bal, hundredPercentDM)
-		net.Quo(net, new(big.Int).Add(hundredPercentDM, e.cfg.LiquidationBonus))
-		maxBonus := new(big.Int).Sub(e.bal, net)
-		return new(big.Int).Sub(e.bal, maxBonus).Cmp(cAFD) < 0
-	}
 
-	last := elems[len(elems)-1]
-	lastIsPartial := last.s.Amount.Cmp(last.bal) == 0
-	// liquidatedAmt == 0 means the contract covered NOTHING, which it can only do
-	// by exhausting the preference array on partial branches (every named token had
-	// totalCollateral == 0). Routing that shape through the FINAL walk would make it
-	// vacuous: with a zero budget the final branch reproduces a zero element for ANY
-	// Safe balance, and the "the Safe really held none" content — the whole
-	// falsifiable claim on this population's dominant shape — would be lost.
-	if liquidated.Sign() == 0 {
-		lastIsPartial = true
-	}
+	// THE SHAPE IS DECIDED BY ARITHMETIC HYPOTHESES, NEVER BY THE EMITTED AMOUNT
+	// (Codex round 2, finding M5).
+	//
+	// The previous discriminator read `last amount == parent balance` as ALL-PARTIAL.
+	// That equality ALSO occurs on the FINAL boundary — Codex's vector: HP=100,
+	// bonus=10, balance=110, cAFD=100 gives net=100, maxBonus=10,
+	// balance-maxBonus=100, and the deployed predicate `net < cAFD` is FALSE at
+	// equality, so the branch is FINAL while amount = 100+10 = 110 = the balance.
+	//
+	// Working the shape out honestly means facing something the first fix missed:
+	// liquidatedAmt does NOT determine u0 in the all-partial case (there
+	// liquidatedAmt = u0 - remainingDebt with remainingDebt > 0), so a predicate walk
+	// seeded with u = liquidatedAmt is not the contract's walk either. What IS
+	// checkable is each shape as a HYPOTHESIS over observed values:
+	//
+	//   ALL-PARTIAL      every element satisfies the partial identity pair AND
+	//                    liquidatedAmt == sum of credited USD;
+	//   FINAL-TERMINATED the predicate-driven walk from u0 = liquidatedAmt reaches
+	//                    FINAL at the last element with every identity exact and the
+	//                    budget spent to zero.
+	//
+	// Exactly one holding resolves the shape. BOTH holding is the true boundary: the
+	// two readings then agree on every element identity, so the row is exact and the
+	// ambiguity is DISCLOSED rather than silently resolved. Neither holding gates.
+	allPartial, allPartialRows, allPartialWhy := tryAllPartial(key, elems, liquidated, partialOf)
+	finalTerm, finalRows, finalWhy := tryFinalTerminated(key, elems, liquidated, partialOf, finalOf, f)
 
-	if lastIsPartial {
-		// ALL-PARTIAL shape: one exact equation over every element ties the whole
-		// fan-out to liquidatedAmt.
-		sum := new(big.Int)
-		for _, e := range elems {
-			credited := new(big.Int).Sub(e.s.Amount, e.s.Bonus)
-			credited.Mul(credited, e.price)
-			credited.Quo(credited, pow10Big(e.dec))
-			sum.Add(sum, credited)
-			subject := fmt.Sprintf("%s element %d %s", key, e.s.Seq, e.tok.Hex())
-			if e.s.Amount.Sign() == 0 && e.s.Bonus.Sign() == 0 {
-				row := compareExact(gateBacktest, subject, "obligation3: partial branch, amount == Safe balance",
-					e.bal, e.s.Amount, "seizure-partial-zero")
-				row.Note = "PARTIAL branch with totalCollateral == 0: the contract seizes the whole (empty) balance, so the falsifiable content is that the Safe REALLY held none of this token at the parent frame. " + row.Note
-				rows = append(rows, row)
-				continue
-			}
-			wantAmount, wantBonus, _ := partialOf(e)
-			rows = append(rows, compareExact(gateBacktest, subject, "obligation3: partial branch amount == totalCollateral",
-				wantAmount, e.s.Amount, "seizure-partial-amount"))
-			rows = append(rows, compareExact(gateBacktest, subject, "obligation3: partial branch bonus == totalCollateral - floor(totalCollateral*HP/(HP+b))",
-				wantBonus, e.s.Bonus, "seizure-partial-bonus"))
-		}
-		budget := compareExact(gateBacktest, key, "obligation3: liquidatedAmt == sum of credited USD over ALL elements",
-			liquidated, sum, "seizure-budget-all-partial")
-		budget.Evidence = map[string]string{
-			"shape":        "ALL-PARTIAL (the collateral-preference array was exhausted before the debt was covered)",
-			"elements":     fmt.Sprintf("%d", len(elems)),
-			"credited_sum": sum.String(),
-			"law":          "liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt, and every element credited floor((amount-bonus)*P/10^dec), so the sum IS the liquidated USD (DebtManagerCore.sol:613-658)",
-		}
-		rows = append(rows, budget)
+	switch {
+	case allPartial && !finalTerm:
+		return append(rows, allPartialRows...)
+	case finalTerm && !allPartial:
+		return append(rows, finalRows...)
+	case allPartial && finalTerm:
+		// The boundary. Both hypotheses reproduce every element exactly, so the
+		// element rows are the same either way; emit them once and name the
+		// ambiguity as evidence so nobody reads a resolved branch label that the
+		// observation does not support.
+		rows = append(rows, allPartialRows...)
+		rows = append(rows, p3Row{
+			Gate: gateBacktest, Subject: key, Leg: "obligation3: branch shape is observationally AMBIGUOUS",
+			Expected: "exactly one of {ALL-PARTIAL, FINAL-TERMINATED} consistent with the emitted elements",
+			Actual:   "BOTH are consistent (the FINAL boundary: totalCollateral - maxBonus == collateralAmountForDebt)",
+			Verdict:  verdictEvidence, Gated: false,
+			Note: "at this boundary the deployed predicate's strict `<` selects FINAL while the emitted amount also equals the Safe balance, so the two readings produce identical numbers. Every element identity is exact under BOTH, which is why this is disclosed rather than gated — but the branch LABEL is not determined by the observation, and the round-1 code silently asserted the wrong one (Codex round 2, finding M5)",
+		})
+		return rows
+	default:
+		rows = append(rows, driftRow(gateBacktest, key, "obligation3: branch shape",
+			"the emitted elements follow from ONE of the deployed shapes at the liquidatedAmt budget",
+			"neither shape reproduces them", "seizure-shape-inconsistent",
+			"ALL-PARTIAL rejected because: "+allPartialWhy+" | FINAL-TERMINATED rejected because: "+finalWhy+
+				". Because the budget is anchored to liquidatedAmt, a proportionally-wrong pair lands here rather than passing"))
+		// The per-element diagnostics from the closer hypothesis are still useful.
+		rows = append(rows, finalRows...)
 		return rows
 	}
+}
 
-	// FINAL-TERMINATED shape: remainingDebt == 0, so u0 == liquidatedAmt exactly.
+// tryAllPartial tests the ALL-PARTIAL hypothesis: every element took the partial
+// branch and liquidatedAmt is the sum of the credited USD. It returns the rows the
+// hypothesis would emit, so the caller can publish them once the shape is resolved.
+func tryAllPartial(key string, elems []preparedSeizure, liquidated *big.Int,
+	partialOf func(preparedSeizure) (*big.Int, *big.Int, *big.Int)) (bool, []p3Row, string) {
+	var rows []p3Row
+	sum := new(big.Int)
+	ok := true
+	why := ""
+	for _, e := range elems {
+		wantAmount, wantBonus, _ := partialOf(e)
+		credited := new(big.Int).Sub(e.s.Amount, e.s.Bonus)
+		credited.Mul(credited, e.price)
+		credited.Quo(credited, pow10Big(e.dec))
+		sum.Add(sum, credited)
+		subject := fmt.Sprintf("%s element %d %s", key, e.s.Seq, e.tok.Hex())
+		if e.s.Amount.Sign() == 0 && e.s.Bonus.Sign() == 0 {
+			row := compareExact(gateBacktest, subject, "obligation3: partial branch, amount == Safe balance",
+				e.bal, e.s.Amount, "seizure-partial-zero")
+			row.Note = "PARTIAL branch with totalCollateral == 0: the contract seizes the whole (empty) balance, so the falsifiable content is that the Safe REALLY held none of this token at the parent frame. " + row.Note
+			rows = append(rows, row)
+			if e.bal.Sign() != 0 {
+				ok, why = false, fmt.Sprintf("element %d emitted a zero amount over a NONZERO Safe balance %s", e.s.Seq, e.bal)
+			}
+			continue
+		}
+		amountRow := compareExact(gateBacktest, subject, "obligation3: partial branch amount == totalCollateral",
+			wantAmount, e.s.Amount, "seizure-partial-amount")
+		bonusRow := compareExact(gateBacktest, subject, "obligation3: partial branch bonus == totalCollateral - floor(totalCollateral*HP/(HP+b))",
+			wantBonus, e.s.Bonus, "seizure-partial-bonus")
+		rows = append(rows, amountRow, bonusRow)
+		if amountRow.Verdict != verdictExact || bonusRow.Verdict != verdictExact {
+			ok, why = false, fmt.Sprintf("element %d does not satisfy the partial identity pair", e.s.Seq)
+		}
+	}
+	budget := compareExact(gateBacktest, key, "obligation3: liquidatedAmt == sum of credited USD over ALL elements",
+		liquidated, sum, "seizure-budget-all-partial")
+	budget.Evidence = map[string]string{
+		"shape":        "ALL-PARTIAL (the collateral-preference array was exhausted before the debt was covered)",
+		"elements":     fmt.Sprintf("%d", len(elems)),
+		"credited_sum": sum.String(),
+		"law":          "liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt, and every element credited floor((amount-bonus)*P/10^dec), so the sum IS the liquidated USD (DebtManagerCore.sol:613-658)",
+	}
+	rows = append(rows, budget)
+	if budget.Verdict != verdictExact {
+		ok, why = false, fmt.Sprintf("liquidatedAmt %s != the credited sum %s", liquidated, sum)
+	}
+	return ok, rows, why
+}
+
+// tryFinalTerminated tests the FINAL-TERMINATED hypothesis: remainingDebt == 0, so
+// u0 == liquidatedAmt exactly, and the predicate-driven walk reaches FINAL at the
+// last element with every identity exact and the budget spent.
+func tryFinalTerminated(key string, elems []preparedSeizure, liquidated *big.Int,
+	partialOf func(preparedSeizure) (*big.Int, *big.Int, *big.Int),
+	finalOf func(preparedSeizure, *big.Int) (*big.Int, *big.Int, *big.Int),
+	f *gateFrame) (bool, []p3Row, string) {
+	var rows []p3Row
+	ok, why := true, ""
+	// u0 == 0 makes this hypothesis IMPOSSIBLE, by the contract rather than by any
+	// emitted value: _liquidate reverts when debtAmountToLiquidateInUsd == 0
+	// (DebtManagerCore.sol:567), so a FINAL-terminated walk cannot start from a zero
+	// budget. Refusing it here is what keeps the zero-amount population falsifiable —
+	// with u = 0 the final branch reproduces a zero element for ANY Safe balance, so
+	// admitting it would turn this population'''s dominant shape into a vacuous pass.
+	if liquidated.Sign() == 0 {
+		return false, nil, "liquidatedAmt is 0, so remainingDebt > 0 and u0 != liquidatedAmt: _liquidate reverts on a zero requested debt (DebtManagerCore.sol:567), so the loop covered nothing and every element took PARTIAL over an empty balance"
+	}
 	u := new(big.Int).Set(liquidated)
+	sawFinal := false
 	for i, e := range elems {
 		subject := fmt.Sprintf("%s element %d %s", key, e.s.Seq, e.tok.Hex())
 		isLast := i == len(elems)-1
-		wantPartial := takesPartial(e, u)
-		observedPartial := e.s.Amount.Cmp(e.bal) == 0
+		wantPartial := deployedTakesPartial(e, u)
+		observedPartial := observedBranchIsPartial(e, u, partialOf, finalOf)
 
 		predicateRow := p3Row{
 			Gate: gateBacktest, Subject: subject, Leg: "obligation3: branch predicate at the carried repay budget",
@@ -838,7 +998,7 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 				"carried_repay_usd": u.String(),
 				"total_collateral":  e.bal.String(),
 				"engine_price":      e.price.String(),
-				"law":               "totalCollateral - maxBonus < collateralAmountForDebt selects PARTIAL (DebtManagerCore.sol:625-638)",
+				"law":               "totalCollateral - maxBonus < collateralAmountForDebt selects PARTIAL, STRICTLY, so equality selects FINAL (DebtManagerCore.sol:625-638)",
 			},
 		}
 		if wantPartial == observedPartial {
@@ -846,16 +1006,21 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 		} else {
 			predicateRow.Verdict = verdictDrift
 			predicateRow.Class = "seizure-branch-predicate"
-			predicateRow.Note = "the branch the deployed predicate selects at the CARRIED repay budget is not the branch this element shows. Because the budget is anchored to liquidatedAmt, this catches the proportionally-wrong pair the old inverted-cAFD check could not"
+			predicateRow.Note = "the branch the deployed predicate selects at the CARRIED repay budget is not the branch this element exhibits. Because the budget is anchored to liquidatedAmt, this catches the proportionally-wrong pair the inverted-cAFD check could not"
+			ok, why = false, fmt.Sprintf("element %d: predicate says %s, element exhibits %s", e.s.Seq, branchName(wantPartial), branchName(observedPartial))
 		}
 		rows = append(rows, predicateRow)
 
 		if wantPartial {
 			wantAmount, wantBonus, credited := partialOf(e)
-			rows = append(rows, compareExact(gateBacktest, subject, "obligation3: partial branch amount == totalCollateral",
-				wantAmount, e.s.Amount, "seizure-partial-amount"))
-			rows = append(rows, compareExact(gateBacktest, subject, "obligation3: partial branch bonus == totalCollateral - floor(totalCollateral*HP/(HP+b))",
-				wantBonus, e.s.Bonus, "seizure-partial-bonus"))
+			aRow := compareExact(gateBacktest, subject, "obligation3: partial branch amount == totalCollateral",
+				wantAmount, e.s.Amount, "seizure-partial-amount")
+			bRow := compareExact(gateBacktest, subject, "obligation3: partial branch bonus == totalCollateral - floor(totalCollateral*HP/(HP+b))",
+				wantBonus, e.s.Bonus, "seizure-partial-bonus")
+			rows = append(rows, aRow, bRow)
+			if aRow.Verdict != verdictExact || bRow.Verdict != verdictExact {
+				ok, why = false, fmt.Sprintf("element %d does not satisfy the partial identity pair", e.s.Seq)
+			}
 			u = new(big.Int).Sub(u, credited)
 			if u.Sign() < 0 {
 				u = new(big.Int)
@@ -865,6 +1030,7 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 
 		// FINAL branch, derived from the CARRIED budget, never from the observed
 		// amount. This is what makes a proportionally-wrong pair fail.
+		sawFinal = true
 		wantAmount, wantBonus, cAFD := finalOf(e, u)
 		amountRow := compareExact(gateBacktest, subject, "obligation3: final branch amount == floor(u*10^dec/P) + floor(cAFD*b/HP)",
 			wantAmount, e.s.Amount, "seizure-final-amount")
@@ -881,20 +1047,25 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 			"tolerance":              tolSeizureTokenWei.String(),
 		}
 		f.cite(tolSeizureTokenWei)
-		rows = append(rows, amountRow)
-		rows = append(rows, compareExact(gateBacktest, subject, "obligation3: final branch bonus == floor(cAFD*b/HP)",
-			wantBonus, e.s.Bonus, "seizure-final-bonus"))
-
+		bonusRow := compareExact(gateBacktest, subject, "obligation3: final branch bonus == floor(cAFD*b/HP)",
+			wantBonus, e.s.Bonus, "seizure-final-bonus")
+		rows = append(rows, amountRow, bonusRow)
+		if amountRow.Verdict != verdictExact || bonusRow.Verdict != verdictExact {
+			ok, why = false, fmt.Sprintf("element %d does not satisfy the final identity pair at the carried budget", e.s.Seq)
+		}
 		if !isLast {
 			rows = append(rows, driftRow(gateBacktest, subject, "obligation3: final branch terminates the fan-out",
 				fmt.Sprintf("the FINAL branch is element %d of %d", i+1, len(elems)),
 				"more elements follow", "seizure-final-not-last",
 				"the deployed loop assembly-trims the array and BREAKS on the final branch (DebtManagerCore.sol:645-652), so an element after it cannot exist"))
+			ok, why = false, "the FINAL branch is not the last element"
 		}
 		u = new(big.Int)
 		break
 	}
-	// A FINAL-terminated fan-out spends the budget exactly.
+	if !sawFinal {
+		ok, why = false, "the predicate never selected FINAL, so remainingDebt > 0 and u0 != liquidatedAmt"
+	}
 	spent := compareExact(gateBacktest, key, "obligation3: carried repay budget fully spent",
 		new(big.Int), u, "seizure-budget-residual")
 	spent.Evidence = map[string]string{
@@ -903,7 +1074,34 @@ func reconstructSeizures(key string, v *backtestView, parent *frameState,
 		"law":   "liquidatedAmt = debtAmountToLiquidateInUsd - remainingDebt (DebtManagerCore.sol:576-578)",
 	}
 	rows = append(rows, spent)
-	return rows
+	if spent.Verdict != verdictExact {
+		ok, why = false, "the budget was not spent to zero"
+	}
+	return ok, rows, why
+}
+
+// observedBranchIsPartial reads the branch an element EXHIBITS from the identities
+// it satisfies, at the carried repay budget.
+//
+// At the FINAL boundary `amount == totalCollateral` is true for BOTH branches, so
+// the balance equality alone cannot classify. The identities can: the PARTIAL pair
+// is (amount == totalCollateral, bonus == totalCollateral - net) and the FINAL pair
+// is (amount == cAFD + floor(cAFD*b/HP), bonus == floor(cAFD*b/HP)) with cAFD
+// derived from the carried u. When BOTH hold — exactly Codex's boundary vector —
+// the element is reported as FINAL, matching the deployed predicate's strict `<`,
+// so the verdict row agrees with the contract instead of contradicting it.
+func observedBranchIsPartial(e preparedSeizure, u *big.Int,
+	partialOf func(preparedSeizure) (*big.Int, *big.Int, *big.Int),
+	finalOf func(preparedSeizure, *big.Int) (*big.Int, *big.Int, *big.Int)) bool {
+	pAmount, pBonus, _ := partialOf(e)
+	fAmount, fBonus, _ := finalOf(e, u)
+	partialHolds := e.s.Amount.Cmp(pAmount) == 0 && e.s.Bonus.Cmp(pBonus) == 0
+	finalHolds := e.s.Amount.Cmp(fAmount) == 0 && e.s.Bonus.Cmp(fBonus) == 0
+	if finalHolds {
+		// The boundary: FINAL is what the deployed predicate selects at equality.
+		return false
+	}
+	return partialHolds
 }
 
 // branchName renders the deployed branch selector for a verdict row.
@@ -932,24 +1130,24 @@ func branchName(partial bool) string {
 //     beforeDebtAmount, and that is what a first pass is welded against.
 //     Block-end borrowingOf is reserved for the FINAL pass, where it is the
 //     honest expected value.
-func residueWeld(key string, v *backtestView, exec *frameState, f *gateFrame) []p3Row {
-	db := v.row
+func residueWeld(key string, v *backtestView, exec execFrame, f *gateFrame) []p3Row {
 	ourAfter := mulDivFloor(v.normalizedAfter(), v.indexAtBlock())
 	residueModelled, residueText := v.residue()
 
 	// FIRST PASS of a two-pass tx: the expected value is the NEXT pass's own
 	// beforeDebtAmount, which is the chain's statement of the state between them.
-	if db.NextPassLogIndex != nil {
-		if db.NextPassBeforeDebtUSD == nil {
+	if v.hasNextPass() {
+		nextIdx, nextBefore, nextText, _ := v.nextPass()
+		if nextBefore == nil {
 			return []p3Row{unreadRow(gateBacktest, key, "obligation4: residue weld (first pass)",
-				fmt.Sprintf("a following Liquidated exists at log_index %d but its beforeDebtAmount did not decode, so the between-passes state has no expected value", *db.NextPassLogIndex))}
+				fmt.Sprintf("a following Liquidated exists at log_index %d but its beforeDebtAmount did not decode, so the between-passes state has no expected value", nextIdx))}
 		}
 		row := compareExact(gateBacktest, key, "obligation4: after-state == the NEXT pass's beforeDebtAmount",
-			db.NextPassBeforeDebtUSD, ourAfter, "residue-first-pass-chain")
+			nextBefore, ourAfter, "residue-first-pass-chain")
 		row.Evidence = map[string]string{
-			"normalized_after":      db.NormalizedAfter.String(),
-			"next_pass_log_index":   fmt.Sprintf("%d", *db.NextPassLogIndex),
-			"next_pass_before_debt": db.NextPassBeforeText,
+			"normalized_after":      v.normalizedAfterText(),
+			"next_pass_log_index":   fmt.Sprintf("%d", nextIdx),
+			"next_pass_before_debt": nextText,
 			"frame":                 "FIRST PASS: block-end borrowingOf is NOT the expected value here, because the second pass moves the debt again before the block closes",
 		}
 		if row.Verdict == verdictExact {
@@ -959,7 +1157,7 @@ func residueWeld(key string, v *backtestView, exec *frameState, f *gateFrame) []
 	}
 
 	// FINAL (or only) pass: block-end borrowingOf is the honest expected value.
-	if exec.chainDebt == nil {
+	if exec.st.chainDebt == nil {
 		return []p3Row{unreadRow(gateBacktest, key, "obligation4: residue weld",
 			"borrowingOf(user, borrowToken) did not read at the liquidation block")}
 	}
@@ -968,19 +1166,19 @@ func residueWeld(key string, v *backtestView, exec *frameState, f *gateFrame) []
 	// normalized amount of 1 to ZERO without emitting anything, so the chain
 	// reads closed while our fold still carries the wei. Judging it on OUR side
 	// would make the tolerance unreachable exactly in the case it exists for.
-	fullyLiquidated := exec.chainDebt.Sign() == 0
+	fullyLiquidated := exec.st.chainDebt.Sign() == 0
 	row := p3Row{
 		Gate: gateBacktest, Subject: key, Leg: "obligation4: residue weld",
-		Expected: exec.chainDebt.String(), Actual: ourAfter.String(), Gated: true,
+		Expected: exec.st.chainDebt.String(), Actual: ourAfter.String(), Gated: true,
 		Evidence: map[string]string{
-			"normalized_after": db.NormalizedAfter.String(),
+			"normalized_after": v.normalizedAfterText(),
 			"residue_modelled": fmt.Sprintf("%v", residueModelled),
 			"residue_amount":   residueText,
 			"fully_liquidated": fmt.Sprintf("%v", fullyLiquidated),
 			"frame":            "FINAL (or only) pass: block-end borrowingOf IS the honest expected value",
 		},
 	}
-	diff := new(big.Int).Sub(ourAfter, exec.chainDebt)
+	diff := new(big.Int).Sub(ourAfter, exec.st.chainDebt)
 	switch {
 	case diff.Sign() == 0:
 		row.Verdict = verdictExact
@@ -1011,6 +1209,100 @@ func priorPassText(v *uint32) string {
 	return fmt.Sprintf("%d", *v)
 }
 
+// The custodied DM topic0s a same-block earlier log can carry, derived from the
+// committed ABI signatures (re-derived by TestDMWitnessTopicsAreCanonical).
+//
+// These are the ONLY writes this run can prove happened before the liquidation log,
+// because the Debt Manager proxy is the only DM-side address in the walker stream
+// set. PriceProviderV2 is NOT walked, so a price push is NOT a custodied witness —
+// which is precisely why a post-block price difference can never be proof of a
+// pre-liquidation flip (Codex round 2, finding H2).
+const (
+	topicDMLiquidated           = "fd54f2a27ee93a2b60fa895931f0067b8eab4f20662e14ef1ef0720eb772ea9c"
+	topicDMInterestIndexUpdated = "84057b54cc0f0532aa9d0ce233280f15c2e7f7cc24d05461b7a360e23baae82f"
+	topicDMCollateralConfigSet  = "011128805ea0277047e3f7163c2d734358e71e614d3c0487497ef1813a2ea110"
+	topicDMBorrowed             = "3fc499aeb0bb1cb58b6de8b02b3f86f4e7394e9690bef0110e32ced8a5631045"
+	topicDMRepaid               = "861660e9b7ead7183d53fe928b5638c7b57a7bcf16a89d7fdb04db65ce3ad6d5"
+)
+
+// causeReplay is the outcome of replaying the ordered same-block earlier witnesses
+// against THIS account's position.
+type causeReplay struct {
+	// Proven is true when at least one earlier custodied log demonstrably changed an
+	// input to this account's eligibility: its own collateral (an earlier seizure),
+	// its own debt (a borrow/repay), the debt token's index, or the liquidation
+	// threshold of a token it holds.
+	Proven bool
+	// Causes are the proven witnesses, in log order, for the artifact.
+	Causes []string
+	// Unrelated counts earlier logs that touch neither this account nor a token it
+	// holds — the ones the round-1 classifier accepted as "a witness".
+	Unrelated int
+}
+
+// replaySameBlockCauses walks the ordered earlier witnesses and decides whether any
+// of them could have moved this account's eligibility.
+//
+// THE DEFECT THIS REPLACES (Codex round 2, finding H2): the classifier accepted
+// `execEligible && (priceMoved || witnesses > 0)` as a proven flip. Both terms are
+// post-hoc: execEligible is computed from an EIP-1898 call at block N, which
+// observes state AFTER the whole block, and `witnesses > 0` counts any log at all.
+// So a price update later in the block, or an unrelated log, produced a false
+// marginal pass. Causation now requires a CUSTODIED PRE-LIQUIDATION write that
+// touches an input to this account's boolean, replayed in log order.
+func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Address,
+	account, debtToken common.Address, held map[common.Address]bool) causeReplay {
+	out := causeReplay{}
+	acct := hexLower(account.Hex())
+	debt := hexLower(debtToken.Hex())
+	proxy := hexLower(dmProxy.Hex())
+	for _, w := range witnesses {
+		if !strings.EqualFold(w.Address, proxy) {
+			// A log from an address outside the walked DM surface is not a custodied
+			// witness for this account's state at all.
+			out.Unrelated++
+			continue
+		}
+		switch w.Topic0 {
+		case topicDMLiquidated:
+			// Liquidated(liquidator, user, borrowToken, ...): an EARLIER seizure for
+			// the same account changed its collateral basket inside the block, which
+			// the parent-frame collateralOf read cannot see.
+			if strings.EqualFold(w.Topic2Addr, acct) {
+				out.Proven = true
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Liquidated for THIS account: an earlier seizure moved its collateral inside the block", w.LogIndex))
+				continue
+			}
+		case topicDMBorrowed, topicDMRepaid:
+			// Borrowed(user, token, amount) / Repaid(user, payer, token, amount): the
+			// account's own debt moved inside the block.
+			if strings.EqualFold(w.Topic1Addr, acct) || strings.EqualFold(w.Topic2Addr, acct) {
+				out.Proven = true
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d borrow/repay for THIS account: its debt moved inside the block", w.LogIndex))
+				continue
+			}
+		case topicDMInterestIndexUpdated:
+			// InterestIndexUpdated(token, newIndex): the debt token's index moved,
+			// which changes the live debt our replay bridges with.
+			if strings.EqualFold(w.Topic1Addr, debt) {
+				out.Proven = true
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d InterestIndexUpdated for the debt token: the live-debt index moved inside the block", w.LogIndex))
+				continue
+			}
+		case topicDMCollateralConfigSet:
+			// CollateralTokenConfigSet(token, old, new): a threshold or bonus change on
+			// a token this account HOLDS moves maxBorrowLT directly.
+			if held[common.HexToAddress(w.Topic1Addr)] {
+				out.Proven = true
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d CollateralTokenConfigSet for a HELD token: its liquidation threshold moved inside the block", w.LogIndex))
+				continue
+			}
+		}
+		out.Unrelated++
+	}
+	return out
+}
+
 // The three-state intra-block outcomes (chain-truth R1), plus the unpriced
 // refusal. Named constants so the CLASSIFIER is a pure, unit-testable decision:
 // the round-1 defect was that this decision never checked causation, and a
@@ -1032,15 +1324,21 @@ const (
 // execEligible must actually be true, i.e. the SAME deployed loop must produce
 // eligibility at execution-frame prices. A witness that does not flip the boolean
 // explains nothing.
-func classifyIntraBlock(ourEligible, execEligible, allPriced, priceMoved bool, witnesses int) string {
+func classifyIntraBlock(ourEligible, execEligible, allPriced, causeProven bool) string {
 	switch {
 	case ourEligible:
 		return eligTrueAtParent
 	case !allPriced:
 		return eligUnpriced
-	case execEligible && (priceMoved || witnesses > 0):
+	case causeProven && execEligible:
+		// A custodied PRE-liquidation write moved an input to this account's boolean,
+		// AND the recomputation corroborates the flip. Both are required: the cause is
+		// the proof, the recomputation is only corroboration (it reads post-block
+		// state), and neither alone earns a marginal pass.
 		return eligFlippedWithWitness
 	default:
+		// Includes the round-1 false-marginal shape: a post-block price difference or
+		// an unrelated same-block log with NO proven cause. That is UNEXPLAINED.
 		return eligUnexplainedOutcome
 	}
 }

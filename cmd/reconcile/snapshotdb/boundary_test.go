@@ -200,7 +200,7 @@ var exportedAPIAllowlist = map[string]bool{
 	// T6SweepState carries the collateral-testimony state AT THE PIN. Exported
 	// because cmd/reconcile's gate classifies on it (classifyDMSweep) — plain
 	// integers and a status string, no capability.
-	"T6SweepState": true,
+	"T6SweepState": true, "T6Witness": true,
 	"FeedRegistry": true, "FeedSpec": true,
 	// consts
 	"DMEngine": true, "AaveEngine": true, "AaveParamEngine": true,

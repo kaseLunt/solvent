@@ -7,7 +7,11 @@ package main
 // defect cannot leave the correct assertion passing unnoticed.
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -15,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
@@ -334,33 +339,386 @@ func TestAdapterFloorStaysThreeEvenWithThinHistory(t *testing.T) {
 	require.Equal(t, 3, adapterRowsPerReserve, "risk-quant R3's strengthening is three, not one")
 }
 
-// --- finding 7: the intra-block classifier must prove causation -------------
+// --- finding 7 / round-2 H2: causation from PRE-liquidation state -----------
 
-// TestIntraBlockClassifierRequiresCausation is the finding-7 kill. A witness that
-// does not flip the boolean explains nothing, and on this population a busy block
-// is the norm — so "there was an earlier log" is not evidence.
-func TestIntraBlockClassifierRequiresCausation(t *testing.T) {
-	// ourEligible=true: exact pass regardless of anything else.
-	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, false, true, false, 0))
+// TestIntraBlockClassifierRequiresAProvenCause is the round-2 H2 kill.
+//
+// Round 1 required the flip to be REPRODUCED at execution-frame prices, which was
+// an improvement but still not proof: those prices come from an EIP-1898 call at
+// block N and therefore observe POST-block state. A price update later in the block
+// makes execEligible true without having caused the liquidation-time flip. Proof
+// now requires a CUSTODIED pre-liquidation write that touches an input to this
+// account's boolean; the recomputation is corroboration only.
+func TestIntraBlockClassifierRequiresAProvenCause(t *testing.T) {
+	// ourEligible: exact pass regardless.
+	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, false, true, false))
 
-	// FALSE at the parent, and the recomputation at execution-frame prices makes it
-	// TRUE, with a custodied witness present: causation PROVEN.
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true, 0))
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, false, 3))
+	// A proven cause AND corroboration: marginal.
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true))
 
-	// THE KILL: witnesses and a price move are present, but the recomputation does
-	// NOT reproduce the flip. That is UNEXPLAINED, not excused.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, true, 5),
-		"an earlier same-block log and a price move do NOT explain a false negative unless the boolean actually flips when recomputed — this is exactly what round 1 accepted without checking")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, false, 0))
+	// THE KILL: corroboration WITHOUT a proven cause is UNEXPLAINED. This is the
+	// post-block-price shape Codex named — execEligible true, no custodied cause.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false),
+		"a post-block price difference is not proof of a pre-liquidation flip; without a custodied cause this must be UNEXPLAINED")
 
-	// A leg we could not price in both frames makes the recomputation impossible,
-	// which gates rather than excusing.
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, true, 2))
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false, 0))
+	// A proven cause with NO corroboration is also unexplained: we could not
+	// reproduce the flip at all, so the cause did not demonstrably do it.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, true))
 
-	// A flip with NO witness and NO price move is not attributable either: the
-	// mechanism chain-truth R1 admits is an intra-block custodied write.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false, 0),
-		"a reproduced flip still needs a custodied mechanism; otherwise the two frames differ for a reason we cannot name")
+	// An unpriceable leg gates rather than being excused, whatever else holds.
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, true))
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false))
+}
+
+// TestReplaySameBlockCausesProvesOnlyRelevantWrites is the causation replay itself:
+// an unrelated log in a busy block must NOT count, and each provable mechanism must.
+func TestReplaySameBlockCausesProvesOnlyRelevantWrites(t *testing.T) {
+	dm := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
+	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
+	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
+	other := common.HexToAddress("0x00000000000000000000000000000000000000ff")
+	held := map[common.Address]bool{tokA: true}
+
+	w := func(topic string, t1, t2, t3 common.Address) snapshotdb.T6Witness {
+		return snapshotdb.T6Witness{
+			LogIndex: 1, Address: hexLower(dm.Hex()), Topic0: topic,
+			Topic1Addr: hexLower(t1.Hex()), Topic2Addr: hexLower(t2.Hex()), Topic3Addr: hexLower(t3.Hex()),
+		}
+	}
+
+	t.Run("an unrelated same-block log proves nothing", func(t *testing.T) {
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMLiquidated, other, other, usdc), // someone ELSE's liquidation
+		}, dm, acct, usdc, held)
+		require.False(t, r.Proven,
+			"a busy block is the norm on this population, so 'a log exists' cannot be the test")
+		require.Equal(t, 1, r.Unrelated)
+	})
+
+	t.Run("an earlier seizure for THIS account is proven", func(t *testing.T) {
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMLiquidated, other, acct, usdc),
+		}, dm, acct, usdc, held)
+		require.True(t, r.Proven)
+		require.Contains(t, r.Causes[0], "THIS account")
+	})
+
+	t.Run("the debt token's index moving is proven", func(t *testing.T) {
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMInterestIndexUpdated, usdc, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, held)
+		require.True(t, r.Proven)
+		// A DIFFERENT token's index is not.
+		r2 := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMInterestIndexUpdated, other, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, held)
+		require.False(t, r2.Proven)
+	})
+
+	t.Run("a threshold change on a HELD token is proven", func(t *testing.T) {
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMCollateralConfigSet, tokA, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, held)
+		require.True(t, r.Proven)
+		// On a token the account does NOT hold, it is not.
+		r2 := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMCollateralConfigSet, tokB, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, held)
+		require.False(t, r2.Proven)
+	})
+
+	t.Run("a log from an address outside the walked DM surface is not a witness", func(t *testing.T) {
+		provider := common.HexToAddress("0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB")
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{{
+			LogIndex: 1, Address: hexLower(provider.Hex()), Topic0: topicDMLiquidated,
+			Topic2Addr: hexLower(acct.Hex()),
+		}}, dm, acct, usdc, held)
+		require.False(t, r.Proven,
+			"PriceProviderV2 is not in the walker stream set, so a price push can never be a custodied witness — which is exactly why post-block price movement is not proof")
+		require.Equal(t, 1, r.Unrelated)
+	})
+}
+
+// TestDMWitnessTopicsAreCanonical re-derives the topic0 constants the replay
+// switches on, so a copied string cannot silently match nothing.
+func TestDMWitnessTopicsAreCanonical(t *testing.T) {
+	for _, tc := range []struct{ sig, want string }{
+		{"Liquidated(address,address,address,(address,uint256,uint256)[],uint256,uint256)", topicDMLiquidated},
+		{"InterestIndexUpdated(address,uint256)", topicDMInterestIndexUpdated},
+		{"CollateralTokenConfigSet(address,(uint80,uint80,uint96),(uint80,uint80,uint96))", topicDMCollateralConfigSet},
+		{"Borrowed(address,address,uint256)", topicDMBorrowed},
+		{"Repaid(address,address,address,uint256)", topicDMRepaid},
+	} {
+		require.Equal(t, hex.EncodeToString(crypto.Keccak256([]byte(tc.sig))), tc.want, tc.sig)
+	}
+	// And the Liquidated topic0 matches the frozen frame's population predicate.
+	require.Equal(t, snapshotdb.AnswerUpdatedTopic0 != topicDMLiquidated, true)
+}
+
+// --- round-2 M5: the FINAL boundary vector ---------------------------------
+
+// TestFinalBoundaryVectorIsNotMislabelledPartial is Codex's boundary integers as a
+// unit vector: HP=100, bonus=10, balance=110, cAFD=100.
+//
+//	net      = floor(110 * 100 / 110) = 100
+//	maxBonus = 110 - 100 = 10
+//	balance - maxBonus = 100, and the deployed predicate `100 < 100` is FALSE
+//	=> FINAL, with bonus = floor(100*10/100) = 10 and amount = 100+10 = 110 = balance.
+//
+// The round-1 discriminator read `amount == balance` and called this PARTIAL.
+func TestFinalBoundaryVectorIsNotMislabelledPartial(t *testing.T) {
+	// The DM's real denominator is 100e18; Codex's HP=100/bonus=10 is the same
+	// ratio, so the vector is expressed at scale here and the arithmetic is
+	// identical.
+	hp := hundredPercentDM
+	bonus := new(big.Int).Div(hp, big.NewInt(10)) // 10% of HUNDRED_PERCENT
+	e := preparedSeizure{
+		s:     seizure(1, tokA, "110", "10"),
+		tok:   tokA,
+		cfg:   collateralTokenConfigResult{LTV: hp, LiquidationThreshold: hp, LiquidationBonus: bonus},
+		bal:   big.NewInt(110),
+		price: pow10Big(6), // P = 1.0 at 6 decimals, so cAFD == u
+		dec:   6,
+	}
+	u := big.NewInt(100)
+
+	// The deployed predicate: STRICT `<`, so equality selects FINAL.
+	require.False(t, deployedTakesPartial(e, u),
+		"balance - maxBonus == cAFD is NOT strictly less, so the deployed predicate selects FINAL")
+
+	// THE KILL: the round-1 discriminator would have said PARTIAL here.
+	require.Equal(t, 0, e.s.Amount.Cmp(e.bal),
+		"the emitted amount equals the Safe balance at this boundary, which is why `amount == balance` is not a branch test")
+
+	// And the identity-based observed classifier agrees with the contract.
+	partialOf := func(x preparedSeizure) (*big.Int, *big.Int, *big.Int) {
+		net := new(big.Int).Mul(x.bal, hundredPercentDM)
+		net.Quo(net, new(big.Int).Add(hundredPercentDM, x.cfg.LiquidationBonus))
+		bn := new(big.Int).Sub(x.bal, net)
+		cr := new(big.Int).Sub(x.bal, bn)
+		cr.Mul(cr, x.price)
+		cr.Quo(cr, pow10Big(x.dec))
+		return new(big.Int).Set(x.bal), bn, cr
+	}
+	finalOf := func(x preparedSeizure, uu *big.Int) (*big.Int, *big.Int, *big.Int) {
+		c := new(big.Int).Mul(uu, pow10Big(x.dec))
+		c.Quo(c, x.price)
+		bn := new(big.Int).Mul(c, x.cfg.LiquidationBonus)
+		bn.Quo(bn, hundredPercentDM)
+		return new(big.Int).Add(c, bn), bn, c
+	}
+	require.False(t, observedBranchIsPartial(e, u, partialOf, finalOf),
+		"at the boundary BOTH identity pairs hold, and the classifier must report FINAL to agree with the deployed predicate's strict `<`")
+
+	// Both hypotheses are consistent, so the gate discloses the ambiguity instead of
+	// asserting a branch label the observation does not determine.
+	row := snapshotdb.T6BacktestRow{
+		Seizures:      []snapshotdb.T6Seizure{e.s},
+		LiquidatedUSD: big.NewInt(100),
+	}
+	parent := parentFrame{st: &frameState{
+		prices:   map[common.Address]*big.Int{tokA: pow10Big(6)},
+		balances: map[common.Address]*big.Int{tokA: big.NewInt(110)},
+		configs:  map[common.Address]collateralTokenConfigResult{tokA: e.cfg},
+	}}
+	f := newGateFrame(gateBacktest)
+	rows := reconstructSeizures("boundary", newBacktestView(row, f), parent, map[common.Address]uint8{tokA: 6}, f)
+	require.Zero(t, tallyP3(rows), "the boundary observation is consistent with the contract, so it must not gate")
+	var sawAmbiguity bool
+	for _, r := range rows {
+		if strings.Contains(r.Leg, "AMBIGUOUS") {
+			sawAmbiguity = true
+			require.Equal(t, verdictEvidence, r.Verdict)
+			require.False(t, r.Gated)
+		}
+	}
+	require.True(t, sawAmbiguity,
+		"the branch LABEL is not determined at the boundary, so the run must say so rather than assert one")
+}
+
+// --- round-2 H1: the first-pass residue branch consumes through the ledger ---
+
+// TestFirstPassResidueBranchLeavesTheLedgerClean drives the ACTUAL first-pass arm —
+// the path the round-1 production-frame test explicitly skipped — and requires zero
+// frame violations. Before the fix, the next-pass source was declared and read
+// directly off v.row, so the deferred validator added a gated failure on every run.
+func TestFirstPassResidueBranchLeavesTheLedgerClean(t *testing.T) {
+	f := backtestFrame_()
+	nextIdx := uint32(160)
+	row := snapshotdb.T6BacktestRow{
+		BeforeDebtUSD: big.NewInt(1993777), LiquidatedUSD: big.NewInt(0),
+		IndexAtBlock:     mustBig("1037090807641666446"),
+		NormalizedBefore: big.NewInt(1922471), NormalizedAfter: big.NewInt(1922471),
+		StoredBlockHash:       "0xabc",
+		NextPassLogIndex:      &nextIdx,
+		NextPassBeforeDebtUSD: big.NewInt(1993777),
+		NextPassBeforeText:    "1993777",
+	}
+	v := newBacktestView(row, f)
+	rows := residueWeld("case", v, execFrame{st: &frameState{}}, f)
+	require.Len(t, rows, 1)
+	require.Equal(t, verdictExact, rows[0].Verdict,
+		"our after-state equals the NEXT pass's own beforeDebtAmount — the two-pass hinge")
+	require.Contains(t, rows[0].Leg, "NEXT pass")
+	require.True(t, f.used[srcBTNextPass],
+		"the next-pass source must be CONSUMED through the accessor, not read off the row")
+
+	// And the conditional source is NOT marked consumed on a case without a next
+	// pass, so the ledger can still tell the two situations apart.
+	f2 := backtestFrame_()
+	noNext := row
+	noNext.NextPassLogIndex = nil
+	v2 := newBacktestView(noNext, f2)
+	_ = residueWeld("case", v2, execFrame{st: &frameState{chainDebt: big.NewInt(1993777)}}, f2)
+	require.False(t, f2.used[srcBTNextPass])
+}
+
+// TestNoGateCodeReadsTheBacktestRowDirectly keeps the accessor discipline: every
+// v.row read must live inside a *backtestView method, so a future gate edit cannot
+// bypass the ledger the way round 1 did.
+func TestNoGateCodeReadsTheBacktestRowDirectly(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "backtest.go", nil, 0)
+	require.NoError(t, err)
+	for _, d := range file.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		onView := false
+		if fn.Recv != nil && len(fn.Recv.List) == 1 {
+			if star, ok := fn.Recv.List[0].Type.(*ast.StarExpr); ok {
+				if id, ok := star.X.(*ast.Ident); ok && id.Name == "backtestView" {
+					onView = true
+				}
+			}
+		}
+		if onView {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "row" {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "v" {
+				t.Fatalf("%s reads v.row directly at %s — every derived read must go through an accessor so consumption and ledger-recording are inseparable (Codex round 2, finding H1)",
+					fn.Name.Name, fset.Position(sel.Pos()))
+			}
+			return true
+		})
+	}
+}
+
+// --- round-2 H3: the head interval and the judged maximum -------------------
+
+// TestHeadIntervalUsesTheBoundaryHeaderAndGatesWhenAbsent is the round-2 H3 kill on
+// the measurement itself.
+func TestHeadIntervalUsesTheBoundaryHeaderAndGatesWhenAbsent(t *testing.T) {
+	lastRound := int64(1_700_000_000)
+	// A boundary header 9 hours after the newest round: that is the silence.
+	secs, chainTime := headInterval(lastRound, chainHeaderTime(lastRound+32_400))
+	require.True(t, chainTime)
+	require.Equal(t, int64(32_400), secs)
+
+	// No boundary header ⇒ UNMEASURABLE, never a substituted number and never zero.
+	secs, chainTime = headInterval(lastRound, 0)
+	require.False(t, chainTime)
+	require.Equal(t, int64(-1), secs,
+		"an unmeasurable head interval must be marked, not defaulted to zero — zero would read as a perfectly fresh feed")
+
+	// A boundary BEFORE the round (clock skew between the two chain facts) clamps to
+	// zero rather than going negative, which would shrink the judged maximum.
+	secs, chainTime = headInterval(lastRound, chainHeaderTime(lastRound-50))
+	require.True(t, chainTime)
+	require.Equal(t, int64(0), secs)
+}
+
+// TestJudgedMaxGapFoldsInTheHeadInterval pins the fold that makes a stall visible.
+func TestJudgedMaxGapFoldsInTheHeadInterval(t *testing.T) {
+	// Healthy: small gaps, fresh head.
+	got, isHead := judgedMaxGap(3400, 900, true)
+	require.Equal(t, int64(3400), got)
+	require.False(t, isHead)
+
+	// STALLED: the same small between-round gaps, silent for 9 hours.
+	got, isHead = judgedMaxGap(3400, 32_400, true)
+	require.Equal(t, int64(32_400), got)
+	require.True(t, isHead, "the judged maximum must be the head interval so the ladder sees the stall")
+	require.Equal(t, verdictBudgetFalsified, ladderVerdict(got, 3600, 1800))
+
+	// An UNMEASURABLE head cannot raise the maximum (the caller gates instead).
+	got, isHead = judgedMaxGap(3400, -1, false)
+	require.Equal(t, int64(3400), got)
+	require.False(t, isHead)
+}
+
+// TestChainHeaderTimeCannotBeSubstituted documents the type guard. The round-2
+// mutation — measuring to the feed population's own last write — is now a COMPILE
+// error, which is why there is no runtime assertion for it: `chainHeaderTime` is
+// produced only by domainBoundaryTime, and only from headerTime.
+func TestChainHeaderTimeCannotBeSubstituted(t *testing.T) {
+	// A plain int64 is not a chainHeaderTime; the line below does not compile:
+	//   var b chainHeaderTime = someRound.SourceAsOf.Unix()
+	// Conversion is possible but must be written explicitly, which is a visible,
+	// reviewable act rather than an accident.
+	var b chainHeaderTime = chainHeaderTime(1_700_000_000)
+	secs, ok := headInterval(1_699_999_000, b)
+	require.True(t, ok)
+	require.Equal(t, int64(1000), secs)
+}
+
+// --- round-2 M4: the two acceptance artifacts must agree --------------------
+
+// TestRendererAgreesWithTheTallyForEveryPassingVerdict is the round-2 M4 kill. The
+// human artifact and the JSON/exit-code verdict must not contradict each other: a
+// provenance upgrade, a qualifier and a causation-proven marginal case are SUCCESSES
+// and must not appear in the failure column or the GATED FAILURES list.
+func TestRendererAgreesWithTheTallyForEveryPassingVerdict(t *testing.T) {
+	for _, v := range []string{verdictProvenanceUpgrade, verdictQualifier, verdictMarginal, verdictExact} {
+		rows := []p3Row{{Gate: gateHeartbeat, Subject: "s", Leg: "l", Verdict: v, Gated: true}}
+		res := &p3Result{Rows: rows, Tolerances: map[string][]string{}, Summary: map[string]any{}}
+
+		// The per-gate counter.
+		counts := p3Counts(rows)
+		require.Equal(t, 0, counts[gateHeartbeat][1],
+			"%s is a SUCCESS and must not be counted in the failure column", v)
+		require.Equal(t, 1, counts[gateHeartbeat][0], "%s is still a gated row", v)
+
+		// The tally and the exit code.
+		require.Zero(t, tallyP3(rows), "%s must not gate", v)
+		result, code := computeResult(tallyP3(rows), 0, nil)
+		require.Equal(t, "pass", result)
+		require.Equal(t, exitPass, code)
+
+		// The rendered text.
+		text := renderP3Text(res)
+		require.Contains(t, text, "P3 gated failures: 0",
+			"%s: the rendered total must agree with the tally", v)
+		require.NotContains(t, text, "GATED FAILURES",
+			"%s: a passing verdict must not open the GATED FAILURES section", v)
+		if v != verdictExact {
+			require.Contains(t, text, "GATED SUCCESSES",
+				"%s: a richer-than-exact success must still be VISIBLE, in its own section", v)
+			require.Contains(t, text, v)
+		}
+	}
+}
+
+// TestRendererStillReportsEveryRealFailure is the other direction: the M4 fix must
+// not quiet a genuine failure.
+func TestRendererStillReportsEveryRealFailure(t *testing.T) {
+	rows := []p3Row{
+		{Gate: gateHeartbeat, Subject: "agg", Leg: "budget", Verdict: verdictBudgetFalsified, Gated: true, Note: "refuted"},
+		{Gate: gateBacktest, Subject: "case", Leg: "obl2", Verdict: verdictUnexplained, Gated: true},
+		{Gate: gateAaveHF, Subject: "acct", Leg: "hf", Verdict: verdictDrift, Gated: true},
+		{Gate: gateAaveHF, Subject: "acct", Leg: "hf", Verdict: verdictProvenanceUpgrade, Gated: true},
+	}
+	require.Equal(t, 3, tallyP3(rows))
+	text := renderP3Text(&p3Result{Rows: rows, Tolerances: map[string][]string{}, Summary: map[string]any{}})
+	require.Contains(t, text, "P3 gated failures: 3")
+	require.Contains(t, text, "GATED FAILURES")
+	for _, v := range []string{verdictBudgetFalsified, verdictUnexplained, verdictDrift} {
+		require.Contains(t, text, v)
+	}
 }
