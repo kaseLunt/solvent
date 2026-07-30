@@ -1,0 +1,111 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xddDD000000000000000000000000000000000004",
+  "positions": [
+    {
+      "engine": "debt_manager",
+      "account": "0xddDD000000000000000000000000000000000004",
+      "status": "refused",
+      "value_decimals": 6,
+      "refusal": {
+        "code": "SWEEP_NEVER",
+        "detail": "account has never had a successful collateral sweep (last_success_block 0)",
+        "note": "SWEEP_NEVER: this account has never had a successful collateral sweep, so its collateral is of UNKNOWN size — not zero. Serving a health factor near zero over it would be a false liquidation alarm."
+      },
+      "flags": [],
+      "health_factor": null,
+      "liquidatable": null,
+      "total_collateral_base": null,
+      "total_debt_base": null,
+      "weighted_lt_sum": null,
+      "avg_lt_bps": null,
+      "collateral_value_usd": null,
+      "max_borrow_lt": null,
+      "borrowings": "1500000000",
+      "legs": [],
+      "price_inputs": [],
+      "as_of": {
+        "balances_block": 154796552,
+        "params_block": 154796552,
+        "sweep_block": 0,
+        "oldest_price_input": null,
+        "stale_price_inputs": false,
+        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      },
+      "liquidation_price": null
+    }
+  ],
+  "found": true,
+  "notes": [
+    "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
+    "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
+    "Debt Manager collateral comes from a sweep with a worst case of 5580 seconds; its prices are 60-second samples. Read `sweep_block` for the collateral as-of, never the price age.",
+    "The two engines are never blended: Aave publishes a continuous health factor, the Debt Manager a strict liquidatable boolean."
+  ]
+}

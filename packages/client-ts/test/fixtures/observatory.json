@@ -1,0 +1,75 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "limit": 50,
+  "series": [
+    {
+      "batch_id": 1,
+      "computed_at": "2026-07-29T10:00:00Z",
+      "age_seconds": 0,
+      "engines": [
+        {
+          "engine": "aave_v3_etherfi",
+          "value_decimals": 8,
+          "positions": 2,
+          "computed_positions": 1,
+          "refused_positions": 1,
+          "flagged_positions": 1,
+          "liquidatable_positions": 0,
+          "refused": false,
+          "refusal": null,
+          "total_collateral": "800000000000",
+          "total_debt": "600000000000",
+          "refusals": [
+            {
+              "key": "G1",
+              "count": 1
+            }
+          ],
+          "flags": [
+            {
+              "key": "stale_price",
+              "count": 1
+            }
+          ],
+          "unit_note": "values are integers at 8 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+        },
+        {
+          "engine": "debt_manager",
+          "value_decimals": 6,
+          "positions": 2,
+          "computed_positions": 1,
+          "refused_positions": 1,
+          "flagged_positions": 0,
+          "liquidatable_positions": 1,
+          "refused": false,
+          "refusal": null,
+          "total_collateral": "4000000000",
+          "total_debt": "4200000000",
+          "refusals": [
+            {
+              "key": "SWEEP_NEVER",
+              "count": 1
+            }
+          ],
+          "flags": [],
+          "unit_note": "values are integers at 6 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+        }
+      ]
+    }
+  ],
+  "rate_indexes": [
+    {
+      "engine": "aave_v3_etherfi",
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "kind": "liquidity_index",
+      "value": "1023456789012345678901234567",
+      "as_of_block": 25634718,
+      "note": "as-of-last-ReserveDataUpdated: this index can trail the derive cursor. `as_of_block` is its OWN as-of and is the only honest freshness statement about it."
+    }
+  ],
+  "notes": [
+    "Each point is one materialization. The series is newest first and is never interpolated.",
+    "Per-engine aggregates are in each engine's own unit and are NEVER summed across engines."
+  ]
+}

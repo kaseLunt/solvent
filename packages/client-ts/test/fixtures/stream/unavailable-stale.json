@@ -1,0 +1,12 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "reason": "no complete risk batch is available yet: this is a statement about this service, not a claim that the book is empty",
+  "batch": null,
+  "engines": null,
+  "degradation": null,
+  "listener_connected": false,
+  "poll_interval_seconds": 5,
+  "note": "a batch tick means `a new batch exists at watermark vector V`. It NEVER means `a new block`: this service makes no chain calls and does not observe blocks.",
+  "stale_since_seconds": 240,
+  "last_good_batch_id": 1
+}

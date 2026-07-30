@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "no such route: this API serves /v1/book, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/observatory, /v1/stream and /v1/meta"
+  }
+}

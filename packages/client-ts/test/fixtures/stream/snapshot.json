@@ -1,0 +1,160 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "value_decimals": 8,
+      "positions": 2,
+      "computed_positions": 1,
+      "refused_positions": 1,
+      "flagged_positions": 1,
+      "liquidatable_positions": 0,
+      "refused": false,
+      "refusal": null,
+      "total_collateral": "800000000000",
+      "total_debt": "600000000000",
+      "refusals": [
+        {
+          "key": "G1",
+          "count": 1
+        }
+      ],
+      "flags": [
+        {
+          "key": "stale_price",
+          "count": 1
+        }
+      ],
+      "unit_note": "values are integers at 8 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    },
+    {
+      "engine": "debt_manager",
+      "value_decimals": 6,
+      "positions": 2,
+      "computed_positions": 1,
+      "refused_positions": 1,
+      "flagged_positions": 0,
+      "liquidatable_positions": 1,
+      "refused": false,
+      "refusal": null,
+      "total_collateral": "4000000000",
+      "total_debt": "4200000000",
+      "refusals": [
+        {
+          "key": "SWEEP_NEVER",
+          "count": 1
+        }
+      ],
+      "flags": [],
+      "unit_note": "values are integers at 6 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    }
+  ],
+  "degradation": {
+    "engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "refused_positions": 1,
+        "flagged_positions": 1,
+        "liquidatable_positions": 0,
+        "refusals": [
+          {
+            "key": "G1",
+            "count": 1
+          }
+        ],
+        "flags": [
+          {
+            "key": "stale_price",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "engine": "debt_manager",
+        "refused_positions": 1,
+        "flagged_positions": 0,
+        "liquidatable_positions": 1,
+        "refusals": [
+          {
+            "key": "SWEEP_NEVER",
+            "count": 1
+          }
+        ],
+        "flags": []
+      }
+    ],
+    "superseded": false,
+    "supersession_legs": [],
+    "refused_engines": [],
+    "note": "a degradation event is a TRANSITION in this posture, not a new fact about the chain. Refusals are named, counted and served; the book is never published with a position quietly missing."
+  },
+  "listener_connected": true,
+  "poll_interval_seconds": 5,
+  "note": "a batch tick means `a new batch exists at watermark vector V`. It NEVER means `a new block`: this service makes no chain calls and does not observe blocks."
+}

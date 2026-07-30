@@ -1,0 +1,209 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xAAaA000000000000000000000000000000000001",
+  "positions": [
+    {
+      "engine": "aave_v3_etherfi",
+      "account": "0xAAaA000000000000000000000000000000000001",
+      "status": "computed",
+      "value_decimals": 8,
+      "refusal": null,
+      "flags": [
+        "stale_price"
+      ],
+      "health_factor": {
+        "wad": "1080000000000000000",
+        "num": "6480000000000000",
+        "den": "6000000000000000",
+        "infinite": false,
+        "note": "`wad` is the pool's own health factor, a half-up composite over the exact weighted sum. Compare against 1e18 on the WAD; do not re-derive a float from num/den to decide eligibility."
+      },
+      "liquidatable": null,
+      "total_collateral_base": "800000000000",
+      "total_debt_base": "600000000000",
+      "weighted_lt_sum": "6480000000000000",
+      "avg_lt_bps": "8100",
+      "collateral_value_usd": null,
+      "max_borrow_lt": null,
+      "borrowings": null,
+      "legs": [
+        {
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "decimals": 6,
+          "live_debt": "6000000000",
+          "live_collateral": null,
+          "debt_base": "600000000000",
+          "collateral_base": null,
+          "weighted_lt": null,
+          "used_as_collateral": false,
+          "debt_index_block": 25635618,
+          "collateral_index_block": null,
+          "amount": null,
+          "value_usd": null,
+          "max_borrow_contribution": null,
+          "liq_threshold": null,
+          "liq_bonus": null
+        },
+        {
+          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "symbol": "weETH",
+          "decimals": 18,
+          "live_debt": null,
+          "live_collateral": "2000000000000000000",
+          "debt_base": null,
+          "collateral_base": "800000000000",
+          "weighted_lt": "6480000000000000",
+          "used_as_collateral": true,
+          "debt_index_block": null,
+          "collateral_index_block": 25635618,
+          "amount": null,
+          "value_usd": null,
+          "max_borrow_contribution": null,
+          "liq_threshold": "8100",
+          "liq_bonus": "10500"
+        }
+      ],
+      "price_inputs": [
+        {
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "chain_id": 1,
+          "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+          "provenance": "adapter-output",
+          "value": "100000000",
+          "decimals": 8,
+          "block_number": 25635610,
+          "source_as_of": "2026-07-29T09:59:48Z",
+          "budget_seconds": 180,
+          "verdict": "fresh",
+          "age_seconds": 12,
+          "fresh": true,
+          "note": "within this input's own budget at compute time."
+        },
+        {
+          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "chain_id": 1,
+          "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+          "provenance": "adapter-output",
+          "value": "400000000000",
+          "decimals": 8,
+          "block_number": 25635610,
+          "source_as_of": "2026-07-29T09:56:30Z",
+          "budget_seconds": 180,
+          "verdict": "stale",
+          "age_seconds": 210,
+          "fresh": false,
+          "note": "older than its budget but within the ceiling: COMPUTED AND FLAGGED (G4), and the flag propagates into every aggregate containing it."
+        }
+      ],
+      "as_of": {
+        "balances_block": 25635618,
+        "params_block": 25635600,
+        "sweep_block": 0,
+        "oldest_price_input": "2026-07-29T09:56:30Z",
+        "stale_price_inputs": true,
+        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      },
+      "liquidation_price": {
+        "in_factor": true,
+        "never_liquidatable": false,
+        "scale_factor_num": "6000000000000000",
+        "scale_factor_den": "6480000000000000",
+        "already_breached": false,
+        "prices": [
+          {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "current_price": "400000000000",
+            "price_decimals": 8,
+            "price_floor": "370370370370",
+            "lowest_healthy_price": "370370370371"
+          }
+        ],
+        "factor_assets": [
+          "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+        ],
+        "held_assets": [
+          "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+        ],
+        "boundary_is_healthy": true,
+        "per_token_floor_omitted": false,
+        "diagnostic": false,
+        "axis": "eth_usd",
+        "note": "at exactly this price the position is HEALTHY on both engines — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
+      }
+    }
+  ],
+  "found": true,
+  "notes": [
+    "Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
+    "`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
+    "Debt Manager collateral comes from a sweep with a worst case of 5580 seconds; its prices are 60-second samples. Read `sweep_block` for the collateral as-of, never the price age.",
+    "The two engines are never blended: Aave publishes a continuous health factor, the Debt Manager a strict liquidatable boolean."
+  ]
+}

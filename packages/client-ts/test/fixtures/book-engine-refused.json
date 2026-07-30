@@ -1,0 +1,423 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "refused_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "value_decimals": 8,
+      "positions": 0,
+      "computed_positions": 0,
+      "refused_positions": 0,
+      "flagged_positions": 0,
+      "liquidatable_positions": 0,
+      "refused": true,
+      "refusal": {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      },
+      "total_collateral": null,
+      "total_debt": null,
+      "refusals": [
+        {
+          "key": "FLAG_CUSTODY_UNPROVEN",
+          "count": 1
+        }
+      ],
+      "flags": [],
+      "unit_note": "values are integers at 8 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    },
+    {
+      "engine": "debt_manager",
+      "value_decimals": 6,
+      "positions": 2,
+      "computed_positions": 1,
+      "refused_positions": 1,
+      "flagged_positions": 0,
+      "liquidatable_positions": 1,
+      "refused": false,
+      "refusal": null,
+      "total_collateral": "4000000000",
+      "total_debt": "4200000000",
+      "refusals": [
+        {
+          "key": "SWEEP_NEVER",
+          "count": 1
+        }
+      ],
+      "flags": [],
+      "unit_note": "values are integers at 6 decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)"
+    }
+  ],
+  "hf_histogram": {
+    "wad_scale": "1000000000000000000",
+    "engines": [
+      {
+        "refused": true,
+        "refusal": {
+          "engine": "aave_v3_etherfi",
+          "code": "FLAG_CUSTODY_UNPROVEN",
+          "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+          "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+        },
+        "engine": "aave_v3_etherfi",
+        "comparator": "hf_wad",
+        "buckets": [
+          {
+            "label": "< 0.90",
+            "lower_wad": null,
+            "upper_wad": "900000000000000000",
+            "count": 0
+          },
+          {
+            "label": "0.90 – 1.00",
+            "lower_wad": "900000000000000000",
+            "upper_wad": "1000000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.00 – 1.05",
+            "lower_wad": "1000000000000000000",
+            "upper_wad": "1050000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.05 – 1.10",
+            "lower_wad": "1050000000000000000",
+            "upper_wad": "1100000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.10 – 1.25",
+            "lower_wad": "1100000000000000000",
+            "upper_wad": "1250000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.25 – 1.50",
+            "lower_wad": "1250000000000000000",
+            "upper_wad": "1500000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.50 – 2.00",
+            "lower_wad": "1500000000000000000",
+            "upper_wad": "2000000000000000000",
+            "count": 0
+          },
+          {
+            "label": ">= 2.00",
+            "lower_wad": "2000000000000000000",
+            "upper_wad": null,
+            "count": 0
+          }
+        ],
+        "infinite_count": 0,
+        "refused_count": 0,
+        "note": "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy."
+      },
+      {
+        "refused": false,
+        "refusal": null,
+        "engine": "debt_manager",
+        "comparator": "hf_num/hf_den",
+        "buckets": [
+          {
+            "label": "< 0.90",
+            "lower_wad": null,
+            "upper_wad": "900000000000000000",
+            "count": 1
+          },
+          {
+            "label": "0.90 – 1.00",
+            "lower_wad": "900000000000000000",
+            "upper_wad": "1000000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.00 – 1.05",
+            "lower_wad": "1000000000000000000",
+            "upper_wad": "1050000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.05 – 1.10",
+            "lower_wad": "1050000000000000000",
+            "upper_wad": "1100000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.10 – 1.25",
+            "lower_wad": "1100000000000000000",
+            "upper_wad": "1250000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.25 – 1.50",
+            "lower_wad": "1250000000000000000",
+            "upper_wad": "1500000000000000000",
+            "count": 0
+          },
+          {
+            "label": "1.50 – 2.00",
+            "lower_wad": "1500000000000000000",
+            "upper_wad": "2000000000000000000",
+            "count": 0
+          },
+          {
+            "label": ">= 2.00",
+            "lower_wad": "2000000000000000000",
+            "upper_wad": null,
+            "count": 0
+          }
+        ],
+        "infinite_count": 0,
+        "refused_count": 1,
+        "note": "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`."
+      }
+    ]
+  },
+  "waterfall": {
+    "scenario_id": "eth_minus_30",
+    "scenario_version": "v1",
+    "axis": "eth_usd",
+    "grid_scale": "1000000000000000000",
+    "points": [
+      {
+        "index": 0,
+        "factor": "1000000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 1,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "4000000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "239603961"
+          }
+        ]
+      },
+      {
+        "index": 1,
+        "factor": "900000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 0,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "3600000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "635643565"
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "factor": "800000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 0,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "3200000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "1031683169"
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "factor": "700000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 0,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "2800000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "1427722773"
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "factor": "600000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 0,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "2400000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "1823762377"
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "factor": "500000000000000000",
+        "engines": [
+          {
+            "engine": "debt_manager",
+            "usd_decimals": 6,
+            "newly_eligible_accounts": 0,
+            "cumulative_eligible_accounts": 1,
+            "cumulative_debt_eligible_usd": "4200000000",
+            "cumulative_collateral_at_risk_usd": "2000000000",
+            "insolvent_if_liquidated_accounts": 1,
+            "cumulative_bad_debt_usd": "2219801981"
+          }
+        ]
+      }
+    ],
+    "held_flat": [
+      {
+        "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "chain_id": 1,
+        "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+        "value": "100000000"
+      }
+    ],
+    "eligibility_note": "debt ELIGIBLE for liquidation; realized ≤ eligible (the Debt Manager closes in two passes, 50% then remainder)",
+    "monotonicity": {
+      "ok": true
+    },
+    "at_risk_note": "cumulative_collateral_at_risk_usd carries NO monotonicity invariant: it is measured AT each grid point, so it legitimately falls once already-crossed accounts are worth less. Do not render it as a monotone accumulation.",
+    "excluded_engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      }
+    ]
+  },
+  "bad_debt": [
+    {
+      "engine": "aave_v3_etherfi",
+      "usd_decimals": 8,
+      "current_bad_debt_usd": null,
+      "insolvent_positions": null,
+      "eligible_positions": null,
+      "eligible_debt_usd": null,
+      "collateral_at_risk_usd": null,
+      "refused": true,
+      "refusal": {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      }
+    },
+    {
+      "engine": "debt_manager",
+      "usd_decimals": 6,
+      "current_bad_debt_usd": "239603961",
+      "insolvent_positions": 1,
+      "eligible_positions": 1,
+      "eligible_debt_usd": "4200000000",
+      "collateral_at_risk_usd": "4000000000",
+      "refused": false,
+      "refusal": null
+    }
+  ],
+  "coverage": {
+    "batch_positions": 2,
+    "in_book": 1,
+    "refused_in_batch": 1,
+    "excluded_by_this_layer": 0,
+    "excluded": [],
+    "stress_coverage_is_full": true,
+    "note": "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — they are absent from the stress and waterfall arithmetic and are named here rather than dropped."
+  },
+  "notes": [
+    "Aave base values are 8-decimal and Debt Manager USD is 6-decimal: the two engines are reported separately and are NEVER summed.",
+    "Refused positions are counted in `refused_positions` and broken down by code in `refusals`. The book is served with its refusals, never without the positions that produced them."
+  ]
+}

@@ -1,0 +1,211 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "service": {
+    "name": "solvent-api",
+    "version": "0.1.0",
+    "schema_version": 14,
+    "algorithm_revision": 4,
+    "scenario_config_version": "v1",
+    "registry_fingerprint": "sha256:fixture-registry-fingerprint",
+    "seizure_model": "pro-rata-over-counted-collateral"
+  },
+  "batch": null,
+  "watermark_vector": [
+    {
+      "engine": "aave_v3_etherfi",
+      "chain_id": 1,
+      "last_block": 25635618,
+      "acked_epoch": 0,
+      "covered_from_block": 20625519,
+      "decoder_revision": 1,
+      "consumed_by_risk": true
+    },
+    {
+      "engine": "aave_param",
+      "chain_id": 1,
+      "last_block": 25635600,
+      "acked_epoch": 0,
+      "covered_from_block": 20625519,
+      "decoder_revision": 1,
+      "consumed_by_risk": true
+    },
+    {
+      "engine": "prices:poll:1",
+      "chain_id": 1,
+      "last_block": 25635610,
+      "acked_epoch": 0,
+      "covered_from_block": null,
+      "decoder_revision": 1,
+      "consumed_by_risk": true
+    },
+    {
+      "engine": "debt_manager",
+      "chain_id": 10,
+      "last_block": 154796552,
+      "acked_epoch": 0,
+      "covered_from_block": 118000000,
+      "decoder_revision": 1,
+      "consumed_by_risk": true
+    },
+    {
+      "engine": "prices:poll:10",
+      "chain_id": 10,
+      "last_block": 154796540,
+      "acked_epoch": 0,
+      "covered_from_block": null,
+      "decoder_revision": 1,
+      "consumed_by_risk": true
+    }
+  ],
+  "reorg_posture": {
+    "max_epochs": [],
+    "superseded": false,
+    "legs": [],
+    "leg_names": [
+      "acked_epoch_moved",
+      "last_block_rewound",
+      "unacked_epoch_recorded"
+    ],
+    "note": "the three legs are evaluated per STAMPED ENGINE against a live cursor read: one chain's rewind does not invalidate the other chain's book."
+  },
+  "prices": [
+    {
+      "chain_id": 1,
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "owner_engine": "prices:poll:1",
+      "provenance": "adapter-output",
+      "value": "999900000000",
+      "decimals": 8,
+      "block_number": 25635660,
+      "anchor_block": 25635660,
+      "observed_at": "2026-07-29T09:59:55Z",
+      "source_as_of": "2026-07-29T09:59:55Z",
+      "age_seconds": 5,
+      "valid": true,
+      "invalid_reason": "",
+      "quarantined_rows": 1,
+      "highest_quarantined_block": 25635510,
+      "is_valuation_witness": true,
+      "valuation_witness_note": "this key is what values an Aave position: only engine-exact and adapter-output provenance may do so."
+    },
+    {
+      "chain_id": 1,
+      "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "symbol": "USDC",
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "owner_engine": "prices:poll:1",
+      "provenance": "adapter-output",
+      "value": "100000000",
+      "decimals": 8,
+      "block_number": 25635610,
+      "anchor_block": 25635610,
+      "observed_at": "2026-07-29T09:59:48Z",
+      "source_as_of": "2026-07-29T09:59:48Z",
+      "age_seconds": 12,
+      "valid": true,
+      "invalid_reason": "",
+      "quarantined_rows": 0,
+      "highest_quarantined_block": null,
+      "is_valuation_witness": true,
+      "valuation_witness_note": "this key is what values an Aave position: only engine-exact and adapter-output provenance may do so."
+    },
+    {
+      "chain_id": 10,
+      "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+      "symbol": "weETH",
+      "source": "priceproviderv2",
+      "owner_engine": "prices:poll:10",
+      "provenance": "engine-exact",
+      "value": "4000000000",
+      "decimals": 6,
+      "block_number": 154796540,
+      "anchor_block": 154796540,
+      "observed_at": "2026-07-29T09:59:30Z",
+      "source_as_of": "2026-07-29T09:59:30Z",
+      "age_seconds": 30,
+      "valid": true,
+      "invalid_reason": "",
+      "quarantined_rows": 0,
+      "highest_quarantined_block": null,
+      "is_valuation_witness": true,
+      "valuation_witness_note": "this key is what values an Aave position: only engine-exact and adapter-output provenance may do so."
+    }
+  ],
+  "neutralized_prices": [
+    {
+      "owner_engine": "prices:poll:1",
+      "chain_id": 1,
+      "rows": 1,
+      "oldest_observed_at": "2026-07-29T09:00:00Z",
+      "newest_observed_at": "2026-07-29T09:00:00Z",
+      "highest_block": 25635510
+    }
+  ],
+  "sweeps": [
+    {
+      "engine": "debt_manager",
+      "rows": 3,
+      "never_swept": 1,
+      "failed_since_success": 1,
+      "success": 1,
+      "note": "never_swept is collateral of UNKNOWN size, never zero: those accounts are REFUSED rather than valued at zero."
+    }
+  ],
+  "sweep_never_refusals_in_batch": 1,
+  "heartbeat_provenance": [
+    {
+      "chain_id": 1,
+      "symbol": "weETH",
+      "proxy": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+      "aggregator": "0x00c7A37B03690fb9f41b5C5AF8131735C7275446",
+      "heartbeat_seconds": 3600,
+      "grace_seconds": 1800,
+      "provenance_grade": "verified",
+      "observed_max_gap_seconds": null,
+      "tested_budget_seconds": null,
+      "budget_refuted": false,
+      "basis": "deployed code observed consuming this exact proxy with a 3600-second heartbeat (constructor evidence at 0x641169f048ee8de8b3037c9d9c840060fe03e463); recon/derivation-notes.md heartbeat-provenance table"
+    },
+    {
+      "chain_id": 1,
+      "symbol": "USDC",
+      "proxy": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
+      "aggregator": "0x789190466E21a8b78b8027866CBBDc151542A26C",
+      "heartbeat_seconds": 86400,
+      "grace_seconds": 3600,
+      "provenance_grade": "published-not-verified",
+      "observed_max_gap_seconds": null,
+      "tested_budget_seconds": null,
+      "budget_refuted": false,
+      "basis": "the published Chainlink mainnet heartbeat for this feed; NOT independently confirmed from bytecode or from a consumer's constructor by this repo (recon/derivation-notes.md heartbeat-provenance table)"
+    }
+  ],
+  "constants": {
+    "confirmation_blocks": 5,
+    "price_poll_seconds": 60,
+    "dm_sweep_interval_seconds": 3600,
+    "dm_sweep_pass_seconds": 1980,
+    "dm_sweep_worst_case_seconds": 5580,
+    "price_budget_seconds": 180,
+    "price_ceiling_seconds": 360,
+    "large_price_step_bps": 2000,
+    "rate_limit_requests_per_second": 20,
+    "rate_limit_burst": 40,
+    "sse_heartbeat_seconds": 15,
+    "note": "every value here is a POLICY OF THIS DEPLOYMENT or a published cadence, not a measurement. The price ceiling is 2x the budget (design spec §7, R = 2 x T_f): an input past it is REFUSED rather than served stale."
+  },
+  "disclosures": [
+    "Prices are 60-second samples: intra-interval wicks are invisible BY CONSTRUCTION, and no surface here implies otherwise (D-012).",
+    "There is exactly one price view per asset. For `priceproviderv2` inputs these numbers are exactly as manipulable as the Debt Manager itself — no more, no less; there is no second witness to disagree with.",
+    "Debt Manager collateral is sweep-dominated: worst case 5580 seconds behind, while its prices are 60 seconds. Never read a fresh price age as a fresh collateral age.",
+    "`rate_indexes` is as-of-last-ReserveDataUpdated, so a debt leg's index can trail the balances cursor badly. Every leg carries its own index as-of block.",
+    "Aave borrow-rate scenarios are excluded from the stress set (utilization-driven, residual dust book) and the Debt Manager rate axis is a labeled PROJECTION, never a spot health-factor shock.",
+    "A price sample used by a batch and neutralized afterwards is invisible to the three supersession legs; the batch recomputes within one materializer cadence (design spec §4, D-012 class).",
+    "Aave base values are 8-decimal and Debt Manager USD is 6-decimal. The two engines are NEVER summed into one number.",
+    "Refused positions are served WITH their reason and are counted in every aggregate's refusal count. This surface never omits a position it could not compute.",
+    "This service makes zero RPC calls. Every age is the database clock minus a durable stamp, so nothing here is measured against a chain head observed at request time."
+  ],
+  "batch_unavailable_reason": "no complete risk batch is available: this is a statement about this service, NOT a claim that the book is empty"
+}
