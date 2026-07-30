@@ -958,10 +958,16 @@ func sortedAddrKeys(m map[common.Address]*big.Int) []common.Address {
 // pre-boundary and fully outbound post-boundary is zero-balance at both edges,
 // appears in NO leg or seizure list, and raises boundary maxBorrowLT exactly
 // like H2's top-up. Only tokens with configs move maxBorrowAtFrame, so the
-// supported set is the provably-sufficient universe. A mid-block
-// CollateralTokenAdded/Removed is DM-custodied and witness-visible
-// (IDebtManager.sol:44-45), and the union of BOTH pins already contains its
-// token — no event surveillance is needed for list completeness.
+// supported set is the provably-sufficient universe — EXCEPT for the in-block
+// ROUND TRIP (Codex round 10, H): a token added AND removed strictly before L
+// is absent from BOTH pins' enumerations, so this union cannot contain it and
+// no sweep can ask about it. That gap is closed on the REPLAY side, not here:
+// replaySameBlockCauses now decodes CollateralTokenAdded/Removed
+// (DM-custodied and witness-visible, IDebtManager.sol:44-45) and REFUSES the
+// whole replay on any pre-boundary occurrence, so a round-trip block can
+// never reach a marginal pass for this sweep to certify. For every
+// non-round-trip lifecycle shape the union of BOTH pins does contain the
+// token, as before.
 //
 // The old union is KEPT as a MINIMALITY check: every parent leg, exec leg and
 // seized token must sit inside the supported union. Keeping it is strictly

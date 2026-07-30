@@ -1622,7 +1622,11 @@ var dmWitnessABI = mustParseABI(`[
 		{"name":"user","type":"address","indexed":true},
 		{"name":"payer","type":"address","indexed":true},
 		{"name":"token","type":"address","indexed":true},
-		{"name":"amount","type":"uint256","indexed":false}]}
+		{"name":"amount","type":"uint256","indexed":false}]},
+	{"type":"event","name":"CollateralTokenAdded","inputs":[
+		{"name":"token","type":"address","indexed":false}]},
+	{"type":"event","name":"CollateralTokenRemoved","inputs":[
+		{"name":"token","type":"address","indexed":false}]}
 ]`)
 
 // dmWitnessTopic0 is the lowercase hex topic0 of one witness event, taken from the
@@ -1637,13 +1641,17 @@ func dmWitnessTopic0(event string) string {
 	return hex.EncodeToString(ev.ID.Bytes())
 }
 
-// The five witness topic0s, derived once at init.
+// The seven witness topic0s, derived once at init. The five APPLIED classes
+// came first; the two supported-set LIFECYCLE classes (Codex round 10, H) are
+// decoded only to REFUSE — see the replay's lifecycle arm.
 var (
 	topicDMLiquidated           = dmWitnessTopic0("Liquidated")
 	topicDMInterestIndexUpdated = dmWitnessTopic0("InterestIndexUpdated")
 	topicDMCollateralConfigSet  = dmWitnessTopic0("CollateralTokenConfigSet")
 	topicDMBorrowed             = dmWitnessTopic0("Borrowed")
 	topicDMRepaid               = dmWitnessTopic0("Repaid")
+	topicDMCollateralAdded      = dmWitnessTopic0("CollateralTokenAdded")
+	topicDMCollateralRemoved    = dmWitnessTopic0("CollateralTokenRemoved")
 )
 
 // collateralLeg is an ALIAS for the anonymous per-leg struct frameState and
@@ -2129,6 +2137,45 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 			}
 			configs[tok] = newCfg
 			applied(w, fmt.Sprintf("CollateralTokenConfigSet for HELD token 0x%s (liquidationThreshold → %s)", w.Topic1Addr, newCfg.LiquidationThreshold))
+		case topicDMCollateralAdded, topicDMCollateralRemoved:
+			// SUPPORTED-SET LIFECYCLE → REFUSE (Codex round 10, H): a
+			// CollateralTokenAdded/Removed is a MEMBERSHIP write. Added is
+			// paired with a ConfigSet (DebtManagerAdmin.sol:30-33) that gives
+			// a previously-unsupported token a live threshold; Removed DELETES
+			// the config outright (DebtManagerAdmin.sol:47-48) with no
+			// ConfigSet emitted. Either way maxBorrowLT moves for every Safe
+			// HOLDING the token — with no Transfer, no netting event, and no
+			// entry in the sweep universe when the token round-trips inside
+			// the block (absent from supported@N-1 ∪ supported@N). This model
+			// CANNOT replay that: the parent basket has no leg for an
+			// unsupported-at-N-1 token (collateralOf does not enumerate it),
+			// so there is no balance to attach the transient config to.
+			// Replaying membership, config AND the boundary balance is the
+			// NAMED EXTENSION; until it exists, ANY pre-boundary occurrence
+			// refuses the whole replay (note → Complete()==false →
+			// UNEXPLAINED) — modeled-iff-fully-replayable, the same law as
+			// the netting term. Not scoped to held/parent-basket tokens, and
+			// deliberately so: the harm is precisely a token OUTSIDE the
+			// parent model.
+			//
+			// Post-boundary occurrences never reach this arm — the witness
+			// query is strictly bounded above by the liquidation's own
+			// log_index (snapshotdb/task6db.go: log_index < the case's) —
+			// and could not matter if they did: the pre-L crossing is a
+			// function of state strictly before L, which a later write
+			// cannot rewrite.
+			event := "CollateralTokenAdded"
+			if w.Topic0 == topicDMCollateralRemoved {
+				event = "CollateralTokenRemoved"
+			}
+			tok, err := decodeWitnessLifecycleToken(event, w)
+			if err != nil {
+				// Undecodable is strictly LESS knowledge, never an excuse:
+				// the refusal stands, with the decode failure disclosed.
+				note(w, "%s before the liquidation boundary (token payload did not decode: %v) — a supported-set membership write moves maxBorrowLT and basket membership in ways the parent-basket model cannot replay; the replay is INCOMPLETE", event, err)
+				continue
+			}
+			note(w, "%s for token 0x%s before the liquidation boundary — a supported-set membership write moves maxBorrowLT and basket membership (the paired config write / config delete) in ways the parent-basket model cannot replay: an in-block add→remove round trip is invisible to the sweep universe AND to every endpoint leg, so nothing here can certify the crossing held; the replay is INCOMPLETE (membership/config/boundary-balance replay is the named extension, not attempted)", event, hexLower(tok.Hex()))
 		default:
 			out.Unrelated++
 		}
@@ -2200,6 +2247,22 @@ func decodeWitnessAmount(event string, w snapshotdb.T6Witness) (*big.Int, error)
 		return nil, fmt.Errorf("%s payload is not a uint256 amount", event)
 	}
 	return new(big.Int).Set(v), nil
+}
+
+// decodeWitnessLifecycleToken decodes the single NON-indexed token address of
+// CollateralTokenAdded / CollateralTokenRemoved (IDebtManager.sol:44-45 — the
+// token travels in the DATA payload, not a topic). Decoded only to NAME the
+// token in the refusal note; the lifecycle arm never applies state.
+func decodeWitnessLifecycleToken(event string, w snapshotdb.T6Witness) (common.Address, error) {
+	vals, err := dmWitnessNonIndexed(event, w)
+	if err != nil {
+		return common.Address{}, err
+	}
+	tok, ok := vals[0].(common.Address)
+	if !ok {
+		return common.Address{}, fmt.Errorf("%s payload is not an address", event)
+	}
+	return tok, nil
 }
 
 // decodeWitnessCollateralConfig decodes CollateralTokenConfigSet's NEW config
