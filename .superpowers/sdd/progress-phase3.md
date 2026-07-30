@@ -2058,6 +2058,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   fixture as the m1 killer, netted-boundary assertion on the own-pass arm,
   31/31 re-capture w/ STOP-on-flip). Round 9 runs in parallel on PINNED
   639d7eb — its findings and the adjustments merge at the next landing.
+- CODEX ROUND 9 ON TASK 6 (session 019fb48b-4434-73f2-96be-e915636a2a2e,
+  ~14min, t6r9 @ 639d7eb, base 21880a7): needs-attention — 1H, and it is
+  THE SAME GAP chain-truth's adjustment 1 found independently minutes
+  earlier: the Transfer sweep's address set (parent∪exec∪seized endpoints)
+  omits TRANSIENT boundary tokens — a supported token in before L and out
+  after L appears in no endpoint set, both getLogs calls are address-
+  filtered to that union, so closure and attribution pass and Proven=true
+  despite an unchecked pre-boundary basket increase; "the committed captures
+  cannot disprove this because they record the same narrowed production
+  queries." TWO INDEPENDENT AUTHORITIES, ONE DEFECT, ONE REMEDY (the
+  supported-collateral set at both pins) — the strongest convergence signal
+  the program has produced; the adjustment wave was ALREADY mid-
+  implementation and received the round-9 verbatim regression shape (token
+  absent from all three endpoint sets, out-leg AFTER L) plus one nuance
+  relayed: netting events name tokens, so a netting event naming a token
+  outside the swept set → refuse (a belt — netting only applies to
+  supported collateral, so a firing belt means the supported-set premise
+  broke) plus the per-case address-list-length diff in the re-capture
+  report. No separate fix wave needed — the lanes merged.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
