@@ -1486,6 +1486,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   hold at chunk boundaries with per-event-type split tests, no unbased delivery
   (bounded buffer or reconnect), retry reset only on valid base frame;
   red-then-green required, mutation checks m1–m4.
+- **FLAG-CUSTODY CLOSED — SHIP** (round 8, session review-ms7mqdlz-dp5fw8 job,
+  ~6min, fcr8 @ 06d0a25 base df6e5f6): "approve — SHIP. All three fixes hold in
+  both failure directions; binding serialization is unambiguous for honest
+  values; every Aave stream is chain-validated before hashing; tests are
+  non-vacuous; no fourth coverage field or adoption regression was found. No
+  material findings." Reviewer's only next-step (focused test run from a
+  writable env — its sandbox couldn't create Go's temp build dir) was ALREADY
+  satisfied: wave ran full -p 1 + -race -p 1 + riskd -race -count=3 in the real
+  repo and the integrator independently re-ran vet/build/tests before 06d0a25.
+  Program: witness law → coverage provenance → five faces (account set, sweep
+  scope, identity/adoption, migrated past, stream-set binding) → completion rule
+  (three homes) — 8 rounds, 5 fix waves. **SHIP 2 of 4.** Remaining gates:
+  Task 6 (wave 5 mid-flight), Task 8 (fix wave 1 mid-flight). Ops note: the
+  reviewer self-caught a backslash-mangled worktree path landing INSIDE the
+  repo pre-dispatch, removed it, and the integrator verified the main tree
+  clean (only wave-5 property + untracked log). t6r4 worktree administratively
+  removed; fcr8 + t8r1 remain registered for the locked-dir cleanup batch.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
