@@ -823,6 +823,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   collateral exists). NEXT: micro-fix lands → post-incident verify EVERYTHING →
   commit micro-fix → commit Task 6 → Codex rounds → daemon restart (13+14) →
   make reconcile = the acceptance run.
+- **RISK-QUANT RULING ON F1 — CONFIRMED FROM THE DEPLOYED VERIFIED SOURCE, AND A
+  SECOND LAW ERROR FOUND** (archived verbatim: p3-consults/risk-quant-component4-
+  7-ruling.md, NORMATIVE). Impl resolved via EIP-1967 today (0x0F3BCeB6…244),
+  PoolInstance solc 0.8.27 pulled and read — source outranks pin counts. (Q1)
+  Component-4 debt leg = MulDivCeil, CONFIRMED at GenericLogic.sol:229 +
+  MathUtils.sol:100-115 (pure ceiling, not half-up); collateral floor confirmed
+  :242-258. (Q2) **NEW: component 7 is NOT a single fused floor** — deployed law
+  is HF = floor(floor((Σ(Cᵢ·LTᵢ)·1e18 + ⌊D/2⌋)/D)/1e4), the wadDiv HALF-UP
+  composite (WadRayMath.sol:53-62) on the raw weighted sum with D = ceil-summed
+  debt. Differs from our fused floor iff carry fires AND q≡9999 (mod 1e4) —
+  ~5e-5 incidence: **Task 1's P-1 was an undetectably-good approximation that NO
+  pin count could separate; only the source read caught it.** Error direction of
+  the old form: false-alarm (benign) — but it is not the contract's law.
+  Discriminators constructed (trivial Σ=1/D=1e14+1 → 1 vs 0; realistic
+  99215323900/13720493 → …431 vs …430 + second witness). (Q3) blast radius:
+  golden E2E re-pin (price 99992646), survivors named (M-1/M-2, liqprice
+  boundaries, collateral vectors — all exact-division, verified), liqprice P*
+  rises ≤1 D-unit in the SAFE direction. (Q4) component-7 composite = the same
+  rode-along-unproven class, ships SAME rev; availableBorrowsBase stays evidence-
+  only; pre-TokenMath regime guard (pin < 23,088,584 refuse/era-flag) REQUIRED.
+  VERDICT: numbers do not hold for the fix as scoped — four-item blocking list;
+  expects to flip on re-read. **REV-3 FIX WAVE DISPATCHED** (internal/risk +
+  derivation-notes only; AlgorithmRevision 2→3 applied by integrator at commit —
+  riskfeed is mid-flight with the sibling wave). Ruling's meta-note for the
+  pattern book: the EXACT-EQUALITY gate posture is what caught F1 — ±1 tolerance
+  on totalDebtBase would have carpeted a real law error 12/12.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
