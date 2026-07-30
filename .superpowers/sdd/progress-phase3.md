@@ -1409,6 +1409,19 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   surfaces) → fw2 (three-valued found) → r3 1H (= staging miss #4) →
   bc0c703 → r4 SHIP. Commits: 328bd0f / 94a13c4 / da5ed0a / bc0c703 (+
   client f58bc48). **SHIP 1 of 4.** NEXT: flag-custody round 7 dispatching.
+- POST-COMPACT RESUME (2026-07-30 07:20): three lanes in flight. (1) flag-custody
+  wave applying the round-7 fixes (binding → sameCoverage forward+reverse, binding →
+  identity cursor line, mixed-chain validateAaveGenesis) — mid-edit on cmd/riskd +
+  internal/riskfeed, new coverage_binding_identity_live_test.go. (2) Task 6 round 4
+  (t6r4 @ c421213, base 9da5448): reviewer's poll loop died across the compact —
+  re-armed on the same job (pid alive, log growing, verified twice). (3) TASK 8
+  ROUND 1 DISPATCHED on a fresh codex-reviewer: worktree C:\wtclose\t8r1 @ f58bc48,
+  base 9a80667 (= d664886~1), scope packages/client-ts ONLY (range crosses the T6/T7
+  trains — brief excludes them), D-013 quoted, hunt list = three-valued found
+  conflation, silent Number precision loss, vacuous ContractInvariantError, drift-gate
+  self-confirmation, SSE reconnect dup/drop, zero-dep enforcement, test honesty,
+  contract mismatch. Maintenance window remains PRE-AUTHORIZED, fires only when T6 +
+  flag-custody + T8 all reach SHIP (T7 already shipped).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
