@@ -1669,6 +1669,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (language set fixed at startup) — TS symbolic tools error until a server
   restart; wave fell back to Read/Grep/Edit per sanction. ROUND 3 (closing)
   dispatched: t8r3 @ d5a62ad, base 6a9ba4e.
+- CODEX ROUND 3 ON TASK 8 (job review-ms7p7e0v-xt7btq, ~6min, t8r3 @ d5a62ad,
+  base 6a9ba4e): needs-attention — 1H; H2 (base deadline) HOLDS. The H1 CLASS
+  survives beyond lookup.found: positionEligible()/aaveEligibleFromWad()
+  return boolean|null (null = refused/never-swept), and the primary payloads
+  export nullable verdicts through generated Position.liquidatable,
+  StressState.liquidatable, ProjectionHorizon.becomes_liquidatable —
+  !positionEligible(p) renderSafe() compiles and paints a withheld verdict
+  definitively safe (conf .99). The round-2 fix sealed the named instance;
+  the class kept three more doors. FIX WAVE 3 dispatched with a CLASS-SWEEP
+  requirement: inventory EVERY exported boolean|null definitive-verdict
+  field/return (seal or justify each), helpers → sealed string unions
+  ('liquidatable'|'not-liquidatable'|'unknowable'-family), primary payloads
+  refined via total mapping (null → 'unknowable'; raw fields ABSENT type+
+  runtime, Omit + destructure-rest; wire shapes only on raw accessors;
+  generated schema and contract UNTOUCHED — the drift gate pins them),
+  @ts-expect-error pins on the reviewer's exact traps + per-field battery,
+  mutants incl. the mapper smuggling null→'not-liquidatable'. Wave-1/2 laws
+  must stay green.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
