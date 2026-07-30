@@ -88,7 +88,7 @@ type replayTarget struct {
 // runPhase1 = Stage A (snapshotdb.Collect, all DB, no chain — structurally)
 // + Stage B (all chain, no DB): pin headers, seed, Go-side seed ordering,
 // selection, and the sample-filtered views.
-func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, opReader, ethReader *pinnedReader) (*phase1Data, error) {
+func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string, vec goldenVectors, wantDM, wantAave bool, opReader, ethReader *pinnedReader, reg *registryView) (*phase1Data, error) {
 	// -include / -accounts parsing first: pure flag/file facts (no DB, no
 	// RPC) whose accounts must join the snapshot's candidate read set.
 	var includes []string
@@ -140,12 +140,25 @@ func runPhase1(ctx context.Context, o *options, cfg *config.Config, roDSN string
 		sum := sha256.Sum256(raw)
 		configSHA = hex.EncodeToString(sum[:])
 	}
-	snap, err := snapshotdb.Collect(ctx, snapshotdb.Params{
+	prm := snapshotdb.Params{
 		ConfigSHA:        configSHA,
 		PinOP:            o.pinOP,
 		PinETH:           o.pinETH,
 		CollateralReplay: o.collateralReplay,
-	}, cfg, roDSN, spec, wantDM, wantAave, extras)
+	}
+	// P3 Task 6: the gate set's DERIVED side must be read in THIS transaction
+	// (snapshotdb/task6db.go explains why it cannot be read later). Everything
+	// handed in is a plain value: the never-seen subjects and the frozen frame's
+	// keys are COMMITTED inputs, and the feed registry arrives already parsed
+	// because the snapshot package may not read files.
+	if o.p3Gates && reg != nil {
+		prm.Task6 = true
+		prm.NeverSeenProbe = neverSeenBytes()
+		prm.BacktestKeys = backtestFrameKeys()
+		prm.AdapterRowsPerReserve = adapterRowsPerReserve
+		prm.Feeds = reg.FeedRegistry
+	}
+	snap, err := snapshotdb.Collect(ctx, prm, cfg, roDSN, spec, wantDM, wantAave, extras)
 	if err != nil {
 		if errors.Is(err, store.ErrUnackedReorgEpoch) {
 			// Exit finding H1: an unacknowledged reorg epoch at snapshot time

@@ -81,6 +81,12 @@ import (
 const (
 	DMEngine   = "debt_manager"
 	AaveEngine = "aave_v3_etherfi"
+	// AaveParamEngine is the PoolConfigurator stream's own engine identity
+	// (P3 Task 2). It is a THIRD engine, not a synonym for AaveEngine: the
+	// param ledger and the position ledger advance on different cursors, and
+	// reading params under the position engine's name would silently return an
+	// empty ledger.
+	AaveParamEngine = "aave_param"
 )
 
 // CleanupStage names one checkpoint of Collect's ORDERED cleanup (round-14
@@ -211,6 +217,28 @@ type Params struct {
 	// CollateralReplay > 0 prefetches the deep-replay history documents
 	// (the replay targets are picked from the SAMPLE after commit).
 	CollateralReplay int
+
+	// --- P3 Task 6 (plain values only, exactly like ConfigSHA) --------------
+
+	// Task6 enables the Task-6 derived-side collection. A plain bool, so a run
+	// with the gate set disabled does not pay for its reads.
+	Task6 bool
+	// NeverSeenProbe are the COMMITTED never-seen probe subjects (risk-quant
+	// R3's phantom-debt cohort). They arrive as BYTES because this package
+	// cannot hash: cmd/reconcile derives them from a committed seed string and a
+	// test re-derives them, so the cohort is reproducible from the repository
+	// alone rather than from a run-time draw.
+	NeverSeenProbe [][]byte
+	// BacktestKeys are the frozen frame's "<tx hex>:<log index>" keys, in frame
+	// order. The FRAME is the floor (risk-quant R2), so this is a committed
+	// input, never a query result.
+	BacktestKeys []string
+	// AdapterRowsPerReserve is the adapter-output weld's per-reserve distinct
+	// anchor count (risk-quant R3 strengthens the plan's >=1 to >=3).
+	AdapterRowsPerReserve int
+	// Feeds is the parsed feed registry (recon/feeds.json + the configurator
+	// streams) the B3 scan and the adapter weld read.
+	Feeds FeedRegistry
 }
 
 // GoldenSpec is the golden-vector slice of Collect's read set: the dual pins
@@ -439,6 +467,11 @@ type Data struct {
 
 	WeldDB     map[string]WeldData
 	Invariants *InvariantsSection
+
+	// Task6 is the P3 Task-6 gate set's derived + committed-input side, read in
+	// this same snapshot (task6db.go explains why it cannot be read later). nil
+	// when Params.Task6 is false.
+	Task6 *Task6Data
 }
 
 // Collect is Stage A (round-10 F5): connect, open the RR RO transaction,
@@ -760,6 +793,18 @@ func Collect(ctx context.Context, prm Params, cfg *config.Config, roDSN string, 
 			}
 		}
 		p.WeldDB[chainName] = w
+	}
+
+	// --- P3 Task 6 derived side, INSIDE the same snapshot -------------------
+	// Last, deliberately: it is the largest read set (a full feed-round history
+	// per aggregator and one fold per frozen backtest case), so putting it after
+	// the invariant scans keeps the cheap preconditions failing fast. Every pin
+	// it uses is a pin resolved above — no read here chooses its own height.
+	if prm.Task6 {
+		p.Task6, err = collectTask6(ctx, tx, prm, prm.Feeds, p.Pins, wantDM, wantAave, p.IngestCursors)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// COMMIT AND CLOSE (round-10 F5): the connection is gone before this

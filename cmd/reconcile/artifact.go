@@ -36,8 +36,12 @@ var hashScope = struct {
 	Sections []string `json:"sections"`
 	Redacted []string `json:"redacted_keys"`
 }{
-	Sections: []string{"pins", "counts", "sample", "dm_rows", "dm_weld", "dm_index_check", "aave_rows", "aave_weld", "golden", "invariants", "summary"},
-	Redacted: []string{"endpoints_consulted", "second_opinion", "rpc_class", "endpoint", "attempts", "depth_note"},
+	Sections: []string{"pins", "counts", "sample", "dm_rows", "dm_weld", "dm_index_check", "aave_rows", "aave_weld", "golden", "invariants", "p3_task6", "summary"},
+	// head_gap_seconds is redacted for the same reason the freshness ages are: it
+	// is measured against the WALL CLOCK, so two otherwise identical runs
+	// legitimately differ there. Every other B3 number (max gap, p99, the domain
+	// bounds) is chain testimony and stays inside the hash.
+	Redacted: []string{"endpoints_consulted", "second_opinion", "rpc_class", "endpoint", "attempts", "depth_note", "head_gap_seconds"},
 }
 
 // pinInfo is one chain's (or golden pin's) pin record.
@@ -87,6 +91,11 @@ type driftReport struct {
 	Freshness        *freshnessResult      `json:"freshness,omitempty"`
 	SpotReads        []spotReadRow         `json:"collateral_spot_reads,omitempty"`
 	CollateralReplay []collateralReplayRow `json:"collateral_replay,omitempty"`
+
+	// P3 is the Task-6 gate set's section: rows, per-gate input-frame
+	// declarations, the three tolerances' appearances, the tokenConfig
+	// composition trees, the backtest table and the B3 verdicts.
+	P3 *p3Result `json:"p3_task6,omitempty"`
 
 	Invariants       *snapshotdb.InvariantsSection `json:"invariants,omitempty"`
 	RPC              *rpcCallLog                   `json:"rpc,omitempty"`
@@ -205,6 +214,7 @@ func comparisonHash(r *driftReport) (string, error) {
 		"aave_weld":      r.AaveWeld,
 		"golden":         r.Golden,
 		"invariants":     r.Invariants,
+		"p3_task6":       r.P3,
 		"summary":        r.Summary,
 	}
 	raw, err := json.Marshal(sections)
@@ -327,6 +337,9 @@ func renderText(r *driftReport) string {
 			r.Invariants.Scan1DistinctHash.Rows, r.Invariants.Scan2EventSums.Rows,
 			r.Invariants.Scan3BorrowIndex.Rows, r.Invariants.Scan4EventLogOrphan.Rows,
 			r.Invariants.Scan5IIUCoverage.Rows, r.Invariants.AdvisoryAaveIndex.Rows)
+	}
+	if r.P3 != nil {
+		b.WriteString(renderP3Text(r.P3))
 	}
 	if r.RPC != nil {
 		fmt.Fprintf(&b, "rpc: %d logged operations\n", len(r.RPC.Entries))

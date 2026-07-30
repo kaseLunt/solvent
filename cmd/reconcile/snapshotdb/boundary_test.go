@@ -191,8 +191,22 @@ var exportedAPIAllowlist = map[string]bool{
 	"GoldenDBSide": true, "WeldData": true, "IdxObs": true, "RewindBaseline": true,
 	"ScanResult": true, "InvariantsSection": true, "Data": true,
 	"ConnectedIdentity": true,
+	// P3 Task-6 derived-side data types (task6db.go). All PLAIN DATA: no method
+	// mutates a connection, no field is func- or interface-typed, and
+	// FeedRegistry/FeedSpec exist precisely so the registry arrives as VALUES —
+	// this package still cannot read a file.
+	"Task6Data": true, "T6Leg": true, "T6NeverSeen": true, "T6BacktestRow": true,
+	"T6Seizure": true, "T6FeedRound": true, "T6FeedScan": true, "T6AdapterRow": true,
+	// T6SweepState carries the collateral-testimony state AT THE PIN. Exported
+	// because cmd/reconcile's gate classifies on it (classifyDMSweep) — plain
+	// integers and a status string, no capability.
+	"T6SweepState": true,
+	"FeedRegistry": true, "FeedSpec": true,
 	// consts
-	"DMEngine": true, "AaveEngine": true,
+	"DMEngine": true, "AaveEngine": true, "AaveParamEngine": true,
+	// AnswerUpdatedTopic0 is exported so cmd/reconcile can re-derive it with
+	// crypto.Keccak256 — this package may not import a hashing surface.
+	"AnswerUpdatedTopic0": true,
 	"StageBeforeRollback": true, "StageBeforeClose": true, "StageAfterClose": true,
 	// Sentinel methods. HoldAt/Arrived/ResetArrivals are the round-14 F2
 	// lifecycle barriers: delay-only bools — they cannot skip, reorder or
@@ -800,6 +814,7 @@ var auditedStoreEntryPoints = map[string]bool{
 	"AssetNetSums":                       true,
 	"CollateralHistoryDocsAtLastSuccess": true,
 	"CountReconRows":                     true,
+	"DMParamsAsOf":                       true,
 	"DeriveCursorStates":                 true,
 	"EventBalanceInternalCheck":          true,
 	"IngestCursorStates":                 true,
@@ -812,6 +827,7 @@ var auditedStoreEntryPoints = map[string]bool{
 	"LatestAPYObservation":               true,
 	"LatestRateIndexAt":                  true,
 	"MaxReorgEpochs":                     true,
+	"ParamsAsOfQ":                        true,
 	"ReconBalancesForAccounts":           true,
 	"ReconHighestLogAtOrBelow":           true,
 	"ResidueZeroedAssets":                true,

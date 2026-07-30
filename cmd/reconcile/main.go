@@ -99,6 +99,9 @@ type options struct {
 	timeout          time.Duration
 	maxHeadLag       time.Duration
 	preflightOnly    bool
+	// P3 Task 6 (the proof surface).
+	p3Gates      bool
+	dmFullCensus bool
 }
 
 // Canonical acceptance defaults (round-11 F1): the ONE set of values an
@@ -113,6 +116,16 @@ const (
 	canonicalSnapshotMaxAge   = "auto"
 	canonicalCollateralReplay = 3
 	canonicalMaxHeadLag       = 30 * time.Minute
+	// canonicalP3Gates: the P3 Task-6 gate set is ON in an acceptance run. It is
+	// a flag at all only so an operator can bisect a failure without paying the
+	// deep-archive budget; turning it OFF bypasses required checks and taints,
+	// exactly like -collateral-replay 0.
+	canonicalP3Gates = true
+	// canonicalFeedsPath is the committed registry the registry-consistency gate
+	// judges against the chain. A CONSTANT, not a flag: acceptance evidence is
+	// defined over the canonical registry, and an operator-chosen one would
+	// change the claim's subject exactly as -config does.
+	canonicalFeedsPath = "recon/feeds.json"
 )
 
 // reconFlagSet registers the COMPLETE reconcile flag surface on a fresh
@@ -144,6 +157,8 @@ func reconFlagSet(o *options, stderr io.Writer) *flag.FlagSet {
 	fs.DurationVar(&o.timeout, "timeout", 20*time.Minute, "whole-run timeout")
 	fs.DurationVar(&o.maxHeadLag, "max-head-lag", canonicalMaxHeadLag, "staleness QUALITY gate on the pin's header time (daemon stalled ⇒ evidence stale; exit 3) — never a serveability inference; loosening or disabling taints acceptance:false")
 	fs.BoolVar(&o.preflightOnly, "preflight-only", false, "run Phase 0 only and exit (the smoke mode; never touches Phase 1)")
+	fs.BoolVar(&o.p3Gates, "p3-gates", canonicalP3Gates, "run the P3 Task-6 gate set (HF gate, DM boolean weld, param welds, registry-consistency gate, tokenConfig sweep, realized-liquidation backtest, B3 heartbeat scan); DISABLING it bypasses required checks and taints acceptance:false")
+	fs.BoolVar(&o.dmFullCensus, "dm-full-census", false, "STRENGTHENER (default off): weld liquidatable(user) against the chain for EVERY derived DM borrower instead of the cohort. Costs one multicall chunk per 15 accounts; it can only ADD gated rows, never weaken a bound")
 	return fs
 }
 
@@ -228,6 +243,9 @@ func acceptanceTaints(o *options) []string {
 		taints = append(taints, fmt.Sprintf("-max-head-lag %s disables the staleness quality gate (a required check)", o.maxHeadLag))
 	} else if o.maxHeadLag > canonicalMaxHeadLag {
 		taints = append(taints, fmt.Sprintf("-max-head-lag %s looser than the canonical %s weakens the staleness quality gate — positive-but-loose is the same class as disabled (round 11)", o.maxHeadLag, canonicalMaxHeadLag))
+	}
+	if !o.p3Gates {
+		taints = append(taints, "-p3-gates=false disables the WHOLE P3 Task-6 gate set (Aave HF gate, DM boolean weld, param welds, registry-consistency gate, tokenConfig sweep, realized-liquidation backtest, B3 heartbeat scan) — a required-check bypass, the same class as -collateral-replay 0")
 	}
 	return taints
 }
@@ -798,6 +816,35 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		return exitPrecondition, err
 	}
 
+	// P3 Task 6, Phase 0: the FROZEN backtest frame's digest, and the committed
+	// registry (the CLAIM). Both are checked before any snapshot or RPC exists,
+	// because a frame that does not hash to the probe record's value makes every
+	// backtest verdict a claim about a DIFFERENT sample, and a self-contradictory
+	// registry cannot be judged against anything. Precondition class, exit 2.
+	var reg *registryView
+	if o.p3Gates {
+		got, ok := backtestFrameDigestOK()
+		if !ok {
+			return exitPrecondition, fmt.Errorf("backtest frame digest %s != the committed %s (recon/p3-probes.md, the Task-6 frozen backtest frame): the frame is FROZEN, so a digest mismatch means this binary would record verdicts against a different sample than the record describes", got, backtestFrameDigest)
+		}
+		if len(backtestFrame) != backtestFrameSize {
+			return exitPrecondition, fmt.Errorf("backtest frame carries %d cases, not the frozen %d", len(backtestFrame), backtestFrameSize)
+		}
+		rep.Run["backtest_frame_digest"] = got
+		feeds, ferr := config.LoadFeeds(canonicalFeedsPath, cfg.Chains)
+		if ferr != nil {
+			return exitPrecondition, fmt.Errorf("load feed registry (the CLAIM the registry-consistency gate judges against the chain): %w", ferr)
+		}
+		streams := map[string]config.Stream{}
+		for _, s := range cfg.Streams {
+			streams[s.Name] = s
+		}
+		if reg, err = buildRegistryView(feeds, streams); err != nil {
+			return exitPrecondition, err
+		}
+		rep.Run["feeds_registry_path"] = canonicalFeedsPath
+	}
+
 	// RPC preflight probes, cheapest first (§0): golden-pin archive
 	// capability on ETH (both deep pins), one pinned call at the OP derive
 	// cursor. A state-pruned classification HERE is exit 2 (golden pins:
@@ -867,7 +914,7 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 	}
 
 	// ---------------- Phase 1: RR snapshot — ALL DB reads ----------------
-	p1, err := runPhase1(ctx, o, cfg, roDSN, vec, wantDM, wantAave, opReader, ethReader)
+	p1, err := runPhase1(ctx, o, cfg, roDSN, vec, wantDM, wantAave, opReader, ethReader, reg)
 	if err != nil {
 		var a *runAbort
 		if errors.As(err, &a) {
@@ -990,6 +1037,29 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 				return finish(a)
 			}
 			return finish(abort(exitRetryable, "aborted: rpc", "aave phase: %v", err))
+		}
+	}
+
+	// ---- P3 Task 6: the proof surface -----------------------------------
+	// INSIDE the before/after weld bracket, deliberately (chain-truth R1.2):
+	// requireCanonical=false means an orphaned pin keeps serving silently, and
+	// the end-of-run re-weld is the only thing that catches it — so a gate set
+	// appended after Phase 3 would sit outside that protection. Its findings join
+	// the SAME gatedFailures counter every pre-existing gate feeds, so a Task-6
+	// failure reaches the exit code through exactly the path a DM row drift
+	// reaches it by (chain-truth R5.4: never a side-channel exit).
+	if o.p3Gates && reg != nil {
+		p3, perr := runP3Phase(ctx, o, p1, reg, opReader, ethReader, dmProxy, aavePool, wantDM, wantAave)
+		if p3 != nil {
+			rep.P3 = p3
+			gatedFailures += tallyP3(p3.Rows)
+		}
+		if perr != nil {
+			var a *runAbort
+			if errors.As(perr, &a) {
+				return finish(a)
+			}
+			return finish(abort(exitRetryable, "aborted: rpc", "p3 gate set: %v", perr))
 		}
 	}
 
@@ -1271,6 +1341,15 @@ func (r *driftReport) tallyTotals() verdictTotals {
 	if r.Freshness != nil {
 		for _, s := range r.Freshness.Sampled {
 			add(true, s.Verdict)
+		}
+	}
+	// P3 Task-6 rows join the SAME per-class accounting as every pre-existing row
+	// family (chain-truth R5.4): one tally, one verdict function, one exit code.
+	// A separate P3 total would be a second story a receipt reader could read
+	// instead of this one.
+	if r.P3 != nil {
+		for _, row := range r.P3.Rows {
+			add(row.Gated, row.Verdict)
 		}
 	}
 	return t

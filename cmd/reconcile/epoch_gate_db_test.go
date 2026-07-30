@@ -78,7 +78,7 @@ func TestSnapshotGateRefusesUnackedReorgEpoch(t *testing.T) {
 
 	// The harness classifies the refusal RETRYABLE (exit 3, stale-evidence
 	// class) — never precondition (permanent) and never a verdict.
-	_, err = runPhase1(ctx, &options{}, cfg, roDSN, goldenVectors{}, true, false, nil, nil)
+	_, err = runPhase1(ctx, &options{}, cfg, roDSN, goldenVectors{}, true, false, nil, nil, nil)
 	require.Error(t, err)
 	var a *runAbort
 	require.ErrorAs(t, err, &a, "the refusal must be a classified abort, not a bare error")
