@@ -1786,6 +1786,34 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   file, either drifting alone fails) and a falsiness-lint assertion on
   fenced blocks; mutants m1 removed-export-in-example / m2 README-drifts-
   alone / m3 falsiness-branch-inserted; no new devDependencies.
+- **WAVE-7 FIX LANDED — 6dea23a** (5 files +614/−85, one NEW wave7 test file;
+  both-ways exact; integrator independently re-ran gofmt/vet/build/tests —
+  green, 257/0/5). Ruling implemented VERBATIM. (H1) ParentComplete = fold
+  present AND index reconstruction succeeded — undecodable/non-positive
+  oldIndex BLOCKS with a note (the old silent snapshot-fallback removed);
+  classifier re-signed to 7 args and REORDERED, parent arm FIRST and
+  structurally unreachable by witness refusals (they only taint Complete());
+  round-5's replay-incomplete-blocks-parent assertion REVERSED per R6-H1.
+  (L1) marginal = causeProven && execEligible && basketContinuityProven;
+  conjunct is a const false, comment names L2 as sole discharger; gated rows
+  carry the ruling's verbatim basket_continuity text + a narrative separating
+  the PROVEN crossing from the UNPROVEN attribution; ungated arms pinned
+  undecorated; tolIntraBlockMarginality uncited while gated (zero appearances
+  = honest per the tolerance-report doctrine). (L5) per-token aggregate
+  preflight, strict Cmp>0 refuses the WHOLE write with the two-explanation
+  note (unseen inbound / netting release); silent clamp REMOVED; equality
+  applies exactly. Positive controls RESTATED (assert Proven/BoundaryEligible/
+  Complete() directly + both conjunct polarities — the arm survives for L2),
+  marked flips-back-when-L2-lands. L2 seam exposed: causeReplay
+  .BoundaryCollateral, consumed by nothing. Mutants m1/m2/m3 killed at the
+  final SHA, sha256 restores. Wave's sibling-session-committed-the-dirt claim
+  checked: FALSE — no foreign commits in log; the session-start snapshot was
+  stale. ROUND 7 dispatched: t6r7 @ 6dea23a, base dd5ccfd, ruling committed
+  in-worktree and MANDATED reading — verify H1 arm order + tick-choice
+  semantics, L1 verbatim-ness + counterfactual leak-proofness, L5
+  completeness, restated-test strength for L2 inheritance, ADJUDICATE the
+  interim posture's shippability (SHIP closes round-6 findings; L2/L3/L6/L7
+  remain the ruling's committed obligation).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
