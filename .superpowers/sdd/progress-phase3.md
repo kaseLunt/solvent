@@ -1834,6 +1834,28 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   in r4) dispatched: t8r5 @ e437ae0, base b9c2a10 — README-vs-surface
   accuracy, sync normalization soundness, paths-mapping leak check, lint-
   limit adjudication.
+- CODEX ROUND 7 ON TASK 6 (session 019fb3f2-1c6e-76e2-8229-777c3ef975d9,
+  ~8min, t6r7 @ 6dea23a, base dd5ccfd, ruling read): needs-attention — 1H;
+  L1 AND L5 HOLD. The wave-7 H1 split opened a NEW seam: ParentComplete can
+  certify an UNREAD parent basket (backtest.go:779-829) — Multicall3 subcalls
+  with Success=false silently skipped, full-frame validation prices only
+  SEIZED tokens, so a failed collateralOf leaves an empty basket, maxBorrow
+  computes 0 "fully priced", ParentComplete set from debt fold + index alone,
+  and the NEW first arm returns true-at-parent BEFORE the unpriced refusal —
+  an honest historical RPC subcall failure becomes a false EXACT pass. The
+  composition tests construct complete in-memory frames and cannot see the
+  decode layer (the round-7 lesson: inject degradation where it occurs).
+  SEQUENCING CORRECTED BY THE REVIEWER: L2/L3/L6/L7 are mandatory BEFORE
+  acceptance (not after) — adopted; the maintenance window's reconcile
+  acceptance now waits on the L2 wave + its round. FIX WAVE 8 dispatched:
+  unread on ANY degraded subcall (per-subcall law, full inventory required;
+  exec-frame sharing question answered explicitly), basket valuation
+  completeness joins the ParentComplete conjunction (silent-zero
+  unrepresentable), arm order distinction made explicit (parent-INPUT
+  refusals gate the parent arm; WITNESS refusals do not), decode-layer
+  regressions (Success=false / missing config / empty-undecodable return →
+  never EXACT; honest-frame guard), mutants m1 skip-restored / m2
+  conjunction-dropped / m3 order-restored (distinct kills).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
