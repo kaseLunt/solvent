@@ -1286,6 +1286,38 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Codex now on the flag-custody CLOSING round (fac5168+31c08c2+dc2b739,
   depth: max-floor overstatement, startup-path completeness, the judgment
   reversal's new seams, rewind interaction with the max bar).
+- **TASK 7 ROUND-2 FIXES LANDED — da5ed0a** (5 files +239/−74). found is
+  THREE-VALUED (rows≥1 → true, a positive claim withholding cannot falsify;
+  0 + all available → false, genuine negative; 0 + relevant engine withheld
+  → NULL — the answer cannot be established, must never render as
+  'no position'); found:boolean → boolean|null is the DELIBERATE breaking
+  contract change; stress_coverage_is_full = book-wide (no exclusions of
+  either route); observatory rate indexes read ALWAYS (deriver custody is
+  independent of the materializer). Six mutants in three OPPOSITE-TEETH
+  pairs (pre-fix and over-correction each die to different tests); mutant
+  A's failure message is the finding verbatim. 113 tests (was 73). client-ts
+  drift gate fails BY DESIGN → regen wave dispatched to the Task 8 agent
+  (incl. the nullable-found ergonomics: consumers must distinguish false
+  from null).
+- FLAG-CUSTODY CLOSING ROUND (session 019fb243-12ab-7111-818d-7520dfe0917a,
+  ~8min, cfclose @ dc2b739, three-commit self-isolated range): needs-attention
+  — **ONE high, the FIFTH face of the coverage law: the persisted claim binds
+  (FromBlock, DecoderRevision) but NOT the stream/address SET that was
+  walked.** Honest sequence: add a new aToken stream at the audited genesis
+  (updating the intentional fixture); cursor already at H; the new stream
+  backfills to H but Step never re-walks; old covered_from_block=genesis
+  survives; validateAaveGenesis passes (every start == constant);
+  CoverageProvenBack passes; riskd publishes a book missing the new stream's
+  historical balances. Migration ordering + all startup paths (incl. -once)
+  CONFIRMED correct. FIX ROUTED: deterministic coverage BINDING over
+  chain+sorted streams(addresses+starts), persisted beside the stamp,
+  matched against config-computed expectation; mismatch = unproven until
+  rewind+replay; binding-change RESTARTS coverage mirroring the
+  decoder-revision rule; stream-addition + coherent-genesis-update
+  regressions. The coverage-law arc, five faces now: empty-set → sweep scope
+  → identity/adoption → legacy past → STREAM-SET BINDING. Each face is the
+  same theorem: a claim of completeness must name EVERYTHING it quantified
+  over.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
