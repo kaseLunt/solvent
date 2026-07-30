@@ -899,6 +899,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   every watermark returns). Schema pins → 14 both sites. DEPLOY-RISK INVERSION
   confirmed: pre-replay state is now SAFE BY REFUSING — the binary can ship
   before the maintenance window.
+- **COMMIT TRAIN LANDED** (2026-07-29 ~22:45, tree clean after): **0df42da**
+  micro-fix (flag-custody provenance, 23 files) → **559828c** rev-3 (component-4
+  ceil + component-7 composite, 8 files incl. integrator's AlgorithmRevision 2→3
+  bump w/ revision-log entry citing the archived ruling) → **e19a94f** Task 6
+  (the proof surface, 34 files +9,861 — incl. the Defect-2 sweep-testimony fix
+  and the hf_gate label/header updated for rev-3). Joint verification before the
+  train: build+vet ALL, full suite exit 0 both DSNs; risk+riskfeed+riskd re-run
+  green after the revision bump; reconcile packages green incl. the mutation-
+  verified DB regression. rev-3 wave highlights for the record: 8/8 mutants
+  killed; M-C (comp7→fused) killed by EXACTLY ONE test in a 99.2%-covered suite
+  (the empirical no-pin-count-could-find-it proof); debt→half-up SURVIVES the
+  golden E2E and dies only on the new sub-half vectors (the ruling's separation
+  claim made empirical); 20,000-Σ exhaustive sweep rediscovers exactly the
+  ruling's 2 carry witnesses; regime guard both-arms pinned (block arm is
+  load-bearing — Regime zero-value is RegimeB). Task-6 adjudication accepted:
+  sweepAbovePin disclosed-not-gated (gating a ~34%-duty-cycle pin property =
+  a floor no honest run can meet), sweepNever gated, exclusion-discards-evidence
+  gated, floors over the evaluable set. NEXT: risk-quant re-read (rev-3, expects
+  to flip) + Codex micro-fix round 2 IN PARALLEL; then Codex rev-3 round; then
+  Codex Task 6 round 1; then daemon restart (13+14) → make reconcile.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
