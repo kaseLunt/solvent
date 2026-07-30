@@ -1610,6 +1610,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   refreshed (distinct kills). Reviewer ops: two dead-pid wedges from
   foreground dispatch (operator error, no side effects, stale job records
   disregarded); third dispatch backgrounded correctly and completed.
+- **WAVE-6 FIX LANDED — 1bc660e** (4 files +564/−77, one NEW composition-test
+  file; both-ways exact, client-ts files = live T8-wave-2 property). (H1)
+  replaySameBlockCauses exposes InitialEligible/ParentDebtUSD/ParentIndex;
+  obligation2Eligibility extracted from runBacktestCase consumes
+  cause.InitialEligible — replay start and classifier predicate are ONE VALUE
+  from one function; artifact Actual/margin now parent-boundary (event-time
+  fold retained for exec-frame corroboration only). (H2) true→false in
+  applied() clears Proven+Causes, bumps Reversals; BoundaryEligible = post-
+  last-write state; Proven = crossed AND held; re-crossing records fresh
+  cause; no cause-stack needed (identity consumed only in note text —
+  verified). (M3) Liquidated arm refuses ENTIRELY on cross-token borrow leg or
+  unseizable token; Complete() = len(Notes)==0; classifyIntraBlock's new
+  replayComplete parameter returns UNEXPLAINED FIRST — before parentEligible,
+  whose reconstruction rests on the same replay. Four production-composition
+  regressions RED against a pure extraction (compile-stub fields — honest red
+  without fake behavior) then green; m1–m4 killed with m3/m4 distinctness
+  proven in-transcript (under m4 the replay-level test passes, only the
+  composed verdict kills). 249/0/5; integrator independently re-ran — green
+  (the parentFrame-redeclared diagnostic was stale gopls, tenth occurrence).
+  New evidence keys: our_debt_usd6_at_parent, parent_boundary_index,
+  same_block_replay_complete, same_block_replay_reversals,
+  eligible_at_liquidation_boundary. DISCLOSED for round-6 adjudication:
+  !replayComplete outranks parentEligible — a parent-eligible case with ANY
+  refusal note resolves UNEXPLAINED (honest reading: tainted replay taints
+  the predicate resting on it; counter-reading: over-refusal hides honest
+  answers — routed to Codex). ROUND 6 dispatched: t6r6 @ 1bc660e, base
+  821991e — walk InitialEligible's exclusivity, multi-reversal cycles,
+  bypasses of applied(), other arms' unmodelable shapes, the widening
+  adjudication, third-parent-computation hunt.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
