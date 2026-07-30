@@ -35,6 +35,17 @@ func (f *riskdFixture) unprovenAaveCoverage(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// dropFlagLedger removes every derived collateral-flag row — the other half of the
+// pre-replay state, since a binary that could not decode those events derived none.
+// Unproven coverage over a POPULATED ledger is a database that cannot exist.
+func (f *riskdFixture) dropFlagLedger(t *testing.T) {
+	t.Helper()
+	_, err := f.admin.Exec(f.ctx,
+		`DELETE FROM position_events WHERE event_type IN ($1, $2)`,
+		store.AaveCollateralEnabledEvent, store.AaveCollateralDisabledEvent)
+	require.NoError(t, err)
+}
+
 // TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger is the round-1 [high]
 // regression AT THE DAEMON LEVEL — the shape Codex demanded be made unwritable.
 //
@@ -62,10 +73,7 @@ func TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger(t *testing.T) {
 	// rows. Leaving the fixture's enable witness in place would model an impossible
 	// database — unproven coverage over a populated ledger — and would let this test
 	// pass for the wrong reason.
-	_, err := f.admin.Exec(f.ctx,
-		`DELETE FROM position_events WHERE event_type IN ($1, $2)`,
-		store.AaveCollateralEnabledEvent, store.AaveCollateralDisabledEvent)
-	require.NoError(t, err)
+	f.dropFlagLedger(t)
 
 	var flagRows int
 	require.NoError(t, f.admin.QueryRow(f.ctx,

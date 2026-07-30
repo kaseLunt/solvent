@@ -1065,6 +1065,21 @@ type RiskEngineAggregate struct {
 
 	TotalCollateral *big.Int
 	TotalDebt       *big.Int
+
+	// RefusalCode / RefusalDetail are the ENGINE-SCOPED refusal (migration 00014).
+	//
+	// They exist because an engine's book can be withheld for a reason that is a
+	// property of the LEDGER rather than of any account — unproven derivation
+	// coverage being the case that forced them — and such a refusal must survive an
+	// EMPTY ACCOUNT SET. The deep rewind that begins the collateral-flag replay
+	// deletes every event-sourced Aave balance, so a tick in that window has no
+	// position to hang a refusal on; without these fields the pass would persist a
+	// zeroed rollup that reads as "this engine has no risk".
+	//
+	// Empty code means NOT REFUSED. Zero positions with an empty code is a
+	// genuinely empty book; zero positions WITH a code is a withheld one.
+	RefusalCode   string
+	RefusalDetail string
 }
 
 // RiskBatchWrite is one complete pass, ready to commit.
@@ -1335,11 +1350,12 @@ func (s *Store) WriteRiskBatch(ctx context.Context, w RiskBatchWrite) (int64, er
 		if _, err := tx.Exec(ctx, `INSERT INTO risk_batch_aggregates
 			(batch_id, engine, value_decimals, positions, computed_positions,
 			 refused_positions, flagged_positions, liquidatable_positions,
-			 total_collateral, total_debt)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			 total_collateral, total_debt, refusal_code, refusal_detail)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 			batchID, a.Engine, int16(a.ValueDecimals), a.Positions, a.ComputedPositions,
 			a.RefusedPositions, a.FlaggedPositions, a.LiquidatablePositions,
-			numericParam(orZeroBig(a.TotalCollateral)), numericParam(orZeroBig(a.TotalDebt))); err != nil {
+			numericParam(orZeroBig(a.TotalCollateral)), numericParam(orZeroBig(a.TotalDebt)),
+			a.RefusalCode, a.RefusalDetail); err != nil {
 			return 0, fmt.Errorf("insert risk aggregate %s: %w", a.Engine, err)
 		}
 	}
@@ -1622,6 +1638,16 @@ type RiskBatch struct {
 	FlaggedCount  int
 	Producer      string
 	Watermarks    []RiskBatchWatermark
+	// RefusedEngines names every engine whose WHOLE BOOK is withheld on this batch
+	// (risk_batch_aggregates.refusal_code non-empty), sorted.
+	//
+	// It is on the batch SUMMARY, not only on the per-engine rollups, because
+	// RefusedCount counts refused POSITION ROWS and is therefore zero when an
+	// engine is withheld with no accounts behind it — the empty-and-unproven state
+	// the flag replay's rewind window produces. A serving path that reads only this
+	// summary must still be unable to mistake a withheld engine for a healthy one,
+	// so the fact travels with the summary.
+	RefusedEngines []string
 }
 
 // NewestCompleteBatch returns the newest batch that is actually whole, or
@@ -1638,11 +1664,15 @@ type RiskBatch struct {
 func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error) {
 	var b RiskBatch
 	err := s.pool.QueryRow(ctx, `
-		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer
+		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer,
+		       COALESCE((SELECT array_agg(a.engine ORDER BY a.engine)
+		                 FROM risk_batch_aggregates a
+		                 WHERE a.batch_id = b.id AND a.refusal_code <> ''), '{}') AS refused_engines
 		FROM risk_batches b
 		WHERE `+riskBatchCompleteConjuncts+`
 		ORDER BY b.id DESC LIMIT 1`).
-		Scan(&b.ID, &b.ComputedAt, &b.Status, &b.PositionCount, &b.RefusedCount, &b.FlaggedCount, &b.Producer)
+		Scan(&b.ID, &b.ComputedAt, &b.Status, &b.PositionCount, &b.RefusedCount, &b.FlaggedCount, &b.Producer,
+			&b.RefusedEngines)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RiskBatch{}, false, nil
 	}
@@ -1854,7 +1884,8 @@ type RiskBatchPosition struct {
 func (s *Store) RiskBatchAggregates(ctx context.Context, batchID int64) ([]RiskEngineAggregate, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT engine, value_decimals, positions, computed_positions, refused_positions,
-		        flagged_positions, liquidatable_positions, total_collateral::text, total_debt::text
+		        flagged_positions, liquidatable_positions, total_collateral::text, total_debt::text,
+		        refusal_code, refusal_detail
 		 FROM risk_batch_aggregates WHERE batch_id = $1 ORDER BY engine`, batchID)
 	if err != nil {
 		return nil, fmt.Errorf("read risk batch aggregates: %w", err)
@@ -1866,7 +1897,8 @@ func (s *Store) RiskBatchAggregates(ctx context.Context, batchID int64) ([]RiskE
 		var dec int16
 		var tc, td string
 		if err := rows.Scan(&a.Engine, &dec, &a.Positions, &a.ComputedPositions, &a.RefusedPositions,
-			&a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td); err != nil {
+			&a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td,
+			&a.RefusalCode, &a.RefusalDetail); err != nil {
 			return nil, fmt.Errorf("scan risk batch aggregate: %w", err)
 		}
 		a.ValueDecimals = uint8(dec)

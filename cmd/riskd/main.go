@@ -120,24 +120,41 @@ type daemonConfig struct {
 	// batch whether the freshness arm exists or not. A plain field would be a data
 	// race between the test and the loop goroutine.
 	//
+	// # IT IS A VALUE, NOT A POINTER, AND THAT IS THE FIX FOR A REAL RACE
+	//
+	// This was `*atomic.Int64` with setSkew lazily allocating it on first use. The
+	// comment above claimed atomicity and was true of the VALUE — and beside the
+	// point, because the race was ONE INDIRECTION HIGHER: setSkew's
+	// `c.clockSkewNanos = &atomic.Int64{}` WROTE THE POINTER FIELD while the loop
+	// goroutine READ that same field through skew()'s nil check. Atomic contents do
+	// not make the reference to them atomic. The repo's first-ever `go test -race`
+	// run caught it in both scheduler-arming tests.
+	//
+	// A value field has no initializing write to race with: the zero value is
+	// already usable, so setSkew only ever Stores and skew() only ever Loads. The
+	// class of bug is closed by construction rather than by careful ordering.
+	//
+	// It also makes `daemonConfig` non-copyable (go vet copylocks), which is a
+	// second correctness win the fixtures now honour: a wholesale struct copy of a
+	// config was silently SHARING one clock between what the tests treated as two
+	// independent daemons.
+	//
 	// Unexported, so no configuration path can set it and production cannot reach a
 	// non-zero value.
-	clockSkewNanos *atomic.Int64
+	clockSkewNanos atomic.Int64
 }
 
 // skew returns the test-only clock offset, zero when unset.
 func (c *daemonConfig) skew() time.Duration {
-	if c == nil || c.clockSkewNanos == nil {
+	if c == nil {
 		return 0
 	}
 	return time.Duration(c.clockSkewNanos.Load())
 }
 
-// setSkew moves the effective clock. Safe to call while runLoop is running.
+// setSkew moves the effective clock. Safe to call while runLoop is running: it is
+// a pure Store against an already-usable zero value, with no initializing write.
 func (c *daemonConfig) setSkew(d time.Duration) {
-	if c.clockSkewNanos == nil {
-		c.clockSkewNanos = &atomic.Int64{}
-	}
 	c.clockSkewNanos.Store(int64(d))
 }
 

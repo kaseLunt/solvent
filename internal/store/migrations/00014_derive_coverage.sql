@@ -43,7 +43,44 @@ COMMENT ON COLUMN derive_cursors.covered_from_block IS
 COMMENT ON COLUMN derive_cursors.decoder_revision IS
     'internal/decode.RegistryRevision in force for the walk that produced the current derived state. 0 = unknown/unproven.';
 
+-- ENGINE-LEVEL REFUSAL (round-2 [high]).
+--
+-- DEV-ONLY IN-PLACE EDIT of this same migration, per the 00002 precedent: 00014
+-- has only ever been applied to disposable local databases (the live database is
+-- at version 12), so it is amended rather than superseded. Cycle a dev db by
+-- dropping the four columns this migration adds and deleting goose_db_version's
+-- version_id=14 row, then let store.Migrate re-apply. NEVER edit an applied
+-- migration once any shared or production database has run it.
+--
+-- Why a refusal on the AGGREGATE row and not only on positions: a refusal that
+-- lives exclusively in `risk_positions` cannot be expressed when there are no
+-- positions, and there is a real, scheduled state where that happens. The
+-- owner-gated flag replay begins with RewindDerived(StartBlock-1), which deletes
+-- every event-sourced Aave balance; a riskd tick landing in that window finds an
+-- EMPTY account set over an explicitly UNPROVEN ledger, iterates zero accounts,
+-- and would otherwise persist an Aave aggregate of positions=0 /
+-- refused_positions=0 / totals=0 — a batch that is structurally complete and
+-- reads as "this engine has no risk", which is the false-safety direction and a
+-- vacuous green in precisely the repair window.
+--
+-- These two columns make that state REPRESENTABLE and therefore unable to
+-- masquerade: an engine whose custody is unproven carries its refusal on its own
+-- rollup row, independent of how many accounts happen to exist. Empty string is
+-- "not refused", so every pre-existing row and every healthy engine reads exactly
+-- as before.
+ALTER TABLE risk_batch_aggregates
+    ADD COLUMN refusal_code   TEXT NOT NULL DEFAULT '',
+    ADD COLUMN refusal_detail TEXT NOT NULL DEFAULT '';
+
+COMMENT ON COLUMN risk_batch_aggregates.refusal_code IS
+    'Engine-SCOPED refusal (e.g. FLAG_CUSTODY_UNPROVEN): the whole engine book is withheld regardless of position count. Empty = not refused. An engine with zero positions AND an empty refusal_code is a genuinely empty book; with a code set it is a withheld one, and the two must never be confused.';
+COMMENT ON COLUMN risk_batch_aggregates.refusal_detail IS
+    'Human-readable reason and remedy for refusal_code.';
+
 -- +goose Down
+ALTER TABLE risk_batch_aggregates
+    DROP COLUMN refusal_detail,
+    DROP COLUMN refusal_code;
 ALTER TABLE derive_cursors
     DROP COLUMN decoder_revision,
     DROP COLUMN covered_from_block;

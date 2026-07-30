@@ -303,15 +303,13 @@ func TestRiskdFreshnessPhaseCrossesOnAdvancingClockAlone(t *testing.T) {
 	cursorsBefore := cursorSnapshot(t, f)
 
 	// ONLY THE CLOCK MOVES. The ceiling is 2x180s; +400s is past it.
-	advanced := *f.cfg
-	advanced.clockSkewNanos = nil
-	advanced.setSkew(400 * time.Second)
+	advanced := f.configWithSkew(t, 400*time.Second)
 
 	require.Equal(t, rowsBefore, priceRowFingerprint(t, f),
 		"the price rows must be BYTE-IDENTICAL, or this test is not isolating the clock")
 	require.Equal(t, cursorsBefore, cursorSnapshot(t, f))
 
-	crossed, err := runPass(f.ctx, f.store, &advanced)
+	crossed, err := runPass(f.ctx, f.store, advanced)
 	require.NoError(t, err)
 	require.NotEqual(t, fresh.MaterializationKey, crossed.MaterializationKey,
 		"an advancing clock crossing the ceiling is a NEW materialization even over identical rows")
@@ -379,9 +377,7 @@ func TestRiskdUnusedRegisteredAssetCrossingDoesNotChangeTheIdentity(t *testing.T
 
 	// THE RESTART, clock advanced 30s: asset B moves 150s -> 180s+30s = past its
 	// staleness boundary, while the used Aave assets (as-of now) stay fresh.
-	restarted := f.restartedConfig(t)
-	restarted.clockSkewNanos = nil
-	restarted.setSkew(40 * time.Second)
+	restarted := f.configWithSkew(t, 40*time.Second)
 
 	afterRestart, err := runPass(f.ctx, f.store, restarted)
 	require.NoError(t, err)
@@ -412,10 +408,8 @@ func TestRiskdJudgedAssetCrossingStillChangesTheIdentity(t *testing.T) {
 	require.NoError(t, err)
 
 	// The USED collateral asset crosses fresh -> stale.
-	advanced := *f.cfg
-	advanced.clockSkewNanos = nil
-	advanced.setSkew(200 * time.Second)
-	second, err := runPass(f.ctx, f.store, &advanced)
+	advanced := f.configWithSkew(t, 200*time.Second)
+	second, err := runPass(f.ctx, f.store, advanced)
 	require.NoError(t, err)
 	require.NotEqual(t, first.MaterializationKey, second.MaterializationKey,
 		"a JUDGED asset crossing a boundary IS a new materialization")

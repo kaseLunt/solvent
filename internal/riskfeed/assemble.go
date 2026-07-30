@@ -64,8 +64,11 @@ import (
 //	    base currency; we floored — false-safety direction), and component 7 is
 //	    the wadDiv HALF-UP composite floor(floor((Σ·1e18+⌊D/2⌋)/D)/1e4), not the
 //	    single fused floor (differs ~5e-5 of evaluations — only a source read
-//	    could catch it). Every Aave HealthFactorWad and TotalDebtBase can move
-//	    by one unit; a pre-TokenMath regime guard now refuses pins < 23,088,584.
+//	    could catch it). Every Aave TotalDebtBase can move by up to N base units
+//	    (N = debt-bearing reserves with a nonzero conversion remainder; 3
+//	    borrowables in this market — ceil applies PER LEG and sums), and every
+//	    HealthFactorWad can move accordingly; a pre-TokenMath regime guard now
+//	    refuses pins < 23,088,584.
 const AlgorithmRevision = 3
 
 // Balance sides and sources, as internal/derive writes them.
@@ -405,7 +408,25 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 		}
 	}
 
-	res.Aggregates = aggregate(res.Positions, cfg)
+	// ENGINE-SCOPED REFUSALS, INDEPENDENT OF THE ACCOUNT SET — the round-2 [high].
+	//
+	// The per-position refusal above is enforced INSIDE the account loop, so it
+	// vanishes when the loop has nothing to iterate. That is not hypothetical: the
+	// owner-gated flag replay begins with RewindDerived(StartBlock-1), which deletes
+	// every event-sourced Aave balance while leaving coverage NULL/0 and the epoch
+	// gate satisfied. A tick in that window would iterate zero accounts and persist
+	// an Aave rollup of positions=0 / refused=0 / totals=0 — structurally complete,
+	// and readable as "this engine has no risk", in the exact repair window.
+	//
+	// So the verdict is ALSO recorded on the engine's own rollup row, where it does
+	// not depend on any account existing. An empty-and-unproven book is then not
+	// expressible as a healthy one.
+	engineRefusals := map[string]string{}
+	if !aaveFlagCustodyProven {
+		engineRefusals[cfg.Aave.Engine] = flagCustodyRefusalDetail(cfg.Aave.Engine, cfg.Aave.GenesisBlock)
+	}
+
+	res.Aggregates = aggregate(res.Positions, cfg, engineRefusals)
 	return res, nil
 }
 
@@ -537,15 +558,7 @@ func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput
 			return nil, nil, nil
 		}
 		return refuse(base, GateFlagCustodyUnproven,
-			fmt.Sprintf("engine %s cannot be valued: the derived flag ledger's coverage is UNPROVEN "+
-				"(needs a walk from block <= %d under decode registry revision >= %d). The collateral law reads a "+
-				"missing ReserveUsedAsCollateral* witness as \"never enabled as collateral\", which is chain-exact ONLY "+
-				"when the walk behind this state could decode those events — a pre-flag binary leaves a cursor at head "+
-				"over an empty flag ledger, and reading that as truth publishes zero collateral and health factor zero "+
-				"for healthy borrowers. Re-derive this engine from its start block (rewind-and-rederive) before serving "+
-				"its book.",
-				engine, a.cfg.Aave.GenesisBlock, decode.RevisionAaveCollateralFlags),
-			nil), nil, nil
+			flagCustodyRefusalDetail(engine, a.cfg.Aave.GenesisBlock), nil), nil, nil
 	}
 
 	var reserves []risk.AaveReserve
@@ -961,7 +974,7 @@ func refuseWithPrices(base store.RiskPositionWrite, code, detail string, asset [
 // REFUSED POSITIONS CONTRIBUTE NOTHING TO THE SUMS and are counted separately.
 // Folding a refusal in as zero would understate exactly the book the refusal
 // exists to protect.
-func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig) []store.RiskEngineAggregate {
+func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRefusals map[string]string) []store.RiskEngineAggregate {
 	order := []EngineBinding{cfg.Aave, cfg.DM}
 	decimals := map[string]uint8{cfg.Aave.Engine: 8, cfg.DM.Engine: 6}
 	acc := map[string]*store.RiskEngineAggregate{}
@@ -1005,7 +1018,15 @@ func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig) []store.
 	}
 	var out []store.RiskEngineAggregate
 	for _, b := range order {
-		out = append(out, *acc[b.Engine])
+		a := *acc[b.Engine]
+		if detail, refused := engineRefusals[b.Engine]; refused {
+			// The engine's WHOLE book is withheld. The sums stay at zero — a refusal
+			// is the absence of a number, and an engine refusal is no different — but
+			// the code is what stops that zero from reading as "nothing at risk here".
+			a.RefusalCode = GateFlagCustodyUnproven
+			a.RefusalDetail = detail
+		}
+		out = append(out, a)
 	}
 	return out
 }
@@ -1087,6 +1108,24 @@ func indexCollateralFlags(rows []store.CollateralFlagRow) (map[string]store.Coll
 
 func collateralFlagKey(reserve, user common.Address) string {
 	return reserve.Hex() + "/" + user.Hex()
+}
+
+// flagCustodyRefusalDetail is the ONE wording for an unproven-coverage refusal,
+// shared by the per-position rows and by the ENGINE-level rollup refusal.
+//
+// It is a function rather than two literals because the engine refusal exists
+// precisely for the case where NO position row carries it, and two texts that
+// could drift would let an operator see different explanations for one fault
+// depending on whether the rewind had emptied the book yet.
+func flagCustodyRefusalDetail(engine string, genesisBlock uint64) string {
+	return fmt.Sprintf("engine %s cannot be valued: the derived flag ledger's coverage is UNPROVEN "+
+		"(needs a walk from block <= %d under decode registry revision >= %d). The collateral law reads a "+
+		"missing ReserveUsedAsCollateral* witness as \"never enabled as collateral\", which is chain-exact ONLY "+
+		"when the walk behind this state could decode those events — a pre-flag binary leaves a cursor at head "+
+		"over an empty flag ledger, and reading that as truth publishes zero collateral and health factor zero "+
+		"for healthy borrowers. Re-derive this engine from its start block (rewind-and-rederive) before serving "+
+		"its book.",
+		engine, genesisBlock, decode.RevisionAaveCollateralFlags)
 }
 
 // hasNonzeroBalance reports whether the account holds anything at all on either

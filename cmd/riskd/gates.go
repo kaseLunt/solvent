@@ -128,6 +128,21 @@ func sweepEqual(a, b store.RiskSweepWatermark) bool {
 // so it is the leg that always moves.
 //
 // A vanished engine counts as a change: its rows are about to stop being truth.
+//
+// Coverage provenance participates too — see sameCoverage.
+// sameCoverage compares the two DERIVATION-COVERAGE fields, treating an UNKNOWN
+// covered-from (nil) as distinct from every concrete block — because it is: nil is
+// "no walk vouches for this state", not "walked from block zero".
+func sameCoverage(cur, old store.DeriveCursorState) bool {
+	if (cur.CoveredFromBlock == nil) != (old.CoveredFromBlock == nil) {
+		return false
+	}
+	if cur.CoveredFromBlock != nil && *cur.CoveredFromBlock != *old.CoveredFromBlock {
+		return false
+	}
+	return cur.DecoderRevision == old.DecoderRevision
+}
+
 func (v watermarkVector) Changed(prev watermarkVector) bool {
 	if len(v.Engines) != len(prev.Engines) {
 		return true
@@ -138,6 +153,24 @@ func (v watermarkVector) Changed(prev watermarkVector) bool {
 			return true
 		}
 		if cur.LastBlock != old.LastBlock || cur.AckedEpoch != old.AckedEpoch || cur.ChainID != old.ChainID {
+			return true
+		}
+		// DERIVATION COVERAGE IS PART OF THE SIGNAL (round-2 [medium]).
+		//
+		// covered_from_block and decoder_revision now switch an engine's output
+		// between REFUSED and COMPUTED, so a change in them is a change in what the
+		// pass would produce — and the trigger has to see it or the identity's
+		// cov/rev distinction never gets the chance to mint its new key.
+		//
+		// The endpoint-ABA case is the one that matters, and it is scheduled: the
+		// owner-gated replay rewinds and re-derives back to the SAME height with the
+		// SAME acked epoch. If riskd observes no intermediate cursor position — polling
+		// paused, or failing throughout the maintenance window — then height, epoch and
+		// chain are all identical across it and a comparison of those three alone
+		// reports "nothing changed". The refused pre-replay batch would then stay served
+		// until something unrelated happened to move. The reverse transition is equally
+		// load-bearing: proven → unproven must not leave a computed batch standing.
+		if !sameCoverage(cur, old) {
 			return true
 		}
 	}

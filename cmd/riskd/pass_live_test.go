@@ -107,9 +107,46 @@ func (f *riskdFixture) restartedConfig(t *testing.T) *daemonConfig {
 	t.Helper()
 	registry, err := riskfeed.NewRegistry(f.feeds)
 	require.NoError(t, err)
-	fresh := *f.cfg
-	fresh.Registry = registry
-	return &fresh
+	// FIELD BY FIELD, NOT `fresh := *f.cfg`.
+	//
+	// daemonConfig carries a VALUE atomic now (the clock skew), so a wholesale copy
+	// is a vet copylocks violation — but the deeper reason is that the copy was
+	// wrong before vet could say so: it duplicated a POINTER to one shared clock
+	// between two configs the tests treat as independent daemons, so moving one
+	// moved the other. Listing the policy fields also makes "what does a restart
+	// preserve?" explicit instead of implicit, and TestDaemonConfigFieldsAreCloned
+	// fails if a new field is added without a decision here.
+	//
+	// Every MUTABLE policy value is carried over, because tests legitimately tune
+	// them (Retention, for one) and a restart of the same build must reproduce the
+	// same materialization identity. The clock skew is deliberately NOT carried: a
+	// restarted process starts at the real clock.
+	fresh := &daemonConfig{
+		Registry:     registry,
+		Aave:         f.cfg.Aave,
+		DM:           f.cfg.DM,
+		PollInterval: f.cfg.PollInterval,
+		Retention:    f.cfg.Retention,
+		Budget:       f.cfg.Budget,
+		StepBps:      f.cfg.StepBps,
+		Producer:     f.cfg.Producer,
+	}
+	return fresh
+}
+
+// configWithSkew is a config with the SAME policy and an INDEPENDENT clock, moved
+// to d.
+//
+// It replaces the `advanced := *f.cfg; advanced.clockSkewNanos = nil` idiom, which
+// only worked because the field was a pointer that could be detached — and which
+// read as "copy a config, then undo part of the copy". What the tests actually want
+// is a second daemon over the same policy whose clock they can move without
+// touching the first one's, and that is what this constructs.
+func (f *riskdFixture) configWithSkew(t *testing.T, d time.Duration) *daemonConfig {
+	t.Helper()
+	cfg := f.restartedConfig(t)
+	cfg.setSkew(d)
+	return cfg
 }
 
 // secondInstance is a separate store handle plus config over the same database —
