@@ -1066,14 +1066,27 @@ func execute(ctx context.Context, o *options, stdout, stderr io.Writer) (int, er
 		// case (continuity unproven, disclosed) rather than killing every
 		// other gate.
 		var opLogs rawLogsBackend
+		var opCode rawCodeBackend
+		var opTrace rawTraceBackend
 		if wantDM {
 			if lr, lerr := dialPinnedLogs(ctx, "op", opURLs, runner); lerr == nil {
 				opLogs = lr
 			} else {
 				fmt.Fprintf(os.Stderr, "reconcile: continuity getLogs surface unavailable (%v) — L2 proofs will refuse per case\n", lerr)
 			}
+			// The R12 evidence surface (eth_getCode / eth_getStorageAt /
+			// debug_traceBlockByHash) — same URL list, same shared runner. A
+			// dial failure does not abort the phase, but unlike the L2
+			// sweeps these pins are MANDATORY: every backtest case then
+			// refuses (decode-authority-unread / admin-continuity-unread),
+			// loudly, never a quieter verdict.
+			if er, eerr := dialPinnedEvidence(ctx, "op", opURLs, runner); eerr == nil {
+				opCode, opTrace = er, er
+			} else {
+				fmt.Fprintf(os.Stderr, "reconcile: R12 evidence surface unavailable (%v) — every backtest case will refuse decode-authority-unread\n", eerr)
+			}
 		}
-		p3, perr := runP3Phase(ctx, o, p1, reg, opReader, ethReader, opLogs, dmProxy, aavePool, wantDM, wantAave)
+		p3, perr := runP3Phase(ctx, o, p1, reg, opReader, ethReader, opLogs, opCode, opTrace, dmProxy, aavePool, wantDM, wantAave)
 		if p3 != nil {
 			rep.P3 = p3
 			gatedFailures += tallyP3(p3.Rows)

@@ -92,7 +92,11 @@ func backtestFrame_() *gateFrame {
 		pinned(srcBTSupportedSet,
 			"the L2(b) sweep's ADDRESS UNIVERSE (addendum adjustment 1): the DM's supported-collateral set at both pins closes the in-and-out-within-block TRANSFER gap — a supported token that enters and fully leaves between the edges is invisible to any legs∪seized union, and only configured tokens move maxBorrowAtFrame. THE CARVE-OUT (Codex round 10 H / round 11 M3): this union is NOT sufficient against the collateral LIFECYCLE — a CollateralTokenAdded→Removed round trip strictly before the boundary leaves its token absent from BOTH pins' enumerations, so no sweep can ask about it; ANY pre-boundary collateral lifecycle event therefore makes the causation replay INCOMPLETE and the case refuses (replaySameBlockCauses' lifecycle arm → UNEXPLAINED), which is the closure of that gap — refusal on the replay side, never coverage claimed here"),
 		pinned(srcBTAdminImpl,
-			"the ADMIN-IMPLEMENTATION EPOCH check (Codex round 11 H1, D-013): setAdminImpl writes ADMIN_IMPL_POSITION with no event and the proxy fallback delegatecalls it, so the two-Upgraded census proves only the core era. Both pins must hold the AUDITED admin implementation (admin_epoch.go) or the case refuses frame-level; the within-block swap-and-revert residual is accepted-and-disclosed per D-013"),
+			"the ADMIN-IMPLEMENTATION EPOCH check (Codex round 11 H1): setAdminImpl writes ADMIN_IMPL_POSITION with no event and the proxy fallback delegatecalls it, so the two-Upgraded census proves only the core era. Both pins must hold the AUDITED admin implementation (admin_epoch.go) or the case refuses frame-level; the within-block swap-and-revert window is closed by the srcBTAdminTrace frame scan (chain-truth R12 Fork 2 Step A — the prior D-013 'evasion-shaped only' adjudication was REFUTED by round 12 H2b and is withdrawn)"),
+		pinned(srcBTCodeHashes,
+			"the THREE-SURFACE CODE-HASH CONSTANCY PIN (chain-truth R12 Fork 1): the address pins above never bound an address to BYTECODE, so the decode authority of every replayed event was unbound. eth_getCode at both case pins for the proxy, the ERC1967 core impl (slot-resolved per pin) and the admin impl; keccak locally; all six hashes must equal the dual-established audited constants (code_epoch.go) or the case refuses (decode-authority-epoch). Certifies BYTECODE CONSTANCY plus empirical fixture anchoring — never source correspondence (no compile bridge exists; the decode_authority evidence key carries the verbatim certification-limits text)"),
+		pinned(srcBTAdminTrace,
+			"the ADMIN-WRITE FRAME SCAN (chain-truth R12 Fork 2 Step A — the probe fired SERVED, recon/p3-probes.md): debug_traceBlockByHash+callTracer at the case's stored pin; any call frame at any depth, in any tx with index < the case's or anywhere in the case's own tx, targeting the DM proxy with the ABI-derived setAdminImpl/upgradeTo/upgradeToAndCall selectors refuses the case (admin-continuity). With trace evidence the D-013 within-block swap-and-revert residual is RETIRED: a slot write with no call frame does not exist"),
 		pinned(srcBTTransferSweep,
 			"the L2(b) Transfer sweep, EIP-234 blockHash-pinned at the case's STORED raw_logs hash (probed 2026-07-30, recon/p3-probes.md): the raw balance channel of the closure identity, validated per L6 (pin echo, address ∈ set, topic count exactly 3, data exactly 32 bytes)"),
 		pinned(srcBTNettingSweep,
@@ -156,6 +160,19 @@ const (
 	// argument — the slot is written by setAdminImpl with NO event, so only a
 	// state read can establish the admin-implementation epoch).
 	srcBTAdminImpl = "DebtManager.getDebtManagerAdmin()@parentHash(N-1) and @pinHash(N) [ADMIN_IMPL_POSITION]"
+
+	// srcBTCodeHashes is the R12 Fork-1 read set: the THREE-SURFACE code-hash
+	// constancy pin — eth_getCode (EIP-1898 blockHash form) of the proxy, the
+	// ERC1967 core implementation (slot-resolved at each pin) and the admin
+	// implementation, at BOTH case pins, keccak'd locally against the
+	// dual-established audited constants (code_epoch.go).
+	srcBTCodeHashes = "eth_getCode(proxy | ERC1967-impl-slot resolvee | admin impl)@parentHash(N-1) and @pinHash(N) [three-surface code-hash constancy pin]"
+
+	// srcBTAdminTrace is the R12 Fork-2 Step-A read: the callTracer block
+	// trace at the case's stored pin, scanned for admin-write call frames
+	// (setAdminImpl / upgradeTo / upgradeToAndCall targeting the proxy) in
+	// every tx at or before the case's (admin_trace.go).
+	srcBTAdminTrace = "debug_traceBlockByHash@pinHash(N) (callTracer) [admin-write frame scan, tx index <= the case's]"
 )
 
 func newBacktestView(row snapshotdb.T6BacktestRow, f *gateFrame) *backtestView {
@@ -270,6 +287,33 @@ func runBacktest(ctx context.Context, c *p3Ctx, decimals map[common.Address]uint
 	var results []backtestCaseResult
 	f.use("the frozen 31-case frame (recon/p3-probes.md), digest 0x740ac240…f0fbf3")
 	f.use("backtest frame seed " + backtestFrameSeed)
+
+	// THE RUN-HEAD SURFACE CHECK (chain-truth R12 Fork 1: "at both pins per
+	// case + head"; "head mismatch → preflightExit posture"). The head pin is
+	// the run's own hash-bound OP pin. Three outcomes: no surface configured
+	// or the reads fail → a gated unread row (the per-case reads still try —
+	// each case refuses individually if its own reads cannot be taken); a
+	// HASH MISMATCH → the preflightExit posture verbatim: a gated row plus a
+	// precondition abort, because a head whose bytecode differs from the
+	// audited constants means the decode authority of EVERYTHING this run
+	// would certify is stale — re-audit and re-pin before any verdict.
+	if c.codeR == nil {
+		rows = append(rows, unreadRow(gateBacktest, "run-head", "decode-authority(head)",
+			"no eth_getCode/eth_getStorageAt surface is configured for this run — the head-pin decode-authority check (chain-truth R12 Fork 1) cannot be taken"))
+	} else if headObs, herr := readCodeSurfaces(ctx, c.codeR, "p3:backtest:head", c.dmProxy, c.hashOP, c.hashOP); herr != nil {
+		rows = append(rows, unreadRow(gateBacktest, "run-head", "decode-authority(head)",
+			fmt.Sprintf("the three-surface code reads could not be taken at the run's head pin (%s): %v", replayFailureClass(herr), herr)))
+	} else if note := headCodeHashRefusal(headObs); note != "" {
+		rows = append(rows, p3Row{
+			Gate: gateBacktest, Subject: "run-head", Leg: "decode-authority(head)",
+			Expected: "all three surfaces' code hashes equal the audited constants at the run's head pin",
+			Actual:   "head epoch: " + note,
+			Verdict:  verdictDrift, Gated: true, Class: "decode-authority-head-epoch",
+			Note: "preflightExit posture (chain-truth R12 Fork 1): a head-pin bytecode mismatch means the audited decode authority is STALE for the whole run, not one case — the run aborts as a precondition failure after recording this row, never certifies under an unaudited generation",
+		})
+		return rows, results, abort(exitPrecondition, "aborted: precondition",
+			"decode-authority HEAD epoch at the run pin (preflightExit posture, chain-truth R12 Fork 1): %s", note)
+	}
 
 	evaluated := 0
 	for _, fc := range backtestFrame {
@@ -480,13 +524,79 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	// pure function in admin_epoch.go (mutation target mH). A mismatch at
 	// EITHER pin is a frame-level refusal with its own named class — never
 	// any verdict: a replay under an unaudited admin generation's ABI proves
-	// nothing about the crossing. The within-block swap-and-revert residual
-	// is accepted-and-disclosed per D-013 (see admin_epoch.go).
+	// nothing about the crossing. The within-block swap-and-revert WINDOW is
+	// closed by the admin-continuity frame scan below (chain-truth R12 Fork 2
+	// Step A) — the prior D-013 residual adjudication was refuted and
+	// withdrawn (see admin_epoch.go).
 	if note := adminImplEpochRefusal(parent.st.adminImpl, exec.st.adminImpl); note != "" {
 		rows = append(rows, unreadRow(gateBacktest, key,
 			"admin-impl-epoch(ADMIN_IMPL_POSITION @ both pins vs the audited constant)", note))
 		res.SkipClass = "admin-impl-epoch"
 		res.Notes = append(res.Notes, "an admin-implementation epoch boundary at this case's pins is CHAIN TRUTH requiring adjudication and a re-audited pin — reported by name, never absorbed into a verdict")
+		return rows, res, nil
+	}
+
+	// ---- the DECODE-AUTHORITY code-hash pin (chain-truth R12 Fork 1) -------
+	// The address pins above prove which ADDRESSES the frame consulted; this
+	// binds those addresses to BYTECODE — three surfaces (proxy, ERC1967 core
+	// impl, admin impl) at both case pins, keccak'd locally against the
+	// dual-established audited constants (code_epoch.go, mutation target mA).
+	// Mandatory for every evaluated case: reads that cannot be taken refuse
+	// as unread, a hash mismatch refuses as a named epoch — never a verdict.
+	if c.codeR == nil {
+		rows = append(rows, unreadRow(gateBacktest, key, "decode-authority(three-surface code-hash pin)",
+			"no eth_getCode/eth_getStorageAt surface is configured for this run — the three-surface code-hash constancy pin (chain-truth R12 Fork 1) cannot be taken, and a case whose decode authority is unpinned refuses rather than certifies"))
+		res.SkipClass = "decode-authority-unread"
+		return rows, res, nil
+	}
+	surfaces, err := readCodeSurfaces(ctx, c.codeR, "p3:backtest:"+key, c.dmProxy, parentHash, pinHash)
+	if err != nil {
+		rows = append(rows, unreadRow(gateBacktest, key, "decode-authority(three-surface code-hash pin)",
+			fmt.Sprintf("the three-surface code reads could not be taken at the case pins (%s): %v", replayFailureClass(err), err)))
+		res.SkipClass = "decode-authority-unread"
+		return rows, res, nil
+	}
+	f.use(srcBTCodeHashes)
+	if note := codeHashConstancyRefusal(surfaces); note != "" {
+		rows = append(rows, unreadRow(gateBacktest, key,
+			"decode-authority(code hashes @ both pins vs the audited constants)", note))
+		res.SkipClass = "decode-authority-epoch"
+		res.Notes = append(res.Notes, "a code-hash epoch boundary at this case's pins is CHAIN TRUTH requiring adjudication and a consciously re-established pin — reported by name, never absorbed into a verdict")
+		return rows, res, nil
+	}
+
+	// ---- the ADMIN-CONTINUITY frame scan (chain-truth R12 Fork 2 Step A) ---
+	// setAdminImpl writes its slot with NO event; the two-pin read above sees
+	// every persistent swap but not a within-block swap-and-revert. The trace
+	// law closes that window: every call frame at every depth in every tx at
+	// or before the case's is scanned for the ABI-derived admin-write
+	// selectors (admin_trace.go, mutation target mC). With trace evidence the
+	// D-013 residual is RETIRED, not reclassified.
+	if c.traceR == nil {
+		rows = append(rows, unreadRow(gateBacktest, key, "admin-continuity(frame scan)",
+			"no debug_traceBlockByHash surface is configured for this run — the admin-write frame scan (chain-truth R12 Fork 2 Step A) cannot be taken, and a case whose admin continuity is unscanned refuses rather than certifies"))
+		res.SkipClass = "admin-continuity-unread"
+		return rows, res, nil
+	}
+	traceRaw, err := c.traceR.traceBlockByHash(ctx, "p3:backtest:"+key+":trace", pinHash)
+	if err != nil {
+		rows = append(rows, unreadRow(gateBacktest, key, "admin-continuity(frame scan)",
+			fmt.Sprintf("the block trace could not be taken at the case pin (%s): %v", replayFailureClass(err), err)))
+		res.SkipClass = "admin-continuity-unread"
+		return rows, res, nil
+	}
+	traceEntries, err := decodeTraceEnvelope(traceRaw)
+	if err != nil {
+		rows = append(rows, unreadRow(gateBacktest, key, "admin-continuity(frame scan)",
+			fmt.Sprintf("the block trace did not decode as a complete callTracer answer: %v", err)))
+		res.SkipClass = "admin-continuity-unread"
+		return rows, res, nil
+	}
+	f.use(srcBTAdminTrace)
+	if note := adminTraceScanRefusal(traceEntries, common.HexToHash(fc.TxHash), c.dmProxy); note != "" {
+		rows = append(rows, unreadRow(gateBacktest, key, "admin-continuity(admin-write frames @ tx index <= the case's)", note))
+		res.SkipClass = "admin-continuity"
+		res.Notes = append(res.Notes, "an admin-write call frame at or before this case's tx is CHAIN TRUTH requiring adjudication — the slot may have differed at the boundary from what the two-pin read certifies; reported by name, never absorbed into a verdict")
 		return rows, res, nil
 	}
 
@@ -512,10 +622,15 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	res.MarginUSD6 = o2.marginUSD6
 	res.PriceDeltaNote = o2.priceNote
 	res.EligibilityState = o2.eligState
-	// The epoch check PASSED (the refusal above returns otherwise), and a
-	// pass is disclosed too (D-013 5b): the reviewer of this row must see
-	// both the premise and its accepted residual.
+	// The epoch checks PASSED (each refusal above returns otherwise), and a
+	// pass is disclosed too: the reviewer of this row must see the premises
+	// AND their limits — the two-pin address pin (admin_impl_epoch), the
+	// three-surface bytecode pin with the verbatim certification-limits text
+	// (decode_authority, chain-truth R12 Fork 1), and the frame scan that
+	// retires the old D-013 residual (admin_continuity, R12 Fork 2 Step A).
 	o2.row.Evidence["admin_impl_epoch"] = adminImplEpochEvidence
+	o2.row.Evidence["decode_authority"] = decodeAuthorityEvidence
+	o2.row.Evidence["admin_continuity"] = adminContinuityEvidence
 	rows = append(rows, o2.row)
 
 	// ---- OBLIGATION 3: seizure reconstruction, exact per branch ------------
@@ -2014,6 +2129,20 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 			out.Unrelated++
 			continue
 		}
+		// LAW 0, arm (i) — ERC1967 upgrade events REFUSE ON SIGHT (chain-truth
+		// R12 Fork 2, zero new reads; mutation target mB). A pre-boundary
+		// Upgraded/AdminChanged/BeaconUpgraded from the PROXY is a decode-
+		// authority epoch INSIDE the case block: the writer set of every slot
+		// this replay models may have changed mid-block, and setAdminImpl is
+		// silent but upgradeToAndCall is not — so this closes the
+		// writer-set-mutation path (core upgrade) entirely inside existing
+		// custody. Checked BEFORE the event switch: Upgraded is ALSO in the
+		// committed 21-event surface, and the upgrade arm takes precedence
+		// over surface membership (an in-surface Upgraded still refuses).
+		if ev := erc1967UpgradeEventName(w.Topic0); ev != "" {
+			note(w, "ERC1967 %s emitted by the DM proxy before the liquidation boundary — an in-block upgrade event means the decode authority (core implementation / admin routing) may have CHANGED between the parent pin and the boundary, so every decoded write and the crossing itself are unverifiable under the pinned generation's semantics; the replay refuses on sight (chain-truth R12 Fork 2, Law 0)", ev)
+			continue
+		}
 		switch w.Topic0 {
 		case topicDMLiquidated:
 			// Liquidated(liquidator, user, borrowToken, ...): an EARLIER
@@ -2232,6 +2361,20 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 			}
 			note(w, "%s for token 0x%s before the liquidation boundary — a supported-set membership write moves maxBorrowLT and basket membership (the paired config write / config delete) in ways the parent-basket model cannot replay: an in-block add→remove round trip is invisible to the sweep universe AND to every endpoint leg, so nothing here can certify the crossing held; the replay is INCOMPLETE (membership/config/boundary-balance replay is the named extension, not attempted)", event, hexLower(tok.Hex()))
 		default:
+			// LAW 0, arm (ii) — a FOREIGN topic0 from the custody address
+			// refuses on sight (chain-truth R12 Fork 2; mutation target mB): a
+			// proxy log whose topic0 is not in the COMMITTED IDebtManager
+			// 21-event surface (dm_surface.go — the membership set is derived
+			// from the committed forge artifact, never a hand list) is the
+			// signature of FOREIGN SEMANTICS: code emitting events the audited
+			// ABI does not declare is code the replay's decode authority does
+			// not cover. Topic0s IN the surface but outside the 5-event replay
+			// model keep their existing adjudicated treatment — unrelated
+			// contact, counted below, never relitigated here.
+			if !dmSurfaceTopic0s[w.Topic0] {
+				note(w, "FOREIGN topic0 0x%s emitted by the DM proxy before the liquidation boundary — not in the committed IDebtManager event surface (21 events, internal/decode/abis/DebtManagerCore.json): the signature of foreign semantics at the custody address, so nothing decoded from this block can be trusted under the audited ABI; the replay refuses on sight (chain-truth R12 Fork 2, Law 0)", w.Topic0)
+				continue
+			}
 			out.Unrelated++
 		}
 	}

@@ -31,6 +31,8 @@ package main
 // rather than skips (the house law for opt-in harnesses).
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -245,6 +247,25 @@ type continuityCapture struct {
 	ParentAdminImplSlot string `json:"parent_admin_impl_slot"`
 	ExecAdminImplSlot   string `json:"exec_admin_impl_slot"`
 
+	// The R12 Fork-1 three-surface observation (code_epoch.go): the ERC1967
+	// impl-slot words at both pins plus each surface's observed code keccak
+	// and byte length at both pins, all taken through the PRODUCTION
+	// readCodeSurfaces path at capture time. The full code BYTES are
+	// committed ONCE per surface (testdata/code_epoch/*.hex — constancy is
+	// the pinned fact, so per-case byte copies would be 31 identical files);
+	// the hermetic suite re-runs readCodeSurfaces over those bytes + these
+	// slot words and re-keccaks locally, so the production path is exercised
+	// end-to-end without the network.
+	ParentERC1967ImplSlot string                `json:"parent_erc1967_impl_slot"`
+	ExecERC1967ImplSlot   string                `json:"exec_erc1967_impl_slot"`
+	CodeSurfaces          []capturedCodeSurface `json:"code_surfaces"`
+
+	// The R12 Fork-2 Step-A block trace: committed per DISTINCT block as
+	// testdata/traces/<blockhash>.json.gz (raw provider bytes, gzip — the
+	// loader gunzips to the EXACT bytes production consumed), with the scan
+	// outcome pinned here.
+	TraceFile string `json:"trace_file"`
+
 	// Raw envelopes, verbatim provider bytes.
 	DMLiquidatedEnvelope json.RawMessage `json:"dm_liquidated_envelope"`
 	TransfersOutEnvelope json.RawMessage `json:"transfers_out_envelope"`
@@ -255,7 +276,22 @@ type continuityCapture struct {
 	Expected struct {
 		Proven   bool     `json:"proven"`
 		Refusals []string `json:"refusals,omitempty"`
+		// AdminScanClean / AdminScanRefusal pin the Step-A frame-scan
+		// outcome over the committed trace (admin_trace.go).
+		AdminScanClean   bool   `json:"admin_scan_clean"`
+		AdminScanRefusal string `json:"admin_scan_refusal,omitempty"`
 	} `json:"expected"`
+}
+
+// capturedCodeSurface is one surface's capture-time observation, mirroring
+// codeSurfaceObservation with hex-rendered hashes.
+type capturedCodeSurface struct {
+	Surface    string `json:"surface"`
+	Address    string `json:"address"`
+	ParentHash string `json:"parent_keccak"`
+	ExecHash   string `json:"exec_keccak"`
+	ParentLen  int    `json:"parent_len"`
+	ExecLen    int    `json:"exec_len"`
 }
 
 // recordingLogsBackend wraps the live backend and records each sweep's RAW
@@ -444,6 +480,14 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 	logsR, err := dialPinnedLogs(ctx, "op", urls, newRPCRunner(1.5, 5, &rpcCallLog{}))
 	require.NoError(t, err)
 
+	// The R12 evidence reader — the PRODUCTION backend for the three-surface
+	// code-hash pin and the Step-A block traces, so capture-time questions
+	// are production's questions by construction.
+	evR, err := dialPinnedEvidence(ctx, "op", urls, newRPCRunner(1.5, 5, &rpcCallLog{}))
+	require.NoError(t, err)
+	wroteSurfaceBytes := false
+	writtenTraces := map[string]bool{}
+
 	// Raw clients for the eth_getStorageAt cross-check (capture-only; see
 	// rawStorageAtHash). Same URL list, endpoints named by env ordinal only.
 	var storageClients []*gethrpc.Client
@@ -606,6 +650,98 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 						key, side.label, acc.Hex(), slotAddr.Hex(), auditedDMAdminImpl.Hex())
 				}
 			}
+			// ---- R12 Fork 1: the three-surface code-hash pin, PRODUCTION path.
+			surfaces, serr := readCodeSurfaces(ctx, evR, key+":capture", liveDMProxy, parentHash, pin)
+			if serr != nil {
+				return fmt.Errorf("three-surface code reads: %w", serr)
+			}
+			if note := codeHashConstancyRefusal(surfaces); note != "" {
+				// STOP semantics: a hash mismatch inside the frozen frame is a
+				// REAL mid-frame upgrade (or a provider fork) — halt the whole
+				// capture and report, never paper over.
+				t.Fatalf("STOP: case %s code-hash pin refused at capture time — %s", key, note)
+			}
+			pWord, serr := evR.storageAtHash(ctx, key+":capture:implslot@parent", liveDMProxy, erc1967ImplSlot, parentHash)
+			if serr != nil {
+				return fmt.Errorf("ERC1967 impl slot @parent: %w", serr)
+			}
+			eWord, serr := evR.storageAtHash(ctx, key+":capture:implslot@pin", liveDMProxy, erc1967ImplSlot, pin)
+			if serr != nil {
+				return fmt.Errorf("ERC1967 impl slot @pin: %w", serr)
+			}
+			cap.ParentERC1967ImplSlot, cap.ExecERC1967ImplSlot = strings.ToLower(pWord.Hex()), strings.ToLower(eWord.Hex())
+			for _, o := range surfaces {
+				cap.CodeSurfaces = append(cap.CodeSurfaces, capturedCodeSurface{
+					Surface: o.Surface, Address: strings.ToLower(o.Address.Hex()),
+					ParentHash: strings.ToLower(o.ParentHash.Hex()), ExecHash: strings.ToLower(o.ExecHash.Hex()),
+					ParentLen: o.ParentLen, ExecLen: o.ExecLen,
+				})
+			}
+			// The full surface BYTES, committed once (constancy is the pinned
+			// fact — every other case's hashes are asserted against the same
+			// constants above, so one byte copy per surface is the honest
+			// deduplication, not a shortcut).
+			if !wroteSurfaceBytes {
+				if err := os.MkdirAll(filepath.Join("testdata", "code_epoch"), 0o755); err != nil {
+					return err
+				}
+				for _, s := range []struct {
+					file string
+					addr common.Address
+				}{
+					{"proxy.hex", liveDMProxy},
+					{"core-impl.hex", common.BytesToAddress(eWord[12:])},
+					{"admin-impl.hex", auditedDMAdminImpl},
+				} {
+					code, cerr := evR.codeAtHash(ctx, key+":capture:bytes:"+s.file, s.addr, pin)
+					if cerr != nil {
+						return fmt.Errorf("surface bytes %s: %w", s.file, cerr)
+					}
+					if err := os.WriteFile(filepath.Join("testdata", "code_epoch", s.file),
+						[]byte("0x"+hex.EncodeToString(code)+"\n"), 0o644); err != nil {
+						return err
+					}
+				}
+				wroteSurfaceBytes = true
+			}
+
+			// ---- R12 Fork 2 Step A: the block trace + frame scan, PRODUCTION path.
+			traceRaw, terr := evR.traceBlockByHash(ctx, key+":capture:trace", pin)
+			if terr != nil {
+				return fmt.Errorf("block trace: %w", terr)
+			}
+			entries, terr := decodeTraceEnvelope(traceRaw)
+			if terr != nil {
+				return fmt.Errorf("block trace decode: %w", terr)
+			}
+			scanNote := adminTraceScanRefusal(entries, common.HexToHash(fc.TxHash), liveDMProxy)
+			cap.Expected.AdminScanClean = scanNote == ""
+			cap.Expected.AdminScanRefusal = scanNote
+			if scanNote != "" {
+				// STOP semantics: an admin-write frame inside the frozen frame
+				// is chain truth requiring adjudication before any capture ships.
+				t.Fatalf("STOP: case %s admin-continuity scan refused at capture time — %s", key, scanNote)
+			}
+			traceName := strings.TrimPrefix(strings.ToLower(fc.BlockHash), "0x") + ".json.gz"
+			cap.TraceFile = filepath.ToSlash(filepath.Join("traces", traceName))
+			if !writtenTraces[traceName] {
+				if err := os.MkdirAll(filepath.Join("testdata", "traces"), 0o755); err != nil {
+					return err
+				}
+				var buf bytes.Buffer
+				zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+				if _, err := zw.Write(traceRaw); err != nil {
+					return err
+				}
+				if err := zw.Close(); err != nil {
+					return err
+				}
+				if err := os.WriteFile(filepath.Join("testdata", "traces", traceName), buf.Bytes(), 0o644); err != nil {
+					return err
+				}
+				writtenTraces[traceName] = true
+			}
+
 			parentSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", pSupRet)
 			if err != nil {
 				return fmt.Errorf("parent getCollateralTokens decode: %w", err)

@@ -5,7 +5,7 @@
  "pin": "0xc011f3163209e33d8b90f4dcb7333aedfa653fc341fe265c522ce26ccc9aecf3",
  "tx_hash": "0x033c9e23ee14899e1fb3b9ba7ac95164f77d48dc1edc82144b48a0b7b4bd7de4",
  "account": "0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76",
- "captured_at": "2026-07-30T22:17:56Z",
+ "captured_at": "2026-07-30T23:42:42Z",
  "endpoint_env": "SOLVENT_RECON_RPC_OP",
  "parent_hash": "0x2073db9f32efe9579233e287c499e82ad25d4126fb1833cc989e3ee7db3208b6",
  "parent_collateral_ret": "0x000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
@@ -16,6 +16,35 @@
  "exec_admin_impl_ret": "0x0000000000000000000000008e87938c7fdf1d4728d87639e15e425a98a2d94f",
  "parent_admin_impl_slot": "0x0000000000000000000000008e87938c7fdf1d4728d87639e15e425a98a2d94f",
  "exec_admin_impl_slot": "0x0000000000000000000000008e87938c7fdf1d4728d87639e15e425a98a2d94f",
+ "parent_erc1967_impl_slot": "0x0000000000000000000000000392347936b84fd2d9de67f178f1d8e0bfc14a19",
+ "exec_erc1967_impl_slot": "0x0000000000000000000000000392347936b84fd2d9de67f178f1d8e0bfc14a19",
+ "code_surfaces": [
+  {
+   "surface": "proxy",
+   "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
+   "parent_keccak": "0xe428fca70a96823c60ffaa430edc8cc501377a4709bdb3a070d024d616d81ff5",
+   "exec_keccak": "0xe428fca70a96823c60ffaa430edc8cc501377a4709bdb3a070d024d616d81ff5",
+   "parent_len": 122,
+   "exec_len": 122
+  },
+  {
+   "surface": "core-impl",
+   "address": "0x0392347936b84fd2d9de67f178f1d8e0bfc14a19",
+   "parent_keccak": "0xdf7eab5a9862bab8b11aef543878afc87f1abbecd61dd4ccd6c4e61a44055fda",
+   "exec_keccak": "0xdf7eab5a9862bab8b11aef543878afc87f1abbecd61dd4ccd6c4e61a44055fda",
+   "parent_len": 18156,
+   "exec_len": 18156
+  },
+  {
+   "surface": "admin-impl",
+   "address": "0x8e87938c7fdf1d4728d87639e15e425a98a2d94f",
+   "parent_keccak": "0x58d08134cbfa191f9e45e44ce0da6f643caae51b50257ed99a4236dd27f7de75",
+   "exec_keccak": "0x58d08134cbfa191f9e45e44ce0da6f643caae51b50257ed99a4236dd27f7de75",
+   "parent_len": 11219,
+   "exec_len": 11219
+  }
+ ],
+ "trace_file": "traces/c011f3163209e33d8b90f4dcb7333aedfa653fc341fe265c522ce26ccc9aecf3.json.gz",
  "dm_liquidated_envelope": [
   {
    "address": "0x0078c5a459132e279056b2371fe8a8ec973a9553",
@@ -56,6 +85,7 @@
  "transfers_in_envelope": [],
  "netting_envelope": [],
  "expected": {
-  "proven": true
+  "proven": true,
+  "admin_scan_clean": true
  }
 }

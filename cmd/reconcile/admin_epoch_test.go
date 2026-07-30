@@ -162,11 +162,11 @@ func TestAdminImplEpochMismatchRefusesTheCase(t *testing.T) {
 	t.Run("an unset slot is not the audited epoch either", func(t *testing.T) {
 		requireRefusal(t, adminImplEpochRefusal(common.Address{}, common.Address{}), common.Address{}, common.Address{})
 	})
-	t.Run("guard: the audited epoch at both pins passes, with the D-013 residual disclosed", func(t *testing.T) {
+	t.Run("guard: the audited epoch at both pins passes, with the refuted D-013 adjudication WITHDRAWN", func(t *testing.T) {
 		require.Empty(t, adminImplEpochRefusal(audited, audited),
 			"the check must not become a blanket veto — both pins audited is the honest steady state on all 31 frozen cases")
-		require.Contains(t, adminImplEpochEvidence, "D-013",
-			"the passing case's evidence carries the adjudicated residual disclosure")
+		require.Contains(t, adminImplEpochEvidence, "withdrawn",
+			"the passing case's evidence must state the D-013 withdrawal (round 12 H2b refuted the adversary-only classification) — the residual claim itself lives with the admin_continuity scan now")
 		require.Contains(t, adminImplEpochEvidence, audited.Hex(),
 			"the disclosure names the audited address it certifies")
 	})

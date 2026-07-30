@@ -558,6 +558,64 @@ enforced as a constant in code):
 - **Enforcement**: `cmd/reconcile/admin_epoch.go` (`auditedDMAdminImpl`). Every backtest case reads
   the slot at both of its pins through the frame machinery and **refuses** (`admin-impl-epoch`)
   unless both equal this constant. A future honest admin upgrade therefore fails loudly until the
-  new epoch is audited and this pin is consciously re-established. Accepted-and-disclosed residual
+  new epoch is audited and this pin is consciously re-established. ~~Accepted-and-disclosed residual
   (D-013): a within-block `setAdminImpl` swap-and-revert between the two reads is invisible to a
-  two-pin read; honest governance has no swap-back motive and the choreography is evasion-shaped.
+  two-pin read; honest governance has no swap-back motive and the choreography is evasion-shaped.~~
+  **[SUPERSEDED 2026-07-30 — Codex round 12 H2b REFUTED the adversary-only classification (an
+  honest migration bundle — swap admin, migrate, restore — has exactly that shape), and the
+  integrator accepts. Under the chain-truth R12 ruling the residual is RETIRED, not reclassified:
+  the Step-A trace-frame scan (next section) sees every `setAdminImpl`/upgrade call frame at every
+  depth in every tx at or before each case's, so no within-block choreography escapes. The struck
+  sentence is kept as the historical record of the withdrawn claim.]**
+
+## Debt Manager code-hash constancy pins (P3 Task 6 R12 Fork 1) + admin-write trace law [2026-07-30]
+
+Codex round 12 (session 019fb52c-0eb3-7ec2-a5a2-82e7a394744e) found the gate pinned ADDRESSES but
+never bound an address to BYTECODE: the decode authority of every replayed event lives in the
+ERC1967 core implementation (and the admin surface in the admin impl), and an upgrade at either
+address would leave the replay decoding under the wrong generation's ABI. The chain-truth R12
+ruling (ADDENDUM 2 of .superpowers/sdd/p3-consults/chain-truth-basket-continuity-ruling.md,
+NORMATIVE) resolved Fork 1 as the **(B) three-surface code-hash constancy pin** — compile-compare
+(A) rejected: no committed source to compile (recon/cash-v3 is a gitignored working copy), no
+custodied build pipeline, and a compile loosened until green calibrates the instrument against its
+target.
+
+- **ERC1967 implementation slot**: `0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`
+  = `keccak256("eip1967.proxy.implementation") − 1` (EIP-1967; minus one exactly so the slot has no
+  known keccak preimage). Derivation recomputed on every suite run
+  (`TestERC1967ImplSlotDerivesFromTheStandard`, cmd/reconcile/code_epoch_test.go) — the same
+  source-anchored discipline as ADMIN_IMPL_POSITION.
+- **The three audited code-hash constants** (keccak256 of deployed runtime bytecode), ESTABLISHED
+  by DUAL-PROVIDER reads — both `SOLVENT_RECON_RPC_OP` endpoints × {head("latest"), frame pins
+  150,057,202 (0x9e536de1…) and 153,399,414 (0xd0df4d30…), by stored hash} — six reads per surface
+  per constant, ALL identical (probe transcript: recon/p3-probes.md "R12 Fork-1 probe"):
+  - proxy `0x0078C5a4…9553`: **`0xe428fca70a96823c60ffaa430edc8cc501377a4709bdb3a070d024d616d81ff5`** (122 bytes);
+  - ERC1967 core impl (slot resolved **`0x0392347936B84Fd2d9De67F178f1D8e0bFc14a19`** at every
+    read): **`0xdf7eab5a9862bab8b11aef543878afc87f1abbecd61dd4ccd6c4e61a44055fda`** (18,156 bytes);
+  - admin impl `0x8E87938C…2d94F`: **`0x58d08134cbfa191f9e45e44ce0da6f643caae51b50257ed99a4236dd27f7de75`** (11,219 bytes).
+  Re-proven across all 31 frozen cases × both pins by the R12 capture
+  (`testdata/continuity/*.json` `code_surfaces` + `testdata/code_epoch/*.hex`, one byte copy per
+  surface keccak-verified hermetically on every suite run).
+- **Enforcement**: `cmd/reconcile/code_epoch.go`. Every backtest case reads all three surfaces at
+  BOTH of its pins (eth_getCode, EIP-1898 blockHash form; the core impl address slot-resolved per
+  pin), keccaks locally, and **refuses** (`decode-authority-epoch`) unless all six hashes equal
+  these constants; empty code refuses, never a zero-hash. The run's own head pin is checked too —
+  a head mismatch is preflightExit posture (precondition abort). A future honest upgrade changes
+  the chain and NOT these constants, so every case refuses loudly until the new bytecode is
+  audited and the pin consciously re-established.
+- **Certification limits (NORMATIVE, verbatim in code + evidence `decode_authority`)**: the pin
+  certifies BYTECODE CONSTANCY at the audited addresses plus empirical fixture anchoring
+  (EIP-6780 gives interior-of-block constancy on OP since Ecotone 2024-03, before frame start).
+  It does NOT certify Solidity-source correspondence — no compile bridge exists; source
+  correspondence is a trust posture resting on fixture anchoring plus human source review.
+- **The admin-write trace law (R12 Fork 2, Step A — probe SERVED)**: `debug_traceBlockByHash` +
+  callTracer at every case's stored pin; any call frame at any depth, in any tx with index < the
+  case's (or anywhere in the case's own tx — over-refusal, since intra-tx frame-vs-log ordering is
+  unresolvable from callTracer), targeting the DM proxy with the ABI-derived
+  `setAdminImpl(address)` / `upgradeTo(address)` / `upgradeToAndCall(address,bytes)` selectors
+  **refuses** the case (`admin-continuity`). Selectors derived from the committed artifact
+  (`TestAdminWriteSelectorsDeriveFromTheCommittedArtifact`), never hand-written. Law 0
+  additionally refuses on sight any pre-boundary proxy log whose topic0 is an ERC1967 upgrade
+  event or absent from the committed 21-event IDebtManager surface
+  (cmd/reconcile/dm_surface.go). One-time trace evidence for all 31 cases committed at
+  `testdata/traces/<blockhash>.json.gz`; 31/31 scanned clean at capture.

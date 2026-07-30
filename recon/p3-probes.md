@@ -579,3 +579,58 @@ serveable as the ruling writes them. (A2 caveat stands: dRPC archive routing is
 nondeterministic — production issues these sweeps through the shared runner's bounded
 retry/failover, and a sweep that cannot be taken REFUSES the continuity proof for that
 case, never fabricates.)
+
+## Task 6 R12 Fork-1 probe — EIP-1898 blockHash-form eth_getCode at frame depth (2026-07-30)
+
+Ruling precondition discharged (chain-truth R12 ruling, ADDENDUM 2, Fork 1 step 1: "eth_getCode
+(EIP-1898 blockHash form — probe it first, transcribed, both SOLVENT_RECON_RPC_OP endpoints at
+frame depth)"). No eth_getCode had ever been issued by this repo — the pinned reader serves
+eth_call/multicall only — so the form was unprobed plumbing exactly as the L6 getLogs form was.
+Probe: `TestLiveCodeHashGetCodeProbe` (cmd/reconcile/p3_epoch_live_test.go, opt-in via
+SOLVENT_P3_LIVE=1) — each configured endpoint asked SEPARATELY, endpoints named by env var +
+ordinal only, never by URL. Pins are the frozen frame's STORED raw_logs hashes (blocks
+150,057,202 / 0x9e536de1… and 153,399,414 / 0xd0df4d30…) plus head ("latest"); the blockHash-form
+answer is cross-checked byte-for-byte (via keccak) against the number-form answer at both frame
+pins. This probe IS the dual-provider ESTABLISHMENT read for the three audited code-hash
+constants (see recon/derivation-notes.md, "Debt Manager code-hash constancy pins").
+
+| endpoint | pin | proxy len / keccak | ERC1967 impl slot → | core impl len / keccak | admin impl len / keccak |
+|---|---|---|---|---|---|
+| SOLVENT_RECON_RPC_OP[0] | 150,057,202 (0x9e536de1…) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+| SOLVENT_RECON_RPC_OP[0] | 153,399,414 (0xd0df4d30…) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+| SOLVENT_RECON_RPC_OP[0] | head (latest) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+| SOLVENT_RECON_RPC_OP[1] | 150,057,202 (0x9e536de1…) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+| SOLVENT_RECON_RPC_OP[1] | 153,399,414 (0xd0df4d30…) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+| SOLVENT_RECON_RPC_OP[1] | head (latest) | 122 / 0xe428fca7…d81ff5 | 0x03923479…c14a19 | 18,156 / 0xdf7eab5a…055fda | 11,219 / 0x58d08134…f7de75 |
+
+Full keccaks (one per surface — the constancy IS the observation):
+proxy `0xe428fca70a96823c60ffaa430edc8cc501377a4709bdb3a070d024d616d81ff5`,
+core impl `0xdf7eab5a9862bab8b11aef543878afc87f1abbecd61dd4ccd6c4e61a44055fda`,
+admin impl `0x58d08134cbfa191f9e45e44ce0da6f643caae51b50257ed99a4236dd27f7de75`;
+ERC1967 impl slot resolved `0x0392347936B84Fd2d9De67F178f1D8e0bFc14a19` at every read.
+
+VERDICT: the EIP-1898 blockHash form of eth_getCode IS served by BOTH configured
+SOLVENT_RECON_RPC_OP endpoints at frame depth; number-form cross-check byte-identical at both
+frame pins on both endpoints; 6 reads per surface per endpoint family answered ONE hash per
+surface and ONE impl address. No mid-frame upgrade — the ruling's STOP condition did not fire.
+The Fork-1 (B) law is serveable as the ruling writes it.
+
+## Task 6 R12 Step-A probe — debug_traceBlockByHash + callTracer at frame depth (2026-07-30)
+
+Ruling fork gate (chain-truth R12 ruling, ADDENDUM 2, Fork 2: "Step A (probe, then traces if
+served) … If UNSERVED: Step B"). Probe: `TestLiveTraceBlockProbe`
+(cmd/reconcile/p3_epoch_live_test.go, opt-in via SOLVENT_P3_LIVE=1), each endpoint separately at
+both frame-depth stored pins.
+
+| endpoint | 150,057,202 (0x9e536de1…) | 153,399,414 (0xd0df4d30…) |
+|---|---|---|
+| SOLVENT_RECON_RPC_OP[0] | UNSERVED — 403, JSON-RPC -32601 "rpc method is not whitelisted" | UNSERVED — same refusal |
+| SOLVENT_RECON_RPC_OP[1] | SERVED — 39 tx traces, full call-frame trees | SERVED — 69 tx traces, full call-frame trees |
+
+VERDICT: SERVED — the configured endpoint FAMILY serves the trace form at frame depth (the
+production evidence reader walks the endpoints in order, so SOLVENT_RECON_RPC_OP[0]'s method
+refusal is a recorded walk error and [1] answers; the one-time R12 capture subsequently served
+callTracer traces for ALL 30 distinct frame blocks, 31/31 cases). STEP A is the landed fork:
+the trace law implements (cmd/reconcile/admin_trace.go), the D-013 within-block residual is
+RETIRED, and Step B's calldata-substring scan (with its pre-deployed-payload residual and
+disclosure-limit fixture) was NOT taken and does not exist in the tree.

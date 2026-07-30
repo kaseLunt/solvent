@@ -42,6 +42,15 @@ type p3Ctx struct {
 	// surface is configured and every continuity proof REFUSES — disclosed,
 	// never skipped.
 	logsR rawLogsBackend
+	// codeR is the raw eth_getCode/eth_getStorageAt surface for the R12
+	// Fork-1 three-surface code-hash constancy pin (code_epoch.go). Nil means
+	// every backtest case REFUSES decode-authority-unread — the pin is
+	// MANDATORY per the ruling, so absence is a loud refusal, never a skip.
+	codeR rawCodeBackend
+	// traceR is the raw debug_traceBlockByHash surface for the R12 Fork-2
+	// Step-A admin-write frame scan (admin_trace.go). Nil refuses every case
+	// admin-continuity-unread, same posture as codeR.
+	traceR rawTraceBackend
 
 	pinOP, pinETH   uint64
 	hashOP, hashETH common.Hash
@@ -84,12 +93,14 @@ type p3Result struct {
 // that makes further reads meaningless (the existing dmPhaseErr / aavePhaseErr
 // classification decides which).
 func runP3Phase(ctx context.Context, o *options, p1 *phase1Data, reg *registryView,
-	opR, ethR *pinnedReader, opLogs rawLogsBackend, dmProxy, aavePool common.Address, wantDM, wantAave bool) (*p3Result, error) {
+	opR, ethR *pinnedReader, opLogs rawLogsBackend, opCode rawCodeBackend, opTrace rawTraceBackend,
+	dmProxy, aavePool common.Address, wantDM, wantAave bool) (*p3Result, error) {
 	if p1.Task6 == nil {
 		return nil, fmt.Errorf("P3 gate set enabled but the Phase-1 snapshot collected no Task-6 derived side — the two are wired from ONE flag, so this is a wiring bug, not a data condition")
 	}
 	c := &p3Ctx{
 		o: o, p1: p1, t6: p1.Task6, reg: reg, opR: opR, ethR: ethR, logsR: opLogs,
+		codeR: opCode, traceR: opTrace,
 		pinOP: p1.Pins[dmEngine], pinETH: p1.Pins[aaveEngine],
 		hashOP: p1.pinHashes["op"], hashETH: p1.pinHashes["eth"],
 		dmProxy: dmProxy, aavePool: aavePool,

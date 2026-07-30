@@ -11,10 +11,12 @@
 // event semantics with zero refusal, and the replay would apply (or ignore)
 // the write under the wrong generation's ABI.
 //
-// THE REMEDY IMPLEMENTED — the TWO-PIN SLOT READ, not trace scanning: the
-// reviewer's debug_traceTransaction remedy needs tracing plumbing the
-// standard endpoints do not serve and the demo-grade bar does not warrant
-// (D-013). Instead, EVERY case reads ADMIN_IMPL_POSITION at BOTH of its pins
+// THE REMEDY — TWO LAYERS, NOT ONE (revised by chain-truth R12): originally
+// the two-pin slot read stood ALONE under D-013's "trace plumbing unserved"
+// premise; the R12 Step-A probe disproved that premise (the configured
+// endpoint family DOES serve debug_traceBlockByHash+callTracer at frame
+// depth — recon/p3-probes.md), so the trace-frame scan (admin_trace.go) now
+// runs alongside this check. Layer 1: EVERY case reads ADMIN_IMPL_POSITION at BOTH of its pins
 // — @parentHash(N-1) and @pinHash(N) — and refuses at frame level unless
 // both reads equal the AUDITED admin implementation constant below. A
 // persistent pre-boundary swap is visible at BOTH pins; a swap landing
@@ -45,14 +47,22 @@
 //     (TestCapturedAdminImplIsTheAuditedConstantAtBothPins). The identity is
 //     chain-proven across the whole frame, not assumed.
 //
-// THE ACCEPTED-AND-DISCLOSED RESIDUAL (D-013): a WITHIN-BLOCK swap-and-revert
-// — setAdminImpl(X) → admin write → setAdminImpl(audited) all strictly
-// between the two read points — is invisible to a two-pin read by
-// construction. Honest governance has no swap-back motive; the scenario
-// requires deliberately evasion-shaped choreography (the swap must also be
-// unwound inside the same block to evade the N-pin read). Accepted, recorded
-// here, in the passing case's evidence (adminImplEpochEvidence), and carried
-// to Codex round 12 as the adjudicated disclosure — never silently.
+// THE WITHIN-BLOCK RESIDUAL — REFUTED ADJUDICATION, THEN RETIRED (Codex
+// round 12 H2b → chain-truth R12 Fork 2 Step A). A WITHIN-BLOCK
+// swap-and-revert — setAdminImpl(X) → admin write → setAdminImpl(audited)
+// all strictly between the two read points — is invisible to a two-pin read
+// by construction. The prior D-013 adjudication classified that residual as
+// "evasion-shaped choreography only"; round 12 H2b REFUTED it (the
+// integrator accepts): an HONEST migration bundle — swap admin, run a
+// migration write, restore — has exactly that shape, so the residual was
+// never adversary-only and the old text was the-RPC-said-so applied to our
+// own prose. Under the R12 ruling the residual is now RETIRED, not
+// reclassified: the Step-A probe fired SERVED (recon/p3-probes.md), so every
+// case additionally scans the callTracer block trace for admin-write call
+// frames (setAdminImpl / upgradeTo / upgradeToAndCall targeting the proxy)
+// in every tx at or before the case's, at every depth (admin_trace.go). A
+// slot write with no call frame does not exist, so no within-block
+// choreography — honest or otherwise — escapes both checks together.
 package main
 
 import (
@@ -101,10 +111,14 @@ var dmAdminImplSlot = common.HexToHash("0x49d4a010ddc5f453173525f0adf6cfb97318b5
 // refusal-over-absorption posture the core pins already have.
 var auditedDMAdminImpl = common.HexToAddress("0x8E87938C7FdF1d4728D87639e15E425A98a2d94F")
 
-// adminImplEpochEvidence is the passing case's disclosure (D-013 5b): short by
+// adminImplEpochEvidence is the passing case's disclosure: short by
 // direction, carried on the obligation-2 row so a reviewer of any marginal or
-// exact verdict sees the epoch premise AND its accepted residual.
-const adminImplEpochEvidence = "admin impl pinned at both ends (getDebtManagerAdmin@N-1 == @N == audited 0x8E87938C7FdF1d4728D87639e15E425A98a2d94F); within-block swap-and-revert excluded per D-013 (disclosed residual, evasion-shaped choreography only)"
+// exact verdict sees the epoch premise AND where its old residual went. The
+// D-013 "evasion-shaped choreography only" classification is WITHDRAWN
+// (refuted by Codex round 12 H2b — the within-block shape is an honest
+// governance pattern too); the window itself is closed by the sibling
+// admin_continuity frame scan, so this key no longer carries a residual.
+const adminImplEpochEvidence = "admin impl pinned at both ends (getDebtManagerAdmin@N-1 == @N == audited 0x8E87938C7FdF1d4728D87639e15E425A98a2d94F); the within-block swap-and-revert window is NOT excluded by this two-pin read — the prior D-013 'evasion-shaped choreography only' adjudication was refuted (R12 H2b: an honest migration bundle has the same shape) and is withdrawn; the window is closed by the admin_continuity trace-frame scan (chain-truth R12 Fork 2 Step A), under which the residual is RETIRED"
 
 // adminImplEpochRefusal is THE admin-epoch check (round-11 H1, step 4 of the
 // dispatch): both pins' slot reads must equal the audited constant, else the
@@ -117,6 +131,6 @@ func adminImplEpochRefusal(parentImpl, execImpl common.Address) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"ADMIN-IMPLEMENTATION EPOCH: ADMIN_IMPL_POSITION (read via the core's own getDebtManagerAdmin accessor, DebtManagerCore.sol:699-707) does not hold the AUDITED admin implementation at both case pins — parent(N-1) %s, exec(N) %s, audited %s. setAdminImpl writes this slot with NO event (DebtManagerCore.sol:715-721), so the two-Upgraded census cannot exclude an admin swap; a swap changes which generation's ABI the proxy's fallback events come from, and a replay under the wrong generation proves nothing. The case REFUSES — this is a real epoch boundary requiring chain-truth adjudication and a re-audited pin, never a verdict (Codex round 11 H1, D-013)",
+		"ADMIN-IMPLEMENTATION EPOCH: ADMIN_IMPL_POSITION (read via the core's own getDebtManagerAdmin accessor, DebtManagerCore.sol:699-707) does not hold the AUDITED admin implementation at both case pins — parent(N-1) %s, exec(N) %s, audited %s. setAdminImpl writes this slot with NO event (DebtManagerCore.sol:715-721), so the two-Upgraded census cannot exclude an admin swap; a swap changes which generation's ABI the proxy's fallback events come from, and a replay under the wrong generation proves nothing. The case REFUSES — this is a real epoch boundary requiring chain-truth adjudication and a re-audited pin, never a verdict (Codex round 11 H1; the R12 admin-continuity frame scan closes the within-block window)",
 		parentImpl.Hex(), execImpl.Hex(), auditedDMAdminImpl.Hex())
 }
