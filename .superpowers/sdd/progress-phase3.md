@@ -935,6 +935,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   rev-3 Codex round (queued behind the micro-fix round in flight). The money-
   code protocol closed its loop twice today: Opus built → fable refuted its own
   prior approximation from source → Opus rebuilt → fable re-derived and flipped.
+- **TWO OWNER DECISIONS RECORDED** (2026-07-29 22:53, AskUserQuestion answers
+  verbatim): (1) -race CI lane: "add it, and/or download a c compiler if you
+  need" → ci.yml race job COMMITTED ccaaa0e under CONTROL_PLANE_OWNER_REVIEWED
+  citing the recorded approval (FULL suite under -race with DB provisioning —
+  a non-DB subset would skip exactly the concurrency worth racing: riskd's
+  scheduler loop, store batch writers under the advisory lock); local gcc
+  (WinLibs) installing in background → local -race run when it lands, ahead of
+  CI. (2) MAINTENANCE WINDOW PRE-AUTHORIZED ("Yes, pre-authorized"): once ALL
+  THREE Codex rounds ship → daemon restart (applies 00013+00014) → owner-gated
+  rewind-and-rederive (zero RPC, ~2,509 windows; riskd/api refuse honestly
+  during; 173 flag events land; 35 stale rows stop counting, 31 stable-
+  collateral accounts become computable) → make reconcile acceptance run
+  (expected honest exit 1 on the three refuted heartbeat budgets → feeds.json
+  meta fixes under ack). Standing conditional delegation: condition = three
+  SHIP verdicts; nothing touches live custody before that. Task 7 (cmd/api)
+  wave DISPATCHED in parallel (disjoint tree; depends only on Task-5-shipped
+  surfaces).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
