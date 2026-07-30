@@ -1379,6 +1379,22 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   on 1ebe6b6..bc0c703. Reviewer ops note carried forward: strip trailing '*'
   from ls glob + native Windows path for the companion script (MODULE_NOT_
   FOUND otherwise).
+- **STREAM-BINDING FIX LANDED — 30768a9** (20 files +740/−107; the both-ways
+  check caught 1 untracked test file — the rule works when applied).
+  CoverageBindingOf = sha256(chain + sorted deduped (address,startBlock)
+  pairs) — reproducible from config hence checkable; NOT names (renames are
+  cosmetic); order/dup-insensitive; per-stream pairs. CoverageProvenBack
+  RETIRED for CoverageClaim.Satisfies(CoverageRequirement) (two structs, no
+  hand-assembled provenance, four legs fail closed incl. empty requirement).
+  Merge rules: different binding RESTARTS (mirrors decoder-revision); rewind
+  clears binding WITH its rows. Binding in the identity. BOTH HALVES: startup
+  compares AuditedAaveCoverageBinding (computed from committed config);
+  the DB gate catches stale data — composition closes the coherent-update
+  variant (everything moves together, startup passes, STILL refuses: the
+  data is stale). Genesis divergence table now 10 cases incl. added/removed/
+  re-addressed at identical starts (invisible pre-round-5). Wave: full suite
+  + -race both -p 1 exit 0; fork legs 3/3. NEXT: flag-custody round 7 —
+  the TRUE closing — queues behind Task 7 round 4 (running).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
