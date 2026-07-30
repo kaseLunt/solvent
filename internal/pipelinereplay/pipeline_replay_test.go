@@ -52,6 +52,7 @@ import (
 	"github.com/kaselunt/solvent/internal/decode"
 	"github.com/kaselunt/solvent/internal/derive"
 	"github.com/kaselunt/solvent/internal/ingest"
+	"github.com/kaselunt/solvent/internal/riskfeed"
 	"github.com/kaselunt/solvent/internal/store"
 )
 
@@ -787,7 +788,7 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	// positions without parameters cannot produce a health factor, and
 	// parameters without positions cannot either. Naming both explicitly is
 	// what makes "aave_param has no cursor yet" a refusal rather than silence.
-	required := []requiredCursor{
+	required := []riskfeed.RequiredCursor{
 		{Engine: derive.AaveEngineName, ChainID: int64(ethChainID)},
 		{Engine: derive.ParamEngineName, ChainID: int64(ethChainID)},
 	}
@@ -797,8 +798,9 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	// exists. Both required engines must be named as missing. This is the
 	// degenerate case of the same law, asserted explicitly rather than left
 	// incidental.
-	requireGateRefuses(t, ctx, dsn, required,
+	requireGateRefuses(t, ctx, st, required,
 		[]string{derive.AaveEngineName, derive.ParamEngineName},
+		riskfeed.GateReasonMissingCursor,
 		"on a freshly truncated database, before anything has been derived")
 
 	// ---- 1. Resolve the risk admin ON the fork. ---------------------------
@@ -882,12 +884,13 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	drain(t, ctx, aaveRunner, "runner "+derive.AaveEngineName+" (startup, alone)")
 	require.NotContainsf(t, readDeriveCursors(t, ctx, dsn), derive.ParamEngineName,
 		"the param engine already has a cursor — this assertion needs the window where it does NOT, or it proves nothing")
-	requireGateRefuses(t, ctx, dsn, required, []string{derive.ParamEngineName},
+	requireGateRefuses(t, ctx, st, required, []string{derive.ParamEngineName},
+		riskfeed.GateReasonMissingCursor,
 		"after the position cursor exists but before aave_param has ever applied a window")
 
 	// Once the param engine catches up, the same gate allows.
 	drain(t, ctx, paramRunner, "runner "+derive.ParamEngineName+" (startup)")
-	requireGateAllows(t, ctx, dsn, required, "once BOTH required engines have cursors and no epoch exists")
+	requireGateAllows(t, ctx, st, required, "once BOTH required engines have cursors and no epoch exists")
 
 	// ---- 2. Emit the FIRST parameter tuple and derive it. -----------------
 	const (
@@ -908,7 +911,7 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	require.Equalf(t, emit1, rows[0].EffectiveBlock, "the derived row is effective at block %d, the event was emitted at %d", rows[0].EffectiveBlock, emit1)
 
 	// The gate is OPEN here: both cursors exist and no epoch has been recorded.
-	requireGateAllows(t, ctx, dsn, required, "before any reorg")
+	requireGateAllows(t, ctx, st, required, "before any reorg")
 	require.Zerof(t, countReorgEpochs(t, ctx, dsn), "a reorg epoch exists before any reorg happened")
 
 	// ---- 3. Reorg the parameter change away. ------------------------------
@@ -948,11 +951,13 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 		"the walker completed its drain without recording a durable reorg epoch — the same-height/different-hash fork was not detected")
 
 	// ---- 6. THE GATE REFUSES while the epoch is unacknowledged. -----------
-	// Thin stand-in for Task 5's watermark reader, same predicate, same two
-	// store surfaces (see riskGate). BOTH engines lag the new epoch, and the
-	// refusal must name BOTH — not merely be false.
-	requireGateRefuses(t, ctx, dsn, required,
+	// riskfeed.GateEpochs — the same predicate cmd/riskd gates its passes with,
+	// read through the same store.BeginRiskSnapshot transaction. BOTH engines
+	// lag the new epoch, so the refusal must name BOTH, with class
+	// unacked_epoch — not merely be false.
+	requireGateRefuses(t, ctx, st, required,
 		[]string{derive.AaveEngineName, derive.ParamEngineName},
+		riskfeed.GateReasonUnackedEpoch,
 		"after the rewind, before any engine acknowledges the epoch")
 
 	// ---- 7. The derivers acknowledge, ONE AT A TIME. ----------------------
@@ -967,11 +972,12 @@ func TestPipelineReplayReorgReplacesParams(t *testing.T) {
 	// param engine's own rewind (RewindParams) and re-derivation may the gate
 	// open.
 	drain(t, ctx, aaveRunner, "runner "+derive.AaveEngineName+" (acknowledge alone)")
-	requireGateRefuses(t, ctx, dsn, required, []string{derive.ParamEngineName},
+	requireGateRefuses(t, ctx, st, required, []string{derive.ParamEngineName},
+		riskfeed.GateReasonUnackedEpoch,
 		"after ONLY the position engine acknowledged — parameter state is still stale")
 
 	drain(t, ctx, paramRunner, "runner "+derive.ParamEngineName+" (acknowledge)")
-	requireGateAllows(t, ctx, dsn, required, "after BOTH engines acknowledged the epoch")
+	requireGateAllows(t, ctx, st, required, "after BOTH engines acknowledged the epoch")
 
 	// ---- 8. Recompute and prove REPLACED, NOT ORPHANED. -------------------
 	runPipeline(t, ctx, walkers, runners)
@@ -1065,8 +1071,9 @@ func requireTuple(t *testing.T, r store.ParamRow, ltv, lt, bonus int64, what str
 	require.Equalf(t, fmt.Sprint(bonus), r.LiqBonus.String(), "%s: liquidation bonus", what)
 }
 
-// requireGateRefuses runs the thin consumer and asserts it refuses naming
-// EXACTLY the given engines — set equality, never a boolean.
+// requireGateRefuses asserts the PRODUCTION gate refuses, naming EXACTLY the
+// given engines and firing exactly the given refusal class — set equality,
+// never a boolean.
 //
 // The boolean form is what let a false green through review: while several
 // required cursors lag at once, a gate that ignores one of them entirely still
@@ -1074,38 +1081,90 @@ func requireTuple(t *testing.T, r store.ParamRow, ltv, lt, bonus int64, what str
 // do with the engine under test. Naming the set makes the refusal discriminate
 // between "blocked on parameters" and "blocked on positions, parameters never
 // considered".
-func requireGateRefuses(t *testing.T, ctx context.Context, dsn string, required []requiredCursor, wantBlocking []string, when string) {
+//
+// The CLASS assertion is new with the promotion and is a strengthening the
+// test-local stand-in could not offer: riskfeed's verdict classifies each
+// refusal (missing_cursor / chain_mismatch / unacked_epoch), so leg 3 now pins
+// WHICH law fired rather than matching on prose. "Refused because aave_param
+// has no cursor" and "refused because aave_param lags an epoch" are different
+// states of the world, and steps 2 and 6 depend on telling them apart.
+func requireGateRefuses(t *testing.T, ctx context.Context, st *store.Store, required []riskfeed.RequiredCursor, wantBlocking []string, wantClass, when string) {
 	t.Helper()
-	v := readGate(t, ctx, dsn, required)
+	v := readGate(t, ctx, st, required)
 	want := append([]string(nil), wantBlocking...)
 	sort.Strings(want)
 	require.NotEmptyf(t, want, "requireGateRefuses called with no expected blocking engines — use requireGateAllows")
-	require.Falsef(t, v.Allowed,
-		"gate %s ALLOWED, but %v must block it (reason: %s)", when, want, v.Reason)
-	require.Equalf(t, want, v.Blocking,
-		"gate %s named blocking engines %v, want exactly %v — a gate that refuses while never considering a required engine is a false green (reason: %s)",
-		when, v.Blocking, want, v.Reason)
-	t.Logf("gate %s: REFUSED, blocking=%v — %s", when, v.Blocking, v.Reason)
+
+	got := make([]string, 0, len(v.Refusals))
+	for _, r := range v.Refusals {
+		got = append(got, r.Engine)
+	}
+	sort.Strings(got)
+
+	require.Falsef(t, v.OK,
+		"gate %s ALLOWED, but %v must block it", when, want)
+	require.Equalf(t, want, got,
+		"gate %s named blocking engines %v, want exactly %v — a gate that refuses while never considering a required engine is a false green (reasons: %v)",
+		when, got, want, v.Reasons())
+	for _, r := range v.Refusals {
+		require.Equalf(t, wantClass, r.Class,
+			"gate %s: engine %s refused with class %q, want %q — the right engine blocking for the wrong law is still the wrong verdict (reason: %s)",
+			when, r.Engine, r.Class, wantClass, r.Reason)
+	}
+	t.Logf("gate %s: REFUSED %v (class %s) — %v", when, got, wantClass, v.Reasons())
 }
 
-// requireGateAllows asserts the gate permits service and names nothing.
-func requireGateAllows(t *testing.T, ctx context.Context, dsn string, required []requiredCursor, when string) {
+// requireGateAllows asserts the production gate permits the pass and names
+// nothing.
+func requireGateAllows(t *testing.T, ctx context.Context, st *store.Store, required []riskfeed.RequiredCursor, when string) {
 	t.Helper()
-	v := readGate(t, ctx, dsn, required)
-	require.Truef(t, v.Allowed,
-		"gate %s REFUSED, blocking=%v — %s", when, v.Blocking, v.Reason)
-	require.Emptyf(t, v.Blocking, "gate %s allowed yet named blocking engines %v", when, v.Blocking)
+	v := readGate(t, ctx, st, required)
+	require.Truef(t, v.OK, "gate %s REFUSED — %v", when, v.Reasons())
+	require.Emptyf(t, v.Refusals, "gate %s allowed yet carried refusals %v", when, v.Reasons())
 	t.Logf("gate %s: allowed", when)
 }
 
-func readGate(t *testing.T, ctx context.Context, dsn string, required []requiredCursor) gateVerdict {
+// readGate calls the production predicate the way PRODUCTION calls it.
+//
+// riskfeed.GateEpochs is a pure function over (cursors, maxEpochs, required),
+// and its contract says both inputs MUST come from one `REPEATABLE READ, READ
+// ONLY` snapshot — read under autocommit they can straddle a rewind and
+// describe a state no instant of the database ever held, which is the very race
+// the gate exists to close, reintroduced inside the gate. So the harness opens
+// the same store.BeginRiskSnapshot transaction cmd/riskd opens and reads the
+// two verbatim readers through it. Exercising the predicate with hand-fed
+// structs would test arithmetic; exercising it through the snapshot tests the
+// thing riskd actually does.
+func readGate(t *testing.T, ctx context.Context, st *store.Store, required []riskfeed.RequiredCursor) riskfeed.EpochGateVerdict {
 	t.Helper()
-	conn, err := pgx.Connect(ctx, dsn)
-	require.NoError(t, err, "connect for the gate read")
-	defer conn.Close(ctx)
-	v, err := riskGate(ctx, conn, required)
-	require.NoError(t, err, "gate read")
+	tx, err := st.BeginRiskSnapshot(ctx)
+	require.NoError(t, err, "open the risk snapshot transaction")
+	defer func() { _ = tx.Rollback(ctx) }() // read-only: nothing to commit
+	cursors, err := store.DeriveCursorStates(ctx, tx)
+	require.NoError(t, err, "read derive cursors inside the snapshot")
+	maxEpochs, err := store.MaxReorgEpochs(ctx, tx)
+	require.NoError(t, err, "read reorg epochs inside the snapshot")
+	v, err := riskfeed.GateEpochs(cursors, maxEpochs, required)
+	require.NoError(t, err, "riskfeed.GateEpochs")
 	return v
+}
+
+// TestGateEpochsRefusesAnEmptyRequirementSet pins the degenerate case the
+// harness relies on but never reaches: a requirement set that is empty (or all
+// blank engine names) is a HARD ERROR, not "allowed". Every requireGate* call
+// above passes a non-empty set, so without this the harness would never
+// exercise the clause that stops a mis-computed requirement list from turning
+// the gate into a rubber stamp. PURE UNIT: no env gate, no anvil, no DB.
+func TestGateEpochsRefusesAnEmptyRequirementSet(t *testing.T) {
+	for _, required := range [][]riskfeed.RequiredCursor{
+		nil,
+		{},
+		{{Engine: "", ChainID: 1}}, // blank names are dropped, leaving nothing
+	} {
+		_, err := riskfeed.GateEpochs(nil, nil, required)
+		require.ErrorIsf(t, err, riskfeed.ErrNoRequiredCursors,
+			"GateEpochs(%v) must refuse an empty requirement set as an ERROR — a gate with nothing required can only ever allow", required)
+	}
 }
 
 // ===========================================================================
