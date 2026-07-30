@@ -30,6 +30,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strings"
@@ -1209,20 +1210,85 @@ func priorPassText(v *uint32) string {
 	return fmt.Sprintf("%d", *v)
 }
 
-// The custodied DM topic0s a same-block earlier log can carry, derived from the
-// committed ABI signatures (re-derived by TestDMWitnessTopicsAreCanonical).
+// dmWitnessABI is the hand-authored event surface the same-block causation replay
+// matches topic0s against, transcribed from internal/decode/abis/DebtManagerCore.json
+// (the committed forge artifact) with the tuple components verbatim.
 //
-// These are the ONLY writes this run can prove happened before the liquidation log,
-// because the Debt Manager proxy is the only DM-side address in the walker stream
-// set. PriceProviderV2 is NOT walked, so a price push is NOT a custodied witness —
-// which is precisely why a post-block price difference can never be proof of a
-// pre-liquidation flip (Codex round 2, finding H2).
-const (
-	topicDMLiquidated           = "fd54f2a27ee93a2b60fa895931f0067b8eab4f20662e14ef1ef0720eb772ea9c"
-	topicDMInterestIndexUpdated = "84057b54cc0f0532aa9d0ce233280f15c2e7f7cc24d05461b7a360e23baae82f"
-	topicDMCollateralConfigSet  = "011128805ea0277047e3f7163c2d734358e71e614d3c0487497ef1813a2ea110"
-	topicDMBorrowed             = "3fc499aeb0bb1cb58b6de8b02b3f86f4e7394e9690bef0110e32ced8a5631045"
-	topicDMRepaid               = "861660e9b7ead7183d53fe928b5638c7b57a7bcf16a89d7fdb04db65ce3ad6d5"
+// WHY IT IS AN ABI AND NOT A LIST OF CONSTANTS (Codex round 3, finding H). The
+// previous version hard-coded five topic0 hashes computed from signatures I had
+// written out by hand, and one of them was WRONG: the deployed event is
+// `InterestIndexUpdated(address indexed borrowToken, uint256 oldIndex, uint256
+// newIndex)` — THREE arguments — and the constant came from a two-argument signature
+// that does not exist. Its hash therefore matched nothing, so every genuine
+// interest-index witness fell through as `unrelated` and a case whose only custodied
+// cause was an index move would be classified UNEXPLAINED and fail an honest run.
+//
+// Deriving the IDs from an abi.ABI removes the hash transcription; the SIGNATURE
+// transcription that remains is pinned in tests against BOTH the real decoder
+// fixtures in internal/decode/testdata and the committed ABI file itself, neither of
+// which comes from a signature I wrote. That is the lesson of the finding: a witness
+// predicate needs fixture-backed regressions, not another hand-written signature.
+//
+// These are also the ONLY writes this run can prove happened before the liquidation
+// log, because the Debt Manager proxy is the only DM-side address in the walker
+// stream set. PriceProviderV2 is NOT walked, so a price push is NOT a custodied
+// witness — which is precisely why a post-block price difference can never be proof
+// of a pre-liquidation flip (Codex round 2, finding H2).
+var dmWitnessABI = mustParseABI(`[
+	{"type":"event","name":"Liquidated","inputs":[
+		{"name":"liquidator","type":"address","indexed":true},
+		{"name":"user","type":"address","indexed":true},
+		{"name":"debtTokenToLiquidate","type":"address","indexed":true},
+		{"name":"userCollateralLiquidated","type":"tuple[]","indexed":false,"components":[
+			{"name":"token","type":"address"},
+			{"name":"amount","type":"uint256"},
+			{"name":"liquidationBonus","type":"uint256"}]},
+		{"name":"beforeDebtAmount","type":"uint256","indexed":false},
+		{"name":"debtAmountLiquidated","type":"uint256","indexed":false}]},
+	{"type":"event","name":"InterestIndexUpdated","inputs":[
+		{"name":"borrowToken","type":"address","indexed":true},
+		{"name":"oldIndex","type":"uint256","indexed":false},
+		{"name":"newIndex","type":"uint256","indexed":false}]},
+	{"type":"event","name":"CollateralTokenConfigSet","inputs":[
+		{"name":"collateralToken","type":"address","indexed":true},
+		{"name":"oldConfig","type":"tuple","indexed":false,"components":[
+			{"name":"ltv","type":"uint80"},
+			{"name":"liquidationThreshold","type":"uint80"},
+			{"name":"liquidationBonus","type":"uint96"}]},
+		{"name":"newConfig","type":"tuple","indexed":false,"components":[
+			{"name":"ltv","type":"uint80"},
+			{"name":"liquidationThreshold","type":"uint80"},
+			{"name":"liquidationBonus","type":"uint96"}]}]},
+	{"type":"event","name":"Borrowed","inputs":[
+		{"name":"user","type":"address","indexed":true},
+		{"name":"token","type":"address","indexed":true},
+		{"name":"amount","type":"uint256","indexed":false}]},
+	{"type":"event","name":"Repaid","inputs":[
+		{"name":"user","type":"address","indexed":true},
+		{"name":"payer","type":"address","indexed":true},
+		{"name":"token","type":"address","indexed":true},
+		{"name":"amount","type":"uint256","indexed":false}]}
+]`)
+
+// dmWitnessTopic0 is the lowercase hex topic0 of one witness event, taken from the
+// ABI object rather than written down.
+func dmWitnessTopic0(event string) string {
+	ev, ok := dmWitnessABI.Events[event]
+	if !ok {
+		// Unreachable via the named helpers below; a typo there is a nil-ID match
+		// against nothing, so it is made loud instead.
+		panic("reconcile: dmWitnessABI has no event " + event)
+	}
+	return hex.EncodeToString(ev.ID.Bytes())
+}
+
+// The five witness topic0s, derived once at init.
+var (
+	topicDMLiquidated           = dmWitnessTopic0("Liquidated")
+	topicDMInterestIndexUpdated = dmWitnessTopic0("InterestIndexUpdated")
+	topicDMCollateralConfigSet  = dmWitnessTopic0("CollateralTokenConfigSet")
+	topicDMBorrowed             = dmWitnessTopic0("Borrowed")
+	topicDMRepaid               = dmWitnessTopic0("Repaid")
 )
 
 // causeReplay is the outcome of replaying the ordered same-block earlier witnesses
@@ -1273,12 +1339,35 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Liquidated for THIS account: an earlier seizure moved its collateral inside the block", w.LogIndex))
 				continue
 			}
-		case topicDMBorrowed, topicDMRepaid:
-			// Borrowed(user, token, amount) / Repaid(user, payer, token, amount): the
-			// account's own debt moved inside the block.
-			if strings.EqualFold(w.Topic1Addr, acct) || strings.EqualFold(w.Topic2Addr, acct) {
+		case topicDMBorrowed:
+			// Borrowed(user indexed, token indexed, amount): topics are
+			// [t0, user, token], so the DEBTOR is topic1 and topic2 is the TOKEN.
+			//
+			// The token is deliberately NOT required to equal the debt token under
+			// test: `liquidatable` compares borrowingOf(user)'s TOTAL across every
+			// borrow token against maxBorrowLT, so a borrow of any token raises the
+			// total and can flip eligibility.
+			if strings.EqualFold(w.Topic1Addr, acct) {
 				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d borrow/repay for THIS account: its debt moved inside the block", w.LogIndex))
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Borrowed by THIS account (token 0x%s): its total borrowings rose inside the block", w.LogIndex, w.Topic2Addr))
+				continue
+			}
+		case topicDMRepaid:
+			// Repaid(user indexed, payer indexed, token indexed, amount): topics are
+			// [t0, user, payer, token]. The INDEBTED party is topic1; topic2 is the
+			// PAYER (Codex round 3, finding M).
+			//
+			// The previous branch accepted the sampled account in EITHER slot, so a
+			// legitimate third-party repayment — someone else clearing this account's
+			// debt, or this account clearing someone else's — counted as "its own debt
+			// moved". Paying for a third party does not touch the payer's position at
+			// all (_repayWithBorrowToken decrements
+			// $.userNormalizedBorrowings[user][token], never the payer's), so with an
+			// eligible post-block recomputation that false cause turned an UNEXPLAINED
+			// case into a passing marginal verdict.
+			if strings.EqualFold(w.Topic1Addr, acct) {
+				out.Proven = true
+				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Repaid FOR THIS account (payer 0x%s, token 0x%s): its debt fell inside the block", w.LogIndex, w.Topic2Addr, w.Topic3Addr))
 				continue
 			}
 		case topicDMInterestIndexUpdated:

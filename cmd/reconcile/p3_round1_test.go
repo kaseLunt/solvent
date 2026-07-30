@@ -7,7 +7,6 @@ package main
 // defect cannot leave the correct assertion passing unnoticed.
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"go/ast"
 	"go/parser"
@@ -19,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
@@ -439,21 +437,11 @@ func TestReplaySameBlockCausesProvesOnlyRelevantWrites(t *testing.T) {
 	})
 }
 
-// TestDMWitnessTopicsAreCanonical re-derives the topic0 constants the replay
-// switches on, so a copied string cannot silently match nothing.
-func TestDMWitnessTopicsAreCanonical(t *testing.T) {
-	for _, tc := range []struct{ sig, want string }{
-		{"Liquidated(address,address,address,(address,uint256,uint256)[],uint256,uint256)", topicDMLiquidated},
-		{"InterestIndexUpdated(address,uint256)", topicDMInterestIndexUpdated},
-		{"CollateralTokenConfigSet(address,(uint80,uint80,uint96),(uint80,uint80,uint96))", topicDMCollateralConfigSet},
-		{"Borrowed(address,address,uint256)", topicDMBorrowed},
-		{"Repaid(address,address,address,uint256)", topicDMRepaid},
-	} {
-		require.Equal(t, hex.EncodeToString(crypto.Keccak256([]byte(tc.sig))), tc.want, tc.sig)
-	}
-	// And the Liquidated topic0 matches the frozen frame's population predicate.
-	require.Equal(t, snapshotdb.AnswerUpdatedTopic0 != topicDMLiquidated, true)
-}
+// The topic0 audit lives in p3_witness_abi_test.go, anchored to the REAL decoder
+// fixtures and the committed ABI. The handwritten-signature version that used to sit
+// here is precisely what Codex round 3 condemned: it re-derived the same
+// two-argument InterestIndexUpdated mistake the production constant had, so it
+// confirmed the defect instead of catching it.
 
 // --- round-2 M5: the FINAL boundary vector ---------------------------------
 
