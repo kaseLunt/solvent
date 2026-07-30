@@ -1714,6 +1714,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   directional laws (top-up reverses, unseen withdrawal fabricates), seizure-
   insufficiency semantics. Wave 7 cuts AFTER the ruling; H1 split + silent-
   clamp refusal are uncontested and join it.
+- **CHAIN-TRUTH RULING LANDED** (archived NORMATIVE at .superpowers/sdd/
+  p3-consults/chain-truth-basket-continuity-ruling.md; ~10min consult). VERDICT:
+  custody breaks at 1bc660e for the marginal-disclosed class. Premise verified
+  from repo authorities (derivation-notes caveat 4, DebtManagerCore/CashLens
+  committed source) AND MATERIALLY WIDENED: the basket leg is balanceOf(safe) −
+  pendingWithdrawalAmount, and the NETTING TERM moves with ZERO transfers
+  (CashModule withdrawal lifecycle on the CashEventEmitter singleton — outside
+  walked custody AND outside the Transfer layer), including inside EVERY
+  liquidation tx (preLiquidate → _cancelOldWithdrawal, after the eligibility
+  check, before the Liquidated log). Codex R6's literal remedy (Transfer
+  custody alone) is therefore UNSOUND — it would false-pass netting moves and
+  spuriously refuse every pending-withdrawal liquidation. Fork ruled A-THEN-B:
+  L1 continuity conjunct (default false; marginal → UNEXPLAINED w/ pinned
+  basket_continuity disclosure; true-at-parent NOT gated — rests on pinned N-1
+  reads) + L5 seizure preflight (refuse-entire-write; note names BOTH honest
+  over-seizure shapes: unseen inbound vs netting release) cut NOW; L2 boundary
+  reconstruction (N-1 state + ordered block-N logs — eth_call CANNOT serve the
+  mid-block boundary; blockHash-pinned Transfer sweep + CashEventEmitter
+  netting sweep; per-token closure identity leg@N − leg@N-1 == ΣTransfers −
+  Δpending refusing non-standard tokens BY ARITHMETIC, no allowlist;
+  attribution law with the case's own pre-boundary seizure transfers
+  chain-guaranteed) + L3 boundary-basket execEligible + L6 EIP-234 probe + L7
+  hermetic fixtures = the designed NEXT wave. Interim all-marginal-UNEXPLAINED
+  posture ruled "correct, not a regression." WAVE 7 DISPATCHED: H1 split
+  (parent completeness = fold + index reconstruction; later refusals cannot
+  un-pin the parent fact) + L1 + L4 narrative + L5; positive controls RESTATED
+  not deleted (replay internals still asserted; verdict reflects L1; each
+  marked "flips back when L2 lands"); mutants m1 parent-gate-restored / m2
+  conjunct-deleted / m3 clamp-restored.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
