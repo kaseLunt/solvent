@@ -214,8 +214,23 @@ func ComputeMaterializationIdentity(
 		if c.CoveredFromBlock != nil {
 			covered = fmt.Sprintf("%d", *c.CoveredFromBlock)
 		}
-		fmt.Fprintf(&b, "%s@%d/%d/ack%d/cov%s/rev%d;",
-			c.Engine, c.ChainID, c.LastBlock, c.AckedEpoch, covered, c.DecoderRevision)
+		// `walked` is the PERSISTED binding — what the database says was actually
+		// walked — and is a different fact from the policy line's `surface`, which is
+		// what the live configuration DEMANDS. The gate compares the two, so both belong
+		// in the key: a pre-replay mismatched claim and a post-replay matching claim must
+		// not derive the same identity.
+		//
+		// The empty-book case is why this is decisive rather than merely tidy. With no
+		// Aave accounts, every substrate row is identical across the repair, so the
+		// digest cannot move — while the engine rollup must change from
+		// FLAG_CUSTODY_UNPROVEN to healthy-empty. Without this token the healing pass
+		// derives the pre-replay key and ADOPTS the refused batch.
+		//
+		// Written in FULL, never truncated: the key is a hash of this string, so two
+		// bindings sharing a prefix would collapse into one identity.
+		fmt.Fprintf(&b, "%s@%d/%d/ack%d/cov%s/rev%d/walked%s;",
+			c.Engine, c.ChainID, c.LastBlock, c.AckedEpoch, covered, c.DecoderRevision,
+			c.CoverageBinding)
 	}
 	b.WriteByte('\n')
 

@@ -162,6 +162,45 @@ func TestValidateAaveGenesisRefusesEveryDivergence(t *testing.T) {
 		require.Contains(t, err.Error(), "coverage binding")
 	})
 
+	// ROUND-7 [medium]. The binding hashes every pair under ONE chain id, and that id
+	// used to be read from the FIRST matching stream. So moving a LATER stream to
+	// another chain left every pair and the chosen id identical to the audited digest
+	// — riskd started and materialized from a stale Ethereum database. The indexer
+	// refuses a cross-chain engine separately, but riskd deploys independently.
+	t.Run("a NON-FIRST stream moved to another chain", func(t *testing.T) {
+		mixed := auditedStreams()
+		mixed[3].Chain = "op" // an aToken, not the Pool: the first stream stays on eth
+		cfg := genesisCfg(mixed...)
+		cfg.Chains["op"] = config.Chain{ChainID: 10}
+
+		_, _, err := validateAaveGenesis(cfg, risk.AaveEngine)
+		require.Error(t, err,
+			"every address/start pair is unchanged, so ONLY a per-stream chain check can see this")
+		require.Contains(t, err.Error(), "spans chains")
+	})
+
+	t.Run("EVERY stream moved to another chain", func(t *testing.T) {
+		moved := auditedStreams()
+		for i := range moved {
+			moved[i].Chain = "op"
+		}
+		cfg := genesisCfg(moved...)
+		cfg.Chains["op"] = config.Chain{ChainID: 10}
+
+		_, _, err := validateAaveGenesis(cfg, risk.AaveEngine)
+		require.Error(t, err,
+			"internally consistent and still wrong: the law is audited on chain 1")
+		require.Contains(t, err.Error(), "audited on")
+	})
+
+	t.Run("a stream naming an unknown chain", func(t *testing.T) {
+		unknown := auditedStreams()
+		unknown[2].Chain = "nosuchchain"
+		_, _, err := validateAaveGenesis(genesisCfg(unknown...), risk.AaveEngine)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "unknown chain")
+	})
+
 	t.Run("no streams at all", func(t *testing.T) {
 		_, _, err := validateAaveGenesis(genesisCfg(), risk.AaveEngine)
 		require.Error(t, err)

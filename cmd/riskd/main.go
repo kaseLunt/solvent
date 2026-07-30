@@ -248,12 +248,48 @@ func validateAaveGenesis(cfg *config.Config, engine string) (uint64, string, err
 	var sawPool bool
 	pool := common.HexToAddress(riskfeed.AuditedAavePoolAddress)
 	var walked []store.CoverageStream
+	var chainSeen uint64
 
 	for _, s := range cfg.Streams {
 		if s.Engine != engine {
 			continue
 		}
 		streams++
+
+		// ONE CHAIN, AND THE AUDITED ONE — checked per stream, BEFORE anything is
+		// hashed (round-7 [medium]).
+		//
+		// The binding hashes (address, startBlock) pairs under a single chain id, and
+		// that id used to be read from the FIRST matching stream. So moving a LATER
+		// aToken stream to another chain left every pair and the chosen id untouched:
+		// the digest still equalled the audited surface and riskd started, happily
+		// materializing from a stale Ethereum database. The indexer refuses a
+		// cross-chain engine separately, but riskd deploys independently and must not
+		// rely on another process having refused first.
+		chainInfo, known := cfg.Chains[s.Chain]
+		if !known {
+			return 0, "", fmt.Errorf("riskd: engine %q stream %q references unknown chain %q",
+				engine, s.Name, s.Chain)
+		}
+		// Compared by resolved CHAIN ID, not by the config key: two keys naming the
+		// same chain are the same feed, and refusing that would be a wrong refusal.
+		if chainSeen == 0 {
+			chainSeen = chainInfo.ChainID
+		}
+		if chainInfo.ChainID != chainSeen {
+			return 0, "", fmt.Errorf(
+				"riskd: engine %q spans chains %d and %d. One engine derives ONE chain's serial "+
+					"log feed, and a per-stream chain change is invisible to the coverage binding "+
+					"(the pairs and the hashed chain id can both stay identical), so it is refused here",
+				engine, chainSeen, chainInfo.ChainID)
+		}
+		if chainInfo.ChainID != riskfeed.AuditedAaveChainID {
+			return 0, "", fmt.Errorf(
+				"riskd: engine %q stream %q walks chain %d, but the collateral law is audited on "+
+					"chain %d. Derived state from another chain cannot license a law about this one",
+				engine, s.Name, chainInfo.ChainID, uint64(riskfeed.AuditedAaveChainID))
+		}
+
 		if s.StartBlock != riskfeed.AuditedAaveGenesisBlock {
 			return 0, "", fmt.Errorf(
 				"riskd: stream %q of engine %q starts at block %d, but the collateral law's "+
@@ -292,7 +328,10 @@ func validateAaveGenesis(cfg *config.Config, engine string) (uint64, string, err
 	// comparing it against the audited constant here is what forces a fixture update
 	// for an intentional change — while riskfeed's comparison against the PERSISTED
 	// binding is what forces the replay.
-	binding := store.CoverageBindingOf(chainIDOf(cfg, engine), walked)
+	// Hashed under the AUDITED chain id, which the per-stream loop has just proved
+	// every stream agrees with — so the id can no longer be inherited from whichever
+	// stream happened to come first.
+	binding := store.CoverageBindingOf(riskfeed.AuditedAaveChainID, walked)
 	if binding != riskfeed.AuditedAaveCoverageBinding {
 		return 0, "", fmt.Errorf(
 			"riskd: engine %q walks a stream set whose coverage binding is %s, but the audited "+
@@ -304,21 +343,6 @@ func validateAaveGenesis(cfg *config.Config, engine string) (uint64, string, err
 			engine, binding, riskfeed.AuditedAaveCoverageBinding)
 	}
 	return riskfeed.AuditedAaveGenesisBlock, binding, nil
-}
-
-// chainIDOf resolves the chain id an engine's streams live on. BuildRunnerSpecs
-// already refuses an engine spanning two chains, so the first match is the answer;
-// zero when the engine has no stream, which every caller above has already refused.
-func chainIDOf(cfg *config.Config, engine string) uint64 {
-	for _, s := range cfg.Streams {
-		if s.Engine != engine {
-			continue
-		}
-		if c, ok := cfg.Chains[s.Chain]; ok {
-			return c.ChainID
-		}
-	}
-	return 0
 }
 
 // requiredStampEngines is the engine set whose watermark stamps must be present

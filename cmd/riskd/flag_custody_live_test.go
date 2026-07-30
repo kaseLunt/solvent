@@ -29,8 +29,12 @@ import (
 // database, and TestMigrateUpgradesV13BaselineWithDerivationCoverage proves it.
 func (f *riskdFixture) unprovenAaveCoverage(t *testing.T) {
 	t.Helper()
+	// ALL THREE provenance fields, because that is what a pre-00014 row is: the
+	// columns did not exist, so none of them can carry a claim. Clearing only two
+	// would model a database that no migration and no writer can produce.
 	_, err := f.admin.Exec(f.ctx,
-		`UPDATE derive_cursors SET covered_from_block = NULL, decoder_revision = 0
+		`UPDATE derive_cursors SET covered_from_block = NULL, decoder_revision = 0,
+		        coverage_binding = ''
 		 WHERE engine = $1`, risk.AaveEngine)
 	require.NoError(t, err)
 }
@@ -118,8 +122,9 @@ func TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger(t *testing.T) {
 	require.NoError(t, f.admin.QueryRow(f.ctx,
 		`SELECT materialization_vector FROM risk_batches WHERE id = $1`, res.BatchID).Scan(&vector))
 	require.Contains(t, vector, risk.AaveEngine+"@1/")
-	require.Contains(t, vector, "/covnone/rev0;",
-		"the unproven coverage is visible in the persisted vector")
+	require.Contains(t, vector, "/covnone/rev0/walked;",
+		"all three provenance fields read as unknown in the persisted vector — and the walked "+
+			"surface is one of them, so a binding-only repair mints a new key")
 }
 
 // TestRiskdComputesTheAaveBookOnceCoverageIsProven is the COUNTERWEIGHT, and it

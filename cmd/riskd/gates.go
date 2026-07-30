@@ -140,7 +140,20 @@ func sameCoverage(cur, old store.DeriveCursorState) bool {
 	if cur.CoveredFromBlock != nil && *cur.CoveredFromBlock != *old.CoveredFromBlock {
 		return false
 	}
-	return cur.DecoderRevision == old.DecoderRevision
+	if cur.DecoderRevision != old.DecoderRevision {
+		return false
+	}
+	// THE WALKED SURFACE (round-7 [high]). It decides refuse-vs-compute exactly as the
+	// other two fields do, so it has to be here for exactly the same reason.
+	//
+	// The endpoint-ABA is identical in shape to the one that put covered_from and
+	// decoder_revision here: a coherent surface update rewinds and re-derives back to
+	// the SAME height, epoch, covered-from and revision, so a daemon that observed no
+	// intermediate state sees every other field unchanged. Only the binding moved, and
+	// without this leg the refused pre-replay batch stays served until something
+	// unrelated happens to move. The reverse leaves a computed batch standing on a
+	// binding that no longer matches the configuration.
+	return cur.CoverageBinding == old.CoverageBinding
 }
 
 func (v watermarkVector) Changed(prev watermarkVector) bool {

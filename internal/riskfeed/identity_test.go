@@ -43,7 +43,8 @@ var idCoveredFrom = uint64(20_625_519)
 func idCursors() []store.DeriveCursorState {
 	return []store.DeriveCursorState{
 		{Engine: "aave_v3_etherfi", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4,
-			CoveredFromBlock: &idCoveredFrom, DecoderRevision: 2},
+			CoveredFromBlock: &idCoveredFrom, DecoderRevision: 2,
+			CoverageBinding: "audited-surface-fixture"},
 		{Engine: "aave_param", ChainID: 1, LastBlock: 25_635_618, AckedEpoch: 4},
 		{Engine: "debt_manager", ChainID: 10, LastBlock: 154_796_552, AckedEpoch: 9},
 	}
@@ -533,7 +534,16 @@ func TestIdentityChangesWithDerivationCoverage(t *testing.T) {
 	higher := uint64(20_625_520)
 	for name, mutate := range map[string]func(c *store.DeriveCursorState){
 		"coverage lost (pre-replay state)": func(c *store.DeriveCursorState) {
-			c.CoveredFromBlock, c.DecoderRevision = nil, 0
+			c.CoveredFromBlock, c.DecoderRevision, c.CoverageBinding = nil, 0, ""
+		},
+		// ROUND-7 [high]. The PERSISTED binding decides refuse-vs-compute exactly as
+		// the other two provenance fields do, so a repair that changes only it must
+		// mint a new key — otherwise the healing pass adopts the refused batch.
+		"walked surface changed": func(c *store.DeriveCursorState) {
+			c.CoverageBinding = "a-different-walked-surface"
+		},
+		"walked surface cleared": func(c *store.DeriveCursorState) {
+			c.CoverageBinding = ""
 		},
 		"coverage start moves":            func(c *store.DeriveCursorState) { c.CoveredFromBlock = &higher },
 		"decoder revision moves":          func(c *store.DeriveCursorState) { c.DecoderRevision++ },
@@ -556,7 +566,7 @@ func TestIdentityChangesWithDerivationCoverage(t *testing.T) {
 	c[0].CoveredFromBlock, c[0].DecoderRevision = nil, 0
 	unproven := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9},
 		idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
-	require.Contains(t, unproven.Vector, "/covnone/rev0;")
+	require.Contains(t, unproven.Vector, "/covnone/rev0/walked;")
 }
 
 // TestIdentitySurvivesTheCoverageReplayChoreography is the operational twin of the
@@ -725,7 +735,7 @@ func TestIdentitySurvivesTheFlagBackfillChoreography(t *testing.T) {
 // answer to "what was this batch computed from", so it must not be an opaque blob.
 func TestIdentityVectorIsHumanReadable(t *testing.T) {
 	id := computeID()
-	require.Contains(t, id.Vector, "aave_v3_etherfi@1/25635618/ack4/cov20625519/rev2",
+	require.Contains(t, id.Vector, "aave_v3_etherfi@1/25635618/ack4/cov20625519/rev2/walkedaudited-surface-fixture;",
 		"the cursor line carries the DERIVATION-COVERAGE provenance: an operator reading a "+
 			"refused Aave book needs to see cov/rev, not infer it")
 	require.Contains(t, id.Vector, "debt_manager=rows2/failed1/sum309580000")

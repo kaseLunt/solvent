@@ -122,10 +122,41 @@ const AlgorithmRevision = 4
 // walked historically when the cursor is already at head. Startup catches the
 // configuration, the coverage gate catches the data, and only a rewind-and-rederive
 // satisfies both.
+//
+// # THE COMPLETION RULE — proven three times, stated once
+//
+// ANY FIELD THE REFUSE-VS-COMPUTE DECISION READS MUST APPEAR IN BOTH THE RECOMPUTE
+// TRIGGER AND THE MATERIALIZATION IDENTITY.
+//
+// Adding it to the decision alone is a half-fix that fails in two directions, and
+// both have now been found the hard way:
+//
+//   - missing from the TRIGGER (cmd/riskd's watermarkVector.Changed via
+//     sameCoverage): a repair that returns every other watermark to its original
+//     value is invisible, so no pass is scheduled and the stale verdict stays served;
+//   - missing from the IDENTITY (riskfeed's ComputeMaterializationIdentity, cursor
+//     line): even a forced pass derives the pre-repair key and ADOPTS the stale
+//     batch. The empty-book case makes this unavoidable — with no positions every
+//     substrate row is identical across the repair, so nothing else can move the key.
+//
+// The three fields the Aave coverage decision reads, each of which must appear in
+// ALL THREE places (store.CoverageClaim.Satisfies, cmd/riskd's sameCoverage, and the
+// cursor line of the identity vector):
+//
+//	covered_from_block  — how far back the walk reached
+//	decoder_revision    — which registry decoded it
+//	coverage_binding    — which contracts it covered
+//
+// A fourth would have to join all three too.
 const (
 	// AuditedAaveGenesisBlock is the block every aave_v3_etherfi stream is audited
 	// to walk from.
 	AuditedAaveGenesisBlock = 20_625_519
+	// AuditedAaveChainID is the chain the completeness argument was made on. It is a
+	// premise in its own right: derived state from another chain cannot license a law
+	// about this one, and a per-stream chain change is invisible to the binding (the
+	// pairs and the hashed chain id can both stay identical).
+	AuditedAaveChainID = 1
 	// AuditedAavePoolAddress is the FLAG-BEARING contract. Its absence from the
 	// engine's stream set would mean no flag event is ingested at all — a state in
 	// which every account's flag reads as absent and the whole book is silently
