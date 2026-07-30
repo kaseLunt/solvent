@@ -348,37 +348,63 @@ func TestAdapterFloorStaysThreeEvenWithThinHistory(t *testing.T) {
 // now requires a CUSTODIED pre-liquidation write that touches an input to this
 // account's boolean; the recomputation is corroboration only.
 func TestIntraBlockClassifierRequiresAProvenCause(t *testing.T) {
-	// parentEligible (the replay's own parent-boundary truth): exact pass —
-	// provided the replay is COMPLETE.
-	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, false, true, false, true))
+	// Argument order: (parentEligible, parentComplete, execEligible,
+	// allPriced, causeProven, replayComplete, basketContinuityProven).
 
-	// A proven cause AND corroboration: marginal.
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true, true))
+	// parentEligible (the replay's own parent-boundary truth): exact pass —
+	// provided the PARENT reconstruction is complete (round 6, H1).
+	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, true, false, true, false, true, false))
+
+	// ROUND 6 (H1): a LATER witness refusal (boundary-replay incompleteness)
+	// cannot rewrite the pinned parent fact — this REVERSES the round-5
+	// ordering, which gated a true parent predicate behind full replay
+	// completeness and produced false failures on honest multi-token blocks.
+	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, true, false, true, false, false, false),
+		"parent true with a complete PARENT reconstruction is an exact pass; a cross-token refusal later in the block is boundary evidence, not a rewrite")
+
+	// ...but a parent predicate whose OWN reconstruction failed proves
+	// nothing: parent-incomplete never reaches the true-at-parent arm.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(true, false, true, true, true, false, false),
+		"an unproven parent predicate cannot pass; its reconstruction failure is noted, so the replay is incomplete with it")
+
+	// A proven cause AND corroboration AND a basket-continuity proof:
+	// marginal (the L2-era shape — nothing in this wave sets the conjunct).
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true, true, true, true))
+
+	// L1 (chain-truth basket-continuity ruling): the SAME proven,
+	// corroborated, complete-replay crossing WITHOUT the continuity proof is
+	// UNEXPLAINED — the marginal attribution claims a custody the walked
+	// surface does not provide.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, true, true, false),
+		"every marginal candidate resolves UNEXPLAINED while basket continuity is unproven (ruling L1)")
 
 	// THE KILL: corroboration WITHOUT a proven cause is UNEXPLAINED. This is the
 	// post-block-price shape Codex named — execEligible true, no custodied cause.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false, true),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, false, true, true),
 		"a post-block price difference is not proof of a pre-liquidation flip; without a custodied cause this must be UNEXPLAINED")
 
 	// A proven cause with NO corroboration is also unexplained: we could not
 	// reproduce the flip at all, so the cause did not demonstrably do it.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, true, true))
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, false, true, true, true, true))
 
 	// An unpriceable leg gates rather than being excused, whatever else holds.
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, true, true))
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false, true))
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, true, false, true, true, true))
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, false, false, true, false))
 
-	// ROUND 5 (M): an INCOMPLETE replay resolves UNEXPLAINED before anything
-	// else is consulted — a proven, corroborated cause cannot outrank a
-	// refused write (the unmodelled write moves the real boolean too), and
-	// neither can the parent predicate, whose reconstruction rests on the
-	// same replay.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, false),
+	// ROUND 5 (M), scoped by round 6 H1 to the crossing-based arms: an
+	// INCOMPLETE boundary replay resolves UNEXPLAINED before any crossing
+	// input is consulted — a proven, corroborated cause cannot outrank a
+	// refused write (the unmodelled write moves the real boolean too).
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, true, false, true),
 		"a proven cause inside an incomplete replay must not earn the marginal pass — this is the m4 law")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(true, true, true, true, false),
-		"even a true parent predicate is uncertifiable when the replay that produced it is incomplete")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, false, false, false),
-		"incompleteness outranks the unpriced refusal too: the replay's own refusal is the first law")
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false, false, false, false),
+		"incompleteness outranks the unpriced refusal too: the replay's own refusal is the first law for crossing arms")
+
+	// The round-6 guard: parent-INeligible with an incomplete replay stays
+	// UNEXPLAINED — the H1 split narrows what replay completeness gates, it
+	// does not widen true-at-parent.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, false, false, false),
+		"the split must not accidentally widen true-at-parent")
 }
 
 // TestReplaySameBlockCausesProvesOnlyRelevantWrites is the causation replay's

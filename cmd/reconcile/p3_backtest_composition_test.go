@@ -131,8 +131,14 @@ func idxOnePlusTick() *big.Int { return big.NewInt(1_000_000_010_000_000_000) }
 // 100,000,001 and causes the crossing. The event-time fold (ourBefore) already
 // contains that index, so a parent predicate computed from it claims
 // true-at-parent EXACT and the required marginal disclosure is lost. The
-// composed verdict must be marginal-disclosed with the index event named as
-// the cause. Kills m1.
+// composed verdict must NOT be true-at-parent. Kills m1.
+//
+// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
+// chain-truth-basket-continuity-ruling.md): while basket continuity is
+// unproven the crossing stays replay-PROVEN (asserted below — the machinery
+// the L2 wave certifies) but the composed verdict is UNEXPLAINED with the
+// basket_continuity disclosure, never a marginal pass and still never
+// true-at-parent.
 func TestIndexCausedCrossingIsMarginalNotTrueAtParent(t *testing.T) {
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
 	usdcHex := hexLower(replayTestUSDC.Hex())
@@ -147,13 +153,16 @@ func TestIndexCausedCrossingIsMarginalNotTrueAtParent(t *testing.T) {
 	parent, exec := compositionFrames(100_000_000, 1_000_000, 1_000_000)
 
 	o2, f := driveObligation2(t, row, parent, exec, acct)
-	require.Equal(t, "flipped-in-block-with-custodied-witness", o2.eligState,
-		"an index-caused in-block crossing is the disclosed marginal state; true-at-parent here means the parent predicate leaked liquidation-time debt (round-5 H1)")
-	require.Equal(t, verdictMarginal, o2.row.Verdict)
+	require.NotEqual(t, "true-at-parent", o2.eligState,
+		"true-at-parent here means the parent predicate leaked liquidation-time debt (round-5 H1)")
+	require.Equal(t, verdictUnexplained, o2.row.Verdict,
+		"an index-caused in-block crossing is a marginal CANDIDATE; while basket continuity is unproven it resolves UNEXPLAINED with disclosure (ruling L1)")
 	require.Contains(t, o2.row.Note, "InterestIndexUpdated",
-		"the marginal disclosure must name the replayed cause")
-	require.Equal(t, []toleranceID{tolIntraBlockMarginality}, f.cited,
-		"the marginal pass must spend its declared tolerance")
+		"the disclosure must still name the replayed cause")
+	require.Equal(t, basketContinuityUnprovenText, o2.row.Evidence["basket_continuity"],
+		"the gated marginal candidate carries the ruling's verbatim disclosure")
+	require.Empty(t, f.cited,
+		"no marginal pass, no tolerance spent while the continuity conjunct is unproven")
 	require.Equal(t, "100000000", o2.row.Evidence["our_debt_usd6_at_parent"],
 		"the artifact must disclose the reconstructed parent-boundary debt the predicate used")
 

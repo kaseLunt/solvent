@@ -204,7 +204,7 @@ func TestRepaidThenPriceAfterIsUnexplained(t *testing.T) {
 	// The block-end recomputation says eligible (the price moved AFTER the
 	// liquidation). Without a replayed pre-liquidation cause that is the
 	// UNEXPLAINED third state — the honest failing verdict.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
 		"Repaid-before + price-after must be UNEXPLAINED, not marginal-disclosed")
 }
 
@@ -230,7 +230,7 @@ func TestRoutineIndexUpdateThenPriceAfterIsUnexplained(t *testing.T) {
 	require.Equal(t, 1, r.Applied)
 	require.False(t, r.Proven,
 		"a routine index tick that does not cross the threshold is not a cause; before this fix ANY debt-token index update set Proven")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
 		"index-tick-before + price-after must be UNEXPLAINED, not marginal-disclosed")
 }
 
@@ -252,7 +252,7 @@ func TestConfigWriteWithoutLTCutThenPriceAfterIsUnexplained(t *testing.T) {
 
 		require.Equal(t, 1, r.Applied, "a config write on a held token is decoded and applied")
 		require.False(t, r.Proven, "an LT-neutral write moves no input of the boolean downward; it cannot be the cause")
-		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
+		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false))
 	})
 
 	t.Run("LT raised (the captured first-time set)", func(t *testing.T) {
@@ -266,7 +266,7 @@ func TestConfigWriteWithoutLTCutThenPriceAfterIsUnexplained(t *testing.T) {
 
 		require.Equal(t, 1, r.Applied)
 		require.False(t, r.Proven, "an LT-raising write cannot cause a healthy→liquidatable flip")
-		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
+		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false))
 	})
 }
 
@@ -275,9 +275,14 @@ func TestConfigWriteWithoutLTCutThenPriceAfterIsUnexplained(t *testing.T) {
 // TestIndexMoveThatCrossesTheThresholdIsProven drives the REAL captured
 // InterestIndexUpdated against a knife-edge position: maxBorrowLT equals the
 // PRE-update debt, so the decoded move itself crosses the threshold. The
-// replay must produce the false→true transition and the composed verdict is
-// the disclosed marginal pass. Kills m3 (skip-apply leaves the state at the
-// parent values and no flip ever happens).
+// replay must produce the false→true transition — that machinery is what the
+// L2 wave certifies and must stay pinned. Kills m3 (skip-apply leaves the
+// state at the parent values and no flip ever happens).
+//
+// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
+// chain-truth-basket-continuity-ruling.md): the classifier now refuses the
+// marginal verdict while basket continuity is unproven, so the composed
+// outcome is UNEXPLAINED-with-disclosure, NOT a weakened proof.
 func TestIndexMoveThatCrossesTheThresholdIsProven(t *testing.T) {
 	w := witnessFromFixture(t, "dm_interest_index_updated.json", 0, 7)
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
@@ -301,13 +306,20 @@ func TestIndexMoveThatCrossesTheThresholdIsProven(t *testing.T) {
 		"the decoded index move crosses the threshold in the replayed state — this is a genuinely caused flip and must stay a proven cause")
 	require.Len(t, r.Causes, 1)
 	require.Contains(t, r.Causes[0], "InterestIndexUpdated")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
-		"a replayed pre-liquidation cause plus corroboration is the disclosed marginal state")
+	require.True(t, r.BoundaryEligible, "the crossing holds to the liquidation boundary")
+	require.True(t, r.Complete(), "the replay fully models the witness — the refusal below is L1's, not a completeness gap")
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
+		"a proven, corroborated crossing WITHOUT a basket-continuity proof resolves UNEXPLAINED (ruling L1)")
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), true),
+		"the marginal arm itself must stay intact for the L2 wave to discharge")
 }
 
 // TestLTCollapseOnHeldTokenIsProven is the config-side positive control: an
 // ABI-packed LT cut (95% → 40%) on the held token drops maxBorrowLT below the
 // unchanged debt. Kills m3.
+//
+// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
+// chain-truth-basket-continuity-ruling.md).
 func TestLTCollapseOnHeldTokenIsProven(t *testing.T) {
 	held := tokA
 	w := packedWitness(t, "CollateralTokenConfigSet", 5, hexLower(held.Hex()), "", "",
@@ -321,12 +333,20 @@ func TestLTCollapseOnHeldTokenIsProven(t *testing.T) {
 
 	require.True(t, r.Proven, "a decoded LT cut that drops maxBorrowLT below the debt is a replayed cause")
 	require.Contains(t, r.Causes[0], "CollateralTokenConfigSet")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
+	require.True(t, r.BoundaryEligible)
+	require.True(t, r.Complete())
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
+		"proven crossing, continuity unproven → UNEXPLAINED (ruling L1)")
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), true),
+		"the marginal arm stays intact for L2")
 }
 
 // TestDebtTokenBorrowThatCrossesTheThresholdIsProven drives the REAL captured
 // Borrowed log (token-native USDC amount in data): the decoded borrow raises
 // the replayed debt above maxBorrowLT. Kills m3.
+//
+// L1-era expectation; flips back to marginal-disclosed when L2 lands (see
+// chain-truth-basket-continuity-ruling.md).
 func TestDebtTokenBorrowThatCrossesTheThresholdIsProven(t *testing.T) {
 	w := witnessFromFixture(t, "dm_borrowed.json", 0, 2)
 	borrower := common.HexToAddress("0x" + w.Topic1Addr)
@@ -342,7 +362,12 @@ func TestDebtTokenBorrowThatCrossesTheThresholdIsProven(t *testing.T) {
 
 	require.True(t, r.Proven, "a decoded borrow of the debt token that crosses the threshold is a replayed cause")
 	require.Contains(t, r.Causes[0], "Borrowed")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
+	require.True(t, r.BoundaryEligible)
+	require.True(t, r.Complete())
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
+		"proven crossing, continuity unproven → UNEXPLAINED (ruling L1)")
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), true),
+		"the marginal arm stays intact for L2")
 }
 
 // --- ordering ---------------------------------------------------------------
@@ -409,6 +434,6 @@ func TestCrossTokenBorrowIsDisclosedNotProven(t *testing.T) {
 	require.False(t, r.Proven, "the single-debt-token model cannot replay a cross-token borrow; refusing honestly beats excusing")
 	require.NotEmpty(t, r.Notes)
 	require.False(t, r.Complete(), "the refusal is structural (round 5, M), not evidence-only")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false),
 		"an unreplayable write leaves the case UNEXPLAINED — the run fails and the reviewer sees why")
 }
