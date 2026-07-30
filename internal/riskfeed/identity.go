@@ -35,8 +35,14 @@ package riskfeed
 //     Debt Manager collateral WITHOUT moving any cursor;
 //   - the policy that shapes the judgement: price budget, step bound, the
 //     engine bindings, the required stamp set;
-//   - a SUBSTRATE DIGEST over the rows actually read — with its PRICE half
-//     restricted to the CONSULTED witnesses, for the same reason the phases are;
+//   - a SUBSTRATE DIGEST over the rows actually read — with its PRICE half and
+//     its COLLATERAL-FLAG half restricted to the CONSULTED witnesses, for the
+//     same reason the phases are;
+//   - the COLLATERAL-FLAG witnesses each position's legs were built from. They
+//     are a distinct input family with a distinct hazard: the flag ledger can
+//     gain its entire history through a rewind-and-rederive that returns the
+//     cursor to the block it started at, so the watermark vector cannot see the
+//     change at all (see the collateral_flags digest section);
 //   - a FRESHNESS PHASE per CONSULTED price — fresh / stale / over-ceiling /
 //     no-as-of. The raw clock stays out (see below), but the phase cannot: it is
 //     what `Assemble` classifies each price by, so crossing a budget or ceiling
@@ -145,12 +151,20 @@ type IdentityPolicy struct {
 // `inputs` is still passed because the NON-price sections of the digest (balances,
 // indexes, sweeps, params, conflicts) are read from it. If a future section needs
 // prices, it takes `consulted`.
+// `consultedFlags` is the collateral-flag half of the same discipline: the flag
+// witnesses `Assemble` actually read, reported by Assemble rather than re-derived
+// here, and hashed into the substrate digest. It is a SEPARATE ARGUMENT rather
+// than a field read off `inputs` for exactly the reason the price scoping law
+// exists — `inputs.CollateralFlags` is the FETCHED fold (every witnessed pair
+// below the cursor, most of them for accounts with no position today) and hashing
+// it would let a pair nobody values mint a new key.
 func ComputeMaterializationIdentity(
 	cursors []store.DeriveCursorState,
 	maxEpochs map[int64]int64,
 	sweeps []store.RiskSweepWatermark,
 	inputs store.RiskInputs,
 	consulted []ConsultedPrice,
+	consultedFlags []ConsultedCollateralFlag,
 	policy IdentityPolicy,
 ) MaterializationIdentity {
 	var b strings.Builder
@@ -237,7 +251,7 @@ func ComputeMaterializationIdentity(
 	b.WriteByte('\n')
 
 	vector := b.String()
-	digest := substrateDigest(inputs, consulted)
+	digest := substrateDigest(inputs, consulted, consultedFlags)
 
 	sum := sha256.Sum256([]byte(vector + "substrate:" + digest))
 	return MaterializationIdentity{
@@ -253,7 +267,7 @@ func ComputeMaterializationIdentity(
 // different data — the D-012 in-place price neutralization being the case that
 // matters. Without it, such a pass would adopt the earlier batch and the
 // corrected prices would never be published.
-func substrateDigest(in store.RiskInputs, consulted []ConsultedPrice) string {
+func substrateDigest(in store.RiskInputs, consulted []ConsultedPrice, consultedFlags []ConsultedCollateralFlag) string {
 	h := sha256.New()
 
 	balances := make([]string, 0, len(in.Balances))
@@ -293,6 +307,28 @@ func substrateDigest(in store.RiskInputs, consulted []ConsultedPrice) string {
 		}
 	}
 	writeSorted(h, "params", params)
+
+	// COLLATERAL FLAGS — OVER THE CONSULTED SET ONLY, same law as prices below.
+	//
+	// This is the section that makes the owner-gated flag backfill safe. That
+	// maintenance operation rewinds the Aave derive cursor, re-derives the range,
+	// and ends with the cursor back at the SAME block — so `cursors`, `epochs`,
+	// `sweep` and every price line are byte-identical across it, and without this
+	// section the post-backfill pass would derive the pre-backfill key, adopt that
+	// batch, and publish the assume-true collateral it was run to correct.
+	//
+	// ABSENCE IS NOT RECORDED, and that is a deliberate asymmetry with prices. An
+	// absent price row causes a G1 REFUSAL, so it is substrate. An absent flag row
+	// yields `false` from the no-history LAW — a constant of the algorithm, whose
+	// changes are AlgorithmRevision's job. Recording absences would write digest
+	// lines with no witness behind them, keyed on nothing but which accounts hold
+	// which assets, which the `balances` section already covers.
+	flags := make([]string, 0, len(consultedFlags))
+	for _, f := range consultedFlags {
+		flags = append(flags, fmt.Sprintf("%s/%d/%x/%x=%t@%d/%d",
+			f.Engine, f.ChainID, f.Reserve, f.User, f.Enabled, f.Block, f.LogIndex))
+	}
+	writeSorted(h, "collateral_flags", flags)
 
 	// PRICES — OVER THE CONSULTED SET ONLY, and this is the second projection of
 	// the same ConsultedPrice slice the phase section above reads.

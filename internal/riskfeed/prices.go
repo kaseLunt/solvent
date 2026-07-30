@@ -66,9 +66,26 @@ const (
 	FlagStalePrice = "stale_price"
 	FlagLargeStep  = "large_price_step"
 	FlagSweepStale = "collateral_sweep_stale"
-	// FlagCollateralFlagUnwitnessed marks every Aave position, and says so
-	// loudly: see AssembleAave.
-	FlagCollateralFlagUnwitnessed = "aave_collateral_flag_unwitnessed"
+
+	// The two collateral-flag disclosures. Both mean the SAME arithmetic thing —
+	// a positive collateral balance that does not count — and differ in WHICH
+	// witness state excluded it, which is what an operator needs to act on:
+	//
+	//   - FlagCollateralOptedOut: the Pool witnessed a DISABLE for this
+	//     (reserve, user). A user decision, reversible by the user, and the
+	//     interesting case: the balance is collateral-eligible and simply turned
+	//     off.
+	//   - FlagCollateralNeverEnabled: no flag event has EVER fired for the pair.
+	//     On this market that means the reserve was initialized at LTV 0 and is
+	//     not collateral-configurable at all, so nothing to reverse.
+	//
+	// They REPLACE `aave_collateral_flag_unwitnessed`, which was attached to every
+	// Aave position by construction. Retiring it is not a loss of disclosure but a
+	// gain: a flag that is always present cannot distinguish anything, and it made
+	// the `flagged_positions` aggregate read as "the whole book is degraded" while
+	// hiding which rows actually were. See assembleAave's collateral law.
+	FlagCollateralOptedOut     = "aave_collateral_opted_out"
+	FlagCollateralNeverEnabled = "aave_collateral_never_enabled"
 )
 
 // ErrUnknownProvenance refuses a source string this repo has never written. A

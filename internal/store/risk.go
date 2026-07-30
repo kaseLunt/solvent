@@ -112,6 +112,15 @@ type RiskSnapshotSpec struct {
 	AaveParamEngine string
 	AaveParamChain  uint64
 	AaveParamBlock  uint64
+	// CollateralFlagEngine is the position engine whose collateral-flag ledger
+	// is read (the Aave engine; empty skips the read entirely). Chain and block
+	// bound it exactly as the param read is bounded — at that engine's OWN
+	// cursor, because a flag above the cursor describes a block whose balances
+	// have not been folded, and judging the two halves of one position at two
+	// different blocks is the incoherence the snapshot exists to prevent.
+	CollateralFlagEngine string
+	CollateralFlagChain  uint64
+	CollateralFlagBlock  uint64
 	// Prices are the exact witnesses to fetch. An empty set fetches none.
 	Prices []RiskPriceKey
 }
@@ -269,6 +278,14 @@ type RiskInputs struct {
 	// fold would mask a live liquidation threshold with a registry row.
 	AaveParams []ParamRow
 	DMParams   []ParamRow
+
+	// CollateralFlags is the LATEST-WINS fold of the Aave collateral-flag
+	// ledger, one row per witnessed (reserve, user) pair at or below the Aave
+	// cursor. Unlike AaveParams/DMParams this IS a folded view, because the fold
+	// is total-order-by-(block, log_index) with no per-field merge to get wrong:
+	// the last event is the state. Pairs with no row are ABSENT here and mean
+	// "never enabled" — see CollateralFlagsAsOf.
+	CollateralFlags []CollateralFlagRow
 
 	Prices []RiskPriceRow
 
@@ -440,6 +457,10 @@ func RiskInputSnapshot(ctx context.Context, q Querier, spec RiskSnapshotSpec) (R
 		}
 	}
 	if in.DMParams, err = DMParamsAsOf(ctx, q, spec.DMParamBlock); err != nil {
+		return RiskInputs{}, err
+	}
+	if in.CollateralFlags, err = CollateralFlagsAsOf(ctx, q,
+		spec.CollateralFlagEngine, spec.CollateralFlagChain, spec.CollateralFlagBlock); err != nil {
 		return RiskInputs{}, err
 	}
 	if in.Prices, err = RiskUsablePrices(ctx, q, spec.Prices); err != nil {

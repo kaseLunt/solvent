@@ -50,7 +50,14 @@ import (
 // Revision log:
 //
 //	1 — P3 Task 5 initial materializer (assembly, G1-G5, per-field param fold).
-const AlgorithmRevision = 1
+//	2 — The COLLATERAL LAW changed from assume-true to witness-derived
+//	    (see assembleAave). Every Aave position's TotalCollateralBase,
+//	    WeightedLTSum, AvgLTBps and per-leg CollateralBase can move, and the
+//	    engine aggregate's TotalCollateral drops. This is exactly the
+//	    "changing what a number MEANS" case above: an unbumped binary would
+//	    re-derive the old key over unchanged state, adopt the assume-true batch,
+//	    and publish the overstated collateral under the corrected release's name.
+const AlgorithmRevision = 2
 
 // Balance sides and sources, as internal/derive writes them.
 const (
@@ -131,6 +138,68 @@ type AssembleResult struct {
 	// freshness-phase section and the price half of the substrate digest) and the
 	// scheduler's next-boundary deadline. See ConsultedPrice.
 	Consulted []ConsultedPrice
+	// ConsultedFlags is every collateral-flag WITNESS ROW the assembler read, in
+	// consultation order — the same discipline ConsultedPrice enforces, applied
+	// to the new input family. It is what the substrate digest hashes; see
+	// ConsultedCollateralFlag.
+	ConsultedFlags []ConsultedCollateralFlag
+}
+
+// ConsultedCollateralFlag is one collateral-flag witness row that INFLUENCED the
+// output: a (reserve, user) pair whose latest-wins fold was read while building
+// a leg, together with the state it asserted and the (block, log_index) that
+// asserted it.
+//
+// # Why this is a NEW INPUT FAMILY in the identity, and why it must be
+//
+// The materialization identity's law is that every input the output depends on is
+// in the identity. The flags are such an input now: they decide each leg's
+// `used_as_collateral`, and through it the position's collateral base, weighted
+// LT sum, average LT and the engine aggregate. Leaving them out would reopen the
+// D-012 class in a new place, and with a concrete trigger already scheduled — the
+// owner-gated rewind-and-rederive that backfills the 173 historical flag logs
+// ends with the Aave cursor back at the SAME head it started from. Cursors,
+// epochs, sweep state and prices would all be byte-identical while the flag
+// ledger beneath them is new, so a post-backfill pass would derive the OLD key,
+// ADOPT the pre-backfill batch, and the corrected collateral would never reach a
+// served number. The digest section is what makes that impossible.
+//
+// # Why only PRESENT rows are recorded — no phantom entries
+//
+// This mirrors ConsultedPrice's scoping law but NOT its absence rule, and the
+// difference is principled. An absent price row produces a G1 REFUSAL, so the
+// absence is itself a substrate fact the identity must carry. An absent flag row
+// produces `false` from a CONSTANT OF THE ALGORITHM — the no-history law below —
+// and constants live in AlgorithmRevision, not in the substrate digest. Recording
+// absences would mint digest entries keyed on the mere presence of an account in
+// the book, with no witness row behind them; and it would buy nothing, because
+// the only way an absence becomes a presence is a new row, which changes the
+// digest through the row itself.
+//
+// # Recorded AT CONSULTATION, including on a position that then refuses
+//
+// A witness read before a later asset refuses the position stays in this slice,
+// exactly as ConsultedPrice keeps its G2 and absent consultations. It is not
+// bookkeeping laziness — the flag genuinely can determine a refusal: a reserve
+// that COUNTS as collateral must carry a liquidation threshold, and
+// internal/risk's ErrMissingParam refusal therefore appears or disappears with the
+// flag. Since a consulted flag may be output-relevant on either path and cannot
+// be classified per case, the inclusive rule is the one taken, and the asymmetry
+// is deliberate: an extra entry costs one needless re-materialization, while a
+// missing entry lets a pass ADOPT a batch whose refusal it had just corrected.
+// Publishing stale is worse than recomputing.
+type ConsultedCollateralFlag struct {
+	Engine  string
+	ChainID uint64
+	Reserve []byte
+	User    []byte
+	// Enabled is the state the witnessed fold asserted.
+	Enabled bool
+	// Block and LogIndex are the witness's own as-of — the flag can be far older
+	// than the balance it governs, and a disclosure must not borrow the balance
+	// cursor's freshness for it.
+	Block    uint64
+	LogIndex uint32
 }
 
 // PriceKeyID is the stable identity of one price witness, used for the
@@ -198,6 +267,10 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 	sweeps := indexSweeps(in.Sweeps)
 	priceRows := indexPriceRows(in.Prices)
 	balances := indexBalances(in.Balances)
+	collateralFlags, err := indexCollateralFlags(in.CollateralFlags)
+	if err != nil {
+		return AssembleResult{}, err
+	}
 
 	// CONFLICTED ACCOUNTS ARE SEEDED EXPLICITLY, because they have NO balance
 	// rows to be discovered from. `store.riskBalances` withholds every row of an
@@ -225,18 +298,20 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 	aaveParamCursor := cursors[cfg.Aave.ParamEngine]
 	for _, account := range accountSet(balances[cfg.Aave.Engine], conflictAccounts[cfg.Aave.Engine]) {
 		p, book, err := assembleAave(assembleArgs{
-			cfg:        cfg,
-			now:        now,
-			account:    account,
-			assets:     balances[cfg.Aave.Engine][accountKey(account)],
-			conflicts:  conflicts,
-			indexes:    indexes,
-			priceRows:  priceRows,
-			params:     aaveParamByAsset,
-			priceReorg: priceReorg[cfg.Aave.PriceEngine],
-			balanceBlk: aaveCursor.LastBlock,
-			paramBlk:   aaveParamCursor.LastBlock,
-			consulted:  &res.Consulted,
+			cfg:             cfg,
+			now:             now,
+			account:         account,
+			assets:          balances[cfg.Aave.Engine][accountKey(account)],
+			conflicts:       conflicts,
+			indexes:         indexes,
+			priceRows:       priceRows,
+			params:          aaveParamByAsset,
+			collateralFlags: collateralFlags,
+			priceReorg:      priceReorg[cfg.Aave.PriceEngine],
+			balanceBlk:      aaveCursor.LastBlock,
+			paramBlk:        aaveParamCursor.LastBlock,
+			consulted:       &res.Consulted,
+			consultedFlags:  &res.ConsultedFlags,
 		})
 		if err != nil {
 			return AssembleResult{}, err
@@ -285,42 +360,99 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 }
 
 type assembleArgs struct {
-	cfg        AssembleConfig
-	now        time.Time
-	account    []byte
-	assets     map[common.Address]map[string]store.RiskBalanceRow
-	conflicts  map[string]string
-	indexes    map[string]store.RiskRateIndexRow
-	priceRows  map[string]store.RiskPriceRow
-	params     map[common.Address]risk.ParamRow
-	sweeps     map[string]store.RiskSweepRow
-	priceReorg bool
-	balanceBlk uint64
-	paramBlk   uint64
+	cfg       AssembleConfig
+	now       time.Time
+	account   []byte
+	assets    map[common.Address]map[string]store.RiskBalanceRow
+	conflicts map[string]string
+	indexes   map[string]store.RiskRateIndexRow
+	priceRows map[string]store.RiskPriceRow
+	params    map[common.Address]risk.ParamRow
+	// collateralFlags is the latest-wins flag fold keyed by
+	// collateralFlagKey(reserve, user). A MISSING key is the chain fact "never
+	// enabled", never "unknown" — see assembleAave's collateral law.
+	collateralFlags map[string]store.CollateralFlagRow
+	sweeps          map[string]store.RiskSweepRow
+	priceReorg      bool
+	balanceBlk      uint64
+	paramBlk        uint64
 	// consulted collects EVERY price witness the assembler consulted, in
 	// consultation order — the single output-relevant price set both projections of
 	// the materialization identity are built from. See ConsultedPrice.
 	consulted *[]ConsultedPrice
+	// consultedFlags collects every collateral-flag witness ROW read, same
+	// discipline. See ConsultedCollateralFlag.
+	consultedFlags *[]ConsultedCollateralFlag
 }
 
 // assembleAave builds one Aave position, or a refusal.
 //
-// # The unwitnessed collateral flag, stated rather than hidden
+// # THE COLLATERAL LAW: witnessed, three states, one direction
 //
 // Aave's `isUsingAsCollateral` is a bitmap in `getUserConfiguration`, an
-// on-chain read riskd may not make (chain-truth R6.3), and no indexed event
-// stream carries it today. This function therefore counts every positive aToken
-// balance as collateral, which is right for every user who has not explicitly
-// disabled a reserve and WRONG — in the false-safety direction, overstating
-// health — for one who has. Every Aave position is flagged
-// `aave_collateral_flag_unwitnessed` so the assumption travels with the number
-// instead of living in a comment.
+// on-chain read riskd may not make (chain-truth R6.3). It is nonetheless FULLY
+// EVENT-WITNESSED, and this function now reads that witness instead of assuming:
 //
-// It is closable, and cheaply: `ReserveUsedAsCollateralEnabled/Disabled` are
-// Pool-emitted, the Pool address is already in the walker's stream set, and the
-// walker's getLogs filter is address-only — so those logs are ALREADY in
-// raw_logs from genesis. Deriving them is `internal/derive` work, outside this
-// task's owned paths; it is recorded as owed rather than approximated further.
+//	latest flag WITNESSED-ENABLED   → true
+//	latest flag WITNESSED-DISABLED  → false
+//	NO FLAG HISTORY AT ALL          → false
+//
+// The third line is the one that deserves an argument, because a default is
+// exactly where a guess hides. It is not a default; it is CHAIN-EXACT under
+// genesis-complete custody. Every path that can turn the flag on emits through
+// the Pool — supply auto-enable, `setUserUseReserveAsCollateral(true)`, and
+// `finalizeTransfer` on an aToken transfer or a liquidation — the Pool has been
+// in the walker's stream set since this market's genesis block, and the walker's
+// getLogs filter is address-only, so raw_logs holds every one of those logs by
+// the coherent-window Step law. A (reserve, user) pair with no row therefore has
+// never been enabled, full stop. Four independent witnesses agree on that
+// completeness: the custody argument just given; a third-party-corroborated
+// Pool-address log census; the state-machine closure that every disabling user
+// has a prior enable (94 == 94, so no enable log is missing); and the param
+// ledger's own prediction that reserves initialized at LTV 0 can have no
+// auto-enable event at all.
+//
+// And the direction is conservative regardless: false SHRINKS counted
+// collateral. If the completeness argument were ever wrong, the error would
+// understate health, never overstate it — the opposite of the posture this
+// replaces, which counted every positive aToken balance as collateral and was
+// therefore wrong in the FALSE-SAFETY direction for every user who had opted out.
+//
+// # EXPECTED, DISCLOSED BEHAVIOUR CHANGE
+//
+// Measured on the live book (read-only, at Aave cursor 25,643,063): of 58
+// positive collateral rows, 23 are witnessed-ENABLED and unchanged, 1 is
+// witnessed-DISABLED, and 34 have NO HISTORY — 35 of 58 flip to not-collateral.
+// The 34 are USDC (25 rows), FRAX (6) and PYUSD (3): reserves initialized at LTV 0
+// and never collateral-configured, so their auto-enable never fired. Served Aave
+// collateral aggregates DROP accordingly. The 1 disabled row is a genuine opt-out
+// (weETH dust, flag off since block 22,551,863) and it DOES move a health factor,
+// which is the point.
+//
+// ONE SHARPENING OF THAT DISCLOSURE, from the data rather than from the
+// expectation. The consult predicted health factors would be unchanged on the
+// stable rows because their LT is zero. On this book their LT is not zero — it is
+// ABSENT: `param_history` carries a liquidation threshold for weETH alone (8100),
+// and the stable reserves have only a ReserveInitialized row, so their folded
+// threshold is nil. Under the retired posture those legs COUNTED, and
+// internal/risk refuses a counting reserve with no threshold. So the first riskd
+// pass over the live book would have REFUSED all 31 accounts holding stable
+// collateral, not merely overstated them. Reading the flag turns those refusals
+// into computed positions, because a reserve the chain never enabled needs no
+// threshold. Both directions are pinned by
+// TestAssembleAaveStableReserveWithNoThresholdRowComputesOnlyOnceWitnessed.
+//
+// # PER-ROW PROVENANCE REPLACES THE BLANKET FLAG
+//
+// The retired `aave_collateral_flag_unwitnessed` marked EVERY Aave position,
+// which made `flagged_positions` uninformative — a count that is always the
+// whole book discloses nothing. In its place the truth is carried where it
+// belongs: each leg's `used_as_collateral` is now a witnessed boolean, and a
+// position is flagged only when a POSITIVE collateral balance is NOT being
+// counted, with the flag naming WHICH witness state excluded it
+// (`aave_collateral_opted_out` vs `aave_collateral_never_enabled`). That is the
+// fact an operator needs to reconcile "this account holds collateral" against
+// "its counted collateral is lower than that".
 func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, error) {
 	engine := a.cfg.Aave.Engine
 	acct := common.BytesToAddress(a.account)
@@ -341,7 +473,7 @@ func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput
 	var priceInputs []risk.PriceInput
 	var snapshots []store.RiskPriceInputWrite
 	var legs []store.RiskLegWrite
-	flags := []string{FlagCollateralFlagUnwitnessed}
+	var flags []string
 	nonzero := false
 
 	for _, asset := range sortedAssets(a.assets) {
@@ -362,19 +494,48 @@ func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput
 				asset.Bytes()), nil, nil
 		}
 
+		// THE COLLATERAL LAW, applied per leg. The witness is consulted for
+		// EVERY reserve in the position, not only the collateral-bearing ones,
+		// because `used_as_collateral` is persisted on every leg — so the flag is
+		// a genuine output dependency of every leg, and recording the
+		// consultation is what keeps the identity honest rather than phantom.
+		usedAsCollateral := false
+		if w, witnessed := a.collateralFlags[collateralFlagKey(asset, acct)]; witnessed {
+			usedAsCollateral = w.Enabled
+			if a.consultedFlags != nil {
+				*a.consultedFlags = append(*a.consultedFlags, ConsultedCollateralFlag{
+					Engine:   w.Engine,
+					ChainID:  w.ChainID,
+					Reserve:  append([]byte(nil), w.Reserve...),
+					User:     append([]byte(nil), w.User...),
+					Enabled:  w.Enabled,
+					Block:    w.Block,
+					LogIndex: w.LogIndex,
+				})
+			}
+			if !w.Enabled && scaledCollateral.Sign() > 0 {
+				flags = append(flags, FlagCollateralOptedOut)
+			}
+		} else if scaledCollateral.Sign() > 0 {
+			// No witness row and a positive balance: never enabled. Disclosed,
+			// because the operator reconciling a collateral total against a
+			// balance needs to know the balance is real and simply does not count.
+			flags = append(flags, FlagCollateralNeverEnabled)
+		}
+
 		r := risk.AaveReserve{
 			Asset:            asset,
 			Decimals:         spec.Decimals,
 			ScaledDebt:       scaledDebt,
 			ScaledCollateral: scaledCollateral,
-			UsedAsCollateral: true,
+			UsedAsCollateral: usedAsCollateral,
 		}
 		leg := store.RiskLegWrite{
 			Asset:            asset.Bytes(),
 			Decimals:         spec.Decimals,
 			ScaledDebt:       scaledDebt,
 			ScaledCollateral: scaledCollateral,
-			UsedAsCollateral: boolPtr(true),
+			UsedAsCollateral: boolPtr(usedAsCollateral),
 		}
 
 		if scaledDebt.Sign() > 0 {
@@ -819,6 +980,34 @@ func indexSweeps(rows []store.RiskSweepRow) map[string]store.RiskSweepRow {
 		out[r.Engine+"/"+hex.EncodeToString(r.Account)] = r
 	}
 	return out
+}
+
+// indexCollateralFlags keys the latest-wins flag fold by (reserve, user).
+//
+// It REFUSES a duplicate key rather than letting the last row win. The store's
+// `DISTINCT ON (asset, account)` already guarantees one row per pair, so a
+// duplicate here means the fold's uniqueness assumption is broken — and silently
+// picking one of two contradictory collateral verdicts is the class of decision
+// that only shows up as a wrong number much later.
+func indexCollateralFlags(rows []store.CollateralFlagRow) (map[string]store.CollateralFlagRow, error) {
+	out := make(map[string]store.CollateralFlagRow, len(rows))
+	for _, r := range rows {
+		if len(r.Reserve) != common.AddressLength || len(r.User) != common.AddressLength {
+			return nil, fmt.Errorf("riskfeed: collateral flag row for engine %q carries a %d-byte reserve and a %d-byte user; both must be %d-byte addresses",
+				r.Engine, len(r.Reserve), len(r.User), common.AddressLength)
+		}
+		key := collateralFlagKey(common.BytesToAddress(r.Reserve), common.BytesToAddress(r.User))
+		if prev, dup := out[key]; dup {
+			return nil, fmt.Errorf("riskfeed: two collateral flag rows for reserve %x user %x (enabled=%t at %d/%d and enabled=%t at %d/%d) — the latest-wins fold is not unique",
+				r.Reserve, r.User, prev.Enabled, prev.Block, prev.LogIndex, r.Enabled, r.Block, r.LogIndex)
+		}
+		out[key] = r
+	}
+	return out, nil
+}
+
+func collateralFlagKey(reserve, user common.Address) string {
+	return reserve.Hex() + "/" + user.Hex()
 }
 
 func indexPriceRows(rows []store.RiskPriceRow) map[string]store.RiskPriceRow {

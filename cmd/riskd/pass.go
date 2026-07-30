@@ -172,6 +172,7 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	identity := riskfeed.ComputeMaterializationIdentity(
 		vector.consumedCursors(), vector.MaxEpochs, vector.consumedSweeps(), inputs,
 		assembled.Consulted,
+		assembled.ConsultedFlags,
 		riskfeed.IdentityPolicy{
 			BudgetSeconds:       cfg.Budget.Seconds,
 			StepBps:             cfg.StepBps,

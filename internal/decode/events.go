@@ -259,6 +259,42 @@ type AaveDeficitCreated struct {
 
 func (AaveDeficitCreated) Name() string { return "AaveDeficitCreated" }
 
+// AaveReserveUsedAsCollateralEnabled corresponds to
+// ReserveUsedAsCollateralEnabled(address indexed reserve, address indexed
+// user) -- the Pool's own witness that `user` is now using `reserve` as
+// collateral. It fires on supply auto-enable, on an explicit
+// setUserUseReserveAsCollateral(true), and inside finalizeTransfer when an
+// aToken transfer or liquidation gives a recipient its first balance in the
+// reserve, which is why the Pool log stream is a COMPLETE witness of the flag
+// rather than a sample of it.
+//
+// BOTH arguments are indexed and the data section is EMPTY (verified against
+// the committed AaveV3Pool ABI and against all 173 in-custody logs). There is
+// therefore NO BODY TO DECODE and correspondingly nothing for a body decoder
+// to get subtly wrong; the reader's entire job is refusing any log that is not
+// exactly that shape. See decodeAaveReserveUsedAsCollateralEnabled.
+type AaveReserveUsedAsCollateralEnabled struct {
+	Reserve, User common.Address
+}
+
+func (AaveReserveUsedAsCollateralEnabled) Name() string {
+	return "AaveReserveUsedAsCollateralEnabled"
+}
+
+// AaveReserveUsedAsCollateralDisabled corresponds to
+// ReserveUsedAsCollateralDisabled(address indexed reserve, address indexed
+// user) -- the mirror witness: the reserve no longer counts as collateral for
+// the user, whether because the user opted out explicitly or because their
+// balance in the reserve reached zero. Same shape, same strictness (see
+// AaveReserveUsedAsCollateralEnabled).
+type AaveReserveUsedAsCollateralDisabled struct {
+	Reserve, User common.Address
+}
+
+func (AaveReserveUsedAsCollateralDisabled) Name() string {
+	return "AaveReserveUsedAsCollateralDisabled"
+}
+
 // ---------------------------------------------------------------------------
 // aToken (ETH, engine "aave_v3_etherfi") events -- collateral-side scaled
 // balance streams, since Pool logs alone are debt-exact but not

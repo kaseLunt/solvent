@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL. Block 20,721,368 log 168 — the FIRST ReserveUsedAsCollateralDisabled the Pool ever emitted, ~7.5k blocks after the market's genesis. Bytes read out of this repo's own raw_logs custody (chain_id 1, Pool 0x0AA97c284e98396202b6A04024F5E2c65026F3c0) under a forced read-only snapshot. Whole-history census of this topic0 in custody: 75 rows over 20,721,368-25,334,454, ZERO nonempty data, ZERO arity != 3.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 20721368,
+    "blockHash": "0x6b8c73fcd574636183f4d2e5cc072aceefe4fca5bafee6d03aacb6f3286e59ba",
+    "txHash": "0x93b745d9292e8301a830dce1543598a3096459cd9868f8012baacc055ea74eea",
+    "logIndex": 168,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x44c58d81365b66dd4b1a7f36c25aa97b8c71c361ee4937adc1a00000227db5dd",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x000000000000000000000000c922a3951b269b9a1dff1186355bcf6dc74e3993"
+    ],
+    "data": "0x"
+  },
+  {
+    "provenance": "REAL, AND THE LOAD-BEARING ONE. Block 22,551,863 log 342 — user 0x2c64a1d5d602e7fb6d21da6211dcecc6e17a0649 turning weETH OFF as collateral. This is the ONE genuine opt-out currently on the book: the account still holds a positive weETH collateral balance (~2e15 wei) whose latest flag witness is DISABLED, so it is the single account where the retired assume-true posture and the witnessed posture disagree in the direction that matters. Same custody and read-only snapshot as entry 0.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 22551863,
+    "blockHash": "0xe96221ec60e589b470a669c085d9b0a4cda953d48c7f7ee7aec0cf0edbf7f9de",
+    "txHash": "0x60a07dc42f86186fee10079c77a5780c6a158d3f1d355170285f7ad8d3c5072c",
+    "logIndex": 342,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x44c58d81365b66dd4b1a7f36c25aa97b8c71c361ee4937adc1a00000227db5dd",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x0000000000000000000000002c64a1d5d602e7fb6d21da6211dcecc6e17a0649"
+    ],
+    "data": "0x"
+  }
+]

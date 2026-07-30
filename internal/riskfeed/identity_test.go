@@ -69,7 +69,28 @@ func idInputs() store.RiskInputs {
 			{Engine: "aave_param", ChainID: 1, Asset: []byte{0xC2},
 				LiqThreshold: big.NewInt(8100), EffectiveBlock: 100, EffectiveLogIndex: 1},
 		},
+		CollateralFlags: []store.CollateralFlagRow{
+			{Engine: "aave_v3_etherfi", ChainID: 1, Reserve: []byte{0xC2}, User: []byte{0xA1},
+				Enabled: true, Block: 25_600_000, LogIndex: 3},
+		},
 	}
+}
+
+// idFlags / idFlagsFrom mirror idJudged / idJudgedFrom for the collateral-flag
+// input family: the CONSULTED projection of the fetched fold, so a test that
+// mutates a flag row also moves the record of what the assembler read. Only
+// PRESENT rows appear — an absent flag is the no-history law, not substrate.
+func idFlags() []ConsultedCollateralFlag { return idFlagsFrom(idInputs()) }
+
+func idFlagsFrom(in store.RiskInputs) []ConsultedCollateralFlag {
+	var out []ConsultedCollateralFlag
+	for _, f := range in.CollateralFlags {
+		out = append(out, ConsultedCollateralFlag{
+			Engine: f.Engine, ChainID: f.ChainID, Reserve: f.Reserve, User: f.User,
+			Enabled: f.Enabled, Block: f.Block, LogIndex: f.LogIndex,
+		})
+	}
+	return out
 }
 
 // idJudged is the fixture's OUTPUT-RELEVANT consulted set: every witness Assemble
@@ -121,14 +142,14 @@ func TestIdentityPriceDigestIsScopedToTheConsultedSet(t *testing.T) {
 		HasSourceAsOf: true, SourceAsOf: idTime,
 	})
 	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), withUnused, idJudged(idTime), idPolicy())
+		idSweeps(), withUnused, idJudged(idTime), idFlags(), idPolicy())
 	require.Equal(t, base.Key, got.Key,
 		"an UNCONSULTED fetched row must not change the identity, however it mutates")
 
 	// And the same row mutating again still changes nothing.
 	withUnused.Prices[len(withUnused.Prices)-1].Value = big.NewInt(9999)
 	again := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), withUnused, idJudged(idTime), idPolicy())
+		idSweeps(), withUnused, idJudged(idTime), idFlags(), idPolicy())
 	require.Equal(t, base.Key, again.Key)
 }
 
@@ -140,7 +161,7 @@ func TestIdentityPriceDigestMovesWithAConsultedRow(t *testing.T) {
 	consulted := idJudged(idTime)
 	consulted[0].Value = big.NewInt(1) // the in-place repair landed on a USED asset
 	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), consulted, idPolicy())
+		idSweeps(), idInputs(), consulted, idFlags(), idPolicy())
 	require.NotEqual(t, base.Key, got.Key,
 		"a CONSULTED witness changing value IS a new materialization")
 
@@ -148,7 +169,7 @@ func TestIdentityPriceDigestMovesWithAConsultedRow(t *testing.T) {
 	consulted = idJudged(idTime)
 	consulted[0].BlockNumber++
 	got = ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), consulted, idPolicy())
+		idSweeps(), idInputs(), consulted, idFlags(), idPolicy())
 	require.NotEqual(t, base.Key, got.Key)
 }
 
@@ -163,7 +184,7 @@ func TestIdentityRecordsAConsultedAbsence(t *testing.T) {
 	absent[0].Value = nil
 	absent[0].PhaseRelevant = false // no row, so no phase was consulted
 	gotAbsent := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), absent, idPolicy())
+		idSweeps(), idInputs(), absent, idFlags(), idPolicy())
 	require.NotEqual(t, present.Key, gotAbsent.Key,
 		"a consulted witness that was ABSENT is a different materialization from a present one")
 
@@ -171,7 +192,7 @@ func TestIdentityRecordsAConsultedAbsence(t *testing.T) {
 	// and finding nothing.
 	notConsulted := idJudged(idTime)[1:]
 	gotDropped := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), notConsulted, idPolicy())
+		idSweeps(), idInputs(), notConsulted, idFlags(), idPolicy())
 	require.NotEqual(t, gotAbsent.Key, gotDropped.Key,
 		"consulted-and-absent must not collide with never-consulted")
 }
@@ -185,7 +206,7 @@ func TestIdentityG2ConsultationEntersTheDigestWithoutAPhase(t *testing.T) {
 	g2[0].PhaseRelevant = false // refused at G2 before freshness was consulted
 	g2[0].Phase = ""
 	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), g2, idPolicy())
+		idSweeps(), idInputs(), g2, idFlags(), idPolicy())
 	require.NotEqual(t, withPhase.Key, got.Key,
 		"dropping the phase changes the identity...")
 	require.Contains(t, got.Vector, "freshness:",
@@ -195,14 +216,14 @@ func TestIdentityG2ConsultationEntersTheDigestWithoutAPhase(t *testing.T) {
 	g2b := g2
 	g2b[0].Value = big.NewInt(7777)
 	got2 := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), g2b, idPolicy())
+		idSweeps(), idInputs(), g2b, idFlags(), idPolicy())
 	require.NotEqual(t, got.Key, got2.Key,
 		"a G2-consulted witness's value still enters the digest")
 }
 
 func computeID() MaterializationIdentity {
 	return ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), idJudged(idTime), idPolicy())
+		idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
 }
 
 // TestIdentityIsDeterministicAcrossRepeatedComputation is the core property: the
@@ -233,7 +254,7 @@ func TestIdentityIsInputOrderIndependent(t *testing.T) {
 	in.Balances[0], in.Balances[1] = in.Balances[1], in.Balances[0]
 
 	shuffled := ComputeMaterializationIdentity(cursors, map[int64]int64{10: 9, 1: 4},
-		idSweeps(), in, idJudged(idTime), idPolicy())
+		idSweeps(), in, idJudged(idTime), idFlagsFrom(in), idPolicy())
 	require.Equal(t, base.Key, shuffled.Key,
 		"reordering the same rows is the same materialization")
 }
@@ -246,23 +267,23 @@ func TestIdentityChangesWithEveryWatermarkComponent(t *testing.T) {
 	t.Run("last_block", func(t *testing.T) {
 		c := idCursors()
 		c[0].LastBlock++
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("acked_epoch", func(t *testing.T) {
 		c := idCursors()
 		c[0].AckedEpoch++
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("chain_id", func(t *testing.T) {
 		c := idCursors()
 		c[0].ChainID = 999
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("max_epoch", func(t *testing.T) {
-		got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 5, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
+		got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 5, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 }
@@ -282,7 +303,7 @@ func TestIdentityChangesWithSweepState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sw := idSweeps()
 			mutate(&sw[0])
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, sw, idInputs(), idJudged(idTime), idPolicy())
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, sw, idInputs(), idJudged(idTime), idFlags(), idPolicy())
 			require.NotEqual(t, base.Key, got.Key)
 		})
 	}
@@ -304,7 +325,7 @@ func TestIdentityChangesWithPolicy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pol := idPolicy()
 			mutate(&pol)
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), pol)
 			require.NotEqual(t, base.Key, got.Key, "policy %s must change the identity", name)
 		})
 	}
@@ -328,7 +349,7 @@ func TestIdentityChangesWhenAPriceIsNeutralizedInPlace(t *testing.T) {
 	// The repaired row is a CONSULTED witness, so the consulted set is derived from
 	// the mutated inputs — that is what the assembler would have seen.
 	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), in, idJudgedFrom(in, idTime), idPolicy())
+		idSweeps(), in, idJudgedFrom(in, idTime), idFlagsFrom(in), idPolicy())
 	require.NotEqual(t, base.Key, got.Key,
 		"the same cursors over DIFFERENT prices is a different materialization")
 }
@@ -352,7 +373,7 @@ func TestIdentityChangesWithSubstrateRows(t *testing.T) {
 			in := idInputs()
 			mutate(&in)
 			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-				idSweeps(), in, idJudgedFrom(in, idTime), idPolicy())
+				idSweeps(), in, idJudgedFrom(in, idTime), idFlagsFrom(in), idPolicy())
 			require.NotEqual(t, base.Key, got.Key, "substrate change %q must change the identity", name)
 		})
 	}
@@ -367,8 +388,8 @@ func TestIdentityDistinguishesAbsentFromZero(t *testing.T) {
 	zero := idInputs()
 	zero.AaveParams[0].LiqBonus = big.NewInt(0)
 
-	a := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), absent, idJudged(idTime), idPolicy())
-	z := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), zero, idJudged(idTime), idPolicy())
+	a := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), absent, idJudged(idTime), idFlagsFrom(absent), idPolicy())
+	z := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), zero, idJudged(idTime), idFlagsFrom(zero), idPolicy())
 	require.NotEqual(t, a.Key, z.Key, "nil is not zero")
 }
 
@@ -388,7 +409,7 @@ func TestIdentityIgnoresTheStepBaselineAndTheClock(t *testing.T) {
 	// +30s: still inside the FRESH phase (budget 180s).
 	later := idInputs()
 	later.ReadAt = idTime.Add(30 * time.Second)
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), later, idJudged(later.ReadAt), idPolicy())
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), later, idJudged(later.ReadAt), idFlagsFrom(later), idPolicy())
 	require.Equal(t, base.Key, got.Key,
 		"the snapshot CLOCK must not enter the identity — otherwise every recomputation is a new materialization")
 
@@ -417,7 +438,7 @@ func TestIdentityChangesWhenAPriceCrossesAFreshnessThreshold(t *testing.T) {
 		in := idInputs()
 		in.ReadAt = idTime.Add(offset)
 		return ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-			idSweeps(), in, idJudged(in.ReadAt), idPolicy())
+			idSweeps(), in, idJudged(in.ReadAt), idFlagsFrom(in), idPolicy())
 	}
 
 	fresh := at(30 * time.Second)
@@ -446,7 +467,7 @@ func TestIdentityChangesWithTheAlgorithmRevision(t *testing.T) {
 	base := computeID()
 	pol := idPolicy()
 	pol.AlgorithmRevision = AlgorithmRevision + 1
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), pol)
 	require.NotEqual(t, base.Key, got.Key,
 		"a revision bump is a new set of laws and therefore a new materialization")
 }
@@ -458,8 +479,150 @@ func TestIdentityChangesWithTheRegistryFingerprint(t *testing.T) {
 	base := computeID()
 	pol := idPolicy()
 	pol.RegistryFingerprint = "a-corrected-registry"
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idFlags(), pol)
 	require.NotEqual(t, base.Key, got.Key)
+}
+
+// ---------------------------------------------------------------------------
+// The collateral-flag input family in the identity.
+// ---------------------------------------------------------------------------
+
+// TestIdentityChangesWithAConsultedCollateralFlag is the identity law applied to
+// the new input family: the flag decides each leg's `used_as_collateral` and
+// through it the position's collateral base, weighted LT sum and the engine
+// aggregate, so a flag that changes IS a new materialization.
+//
+// MUTANT THIS KILLS: drop the `collateral_flags` section from substrateDigest.
+// Every subtest below then collides with the base key.
+func TestIdentityChangesWithAConsultedCollateralFlag(t *testing.T) {
+	base := computeID()
+	for name, mutate := range map[string]func(f *ConsultedCollateralFlag){
+		"enabled flips":  func(f *ConsultedCollateralFlag) { f.Enabled = !f.Enabled },
+		"witness block":  func(f *ConsultedCollateralFlag) { f.Block++ },
+		"witness logidx": func(f *ConsultedCollateralFlag) { f.LogIndex++ },
+		"reserve":        func(f *ConsultedCollateralFlag) { f.Reserve = []byte{0xCC} },
+		"user":           func(f *ConsultedCollateralFlag) { f.User = []byte{0xAA} },
+		"engine":         func(f *ConsultedCollateralFlag) { f.Engine = "other_engine" },
+		"chain":          func(f *ConsultedCollateralFlag) { f.ChainID = 999 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			fl := idFlags()
+			mutate(&fl[0])
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+				idSweeps(), idInputs(), idJudged(idTime), fl, idPolicy())
+			require.NotEqual(t, base.Key, got.Key,
+				"collateral-flag change %q must change the identity", name)
+		})
+	}
+}
+
+// TestIdentityCollateralFlagDigestIsScopedToTheConsultedSet applies the price
+// scoping law to the flags. `CollateralFlagsAsOf` returns every witnessed pair
+// below the cursor — on the live book that is 94 pairs, most for accounts with no
+// position today. Hashing the FETCHED fold would let one of those mint a new key
+// for an output-identical batch, which is how a restart declines to adopt and
+// writes a clean batch over a large-step warning.
+//
+// MUTANT THIS KILLS: hash inputs.CollateralFlags instead of the consulted slice.
+func TestIdentityCollateralFlagDigestIsScopedToTheConsultedSet(t *testing.T) {
+	base := computeID()
+
+	withUnused := idInputs()
+	withUnused.CollateralFlags = append(withUnused.CollateralFlags, store.CollateralFlagRow{
+		Engine: "aave_v3_etherfi", ChainID: 1, Reserve: []byte{0xEE}, User: []byte{0xFF},
+		Enabled: false, Block: 25_111_111, LogIndex: 9,
+	})
+	// The consulted set is deliberately NOT re-derived: this models a witnessed
+	// pair the assembler never read, because that account holds nothing.
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), withUnused, idJudged(idTime), idFlags(), idPolicy())
+	require.Equal(t, base.Key, got.Key,
+		"a witnessed pair NOBODY VALUED must not change the identity")
+
+	// And it still must not, whichever way it mutates.
+	withUnused.CollateralFlags[len(withUnused.CollateralFlags)-1].Enabled = true
+	again := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), withUnused, idJudged(idTime), idFlags(), idPolicy())
+	require.Equal(t, base.Key, again.Key)
+}
+
+// TestIdentityNoFlagHistoryAddsNoDigestEntry is the phantom-entry half.
+//
+// A leg with NO flag witness resolves to false by the no-history LAW — a constant
+// of the algorithm, covered by AlgorithmRevision — so it must contribute NOTHING
+// to the substrate digest. If absence were recorded the way an absent PRICE is,
+// the digest would gain lines keyed on nothing but which accounts hold which
+// assets, and the flag section would move whenever the book's shape moved even
+// with the ledger untouched.
+//
+// The property is expressed the only way it honestly can be: the digest is a pure
+// function of the consulted slice, so "no phantom entry" means an empty consulted
+// slice is one fixed digest regardless of the book, while a single WITNESSED row
+// is a different one. Assemble's own half of the proof — that a no-history book
+// really does report an EMPTY ConsultedFlags — lives in
+// TestAssembleAaveNoFlagHistoryMeansNotCollateral.
+func TestIdentityNoFlagHistoryAddsNoDigestEntry(t *testing.T) {
+	noHistory := idInputs()
+	noHistory.CollateralFlags = nil
+
+	empty := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), noHistory, idJudged(idTime), nil, idPolicy())
+
+	// Growing the BOOK while the flag ledger stays empty must not touch the flag
+	// section: no witness, no entry.
+	biggerBook := noHistory
+	biggerBook.Balances = append(append([]store.RiskBalanceRow(nil), noHistory.Balances...),
+		store.RiskBalanceRow{Engine: "aave_v3_etherfi", Account: []byte{0xA7}, Asset: []byte{0xC2},
+			Side: "collateral", Source: "event", Amount: big.NewInt(7), UpdatedBlock: 25_635_618})
+	grown := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), biggerBook, idJudged(idTime), nil, idPolicy())
+	require.NotEqual(t, empty.Key, grown.Key,
+		"the new BALANCE row is substrate and must move the key (via the balances section)")
+
+	// nil and an explicitly empty slice are the same statement: nothing was
+	// witnessed. A digest that distinguished them would make the key depend on how
+	// Assemble happened to initialize a slice.
+	emptySlice := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), noHistory, idJudged(idTime), []ConsultedCollateralFlag{}, idPolicy())
+	require.Equal(t, empty.Key, emptySlice.Key)
+
+	// And a single WITNESSED row is a genuinely different materialization from no
+	// history at all — the fact that makes the backfill safe.
+	witnessed := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), idInputs(), idJudged(idTime), idFlags(), idPolicy())
+	require.NotEqual(t, empty.Key, witnessed.Key,
+		"witnessed-enabled must not collide with no-history-so-false: the backfill depends on it")
+}
+
+// TestIdentitySurvivesTheFlagBackfillChoreography is the operational case stated
+// as a test, because it is the one where every OTHER section of the identity is
+// byte-identical.
+//
+// The owner-gated maintenance window rewinds the Aave derive cursor, re-derives
+// the range, and ends with the cursor back at the block it started from. Cursors,
+// epochs, sweep state, params, balances and every price line are therefore
+// unchanged across it — only the flag ledger is new. Without the collateral_flags
+// digest section the post-backfill pass would derive the pre-backfill key, ADOPT
+// that batch, and publish the assume-true collateral the backfill existed to
+// correct.
+func TestIdentitySurvivesTheFlagBackfillChoreography(t *testing.T) {
+	before := idInputs()
+	before.CollateralFlags = nil // pre-backfill: the logs are in raw_logs, undERIVED
+
+	after := idInputs() // post-backfill: same cursor, same everything, flags present
+
+	pre := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), before, idJudged(idTime), nil, idPolicy())
+	post := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
+		idSweeps(), after, idJudged(idTime), idFlags(), idPolicy())
+
+	// The vector — cursors, epochs, sweep, policy, freshness — is IDENTICAL. That
+	// is the whole hazard: nothing outside the digest can see this change.
+	require.Equal(t, pre.Vector, post.Vector,
+		"the backfill moves no watermark, which is exactly why the digest must carry it")
+	require.NotEqual(t, pre.SubstrateDigest, post.SubstrateDigest)
+	require.NotEqual(t, pre.Key, post.Key,
+		"a re-derived flag ledger at an unchanged cursor is a NEW materialization")
 }
 
 // TestIdentityVectorIsHumanReadable: the persisted vector is also the operational

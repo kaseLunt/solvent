@@ -183,6 +183,12 @@ func init() {
 	reg(aaveTopics, aavePoolABI.Events["LiquidationCall"].ID, decodeAaveLiquidationCall)
 	reg(aaveTopics, aavePoolABI.Events["ReserveDataUpdated"].ID, decodeAaveReserveDataUpdated)
 	reg(aaveTopics, aavePoolABI.Events["DeficitCreated"].ID, decodeAaveDeficitCreated)
+	// The collateral-flag pair. Registered from the EMBEDDED ABI's own event
+	// IDs, never from a hand-copied topic0 literal; decode_test.go pins those
+	// IDs against the independently keccak-derived hashes so the two can never
+	// drift apart silently.
+	reg(aaveTopics, aavePoolABI.Events["ReserveUsedAsCollateralEnabled"].ID, decodeAaveReserveUsedAsCollateralEnabled)
+	reg(aaveTopics, aavePoolABI.Events["ReserveUsedAsCollateralDisabled"].ID, decodeAaveReserveUsedAsCollateralDisabled)
 	reg(aaveTopics, aTokenABI.Events["Transfer"].ID, decodeATokenTransfer)
 	reg(aaveTopics, aTokenABI.Events["Mint"].ID, decodeATokenMint)
 	reg(aaveTopics, aTokenABI.Events["Burn"].ID, decodeATokenBurn)
@@ -652,6 +658,105 @@ func decodeAaveDeficitCreated(topics [][]byte, data []byte) (Event, error) {
 		DebtAsset:     topicAddress(topics[2]),
 		AmountCreated: vals[0].(*big.Int),
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Aave collateral-flag decode functions — the STRICT pair.
+//
+// These two events are the only ones in this package with NOTHING IN THE DATA
+// SECTION: both arguments are indexed, so every payload byte lives in a topic
+// and there is no body decode to get wrong. That removes the usual class of
+// decoder bug and leaves exactly one: accepting a log whose SHAPE is not the
+// event's. So the reader asserts the shape completely and REFUSES LOUD on any
+// violation, per the house strict-decode law (the unpackAddressUint256Arrays
+// precedent: a parser that tolerates a shape Solidity never emits is a parser
+// that will one day decode something else as this).
+//
+// The three assertions, and why each one is not decoration:
+//
+//   - EXACT TOPIC ARITY 3 (topic0 + two indexed addresses). An arity-2 log
+//     would leave topics[2] out of range; an arity-4 log with this topic0
+//     cannot come from this ABI, so treating its extra topic as noise would be
+//     deciding that a log we do not understand means what we hope it means.
+//   - EMPTY DATA. A non-empty body under this topic0 means the emitting code is
+//     not the event we registered — an implementation upgrade that changed the
+//     signature while keeping the name would land here, and it must fail rather
+//     than have its body silently ignored (the A1 ReserveInitialized lesson).
+//   - ZERO UPPER-12-BYTE PAD on both address topics. `common.BytesToAddress`
+//     takes the low 20 bytes and DISCARDS the rest, so without this check two
+//     different topic words collapse to the same address and a dirty word reads
+//     as a clean one. The pad is the only evidence that the word was written by
+//     an `address indexed` encoder at all.
+//
+// topics[1] is the RESERVE and topics[2] is the USER, in ABI-declared order
+// (AaveV3Pool.json: `reserve` then `user`, both indexed). Getting that pair
+// backwards would silently invert every fold, which is why the fixture tests
+// assert the concrete reserve/user of real logs rather than only that decoding
+// succeeded.
+// ---------------------------------------------------------------------------
+
+// requireEmptyData refuses any data section at all. It exists as a named check
+// rather than an inline length test so the refusal message says WHY the body
+// must be empty.
+func requireEmptyData(eventName string, data []byte) error {
+	if len(data) != 0 {
+		return fmt.Errorf("%s: expected an EMPTY data section (every argument is indexed), got %d bytes — this topic0 was emitted by code whose signature is not the one registered",
+			eventName, len(data))
+	}
+	return nil
+}
+
+// strictTopicAddress decodes an indexed-address topic under the strict reading:
+// the word must be exactly 32 bytes and its upper 12 bytes must be zero.
+//
+// It is deliberately NOT `topicAddress`, which is `common.BytesToAddress` and
+// therefore silently truncates. Callers that already tolerate the permissive
+// form keep it; readers written to the strict law use this.
+func strictTopicAddress(eventName, field string, topics [][]byte, i int) (common.Address, error) {
+	t := topics[i]
+	if len(t) != common.HashLength {
+		return common.Address{}, fmt.Errorf("%s: topic %d (%s) is %d bytes, want exactly %d",
+			eventName, i, field, len(t), common.HashLength)
+	}
+	if !bytes.Equal(t[:12], zero12Pad[:]) {
+		return common.Address{}, fmt.Errorf("%s: topic %d (%s) has a non-zero upper-12-byte pad (0x%x) — not a canonical indexed address",
+			eventName, i, field, t[:12])
+	}
+	return common.BytesToAddress(t), nil
+}
+
+// decodeCollateralFlagTopics is the whole strict reader, shared by the enabled
+// and disabled variants so the two can never diverge in strictness.
+func decodeCollateralFlagTopics(eventName string, topics [][]byte, data []byte) (reserve, user common.Address, err error) {
+	if err = requireTopics(eventName, topics, 3); err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	if err = requireEmptyData(eventName, data); err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	if reserve, err = strictTopicAddress(eventName, "reserve", topics, 1); err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	if user, err = strictTopicAddress(eventName, "user", topics, 2); err != nil {
+		return common.Address{}, common.Address{}, err
+	}
+	return reserve, user, nil
+}
+
+func decodeAaveReserveUsedAsCollateralEnabled(topics [][]byte, data []byte) (Event, error) {
+	reserve, user, err := decodeCollateralFlagTopics("AaveReserveUsedAsCollateralEnabled", topics, data)
+	if err != nil {
+		return nil, err
+	}
+	return AaveReserveUsedAsCollateralEnabled{Reserve: reserve, User: user}, nil
+}
+
+func decodeAaveReserveUsedAsCollateralDisabled(topics [][]byte, data []byte) (Event, error) {
+	reserve, user, err := decodeCollateralFlagTopics("AaveReserveUsedAsCollateralDisabled", topics, data)
+	if err != nil {
+		return nil, err
+	}
+	return AaveReserveUsedAsCollateralDisabled{Reserve: reserve, User: user}, nil
 }
 
 // ---------------------------------------------------------------------------

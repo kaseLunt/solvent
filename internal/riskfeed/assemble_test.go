@@ -76,6 +76,23 @@ func idx(engine string, asset common.Address, kind, value string, block uint64) 
 	return store.RiskRateIndexRow{Engine: engine, Asset: asset.Bytes(), Kind: kind, Value: bi(value), Block: block}
 }
 
+// collFlag builds one latest-wins collateral-flag witness row.
+//
+// Every Aave fixture below that expects its collateral to COUNT now carries one,
+// and that is not fixture bookkeeping added to satisfy the new code — it is what
+// the Pool actually emits. A first supply into a collateral-configured reserve
+// emits ReserveUsedAsCollateralEnabled in the same transaction as the aToken
+// Mint. A fixture with a positive aToken balance and NO enable event is a state
+// the chain cannot produce, so seeding one would be testing against an
+// impossible substrate.
+func collFlag(reserve, user common.Address, enabled bool, block uint64, logIndex uint32) store.CollateralFlagRow {
+	return store.CollateralFlagRow{
+		Engine: risk.AaveEngine, ChainID: 1,
+		Reserve: reserve.Bytes(), User: user.Bytes(),
+		Enabled: enabled, Block: block, LogIndex: logIndex,
+	}
+}
+
 func price(chain uint64, asset common.Address, source, value string, decimals int32, age time.Duration) store.RiskPriceRow {
 	return store.RiskPriceRow{
 		ChainID: chain, Asset: asset.Bytes(), Source: source, Value: bi(value),
@@ -154,6 +171,7 @@ func TestAssembleAaveHealthFactor(t *testing.T) {
 		price(1, weETH, fixtureOracleSource, "300000000000", 8, 30*time.Second),
 		price(1, usdc, fixtureOracleSource, "100000000", 8, 30*time.Second),
 	}
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
 
 	res, err := Assemble(in, fixtureConfig(t))
 	require.NoError(t, err)
@@ -187,8 +205,20 @@ func TestAssembleAaveHealthFactor(t *testing.T) {
 	require.Equal(t, "10600", legs[weETH.Hex()].LiqBonus.String(),
 		"the bonus reached the persisted leg: without it, recovery arithmetic silently uses par")
 
-	// The unwitnessed-collateral assumption travels WITH the number.
-	require.Contains(t, p.Flags, FlagCollateralFlagUnwitnessed)
+	// THE FLAG IS NOW WITNESSED, so the number carries no assumption to disclose.
+	// Under the retired posture this position was flagged
+	// `aave_collateral_flag_unwitnessed`; with an ENABLED witness it is clean, and
+	// the leg records the witness rather than a guess.
+	require.Empty(t, p.Flags,
+		"a witnessed-enabled, fresh-priced position has nothing to disclose")
+	require.NotNil(t, legs[weETH.Hex()].UsedAsCollateral)
+	require.True(t, *legs[weETH.Hex()].UsedAsCollateral,
+		"the leg carries the WITNESS, per-row, not a blanket assumption")
+	require.Len(t, res.ConsultedFlags, 1,
+		"exactly the witnesses read: weETH is witnessed, USDC has no history and contributes no digest entry")
+	require.Equal(t, weETH.Bytes(), res.ConsultedFlags[0].Reserve)
+	require.EqualValues(t, 20_714_007, res.ConsultedFlags[0].Block,
+		"the witness carries its OWN as-of, not the balances cursor's")
 }
 
 // TestAssembleAaveNeverFetchesTheUncappedFeed is the structural half of the
@@ -325,6 +355,7 @@ func TestAssembleAaveMissingPriceRefusesAndNamesTheAsset(t *testing.T) {
 		idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
 	}
 	in.AaveParams = []store.ParamRow{collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600")}
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
 	// No price rows at all.
 
 	res, err := Assemble(in, fixtureConfig(t))
@@ -374,6 +405,11 @@ func TestAssembleAaveMissingThresholdRefusesRatherThanZeroing(t *testing.T) {
 		price(1, weETH, fixtureOracleSource, "300000000000", 8, 0),
 		price(1, usdc, fixtureOracleSource, "100000000", 8, 0),
 	}
+	// The enable witness is LOAD-BEARING here. Without it the reserve stops
+	// counting as collateral, internal/risk stops requiring a liquidation
+	// threshold for it, and this test would pass by no longer exercising the
+	// masking hazard at all — a green that proves nothing.
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
 
 	res, err := Assemble(in, fixtureConfig(t))
 	require.NoError(t, err)
@@ -382,6 +418,335 @@ func TestAssembleAaveMissingThresholdRefusesRatherThanZeroing(t *testing.T) {
 	require.Equal(t, GateEngine, p.RefusalCode)
 	require.Contains(t, p.RefusalDetail, "liquidation threshold")
 	require.Nil(t, p.HFWad)
+}
+
+// ---------------------------------------------------------------------------
+// The collateral law — three states, one direction.
+// ---------------------------------------------------------------------------
+
+// flagLawInputs is one weETH-collateral / USDC-debt Aave position with the
+// collateral flag DELIBERATELY UNSET, so each test below supplies exactly the
+// witness state it is about.
+func flagLawInputs() store.RiskInputs {
+	in := baseInputs()
+	in.Balances = []store.RiskBalanceRow{
+		bal(risk.AaveEngine, acctA, weETH, sideCollateral, sourceEvent, "1000000000000000000", 25_635_618),
+		bal(risk.AaveEngine, acctA, usdc, sideDebt, sourceEvent, "1000000000", 25_635_618),
+	}
+	in.Indexes = []store.RiskRateIndexRow{
+		idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+		idx(risk.AaveEngine, usdc, kindVariableBorrowIndex, "1000000000000000000000000000", 25_610_000),
+	}
+	in.AaveParams = []store.ParamRow{
+		collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600"),
+		collateralConfigRow(usdc, 20_714_100, 2, "7500", "7800", "10450"),
+	}
+	in.Prices = []store.RiskPriceRow{
+		price(1, weETH, fixtureOracleSource, "300000000000", 8, 30*time.Second),
+		price(1, usdc, fixtureOracleSource, "100000000", 8, 30*time.Second),
+	}
+	return in
+}
+
+// TestAssembleAaveWitnessedEnableCountsCollateral is the first of the three
+// states, stated on its own so the other two are diffs against a known baseline.
+func TestAssembleAaveWitnessedEnableCountsCollateral(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionComputed, p.Status)
+	require.Equal(t, "300000000000", p.TotalCollateralBase.String())
+	require.Equal(t, "2430000000000000", p.WeightedLTSum.String())
+	require.Equal(t, "2430000000000000000", p.HFWad.String())
+	require.Empty(t, p.Flags)
+}
+
+// TestAssembleAaveNoFlagHistoryMeansNotCollateral is the 34-row class on the live
+// book (USDC / FRAX / PYUSD): reserves never configured as collateral, so their
+// auto-enable never fired and no flag event exists for them at all.
+//
+// This is also the PHANTOM-ENTRY half of the identity proof: a leg resolved by the
+// no-history law must contribute NOTHING to ConsultedFlags, because that slice is
+// exactly what the substrate digest hashes. The identity-side half is
+// TestIdentityNoFlagHistoryAddsNoDigestEntry.
+//
+// MUTANT THIS KILLS: default `usedAsCollateral` to true when no witness row
+// exists (i.e. restore the retired assume-true posture). The collateral total
+// below jumps back to 300000000000 and the disclosure flag disappears.
+func TestAssembleAaveNoFlagHistoryMeansNotCollateral(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = nil // never enabled, on any reserve, for anyone
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+
+	require.Equal(t, store.RiskPositionComputed, p.Status,
+		"no-history is a chain FACT, not a missing input: the position still computes")
+	require.Equal(t, "0", p.TotalCollateralBase.String(),
+		"a reserve that was never enabled contributes NO counted collateral")
+	require.Equal(t, "0", p.WeightedLTSum.String())
+	require.Equal(t, "100000000000", p.TotalDebtBase.String(),
+		"the DEBT is untouched — the law shrinks collateral only, never inflates it")
+	require.False(t, p.HFInfinite, "collateral 0 against real debt is HF 0, not infinite")
+	require.Equal(t, "0", p.HFWad.String())
+
+	require.Contains(t, p.Flags, FlagCollateralNeverEnabled,
+		"the operator must be able to reconcile a real balance against a zero collateral total")
+	require.NotContains(t, p.Flags, FlagCollateralOptedOut,
+		"no-history is not an opt-out and must not be reported as one")
+
+	legs := map[string]store.RiskLegWrite{}
+	for _, l := range p.Legs {
+		legs[common.BytesToAddress(l.Asset).Hex()] = l
+	}
+	require.NotNil(t, legs[weETH.Hex()].UsedAsCollateral)
+	require.False(t, *legs[weETH.Hex()].UsedAsCollateral)
+	require.Equal(t, "1000000000000000000", legs[weETH.Hex()].ScaledCollateral.String(),
+		"the BALANCE is still disclosed in full — only its collateral status changed")
+
+	require.Empty(t, res.ConsultedFlags,
+		"NO PHANTOM DIGEST ENTRIES: an absent witness is the no-history law, not substrate")
+}
+
+// TestAssembleAaveWitnessedDisableExcludesCollateral is the one genuine opt-out on
+// the live book (weETH dust, flag off since block 22,551,863) — the row where the
+// retired assume-true posture was wrong in the FALSE-SAFETY direction, overstating
+// health for a user who had explicitly turned collateral off.
+func TestAssembleAaveWitnessedDisableExcludesCollateral(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, false, 22_551_863, 342)}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+
+	require.Equal(t, store.RiskPositionComputed, p.Status)
+	require.Equal(t, "0", p.TotalCollateralBase.String())
+	require.Equal(t, "0", p.HFWad.String(),
+		"the assume-true posture served 2.43 here; the witness says this borrower has no counted collateral")
+	require.Contains(t, p.Flags, FlagCollateralOptedOut)
+	require.NotContains(t, p.Flags, FlagCollateralNeverEnabled,
+		"a WITNESSED disable is a user decision and must be distinguishable from never-configured")
+
+	require.Len(t, res.ConsultedFlags, 1)
+	require.False(t, res.ConsultedFlags[0].Enabled)
+	require.EqualValues(t, 22_551_863, res.ConsultedFlags[0].Block)
+	require.EqualValues(t, 342, res.ConsultedFlags[0].LogIndex)
+}
+
+// TestAssembleAaveZeroBalanceNeedsNoDisclosure: the flags exist to explain a
+// balance that does not count. A reserve with a positive DEBT leg and no
+// collateral has nothing to explain, so it must not be flagged — otherwise the
+// disclosure returns to marking the whole book, which is what retiring
+// `aave_collateral_flag_unwitnessed` was for.
+func TestAssembleAaveZeroBalanceNeedsNoDisclosure(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+
+	// USDC is debt-only and has NO flag history. It is not flagged.
+	require.Empty(t, p.Flags)
+	legs := map[string]store.RiskLegWrite{}
+	for _, l := range p.Legs {
+		legs[common.BytesToAddress(l.Asset).Hex()] = l
+	}
+	require.NotNil(t, legs[usdc.Hex()].UsedAsCollateral)
+	require.False(t, *legs[usdc.Hex()].UsedAsCollateral,
+		"a debt-only leg still carries the witnessed value, and the witness says false")
+}
+
+// TestAssembleAaveStableReserveDropsCollateralButNotHealthFactor encodes the
+// DISCLOSED BEHAVIOUR CHANGE as an executable fact, both halves at once.
+//
+// On the live book the ~34 flipping rows are USDC / FRAX / PYUSD, whose LT is 0 in
+// param custody because they were initialized at LTV 0 and never
+// collateral-configured. So the same change that DROPS served collateral
+// aggregates leaves health factors EXACTLY where they were: the numerator term
+// Σ(Cᵢ·LTᵢ) contributed zero either way. The old numbers were right by accident;
+// the collateral totals were simply wrong.
+//
+// The two assemblies below differ ONLY in the stable reserve's flag, which is the
+// cleanest available statement of "what this wave changed".
+func TestAssembleAaveStableReserveDropsCollateralButNotHealthFactor(t *testing.T) {
+	build := func(stableEnabled bool) store.RiskInputs {
+		in := baseInputs()
+		in.Balances = []store.RiskBalanceRow{
+			bal(risk.AaveEngine, acctA, weETH, sideCollateral, sourceEvent, "1000000000000000000", 25_635_618),
+			// The stable reserve, held as collateral and priced at $1.
+			bal(risk.AaveEngine, acctA, usdc, sideCollateral, sourceEvent, "500000000", 25_635_618),
+		}
+		in.Indexes = []store.RiskRateIndexRow{
+			idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+			idx(risk.AaveEngine, usdc, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+		}
+		in.AaveParams = []store.ParamRow{
+			collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600"),
+			// LTV 0 / LT 0: exactly what the configurator ledger holds for the
+			// stable reserves on this market — they were never given a
+			// CollateralConfigurationChanged at all.
+			collateralConfigRow(usdc, 20_714_100, 2, "0", "0", "0"),
+		}
+		in.Prices = []store.RiskPriceRow{
+			price(1, weETH, fixtureOracleSource, "300000000000", 8, 30*time.Second),
+			price(1, usdc, fixtureOracleSource, "100000000", 8, 30*time.Second),
+		}
+		in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+		if stableEnabled {
+			in.CollateralFlags = append(in.CollateralFlags, collFlag(usdc, acctA, true, 20_714_101, 3))
+		}
+		return in
+	}
+
+	// `true` reproduces the RETIRED posture for the stable reserve; `false` (no
+	// witness row) is the new law's answer for it.
+	assumeTrue, err := Assemble(build(true), fixtureConfig(t))
+	require.NoError(t, err)
+	witnessed, err := Assemble(build(false), fixtureConfig(t))
+	require.NoError(t, err)
+
+	before := findPosition(t, assumeTrue, risk.AaveEngine, acctA)
+	after := findPosition(t, witnessed, risk.AaveEngine, acctA)
+
+	// COLLATERAL DROPS, by exactly the stable reserve's $500 at 8 decimals.
+	require.Equal(t, "350000000000", before.TotalCollateralBase.String())
+	require.Equal(t, "300000000000", after.TotalCollateralBase.String())
+	beforeAgg := findAggregate(t, assumeTrue, risk.AaveEngine)
+	afterAgg := findAggregate(t, witnessed, risk.AaveEngine)
+	require.Equal(t, "350000000000", beforeAgg.TotalCollateral.String())
+	require.Equal(t, "300000000000", afterAgg.TotalCollateral.String(),
+		"served Aave collateral aggregates DROP — the disclosed, expected change")
+
+	// AND THE HEALTH FACTOR DOES NOT MOVE, because LT is 0 on the reserve that
+	// stopped counting.
+	require.Equal(t, before.WeightedLTSum.String(), after.WeightedLTSum.String(),
+		"Σ(Cᵢ·LTᵢ) is unchanged: the stable reserve's LT was already 0")
+	require.True(t, before.HFInfinite, "no debt in this fixture")
+	require.Equal(t, before.HFInfinite, after.HFInfinite)
+
+	// The average LT DOES move, and honestly so: the denominator lost collateral
+	// that was contributing nothing to the numerator, so the book-average
+	// threshold it reports was diluted before and is exact now.
+	require.Equal(t, "6942", before.AvgLTBps.String())
+	require.Equal(t, "8100", after.AvgLTBps.String(),
+		"avgLT stops being diluted by collateral the engine never counted")
+
+	require.Contains(t, after.Flags, FlagCollateralNeverEnabled)
+}
+
+// TestAssembleAaveStableReserveWithNoThresholdRowComputesOnlyOnceWitnessed is the
+// LIVE-BOOK SHAPE, and it is a bigger change than "collateral aggregates drop".
+//
+// On the live market `param_history` carries a liquidation threshold for exactly
+// ONE asset — weETH, 8100. USDC / FRAX / PYUSD have NO threshold row at all: they
+// were initialized and never given a CollateralConfigurationChanged, so their
+// folded param row exists (from ReserveInitialized) with a NIL threshold. That is
+// absent, not zero.
+//
+// Under the retired assume-true posture those legs COUNTED as collateral, and
+// internal/risk correctly refuses a counting reserve with no threshold
+// (ErrMissingParam — "a missing liquidation threshold is a WRONG health factor,
+// never a zero one"). So the first riskd pass over the live book would have
+// REFUSED every account holding stable collateral — 31 accounts / 34 legs — not
+// merely overstated their collateral. Reading the flag turns those refusals into
+// computed positions, because a reserve the chain never enabled needs no threshold.
+//
+// Both directions are asserted here, from ONE fixture differing only in the flag.
+func TestAssembleAaveStableReserveWithNoThresholdRowComputesOnlyOnceWitnessed(t *testing.T) {
+	build := func(stableFlag []store.CollateralFlagRow) store.RiskInputs {
+		in := baseInputs()
+		in.Balances = []store.RiskBalanceRow{
+			bal(risk.AaveEngine, acctA, weETH, sideCollateral, sourceEvent, "1000000000000000000", 25_635_618),
+			bal(risk.AaveEngine, acctA, usdc, sideCollateral, sourceEvent, "500000000", 25_635_618),
+		}
+		in.Indexes = []store.RiskRateIndexRow{
+			idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+			idx(risk.AaveEngine, usdc, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+		}
+		in.AaveParams = []store.ParamRow{
+			collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600"),
+			// EXACTLY the live shape: a ReserveInitialized row and nothing else, so
+			// the folded threshold is NIL.
+			reserveInitRow(usdc, 20_714_100, 2),
+		}
+		in.Prices = []store.RiskPriceRow{
+			price(1, weETH, fixtureOracleSource, "300000000000", 8, 30*time.Second),
+			price(1, usdc, fixtureOracleSource, "100000000", 8, 30*time.Second),
+		}
+		in.CollateralFlags = append([]store.CollateralFlagRow{
+			collFlag(weETH, acctA, true, 20_714_007, 6),
+		}, stableFlag...)
+		return in
+	}
+
+	// (a) The RETIRED posture, reproduced by witnessing the stable reserve ENABLED:
+	// counting collateral with no threshold row is a refusal, and rightly so.
+	assumeTrue, err := Assemble(build([]store.CollateralFlagRow{collFlag(usdc, acctA, true, 20_714_101, 3)}),
+		fixtureConfig(t))
+	require.NoError(t, err)
+	refused := findPosition(t, assumeTrue, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionRefused, refused.Status,
+		"counting a reserve with NO threshold row must refuse — this is what the live book would have done")
+	require.Equal(t, GateEngine, refused.RefusalCode)
+	require.Contains(t, refused.RefusalDetail, "liquidation threshold")
+	require.Nil(t, refused.HFWad)
+
+	// (b) THE NEW LAW: no flag history for the stable reserve, so it does not count,
+	// so no threshold is required, so the position COMPUTES — over the weETH
+	// collateral that genuinely is enabled.
+	witnessed, err := Assemble(build(nil), fixtureConfig(t))
+	require.NoError(t, err)
+	computed := findPosition(t, witnessed, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionComputed, computed.Status,
+		"a reserve the chain never enabled needs no liquidation threshold, so the account is servable again")
+	require.Equal(t, "300000000000", computed.TotalCollateralBase.String(),
+		"only the witnessed-enabled weETH counts")
+	require.Equal(t, "2430000000000000", computed.WeightedLTSum.String())
+	require.Contains(t, computed.Flags, FlagCollateralNeverEnabled)
+
+	// The refusal really did suppress a whole position from the aggregate, which is
+	// the direction of the improvement: a refused row contributes nothing.
+	require.Equal(t, 1, findAggregate(t, assumeTrue, risk.AaveEngine).RefusedPositions)
+	require.Equal(t, 0, findAggregate(t, witnessed, risk.AaveEngine).RefusedPositions)
+	require.Equal(t, 1, findAggregate(t, witnessed, risk.AaveEngine).ComputedPositions)
+}
+
+// TestAssembleRefusesTwoFlagRowsForOnePair: the store's DISTINCT ON guarantees one
+// row per pair, so two rows mean the fold's uniqueness assumption broke. Silently
+// picking one of two contradictory collateral verdicts is the decision that
+// surfaces months later as a wrong number, so it is a loud error instead.
+func TestAssembleRefusesTwoFlagRowsForOnePair(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{
+		collFlag(weETH, acctA, true, 20_714_007, 6),
+		collFlag(weETH, acctA, false, 22_551_863, 342),
+	}
+	_, err := Assemble(in, fixtureConfig(t))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "latest-wins fold is not unique")
+}
+
+// TestAssembleRefusesMalformedFlagAddresses: a short reserve or user column would
+// be silently zero-extended by BytesToAddress and collide with an unrelated pair.
+func TestAssembleRefusesMalformedFlagAddresses(t *testing.T) {
+	for name, row := range map[string]store.CollateralFlagRow{
+		"short reserve": {Engine: risk.AaveEngine, ChainID: 1, Reserve: []byte{0x01}, User: acctA.Bytes(), Enabled: true},
+		"short user":    {Engine: risk.AaveEngine, ChainID: 1, Reserve: weETH.Bytes(), User: []byte{0x02}, Enabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := flagLawInputs()
+			in.CollateralFlags = []store.CollateralFlagRow{row}
+			_, err := Assemble(in, fixtureConfig(t))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "must be 20-byte addresses")
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +904,7 @@ func TestAssembleG2RefusesOnlyTheAffectedChain(t *testing.T) {
 		idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000))
 	in.AaveParams = []store.ParamRow{collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600")}
 	in.Prices = append(in.Prices, price(1, weETH, fixtureOracleSource, "300000000000", 8, 0))
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctB, true, 20_714_007, 6)}
 
 	// OP's price poller has an unacknowledged epoch; ETH's does not.
 	in.MaxEpochs = map[int64]int64{10: 7}
@@ -734,6 +1100,7 @@ func TestAssembleRefusesWhenAWatermarkIsMissing(t *testing.T) {
 	}
 	in.AaveParams = []store.ParamRow{collateralConfigRow(weETH, 20_714_007, 5, "7800", "8100", "10600")}
 	in.Prices = []store.RiskPriceRow{price(1, weETH, fixtureOracleSource, "300000000000", 8, 0)}
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
 
 	res, err := Assemble(in, fixtureConfig(t))
 	require.NoError(t, err)

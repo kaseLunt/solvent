@@ -237,6 +237,13 @@ func (c *daemonConfig) snapshotSpec(v watermarkVector) store.RiskSnapshotSpec {
 	}
 	if cur, ok := v.Engines[c.Aave.Engine]; ok {
 		spec.IndexBounds[c.Aave.Engine] = cur.LastBlock
+		// The collateral-flag ledger is the Aave engine's OWN position_events, so
+		// it is bounded by that engine's cursor — the same block the balances it
+		// governs were folded to. A flag read above it would judge the two halves
+		// of one position at two different blocks.
+		spec.CollateralFlagEngine = c.Aave.Engine
+		spec.CollateralFlagChain = c.Aave.ChainID
+		spec.CollateralFlagBlock = cur.LastBlock
 	}
 	if cur, ok := v.Engines[c.DM.Engine]; ok {
 		spec.IndexBounds[c.DM.Engine] = cur.LastBlock

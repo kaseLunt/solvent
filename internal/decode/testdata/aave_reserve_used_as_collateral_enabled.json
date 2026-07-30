@@ -1,0 +1,34 @@
+[
+  {
+    "provenance": "REAL. Block 20,713,917 log 194 — the ether.fi Aave market's GENESIS CLUSTER, the very first ReserveUsedAsCollateralEnabled the Pool ever emitted (supply auto-enable on the first weETH supply). Bytes read out of this repo's own raw_logs custody (chain_id 1, Pool 0x0AA97c284e98396202b6A04024F5E2c65026F3c0) under a forced read-only snapshot, which is the same custody the deriver folds — so the fixture and production consume byte-identical input. Cross-checks: the reserve equals the weETH address every other aave_* fixture carries, the block matches the market's reserve-initialization block, and the whole-history census of this topic0 in custody is 98 rows over 20,713,917-23,357,693 with ZERO nonempty data and ZERO arity != 3.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 20713917,
+    "blockHash": "0x90b3a4ec3dc9fac9b5b531594aa720ee1a12ebd6371ba232654423322951b1c7",
+    "txHash": "0x8dce3e22688d50eaba48fbd1805623e7b7b9cb8910c96e609f279906c3d6ef67",
+    "logIndex": 194,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x00058a56ea94653cdf4f152d227ace22d4c00ad99e2a43f58cb7d9e3feb295f2",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x000000000000000000000000464c71f6c2f760dda6093dcb91c24c39e5d6e18c"
+    ],
+    "data": "0x"
+  },
+  {
+    "provenance": "REAL. Block 20,713,977 log 251 — a second, DIFFERENT user enabling the same weETH reserve 60 blocks after genesis. Same custody and the same read-only snapshot as entry 0. A second real occurrence with a different user word is what makes the reserve/user ordering assertion falsifiable: a decoder that swapped topics[1] and topics[2] would still 'pass' against one log if the test only checked that the pair round-tripped.",
+    "synthetic": false,
+    "chainId": 1,
+    "blockNumber": 20713977,
+    "blockHash": "0xf0dda28f7b44dbe1629f7dd575bd888631a5aefd1ec49096308c6a0fe2927640",
+    "txHash": "0x84ce635b0574cdedc83e5dfd9f6fc557122a3e21eb7f26a3dd72ff09b26c07f8",
+    "logIndex": 251,
+    "address": "0x0aa97c284e98396202b6a04024f5e2c65026f3c0",
+    "topics": [
+      "0x00058a56ea94653cdf4f152d227ace22d4c00ad99e2a43f58cb7d9e3feb295f2",
+      "0x000000000000000000000000cd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+      "0x000000000000000000000000e1f8afc92644bfe77080d7dcb0f936f578e00f53"
+    ],
+    "data": "0x"
+  }
+]

@@ -702,6 +702,26 @@ func (e *AaveEngine) Process(l store.RawLog, d decode.Event) ([]store.PositionEv
 			"to":     ev.To.Hex(),
 			"amount": ev.Amount.String(),
 		})}, nil
+	case decode.AaveReserveUsedAsCollateralEnabled:
+		// RECORD-ONLY, and deliberately so — the DM config-row precedent
+		// (debtmanager.go's CollateralTokenConfigSet/Added/Removed cases).
+		//
+		// These two events carry NO AMOUNT: they toggle whether a balance the
+		// aToken streams already fold COUNTS as collateral, so folding them into
+		// a balance would be inventing a movement that never happened. Writing
+		// them as position_events instead makes the flag a first-class ledger
+		// whose as-of state any consumer can read (store.CollateralFlagsAsOf) —
+		// and, because they travel through the ordinary window commit, they
+		// inherit epoch protection, rewind, and divergent-replay refusal for
+		// free rather than needing a private table with its own reorg story.
+		//
+		// ACCOUNT is the USER and ASSET is the RESERVE, matching every other
+		// per-account Aave row so the fold's DISTINCT ON keys line up with the
+		// balance rows it governs. SIDE is empty and DELTA nil: this is not a
+		// movement on either side of the book.
+		return []store.PositionEvent{aaveEvent(l, 0, store.AaveCollateralEnabledEvent, ev.User, ev.Reserve, "", nil, nil)}, nil
+	case decode.AaveReserveUsedAsCollateralDisabled:
+		return []store.PositionEvent{aaveEvent(l, 0, store.AaveCollateralDisabledEvent, ev.User, ev.Reserve, "", nil, nil)}, nil
 	case decode.ATokenMint:
 		return e.processATokenMint(l, ev)
 	case decode.ATokenBurn:

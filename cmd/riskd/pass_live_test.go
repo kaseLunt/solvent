@@ -228,6 +228,16 @@ func (f *riskdFixture) seedHealthyAavePosition(t *testing.T) {
 			{ChainID: 1, Engine: risk.AaveEngine, BlockNumber: fxAaveBlock, TxHash: []byte{0x01}, LogIndex: 0,
 				EventType: "atoken_mint", Account: fxAcct.Bytes(), Asset: fxAave.Bytes(),
 				Side: "collateral", Delta: mustBig("1000000000000000000")},
+			// THE COLLATERAL-FLAG WITNESS, and it is not a workaround for the
+			// retired assume-true posture — it is what the chain does. A first
+			// supply into a collateral-configured reserve emits
+			// ReserveUsedAsCollateralEnabled in the SAME TRANSACTION as the aToken
+			// Mint, one log later; a fixture that folded the mint without the
+			// enable would be seeding a state the Pool cannot produce. The
+			// assertions below (300000000000 counted collateral, HF 2.43) are
+			// unchanged and now rest on a witness instead of an assumption.
+			{ChainID: 1, Engine: risk.AaveEngine, BlockNumber: fxAaveBlock, TxHash: []byte{0x01}, LogIndex: 1,
+				EventType: store.AaveCollateralEnabledEvent, Account: fxAcct.Bytes(), Asset: fxAave.Bytes()},
 			{ChainID: 1, Engine: risk.AaveEngine, BlockNumber: fxAaveBlock, TxHash: []byte{0x02}, LogIndex: 0,
 				EventType: "aave_borrow", Account: fxAcct.Bytes(), Asset: fxAaveDb.Bytes(),
 				Side: "debt", Delta: mustBig("1000000000")},
@@ -558,16 +568,18 @@ func TestRiskdG5FlagsALargeStepAgainstThePreviousBatch(t *testing.T) {
 	first, err := runPass(f.ctx, f.store, f.cfg)
 	require.NoError(t, err)
 
-	// NOT an assertion on the flag COUNT: every Aave position carries
-	// `aave_collateral_flag_unwitnessed` by construction (the
-	// isUsingAsCollateral bitmap has no indexed witness), so the count is never
-	// zero on this engine. The discriminating fact is the STEP flag's absence.
+	// The first pass has NO flags at all, and that is now a real assertion rather
+	// than an unavailable one. Under the retired assume-true posture every Aave
+	// position carried `aave_collateral_flag_unwitnessed` by construction, so a
+	// flag-count assertion here could never discriminate anything. With the flag
+	// witnessed — and the fixture's witness saying ENABLED — a clean position is
+	// genuinely clean, so the G5 flag appearing in the second pass is visible as a
+	// transition from empty rather than as one entry among a permanent one.
 	firstPositions, err := f.store.RiskBatchPositions(f.ctx, first.BatchID)
 	require.NoError(t, err)
 	require.Len(t, firstPositions, 1)
-	require.NotContains(t, firstPositions[0].Flags, riskfeed.FlagLargeStep,
-		"the first pass has no previous batch to compare against, so no step can be claimed")
-	require.Contains(t, firstPositions[0].Flags, riskfeed.FlagCollateralFlagUnwitnessed)
+	require.Empty(t, firstPositions[0].Flags,
+		"a witnessed-enabled, fresh-priced, first-pass position carries nothing to disclose")
 
 	// A later poll lands a −40% move on the collateral asset.
 	f.seedPricesAt(t, fxPriceBlock+10, "180000000000", "100000000")
