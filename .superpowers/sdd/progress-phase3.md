@@ -2104,6 +2104,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   universe vs the maxBorrowAtFrame config dependency, third premise-break
   hunt beyond the two belts, regression fidelity, adjustment-2 structural
   verification, capture honesty. On SHIP: 4 of 4 → maintenance window.
+- CODEX ROUND 10 ON TASK 6 (session 019fb4b0-24a8-7c80-8b4a-469ee201db11,
+  ~11min, t6r10 @ 5f18f28, base 0e06a7a): needs-attention — 1H, the third
+  premise-break shape the brief asked it to hunt: a CollateralTokenAdded→
+  Removed ROUND TRIP within the block leaves a token absent from BOTH pinned
+  enumerations; if the Safe ALREADY HOLDS it (no Transfer, no netting
+  event), the transient config moves maxBorrowLT mid-block — both belts
+  silent, replay treats the lifecycle events as Unrelated via the default
+  branch; a modeled interest crossing reversed-then-re-crossed by the
+  add/remove pair falsely reports held-to-L and Proven=true. The round-9
+  transfer shape itself is CLOSED. LIFECYCLE FIX WAVE dispatched (minimal
+  refusal per the recommendation's floor — the same precedent as netting
+  modeled-iff-final-pass): decode arms for Added/Removed (ABI-derived
+  topic0s), ANY pre-boundary occurrence → replay incomplete → UNEXPLAINED
+  via the existing structural path; post-boundary ignored (cannot affect the
+  pre-L crossing); full DM event-surface disposition inventory required (the
+  artifact that lets round 11 close the fall-through class, not the
+  instance); regression = the finding's exact shape (pre-held token, absent
+  both pins, add+remove pre-boundary, crossing disturbed) + event-triggered
+  guard; m1 = arms reverted → witnessed false-pass. 31/31 must stay proven
+  byte-stable (zero lifecycle events in the frame — parent==exec supported
+  sets in all 31).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
