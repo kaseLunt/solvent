@@ -981,6 +981,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   PATTERN: rounds keep converging on 'the refusal must be as durable as the
   thing it refuses' — first per-position, then per-batch, now per-ENGINE
   across an empty set.
+- CODEX ROUND ON REV-3 (session 019fb1a6-ec65-7790-8df3-178d7113d424, ~13min,
+  worktree rev3 @ 559828c): **needs-attention — arithmetic FULLY CONFIRMED
+  (every carry vector + the 2/20,000 sweep independently reproduced; both
+  direction claims verified; no old-law consumer survives) — the two findings
+  are DOCUMENTATION-AUTHORITY skew.** (H) authoritative surfaces still mandated
+  the revoked fused floor (design spec §7, probe record P-2, migration 00013
+  comment, types.go, the UI concept) — money-law version skew: an honest
+  engineer following repo authority would reintroduce rev-2. (M) the documented
+  one-unit rev-2→rev-3 debt bound is FALSE for multi-reserve borrowers — ceil
+  applies per leg and sums, so N non-exact legs → up to N units (registry has
+  3 borrowable reserves). SPLIT BY TREE: integrator fixed design spec + P-2
+  supersession banner (honest about what the probe could/couldn't see — the
+  two-step refutation stands, the final-division rounding was invisible to pin
+  evidence) + UI formula → committed 8bb043d; rev-3 wave dispatched for
+  types.go/liqprice.go/derivation-notes bound (0..N) + the two-debt-reserve +2
+  regression vector; assemble.go revision-log line + 00013 comment DEFERRED to
+  integration (flag-custody wave mid-flight in both). OUTAGE NOTE: 529s took
+  down both build waves once (~23:20); both resumed from durable state; owner
+  directive recorded: 20-minute heartbeat intervals, never quit — ScheduleWakeup
+  armed at 1200s.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
