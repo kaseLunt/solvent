@@ -40,19 +40,26 @@ package risk
 // biased P* LOW, i.e. it published a liquidation price below the true one, which
 // was the dangerous residue of the component-4 bug.
 //
-// The size of that rise, stated correctly: mulDivCeil is applied PER RESERVE and
-// the results are summed (GenericLogic.sol:141), so
+// The size of that rise, stated exactly. mulDivCeil is applied PER RESERVE and
+// the results are summed (GenericLogic.sol:229 then :141), and a pure ceiling
+// adds exactly one base unit to a leg with any nonzero remainder and exactly
+// zero to a leg that divides evenly. With two DISTINCT counts:
 //
-//	0 ≤ D_rev3 − D_rev2 ≤ N,  N = debt-bearing reserves whose conversion
-//	                              leaves a nonzero remainder
+//	M = debt-bearing reserves on the position
+//	R = those whose conversion leaves a nonzero remainder     0 ≤ R ≤ M
 //
-// and P* moves by that many debt base units' worth, i.e. ΔD × W × price / Σ_in.
-// An earlier revision of this comment said "at most one base unit", which is
-// wrong for any multi-reserve borrower: this market's registry lists THREE
-// borrowables (USDC, PYUSD, FRAX), so N reaches 3. Pinned by
-// TestComputeAaveHealthDebtCeilAccumulatesPerReserve, which exhibits +2 and +3
-// deltas and the 0 case. No boundary flips in the shipped vectors: their debt
-// legs all divide exactly, which is the ΔD = 0 end of that range.
+//	ΔD = D_rev3 − D_rev2 = R          exactly, not merely bounded by it
+//
+// so P* moves by ΔD × W × price / Σ_in. The range lives in R, which is a property
+// of the position's own prices and balances.
+//
+// Two earlier revisions of this comment were wrong: the first said "at most one
+// base unit" (false for any multi-reserve borrower), the second wrote one symbol
+// N for both counts and stated a bound where an equality holds. This market's
+// registry lists THREE borrowables (USDC, PYUSD, FRAX), so M ≤ 3 and ΔD reaches
+// 3. Pinned by TestComputeAaveHealthDebtCeilAccumulatesPerReserve, which exhibits
+// R = 2, R = 3, and R = 0 at M = 2. No boundary flips in the shipped vectors:
+// their debt legs all divide exactly, i.e. R = 0.
 //
 // Component 7's half-up sliver does not reach this file at all. The solve runs on
 // the exact rational, and the chain's inner wadDiv can only round the published

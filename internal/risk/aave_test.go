@@ -317,19 +317,36 @@ func TestComputeAaveHealthComponent4LegsRoundOppositeWaysOnOneVector(t *testing.
 // The rev-3 note originally claimed the rev-2 → rev-3 debt move was bounded by
 // ONE base unit. That is false, and this test is why: `mulDivCeil` is applied
 // per reserve inside `_getUserDebtInBaseCurrency` and the results are SUMMED
-// (GenericLogic.sol:141), so each debt-bearing reserve whose conversion leaves a
-// nonzero remainder contributes its own +1. The true bound is
+// (GenericLogic.sol:229 then :141), so each debt-bearing reserve whose conversion
+// leaves a nonzero remainder contributes its own +1 — no more, no less.
 //
-//	0 ≤ D_rev3 − D_rev2 ≤ N,   N = debt-bearing reserves with a nonzero remainder
+// TWO distinct counts, which an earlier draft wrongly collapsed into one symbol:
 //
-// and this market's registry lists THREE borrowables (USDC, PYUSD, FRAX), so N
-// reaches 3 on a fully-diversified borrower.
+//	M = debt-bearing reserves on the position
+//	R = those whose conversion leaves a nonzero remainder     0 ≤ R ≤ M
 //
-// The per-reserve structure is not a rounding preference — it is forced. Each
-// reserve divides by its OWN assetUnit (10^decimals), so for a book mixing 6-
-// and 18-decimal debt there is no single denominator a "sum the products, divide
-// once" form could even use. The two-reserve case below happens to share
-// decimals, which lets it ALSO refute that strawman with a distinct third value.
+//	ΔD = D_rev3 − D_rev2 = R         EXACTLY, not merely bounded by it
+//
+// The equality holds because a pure ceiling adds exactly one to a leg with any
+// nonzero remainder and exactly zero to a leg that divides evenly. The range
+// lives in R. The subtests below exhibit R = 2, R = 3, and R = 0 at M = 2 — that
+// last one is the case the old single-symbol wording contradicted itself on, by
+// calling a zero-delta position "N = 2".
+//
+// This market's registry lists THREE borrowables (USDC, PYUSD, FRAX), so M ≤ 3
+// and ΔD reaches 3 on a fully-diversified borrower.
+//
+// # Why per-reserve is the law — a source MANDATE, not an arithmetic necessity
+//
+// GenericLogic ceilings each reserve's conversion and sums the results. That is
+// all the authority there is, and it is enough. An earlier draft of this comment
+// over-argued it, claiming a mixed 6-/18-decimal book has no common denominator a
+// "sum the products, divide once" form could use — which is false: 10^18 serves
+// perfectly well once the 6-decimal numerators are scaled by 10^12, and that form
+// is entirely expressible. The arithmetic permits both shapes; only the source
+// settles which is deployed, which is precisely why this had to be read rather
+// than derived. The two-reserve subtest shares decimals, so it can compare the
+// sum-then-ceil form directly and show it lands on a THIRD, distinct value.
 func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
 	// One collateral leg, held constant: C = 20000000, LT = 8100 ⇒ Σ = 162000000000.
 	collateral := simpleReserve(aWeETH, 8, "20000000", "0", true)
@@ -411,13 +428,13 @@ func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
 		return h, rev2D, rev3D
 	}
 
-	t.Run("two debt reserves move total debt by +2", func(t *testing.T) {
+	t.Run("two debt reserves: M=2, R=2, delta +2", func(t *testing.T) {
 		h, rev2D, rev3D := run(t, []debtLeg{usdc, pyusd})
 
 		requireBig(t, "27441077", rev2D, "rev-2: floor 13720585 + floor 13720492")
 		requireBig(t, "27441079", rev3D, "rev-3: ceil 13720586 + ceil 13720493")
 		requireBig(t, "2", new(big.Int).Sub(rev3D, rev2D),
-			"TWO base units, not one — this is the assertion that makes the old bound false")
+			"ΔD = R = 2 — TWO base units, which is what makes the original one-unit claim false")
 		requireBig(t, "27441079", h.TotalDebtBase)
 		requireBig(t, "162000000000", h.WeightedLTSum)
 
@@ -448,13 +465,13 @@ func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
 		require.Equal(t, -1, mid.Cmp(rev2), "strictly ordered: deployed < sum-then-ceil < rev-2")
 	})
 
-	t.Run("all three borrowables move total debt by +3, which is this market's N", func(t *testing.T) {
+	t.Run("all three borrowables: M=3, R=3, delta +3", func(t *testing.T) {
 		h, rev2D, rev3D := run(t, []debtLeg{usdc, pyusd, frax})
 
 		requireBig(t, "127431077", rev2D, "rev-2: 13720585 + 13720492 + 99990000")
 		requireBig(t, "127431080", rev3D, "rev-3: 13720586 + 13720493 + 99990001")
 		requireBig(t, "3", new(big.Int).Sub(rev3D, rev2D),
-			"THREE base units — the bound is N, and N = 3 is this market's whole borrowable set")
+			"ΔD = R = 3, this market's whole borrowable set carrying remainders")
 		requireBig(t, "127431080", h.TotalDebtBase)
 		requireBig(t, "127127542197711892", h.HealthFactorWad)
 		rev2, ok := AaveHealthFactorWad(mustBig(t, "162000000000"), rev2D)
@@ -462,17 +479,21 @@ func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
 		requireBig(t, "127127545190566034", rev2)
 		require.Equal(t, -1, h.HealthFactorWad.Cmp(rev2), "safe direction")
 
-		// The mixed 6/18-decimal book is exactly the case where a single fused
-		// ceiling is not even expressible: there is no shared assetUnit.
+		// FRAX is here for the MIXED-DECIMAL book, which is the shape the source
+		// mandate has to cover. Note what this does NOT claim: a sum-then-divide
+		// form is perfectly expressible across 6- and 18-decimal legs (10^18 after
+		// scaling the 6-dec numerators by 10^12). It is just not what GenericLogic
+		// does — hence "read it, don't derive it".
 		require.NotEqual(t, usdc.reserve.Decimals, frax.reserve.Decimals,
 			"the point of including FRAX: 18-dec debt alongside 6-dec debt")
 	})
 
-	t.Run("legs that divide exactly contribute nothing, so the bound's floor is 0", func(t *testing.T) {
-		// The LOWER end of 0..N, through the same harness: two debt reserves, both
-		// exactly dividing, delta 0. This is why the bound is a range and not a
-		// count of reserves — and it is why every survivor vector in this suite
-		// (whose debt legs all divide exactly) came through rev 3 unmoved.
+	t.Run("legs that divide exactly: M=2 but R=0, delta 0", func(t *testing.T) {
+		// The R = 0 end, through the same harness: two debt reserves, both dividing
+		// exactly. This is the case that proves R and M need separate names — the
+		// position HAS two debt reserves, and the delta is still zero. It is also
+		// why every survivor vector in this suite (whose debt legs all divide
+		// exactly) came through rev 3 unmoved.
 		_, rev2D, rev3D := run(t, []debtLeg{
 			{
 				reserve: simpleReserve(aUSDC, 8, "0", "10000000", false), price: "100000000",
@@ -488,7 +509,7 @@ func TestComputeAaveHealthDebtCeilAccumulatesPerReserve(t *testing.T) {
 		requireBig(t, "30000000", rev2D)
 		requireBig(t, "30000000", rev3D)
 		requireBig(t, "0", new(big.Int).Sub(rev3D, rev2D),
-			"delta 0 despite N = 2: the bound is 0..N, not exactly N")
+			"ΔD = R = 0 at M = 2: the range lives in R, not in the reserve count")
 	})
 }
 

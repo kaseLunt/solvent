@@ -299,22 +299,40 @@ chain's inner half-up step can only make the chain MORE generous than the ration
 grace band lies strictly below `ceil(P*)`. The ceil-summed `D` raises `P*` versus rev 2 — the **safe**
 direction, since the old floor-summed `D` biased `P*` low.
 
-**The rev-2 → rev-3 debt bound is PER RESERVE, not one unit** [correction, Codex round on 559828c].
-`mulDivCeil` is applied inside `_getUserDebtInBaseCurrency` per borrowed reserve and the results are
-summed (`GenericLogic.sol:141`), so each debt-bearing reserve whose conversion leaves a nonzero
-remainder contributes its own `+1`:
+**The rev-2 → rev-3 debt move is PER RESERVE, not one unit** [correction, Codex round on 559828c;
+symbols and authority sharpened, Codex round on c680f78].
+
+`mulDivCeil` is applied per borrowed reserve inside `_getUserDebtInBaseCurrency`
+(`GenericLogic.sol:229`) and the per-reserve results are then summed (`:141`), so each debt-bearing
+reserve whose conversion leaves a nonzero remainder contributes its own `+1` — no more, no less. TWO
+distinct counts are involved and must not share a symbol:
 
 ```
-0 ≤ D_rev3 − D_rev2 ≤ N,    N = debt-bearing reserves with a nonzero conversion remainder
+M = debt-bearing reserves on the position
+R = those whose conversion leaves a NONZERO remainder          0 ≤ R ≤ M
+
+ΔD = D_rev3 − D_rev2 = R            exactly — not merely bounded by it
 ```
 
-An earlier draft of this section, and of `internal/risk/liqprice.go`, stated the bound as "at most
-one debt base unit". That is false for any multi-reserve borrower. This market's registry lists
-**three** borrowables (USDC, PYUSD, FRAX — see the Aave reserve table below), so `N` reaches 3, and
-`P*` moves by `ΔD × W × price / Σ_in`, i.e. up to N debt base units' worth. The structure is forced
-rather than chosen: each reserve divides by its own `assetUnit = 10^decimals`, so for a book mixing
-6-decimal and 18-decimal debt there is no single denominator that a "sum the products, divide once"
-form could use at all.
+`ΔD = R` is an equality because a pure ceiling adds exactly one base unit to a leg with any nonzero
+remainder and exactly zero to a leg that divides evenly. The *range* lives in `R` itself: `R` is a
+property of the position's prices and balances, and runs from 0 (every leg divides exactly) to `M`
+(no leg does). An earlier draft of this section, and of `internal/risk/liqprice.go`, wrote a single
+`N` for both counts and then stated `0 ≤ ΔD ≤ N` — which is loose where it should be exact, and
+which contradicted itself two paragraphs later by calling a delta-0 case "N = 2". Before that, both
+said "at most one debt base unit", which is false for any multi-reserve borrower. This market's
+registry lists **three** borrowables (USDC, PYUSD, FRAX — see the Aave reserve table below), so
+`M ≤ 3` here and `ΔD` reaches 3. `P*` moves by `ΔD × W × price / Σ_in`, i.e. `R` debt base units'
+worth.
+
+**Why per-reserve, stated as the authority it actually is.** The per-reserve ceiling is a MANDATE of
+the deployed source — `GenericLogic.sol:229` ceilings each reserve's conversion and `:141` sums the
+results — not a mathematical necessity. An earlier draft claimed a mixed 6-/18-decimal book has no
+common denominator a "sum the products, divide once" form could use. That is wrong: `10^18` is a
+perfectly good common denominator once the 6-decimal numerators are scaled by `10^12`, and such a
+form is entirely expressible. It is simply not what the contract does. That is exactly why the
+per-reserve shape had to be READ out of the source rather than derived from the arithmetic — the
+arithmetic permits both, and only the source settles which one is the law.
 
 Regression vector (`TestComputeAaveHealthDebtCeilAccumulatesPerReserve`), which separates the
 deployed law from BOTH the rev-2 law and the single-fused-ceiling strawman:
@@ -325,17 +343,19 @@ deployed law from BOTH the rev-2 law and the single-fused-ceiling strawman:
 | PYUSD 6-dec, debt 137231 @ 99981000 | 13720492611000 | 611000 (super-half) | 13720492 | 13720493 | **13720493** |
 | FRAX 18-dec, debt 1000000000000000001 @ 99990000 | 99990000000000000099990000 | 99990000 | 99990000 | 99990000 | **99990001** |
 
-- Two reserves (USDC + PYUSD): `D_rev2 = 27441077`, **`D_rev3 = 27441079`** — delta **+2**. Both legs
-  share 6 decimals here, so the strawman is expressible and also refuted: summing the products
-  (27441077624248, remainder 624248) and ceiling ONCE gives 27441078, strictly between the two. All
-  three health factors are distinct and correctly ordered:
+- Two reserves, both with remainders (`M = 2`, `R = 2`): `D_rev2 = 27441077`,
+  **`D_rev3 = 27441079`** — `ΔD = 2 = R`. Both legs share 6 decimals here, so the sum-then-ceil
+  strawman is directly comparable and also refuted: summing the products (27441077624248, remainder
+  624248) and ceiling ONCE gives 27441078, strictly between the two per-leg forms. All three health
+  factors are distinct and correctly ordered:
   `590355794682854854` (deployed) < `590355816196433682` (sum-then-ceil) < `590355837710014078` (rev 2)
   — more debt, lower health factor, the conservative direction.
-- All three reserves: `D_rev2 = 127431077`, **`D_rev3 = 127431080`** — delta **+3**, this market's
-  full `N`. HF `127127542197711892` vs rev-2 `127127545190566034`.
-- Two exactly-dividing legs: delta **0** despite `N = 2` — which is why the bound is a range, and why
-  every survivor vector in the suite (all of whose debt legs divide exactly) came through rev 3
-  unmoved.
+- All three reserves, all with remainders (`M = 3`, `R = 3`): `D_rev2 = 127431077`,
+  **`D_rev3 = 127431080`** — `ΔD = 3 = R`, this market's full borrowable set. HF
+  `127127542197711892` vs rev-2 `127127545190566034`.
+- Two exactly-dividing legs (`M = 2`, **`R = 0`**): `ΔD = 0`. This is the `R = 0` end, and it is why
+  `R` and `M` need separate names — the position still has two debt reserves. It is also why every
+  survivor vector in the suite came through rev 3 unmoved: their debt legs all divide exactly.
 
 **Regime scope — both corrections are proven for the CURRENT implementation ONLY.** The regime split
 above (A/B at block 23,088,584) covers components 2 and 3, the scaled→live ray projections. Nobody
