@@ -1395,6 +1395,20 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   re-addressed at identical starts (invisible pre-round-5). Wave: full suite
   + -race both -p 1 exit 0; fork legs 3/3. NEXT: flag-custody round 7 —
   the TRUE closing — queues behind Task 7 round 4 (running).
+- **TASK 7 CLOSED — SHIP** (round 4, session 019fb272-25d7-7313-80dc-
+  265dc1e4bc2f, ~3.5min, t7r4 @ bc0c703): "APPROVE / SHIP. The committed
+  tests non-vacuously cover every requested degraded-state case with valid
+  opposite-teeth fixtures and OpenAPI validation. Static tracing confirms
+  they kill the found-by-rowcount, coverage-reconstruction-only, and
+  restored-early-return mutants. da5ed0a's implementation matches the
+  assertions. No material findings." The tracing detail worth keeping: the
+  withheld and proven-empty batches have IDENTICAL zero-row Aave aggregates
+  distinguished only by the persisted refusal — the fixtures genuinely
+  discriminate. Program: wave (60 tests) → r1 1C/2H/2M → fw1 (seven-point
+  unrepresentability, bonus weld, refuted grades) → r2 1H/2M (unswept
+  surfaces) → fw2 (three-valued found) → r3 1H (= staging miss #4) →
+  bc0c703 → r4 SHIP. Commits: 328bd0f / 94a13c4 / da5ed0a / bc0c703 (+
+  client f58bc48). **SHIP 1 of 4.** NEXT: flag-custody round 7 dispatching.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
