@@ -1639,6 +1639,36 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   821991e — walk InitialEligible's exclusivity, multi-reversal cycles,
   bypasses of applied(), other arms' unmodelable shapes, the widening
   adjudication, third-parent-computation hunt.
+- **T8 FIX WAVE 2 LANDED — d5a62ad** (8 files +503/−58, zero new; both-ways
+  exact; verify independently re-run exit 0, 263/263). (H1) top-level found
+  REMOVED from every arm, type AND runtime — outcome (three non-empty string
+  literals) is the sole discriminant, falsiness has nothing to grab; wire
+  found survives only on raw accessors + inside the sealed response;
+  enforcement is a @ts-expect-error battery: unnarrowed union, EACH arm
+  separately (restoring the field on one arm makes that arm's directive
+  unused → typecheck fails), unnarrowed client.address()/addressStress()
+  incl. the reviewer's exact !result.found line as a compile-error pin,
+  runtime hasOwn absence. Round-1's literal-found design (the BRIEF'S choice)
+  completed, not reversed. (H2) onHeartbeat gated on baseReceived (pre-base
+  comments still touch the transport watchdog — bytes-flow is real — but are
+  never consumer-visible); NEW StreamOptions.baseFrameTimeoutMs — armed at
+  connect, disarmed ONLY by the base frame, refreshed by NOTHING; expiry =
+  protocol error + drop + reconnect = failed attempt under the wave-1 backoff
+  law. Default heartbeatTimeoutMs when set (usable gets the same window as
+  alive), else exported DEFAULT_BASE_FRAME_TIMEOUT_MS=45s, ON by default (the
+  base is a NAMED event the contract owes every connection — the watchdog's
+  opt-in rationale doesn't transfer); 0 disables. One pre-existing test's
+  60s clock advance amended to 500ms (its base-less connection now rightly
+  expires; intent unchanged — routed to round 3 to confirm). Red: 10
+  typecheck + 12/12 regressions. Mutants m1/m2/m3 killed, m2/m3 distinct by
+  disjoint kill sets (slow-but-honest kills only m2's class; deadline-
+  exactness only m3's). Disclosed behavioral default change: base-less
+  connections fail after 45s by default (documented 0 opt-out) — routed to
+  round 3 for default-posture judgment (honest slow-server hazard vs owed-
+  event discipline). Serena ops: running MCP server predates the config fix
+  (language set fixed at startup) — TS symbolic tools error until a server
+  restart; wave fell back to Read/Grep/Edit per sanction. ROUND 3 (closing)
+  dispatched: t8r3 @ d5a62ad, base 6a9ba4e.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
