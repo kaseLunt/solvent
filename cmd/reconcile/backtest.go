@@ -432,96 +432,16 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	}
 
 	// ---- OBLIGATION 2: our eligibility boolean, three-state law -----------
-	// maxBorrowLT is computed by the SAME deployed loop shape in both frames —
-	// per-token floor, then sum (DebtManagerCore.sol:139-165) — so the ONLY
-	// difference between them is the engine-exact price. That is what makes the
-	// intra-block recomputation a causation test rather than a label.
-	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.st.collateral, parent.st.prices, parent.st.configs, decimals)
-	ourDebt := ourBefore
-	ourEligible := ourDebt.Cmp(ourMaxBorrow) > 0
-	margin := new(big.Int).Sub(ourDebt, ourMaxBorrow)
-	margin.Abs(margin)
-	res.MarginUSD6 = margin.String()
-
-	priceMoved, moveNote := priceFrameDelta(parent, exec)
-	res.PriceDeltaNote = moveNote
-	witnesses := v.sameBlockEarlier()
-	// THE CAUSATION REPLAY'S STARTING STATE (Codex round 4, M): the PARENT
-	// block's own position — the parent-boundary fold, the parent basket, the
-	// parent prices and thresholds. The replay applies the block's decoded
-	// pre-liquidation writes to THIS state in log order; the event-time debt
-	// (ourDebt) is deliberately NOT the start, because it already contains
-	// those writes' effects.
-	cause := replaySameBlockCauses(v.sameBlockWitnesses(), c.dmProxy, account, debtToken, replayParentState{
-		NormalizedAtParent: v.normalizedAtParent(),
-		IndexAtBlock:       v.indexAtBlock(),
-		Collateral:         parent.st.collateral,
-		Prices:             parent.st.prices,
-		Configs:            parent.st.configs,
-		Decimals:           decimals,
-	})
-
-	// THE CAUSATION TEST (round-1 finding 7). The old code labelled a case
-	// "flipped-with-witness" whenever ANY earlier log existed or ANY price
-	// differed — it never checked that the witness actually flipped the boolean,
-	// so an unrelated log in a busy block excused a genuine false negative. Now
-	// the boolean is RECOMPUTED in the execution frame, and the flip must be
-	// REPRODUCED: eligible-at-exec is required, not inferred.
-	execMaxBorrow, execPriced := maxBorrowAtFrame(parent.st.collateral, exec.st.prices, parent.st.configs, decimals)
-	execEligible := ourDebt.Cmp(execMaxBorrow) > 0
-	allPriced := parentPriced && execPriced
-
-	oblRow := p3Row{
-		Gate: gateBacktest, Subject: key, Leg: "obligation2: OUR eligibility at N-1",
-		Expected: "true (the contract executed the liquidation, so it was eligible in the execution frame)",
-		Actual:   fmt.Sprintf("%v (debt %s vs maxBorrowLT %s)", ourEligible, ourDebt, ourMaxBorrow),
-		Gated:    true,
-		Evidence: map[string]string{
-			"margin_usd6":                  margin.String(),
-			"our_max_borrow_lt_at_parent":  ourMaxBorrow.String(),
-			"our_max_borrow_lt_at_exec":    execMaxBorrow.String(),
-			"our_debt_usd6":                ourDebt.String(),
-			"recomputed_eligible_at_exec":  fmt.Sprintf("%v", execEligible),
-			"price_frame_delta":            moveNote,
-			"every_leg_priced_both_frames": fmt.Sprintf("%v", allPriced),
-			"same_block_earlier_logs":      fmt.Sprintf("%d", len(witnesses)),
-			"same_block_witness_detail":    strings.Join(witnesses, "; "),
-			"same_block_replay_applied":    fmt.Sprintf("%d", cause.Applied),
-		},
-	}
-	if len(cause.Notes) > 0 {
-		// Replay refusals and unmodelled writes are DISCLOSED, never silent:
-		// an undecodable or unreplayable witness leaves the case UNEXPLAINED,
-		// and the reviewer must be able to see why.
-		oblRow.Evidence["same_block_replay_notes"] = strings.Join(cause.Notes, "; ")
-	}
-	switch classifyIntraBlock(ourEligible, execEligible, allPriced, cause.Proven) {
-	case eligTrueAtParent:
-		res.EligibilityState = "true-at-parent"
-		oblRow.Verdict = verdictExact
-		oblRow.Note = "TRUE-AT-PARENT: exact pass. Our boolean, over our replayed debt and the parent frame's pinned collateral/prices/thresholds, agrees with the chain's decision"
-	case eligUnpriced:
-		// A leg we could not price in BOTH frames makes the recomputation
-		// impossible, and "cannot verify" is never advisory (round-11 F2).
-		res.EligibilityState = "unpriced-leg"
-		oblRow.Verdict = verdictWeldUnread
-		oblRow.Class = "intra-block-recompute-unpriced"
-		oblRow.Note = "false at the parent frame, and at least one collateral leg could not be priced in BOTH frames — so the intra-block flip can be neither reproduced nor refuted. Gated as unread rather than excused: an unpriceable leg is exactly how a false negative would hide behind a 'witness'"
-	case eligFlippedWithWitness:
-		res.EligibilityState = "flipped-in-block-with-custodied-witness"
-		oblRow.Verdict = verdictMarginal
-		oblRow.Class = verdictMarginal
-		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION REPLAYED FROM PRE-LIQUIDATION STATE: false at the parent frame (maxBorrowLT %s), and a CUSTODIED earlier log's DECODED write, applied to the parent state in log order, itself produces the false→true transition — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
-			ourMaxBorrow, strings.Join(cause.Causes, "; "), execMaxBorrow)
-		f.cite(tolIntraBlockMarginality)
-	default:
-		res.EligibilityState = verdictUnexplained
-		oblRow.Verdict = verdictUnexplained
-		oblRow.Class = verdictUnexplained
-		oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent frame with NO replayed pre-liquidation cause. maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (of which %d touch neither this account nor a token it holds, and %d decoded writes were applied to the replayed parent state WITHOUT producing the flip); price moved between frames: %v. A post-block price difference is NOT proof of a pre-liquidation flip, an unrelated log is not a witness, and CONTACT without a replayed transition is not causation (a repayment, a routine index tick, an LT-neutral config write) — the gated third state of chain-truth R1's law: a false negative the block's own custody does not explain",
-			ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, cause.Applied, priceMoved)
-	}
-	rows = append(rows, oblRow)
+	// The whole composition — parent predicate, causation replay, block-end
+	// recomputation, classification — lives in obligation2Eligibility so the
+	// EXACT production path is drivable by tests from fixtures/DB rows
+	// (Codex round 5: isolated classifier calls with hand-fed booleans let
+	// composition defects hide).
+	o2 := obligation2Eligibility(key, v, parent, exec, c.dmProxy, account, debtToken, ourBefore, decimals, f)
+	res.MarginUSD6 = o2.marginUSD6
+	res.PriceDeltaNote = o2.priceNote
+	res.EligibilityState = o2.eligState
+	rows = append(rows, o2.row)
 
 	// ---- OBLIGATION 3: seizure reconstruction, exact per branch ------------
 	rows = append(rows, reconstructSeizures(key, v, parent, decimals, f)...)
@@ -534,6 +454,147 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 
 	res.Evaluated = true
 	return rows, res, nil
+}
+
+// obl2Outcome carries obligation 2's composed verdict back into the case result.
+type obl2Outcome struct {
+	row        p3Row
+	eligState  string
+	marginUSD6 string
+	priceNote  string
+}
+
+// obligation2Eligibility is obligation 2's PRODUCTION COMPOSITION: the parent
+// eligibility predicate, the same-block causation replay, the block-end
+// recomputation, and the three-state classification, composed exactly as
+// runBacktestCase consumes them. It exists as a single function so the real
+// composition is testable end-to-end from fixtures/DB rows — the round-5
+// lesson is that hand-fed classifier booleans let composition defects hide.
+//
+// maxBorrowLT is computed by the SAME deployed loop shape in both frames —
+// per-token floor, then sum (DebtManagerCore.sol:139-165) — so the ONLY
+// difference between them is the engine-exact price. That is what makes the
+// intra-block recomputation a causation test rather than a label.
+func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exec execFrame,
+	dmProxy, account, debtToken common.Address, eventDebt *big.Int,
+	decimals map[common.Address]uint8, f *gateFrame) obl2Outcome {
+	var out obl2Outcome
+	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.st.collateral, parent.st.prices, parent.st.configs, decimals)
+
+	priceMoved, moveNote := priceFrameDelta(parent, exec)
+	out.priceNote = moveNote
+	witnesses := v.sameBlockEarlier()
+	// THE CAUSATION REPLAY'S STARTING STATE (Codex round 4, M): the PARENT
+	// block's own position — the parent-boundary fold, the parent basket, the
+	// parent prices and thresholds. The replay applies the block's decoded
+	// pre-liquidation writes to THIS state in log order; the event-time debt
+	// (eventDebt) is deliberately NOT the start, because it already contains
+	// those writes' effects.
+	cause := replaySameBlockCauses(v.sameBlockWitnesses(), dmProxy, account, debtToken, replayParentState{
+		NormalizedAtParent: v.normalizedAtParent(),
+		IndexAtBlock:       v.indexAtBlock(),
+		Collateral:         parent.st.collateral,
+		Prices:             parent.st.prices,
+		Configs:            parent.st.configs,
+		Decimals:           decimals,
+	})
+
+	// ONE SOURCE OF PARENT TRUTH (Codex round 5, H1): the parent predicate IS
+	// the replay's own initial eligibility — the parent fold at the
+	// event-sourced parent index against the parent frame's maxBorrowLT. The
+	// event-time fold (eventDebt) already reflects the block's earlier debt
+	// writes and the liquidation-time index, so a predicate computed from it
+	// recorded an index-caused in-block crossing as true-at-parent EXACT and
+	// lost the required marginal disclosure.
+	ourEligible := cause.InitialEligible
+	parentDebt := cause.ParentDebtUSD
+	parentIndexText := "unreconstructed (replay refused its inputs)"
+	if cause.ParentIndex != nil {
+		parentIndexText = cause.ParentIndex.String()
+	}
+	if parentDebt == nil {
+		// The replay refused its parent-state inputs, so there is no parent
+		// truth to print; the event-time fold stands in FOR DISPLAY ONLY.
+		// Classification is forced UNEXPLAINED by the completeness flag below.
+		parentDebt = eventDebt
+	}
+	margin := new(big.Int).Sub(parentDebt, ourMaxBorrow)
+	margin.Abs(margin)
+	out.marginUSD6 = margin.String()
+
+	// THE CAUSATION TEST (round-1 finding 7). The old code labelled a case
+	// "flipped-with-witness" whenever ANY earlier log existed or ANY price
+	// differed — it never checked that the witness actually flipped the boolean,
+	// so an unrelated log in a busy block excused a genuine false negative. Now
+	// the boolean is RECOMPUTED in the execution frame, and the flip must be
+	// REPRODUCED: eligible-at-exec is required, not inferred.
+	execMaxBorrow, execPriced := maxBorrowAtFrame(parent.st.collateral, exec.st.prices, parent.st.configs, decimals)
+	execEligible := eventDebt.Cmp(execMaxBorrow) > 0
+	allPriced := parentPriced && execPriced
+
+	oblRow := p3Row{
+		Gate: gateBacktest, Subject: key, Leg: "obligation2: OUR eligibility at N-1",
+		Expected: "true (the contract executed the liquidation, so it was eligible in the execution frame)",
+		Actual:   fmt.Sprintf("%v (parent-boundary debt %s vs maxBorrowLT %s)", ourEligible, parentDebt, ourMaxBorrow),
+		Gated:    true,
+		Evidence: map[string]string{
+			"margin_usd6":                      margin.String(),
+			"our_max_borrow_lt_at_parent":      ourMaxBorrow.String(),
+			"our_max_borrow_lt_at_exec":        execMaxBorrow.String(),
+			"our_debt_usd6":                    eventDebt.String(),
+			"our_debt_usd6_at_parent":          parentDebt.String(),
+			"parent_boundary_index":            parentIndexText,
+			"recomputed_eligible_at_exec":      fmt.Sprintf("%v", execEligible),
+			"price_frame_delta":                moveNote,
+			"every_leg_priced_both_frames":     fmt.Sprintf("%v", allPriced),
+			"same_block_earlier_logs":          fmt.Sprintf("%d", len(witnesses)),
+			"same_block_witness_detail":        strings.Join(witnesses, "; "),
+			"same_block_replay_applied":        fmt.Sprintf("%d", cause.Applied),
+			"same_block_replay_complete":       fmt.Sprintf("%v", cause.Complete()),
+			"same_block_replay_reversals":      fmt.Sprintf("%d", cause.Reversals),
+			"eligible_at_liquidation_boundary": fmt.Sprintf("%v", cause.BoundaryEligible),
+		},
+	}
+	if len(cause.Notes) > 0 {
+		// Replay refusals and unmodelled writes are DISCLOSED as evidence AND
+		// consumed as law: cause.Complete() feeds the classifier, so any
+		// refusal forces UNEXPLAINED (round 5, M — evidence-only Notes proved
+		// insufficient exactly as the declared rule warned).
+		oblRow.Evidence["same_block_replay_notes"] = strings.Join(cause.Notes, "; ")
+	}
+	switch classifyIntraBlock(ourEligible, execEligible, allPriced, cause.Proven, cause.Complete()) {
+	case eligTrueAtParent:
+		out.eligState = "true-at-parent"
+		oblRow.Verdict = verdictExact
+		oblRow.Note = "TRUE-AT-PARENT: exact pass. Our boolean, over the replay's own parent-boundary debt (the parent fold at the event-sourced parent index) and the parent frame's pinned collateral/prices/thresholds, agrees with the chain's decision"
+	case eligUnpriced:
+		// A leg we could not price in BOTH frames makes the recomputation
+		// impossible, and "cannot verify" is never advisory (round-11 F2).
+		out.eligState = "unpriced-leg"
+		oblRow.Verdict = verdictWeldUnread
+		oblRow.Class = "intra-block-recompute-unpriced"
+		oblRow.Note = "false at the parent frame, and at least one collateral leg could not be priced in BOTH frames — so the intra-block flip can be neither reproduced nor refuted. Gated as unread rather than excused: an unpriceable leg is exactly how a false negative would hide behind a 'witness'"
+	case eligFlippedWithWitness:
+		out.eligState = "flipped-in-block-with-custodied-witness"
+		oblRow.Verdict = verdictMarginal
+		oblRow.Class = verdictMarginal
+		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION REPLAYED FROM PRE-LIQUIDATION STATE: false at the parent boundary (maxBorrowLT %s), and a CUSTODIED earlier log's DECODED write, applied to the parent state in log order, itself produces the false→true transition AND holds to the liquidation boundary — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
+			ourMaxBorrow, strings.Join(cause.Causes, "; "), execMaxBorrow)
+		f.cite(tolIntraBlockMarginality)
+	default:
+		out.eligState = verdictUnexplained
+		oblRow.Verdict = verdictUnexplained
+		oblRow.Class = verdictUnexplained
+		if !cause.Complete() {
+			oblRow.Note = fmt.Sprintf("UNEXPLAINED: the causation replay is INCOMPLETE — %d refusal note(s), disclosed under same_block_replay_notes. A witness the model cannot FULLY apply applies NOTHING and certifies nothing, so the case resolves UNEXPLAINED regardless of any proven cause or block-end recomputation (Codex round 5, M: the declared unreplayable→UNEXPLAINED rule, now structural). maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (%d unrelated, %d applied); price moved between frames: %v",
+				len(cause.Notes), ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, cause.Applied, priceMoved)
+		} else {
+			oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent boundary with NO replayed pre-liquidation cause SURVIVING to the liquidation boundary (%d true→false reversal(s) cleared any earlier crossing — a reversed crossing cannot be what the liquidation executed against, Codex round 5 H2). maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (of which %d touch neither this account nor a token it holds, and %d decoded writes were applied to the replayed parent state WITHOUT producing a surviving flip); price moved between frames: %v. A post-block price difference is NOT proof of a pre-liquidation flip, an unrelated log is not a witness, and CONTACT without a replayed transition is not causation (a repayment, a routine index tick, an LT-neutral config write) — the gated third state of chain-truth R1's law: a false negative the block's own custody does not explain",
+				cause.Reversals, ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, cause.Applied, priceMoved)
+		}
+	}
+	out.row = oblRow
+	return out
 }
 
 // maxBorrowAtFrame runs the deployed getMaxBorrowAmount loop over one frame's
@@ -1367,6 +1428,10 @@ type causeReplay struct {
 	// write cannot either; an index update qualifies only when the decoded move
 	// actually crosses the threshold. None of that is special-cased — the
 	// arithmetic decides.
+	//
+	// Round 5 (H2): the crossing must also HOLD to the liquidation boundary.
+	// A later true→false write clears Proven (and the cause), because a
+	// reversed crossing cannot be what the liquidation executed against.
 	Proven bool
 	// Causes are the witnesses whose replayed write produced the flip, in log
 	// order, for the artifact.
@@ -1381,7 +1446,34 @@ type causeReplay struct {
 	// writes the single-debt-token model cannot replay. A noted event never
 	// contributes to Proven — the gate fails UNEXPLAINED rather than excuses.
 	Notes []string
+	// InitialEligible is the account's eligibility AT THE PARENT BOUNDARY as
+	// the replay itself reconstructs it (Codex round 5, H1): the parent fold
+	// at the reconstructed parent index against the parent frame's
+	// maxBorrowLT. It is the production classifier's parent predicate — the
+	// same value the replay starts from, by construction, never a second
+	// computation.
+	InitialEligible bool
+	// ParentDebtUSD / ParentIndex are the reconstructed parent-boundary debt
+	// (floor bridge) and index behind InitialEligible, for the artifact. Nil
+	// when the replay refused its inputs.
+	ParentDebtUSD *big.Int
+	ParentIndex   *big.Int
+	// BoundaryEligible is the replayed eligibility AFTER the last applied
+	// pre-liquidation write — the state the liquidation actually executed
+	// against (Codex round 5, H2). Proven implies BoundaryEligible by
+	// construction: a true→false transition clears the earlier cause.
+	BoundaryEligible bool
+	// Reversals counts true→false transitions during the replay; each one
+	// invalidates (clears) any earlier proven cause.
+	Reversals int
 }
+
+// Complete reports whether the replay FULLY modelled every witness it did not
+// classify as unrelated (Codex round 5, M): no refusals, no undecodable
+// payloads, no cross-token or unmodellable writes, no clamps. The classifier
+// CONSUMES this — any relevant refusal forces UNEXPLAINED regardless of
+// Proven/execEligible. Notes stay as evidence, but the law lives here.
+func (r causeReplay) Complete() bool { return len(r.Notes) == 0 }
 
 // replaySameBlockCauses REPLAYS the ordered earlier witnesses from the parent
 // state and decides whether one of them actually flipped this account's
@@ -1472,6 +1564,17 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 		return mulDivFloor(normalized, index).Cmp(maxBorrow) > 0
 	}
 	prev := eligibleNow()
+	// ONE SOURCE OF PARENT TRUTH (Codex round 5, H1): the replay's own
+	// reconstruction of the parent boundary — the parent fold at the
+	// event-sourced parent index — is exposed as the production classifier's
+	// parent predicate. One function returns both the starting state and the
+	// initial eligibility, so the predicate and the replay can never diverge:
+	// the event-time fold (ourBefore) already contains the block's earlier
+	// writes and the liquidation-time index, which is exactly how an
+	// index-caused crossing masqueraded as true-at-parent.
+	out.InitialEligible = prev
+	out.ParentDebtUSD = mulDivFloor(normalized, index)
+	out.ParentIndex = new(big.Int).Set(index)
 	applied := func(w snapshotdb.T6Witness, what string) {
 		out.Applied++
 		cur := eligibleNow()
@@ -1482,6 +1585,17 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 			// LT-raising write simply never lands here.
 			out.Proven = true
 			out.Causes = append(out.Causes, fmt.Sprintf("log_index %d %s — the replayed parent state crosses from ineligible to ELIGIBLE at this write", w.LogIndex, what))
+		}
+		if prev && !cur {
+			// ELIGIBILITY MUST HOLD TO THE BOUNDARY (Codex round 5, H2): a
+			// true→false transition INVALIDATES any earlier crossing. Proven
+			// used to latch, so an index-then-repaid block retained its stale
+			// log-2 cause while the actual liquidation-time crossing was an
+			// unproven price move. The cause is cleared, never carried; a
+			// later genuine re-crossing records a fresh one.
+			out.Proven = false
+			out.Causes = nil
+			out.Reversals++
 		}
 		prev = cur
 	}
@@ -1524,29 +1638,51 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 				note(w, "Liquidated for THIS account did not decode (%v) — cannot be applied, so it can prove nothing", err)
 				continue
 			}
-			if strings.EqualFold(w.Topic3Addr, debt) {
-				normalized.Sub(normalized, usdToNormalizedFloor(liqUSD, index))
-				clampDebt(w)
-			} else {
-				note(w, "earlier seizure repays a DIFFERENT borrow token (0x%s); the debt model tracks only the case's debt token, so only its basket effect is replayed", w.Topic3Addr)
+			// ALL-OR-NOTHING (Codex round 5, M): a liquidation the model
+			// cannot FULLY replay applies NOTHING. Removing the seized
+			// collateral while refusing an unmodellable debt leg is how a
+			// partial replay manufactured a crossing — debt held flat against
+			// a shrunken basket. The refusal is noted (tainting Complete) and
+			// the replayed state is untouched.
+			if !strings.EqualFold(w.Topic3Addr, debt) {
+				note(w, "earlier seizure repays a DIFFERENT borrow token (0x%s); the single-debt-token model cannot replay its debt leg, so NOTHING of this liquidation is applied — a partially replayed basket removal would manufacture a crossing", w.Topic3Addr)
+				continue
 			}
+			unmatched := ""
 			for _, s := range seized {
 				if s.Amount.Sign() == 0 {
 					continue
 				}
-				found := false
+				inBasket := false
+				for i := range collateral {
+					if collateral[i].token == s.Token {
+						inBasket = true
+						break
+					}
+				}
+				if !inBasket {
+					unmatched = s.Token.Hex()
+					break
+				}
+			}
+			if unmatched != "" {
+				note(w, "seized token %s is not in the parent basket — the basket model disagrees with the chain, so NOTHING of this liquidation is applied", unmatched)
+				continue
+			}
+			normalized.Sub(normalized, usdToNormalizedFloor(liqUSD, index))
+			clampDebt(w)
+			for _, s := range seized {
+				if s.Amount.Sign() == 0 {
+					continue
+				}
 				for i := range collateral {
 					if collateral[i].token == s.Token {
 						collateral[i].amount.Sub(collateral[i].amount, s.Amount)
 						if collateral[i].amount.Sign() < 0 {
 							collateral[i].amount.SetInt64(0)
 						}
-						found = true
 						break
 					}
-				}
-				if !found {
-					note(w, "seized token %s is not in the parent basket; nothing to remove", s.Token.Hex())
 				}
 			}
 			applied(w, fmt.Sprintf("Liquidated for THIS account (earlier pass: %s USD of debt repaid, %d elements seized, bonus included in the amounts)", liqUSD, len(seized)))
@@ -1632,6 +1768,9 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 			out.Unrelated++
 		}
 	}
+	// H2's boundary state: the eligibility the liquidation actually executed
+	// against, after the LAST applied pre-liquidation write.
+	out.BoundaryEligible = prev
 	return out
 }
 
@@ -1820,9 +1959,24 @@ const (
 // execEligible must actually be true, i.e. the SAME deployed loop must produce
 // eligibility at execution-frame prices. A witness that does not flip the boolean
 // explains nothing.
-func classifyIntraBlock(ourEligible, execEligible, allPriced, causeProven bool) string {
+//
+// ROUND 5 (H1, M): parentEligible is the REPLAY's own parent-boundary
+// reconstruction (causeReplay.InitialEligible), never a second computation from
+// the event-time fold; replayComplete is causeReplay.Complete(), and an
+// incomplete replay resolves UNEXPLAINED before anything else is consulted.
+func classifyIntraBlock(parentEligible, execEligible, allPriced, causeProven, replayComplete bool) string {
 	switch {
-	case ourEligible:
+	case !replayComplete:
+		// THE STRUCTURAL COMPLETENESS LAW (Codex round 5, M): a replay that
+		// could not fully model the block's custodied writes proves nothing
+		// and certifies nothing — an unreplayable or refused write resolves
+		// UNEXPLAINED regardless of every other input, including a proven
+		// cause (the unmodelled write moves the real account's boolean too)
+		// and including the parent predicate (whose reconstruction rests on
+		// the same replay). Notes remain the evidence; this arm is the law
+		// they previously only narrated.
+		return eligUnexplainedOutcome
+	case parentEligible:
 		return eligTrueAtParent
 	case !allPriced:
 		return eligUnpriced
@@ -1830,7 +1984,9 @@ func classifyIntraBlock(ourEligible, execEligible, allPriced, causeProven bool) 
 		// A custodied PRE-liquidation write moved an input to this account's boolean,
 		// AND the recomputation corroborates the flip. Both are required: the cause is
 		// the proof, the recomputation is only corroboration (it reads post-block
-		// state), and neither alone earns a marginal pass.
+		// state), and neither alone earns a marginal pass. Proven itself now embeds
+		// round-5 H2: the crossing must have HELD to the liquidation boundary — a
+		// reversed crossing was cleared inside the replay.
 		return eligFlippedWithWitness
 	default:
 		// Includes the round-1 false-marginal shape: a post-block price difference or

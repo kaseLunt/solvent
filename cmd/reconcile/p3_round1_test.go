@@ -348,24 +348,37 @@ func TestAdapterFloorStaysThreeEvenWithThinHistory(t *testing.T) {
 // now requires a CUSTODIED pre-liquidation write that touches an input to this
 // account's boolean; the recomputation is corroboration only.
 func TestIntraBlockClassifierRequiresAProvenCause(t *testing.T) {
-	// ourEligible: exact pass regardless.
-	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, false, true, false))
+	// parentEligible (the replay's own parent-boundary truth): exact pass —
+	// provided the replay is COMPLETE.
+	require.Equal(t, eligTrueAtParent, classifyIntraBlock(true, false, true, false, true))
 
 	// A proven cause AND corroboration: marginal.
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true))
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, true, true))
 
 	// THE KILL: corroboration WITHOUT a proven cause is UNEXPLAINED. This is the
 	// post-block-price shape Codex named — execEligible true, no custodied cause.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, false, true),
 		"a post-block price difference is not proof of a pre-liquidation flip; without a custodied cause this must be UNEXPLAINED")
 
 	// A proven cause with NO corroboration is also unexplained: we could not
 	// reproduce the flip at all, so the cause did not demonstrably do it.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, true))
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, false, true, true, true))
 
 	// An unpriceable leg gates rather than being excused, whatever else holds.
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, true))
-	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false))
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, true, false, true, true))
+	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false, true))
+
+	// ROUND 5 (M): an INCOMPLETE replay resolves UNEXPLAINED before anything
+	// else is consulted — a proven, corroborated cause cannot outrank a
+	// refused write (the unmodelled write moves the real boolean too), and
+	// neither can the parent predicate, whose reconstruction rests on the
+	// same replay.
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, true, false),
+		"a proven cause inside an incomplete replay must not earn the marginal pass — this is the m4 law")
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(true, true, true, true, false),
+		"even a true parent predicate is uncertifiable when the replay that produced it is incomplete")
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, false, false, false),
+		"incompleteness outranks the unpriced refusal too: the replay's own refusal is the first law")
 }
 
 // TestReplaySameBlockCausesProvesOnlyRelevantWrites is the causation replay's

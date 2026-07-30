@@ -204,7 +204,7 @@ func TestRepaidThenPriceAfterIsUnexplained(t *testing.T) {
 	// The block-end recomputation says eligible (the price moved AFTER the
 	// liquidation). Without a replayed pre-liquidation cause that is the
 	// UNEXPLAINED third state — the honest failing verdict.
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, r.Proven),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
 		"Repaid-before + price-after must be UNEXPLAINED, not marginal-disclosed")
 }
 
@@ -230,7 +230,7 @@ func TestRoutineIndexUpdateThenPriceAfterIsUnexplained(t *testing.T) {
 	require.Equal(t, 1, r.Applied)
 	require.False(t, r.Proven,
 		"a routine index tick that does not cross the threshold is not a cause; before this fix ANY debt-token index update set Proven")
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, r.Proven),
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
 		"index-tick-before + price-after must be UNEXPLAINED, not marginal-disclosed")
 }
 
@@ -252,7 +252,7 @@ func TestConfigWriteWithoutLTCutThenPriceAfterIsUnexplained(t *testing.T) {
 
 		require.Equal(t, 1, r.Applied, "a config write on a held token is decoded and applied")
 		require.False(t, r.Proven, "an LT-neutral write moves no input of the boolean downward; it cannot be the cause")
-		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, r.Proven))
+		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
 	})
 
 	t.Run("LT raised (the captured first-time set)", func(t *testing.T) {
@@ -266,7 +266,7 @@ func TestConfigWriteWithoutLTCutThenPriceAfterIsUnexplained(t *testing.T) {
 
 		require.Equal(t, 1, r.Applied)
 		require.False(t, r.Proven, "an LT-raising write cannot cause a healthy→liquidatable flip")
-		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, r.Proven))
+		require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
 	})
 }
 
@@ -301,7 +301,7 @@ func TestIndexMoveThatCrossesTheThresholdIsProven(t *testing.T) {
 		"the decoded index move crosses the threshold in the replayed state — this is a genuinely caused flip and must stay a proven cause")
 	require.Len(t, r.Causes, 1)
 	require.Contains(t, r.Causes[0], "InterestIndexUpdated")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, r.Proven),
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
 		"a replayed pre-liquidation cause plus corroboration is the disclosed marginal state")
 }
 
@@ -321,7 +321,7 @@ func TestLTCollapseOnHeldTokenIsProven(t *testing.T) {
 
 	require.True(t, r.Proven, "a decoded LT cut that drops maxBorrowLT below the debt is a replayed cause")
 	require.Contains(t, r.Causes[0], "CollateralTokenConfigSet")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, r.Proven))
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
 }
 
 // TestDebtTokenBorrowThatCrossesTheThresholdIsProven drives the REAL captured
@@ -342,7 +342,7 @@ func TestDebtTokenBorrowThatCrossesTheThresholdIsProven(t *testing.T) {
 
 	require.True(t, r.Proven, "a decoded borrow of the debt token that crosses the threshold is a replayed cause")
 	require.Contains(t, r.Causes[0], "Borrowed")
-	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(false, true, true, r.Proven))
+	require.Equal(t, eligFlippedWithWitness, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()))
 }
 
 // --- ordering ---------------------------------------------------------------
@@ -408,6 +408,7 @@ func TestCrossTokenBorrowIsDisclosedNotProven(t *testing.T) {
 	r := replaySameBlockCauses([]snapshotdb.T6Witness{w}, replayTestDM, acct, replayTestUSDC, st)
 	require.False(t, r.Proven, "the single-debt-token model cannot replay a cross-token borrow; refusing honestly beats excusing")
 	require.NotEmpty(t, r.Notes)
-	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(false, true, true, r.Proven),
+	require.False(t, r.Complete(), "the refusal is structural (round 5, M), not evidence-only")
+	require.Equal(t, eligUnexplainedOutcome, classifyIntraBlock(r.InitialEligible, true, true, r.Proven, r.Complete()),
 		"an unreplayable write leaves the case UNEXPLAINED — the run fails and the reviewer sees why")
 }
