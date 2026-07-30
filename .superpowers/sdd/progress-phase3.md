@@ -919,6 +919,22 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   gated, floors over the evaluable set. NEXT: risk-quant re-read (rev-3, expects
   to flip) + Codex micro-fix round 2 IN PARALLEL; then Codex rev-3 round; then
   Codex Task 6 round 1; then daemon restart (13+14) → make reconcile.
+- **RISK-QUANT RE-READ ON REV-3: NUMBERS HOLD, blocking list EMPTY** (verdict
+  flipped at 559828c). All four items verified on committed code with every
+  integer recomputed independently; the E2E carry vector traced through
+  ComputeAaveHealth itself (inner quotient 7270621702811489680000 visible —
+  proves the composite is CALLED, not a lookalike); its own earlier 20k loop
+  corroborated the sweep (2 hits, offsets 11500/13527, always +1); guard
+  placement accepted (nothing above it does arithmetic; input-fault-first
+  precedence defensible); liqprice half-up-sliver derivation endorsed (chain
+  grace strictly below ceil(P*) — conservative). ONE CONDITION on the
+  acceptance-run second pin: the fresh-pin 12/12 re-run inside make reconcile
+  must be a GATED cohort (totalDebtBase AND healthFactor exact or the run
+  fails), not informational — ALREADY SATISFIED by the Task 6 HF gate's
+  exact-gated design; noted so the acceptance review checks it. Clear for the
+  rev-3 Codex round (queued behind the micro-fix round in flight). The money-
+  code protocol closed its loop twice today: Opus built → fable refuted its own
+  prior approximation from source → Opus rebuilt → fable re-derived and flipped.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
