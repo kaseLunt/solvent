@@ -602,6 +602,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   on the same lesson — every input the OUTPUT depends on must be in the identity,
   and everything the identity admits must be verified on adoption. Task 5 open,
   round 4 pending.
+- FIX WAVE 3 LANDED — 906af58 (2026-07-29 18:34; lease renewal 31e3459 preceded it
+  after the 8h expiry blocked the commit — routine mechanics). All four round-3
+  findings fixed with revert-discrimination proof: (1) identity consumes
+  vector.consumedCursors() — ONE source of truth, no parallel filter; live
+  regression = Codex's exact chainlink-cursor sequence, identical keys + G5
+  retained; counterweight proves consumed cursors still move it. (2) deterministic
+  freshness phase via PriceFreshnessPhase SHARED with JudgePriceInput (served
+  verdict and identity cannot disagree); boundaries pinned 180/181 + 360/361s;
+  IgnoresTheClock upgraded to output-equivalence. (3) AlgorithmRevision constant
+  (bump-list names internal/risk) + Registry.Fingerprint(); wiring proven against
+  the PERSISTED vector. (4) adoption shares riskBatchCompleteConjuncts with the
+  serving path; REPLACE-not-refuse chosen (refusal livelocks under a deterministic
+  key; replace conditioned on unservable + identity-verified + in-tx delete);
+  same-key partial-restore + 5 per-relation negatives. WAVE'S OWN HONESTY: mutant 3
+  initially SURVIVED (function-level tests can't prove daemon wiring — fixed with
+  persisted readback); the e2e freshness test proven NON-isolating (as-of shift
+  moves the digest) and replaced by the byte-identical-rows elapsed-time test.
+  INTEGRATOR: build/vet 0; clean-cache full suite 16/16; riskd 3x isolated + 2x
+  under concurrent store load. **ONE UNREPRODUCED TRANSIENT on the record**: first
+  post-wave make test FAILED in cmd/riskd (output lost to /dev/null — lesson:
+  never discard first-run output), unreproduced in 7 runs incl. load; suspected
+  the load-bearing 5s-sleep elapsed-time test; hardening owed if it recurs;
+  disclosed to Codex round 4 for a ruling on the test's timing assumptions.
+  NEXT: Codex round 4 on 789a19e..906af58 — approve closes Task 5.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
