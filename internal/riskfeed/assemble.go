@@ -126,6 +126,11 @@ type AssembleResult struct {
 	// re-assemble the book from the persisted rows — which would be a second
 	// assembly, and a second place for it to be wrong.
 	Book []risk.PositionInput
+	// Judged is every price witness whose freshness actually influenced this
+	// batch, with the phase it was judged under. It feeds BOTH the materialization
+	// identity (so only output-relevant phases can change a key) and the
+	// scheduler's next-boundary deadline (so a crossing wakes the daemon).
+	Judged []JudgedPrice
 }
 
 // PriceKeyID is the stable identity of one price witness, used for the
@@ -231,6 +236,7 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 			priceReorg: priceReorg[cfg.Aave.PriceEngine],
 			balanceBlk: aaveCursor.LastBlock,
 			paramBlk:   aaveParamCursor.LastBlock,
+			judged:     &res.Judged,
 		})
 		if err != nil {
 			return AssembleResult{}, err
@@ -260,6 +266,7 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 			priceReorg: priceReorg[cfg.DM.PriceEngine],
 			balanceBlk: dmCursor.LastBlock,
 			paramBlk:   dmCursor.LastBlock,
+			judged:     &res.Judged,
 		})
 		if err != nil {
 			return AssembleResult{}, err
@@ -290,6 +297,10 @@ type assembleArgs struct {
 	priceReorg bool
 	balanceBlk uint64
 	paramBlk   uint64
+	// judged collects the price witnesses that ACTUALLY influenced this batch's
+	// output, in judging order. Only these enter the materialization identity —
+	// see JudgedPrice.
+	judged *[]JudgedPrice
 }
 
 // assembleAave builds one Aave position, or a refusal.
@@ -642,8 +653,25 @@ func judge(a assembleArgs, spec AssetSpec) (PriceJudgement, error) {
 		rr := r
 		row = &rr
 	}
-	return JudgePriceInput(spec.Asset, spec.Key, row, a.cfg.Budget, a.now,
+	j, err := JudgePriceInput(spec.Asset, spec.Key, row, a.cfg.Budget, a.now,
 		a.cfg.PrevPrices[id], a.cfg.StepBps, a.priceReorg)
+	if err != nil {
+		return j, err
+	}
+	// Record it only when freshness was CONSULTED. A G2 return, or an absent row,
+	// consulted no phase — and a phase that influenced nothing must not be able to
+	// change the identity of an output-identical batch.
+	if j.PhaseRelevant && a.judged != nil {
+		*a.judged = append(*a.judged, JudgedPrice{
+			ChainID: spec.Key.ChainID,
+			Asset:   spec.Key.Asset,
+			Source:  spec.Key.Source,
+			Phase:   j.Phase,
+			AsOf:    j.AsOf,
+			HasAsOf: !j.AsOf.IsZero(),
+		})
+	}
+	return j, nil
 }
 
 // ---------------------------------------------------------------------------

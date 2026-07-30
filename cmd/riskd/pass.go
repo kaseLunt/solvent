@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/kaselunt/solvent/internal/riskfeed"
 	"github.com/kaselunt/solvent/internal/store"
@@ -52,6 +53,14 @@ type passResult struct {
 	// test (and an operator reading logs) can see that two computations of the
 	// same materialization really do derive the same name.
 	MaterializationKey string
+	// FreshnessDeadline is the earliest instant at which one of this batch's JUDGED
+	// prices crosses a freshness boundary, zero when none will. The poll loop arms
+	// on it: nothing in the cursor/epoch/sweep vector moves when a price merely
+	// AGES, so without this a stopped poller leaves a "fresh" verdict standing
+	// forever instead of gaining G4 and then refusing at G1.
+	FreshnessDeadline time.Time
+	// ReadAt is the effective snapshot clock the pass judged against.
+	ReadAt time.Time
 }
 
 // runPass executes one materialization pass.
@@ -117,6 +126,10 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 		return res, fmt.Errorf("%w: gated %s, snapshot %s", errVectorDrift, vector, reread)
 	}
 
+	// The clock skew is zero in production; see daemonConfig.clockSkew.
+	inputs.ReadAt = inputs.ReadAt.Add(cfg.skew())
+	res.ReadAt = inputs.ReadAt
+
 	// Step 4 — release the snapshot BEFORE computing.
 	if err := tx.Commit(ctx); err != nil {
 		return res, fmt.Errorf("commit risk snapshot: %w", err)
@@ -158,6 +171,7 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	// which is exactly how a restart erases a large-step flag.
 	identity := riskfeed.ComputeMaterializationIdentity(
 		vector.consumedCursors(), vector.MaxEpochs, vector.consumedSweeps(), inputs,
+		assembled.Judged,
 		riskfeed.IdentityPolicy{
 			BudgetSeconds:       cfg.Budget.Seconds,
 			StepBps:             cfg.StepBps,
@@ -186,6 +200,10 @@ func runPass(ctx context.Context, s *store.Store, cfg *daemonConfig) (passResult
 	})
 	if err != nil {
 		return res, err
+	}
+
+	if deadline, ok := riskfeed.NextFreshnessDeadline(assembled.Judged, cfg.Budget, inputs.ReadAt); ok {
+		res.FreshnessDeadline = deadline
 	}
 
 	res.BatchID = batchID

@@ -186,6 +186,40 @@ type PriceJudgement struct {
 	Flag     string // set for G4/G5; empty otherwise
 	Input    risk.PriceInput
 	Snapshot store.RiskPriceInputWrite
+
+	// Phase is the freshness phase this judgement was made under, and
+	// PhaseRelevant reports whether freshness was CONSULTED at all.
+	//
+	// The distinction is the gate ordering. G2 (an unacknowledged price reorg)
+	// returns before any freshness reasoning happens, so no phase influenced the
+	// output and none may enter the materialization identity — otherwise a
+	// boundary crossing on a row that was never freshness-judged would mint a new
+	// key for an output-identical batch, which is how a large-step warning gets
+	// overwritten by an unflagged recomputation.
+	Phase         string
+	PhaseRelevant bool
+	// AsOf is the chain-asserted as-of the phase was measured from, carried so a
+	// scheduler can compute WHEN this input next crosses a boundary. Zero when
+	// the row carried no as-of.
+	AsOf time.Time
+}
+
+// JudgedPrice is one price witness that ACTUALLY INFLUENCED a batch's output,
+// with the freshness phase it was judged under.
+//
+// Only these belong in the materialization identity. `snapshotSpec` fetches every
+// witness the registry declares, but `Assemble` judges only the assets referenced
+// by current positions — and stops early on a refusal. A registered asset with no
+// position affects no persisted position, disclosure or aggregate, so letting its
+// boundary crossings change the identity reintroduces exactly the
+// warning-erasure the consumed-input scoping exists to prevent.
+type JudgedPrice struct {
+	ChainID uint64
+	Asset   []byte
+	Source  string
+	Phase   string
+	AsOf    time.Time
+	HasAsOf bool
 }
 
 // JudgePriceInput evaluates one candidate price against its budget at the
@@ -233,11 +267,15 @@ func JudgePriceInput(
 	// the row may describe a block the raw rewind already deleted. That is a
 	// custody failure, and it outranks any freshness judgement made over it.
 	if reorgUnacked {
+		// FRESHNESS WAS NEVER CONSULTED on this path, so no phase influenced the
+		// output and none may enter the identity. PhaseRelevant stays false.
 		j.Gate, j.Snapshot.Verdict = GatePriceReorg, VerdictReorgUnacked
 		return j, nil
 	}
 
 	if row == nil {
+		// An absent row has no phase to cross. Its absence is already carried by
+		// the substrate digest, so nothing is lost by leaving PhaseRelevant false.
 		j.Gate, j.Snapshot.Verdict = GateMissingInput, VerdictMissing
 		return j, nil
 	}
@@ -258,6 +296,12 @@ func JudgePriceInput(
 	// "fresh" disclosure standing over the stale flag or G1 refusal it had just
 	// computed.
 	phase := PriceFreshnessPhase(*row, budget, now)
+	// From here on freshness HAS been consulted, so the phase is output-relevant
+	// and belongs in the materialization identity.
+	j.Phase, j.PhaseRelevant = phase, true
+	if row.HasSourceAsOf {
+		j.AsOf = row.SourceAsOf.UTC()
+	}
 
 	if phase == VerdictNoAsOf {
 		j.Gate, j.Snapshot.Verdict = GateMissingInput, VerdictNoAsOf

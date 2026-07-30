@@ -269,33 +269,25 @@ func TestRiskdFreshnessCrossingProducesANewBatch(t *testing.T) {
 		"the served verdict reflects the crossing rather than a stale 'fresh'")
 }
 
-// TestRiskdFreshnessPhaseCrossesOnElapsedTimeAlone isolates the freshness phase in
-// a way the test above cannot.
+// TestRiskdFreshnessPhaseCrossesOnAdvancingClockAlone isolates the freshness phase
+// DETERMINISTICALLY.
 //
-// TestRiskdFreshnessCrossingProducesANewBatch shifts `source_as_of`, which also
-// moves the substrate digest — so it proves the end-to-end behaviour but does NOT
-// prove the phase is load-bearing. Here the price rows are byte-identical and
-// untouched; the ONLY thing that changes between the two passes is elapsed database
-// time crossing the budget and ceiling. That is the production scenario exactly: a
-// poller stops and nothing in the database changes at all.
+// The earlier version seeded an as-of from PROCESS time, gave it a two-second fresh
+// window, and then did database work plus a full pass before asserting freshness — so
+// a loaded PostgreSQL or a scheduler hiccup could consume the window before the first
+// assertion and produce a nondeterministic stale/over-ceiling result. It also slept
+// five seconds to reach the later ceiling. Both are gone: the as-of is anchored to the
+// DATABASE clock (and the fresh premise is asserted, not assumed), and time advances
+// through the clock-skew seam. There is no sleep and no wall-clock deadline anywhere
+// in it, so it cannot flap.
 //
-// The budget is deliberately tiny so real time crosses it. The sleep is
-// load-bearing rather than incidental — the database clock cannot be frozen from
-// here, and elapsed time IS the variable under test.
-//
-// MUTANT THIS KILLS: remove the freshness-phase section from the identity. The
-// second pass then derives the first pass's key over byte-identical rows, adopts the
-// batch whose disclosure says "fresh", and the newly-computed over-ceiling refusal
-// is discarded.
-func TestRiskdFreshnessPhaseCrossesOnElapsedTimeAlone(t *testing.T) {
+// MUTANT THIS KILLS: remove the freshness-phase section from the identity. The second
+// pass then derives the first pass's key over byte-identical rows, adopts the batch
+// whose disclosure says "fresh", and the newly-computed over-ceiling refusal is
+// discarded.
+func TestRiskdFreshnessPhaseCrossesOnAdvancingClockAlone(t *testing.T) {
 	f := newRiskdFixture(t)
-	f.seedHealthyAavePosition(t)
-	// Budget 2s ⇒ ceiling 4s. The base fixture seeds its as-of 30s in the past,
-	// which under this budget is ALREADY over-ceiling — so a genuinely fresh row is
-	// seeded at a new block first. Without it both passes sit in the same
-	// (over-ceiling) phase and the test would pass for no reason.
-	f.seedPricesAt(t, fxPriceBlock+5, "300000000000", "100000000")
-	f.cfg.Budget = riskfeed.PriceBudget{Seconds: 2}
+	f.seedFreshPrices(t)
 
 	fresh, err := runPass(f.ctx, f.store, f.cfg)
 	require.NoError(t, err)
@@ -306,17 +298,21 @@ func TestRiskdFreshnessPhaseCrossesOnElapsedTimeAlone(t *testing.T) {
 		"pass 1 must be inside the FRESH phase, or there is no crossing to observe")
 
 	rowsBefore := priceRowFingerprint(t, f)
+	cursorsBefore := cursorSnapshot(t, f)
 
-	// Only time passes. No cursor moves, no row is written, no poller runs.
-	time.Sleep(5 * time.Second)
+	// ONLY THE CLOCK MOVES. The ceiling is 2x180s; +400s is past it.
+	advanced := *f.cfg
+	advanced.clockSkewNanos = nil
+	advanced.setSkew(400 * time.Second)
 
 	require.Equal(t, rowsBefore, priceRowFingerprint(t, f),
-		"the price rows must be BYTE-IDENTICAL across the two passes, or this test is not isolating elapsed time")
+		"the price rows must be BYTE-IDENTICAL, or this test is not isolating the clock")
+	require.Equal(t, cursorsBefore, cursorSnapshot(t, f))
 
-	crossed, err := runPass(f.ctx, f.store, f.cfg)
+	crossed, err := runPass(f.ctx, f.store, &advanced)
 	require.NoError(t, err)
 	require.NotEqual(t, fresh.MaterializationKey, crossed.MaterializationKey,
-		"elapsed time crossing the ceiling is a NEW materialization even over identical rows")
+		"an advancing clock crossing the ceiling is a NEW materialization even over identical rows")
 	require.Greater(t, crossed.BatchID, fresh.BatchID)
 	require.Equal(t, 1, crossed.Refused, "and the refusal it computed is the one that gets published")
 
@@ -326,18 +322,126 @@ func TestRiskdFreshnessPhaseCrossesOnElapsedTimeAlone(t *testing.T) {
 	require.Equal(t, riskfeed.VerdictOverCeiling, served[0].Verdict)
 }
 
-// priceRowFingerprint renders every price row's value-bearing columns, so a test can
-// prove the substrate did not move.
-func priceRowFingerprint(t *testing.T, f *riskdFixture) string {
+// TestRiskdUnusedRegisteredAssetCrossingDoesNotChangeTheIdentity is the round-4
+// [medium] finding.
+//
+// snapshotSpec fetches EVERY witness the registry declares, but Assemble judges only
+// the assets referenced by current positions. So a registered asset with NO position
+// affects no persisted position, disclosure or aggregate — and must not be able to
+// change the materialization identity by crossing a freshness boundary. When it
+// could, a restart declined to adopt, recomputed against the post-move baseline, and
+// wrote an output-equivalent but UNFLAGGED newer batch over a large-step warning:
+// exactly the erasure consumed-input scoping exists to prevent.
+//
+// MUTANT THIS KILLS: classify every row in inputs.Prices instead of the judged set.
+// Asset B's crossing then changes the key, the restart does not adopt, and the G5
+// assertion at the end fails.
+func TestRiskdUnusedRegisteredAssetCrossingDoesNotChangeTheIdentity(t *testing.T) {
+	f := newRiskdFixture(t)
+	f.seedFreshPrices(t)
+
+	// Asset B is REGISTERED (so it is fetched) but held by nobody: an OP Debt
+	// Manager collateral token, while the only position in this fixture is on Aave.
+	unusedAsset := common20(fxDMCollateral)
+	_, err := f.store.ApplyPolledPrices(f.ctx, "prices:poll:10", 10, []store.PriceObservation{
+		{Asset: unusedAsset, Source: "priceproviderv2", Price: mustBig("3000000000"), Decimals: 6,
+			BlockNumber: 154790000, SourceAsOf: time.Now().UTC()},
+	}, 154790000, store.PollAnchor{BlockNumber: 154790000, BlockHash: hash32(0x77)})
+	require.NoError(t, err)
+	// Age it so a modest clock advance crosses ITS staleness boundary while the used
+	// Aave assets stay comfortably fresh.
+	_, err = f.admin.Exec(f.ctx,
+		`UPDATE prices SET source_as_of = now() - make_interval(secs => 150) WHERE chain_id = 10`)
+	require.NoError(t, err)
+
+	// A BASELINE pass first: G5 compares against what the previous batch disclosed,
+	// so without one there is no step to flag and the test would prove nothing.
+	baseline, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+
+	// A large downward move on the USED asset: the next pass flags it.
+	f.seedPricesAt(t, fxPriceBlock+10, "180000000000", "100000000")
+	_, err = f.admin.Exec(f.ctx, `UPDATE prices SET source_as_of = now() WHERE chain_id = 1`)
+	require.NoError(t, err)
+
+	flagged, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+	require.Greater(t, flagged.BatchID, baseline.BatchID)
+	require.Equal(t, 1, flagged.Flagged)
+	require.Contains(t, aavePositionOf(t, f, flagged.BatchID).Flags, riskfeed.FlagLargeStep)
+
+	// PROVE the premise: asset B is in the FETCHED key set, and never judged.
+	require.True(t, f.registryDeclares(unusedAsset), "asset B must be in the fetched key set")
+	require.False(t, f.judgedInBatch(t, flagged.BatchID, unusedAsset),
+		"and it must NOT appear as a judged disclosure on the batch")
+
+	// THE RESTART, clock advanced 30s: asset B moves 150s -> 180s+30s = past its
+	// staleness boundary, while the used Aave assets (as-of now) stay fresh.
+	restarted := f.restartedConfig(t)
+	restarted.clockSkewNanos = nil
+	restarted.setSkew(40 * time.Second)
+
+	afterRestart, err := runPass(f.ctx, f.store, restarted)
+	require.NoError(t, err)
+	require.Equal(t, flagged.MaterializationKey, afterRestart.MaterializationKey,
+		"an UNUSED registered asset crossing a freshness boundary must not change the identity")
+	require.Equal(t, flagged.BatchID, afterRestart.BatchID, "so the restart adopts")
+
+	var n int
+	require.NoError(t, f.admin.QueryRow(f.ctx, `SELECT count(*) FROM risk_batches`).Scan(&n))
+	require.Equal(t, 2, n, "no third batch — the restart adopted instead of writing")
+
+	batch, found, err := f.store.NewestCompleteBatch(f.ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, flagged.BatchID, batch.ID)
+	require.Equal(t, 1, batch.FlaggedCount,
+		"the large-step warning SURVIVES an unused asset's boundary crossing")
+	require.Contains(t, aavePositionOf(t, f, batch.ID).Flags, riskfeed.FlagLargeStep)
+}
+
+// TestRiskdJudgedAssetCrossingStillChangesTheIdentity is the counterweight demanded
+// alongside: scoping must not go so far that a JUDGED asset stops mattering.
+func TestRiskdJudgedAssetCrossingStillChangesTheIdentity(t *testing.T) {
+	f := newRiskdFixture(t)
+	f.seedFreshPrices(t)
+
+	first, err := runPass(f.ctx, f.store, f.cfg)
+	require.NoError(t, err)
+
+	// The USED collateral asset crosses fresh -> stale.
+	advanced := *f.cfg
+	advanced.clockSkewNanos = nil
+	advanced.setSkew(200 * time.Second)
+	second, err := runPass(f.ctx, f.store, &advanced)
+	require.NoError(t, err)
+	require.NotEqual(t, first.MaterializationKey, second.MaterializationKey,
+		"a JUDGED asset crossing a boundary IS a new materialization")
+	require.Greater(t, second.BatchID, first.BatchID)
+}
+
+// registryDeclares reports whether the pass would FETCH a price for this asset.
+func (f *riskdFixture) registryDeclares(asset []byte) bool {
+	for _, k := range f.cfg.Registry.PriceKeys() {
+		if string(k.Asset) == string(asset) {
+			return true
+		}
+	}
+	return false
+}
+
+// judgedInBatch reports whether the asset appears as a price disclosure on a batch —
+// i.e. whether Assemble actually judged it.
+func (f *riskdFixture) judgedInBatch(t *testing.T, batchID int64, asset []byte) bool {
 	t.Helper()
-	var out string
-	require.NoError(t, f.admin.QueryRow(f.ctx,
-		`SELECT COALESCE(string_agg(
-		     encode(asset,'hex') || '/' || source || '/' || price::text || '/' ||
-		     block_number::text || '/' || COALESCE(source_as_of::text,'none') || '/' || valid::text,
-		     '|' ORDER BY asset, source, block_number), '')
-		 FROM prices WHERE chain_id = 1`).Scan(&out))
-	return out
+	rows, err := f.store.RiskBatchPriceInputs(f.ctx, batchID)
+	require.NoError(t, err)
+	for _, r := range rows {
+		if string(r.Asset) == string(asset) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestRiskdSecondInstanceDoesNotEraseALargeStepFlag is the same law through the
@@ -440,3 +544,17 @@ func aavePositionOf(t *testing.T, f *riskdFixture, batchID int64) store.RiskBatc
 }
 
 var _ = context.Background
+
+// priceRowFingerprint renders every price row's value-bearing columns, so a test can
+// prove the substrate did not move.
+func priceRowFingerprint(t *testing.T, f *riskdFixture) string {
+	t.Helper()
+	var out string
+	require.NoError(t, f.admin.QueryRow(f.ctx,
+		`SELECT COALESCE(string_agg(
+		     encode(asset,'hex') || '/' || source || '/' || price::text || '/' ||
+		     block_number::text || '/' || COALESCE(source_as_of::text,'none') || '/' || valid::text,
+		     '|' ORDER BY asset, source, block_number), '')
+		 FROM prices WHERE chain_id = 1`).Scan(&out))
+	return out
+}

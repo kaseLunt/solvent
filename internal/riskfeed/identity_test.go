@@ -72,9 +72,25 @@ func idInputs() store.RiskInputs {
 	}
 }
 
+// idJudged is the fixture's OUTPUT-RELEVANT judged set: the prices Assemble would
+// actually have consulted freshness for. It is derived from the fixture inputs at a
+// given clock so the phase assertions below exercise the real classifier.
+func idJudged(now time.Time) []JudgedPrice {
+	budget := PriceBudget{Seconds: idPolicy().BudgetSeconds}
+	var out []JudgedPrice
+	for _, p := range idInputs().Prices {
+		out = append(out, JudgedPrice{
+			ChainID: p.ChainID, Asset: p.Asset, Source: p.Source,
+			Phase: PriceFreshnessPhase(p, budget, now),
+			AsOf:  p.SourceAsOf.UTC(), HasAsOf: p.HasSourceAsOf,
+		})
+	}
+	return out
+}
+
 func computeID() MaterializationIdentity {
 	return ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-		idSweeps(), idInputs(), idPolicy())
+		idSweeps(), idInputs(), idJudged(idTime), idPolicy())
 }
 
 // TestIdentityIsDeterministicAcrossRepeatedComputation is the core property: the
@@ -105,7 +121,7 @@ func TestIdentityIsInputOrderIndependent(t *testing.T) {
 	in.Balances[0], in.Balances[1] = in.Balances[1], in.Balances[0]
 
 	shuffled := ComputeMaterializationIdentity(cursors, map[int64]int64{10: 9, 1: 4},
-		idSweeps(), in, idPolicy())
+		idSweeps(), in, idJudged(idTime), idPolicy())
 	require.Equal(t, base.Key, shuffled.Key,
 		"reordering the same rows is the same materialization")
 }
@@ -118,23 +134,23 @@ func TestIdentityChangesWithEveryWatermarkComponent(t *testing.T) {
 	t.Run("last_block", func(t *testing.T) {
 		c := idCursors()
 		c[0].LastBlock++
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("acked_epoch", func(t *testing.T) {
 		c := idCursors()
 		c[0].AckedEpoch++
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("chain_id", func(t *testing.T) {
 		c := idCursors()
 		c[0].ChainID = 999
-		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idPolicy())
+		got := ComputeMaterializationIdentity(c, map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 	t.Run("max_epoch", func(t *testing.T) {
-		got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 5, 10: 9}, idSweeps(), idInputs(), idPolicy())
+		got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 5, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), idPolicy())
 		require.NotEqual(t, base.Key, got.Key)
 	})
 }
@@ -154,7 +170,7 @@ func TestIdentityChangesWithSweepState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			sw := idSweeps()
 			mutate(&sw[0])
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, sw, idInputs(), idPolicy())
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, sw, idInputs(), idJudged(idTime), idPolicy())
 			require.NotEqual(t, base.Key, got.Key)
 		})
 	}
@@ -176,7 +192,7 @@ func TestIdentityChangesWithPolicy(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pol := idPolicy()
 			mutate(&pol)
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), pol)
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
 			require.NotEqual(t, base.Key, got.Key, "policy %s must change the identity", name)
 		})
 	}
@@ -197,7 +213,7 @@ func TestIdentityChangesWhenAPriceIsNeutralizedInPlace(t *testing.T) {
 	in.Prices[0].Value = big.NewInt(99000000)
 	in.Prices[0].BlockNumber = 25_635_500
 
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idPolicy())
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idJudged(idTime), idPolicy())
 	require.NotEqual(t, base.Key, got.Key,
 		"the same cursors over DIFFERENT prices is a different materialization")
 }
@@ -220,7 +236,7 @@ func TestIdentityChangesWithSubstrateRows(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := idInputs()
 			mutate(&in)
-			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idPolicy())
+			got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), in, idJudged(idTime), idPolicy())
 			require.NotEqual(t, base.Key, got.Key, "substrate change %q must change the identity", name)
 		})
 	}
@@ -235,8 +251,8 @@ func TestIdentityDistinguishesAbsentFromZero(t *testing.T) {
 	zero := idInputs()
 	zero.AaveParams[0].LiqBonus = big.NewInt(0)
 
-	a := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), absent, idPolicy())
-	z := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), zero, idPolicy())
+	a := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), absent, idJudged(idTime), idPolicy())
+	z := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), zero, idJudged(idTime), idPolicy())
 	require.NotEqual(t, a.Key, z.Key, "nil is not zero")
 }
 
@@ -256,7 +272,7 @@ func TestIdentityIgnoresTheStepBaselineAndTheClock(t *testing.T) {
 	// +30s: still inside the FRESH phase (budget 180s).
 	later := idInputs()
 	later.ReadAt = idTime.Add(30 * time.Second)
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), later, idPolicy())
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), later, idJudged(later.ReadAt), idPolicy())
 	require.Equal(t, base.Key, got.Key,
 		"the snapshot CLOCK must not enter the identity — otherwise every recomputation is a new materialization")
 
@@ -285,7 +301,7 @@ func TestIdentityChangesWhenAPriceCrossesAFreshnessThreshold(t *testing.T) {
 		in := idInputs()
 		in.ReadAt = idTime.Add(offset)
 		return ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9},
-			idSweeps(), in, idPolicy())
+			idSweeps(), in, idJudged(in.ReadAt), idPolicy())
 	}
 
 	fresh := at(30 * time.Second)
@@ -314,7 +330,7 @@ func TestIdentityChangesWithTheAlgorithmRevision(t *testing.T) {
 	base := computeID()
 	pol := idPolicy()
 	pol.AlgorithmRevision = AlgorithmRevision + 1
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), pol)
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
 	require.NotEqual(t, base.Key, got.Key,
 		"a revision bump is a new set of laws and therefore a new materialization")
 }
@@ -326,7 +342,7 @@ func TestIdentityChangesWithTheRegistryFingerprint(t *testing.T) {
 	base := computeID()
 	pol := idPolicy()
 	pol.RegistryFingerprint = "a-corrected-registry"
-	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), pol)
+	got := ComputeMaterializationIdentity(idCursors(), map[int64]int64{1: 4, 10: 9}, idSweeps(), idInputs(), idJudged(idTime), pol)
 	require.NotEqual(t, base.Key, got.Key)
 }
 

@@ -424,7 +424,7 @@ func TestRiskdABARecomputeFiresOnLiveCursors(t *testing.T) {
 	baselineHeight := baseline.Engines[risk.AaveEngine].LastBlock
 
 	// Quiet chain: nothing moved, so nothing recomputes.
-	changed, _, err := vectorChanged(f.ctx, f.store, f.cfg, baseline)
+	changed, _, _, err := pollTrigger(f.ctx, f.store, f.cfg, baseline)
 	require.NoError(t, err)
 	require.False(t, changed)
 
@@ -450,7 +450,7 @@ func TestRiskdABARecomputeFiresOnLiveCursors(t *testing.T) {
 	_, err = f.admin.Exec(f.ctx, `DELETE FROM reorg_epochs WHERE chain_id = 1`)
 	require.NoError(t, err)
 
-	changed, after, err := vectorChanged(f.ctx, f.store, f.cfg, baseline)
+	changed, after, _, err := pollTrigger(f.ctx, f.store, f.cfg, baseline)
 	require.NoError(t, err)
 	require.Equal(t, baselineHeight, after.Engines[risk.AaveEngine].LastBlock,
 		"the cursor regained its original height — a last_block-only comparison sees nothing")
@@ -603,6 +603,38 @@ func TestRiskdG5FlagsALargeStepAgainstThePreviousBatch(t *testing.T) {
 			require.Equal(t, 1, a.FlaggedPositions, "the flag propagates into the aggregate")
 		}
 	}
+}
+
+// seedFreshPrices lands a healthy Aave position whose price as-ofs are the
+// DATABASE'S OWN now(), then proves it.
+//
+// The base fixture seeds its as-of 30 seconds in the process's past, which is fine
+// for the default 180s budget but makes any tight-budget test race: a loaded
+// PostgreSQL or a scheduler hiccup can consume the fresh window before the first
+// assertion runs, and the test flaps between fresh, stale and over-ceiling. Anchoring
+// to the database clock inside the same statement removes wall-clock timing from the
+// setup entirely — every freshness test then moves time through
+// daemonConfig.clockSkew, deterministically, instead of waiting for it.
+func (f *riskdFixture) seedFreshPrices(t *testing.T) {
+	t.Helper()
+	f.seedHealthyAavePosition(t)
+
+	// Re-anchor every price as-of to the database's own clock. No value, scale,
+	// block or validity is touched — only the as-of — so nothing about which row is
+	// usable changes.
+	_, err := f.admin.Exec(f.ctx, `UPDATE prices SET source_as_of = now() WHERE chain_id = 1`)
+	require.NoError(t, err)
+
+	// PROVE the premise rather than assume it: every consumed row must be inside
+	// the fresh window by the database's reckoning, or a test that later observes a
+	// crossing is observing nothing.
+	var maxAge float64
+	require.NoError(t, f.admin.QueryRow(f.ctx,
+		`SELECT COALESCE(MAX(EXTRACT(EPOCH FROM (now() - source_as_of))), 0)
+		 FROM prices WHERE chain_id = 1 AND valid`).Scan(&maxAge))
+	require.Less(t, maxAge, float64(f.cfg.Budget.Seconds),
+		"the seeded prices must start INSIDE the fresh window (age %.2fs vs budget %ds)",
+		maxAge, f.cfg.Budget.Seconds)
 }
 
 func uniqueInt64(in []int64) []int64 {

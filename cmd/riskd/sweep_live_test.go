@@ -168,7 +168,7 @@ func TestRiskdSweepFirstSuccessForcesRecompute(t *testing.T) {
 	require.Equal(t, cursorsBefore, cursorSnapshot(t, f),
 		"NOT ONE derive cursor or epoch moved — if this fails the test is not isolating the sweep leg")
 
-	changed, _, err := vectorChanged(f.ctx, f.store, f.cfg, first.Vector)
+	changed, _, _, err := pollTrigger(f.ctx, f.store, f.cfg, first.Vector)
 	require.NoError(t, err)
 	require.True(t, changed,
 		"a first successful sweep MUST trigger a recompute: otherwise the SWEEP_NEVER refusal stands over known collateral")
@@ -219,7 +219,7 @@ func TestRiskdSweepFailureAfterSuccessForcesRecompute(t *testing.T) {
 	require.Equal(t, cursorsBefore, cursorSnapshot(t, f),
 		"NOT ONE derive cursor or epoch moved")
 
-	changed, _, err := vectorChanged(f.ctx, f.store, f.cfg, first.Vector)
+	changed, _, _, err := pollTrigger(f.ctx, f.store, f.cfg, first.Vector)
 	require.NoError(t, err)
 	require.True(t, changed,
 		"a post-success sweep failure MUST trigger a recompute: otherwise an unflagged result stands over stale collateral")
@@ -287,7 +287,7 @@ func TestRiskdQuietDatabaseDoesNotRecompute(t *testing.T) {
 	require.NoError(t, err)
 
 	for i := 0; i < 3; i++ {
-		changed, _, err := vectorChanged(f.ctx, f.store, f.cfg, res.Vector)
+		changed, _, _, err := pollTrigger(f.ctx, f.store, f.cfg, res.Vector)
 		require.NoError(t, err)
 		require.False(t, changed, "nothing moved; the sweep aggregate must compare EQUAL across reads")
 	}

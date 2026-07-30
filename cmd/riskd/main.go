@@ -37,6 +37,7 @@ import (
 	"os/signal"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -102,6 +103,42 @@ type daemonConfig struct {
 	Budget       riskfeed.PriceBudget
 	StepBps      int64
 	Producer     string
+
+	// clockSkewNanos is added to the DATABASE clock the pass judges freshness
+	// against.
+	//
+	// It is zero in production and exists only so tests can move a price across a
+	// freshness boundary DETERMINISTICALLY. The alternative — seeding an as-of a
+	// couple of seconds in the past and racing to assert before it expires — is
+	// unsound: a loaded PostgreSQL or a scheduler hiccup consumes the window and
+	// the test flaps. Time is the variable under test, so it has to be an input.
+	//
+	// It is an ATOMIC and reached through skew()/setSkew() because the scheduler
+	// tests must advance it while runLoop is RUNNING. That is not a convenience:
+	// arming-on-freshness can only be observed inside ONE continuous loop, since
+	// restarting the loop fires its mandatory startup pass and would produce a new
+	// batch whether the freshness arm exists or not. A plain field would be a data
+	// race between the test and the loop goroutine.
+	//
+	// Unexported, so no configuration path can set it and production cannot reach a
+	// non-zero value.
+	clockSkewNanos *atomic.Int64
+}
+
+// skew returns the test-only clock offset, zero when unset.
+func (c *daemonConfig) skew() time.Duration {
+	if c == nil || c.clockSkewNanos == nil {
+		return 0
+	}
+	return time.Duration(c.clockSkewNanos.Load())
+}
+
+// setSkew moves the effective clock. Safe to call while runLoop is running.
+func (c *daemonConfig) setSkew(d time.Duration) {
+	if c.clockSkewNanos == nil {
+		c.clockSkewNanos = &atomic.Int64{}
+	}
+	c.clockSkewNanos.Store(int64(d))
 }
 
 // consumedEngines is every engine whose cursor participates in the recompute
@@ -375,51 +412,89 @@ func run(ctx context.Context, configPath, feedsPath string, once bool) error {
 		"step_bps", cfg.StepBps,
 		"scoped_role", scoped)
 
-	var last watermarkVector
-	first := true
-
-	tick := func() error {
-		res, err := runPass(ctx, s, cfg)
-		if err != nil {
-			return err
-		}
-		if res.Gated {
-			// A gated pass is ORDINARY. It is logged at info, not error: the
-			// chain is mid-rewind and the next tick will find it acked.
-			slog.Info("risk pass gated (retryable)", "reason", res.GateErr, "vector", res.Vector.String())
-			// The vector is NOT recorded as `last`: the pass produced no batch,
-			// so the work is still owed and the next tick must still see a
-			// change.
-			return nil
-		}
-		last, first = res.Vector, false
-		slog.Info("risk batch committed",
-			"batch", res.BatchID, "positions", res.Positions,
-			"refused", res.Refused, "flagged", res.Flagged, "vector", res.Vector.String())
-		return nil
-	}
-
 	if once {
-		return tick()
+		_, err := riskTick(ctx, s, cfg, nil)
+		return err
 	}
+	return runLoop(ctx, s, cfg)
+}
+
+// loopState is the poll loop's carried state: the vector the last batch was
+// materialized at, and the next freshness boundary it is waiting on.
+type loopState struct {
+	last watermarkVector
+	// first forces the mandatory startup pass: a restarted riskd has no in-memory
+	// baseline, and skipping until something moves would leave the newest batch
+	// standing for as long as the chain is quiet.
+	first bool
+	// freshnessDeadline is the earliest instant at which one of the last batch's
+	// JUDGED prices crosses a freshness boundary. Zero means none will.
+	freshnessDeadline time.Time
+}
+
+// riskTick runs one pass and folds its result into the loop state.
+func riskTick(ctx context.Context, s *store.Store, cfg *daemonConfig, st *loopState) (passResult, error) {
+	res, err := runPass(ctx, s, cfg)
+	if err != nil {
+		return res, err
+	}
+	if res.Gated {
+		// A gated pass is ORDINARY. It is logged at info, not error: the chain is
+		// mid-rewind and the next tick will find it acked. The vector is NOT
+		// recorded, so the work stays owed.
+		slog.Info("risk pass gated (retryable)", "reason", res.GateErr, "vector", res.Vector.String())
+		return res, nil
+	}
+	if st != nil {
+		st.last, st.first = res.Vector, false
+		st.freshnessDeadline = res.FreshnessDeadline
+	}
+	slog.Info("risk batch committed",
+		"batch", res.BatchID, "positions", res.Positions,
+		"refused", res.Refused, "flagged", res.Flagged,
+		"key", res.MaterializationKey, "freshness_deadline", res.FreshnessDeadline,
+		"vector", res.Vector.String())
+	return res, nil
+}
+
+// runLoop is the steady-state scheduler, extracted from run so a test can drive
+// the REAL loop rather than calling runPass by hand.
+//
+// That distinction turned out to matter. The freshness-crossing test used to invoke
+// runPass directly after sleeping, which passes happily while the production loop
+// never fires at all — the very bug it was meant to guard. A scheduler property has
+// to be tested through the scheduler.
+func runLoop(ctx context.Context, s *store.Store, cfg *daemonConfig) error {
+	st := &loopState{first: true}
 
 	t := time.NewTicker(cfg.PollInterval)
 	defer t.Stop()
 	for {
-		// The FIRST pass always runs: a restarted riskd has no in-memory
-		// baseline, and skipping until something moves would leave the newest
-		// batch stale for as long as the chain is quiet.
-		if first {
-			if err := tick(); err != nil {
+		switch {
+		case st.first:
+			if _, err := riskTick(ctx, s, cfg, st); err != nil {
 				slog.Error("risk pass failed", "err", err)
 			}
-		} else {
-			changed, vec, err := vectorChanged(ctx, s, cfg, last)
-			if err != nil {
+		default:
+			changed, vec, dbNow, err := pollTrigger(ctx, s, cfg, st.last)
+			switch {
+			case err != nil:
 				slog.Error("watermark poll failed", "err", err)
-			} else if changed {
-				slog.Debug("watermark vector moved", "from", last.String(), "to", vec.String())
-				if err := tick(); err != nil {
+			case changed:
+				slog.Debug("watermark vector moved", "from", st.last.String(), "to", vec.String())
+				if _, err := riskTick(ctx, s, cfg, st); err != nil {
+					slog.Error("risk pass failed", "err", err)
+				}
+			case freshnessDue(st.freshnessDeadline, dbNow):
+				// NOTHING IN THE VECTOR MOVED — a price simply aged past a
+				// boundary. This is the honest-outage case: ingestion stopped
+				// while prices were fresh, so no cursor, epoch or sweep state
+				// changes as inputs cross the budget and then the ceiling.
+				// Forcing the pass here is what turns a standing "fresh" verdict
+				// into a G4 flag and then a G1 refusal.
+				slog.Info("freshness boundary reached; forcing a pass",
+					"deadline", st.freshnessDeadline, "db_now", dbNow)
+				if _, err := riskTick(ctx, s, cfg, st); err != nil {
 					slog.Error("risk pass failed", "err", err)
 				}
 			}
@@ -434,36 +509,49 @@ func run(ctx context.Context, configPath, feedsPath string, once bool) error {
 	}
 }
 
-// vectorChanged reads the watermark vector and reports whether it moved.
+// freshnessDue reports whether the armed freshness boundary has been reached,
+// measured on the DATABASE clock like every other age in this system.
+func freshnessDue(deadline, dbNow time.Time) bool {
+	return !deadline.IsZero() && !dbNow.Before(deadline)
+}
+
+// pollTrigger reads the watermark vector plus the database clock, and reports
+// whether the vector moved.
 //
 // The read is its own `REPEATABLE READ, READ ONLY` transaction — the same shape
 // `cmd/reconcile`'s readRecheckState uses — so the cursors and the epoch maxima
 // come from one snapshot. Two autocommit statements could straddle a rewind and
 // produce a vector no instant of the database ever held.
-func vectorChanged(ctx context.Context, s *store.Store, cfg *daemonConfig, last watermarkVector) (bool, watermarkVector, error) {
+func pollTrigger(ctx context.Context, s *store.Store, cfg *daemonConfig, last watermarkVector) (bool, watermarkVector, time.Time, error) {
 	tx, err := s.BeginRiskSnapshot(ctx)
 	if err != nil {
-		return false, watermarkVector{}, err
+		return false, watermarkVector{}, time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	var dbNow time.Time
+	if err := tx.QueryRow(ctx, "SELECT now()").Scan(&dbNow); err != nil {
+		return false, watermarkVector{}, time.Time{}, fmt.Errorf("read poll clock: %w", err)
+	}
 	cursors, err := store.DeriveCursorStates(ctx, tx)
 	if err != nil {
-		return false, watermarkVector{}, err
+		return false, watermarkVector{}, time.Time{}, err
 	}
 	maxEpochs, err := store.MaxReorgEpochs(ctx, tx)
 	if err != nil {
-		return false, watermarkVector{}, err
+		return false, watermarkVector{}, time.Time{}, err
 	}
 	sweeps, err := store.RiskSweepStateFor(ctx, tx, cfg.sweptEngines())
 	if err != nil {
-		return false, watermarkVector{}, err
+		return false, watermarkVector{}, time.Time{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return false, watermarkVector{}, fmt.Errorf("commit watermark poll: %w", err)
+		return false, watermarkVector{}, time.Time{}, fmt.Errorf("commit watermark poll: %w", err)
 	}
 	v := newWatermarkVector(cursors, maxEpochs, sweeps, cfg.consumedEngines())
-	return v.Changed(last), v, nil
+	// The SAME skew the pass applies, so an armed deadline and the clock that
+	// judges it cannot disagree.
+	return v.Changed(last), v, dbNow.UTC().Add(cfg.skew()), nil
 }
 
 // requireSchema refuses to start against a database whose schema is not the one

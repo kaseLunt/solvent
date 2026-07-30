@@ -71,6 +71,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/kaselunt/solvent/internal/store"
 )
@@ -126,6 +127,7 @@ func ComputeMaterializationIdentity(
 	maxEpochs map[int64]int64,
 	sweeps []store.RiskSweepWatermark,
 	inputs store.RiskInputs,
+	judged []JudgedPrice,
 	policy IdentityPolicy,
 ) MaterializationIdentity {
 	var b strings.Builder
@@ -185,13 +187,20 @@ func ComputeMaterializationIdentity(
 	}
 	b.WriteByte('\n')
 
-	// FRESHNESS PHASES, from the same classifier Assemble uses. Keyed by witness
-	// so the section is stable regardless of read order.
-	phases := make([]string, 0, len(inputs.Prices))
-	budget := PriceBudget{Seconds: policy.BudgetSeconds}
-	for _, p := range inputs.Prices {
+	// FRESHNESS PHASES — OVER THE JUDGED SET ONLY.
+	//
+	// These are the witnesses `Assemble` actually consulted freshness for, reported
+	// by Assemble itself rather than re-derived here. Classifying every FETCHED row
+	// instead was a real hole: `snapshotSpec` asks for every witness the registry
+	// declares, so a registered asset with NO position — affecting no persisted
+	// position, disclosure or aggregate — could cross a boundary and mint a new key
+	// for an output-identical batch. A restart would then decline to adopt, compute
+	// against the post-move baseline, and write an unflagged newer batch over a
+	// large-step warning.
+	phases := make([]string, 0, len(judged))
+	for _, p := range judged {
 		phases = append(phases, fmt.Sprintf("%d/%x/%s=%s",
-			p.ChainID, p.Asset, p.Source, PriceFreshnessPhase(p, budget, inputs.ReadAt)))
+			p.ChainID, p.Asset, p.Source, p.Phase))
 	}
 	sort.Strings(phases)
 	b.WriteString("freshness:")
@@ -299,4 +308,45 @@ func sortedCopy(in []string) []string {
 	out := append([]string(nil), in...)
 	sort.Strings(out)
 	return out
+}
+
+// NextFreshnessDeadline reports the earliest instant at which one of the JUDGED
+// prices crosses a freshness boundary, and whether such an instant exists.
+//
+// # Why the scheduler needs this
+//
+// The recompute trigger watches cursors, epochs and sweep state. None of those
+// move when a price simply AGES. So in an honest outage — ingestion stops while
+// prices are fresh — nothing wakes the daemon as inputs cross 180s and then 360s,
+// and the newest batch keeps its persisted "fresh" verdict indefinitely instead of
+// gaining a G4 flag and then refusing at G1. Arming the poll loop at this deadline
+// is what makes the transition happen without anything else changing.
+//
+// The boundaries are the SAME ones PriceFreshnessPhase uses, derived from each
+// input's own as-of: `asOf + budget` (fresh→stale) and `asOf + ceiling`
+// (stale→over-ceiling). A row already past both has no further crossing and
+// contributes nothing. A row with no as-of is permanently in the no-as-of phase and
+// likewise never crosses.
+//
+// The returned deadline is strictly AFTER now, so an armed pass cannot re-fire on
+// the same boundary forever.
+func NextFreshnessDeadline(judged []JudgedPrice, budget PriceBudget, now time.Time) (time.Time, bool) {
+	var best time.Time
+	for _, p := range judged {
+		if !p.HasAsOf {
+			continue // no as-of, no crossing
+		}
+		for _, bound := range []int64{budget.Seconds, budget.Ceiling()} {
+			// +1s because the phase test is strictly `age > bound`: the crossing
+			// happens at the first instant past the bound, not at it.
+			at := p.AsOf.Add(time.Duration(bound+1) * time.Second)
+			if !at.After(now) {
+				continue
+			}
+			if best.IsZero() || at.Before(best) {
+				best = at
+			}
+		}
+	}
+	return best, !best.IsZero()
 }
