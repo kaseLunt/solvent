@@ -1931,6 +1931,46 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   noted-and-excluded): decode-law walk (sixth-subcall hunt, legit-empty vs
   promised-data distinction, belt fires), conjunction bypass hunt, arm-order
   text-vs-code, the two disclosed judgment calls, regression realism.
+- **TASK 6 PRE-L2 POSTURE CLOSED — SHIP** (round 8, session 019fb420-d8cf-
+  7192-96b4-f1abc8b99379, ~6.5min, t6r8 @ 75f1962): "approve — SHIP. The
+  round-7 false-EXACT path is closed, both disclosed judgment calls
+  adjudicate cleanly, and the regression/mutant sets are non-vacuous and
+  distinct. No material findings." Reviewer's static-trace caveat (read-only
+  sandbox, no Go execution; "will not treat an unexecuted test as passing
+  evidence" — SHIP grounded in the static non-vacuity trace) is ALREADY
+  discharged: the integrator independently executed the full scoped suite in
+  the real repo before committing 75f1962. Trace detail worth keeping:
+  collateral tokens discovered only by collateralOf get no follow-up
+  valuation calls and correctly become a GATED unpriced refusal, not a false
+  pass. Rounds 1-8 program: contact→ABI→causation→composition→ruling→
+  interim-posture→decode-layer. THE L2 WAVE IS NOW THE ONLY REMAINING T6
+  OBLIGATION (then round 9 = acceptance-eligible SHIP). L2 WAVE DISPATCHED
+  (the ruling as spec): STEP-0 L6 EIP-234 blockHash-getLogs probe (STOP-and-
+  report if unserved), getLogs plumbing w/ response validation, per-case
+  Transfer + CashEventEmitter netting sweeps (ABI-derived topics), closure
+  identity per token, attribution law, L3 execEligible over
+  BoundaryCollateral (both prongs or neither), L7 hermetic fixtures w/ the
+  chain-impossible rule + capture split sanctioned (refusal-over-fabrication
+  if 31 full captures disproportionate), flip-back of the L1-era restated
+  controls, mutation floor m1-m4 incl. the Δpending-dropped mutant proving
+  the ruling's own netting insight. RPC secrets by env-var name only;
+  STOP-don't-improvise if the ruling meets unanticipated chain reality.
+- **T8 WAVE 6 LANDED — 15becd9** (ONE file +114/−28; both-ways exact;
+  generated schema confirmed byte-identical to HEAD post-mutants; verify
+  independently re-run exit 0, 292/292). DeepNullableBooleanKeys: Required-
+  normalized optionals, object+array recursion (unions distribute; anonymous
+  shapes traversed), tuple-budget bound (13) FAIL-CLOSED via sentinel
+  poisoning + TWO probe constants (coverage never bottomed out; margin
+  re-run at 8 = today's exact deepest chain) — a ninth nesting level is a
+  NAMED compile error long before coverage runs out. Red: all three shape
+  mutants compiled exit 0 under the old sweep. Green: mA/mB/mC each killed
+  alone by the self-describing error; all four prior kills re-run green.
+  Corrected inventory comment (ErrorBody.error the one anonymous shape).
+  Disclosed: optional mutant fields (required broke fixtures — noise not
+  law); refined-shapes side stays flat-enumerated (flat today). ROUND 7
+  (expected FINAL for T8) dispatched: t8r7 @ 15becd9, base f3e400c —
+  Record/tuple/readonly evasion hunt, sentinel fail-closed verification,
+  margin-count check, disclosed-item adjudication.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
