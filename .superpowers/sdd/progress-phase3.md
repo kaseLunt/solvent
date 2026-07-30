@@ -1049,6 +1049,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   failure findings are the acceptance run's friends: they prove the gate set
   as committed could NEVER have passed honestly — better found now than at
   the restart.
+- CODEX ROUND 3 ON FLAG-CUSTODY (session 019fb1db-5ea4-7b21-84e3-5466fb280100,
+  ~9min, cfr3 @ 631d295): **needs-attention — 1H/2M, ALL in the legacy/adoption
+  seam; the refusal logic, coverage trigger, and race fix traced CLEAN.** (H)
+  the changed refusal law kept AlgorithmRevision 3 → a new binary derives the
+  SAME key as a legacy empty/unproven batch and ADOPTS it — migrated aggregates
+  have empty refusal codes, so the original vacuous green returns through
+  adoption. (M) GenesisBlock steers refuse-vs-compute but is absent from the
+  identity — an honest start-block correction changes the outcome without
+  changing the key, both directions. (M) 00014's '' defaults affirm legacy Aave
+  aggregates HEALTHY while the same migration nulls their coverage — a
+  v13→v14 upgrade serves the wrong answer until rematerialization, indefinitely
+  if the pass gates. FIX WAVE dispatched (rev 3→4 + legacy-adoption regression;
+  GenesisBlock into the identity + policy-mutation test both directions;
+  fail-closed legacy backfill scoped to coverage-nulled engines + upgrade-path
+  test). The seam lesson compounds: a law change is not landed until the
+  REVISION, the IDENTITY, and the MIGRATED PAST all agree with it. Codex now
+  reviewing the queued rev-3 docs range (c680f78) in parallel.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
