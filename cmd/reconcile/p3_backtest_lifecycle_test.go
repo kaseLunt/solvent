@@ -204,6 +204,101 @@ func TestAddRemoveRoundTripPreBoundaryCannotPassMarginal(t *testing.T) {
 	require.Equal(t, eligUnexplainedOutcome,
 		classifyIntraBlock(r.InitialEligible, r.ParentComplete, true, true, r.Proven, r.Complete(), false))
 
+	// ---- the transient collateral, INSTANTIATED (Codex round 11, M2) -------
+	// The replay applies NOTHING for lifecycle events — that is the law the
+	// assertions above pin — so tokB's harm is proven COUNTERFACTUALLY, with
+	// the SAME production arithmetic the replay consults (maxBorrowAtFrame,
+	// mulDivFloor) over hand-built frames, and with the transient config
+	// decoded from the pairedCfg WITNESS by the production decoder. Before
+	// this section the harm existed only in prose: no balance, no price, no
+	// USD contribution — the test stayed green even if tokB could not have
+	// affected eligibility at all (the M2 finding, verbatim). Now the exact
+	// numbers are asserted at every stage while the verdict above stays
+	// UNEXPLAINED: the refusal is conservative BECAUSE the harm is real.
+	t.Run("the instantiated harm: tokB's transient config strictly reverses the crossing", func(t *testing.T) {
+		stX := oneLegState(tokA, debtOld, pctE18(100), n, new(big.Int).Set(newIdx))
+
+		// STAGE A — after the tick, tokB unsupported: the crossing is real.
+		debtNew := mulDivFloor(n, newIdx)
+		mbA, pricedA := maxBorrowAtFrame(stX.Collateral, stX.Prices, stX.Configs, stX.Decimals)
+		require.True(t, pricedA)
+		require.Equal(t, debtOld.String(), mbA.String(),
+			"reference: the tokA-only maxBorrowLT IS the knife-edge value (floor($1 leg × LT 100%))")
+		require.Positive(t, debtNew.Cmp(mbA), "ELIGIBLE after the tick — the crossing the replay proves")
+		margin := new(big.Int).Sub(debtNew, mbA)
+
+		// The transient config is the pairedCfg witness's OWN decoded write —
+		// production decoder, never re-typed numbers.
+		cfgB, err := decodeWitnessCollateralConfig(pairedCfg)
+		require.NoError(t, err)
+		require.Equal(t, pctE18(90).String(), cfgB.LiquidationThreshold.String(),
+			"the decoded transient threshold is the ConfigSet payload's newConfig")
+
+		// The pre-held balance: NONZERO on chain (liquidBTC-like, 8 decimals,
+		// engine price $100.00), sized so tokB's LT contribution strictly
+		// exceeds the crossing margin — the reversal is structural, not
+		// fixture luck. m2's cut point: a zero balance here contributes $0.
+		tokBDec := uint8(8)
+		tokBPrice := big.NewInt(100_000_000) // USD-6 per whole token
+		usdTarget := new(big.Int).Add(new(big.Int).Mul(margin, big.NewInt(2)), big.NewInt(1_000_000))
+		tokBBal := new(big.Int).Div(new(big.Int).Mul(usdTarget, pow10Big(tokBDec)), tokBPrice)
+		require.Positive(t, tokBBal.Sign(), "the Safe HOLDS tokB — the nonzero balance is the instantiation M2 demanded")
+
+		// tokB's EXACT maxBorrowLT contribution, the deployed loop shape by
+		// hand: floor(bal × P / 10^dec) × LT / HUNDRED_PERCENT.
+		usdB := new(big.Int).Div(new(big.Int).Mul(tokBBal, tokBPrice), pow10Big(tokBDec))
+		contribB := new(big.Int).Div(new(big.Int).Mul(usdB, cfgB.LiquidationThreshold), hundredPercentDM)
+		require.Positive(t, contribB.Cmp(margin),
+			"tokB's exact contribution must exceed the crossing margin, or the round trip could not have reversed this crossing")
+		t.Logf("reference numbers: debt@oldIdx=%s debt@newIdx=%s margin=%s tokB bal=%s usd=%s contribution=%s",
+			debtOld, debtNew, margin, tokBBal, usdB, contribB)
+
+		// STAGE B — while tokB is supported AND configured: INELIGIBLE. The
+		// crossing the tick produced is REVERSED by the transient config.
+		colB := append(append([]collateralLeg{}, stX.Collateral...), collateralLeg{token: tokB, amount: tokBBal})
+		pricesB := map[common.Address]*big.Int{tokA: stX.Prices[tokA], tokB: tokBPrice}
+		configsB := map[common.Address]collateralTokenConfigResult{tokA: stX.Configs[tokA], tokB: cfgB}
+		decimalsB := map[common.Address]uint8{tokA: 6, tokB: tokBDec}
+		mbB, pricedB := maxBorrowAtFrame(colB, pricesB, configsB, decimalsB)
+		require.True(t, pricedB)
+		require.Equal(t, new(big.Int).Add(mbA, contribB).String(), mbB.String(),
+			"reference: maxBorrowLT while configured == knife-edge + tokB's exact contribution (the deployed per-token-floor-then-sum shape)")
+		require.True(t, debtNew.Cmp(mbB) <= 0,
+			"INELIGIBLE while tokB's transient config counts — the reversal the comments used to narrate, now arithmetic (m2's kill: zero balance makes this assertion fail)")
+
+		// STAGE C — after the remove: membership gone, config DELETED
+		// (DebtManagerAdmin.sol:47-48, no ConfigSet emitted). The enumerable
+		// basket is tokA-only again and the crossing RE-CROSSES.
+		mbC, pricedC := maxBorrowAtFrame(stX.Collateral, stX.Prices, stX.Configs, stX.Decimals)
+		require.True(t, pricedC)
+		require.Equal(t, mbA.String(), mbC.String())
+		require.Positive(t, debtNew.Cmp(mbC),
+			"ELIGIBLE again after the removal — add→remove reversed and then restored the crossing with zero Transfers and zero netting events")
+		// And there is NO honest way to keep valuing the leg post-remove: the
+		// deleted config makes it unvaluable, never zero-thresholded.
+		_, pricedDeleted := maxBorrowAtFrame(colB, pricesB,
+			map[common.Address]collateralTokenConfigResult{tokA: stX.Configs[tokA]}, decimalsB)
+		require.False(t, pricedDeleted,
+			"valuing tokB after the config deletion would invent a threshold — maxBorrowAtFrame refuses the basket as incompletely valued instead")
+
+		// THROUGHOUT: tokB is absent from BOTH endpoint enumerations and from
+		// every replayable surface — the invisibility that makes refusal the
+		// floor rather than a modeling choice.
+		parentSupported := []common.Address{tokA}
+		execSupported := []common.Address{tokA}
+		union := map[common.Address]bool{}
+		for _, a := range append(append([]common.Address{}, parentSupported...), execSupported...) {
+			union[a] = true
+		}
+		require.False(t, union[tokB],
+			"tokB is in NEITHER pin's getCollateralTokens enumeration — the sweep universe cannot even ask about it")
+		for _, leg := range stX.Collateral {
+			require.NotEqual(t, tokB, leg.token, "no parent leg carries tokB — collateralOf@N-1 does not enumerate an unsupported token")
+		}
+		_, hasCfg := stX.Configs[tokB]
+		require.False(t, hasCfg, "no parent config exists for tokB — there is nothing to attach the transient threshold to")
+	})
+
 	// The refusal must not be weaker when the payload does not decode: an
 	// undecodable lifecycle witness still refuses (naming the decode failure),
 	// because "cannot read which token" is strictly less knowledge, never more.

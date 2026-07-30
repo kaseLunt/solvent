@@ -37,6 +37,7 @@ func TestP3SelectorsArePinned(t *testing.T) {
 		{"liquidatable", dmLiquidatableABI, "liquidatable", "liquidatable(address)", "ffec70af"},
 		{"getMaxBorrowAmount", dmGetMaxBorrowAmountABI, "getMaxBorrowAmount", "getMaxBorrowAmount(address,bool)", "cebcff89"},
 		{"convertCollateralTokenToUsd", dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", "convertCollateralTokenToUsd(address,uint256)", "c5b66b4a"},
+		{"getDebtManagerAdmin", dmGetDebtManagerAdminABI, "getDebtManagerAdmin", "getDebtManagerAdmin()", "d6d3ec9c"},
 		{"price", priceProviderPriceABI, "price", "price(address)", "aea91078"},
 		{"tokenConfig", priceProviderTokenConfigABI, "tokenConfig", "tokenConfig(address)", "fe136c4e"},
 		{"isBaseAsset", priceProviderIsBaseAssetABI, "isBaseAsset", "isBaseAsset(address)", "2175fe3d"},

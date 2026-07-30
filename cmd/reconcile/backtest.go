@@ -90,7 +90,9 @@ func backtestFrame_() *gateFrame {
 		pinned(srcBTExecCollateralOf,
 			"the exec-frame leg read — L2(a) of the basket-continuity ruling: leg@N is one side of the per-token closure identity leg@N − leg@N-1 == Σ signed Transfers − Δpending"),
 		pinned(srcBTSupportedSet,
-			"the L2(b) sweep's ADDRESS UNIVERSE (addendum adjustment 1): the DM's supported-collateral set at both pins closes the in-and-out-within-block gap — a supported token that enters and fully leaves between the edges is invisible to any legs∪seized union; only configured tokens move maxBorrowAtFrame, so this set is provably sufficient. A mid-block CollateralTokenAdded/Removed is DM-custodied and the union of both pins already covers its token"),
+			"the L2(b) sweep's ADDRESS UNIVERSE (addendum adjustment 1): the DM's supported-collateral set at both pins closes the in-and-out-within-block TRANSFER gap — a supported token that enters and fully leaves between the edges is invisible to any legs∪seized union, and only configured tokens move maxBorrowAtFrame. THE CARVE-OUT (Codex round 10 H / round 11 M3): this union is NOT sufficient against the collateral LIFECYCLE — a CollateralTokenAdded→Removed round trip strictly before the boundary leaves its token absent from BOTH pins' enumerations, so no sweep can ask about it; ANY pre-boundary collateral lifecycle event therefore makes the causation replay INCOMPLETE and the case refuses (replaySameBlockCauses' lifecycle arm → UNEXPLAINED), which is the closure of that gap — refusal on the replay side, never coverage claimed here"),
+		pinned(srcBTAdminImpl,
+			"the ADMIN-IMPLEMENTATION EPOCH check (Codex round 11 H1, D-013): setAdminImpl writes ADMIN_IMPL_POSITION with no event and the proxy fallback delegatecalls it, so the two-Upgraded census proves only the core era. Both pins must hold the AUDITED admin implementation (admin_epoch.go) or the case refuses frame-level; the within-block swap-and-revert residual is accepted-and-disclosed per D-013"),
 		pinned(srcBTTransferSweep,
 			"the L2(b) Transfer sweep, EIP-234 blockHash-pinned at the case's STORED raw_logs hash (probed 2026-07-30, recon/p3-probes.md): the raw balance channel of the closure identity, validated per L6 (pin echo, address ∈ set, topic count exactly 3, data exactly 32 bytes)"),
 		pinned(srcBTNettingSweep,
@@ -141,9 +143,19 @@ const (
 	// pre-boundary and fully outbound post-boundary within block N is
 	// zero-balance at both edges and invisible to any legs∪seized union, yet
 	// it raises boundary maxBorrowLT exactly like H2's top-up. Only tokens
-	// with configs move maxBorrowAtFrame, so the supported set is the
-	// provably-sufficient universe.
+	// with configs move maxBorrowAtFrame — but the union is sufficient ONLY
+	// against transfers of tokens supported at an edge: a collateral
+	// LIFECYCLE round trip (Added→Removed strictly pre-boundary, Codex
+	// round 10 H) leaves its token outside BOTH enumerations, so any
+	// pre-boundary lifecycle event refuses the replay outright instead of
+	// being claimed covered here (round 11, M3).
 	srcBTSupportedSet = "DebtManager.getCollateralTokens()@parentHash(N-1) and @pinHash(N)"
+
+	// srcBTAdminImpl is the round-11 H1 read pair: ADMIN_IMPL_POSITION at both
+	// case pins, via the core's own accessor (admin_epoch.go has the whole
+	// argument — the slot is written by setAdminImpl with NO event, so only a
+	// state read can establish the admin-implementation epoch).
+	srcBTAdminImpl = "DebtManager.getDebtManagerAdmin()@parentHash(N-1) and @pinHash(N) [ADMIN_IMPL_POSITION]"
 )
 
 func newBacktestView(row snapshotdb.T6BacktestRow, f *gateFrame) *backtestView {
@@ -463,6 +475,21 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 		return rows, res, nil
 	}
 
+	// ---- the ADMIN-IMPLEMENTATION EPOCH check (Codex round 11 H1) ----------
+	// Both frames decoded, so both slot reads exist; the check itself is the
+	// pure function in admin_epoch.go (mutation target mH). A mismatch at
+	// EITHER pin is a frame-level refusal with its own named class — never
+	// any verdict: a replay under an unaudited admin generation's ABI proves
+	// nothing about the crossing. The within-block swap-and-revert residual
+	// is accepted-and-disclosed per D-013 (see admin_epoch.go).
+	if note := adminImplEpochRefusal(parent.st.adminImpl, exec.st.adminImpl); note != "" {
+		rows = append(rows, unreadRow(gateBacktest, key,
+			"admin-impl-epoch(ADMIN_IMPL_POSITION @ both pins vs the audited constant)", note))
+		res.SkipClass = "admin-impl-epoch"
+		res.Notes = append(res.Notes, "an admin-implementation epoch boundary at this case's pins is CHAIN TRUTH requiring adjudication and a re-audited pin — reported by name, never absorbed into a verdict")
+		return rows, res, nil
+	}
+
 	// ---- the L2 continuity sweep (basket-continuity ruling) ----------------
 	// Issued for EVERY evaluated case ("per case" is the ruling's own scope):
 	// the proof outcome discharges — or refuses to discharge — L1's conjunct,
@@ -485,6 +512,10 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	res.MarginUSD6 = o2.marginUSD6
 	res.PriceDeltaNote = o2.priceNote
 	res.EligibilityState = o2.eligState
+	// The epoch check PASSED (the refusal above returns otherwise), and a
+	// pass is disclosed too (D-013 5b): the reviewer of this row must see
+	// both the premise and its accepted residual.
+	o2.row.Evidence["admin_impl_epoch"] = adminImplEpochEvidence
 	rows = append(rows, o2.row)
 
 	// ---- OBLIGATION 3: seizure reconstruction, exact per branch ------------
@@ -797,7 +828,12 @@ type frameState struct {
 	// supported is getCollateralTokens() at THIS frame's pin — the DM's own
 	// supported-collateral enumeration (addendum adjustment 1). The union of
 	// the two frames' sets is the continuity sweep's address universe.
-	supported  []common.Address
+	supported []common.Address
+	// adminImpl is ADMIN_IMPL_POSITION at THIS frame's pin, read via the
+	// core's own getDebtManagerAdmin accessor (round-11 H1, admin_epoch.go).
+	// Both frames carry it; runBacktestCase refuses the case unless both
+	// equal the audited constant.
+	adminImpl  common.Address
 	chainDebt  *big.Int
 	unread     string
 	pricesOnly bool
@@ -838,7 +874,7 @@ func newBacktestFrameState(block uint64, hash common.Hash, full bool) *frameStat
 // SUBCALL and a refusal must NAME the degraded call (Codex round 7, H1), so
 // the tag carries enough to print it.
 type backtestFrameTag struct {
-	kind string // "collateralOf" | "collateralTokens" | "borrowingOf" | "price" | "config" | "balanceOf"
+	kind string // "collateralOf" | "collateralTokens" | "adminImpl" | "borrowingOf" | "price" | "config" | "balanceOf"
 	tok  common.Address
 }
 
@@ -850,6 +886,8 @@ func (tg backtestFrameTag) name() string {
 		return "DebtManager.collateralOf(user)"
 	case "collateralTokens":
 		return "DebtManager.getCollateralTokens()"
+	case "adminImpl":
+		return "DebtManager.getDebtManagerAdmin() [ADMIN_IMPL_POSITION]"
 	case "borrowingOf":
 		return "DebtManager.borrowingOf(user, borrowToken)"
 	case "price":
@@ -905,6 +943,15 @@ func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bo
 		return nil, nil, err
 	}
 	calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: gct}), append(tags, backtestFrameTag{kind: "collateralTokens"})
+	// The admin-implementation slot at this frame's pin (round-11 H1,
+	// admin_epoch.go), in BOTH frames — same shared decode loop, so the
+	// wave-8 per-subcall law covers it with no special-casing (pinned by
+	// TestAdminImplSubcallJoinsTheWave8DecodeLaw).
+	gda, err := dmGetDebtManagerAdminABI.Pack("getDebtManagerAdmin")
+	if err != nil {
+		return nil, nil, err
+	}
+	calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: gda}), append(tags, backtestFrameTag{kind: "adminImpl"})
 	for _, tok := range sortedAddrs(tokens) {
 		dec, ok := decimals[tok]
 		if !ok {
@@ -987,6 +1034,14 @@ func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFram
 			}
 			st.supported = list
 			f.use(srcBTSupportedSet)
+		case "adminImpl":
+			v, err := unpackAddressStrict(dmGetDebtManagerAdminABI, "getDebtManagerAdmin", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.adminImpl = v
+			f.use(srcBTAdminImpl)
 		case "borrowingOf":
 			v, err := unpackUint256Strict(dmBorrowingOfOneABI, "borrowingOf", res[i].ReturnData)
 			if err != nil {

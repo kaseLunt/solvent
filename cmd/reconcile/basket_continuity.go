@@ -9,9 +9,15 @@
 // missed a supported token inbound pre-boundary and fully outbound
 // post-boundary within block N — zero at both edges, absent from every leg
 // list, yet moving boundary maxBorrowLT; only configured tokens move
-// maxBorrowAtFrame, so the supported set is the provably-sufficient universe.
-// The old union survives as a minimality check: legs∪seized ⊄ supported is a
-// decode/config anomaly and refuses):
+// maxBorrowAtFrame, so against TRANSFERS of edge-supported tokens the
+// supported set is the sufficient universe. It is NOT sufficient against the
+// collateral LIFECYCLE: an in-block Added→Removed round trip strictly before
+// L leaves its token absent from BOTH enumerations (Codex round 10, H), and
+// that gap is closed by REFUSAL on the replay side — any pre-boundary
+// lifecycle event makes the causation replay incomplete (see
+// assembleContinuitySweep's carve-out note below) — never by a coverage
+// claim here. The old union survives as a minimality check: legs∪seized ⊄
+// supported is a decode/config anomaly and refuses):
 //
 //	(a) collateralOf(user)@pinHash(N): the exec-frame leg read (the parent
 //	    frame's @parentHash(N-1) twin already existed);
@@ -958,10 +964,11 @@ func sortedAddrKeys(m map[common.Address]*big.Int) []common.Address {
 // pre-boundary and fully outbound post-boundary is zero-balance at both edges,
 // appears in NO leg or seizure list, and raises boundary maxBorrowLT exactly
 // like H2's top-up. Only tokens with configs move maxBorrowAtFrame, so the
-// supported set is the provably-sufficient universe — EXCEPT for the in-block
-// ROUND TRIP (Codex round 10, H): a token added AND removed strictly before L
-// is absent from BOTH pins' enumerations, so this union cannot contain it and
-// no sweep can ask about it. That gap is closed on the REPLAY side, not here:
+// supported set is the sufficient universe against TRANSFERS of
+// edge-supported tokens — it is NOT sufficient against the collateral
+// LIFECYCLE's in-block ROUND TRIP (Codex round 10, H): a token added AND
+// removed strictly before L is absent from BOTH pins' enumerations, so this
+// union cannot contain it and no sweep can ask about it. That gap is closed on the REPLAY side, not here:
 // replaySameBlockCauses now decodes CollateralTokenAdded/Removed
 // (DM-custodied and witness-visible, IDebtManager.sol:44-45) and REFUSES the
 // whole replay on any pre-boundary occurrence, so a round-trip block can

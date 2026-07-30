@@ -114,16 +114,20 @@ func wave8Plan(t *testing.T, full bool) []backtestFrameTag {
 	if full {
 		// The inventory gained collateralTokens in the ADJUSTMENT wave
 		// (addendum adjustment 1): getCollateralTokens()@parentHash(N-1) —
-		// half of the continuity sweep's supported-set address universe.
-		require.Equal(t, []string{"collateralOf", "collateralTokens", "price", "config", "balanceOf"}, kinds,
+		// half of the continuity sweep's supported-set address universe —
+		// and adminImpl in the PROVENANCE wave (round-11 H1): the
+		// ADMIN_IMPL_POSITION slot read at the parent pin.
+		require.Equal(t, []string{"collateralOf", "collateralTokens", "adminImpl", "price", "config", "balanceOf"}, kinds,
 			"the parent frame's canonical subcall order — the SUBCALL INVENTORY this wave's law covers")
 	} else {
 		// The exec inventory gained collateralOf in the L2 wave (basket-
-		// continuity ruling L2(a): leg@N is one side of the closure identity)
-		// and collateralTokens in the adjustment wave (adjustment 1: the
-		// supported set @pinHash(N)). The wave-8 decode law covers both new
-		// subcalls automatically — same loop, same per-subcall refusal.
-		require.Equal(t, []string{"borrowingOf", "collateralOf", "collateralTokens", "price"}, kinds,
+		// continuity ruling L2(a): leg@N is one side of the closure identity),
+		// collateralTokens in the adjustment wave (adjustment 1: the
+		// supported set @pinHash(N)), and adminImpl in the provenance wave
+		// (round-11 H1: the slot read at the N pin). The wave-8 decode law
+		// covers every new subcall automatically — same loop, same
+		// per-subcall refusal.
+		require.Equal(t, []string{"borrowingOf", "collateralOf", "collateralTokens", "adminImpl", "price"}, kinds,
 			"the execution frame's canonical subcall order — the same decode path, the same law")
 	}
 	return tags
@@ -143,6 +147,12 @@ func wave8Honest(t *testing.T, tags []backtestFrameTag, legAmount int64) []multi
 		case "collateralTokens":
 			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmGetCollateralTokensABI, "getCollateralTokens",
 				[]common.Address{tokA})}
+		case "adminImpl":
+			// The honest answer is the AUDITED constant — the epoch check is
+			// a separate law with its own regressions (admin_epoch_test.go);
+			// wave-8 fixtures must pass it, not exercise it.
+			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmGetDebtManagerAdminABI, "getDebtManagerAdmin",
+				auditedDMAdminImpl)}
 		case "borrowingOf":
 			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmBorrowingOfOneABI, "borrowingOf", big.NewInt(legAmount))}
 		case "price":

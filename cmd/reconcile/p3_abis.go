@@ -187,6 +187,21 @@ var dmGetMaxBorrowAmountABI = mustParseABI(`[{
 	"outputs": [{"name": "", "type": "uint256"}]
 }]`)
 
+// dmGetDebtManagerAdminABI: getDebtManagerAdmin() → address. Provenance:
+// DebtManagerCore.sol:699-707 — `addr := sload(ADMIN_IMPL_POSITION)` and
+// nothing else, i.e. the core's OWN read of the admin-implementation slot
+// (DebtManagerStorageContract.sol:99, keccak256("DebtManager.admin.impl") —
+// pinned by TestAdminImplSlotDerivesFromTheCommittedSource). This is the
+// admin-epoch check's two-pin slot read (admin_epoch.go): a CORE-declared
+// selector, dispatched BEFORE the fallback, so the admin implementation under
+// scrutiny can never intercept it; cross-checked against raw
+// eth_getStorageAt at capture time. Selector 0xd6d3ec9c.
+var dmGetDebtManagerAdminABI = mustParseABI(`[{
+	"type": "function", "name": "getDebtManagerAdmin", "stateMutability": "view",
+	"inputs": [],
+	"outputs": [{"name": "", "type": "address"}]
+}]`)
+
 // dmConvertCollateralToUsdABI: convertCollateralTokenToUsd(token, amount) →
 // uint256 (USD 6-dec). Provenance: DebtManagerCore.sol:375-379 —
 // `(amount × IPriceProvider(dataProvider.getPriceProvider()).price(token)) /

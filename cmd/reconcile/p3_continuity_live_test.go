@@ -235,6 +235,15 @@ type continuityCapture struct {
 	// their union is the swept address list.
 	ParentSupportedRet string `json:"parent_supported_ret"`
 	ExecSupportedRet   string `json:"exec_supported_ret"`
+	// The ADMIN_IMPL_POSITION reads at both pins (Codex round 11 H1,
+	// admin_epoch.go): the core accessor's eth_call word AND the raw
+	// eth_getStorageAt word, so the hermetic suite pins
+	// accessor == slot == the audited constant on committed chain bytes
+	// (TestCapturedAdminImplIsTheAuditedConstantAtBothPins).
+	ParentAdminImplRet  string `json:"parent_admin_impl_ret"`
+	ExecAdminImplRet    string `json:"exec_admin_impl_ret"`
+	ParentAdminImplSlot string `json:"parent_admin_impl_slot"`
+	ExecAdminImplSlot   string `json:"exec_admin_impl_slot"`
 
 	// Raw envelopes, verbatim provider bytes.
 	DMLiquidatedEnvelope json.RawMessage `json:"dm_liquidated_envelope"`
@@ -383,10 +392,39 @@ func ownSeizures(w snapshotdb.T6Witness) ([]snapshotdb.T6Seizure, error) {
 	return out, nil
 }
 
+// rawStorageAtHash reads ONE storage word via eth_getStorageAt in the
+// EIP-1898 form (READ-ONLY), walking the dialed endpoints in order. It is
+// capture-only plumbing: production cannot issue this method (the chainReader
+// surface has no storage read — the implWitnessDeviation limitation), which
+// is exactly why the capture cross-checks the production accessor against the
+// raw slot here and commits both words.
+func rawStorageAtHash(ctx context.Context, clients []*gethrpc.Client, addr common.Address, slot common.Hash, blockArg any) (string, error) {
+	var errs []string
+	for i, c := range clients {
+		var out string
+		if err := c.CallContext(ctx, &out, "eth_getStorageAt", addr, slot, blockArg); err != nil {
+			errs = append(errs, fmt.Sprintf("endpoint %d: %v", i, err))
+			continue
+		}
+		if strings.TrimSpace(out) == "" {
+			errs = append(errs, fmt.Sprintf("endpoint %d: empty storage answer (protocol violation)", i))
+			continue
+		}
+		return strings.ToLower(out), nil
+	}
+	return "", fmt.Errorf("eth_getStorageAt: every endpoint failed: %s", strings.Join(errs, " | "))
+}
+
+// blockHashArg renders the EIP-1898 blockHash block parameter.
+func blockHashArg(h common.Hash) map[string]any {
+	return map[string]any{"blockHash": strings.ToLower(h.Hex())}
+}
+
 // TestLiveCaptureContinuityFixtures runs the production read set per frozen
-// case against the live endpoints (READ-ONLY: eth_call + eth_getLogs at
-// stored pins) and commits the envelopes + call words + observed proof
-// outcome to testdata/continuity/. Opt-in: SOLVENT_P3_CONTINUITY_CAPTURE=1.
+// case against the live endpoints (READ-ONLY: eth_call + eth_getLogs +
+// eth_getStorageAt at stored pins) and commits the envelopes + call words +
+// observed proof outcome to testdata/continuity/. Opt-in:
+// SOLVENT_P3_CONTINUITY_CAPTURE=1.
 func TestLiveCaptureContinuityFixtures(t *testing.T) {
 	if os.Getenv("SOLVENT_P3_CONTINUITY_CAPTURE") == "" {
 		t.Skip("SOLVENT_P3_CONTINUITY_CAPTURE unset: fixture capture is opt-in")
@@ -405,6 +443,44 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 	}
 	logsR, err := dialPinnedLogs(ctx, "op", urls, newRPCRunner(1.5, 5, &rpcCallLog{}))
 	require.NoError(t, err)
+
+	// Raw clients for the eth_getStorageAt cross-check (capture-only; see
+	// rawStorageAtHash). Same URL list, endpoints named by env ordinal only.
+	var storageClients []*gethrpc.Client
+	for i, u := range urls {
+		c, derr := gethrpc.DialContext(ctx, u)
+		require.NoError(t, derr, "dial SOLVENT_RECON_RPC_OP[%d] for the storage cross-check", i)
+		defer c.Close()
+		storageClients = append(storageClients, c)
+	}
+
+	// THE AUDITED-CONSTANT ESTABLISHMENT READ (round-11 dispatch step 3),
+	// before any case runs: the admin implementation at the CURRENT HEAD,
+	// through BOTH read families. Head and frame era must agree with the
+	// audited pin — a difference is a REAL admin epoch boundary and the whole
+	// run STOPS for chain-truth adjudication, never papers over.
+	gdaData, err := dmGetDebtManagerAdminABI.Pack("getDebtManagerAdmin")
+	require.NoError(t, err)
+	var headCallRet string
+	require.NoError(t, storageClients[0].CallContext(ctx, &headCallRet, "eth_call",
+		map[string]any{"to": strings.ToLower(liveDMProxy.Hex()), "data": "0x" + hex.EncodeToString(gdaData)}, "latest"),
+		"head eth_call getDebtManagerAdmin")
+	headCallBytes, err := hex.DecodeString(strings.TrimPrefix(headCallRet, "0x"))
+	require.NoError(t, err)
+	headAccessor, err := unpackAddressStrict(dmGetDebtManagerAdminABI, "getDebtManagerAdmin", headCallBytes)
+	require.NoError(t, err)
+	headSlotHex, err := rawStorageAtHash(ctx, storageClients, liveDMProxy, dmAdminImplSlot, "latest")
+	require.NoError(t, err, "head eth_getStorageAt(ADMIN_IMPL_POSITION)")
+	headSlotBytes, err := hex.DecodeString(strings.TrimPrefix(headSlotHex, "0x"))
+	require.NoError(t, err)
+	require.Len(t, headSlotBytes, 32)
+	headSlot := common.BytesToAddress(headSlotBytes[12:])
+	t.Logf("admin-impl establishment @head: accessor %s, raw slot %s, audited %s",
+		headAccessor.Hex(), headSlot.Hex(), auditedDMAdminImpl.Hex())
+	if headAccessor != auditedDMAdminImpl || headSlot != auditedDMAdminImpl {
+		t.Fatalf("STOP: the CURRENT HEAD's admin implementation (accessor %s, slot %s) differs from the audited constant %s — a real admin epoch boundary; re-audit and re-pin before any capture, never absorb",
+			headAccessor.Hex(), headSlot.Hex(), auditedDMAdminImpl.Hex())
+	}
 
 	require.NoError(t, os.MkdirAll(filepath.Join("testdata", "continuity"), 0o755))
 	captured, failed := 0, 0
@@ -480,6 +556,56 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 			}
 			cap.ParentSupportedRet = "0x" + hex.EncodeToString(pSupRet)
 			cap.ExecSupportedRet = "0x" + hex.EncodeToString(eSupRet)
+
+			// The ADMIN_IMPL_POSITION reads at both pins (round-11 H1): the
+			// production accessor through the pinned reader, AND the raw slot
+			// word through eth_getStorageAt — both committed, so the hermetic
+			// suite pins accessor == slot == audited on chain bytes.
+			pAdmRet, _, err := r.callAtHash(ctx, key+":capture:getDebtManagerAdmin@parent", liveDMProxy, gdaData, parentHash)
+			if err != nil {
+				return fmt.Errorf("parent getDebtManagerAdmin: %w", err)
+			}
+			eAdmRet, _, err := r.callAtHash(ctx, key+":capture:getDebtManagerAdmin@pin", liveDMProxy, gdaData, pin)
+			if err != nil {
+				return fmt.Errorf("exec getDebtManagerAdmin: %w", err)
+			}
+			cap.ParentAdminImplRet = "0x" + hex.EncodeToString(pAdmRet)
+			cap.ExecAdminImplRet = "0x" + hex.EncodeToString(eAdmRet)
+			pSlotHex, err := rawStorageAtHash(ctx, storageClients, liveDMProxy, dmAdminImplSlot, blockHashArg(parentHash))
+			if err != nil {
+				return fmt.Errorf("parent eth_getStorageAt(ADMIN_IMPL_POSITION): %w", err)
+			}
+			eSlotHex, err := rawStorageAtHash(ctx, storageClients, liveDMProxy, dmAdminImplSlot, blockHashArg(pin))
+			if err != nil {
+				return fmt.Errorf("exec eth_getStorageAt(ADMIN_IMPL_POSITION): %w", err)
+			}
+			cap.ParentAdminImplSlot, cap.ExecAdminImplSlot = pSlotHex, eSlotHex
+			// STOP semantics (dispatch step 6's re-capture clause): ANY case
+			// showing a non-audited address at either pin, via either read
+			// family, is a REAL historical epoch — halt the whole capture
+			// immediately and report; do not paper over.
+			for _, side := range []struct {
+				label   string
+				ret     []byte
+				slotHex string
+			}{
+				{"parent(N-1)", pAdmRet, pSlotHex},
+				{"exec(N)", eAdmRet, eSlotHex},
+			} {
+				acc, uerr := unpackAddressStrict(dmGetDebtManagerAdminABI, "getDebtManagerAdmin", side.ret)
+				if uerr != nil {
+					return fmt.Errorf("%s getDebtManagerAdmin decode: %w", side.label, uerr)
+				}
+				slotBytes, herr := hex.DecodeString(strings.TrimPrefix(side.slotHex, "0x"))
+				if herr != nil || len(slotBytes) != 32 {
+					return fmt.Errorf("%s raw slot word malformed (%q): %v", side.label, side.slotHex, herr)
+				}
+				slotAddr := common.BytesToAddress(slotBytes[12:])
+				if acc != auditedDMAdminImpl || slotAddr != auditedDMAdminImpl {
+					t.Fatalf("STOP: case %s %s carries admin impl accessor=%s slot=%s, audited=%s — a REAL historical admin epoch inside the frozen frame; halt, report, re-adjudicate (never re-pin silently)",
+						key, side.label, acc.Hex(), slotAddr.Hex(), auditedDMAdminImpl.Hex())
+				}
+			}
 			parentSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", pSupRet)
 			if err != nil {
 				return fmt.Errorf("parent getCollateralTokens decode: %w", err)

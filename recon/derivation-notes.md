@@ -530,3 +530,34 @@ Two further honest notes:
    rescoped to poll-based snapshots (or ERC20 Transfer streams for Safe balances).
 4. Aave-side collateral (aToken balances) similarly needs aToken streams, not just Pool logs; debt
    is Pool-log-exact.
+
+## DebtManagerAdmin implementation pin (P3 Task 6 provenance wave, Codex round 11 H1) [2026-07-30]
+
+`DebtManagerCore.setAdminImpl` (DebtManagerCore.sol:715-721) writes the admin-implementation slot
+with a bare `sstore` and **no event**, and the proxy fallback (:746-763) delegatecalls whatever the
+slot holds — so the admin implementation is an epoch the `Upgraded` census cannot see. Pinned the
+same way the core/pool impls were pinned (live read at an EIP-1898 hash/height pin, recorded here,
+enforced as a constant in code):
+
+- **Slot**: `ADMIN_IMPL_POSITION = 0x49d4a010ddc5f453173525f0adf6cfb97318b551312f237c11fd9f432a1f5d21`
+  (DebtManagerStorageContract.sol:99). The source's own derivation comment (:98) —
+  `keccak256("DebtManager.admin.impl")` — **holds exactly** (recomputed 2026-07-30;
+  `cmd/reconcile`'s `TestAdminImplSlotDerivesFromTheCommittedSource` re-derives both sides from the
+  source text on every run, so the transcription can never drift silently).
+- **Audited admin implementation**: **`0x8E87938C7FdF1d4728D87639e15E425A98a2d94F`** — the deployed
+  `DebtManagerAdmin` (committed audited source `recon/cash-v3/src/debt-manager/DebtManagerAdmin.sol`;
+  CREATE3 salt lineage `keccak256("DebtManagerAdminImpl")`, scripts/SetupOptimismProd.s.sol:57).
+  Read live 2026-07-30 from **both** `SOLVENT_RECON_RPC_OP` endpoints, via **both** read families
+  (raw `eth_getStorageAt(proxy, ADMIN_IMPL_POSITION)` and the core accessor `getDebtManagerAdmin()`,
+  which is nothing but `sload(ADMIN_IMPL_POSITION)`, DebtManagerCore.sol:699-707), at the current
+  head **and** at frame-era pins (blocks 150,057,202 and 153,399,414 by stored hash). All reads
+  identical — head == frame era, so **no admin epoch boundary exists over the frozen backtest
+  frame** (the wave's STOP condition did not fire). Re-proven across all 31 frozen cases × both
+  pins × both read families by the continuity capture (`testdata/continuity/*.json`,
+  `parent_admin_impl_*` / `exec_admin_impl_*`), asserted hermetically on every suite run.
+- **Enforcement**: `cmd/reconcile/admin_epoch.go` (`auditedDMAdminImpl`). Every backtest case reads
+  the slot at both of its pins through the frame machinery and **refuses** (`admin-impl-epoch`)
+  unless both equal this constant. A future honest admin upgrade therefore fails loudly until the
+  new epoch is audited and this pin is consciously re-established. Accepted-and-disclosed residual
+  (D-013): a within-block `setAdminImpl` swap-and-revert between the two reads is invisible to a
+  two-pin read; honest governance has no swap-back motive and the choreography is evasion-shaped.
