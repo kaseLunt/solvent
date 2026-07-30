@@ -1147,6 +1147,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   workaround TRUNCATE reorg_epochs; MICRO-TASK OWED.** NEXT: Codex
   flag-custody round 4 (closing) queues behind the Task 7 round in flight;
   then Task 6 round 2.
+- CODEX ROUND 1 ON TASK 7 (session 019fb1fb-a5ad-7a93-8bba-339d54b7078c,
+  ~10.5min, t7 @ 328bd0f): **needs-attention — 1 CRITICAL + 2H + 2M; fixture
+  arithmetic and the five contract-valid mutations verified correct.** (C)
+  THE SESSION'S SIGNATURE CLASS AT A NEW LAYER: the API's read query predates
+  the flag-custody round-3 fix — it never selects refusal_code/refusal_detail
+  or RefusedEngines, so the honest maintenance path's withheld Aave engine
+  serves as a clean zero-position healthy book across REST+SSE (the exact
+  empty-set vacuous green riskd just closed, re-opened by a parallel-build
+  seam). (H) verifyReconstruction misses bonus-dependent outputs (liq_bonus
+  mutation would pass the guard yet move waterfall/market-realization; also
+  AvgLTBps + exact rational omitted). (H) the const heartbeat table reports
+  KNOWN-REFUTED budgets (FRAX 170712 / USDC 248460 / PYUSD 604896 vs 90000)
+  as merely published-not-verified — no refuted grade exists in the enum.
+  (M) SSE heartbeats continue through DB read failures with no degradation
+  event — an apparently-live stream over indefinitely stale data. (M) the
+  observatory duplicates a WEAKER completeness predicate than
+  NewestCompleteBatch — a torn restore can serve a point the authority
+  rejects (the claimed single-authority violated). FIX WAVE dispatched (all
+  five + the store Querier-reader owed-forward item pulled INTO scope for
+  the observatory fix). Codex now on flag-custody round 4 (closing).
+  PATTERN NOTE: parallel waves that both touch one contract (writer adds a
+  field; reader built before it) need a SEAM CHECK at integration — added
+  to the standing integration checklist.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
