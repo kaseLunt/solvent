@@ -1318,6 +1318,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   → identity/adoption → legacy past → STREAM-SET BINDING. Each face is the
   same theorem: a claim of completeness must name EVERYTHING it quantified
   over.
+- **CLIENT REGEN LANDED — f58bc48** (23 files +1,416/−30; 227/227, drift gate
+  green — its SECOND catch, the loop works). lookup() free function returning
+  a three-case discriminated union with NO boolean anywhere (the nullable
+  type alone protects nobody — '!found' branches identically on false and
+  null, DEMONSTRATED by test before the discriminant separates it); complete
+  narrowed to LITERALS on two arms (impossible combinations unrepresentable);
+  ContractInvariantError refuses schema-valid-but-self-contradicting bodies —
+  THE CLIENT ENFORCES THE SERVER'S LAW (a found:false over an incomplete
+  lookup is refused client-side, so the round-2 fix cannot be undone
+  downstream); isDefinitiveNegative() deliberately not a negation. Provenance:
+  new fields SHAPE-ONLY except the three-valued semantics asserted as
+  CONTRACT LAW (reasoned: prose rules a client can get catastrophically wrong
+  with no number involved). Zero PINNED values moved across 328bd0f..HEAD.
+  NOTE: reviewer transcript rotation — the standing Codex agent
+  (a59d42847…) lost its transcript; Task 6 round 3 runs on a FRESH
+  codex-reviewer with the operational pattern re-briefed. Remaining Codex
+  queue: Task 6 r3 (running) → flag-custody r6 (stream-binding fix, wave
+  mid-work) → Task 7 r3 (da5ed0a) → Task 8 r1 (d664886+f58bc48).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
