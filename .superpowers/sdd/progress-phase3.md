@@ -1066,6 +1066,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   test). The seam lesson compounds: a law change is not landed until the
   REVISION, the IDENTITY, and the MIGRATED PAST all agree with it. Codex now
   reviewing the queued rev-3 docs range (c680f78) in parallel.
+- CODEX ROUND ON REV-3 DOCS (session 019fb1e8-4f46-7381-aada-607e35c4de3b,
+  ~6min, rev3doc @ c680f78): needs-attention — 1H/1M, closure NOT complete.
+  **(H) caught MY integration error directly: 631d295's message claimed the
+  00013 comment fix but the edit sat UNSTAGED (missed in the git-add name
+  list) — lesson: verify the staged list against the message's claims before
+  committing.** Plus three more present-tense remnants beyond the original
+  list (plan Task-1 headline + Task-4 fused-floor-vectors clause; UI concept
+  scope note :476; IDEA-002:33). ALL FIXED: ac48b6a (00013 finally committed
+  + plan + UI) and ae143d7 (IDEA-002, separate roadmap commit). (M) the
+  corrected bound's own notation is defective — N-as-remainder-legs means
+  ΔD=N exactly (not 0..N), and the delta-0 example calls itself N=2 under a
+  definition making it N=0; AND the mixed-decimal impossibility claim is
+  FALSE (10^18 is a valid common denominator after scaling — per-reserve
+  ceiling is GenericLogic's MANDATE, not mathematical necessity). Notation
+  fix (M = all debt legs, R = remainder legs, ΔD = R ≤ M) dispatched to the
+  rev-3 wave for derivation-notes + aave_test + liqprice; **assemble.go's
+  revision-log wording gets the same M/R correction AT INTEGRATION (third
+  deferred assemble.go item — flag-custody wave mid-edit there again).**
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
