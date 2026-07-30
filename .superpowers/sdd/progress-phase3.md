@@ -1216,6 +1216,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   0 skips. Disclosed: one-wei live_collateral mutation invisible at this
   layer (floors away — stated in the test). NEXT: Codex Task 7 round 2 after
   the current fix-wave queue clears.
+- **TASK 8 (client-ts) LANDED — d664886** (2026-07-30 01:55, 50 files +15,249;
+  202/202, zero runtime deps ENFORCED BY TEST, npm ci reproducible, packed not
+  published). Judgment call endorsed: tracked the LIVE contract while Task 7's
+  fix wave amended it (drift gate must point at the contract; verified zero
+  mirrored numbers changed; the tracked contract became HEAD at 94a13c4).
+  Fixture provenance record grades MIRRORED/DERIVED/ILLUSTRATIVE/SHAPE-ONLY —
+  only ~90 MIRRORED values asserted as server fact; DERIVED model-validated
+  but asserted only against invariants; addresses EIP-55-computed not
+  transcribed. Design finding kept: toNumber refuses on SAFE-INTEGER, not
+  round-trip (1.08e18 IS a representable double yet x+1===x — first impl had
+  the bug, the test demonstrates the trap). fetchEventSource because native
+  EventSource cannot see comment frames by spec. yaml@2.9.0 devDep flagged
+  for owner bookkeeping.
+- **FLAG-CUSTODY ROUND-5 FIX LANDED — 31c08c2** (5 files). Genesis bug had two
+  halves: coverage vouches from the MAX stream start (min stays the walk
+  floor — chainlink_feed's 4 legitimate starts ruled out refuse-divergence;
+  structural: an unchecked binary still fails the coverage gate) + the audited
+  premise as CONSTANTS beside the law (AuditedAaveGenesisBlock/PoolAddress),
+  validateAaveGenesis refusing startup on divergence. JUDGMENT REVERSED and
+  documented in-code: 'read the bar from config' was wrong — CONFIG IS WHERE
+  DRIFT HAPPENS; the bar is the constant, config is checked against it.
+  7-case divergence table + production-config coupling + real-runner
+  max-stamp proof. DM scoping control BEFORE Migrate; Codex's mutation run
+  for real (WHERE deleted → right failure → restored). **ROOT CAUSE for the
+  store flakiness (supersedes idempotency theory): CROSS-PACKAGE PARALLELISM
+  on the shared scratch DB — prices writes reorg_epochs while store runs;
+  -p 1 → 0 failures, default → 27. make test green was TIMING LUCK.** FIXED
+  at the recipe level: -p 1 on make test (6266f63) and both CI lanes
+  (49861dc, owner-reviewed); store/prices DB split stays the owed micro-task.
+  NEXT: Codex queue = Task 7 round 2 (running) → flag-custody CLOSING round
+  (fac5168+31c08c2) → Task 8 round 1 → Task 6 round 3 (wave mid-fix).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
