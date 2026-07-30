@@ -1029,6 +1029,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   631d295 + c680f78). NEXT: Codex re-rounds on 631d295 (flag-custody round 3)
   and c680f78 (rev-3 docs) once the Task 6 round frees the reviewer; Task 7
   wave mid-build (cmd/api WIP untracked, its go.mod deps held for its commit).
+- CODEX ROUND 1 ON TASK 6 (session 019fb1c8-1c5e-7433-a335-84cd2496db28, ~14min,
+  t6 @ e19a94f): **needs-attention — 9 HIGH + 1 MEDIUM, the deepest verdict of
+  the session.** Split: DETERMINISTIC FALSE-FAILURES (tally counts provenance-
+  upgrade/qualifier/marginal-disclosed as failures — honest pass impossible;
+  residueWeld receives PARENT frame but borrowingOf populates on EXEC — every
+  case would gate weld-unread) and VACUOUS GREENS (Aave census derived from
+  AaveLegs — the cohort compared to itself; DM mandatory population =
+  ourLiquidatable, the implementation under test — my acceptance of the
+  opt-in full-census deviation WITHDRAWN, Codex found the deeper defect: not
+  cost, census independence; input ledger opt-in — BeforeDebtUSD already
+  consumed undeclared, a fourth tolerance can skip cite; final-branch seizure
+  never consumes LiquidatedUSD; intra-block classifier labels flips without
+  replaying the witness; open-ended heartbeat gaps never judged — a stalled
+  feed could get UPGRADED, and head-gap uses wall clock not chain time;
+  tokenConfig never welds base mapping to the scenario claim — the exact
+  class-closure the sweep exists for; three-anchor floor silently lowered).
+  FIX WAVE dispatched with all ten + Codex's mutation classes. The false-
+  failure findings are the acceptance run's friends: they prove the gate set
+  as committed could NEVER have passed honestly — better found now than at
+  the restart.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
