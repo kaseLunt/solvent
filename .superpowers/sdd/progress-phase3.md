@@ -1856,6 +1856,21 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   regressions (Success=false / missing config / empty-undecodable return →
   never EXACT; honest-frame guard), mutants m1 skip-restored / m2
   conjunction-dropped / m3 order-restored (distinct kills).
+- CODEX ROUND 5 ON TASK 8 (session 019fb3fb-04ba-7aa3-9227-c692fa9efdc4,
+  ~8min, t8r5 @ e437ae0, base b9c2a10): needs-attention — 1 MEDIUM, surgical.
+  README-vs-API accuracy HELD; sync/typecheck wiring HELD. The residual: the
+  falsiness lint's vocabulary (result/lookup/verdict/found/outcome) misses
+  the CANONICAL field names it exists to protect — !position.liquidatable,
+  !leg.used_as_collateral, !horizon.becomes_liquidatable, !leg.collateral_use
+  all pass typecheck + sync + lint (nullable booleans render null definitive;
+  the refined string unions collapse every token into one branch). Direct
+  public field names, NOT the disclosed alias-evasion limit. FIX WAVE 5
+  dispatched (small): vocabulary tied to the sealed-field inventory (const +
+  cross-check assertion so a FUTURE sealed field can't be forgotten),
+  per-expression anti-vacuity positives, the reviewer's synchronized mutant
+  (identical insertion both sides — typecheck green, sync green, lint kills),
+  expanded lint run against the actual README (violation-or-explicit-none).
+  Then round 6 final.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
