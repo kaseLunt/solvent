@@ -1270,6 +1270,22 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   CALIBRATION NOTE, kept: two of six were its own round-1 fix INCOMPLETE
   (p3Counts half; the u0 seed), both surfaced by the sweep, not re-reading.
   NEXT: Task 6 round 3 joins the Codex queue.
+- CODEX ROUND 2 ON TASK 7 (session 019fb232-a528-7421-aec3-e0d7959f05a5,
+  ~11min, t7r2 @ 94a13c4): needs-attention — 1H/2M. CONFIRMED SOUND: the
+  seven listed refusal points, weld-not-TOCTOU (despite rewindable ledger
+  rows), SSE edges, the one-wei disclosure (not material), CompleteBatchIDs
+  by-construction. The findings: the SAME withheld-engine class at two
+  unswept surfaces — (H) address/stress lookups emit DEFINITIVE found:false
+  when the relevant engine is withheld (the contract defines found:false as
+  'no position exists'; an honest client consumes a false negative exactly
+  when the service cannot know); (M) stress_coverage_is_full stays green
+  over an excluded engine; (M) observatory returns-early on empty
+  CompleteBatchIDs and suppresses INDEPENDENT rate-index custody. Fix wave 2
+  dispatched (three-valued lookup availability + opposite-teeth tests both
+  endpoints; coverage false on exclusion; rate indexes read regardless).
+  Codex now on the flag-custody CLOSING round (fac5168+31c08c2+dc2b739,
+  depth: max-floor overstatement, startup-path completeness, the judgment
+  reversal's new seams, rewind interaction with the max bar).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
