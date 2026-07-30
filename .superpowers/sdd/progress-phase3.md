@@ -1996,6 +1996,43 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   appearing in-stream are STALE gopls (that signature landed at 06d0a25,
   suite + -race green, CI green) — eleventh occurrence, compiler remains the
   authority.
+- **L2 WAVE LANDED — 639d7eb** (45 files +4,539/−56: basket_continuity.go
+  ~700 lines + tests + captured suite + 31 fixture JSONs + probe record;
+  both-ways exact; integrator independently re-ran — 253/0/7; survived one
+  session-limit interruption earlier in the train; wave ran ~51min).
+  HEADLINES: (L6) both RECON_RPC_OP endpoints serve EIP-234 blockHash-form
+  getLogs at frame-era depth — blockHash==range log-by-log at both probe
+  pins, recorded in recon/p3-probes.md as a committed env-gated live test.
+  (L2) closure identity per token over parent ∪ seized ∪ EXEC legs (union
+  WIDENED past the ruling — closes the inbound-new-token blind spot);
+  Δpending signs derived from committed CashModule source; WithdrawalAmount-
+  Updated has NO committed caller → underivable → refuse; attribution
+  two-sided (a fixture missing its own seizure transfers is chain-impossible
+  and REFUSED); netting modeled IFF the case's own final pass (earlier-pass
+  cancellation = attributed-but-unmodeled → refuse — the floor, not the
+  extension); T6Witness gained TxHash. (L3) execEligible over
+  BoundaryCollateral iff proven, disclosed per row. (L1) discharged:
+  := proof.Proven, the const seam gone; unproven text verbatim-stable.
+  (L7) **31/31 captured through the PRODUCTION assembler, ALL PROVED, zero
+  refusals — the ruling held against real chain data with nothing
+  unimplementable.** Population facts: 22 cases are zero-amount seizures
+  over empty baskets (chain emits no Transfer for zero elements — the
+  two-sided law matches); real-seizure cases confirm the outbound aggregate
+  law; ZERO netting events frame-wide (Δpending synthesis-exercised only —
+  chain fact, disclosed, mutation-proven load-bearing). Mutants m1-m4 killed
+  incl. m2's OPPOSITE-direction pair (drop Δpending → pending-liquidation
+  false-refuses AND netting-moved false-passes — the ruling's netting
+  insight proven in both failure directions). New keys:
+  basket_continuity (proven text), basket_continuity_refusals,
+  exec_eligibility_basket, over_seizure_discrimination. ROUND 9 (FINAL — on
+  SHIP the P3 review program closes 4 of 4) dispatched: t6r9 @ 639d7eb, base
+  21880a7 — ruling conformance law-by-law, Δpending signs vs source,
+  attribution edge cases (two-pass block, per-(tx,token) granularity),
+  capture honesty (production-assembled? zero-refusal credible? hermetic
+  replay re-runs the PROOF?), the two sharpenings + synthesis-only Δpending
+  adjudicated. CHAIN-TRUTH ACK requested in parallel (same standing
+  instance) for the two refusal-widening sharpenings — Codex judges
+  honest-use, chain-truth judges chain-reality.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
