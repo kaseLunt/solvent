@@ -167,3 +167,53 @@ revaluation :531-532), `recon/derivation-notes.md` (:99-102), `recon/cash-v3/src
 (:539-565), `recon/cash-v3/src/debt-manager/DebtManagerCore.sol` (:526, :568-584),
 `recon/cash-v3/src/modules/cash/CashModuleCore.sol` (:228-231),
 `recon/cash-v3/src/modules/cash/CashEventEmitter.sol` (:52-78).
+
+---
+
+# ADDENDUM (2026-07-30) — ACK/ADJUST on the L2 wave's two sharpenings
+
+Archived verbatim from the standing chain-truth instance, responding to the L2 implementation
+(639d7eb). NORMATIVE, same authority as the ruling above.
+
+**1. UNION WIDENING — ACK the motive, ADJUST to the complete form.**
+The widening is strictly refusal-widening and closes a real gap (a token appearing only at N was
+invisible to a parent∪seized sweep — genuine unseen-inbound through the address list itself). But
+the three-way union is still not closed: a **supported collateral token inbound pre-boundary and
+fully outbound post-boundary within block N** is zero-balance at both edges, appears in none of
+{parent legs, exec legs, seized}, and raises boundary maxBorrowLT exactly like H2's top-up — the
+same class, one gap deeper. The complete form is cheap: the swept address list = the DM's
+**supported-collateral set at both pins** (`getCollateralTokens()@parentHash(N-1) ∪ @pinHash(N)` —
+both already in the ABI surface; a mid-block `CollateralTokenAdded/Removed` is DM-custodied and
+witness-visible, `IDebtManager.sol:44-45`). Same two getLogs calls, longer address array, one
+extra pinned read per frame. Take it. Only tokens with configs move `maxBorrowAtFrame`, so the
+supported set is the provably-sufficient universe — no unsupported-token sweep needed. If the
+wave keeps the union anyway, the in-and-out residual must be a **named disclosure in the verdict
+evidence**, not silence — but adjust rather than disclose; the fix costs less than the caveat.
+
+**2. NETTING MODELED-IFF-FINAL-PASS — ACK, conditional on one invariant being explicit.**
+The refusal split is correct and within my floor (earlier-pass cancellation =
+attributed-but-unmodeled → refuse; the sanctioned extension was permission, never obligation —
+declining it pending a cross-pass netting state-machine design is honest). The condition: state
+and pin the invariant your own `:526`-then-`:568` justification implies — **the case's own-pass
+cancellation must NEVER enter the boundary-eligibility basket.** The contract judged eligibility
+NETTED (the `:526`/`:544` check precedes `preLiquidate`'s `_cancelOldWithdrawal`), so the own-pass
+cancellation is post-check: it is attributed for closure and available to the seizure/L5
+accounting (seizure operates un-netted), but the boundary crossing is evaluated against the
+netted basket. If "models the basket effect" currently means adding the freed amounts to the
+pre-boundary eligibility basket, **invert it** — that would model the one cancellation that must
+not affect the check while refusing the one that must (the earlier pass's cancellation DID un-net
+the basket before the case's `:544` check — which is precisely why refusing it is right until
+modeled). Error direction if wrong is over-refusal, not false pass, so this is a should-fix
+sharpening, not a custody break — but pin it: the synthesized pending-liquidation fixture should
+assert the boundary basket stays netted on the own-pass arm, alongside the existing refuse
+assertion on the earlier-pass arm.
+
+**Record items:** (a) refuse-on-sight for `WithdrawalAmountUpdated` is right; (b) the
+opposite-direction mutation pair is exactly the L7 floor; (c) skipping zero-amount elements is
+chain-faithful (observed, not assumed) and the zero-arm's falsifiable content stays with
+`tryAllPartial`'s balance check.
+
+**Verdict on the sharpenings: CUSTODY HOLDS** with adjustment 1 (supported-set sweep, or named
+residual as the disclosed fallback) and the invariant in adjustment 2 made explicit and
+fixture-pinned. Neither is a re-open of the L2 design; both are address-list/semantics
+completions inside it.
