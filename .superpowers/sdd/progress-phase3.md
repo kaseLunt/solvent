@@ -698,6 +698,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   same key, adopt, FlagLargeStep survives) + consumed-witness counterweight; plus a
   structural single-source-of-truth requirement so phases and digest project the
   SAME reported set and cannot drift apart again. Last finding before SHIP.
+- FIX WAVE 5 LANDED — 4c10793 (2026-07-29 19:50, 6 files +407/−64, surgical). ONE
+  reported set, TWO projections: Assemble reports []ConsultedPrice (every consulted
+  witness: presence, value fields as seen, phase; PhaseRelevant=false on G2/absent);
+  freshness section projects the PhaseRelevant subset; price digest projects the
+  whole slice with consulted-absence recorded AS absent (absence → G1 must move the
+  key like a value change); inputs.Prices feeds NO price section (sole remaining
+  mention = the comment forbidding it; ConsultedPrice doc names itself THE single
+  source of truth and says why). Live regression = Codex's exact shape (unused row
+  neutralized+superseded in place, unchanged vector, restart → same key, adopted,
+  FlagLargeStep survives; premise PROVED); consumed-witness counterweight correctly
+  SURVIVES the digest mutant (that's what makes it a counterweight). Fixture-honesty
+  fix disclosed: two old tests mutated inputs.Prices without mutating the consulted
+  set — impossible pipeline state; idJudgedFrom keeps fixtures coherent, assertions
+  undiminished. Integrator: build/vet 0, full suite 16/16 both DSNs. NEXT: Codex
+  round 6 = CLOSING review on 564020d..4c10793 (depth: ConsultedPrice completeness
+  across all gate paths; G2-exit phase joins; one last unscoped-input sweep; full
+  round-2-M1 harm walk end-to-end across rounds 1-5 combined). SHIP closes Task 5.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
