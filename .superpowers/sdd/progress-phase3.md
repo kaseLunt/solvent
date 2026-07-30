@@ -1349,6 +1349,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   dispatched (ABI-derived topic0s + the real dm_interest_index_updated.json
   fixture + an audit of all five witness topic0s; Borrowed/Repaid split with
   topic1-only matching + the payer-slot negative).
+- **TASK 6 ROUND-3 FIXES LANDED — c421213** (3 files +376/−35). Audit: exactly
+  1 of 5 topic0s wrong (the flagged one), verified against TWO anchors outside
+  the wave's authorship. THE NIGHT'S MOST INSTRUCTIVE MOMENT: the wave DELETED
+  its own passing test (TestDMWitnessTopicsAreCanonical hashed its OWN wrong
+  signature and confirmed its own mistake) with a comment saying so — the
+  fixture is the only party to a test that cannot share the author's error.
+  Replacements: fixture==ABI==replay per event w/ fixture-vs-ABI cross-check;
+  full argument-shape assertion (would have caught it at writing time); the
+  real captured log driven to Proven. Borrowed/Repaid split with topic1
+  discipline + the wave found the defect's OTHER HALF beyond the finding
+  (Borrowed's token slot also accepted the account); deliberate disclosed
+  call: token slot NOT narrowed to the debt token (liquidatable totals across
+  all borrow tokens — narrowing would recreate the H-shape). Mutation 4/4
+  incl. Hb beyond the list (tuple-component drop = shape-error coverage).
+  Fixture-backed-over-transcribed is now the RULE for anything ABI-shaped in
+  the gate. NEXT: Task 6 round 4 (should be closing) queues behind Task 7
+  round 3 (running).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
