@@ -2125,6 +2125,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   guard; m1 = arms reverted → witnessed false-pass. 31/31 must stay proven
   byte-stable (zero lifecycle events in the frame — parent==exec supported
   sets in all 31).
+- **LIFECYCLE FIX LANDED — 16b0a5d** (3 files +308/−6; both-ways exact;
+  integrator independently re-ran — green; the stray zz_capture_diff temp
+  file from the adjustment wave confirmed already deleted). Added/Removed
+  join dmWitnessABI from the committed artifact (non-indexed token in DATA;
+  per-field pin vs the independently-parsed artifact); the arm decodes only
+  to NAME the token in the refusal note, applies nothing, refuses on
+  undecodable, NOT scoped to held tokens; post-boundary never reaches the
+  arm (collector bound log_index < L). THE CLOSURE ARTIFACT: all 21
+  committed DM events dispositioned — 5 applied / 2 refuse / 8 irrelevant
+  with source-cited reasons / 3 never-emitted-in-committed-source / infra —
+  the channel taxonomy is now CLOSED (balances swept, netting swept,
+  configuration witnessed-or-refused). Two judgment calls DISCLOSED for
+  round 11: cross-token InterestIndexUpdated stays Unrelated (round-4
+  single-debt-token boundary, pre-existing — cross-token acquisition events
+  already refuse); Upgraded does not refuse (engine identity governed by
+  the recon implementation pins). RED = the finding's false pass verbatim;
+  regression = the exact shape incl. pre-held-token nuance; event-triggered
+  guard; m1 killed 1/1; 31/31 byte-stable (the green suite is ITSELF proof
+  the frame carries zero lifecycle events). ROUND 11 (closing) dispatched:
+  t6r11 @ 16b0a5d, base 07e8a70 — audit the inventory against sources
+  (wrong-irrelevant hunt, never-emitted greps, artifact exhaustiveness),
+  refusal-arm reachability incl. lifecycle-as-only-witness, the two
+  judgment calls, regression fidelity, no-prior-law-regressed.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
