@@ -647,6 +647,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   hardening-owed item if it lands). Round-4 pattern: the erasure class keeps
   re-entering through unscoped inputs — round 3 unconsumed CURSORS, round 4 unjudged
   PRICES; same law, narrower each time. Task 5 open, round 5 pending.
+- **BACKTEST FRAME FROZEN — d2498bd** (2026-07-29 18:57; plan Task 6 pre-wave
+  deliverable, dispatched parallel to the fix waves). 31 cases (22 seeded + 9
+  forced) appended to recon/p3-probes.md, pure append 348/0, read-only freeze
+  (writes proven refused in-session), pins = stored raw_logs.block_hash, ZERO chain
+  reads. Census re-verified exact (763/471/170/9,242; histogram matches); topic0
+  re-derived from ABIs; era re-confirmed closed w/ no in-era impl upgrades. Keyed-
+  permutation draw (md5(seed||tx:logidx), seed solvent-p3-task6-backtest-v1) —
+  reproducible from psql alone; 3x byte-identical; digest 0x740ac240…f0fbf3;
+  contiguous-prefix proof against cherry-picking. FRAME FINDINGS: (1) two-pass
+  liquidations DOMINANT — 292/471 groups, 76.5% of events are pair members
+  (qualifies risk-quant R2's rare-tail premise; both passes of one pair
+  force-included — the frame's sole shared tx); (2) 74.2% single-account
+  concentration is population-faithful under the committed per-event rule
+  (disclosed, not re-specified); (3) per-bucket max-fanout force-include degenerate
+  in B1/B2 (all events tie at 15 — disclosed so nobody over-reads it); global-max
+  17 x3 and fan-out-1 x3 both in frame. Task 6 pre-wave deliverables now ALL
+  present: amended plan (cf5faed) + two normative consults + frozen frame.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
