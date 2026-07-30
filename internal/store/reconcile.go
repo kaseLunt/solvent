@@ -224,12 +224,27 @@ type DeriveCursorState struct {
 	// consumer must read as unproven rather than as coverage from genesis.
 	CoveredFromBlock *uint64
 	DecoderRevision  int32
+	// CoverageBinding is the WALKED SURFACE the claim covers — see
+	// store.CoverageBindingOf. Empty means unknown, exactly as DecoderRevision 0.
+	CoverageBinding string
+}
+
+// CoverageClaim projects the cursor's provenance columns into the claim every
+// consumer of the coverage precondition judges. It exists so no caller assembles
+// those three fields by hand and accidentally drops one.
+func (c DeriveCursorState) CoverageClaim() CoverageClaim {
+	return CoverageClaim{
+		CoveredFromBlock: c.CoveredFromBlock,
+		DecoderRevision:  c.DecoderRevision,
+		Binding:          c.CoverageBinding,
+	}
 }
 
 // DeriveCursorStates reads every derive cursor, ordered by engine.
 func DeriveCursorStates(ctx context.Context, q Querier) ([]DeriveCursorState, error) {
 	rows, err := q.Query(ctx,
-		`SELECT engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision
+		`SELECT engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision,
+		        coverage_binding
 		 FROM derive_cursors ORDER BY engine`)
 	if err != nil {
 		return nil, fmt.Errorf("query derive cursors: %w", err)
@@ -240,7 +255,7 @@ func DeriveCursorStates(ctx context.Context, q Querier) ([]DeriveCursorState, er
 		var s DeriveCursorState
 		var coveredFrom *int64
 		if err := rows.Scan(&s.Engine, &s.ChainID, &s.LastBlock, &s.AckedEpoch,
-			&coveredFrom, &s.DecoderRevision); err != nil {
+			&coveredFrom, &s.DecoderRevision, &s.CoverageBinding); err != nil {
 			return nil, fmt.Errorf("scan derive cursor: %w", err)
 		}
 		if coveredFrom != nil {

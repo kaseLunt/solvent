@@ -141,7 +141,7 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 		"a row that predates 00014 has UNKNOWN provenance, and NULL is how that must read")
 	require.EqualValues(t, 0, c.DecoderRevision,
 		"a DEFAULT that claimed a revision would license the absence-is-truth reading over an unwalked ledger")
-	require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev),
+	require.False(t, c.CoverageClaim().Satisfies(cvReq()),
 		"THE POINT OF THIS MIGRATION: an upgraded daemon finds its inherited state unproven and refuses, "+
 			"instead of publishing zero collateral for every enabled position")
 
@@ -205,9 +205,9 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 	// (f) And the upgrade did not merely add columns nothing can write: a walking
 	// window through the new entry point establishes coverage on the SAME row.
 	require.NoError(t, s.ApplyDerivedWindow(ctx, engine, 1, nil, nil, 25_000_100,
-		DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: cvRev}))
+		cvCoverage(cvGenesis)))
 	c = cvCursor(t, s, engine)
 	require.NotNil(t, c.CoveredFromBlock)
 	require.Equal(t, cvGenesis, *c.CoveredFromBlock)
-	require.True(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+	require.True(t, c.CoverageClaim().Satisfies(cvReq()))
 }

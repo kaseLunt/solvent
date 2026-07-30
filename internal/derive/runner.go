@@ -165,6 +165,15 @@ type RunnerSpec struct {
 	// Zero means "unset" and the runner falls back to StartBlock (hand-built specs
 	// in tests); it is never allowed to claim BELOW StartBlock.
 	CoverageFromBlock uint64
+	// CoverageBinding is the digest of the WALKED SURFACE this spec describes:
+	// store.CoverageBindingOf over the engine's chain and its streams'
+	// (address, startBlock) pairs.
+	//
+	// It travels with every coverage claim so a reader can tell whether the derived
+	// state was walked over the set of contracts now configured. Without it, adding a
+	// stream to an engine whose cursor is at head inherits a "from genesis" claim over
+	// an address whose history was never read.
+	CoverageBinding string
 }
 
 // BuildRunnerSpecs groups cfg's streams by engine into derivation bindings.
@@ -175,6 +184,10 @@ type RunnerSpec struct {
 func BuildRunnerSpecs(cfg *config.Config) ([]RunnerSpec, error) {
 	byEngine := map[string]*RunnerSpec{}
 	addrSeen := map[string]map[string]bool{}
+	// bindingStreams collects the (address, startBlock) pairs PER STREAM, which is
+	// finer than spec.Addresses: that set is deduped across streams and so cannot
+	// express "this address is walked from a different block".
+	bindingStreams := map[string][]store.CoverageStream{}
 	var order []string
 	for _, s := range cfg.Streams {
 		chain, ok := cfg.Chains[s.Chain]
@@ -214,6 +227,10 @@ func BuildRunnerSpecs(cfg *config.Config) ([]RunnerSpec, error) {
 		if s.StartBlock > spec.CoverageFromBlock {
 			spec.CoverageFromBlock = s.StartBlock
 		}
+		for _, a := range s.Addresses {
+			bindingStreams[s.Engine] = append(bindingStreams[s.Engine],
+				store.CoverageStream{Address: a.Bytes(), StartBlock: s.StartBlock})
+		}
 		if s.Window > spec.Window {
 			spec.Window = s.Window
 		}
@@ -228,7 +245,9 @@ func BuildRunnerSpecs(cfg *config.Config) ([]RunnerSpec, error) {
 	}
 	out := make([]RunnerSpec, 0, len(order))
 	for _, name := range order {
-		out = append(out, *byEngine[name])
+		spec := byEngine[name]
+		spec.CoverageBinding = store.CoverageBindingOf(spec.ChainID, bindingStreams[name])
+		out = append(out, *spec)
 	}
 	return out, nil
 }
@@ -449,6 +468,7 @@ func (r *Runner) Step(ctx context.Context) (bool, error) {
 	coverage := store.DerivationCoverage{
 		FromBlock:       r.coverageFrom(from),
 		DecoderRevision: decode.RegistryRevision,
+		Binding:         r.spec.CoverageBinding,
 	}
 	if err := r.store.ApplyDerivedWindow(ctx, r.spec.Engine, r.spec.ChainID, events, rates.observations(), to, coverage); err != nil {
 		// COMMIT-INDETERMINACY RULE (derive.Engine): ANY store-apply error →

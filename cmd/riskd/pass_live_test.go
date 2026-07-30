@@ -43,6 +43,14 @@ import (
 // ACCEPTANCE MODE makes that fatal (a skipped live-db suite can never produce
 // suite-green evidence, round-10 F1), and a base DSN pointing at the live
 // `solvent` database is refused outright.
+// fxAaveBinding is the WALKED SURFACE the riskd fixtures claim: the weETH reserve's
+// stream at the audited genesis. Both the config's expectation and the coverage the
+// fixture stamps are built from it, so they agree by construction — a fixture whose
+// two halves disagreed would refuse every Aave book for the wrong reason.
+var fxAaveBinding = store.CoverageBindingOf(1, []store.CoverageStream{
+	{Address: fxAave.Bytes(), StartBlock: fxAaveGenesis},
+})
+
 func riskdTestDSN(t *testing.T) string {
 	t.Helper()
 	base := os.Getenv("TEST_DATABASE_URL")
@@ -228,7 +236,7 @@ func newRiskdFixture(t *testing.T) *riskdFixture {
 			Registry: registry,
 			Aave: riskfeed.EngineBinding{Engine: risk.AaveEngine, ChainID: 1,
 				ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1",
-				GenesisBlock: fxAaveGenesis},
+				GenesisBlock: fxAaveGenesis, CoverageBinding: fxAaveBinding},
 			DM: riskfeed.EngineBinding{Engine: risk.DMEngine, ChainID: 10,
 				ParamEngine: risk.DMEngine, PriceEngine: "prices:poll:10"},
 			PollInterval: time.Second,
@@ -264,7 +272,8 @@ func (f *riskdFixture) seedRequiredCursors(t *testing.T) {
 	// state gets its own explicit fixture in
 	// TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger.
 	require.NoError(t, f.store.ApplyDerivedWindow(f.ctx, risk.AaveEngine, 1, nil, nil, fxAaveBlock,
-		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision}))
+		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision,
+			Binding: fxAaveBinding}))
 	require.NoError(t, f.store.ApplyParamEvents(f.ctx, risk.AaveParamEngine, 1, nil, fxParamBlock))
 	require.NoError(t, f.store.ApplyDerived(f.ctx, risk.DMEngine, 10, nil, fxDMBlock))
 }
@@ -303,7 +312,8 @@ func (f *riskdFixture) seedHealthyAavePosition(t *testing.T) {
 			{Asset: fxAaveDb.Bytes(), Block: 25_610_000, Kind: "variable_borrow_index", Value: mustBig("1000000000000000000000000000")},
 		},
 		fxAaveBlock,
-		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision}))
+		store.DerivationCoverage{FromBlock: fxAaveGenesis, DecoderRevision: decode.RegistryRevision,
+			Binding: fxAaveBinding}))
 
 	require.NoError(t, f.store.ApplyParamEvents(f.ctx, risk.AaveParamEngine, 1, []store.ParamRow{
 		{Engine: risk.AaveParamEngine, ChainID: 1, Asset: fxAave.Bytes(),

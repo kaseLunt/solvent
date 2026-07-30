@@ -168,7 +168,8 @@ func TestRiskdRevisionIsSerializedIntoEveryBatchVector(t *testing.T) {
 	require.NotContains(t, id.vector, "rev=3;")
 
 	// And GenesisBlock — the round-3 [medium] — is in the binding, so a corrected
-	// start block cannot adopt a batch computed under the old bar.
-	require.Contains(t, id.vector, "/genesis20625519;",
-		"the flag-custody bar is part of the identity")
+	// start block cannot adopt a batch computed under the old bar. The WALKED SURFACE
+	// (round-5) rides in the same token for the same reason.
+	require.Contains(t, id.vector, "/genesis20625519/surface"+fxAaveBinding+";",
+		"the flag-custody bar AND the walked surface are both part of the identity")
 }

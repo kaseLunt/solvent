@@ -46,25 +46,49 @@ var (
 	someAToken  = common.HexToAddress("0xbe1F842e7e0afd2c2322aae5d34bA899544b29db")
 )
 
+// auditedStreams is the FULL audited surface: the Pool plus its four aTokens, every
+// one at the audited genesis. It must be the whole set, because the invariant now
+// checks the walked-surface BINDING too — a two-stream fixture would be refused for
+// the right reason and would make the "accepted" control unreachable.
+func auditedStreams() []config.Stream {
+	const g = uint64(riskfeed.AuditedAaveGenesisBlock)
+	return []config.Stream{
+		aaveStream("eth:aave-etherfi", g, auditedPool),
+		aaveStream("eth:atoken-weeth", g, someAToken),
+		aaveStream("eth:atoken-usdc", g, common.HexToAddress("0x7380c583cDe4409eFF5DD3320D93a45D96B80E2e")),
+		aaveStream("eth:atoken-pyusd", g, common.HexToAddress("0xdF7f48892244C6106EA784609f7de10AB36F9c7e")),
+		aaveStream("eth:atoken-frax", g, common.HexToAddress("0x6914ECCf50837dC61b43ee478a9BD9B439648956")),
+	}
+}
+
+// withStream returns the audited set with one stream replaced by name.
+func withStream(name string, replacement config.Stream) []config.Stream {
+	out := auditedStreams()
+	for i := range out {
+		if out[i].Name == name {
+			out[i] = replacement
+			return out
+		}
+	}
+	panic("no such stream: " + name)
+}
+
 // TestValidateAaveGenesisRefusesEveryDivergence is the discrimination table. Each row
 // is a configuration a human could plausibly commit.
 func TestValidateAaveGenesisRefusesEveryDivergence(t *testing.T) {
 	const audited = uint64(riskfeed.AuditedAaveGenesisBlock)
 
 	t.Run("the audited configuration is accepted", func(t *testing.T) {
-		got, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:aave-etherfi", audited, auditedPool),
-			aaveStream("eth:atoken-weeth", audited, someAToken),
-		), risk.AaveEngine)
+		got, gotBinding, err := validateAaveGenesis(genesisCfg(auditedStreams()...), risk.AaveEngine)
 		require.NoError(t, err)
 		require.Equal(t, audited, got,
 			"the CONTROL: without it every refusal below could be a blanket refusal")
+		require.NotEmpty(t, gotBinding, "the accepted path also returns the walked-surface binding")
 	})
 
 	t.Run("ONLY the Pool stream moved later (the typo)", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:aave-etherfi", audited+100_000, auditedPool),
-			aaveStream("eth:atoken-weeth", audited, someAToken),
+		_, _, err := validateAaveGenesis(genesisCfg(
+			withStream("eth:aave-etherfi", aaveStream("eth:aave-etherfi", audited+100_000, auditedPool))...,
 		), risk.AaveEngine)
 		require.Error(t, err, "the minimum is unchanged, so only an audited comparison can catch this")
 		require.Contains(t, err.Error(), "eth:aave-etherfi")
@@ -73,9 +97,8 @@ func TestValidateAaveGenesisRefusesEveryDivergence(t *testing.T) {
 	})
 
 	t.Run("ONLY an aToken stream moved later", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:aave-etherfi", audited, auditedPool),
-			aaveStream("eth:atoken-weeth", audited+5, someAToken),
+		_, _, err := validateAaveGenesis(genesisCfg(
+			withStream("eth:atoken-weeth", aaveStream("eth:atoken-weeth", audited+5, someAToken))...,
 		), risk.AaveEngine)
 		require.Error(t, err,
 			"balances derived from a partially-ingested aToken stream are wrong too")
@@ -83,35 +106,64 @@ func TestValidateAaveGenesisRefusesEveryDivergence(t *testing.T) {
 	})
 
 	t.Run("EVERY start moved later (the silent new lineage)", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:aave-etherfi", audited+1, auditedPool),
-			aaveStream("eth:atoken-weeth", audited+1, someAToken),
-		), risk.AaveEngine)
+		later := auditedStreams()
+		for i := range later {
+			later[i].StartBlock = audited + 1
+		}
+		_, _, err := validateAaveGenesis(genesisCfg(later...), risk.AaveEngine)
 		require.Error(t, err,
 			"internally consistent and still wrong: the lineage is no longer the audited one")
 	})
 
 	t.Run("every start moved EARLIER", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:aave-etherfi", audited-1, auditedPool),
-			aaveStream("eth:atoken-weeth", audited-1, someAToken),
-		), risk.AaveEngine)
+		earlier := auditedStreams()
+		for i := range earlier {
+			earlier[i].StartBlock = audited - 1
+		}
+		_, _, err := validateAaveGenesis(genesisCfg(earlier...), risk.AaveEngine)
 		require.Error(t, err,
 			"walking earlier is not unsafe for completeness, but it IS a different lineage whose "+
 				"coverage value differs — an unaudited change must not pass silently")
 	})
 
 	t.Run("the flag-bearing Pool is absent entirely", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(
-			aaveStream("eth:atoken-weeth", audited, someAToken),
-			aaveStream("eth:atoken-usdc", audited, common.HexToAddress("0x7380c583cDe4409eFF5DD3320D93a45D96B80E2e")),
-		), risk.AaveEngine)
+		noPool := auditedStreams()[1:] // drop the Pool stream
+		_, _, err := validateAaveGenesis(genesisCfg(noPool...), risk.AaveEngine)
 		require.Error(t, err, "no Pool stream means NO flag log is ever ingested")
 		require.Contains(t, err.Error(), riskfeed.AuditedAavePoolAddress)
 	})
 
+	// THE ROUND-5 FINDING, CONFIG SIDE. Every start block equals the audited constant
+	// and the Pool is present, so every check that existed before this round passes.
+	// Only the walked-surface BINDING notices that the set of contracts changed.
+	t.Run("a stream ADDED at the audited genesis", func(t *testing.T) {
+		added := append(auditedStreams(),
+			aaveStream("eth:atoken-new", audited, common.HexToAddress("0x00000000000000000000000000000000000000FF")))
+		_, _, err := validateAaveGenesis(genesisCfg(added...), risk.AaveEngine)
+		require.Error(t, err,
+			"an added stream changes WHICH CONTRACTS must be walked; start blocks alone cannot see it")
+		require.Contains(t, err.Error(), "coverage binding")
+		require.Contains(t, err.Error(), "rewind-and-rederive",
+			"and the refusal names the remedy: inherited coverage cannot vouch for the new address")
+	})
+
+	t.Run("a stream REMOVED", func(t *testing.T) {
+		_, _, err := validateAaveGenesis(genesisCfg(auditedStreams()[:4]...), risk.AaveEngine)
+		require.Error(t, err, "a narrower surface is also a different surface")
+		require.Contains(t, err.Error(), "coverage binding")
+	})
+
+	t.Run("a stream RE-ADDRESSED", func(t *testing.T) {
+		_, _, err := validateAaveGenesis(genesisCfg(
+			withStream("eth:atoken-frax",
+				aaveStream("eth:atoken-frax", audited, common.HexToAddress("0x00000000000000000000000000000000000000AB")))...,
+		), risk.AaveEngine)
+		require.Error(t, err, "same count, same starts, different contract")
+		require.Contains(t, err.Error(), "coverage binding")
+	})
+
 	t.Run("no streams at all", func(t *testing.T) {
-		_, err := validateAaveGenesis(genesisCfg(), risk.AaveEngine)
+		_, _, err := validateAaveGenesis(genesisCfg(), risk.AaveEngine)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "NO configured stream")
 	})
@@ -166,10 +218,12 @@ func TestProductionAaveStreamsMatchTheAuditedGenesis(t *testing.T) {
 		"the committed config declares the Pool plus four aTokens; a changed count needs a "+
 			"decision about this invariant, not a silently updated number")
 
-	got, err := validateAaveGenesis(cfg, risk.AaveEngine)
+	got, gotBinding, err := validateAaveGenesis(cfg, risk.AaveEngine)
 	require.NoError(t, err,
 		"the PRODUCTION config must satisfy the audited-genesis invariant riskd enforces at startup")
 	require.EqualValues(t, riskfeed.AuditedAaveGenesisBlock, got)
+	require.Equal(t, riskfeed.AuditedAaveCoverageBinding, gotBinding,
+		"the PRODUCTION stream set must hash to the audited surface binding")
 
 	// And the audited premise is a real fact about this market, not a placeholder:
 	// it sits BELOW the first collateral-flag event the Pool ever emitted, which is

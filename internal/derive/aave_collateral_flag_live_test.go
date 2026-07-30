@@ -77,6 +77,12 @@ func cfRunnerSpec() RunnerSpec {
 		Engine: AaveEngineName, Chain: "eth", ChainID: 1,
 		Streams: []string{cfStream}, Addresses: [][]byte{cfPool.Bytes()},
 		StartBlock: cfStartBlock,
+		// A hand-built spec must declare its WALKED SURFACE, exactly as
+		// BuildRunnerSpecs computes one: the coverage claim is not assertable without
+		// it (store.DerivationCoverage.Asserts), which is the fail-closed default.
+		CoverageBinding: store.CoverageBindingOf(1, []store.CoverageStream{
+			{Address: cfPool.Bytes(), StartBlock: cfStartBlock},
+		}),
 		// One window wide enough to cover the whole fixture span, so the test
 		// exercises the fold rather than the runner's windowing (which has its own
 		// suite).
@@ -152,8 +158,11 @@ func cfCursor(t *testing.T, s *store.Store) store.DeriveCursorState {
 func cfCoverageProven(t *testing.T, s *store.Store) bool {
 	t.Helper()
 	c := cfCursor(t, s)
-	return store.CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision,
-		cfStartBlock, decode.RevisionAaveCollateralFlags)
+	return c.CoverageClaim().Satisfies(store.CoverageRequirement{
+		GenesisBlock:       cfStartBlock,
+		MinDecoderRevision: decode.RevisionAaveCollateralFlags,
+		Binding:            cfRunnerSpec().CoverageBinding,
+	})
 }
 
 // TestAaveCollateralFlagsDeriveFromRealLogsEndToEnd is the machinery proof.

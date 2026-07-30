@@ -21,6 +21,21 @@ const (
 	cvRev     = int32(2)
 )
 
+// cvBinding is the WALKED SURFACE these fixtures claim: one address at cvGenesis.
+// Spelled through the production helper rather than as a literal, so a change to the
+// binding's own encoding cannot silently make every fixture claim a stale surface.
+var cvBinding = CoverageBindingOf(1, []CoverageStream{{Address: addr20(0xC1), StartBlock: cvGenesis}})
+
+// cvReq is the requirement every fixture below is judged against.
+func cvReq() CoverageRequirement {
+	return CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}
+}
+
+// cvCoverage is the claim a walker of that surface would stamp.
+func cvCoverage(from uint64) DerivationCoverage {
+	return DerivationCoverage{FromBlock: from, DecoderRevision: cvRev, Binding: cvBinding}
+}
+
 func cvCursor(t *testing.T, s *Store, engine string) DeriveCursorState {
 	t.Helper()
 	states, err := DeriveCursorStates(context.Background(), s.pool)
@@ -49,24 +64,24 @@ func TestCoverageIsEstablishedAndExtendedByWalkingWindows(t *testing.T) {
 
 	require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 		[]PositionEvent{cvEvent(cvGenesis+10, 0x01)}, nil, cvGenesis+100,
-		DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: cvRev}))
+		cvCoverage(cvGenesis)))
 
 	c := cvCursor(t, s, riskAaveEngine)
 	require.NotNil(t, c.CoveredFromBlock)
 	require.Equal(t, cvGenesis, *c.CoveredFromBlock)
 	require.Equal(t, cvRev, c.DecoderRevision)
-	require.True(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+	require.True(t, c.CoverageClaim().Satisfies(cvReq()))
 
 	// A second window: the cursor advances, the coverage ORIGIN does not.
 	require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 		[]PositionEvent{cvEvent(cvGenesis+150, 0x02)}, nil, cvGenesis+200,
-		DerivationCoverage{FromBlock: cvGenesis + 101, DecoderRevision: cvRev}))
+		cvCoverage(cvGenesis+101)))
 
 	c = cvCursor(t, s, riskAaveEngine)
 	require.EqualValues(t, cvGenesis+200, c.LastBlock)
 	require.Equal(t, cvGenesis, *c.CoveredFromBlock,
 		"coverage keeps the LOWEST from seen — the walk's origin, not the newest window's")
-	require.True(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+	require.True(t, c.CoverageClaim().Satisfies(cvReq()))
 }
 
 // TestCoverageRestartsWhenTheDecoderRevisionChanges is the case the whole mechanism
@@ -84,23 +99,23 @@ func TestCoverageRestartsWhenTheDecoderRevisionChanges(t *testing.T) {
 	// The OLD binary walks from genesis under revision 1.
 	require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 		[]PositionEvent{cvEvent(cvGenesis+10, 0x01)}, nil, cvGenesis+1000,
-		DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: 1}))
+		DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: 1, Binding: cvBinding}))
 	c := cvCursor(t, s, riskAaveEngine)
 	require.Equal(t, cvGenesis, *c.CoveredFromBlock)
 	require.EqualValues(t, 1, c.DecoderRevision)
-	require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev),
+	require.False(t, c.CoverageClaim().Satisfies(cvReq()),
 		"revision 1 cannot vouch for events that entered the registry at revision 2")
 
 	// The NEW binary resumes at the cursor under revision 2. Coverage restarts here.
 	require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 		[]PositionEvent{cvEvent(cvGenesis+1100, 0x02)}, nil, cvGenesis+2000,
-		DerivationCoverage{FromBlock: cvGenesis + 1001, DecoderRevision: cvRev}))
+		cvCoverage(cvGenesis+1001)))
 
 	c = cvCursor(t, s, riskAaveEngine)
 	require.Equal(t, cvGenesis+1001, *c.CoveredFromBlock,
 		"the upgraded binary has covered only from where IT began")
 	require.Equal(t, cvRev, c.DecoderRevision)
-	require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev),
+	require.False(t, c.CoverageClaim().Satisfies(cvReq()),
 		"THE FINDING: a head cursor under the new registry is still not genesis coverage")
 }
 
@@ -112,9 +127,8 @@ func TestCoverageIsClearedByANonAssertingWindow(t *testing.T) {
 
 	require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 		[]PositionEvent{cvEvent(cvGenesis+10, 0x01)}, nil, cvGenesis+100,
-		DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: cvRev}))
-	require.True(t, CoverageProvenBack(cvCursor(t, s, riskAaveEngine).CoveredFromBlock,
-		cvCursor(t, s, riskAaveEngine).DecoderRevision, cvGenesis, cvRev))
+		cvCoverage(cvGenesis)))
+	require.True(t, cvCursor(t, s, riskAaveEngine).CoverageClaim().Satisfies(cvReq()))
 
 	// The coverage-free entry point — a tool or a fixture.
 	require.NoError(t, s.ApplyDerivedWithRates(ctx, riskAaveEngine, 1,
@@ -124,7 +138,7 @@ func TestCoverageIsClearedByANonAssertingWindow(t *testing.T) {
 	require.Nil(t, c.CoveredFromBlock,
 		"after a window nobody vouched for, the stored range is no longer attributable to a known walk")
 	require.EqualValues(t, 0, c.DecoderRevision)
-	require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+	require.False(t, c.CoverageClaim().Satisfies(cvReq()))
 }
 
 // TestCoverageSurvivesAShallowRewindAndIsClearedByADeepOne is the atomicity half.
@@ -144,7 +158,7 @@ func TestCoverageSurvivesAShallowRewindAndIsClearedByADeepOne(t *testing.T) {
 		s := testDeriveStore(t)
 		require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 			[]PositionEvent{cvEvent(cvGenesis+10, 0x01)}, nil, cvGenesis+1000,
-			DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: cvRev}))
+			cvCoverage(cvGenesis)))
 
 		require.NoError(t, s.RewindDerived(ctx, riskAaveEngine, 1, cvGenesis+500))
 		c := cvCursor(t, s, riskAaveEngine)
@@ -152,14 +166,14 @@ func TestCoverageSurvivesAShallowRewindAndIsClearedByADeepOne(t *testing.T) {
 		require.Equal(t, cvGenesis, *c.CoveredFromBlock,
 			"the range lost its top, not its origin, and re-derivation continues upward from the target")
 		require.Equal(t, cvRev, c.DecoderRevision)
-		require.True(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+		require.True(t, c.CoverageClaim().Satisfies(cvReq()))
 	})
 
 	t.Run("deep rewind clears it", func(t *testing.T) {
 		s := testDeriveStore(t)
 		require.NoError(t, s.ApplyDerivedWindow(ctx, riskAaveEngine, 1,
 			[]PositionEvent{cvEvent(cvGenesis+10, 0x01)}, nil, cvGenesis+1000,
-			DerivationCoverage{FromBlock: cvGenesis, DecoderRevision: cvRev}))
+			cvCoverage(cvGenesis)))
 
 		// Exactly the backfill's first step: rewind to StartBlock-1.
 		require.NoError(t, s.RewindDerived(ctx, riskAaveEngine, 1, cvGenesis-1))
@@ -167,7 +181,7 @@ func TestCoverageSurvivesAShallowRewindAndIsClearedByADeepOne(t *testing.T) {
 		require.Nil(t, c.CoveredFromBlock,
 			"every row the claim described was just deleted, so the claim goes with them")
 		require.EqualValues(t, 0, c.DecoderRevision)
-		require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev))
+		require.False(t, c.CoverageClaim().Satisfies(cvReq()))
 
 		// And the ledger really is empty — the two facts are consistent, which is
 		// the point of clearing atomically.
@@ -177,20 +191,34 @@ func TestCoverageSurvivesAShallowRewindAndIsClearedByADeepOne(t *testing.T) {
 	})
 }
 
-// TestCoverageProvenBackFailsClosed pins the pure predicate every consumer shares.
-func TestCoverageProvenBackFailsClosed(t *testing.T) {
+// TestCoverageClaimSatisfiesFailsClosed pins the pure predicate every consumer shares.
+func TestCoverageClaimSatisfiesFailsClosed(t *testing.T) {
 	genesis := cvGenesis
 	above := cvGenesis + 1
 
-	require.True(t, CoverageProvenBack(&genesis, cvRev, cvGenesis, cvRev), "exactly at genesis")
-	require.True(t, CoverageProvenBack(&genesis, cvRev+1, cvGenesis, cvRev), "a LATER revision still satisfies it")
+	require.True(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "exactly at genesis")
+	require.True(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev + 1, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "a LATER revision still satisfies it")
 
-	require.False(t, CoverageProvenBack(nil, cvRev, cvGenesis, cvRev), "nil is unknown, not genesis")
-	require.False(t, CoverageProvenBack(&above, cvRev, cvGenesis, cvRev), "one block late is late")
-	require.False(t, CoverageProvenBack(&genesis, cvRev-1, cvGenesis, cvRev), "an older registry cannot vouch")
-	require.False(t, CoverageProvenBack(&genesis, 0, cvGenesis, cvRev), "revision 0 asserts nothing")
-	require.False(t, CoverageProvenBack(&genesis, cvRev, 0, cvRev),
+	require.False(t, CoverageClaim{CoveredFromBlock: nil, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "nil is unknown, not genesis")
+	require.False(t, CoverageClaim{CoveredFromBlock: &above, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "one block late is late")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev - 1, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "an older registry cannot vouch")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: 0, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: cvBinding}), "revision 0 asserts nothing")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: 0, MinDecoderRevision: cvRev, Binding: cvBinding}),
 		"an UNCONFIGURED genesis must refuse, or the gate would pass everything")
-	require.False(t, CoverageProvenBack(&genesis, cvRev, cvGenesis, 0),
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: 0, Binding: cvBinding}),
 		"a zero requirement is a misconfigured caller, not a satisfied one")
+
+	// THE BINDING LEGS. A claim over a DIFFERENT walked surface cannot license a
+	// requirement, however far back it reaches.
+	other := CoverageBindingOf(1, []CoverageStream{
+		{Address: addr20(0xC1), StartBlock: cvGenesis},
+		{Address: addr20(0xC2), StartBlock: cvGenesis}, // a stream ADDED
+	})
+	require.NotEqual(t, cvBinding, other, "adding a stream must change the binding")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: other}),
+		"coverage walked over the OLD surface cannot vouch for a newly added address")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: ""}.Satisfies(cvReq()),
+		"an empty claim binding asserts nothing")
+	require.False(t, CoverageClaim{CoveredFromBlock: &genesis, DecoderRevision: cvRev, Binding: cvBinding}.Satisfies(CoverageRequirement{GenesisBlock: cvGenesis, MinDecoderRevision: cvRev, Binding: ""}),
+		"an empty REQUIREMENT binding is an unwired reader, refused rather than satisfied")
 }

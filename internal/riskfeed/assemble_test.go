@@ -59,7 +59,7 @@ func fixtureConfig(t *testing.T) AssembleConfig {
 		Registry: fixtureRegistry(t),
 		Aave: EngineBinding{Engine: risk.AaveEngine, ChainID: 1,
 			ParamEngine: risk.AaveParamEngine, PriceEngine: "prices:poll:1",
-			GenesisBlock: fixtureAaveGenesis},
+			GenesisBlock: fixtureAaveGenesis, CoverageBinding: fixtureAaveBinding},
 		DM: EngineBinding{Engine: risk.DMEngine, ChainID: 10,
 			ParamEngine: risk.DMEngine, PriceEngine: "prices:poll:10"},
 		Budget:  PriceBudget{Seconds: 180},
@@ -83,6 +83,14 @@ func idx(engine string, asset common.Address, kind, value string, block uint64) 
 // here). The flag-custody gate asks for coverage reaching at or below it.
 const fixtureAaveGenesis = 20_625_519
 
+// fixtureAaveBinding is the WALKED SURFACE these fixtures claim — the weETH reserve's
+// stream at the audited genesis. It is computed through the production helper, not
+// written as a literal, so a change to the binding encoding cannot leave the fixtures
+// claiming a surface no walker would stamp.
+var fixtureAaveBinding = store.CoverageBindingOf(1, []store.CoverageStream{
+	{Address: weETH.Bytes(), StartBlock: fixtureAaveGenesis},
+})
+
 // provenAaveCursor is the Aave derive cursor with PROVEN flag custody: walked from
 // the engine's genesis under a decode registry that includes the collateral-flag
 // pair. This is what a database that has completed the rewind-and-rederive looks
@@ -92,6 +100,7 @@ func provenAaveCursor(lastBlock uint64) store.DeriveCursorState {
 	return store.DeriveCursorState{
 		Engine: risk.AaveEngine, ChainID: 1, LastBlock: lastBlock, AckedEpoch: 0,
 		CoveredFromBlock: &from, DecoderRevision: decode.RevisionAaveCollateralFlags,
+		CoverageBinding: fixtureAaveBinding,
 	}
 }
 
@@ -770,7 +779,7 @@ func TestAssembleAaveStableReserveWithNoThresholdRowComputesOnlyOnceWitnessed(t 
 // worse than the assume-true posture this wave retired.
 //
 // MUTANT THIS KILLS: delete the `if !a.flagCustody` block in assembleAave, or make
-// store.CoverageProvenBack return true for a nil covered-from. The position below
+// store.CoverageClaim.Satisfies return true for a nil covered-from. The position below
 // then computes HF 0 instead of refusing.
 func TestAssembleRefusesTheAaveBookWhenFlagCustodyIsUnproven(t *testing.T) {
 	in := flagLawInputs()
@@ -889,6 +898,27 @@ func TestAssembleFlagCustodyRequiresBothLegs(t *testing.T) {
 			refuse: true,
 			why:    "walked from genesis, but by a registry that silently skipped the flag topics",
 		},
+		"binding differs (a stream added)": {
+			cursor: func() store.DeriveCursorState {
+				c := provenAaveCursor(25_635_618)
+				c.CoverageBinding = store.CoverageBindingOf(1, []store.CoverageStream{
+					{Address: weETH.Bytes(), StartBlock: fixtureAaveGenesis},
+					{Address: usdc.Bytes(), StartBlock: fixtureAaveGenesis},
+				})
+				return c
+			}(),
+			refuse: true,
+			why:    "walked over a different set of contracts than the one configured",
+		},
+		"binding empty": {
+			cursor: func() store.DeriveCursorState {
+				c := provenAaveCursor(25_635_618)
+				c.CoverageBinding = ""
+				return c
+			}(),
+			refuse: true,
+			why:    "an empty binding asserts nothing about what was walked",
+		},
 		"revision zero with a covered-from": {
 			cursor: store.DeriveCursorState{Engine: risk.AaveEngine, ChainID: 1, LastBlock: 25_635_618,
 				CoveredFromBlock: &genesis, DecoderRevision: 0},
@@ -915,6 +945,49 @@ func TestAssembleFlagCustodyRequiresBothLegs(t *testing.T) {
 			require.Equal(t, "300000000000", p.TotalCollateralBase.String(), tc.why)
 		})
 	}
+}
+
+// TestAssembleRefusesWhenTheWALKEDSURFACEChanged is the round-5 [high], reader side.
+//
+// THE HISTORY IT FORBIDS: an operator adds an Aave aToken stream at the audited
+// genesis. The engine cursor is already at head, so the runner never walks history for
+// the new address — it resumes at H+1 — while the persisted claim still says
+// "covered from genesis" under an unchanged decoder revision. Block and revision both
+// check out; only the walked SURFACE differs, and without comparing it riskd would
+// publish a book missing that stream's entire history.
+//
+// MUTANT THIS KILLS: drop the Binding leg from CoverageClaim.Satisfies (or stop
+// passing cfg.Aave.CoverageBinding). The position below then computes over a ledger
+// that never saw the new contract.
+func TestAssembleRefusesWhenTheWALKEDSURFACEChanged(t *testing.T) {
+	in := flagLawInputs()
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+
+	// The config now walks a SECOND address; the persisted claim was stamped over the
+	// old one-address surface and is otherwise perfect.
+	cfg := fixtureConfig(t)
+	cfg.Aave.CoverageBinding = store.CoverageBindingOf(1, []store.CoverageStream{
+		{Address: weETH.Bytes(), StartBlock: fixtureAaveGenesis},
+		{Address: usdc.Bytes(), StartBlock: fixtureAaveGenesis},
+	})
+	require.NotEqual(t, fixtureAaveBinding, cfg.Aave.CoverageBinding,
+		"the premise: adding a stream changes the binding")
+
+	res, err := Assemble(in, cfg)
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.AaveEngine, acctA)
+	require.Equal(t, store.RiskPositionRefused, p.Status,
+		"inherited coverage cannot vouch for an address it never walked")
+	require.Equal(t, GateFlagCustodyUnproven, p.RefusalCode)
+	require.Nil(t, p.HFWad)
+
+	// COUNTERWEIGHT: the same everything with the binding restored computes, so the
+	// refusal is attributable to the surface change and not to the gate rejecting all.
+	cfg.Aave.CoverageBinding = fixtureAaveBinding
+	res, err = Assemble(in, cfg)
+	require.NoError(t, err)
+	require.Equal(t, store.RiskPositionComputed,
+		findPosition(t, res, risk.AaveEngine, acctA).Status)
 }
 
 // TestAssembleFlagCustodyRefusesAnUnwiredGenesis is the fail-closed leg on the

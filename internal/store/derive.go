@@ -345,6 +345,12 @@ func (s *Store) ApplyDerivedWindow(ctx context.Context, engine string, chainID u
 	//     registry that is not this one. This is the case that matters: it is what
 	//     makes a binary that newly decodes an event honestly report "I have only
 	//     covered from here" instead of inheriting the previous walk's reach;
+	//   - a window under a DIFFERENT BINDING likewise RESTARTS coverage, for the same
+	//     reason one step over: the rows below were walked over a different set of
+	//     contracts. Adding an aToken stream to an engine whose cursor is already at
+	//     head means the runner resumes at H+1 and never reads the new address's
+	//     history, so an inherited "from genesis" claim would be vouching for logs that
+	//     were never ingested;
 	//   - otherwise coverage EXTENDS, keeping the lowest `from` seen. The runner
 	//     walks contiguously upward from the cursor, so the low end is where the
 	//     current walk began.
@@ -353,20 +359,24 @@ func (s *Store) ApplyDerivedWindow(ctx context.Context, engine string, chainID u
 		coveredParam = int64(coverage.FromBlock)
 	}
 	ct, err := tx.Exec(ctx, `INSERT INTO derive_cursors
-		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,now())
+		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision,
+		 coverage_binding, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,now())
 		ON CONFLICT (engine) DO UPDATE
 		SET last_block = EXCLUDED.last_block, updated_at = now(),
 		    covered_from_block = CASE
-		        WHEN EXCLUDED.decoder_revision = 0 THEN NULL
+		        WHEN EXCLUDED.decoder_revision = 0 OR EXCLUDED.coverage_binding = '' THEN NULL
 		        WHEN derive_cursors.decoder_revision <> EXCLUDED.decoder_revision THEN EXCLUDED.covered_from_block
+		        WHEN derive_cursors.coverage_binding <> EXCLUDED.coverage_binding THEN EXCLUDED.covered_from_block
 		        WHEN derive_cursors.covered_from_block IS NULL THEN EXCLUDED.covered_from_block
 		        ELSE LEAST(derive_cursors.covered_from_block, EXCLUDED.covered_from_block)
 		    END,
-		    decoder_revision = EXCLUDED.decoder_revision
+		    decoder_revision = EXCLUDED.decoder_revision,
+		    coverage_binding = EXCLUDED.coverage_binding
 		WHERE derive_cursors.chain_id = EXCLUDED.chain_id
 		  AND derive_cursors.last_block <= EXCLUDED.last_block`,
-		engine, chainID, throughBlock, maxEpoch, coveredParam, coverage.DecoderRevision)
+		engine, chainID, throughBlock, maxEpoch, coveredParam, coverage.DecoderRevision,
+		coverage.Binding)
 	if err != nil {
 		return fmt.Errorf("upsert derive cursor: %w", err)
 	}
@@ -706,8 +716,9 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 	// contiguous range, and re-derivation continues upward from the target, so the
 	// range stays contiguous and its origin is unchanged.
 	if _, err := tx.Exec(ctx, `INSERT INTO derive_cursors
-		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision, updated_at)
-		VALUES ($1,$2,$3,$4,NULL,0,now())
+		(engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision,
+		 coverage_binding, updated_at)
+		VALUES ($1,$2,$3,$4,NULL,0,'',now())
 		ON CONFLICT (engine) DO UPDATE
 		SET last_block = EXCLUDED.last_block,
 		    acked_epoch = EXCLUDED.acked_epoch, updated_at = now(),
@@ -720,6 +731,11 @@ func (s *Store) RewindDerived(ctx context.Context, engine string, chainID uint64
 		        WHEN derive_cursors.covered_from_block IS NULL
 		          OR derive_cursors.covered_from_block > EXCLUDED.last_block THEN 0
 		        ELSE derive_cursors.decoder_revision
+		    END,
+		    coverage_binding = CASE
+		        WHEN derive_cursors.covered_from_block IS NULL
+		          OR derive_cursors.covered_from_block > EXCLUDED.last_block THEN ''
+		        ELSE derive_cursors.coverage_binding
 		    END`,
 		engine, chainID, effectiveTarget, maxEpoch); err != nil {
 		return fmt.Errorf("reset derive cursor: %w", err)

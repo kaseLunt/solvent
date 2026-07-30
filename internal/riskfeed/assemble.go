@@ -102,8 +102,26 @@ const AlgorithmRevision = 4
 //
 // `cmd/riskd` validates the production config against these at STARTUP and refuses
 // to run on divergence — so an honest typo cannot mint false coverage, and an
-// intentional correction has to update this constant and its fixture, which is
+// intentional correction has to update these constants and their fixture, which is
 // precisely the re-examination the law deserves.
+//
+// # TWO PREMISES, BECAUSE THE BLOCK WAS NEVER THE WHOLE CLAIM
+//
+// The genesis block closes "how far back was the walk". It says nothing about OVER
+// WHICH CONTRACTS, and the law is wrong about an address whose history was never
+// walked in exactly the way it is wrong about a range that was never walked: both end
+// with a missing flag event read as "never enabled". The walked-surface binding closes
+// that half. Together they make the law's premises un-editable without a decision:
+//
+//	AuditedAaveGenesisBlock     — the block every Aave stream is audited to walk from
+//	AuditedAaveCoverageBinding  — the SET of (contract, start block) pairs walked
+//
+// And a config check alone was never sufficient either. Config drift is caught at
+// startup; a DATABASE derived before the change is caught by riskfeed comparing the
+// PERSISTED binding against the configured one, because an added stream is never
+// walked historically when the cursor is already at head. Startup catches the
+// configuration, the coverage gate catches the data, and only a rewind-and-rederive
+// satisfies both.
 const (
 	// AuditedAaveGenesisBlock is the block every aave_v3_etherfi stream is audited
 	// to walk from.
@@ -113,6 +131,23 @@ const (
 	// which every account's flag reads as absent and the whole book is silently
 	// wrong rather than loudly refused.
 	AuditedAavePoolAddress = "0x0AA97c284e98396202b6A04024F5E2c65026F3c0"
+	// AuditedAaveCoverageBinding is store.CoverageBindingOf over the audited stream
+	// set: chain 1 and the five (address, startBlock) pairs — the Pool plus its four
+	// aTokens, each at AuditedAaveGenesisBlock.
+	//
+	// It closes the same gap for the STREAM SET that AuditedAaveGenesisBlock closes
+	// for the block. The genesis constant made "how far back" un-editable without
+	// re-examination; this one makes "over which contracts" un-editable too — because
+	// the block alone never constrained the surface, and a law that reads ABSENCE as
+	// chain truth is wrong about an address whose history was never walked in exactly
+	// the way it is wrong about a range that was never walked.
+	//
+	// A stream added, removed, re-addressed or re-based changes this digest, so an
+	// honest correction must update it here and in its fixture, AND the persisted
+	// binding will not match until a rewind-and-rederive re-establishes it. Both
+	// halves are required: the constant catches the config change at startup, the
+	// persisted comparison catches the un-replayed database.
+	AuditedAaveCoverageBinding = "dedfc48fab175ee170f643b5d1c6b024ee1855571966d65493a223305a0089fb"
 )
 
 // Balance sides and sources, as internal/derive writes them.
@@ -180,10 +215,20 @@ type EngineBinding struct {
 	// It is here because a law that reads ABSENCE as chain truth needs to know how
 	// far back the walk behind the current state must reach for that reading to be
 	// licensed, and "as far back as the engine begins" is the only honest answer.
-	// Zero is not "no requirement": store.CoverageProvenBack refuses a zero
+	// Zero is not "no requirement": store.CoverageClaim.Satisfies refuses a zero
 	// genesis outright, so an unwired binding fails CLOSED rather than declaring
 	// every engine proven. See GateFlagCustodyUnproven.
 	GenesisBlock uint64
+	// CoverageBinding is the WALKED SURFACE the live configuration implies for this
+	// engine (store.CoverageBindingOf). The coverage gate requires the persisted
+	// binding to EQUAL it.
+	//
+	// GenesisBlock alone answers "how far back", and that is not the same question as
+	// "over which contracts". A stream added to an engine whose cursor is already at
+	// head is never walked historically, so its genesis claim is inherited and false
+	// for the new address; the binding is what notices. Empty fails CLOSED, like a
+	// zero genesis.
+	CoverageBinding string
 }
 
 // AssembleConfig is everything a pass needs that is not in the snapshot.
@@ -388,9 +433,11 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 	// a head cursor over an EMPTY flag ledger — and reading that as truth zeroes
 	// the collateral of every genuinely-enabled position. Unproven ⇒ the whole Aave
 	// book refuses. See GateFlagCustodyUnproven.
-	aaveFlagCustodyProven := store.CoverageProvenBack(
-		aaveCursor.CoveredFromBlock, aaveCursor.DecoderRevision,
-		cfg.Aave.GenesisBlock, decode.RevisionAaveCollateralFlags)
+	aaveFlagCustodyProven := aaveCursor.CoverageClaim().Satisfies(store.CoverageRequirement{
+		GenesisBlock:       cfg.Aave.GenesisBlock,
+		MinDecoderRevision: decode.RevisionAaveCollateralFlags,
+		Binding:            cfg.Aave.CoverageBinding,
+	})
 
 	for _, account := range accountSet(balances[cfg.Aave.Engine], conflictAccounts[cfg.Aave.Engine]) {
 		p, book, err := assembleAave(assembleArgs{

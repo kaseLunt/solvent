@@ -36,10 +36,26 @@
 -- coverage would have made this migration the bug.
 ALTER TABLE derive_cursors
     ADD COLUMN covered_from_block BIGINT,
-    ADD COLUMN decoder_revision   INT NOT NULL DEFAULT 0;
+    ADD COLUMN decoder_revision   INT NOT NULL DEFAULT 0,
+    -- coverage_binding identifies WHAT WAS WALKED: a digest over the engine's chain
+    -- and the (address, startBlock) pairs of its streams (store.CoverageBindingOf).
+    --
+    -- The other two columns answer "from when, by which decoder" and cannot answer
+    -- "over which contracts". That gap was a live hole with no loud failure: an
+    -- operator who ADDS an Aave aToken stream at the audited genesis leaves the
+    -- engine cursor at head, so the runner never walks history for the new address
+    -- (it resumes at H+1) while the inherited covered_from_block still reads
+    -- "genesis" under an unchanged decoder revision. Every gate passed and riskd
+    -- would serve a book missing that stream's entire history.
+    --
+    -- Empty string is "no claim", exactly as decoder_revision 0 is, so every
+    -- pre-existing row stays UNPROVEN under the same fail-closed default.
+    ADD COLUMN coverage_binding   TEXT NOT NULL DEFAULT '';
 
 COMMENT ON COLUMN derive_cursors.covered_from_block IS
     'Low end of the contiguous block range the current derived state was walked over under decoder_revision. NULL = unknown/unproven (pre-00014 state, or rewound below the covered range).';
+COMMENT ON COLUMN derive_cursors.coverage_binding IS
+    'Digest over the engine chain + sorted (address, startBlock) pairs actually walked (store.CoverageBindingOf). Empty = unknown/unproven. A reader must require it to equal the binding the LIVE config implies: inherited coverage cannot vouch for a contract it never read.';
 COMMENT ON COLUMN derive_cursors.decoder_revision IS
     'internal/decode.RegistryRevision in force for the walk that produced the current derived state. 0 = unknown/unproven.';
 
@@ -121,5 +137,6 @@ ALTER TABLE risk_batch_aggregates
     DROP COLUMN refusal_detail,
     DROP COLUMN refusal_code;
 ALTER TABLE derive_cursors
+    DROP COLUMN coverage_binding,
     DROP COLUMN decoder_revision,
     DROP COLUMN covered_from_block;

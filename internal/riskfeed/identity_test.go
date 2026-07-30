@@ -23,7 +23,7 @@ func idPolicy() IdentityPolicy {
 			// WIRED, so the genesis mutations below are genuine changes. A fixture
 			// leaving it 0 would make the "genesis unset" case a no-op and the test
 			// would pass while proving nothing.
-			GenesisBlock: idCoveredFrom},
+			GenesisBlock: idCoveredFrom, CoverageBinding: "audited-surface-fixture"},
 		DMEngine: EngineBinding{Engine: "debt_manager", ChainID: 10,
 			ParamEngine: "debt_manager", PriceEngine: "prices:poll:10"},
 		RequiredEngines:     []string{"aave_v3_etherfi", "aave_param", "debt_manager"},
@@ -341,8 +341,16 @@ func TestIdentityChangesWithPolicy(t *testing.T) {
 			p.AaveEngine.GenesisBlock = 0
 		},
 		"dm genesis": func(p *IdentityPolicy) { p.DMEngine.GenesisBlock = 42 },
-		"required":   func(p *IdentityPolicy) { p.RequiredEngines = []string{"aave_v3_etherfi"} },
-		"swept":      func(p *IdentityPolicy) { p.SweptEngines = nil },
+		// The WALKED SURFACE decides refuse-vs-compute exactly as the genesis block
+		// does, so a changed stream set must not adopt a batch computed over the old one.
+		"coverage binding (a stream added or removed)": func(p *IdentityPolicy) {
+			p.AaveEngine.CoverageBinding = "a-different-walked-surface"
+		},
+		"coverage binding unset (fails closed)": func(p *IdentityPolicy) {
+			p.AaveEngine.CoverageBinding = ""
+		},
+		"required": func(p *IdentityPolicy) { p.RequiredEngines = []string{"aave_v3_etherfi"} },
+		"swept":    func(p *IdentityPolicy) { p.SweptEngines = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			pol := idPolicy()

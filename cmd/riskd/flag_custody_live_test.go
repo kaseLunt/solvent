@@ -60,7 +60,7 @@ func (f *riskdFixture) dropFlagLedger(t *testing.T) {
 // wave retired.
 //
 // MUTANT THIS KILLS: any of — drop the `if !a.flagCustody` refusal in assembleAave;
-// make store.CoverageProvenBack accept a nil covered-from; stop wiring
+// make store.CoverageClaim.Satisfies accept a nil covered-from; stop wiring
 // Aave.GenesisBlock in loadConfig; have seedRequiredCursors claim coverage it never
 // walked. Each one turns the refusal below back into a published health factor of 0.
 func TestRiskdRefusesTheAaveBookOnAnUnbackfilledFlagLedger(t *testing.T) {

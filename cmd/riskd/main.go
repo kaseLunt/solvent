@@ -243,10 +243,11 @@ func (c *daemonConfig) sweptEngines() []string {
 // The complementary half lives in internal/derive: RunnerSpec.CoverageFromBlock
 // claims the MAXIMUM stream start, so even a database derived by a binary that never
 // ran this check fails the coverage gate rather than passing it.
-func validateAaveGenesis(cfg *config.Config, engine string) (uint64, error) {
+func validateAaveGenesis(cfg *config.Config, engine string) (uint64, string, error) {
 	var streams int
 	var sawPool bool
 	pool := common.HexToAddress(riskfeed.AuditedAavePoolAddress)
+	var walked []store.CoverageStream
 
 	for _, s := range cfg.Streams {
 		if s.Engine != engine {
@@ -254,7 +255,7 @@ func validateAaveGenesis(cfg *config.Config, engine string) (uint64, error) {
 		}
 		streams++
 		if s.StartBlock != riskfeed.AuditedAaveGenesisBlock {
-			return 0, fmt.Errorf(
+			return 0, "", fmt.Errorf(
 				"riskd: stream %q of engine %q starts at block %d, but the collateral law's "+
 					"completeness argument is audited at %d. A stream that starts later has NO logs below "+
 					"its own start, so the engine's joint ledger is incomplete there and a missing "+
@@ -267,21 +268,57 @@ func validateAaveGenesis(cfg *config.Config, engine string) (uint64, error) {
 			if a == pool {
 				sawPool = true
 			}
+			walked = append(walked, store.CoverageStream{Address: a.Bytes(), StartBlock: s.StartBlock})
 		}
 	}
 
 	if streams == 0 {
-		return 0, fmt.Errorf("riskd: engine %q has NO configured stream: nothing would be ingested, "+
+		return 0, "", fmt.Errorf("riskd: engine %q has NO configured stream: nothing would be ingested, "+
 			"and every collateral flag would read as absent", engine)
 	}
 	if !sawPool {
-		return 0, fmt.Errorf(
+		return 0, "", fmt.Errorf(
 			"riskd: engine %q does not walk the flag-bearing Pool %s. Without it NO "+
 				"ReserveUsedAsCollateral* log is ingested, so every account's flag reads as absent and the "+
 				"whole book is silently wrong instead of loudly refused",
 			engine, riskfeed.AuditedAavePoolAddress)
 	}
-	return riskfeed.AuditedAaveGenesisBlock, nil
+
+	// THE WALKED SURFACE, checked the same way the genesis block is.
+	//
+	// Every start block matching the audited constant does NOT imply the audited
+	// STREAM SET: adding a stream at the audited genesis satisfies every check above
+	// while changing what must be walked. The binding is the value that notices, and
+	// comparing it against the audited constant here is what forces a fixture update
+	// for an intentional change — while riskfeed's comparison against the PERSISTED
+	// binding is what forces the replay.
+	binding := store.CoverageBindingOf(chainIDOf(cfg, engine), walked)
+	if binding != riskfeed.AuditedAaveCoverageBinding {
+		return 0, "", fmt.Errorf(
+			"riskd: engine %q walks a stream set whose coverage binding is %s, but the audited "+
+				"surface is %s. Every start block matches, so this is a change to WHICH CONTRACTS are "+
+				"walked — a stream added, removed, re-addressed or re-based. Derived state carrying the "+
+				"old binding cannot vouch for the new surface (an address added at genesis is never "+
+				"walked historically when the cursor is already at head), so update "+
+				"riskfeed.AuditedAaveCoverageBinding and its fixture, then rewind-and-rederive",
+			engine, binding, riskfeed.AuditedAaveCoverageBinding)
+	}
+	return riskfeed.AuditedAaveGenesisBlock, binding, nil
+}
+
+// chainIDOf resolves the chain id an engine's streams live on. BuildRunnerSpecs
+// already refuses an engine spanning two chains, so the first match is the answer;
+// zero when the engine has no stream, which every caller above has already refused.
+func chainIDOf(cfg *config.Config, engine string) uint64 {
+	for _, s := range cfg.Streams {
+		if s.Engine != engine {
+			continue
+		}
+		if c, ok := cfg.Chains[s.Chain]; ok {
+			return c.ChainID
+		}
+	}
+	return 0
 }
 
 // requiredStampEngines is the engine set whose watermark stamps must be present
@@ -372,7 +409,7 @@ func loadConfig(configPath, feedsPath string) (*daemonConfig, error) {
 	// stream configuration has drifted from the value the collateral law's
 	// completeness argument was made about, riskd must not start at all. Serving a
 	// book over an unexamined lineage is the failure this refuses.
-	aaveGenesis, err := validateAaveGenesis(cfg, risk.AaveEngine)
+	aaveGenesis, aaveBinding, err := validateAaveGenesis(cfg, risk.AaveEngine)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +439,8 @@ func loadConfig(configPath, feedsPath string) (*daemonConfig, error) {
 			// drift HAPPENS, so deriving the bar from it means the bar moves with the
 			// drift and the gate silently measures against whatever was committed. The
 			// bar is now the audited constant, and the config is checked AGAINST it.
-			GenesisBlock: aaveGenesis,
+			GenesisBlock:    aaveGenesis,
+			CoverageBinding: aaveBinding,
 		},
 		DM: riskfeed.EngineBinding{
 			Engine: risk.DMEngine,

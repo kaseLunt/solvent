@@ -186,8 +186,8 @@ func ComputeMaterializationIdentity(
 	// would let a corrected registry adopt a batch computed under the wrong bar,
 	// which is the same class as the token-decimals hole RegistryFingerprint closes.
 	for _, e := range []EngineBinding{policy.AaveEngine, policy.DMEngine} {
-		fmt.Fprintf(&b, "bind=%s/%d/%s/%s/genesis%d;",
-			e.Engine, e.ChainID, e.ParamEngine, e.PriceEngine, e.GenesisBlock)
+		fmt.Fprintf(&b, "bind=%s/%d/%s/%s/genesis%d/surface%s;",
+			e.Engine, e.ChainID, e.ParamEngine, e.PriceEngine, e.GenesisBlock, e.CoverageBinding)
 	}
 	fmt.Fprintf(&b, "required=%s;", strings.Join(sortedCopy(policy.RequiredEngines), ","))
 	fmt.Fprintf(&b, "swept=%s\n", strings.Join(sortedCopy(policy.SweptEngines), ","))

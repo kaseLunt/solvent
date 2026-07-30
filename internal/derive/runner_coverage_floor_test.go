@@ -159,9 +159,11 @@ func TestRunnerStampsCoverageFromTheMaxNotTheMin(t *testing.T) {
 	// AND THE CONSEQUENCE: that stamp no longer satisfies a gate asking for coverage
 	// back to the engine's start. The misconfiguration fails CLOSED instead of
 	// serving a book over logs that were never ingested.
-	require.False(t, store.CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision,
-		cfStartBlock, decode.RevisionAaveCollateralFlags),
-		"false coverage is exactly what this prevents")
+	require.False(t, c.CoverageClaim().Satisfies(store.CoverageRequirement{
+		GenesisBlock:       cfStartBlock,
+		MinDecoderRevision: decode.RevisionAaveCollateralFlags,
+		Binding:            spec.CoverageBinding,
+	}), "false coverage is exactly what this prevents")
 
 	// The counterweight: a correctly configured engine (floors equal) DOES satisfy it,
 	// so the refusal above is attributable to the divergence and not to the gate

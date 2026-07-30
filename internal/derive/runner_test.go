@@ -294,6 +294,14 @@ func TestBuildRunnerSpecs(t *testing.T) {
 		// is the max (500) — the block from which the engine's joint ledger is
 		// actually complete. See RunnerSpec.CoverageFromBlock.
 		CoverageFromBlock: 500,
+		// The WALKED SURFACE: both addresses, each at its own stream's start. a1
+		// appears once even though two streams list it, because the pair (a1, 500)
+		// and (a1, 400) are distinct atoms and dedup is per pair.
+		CoverageBinding: store.CoverageBindingOf(1, []store.CoverageStream{
+			{Address: a1.Bytes(), StartBlock: 500},
+			{Address: a2.Bytes(), StartBlock: 400},
+			{Address: a1.Bytes(), StartBlock: 400},
+		}),
 	}, specs[0])
 	require.Equal(t, RunnerSpec{
 		Engine: "debt_manager", Chain: "op", ChainID: 10,
@@ -302,6 +310,9 @@ func TestBuildRunnerSpecs(t *testing.T) {
 		StartBlock: 900, Window: 1000,
 		// A single-stream engine: the two floors necessarily coincide.
 		CoverageFromBlock: 900,
+		CoverageBinding: store.CoverageBindingOf(10, []store.CoverageStream{
+			{Address: a3.Bytes(), StartBlock: 900},
+		}),
 	}, specs[1])
 
 	// One engine spanning two chains is refused: a serial (block, logIndex)
