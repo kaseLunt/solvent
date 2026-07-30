@@ -682,6 +682,22 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Integrator: build/vet 0, full suite 16/16 both DSNs, timing tests -count=3.
   NEXT: Codex round 5 on e926b36..b399ea2 — SHIP closes Task 5; round-5 depth asks
   probe deadline/poll interplay, refusal-state re-arming, G2-exit identity joins.
+- CODEX ROUND 5 ON RISKD (session 019fb0d5-96b0-7763-a887-10eb4e3db653, ~7min, t5r5
+  @ b399ea2): **needs-attention — exactly ONE medium residual; ALL FIVE depth
+  questions confirmed tracing correctly** (scheduler wake-up, late firing,
+  refusal-state arming, G2 recovery, deadline re-arming, clock-seam production
+  isolation). Residual = the round-4 scoping law through its LAST door:
+  substrateDigest still hashes every fetched price row (only the phase section was
+  scoped to Judged), so an honest D-012 in-place repair of an UNUSED registered
+  asset (no cursor movement) changes the digest → new key on restart → clean batch
+  written instead of adopting the flagged one → G5 erased. The round-4 regression
+  missed it because it varied only elapsed time (digest byte-identical). FIX WAVE 5
+  dispatched (surgical): Assemble reports the attempted/consumed price witness set
+  (incl. consumed absences + G2-path consultations); digest price portion restricted
+  to exactly that set; live regression (neutralize unused row in place → restart →
+  same key, adopt, FlagLargeStep survives) + consumed-witness counterweight; plus a
+  structural single-source-of-truth requirement so phases and digest project the
+  SAME reported set and cannot drift apart again. Last finding before SHIP.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
