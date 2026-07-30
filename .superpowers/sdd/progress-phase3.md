@@ -2175,6 +2175,34 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   explicitly. M2: instantiate the arithmetic (replay-internal/counterfactual
   assertions prove the harm is real while the verdict stays conservative).
   M3: text sync w/ STOP-if-digest-bearing guard.
+- **PROVENANCE FIX LANDED — ea25975** (41 files +920/−53: admin_epoch.go +
+  test NEW, 31 fixtures re-captured with admin-impl words, derivation-notes
+  pin record; both-ways exact; integrator independently re-ran — green).
+  (H1) ADMIN_IMPL_POSITION derived from source EVERY RUN (test extracts the
+  literal AND the keccak preimage from DebtManagerStorageContract.sol:98-99
+  and recomputes); auditedDMAdminImpl 0x8E87938C… established 12/12
+  identical (both endpoints × head + two frame pins × accessor AND raw
+  EIP-1898 getStorageAt), corroborated by committed source + CREATE3 salt;
+  NO epoch boundary (head == frame era — STOP never fired); per-case
+  adminImpl subcall in BOTH frames under the wave-8 law; mismatch = frame
+  refusal, never a verdict; passing rows carry admin_impl_epoch. Disclosed
+  deviation: production reads the CORE accessor (chainReader has no storage
+  read — pre-existing implWitnessDeviation); soundness CHAIN-PROVEN by the
+  capture's accessor-vs-raw cross-check at both pins × 31 + head, hermetic
+  every run. D-013 residual (within-block swap→write→swap-back between the
+  two reads) ACCEPTED-AND-DISCLOSED with the full adjudication text carried
+  verbatim to round 12. (M2) tokB harm INSTANTIATED — exact contribution
+  arithmetic via production helpers, three stages asserted, verdict stays
+  conservative. (M3) four prose sites synced incl. the EMITTED artifact
+  text; digest preimage checked FIRST (only tx:log_index lines — unmoved).
+  Mutants mH + m2/m2-deep killed; 31/31 re-captured. Probe fact recorded:
+  both endpoints serve blockHash-form eth_getStorageAt at frame-era depth.
+  ROUND 12 (closing) dispatched: t6r12 @ ea25975, base 253a22a — slot-
+  derivation genuineness, provenance chain, accessor-shadow analysis via
+  the proxy fallback, the D-013 disclosure adjudicated AS a disclosure
+  (honest-scenario hunt), M2 arithmetic recompute, M3 grep, no-regression.
+  Brief carries the foreground-wedge warning prominently (two jobs wedged
+  last round by tool-level foregrounding).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
