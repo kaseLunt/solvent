@@ -217,3 +217,120 @@ chain-faithful (observed, not assumed) and the zero-arm's falsifiable content st
 residual as the disclosed fallback) and the invariant in adjustment 2 made explicit and
 fixture-pinned. Neither is a re-open of the L2 design; both are address-list/semantics
 completions inside it.
+
+---
+
+# ADDENDUM 2 (2026-07-30) — RULING on Codex R12 admin-epoch forks
+
+Archived verbatim from the standing chain-truth instance (responding to Codex round 12, session
+019fb52c-0eb3-7ec2-a5a2-82e7a394744e, @ ea25975). NORMATIVE.
+
+Source facts confirmed before ruling: `DebtManagerCore.sol:715-718` — `setAdminImpl` is
+`onlyRoleRegistryOwner`, a bare `sstore`, **no event**; the slot constant lives at
+`DebtManagerStorageContract.sol:99`; the only in-code writer of `ADMIN_IMPL_POSITION` is that
+setter (the :703/:748 sites are reads). The lifecycle events `CollateralTokenAdded/Removed`
+(`IDebtManager.sol:44-45`) ARE proxy-emitted and therefore in walked custody.
+
+## FORK 1: (B) CODE-HASH CONSTANCY PIN — with three sharpenings. (A) rejected.
+
+**Why not (A):** We do not custody the deployment build pipeline — compiler version, optimizer
+runs, via-ir, remappings, and the CBOR metadata trailer are all inputs we would have to guess,
+and `recon/cash-v3/` is a **gitignored working copy**: there is no committed source to compile,
+so (A) as specified is unimplementable without first changing the repo's source-custody posture.
+Worse, a compile-compare that must be progressively loosened (metadata stripping, immutable
+zeroing) until it goes green is calibrating the instrument against its target — the banned side
+of the recomputation line. Sanctioned as **offline evidence only**; it never enters the gate loop.
+
+**The (B) law:**
+1. `eth_getCode` (EIP-1898 blockHash form — **probe it first**, transcribed, both
+   `SOLVENT_RECON_RPC_OP` endpoints at frame depth) at `parentHash(N-1)` and `pinHash(N)` for all
+   31 cases plus the run's head pin; keccak the returned bytes locally (permitted recomputation —
+   raw bytes→keccak is a complete model); all hashes must equal ONE audited constant per surface.
+   Case mismatch → case refusal; head mismatch → preflightExit posture.
+2. **Three surfaces, not one:** (i) the proxy itself, (ii) the ERC1967 core implementation (impl
+   slot read at both pins by the same two-pin discipline), (iii) the admin impl.
+   Borrowed/Repaid/Liquidated/IIU semantics live in the core — pinning only the admin closes half
+   the finding.
+3. Establishment of each constant is a **dual-provider read**; frame reads thereafter may be
+   single-provider (they compare against the dual-established constant). Non-empty code required —
+   empty getCode is a refusal, never a zero-hash.
+
+**What the pinned hash certifies (disclosure text, use verbatim):** "The pinned code hash
+certifies that the bytecode at the audited address is byte-identical at every frame boundary read
+and at establishment, and that the replay's decode semantics were empirically anchored against
+logs emitted by this exact bytecode (the captured fixtures come from these very blocks).
+Interior-of-block constancy follows from EIP-6780 (active on OP since Ecotone, 2024-03, before
+frame start 150,057,202): code deployed in a prior block cannot change mid-block. It does NOT
+certify that any Solidity source text corresponds to this bytecode — no compile bridge exists;
+source correspondence rests on fixture anchoring plus human source review, and is a trust
+posture, not a proof."
+
+## FORK 2: (C) — sequenced, plus one zero-cost law regardless.
+
+**Law 0 (regardless, zero new reads):** the witness loop refuses on sight — pre-boundary, note →
+Complete()==false → UNEXPLAINED — any proxy log whose topic0 is (i) ERC1967
+Upgraded/AdminChanged/BeaconUpgraded, or (ii) not in the committed IDebtManager event surface at
+all (a foreign topic0 from the custody address is the signature of foreign semantics). Topic0s in
+the committed surface but outside the 5-event replay model keep their existing adjudicated
+treatment. This closes the writer-set-mutation path (core upgrade) entirely inside existing
+custody, because setAdminImpl is silent but upgradeToAndCall is not.
+
+**Step A (probe, then traces if served):** probe `debug_traceBlockByHash` + callTracer at frame
+depth on both endpoints, transcribed. If served: one-time capture, hermetic fixtures. Law: refuse
+the case if any call frame, at any depth, in any tx with transactionIndex < the case's (plus the
+case's own tx at any position — intra-tx frame-vs-logIndex ordering unresolvable from callTracer,
+over-refuse), targets the DM proxy with input prefixed by the **ABI-derived** setAdminImpl(address)
+selector (IDebtManager.sol:440, never hand-written), or by upgradeTo/upgradeToAndCall selectors.
+With traces, the D-013 residual is **retired**, not reclassified.
+
+**Step B (fallback if traces unserved):** eth_getBlockByHash(pin, fullTx=true) per case (hash echo
+validated); scan the raw input of every tx with index ≤ the case's for the ABI-derived selector as
+a contiguous byte substring; any occurrence → refuse, narrative naming tx hash and byte offset and
+stating occurrence ≠ proof of execution (over-refusal-safe).
+
+**Ruling on the substring argument: TRUE but not universal — the gap must be disclosed, not argued
+away.** The claim holds for direct calls and every verbatim-wrapping encoding in the standard
+stack — Safe execTransaction, MultiSend/MultiSendCallOnly, OZ TimelockController execute/
+executeBatch, and arbitrary nestings. It is **false** for the pre-deployed payload/executor
+pattern: a migration contract deployed in an earlier block and invoked in the case block carries
+the selector in its **code**, not in any scanned calldata — a named, honest, widely-practiced
+governance pattern (Aave-style payload execution), not evasion-shaped. Therefore under Step B:
+(i) the marginal class survives only with a mandatory evidence key (`admin_continuity: "two-pin +
+calldata-scan clean; pre-deployed-payload migration residual undetectable at this read tier"`);
+(ii) the prior D-013 residual text ("evasion-shaped choreography only") is **superseded — the
+residual is not adversary-only**, per H2b exactly; (iii) a fixture must exist that exercises the
+limit: a payload-contract invocation the scan does NOT catch, asserting the disclosure IS emitted
+— the fixtures-that-cannot-fail law applied to a disclosure.
+
+## M3b — SUPERSEDING ADDENDUM (this text governs over the archived ruling above)
+
+**SUPERSEDING ADDENDUM (Codex R12, M3b).** The sentence above declaring the two-pin
+supported-collateral set "the provably-sufficient universe" is SUPERSEDED. The lifecycle
+round-trip disproved unqualified sufficiency: a token supported only mid-block
+(CollateralTokenAdded pre-boundary, removed before block end, or the mirror shape) is absent from
+getCollateralTokens() at both endpoint pins yet participates in the boundary maxBorrowLT — the
+same endpoint-pair blindness this ruling identified for balances applies to the supported set
+itself. The corrected claim: the two-pin supported set is sufficient **conditional on the absence
+of any pre-boundary collateral-lifecycle witness**, and the condition is checked in custody — any
+pre-boundary CollateralTokenAdded/CollateralTokenRemoved log from the proxy (IDebtManager.sol:
+44-45, walked surface) is a mandatory refusal: note → Complete()==false → UNEXPLAINED, never
+modeled. Additionally binding from the R12 rulings: (1) decode authority rests on the CODE-HASH
+CONSTANCY PIN — proxy, ERC1967 core impl, and admin impl code hashes pinned at both pins of every
+case and at head, dual-provider-established, with the certification limited to bytecode constancy
+plus empirical fixture anchoring (no compile bridge is claimed); (2) the silent setAdminImpl write
+(bare sstore, DebtManagerCore.sol:715-718, no event) is detected by trace-frame evidence where
+debug_traceBlockByHash is served, else by the calldata-selector scan with the pre-deployed-payload
+residual DISCLOSED and the D-013 "evasion-shaped only" classification withdrawn — the residual has
+an honest governance shape and is never classified adversary-only; (3) any proxy log bearing a
+topic0 outside the committed IDebtManager event surface, or any ERC1967 upgrade event, refuses on
+sight pre-boundary. Sufficiency claims in this file are henceforth conditional claims with their
+checking law named; where this addendum conflicts with the archived text above, the addendum
+governs.
+
+**Verdict: CUSTODY HOLDS** on the shipped two-pin/wave-8 work, **conditional** on: Fork 1 = (B)
+three-surface hash pin with the getCode-form probe and the non-claim disclosure; Fork 2 = Law 0 +
+trace-else-scan with the D-013 reclassification and the disclosure-limit fixture; M3b addendum
+applied. Blocking if omitted: the core-impl surface in Fork 1 (admin-only pinning leaves the
+Liquidated/IIU decode authority unbound — the identical version-skew scenario one slot over), and
+the D-013 reclassification under the Step-B fallback (a residual with an honest shape presented as
+adversary-only is the-RPC-said-so applied to our own prose).
