@@ -581,6 +581,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Micro-wave surfaces: decode (2 topics, strict empty-data reader), derive/aave
   (record-only fold), store (CollateralFlagsAsOf), riskfeed/assemble (retire
   FlagCollateralFlagUnwitnessed). Sequence: before or alongside Task 6.
+- CODEX ROUND 3 ON RISKD (session 019fb07c-023c-7f32-8efd-c32ba0a100f2, ~10.5min,
+  t5r3 @ 1d46925): **needs-attention — 4 MEDIUM, all identity/adoption; sweep CHECK
+  and vector/digest comparison confirmed SOUND.** (1) identity serializes ALL derive
+  cursors, not the consumed set — an UNRELATED cursor (prices:chainlink_feed:1)
+  advancing between flagged pass and restart mints a new key → unflagged duplicate →
+  round-2 M1 REOPENED through the side door. (2) ReadAt excluded entirely — a
+  poller-stopped restart computes stale/G1 but derives the ORIGINAL key and ADOPTS
+  the batch persisted as "fresh" (the IgnoresTheClock test pinned the collision
+  without output-equivalence). Fix: deterministic freshness PHASE (fresh/stale/
+  over-ceiling) in the key, raw clock stays out. (3) Producer hard-coded, no
+  registry fingerprint — upgraded math or a token-decimals registry fix ADOPTS the
+  old-code/old-scale batch. Fix: algorithm revision constant + canonical registry
+  fingerprint. (4) adoptRiskBatch verifies header only — a partial restore with
+  matching header adopts, logs success, reader refuses: no complete batch exists but
+  the vector reads handled. Fix: adoption passes the SAME completeness predicate as
+  serving. FIX WAVE 3 dispatched with all four + Codex's demanded regressions
+  (unconsumed-cursor advance; phase-crossing; revision-only + decimals-only;
+  same-key partial restore). PATTERN NOTE for the record: rounds 2→3 are converging
+  on the same lesson — every input the OUTPUT depends on must be in the identity,
+  and everything the identity admits must be verified on adoption. Task 5 open,
+  round 4 pending.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
