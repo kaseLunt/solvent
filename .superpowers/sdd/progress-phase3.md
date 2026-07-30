@@ -1769,6 +1769,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   leakage (integrator-added: stream events were NOT touched by the wave),
   adjudicates the three disclosed items (leg sealing scope, uniform field
   name, recovered disposition).
+- CODEX ROUND 4 ON TASK 8 (session 019fb3de-fad1-7481-82b4-b8e1b89f43ad,
+  ~7.5min, t8r4 @ e073cbe, base bee4946): needs-attention — 1H, DOCS-ONLY BUT
+  REAL. The implementation seals the class CORRECTLY; all three disclosed
+  adjudications HOLD; independent strict typecheck of production sources
+  passed; no SSE leak flagged. The residual: README:66-156 still TEACHES the
+  removed API — promises positionEligible(): boolean|null, imports and calls
+  it, claims result.response carries everything-but-found. Honest JS consumer
+  reads the absent raw verdict as undefined → !undefined renders SAFE — the
+  exact class, resurrected through documentation; and no doc example is
+  compiled, so verify stays green (false green). Waves 1-2 updated the README
+  for their own changes; wave 3 did not sweep it — the miss. FIX WAVE 4
+  dispatched (small): full-README sweep to the current surface, plus COMPILED
+  DOC EXAMPLES — fenced ts blocks extracted to real example files included in
+  the verify typecheck, with a verbatim-sync vitest (README block ⇄ example
+  file, either drifting alone fails) and a falsiness-lint assertion on
+  fenced blocks; mutants m1 removed-export-in-example / m2 README-drifts-
+  alone / m3 falsiness-branch-inserted; no new devDependencies.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
