@@ -100,6 +100,13 @@ type T6BacktestRow struct {
 	// (block_number, log_index, seq) — OUR fold at the pre-liquidation point.
 	// This is the derived-under-test value of obligation 1.
 	NormalizedBefore *big.Int `json:"-"`
+	// NormalizedAtParent is the SAME fold cut at the PARENT boundary instead:
+	// Σ deltas strictly below block N, i.e. before (N, 0, 0). It is the debt
+	// state the causation replay STARTS from (Codex round 4, M): the replay
+	// applies the block's own pre-liquidation witness events to parent state,
+	// so its starting debt must exclude those very events — NormalizedBefore
+	// already contains them.
+	NormalizedAtParent *big.Int `json:"-"`
 	// NormalizedDelta is this event's own delta (negative).
 	NormalizedDelta *big.Int `json:"-"`
 	// NormalizedAfter is NormalizedBefore + NormalizedDelta, plus the residue
@@ -114,6 +121,7 @@ type T6BacktestRow struct {
 	LiquidatedText   string      `json:"liquidated_usd"`
 	IndexText        string      `json:"index_at_block"`
 	NormBeforeText   string      `json:"normalized_before"`
+	NormAtParentText string      `json:"normalized_at_parent"`
 	NormDeltaText    string      `json:"normalized_delta"`
 	NormAfterText    string      `json:"normalized_after"`
 	ResidueText      string      `json:"residue,omitempty"`
@@ -166,6 +174,14 @@ type T6Witness struct {
 	Topic1Addr string `json:"topic1_addr,omitempty"`
 	Topic2Addr string `json:"topic2_addr,omitempty"`
 	Topic3Addr string `json:"topic3_addr,omitempty"`
+	// Data is the log's full ABI-encoded payload, hex without 0x (empty when the
+	// log carries none). Codex round 4 (M): topics alone prove CONTACT — which
+	// event touched which account — but never DIRECTION or MAGNITUDE, so a
+	// repayment (debt DOWN) was indistinguishable from a borrow (debt UP) and
+	// "witness exists" leaked into "cause proven". The gate's replay decodes this
+	// payload and applies the write to parent state; only a replayed
+	// false→true eligibility transition proves a cause.
+	Data string `json:"data,omitempty"`
 }
 
 // T6FeedRound is one aggregator round as CUSTODY holds it: the block, and the
@@ -663,6 +679,24 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			return fmt.Errorf("case %s normalized-before: %w", key, err)
 		}
 
+		// The SAME fold cut at the PARENT boundary — before (block, 0, 0), i.e.
+		// strictly below block N. This is the causation replay's starting debt
+		// (Codex round 4, M): it must NOT contain the block's own earlier
+		// events, because the replay applies those itself, in log order, from
+		// their decoded payloads.
+		var normAtParent string
+		if err := q.QueryRow(ctx, `
+			SELECT COALESCE(SUM(delta),0)::text FROM position_events
+			WHERE engine = 'debt_manager' AND chain_id = 10
+			  AND account = $1 AND asset = $2 AND side = 'debt' AND delta IS NOT NULL
+			  AND block_number < $3`,
+			account, asset, blockNumber).Scan(&normAtParent); err != nil {
+			return fmt.Errorf("case %s normalized-at-parent fold: %w", key, err)
+		}
+		if row.NormalizedAtParent, err = numericText(normAtParent); err != nil {
+			return fmt.Errorf("case %s normalized-at-parent: %w", key, err)
+		}
+
 		// Residue: the deriver's explicit model of DebtManagerCore.sol:549-553.
 		var residueText *string
 		if err := q.QueryRow(ctx, `
@@ -682,6 +716,7 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			row.NormalizedAfter = new(big.Int).Sub(row.NormalizedAfter, row.ResidueAmount)
 		}
 		row.NormBeforeText = row.NormalizedBefore.String()
+		row.NormAtParentText = row.NormalizedAtParent.String()
 		row.NormAfterText = row.NormalizedAfter.String()
 
 		// The seizure fan-out, record-only rows in seq order.
@@ -725,7 +760,8 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			SELECT r.log_index, encode(r.address,'hex'), encode(r.topics[1],'hex'),
 			       COALESCE(encode(substring(r.topics[2] FROM 13 FOR 20),'hex'),''),
 			       COALESCE(encode(substring(r.topics[3] FROM 13 FOR 20),'hex'),''),
-			       COALESCE(encode(substring(r.topics[4] FROM 13 FOR 20),'hex'),'')
+			       COALESCE(encode(substring(r.topics[4] FROM 13 FOR 20),'hex'),''),
+			       COALESCE(encode(r.data,'hex'),'')
 			FROM raw_logs r
 			WHERE r.chain_id = 10 AND r.block_number = $1 AND r.log_index < $2
 			ORDER BY r.log_index`, blockNumber, int32(logIdx))
@@ -734,8 +770,8 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 		}
 		for wrows.Next() {
 			var li int32
-			var addr, topic, t1, t2, t3 string
-			if err := wrows.Scan(&li, &addr, &topic, &t1, &t2, &t3); err != nil {
+			var addr, topic, t1, t2, t3, data string
+			if err := wrows.Scan(&li, &addr, &topic, &t1, &t2, &t3, &data); err != nil {
 				wrows.Close()
 				return fmt.Errorf("scan case %s witness: %w", key, err)
 			}
@@ -743,7 +779,7 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 				fmt.Sprintf("log_index %d address 0x%s topic0 0x%s", li, addr, topic))
 			row.SameBlockWitnesses = append(row.SameBlockWitnesses, T6Witness{
 				LogIndex: uint32(li), Address: addr, Topic0: topic,
-				Topic1Addr: t1, Topic2Addr: t2, Topic3Addr: t3,
+				Topic1Addr: t1, Topic2Addr: t2, Topic3Addr: t3, Data: data,
 			})
 		}
 		wrows.Close()

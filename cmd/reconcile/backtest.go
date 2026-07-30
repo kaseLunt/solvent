@@ -33,6 +33,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -142,6 +144,15 @@ func (v *backtestView) normalizedBefore() *big.Int {
 func (v *backtestView) normalizedAfter() *big.Int {
 	v.f.use(srcBTDeltaFold)
 	return v.row.NormalizedAfter
+}
+
+// normalizedAtParent is the SAME Σ-delta fold cut at the PARENT boundary —
+// the debt state the causation replay starts from (Codex round 4, M). It is
+// recorded under srcBTDeltaFold because it IS that source: the identical
+// fold discipline with a different upper bound, not a new input.
+func (v *backtestView) normalizedAtParent() *big.Int {
+	v.f.use(srcBTDeltaFold)
+	return v.row.NormalizedAtParent
 }
 
 func (v *backtestView) indexAtBlock() *big.Int { v.f.use(srcBTIndex); return v.row.IndexAtBlock }
@@ -435,11 +446,20 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	priceMoved, moveNote := priceFrameDelta(parent, exec)
 	res.PriceDeltaNote = moveNote
 	witnesses := v.sameBlockEarlier()
-	held := map[common.Address]bool{}
-	for _, leg := range parent.st.collateral {
-		held[leg.token] = true
-	}
-	cause := replaySameBlockCauses(v.sameBlockWitnesses(), c.dmProxy, account, debtToken, held)
+	// THE CAUSATION REPLAY'S STARTING STATE (Codex round 4, M): the PARENT
+	// block's own position — the parent-boundary fold, the parent basket, the
+	// parent prices and thresholds. The replay applies the block's decoded
+	// pre-liquidation writes to THIS state in log order; the event-time debt
+	// (ourDebt) is deliberately NOT the start, because it already contains
+	// those writes' effects.
+	cause := replaySameBlockCauses(v.sameBlockWitnesses(), c.dmProxy, account, debtToken, replayParentState{
+		NormalizedAtParent: v.normalizedAtParent(),
+		IndexAtBlock:       v.indexAtBlock(),
+		Collateral:         parent.st.collateral,
+		Prices:             parent.st.prices,
+		Configs:            parent.st.configs,
+		Decimals:           decimals,
+	})
 
 	// THE CAUSATION TEST (round-1 finding 7). The old code labelled a case
 	// "flipped-with-witness" whenever ANY earlier log existed or ANY price
@@ -466,7 +486,14 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 			"every_leg_priced_both_frames": fmt.Sprintf("%v", allPriced),
 			"same_block_earlier_logs":      fmt.Sprintf("%d", len(witnesses)),
 			"same_block_witness_detail":    strings.Join(witnesses, "; "),
+			"same_block_replay_applied":    fmt.Sprintf("%d", cause.Applied),
 		},
+	}
+	if len(cause.Notes) > 0 {
+		// Replay refusals and unmodelled writes are DISCLOSED, never silent:
+		// an undecodable or unreplayable witness leaves the case UNEXPLAINED,
+		// and the reviewer must be able to see why.
+		oblRow.Evidence["same_block_replay_notes"] = strings.Join(cause.Notes, "; ")
 	}
 	switch classifyIntraBlock(ourEligible, execEligible, allPriced, cause.Proven) {
 	case eligTrueAtParent:
@@ -484,15 +511,15 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 		res.EligibilityState = "flipped-in-block-with-custodied-witness"
 		oblRow.Verdict = verdictMarginal
 		oblRow.Class = verdictMarginal
-		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION PROVEN FROM PRE-LIQUIDATION STATE: false at the parent frame (maxBorrowLT %s), and a CUSTODIED earlier log in this block moved an input to this account's boolean — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
+		oblRow.Note = fmt.Sprintf("FLIPPED-IN-BLOCK, CAUSATION REPLAYED FROM PRE-LIQUIDATION STATE: false at the parent frame (maxBorrowLT %s), and a CUSTODIED earlier log's DECODED write, applied to the parent state in log order, itself produces the false→true transition — %s. The recomputation at execution-frame prices corroborates it (maxBorrowLT %s) but is not the proof, because it reads post-block state. Disclosed as marginal with the margin printed, never absorbed",
 			ourMaxBorrow, strings.Join(cause.Causes, "; "), execMaxBorrow)
 		f.cite(tolIntraBlockMarginality)
 	default:
 		res.EligibilityState = verdictUnexplained
 		oblRow.Verdict = verdictUnexplained
 		oblRow.Class = verdictUnexplained
-		oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent frame with NO custodied pre-liquidation cause. maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (of which %d touch neither this account nor a token it holds); price moved between frames: %v. A post-block price difference is NOT proof of a pre-liquidation flip and an unrelated log is not a witness, so this is the gated third state of chain-truth R1's law — a false negative the block's own custody does not explain",
-			ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, priceMoved)
+		oblRow.Note = fmt.Sprintf("UNEXPLAINED: false at the parent frame with NO replayed pre-liquidation cause. maxBorrowLT %s -> %s at execution-frame prices; earlier same-block logs %d (of which %d touch neither this account nor a token it holds, and %d decoded writes were applied to the replayed parent state WITHOUT producing the flip); price moved between frames: %v. A post-block price difference is NOT proof of a pre-liquidation flip, an unrelated log is not a witness, and CONTACT without a replayed transition is not causation (a repayment, a routine index tick, an LT-neutral config write) — the gated third state of chain-truth R1's law: a false negative the block's own custody does not explain",
+			ourMaxBorrow, execMaxBorrow, len(witnesses), cause.Unrelated, cause.Applied, priceMoved)
 	}
 	rows = append(rows, oblRow)
 
@@ -1291,105 +1318,485 @@ var (
 	topicDMRepaid               = dmWitnessTopic0("Repaid")
 )
 
+// collateralLeg is an ALIAS for the anonymous per-leg struct frameState and
+// maxBorrowAtFrame already share, so the replay can copy and mutate a basket
+// without re-deriving the gate's eligibility math.
+type collateralLeg = struct {
+	token  common.Address
+	amount *big.Int
+}
+
+// replayParentState is the PARENT-BLOCK state the causation replay starts
+// from (Codex round 4, M). Every field is an input the gate already reads —
+// nothing here is a new source: the fold comes from the same Σ-delta
+// discipline as obligation 1, and the basket/prices/configs are the parent
+// frame's pinned reads.
+type replayParentState struct {
+	// NormalizedAtParent is the account's normalized debt in the CASE'S debt
+	// token at the parent boundary — Σ deltas strictly below block N. It
+	// deliberately excludes the block's own earlier events: the replay applies
+	// those itself, in log order, from their decoded payloads.
+	NormalizedAtParent *big.Int
+	// IndexAtBlock is the case's own liquidation-time index snapshot. It is the
+	// replay's FALLBACK starting index only: when the block carries an earlier
+	// InterestIndexUpdated for the debt token, that event's decoded oldIndex IS
+	// the parent-boundary index (the chain's own statement of the value carried
+	// into the block) and supersedes this.
+	IndexAtBlock *big.Int
+	// Collateral / Prices / Configs are the parent frame's pinned reads.
+	// Prices stay FIXED for the whole replay: a DM price move is not a DM log
+	// (PriceProviderV2 is outside the walked witness surface), so no witness
+	// event can move them — which is exactly why a post-liquidation price
+	// difference must never become a proven cause.
+	Collateral []collateralLeg
+	Prices     map[common.Address]*big.Int
+	Configs    map[common.Address]collateralTokenConfigResult
+	// Decimals is the pinned ERC20.decimals map (10^dec denominators).
+	Decimals map[common.Address]uint8
+}
+
 // causeReplay is the outcome of replaying the ordered same-block earlier witnesses
-// against THIS account's position.
+// against THIS account's parent-state position.
 type causeReplay struct {
-	// Proven is true when at least one earlier custodied log demonstrably changed an
-	// input to this account's eligibility: its own collateral (an earlier seizure),
-	// its own debt (a borrow/repay), the debt token's index, or the liquidation
-	// threshold of a token it holds.
+	// Proven is true IFF the replay ITSELF produced a false→true eligibility
+	// transition at some pre-liquidation point: starting from parent state,
+	// applying the decoded witness writes strictly in log-index order, the
+	// account's boolean (debt > maxBorrowLT) crossed from ineligible to
+	// eligible. Contact is not causation (Codex round 4, M): a Repaid lowers
+	// debt and can never produce the flip; an LT-neutral or LT-raising config
+	// write cannot either; an index update qualifies only when the decoded move
+	// actually crosses the threshold. None of that is special-cased — the
+	// arithmetic decides.
 	Proven bool
-	// Causes are the proven witnesses, in log order, for the artifact.
+	// Causes are the witnesses whose replayed write produced the flip, in log
+	// order, for the artifact.
 	Causes []string
+	// Applied counts decoded witnesses that concern this account's boolean and
+	// were applied to the replayed state (whether or not they flipped it).
+	Applied int
 	// Unrelated counts earlier logs that touch neither this account nor a token it
 	// holds — the ones the round-1 classifier accepted as "a witness".
 	Unrelated int
+	// Notes records honesty caveats: undecodable payloads, refused replays,
+	// writes the single-debt-token model cannot replay. A noted event never
+	// contributes to Proven — the gate fails UNEXPLAINED rather than excuses.
+	Notes []string
 }
 
-// replaySameBlockCauses walks the ordered earlier witnesses and decides whether any
-// of them could have moved this account's eligibility.
+// replaySameBlockCauses REPLAYS the ordered earlier witnesses from the parent
+// state and decides whether one of them actually flipped this account's
+// eligibility.
 //
-// THE DEFECT THIS REPLACES (Codex round 2, finding H2): the classifier accepted
-// `execEligible && (priceMoved || witnesses > 0)` as a proven flip. Both terms are
-// post-hoc: execEligible is computed from an EIP-1898 call at block N, which
-// observes state AFTER the whole block, and `witnesses > 0` counts any log at all.
-// So a price update later in the block, or an unrelated log, produced a false
-// marginal pass. Causation now requires a CUSTODIED PRE-LIQUIDATION write that
-// touches an input to this account's boolean, replayed in log order.
+// THE LINEAGE OF DEFECTS THIS CLOSES:
+//   - Round 2 (H2): the classifier accepted `execEligible && (priceMoved ||
+//     witnesses > 0)` — both terms post-hoc — so any log or price delta
+//     excused a false negative. Fixed by requiring a custodied
+//     pre-liquidation write.
+//   - Round 4 (M): "witness replay proves contact, not the eligibility
+//     transition." A Repaid set Proven even though a repayment LOWERS debt
+//     and cannot cause the flip; InterestIndexUpdated and
+//     CollateralTokenConfigSet were accepted without decoding their values.
+//     An honest block with a repayment (or a routine index tick, or an
+//     LT-neutral config write) before the liquidation and a price update
+//     after it therefore produced a false marginal-disclosed pass.
+//
+// THE LAW NOW: start from the PARENT-BLOCK state (the parent-boundary debt
+// fold, the parent basket/prices/thresholds), apply each custodied witness's
+// DECODED write strictly in log-index order, and recompute the gate's own
+// boolean after each application with the SAME proven functions obligation 2
+// uses (mulDivFloor + maxBorrowAtFrame). Proven is true IFF that replay
+// itself crosses false→true at some pre-liquidation point. Post-liquidation
+// state (including block-end prices) never participates: the witness set is
+// bounded above by the liquidation's own log_index at collection time, and
+// prices are not writable by any DM log. Directionality is a CONSEQUENCE of
+// applying the write — nothing here special-cases an event class.
 func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Address,
-	account, debtToken common.Address, held map[common.Address]bool) causeReplay {
+	account, debtToken common.Address, start replayParentState) causeReplay {
 	out := causeReplay{}
 	acct := hexLower(account.Hex())
 	debt := hexLower(debtToken.Hex())
 	proxy := hexLower(dmProxy.Hex())
-	for _, w := range witnesses {
+
+	// A replay without its parent state cannot apply anything, and what cannot
+	// be applied cannot prove — refuse loudly rather than guess.
+	if start.NormalizedAtParent == nil || start.IndexAtBlock == nil || start.IndexAtBlock.Sign() <= 0 {
+		out.Notes = append(out.Notes, "replay refused: parent-state inputs incomplete (normalized fold or index); no witness can be proven a cause")
+		return out
+	}
+
+	// STRICT LOG-INDEX ORDER. The collector already orders its rows; sorting
+	// here makes the law structural rather than an upstream courtesy
+	// (mutation spec m2b in p3_backtest_replay_test.go).
+	ordered := make([]snapshotdb.T6Witness, len(witnesses))
+	copy(ordered, witnesses)
+	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].LogIndex < ordered[j].LogIndex })
+
+	// Copy every piece of state a witness write may touch. Prices are NOT
+	// copied because no DM log writes a price — see replayParentState.
+	normalized := new(big.Int).Set(start.NormalizedAtParent)
+	index := new(big.Int).Set(start.IndexAtBlock)
+	collateral := make([]collateralLeg, len(start.Collateral))
+	held := map[common.Address]bool{}
+	for i, leg := range start.Collateral {
+		collateral[i] = collateralLeg{token: leg.token, amount: new(big.Int).Set(leg.amount)}
+		held[leg.token] = true
+	}
+	configs := make(map[common.Address]collateralTokenConfigResult, len(start.Configs))
+	for k, cfg := range start.Configs {
+		configs[k] = cfg
+	}
+
+	// THE PARENT-BOUNDARY INDEX. IndexAtBlock is the liquidation-time
+	// snapshot. When the block carries an EARLIER InterestIndexUpdated for the
+	// debt token, that event's own decoded oldIndex is the chain's statement
+	// of the value carried INTO the block — the true parent value the replay
+	// must start from, or an index-caused flip could never be attributed to
+	// its event. Without one, the index did not move before the liquidation
+	// and the snapshot IS the parent value.
+	for _, w := range ordered {
+		if !strings.EqualFold(w.Address, proxy) || w.Topic0 != topicDMInterestIndexUpdated || !strings.EqualFold(w.Topic1Addr, debt) {
+			continue
+		}
+		if oldIdx, _, err := decodeWitnessIndexUpdate(w); err == nil && oldIdx.Sign() > 0 {
+			index.Set(oldIdx)
+		}
+		break
+	}
+
+	// The gate's own eligibility law over the REPLAYED state: the §3.3 debt
+	// bridge (mulDivFloor) against the deployed maxBorrowLT loop shape
+	// (maxBorrowAtFrame) — the same proven functions obligation 2 uses, never
+	// re-derived arithmetic.
+	eligibleNow := func() bool {
+		maxBorrow, _ := maxBorrowAtFrame(collateral, start.Prices, configs, start.Decimals)
+		return mulDivFloor(normalized, index).Cmp(maxBorrow) > 0
+	}
+	prev := eligibleNow()
+	applied := func(w snapshotdb.T6Witness, what string) {
+		out.Applied++
+		cur := eligibleNow()
+		if !prev && cur {
+			// THE ONLY WAY TO PROVE (Codex round 4, M): the replay itself
+			// crossed from ineligible to eligible at this pre-liquidation
+			// write. Directionality is a consequence — a repayment or an
+			// LT-raising write simply never lands here.
+			out.Proven = true
+			out.Causes = append(out.Causes, fmt.Sprintf("log_index %d %s — the replayed parent state crosses from ineligible to ELIGIBLE at this write", w.LogIndex, what))
+		}
+		prev = cur
+	}
+	note := func(w snapshotdb.T6Witness, format string, a ...any) {
+		out.Notes = append(out.Notes, fmt.Sprintf("log_index %d: %s", w.LogIndex, fmt.Sprintf(format, a...)))
+	}
+	clampDebt := func(w snapshotdb.T6Witness) {
+		if normalized.Sign() < 0 {
+			note(w, "replayed normalized debt went below zero (decoded write exceeds the folded parent debt); clamped to 0")
+			normalized.SetInt64(0)
+		}
+	}
+
+	for _, w := range ordered {
 		if !strings.EqualFold(w.Address, proxy) {
-			// A log from an address outside the walked DM surface is not a custodied
-			// witness for this account's state at all.
+			// A log from an address outside the walked DM surface is not a
+			// custodied witness for this account's state at all — including a
+			// price push: PriceProviderV2 is outside the walker stream set,
+			// which is exactly why a price difference can never be a proven
+			// cause here.
 			out.Unrelated++
 			continue
 		}
 		switch w.Topic0 {
 		case topicDMLiquidated:
-			// Liquidated(liquidator, user, borrowToken, ...): an EARLIER seizure for
-			// the same account changed its collateral basket inside the block, which
-			// the parent-frame collateralOf read cannot see.
-			if strings.EqualFold(w.Topic2Addr, acct) {
-				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Liquidated for THIS account: an earlier seizure moved its collateral inside the block", w.LogIndex))
+			// Liquidated(liquidator, user, borrowToken, ...): an EARLIER
+			// seizure for the same account. Its decoded payload moves BOTH
+			// sides of the boolean: each seized element leaves the basket
+			// (element amounts INCLUDE the liquidation bonus —
+			// DebtManagerCore.sol:613-658, cross-checked by the captured
+			// fixture: 15,845,260 repaid + 158,452 bonus = 16,003,712 seized)
+			// and the repaid USD leaves the debt. The bonus premium is what
+			// lets an earlier pass flip the next one.
+			if !strings.EqualFold(w.Topic2Addr, acct) {
+				out.Unrelated++
 				continue
 			}
+			seized, liqUSD, err := decodeWitnessLiquidated(w)
+			if err != nil {
+				note(w, "Liquidated for THIS account did not decode (%v) — cannot be applied, so it can prove nothing", err)
+				continue
+			}
+			if strings.EqualFold(w.Topic3Addr, debt) {
+				normalized.Sub(normalized, usdToNormalizedFloor(liqUSD, index))
+				clampDebt(w)
+			} else {
+				note(w, "earlier seizure repays a DIFFERENT borrow token (0x%s); the debt model tracks only the case's debt token, so only its basket effect is replayed", w.Topic3Addr)
+			}
+			for _, s := range seized {
+				if s.Amount.Sign() == 0 {
+					continue
+				}
+				found := false
+				for i := range collateral {
+					if collateral[i].token == s.Token {
+						collateral[i].amount.Sub(collateral[i].amount, s.Amount)
+						if collateral[i].amount.Sign() < 0 {
+							collateral[i].amount.SetInt64(0)
+						}
+						found = true
+						break
+					}
+				}
+				if !found {
+					note(w, "seized token %s is not in the parent basket; nothing to remove", s.Token.Hex())
+				}
+			}
+			applied(w, fmt.Sprintf("Liquidated for THIS account (earlier pass: %s USD of debt repaid, %d elements seized, bonus included in the amounts)", liqUSD, len(seized)))
 		case topicDMBorrowed:
-			// Borrowed(user indexed, token indexed, amount): topics are
-			// [t0, user, token], so the DEBTOR is topic1 and topic2 is the TOKEN.
-			//
-			// The token is deliberately NOT required to equal the debt token under
-			// test: `liquidatable` compares borrowingOf(user)'s TOTAL across every
-			// borrow token against maxBorrowLT, so a borrow of any token raises the
-			// total and can flip eligibility.
-			if strings.EqualFold(w.Topic1Addr, acct) {
-				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Borrowed by THIS account (token 0x%s): its total borrowings rose inside the block", w.LogIndex, w.Topic2Addr))
+			// Borrowed(user indexed, token indexed, amount): the DEBTOR is
+			// topic1 and topic2 is the TOKEN; amount is token-native.
+			if !strings.EqualFold(w.Topic1Addr, acct) {
+				out.Unrelated++
 				continue
 			}
+			if !strings.EqualFold(w.Topic2Addr, debt) {
+				// A borrow of a DIFFERENT token raises the TOTAL the deployed
+				// `liquidatable` sums, but this frame's debt model tracks only
+				// the case's debt token — the flip cannot be REPLAYED, so it
+				// cannot be proven. The case stays UNEXPLAINED with the reason
+				// disclosed; excusing it on contact was the round-4 hole.
+				note(w, "Borrowed a DIFFERENT token (0x%s) by this account: raises its total borrowings but is not replayable under the single-debt-token model — never a proven cause", w.Topic2Addr)
+				continue
+			}
+			amount, err := decodeWitnessAmount("Borrowed", w)
+			if err != nil {
+				note(w, "Borrowed by THIS account did not decode (%v) — cannot be applied, so it can prove nothing", err)
+				continue
+			}
+			usd, err := borrowTokenUSD(amount, debtToken, start.Decimals)
+			if err != nil {
+				note(w, "Borrowed by THIS account cannot be valued: %v", err)
+				continue
+			}
+			// The deployed borrow normalization CEILS (DebtManagerCore.sol:472;
+			// mirrored by the deriver's mulDivCeil in internal/derive).
+			normalized.Add(normalized, usdToNormalizedCeil(usd, index))
+			applied(w, fmt.Sprintf("Borrowed %s of the debt token by THIS account (%s USD at the replayed index)", amount, usd))
 		case topicDMRepaid:
-			// Repaid(user indexed, payer indexed, token indexed, amount): topics are
-			// [t0, user, payer, token]. The INDEBTED party is topic1; topic2 is the
-			// PAYER (Codex round 3, finding M).
-			//
-			// The previous branch accepted the sampled account in EITHER slot, so a
-			// legitimate third-party repayment — someone else clearing this account's
-			// debt, or this account clearing someone else's — counted as "its own debt
-			// moved". Paying for a third party does not touch the payer's position at
-			// all (_repayWithBorrowToken decrements
-			// $.userNormalizedBorrowings[user][token], never the payer's), so with an
-			// eligible post-block recomputation that false cause turned an UNEXPLAINED
-			// case into a passing marginal verdict.
-			if strings.EqualFold(w.Topic1Addr, acct) {
-				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d Repaid FOR THIS account (payer 0x%s, token 0x%s): its debt fell inside the block", w.LogIndex, w.Topic2Addr, w.Topic3Addr))
+			// Repaid(user indexed, payer indexed, token indexed, amount): the
+			// INDEBTED party is topic1; a payer-only match is unrelated contact
+			// (round 3, M — _repayWithBorrowToken never touches the payer).
+			if !strings.EqualFold(w.Topic1Addr, acct) {
+				out.Unrelated++
 				continue
 			}
+			if !strings.EqualFold(w.Topic3Addr, debt) {
+				note(w, "Repaid a DIFFERENT borrow token (0x%s) for this account: lowers a leg the model does not track — no replayable effect", w.Topic3Addr)
+				continue
+			}
+			usd, err := decodeWitnessAmount("Repaid", w)
+			if err != nil {
+				note(w, "Repaid FOR THIS account did not decode (%v) — cannot be applied, so it can prove nothing", err)
+				continue
+			}
+			// Repaid.amount is ALREADY USD-6 (recon "Debt Manager event
+			// semantics"); the deployed repay normalization FLOORS
+			// (DebtManagerCore.sol:599; the deriver's mulDivFloor).
+			normalized.Sub(normalized, usdToNormalizedFloor(usd, index))
+			clampDebt(w)
+			applied(w, fmt.Sprintf("Repaid %s USD FOR THIS account (payer 0x%s) — debt falls; a repayment can never produce the flip", usd, w.Topic2Addr))
 		case topicDMInterestIndexUpdated:
-			// InterestIndexUpdated(token, newIndex): the debt token's index moved,
-			// which changes the live debt our replay bridges with.
-			if strings.EqualFold(w.Topic1Addr, debt) {
-				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d InterestIndexUpdated for the debt token: the live-debt index moved inside the block", w.LogIndex))
+			if !strings.EqualFold(w.Topic1Addr, debt) {
+				out.Unrelated++
 				continue
 			}
+			_, newIdx, err := decodeWitnessIndexUpdate(w)
+			if err != nil {
+				note(w, "InterestIndexUpdated for the debt token did not decode (%v) — cannot be applied, so it can prove nothing", err)
+				continue
+			}
+			index.Set(newIdx)
+			applied(w, fmt.Sprintf("InterestIndexUpdated for the debt token (index → %s)", newIdx))
 		case topicDMCollateralConfigSet:
-			// CollateralTokenConfigSet(token, old, new): a threshold or bonus change on
-			// a token this account HOLDS moves maxBorrowLT directly.
-			if held[common.HexToAddress(w.Topic1Addr)] {
-				out.Proven = true
-				out.Causes = append(out.Causes, fmt.Sprintf("log_index %d CollateralTokenConfigSet for a HELD token: its liquidation threshold moved inside the block", w.LogIndex))
+			tok := common.HexToAddress(w.Topic1Addr)
+			if !held[tok] {
+				out.Unrelated++
 				continue
 			}
+			newCfg, err := decodeWitnessCollateralConfig(w)
+			if err != nil {
+				note(w, "CollateralTokenConfigSet for a HELD token did not decode (%v) — cannot be applied, so it can prove nothing", err)
+				continue
+			}
+			configs[tok] = newCfg
+			applied(w, fmt.Sprintf("CollateralTokenConfigSet for HELD token 0x%s (liquidationThreshold → %s)", w.Topic1Addr, newCfg.LiquidationThreshold))
+		default:
+			out.Unrelated++
 		}
-		out.Unrelated++
 	}
 	return out
+}
+
+// --- witness payload decoding (Codex round 4, M) ----------------------------
+//
+// Every decoder below goes through dmWitnessABI — the object
+// p3_witness_abi_test.go pins field-by-field against the COMMITTED forge
+// artifact (internal/decode/abis/DebtManagerCore.json) and whose topic0s are
+// pinned against the CAPTURED chain logs (internal/decode/testdata). No word
+// offset here is hand-transcribed.
+
+// dmWitnessNonIndexed hex-decodes a witness's data payload and unpacks the
+// event's non-indexed inputs.
+func dmWitnessNonIndexed(event string, w snapshotdb.T6Witness) ([]interface{}, error) {
+	raw := strings.TrimPrefix(strings.TrimSpace(w.Data), "0x")
+	if raw == "" {
+		return nil, fmt.Errorf("no data payload captured")
+	}
+	data, err := hex.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("data payload is not hex: %w", err)
+	}
+	args := dmWitnessABI.Events[event].Inputs.NonIndexed()
+	vals, err := args.Unpack(data)
+	if err != nil {
+		return nil, fmt.Errorf("unpack %s: %w", event, err)
+	}
+	if len(vals) != len(args) {
+		return nil, fmt.Errorf("unpack %s: got %d values, want %d", event, len(vals), len(args))
+	}
+	return vals, nil
+}
+
+// decodeWitnessIndexUpdate decodes InterestIndexUpdated's (oldIndex, newIndex).
+func decodeWitnessIndexUpdate(w snapshotdb.T6Witness) (oldIndex, newIndex *big.Int, err error) {
+	vals, err := dmWitnessNonIndexed("InterestIndexUpdated", w)
+	if err != nil {
+		return nil, nil, err
+	}
+	oldIndex, ok1 := vals[0].(*big.Int)
+	newIndex, ok2 := vals[1].(*big.Int)
+	if !ok1 || !ok2 || oldIndex == nil || newIndex == nil {
+		return nil, nil, fmt.Errorf("InterestIndexUpdated payload is not two uint256 words")
+	}
+	if newIndex.Sign() <= 0 {
+		return nil, nil, fmt.Errorf("InterestIndexUpdated carries non-positive newIndex %s", newIndex)
+	}
+	return new(big.Int).Set(oldIndex), new(big.Int).Set(newIndex), nil
+}
+
+// decodeWitnessAmount decodes the single-uint256 payload of Borrowed/Repaid.
+func decodeWitnessAmount(event string, w snapshotdb.T6Witness) (*big.Int, error) {
+	vals, err := dmWitnessNonIndexed(event, w)
+	if err != nil {
+		return nil, err
+	}
+	v, ok := vals[0].(*big.Int)
+	if !ok || v == nil {
+		return nil, fmt.Errorf("%s payload is not a uint256 amount", event)
+	}
+	return new(big.Int).Set(v), nil
+}
+
+// decodeWitnessCollateralConfig decodes CollateralTokenConfigSet's NEW config
+// tuple (ltv, liquidationThreshold, liquidationBonus — 1e18-scaled
+// percentages, go-ethereum widens uint80/uint96 to *big.Int).
+func decodeWitnessCollateralConfig(w snapshotdb.T6Witness) (cfg collateralTokenConfigResult, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			cfg, err = collateralTokenConfigResult{}, fmt.Errorf("decode CollateralTokenConfigSet: recovered panic: %v", rec)
+		}
+	}()
+	vals, err := dmWitnessNonIndexed("CollateralTokenConfigSet", w)
+	if err != nil {
+		return collateralTokenConfigResult{}, err
+	}
+	el := reflect.ValueOf(vals[1]) // vals[0] is oldConfig; the WRITE is newConfig
+	if el.Kind() != reflect.Struct || el.NumField() != 3 {
+		return collateralTokenConfigResult{}, fmt.Errorf("newConfig is %T, not the 3-field tuple", vals[1])
+	}
+	cfg.LTV, _ = el.Field(0).Interface().(*big.Int)
+	cfg.LiquidationThreshold, _ = el.Field(1).Interface().(*big.Int)
+	cfg.LiquidationBonus, _ = el.Field(2).Interface().(*big.Int)
+	if cfg.LiquidationThreshold == nil {
+		return collateralTokenConfigResult{}, fmt.Errorf("newConfig carries no liquidationThreshold")
+	}
+	return cfg, nil
+}
+
+// decodeWitnessLiquidated decodes Liquidated's payload: the seized elements
+// (token, amount — amount INCLUDES the liquidation bonus) and the USD of debt
+// repaid (debtAmountLiquidated).
+func decodeWitnessLiquidated(w snapshotdb.T6Witness) (seized []tokenAmount, debtLiquidatedUSD *big.Int, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			seized, debtLiquidatedUSD, err = nil, nil, fmt.Errorf("decode Liquidated: recovered panic: %v", rec)
+		}
+	}()
+	vals, err := dmWitnessNonIndexed("Liquidated", w)
+	if err != nil {
+		return nil, nil, err
+	}
+	list := reflect.ValueOf(vals[0])
+	if list.Kind() != reflect.Slice {
+		return nil, nil, fmt.Errorf("userCollateralLiquidated is %T, not a slice", vals[0])
+	}
+	for i := 0; i < list.Len(); i++ {
+		el := list.Index(i)
+		tok, ok := el.Field(0).Interface().(common.Address)
+		if !ok {
+			return nil, nil, fmt.Errorf("seizure element %d token is not an address", i)
+		}
+		amt, ok := el.Field(1).Interface().(*big.Int)
+		if !ok || amt == nil {
+			return nil, nil, fmt.Errorf("seizure element %d carries no amount", i)
+		}
+		seized = append(seized, tokenAmount{Token: tok, Amount: new(big.Int).Set(amt)})
+	}
+	liq, ok := vals[2].(*big.Int)
+	if !ok || liq == nil {
+		return nil, nil, fmt.Errorf("debtAmountLiquidated is %T, not *big.Int", vals[2])
+	}
+	return seized, new(big.Int).Set(liq), nil
+}
+
+// --- the deployed USD↔normalized laws the replay applies --------------------
+
+// usdToNormalizedFloor mirrors the deployed repay/liquidation normalization:
+// floor(usd × 1e18 / index) (DebtManagerCore.sol:599 repay, :579-580
+// liquidation; the deriver's mulDivFloor in internal/derive/debtmanager.go).
+func usdToNormalizedFloor(usd, index *big.Int) *big.Int {
+	out := new(big.Int).Mul(usd, wad)
+	return out.Quo(out, index)
+}
+
+// usdToNormalizedCeil mirrors the deployed borrow normalization:
+// ceil(usd × 1e18 / index), exact divisions not bumped
+// (DebtManagerCore.sol:472; the deriver's mulDivCeil).
+func usdToNormalizedCeil(usd, index *big.Int) *big.Int {
+	q, r := new(big.Int).QuoRem(new(big.Int).Mul(usd, wad), index, new(big.Int))
+	if r.Sign() != 0 {
+		q.Add(q, big.NewInt(1))
+	}
+	return q
+}
+
+// borrowTokenUSD values a Borrowed token-native amount in USD-6 under the
+// deployed stable-snap pricing: a 6-dec stable's amount IS the USD-6 figure;
+// an 18-dec stable floors away 1e12 (usd = amount×price/10^decimals with the
+// contract's own flooring division, DebtManagerCore.sol:378; mirrored by the
+// deriver's borrowUsd). An unknown-decimals token cannot be valued — the
+// caller records the refusal and the event proves nothing.
+func borrowTokenUSD(amount *big.Int, token common.Address, decimals map[common.Address]uint8) (*big.Int, error) {
+	dec, ok := decimals[token]
+	if !ok {
+		return nil, fmt.Errorf("no pinned decimals for borrow token %s", token.Hex())
+	}
+	switch dec {
+	case 6:
+		return new(big.Int).Set(amount), nil
+	case 18:
+		return new(big.Int).Quo(amount, new(big.Int).Exp(big.NewInt(10), big.NewInt(12), nil)), nil
+	default:
+		return nil, fmt.Errorf("borrow token %s has unhandled decimals %d", token.Hex(), dec)
+	}
 }
 
 // The three-state intra-block outcomes (chain-truth R1), plus the unpriced

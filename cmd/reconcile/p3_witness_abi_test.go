@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,101 +165,117 @@ func TestWitnessABIArgumentShapesMatchTheCommittedABI(t *testing.T) {
 }
 
 // TestInterestIndexWitnessIsVisibleUsingTheRealFixture drives the replay with the
-// ACTUAL captured log. Before the fix this returned Proven=false, so a case whose
-// only custodied cause was an index move failed as UNEXPLAINED on an honest run.
+// ACTUAL captured log. Round 3: with the two-argument topic0 this witness was
+// invisible and an honest index-caused case failed UNEXPLAINED. Round 4 (M)
+// moved the bar from visibility to CAUSATION: the same captured log now proves
+// only when its decoded move itself crosses the threshold in the replayed
+// parent state — which is exactly how it is driven here.
 func TestInterestIndexWitnessIsVisibleUsingTheRealFixture(t *testing.T) {
 	// From internal/decode/testdata/dm_interest_index_updated.json: the DM proxy, the
-	// real topic0, and USDC(OP) in topics[1].
+	// real topic0, USDC(OP) in topics[1], and the REAL (oldIndex, newIndex) payload.
 	dm := common.HexToAddress("0x0078c5a459132e279056b2371fe8a8ec973a9553")
 	usdc := common.HexToAddress("0x0b2c639c533813f4aa9d7837caf62653d097ff85")
 	fixtureT0 := fixtureTopic0(t, "dm_interest_index_updated.json")
 	require.Equal(t, fixtureT0, topicDMInterestIndexUpdated)
 
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
-	w := snapshotdb.T6Witness{
-		LogIndex: 7, Address: hexLower(dm.Hex()), Topic0: fixtureT0,
-		Topic1Addr: hexLower(usdc.Hex()),
-	}
-	got := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, acct, usdc, map[common.Address]bool{tokA: true})
+	w := witnessFromFixture(t, "dm_interest_index_updated.json", 0, 7)
+	require.Equal(t, fixtureT0, w.Topic0)
+
+	// Knife edge computed FROM the decoded fixture values: maxBorrowLT equals
+	// the debt at the OLD index, so the captured move itself crosses.
+	oldIdx, newIdx := decodedIndexPair(t, w)
+	n := new(big.Int).Exp(big.NewInt(10), big.NewInt(12), nil)
+	st := oneLegState(tokA, mulDivFloor(n, oldIdx), pctE18(100), n, new(big.Int).Set(newIdx))
+	got := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, acct, usdc, st)
 	require.True(t, got.Proven,
-		"a REAL interest-index log for the debt token must be a proven cause; with the two-argument topic0 it fell through as unrelated and the case failed UNEXPLAINED")
+		"a REAL interest-index log for the debt token whose decoded move crosses the threshold is a proven cause; with the two-argument topic0 it fell through as unrelated and the case failed UNEXPLAINED")
 	require.Equal(t, 0, got.Unrelated)
 	require.Contains(t, got.Causes[0], "InterestIndexUpdated")
 
 	// A different token's index still proves nothing.
-	other := snapshotdb.T6Witness{
-		LogIndex: 7, Address: hexLower(dm.Hex()), Topic0: fixtureT0,
-		Topic1Addr: hexLower(common.HexToAddress("0x94b008aa00579c1307b0ef2c499ad98a8ce58e58").Hex()),
-	}
-	require.False(t, replaySameBlockCauses([]snapshotdb.T6Witness{other}, dm, acct, usdc, nil).Proven)
+	other := w
+	other.Topic1Addr = hexLower(common.HexToAddress("0x94b008aa00579c1307b0ef2c499ad98a8ce58e58").Hex())
+	require.False(t, replaySameBlockCauses([]snapshotdb.T6Witness{other}, dm, acct, usdc, st).Proven)
 }
 
 // TestRepaidPayerIsNotMistakenForTheDebtor is the round-3 M kill, using the real
-// third-party repayment in the fixture.
+// third-party repayment in the fixture, restated under the round-4 law.
 //
 // dm_repaid.json's second entry is a genuine third-party repayment: topics[1] (the
 // indebted user) is 0x57e6d3f7…ab09 and topics[2] (the payer) is 0x39161a44…a539.
-// Sampling the PAYER must yield `unrelated` — its own position did not move.
+// Sampling the PAYER must yield `unrelated` — its own position did not move
+// (_repayWithBorrowToken decrements userNormalizedBorrowings[user], never the
+// payer's). Sampling the DEBTOR applies the decoded write — and per round 4 (M)
+// even then it is NEVER a proven cause, because a repayment lowers debt and
+// cannot produce the healthy→liquidatable flip. The old assertion that the
+// debtor's repayment was "proven" is precisely the false-pass hole this wave
+// closes.
 func TestRepaidPayerIsNotMistakenForTheDebtor(t *testing.T) {
 	dm := common.HexToAddress("0x0078c5a459132e279056b2371fe8a8ec973a9553")
 	usdc := common.HexToAddress("0x0b2c639c533813f4aa9d7837caf62653d097ff85")
-	debtor := common.HexToAddress("0x57e6d3f754c45c94418cdb11ea8433854c87ab09")
-	payer := common.HexToAddress("0x39161a44588ec2327a18d4707ea5216c721ba539")
-	t0 := fixtureTopic0(t, "dm_repaid.json")
-	require.Equal(t, t0, topicDMRepaid, "the Repaid topic0 comes from the captured log")
+	w := witnessFromFixture(t, "dm_repaid.json", 1, 3)
+	debtor := common.HexToAddress("0x" + w.Topic1Addr)
+	payer := common.HexToAddress("0x" + w.Topic2Addr)
+	require.NotEqual(t, debtor, payer, "the fixture's second entry is the discriminating THIRD-PARTY repayment")
+	require.Equal(t, w.Topic0, topicDMRepaid, "the Repaid topic0 comes from the captured log")
 
-	w := snapshotdb.T6Witness{
-		LogIndex: 3, Address: hexLower(dm.Hex()), Topic0: t0,
-		Topic1Addr: hexLower(debtor.Hex()),
-		Topic2Addr: hexLower(payer.Hex()),
-		Topic3Addr: hexLower(usdc.Hex()),
+	healthy := func() replayParentState {
+		return oneLegState(tokA, big.NewInt(12_000_000), pctE18(100), big.NewInt(10_000_000), new(big.Int).Set(wad))
 	}
 
-	// THE KILL: sampling the PAYER must not prove a cause.
-	asPayer := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, payer, usdc, nil)
-	require.False(t, asPayer.Proven,
-		"paying a third party's debt does not move the payer's own position (_repayWithBorrowToken decrements userNormalizedBorrowings[user], never the payer's), so accepting topic2 turned an UNEXPLAINED case into a passing marginal verdict")
-	require.Equal(t, 1, asPayer.Unrelated)
+	// THE ROUND-3 KILL, intact: sampling the PAYER is unrelated contact.
+	asPayer := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, payer, usdc, healthy())
+	require.False(t, asPayer.Proven)
+	require.Equal(t, 1, asPayer.Unrelated,
+		"paying a third party's debt does not move the payer's own position, so accepting topic2 turned an UNEXPLAINED case into a passing marginal verdict")
+	require.Equal(t, 0, asPayer.Applied)
 
-	// And the DEBTOR is still a proven cause.
-	asDebtor := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, debtor, usdc, nil)
-	require.True(t, asDebtor.Proven)
-	require.Contains(t, asDebtor.Causes[0], "Repaid FOR THIS account")
-
-	// The self-repay entry (topic1 == topic2) is a proven cause either way, which is
-	// why the fixture's THIRD-PARTY entry is the discriminating one.
-	self := w
-	self.Topic2Addr = hexLower(debtor.Hex())
-	require.True(t, replaySameBlockCauses([]snapshotdb.T6Witness{self}, dm, debtor, usdc, nil).Proven)
+	// THE ROUND-4 KILL: the DEBTOR's repayment is decoded and APPLIED — and
+	// still proves nothing, because the replayed debt only falls.
+	asDebtor := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, debtor, usdc, healthy())
+	require.Equal(t, 1, asDebtor.Applied)
+	require.Equal(t, 0, asDebtor.Unrelated)
+	require.False(t, asDebtor.Proven,
+		"a repayment lowers the account's debt; treating it as a proven cause let an honest repay-then-price-move block hide a false negative")
 }
 
 // TestBorrowedTokenSlotIsNotMistakenForTheAccount is the same defect's other half:
 // Borrowed's topics are [t0, user, token], so the old combined branch also accepted
-// the account in the TOKEN slot.
+// the account in the TOKEN slot. Restated under the round-4 law: the borrower's
+// own borrow is decoded, applied, and proves ONLY because the captured amount
+// actually crosses the threshold in the replayed state.
 func TestBorrowedTokenSlotIsNotMistakenForTheAccount(t *testing.T) {
 	dm := common.HexToAddress("0x0078c5a459132e279056b2371fe8a8ec973a9553")
 	usdc := common.HexToAddress("0x0b2c639c533813f4aa9d7837caf62653d097ff85")
-	borrower := common.HexToAddress("0x983e36549d27ccfe30d37e615d35222f52fc104d")
-	t0 := fixtureTopic0(t, "dm_borrowed.json")
-	require.Equal(t, t0, topicDMBorrowed)
+	w := witnessFromFixture(t, "dm_borrowed.json", 0, 2)
+	borrower := common.HexToAddress("0x" + w.Topic1Addr)
+	require.Equal(t, w.Topic0, topicDMBorrowed)
+	require.Equal(t, hexLower(usdc.Hex()), w.Topic2Addr, "the captured borrow is USDC")
 
-	w := snapshotdb.T6Witness{
-		LogIndex: 2, Address: hexLower(dm.Hex()), Topic0: t0,
-		Topic1Addr: hexLower(borrower.Hex()),
-		Topic2Addr: hexLower(usdc.Hex()),
+	// $1.00 of parent debt against $2.00 of threshold-weighted collateral; the
+	// captured borrow is several USD, so the replayed debt crosses.
+	st := func() replayParentState {
+		s := oneLegState(tokA, big.NewInt(2_000_000), pctE18(100), big.NewInt(1_000_000), new(big.Int).Set(wad))
+		s.Decimals[usdc] = 6 // the debt token's decimals value the borrow (stable-snap law)
+		return s
 	}
-	require.True(t, replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, borrower, usdc, nil).Proven,
-		"the borrower in topic1 is a proven cause: its total borrowings rose inside the block")
+	require.True(t, replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, borrower, usdc, st()).Proven,
+		"the borrower in topic1 is a proven cause when the decoded amount crosses: its debt rose inside the block")
 
 	// Sampling the TOKEN address as if it were an account proves nothing.
-	asToken := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, usdc, usdc, nil)
+	asToken := replaySameBlockCauses([]snapshotdb.T6Witness{w}, dm, usdc, usdc, st())
 	require.False(t, asToken.Proven, "topic2 is the TOKEN, not a party to the position")
 	require.Equal(t, 1, asToken.Unrelated)
 
-	// A borrow of a DIFFERENT token by this account IS still a cause: liquidatable
-	// compares borrowingOf(user)'s TOTAL across every borrow token, so any borrow
-	// raises the total and can flip eligibility.
+	// A borrow of a DIFFERENT token by this account raises the TOTAL the
+	// deployed `liquidatable` sums — but the frame's debt model tracks only the
+	// case's debt token, so the replay cannot reproduce that flip. It must
+	// refuse with a disclosed note (the case stays UNEXPLAINED), never prove on
+	// contact — proving here without applying was the round-4 hole.
 	otherToken := w
 	otherToken.Topic2Addr = hexLower(common.HexToAddress("0x94b008aa00579c1307b0ef2c499ad98a8ce58e58").Hex())
-	require.True(t, replaySameBlockCauses([]snapshotdb.T6Witness{otherToken}, dm, borrower, usdc, nil).Proven)
+	crossToken := replaySameBlockCauses([]snapshotdb.T6Witness{otherToken}, dm, borrower, usdc, st())
+	require.False(t, crossToken.Proven)
+	require.NotEmpty(t, crossToken.Notes)
 }

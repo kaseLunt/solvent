@@ -368,14 +368,17 @@ func TestIntraBlockClassifierRequiresAProvenCause(t *testing.T) {
 	require.Equal(t, eligUnpriced, classifyIntraBlock(false, false, false, false))
 }
 
-// TestReplaySameBlockCausesProvesOnlyRelevantWrites is the causation replay itself:
-// an unrelated log in a busy block must NOT count, and each provable mechanism must.
+// TestReplaySameBlockCausesProvesOnlyRelevantWrites is the causation replay's
+// relevance law: an unrelated log in a busy block must NOT count, and only a
+// witness whose DECODED, APPLIED write flips the replayed parent state can
+// prove (Codex round 4, M — contact is not causation; the flip-producing
+// positive controls live in p3_backtest_replay_test.go, anchored to the
+// captured fixtures).
 func TestReplaySameBlockCausesProvesOnlyRelevantWrites(t *testing.T) {
 	dm := common.HexToAddress("0x0078C5a459132e279056B2371fE8A8eC973A9553")
 	acct := common.HexToAddress("0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76")
 	usdc := common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85")
 	other := common.HexToAddress("0x00000000000000000000000000000000000000ff")
-	held := map[common.Address]bool{tokA: true}
 
 	w := func(topic string, t1, t2, t3 common.Address) snapshotdb.T6Witness {
 		return snapshotdb.T6Witness{
@@ -383,46 +386,56 @@ func TestReplaySameBlockCausesProvesOnlyRelevantWrites(t *testing.T) {
 			Topic1Addr: hexLower(t1.Hex()), Topic2Addr: hexLower(t2.Hex()), Topic3Addr: hexLower(t3.Hex()),
 		}
 	}
+	// A parent state with real headroom: $10.00 debt against $12.00 of
+	// threshold-weighted collateral in tokA.
+	st := func() replayParentState {
+		return replayParentState{
+			NormalizedAtParent: big.NewInt(10_000_000),
+			IndexAtBlock:       new(big.Int).Set(wad),
+			Collateral:         []collateralLeg{{token: tokA, amount: big.NewInt(12_000_000)}},
+			Prices:             map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)},
+			Configs: map[common.Address]collateralTokenConfigResult{tokA: {
+				LTV: big.NewInt(0), LiquidationThreshold: new(big.Int).Mul(big.NewInt(100), wad), LiquidationBonus: new(big.Int).Set(wad),
+			}},
+			Decimals: map[common.Address]uint8{tokA: 6},
+		}
+	}
 
 	t.Run("an unrelated same-block log proves nothing", func(t *testing.T) {
 		r := replaySameBlockCauses([]snapshotdb.T6Witness{
 			w(topicDMLiquidated, other, other, usdc), // someone ELSE's liquidation
-		}, dm, acct, usdc, held)
+		}, dm, acct, usdc, st())
 		require.False(t, r.Proven,
 			"a busy block is the norm on this population, so 'a log exists' cannot be the test")
 		require.Equal(t, 1, r.Unrelated)
+		require.Equal(t, 0, r.Applied)
 	})
 
-	t.Run("an earlier seizure for THIS account is proven", func(t *testing.T) {
+	t.Run("a DIFFERENT token's index update is unrelated", func(t *testing.T) {
 		r := replaySameBlockCauses([]snapshotdb.T6Witness{
-			w(topicDMLiquidated, other, acct, usdc),
-		}, dm, acct, usdc, held)
-		require.True(t, r.Proven)
-		require.Contains(t, r.Causes[0], "THIS account")
+			w(topicDMInterestIndexUpdated, other, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, st())
+		require.False(t, r.Proven)
+		require.Equal(t, 1, r.Unrelated)
 	})
 
-	t.Run("the debt token's index moving is proven", func(t *testing.T) {
+	t.Run("a threshold change on a token the account does NOT hold is unrelated", func(t *testing.T) {
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{
+			w(topicDMCollateralConfigSet, tokB, common.Address{}, common.Address{}),
+		}, dm, acct, usdc, st())
+		require.False(t, r.Proven)
+		require.Equal(t, 1, r.Unrelated)
+	})
+
+	t.Run("a relevant event without a decodable payload proves nothing and is disclosed", func(t *testing.T) {
+		// The debt token's index DID move — but the witness carries no payload,
+		// so the write cannot be applied, and what cannot be applied cannot
+		// prove. Before this wave the same witness set Proven on contact.
 		r := replaySameBlockCauses([]snapshotdb.T6Witness{
 			w(topicDMInterestIndexUpdated, usdc, common.Address{}, common.Address{}),
-		}, dm, acct, usdc, held)
-		require.True(t, r.Proven)
-		// A DIFFERENT token's index is not.
-		r2 := replaySameBlockCauses([]snapshotdb.T6Witness{
-			w(topicDMInterestIndexUpdated, other, common.Address{}, common.Address{}),
-		}, dm, acct, usdc, held)
-		require.False(t, r2.Proven)
-	})
-
-	t.Run("a threshold change on a HELD token is proven", func(t *testing.T) {
-		r := replaySameBlockCauses([]snapshotdb.T6Witness{
-			w(topicDMCollateralConfigSet, tokA, common.Address{}, common.Address{}),
-		}, dm, acct, usdc, held)
-		require.True(t, r.Proven)
-		// On a token the account does NOT hold, it is not.
-		r2 := replaySameBlockCauses([]snapshotdb.T6Witness{
-			w(topicDMCollateralConfigSet, tokB, common.Address{}, common.Address{}),
-		}, dm, acct, usdc, held)
-		require.False(t, r2.Proven)
+		}, dm, acct, usdc, st())
+		require.False(t, r.Proven)
+		require.NotEmpty(t, r.Notes)
 	})
 
 	t.Run("a log from an address outside the walked DM surface is not a witness", func(t *testing.T) {
@@ -430,10 +443,42 @@ func TestReplaySameBlockCausesProvesOnlyRelevantWrites(t *testing.T) {
 		r := replaySameBlockCauses([]snapshotdb.T6Witness{{
 			LogIndex: 1, Address: hexLower(provider.Hex()), Topic0: topicDMLiquidated,
 			Topic2Addr: hexLower(acct.Hex()),
-		}}, dm, acct, usdc, held)
+		}}, dm, acct, usdc, st())
 		require.False(t, r.Proven,
 			"PriceProviderV2 is not in the walker stream set, so a price push can never be a custodied witness — which is exactly why post-block price movement is not proof")
 		require.Equal(t, 1, r.Unrelated)
+	})
+
+	t.Run("an earlier seizure for THIS account replays BOTH sides and can flip", func(t *testing.T) {
+		// The REAL captured Liquidated log (dm_liquidated.json): $15.845260 of
+		// debt repaid, $16.003712 of USDC seized — the element amount INCLUDES
+		// the liquidation bonus, which is why value leaves the basket faster
+		// than debt and an earlier pass can flip the next one. Parent state
+		// sits at the captured beforeDebtAmount with $0.000001 of headroom.
+		lw := witnessFromFixture(t, "dm_liquidated.json", 0, 4)
+		seizedAcct := common.HexToAddress("0x" + lw.Topic2Addr)
+		state := replayParentState{
+			NormalizedAtParent: big.NewInt(31_690_519),
+			IndexAtBlock:       new(big.Int).Set(wad),
+			Collateral:         []collateralLeg{{token: usdc, amount: big.NewInt(31_690_520)}},
+			Prices:             map[common.Address]*big.Int{usdc: big.NewInt(1_000_000)},
+			Configs: map[common.Address]collateralTokenConfigResult{usdc: {
+				LTV: big.NewInt(0), LiquidationThreshold: new(big.Int).Mul(big.NewInt(100), wad), LiquidationBonus: new(big.Int).Set(wad),
+			}},
+			Decimals: map[common.Address]uint8{usdc: 6},
+		}
+		r := replaySameBlockCauses([]snapshotdb.T6Witness{lw}, dm, seizedAcct, usdc, state)
+		require.True(t, r.Proven,
+			"debt 31690519→15845259 while maxBorrowLT falls 31690520→15686808: the bonus premium makes the replayed state cross — a genuinely caused flip")
+		require.Contains(t, r.Causes[0], "Liquidated")
+
+		// The same event with generous headroom does NOT flip: directionality
+		// is decided by the replayed numbers, not by the event class.
+		state.Collateral = []collateralLeg{{token: usdc, amount: big.NewInt(100_000_000)}}
+		state.NormalizedAtParent = big.NewInt(31_690_519)
+		r2 := replaySameBlockCauses([]snapshotdb.T6Witness{lw}, dm, seizedAcct, usdc, state)
+		require.False(t, r2.Proven)
+		require.Equal(t, 1, r2.Applied)
 	})
 }
 
