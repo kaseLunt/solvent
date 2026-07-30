@@ -1187,6 +1187,35 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   AFTER Migrate — a WHERE-clause deletion would pass. Both routed to the
   flag-custody wave (genesis startup invariant + config-coupled fixture;
   control-before-Migrate ordering). Round 5 will be the true closing.
+- CODEX ROUND 2 ON TASK 6 (session 019fb21a-687f-7132-b275-0d5e47c2fb39,
+  ~13min, t6r2 @ 9751414): needs-attention — 3H/3M, seams the round-1 fixes
+  themselves created plus two carried proof gaps. (H) the next-pass residue
+  input bypasses its own ledger → deterministic false failure the frame test
+  never exercises; (H) the causation classifier accepts POST-BLOCK prices as
+  proof of pre-liquidation flips (witnesses==0 + priceMoved = false marginal);
+  (H) the cross-feed head endpoint collapses when ALL feeds stall together
+  (population max, not header time at the custody boundary); (M) the HUMAN
+  renderer still lists passing verdicts under GATED FAILURES — the two
+  acceptance artifacts contradict; (M) FINAL/ALL-PARTIAL inferred from
+  amount==balance, ambiguous exactly at the boundary (HP100/b10/bal110/
+  cAFD100 = FINAL with amount==balance); (M) the go/ast pin checks SPELLING
+  (exec := parent evades it) — the depth request confirmed. Fix wave 2
+  dispatched with all six.
+- **TASK 7 ROUND-1 FIXES LANDED — 94a13c4** (2026-07-30 01:40, 13 files
+  +1,812/−205). Withheld-engine unrepresentable at SEVEN points w/ the
+  opposite-teeth pair (withheld test + proven-empty control); the bonus
+  TAUTOLOGY closed by an independent witness (weldLegParams vs the custodied
+  param ledger at the position's own params_block through the ONE FoldParams —
+  weld discipline, not TOCTOU; the bonus mutant dies only on the new weld,
+  which is why it had to exist); published-and-refuted grade w/ FRAX/USDC/
+  PYUSD numbers + SELF-CORRECTION (weETH downgraded to qualifier — a complete
+  ledger's max gap can never certify the future; 'verified' documented
+  unreachable); SSE read-health latch (one unavailable + recovered snapshot;
+  heartbeats = connection liveness, asserted to continue); CompleteBatchIDs
+  (+42/−0) = one completeness authority, API duplicate deleted. 73 tests
+  0 skips. Disclosed: one-wei live_collateral mutation invisible at this
+  layer (floors away — stated in the test). NEXT: Codex Task 7 round 2 after
+  the current fix-wave queue clears.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
