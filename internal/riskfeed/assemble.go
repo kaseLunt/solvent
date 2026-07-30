@@ -64,12 +64,26 @@ import (
 //	    base currency; we floored — false-safety direction), and component 7 is
 //	    the wadDiv HALF-UP composite floor(floor((Σ·1e18+⌊D/2⌋)/D)/1e4), not the
 //	    single fused floor (differs ~5e-5 of evaluations — only a source read
-//	    could catch it). Every Aave TotalDebtBase can move by up to N base units
-//	    (N = debt-bearing reserves with a nonzero conversion remainder; 3
-//	    borrowables in this market — ceil applies PER LEG and sums), and every
+//	    could catch it). Debt delta vs rev 2: ΔD = R exactly, where R = the
+//	    position's debt legs with a NONZERO conversion remainder, 0 ≤ R ≤ M =
+//	    all debt-bearing reserves (ceil applies PER LEG and sums —
+//	    GenericLogic.sol:229/:141, a mandate of the deployed source); every
 //	    HealthFactorWad can move accordingly; a pre-TokenMath regime guard now
 //	    refuses pins < 23,088,584.
-const AlgorithmRevision = 3
+//	4 — THE ENGINE-REFUSAL LAW: what "refused" versus "healthy" MEANS at the
+//	    ENGINE level changed. Flag custody is now a precondition of the whole Aave
+//	    book, and an unproven ledger is recorded on the engine's own rollup row
+//	    (RiskEngineAggregate.RefusalCode) so it survives an EMPTY ACCOUNT SET —
+//	    the state the owner-gated replay's RewindDerived(StartBlock-1) guarantees.
+//	    The bump is REQUIRED by this file's own rule and by a concrete adoption
+//	    hole: a revision-3 binary materializes that same empty/unproven state
+//	    WITHOUT an engine refusal, and a revision-3 recomputation derives the
+//	    identical vector and substrate digest — so the corrected binary would
+//	    ADOPT the legacy batch, whose migrated aggregate carries an empty refusal
+//	    code, and NewestCompleteBatch would still report RefusedEngines=[] and
+//	    RefusedCount=0. That is the original vacuous green, re-entered through the
+//	    adoption path rather than through the account loop.
+const AlgorithmRevision = 4
 
 // Balance sides and sources, as internal/derive writes them.
 const (

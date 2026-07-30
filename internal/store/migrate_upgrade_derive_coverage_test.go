@@ -69,6 +69,30 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 			Value: bigStr("1000000000000000000000000000")}},
 		25_000_000)
 
+	// (b2) A PRE-EXISTING COMPLETE RISK BATCH, of the shape a v13 riskd wrote:
+	// servable, with an Aave rollup and no notion of an engine refusal (the columns
+	// do not exist yet). This is the round-3 [medium] subject — an ordinary upgrade,
+	// not the replay window.
+	legacyBatch := insertSyntheticBatch(t, s, wholeSynthetic())
+
+	// The CONTROL is asserted with ERA-APPROPRIATE SQL, not through
+	// NewestCompleteBatch: that reader is written against the CURRENT schema and
+	// selects refusal_code, which does not exist at v13. (Same reason
+	// seedDerivedPre00014 exists — a v13 baseline must be inspected the way a v13
+	// binary would.) What matters here is that the batch is genuinely complete and
+	// whole, so the post-upgrade assertion is not vacuous.
+	var status string
+	var declaredPositions, actualPositions, aggregates int
+	require.NoError(t, s.pool.QueryRow(ctx, `
+		SELECT b.status, b.position_count,
+		       (SELECT count(*) FROM risk_positions p WHERE p.batch_id = b.id),
+		       (SELECT count(*) FROM risk_batch_aggregates a WHERE a.batch_id = b.id)
+		FROM risk_batches b WHERE b.id = $1`, legacyBatch).
+		Scan(&status, &declaredPositions, &actualPositions, &aggregates))
+	require.Equal(t, RiskBatchComplete, status)
+	require.Equal(t, declaredPositions, actualPositions, "declared == actual: the batch is not torn")
+	require.Positive(t, aggregates, "and it carries the Aave rollup the backfill must reach")
+
 	// (c) The forward upgrade — the production entry point, exactly as a restarted
 	// daemon at the new code would run it.
 	require.NoError(t, Migrate(ctx, scratch))
@@ -98,6 +122,59 @@ func TestMigrateUpgradesV13BaselineWithDerivationCoverage(t *testing.T) {
 	require.False(t, CoverageProvenBack(c.CoveredFromBlock, c.DecoderRevision, cvGenesis, cvRev),
 		"THE POINT OF THIS MIGRATION: an upgraded daemon finds its inherited state unproven and refuses, "+
 			"instead of publishing zero collateral for every enabled position")
+
+	// (e2) THE LEGACY BATCH CANNOT READ HEALTHY. This is the round-3 [medium].
+	//
+	// The columns default to '' — correct for rows written after the migration, and a
+	// CLAIM for rows written before it, because this same migration has just declared
+	// every pre-existing cursor coverage-unknown. So the migration backfills the Aave
+	// rollup as refused: `NewestCompleteBatch` may still return the batch (it is not
+	// torn), but it can no longer be mistaken for an affirmed-healthy book — which
+	// matters because a replacement pass can be GATED or FAIL, leaving this batch
+	// served indefinitely.
+	//
+	// MUTANT THIS KILLS: drop the UPDATE from migration 00014. The batch then comes
+	// out of the upgrade with RefusedEngines=[] and reads exactly as healthy.
+	postBatch, postFound, err := s.NewestCompleteBatch(ctx)
+	require.NoError(t, err)
+	require.True(t, postFound, "the batch is not torn, so it is still returned...")
+	require.Equal(t, legacyBatch, postBatch.ID)
+	require.Contains(t, postBatch.RefusedEngines, riskAaveEngine,
+		"...but the served summary must name the Aave engine as REFUSED, never affirm it healthy")
+
+	legacyAggs, err := s.RiskBatchAggregates(ctx, legacyBatch)
+	require.NoError(t, err)
+	require.NotEmpty(t, legacyAggs)
+	for _, a := range legacyAggs {
+		switch a.Engine {
+		case riskAaveEngine:
+			require.Equal(t, "FLAG_CUSTODY_UNPROVEN", a.RefusalCode,
+				"a pre-00014 Aave rollup has unestablished flag provenance by construction")
+			require.Contains(t, a.RefusalDetail, "rewind-and-rederive")
+		default:
+			require.Empty(t, a.RefusalCode,
+				"engine %s does not read absence as truth, so its legacy rollup must NOT be refused", a.Engine)
+		}
+	}
+
+	// (e3) SCOPING, asserted rather than trusted: a legacy DEBT MANAGER rollup is
+	// untouched by the backfill. Blanket-refusing every engine would withhold a book
+	// whose correctness never depended on flag coverage.
+	_, err = s.pool.Exec(ctx, `INSERT INTO risk_batch_aggregates
+		(batch_id, engine, value_decimals, positions, computed_positions,
+		 refused_positions, flagged_positions, liquidatable_positions, total_collateral, total_debt)
+		VALUES ($1,$2,6,1,1,0,0,0,0,0)`, legacyBatch, riskDMEngine)
+	require.NoError(t, err)
+	dmAggs, err := s.RiskBatchAggregates(ctx, legacyBatch)
+	require.NoError(t, err)
+	var sawDM bool
+	for _, a := range dmAggs {
+		if a.Engine == riskDMEngine {
+			require.Empty(t, a.RefusalCode, "the Debt Manager is deliberately out of the backfill's scope")
+			sawDM = true
+		}
+	}
+	require.True(t, sawDM)
 
 	// (f) And the upgrade did not merely add columns nothing can write: a walking
 	// window through the new entry point establishes coverage on the SAME row.

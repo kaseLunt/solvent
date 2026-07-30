@@ -19,7 +19,11 @@ func idPolicy() IdentityPolicy {
 		BudgetSeconds: 180,
 		StepBps:       2000,
 		AaveEngine: EngineBinding{Engine: "aave_v3_etherfi", ChainID: 1,
-			ParamEngine: "aave_param", PriceEngine: "prices:poll:1"},
+			ParamEngine: "aave_param", PriceEngine: "prices:poll:1",
+			// WIRED, so the genesis mutations below are genuine changes. A fixture
+			// leaving it 0 would make the "genesis unset" case a no-op and the test
+			// would pass while proving nothing.
+			GenesisBlock: idCoveredFrom},
 		DMEngine: EngineBinding{Engine: "debt_manager", ChainID: 10,
 			ParamEngine: "debt_manager", PriceEngine: "prices:poll:10"},
 		RequiredEngines:     []string{"aave_v3_etherfi", "aave_param", "debt_manager"},
@@ -324,8 +328,21 @@ func TestIdentityChangesWithPolicy(t *testing.T) {
 		"stepBps":  func(p *IdentityPolicy) { p.StepBps = 500 },
 		"producer": func(p *IdentityPolicy) { p.Producer = "riskd-next" },
 		"binding":  func(p *IdentityPolicy) { p.DMEngine.PriceEngine = "prices:poll:999" },
-		"required": func(p *IdentityPolicy) { p.RequiredEngines = []string{"aave_v3_etherfi"} },
-		"swept":    func(p *IdentityPolicy) { p.SweptEngines = nil },
+		// GENESIS, BOTH DIRECTIONS. An honest correction to the configured start
+		// block changes the flag-custody bar Assemble applies, so it changes the
+		// verdict without changing one substrate row.
+		"genesis earlier (a computed book may no longer have enough history)": func(p *IdentityPolicy) {
+			p.AaveEngine.GenesisBlock = idCoveredFrom - 1
+		},
+		"genesis later (a refusal may no longer be warranted)": func(p *IdentityPolicy) {
+			p.AaveEngine.GenesisBlock = idCoveredFrom + 1
+		},
+		"genesis unset (fails closed, and must not share a key with a wired one)": func(p *IdentityPolicy) {
+			p.AaveEngine.GenesisBlock = 0
+		},
+		"dm genesis": func(p *IdentityPolicy) { p.DMEngine.GenesisBlock = 42 },
+		"required":   func(p *IdentityPolicy) { p.RequiredEngines = []string{"aave_v3_etherfi"} },
+		"swept":      func(p *IdentityPolicy) { p.SweptEngines = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			pol := idPolicy()

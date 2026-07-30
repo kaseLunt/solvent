@@ -176,8 +176,18 @@ func ComputeMaterializationIdentity(
 	fmt.Fprintf(&b, "rev=%d;budget=%d;step=%d;producer=%s;registry=%s;",
 		policy.AlgorithmRevision, policy.BudgetSeconds, policy.StepBps,
 		policy.Producer, policy.RegistryFingerprint)
+	// GenesisBlock is serialized with the rest of the binding because it DECIDES A
+	// VERDICT: `Assemble` compares the engine's coverage against it, so the same
+	// substrate yields a computed book under one genesis and FLAG_CUSTODY_UNPROVEN
+	// under an earlier one. Both directions of the honest-correction story need it —
+	// moving the configured start block EARLIER must invalidate a computed key
+	// (the book is now known to lack sufficient history), and moving it LATER must
+	// invalidate a refusal key (the refusal is no longer warranted). Omitting it
+	// would let a corrected registry adopt a batch computed under the wrong bar,
+	// which is the same class as the token-decimals hole RegistryFingerprint closes.
 	for _, e := range []EngineBinding{policy.AaveEngine, policy.DMEngine} {
-		fmt.Fprintf(&b, "bind=%s/%d/%s/%s;", e.Engine, e.ChainID, e.ParamEngine, e.PriceEngine)
+		fmt.Fprintf(&b, "bind=%s/%d/%s/%s/genesis%d;",
+			e.Engine, e.ChainID, e.ParamEngine, e.PriceEngine, e.GenesisBlock)
 	}
 	fmt.Fprintf(&b, "required=%s;", strings.Join(sortedCopy(policy.RequiredEngines), ","))
 	fmt.Fprintf(&b, "swept=%s\n", strings.Join(sortedCopy(policy.SweptEngines), ","))

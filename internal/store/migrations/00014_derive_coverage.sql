@@ -77,6 +77,45 @@ COMMENT ON COLUMN risk_batch_aggregates.refusal_code IS
 COMMENT ON COLUMN risk_batch_aggregates.refusal_detail IS
     'Human-readable reason and remedy for refusal_code.';
 
+-- LEGACY AAVE ROLLUPS FAIL CLOSED (round-3 [medium]).
+--
+-- The DEFAULT above is the right answer for rows written AFTER this migration and
+-- the WRONG answer for rows written before it. This same migration has just
+-- declared every pre-existing derive cursor coverage-UNKNOWN — so an Aave batch
+-- that predates it was computed by a binary whose flag-ledger provenance cannot be
+-- established, and an empty refusal_code on it would AFFIRM it as healthy. That is
+-- not a neutral default; it is a claim, and it is one this migration is in no
+-- position to make.
+--
+-- It matters on the ordinary v13→v14 upgrade path, not only in the replay window:
+-- `NewestCompleteBatch` will happily return the newest legacy batch with
+-- RefusedEngines empty until a replacement pass runs, and INDEFINITELY if that pass
+-- is gated (a required cursor missing, an unacked epoch) or simply fails. A
+-- committed consumer reading during that gap gets the wrong answer.
+--
+-- SCOPED TO THE AAVE ENGINE, DELIBERATELY. Coverage is nulled for every cursor, but
+-- it is a PRECONDITION only for a law that reads ABSENCE as chain truth, and Aave's
+-- collateral flag is the only one. The Debt Manager's params come from its own
+-- position_events where a MISSING row already refuses per position, so its legacy
+-- rollups are not unproven and blanket-refusing them would withhold a correct book.
+--
+-- The engine name is a literal here, which couples this migration to
+-- internal/risk.AaveEngine. That coupling is intentional and cheap to honour: a
+-- SECOND engine that ever reads absence as truth must add itself to this list, and
+-- riskfeed's TestAggregateRefusalVocabularyIsClosed is the reminder.
+--
+-- Rows written after this point are never touched: the UPDATE runs once, and the
+-- current binary always writes an explicit value.
+UPDATE risk_batch_aggregates
+   SET refusal_code   = 'FLAG_CUSTODY_UNPROVEN',
+       refusal_detail = 'engine aave_v3_etherfi was rolled up by a binary that recorded no '
+                     || 'derivation-coverage provenance (pre-migration-00014), so its flag ledger '
+                     || 'cannot be shown to have been walked from the engine start block under a '
+                     || 'decode registry that includes the ReserveUsedAsCollateral* events. This '
+                     || 'batch is therefore NOT affirmed healthy. Re-derive the engine from its '
+                     || 'start block (rewind-and-rederive) and let riskd rematerialize.'
+ WHERE engine = 'aave_v3_etherfi';
+
 -- +goose Down
 ALTER TABLE risk_batch_aggregates
     DROP COLUMN refusal_detail,
