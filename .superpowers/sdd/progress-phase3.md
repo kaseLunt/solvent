@@ -1532,6 +1532,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   verify apply-site crossings, parent-fold scope, oldIndex supersession choice
   among multiple ticks, rounding directions vs deployed source, Notes-path
   honesty, positive-control knife-edges computed not hardcoded.
+- **T8 FIX WAVE 1 LANDED — 053b29a** (9 files +627/−108, all modified, zero new;
+  both-ways exact). (H1) union arms carry found as a per-arm LITERAL second
+  discriminant; response is Omit<T,'found'> AND destructure-rest built — sealed
+  at compile time (@ts-expect-error-enforced permanently) and absent at runtime
+  (hasOwn false); address()/addressStress() return the discriminated lookup so
+  invariant enforcement is the PRIMARY path; raw bodies behind addressRaw()/
+  addressStressRaw() (persistence/forensics JSDoc); exact-values suite migrated
+  to raw deliberately — it asserts wire truth. Public-surface break sanctioned
+  (pre-publish). (H2) completeness law BEFORE the branch on all three outcomes,
+  inverse also refused with contract-text justification (withheld_engines IS
+  the attribution of incompleteness). (H3) dangling-CR hold across chunks, EOF
+  resolves held CR as terminator; split tests through REAL HTTP at every \r|\n
+  boundary per product event type. (H4) drop-and-reconnect chosen over
+  buffering (buffered pre-base delta over a later snapshot = wrong-by-
+  construction; violations count failed attempts so misbehavior terminates);
+  source-null guard against double-counted reconnects. (M5) reset only on a
+  PARSED base frame — not open, not heartbeats. 19 red-then-green + typecheck
+  reds; mutants m1–m4 killed (3/3/3/5); verify exit 0, 249/249; drift gate
+  green, zero-dep intact, lock+contract untouched. Integrator independently
+  re-ran verify — exit 0 (a post-wave TS2367 diagnostic was stale tsserver
+  state; compiler authoritative, again). Disclosed residuals routed to round 2
+  for adjudication: !found on an UNNARROWED union still compiles (language
+  limit — TS cannot ban falsiness on true|false|null; docs forbid; the cited
+  response.found hazard IS sealed); heartbeat comments surfaced pre-base
+  (liveness, never data). ROUND 2 (closing) dispatched: t8r2 @ 053b29a, base
+  865fa1c — verify seal completeness across exported surfaces, judge the
+  inverse-refusal contract reading (over-refusal is ALSO a wrong answer),
+  CR-hold edge cases, cross-connection ordering, exact-values migration
+  weakening, mutant non-vacuity. Wave ops notes: Serena indexes Go only in
+  this repo (.serena/project.yml languages omits TypeScript — one-line fix
+  OWED); wave used Read/Edit per documented fallback.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
