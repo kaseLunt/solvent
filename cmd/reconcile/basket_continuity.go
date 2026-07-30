@@ -3,15 +3,21 @@
 // .superpowers/sdd/p3-consults/chain-truth-basket-continuity-ruling.md).
 //
 // This file is the ONLY sanctioned discharger of L1's basketContinuityProven
-// conjunct. Per case, per basket token (union of the parent collateralOf legs,
-// the seized tokens, and — a strictly-wider closing of the same law — the exec
-// frame's own legs, so an inbound NEW token cannot sit outside the sweep):
+// conjunct. Per case, per swept token — the swept list is the DM's
+// SUPPORTED-COLLATERAL SET AT BOTH PINS, getCollateralTokens()@parentHash(N-1)
+// ∪ @pinHash(N) (addendum adjustment 1: the earlier legs∪seized∪exec union
+// missed a supported token inbound pre-boundary and fully outbound
+// post-boundary within block N — zero at both edges, absent from every leg
+// list, yet moving boundary maxBorrowLT; only configured tokens move
+// maxBorrowAtFrame, so the supported set is the provably-sufficient universe.
+// The old union survives as a minimality check: legs∪seized ⊄ supported is a
+// decode/config anomaly and refuses):
 //
 //	(a) collateralOf(user)@pinHash(N): the exec-frame leg read (the parent
 //	    frame's @parentHash(N-1) twin already existed);
 //	(b) Transfer sweep: eth_getLogs pinned by blockHash (EIP-234) = the case's
 //	    STORED raw_logs pin — two calls, topics [Transfer, safe] (outbound) and
-//	    [Transfer, ·, safe] (inbound), over the basket-token address list;
+//	    [Transfer, ·, safe] (inbound), over the supported-set address list;
 //	(c) Netting sweep: eth_getLogs(blockHash=pin, address=CashEventEmitter,
 //	    topics=[[WithdrawalRequested, WithdrawalAmountUpdated,
 //	    WithdrawalCancelled, WithdrawalProcessed], [safe]]).
@@ -557,7 +563,9 @@ type continuitySweep struct {
 	BoundaryLogIndex uint32
 	CaseTx           common.Hash
 	Safe             common.Address
-	// Tokens is the union list the sweeps were issued over, sorted.
+	// Tokens is the swept address list, sorted: the DM's supported-collateral
+	// set at both pins (addendum adjustment 1) — NOT the legs∪seized union,
+	// which is only this list's minimality floor.
 	Tokens []common.Address
 	// ParentLegs / ExecLegs are leg@N-1 / leg@N (absent token = 0).
 	ParentLegs map[common.Address]*big.Int
@@ -673,12 +681,27 @@ func proveBasketContinuity(sw *continuitySweep, caseSeizures []snapshotdb.T6Seiz
 	for _, t := range sw.Tokens {
 		tokenSet[t] = true
 	}
-	// A transfer of a token outside the union list would mean the sweep asked
+	// A transfer of a token outside the swept list would mean the sweep asked
 	// a narrower question than the basket needs — refuse rather than reason
 	// over a partial answer.
 	for _, tr := range sw.Transfers {
 		if !tokenSet[tr.Token] {
-			out.Refusals = append(out.Refusals, fmt.Sprintf("swept Transfer at log_index %d concerns token %s outside the basket union — the sweep does not cover the question", tr.LogIndex, tr.Token.Hex()))
+			out.Refusals = append(out.Refusals, fmt.Sprintf("swept Transfer at log_index %d concerns token %s outside the swept supported set — the sweep does not cover the question", tr.LogIndex, tr.Token.Hex()))
+		}
+	}
+	// THE NETTING-TOKEN BELT (Codex round 9 recommendation, alongside addendum
+	// adjustment 1): sweep (c) is address-filtered to the CashEventEmitter, so
+	// every lifecycle event is VISIBLE regardless of token — but each event
+	// NAMES tokens, and a Δpending contribution for a token outside the swept
+	// supported set would feed a closure identity the loop below never
+	// computes. Netting applies only to supported collateral, so this belt
+	// should be unreachable; a firing belt means the supported-set premise
+	// itself broke, which is exactly when nothing here may be trusted.
+	for _, ev := range sw.Netting {
+		for _, tok := range ev.Tokens {
+			if !tokenSet[tok] {
+				out.Refusals = append(out.Refusals, fmt.Sprintf("netting event %s at log_index %d names token %s OUTSIDE the swept supported set — its Δpending would feed a closure identity that was never computed; netting applies only to supported collateral, so a firing belt means the supported-set premise broke (Codex round 9); continuity unproven", ev.Kind, ev.LogIndex, tok.Hex()))
+			}
 		}
 	}
 
@@ -871,10 +894,20 @@ func proveBasketContinuity(sw *continuitySweep, caseSeizures []snapshotdb.T6Seiz
 		}
 		// The remaining shape — a cancellation in the CASE'S OWN tx with no
 		// witnessed Liquidated between it and L — is the case's own pass's
-		// _cancelOldWithdrawal: it executes AFTER the :526 eligibility check
-		// (DebtManagerCore.sol:568 → CashModuleCore.sol:228-231), so it
-		// cannot move the boundary the proof certifies. Attributed, modeled
-		// (the closure identity consumed its Δpending), no refusal.
+		// _cancelOldWithdrawal. THE INVARIANT (addendum adjustment 2,
+		// NORMATIVE, explicit and fixture-pinned): the own-pass cancellation
+		// must NEVER enter the boundary-ELIGIBILITY basket. The contract
+		// judged eligibility NETTED — the :526/:544 check runs BEFORE
+		// preLiquidate's _cancelOldWithdrawal (DebtManagerCore.sol:568 →
+		// CashModuleCore.sol:228-231) — so the own-pass cancellation is
+		// post-check: attributed for closure (the identity consumed its
+		// Δpending), available to the seizure/L5 accounting (seizure operates
+		// un-netted), but the boundary crossing is evaluated against the
+		// NETTED basket. The replay honors this structurally — its basket
+		// starts from the CashLens-netted parent legs and only DM-custodied
+		// witnesses (never a CashEventEmitter event) touch it — and
+		// TestOwnPassCancellationNeverEntersTheBoundaryEligibilityBasket pins
+		// it at the composition layer. No refusal here.
 	}
 
 	sort.Strings(out.Refusals)
@@ -915,34 +948,68 @@ func sortedAddrKeys(m map[common.Address]*big.Int) []common.Address {
 }
 
 // assembleContinuitySweep issues sweeps (b) and (c) at the case's STORED pin
-// and builds the proof's input set. The basket-token union is the parent legs
-// ∪ the seized tokens (the ruling's list) ∪ the exec frame's own legs (a
-// strictly-wider closing: an inbound NEW token would otherwise sit outside
-// the swept address set and its closure violation would be invisible). ANY
-// failure — transport, envelope, L6 validation, decode — returns a REFUSED
-// sweep carrying the reason; the proof then refuses the case. Nothing here
-// fabricates.
+// and builds the proof's input set.
+//
+// THE SWEPT ADDRESS LIST (addendum adjustment 1, NORMATIVE): the DM's
+// SUPPORTED-COLLATERAL SET AT BOTH PINS — getCollateralTokens()@parentHash(N-1)
+// ∪ getCollateralTokens()@pinHash(N), both read inside the shared frame decode
+// loop (wave-8 per-subcall law). This closes the in-and-out-within-block gap
+// the previous parent∪seized∪exec union left open: a supported token inbound
+// pre-boundary and fully outbound post-boundary is zero-balance at both edges,
+// appears in NO leg or seizure list, and raises boundary maxBorrowLT exactly
+// like H2's top-up. Only tokens with configs move maxBorrowAtFrame, so the
+// supported set is the provably-sufficient universe. A mid-block
+// CollateralTokenAdded/Removed is DM-custodied and witness-visible
+// (IDebtManager.sol:44-45), and the union of BOTH pins already contains its
+// token — no event surveillance is needed for list completeness.
+//
+// The old union is KEPT as a MINIMALITY check: every parent leg, exec leg and
+// seized token must sit inside the supported union. Keeping it is strictly
+// refusal-widening — a basket or seizure token the DM's own enumeration does
+// not contain at either pin is a decode/config anomaly no sweep can reason
+// over, and refusing it turns the former "sweep asked a narrower question"
+// runtime hazard into a pinned invariant.
+//
+// ANY failure — transport, envelope, L6 validation, decode, minimality —
+// returns a REFUSED sweep carrying the reason; the proof then refuses the
+// case. Nothing here fabricates.
 func assembleContinuitySweep(ctx context.Context, backend rawLogsBackend, f *gateFrame,
 	key string, pin common.Hash, block uint64, boundary uint32, caseTx common.Hash,
 	safe common.Address, parentLegs, execLegs []collateralLeg,
+	parentSupported, execSupported []common.Address,
 	seizures []snapshotdb.T6Seizure) *continuitySweep {
 	sw := &continuitySweep{
 		Pin: pin, Block: block, BoundaryLogIndex: boundary, CaseTx: caseTx, Safe: safe,
 		ParentLegs: map[common.Address]*big.Int{}, ExecLegs: map[common.Address]*big.Int{},
 	}
-	union := map[common.Address]bool{}
+	supported := map[common.Address]bool{}
+	for _, t := range parentSupported {
+		supported[t] = true
+	}
+	for _, t := range execSupported {
+		supported[t] = true
+	}
+	// The minimality check's subject: the legs∪seized union the ruling's
+	// original list named. It must be ⊆ the supported union.
+	minimal := map[common.Address]bool{}
 	for _, l := range parentLegs {
 		sw.ParentLegs[l.token] = new(big.Int).Set(l.amount)
-		union[l.token] = true
+		minimal[l.token] = true
 	}
 	for _, l := range execLegs {
 		sw.ExecLegs[l.token] = new(big.Int).Set(l.amount)
-		union[l.token] = true
+		minimal[l.token] = true
 	}
 	for _, s := range seizures {
-		union[common.HexToAddress(s.AssetHex)] = true
+		minimal[common.HexToAddress(s.AssetHex)] = true
 	}
-	sw.Tokens = sortedAddrs(union)
+	for _, tok := range sortedAddrs(minimal) {
+		if !supported[tok] {
+			sw.Refusal = fmt.Sprintf("supported-set MINIMALITY violation (addendum adjustment 1): token %s appears in the parent/exec legs or seized elements but in NEITHER pin's getCollateralTokens() — a decode/config anomaly the sweep cannot reason over; continuity refuses", tok.Hex())
+			return sw
+		}
+	}
+	sw.Tokens = sortedAddrs(supported)
 
 	safeTopic := common.BytesToHash(common.LeftPadBytes(safe.Bytes(), 32))
 	fetch := func(op string, q logsQuery) ([]sweptLog, error) {

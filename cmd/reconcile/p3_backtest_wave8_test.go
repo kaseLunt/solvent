@@ -112,14 +112,18 @@ func wave8Plan(t *testing.T, full bool) []backtestFrameTag {
 		kinds[i] = tg.kind
 	}
 	if full {
-		require.Equal(t, []string{"collateralOf", "price", "config", "balanceOf"}, kinds,
+		// The inventory gained collateralTokens in the ADJUSTMENT wave
+		// (addendum adjustment 1): getCollateralTokens()@parentHash(N-1) —
+		// half of the continuity sweep's supported-set address universe.
+		require.Equal(t, []string{"collateralOf", "collateralTokens", "price", "config", "balanceOf"}, kinds,
 			"the parent frame's canonical subcall order — the SUBCALL INVENTORY this wave's law covers")
 	} else {
 		// The exec inventory gained collateralOf in the L2 wave (basket-
-		// continuity ruling L2(a): leg@N is one side of the closure identity).
-		// The wave-8 decode law covers the new subcall automatically — same
-		// loop, same per-subcall refusal.
-		require.Equal(t, []string{"borrowingOf", "collateralOf", "price"}, kinds,
+		// continuity ruling L2(a): leg@N is one side of the closure identity)
+		// and collateralTokens in the adjustment wave (adjustment 1: the
+		// supported set @pinHash(N)). The wave-8 decode law covers both new
+		// subcalls automatically — same loop, same per-subcall refusal.
+		require.Equal(t, []string{"borrowingOf", "collateralOf", "collateralTokens", "price"}, kinds,
 			"the execution frame's canonical subcall order — the same decode path, the same law")
 	}
 	return tags
@@ -136,6 +140,9 @@ func wave8Honest(t *testing.T, tags []backtestFrameTag, legAmount int64) []multi
 		case "collateralOf":
 			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmCollateralOfABI, "collateralOf",
 				[]tokenDataTuple{{Token: tokA, Amount: big.NewInt(legAmount)}}, big.NewInt(legAmount))}
+		case "collateralTokens":
+			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmGetCollateralTokensABI, "getCollateralTokens",
+				[]common.Address{tokA})}
 		case "borrowingOf":
 			res[i] = multicallResult{Success: true, ReturnData: packFrameReturn(t, dmBorrowingOfOneABI, "borrowingOf", big.NewInt(legAmount))}
 		case "price":

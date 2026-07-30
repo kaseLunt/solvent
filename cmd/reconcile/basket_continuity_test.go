@@ -176,21 +176,52 @@ func legs(pairs ...any) []collateralLeg {
 	return out
 }
 
-// driveSweep runs the PRODUCTION assembler over the fake backend.
-func driveSweep(t *testing.T, b *fakeLogsBackend, boundary uint32,
+// driveSweep runs the PRODUCTION assembler over the fake backend. The
+// supported set defaults to the legs∪seized union so every pre-adjustment
+// fixture keeps its exact address list (supported ⊇ union holds by equality);
+// fixtures about the WIDER supported set use driveSweepSupported.
+func driveSweep(t *testing.T, b rawLogsBackend, boundary uint32,
 	parentLegs, execLegs []collateralLeg, seizures []snapshotdb.T6Seizure) *continuitySweep {
 	t.Helper()
-	if b.out == nil {
-		b.out = envelope(t)
+	var supported []common.Address
+	seen := map[common.Address]bool{}
+	for _, l := range append(append([]collateralLeg{}, parentLegs...), execLegs...) {
+		if !seen[l.token] {
+			seen[l.token] = true
+			supported = append(supported, l.token)
+		}
 	}
-	if b.in == nil {
-		b.in = envelope(t)
+	for _, s := range seizures {
+		tok := common.HexToAddress(s.AssetHex)
+		if !seen[tok] {
+			seen[tok] = true
+			supported = append(supported, tok)
+		}
 	}
-	if b.net == nil {
-		b.net = envelope(t)
+	return driveSweepSupported(t, b, boundary, parentLegs, execLegs, seizures, supported, supported)
+}
+
+// driveSweepSupported is driveSweep with the supported-collateral sets given
+// explicitly (addendum adjustment 1: the swept address list is the supported
+// set at both pins, not the legs∪seized union).
+func driveSweepSupported(t *testing.T, b rawLogsBackend, boundary uint32,
+	parentLegs, execLegs []collateralLeg, seizures []snapshotdb.T6Seizure,
+	parentSupported, execSupported []common.Address) *continuitySweep {
+	t.Helper()
+	if fb, ok := b.(*fakeLogsBackend); ok {
+		if fb.out == nil {
+			fb.out = envelope(t)
+		}
+		if fb.in == nil {
+			fb.in = envelope(t)
+		}
+		if fb.net == nil {
+			fb.net = envelope(t)
+		}
 	}
 	return assembleContinuitySweep(context.Background(), b, newGateFrame(gateBacktest),
-		"unit-case", contPin, 150000000, boundary, contCase, contSafe, parentLegs, execLegs, seizures)
+		"unit-case", contPin, 150000000, boundary, contCase, contSafe, parentLegs, execLegs,
+		parentSupported, execSupported, seizures)
 }
 
 // witnessWithTx decorates a packedWitness with its tx identity (the L2

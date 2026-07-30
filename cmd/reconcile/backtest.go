@@ -89,6 +89,8 @@ func backtestFrame_() *gateFrame {
 			"the post-liquidation residue: obligation 4's chain side, read at the liquidation block itself"),
 		pinned(srcBTExecCollateralOf,
 			"the exec-frame leg read — L2(a) of the basket-continuity ruling: leg@N is one side of the per-token closure identity leg@N − leg@N-1 == Σ signed Transfers − Δpending"),
+		pinned(srcBTSupportedSet,
+			"the L2(b) sweep's ADDRESS UNIVERSE (addendum adjustment 1): the DM's supported-collateral set at both pins closes the in-and-out-within-block gap — a supported token that enters and fully leaves between the edges is invisible to any legs∪seized union; only configured tokens move maxBorrowAtFrame, so this set is provably sufficient. A mid-block CollateralTokenAdded/Removed is DM-custodied and the union of both pins already covers its token"),
 		pinned(srcBTTransferSweep,
 			"the L2(b) Transfer sweep, EIP-234 blockHash-pinned at the case's STORED raw_logs hash (probed 2026-07-30, recon/p3-probes.md): the raw balance channel of the closure identity, validated per L6 (pin echo, address ∈ set, topic count exactly 3, data exactly 32 bytes)"),
 		pinned(srcBTNettingSweep,
@@ -131,8 +133,17 @@ const (
 
 	// The L2 basket-continuity sources (chain-truth basket-continuity ruling).
 	srcBTExecCollateralOf = "DebtManager.collateralOf(user)@pinHash(N)"
-	srcBTTransferSweep    = "eth_getLogs@pinHash(N) (EIP-234 blockHash form; address=basket-token union, topics=[Transfer, safe|·, ·|safe]) — two calls"
+	srcBTTransferSweep    = "eth_getLogs@pinHash(N) (EIP-234 blockHash form; address=supported-collateral set at both pins, topics=[Transfer, safe|·, ·|safe]) — two calls"
 	srcBTNettingSweep     = "eth_getLogs@pinHash(N) (EIP-234 blockHash form; address=CashEventEmitter, topics=[[WithdrawalRequested,WithdrawalAmountUpdated,WithdrawalCancelled,WithdrawalProcessed],[safe]])"
+	// srcBTSupportedSet is the ADDENDUM ADJUSTMENT-1 read pair: the DM's own
+	// supported-collateral enumeration at BOTH pins. Their union is the
+	// Transfer sweep's address universe — a supported token inbound
+	// pre-boundary and fully outbound post-boundary within block N is
+	// zero-balance at both edges and invisible to any legs∪seized union, yet
+	// it raises boundary maxBorrowLT exactly like H2's top-up. Only tokens
+	// with configs move maxBorrowAtFrame, so the supported set is the
+	// provably-sufficient universe.
+	srcBTSupportedSet = "DebtManager.getCollateralTokens()@parentHash(N-1) and @pinHash(N)"
 )
 
 func newBacktestView(row snapshotdb.T6BacktestRow, f *gateFrame) *backtestView {
@@ -460,7 +471,8 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	cont := refusedSweep("no eth_getLogs surface is configured for this run — the continuity sweeps (ruling L2 b/c) cannot be taken, so continuity is unproven by refusal")
 	if c.logsR != nil {
 		cont = assembleContinuitySweep(ctx, c.logsR, f, key, pinHash, fc.Block, fc.LogIndex,
-			common.HexToHash(fc.TxHash), account, parent.st.collateral, exec.st.collateral, db.Seizures)
+			common.HexToHash(fc.TxHash), account, parent.st.collateral, exec.st.collateral,
+			parent.st.supported, exec.st.supported, db.Seizures)
 	}
 
 	// ---- OBLIGATION 2: our eligibility boolean, three-state law -----------
@@ -779,9 +791,13 @@ type frameState struct {
 		token  common.Address
 		amount *big.Int
 	}
-	prices     map[common.Address]*big.Int
-	configs    map[common.Address]collateralTokenConfigResult
-	balances   map[common.Address]*big.Int
+	prices   map[common.Address]*big.Int
+	configs  map[common.Address]collateralTokenConfigResult
+	balances map[common.Address]*big.Int
+	// supported is getCollateralTokens() at THIS frame's pin — the DM's own
+	// supported-collateral enumeration (addendum adjustment 1). The union of
+	// the two frames' sets is the continuity sweep's address universe.
+	supported  []common.Address
 	chainDebt  *big.Int
 	unread     string
 	pricesOnly bool
@@ -822,7 +838,7 @@ func newBacktestFrameState(block uint64, hash common.Hash, full bool) *frameStat
 // SUBCALL and a refusal must NAME the degraded call (Codex round 7, H1), so
 // the tag carries enough to print it.
 type backtestFrameTag struct {
-	kind string // "collateralOf" | "borrowingOf" | "price" | "config" | "balanceOf"
+	kind string // "collateralOf" | "collateralTokens" | "borrowingOf" | "price" | "config" | "balanceOf"
 	tok  common.Address
 }
 
@@ -832,6 +848,8 @@ func (tg backtestFrameTag) name() string {
 	switch tg.kind {
 	case "collateralOf":
 		return "DebtManager.collateralOf(user)"
+	case "collateralTokens":
+		return "DebtManager.getCollateralTokens()"
 	case "borrowingOf":
 		return "DebtManager.borrowingOf(user, borrowToken)"
 	case "price":
@@ -848,11 +866,14 @@ func (tg backtestFrameTag) name() string {
 // the frame-defining read first (collateralOf for the full/parent frame,
 // borrowingOf THEN collateralOf for the execution frame — the L2(a) exec-frame
 // leg read the basket-continuity ruling adds: leg@N is one side of the closure
-// identity), then per token in address order: price, and — full frames only —
-// config and Safe balance. A token with no pinned decimals gets NO subcalls;
-// for a seized token the caller's trailing price check refuses the frame, and
-// for a basket-only token the parent valuation-completeness conjunct does
-// (Codex round 7, H1) — never a silent drop.
+// identity), then getCollateralTokens — the supported-collateral enumeration
+// at THIS frame's pin (addendum adjustment 1: the two frames' sets union into
+// the continuity sweep's address universe) — then per token in address order:
+// price, and — full frames only — config and Safe balance. A token with no
+// pinned decimals gets NO subcalls; for a seized token the caller's trailing
+// price check refuses the frame, and for a basket-only token the parent
+// valuation-completeness conjunct does (Codex round 7, H1) — never a silent
+// drop.
 func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bool,
 	tokens map[common.Address]bool, decimals map[common.Address]uint8) ([]multicallCall, []backtestFrameTag, error) {
 	var calls []multicallCall
@@ -875,6 +896,15 @@ func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bo
 		}
 		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{kind: "collateralOf"})
 	}
+	// The supported-collateral enumeration at this frame's pin, in BOTH frames
+	// — the same shared decode loop, so the wave-8 per-subcall law (fail /
+	// empty / undecodable ⇒ frame UNREAD, subcall named) covers it with no
+	// special-casing (pinned by TestAdjust1SupportedSetJoinsTheWave8DecodeLaw).
+	gct, err := dmGetCollateralTokensABI.Pack("getCollateralTokens")
+	if err != nil {
+		return nil, nil, err
+	}
+	calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: gct}), append(tags, backtestFrameTag{kind: "collateralTokens"})
 	for _, tok := range sortedAddrs(tokens) {
 		dec, ok := decimals[tok]
 		if !ok {
@@ -949,6 +979,14 @@ func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFram
 			} else {
 				f.use("DebtManager.collateralOf(user)@parentHash(N-1)")
 			}
+		case "collateralTokens":
+			list, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.supported = list
+			f.use(srcBTSupportedSet)
 		case "borrowingOf":
 			v, err := unpackUint256Strict(dmBorrowingOfOneABI, "borrowingOf", res[i].ReturnData)
 			if err != nil {

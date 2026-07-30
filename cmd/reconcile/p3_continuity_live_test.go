@@ -230,6 +230,11 @@ type continuityCapture struct {
 	// they decode, and the hermetic suite decodes them again).
 	ParentCollateralRet string `json:"parent_collateral_ret"`
 	ExecCollateralRet   string `json:"exec_collateral_ret"`
+	// The supported-collateral enumerations at both pins (addendum
+	// adjustment 1): getCollateralTokens()@parentHash(N-1) and @pinHash(N) —
+	// their union is the swept address list.
+	ParentSupportedRet string `json:"parent_supported_ret"`
+	ExecSupportedRet   string `json:"exec_supported_ret"`
 
 	// Raw envelopes, verbatim provider bytes.
 	DMLiquidatedEnvelope json.RawMessage `json:"dm_liquidated_envelope"`
@@ -315,6 +320,23 @@ func continuityCaptureInputs(t *testing.T, cap *continuityCapture) (*continuityS
 		execLegs = append(execLegs, collateralLeg{token: l.Token, amount: l.Amount})
 	}
 
+	// The supported-collateral sets at both pins (addendum adjustment 1),
+	// through the SAME strict unpacker the frame decode layer uses. A capture
+	// without them cannot rebuild the production question and must fail
+	// loudly, never fall back to the narrower legs∪seized list.
+	require.NotEmpty(t, cap.ParentSupportedRet,
+		"case %s: capture predates adjustment 1 (no parent_supported_ret) — re-capture required", cap.Case)
+	require.NotEmpty(t, cap.ExecSupportedRet,
+		"case %s: capture predates adjustment 1 (no exec_supported_ret) — re-capture required", cap.Case)
+	pSupRet, err := hex.DecodeString(strings.TrimPrefix(cap.ParentSupportedRet, "0x"))
+	require.NoError(t, err)
+	eSupRet, err := hex.DecodeString(strings.TrimPrefix(cap.ExecSupportedRet, "0x"))
+	require.NoError(t, err)
+	parentSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", pSupRet)
+	require.NoError(t, err, "case %s: parent getCollateralTokens words must decode through the production unpacker", cap.Case)
+	execSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", eSupRet)
+	require.NoError(t, err, "case %s: exec getCollateralTokens words must decode through the production unpacker", cap.Case)
+
 	// The case's own Liquidated (and every earlier-pass Liquidated witness)
 	// from the captured DM envelope, through the strict envelope decode.
 	dmLogs, err := decodeLogsEnvelope(cap.DMLiquidatedEnvelope)
@@ -341,7 +363,7 @@ func continuityCaptureInputs(t *testing.T, cap *continuityCapture) (*continuityS
 	backend := &fakeLogsBackend{out: cap.TransfersOutEnvelope, in: cap.TransfersInEnvelope, net: cap.NettingEnvelope}
 	sw := assembleContinuitySweep(context.Background(), backend, newGateFrame(gateBacktest),
 		cap.Case, pin, cap.Block, cap.LogIndex, common.HexToHash(cap.TxHash), safe,
-		parentLegs, execLegs, seizures)
+		parentLegs, execLegs, parentSupported, execSupported, seizures)
 	return sw, seizures, witnesses
 }
 
@@ -442,6 +464,31 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 			cap.ParentCollateralRet = "0x" + hex.EncodeToString(pRet)
 			cap.ExecCollateralRet = "0x" + hex.EncodeToString(eRet)
 
+			// The supported-collateral enumerations at both pins (addendum
+			// adjustment 1) — the swept address universe.
+			gctData, err := dmGetCollateralTokensABI.Pack("getCollateralTokens")
+			if err != nil {
+				return err
+			}
+			pSupRet, _, err := r.callAtHash(ctx, key+":capture:getCollateralTokens@parent", liveDMProxy, gctData, parentHash)
+			if err != nil {
+				return fmt.Errorf("parent getCollateralTokens: %w", err)
+			}
+			eSupRet, _, err := r.callAtHash(ctx, key+":capture:getCollateralTokens@pin", liveDMProxy, gctData, pin)
+			if err != nil {
+				return fmt.Errorf("exec getCollateralTokens: %w", err)
+			}
+			cap.ParentSupportedRet = "0x" + hex.EncodeToString(pSupRet)
+			cap.ExecSupportedRet = "0x" + hex.EncodeToString(eSupRet)
+			parentSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", pSupRet)
+			if err != nil {
+				return fmt.Errorf("parent getCollateralTokens decode: %w", err)
+			}
+			execSupported, err := unpackAddressListStrict(dmGetCollateralTokensABI, "getCollateralTokens", eSupRet)
+			if err != nil {
+				return fmt.Errorf("exec getCollateralTokens decode: %w", err)
+			}
+
 			// The sweeps, through the PRODUCTION assembler over a recording
 			// wrapper — capture-time questions are production's questions by
 			// construction.
@@ -481,7 +528,8 @@ func TestLiveCaptureContinuityFixtures(t *testing.T) {
 			}
 			rec := &recordingLogsBackend{inner: logsR}
 			sw := assembleContinuitySweep(ctx, rec, newGateFrame(gateBacktest), key, pin, fc.Block,
-				fc.LogIndex, common.HexToHash(fc.TxHash), safe, parentLegs, execLegs, seizures)
+				fc.LogIndex, common.HexToHash(fc.TxHash), safe, parentLegs, execLegs,
+				parentSupported, execSupported, seizures)
 			if sw.Refusal != "" {
 				return fmt.Errorf("sweep refused at capture time: %s", sw.Refusal)
 			}
