@@ -1,0 +1,477 @@
+<title>Solvent — P5 UI concept</title>
+<style>
+  :root {
+    --bg: #f4f6f6;
+    --panel: #ffffff;
+    --panel-2: #eef1f2;
+    --ink: #1a2327;
+    --ink-2: #56676e;
+    --ink-3: #8a979c;
+    --line: #d8dfe1;
+    --accent: #2e7d8c;
+    --accent-ink: #ffffff;
+    --ok: #2e8c5a;
+    --warn: #b07c1f;
+    --crit: #c24438;
+    --crit-bg: rgba(194, 68, 56, 0.07);
+    --refused-bg: rgba(138, 151, 156, 0.10);
+    --chip-bg: #e6ecee;
+    --term-bg: #10181b;
+    --term-ink: #c7d4d8;
+    --term-dim: #6b7d84;
+    --term-ok: #63b98a;
+    --term-accent: #5ab3c4;
+    --shadow: 0 1px 2px rgba(16, 24, 27, .06), 0 8px 24px rgba(16, 24, 27, .07);
+    --mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c1215;
+      --panel: #131c20;
+      --panel-2: #0f171a;
+      --ink: #dbe5e8;
+      --ink-2: #93a5ab;
+      --ink-3: #5f7178;
+      --line: #223034;
+      --accent: #5ab3c4;
+      --accent-ink: #0c1215;
+      --ok: #63b98a;
+      --warn: #d0a04a;
+      --crit: #d96a5d;
+      --crit-bg: rgba(217, 106, 93, 0.10);
+      --refused-bg: rgba(95, 113, 120, 0.12);
+      --chip-bg: #1b262b;
+      --term-bg: #0a0f12;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f6f6; --panel: #ffffff; --panel-2: #eef1f2; --ink: #1a2327; --ink-2: #56676e;
+    --ink-3: #8a979c; --line: #d8dfe1; --accent: #2e7d8c; --accent-ink: #ffffff;
+    --ok: #2e8c5a; --warn: #b07c1f; --crit: #c24438; --crit-bg: rgba(194,68,56,.07);
+    --refused-bg: rgba(138,151,156,.10); --chip-bg: #e6ecee; --term-bg: #10181b;
+    --shadow: 0 1px 2px rgba(16,24,27,.06), 0 8px 24px rgba(16,24,27,.07);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0c1215; --panel: #131c20; --panel-2: #0f171a; --ink: #dbe5e8; --ink-2: #93a5ab;
+    --ink-3: #5f7178; --line: #223034; --accent: #5ab3c4; --accent-ink: #0c1215;
+    --ok: #63b98a; --warn: #d0a04a; --crit: #d96a5d; --crit-bg: rgba(217,106,93,.10);
+    --refused-bg: rgba(95,113,120,.12); --chip-bg: #1b262b; --term-bg: #0a0f12;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55; margin: 0; padding: 0 20px 96px;
+  }
+  main { max-width: 1060px; margin: 0 auto; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 10px;
+  }
+  header.page { padding: 56px 0 8px; max-width: 720px; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 0 0 14px; letter-spacing: -.01em; text-wrap: balance; }
+  .lede { color: var(--ink-2); font-size: 15.5px; margin: 0 0 10px; }
+  .lede strong { color: var(--ink); }
+
+  .scopebar {
+    display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 44px;
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  .scopebar span {
+    border: 1px solid var(--line); border-radius: 3px; padding: 4px 10px; color: var(--ink-2);
+    background: var(--panel);
+  }
+  .scopebar span.now { border-color: var(--accent); color: var(--accent); }
+
+  section.surface { margin: 0 0 64px; }
+  .surface-head { max-width: 720px; margin-bottom: 18px; }
+  .surface-head h2 { font-size: 20px; margin: 0 0 8px; letter-spacing: -.01em; }
+  .surface-head p { color: var(--ink-2); font-size: 14.5px; margin: 0 0 6px; }
+  .fed-by {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 10px;
+  }
+  .fed-by b { color: var(--accent); font-weight: 500; }
+
+  /* ---------- app window frame ---------- */
+  .window {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: var(--shadow); overflow: hidden;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px; border-bottom: 1px solid var(--line); background: var(--panel-2);
+  }
+  .dots { display: flex; gap: 5px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
+  .addr {
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-3);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
+    padding: 3px 10px; flex: 1; max-width: 420px;
+  }
+  .live {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; color: var(--ok);
+    display: flex; align-items: center; gap: 6px; margin-left: auto;
+  }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: block; }
+  @media (prefers-reduced-motion: no-preference) {
+    .live i { animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  }
+
+  .appnav {
+    display: flex; gap: 2px; padding: 8px 14px 0; border-bottom: 1px solid var(--line);
+    font-size: 13px; background: var(--panel);
+  }
+  .appnav span { padding: 7px 14px 9px; color: var(--ink-3); border-bottom: 2px solid transparent; }
+  .appnav span.on { color: var(--ink); border-color: var(--accent); font-weight: 550; }
+
+  .pad { padding: 18px; }
+
+  /* ---------- stat cards ---------- */
+  .statrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px; }
+  .stat {
+    border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; background: var(--panel);
+  }
+  .stat .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+  .stat .v { font-size: 21px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .stat .s { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+  .stat .v .crit-t { color: var(--crit); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 860px; }
+  thead th {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; text-align: left; padding: 9px 12px;
+    border-bottom: 1px solid var(--line); background: var(--panel-2); white-space: nowrap;
+  }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .dim { color: var(--ink-3); }
+
+  .engine {
+    font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border-radius: 3px;
+    background: var(--chip-bg); color: var(--ink-2); border: 1px solid var(--line);
+  }
+  .hf { font-weight: 600; font-family: var(--mono); font-size: 12.5px; }
+  .hf.ok { color: var(--ok); } .hf.warn { color: var(--warn); } .hf.crit { color: var(--crit); }
+  .hf.inf { color: var(--ink-3); font-weight: 400; }
+  .sev { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 8px; vertical-align: baseline; }
+  .sev.ok { background: var(--ok); } .sev.warn { background: var(--warn); } .sev.crit { background: var(--crit); }
+
+  tr.crit-row td { background: var(--crit-bg); }
+  tr.refused td { background: var(--refused-bg); color: var(--ink-3); }
+  .refused-tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .05em;
+    border: 1px dashed var(--ink-3); border-radius: 3px; padding: 2px 7px; color: var(--ink-2);
+  }
+  .stampline {
+    display: flex; flex-wrap: wrap; gap: 14px; padding: 10px 14px; margin-top: 12px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2);
+    font-family: var(--mono); font-size: 11px; color: var(--ink-2);
+  }
+  .stampline b { color: var(--ink); font-weight: 550; }
+  .stampline .okt { color: var(--ok); }
+
+  /* ---------- inspector ---------- */
+  .split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .split { grid-template-columns: 1fr; } .statrow { grid-template-columns: repeat(2, 1fr); } }
+  .card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  .card h4 {
+    margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; background: var(--panel-2);
+  }
+  .kv { padding: 6px 0; }
+  .kv div { display: flex; justify-content: space-between; gap: 18px; padding: 6px 14px; font-size: 13px; }
+  .kv div + div { border-top: 1px solid var(--line); }
+  .kv .k { color: var(--ink-2); }
+  .kv .v { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+  .kv .v.okt { color: var(--ok); }
+  .formula {
+    margin: 0; padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.7;
+    color: var(--ink-2); overflow-x: auto; white-space: pre;
+  }
+  .formula b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- observatory ---------- */
+  .scenario-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .scenario-bar span {
+    font-family: var(--mono); font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px;
+    padding: 5px 12px; color: var(--ink-2); background: var(--panel);
+  }
+  .scenario-bar span.on { border-color: var(--accent); color: var(--accent); background: var(--chip-bg); }
+  .delta-pos { color: var(--ok); } .delta-neg { color: var(--crit); }
+  .projection {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .1em; padding: 2px 6px;
+    border-radius: 3px; background: var(--warn); color: var(--panel); vertical-align: middle;
+  }
+
+  /* ---------- watch / terminal ---------- */
+  .term {
+    background: var(--term-bg); color: var(--term-ink); border-radius: 8px;
+    border: 1px solid var(--line);
+    padding: 16px 18px; font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    overflow-x: auto; box-shadow: var(--shadow);
+  }
+  .term .p { color: var(--term-ok); }
+  .term .c { color: var(--term-dim); }
+  .term .a { color: var(--term-accent); }
+  .term .w { color: #d0a04a; }
+  .term .r { color: #d96a5d; }
+  .term pre { margin: 0; white-space: pre; }
+
+  .feed { display: flex; flex-direction: column; }
+  .feed-item { display: flex; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--line); font-size: 13px; align-items: baseline; }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-item .t { font-family: var(--mono); font-size: 11px; color: var(--ink-3); min-width: 72px; }
+  .feed-item .tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; padding: 2px 7px;
+    border-radius: 3px; min-width: 96px; text-align: center;
+  }
+  .tag.crit { background: var(--crit); color: var(--panel); }
+  .tag.warn { background: var(--warn); color: var(--panel); }
+  .tag.info { background: var(--chip-bg); color: var(--ink-2); border: 1px solid var(--line); }
+  .feed-item .b { color: var(--ink-2); }
+  .feed-item .b b { color: var(--ink); font-weight: 550; }
+  .feed-item .b .mono { font-size: 11.5px; }
+
+  .note {
+    max-width: 720px; margin: 56px auto 0; padding: 16px 18px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--panel); color: var(--ink-2); font-size: 13.5px;
+  }
+  .note b { color: var(--ink); }
+</style>
+
+<main>
+  <header class="page">
+    <p class="eyebrow">Solvent · ether.fi risk observatory</p>
+    <h1>What the product looks like when there's a screen on it</h1>
+    <p class="lede">P3 (now) builds everything <em>behind</em> the glass: proven math, the risk daemon, and the public REST/SSE API. The UI is <strong>Phase 5</strong> — a Next.js app the roadmap names in four surfaces: <strong>Book, Inspector, Observatory, Watch</strong>. Below is a concept of each, populated with the real data shapes the P3 API serves.</p>
+    <div class="scopebar">
+      <span class="now">P3 · risk engine + API ← we are here</span>
+      <span>P4</span>
+      <span>P5 · this UI (MVP line)</span>
+    </div>
+  </header>
+
+  <!-- ============ P3 TODAY ============ -->
+  <section class="surface">
+    <div class="surface-head">
+      <h2>Today, at P3 close: the API is the interface</h2>
+      <p>No browser needed to demo it — two daemons and curl. Every number arrives with its proof-of-inputs, and anything unproven is a refusal with a name, never a zero.</p>
+    </div>
+    <div class="term"><pre><span class="c">$ </span>curl -s localhost:8090/v1/book | jq '.aggregates, .positions[7]'
+<span class="a">{
+  "batch":        "bk_019fb0a2",
+  "block":        25641730,
+  "collateralUSD": "23412884.117201",
+  "debtUSD":       "9101442.809934",
+  "positions":     70,   "refused": 3
+}</span>
+{
+  "engine":  "debt_manager",
+  "account": "0x8f24…c11d",
+  "status":  <span class="w">"refused"</span>,
+  "reason":  <span class="w">"sweep_failed_no_success"</span>,   <span class="c">// named, never a served zero</span>
+  "marks":   { "balances": 25641730, "params": 25641730, "sweep": <span class="r">null</span> }
+}
+
+<span class="c">$ </span>curl -sN localhost:8090/v1/stream   <span class="c"># SSE — the Watch surface eats this</span>
+<span class="p">event:</span> batch     <span class="c">data:</span> {"batch":"bk_019fb0a2","block":25641730,"refused":3}
+<span class="p">event:</span> hf_cross  <span class="c">data:</span> {"account":"0x71aa…04e2","hf":"1.043","threshold":"1.05","dir":"down"}
+<span class="p">event:</span> param     <span class="c">data:</span> {"reserve":"weETH","field":"liquidationThreshold","from":8100,"to":8000}</pre></div>
+    <p class="fed-by">This layer is the demo at P3 close — plus <b>make test-pipeline-replay</b> reproducing chain truth byte-for-byte on a hash-pinned fork for the technical audience.</p>
+  </section>
+
+  <!-- ============ BOOK ============ -->
+  <section class="surface">
+    <div class="surface-head">
+      <h2>1 · Book — the whole position set, one glance</h2>
+      <p>Every account both engines cover. Health factor carries severity; the three sub-1.0 dust positions the chain census found are real and render as liquidatable. Refused rows stay <em>visible</em> — an honest book shows what it refuses to price.</p>
+      <p class="fed-by">fed by <b>GET /v1/book</b> · updates via <b>SSE event: batch</b></p>
+    </div>
+    <div class="window">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div><span class="addr">solvent.app/book</span><span class="live"><i></i>LIVE · block 25,641,730</span></div>
+      <div class="appnav"><span class="on">Book</span><span>Inspector</span><span>Observatory</span><span>Watch</span></div>
+      <div class="pad">
+        <div class="statrow">
+          <div class="stat"><div class="k">Collateral (counted)</div><div class="v">$23.41M</div><div class="s">adapter-output prices only</div></div>
+          <div class="stat"><div class="k">Debt</div><div class="v">$9.10M</div><div class="s">rayMulCeil, chain-exact</div></div>
+          <div class="stat"><div class="k">Liquidatable</div><div class="v"><span class="crit-t">3</span> / 70</div><div class="s">all dust · $31 total</div></div>
+          <div class="stat"><div class="k">Refused</div><div class="v">3</div><div class="s">named reasons, counted</div></div>
+        </div>
+        <div class="tablewrap">
+        <table>
+          <thead><tr>
+            <th>Engine</th><th>Account</th><th class="num">Collateral</th><th class="num">Debt</th>
+            <th class="num">Health factor</th><th class="num">Liq. distance</th><th>Marks</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><span class="engine">aave_v3</span></td><td class="mono">0x3c19…88af</td>
+              <td class="num">$4,182,003.11</td><td class="num">$2,201,554.87</td>
+              <td class="num"><span class="sev ok"></span><span class="hf ok">1.539</span></td>
+              <td class="num">−34.9% <span class="dim">weETH</span></td>
+              <td class="mono dim">B·P @25641730</td>
+            </tr>
+            <tr>
+              <td><span class="engine">aave_v3</span></td><td class="mono">0x71aa…04e2</td>
+              <td class="num">$1,904,112.60</td><td class="num">$1,478,220.02</td>
+              <td class="num"><span class="sev warn"></span><span class="hf warn">1.043</span></td>
+              <td class="num">−4.1% <span class="dim">weETH</span></td>
+              <td class="mono dim">B·P @25641730</td>
+            </tr>
+            <tr>
+              <td><span class="engine">debt_manager</span></td><td class="mono">0xb2f1…7d30</td>
+              <td class="num">$611,940.55</td><td class="num">$343,008.14</td>
+              <td class="num"><span class="sev ok"></span><span class="hf ok">1.427</span></td>
+              <td class="num">−29.9% <span class="dim">liquidETH</span></td>
+              <td class="mono dim">B·P·S @25641712</td>
+            </tr>
+            <tr class="crit-row">
+              <td><span class="engine">debt_manager</span></td><td class="mono">0x9a04…e6c2</td>
+              <td class="num">$14.02</td><td class="num">$14.55</td>
+              <td class="num"><span class="sev crit"></span><span class="hf crit">0.963</span></td>
+              <td class="num crit-t">liquidatable</td>
+              <td class="mono dim">B·P·S @25641712</td>
+            </tr>
+            <tr class="refused">
+              <td><span class="engine">debt_manager</span></td><td class="mono">0x8f24…c11d</td>
+              <td class="num">—</td><td class="num">—</td>
+              <td class="num"><span class="refused-tag">REFUSED · sweep_failed_no_success</span></td>
+              <td class="num">—</td>
+              <td class="mono">B·P @25641730 · S <b>∅</b></td>
+            </tr>
+            <tr>
+              <td><span class="engine">aave_v3</span></td><td class="mono">0x2c64…0649</td>
+              <td class="num">$8.38 <span class="dim">(flag: off)</span></td><td class="num">$0.00</td>
+              <td class="num"><span class="hf inf">∞</span></td>
+              <td class="num dim">—</td>
+              <td class="mono dim">B·P @25641730</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="stampline">
+          <span>batch <b>bk_019fb0a2</b></span>
+          <span>marks <b class="okt">balances ✓ params ✓ sweep ✓</b></span>
+          <span>gate <b class="okt">2/2 engines allowed</b></span>
+          <span>key <b>m9a41c…</b> <span class="dim">(deterministic)</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ INSPECTOR ============ -->
+  <section class="surface">
+    <div class="surface-head">
+      <h2>2 · Inspector — one position, every number defended</h2>
+      <p>Click any row and the product shows its work: which law computed the number, which block each input was proven at, where the parameters came from. This is the surface that makes Solvent different from a dashboard that "shows APY".</p>
+      <p class="fed-by">fed by <b>GET /v1/positions/:account</b></p>
+    </div>
+    <div class="window">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div><span class="addr">solvent.app/inspector/0x71aa…04e2</span><span class="live"><i></i>LIVE</span></div>
+      <div class="appnav"><span>Book</span><span class="on">Inspector</span><span>Observatory</span><span>Watch</span></div>
+      <div class="pad">
+        <div class="split">
+          <div class="card">
+            <h4>Position · aave_v3 · 0x71aa…04e2</h4>
+            <div class="kv">
+              <div><span class="k">Collateral leg</span><span class="v">455.512 weETH · $1,904,112.60</span></div>
+              <div><span class="k">weETH price</span><span class="v">$4,180.15 · anchor 25,641,728 · as-of 18:56:31Z</span></div>
+              <div><span class="k">Reserve params</span><span class="v">LTV 78.00 · LT 81.00 · bonus 6.00</span></div>
+              <div><span class="k">Param provenance</span><span class="v okt">param_history @ (20,713,917 · log 178)</span></div>
+              <div><span class="k">Debt leg</span><span class="v">1,478,220.02 USDC · rayMulCeil index 1.0841…</span></div>
+              <div><span class="k">Collateral flag</span><span class="v okt">witnessed · Enabled @ 21,204,551</span></div>
+              <div><span class="k">Liquidation price</span><span class="v">$4,005.87 <span class="dim">· lowest healthy — floor(P*) already liquidates</span></span></div>
+            </div>
+            <pre class="formula"><b>HF</b> = floor( Σ(Cᵢ · LT_bpsᵢ) × 1e18 / (10000 × D) )
+   = floor( 1,904,112,602,113 · 8100 × 1e18 / (10000 × 1,478,220,021,554) )
+   = <b>1.043810…e18</b>   <span class="dim">// single fused floor — two-step refuted 0/12 at chain</span></pre>
+          </div>
+          <div class="card">
+            <h4>Proof of inputs</h4>
+            <div class="kv">
+              <div><span class="k">Balances mark</span><span class="v okt">✓ 25,641,730</span></div>
+              <div><span class="k">Params mark</span><span class="v okt">✓ 25,641,730</span></div>
+              <div><span class="k">Sweep mark</span><span class="v dim">n/a — engine has no sweeper</span></div>
+              <div><span class="k">Price custody</span><span class="v okt">adapter-output · aaveoracle</span></div>
+              <div><span class="k">Reorg epochs</span><span class="v okt">none unacked</span></div>
+              <div><span class="k">Batch</span><span class="v">bk_019fb0a2</span></div>
+              <div><span class="k">Welded at pins</span><span class="v okt">reconcile: 12/12 exact</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OBSERVATORY ============ -->
+  <section class="surface">
+    <div class="surface-head">
+      <h2>3 · Observatory — stress, priced honestly</h2>
+      <p>Run the committed scenarios against the live book. The engine knows which stables snap (chain-welded, not author-asserted), refuses axes it can't compose, and labels projections as projections.</p>
+      <p class="fed-by">fed by <b>POST /v1/scenarios/:id/run</b> · waterfall via <b>GET /v1/waterfall</b></p>
+    </div>
+    <div class="window">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div><span class="addr">solvent.app/observatory</span><span class="live"><i></i>block 25,641,730</span></div>
+      <div class="appnav"><span>Book</span><span>Inspector</span><span class="on">Observatory</span><span>Watch</span></div>
+      <div class="pad">
+        <div class="scenario-bar">
+          <span class="on">ETH −25%</span><span>ETH −40%</span><span>USDC depeg −5% (base snap)</span>
+          <span>weETH/ETH −3%</span><span>rates +200bp <span class="projection">PROJECTION</span></span>
+        </div>
+        <div class="statrow">
+          <div class="stat"><div class="k">HF &lt; 1 after shock</div><div class="v"><span class="crit-t">9</span> / 70</div><div class="s">was 3 — six cross under</div></div>
+          <div class="stat"><div class="k">Collateral at risk</div><div class="v">$3.87M</div><div class="s">pro-rata over counted collateral</div></div>
+          <div class="stat"><div class="k">Recoverable</div><div class="v">$3.61M</div><div class="s">per-token Σ floor(vᵢ·100e18/(100e18+bᵢ))</div></div>
+          <div class="stat"><div class="k">Bad debt</div><div class="v"><span class="crit-t">$262.4k</span></div><div class="s">waterfall, per-token bonus law</div></div>
+        </div>
+        <div class="tablewrap">
+        <table>
+          <thead><tr><th>Waterfall step</th><th>Token</th><th class="num">Seized</th><th class="num">Bonus</th><th class="num">Debt cleared</th><th class="num">Residual bad debt</th></tr></thead>
+          <tbody>
+            <tr><td>1 · dust cohort</td><td class="mono">liquidETH</td><td class="num">$28.11</td><td class="num">$1.59</td><td class="num">$26.52</td><td class="num">$0.00</td></tr>
+            <tr><td>2 · crossed cohort</td><td class="mono">weETH</td><td class="num">$2,904,332.10</td><td class="num">$164,396.15</td><td class="num">$2,739,935.95</td><td class="num">$0.00</td></tr>
+            <tr><td>3 · crossed cohort</td><td class="mono">liquidBTC</td><td class="num">$962,110.44</td><td class="num">$54,459.08</td><td class="num">$845,204.11</td><td class="num crit-t">$262,447.25</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="stampline">
+          <span>scenario <b>usdc_base_snap_-5</b>: liquidUSD moves with snap(USDC) — <b class="okt">in-band control bit-identical</b></span>
+          <span>joint base+rate shock → <b>refused: factor composition undefined</b> <span class="dim">(by design)</span></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ WATCH ============ -->
+  <section class="surface">
+    <div class="surface-head">
+      <h2>4 · Watch — the SSE stream with a face</h2>
+      <p>What the ops half of the audience actually keeps open: threshold crossings, governance parameter changes, refusal-state transitions, oracle heartbeat verdicts — each carrying its block and its evidence.</p>
+      <p class="fed-by">fed by <b>GET /v1/stream</b> (SSE) · same events the npm client subscribes to</p>
+    </div>
+    <div class="window">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div><span class="addr">solvent.app/watch</span><span class="live"><i></i>streaming</span></div>
+      <div class="appnav"><span>Book</span><span>Inspector</span><span>Observatory</span><span class="on">Watch</span></div>
+      <div class="feed">
+        <div class="feed-item"><span class="t">19:02:11</span><span class="tag crit">HF CROSS</span><span class="b"><b>0x71aa…04e2</b> crossed 1.05 ↓ — now <b>1.043</b> · weETH leg · block <span class="mono">25,641,730</span></span></div>
+        <div class="feed-item"><span class="t">18:57:40</span><span class="tag warn">PARAM</span><span class="b"><b>weETH</b> liquidationThreshold <span class="mono">8100 → 8000</span> · CollateralConfigurationChanged @ <span class="mono">25,641,502 · log 44</span> — 12 positions recomputed</span></div>
+        <div class="feed-item"><span class="t">18:55:03</span><span class="tag warn">REFUSAL</span><span class="b"><b>0x8f24…c11d</b> entered <span class="mono">sweep_failed_no_success</span> — was computed+flagged, sweep failed twice · not served since <span class="mono">25,641,671</span></span></div>
+        <div class="feed-item"><span class="t">18:41:19</span><span class="tag info">ORACLE</span><span class="b"><b>weETH/ETH</b> heartbeat budget <b>held</b>: max observed gap 21h58m ≤ 24h · graded <span class="mono">empirical-historical (n=1,204)</span></span></div>
+        <div class="feed-item"><span class="t">18:22:00</span><span class="tag info">BATCH</span><span class="b"><b>bk_019fb0a2</b> committed · 70 positions · 3 refused · gate <span class="mono">2/2 allowed</span> · key <span class="mono">m9a41c…</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <p class="note"><b>Scope honesty:</b> this page is a concept mockup — none of this UI exists yet, and P3 does not build it. What P3 <em>does</em> build is every number on it: the API responses shown in the terminal are the real wire shapes, the refusal reasons and marks are the real vocabulary (<span class="mono">missing_cursor · chain_mismatch · unacked_epoch · sweep_failed_no_success</span>), the weETH <span class="mono">7800/8100/10600</span> parameters, the fused-floor HF law, and the per-token bonus waterfall are all chain-proven today. P5 puts glass on it.</p>
+</main>
