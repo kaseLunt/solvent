@@ -2233,6 +2233,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   honest governance doesn't obfuscate — byte-substring completeness across
   the ether.fi Safe/timelock stack is exactly the chain-reality question)
   vs probe-then-fallback. Wave cuts on the ruling.
+- **CHAIN-TRUTH R12 RULING ARCHIVED** (ADDENDUM 2 in the ruling file,
+  4cec808). FORK 1 = (B) CODE-HASH CONSTANCY, three surfaces (proxy + ERC1967
+  core impl + admin impl — "pinning only the admin closes half the finding";
+  Borrowed/Repaid/Liquidated/IIU semantics live in the CORE); compile-and-
+  compare REJECTED as recomputation-where-the-model-is-incomplete (no
+  committed source to compile — recon/cash-v3 is a gitignored working copy;
+  progressive loosening until green = calibrating the instrument against its
+  target); certification limits stated verbatim (bytecode constancy +
+  EIP-6780 interior-of-block immutability + fixture anchoring; NO compile
+  bridge claimed — source correspondence is a trust posture, not a proof).
+  FORK 2 = LAW 0 regardless (foreign topic0s from the custody address +
+  ERC1967 upgrade events refuse on sight — closes the CORE-upgrade path
+  inside existing custody since upgradeToAndCall is NOT silent) + Step A
+  trace probe (if served: frame-level selector law, D-013 residual RETIRED)
+  else Step B calldata scan (substring argument ruled TRUE for the whole
+  standard wrapping stack but FALSE for pre-deployed payload contracts —
+  a named HONEST governance pattern; mandatory admin_continuity disclosure
+  key + the D-013 classification WITHDRAWN + a fixture exercising the
+  scan's limit). M3b superseding addendum applied — sufficiency claims in
+  the ruling file are now conditional with their checking laws named.
+  Blocking-if-omitted named: the core-impl surface and the D-013
+  reclassification. R12 FIX WAVE dispatched implementing the ruling as
+  spec (probes first w/ STOP points; mutation floor mA-mD incl. the
+  core-impl-dropped and disclosure-dropped mutants).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
