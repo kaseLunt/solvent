@@ -1422,6 +1422,28 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   self-confirmation, SSE reconnect dup/drop, zero-dep enforcement, test honesty,
   contract mismatch. Maintenance window remains PRE-AUTHORIZED, fires only when T6 +
   flag-custody + T8 all reach SHIP (T7 already shipped).
+- CODEX ROUND 4 ON TASK 6 (session 019fb35e-3058-7680-90c6-2a71f97bf7aa, ~11min,
+  t6r4 @ c421213, base 9da5448): needs-attention — 1 MEDIUM, zero highs; the round-3
+  ABI/slot fixes HELD. (M) Witness replay proves CONTACT, not the eligibility
+  TRANSITION (backtest.go:1355-1387): Repaid sets Proven though repayment lowers debt
+  and cannot cause the flip; InterestIndexUpdated / CollateralTokenConfigSet accepted
+  without decoding or applying old/new values; caller computes both booleans from the
+  same event-time debt + parent config, changing only to block-end prices — so a
+  non-causal witness before the liquidation plus a price update AFTER it converts the
+  exact false negative this gate exists to expose into non-failing marginal-disclosed.
+  Especially reachable post-round-3: liquidation blocks ordinarily contain an earlier
+  index update. Adjudicated FIX-WORTHY (false pass in honest use). FIX WAVE 5
+  dispatched: directional STATEFUL replay — parent state, witness events applied in
+  log-index order (pre-liquidation only), eligibility recomputed via hf_gate.go after
+  each; Proven IFF the replay itself produces false→true before the liquidation;
+  directionality proven by counterexample TESTS not special-cased (Repaid+price-after,
+  routine-index+price-after, LT-neutral/-increase-config+price-after → UNEXPLAINED;
+  positive control: sufficient index/LT-decrease → Proven); mutation spec m1 contact-
+  only revert / m2 ordering dropped / m3 state-not-applied, cut-and-kill required;
+  fixture-backed decode rule binding; frozen frame + closed registry untouchable
+  (report, don't re-freeze). Wave runs on an ISOLATED scratch DB solvent_test_t6w5 —
+  the sibling flag-custody wave holds solvent_test (two concurrent destructive
+  live-db suites on one DB would race exactly like the pre--p1 cross-package runs).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
