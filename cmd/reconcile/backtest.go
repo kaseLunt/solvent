@@ -430,6 +430,16 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	if err != nil {
 		return rows, res, err
 	}
+	// THE SAME LAW AS THE PARENT FRAME (Codex round 7, H1): the exec frame is
+	// built by the same decode path, so a degraded subcall there (a failed
+	// borrowingOf, an empty price return) marks it unread and the case
+	// REFUSES — previously exec.st.unread was set only by a total multicall
+	// failure and then ignored, degrading to a silently smaller frame.
+	if exec.st.unread != "" {
+		rows = append(rows, unreadRow(gateBacktest, key, "exec-frame state", exec.st.unread))
+		res.SkipClass = "exec-frame-unread"
+		return rows, res, nil
+	}
 
 	// ---- OBLIGATION 2: our eligibility boolean, three-state law -----------
 	// The whole composition — parent predicate, causation replay, block-end
@@ -481,6 +491,25 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 	var out obl2Outcome
 	ourMaxBorrow, parentPriced := maxBorrowAtFrame(parent.st.collateral, parent.st.prices, parent.st.configs, decimals)
 
+	// PARENT-BASKET COMPLETENESS (Codex round 7, H1): the basket every parent
+	// claim rests on must be FULLY READ (every frame subcall decoded —
+	// parent.st.unread carries the decode layer's refusal; runBacktestCase
+	// refuses the case before this function ever runs, and the conjunction
+	// below makes the false green unrepresentable even if that gate were
+	// bypassed) and FULLY VALUED (every collateralOf leg priced, configured
+	// and decimal-pinned — parentPriced; a dropped leg UNDERSTATES maxBorrowLT
+	// and manufactures parent eligibility). The note travels into the replay
+	// as replayParentState.BasketNote, where it joins the ParentComplete
+	// conjunction. It is deliberately NOT a witness Note: it gates the parent
+	// arm as a parent-INPUT refusal without masquerading as a boundary-replay
+	// (witness-application) refusal.
+	parentBasketNote := ""
+	if parent.st.unread != "" {
+		parentBasketNote = "parent frame unread: " + parent.st.unread
+	} else if !parentPriced {
+		parentBasketNote = "parent basket valuation incomplete: at least one collateralOf leg lacks an engine-exact price, a collateralTokenConfig, or pinned decimals at N-1 — a dropped leg understates maxBorrowLT, so no parent claim can rest on this basket"
+	}
+
 	priceMoved, moveNote := priceFrameDelta(parent, exec)
 	out.priceNote = moveNote
 	witnesses := v.sameBlockEarlier()
@@ -497,6 +526,7 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 		Prices:             parent.st.prices,
 		Configs:            parent.st.configs,
 		Decimals:           decimals,
+		BasketNote:         parentBasketNote,
 	})
 
 	// ONE SOURCE OF PARENT TRUTH (Codex round 5, H1): the parent predicate IS
@@ -554,7 +584,14 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 			"same_block_replay_parent_complete": fmt.Sprintf("%v", cause.ParentComplete),
 			"same_block_replay_reversals":       fmt.Sprintf("%d", cause.Reversals),
 			"eligible_at_liquidation_boundary":  fmt.Sprintf("%v", cause.BoundaryEligible),
+			"parent_basket_complete":            fmt.Sprintf("%v", parentBasketNote == ""),
 		},
+	}
+	if parentBasketNote != "" {
+		// The round-7 disclosure: WHICH parent-basket input degraded (the
+		// failed subcall by name, or the unvalued leg class). Evidence key
+		// only when there is something to say, mirroring same_block_replay_notes.
+		oblRow.Evidence["parent_basket_note"] = parentBasketNote
 	}
 	if len(cause.Notes) > 0 {
 		// Replay refusals and unmodelled writes are DISCLOSED as evidence AND
@@ -596,7 +633,7 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 		out.eligState = "unpriced-leg"
 		oblRow.Verdict = verdictWeldUnread
 		oblRow.Class = "intra-block-recompute-unpriced"
-		oblRow.Note = "false at the parent frame, and at least one collateral leg could not be priced in BOTH frames — so the intra-block flip can be neither reproduced nor refuted. Gated as unread rather than excused: an unpriceable leg is exactly how a false negative would hide behind a 'witness'"
+		oblRow.Note = "at least one collateral leg could not be valued (priced + configured + decimal-pinned) in BOTH frames — so neither the parent predicate nor the intra-block flip is computed over the complete basket: the case can be neither reproduced nor refuted. Gated as unread rather than excused: a dropped leg UNDERSTATES maxBorrowLT, which is exactly how a false negative would hide behind a 'witness' — or, spuriously eligible, behind a true-at-parent EXACT (Codex round 7, H1)"
 	case eligFlippedWithWitness:
 		out.eligState = "flipped-in-block-with-custodied-witness"
 		oblRow.Verdict = verdictMarginal
@@ -705,6 +742,173 @@ func readExecFrame(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtTok
 	return execFrame{st: st}, err
 }
 
+// newBacktestFrameState is the ONE frameState constructor — shared with the
+// decode-layer regressions so tests drive the REAL apply path over the exact
+// zero state production uses.
+func newBacktestFrameState(block uint64, hash common.Hash, full bool) *frameState {
+	return &frameState{
+		block: block, hash: hash, pricesOnly: !full,
+		prices:   map[common.Address]*big.Int{},
+		configs:  map[common.Address]collateralTokenConfigResult{},
+		balances: map[common.Address]*big.Int{},
+	}
+}
+
+// backtestFrameTag names one frame subcall. The decode layer refuses PER
+// SUBCALL and a refusal must NAME the degraded call (Codex round 7, H1), so
+// the tag carries enough to print it.
+type backtestFrameTag struct {
+	kind string // "collateralOf" | "borrowingOf" | "price" | "config" | "balanceOf"
+	tok  common.Address
+}
+
+// name renders the subcall for refusal notes: the reviewer must see WHICH
+// call degraded, never just "the frame failed".
+func (tg backtestFrameTag) name() string {
+	switch tg.kind {
+	case "collateralOf":
+		return "DebtManager.collateralOf(user)"
+	case "borrowingOf":
+		return "DebtManager.borrowingOf(user, borrowToken)"
+	case "price":
+		return "DebtManager.convertCollateralTokenToUsd(" + tg.tok.Hex() + ", 10^dec)"
+	case "config":
+		return "DebtManager.collateralTokenConfig(" + tg.tok.Hex() + ")"
+	case "balanceOf":
+		return "ERC20.balanceOf(user) on " + tg.tok.Hex()
+	}
+	return tg.kind
+}
+
+// buildBacktestFrameCalls packs the frame's subcalls in their canonical order:
+// the frame-defining read first (collateralOf for the full/parent frame,
+// borrowingOf for the execution frame), then per token in address order:
+// price, and — full frames only — config and Safe balance. A token with no
+// pinned decimals gets NO subcalls; for a seized token the caller's trailing
+// price check refuses the frame, and for a basket-only token the parent
+// valuation-completeness conjunct does (Codex round 7, H1) — never a silent
+// drop.
+func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bool,
+	tokens map[common.Address]bool, decimals map[common.Address]uint8) ([]multicallCall, []backtestFrameTag, error) {
+	var calls []multicallCall
+	var tags []backtestFrameTag
+	if full {
+		d, err := dmCollateralOfABI.Pack("collateralOf", account)
+		if err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{kind: "collateralOf"})
+	} else {
+		d, err := dmBorrowingOfOneABI.Pack("borrowingOf", account, debtToken)
+		if err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{kind: "borrowingOf"})
+	}
+	for _, tok := range sortedAddrs(tokens) {
+		dec, ok := decimals[tok]
+		if !ok {
+			continue
+		}
+		d, err := dmConvertCollateralToUsdABI.Pack("convertCollateralTokenToUsd", tok, pow10Big(dec))
+		if err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{"price", tok})
+		if !full {
+			continue
+		}
+		if d, err = dmCollateralTokenConfigABI.Pack("collateralTokenConfig", tok); err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: d}), append(tags, backtestFrameTag{"config", tok})
+		if d, err = erc20BalanceOfABI.Pack("balanceOf", account); err != nil {
+			return nil, nil, err
+		}
+		calls, tags = append(calls, multicallCall{Target: tok, CallData: d}), append(tags, backtestFrameTag{"balanceOf", tok})
+	}
+	return calls, tags, nil
+}
+
+// applyBacktestFrameResults is THE frame decode layer, shared verbatim by the
+// parent and execution frames (readParentFrame / readExecFrame both reach it
+// through readBacktestFrameState).
+//
+// THE PER-SUBCALL LAW (Codex round 7, H1): ANY subcall that (1) reports
+// Success=false, (2) answers empty return data where the ABI promises a
+// value (every subcall here promises at least one word), or (3) does not
+// decode marks the WHOLE FRAME unread with the degraded subcall NAMED —
+// never a silently smaller basket, a silently unpriced token, a silently
+// unconfigured leg, or a silently nil chainDebt. The old code skipped
+// Success=false results and swallowed borrowingOf/price/config/balanceOf
+// decode errors; a failed collateralOf therefore left an EMPTY basket that
+// maxBorrowAtFrame valued to zero "fully priced", and an honest historical
+// RPC subcall failure was reported as a true-at-parent EXACT pass. The law
+// applies to EVERY subcall in the inventory (collateralOf, borrowingOf,
+// price, config, balanceOf) in BOTH frames — the exec frame shares this
+// exact loop, and runBacktestCase consumes exec.st.unread the same way it
+// consumes the parent's.
+func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFrameTag, res []multicallResult) {
+	if len(res) != len(tags) {
+		st.unread = fmt.Sprintf("frame decode refused: %d Multicall3 results for %d subcalls — the response set does not answer the question asked", len(res), len(tags))
+		return
+	}
+	for i, tg := range tags {
+		if !res[i].Success {
+			st.unread = fmt.Sprintf("frame subcall %s FAILED at the frame pin (Multicall3 success=false) — the frame is UNREAD: a failed subcall must never yield a silently smaller basket (Codex round 7, H1)", tg.name())
+			return
+		}
+		if len(res[i].ReturnData) == 0 {
+			st.unread = fmt.Sprintf("frame subcall %s answered EMPTY return data at the frame pin where the ABI promises a value — the frame is UNREAD, never decoded as zero (Codex round 7, H1)", tg.name())
+			return
+		}
+		switch tg.kind {
+		case "collateralOf":
+			list, _, err := unpackTokenAmountList(dmCollateralOfABI, "collateralOf", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			for _, l := range list {
+				st.collateral = append(st.collateral, collateralLeg{token: l.Token, amount: l.Amount})
+			}
+			f.use("DebtManager.collateralOf(user)@parentHash(N-1)")
+		case "borrowingOf":
+			v, err := unpackUint256Strict(dmBorrowingOfOneABI, "borrowingOf", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.chainDebt = v
+			f.use("DebtManager.borrowingOf(user, borrowToken)@pinHash(N)")
+		case "price":
+			v, err := unpackUint256Strict(dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.prices[tg.tok] = v
+			f.use("DebtManager.convertCollateralTokenToUsd(token, 10^dec)@parentHash(N-1) and @pinHash(N)")
+		case "config":
+			cfg, err := unpackCollateralTokenConfig(res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.configs[tg.tok] = cfg
+			f.use("DebtManager.collateralTokenConfig(token)@parentHash(N-1)")
+		case "balanceOf":
+			v, err := unpackUint256Strict(erc20BalanceOfABI, "balanceOf", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			st.balances[tg.tok] = v
+			f.use("ERC20.balanceOf(user, token)@parentHash(N-1)")
+		}
+	}
+}
+
 // readBacktestFrameState reads one frame's state at a hash-bound pin. When
 // `full` is false only the prices (and, at the execution frame, the residue
 // read) are fetched — the execution frame exists for the marginality detector
@@ -712,12 +916,7 @@ func readExecFrame(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtTok
 func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtToken common.Address,
 	db snapshotdb.T6BacktestRow, decimals map[common.Address]uint8, block uint64, hash common.Hash, full bool,
 	alsoPrice ...common.Address) (*frameState, error) {
-	st := &frameState{
-		block: block, hash: hash, pricesOnly: !full,
-		prices:   map[common.Address]*big.Int{},
-		configs:  map[common.Address]collateralTokenConfigResult{},
-		balances: map[common.Address]*big.Int{},
-	}
+	st := newBacktestFrameState(block, hash, full)
 	// Tokens of interest: the seized elements (obligation 3), whatever
 	// collateralOf reports in the full frame (obligation 2), plus any token the
 	// caller needs priced here — the execution frame must price the PARENT's whole
@@ -729,93 +928,18 @@ func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account
 	for _, s := range db.Seizures {
 		seized[common.HexToAddress(s.AssetHex)] = true
 	}
-
-	var calls []multicallCall
-	type tag struct {
-		kind string
-		tok  common.Address
-	}
-	var tags []tag
-	if full {
-		d, err := dmCollateralOfABI.Pack("collateralOf", account)
-		if err != nil {
-			return nil, err
-		}
-		calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "collateralOf"})
-	} else {
-		d, err := dmBorrowingOfOneABI.Pack("borrowingOf", account, debtToken)
-		if err != nil {
-			return nil, err
-		}
-		calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "borrowingOf"})
-	}
-	for _, tok := range sortedAddrs(seized) {
-		dec, ok := decimals[tok]
-		if !ok {
-			continue
-		}
-		d, err := dmConvertCollateralToUsdABI.Pack("convertCollateralTokenToUsd", tok, pow10Big(dec))
-		if err != nil {
-			return nil, err
-		}
-		calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{"price", tok})
-		if !full {
-			continue
-		}
-		if d, err = dmCollateralTokenConfigABI.Pack("collateralTokenConfig", tok); err != nil {
-			return nil, err
-		}
-		calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{"config", tok})
-		if d, err = erc20BalanceOfABI.Pack("balanceOf", account); err != nil {
-			return nil, err
-		}
-		calls, tags = append(calls, multicallCall{Target: tok, CallData: d}), append(tags, tag{"balanceOf", tok})
+	calls, tags, err := buildBacktestFrameCalls(c.dmProxy, account, debtToken, full, seized, decimals)
+	if err != nil {
+		return nil, err
 	}
 	res, _, err := c.opR.multicall(ctx, fmt.Sprintf("p3:backtest:frame@%d", block), block, hash, calls)
 	if err != nil {
 		st.unread = fmt.Sprintf("frame read at %d (%s) failed: %v", block, replayFailureClass(err), err)
 		return st, nil
 	}
-	for i, tg := range tags {
-		if !res[i].Success {
-			continue
-		}
-		switch tg.kind {
-		case "collateralOf":
-			list, _, err := unpackTokenAmountList(dmCollateralOfABI, "collateralOf", res[i].ReturnData)
-			if err != nil {
-				st.unread = "collateralOf undecodable at the frame pin: " + err.Error()
-				return st, nil
-			}
-			for _, l := range list {
-				st.collateral = append(st.collateral, struct {
-					token  common.Address
-					amount *big.Int
-				}{l.Token, l.Amount})
-			}
-			f.use("DebtManager.collateralOf(user)@parentHash(N-1)")
-		case "borrowingOf":
-			v, err := unpackUint256Strict(dmBorrowingOfOneABI, "borrowingOf", res[i].ReturnData)
-			if err == nil {
-				st.chainDebt = v
-				f.use("DebtManager.borrowingOf(user, borrowToken)@pinHash(N)")
-			}
-		case "price":
-			if v, err := unpackUint256Strict(dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", res[i].ReturnData); err == nil {
-				st.prices[tg.tok] = v
-				f.use("DebtManager.convertCollateralTokenToUsd(token, 10^dec)@parentHash(N-1) and @pinHash(N)")
-			}
-		case "config":
-			if cfg, err := unpackCollateralTokenConfig(res[i].ReturnData); err == nil {
-				st.configs[tg.tok] = cfg
-				f.use("DebtManager.collateralTokenConfig(token)@parentHash(N-1)")
-			}
-		case "balanceOf":
-			if v, err := unpackUint256Strict(erc20BalanceOfABI, "balanceOf", res[i].ReturnData); err == nil {
-				st.balances[tg.tok] = v
-				f.use("ERC20.balanceOf(user, token)@parentHash(N-1)")
-			}
-		}
+	applyBacktestFrameResults(st, f, tags, res)
+	if st.unread != "" {
+		return st, nil
 	}
 	if full {
 		// The parent frame needs collateral AND the per-token price/config for
@@ -1443,6 +1567,19 @@ type replayParentState struct {
 	Configs    map[common.Address]collateralTokenConfigResult
 	// Decimals is the pinned ERC20.decimals map (10^dec denominators).
 	Decimals map[common.Address]uint8
+	// BasketNote is the caller's statement of PARENT-BASKET completeness
+	// (Codex round 7, H1): empty means every basket subcall decoded (the
+	// frame is not unread) AND every collateralOf leg valued; non-empty
+	// carries the reason (the failed subcall by name, or the unvalued-leg
+	// class) and fails the ParentComplete conjunction. It is deliberately
+	// NOT folded into Notes: it is a parent-INPUT refusal, not a
+	// witness-application refusal, so it gates the parent arm without
+	// tainting boundary-replay completeness (round 6 H1 kept intact). The
+	// replay ALSO recomputes basket valuation itself from
+	// Collateral/Prices/Configs/Decimals, so a caller that forgets this
+	// field cannot smuggle an unvalued basket past the conjunction — only
+	// decode-layer facts (unread) need the field to travel.
+	BasketNote string
 }
 
 // causeReplay is the outcome of replaying the ordered same-block earlier witnesses
@@ -1482,16 +1619,25 @@ type causeReplay struct {
 	// same value the replay starts from, by construction, never a second
 	// computation.
 	InitialEligible bool
-	// ParentComplete reports PARENT-STATE completeness (Codex round 6, H1):
-	// the parent fold (NormalizedAtParent) was present AND the parent index
-	// reconstruction succeeded — the event-sourced oldIndex decode when a
-	// pre-liquidation tick exists, else the snapshot. It is DISTINCT from
-	// Complete(), which is BOUNDARY-replay completeness: a later witness
-	// refusal (a cross-token repayment, an unmodellable liquidation) taints
-	// the boundary replay but cannot rewrite the already-pinned parent fact,
-	// so the classifier's true-at-parent arm consults ONLY this flag. A
-	// pre-liquidation tick whose oldIndex is unusable BLOCKS the
-	// reconstruction and fails parent completeness (noted, never silent).
+	// ParentComplete reports PARENT-STATE completeness — the FULL parent-input
+	// conjunction (Codex round 6 H1, widened by round 7 H1):
+	//   (1) the parent fold (NormalizedAtParent) was present;
+	//   (2) the parent index reconstruction succeeded — the event-sourced
+	//       oldIndex decode when a pre-liquidation tick exists, else the
+	//       snapshot;
+	//   (3) the parent BASKET is complete — every basket subcall decoded
+	//       (start.BasketNote empty) AND every basket leg valued
+	//       (price + config + decimals; a dropped leg understates maxBorrowLT
+	//       and manufactures parent eligibility, the round-7 false green).
+	// It is DISTINCT from Complete(), which is BOUNDARY-replay completeness:
+	// a later witness refusal (a cross-token repayment, an unmodellable
+	// liquidation) taints the boundary replay but cannot rewrite the
+	// already-pinned parent fact, so the classifier's true-at-parent arm
+	// consults ONLY this flag. A pre-liquidation tick whose oldIndex is
+	// unusable BLOCKS the reconstruction and fails parent completeness
+	// (noted, never silent); a basket-completeness failure fails it WITHOUT
+	// a witness Note — it is a parent-INPUT refusal, and dressing it as a
+	// boundary refusal would re-blur exactly the split round 6 established.
 	ParentComplete bool
 	// ParentDebtUSD / ParentIndex are the reconstructed parent-boundary debt
 	// (floor bridge) and index behind InitialEligible, for the artifact. Nil
@@ -1593,14 +1739,27 @@ func replaySameBlockCauses(witnesses []snapshotdb.T6Witness, dmProxy common.Addr
 	// its event. Without one, the index did not move before the liquidation
 	// and the snapshot IS the parent value.
 	//
-	// PARENT-STATE COMPLETENESS (Codex round 6, H1): the parent fold was
-	// present (checked above) and the reconstruction below either finds no
-	// pre-liquidation tick (snapshot IS the parent value) or event-sources
-	// the tick's own oldIndex. A tick whose oldIndex is unusable BLOCKS the
-	// reconstruction — falling back to the liquidation-time snapshot would
-	// smuggle in-block movement into the parent fact — so PARENT
-	// completeness fails, noted.
-	out.ParentComplete = true
+	// PARENT-STATE COMPLETENESS — THE FULL CONJUNCTION (Codex round 6 H1,
+	// widened by round 7 H1): the parent fold was present (checked above);
+	// the reconstruction below either finds no pre-liquidation tick
+	// (snapshot IS the parent value) or event-sources the tick's own
+	// oldIndex — a tick whose oldIndex is unusable BLOCKS the reconstruction
+	// (falling back to the liquidation-time snapshot would smuggle in-block
+	// movement into the parent fact), noted; AND the parent BASKET is
+	// complete. Basket completeness has two prongs, both required:
+	// start.BasketNote carries the DECODE-layer fact (an unread frame — a
+	// failed/empty/undecodable subcall — that this function cannot see from
+	// the maps alone: an unread empty basket values to maxBorrow 0
+	// "fully priced", the exact silent-zero false green of round 7), and the
+	// valuation recheck below catches any leg the frame never valued (no
+	// price, no config, no decimals — a dropped leg UNDERSTATES maxBorrowLT
+	// and manufactures parent eligibility). Neither prong appends a witness
+	// Note: this is a parent-INPUT refusal and must not masquerade as
+	// boundary-replay incompleteness (the round-6 split stays intact).
+	out.ParentComplete = start.BasketNote == ""
+	if _, basketValued := maxBorrowAtFrame(collateral, start.Prices, configs, start.Decimals); !basketValued {
+		out.ParentComplete = false
+	}
 	for _, w := range ordered {
 		if !strings.EqualFold(w.Address, proxy) || w.Topic0 != topicDMInterestIndexUpdated || !strings.EqualFold(w.Topic1Addr, debt) {
 			continue
@@ -2080,6 +2239,23 @@ const basketContinuityUnproven = "unproven: Safe collateral moves without DM eve
 // structural, not incidental; crossing-based arms still require full
 // boundary-replay completeness.
 //
+// ROUND 7 (H1) — THE ORDERING, MADE EXPLICIT. Two refusal families exist and
+// they gate DIFFERENT arms:
+//   - PARENT-INPUT refusals (parentComplete=false: the fold, the index
+//     reconstruction, or the parent BASKET — a frame subcall that failed or
+//     a leg the frame never valued) gate the parent arm AND the marginal
+//     arm: a degraded parent state can certify nothing, because both the
+//     parent predicate and the replayed crossing are arithmetic OVER that
+//     state. A spuriously eligible predicate (empty/short basket →
+//     understated maxBorrowLT) must land in the unpriced/unexplained
+//     refusals below, never in true-at-parent — the round-6 split let the
+//     parent arm preempt the unpriced refusal, which is exactly how the
+//     round-7 false green escaped.
+//   - WITNESS-APPLICATION refusals (replayComplete=false: a cross-token
+//     repayment, an unmodellable liquidation, an over-seizure) gate ONLY the
+//     crossing-based arms. They are boundary evidence; they cannot un-pin
+//     the parent fact (round 6 H1, unchanged).
+//
 // L1 (chain-truth basket-continuity ruling, NORMATIVE — archived verbatim at
 // .superpowers/sdd/p3-consults/chain-truth-basket-continuity-ruling.md): the
 // marginal arm carries a basketContinuityProven conjunct. Default false, and
@@ -2094,6 +2270,10 @@ func classifyIntraBlock(parentEligible, parentComplete, execEligible, allPriced,
 		// event-sourced parent index; it makes no intra-block claim, so
 		// boundary-replay completeness has no vote here (Codex round 6, H1).
 		// Checked FIRST: a later refusal cannot reach this arm's inputs.
+		// parentComplete is the arm's OWN gate (round 7, H1): it now embeds
+		// parent-basket completeness, so an "eligible" predicate computed
+		// over an unread or partially valued basket falls through to the
+		// refusals below instead of being crowned an exact pass.
 		return eligTrueAtParent
 	case !replayComplete:
 		// THE STRUCTURAL COMPLETENESS LAW (Codex round 5, M), scoped by
@@ -2110,17 +2290,21 @@ func classifyIntraBlock(parentEligible, parentComplete, execEligible, allPriced,
 		return eligUnexplainedOutcome
 	case !allPriced:
 		return eligUnpriced
-	case causeProven && execEligible && basketContinuityProven:
+	case causeProven && execEligible && basketContinuityProven && parentComplete:
 		// A custodied PRE-liquidation write moved an input to this account's
 		// boolean, the recomputation corroborates the flip, AND the basket's
 		// continuity to the liquidation boundary is proven (ruling L1/L2).
-		// ALL THREE are required: the cause is the proof, the recomputation
+		// ALL of it is required: the cause is the proof, the recomputation
 		// is only corroboration (it reads post-block state), and without
 		// continuity the attribution claims a custody the walked surface
 		// does not provide — Safe collateral moves without DM events and the
 		// netting term moves without transfers, so an unseen same-block
 		// basket move could be the actual cause. Proven itself embeds
-		// round-5 H2: the crossing must have HELD to the boundary.
+		// round-5 H2: the crossing must have HELD to the boundary. And the
+		// marginal claim is arithmetic OVER the replayed parent state, so a
+		// parent-INPUT refusal (parentComplete=false, round 7 H1) blocks
+		// this arm too — a crossing "proven" over a degraded basket proves
+		// nothing.
 		return eligFlippedWithWitness
 	default:
 		// Includes the round-1 false-marginal shape (a post-block price

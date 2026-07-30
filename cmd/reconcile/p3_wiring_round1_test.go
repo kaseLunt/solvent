@@ -95,9 +95,12 @@ func TestResidueWeldIsWiredToTheExecutionFrame(t *testing.T) {
 }
 
 // TestFrameReadContractSeparatesResidueFromSeizureInputs documents the contract
-// the wiring assertion above depends on, so a future change to
-// readBacktestFrameState cannot silently move borrowingOf to the full frame and
-// make the assertion meaningless.
+// the wiring assertion above depends on, so a future change to the frame call
+// plan cannot silently move borrowingOf to the full frame and make the
+// assertion meaningless. Wave 8 moved the `if full` split from
+// readBacktestFrameState into buildBacktestFrameCalls (the extracted call
+// plan that the decode-layer regressions drive with crafted Multicall3
+// responses); the CONTRACT is unchanged and this pin follows the split.
 func TestFrameReadContractSeparatesResidueFromSeizureInputs(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "backtest.go", nil, 0)
@@ -106,7 +109,7 @@ func TestFrameReadContractSeparatesResidueFromSeizureInputs(t *testing.T) {
 	var full, notFull []string
 	ast.Inspect(file, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "readBacktestFrameState" {
+		if !ok || fn.Name.Name != "buildBacktestFrameCalls" {
 			return true
 		}
 		ast.Inspect(fn.Body, func(m ast.Node) bool {
