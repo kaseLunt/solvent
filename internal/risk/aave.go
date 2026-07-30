@@ -6,19 +6,40 @@ package risk
 //	1 scaled balances      bit-identity (the caller's derived fold)
 //	2 live debt            rayMulCeil(scaled, variableBorrowIndex)      CEILING
 //	3 live collateral      rayMulFloor(scaled, liquidityIndex)          FLOOR (regime B)
-//	4 per-reserve base     floor(balance × getAssetPrice / 10^dec)
+//	4 per-reserve base     debt       CEIL(balance × getAssetPrice / 10^dec)
+//	                       collateral FLOOR(balance × getAssetPrice / 10^dec)
 //	5 base totals          exact sums
 //	6 avg liq. threshold   floor(Σ(Cᵢ·LTᵢ) / ΣCᵢ)   — DISCLOSURE ONLY
-//	7 health factor        ONE fused floor division over Σ(Cᵢ·LTᵢ)
+//	7 health factor        wadDiv HALF-UP over Σ(Cᵢ·LTᵢ), then /1e4 truncating
 //
 // Component 7 is the P-2 finding and the reason this file exists: the
 // previously-drafted two-step `wadDiv(percentMul(C, avgLT), D)` matches ZERO
-// live borrowers under any of the four rounding conventions. The deployed
-// contract performs a single exact-integer multiplication and floors once
-// (v3.5-style precision-preserving math). Component 6 is computed and
-// surfaced because the reconcile gate compares it, but it is NOT an input to
-// component 7 — feeding the truncated average back in is exactly the bug the
-// probe falsified.
+// live borrowers under any of the four rounding conventions. Component 6 is
+// computed and surfaced because the reconcile gate compares it, but it is NOT an
+// input to component 7 — feeding the truncated average back in is exactly the
+// bug the probe falsified. The average division happens AFTER the health factor
+// in the source (GenericLogic.sol:167-173 vs :160-164), which is the code-order
+// proof of the same point.
+//
+// # REV 3 — two law corrections, from the deployed verified source
+//
+// Both came out of reading the live Pool implementation (EIP-1967 slot →
+// Blockscout-verified PoolInstance, solc 0.8.27) rather than out of a pin count,
+// and both shipped in ONE revision because re-pinning either alone would leave a
+// law the source refutes:
+//
+//  1. Component 4's DEBT leg is a pure CEILING, MathUtils.mulDivCeil
+//     (GenericLogic.sol:229, MathUtils.sol:100-115), summed at :141. The
+//     COLLATERAL leg is unchanged plain truncation (:242-258). totalDebtBase was
+//     exact for 0/12 live borrowers under floor and 12/12 under ceil.
+//  2. Component 7 is the wadDiv HALF-UP composite, not a single fused floor
+//     (GenericLogic.sol:160-164 + WadRayMath.sol:53-62). The refuted fused floor
+//     agreed with the chain on every recorded borrower and differs on ~5×10⁻⁵ of
+//     evaluations, so no pin count could ever have caught it — see
+//     AaveHealthFactorWad for the carry derivation.
+//
+// Both laws are established for the CURRENT implementation ONLY, which is why
+// this surface refuses a pin before the TokenMath cut (ErrPreTokenMathRegime).
 
 import (
 	"math/big"
@@ -85,6 +106,23 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 	}
 	out.BaseDecimals = baseDecimals
 
+	// Regime. Components 4 and 7 carry laws read out of the CURRENT Pool
+	// implementation's source, so a pre-cut pin is refused rather than computed.
+	//
+	// POSITION, deliberately: last of the refusals, FIRST before any arithmetic.
+	// Nothing above this line multiplies or divides anything — requireWatermarks,
+	// the eMode check, indexPrices and indexParams only validate and key inputs —
+	// so "never compute with today's laws for a pre-cut pin" holds exactly as
+	// strongly here as it would three checks earlier —
+	// TestComputeAaveHealthRefusesPinsBeforeTheTokenMathCut pins that the refused
+	// result is the ZERO AaveHealth, with no partial totals in it. It sits after
+	// input indexing so that a caller with BOTH a malformed input and a pre-cut
+	// block is told about the malformed input, which is the fault it can actually
+	// act on (same subtest, "an input fault the caller can act on").
+	if err := requireCurrentRegime(op, in.Account, in.Regime, in.Marks.BalancesBlock); err != nil {
+		return AaveHealth{}, err
+	}
+
 	totalCollateral := new(big.Int)
 	totalDebt := new(big.Int)
 	weightedLTSum := new(big.Int)
@@ -135,8 +173,13 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 		if hasPrice {
 			rv.Price = p.clone()
 			den := pow10(r.Decimals)
-			// Component 4: one integer division per reserve, floor.
-			rv.DebtBase = MulDivFloor(rv.LiveDebt, p.Value, den)
+			// Component 4: one integer division per reserve, and the two legs
+			// round in OPPOSITE directions. Debt CEILS (mulDivCeil,
+			// GenericLogic.sol:229) — a pure ceiling, so a remainder of 1 wei's
+			// worth still adds a whole base unit. Collateral TRUNCATES
+			// (GenericLogic.sol:242-258). Handing both legs the same rounding is
+			// the rev-2 bug: it understated debt on 12/12 live borrowers.
+			rv.DebtBase = MulDivCeil(rv.LiveDebt, p.Value, den)
 			if r.UsedAsCollateral {
 				rv.CollateralBase = MulDivFloor(rv.LiveCollateral, p.Value, den)
 			}
@@ -189,8 +232,11 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 		out.AvgLiquidationThresholdBps = new(big.Int).Div(new(big.Int).Set(weightedLTSum), totalCollateral)
 	}
 
-	// Component 7 — the single fused floor division.
-	if hf, ok := FusedHealthFactorWad(weightedLTSum, totalDebt); ok {
+	// Component 7 — the wadDiv half-up composite. HealthFactorWad can land one
+	// wad ULP ABOVE the exact rational's floor on a carry vector; that is the
+	// chain's arithmetic, and HealthFactor carries the un-rounded ratio for every
+	// downstream solve so no consumer has to inherit the sliver.
+	if hf, ok := AaveHealthFactorWad(weightedLTSum, totalDebt); ok {
 		out.HealthFactorWad = hf
 		r, err := NewRational(weightedLTSum, new(big.Int).Mul(bpsUnit, totalDebt))
 		if err != nil {
@@ -201,6 +247,37 @@ func ComputeAaveHealth(in AaveInput) (AaveHealth, error) {
 	}
 
 	return out, nil
+}
+
+// requireCurrentRegime refuses an Aave health computation whose pin predates the
+// TokenMath cut.
+//
+// TWO triggers, because Regime's zero value is RegimeB (deliberately, so a
+// caller who never thinks about regimes gets today's chain):
+//
+//	regime != RegimeB          an EXPLICIT historical request
+//	balancesBlock < the cut    an IMPLICIT one — the caller is recomputing
+//	                           history and never set Regime at all
+//
+// The second arm is the one that matters. Without it, a Task-1-style backfill
+// over 2024 blocks would sail straight through with today's ceil-debt and
+// half-up-composite laws and publish health factors whose derivation nobody has
+// done. The ray-level projection helpers still honour RegimeA — components 2 and
+// 3 ARE established on both sides of the cut — so this refusal is scoped to the
+// aggregate surface, exactly where the unproven laws live.
+func requireCurrentRegime(op string, account common.Address, regime Regime, balancesBlock uint64) error {
+	if regime != RegimeB {
+		return assetErr(op, AaveEngine, account, ErrPreTokenMathRegime,
+			"regime "+regime.String()+" requested")
+	}
+	if balancesBlock < AaveTokenMathFromBlock {
+		return assetErr(op, AaveEngine, account, ErrPreTokenMathRegime,
+			// strconv is not on this package's import allowlist; big.Int is the
+			// house way to render an integer without one.
+			"Marks.BalancesBlock "+new(big.Int).SetUint64(balancesBlock).String()+
+				" is below the TokenMath cut "+new(big.Int).SetUint64(AaveTokenMathFromBlock).String())
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

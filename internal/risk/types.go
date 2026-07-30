@@ -92,6 +92,11 @@ const (
 	// RegimeA is the pre-23,088,584 WadRayMath line, where BOTH the aToken
 	// and vToken scaled-to-live projections are half-up rayMul. Historical
 	// pins only.
+	//
+	// The ray helpers (AaveLiveDebt / AaveLiveCollateral) honour it.
+	// ComputeAaveHealth REFUSES it (ErrPreTokenMathRegime): components 4 and 7
+	// carry rev-3 laws read out of the CURRENT implementation's source, and
+	// nothing establishes what they were before the cut.
 	RegimeA
 )
 
@@ -161,6 +166,25 @@ var (
 	// table, so a nonzero category is refused rather than computed with the
 	// wrong thresholds.
 	ErrEModeUnsupported = errors.New("risk: nonzero eMode category is not supported (no category param rows)")
+	// ErrPreTokenMathRegime: an Aave health computation for a pin BEFORE the
+	// TokenMath cut (AaveTokenMathFromBlock = 23,088,584).
+	//
+	// The rev-3 corrections — component 4's debt-leg ceiling and component 7's
+	// wadDiv half-up composite — were derived from the source of the CURRENT
+	// Pool implementation. The regime split this package already carries covers
+	// components 2 and 3 only (the scaled→live ray projections, where the
+	// pre-cut law is documented half-up rayMul on both sides). Nobody has read
+	// the pre-cut GenericLogic, so nobody knows whether _getUserDebtInBaseCurrency
+	// ceiled or floored there, or whether healthFactor was already the half-up
+	// composite. Computing a historical health factor with today's laws would
+	// publish a number whose law was never established — so this surface refuses,
+	// which is the same posture as an unpriced asset or a nonzero eMode.
+	//
+	// The refusal has TWO triggers, because Regime's zero value is RegimeB: an
+	// explicit RegimeA, and a BalancesBlock below the cut (which catches the
+	// caller who recomputes history without ever thinking about regimes and would
+	// otherwise get today's laws silently).
+	ErrPreTokenMathRegime = errors.New("risk: Aave health is not computable for a pin before the TokenMath cut (block 23,088,584): components 4 and 7 are proven for the current implementation only")
 	// ErrEngineMismatch: a PositionInput whose Engine tag disagrees with which
 	// engine payload is populated.
 	ErrEngineMismatch = errors.New("risk: position engine tag does not match its payload")
@@ -598,8 +622,14 @@ type AaveReserveValue struct {
 	Decimals       uint8
 	LiveDebt       *big.Int // token units, rayMulCeil(scaled, debtIndex)
 	LiveCollateral *big.Int // token units, rayMulFloor(scaled, collateralIndex)
-	DebtBase       *big.Int // base currency, floor(liveDebt × price / 10^dec)
-	CollateralBase *big.Int // base currency; zero when !UsedAsCollateral
+	// DebtBase is base currency, CEIL(liveDebt × price / 10^dec) —
+	// MathUtils.mulDivCeil, GenericLogic.sol:229. The two legs of component 4
+	// round in OPPOSITE directions and that is deliberate: debt is never
+	// understated, collateral is never overstated.
+	DebtBase *big.Int
+	// CollateralBase is base currency, FLOOR(liveCollateral × price / 10^dec) —
+	// plain truncation, GenericLogic.sol:242-258. Zero when !UsedAsCollateral.
+	CollateralBase *big.Int
 
 	LiquidationThresholdBps *big.Int // nil when the reserve holds no collateral
 	LiquidationBonusBps     *big.Int
@@ -629,12 +659,21 @@ type AaveHealth struct {
 	// the deployed law fuses over WeightedLTSum directly (P-2).
 	AvgLiquidationThresholdBps *big.Int
 
-	// HealthFactorWad is the chain-identical value: a SINGLE FUSED FLOOR
-	// DIVISION, floor(WeightedLTSum × 1e18 / (10000 × TotalDebtBase)).
-	// nil when IsInfinite.
+	// HealthFactorWad is the chain-identical value: the wadDiv HALF-UP
+	// COMPOSITE, floor( floor((WeightedLTSum×1e18 + ⌊D/2⌋)/D) / 1e4 ) with
+	// D = TotalDebtBase (AaveHealthFactorWad). nil when IsInfinite.
+	//
+	// It is NOT floor(HealthFactor). When the inner half-up carry fires and the
+	// inner quotient is ≡ 9999 (mod 1e4) this value is one wad ULP ABOVE
+	// HealthFactor.FloorScaled(WadUnit()) — that is the chain's own arithmetic,
+	// not a defect, and a consumer that recomputes floor(HealthFactor) and
+	// compares for equality will disagree with the chain on ~5×10⁻⁵ of rows.
+	// Compare against HealthFactorWad, or compare the exact rational.
 	HealthFactorWad *big.Int
-	// HealthFactor is the same quantity un-rounded, for downstream exact
-	// arithmetic (liquidation price, waterfall crossings).
+	// HealthFactor is the underlying ratio un-rounded — WeightedLTSum /
+	// (10000 × TotalDebtBase) — for downstream exact arithmetic (liquidation
+	// price, waterfall crossings). Rounding-law-free, and therefore the
+	// authoritative quantity for a comparison against a boundary.
 	HealthFactor Rational
 	// IsInfinite marks zero debt: the health factor is
 	// undefined-because-unbounded. Never a fake big number.

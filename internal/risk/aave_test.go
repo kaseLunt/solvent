@@ -27,12 +27,36 @@ import (
 //     the recorded golden-borrower values C = 12305519 and D = 13720591
 //     (8-decimal base currency, i.e. $0.12305519 and $0.13720591 — this is one
 //     of the three sub-1.0 dust positions the probe found live at the pin).
-//     weETH at 210635958286 is $2106.36; USDC at 99992647 is $0.99992647. Both
+//     weETH at 210635958286 is $2106.36; USDC at 99992646 is $0.99992646. Both
 //     are plausible marks, but they are solved-for, not read.
 //   - LT = 8100 bps is the real weETH configuration (the single
 //     CollateralConfigurationChanged the configurator ever emitted).
 //
 // The ASSERTION — 726460718055075032 — is the chain's own healthFactor.
+//
+// # REV-3 RE-PIN of the solved USDC price: 99992647 → 99992646
+//
+// The debt leg is a CEILING now, so the price that solved D = 13720591 under
+// floor no longer solves it:
+//
+//	137216 × 99992647 = 13720591050752   floor 13720591   CEIL 13720592  ✗
+//	137216 × 99992646 = 13720590913536   floor 13720590   CEIL 13720591  ✓
+//
+// The full bracket of prices satisfying ceil(137216·p/1e6) = 13720591 is
+// [99992640, 99992646] — verified endpoint-by-endpoint in
+// TestComputeAaveHealthGoldenDebtPriceBracket — and 99992646 is its top, kept
+// because it is adjacent to the value this test carried before.
+//
+// NOTE the character of the retained leg: remainder 913536 out of 1000000 is
+// SUPER-half, so ceil and half-up agree here (both 13720591) and this vector
+// cannot separate them. That is exactly why
+// TestComputeAaveHealthDebtLegCeilsOnSubHalfRemainders exists.
+//
+// Component 7's re-derivation does NOT move this assertion: Σ·1e18 = q·D + r
+// with q ≡ 8466 (mod 1e4) and r = 2356594 < ⌈D/2⌉ = 6860296, so the inner
+// half-up carry does not fire and the composite coincides with the refuted fused
+// floor. A vector where it does NOT coincide rides the same pipeline in
+// TestComputeAaveHealthComponent7CompositeCarriesEndToEnd.
 func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 	in := AaveInput{
 		Marks:   testAaveMarks,
@@ -58,7 +82,7 @@ func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 		Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
 		Prices: []PriceInput{
 			adapterPrice(aWeETH, "210635958286"),
-			adapterPrice(aUSDC, "99992647"),
+			adapterPrice(aUSDC, "99992646"),
 		},
 	}
 
@@ -78,16 +102,54 @@ func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 	requireBig(t, "13720591", h.TotalDebtBase)
 	require.Equal(t, uint8(8), h.BaseDecimals)
 
+	// Component 4, the debt leg's own integers — spelled out because the ceiling
+	// is the rev-3 correction and "13720591" alone would not show which law
+	// produced it.
+	prod := new(big.Int).Mul(mustBig(t, "137216"), mustBig(t, "99992646"))
+	requireBig(t, "13720590913536", prod)
+	q, rem := new(big.Int).QuoRem(prod, pow10(6), new(big.Int))
+	requireBig(t, "13720590", q, "the REFUTED floor: what rev 2 published")
+	requireBig(t, "913536", rem)
+	require.Equal(t, 1, rem.Cmp(big.NewInt(500000)),
+		"this leg's remainder is SUPER-half, so it cannot separate ceil from half-up")
+	requireBig(t, "13720591", new(big.Int).Add(q, big.NewInt(1)), "ceil — the chain's value")
+	require.Equal(t, "13720591", h.Reserves[1].DebtBase.String(),
+		"the pipeline must have used the CEILING, not the floor sitting one unit below it")
+
+	// The collateral leg is untouched by rev 3 and still truncates.
+	colProd := new(big.Int).Mul(mustBig(t, "58420789594330"), mustBig(t, "210635958286"))
+	colQ, colRem := new(big.Int).QuoRem(colProd, pow10(18), new(big.Int))
+	requireBig(t, "12305519", colQ)
+	require.NotZero(t, colRem.Sign(), "an exact collateral leg would discriminate nothing")
+	requireBig(t, "12305519", h.Reserves[0].CollateralBase,
+		"collateral FLOORS even though the debt leg one row down CEILS")
+
 	// Component 6 — disclosure. Uniform LT, so the average is exactly 8100.
 	requireBig(t, "99674703900", h.WeightedLTSum, "12305519 × 8100")
 	requireBig(t, "8100", h.AvgLiquidationThresholdBps)
 
-	// Component 7 — the chain's own number.
+	// Component 7 — the chain's own number, under the half-up composite.
 	requireBig(t, "726460718055075032", h.HealthFactorWad)
 	require.False(t, h.IsInfinite)
 
-	// The exact rational carries the same quantity un-rounded, and re-flooring
-	// it to WAD must reproduce the same integer.
+	// …and the reason this borrower cannot discriminate the composite from the
+	// refuted fused floor: the inner carry does not fire.
+	inner, carryRem := new(big.Int).QuoRem(
+		new(big.Int).Mul(mustBig(t, "99674703900"), WadUnit()), mustBig(t, "13720591"), new(big.Int))
+	requireBig(t, "7264607180550750328466", inner, "q = floor(Σ·1e18 / D)")
+	requireBig(t, "8466", new(big.Int).Mod(inner, BpsUnit()), "q mod 1e4 — not 9999, so no ULP step")
+	requireBig(t, "2356594", carryRem, "r")
+	requireBig(t, "6860296", new(big.Int).Div(new(big.Int).Add(mustBig(t, "13720591"), big.NewInt(1)), big.NewInt(2)), "⌈D/2⌉")
+	require.Equal(t, -1, carryRem.Cmp(big.NewInt(6860296)), "r < ⌈D/2⌉: the half-up carry does NOT fire here")
+	refuted, ok := fusedHealthFactorWad(mustBig(t, "99674703900"), mustBig(t, "13720591"))
+	require.True(t, ok)
+	require.Equal(t, h.HealthFactorWad.String(), refuted.String(),
+		"on this borrower the composite and the refuted fused floor COINCIDE — which is precisely why 12/12 exact never caught the difference")
+
+	// The exact rational carries the same quantity un-rounded. Re-flooring it to
+	// WAD reproduces the same integer HERE only because the carry did not fire;
+	// on a carry vector HealthFactorWad is floor + 1 (see
+	// TestComputeAaveHealthComponent7CompositeCarriesEndToEnd).
 	requireBig(t, "99674703900", h.HealthFactor.Num)
 	requireBig(t, "137205910000", h.HealthFactor.Den, "10000 × totalDebtBase")
 	v, ok := h.HealthFactor.FloorScaled(WadUnit())
@@ -102,9 +164,352 @@ func TestComputeAaveHealthGoldenBorrowerEndToEnd(t *testing.T) {
 	require.Equal(t, RegimeB, h.Regime)
 }
 
+// ---------------------------------------------------------------------------
+// Rev-3 component 4: the debt leg CEILS.
+// ---------------------------------------------------------------------------
+
+// TestComputeAaveHealthGoldenDebtPriceBracket verifies the re-pin bracket the
+// ruling supplied, endpoint by endpoint, THROUGH THE PIPELINE rather than by
+// re-deriving it on the side.
+//
+// ceil(137216·p/1e6) = 13720591 holds for p ∈ [99992640, 99992646] and for no
+// price outside it. Both endpoints are asserted, and so are the two prices that
+// bracket them — a bracket whose ends are not shown to be ends is an assertion
+// about nothing.
+func TestComputeAaveHealthGoldenDebtPriceBracket(t *testing.T) {
+	debtBaseAt := func(t *testing.T, price string) *big.Int {
+		t.Helper()
+		h, err := ComputeAaveHealth(AaveInput{
+			Marks:   testAaveMarks,
+			Account: acctA,
+			Reserves: []AaveReserve{
+				simpleReserve(aUSDC, 6, "0", "137216", false),
+			},
+			Prices: []PriceInput{adapterPrice(aUSDC, price)},
+		})
+		require.NoError(t, err)
+		requireBig(t, "137216", h.Reserves[0].LiveDebt, "index is RAY, so the scaled balance IS the live one")
+		return h.TotalDebtBase
+	}
+
+	for _, tc := range []struct {
+		price, wantDebtBase, note string
+	}{
+		{"99992639", "13720590", "one below the bracket: 13720589953024 ceils to 13720590"},
+		{"99992640", "13720591", "BRACKET LOW: 13720590090240, remainder 90240"},
+		{"99992643", "13720591", "interior"},
+		{"99992646", "13720591", "BRACKET HIGH: 13720590913536, remainder 913536 — the re-pinned price"},
+		{"99992647", "13720592", "one above: 13720591050752 ceils to 13720592, which is why 99992647 no longer solves the pin"},
+	} {
+		t.Run(tc.price, func(t *testing.T) {
+			requireBig(t, tc.wantDebtBase, debtBaseAt(t, tc.price), tc.note)
+		})
+	}
+}
+
+// TestComputeAaveHealthDebtLegCeilsOnSubHalfRemainders is the ruling's BLOCKING
+// ITEM 2, and it is the only vector in this suite that pins the debt leg's law
+// uniquely.
+//
+// The golden leg's remainder is 913536/1000000 — SUPER-half — so ceil and half-up
+// both produce 13720591 there and the vector is blind to the difference between
+// them. Under a SUB-half remainder all three conventions separate at once:
+//
+//	137216 × 99992603 = 13720585013248   rem  13248  (frac ≈ 0.0132)
+//	137216 × 99992606 = 13720585424896   rem 424896  (frac ≈ 0.4249)
+//
+//	floor    13720585      half-up  13720585      CEIL  13720586
+//
+// Both points sit inside the sub-half band — one just above zero, one just below
+// the half — and both must round UP, because MathUtils.mulDivCeil adds one for
+// ANY nonzero remainder. floor and half-up agree with each other and disagree
+// with the chain; that is the discrimination.
+//
+// The health factor separates too, and in the safe direction: the larger ceil-D
+// yields the LOWER health factor.
+func TestComputeAaveHealthDebtLegCeilsOnSubHalfRemainders(t *testing.T) {
+	for _, tc := range []struct {
+		price, product, remainder string
+	}{
+		{"99992603", "13720585013248", "13248"},
+		{"99992606", "13720585424896", "424896"},
+	} {
+		t.Run(tc.price, func(t *testing.T) {
+			// The three conventions, computed here from the hard-coded integers.
+			prod := new(big.Int).Mul(mustBig(t, "137216"), mustBig(t, tc.price))
+			requireBig(t, tc.product, prod)
+			den := pow10(6)
+			floor, rem := new(big.Int).QuoRem(new(big.Int).Set(prod), den, new(big.Int))
+			requireBig(t, tc.remainder, rem)
+			require.Equal(t, -1, rem.Cmp(big.NewInt(500000)),
+				"the remainder must be BELOW half or this vector cannot separate ceil from half-up")
+			require.NotZero(t, rem.Sign(), "…and nonzero, or it cannot separate ceil from floor either")
+			halfUp := new(big.Int).Add(new(big.Int).Set(prod), big.NewInt(500000))
+			halfUp.Div(halfUp, den)
+			ceil := new(big.Int).Add(new(big.Int).Set(floor), big.NewInt(1))
+			requireBig(t, "13720585", floor, "REFUTED: floor")
+			requireBig(t, "13720585", halfUp, "REFUTED: half-up — equal to floor on a sub-half remainder")
+			requireBig(t, "13720586", ceil, "the deployed law")
+
+			h, err := ComputeAaveHealth(AaveInput{
+				Marks:   testAaveMarks,
+				Account: acctA,
+				Reserves: []AaveReserve{
+					simpleReserve(aWeETH, 8, "20000000", "0", true),
+					simpleReserve(aUSDC, 6, "0", "137216", false),
+				},
+				Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+				Prices: []PriceInput{adapterPrice(aWeETH, "100000000"), adapterPrice(aUSDC, tc.price)},
+			})
+			require.NoError(t, err)
+			requireBig(t, "13720586", h.Reserves[1].DebtBase, "the pipeline CEILS the debt leg")
+			requireBig(t, "13720586", h.TotalDebtBase)
+			requireBig(t, "162000000000", h.WeightedLTSum, "20000000 × 8100")
+
+			// Health factor under the shipped ceil-D, and under the refuted
+			// floor-D, computed with the SAME component-7 law so the only
+			// difference is the debt-leg rounding.
+			requireBig(t, "1180707587853754934", h.HealthFactorWad)
+			refuted, ok := AaveHealthFactorWad(mustBig(t, "162000000000"), mustBig(t, "13720585"))
+			require.True(t, ok)
+			requireBig(t, "1180707673907490096", refuted, "what a floored debt leg would have published")
+			require.Equal(t, -1, h.HealthFactorWad.Cmp(refuted),
+				"ceiling the debt raises D and therefore LOWERS the health factor — the conservative direction")
+		})
+	}
+}
+
+// TestComputeAaveHealthComponent4LegsRoundOppositeWaysOnOneVector puts the
+// asymmetry beyond doubt by giving ONE reserve both a debt and a collateral
+// balance of the SAME size at the SAME price, so a single (amount, price,
+// decimals) triple has to produce two different base values.
+//
+//	137216 × 99992603 / 1e6 = 13720585.013248
+//	  collateralBase = 13720585   (floor)
+//	  debtBase       = 13720586   (ceil)
+//
+// A single-rounding implementation cannot pass this test, whichever rounding it
+// picks.
+func TestComputeAaveHealthComponent4LegsRoundOppositeWaysOnOneVector(t *testing.T) {
+	h, err := ComputeAaveHealth(AaveInput{
+		Marks:   testAaveMarks,
+		Account: acctA,
+		Reserves: []AaveReserve{
+			simpleReserve(aUSDC, 6, "137216", "137216", true),
+		},
+		Params: []ParamRow{aaveParam(aUSDC, "8100", "10600")},
+		Prices: []PriceInput{adapterPrice(aUSDC, "99992603")},
+	})
+	require.NoError(t, err)
+	requireBig(t, "137216", h.Reserves[0].LiveCollateral)
+	requireBig(t, "137216", h.Reserves[0].LiveDebt)
+	requireBig(t, "13720585", h.Reserves[0].CollateralBase, "collateral truncates")
+	requireBig(t, "13720586", h.Reserves[0].DebtBase, "debt ceils")
+	require.Equal(t, 1, h.Reserves[0].DebtBase.Cmp(h.Reserves[0].CollateralBase),
+		"the same tokens at the same price must value HIGHER as debt than as collateral")
+	requireBig(t, "1", new(big.Int).Sub(h.Reserves[0].DebtBase, h.Reserves[0].CollateralBase),
+		"exactly one base unit apart: one ceiling step")
+}
+
+// ---------------------------------------------------------------------------
+// Rev-3 component 7: the half-up composite, end to end.
+// ---------------------------------------------------------------------------
+
+// TestComputeAaveHealthComponent7CompositeCarriesEndToEnd is the ruling's
+// BLOCKING ITEM 1 riding the whole pipeline rather than only the helper.
+//
+// Every recorded live borrower has q ≢ 9999 (mod 1e4) and therefore cannot tell
+// the composite from the refuted fused floor. This vector can. Its debt leg is an
+// EXACT division (13720591 × 1e8 / 1e8) so component 4's ceiling is inert here
+// and the only thing under test is component 7:
+//
+//	C = 12315707, LT = 8100  ⇒  Σ = 99757226700
+//	D = 13720591
+//	Σ·1e18 = q·D + r   with q = 7270621702811489679999   (q mod 1e4 = 9999)
+//	                        r = 12840591 ≥ ⌈D/2⌉ = 6860296   ⇒ the carry FIRES
+//	inner wadDiv = q + 1 = 7270621702811489680000
+//	  composite   = 727062170281148968   <- the chain, and what ships
+//	  fused floor = 727062170281148967   <- rev 2, one wad ULP LOW
+//
+// A build that still fused-floored, or that floored the inner division, or that
+// used any of the four two-step composites, lands on a different integer.
+func TestComputeAaveHealthComponent7CompositeCarriesEndToEnd(t *testing.T) {
+	h, err := ComputeAaveHealth(AaveInput{
+		Marks:   testAaveMarks,
+		Account: acctA,
+		Reserves: []AaveReserve{
+			simpleReserve(aWeETH, 8, "12315707", "0", true),
+			simpleReserve(aUSDC, 8, "0", "13720591", false),
+		},
+		Params: []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+		Prices: []PriceInput{adapterPrice(aWeETH, "100000000"), adapterPrice(aUSDC, "100000000")},
+	})
+	require.NoError(t, err)
+
+	sigma, d := mustBig(t, "99757226700"), mustBig(t, "13720591")
+	requireBig(t, "12315707", h.TotalCollateralBase)
+	requireBig(t, "13720591", h.TotalDebtBase, "exact division: component 4's ceiling is inert on this vector")
+	requireBig(t, "99757226700", h.WeightedLTSum, "12315707 × 8100")
+	requireBig(t, "8100", h.AvgLiquidationThresholdBps)
+
+	// The carry, in integers.
+	q, r := new(big.Int).QuoRem(new(big.Int).Mul(sigma, WadUnit()), d, new(big.Int))
+	requireBig(t, "7270621702811489679999", q)
+	requireBig(t, "9999", new(big.Int).Mod(new(big.Int).Set(q), BpsUnit()),
+		"q ≡ 9999 (mod 1e4) — the /1e4 step is one unit away from stepping")
+	requireBig(t, "12840591", r)
+	ceilHalfD := new(big.Int).Div(new(big.Int).Add(new(big.Int).Set(d), big.NewInt(1)), big.NewInt(2))
+	requireBig(t, "6860296", ceilHalfD)
+	require.GreaterOrEqual(t, r.Cmp(ceilHalfD), 0, "r ≥ ⌈D/2⌉: the half-up carry FIRES")
+	requireBig(t, "7270621702811489680000", new(big.Int).Add(new(big.Int).Set(q), big.NewInt(1)),
+		"the inner wadDiv result")
+
+	// What ships.
+	requireBig(t, "727062170281148968", h.HealthFactorWad, "the composite")
+
+	// Every refuted form, computed here from the same totals.
+	fusedFloor, ok := fusedHealthFactorWad(sigma, d)
+	require.True(t, ok)
+	requireBig(t, "727062170281148967", fusedFloor, "REFUTED rev-2 fused floor — one wad ULP LOW")
+	require.NotEqual(t, h.HealthFactorWad.String(), fusedFloor.String(),
+		"if these agree the vector proves nothing")
+
+	c, lt := mustBig(t, "12315707"), mustBig(t, "8100")
+	twoStep := map[string]string{
+		"pmFloor+wdFloor":   wadDivFloor(percentMulFloor(c, lt), d).String(),
+		"pmFloor+wdHalfUp":  wadDivHalfUp(percentMulFloor(c, lt), d).String(),
+		"pmHalfUp+wdFloor":  wadDivFloor(percentMulHalfUp(c, lt), d).String(),
+		"pmHalfUp+wdHalfUp": wadDivHalfUp(percentMulHalfUp(c, lt), d).String(),
+	}
+	require.Equal(t, "727062121449433191", twoStep["pmFloor+wdFloor"])
+	require.Equal(t, "727062121449433191", twoStep["pmFloor+wdHalfUp"])
+	require.Equal(t, "727062194332591066", twoStep["pmHalfUp+wdFloor"])
+	require.Equal(t, "727062194332591067", twoStep["pmHalfUp+wdHalfUp"])
+	for name, v := range twoStep {
+		require.NotEqual(t, h.HealthFactorWad.String(), v, "two-step composite %s must not reproduce the shipped value", name)
+	}
+
+	// THE CONSEQUENCE a consumer must know: the published wad is NOT the floor of
+	// the exact rational on a carry vector. It is one ULP above it.
+	requireBig(t, "99757226700", h.HealthFactor.Num)
+	requireBig(t, "137205910000", h.HealthFactor.Den)
+	floorOfRational, ok := h.HealthFactor.FloorScaled(WadUnit())
+	require.True(t, ok)
+	requireBig(t, "727062170281148967", floorOfRational)
+	requireBig(t, "1", new(big.Int).Sub(h.HealthFactorWad, floorOfRational),
+		"the chain's half-up inner step puts the published wad exactly one ULP above the rational's floor")
+}
+
+// ---------------------------------------------------------------------------
+// Rev-3 regime guard: pins before the TokenMath cut are REFUSED.
+// ---------------------------------------------------------------------------
+
+// TestComputeAaveHealthRefusesPinsBeforeTheTokenMathCut is the ruling's BLOCKING
+// ITEM 4.
+//
+// Components 4 and 7 were derived from the CURRENT Pool implementation's source.
+// Nobody has read the pre-23,088,584 GenericLogic, so a historical health factor
+// computed with today's laws would be a number whose derivation does not exist.
+// The refusal has two arms and BOTH are needed:
+//
+//	explicit    Regime = RegimeA
+//	implicit    Marks.BalancesBlock < 23,088,584 with the zero-value Regime
+//
+// The implicit arm is the load-bearing one. Regime's zero value is RegimeB by
+// design, so a backfill that never mentions regimes would otherwise be served
+// today's laws silently — which is exactly the class of failure the pre-cut ray
+// split already exists to prevent.
+func TestComputeAaveHealthRefusesPinsBeforeTheTokenMathCut(t *testing.T) {
+	build := func(regime Regime, balancesBlock uint64) AaveInput {
+		return AaveInput{
+			Marks:    Watermarks{BalancesBlock: balancesBlock, ParamsBlock: 20713917},
+			Account:  acctA,
+			Regime:   regime,
+			Reserves: []AaveReserve{simpleReserve(aWeETH, 8, "20000000", "0", true), simpleReserve(aUSDC, 8, "0", "10000000", false)},
+			Params:   []ParamRow{aaveParam(aWeETH, "8100", "10600")},
+			Prices:   []PriceInput{adapterPrice(aWeETH, "100000000"), adapterPrice(aUSDC, "100000000")},
+		}
+	}
+
+	t.Run("explicit RegimeA is refused even at a current block", func(t *testing.T) {
+		_, err := ComputeAaveHealth(build(RegimeA, 25635618))
+		require.ErrorIs(t, err, ErrPreTokenMathRegime)
+		require.Contains(t, err.Error(), "regime A requested")
+		require.Contains(t, err.Error(), acctA.Hex(), "the refusal names the account")
+	})
+
+	t.Run("a pre-cut block is refused even with the zero-value regime", func(t *testing.T) {
+		var zero Regime
+		require.Equal(t, RegimeB, zero, "the trap this arm closes: the zero value is the CURRENT regime")
+		_, err := ComputeAaveHealth(build(zero, 23088583))
+		require.ErrorIs(t, err, ErrPreTokenMathRegime)
+		require.Contains(t, err.Error(), "Marks.BalancesBlock 23088583 is below the TokenMath cut 23088584")
+	})
+
+	t.Run("the cut block itself computes", func(t *testing.T) {
+		h, err := ComputeAaveHealth(build(RegimeB, AaveTokenMathFromBlock))
+		require.NoError(t, err, "23,088,584 is the FIRST block of the current regime, not the last of the old one")
+		requireBig(t, "1620000000000000000", h.HealthFactorWad)
+		require.Equal(t, RegimeB, h.Regime)
+	})
+
+	t.Run("the refusal reaches the derived surfaces", func(t *testing.T) {
+		in := build(RegimeA, 25635618)
+		_, _, err := ComputeLiquidationPrice(PositionInput{Engine: AaveEngine, Aave: &in}, []common.Address{aWeETH})
+		require.ErrorIs(t, err, ErrPreTokenMathRegime,
+			"weightsFor goes through ComputeAaveHealth, so the liquidation-price surface inherits the guard")
+	})
+
+	t.Run("no arithmetic result escapes the refusal", func(t *testing.T) {
+		// The contrast that makes the claim mean something: the SAME reserves,
+		// prices and params produce a full result one block later.
+		ok, err := ComputeAaveHealth(build(RegimeB, AaveTokenMathFromBlock))
+		require.NoError(t, err)
+		requireBig(t, "10000000", ok.TotalDebtBase)
+		requireBig(t, "1620000000000000000", ok.HealthFactorWad)
+
+		h, err := ComputeAaveHealth(build(RegimeB, AaveTokenMathFromBlock-1))
+		require.ErrorIs(t, err, ErrPreTokenMathRegime)
+		require.Equal(t, AaveHealth{}, h,
+			"a refused era must return the ZERO result — no partial totals, no health factor, "+
+				"no reserve rows a caller could mistake for numbers")
+	})
+
+	t.Run("an input fault the caller can act on is reported ahead of the era", func(t *testing.T) {
+		// ORDERING, pinned deliberately. The guard is the last refusal and the
+		// first thing before any arithmetic; it is NOT first overall, so a caller
+		// holding a DM-tagged param row at a pre-cut block hears about the row.
+		// A future refactor that moves the guard to the top of the function
+		// breaks this test, which is the point of writing it down.
+		in := build(RegimeB, 20000000)
+		in.Params = []ParamRow{dmParam(aWeETH, "81000000000000000000", "1000000000000000000")}
+		_, err := ComputeAaveHealth(in)
+		require.ErrorIs(t, err, ErrParamEngineMismatch)
+		require.NotErrorIs(t, err, ErrPreTokenMathRegime)
+
+		// With the row fixed, the era refusal is what remains.
+		in.Params = []ParamRow{aaveParam(aWeETH, "8100", "10600")}
+		_, err = ComputeAaveHealth(in)
+		require.ErrorIs(t, err, ErrPreTokenMathRegime)
+	})
+
+	t.Run("the ray-level regime split is NOT withdrawn", func(t *testing.T) {
+		// Components 2 and 3 are established on both sides of the cut, and the
+		// helpers still honour RegimeA. The refusal is scoped to the aggregate
+		// surface, where the unproven laws are.
+		requireBig(t, "137215", AaveLiveDebt(mustBig(t, "125415"), mustBig(t, "1094089501745475497022017896"), RegimeA))
+		requireBig(t, "137216", AaveLiveDebt(mustBig(t, "125415"), mustBig(t, "1094089501745475497022017896"), RegimeB))
+	})
+}
+
 // TestComputeAaveHealthSecondGoldenVector pins the 0x849b5e51 borrower with a
 // single-reserve construction where the base values are set directly (both
 // indexes RAY, both prices 1e8 at 8 decimals, so base value == token amount).
+//
+// REV-3 SURVIVOR, and both legs of why: the debt leg 9604879 × 1e8 / 1e8 divides
+// EXACTLY, so ceil == floor and component 4's correction is inert; and
+// Σ·1e18 = q·D + r has q ≡ 9309 (mod 1e4) with r = 3701389 < ⌈D/2⌉ = 4802440, so
+// component 7's carry does not fire. The recorded chain integer is unchanged.
 func TestComputeAaveHealthSecondGoldenVector(t *testing.T) {
 	in := AaveInput{
 		Marks:   testAaveMarks,
@@ -124,6 +529,19 @@ func TestComputeAaveHealthSecondGoldenVector(t *testing.T) {
 	requireBig(t, "10000153", h.TotalCollateralBase)
 	requireBig(t, "9604879", h.TotalDebtBase)
 	requireBig(t, "843334302285328112", h.HealthFactorWad)
+
+	// The two exactness facts the survival rests on, asserted rather than
+	// claimed in prose.
+	requireBig(t, "0", new(big.Int).Mod(
+		new(big.Int).Mul(mustBig(t, "9604879"), mustBig(t, "100000000")), pow10(8)),
+		"the debt leg divides EXACTLY, so component 4's ceiling is inert")
+	requireBig(t, "9604879", MulDivCeil(mustBig(t, "9604879"), mustBig(t, "100000000"), pow10(8)),
+		"ceil == floor on an exact division")
+	refuted, ok := fusedHealthFactorWad(
+		new(big.Int).Mul(mustBig(t, "10000153"), mustBig(t, "8100")), mustBig(t, "9604879"))
+	require.True(t, ok)
+	require.Equal(t, h.HealthFactorWad.String(), refuted.String(),
+		"no carry here either, so component 7's correction leaves this borrower alone")
 }
 
 // ---------------------------------------------------------------------------
@@ -216,10 +634,12 @@ func TestComputeAaveHealthMixedLTUsesWeightedSum(t *testing.T) {
 			requireBig(t, tc.wantHFWeightedSumFused, h.HealthFactorWad,
 				"the shipped law fuses over the exact weighted sum")
 
-			// The refuted form, computed here from the SAME totals, must be
-			// the recorded aggregate-LT value and must differ from what
-			// shipped.
-			aggregate, ok := FusedHealthFactorWad(
+			// The refuted form, computed here from the SAME totals with the
+			// SAME component-7 law, so the only difference under test is the
+			// fusion INPUT. Both vectors divide exactly (D = 1e14, r = 0), so
+			// the rev-3 half-up carry cannot fire and these recorded integers
+			// are unchanged from rev 2 — M-1/M-2 are survivors.
+			aggregate, ok := AaveHealthFactorWad(
 				new(big.Int).Mul(h.TotalCollateralBase, h.AvgLiquidationThresholdBps),
 				h.TotalDebtBase)
 			require.True(t, ok)
@@ -245,7 +665,7 @@ func TestComputeAaveHealthUniformLTFusionFormsCoincide(t *testing.T) {
 	}
 	h, err := ComputeAaveHealth(in)
 	require.NoError(t, err)
-	aggregate, ok := FusedHealthFactorWad(
+	aggregate, ok := AaveHealthFactorWad(
 		new(big.Int).Mul(h.TotalCollateralBase, h.AvgLiquidationThresholdBps), h.TotalDebtBase)
 	require.True(t, ok)
 	require.Equal(t, h.HealthFactorWad.String(), aggregate.String(),

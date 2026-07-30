@@ -169,11 +169,18 @@ func TestRegimeAtBlock(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Component 7 — the fused floor division (P-2 DISCHARGED BY FALSIFICATION).
+// Component 7 — the wadDiv HALF-UP composite (rev 3), and the forms it refutes.
 // ---------------------------------------------------------------------------
 
 // goldenHFVectors are the two recorded live-borrower vectors from
 // recon/p3-probes.md. Both have uniform LT = 8100 bps.
+//
+// Neither one discriminates the composite from the refuted fused floor: on both,
+// q ≢ 9999 (mod 1e4), so the inner half-up carry cannot step the outer /1e4
+// division. That is the whole reason rev 2's approximation survived 12/12 twice,
+// and the reason the constructed vectors in
+// TestAaveHealthFactorCompositeCarryDiscriminators are mandatory rather than
+// decorative.
 var goldenHFVectors = []struct {
 	name             string
 	collateral, debt string
@@ -202,17 +209,31 @@ var goldenHFVectors = []struct {
 	},
 }
 
-// TestFusedHealthFactorGoldenVectors pins the deployed law and the fused
-// half-up / fused ceil values it refutes.
-func TestFusedHealthFactorGoldenVectors(t *testing.T) {
+// TestAaveHealthFactorGoldenVectors pins the deployed composite on both recorded
+// borrowers, and the fused half-up / fused ceil values it refutes.
+//
+// It ALSO records, as an assertion rather than a comment, that the refuted rev-2
+// fused floor reproduces the chain here. Two live borrowers agreeing with a wrong
+// law is the evidence-shape this revision exists to correct.
+func TestAaveHealthFactorGoldenVectors(t *testing.T) {
 	for _, tc := range goldenHFVectors {
 		t.Run(tc.name, func(t *testing.T) {
 			c, d, lt := mustBig(t, tc.collateral), mustBig(t, tc.debt), mustBig(t, tc.ltBps)
 			weighted := new(big.Int).Mul(c, lt)
 
-			hf, ok := FusedHealthFactorWad(weighted, d)
+			hf, ok := AaveHealthFactorWad(weighted, d)
 			require.True(t, ok)
-			require.Equal(t, tc.chainHF, hf.String(), "the fused FLOOR division is the deployed law")
+			require.Equal(t, tc.chainHF, hf.String(), "the wadDiv half-up composite is the deployed law")
+
+			// The rev-2 fused floor agrees HERE — and that agreement is why no
+			// pin count could have caught it.
+			refuted, ok := fusedHealthFactorWad(weighted, d)
+			require.True(t, ok)
+			require.Equal(t, tc.chainHF, refuted.String(),
+				"the refuted fused floor matches the chain on this borrower; only a carry vector separates them")
+			q, _ := new(big.Int).QuoRem(new(big.Int).Mul(weighted, WadUnit()), d, new(big.Int))
+			require.NotEqual(t, "9999", new(big.Int).Mod(q, BpsUnit()).String(),
+				"…and this is the arithmetic reason: q ≢ 9999 (mod 1e4)")
 
 			// Fused half-up and fused ceil, computed here and asserted to be
 			// the recorded REFUTED values.
@@ -220,21 +241,162 @@ func TestFusedHealthFactorGoldenVectors(t *testing.T) {
 			den := new(big.Int).Mul(BpsUnit(), d)
 			half := new(big.Int).Add(new(big.Int).Set(n), new(big.Int).Div(new(big.Int).Set(den), big.NewInt(2)))
 			require.Equal(t, tc.refutedFusedHalf, half.Div(half, den).String())
-			q, rem := new(big.Int).QuoRem(n, den, new(big.Int))
+			fq, rem := new(big.Int).QuoRem(n, den, new(big.Int))
 			require.NotZero(t, rem.Sign(), "an exact division would discriminate nothing")
-			require.Equal(t, tc.refutedFusedCeil, q.Add(q, big.NewInt(1)).String())
+			require.Equal(t, tc.refutedFusedCeil, fq.Add(fq, big.NewInt(1)).String())
 		})
 	}
 }
 
-// TestFusedHealthFactorRefutesEveryTwoStepComposite is P-2's falsification,
+// TestAaveHealthFactorCompositeCarryDiscriminators is the ruling's BLOCKING
+// ITEM 1: the two constructed vectors on which the deployed composite and the
+// refuted rev-2 fused floor DISAGREE, plus the derivation's own intermediates.
+//
+// The law is
+//
+//	HF = floor( floor((Σ·1e18 + ⌊D/2⌋) / D) / 1e4 )
+//
+// Write Σ·1e18 = q·D + r. The inner wadDiv returns q + [r ≥ ⌈D/2⌉]; the fused
+// floor returns floor(q/1e4). They differ IFF the carry fires AND
+// q ≡ 9999 (mod 1e4), and then the chain is one wad ULP HIGHER. Every row below
+// satisfies both conditions, and each intermediate is asserted so a reader can
+// see WHY the values differ rather than being told that they do.
+//
+// All integers here were recomputed from scratch and agree with the ruling's.
+func TestAaveHealthFactorCompositeCarryDiscriminators(t *testing.T) {
+	cases := []struct {
+		name                       string
+		sigma, d                   string
+		q, qMod1e4, r, ceilHalfD   string
+		innerWadDiv                string
+		wantComposite              string
+		refutedFusedFloor          string
+		refutedHalfUpTwoStepFloor  string
+		refutedHalfUpTwoStepHalfUp string
+	}{
+		{
+			// The minimal existence proof: the two laws do not merely differ in
+			// the last digit of a large number, they differ across the 0/1
+			// boundary of the health factor itself.
+			name:  "trivial: composite 1, fused floor 0",
+			sigma: "1", d: "100000000000001",
+			q: "9999", qMod1e4: "9999", r: "99999999990001", ceilHalfD: "50000000000001",
+			innerWadDiv:   "10000",
+			wantComposite: "1", refutedFusedFloor: "0",
+			refutedHalfUpTwoStepFloor: "0", refutedHalfUpTwoStepHalfUp: "0",
+		},
+		{
+			// Realistic magnitudes: D is the ceil-summed debt base of the pin
+			// the ruling read (13720493), Σ a weighted sum of the same order as
+			// the live book's.
+			name:  "realistic witness 1",
+			sigma: "99215323900", d: "13720493",
+			q: "7231177764530764309999", qMod1e4: "9999", r: "8890493", ceilHalfD: "6860247",
+			innerWadDiv:   "7231177764530764310000",
+			wantComposite: "723117776453076431", refutedFusedFloor: "723117776453076430",
+			refutedHalfUpTwoStepFloor: "723117748028441835", refutedHalfUpTwoStepHalfUp: "723117748028441835",
+		},
+		{
+			name:  "realistic witness 2",
+			sigma: "99215325927", d: "13720493",
+			q: "7231177912265980529999", qMod1e4: "9999", r: "12430493", ceilHalfD: "6860247",
+			innerWadDiv:   "7231177912265980530000",
+			wantComposite: "723117791226598053", refutedFusedFloor: "723117791226598052",
+			refutedHalfUpTwoStepFloor: "723117820912120286", refutedHalfUpTwoStepHalfUp: "723117820912120286",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sigma, d := mustBig(t, tc.sigma), mustBig(t, tc.d)
+
+			// The decomposition Σ·1e18 = q·D + r.
+			q, r := new(big.Int).QuoRem(new(big.Int).Mul(sigma, WadUnit()), d, new(big.Int))
+			require.Equal(t, tc.q, q.String())
+			require.Equal(t, tc.qMod1e4, new(big.Int).Mod(new(big.Int).Set(q), BpsUnit()).String())
+			require.Equal(t, "9999", tc.qMod1e4, "the vector is only a discriminator when q ≡ 9999 (mod 1e4)")
+			require.Equal(t, tc.r, r.String())
+
+			// The carry condition r ≥ ⌈D/2⌉, with ⌈D/2⌉ spelled out.
+			ceilHalfD := new(big.Int).Div(new(big.Int).Add(new(big.Int).Set(d), big.NewInt(1)), big.NewInt(2))
+			require.Equal(t, tc.ceilHalfD, ceilHalfD.String())
+			require.GreaterOrEqual(t, r.Cmp(ceilHalfD), 0, "the half-up carry must FIRE for this vector to discriminate")
+
+			// The inner wadDiv, which is q+1 exactly when the carry fires.
+			inner := new(big.Int).Add(new(big.Int).Mul(sigma, WadUnit()), new(big.Int).Rsh(new(big.Int).Set(d), 1))
+			inner.Div(inner, d)
+			require.Equal(t, tc.innerWadDiv, inner.String())
+			require.Equal(t, "1", new(big.Int).Sub(inner, q).String(), "inner = q + 1 under a fired carry")
+
+			// The shipped law.
+			got, ok := AaveHealthFactorWad(sigma, d)
+			require.True(t, ok)
+			require.Equal(t, tc.wantComposite, got.String())
+			require.Equal(t, tc.wantComposite, new(big.Int).Div(inner, BpsUnit()).String(),
+				"the shipped helper must be exactly floor(innerWadDiv / 1e4)")
+
+			// The refuted rev-2 fused floor, one wad ULP LOW.
+			fused, ok := fusedHealthFactorWad(sigma, d)
+			require.True(t, ok)
+			require.Equal(t, tc.refutedFusedFloor, fused.String())
+			require.Equal(t, "1", new(big.Int).Sub(got, fused).String(),
+				"the chain is exactly one wad ULP HIGHER than the fused floor on a carry vector")
+			require.Equal(t, tc.refutedFusedFloor, new(big.Int).Div(new(big.Int).Set(q), BpsUnit()).String(),
+				"…and the fused floor is floor(q/1e4), the composition-of-floors identity")
+
+			// The refuted half-up TWO-STEP forms (percentMul then wadDiv), which
+			// round the weighted sum down to base units before dividing and so
+			// miss by far more than one ULP.
+			require.Equal(t, tc.refutedHalfUpTwoStepFloor, wadDivFloor(percentMulHalfUp(sigma, big.NewInt(1)), d).String())
+			require.Equal(t, tc.refutedHalfUpTwoStepHalfUp, wadDivHalfUp(percentMulHalfUp(sigma, big.NewInt(1)), d).String())
+			require.NotEqual(t, tc.wantComposite, tc.refutedHalfUpTwoStepFloor)
+			require.NotEqual(t, tc.wantComposite, tc.refutedHalfUpTwoStepHalfUp)
+		})
+	}
+}
+
+// TestAaveHealthFactorCarryIncidenceIsNarrow records the OTHER half of item 1's
+// point: the two laws agree almost always, which is why an observation streak
+// could never have settled this and only the source could.
+//
+// The sweep is exhaustive over a contiguous Σ range at a fixed realistic D, so
+// the count is a fact about the arithmetic rather than a sample.
+func TestAaveHealthFactorCarryIncidenceIsNarrow(t *testing.T) {
+	d := mustBig(t, "13720493")
+	differ := 0
+	const span = 20000
+	for i := 0; i < span; i++ {
+		sigma := new(big.Int).Add(mustBig(t, "99215313900"), big.NewInt(int64(i)))
+		got, ok := AaveHealthFactorWad(sigma, d)
+		require.True(t, ok)
+		fused, ok := fusedHealthFactorWad(sigma, d)
+		require.True(t, ok)
+		if got.Cmp(fused) != 0 {
+			differ++
+			require.Equal(t, "1", new(big.Int).Sub(got, fused).String(),
+				"when they differ it is ALWAYS by exactly one wad ULP, and always upward")
+		}
+	}
+	require.Equal(t, 2, differ,
+		"2 of 20000 consecutive weighted sums separate the two laws — ~1e-4 here, ~5e-5 in general; "+
+			"a 12-borrower pin had no chance of finding one")
+}
+
+// TestAaveHealthFactorRefutesEveryTwoStepComposite is P-2's falsification,
 // re-run in the unit layer: on BOTH golden vectors, all four
 // wadDiv(percentMul(...)) composites disagree with the chain.
+//
+// Rev 3 does not weaken this. The deployed law's INNER step is a half-up wadDiv,
+// but it is applied to the RAW weighted sum, not to a percentMul-rounded one —
+// GenericLogic.sol calls wadDiv on Σ(Cᵢ·LTᵢ) and divides by 1e4 afterwards
+// (:160-164), with the average threshold computed later (:167-173). Pre-rounding
+// the weighted sum into base units is the part that was always wrong, and these
+// four values are still what it produces.
 //
 // The recorded composites are hard-coded, so this test also proves the two
 // helper conventions themselves are implemented as the deployed sources
 // describe them.
-func TestFusedHealthFactorRefutesEveryTwoStepComposite(t *testing.T) {
+func TestAaveHealthFactorRefutesEveryTwoStepComposite(t *testing.T) {
 	cases := []struct {
 		name     string
 		c, d, lt string
@@ -264,9 +426,9 @@ func TestFusedHealthFactorRefutesEveryTwoStepComposite(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, d, lt := mustBig(t, tc.c), mustBig(t, tc.d), mustBig(t, tc.lt)
-			fused, ok := FusedHealthFactorWad(new(big.Int).Mul(c, lt), d)
+			shipped, ok := AaveHealthFactorWad(new(big.Int).Mul(c, lt), d)
 			require.True(t, ok)
-			require.Equal(t, tc.chainHF, fused.String())
+			require.Equal(t, tc.chainHF, shipped.String())
 
 			pmFl := percentMulFloor(c, lt)
 			pmHu := percentMulHalfUp(c, lt)
@@ -307,29 +469,56 @@ func TestRetainedTwoStepBoundaryVectors(t *testing.T) {
 	require.Equal(t, "1", wadDivHalfUp(big.NewInt(810), b).String())
 	require.Equal(t, "0", wadDivFloor(big.NewInt(810), b).String())
 
-	// And the shipped fused law on the same inputs is 0 — i.e. it agrees with
-	// the floor composite here and refutes the half-up one. This vector alone
-	// cannot separate fused from two-step-floor; the golden vectors above do
+	// And the shipped law on the same inputs is 0 — i.e. it agrees with the floor
+	// composite here and refutes the half-up one. This vector alone cannot
+	// separate the shipped law from two-step-floor; the golden vectors above do
 	// that, and this one closes the half-up arm.
-	fused, ok := FusedHealthFactorWad(new(big.Int).Mul(big.NewInt(1000), big.NewInt(8100)), b)
+	//
+	// Rev-3 note: the inner carry DOES fire here (r = 809999999999999993334 ≥
+	// ⌈D/2⌉ = 607500000000000000001, inner wadDiv = 6667 vs q = 6666), and the
+	// composite is STILL 0 — because q ≡ 6666, not 9999, so the step never
+	// reaches the outer /1e4 division. A fired carry is necessary but not
+	// sufficient, and this vector is the record of that.
+	shipped, ok := AaveHealthFactorWad(new(big.Int).Mul(big.NewInt(1000), big.NewInt(8100)), b)
 	require.True(t, ok)
-	require.Equal(t, "0", fused.String())
+	require.Equal(t, "0", shipped.String())
+	refuted, ok := fusedHealthFactorWad(new(big.Int).Mul(big.NewInt(1000), big.NewInt(8100)), b)
+	require.True(t, ok)
+	require.Equal(t, "0", refuted.String())
+
+	q, r := new(big.Int).QuoRem(new(big.Int).Mul(big.NewInt(8100000), WadUnit()), b, new(big.Int))
+	require.Equal(t, "6666", q.String())
+	require.Equal(t, "809999999999999993334", r.String())
+	ceilHalfB := new(big.Int).Div(new(big.Int).Add(new(big.Int).Set(b), big.NewInt(1)), big.NewInt(2))
+	require.Equal(t, "607500000000000000001", ceilHalfB.String())
+	require.GreaterOrEqual(t, r.Cmp(ceilHalfB), 0, "the carry fires…")
+	require.NotEqual(t, "9999", new(big.Int).Mod(q, BpsUnit()).String(), "…but q ≢ 9999, so nothing steps")
 }
 
-// TestFusedHealthFactorZeroDebtIsNotANumber: the deployed contract returns
+// TestAaveHealthFactorZeroDebtIsNotANumber: the deployed contract returns
 // type(uint256).max for a debt-free account. This package returns a marker.
-func TestFusedHealthFactorZeroDebtIsNotANumber(t *testing.T) {
-	hf, ok := FusedHealthFactorWad(big.NewInt(1000), big.NewInt(0))
-	require.False(t, ok)
-	require.Nil(t, hf)
+//
+// Both the shipped composite and the retained witness must refuse identically —
+// a witness that returned a number where the law returns nothing would make every
+// comparison between them meaningless at the boundary.
+func TestAaveHealthFactorZeroDebtIsNotANumber(t *testing.T) {
+	for _, d := range []*big.Int{big.NewInt(0), nil, big.NewInt(-1)} {
+		hf, ok := AaveHealthFactorWad(big.NewInt(1000), d)
+		require.False(t, ok)
+		require.Nil(t, hf)
 
-	hf, ok = FusedHealthFactorWad(big.NewInt(1000), nil)
-	require.False(t, ok)
-	require.Nil(t, hf)
+		hf, ok = fusedHealthFactorWad(big.NewInt(1000), d)
+		require.False(t, ok)
+		require.Nil(t, hf)
+	}
 
-	hf, ok = FusedHealthFactorWad(big.NewInt(1000), big.NewInt(-1))
-	require.False(t, ok)
-	require.Nil(t, hf)
+	// The shipped helper must not mutate the debt it divides by — the inner
+	// half-up step reads D twice (once as ⌊D/2⌋, once as the divisor).
+	d := mustBig(t, "13720493")
+	hf, ok := AaveHealthFactorWad(mustBig(t, "99215323900"), d)
+	require.True(t, ok)
+	require.Equal(t, "723117776453076431", hf.String())
+	require.Equal(t, "13720493", d.String(), "the divisor must survive the call unchanged")
 }
 
 // ---------------------------------------------------------------------------
@@ -521,6 +710,83 @@ func TestMulDivFloorTruncatesTowardZero(t *testing.T) {
 	require.Equal(t, "3", MulDivFloor(big.NewInt(39), big.NewInt(1), big.NewInt(10)).String()) // 3.9 → 3
 	require.Equal(t, "0", MulDivFloor(big.NewInt(9), big.NewInt(1), big.NewInt(10)).String())
 	require.Equal(t, "0", MulDivFloor(big.NewInt(0), big.NewInt(1), big.NewInt(10)).String())
+}
+
+// TestMulDivCeilIsAPureCeilingNotHalfUp pins MathUtils.mulDivCeil, the rev-3
+// component-4 debt-leg law, against BOTH neighbours.
+//
+// The assembly is `div(product, c) + iszero(iszero(mod(product, c)))`: one added
+// for ANY nonzero remainder, however small. The sub-half rows are the ones that
+// matter — they are where ceil, floor and half-up all take different values, and
+// the only ones that can refute half-up.
+func TestMulDivCeilIsAPureCeilingNotHalfUp(t *testing.T) {
+	cases := []struct {
+		name                    string
+		a, b, den               string
+		wantCeil, floor, halfUp string
+		remainder               string
+		subHalf                 bool
+	}{
+		{
+			name: "remainder 1 of 10 — the smallest possible fraction still rounds UP",
+			a:    "31", b: "1", den: "10",
+			wantCeil: "4", floor: "3", halfUp: "3", remainder: "1", subHalf: true,
+		},
+		{
+			name: "remainder 4 of 10 — just below half",
+			a:    "34", b: "1", den: "10",
+			wantCeil: "4", floor: "3", halfUp: "3", remainder: "4", subHalf: true,
+		},
+		{
+			name: "remainder exactly half — ceil and half-up agree, floor does not",
+			a:    "35", b: "1", den: "10",
+			wantCeil: "4", floor: "3", halfUp: "4", remainder: "5", subHalf: false,
+		},
+		{
+			name: "the golden debt leg, sub-half: 137216 × 99992603 / 1e6",
+			a:    "137216", b: "99992603", den: "1000000",
+			wantCeil: "13720586", floor: "13720585", halfUp: "13720585", remainder: "13248", subHalf: true,
+		},
+		{
+			name: "the golden debt leg, SUPER-half: 137231 × 99981000 / 1e6 (0.611)",
+			a:    "137231", b: "99981000", den: "1000000",
+			wantCeil: "13720493", floor: "13720492", halfUp: "13720493", remainder: "611000", subHalf: false,
+		},
+		{
+			name: "exact division adds nothing",
+			a:    "13720591", b: "100000000", den: "100000000",
+			wantCeil: "13720591", floor: "13720591", halfUp: "13720591", remainder: "0", subHalf: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, b, den := mustBig(t, tc.a), mustBig(t, tc.b), mustBig(t, tc.den)
+			require.Equal(t, tc.wantCeil, MulDivCeil(a, b, den).String())
+			require.Equal(t, tc.floor, MulDivFloor(a, b, den).String())
+
+			// Half-up and the remainder, computed here rather than taken on
+			// trust, so the discrimination claim is checkable.
+			prod := new(big.Int).Mul(a, b)
+			rem := new(big.Int).Mod(new(big.Int).Set(prod), den)
+			require.Equal(t, tc.remainder, rem.String())
+			halfUp := new(big.Int).Add(new(big.Int).Set(prod), new(big.Int).Div(new(big.Int).Set(den), big.NewInt(2)))
+			require.Equal(t, tc.halfUp, halfUp.Div(halfUp, den).String())
+
+			if tc.subHalf {
+				require.Equal(t, -1, rem.Cmp(new(big.Int).Div(new(big.Int).Set(den), big.NewInt(2))))
+				require.NotEqual(t, tc.wantCeil, tc.halfUp, "a sub-half vector MUST separate ceil from half-up")
+				require.Equal(t, tc.floor, tc.halfUp, "…and on a sub-half remainder floor and half-up coincide")
+			}
+		})
+	}
+
+	// Inputs are not mutated: the assembly's `+1` must not land in a caller's
+	// *big.Int.
+	a, b, den := mustBig(t, "31"), mustBig(t, "1"), mustBig(t, "10")
+	require.Equal(t, "4", MulDivCeil(a, b, den).String())
+	require.Equal(t, "31", a.String())
+	require.Equal(t, "1", b.String())
+	require.Equal(t, "10", den.String())
 }
 
 // TestAPYPerSecondFromAnnualMatchesDeployedFixture: the deployed Debt Manager

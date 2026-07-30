@@ -123,27 +123,67 @@ func AaveLiveCollateral(scaled, index *big.Int, r Regime) *big.Int {
 // ---------------------------------------------------------------------------
 
 // MulDivFloor is floor(a×b / den) — OpenZeppelin Math.mulDiv with
-// Math.Rounding.Floor, which is what every Debt Manager site uses. Panics on a
-// non-positive denominator; callers validate first.
+// Math.Rounding.Floor, which is what every Debt Manager site uses, and what the
+// Aave COLLATERAL leg of component 4 uses. Panics on a non-positive
+// denominator; callers validate first.
 func MulDivFloor(a, b, den *big.Int) *big.Int {
 	n := new(big.Int).Mul(a, b)
 	return n.Div(n, den)
 }
 
+// MulDivCeil is ceil(a×b / den) — Aave v3.5's MathUtils.mulDivCeil, the
+// DEPLOYED debt-base conversion in component 4.
+//
+//	GenericLogic.sol:219-230 _getUserDebtInBaseCurrency
+//	  return MathUtils.mulDivCeil(userTotalDebt, assetPrice, assetUnit);   (:229)
+//	MathUtils.sol:100-115 mulDivCeil
+//	  d := div(product, c) + iszero(iszero(mod(product, c)))
+//
+// That assembly is a PURE CEILING, not half-up: any nonzero remainder adds one,
+// however small. The never-understate-debt asymmetry that already governs
+// component 2 (RayMulCeil) therefore continues through the base-currency
+// conversion, while the collateral leg stays MulDivFloor
+// (GenericLogic.sol:242-258: `balance * assetPrice; return balance / assetUnit`,
+// plain truncation).
+//
+// Proven on-chain: totalDebtBase was exact for 0/12 live borrowers under floor
+// and 12/12 under ceil (Task 6), and the golden leg 137231 × 99981000 / 1e6 =
+// 13720492.611 lands on the chain's 13720493. That leg's remainder is
+// SUPER-half, so it cannot separate ceil from half-up; the sub-half vectors in
+// aave_test.go do (risk-quant rev-3 ruling item 2).
+//
+// Panics on a non-positive denominator; callers validate first.
+func MulDivCeil(a, b, den *big.Int) *big.Int {
+	n := new(big.Int).Mul(a, b)
+	q, r := new(big.Int).QuoRem(n, den, new(big.Int))
+	if r.Sign() != 0 {
+		q.Add(q, bigOne)
+	}
+	return q
+}
+
 // ---------------------------------------------------------------------------
-// The two-step convention this system does NOT use.
+// The health-factor forms this system does NOT use.
 // ---------------------------------------------------------------------------
 //
-// percentMulHalfUp / percentMulFloor / wadDivHalfUp / wadDivFloor exist so the
-// test suite can PROVE, on the golden on-chain vectors, that the shipped
-// health factor is not any of the four two-step composites. They are
-// deliberately unexported and are never called from a computation path.
+// percentMulHalfUp / percentMulFloor / wadDivHalfUp / wadDivFloor /
+// fusedHealthFactorWad exist so the test suite can PROVE, on the golden on-chain
+// vectors and on the constructed carry discriminators, that the shipped health
+// factor is none of them. They are deliberately unexported and are never called
+// from a computation path.
 //
 // P-2 DISCHARGED BY FALSIFICATION: `wadDiv(percentMul(C, LT), D)` matches the
 // chain healthFactor for ZERO of 12 live borrowers under all four rounding
 // combinations, and one borrower's chain value lies strictly BETWEEN the
 // all-floor and all-half-up composites — the signature of no intermediate
-// rounding (recon/p3-probes.md).
+// rounding of the weighted sum (recon/p3-probes.md).
+//
+// REV-3 ADDITION: the fused floor that shipped as the law in rev 2 is refuted
+// too, from the source rather than from a pin — see AaveHealthFactorWad. It
+// agrees with the deployed composite on every recorded live borrower and differs
+// on ~5×10⁻⁵ of evaluations, which is why it survived 12/12 twice. It is kept
+// here, unexported, so the discriminator vectors can show the difference is real
+// arithmetic and not a typo.
 
 // percentMulHalfUp is PercentageMath.percentMul: (a×bps + 5000) / 10000.
 func percentMulHalfUp(a, bps *big.Int) *big.Int {
@@ -171,30 +211,78 @@ func wadDivFloor(a, b *big.Int) *big.Int {
 	return n.Div(n, b)
 }
 
-// ---------------------------------------------------------------------------
-// The deployed health-factor law.
-// ---------------------------------------------------------------------------
-
-// FusedHealthFactorWad is the DEPLOYED law: ONE exact-integer multiplication
-// over the weighted sum, floored ONCE.
+// fusedHealthFactorWad is the REFUTED rev-2 law: ONE exact-integer
+// multiplication over the weighted sum, floored ONCE.
 //
-//	HF = floor( Σ(CollateralBaseᵢ × LT_bpsᵢ) × 1e18 / (10000 × TotalDebtBase) )
+//	HF = floor( Σ(Cᵢ·LTᵢ) × 1e18 / (10000 × TotalDebtBase) )
 //
-// weightedLTSum is Σ(CollateralBaseᵢ × LT_bpsᵢ) — already summed, NOT divided
-// down by an average threshold. For a uniform-LT book this coincides with
-// floor(C × LT × 1e18 / (10000 × D)); for a mixed-LT book it does not, and
-// the weighted-sum form is what upstream v3.5 computes (P-2 disclosed caveat;
-// pinned by the synthetic mixed-LT vectors M-1/M-2 in aave_test.go).
-//
-// Returns ok=false for zero debt: the health factor is infinite and this
-// function will not invent a value.
-func FusedHealthFactorWad(weightedLTSum, totalDebtBase *big.Int) (hf *big.Int, ok bool) {
+// Retained as a witness only. It equals the deployed composite except when the
+// inner half-up carry fires AND q ≡ 9999 (mod 1e4), where it is one wad ULP LOW.
+// See AaveHealthFactorWad for the derivation and the discriminators.
+func fusedHealthFactorWad(weightedLTSum, totalDebtBase *big.Int) (hf *big.Int, ok bool) {
 	if totalDebtBase == nil || totalDebtBase.Sign() <= 0 {
 		return nil, false
 	}
 	n := new(big.Int).Mul(weightedLTSum, wadUnit)
 	d := new(big.Int).Mul(bpsUnit, totalDebtBase)
 	return n.Div(n, d), true
+}
+
+// ---------------------------------------------------------------------------
+// The deployed health-factor law — the wadDiv HALF-UP composite.
+// ---------------------------------------------------------------------------
+
+// AaveHealthFactorWad is the DEPLOYED component-7 law: a half-up wadDiv over the
+// RAW weighted sum, then a truncating divide by the basis-point denominator.
+//
+//	HF = floor( floor( (Σ(Cᵢ·LTᵢ)·1e18 + ⌊D/2⌋) / D ) / 1e4 ),   D = TotalDebtBase
+//
+// Two divisions, TWO different roundings, in this order. From the deployed
+// verified source (proxy impl resolved via EIP-1967, PoolInstance solc 0.8.27):
+//
+//	GenericLogic.sol:160-164
+//	  healthFactor = avgLiquidationThreshold.wadDiv(totalDebtInBaseCurrency) / 100_00;
+//	WadRayMath.sol:53-62
+//	  wadDiv(a, b) = (a·WAD + b/2) / b        <- HALF-UP, not floor
+//
+// The value the inner wadDiv is called on is the raw Σ(Cᵢ·LTᵢ): the average
+// division at :167-173 happens AFTER, so the aggregate threshold is dead on this
+// path. weightedLTSum is therefore the already-summed weighted sum, NOT divided
+// down by an average threshold — for a uniform-LT book this coincides with the
+// C×LT form, for a mixed-LT book it does not, and the weighted-sum form is what
+// the source computes (pinned by the synthetic mixed-LT vectors M-1/M-2 in
+// aave_test.go).
+//
+// # Why this is NOT the single fused floor we shipped in rev 2
+//
+// Write Σ·1e18 = q·D + r with 0 ≤ r < D. The inner wadDiv returns
+// q + [r ≥ ⌈D/2⌉]; the refuted fused floor floor(Σ·1e18/(1e4·D)) equals
+// floor(q/1e4) by the composition-of-floors identity. The two therefore differ
+// EXACTLY when the half-up carry fires AND q ≡ 9999 (mod 1e4) — and when they
+// differ, the chain's value is one wad ULP HIGHER. Incidence is ~5×10⁻⁵ per
+// evaluation, so 12/12 exact at any pin could never have separated them: rev 2's
+// fused floor was an undetectably good approximation, and its error direction
+// (reporting a hair LOW) was benign. It was still not the contract's law.
+//
+// Consequence a caller must know: HF is NOT floor(HealthFactor) in general. On
+// a carry vector it is floor + 1. Both carry discriminators are pinned in
+// math_test.go and one rides the whole pipeline in aave_test.go.
+//
+// Returns ok=false for zero debt: the health factor is infinite and this
+// function will not invent a value. Panics on a nil weighted sum — a caller
+// that has no weighted sum has no health factor, and inventing zero would
+// publish "maximally unhealthy" for an arithmetic mistake.
+func AaveHealthFactorWad(weightedLTSum, totalDebtBase *big.Int) (hf *big.Int, ok bool) {
+	if totalDebtBase == nil || totalDebtBase.Sign() <= 0 {
+		return nil, false
+	}
+	// Inner step: WadRayMath.wadDiv — half-up at WAD scale. `b/2` is Solidity
+	// integer division, i.e. ⌊D/2⌋, which for a positive D is D>>1.
+	inner := new(big.Int).Mul(weightedLTSum, wadUnit)
+	inner.Add(inner, new(big.Int).Rsh(totalDebtBase, 1))
+	inner.Div(inner, totalDebtBase)
+	// Outer step: `/ 100_00` — Solidity integer division, truncating.
+	return inner.Div(inner, bpsUnit), true
 }
 
 // ---------------------------------------------------------------------------

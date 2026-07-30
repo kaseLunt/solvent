@@ -218,6 +218,97 @@ v3.3-line deployment: the Pool ABI carries `DeficitCreated`/`DeficitCovered` and
   derivation is exact for **debt**, but collateral needs the aToken contracts' streams too
   (same limitation class as the OP side).
 
+### Aave precision — health-pipeline components 4 and 7 [REV 3, 2026-07-29]
+
+Two corrections, landed in ONE revision (`internal/risk` AlgorithmRevision 3). Both were derived
+from the **deployed verified source**, not from a pin count: the live Pool implementation resolved
+from the proxy's EIP-1967 slot (`0x0AA97c284e…` → impl `0x0F3BCeB6b3B2dFb7F0AC58FCbF6dADD23cF34244`),
+Blockscout-verified `PoolInstance` (solc 0.8.27). Authority:
+`.superpowers/sdd/p3-consults/risk-quant-component4-7-ruling.md`.
+
+**Correction 1 — component 4's DEBT leg is a pure CEILING; the collateral leg is unchanged.**
+
+```
+GenericLogic.sol:219-230  _getUserDebtInBaseCurrency
+  scaledBalanceOf(user).getVTokenBalance(reserve.getNormalizedDebt())
+  return MathUtils.mulDivCeil(userTotalDebt, assetPrice, assetUnit);        (:229)
+  summed per borrowed reserve at :141
+MathUtils.sol:100-115     mulDivCeil
+  d := div(product, c) + iszero(iszero(mod(product, c)))    <- PURE ceiling, not half-up
+TokenMath.sol:108-113     getVTokenBalance = rayMulCeil     <- our component 2, already right
+GenericLogic.sol:242-258  _getUserBalanceInBaseCurrency
+  getATokenBalance (rayMulFloor, :66-71); balance * assetPrice; return balance / assetUnit
+                                                              <- plain truncation, UNCHANGED
+```
+
+So `DebtBaseᵢ = MulDivCeil(liveDebtᵢ, priceᵢ, 10^decᵢ)` and
+`CollateralBaseᵢ = MulDivFloor(liveCollateralᵢ, priceᵢ, 10^decᵢ)`. The never-understate-debt
+asymmetry that governs component 2 continues through the base-currency conversion; the two legs of
+one division round in **opposite directions**, and a single-rounding implementation is wrong
+whichever rounding it picks. Live evidence: `totalDebtBase` was exact for **0 of 12** borrowers
+under floor and **12 of 12** under ceil. Golden integers: `137231 × 99981000 = 13720492611000`
+→ floor 13720492 / **ceil 13720493** = chain.
+
+That golden leg's remainder is 611000/1000000 — **super-half** — so it cannot separate ceil from
+half-up. Sub-half vectors are required and are pinned in `internal/risk/aave_test.go`
+(`TestComputeAaveHealthDebtLegCeilsOnSubHalfRemainders`):
+`137216 × 99992603 = 13720585013248`, remainder 13248 (frac ≈ 0.0132) → floor 13720585,
+half-up 13720585, **ceil 13720586**. Under a sub-half remainder all three conventions separate at
+once, because `mulDivCeil` adds one for ANY nonzero remainder.
+
+**Correction 2 — component 7 is the wadDiv HALF-UP composite, NOT a single fused floor.**
+
+```
+GenericLogic.sol:160-164
+  healthFactor = avgLiquidationThreshold.wadDiv(totalDebtInBaseCurrency) / 100_00;
+  — called on the RAW weighted sum Σ(Cᵢ·LTᵢ); the average division at :167-173 happens AFTER,
+    which is the code-order proof that the aggregate threshold is dead on this path
+WadRayMath.sol:53-62
+  wadDiv(a, b) = (a·WAD + b/2) / b        <- HALF-UP
+```
+
+```
+HF = floor( floor( (Σ(Cᵢ·LTᵢ)·1e18 + ⌊D/2⌋) / D ) / 1e4 ),     D = the CEIL-summed debt base
+```
+
+Two divisions, two different roundings, in that order. The previously-shipped fused form
+`floor(Σ·1e18 / (1e4·D))` is **refuted**. Derivation of the difference: write `Σ·1e18 = q·D + r`
+with `0 ≤ r < D`. The inner `wadDiv` returns `q + [r ≥ ⌈D/2⌉]`; the fused floor equals `floor(q/1e4)`
+by the composition-of-floors identity. They differ **iff the carry fires AND q ≡ 9999 (mod 1e4)**,
+and when they differ the chain is **one wad ULP HIGHER**. Incidence ≈ 5×10⁻⁵ per evaluation — an
+exhaustive sweep of 20,000 consecutive weighted sums at D = 13720493 finds exactly 2 — so 12/12
+exact at any pin could never have separated them. The fused floor was an undetectably good
+approximation whose error direction (reporting a hair LOW ⇒ false alarm) was benign; it was still
+not the contract's law.
+
+Discriminators (recomputed independently of the ruling; all three agree with it):
+
+| Σ | D | q mod 1e4 | carry | composite (chain) | refuted fused floor |
+|---|---|---|---|---|---|
+| 1 | 100000000000001 | 9999 | fires | **1** | 0 |
+| 99215323900 | 13720493 | 9999 | fires | **723117776453076431** | 723117776453076430 |
+| 99215325927 | 13720493 | 9999 | fires | **723117791226598053** | 723117791226598052 |
+
+Consequence for consumers: the published health-factor wad is **NOT** `floor(exact rational)`. On a
+carry vector it is floor + 1. Compare against the published wad or against the exact rational, never
+against a re-floored rational — a re-flooring consumer disagrees with the chain on ~5×10⁻⁵ of rows.
+The un-rounded rational (`AaveHealth.HealthFactor`) is rounding-law-free and remains the
+authoritative quantity for a boundary comparison; the liquidation-price solve runs on it, so the
+half-up sliver never propagates. `LowestHealthyPrice = ceil(P*)` therefore stays conservative: the
+chain's inner half-up step can only make the chain MORE generous than the rational boundary, and the
+grace band lies strictly below `ceil(P*)`. The ceil-summed `D` raises `P*` by at most one debt base
+unit's worth versus rev 2 — the **safe** direction, since the old floor-summed `D` biased `P*` low.
+
+**Regime scope — both corrections are proven for the CURRENT implementation ONLY.** The regime split
+above (A/B at block 23,088,584) covers components 2 and 3, the scaled→live ray projections. Nobody
+has read the pre-cut `GenericLogic`, so nothing establishes whether `_getUserDebtInBaseCurrency`
+ceiled there or whether `healthFactor` was already the half-up composite. `ComputeAaveHealth`
+therefore **refuses** any pin before the cut (`ErrPreTokenMathRegime`), on two triggers: an explicit
+`RegimeA`, and a `Marks.BalancesBlock` below 23,088,584 with the zero-value regime (which is
+`RegimeB` by design, so the block arm is what stops a regime-unaware backfill from being served
+today's laws silently). The ray-level helpers still honour `RegimeA` — the refusal is scoped to the
+aggregate surface, where the unproven laws live.
+
 ## Asset registry
 
 ### Debt Manager (OP, chain 10) — 20 collateral tokens, 8 borrow tokens

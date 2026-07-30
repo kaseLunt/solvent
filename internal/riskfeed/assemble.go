@@ -58,7 +58,15 @@ import (
 //	    "changing what a number MEANS" case above: an unbumped binary would
 //	    re-derive the old key over unchanged state, adopt the assume-true batch,
 //	    and publish the overstated collateral under the corrected release's name.
-const AlgorithmRevision = 2
+//	3 — TWO Aave laws in internal/risk corrected against the deployed verified
+//	    source (risk-quant ruling, p3-consults/risk-quant-component4-7-ruling.md):
+//	    component-4 debt leg is MulDivCeil (the Pool never understates debt in
+//	    base currency; we floored — false-safety direction), and component 7 is
+//	    the wadDiv HALF-UP composite floor(floor((Σ·1e18+⌊D/2⌋)/D)/1e4), not the
+//	    single fused floor (differs ~5e-5 of evaluations — only a source read
+//	    could catch it). Every Aave HealthFactorWad and TotalDebtBase can move
+//	    by one unit; a pre-TokenMath regime guard now refuses pins < 23,088,584.
+const AlgorithmRevision = 3
 
 // Balance sides and sources, as internal/derive writes them.
 const (

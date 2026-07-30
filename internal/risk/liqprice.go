@@ -32,6 +32,21 @@ package risk
 // sum. The difference is bounded by one unit of USD 6-dec per collateral
 // token — sub-cent on any real position — and it is recorded on the result as
 // PerTokenFloorOmitted rather than left for a reader to discover.
+//
+// # The Aave arm under the rev-3 laws
+//
+// D is now the CEIL-summed debt base (component 4's debt leg is mulDivCeil), so
+// P* rises by at most one base unit of debt's worth versus rev 2. That is the
+// SAFE direction — the old floor-summed D biased P* LOW, i.e. it published a
+// liquidation price below the true one, which was the dangerous residue of the
+// component-4 bug. No boundary flips: the Aave vectors' debt legs divide exactly.
+//
+// Component 7's half-up sliver does not reach this file at all. The solve runs on
+// the exact rational, and the chain's inner wadDiv can only round the published
+// health factor UP by one wad ULP — i.e. the chain is at most a half-ULP MORE
+// generous than the rational boundary, never less. So LowestHealthyPrice =
+// ceil(P*) remains conservative: every price this package calls healthy the chain
+// also calls healthy, and the grace band lies strictly below ceil(P*).
 
 import (
 	"errors"
