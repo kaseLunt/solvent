@@ -767,6 +767,26 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   cmd/reconcile), 6 packages green both DSNs, opted-in pipelinereplay 3/3 (leg 1
   now derives the flag logs). NEXT: Codex round on 5f584e2..62c6196; Task 6 wave
   still in flight.
+- CODEX ROUND ON MICRO-WAVE (session 019fb138-0479-7a00-a376-4f63709047c0, ~8min,
+  worktree cf @ 62c6196): **needs-attention — 1 HIGH, and it answered depth
+  question (d): THE INTERIM STATE IS UNSAFE.** no-history⇒false is chain-exact
+  only under genesis-complete flag custody, but nothing enforces the precondition:
+  an honest rev-2 start BEFORE the owner-gated rewind reads the empty live flag
+  ledger (0 rows) and zeroes the 23 genuinely-ENABLED weETH legs → borrowers with
+  debt get HF 0 → false-liquidation-looking answers, WORSE than the retired
+  assume-true for exactly those legs. Codex cited the wave's own law test as
+  demonstrating the shape. Adjudication: FIX-WORTHY (the law shipped without its
+  precondition; sequencing-by-runbook is not enforcement). FIX WAVE dispatched:
+  durable derivation-provenance marker (coverage-from-StartBlock under a
+  flag-inclusive decoder registry, set NATURALLY by completed rewind-rederive —
+  not operator attestation); whole-engine riskd refusal (flag_custody_unproven)
+  when absent/stale; e2e regression head-cursor+empty-ledger+no-marker REFUSES
+  (the HF-0 shape unwritable) + real scratch rewind-rederive counterweight; the
+  law test gains its explicit precondition; marker joins the identity (present/
+  absent changes refuse-vs-compute — the standing law). LESSON FOR THE PATTERN
+  BOOK: a derived-input law whose exactness depends on custody completeness must
+  carry a CUSTODY-COMPLETENESS WITNESS in the same commit — this class recurs for
+  every future decoder addition behind a live cursor.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
