@@ -1029,14 +1029,31 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 	if err != nil {
 		return time.Time{}, nil, nil, err
 	}
-	if len(ids) == 0 {
-		if err := tx.Commit(ctx); err != nil {
-			return time.Time{}, nil, nil, fmt.Errorf("commit observatory snapshot: %w", err)
+	// ONLY the aggregate series depends on there being a complete batch. Rate-index
+	// custody is INDEPENDENT of it — the derivers write `rate_indexes` on their own
+	// cadence — so an honest startup or a partial restore can hold valid current
+	// indexes with no servable batch yet. Returning early here reported those
+	// indexes as absent, which is the same class of lie as an empty book: data that
+	// exists, served as data that does not.
+	if len(ids) > 0 {
+		if out, err = readObservatorySeries(ctx, tx, ids); err != nil {
+			return time.Time{}, nil, nil, err
 		}
-		return now, nil, nil, nil
 	}
 
-	rows, err := tx.Query(ctx, `
+	if indexes, err = readRateIndexes(ctx, tx); err != nil {
+		return time.Time{}, nil, nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return time.Time{}, nil, nil, fmt.Errorf("commit observatory snapshot: %w", err)
+	}
+	return now, out, indexes, nil
+}
+
+// readObservatorySeries reads the per-engine rollups of the given batch ids.
+func readObservatorySeries(ctx context.Context, q store.Querier, ids []int64) ([]observatoryBatch, error) {
+	rows, err := q.Query(ctx, `
 		SELECT b.id, b.computed_at, a.engine, a.value_decimals, a.positions, a.computed_positions,
 		       a.refused_positions, a.flagged_positions, a.liquidatable_positions,
 		       a.total_collateral::text, a.total_debt::text, a.refusal_code, a.refusal_detail
@@ -1045,7 +1062,7 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 		 WHERE b.id = ANY($1::bigint[])
 		 ORDER BY b.id DESC, a.engine`, ids)
 	if err != nil {
-		return time.Time{}, nil, nil, fmt.Errorf("read observatory series: %w", err)
+		return nil, fmt.Errorf("read observatory series: %w", err)
 	}
 	defer rows.Close()
 	byID := map[int64]*observatoryBatch{}
@@ -1059,15 +1076,15 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 		if err := rows.Scan(&id, &computedAt, &a.Engine, &dec, &a.Positions, &a.ComputedPositions,
 			&a.RefusedPositions, &a.FlaggedPositions, &a.LiquidatablePositions, &tc, &td,
 			&a.RefusalCode, &a.RefusalDetail); err != nil {
-			return time.Time{}, nil, nil, fmt.Errorf("scan observatory row: %w", err)
+			return nil, fmt.Errorf("scan observatory row: %w", err)
 		}
 		a.ValueDecimals = uint8(dec)
 		var ok bool
 		if a.TotalCollateral, ok = new(big.Int).SetString(tc, 10); !ok {
-			return time.Time{}, nil, nil, fmt.Errorf("observatory batch %d engine %s: total_collateral %q is not an integer", id, a.Engine, tc)
+			return nil, fmt.Errorf("observatory batch %d engine %s: total_collateral %q is not an integer", id, a.Engine, tc)
 		}
 		if a.TotalDebt, ok = new(big.Int).SetString(td, 10); !ok {
-			return time.Time{}, nil, nil, fmt.Errorf("observatory batch %d engine %s: total_debt %q is not an integer", id, a.Engine, td)
+			return nil, fmt.Errorf("observatory batch %d engine %s: total_debt %q is not an integer", id, a.Engine, td)
 		}
 		b, seen := byID[id]
 		if !seen {
@@ -1078,47 +1095,54 @@ func (s *server) readObservatory(ctx context.Context, limit int) (now time.Time,
 		b.Aggregates = append(b.Aggregates, a)
 	}
 	if err := rows.Err(); err != nil {
-		return time.Time{}, nil, nil, fmt.Errorf("iterate observatory series: %w", err)
+		return nil, fmt.Errorf("iterate observatory series: %w", err)
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i] > order[j] })
+	out := make([]observatoryBatch, 0, len(order))
 	for _, id := range order {
 		out = append(out, *byID[id])
 	}
+	return out, nil
+}
 
-	// DISTINCT ON, because `rate_indexes` is keyed on (engine, asset,
-	// block_number, kind) and therefore holds the whole history: the latest row
-	// per (engine, asset, kind) is the current index, and its own block is the
-	// as-of the surface must disclose. `rate_indexes` updates only on
-	// ReserveDataUpdated and can trail the derive cursor badly (design spec §5,
-	// Codex round 1 [H5]) — which is exactly why the block travels with the value.
-	irows, err := tx.Query(ctx,
+// readRateIndexes reads the CURRENT accrual index per (engine, asset, kind).
+//
+// It is deliberately independent of the batch series: `rate_indexes` is written by
+// the derivers on their own cadence, so valid current indexes can exist with no
+// servable risk batch at all.
+//
+// DISTINCT ON, because the table is keyed on (engine, asset, block_number, kind)
+// and therefore holds the whole history: the latest row per (engine, asset, kind)
+// is the current index, and its OWN block is the as-of the surface must disclose.
+// `rate_indexes` updates only on ReserveDataUpdated and can trail the derive
+// cursor badly (design spec §5, Codex round 1 [H5]) — which is exactly why the
+// block travels with the value.
+func readRateIndexes(ctx context.Context, q store.Querier) ([]rateIndexRow, error) {
+	rows, err := q.Query(ctx,
 		`SELECT DISTINCT ON (engine, asset, kind) engine, asset, kind, value::text, block_number
 		   FROM rate_indexes
 		  ORDER BY engine, asset, kind, block_number DESC`)
 	if err != nil {
-		return time.Time{}, nil, nil, fmt.Errorf("read rate indexes: %w", err)
+		return nil, fmt.Errorf("read rate indexes: %w", err)
 	}
-	defer irows.Close()
-	for irows.Next() {
+	defer rows.Close()
+	var out []rateIndexRow
+	for rows.Next() {
 		var r rateIndexRow
 		var value string
 		var block int64
-		if err := irows.Scan(&r.Engine, &r.Asset, &r.Kind, &value, &block); err != nil {
-			return time.Time{}, nil, nil, fmt.Errorf("scan rate index: %w", err)
+		if err := rows.Scan(&r.Engine, &r.Asset, &r.Kind, &value, &block); err != nil {
+			return nil, fmt.Errorf("scan rate index: %w", err)
 		}
 		v, ok := new(big.Int).SetString(value, 10)
 		if !ok {
-			return time.Time{}, nil, nil, fmt.Errorf("rate index %s/%x/%s: %q is not an integer", r.Engine, r.Asset, r.Kind, value)
+			return nil, fmt.Errorf("rate index %s/%x/%s: %q is not an integer", r.Engine, r.Asset, r.Kind, value)
 		}
 		r.Value, r.Block = v, uint64(block)
-		indexes = append(indexes, r)
+		out = append(out, r)
 	}
-	if err := irows.Err(); err != nil {
-		return time.Time{}, nil, nil, fmt.Errorf("iterate rate indexes: %w", err)
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rate indexes: %w", err)
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return time.Time{}, nil, nil, fmt.Errorf("commit observatory snapshot: %w", err)
-	}
-	return now, out, indexes, nil
+	return out, nil
 }

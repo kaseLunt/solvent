@@ -263,6 +263,7 @@ func assertBookExactValues(t jt, body map[string]any) {
 	require.EqualValues(t, 2, num(t, body, "coverage", "in_book"))
 	require.EqualValues(t, 2, num(t, body, "coverage", "refused_in_batch"))
 	require.EqualValues(t, 0, num(t, body, "coverage", "excluded_by_this_layer"))
+	require.Empty(t, arr(t, body, "coverage", "withheld_engines"))
 	require.True(t, boolAt(t, body, "coverage", "stress_coverage_is_full"))
 }
 
@@ -392,6 +393,7 @@ func TestSeededSuiteRejectsEmptyButValid(t *testing.T) {
 		"coverage": map[string]any{
 			"batch_positions": float64(0), "in_book": float64(0), "refused_in_batch": float64(0),
 			"excluded_by_this_layer": float64(0), "excluded": []any{},
+			"withheld_engines":        []any{},
 			"stress_coverage_is_full": true, "note": "n",
 		},
 		"notes": []any{},
@@ -439,6 +441,7 @@ func TestContractValidatorCanReject(t *testing.T) {
 				"coverage": map[string]any{
 					"batch_positions": float64(0), "in_book": float64(0), "refused_in_batch": float64(0),
 					"excluded_by_this_layer": float64(0), "excluded": []any{},
+					"withheld_engines":        []any{},
 					"stress_coverage_is_full": true, "note": "n",
 				},
 				"notes": []any{},
@@ -470,6 +473,9 @@ func TestAddressServesExactSeededValuesAndIsIsolated(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &body))
 
 	require.True(t, boolAt(t, body, "found"))
+	require.True(t, boolAt(t, body, "lookup_complete"),
+		"every engine is available in the healthy fixture, so `found` is a definitive answer")
+	require.Empty(t, arr(t, body, "withheld_engines"))
 	require.Equal(t, fxAcctAave.Hex(), str(t, body, "address"))
 	positions := arr(t, body, "positions")
 	require.Len(t, positions, 1, "the requested address holds exactly one position in this batch")
@@ -600,7 +606,10 @@ func TestAddressWithNoPositionAnswersFoundFalse(t *testing.T) {
 	validateContract(t, "/v1/address/{addr}", http.StatusOK, raw)
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(raw, &body))
-	require.False(t, boolAt(t, body, "found"))
+	require.False(t, boolAt(t, body, "found"),
+		"with every engine available, no position is a DEFINITIVE negative")
+	require.True(t, boolAt(t, body, "lookup_complete"))
+	require.Empty(t, arr(t, body, "withheld_engines"))
 	require.Empty(t, arr(t, body, "positions"))
 	// It still says WHICH batch answered.
 	require.EqualValues(t, f.batchID, num(t, body, "batch", "id"))

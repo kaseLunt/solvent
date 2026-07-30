@@ -209,7 +209,7 @@ func TestReconstructAllRefusesRatherThanDropping(t *testing.T) {
 	require.Len(t, b, 1, "only the position that reproduced its verdict may enter the book")
 
 	// And the exclusion is REPORTED.
-	cov := coverage(rows, len(b))
+	cov := coverage(rows, len(b), nil)
 	require.Equal(t, 2, cov.BatchPositions)
 	require.Equal(t, 1, cov.InBook)
 	require.Equal(t, 1, cov.ExcludedByThisLayer)

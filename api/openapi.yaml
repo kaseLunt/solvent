@@ -649,12 +649,13 @@ components:
       additionalProperties: false
       required:
         [batch_positions, in_book, refused_in_batch, excluded_by_this_layer,
-         excluded, stress_coverage_is_full, note]
+         excluded, withheld_engines, stress_coverage_is_full, note]
       description: |
         The audit of what reached the derived arithmetic. It exists so an
-        exclusion can never be silent: a position the service could not rebuild
-        into the pure library's input form is NAMED here and is absent from the
-        stress and waterfall numbers.
+        exclusion can never be silent, in EITHER of the two ways one can happen: a
+        position the service could not rebuild into the pure library's input form
+        (`excluded`), or an ENGINE whose whole book is withheld and is therefore
+        absent from every scenario (`withheld_engines`).
       properties:
         batch_positions: { type: integer }
         in_book: { type: integer }
@@ -663,7 +664,16 @@ components:
         excluded:
           type: array
           items: { $ref: "#/components/schemas/Excluded" }
-        stress_coverage_is_full: { type: boolean }
+        withheld_engines:
+          type: array
+          items: { $ref: "#/components/schemas/EngineRefusal" }
+        stress_coverage_is_full:
+          type: boolean
+          description: |
+            A BOOK-WIDE claim: false if any position could not be rebuilt OR any
+            engine is withheld. It is not a per-position predicate — a
+            reconstruction-only reading would stay green while an entire engine was
+            missing from the stress and waterfall arithmetic.
         note: { type: string }
 
     BookResponse:
@@ -909,7 +919,9 @@ components:
     AddressResponse:
       type: object
       additionalProperties: false
-      required: [served_at, batch, address, positions, found, notes]
+      required:
+        [served_at, batch, address, positions, found, lookup_complete,
+         withheld_engines, lookup_complete_note, notes]
       properties:
         served_at: { type: string, format: date-time }
         batch: { $ref: "#/components/schemas/Batch" }
@@ -917,7 +929,30 @@ components:
         positions:
           type: array
           items: { $ref: "#/components/schemas/Position" }
-        found: { type: boolean }
+        found:
+          type: boolean
+          nullable: true
+          description: |
+            THREE-VALUED.
+
+            - `true` — at least one position was found. A positive existence claim,
+              safe to assert whatever else is withheld (but see `lookup_complete`:
+              it may be a floor rather than a total).
+            - `false` — a DEFINITIVE negative: no position exists in this batch, and
+              every engine was available to be asked.
+            - `null` — the answer CANNOT BE ESTABLISHED, because an engine's whole
+              book is withheld. A withheld engine has zero position rows, so a
+              `false` derived from the row count would publish a definitive negative
+              exactly where the service cannot determine one. **Never render null as
+              "no position".**
+        lookup_complete:
+          type: boolean
+          description: Whether every engine could be consulted for this lookup.
+        withheld_engines:
+          type: array
+          description: Engines whose whole book is withheld, and which this lookup therefore could not consult.
+          items: { $ref: "#/components/schemas/EngineRefusal" }
+        lookup_complete_note: { type: string }
         notes:
           type: array
           items: { type: string }
@@ -1085,13 +1120,26 @@ components:
     StressResponse:
       type: object
       additionalProperties: false
-      required: [served_at, batch, address, scenario_config_version, found, scenarios, notes]
+      required:
+        [served_at, batch, address, scenario_config_version, found,
+         lookup_complete, withheld_engines, lookup_complete_note, scenarios, notes]
       properties:
         served_at: { type: string, format: date-time }
         batch: { $ref: "#/components/schemas/Batch" }
         address: { $ref: "#/components/schemas/Address" }
         scenario_config_version: { type: string }
-        found: { type: boolean }
+        found:
+          type: boolean
+          nullable: true
+          description: |
+            THREE-VALUED, with the same contract as `/v1/address`. A withheld engine
+            has no positions to stress, so `null` means the answer could not be
+            established — never that no position exists.
+        lookup_complete: { type: boolean }
+        withheld_engines:
+          type: array
+          items: { $ref: "#/components/schemas/EngineRefusal" }
+        lookup_complete_note: { type: string }
         scenarios:
           type: array
           items: { $ref: "#/components/schemas/Scenario" }

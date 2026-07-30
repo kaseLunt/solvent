@@ -225,13 +225,18 @@ type wireExcluded struct {
 }
 
 type wireBookCoverage struct {
-	BatchPositions       int            `json:"batch_positions"`
-	InBook               int            `json:"in_book"`
-	RefusedInBatch       int            `json:"refused_in_batch"`
-	ExcludedByThisLayer  int            `json:"excluded_by_this_layer"`
-	Excluded             []wireExcluded `json:"excluded"`
-	StressCoverageIsFull bool           `json:"stress_coverage_is_full"`
-	Note                 string         `json:"note"`
+	BatchPositions      int            `json:"batch_positions"`
+	InBook              int            `json:"in_book"`
+	RefusedInBatch      int            `json:"refused_in_batch"`
+	ExcludedByThisLayer int            `json:"excluded_by_this_layer"`
+	Excluded            []wireExcluded `json:"excluded"`
+	// WithheldEngines are engines absent from the derived arithmetic ENTIRELY, for a
+	// reason that is not attributable to any position.
+	WithheldEngines []wireEngineRefusal `json:"withheld_engines"`
+	// StressCoverageIsFull is book-wide: false if ANY position could not be rebuilt
+	// OR any engine is withheld.
+	StressCoverageIsFull bool   `json:"stress_coverage_is_full"`
+	Note                 string `json:"note"`
 }
 
 type bookResponse struct {
@@ -281,7 +286,7 @@ func (s *server) handleBook(w http.ResponseWriter, r *http.Request) {
 	wf.ExcludedEngines = refused
 	out.Waterfall = &wf
 	out.BadDebt = badDebtLine(series, refused)
-	out.Coverage = coverage(v.Positions, len(b))
+	out.Coverage = coverage(v.Positions, len(b), refused)
 
 	writeJSON(w, out)
 }
@@ -638,13 +643,24 @@ func badDebtLine(series risk.WaterfallSeries, refused []wireEngineRefusal) []wir
 	return out
 }
 
-func coverage(positions []*positionRow, inBook int) wireBookCoverage {
+// coverage audits what actually reached the derived arithmetic.
+//
+// `stress_coverage_is_full` is a BOOK-WIDE claim, so it must account for BOTH ways
+// an engine's numbers can be missing from the stress and waterfall surfaces: a
+// position this layer could not rebuild, and an ENGINE whose whole book is
+// withheld. A withheld engine contributes no positions, so a
+// reconstruction-only predicate stayed green while an entire engine was absent
+// from every scenario — a prominent green signal contradicting the refusal
+// disclosures three fields above it.
+func coverage(positions []*positionRow, inBook int, withheld []wireEngineRefusal) wireBookCoverage {
 	out := wireBookCoverage{
-		BatchPositions: len(positions),
-		InBook:         inBook,
-		Excluded:       []wireExcluded{},
-		Note: "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form — " +
-			"they are absent from the stress and waterfall arithmetic and are named here rather than dropped.",
+		BatchPositions:  len(positions),
+		InBook:          inBook,
+		Excluded:        []wireExcluded{},
+		WithheldEngines: withheld,
+		Note: "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form; " +
+			"`withheld_engines` lists ENGINES whose whole book is refused and therefore absent from the stress and waterfall arithmetic entirely. " +
+			"`stress_coverage_is_full` accounts for both — it is a book-wide claim, not a per-position one.",
 	}
 	for _, p := range positions {
 		if p.Status == store.RiskPositionRefused {
@@ -660,7 +676,7 @@ func coverage(positions []*positionRow, inBook int) wireBookCoverage {
 			})
 		}
 	}
-	out.StressCoverageIsFull = out.ExcludedByThisLayer == 0
+	out.StressCoverageIsFull = out.ExcludedByThisLayer == 0 && len(withheld) == 0
 	return out
 }
 
@@ -784,11 +800,61 @@ type addressResponse struct {
 	Batch     wireBatch      `json:"batch"`
 	Address   string         `json:"address"`
 	Positions []wirePosition `json:"positions"`
-	// Found is false when the address carries no position in this batch. It is an
-	// explicit field rather than a 404: "this address has no position in the
-	// newest batch" is an ANSWER, and it comes with the batch that answered it.
-	Found bool     `json:"found"`
+
+	// Found is THREE-VALUED, and that is the whole point.
+	//
+	//	true   at least one position was found — a positive existence claim, safe
+	//	       to assert whatever else is withheld
+	//	false  a DEFINITIVE negative: no position exists in this batch, and every
+	//	       engine was available to be asked
+	//	null   the answer CANNOT BE ESTABLISHED because an engine's whole book is
+	//	       withheld. A withheld engine has zero position rows, so deriving
+	//	       `false` from the row count would publish a definitive negative
+	//	       precisely where the service is unable to determine one.
+	Found *bool `json:"found"`
+	// LookupComplete reports whether every engine could be consulted. When false,
+	// `withheld_engines` names the ones that could not, and a `found: true` answer
+	// is still a floor rather than the whole picture.
+	LookupComplete     bool                `json:"lookup_complete"`
+	WithheldEngines    []wireEngineRefusal `json:"withheld_engines"`
+	LookupCompleteNote string              `json:"lookup_complete_note"`
+
 	Notes []string `json:"notes"`
+}
+
+// lookupNoteComplete / lookupNoteIncomplete are the on-wire explanation of the
+// three-valued answer, so a client never has to infer the semantics.
+const (
+	lookupNoteComplete   = "every engine was available to be asked, so `found` is a definitive answer for this batch."
+	lookupNoteIncomplete = "at least one engine's whole book is WITHHELD on this batch (see `withheld_engines`), so this lookup could not consult it. " +
+		"`found: true` is therefore a floor, not a total; `found: null` means the answer could not be established at all and must NEVER be rendered as `no position`."
+)
+
+// lookupOutcome computes the three-valued answer.
+//
+// A withheld engine contributes ZERO position rows, which is indistinguishable
+// from "this address holds nothing there" if the row count is the only input. So
+// the row count decides only the POSITIVE case; the negative case additionally
+// requires that every engine was available to be asked.
+func lookupOutcome(v *batchView, positions int) (*bool, bool, []wireEngineRefusal, string) {
+	withheld := engineRefusals(v)
+	complete := len(withheld) == 0
+	note := lookupNoteComplete
+	if !complete {
+		note = lookupNoteIncomplete
+	}
+	switch {
+	case positions > 0:
+		// A found position is a positive fact about the chain; another engine being
+		// withheld cannot make it untrue.
+		yes := true
+		return &yes, complete, withheld, note
+	case complete:
+		no := false
+		return &no, complete, withheld, note
+	default:
+		return nil, complete, withheld, note
+	}
 }
 
 // parseAddress accepts a 0x-prefixed 20-byte hex address, case-insensitively.
@@ -824,13 +890,18 @@ func (s *server) handleAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	found, complete, withheld, lookupNote := lookupOutcome(v, len(v.Positions))
 	out := addressResponse{
-		ServedAt:  v.Now,
-		Batch:     batchEnvelope(v),
-		Address:   addr.Hex(),
-		Positions: []wirePosition{},
-		Found:     len(v.Positions) > 0,
+		ServedAt:           v.Now,
+		Batch:              batchEnvelope(v),
+		Address:            addr.Hex(),
+		Positions:          []wirePosition{},
+		Found:              found,
+		LookupComplete:     complete,
+		WithheldEngines:    withheld,
+		LookupCompleteNote: lookupNote,
 		Notes: []string{
+			"`found` is THREE-VALUED: true (at least one position), false (a definitive negative — every engine was asked), or null (an engine's book is withheld, so the answer could not be established). Never render null as `no position`.",
 			"Every price disclosure below is the SNAPSHOT the batch persisted — value, decimals, block, as-of, source, provenance, budget and verdict. Nothing here is re-read or re-judged at request time (design spec §7).",
 			"`source_as_of` is the chain-asserted as-of (a poll anchor's block timestamp or an AnswerUpdated updatedAt). Database insert time is NEVER substituted for it.",
 			"Debt Manager collateral comes from a sweep with a worst case of " + strconv.Itoa(dmSweepIntervalSeconds+dmSweepPassSeconds) + " seconds; its prices are 60-second samples. Read `sweep_block` for the collateral as-of, never the price age.",
@@ -1164,13 +1235,21 @@ type wireShock struct {
 }
 
 type stressResponse struct {
-	ServedAt              time.Time      `json:"served_at"`
-	Batch                 wireBatch      `json:"batch"`
-	Address               string         `json:"address"`
-	ScenarioConfigVersion string         `json:"scenario_config_version"`
-	Found                 bool           `json:"found"`
-	Scenarios             []wireScenario `json:"scenarios"`
-	Notes                 []string       `json:"notes"`
+	ServedAt              time.Time `json:"served_at"`
+	Batch                 wireBatch `json:"batch"`
+	Address               string    `json:"address"`
+	ScenarioConfigVersion string    `json:"scenario_config_version"`
+
+	// Found / LookupComplete / WithheldEngines carry the SAME three-valued contract
+	// as /v1/address. A withheld engine has no positions to stress, so a row-count
+	// `false` here would be the identical definitive false negative.
+	Found              *bool               `json:"found"`
+	LookupComplete     bool                `json:"lookup_complete"`
+	WithheldEngines    []wireEngineRefusal `json:"withheld_engines"`
+	LookupCompleteNote string              `json:"lookup_complete_note"`
+
+	Scenarios []wireScenario `json:"scenarios"`
+	Notes     []string       `json:"notes"`
 }
 
 func (s *server) handleStress(w http.ResponseWriter, r *http.Request) {
@@ -1185,14 +1264,19 @@ func (s *server) handleStress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	found, complete, withheld, lookupNote := lookupOutcome(v, len(v.Positions))
 	out := stressResponse{
 		ServedAt:              v.Now,
 		Batch:                 batchEnvelope(v),
 		Address:               addr.Hex(),
 		ScenarioConfigVersion: s.scenarioConfigVersion(),
-		Found:                 len(v.Positions) > 0,
+		Found:                 found,
+		LookupComplete:        complete,
+		WithheldEngines:       withheld,
+		LookupCompleteNote:    lookupNote,
 		Scenarios:             []wireScenario{},
 		Notes: []string{
+			"`found` is THREE-VALUED: null means an engine's book is withheld and the answer could not be established. Never render null as `no position`.",
 			"Every scenario is a shock to PRIMITIVE AXES propagated through each engine's ACTUAL pricing transforms — the Debt Manager's stable snap band, composed-asset bases. Stored rows are never linearly scaled and derived USD feeds are never shocked independently.",
 			"`held_flat` names every price input no propagation row described. An empty list is the claim that the matrix covered this position; a non-empty one is the disclosure that it did not.",
 			"Cap-adapter ceilings are NOT carried on a persisted price snapshot, so an UPWARD shock cannot be cap-bound here. Every committed scenario is a down-shock, a rate axis or a market-realization axis, so no served number depends on a cap that was not checked.",
