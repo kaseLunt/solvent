@@ -1,10 +1,12 @@
-// The Book row view model + display helpers, pinned (W1).
+// The Book row view model + display helpers, pinned (W1; C2 swapped the
+// source to the wire's lean PositionSummary).
 //
 // Laws under test:
-//   - `toPositionRow` maps canonical wire Positions to the PositionSummary
-//     field set without inventing anything: refused rows keep null totals and
-//     an UNKNOWABLE verdict; the DM's strict boolean is the ONLY source of a
-//     DM crit; Aave's verdict comes from the wad comparator.
+//   - `toPositionRow` maps REFINED wire PositionSummary rows (the same
+//     `refinePositionSummary` the client's primary positions() path applies)
+//     to the row model without inventing anything: refused rows keep null
+//     totals and an UNKNOWABLE verdict; the DM's sealed verdict is the ONLY
+//     source of a DM crit; Aave's verdict comes from the wad comparator.
 //   - display strings are exact-derived (string/bigint surgery, truncation
 //     never rounding) — "1.08" from the wad, "0.761" from the DM disclosure,
 //     "−7.4%" from the factor solve.
@@ -12,6 +14,7 @@
 //     (absent, visible), never a dropped mark.
 
 import { expect, test } from "@playwright/test";
+import { refinePositionSummary } from "@solvent/client";
 import { factorDistancePercent, groupDecimalString, hfDisplayFromRatio, hfDisplayFromWad, renderEngineAmount } from "../../lib/book-format";
 import { EM_DASH } from "../../lib/format";
 import { toPositionRow } from "../../app/book/positionRow";
@@ -51,6 +54,8 @@ test.describe("book-format", () => {
 });
 
 test.describe("toPositionRow — the PositionSummary mapping", () => {
+  // The wire fixtures are RAW summaries; the client's primary path refines
+  // them before any component sees a row, so the spec applies the same seal.
   const aaveComputed = POSITIONS_AAVE_PAGE_1.positions[0];
   const aaveRefused = POSITIONS_AAVE_PAGE_2.positions[0];
   const dmLiquidatable = POSITIONS_DM_PAGE_1.positions[0];
@@ -58,7 +63,7 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
 
   test("aave computed: wad comparator verdict, warn-band ratio, factor distance", () => {
     if (aaveComputed === undefined) throw new Error("fixture lost its aave row");
-    const row = toPositionRow(aaveComputed);
+    const row = toPositionRow(refinePositionSummary(aaveComputed));
     expect(row.verdict).toBe("not-liquidatable"); // 1.08e18 >= 1e18, ON THE WAD
     expect(row.hf.display).toBe("1.08");
     expect(row.hf.ratio).toBeCloseTo(1.08, 6); // display-precision, warn band only
@@ -75,7 +80,7 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
 
   test("aave refused: verdict UNKNOWABLE, totals stay null, refusal named", () => {
     if (aaveRefused === undefined) throw new Error("fixture lost its refused aave row");
-    const row = toPositionRow(aaveRefused);
+    const row = toPositionRow(refinePositionSummary(aaveRefused));
     expect(row.status).toBe("refused");
     expect(row.refusalCode).toBe("G1");
     expect(row.verdict).toBe("unknowable"); // NEVER 'not-liquidatable'
@@ -87,7 +92,7 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
 
   test("dm liquidatable: crit from the engine's strict boolean, hf is a labeled disclosure", () => {
     if (dmLiquidatable === undefined) throw new Error("fixture lost its dm row");
-    const row = toPositionRow(dmLiquidatable);
+    const row = toPositionRow(refinePositionSummary(dmLiquidatable));
     expect(row.verdict).toBe("liquidatable"); // the strict boolean, not a ratio re-derivation
     expect(row.hf.disclosureOnly).toBe(true);
     expect(row.hf.display).toBe("0.761"); // maxBorrowLT/borrowings, truncated
@@ -106,7 +111,7 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
 
   test("dm refused (SWEEP_NEVER): S mark is ABSENT (∅), visible — never dropped", () => {
     if (dmRefused === undefined) throw new Error("fixture lost its refused dm row");
-    const row = toPositionRow(dmRefused);
+    const row = toPositionRow(refinePositionSummary(dmRefused));
     expect(row.refusalCode).toBe("SWEEP_NEVER");
     expect(row.verdict).toBe("unknowable");
     expect(row.marks).toEqual([

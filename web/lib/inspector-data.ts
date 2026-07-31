@@ -1,26 +1,27 @@
-// Typed access to the C1 read endpoints the hand-written @solvent/client does
-// not wrap yet: /v1/address/{addr}/history, /v1/events and /v1/params.
+// Typed access to /v1/address/{addr}/history, /v1/events and /v1/params —
+// THINNED TO DELEGATION (the OWED note of the C1 seam is discharged):
+// @solvent/client now wraps all three endpoints, so this file no longer owns
+// fetch mechanics. What it still owns:
 //
-// This file is the ONE seam where those wire bodies are parsed, and it stays
-// inside the client's laws rather than around them:
+//   - the surfaces' error contract: a non-2xx answer is an
+//     `InspectorFetchError` carrying the envelope's own status + code, which
+//     is what the Inspector and Feed surfaces branch on;
+//   - the re-exported generated contract types the surfaces are written
+//     against.
 //
-//   - every body is typed by the client's GENERATED contract types
-//     (`components["schemas"][...]` from api/openapi.yaml — no hand-shaped
-//     wire types);
-//   - the history body is three-valued (`found`) and is served ONLY through
-//     the client's own `lookup()`, so the sealed outcome union and its
-//     contract-invariant enforcement apply here exactly as on /v1/address;
-//   - addresses are validated LOCALLY with the contract's strict pattern
-//     before any URL is built — a malformed address is refused, never sent,
-//     so it can never become a request for a different account.
-//
-// OWED: when @solvent/client grows `addressHistory()` / `events()` /
-// `params()` methods, this file thins to delegation. The fetch mechanics here
-// are deliberately minimal (typed status + error-envelope code), not a second
-// client.
+// The client's own laws apply unchanged underneath: the history body is
+// three-valued (`found`) and served ONLY through the client's `lookup()`
+// (sealed outcome union, contract-invariant enforcement), and addresses are
+// validated locally by the client — a malformed address is refused, never
+// sent, so it can never become a request for a different account.
 
-import { lookup, type Lookup, type components } from "@solvent/client";
-import { ADDRESS_PATTERN } from "./format";
+import {
+  SolventHttpError,
+  type components,
+  type EngineName,
+  type EventDisplayType as ClientEventDisplayType,
+} from "@solvent/client";
+import { solventClientFor } from "./api";
 
 export type AddressHistoryResponse = components["schemas"]["AddressHistoryResponse"];
 export type AddressHistoryEngine = components["schemas"]["AddressHistoryEngine"];
@@ -32,7 +33,8 @@ export type ParamsResponse = components["schemas"]["ParamsResponse"];
 export type ParamChange = components["schemas"]["ParamChange"];
 
 /** The history lookup, discriminated on `outcome` — same law as `client.address()`. */
-export type HistoryLookup = Lookup<AddressHistoryResponse>;
+export type { HistoryLookup } from "@solvent/client";
+import type { HistoryLookup } from "@solvent/client";
 
 /** A non-2xx answer from one of these endpoints, with the envelope's own code. */
 export class InspectorFetchError extends Error {
@@ -47,55 +49,32 @@ export class InspectorFetchError extends Error {
   }
 }
 
-function checkAddress(addr: string): string {
-  if (!ADDRESS_PATTERN.test(addr)) {
-    throw new Error(
-      `not a 0x-prefixed 20-byte address: ${JSON.stringify(addr)} — refused locally, never sent`,
-    );
+/** Translate the client's typed HTTP errors into this seam's error contract. */
+function translate(error: unknown): never {
+  if (error instanceof SolventHttpError) {
+    // The envelope's own message, verbatim (the client's .message prefixes
+    // status and code, which this error's own formatting already does).
+    throw new InspectorFetchError(error.url, error.status, error.code, error.body.error.message);
   }
-  return addr;
-}
-
-async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const raw = await response.text();
-  if (!response.ok) {
-    let code: string | null = null;
-    let message = raw.slice(0, 200);
-    try {
-      const body = JSON.parse(raw) as { error?: { code?: unknown; message?: unknown } };
-      if (typeof body.error?.code === "string") code = body.error.code;
-      if (typeof body.error?.message === "string") message = body.error.message;
-    } catch {
-      // Not the contract envelope; keep the truncated raw body as the message.
-    }
-    throw new InspectorFetchError(url, response.status, code, message);
-  }
-  return JSON.parse(raw) as T;
+  throw error;
 }
 
 /**
  * `GET /v1/address/{addr}/history` — per-batch persisted points, newest first,
  * as a DISCRIMINATED LOOKUP (the response carries the same three-valued
- * `found` contract as `/v1/address`, and `lookup()` enforces its invariants).
+ * `found` contract as `/v1/address`, and the client's `lookup()` enforces its
+ * invariants).
  */
 export async function fetchAddressHistory(
   baseUrl: string,
   addr: string,
   options?: { limit?: number; signal?: AbortSignal },
 ): Promise<HistoryLookup> {
-  const params = new URLSearchParams();
-  if (options?.limit !== undefined) params.set("limit", String(options.limit));
-  const query = params.size > 0 ? `?${params.toString()}` : "";
-  const body = await getJson<AddressHistoryResponse>(
-    `${baseUrl}/v1/address/${checkAddress(addr)}/history${query}`,
-    options?.signal,
-  );
-  return lookup(body);
+  try {
+    return await solventClientFor(baseUrl).addressHistory(addr, options);
+  } catch (error) {
+    translate(error);
+  }
 }
 
 export interface EventsQuery {
@@ -113,15 +92,23 @@ export async function fetchEvents(
   query: EventsQuery = {},
   signal?: AbortSignal,
 ): Promise<EventsResponse> {
-  const params = new URLSearchParams();
-  if (query.cursor !== undefined) params.set("cursor", query.cursor);
-  if (query.limit !== undefined) params.set("limit", String(query.limit));
-  if (query.engine !== undefined) params.set("engine", query.engine);
-  if (query.account !== undefined) params.set("account", checkAddress(query.account));
-  if (query.types !== undefined && query.types.length > 0) params.set("types", query.types.join(","));
-  if (query.sinceBlock !== undefined) params.set("since_block", String(query.sinceBlock));
-  const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return getJson<EventsResponse>(`${baseUrl}/v1/events${suffix}`, signal);
+  try {
+    return await solventClientFor(baseUrl).events(
+      {
+        ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+        ...(query.engine === undefined ? {} : { engine: query.engine as EngineName }),
+        ...(query.account === undefined ? {} : { account: query.account }),
+        ...(query.types === undefined
+          ? {}
+          : { types: query.types as readonly ClientEventDisplayType[] }),
+        ...(query.sinceBlock === undefined ? {} : { sinceBlock: query.sinceBlock }),
+      },
+      signal,
+    );
+  } catch (error) {
+    translate(error);
+  }
 }
 
 export interface ParamsQuery {
@@ -136,12 +123,15 @@ export async function fetchParams(
   query: ParamsQuery = {},
   signal?: AbortSignal,
 ): Promise<ParamsResponse> {
-  const params = new URLSearchParams();
-  if (query.engine !== undefined) params.set("engine", query.engine);
-  if (query.asset !== undefined) params.set("asset", checkAddress(query.asset));
-  if (query.cursor !== undefined) params.set("cursor", query.cursor);
-  const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return getJson<ParamsResponse>(`${baseUrl}/v1/params${suffix}`, signal);
+  try {
+    return await solventClientFor(baseUrl).params({
+      ...(query.engine === undefined ? {} : { engine: query.engine as EngineName }),
+      ...(query.asset === undefined ? {} : { asset: query.asset }),
+      ...(query.cursor === undefined ? {} : { cursor: query.cursor }),
+    }, signal);
+  } catch (error) {
+    translate(error);
+  }
 }
 
 /**

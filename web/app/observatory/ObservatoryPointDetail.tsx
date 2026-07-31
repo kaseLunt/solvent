@@ -95,6 +95,34 @@ function DetailBody({
           </span>
         </dd>
 
+        <dt>observed batch</dt>
+        <dd data-testid="observatory-point-batch">
+          #{String(point.batch_id)}{" "}
+          <span className="dim">
+            (the COMPLETE batch this bucket observed; the batch itself may since have been
+            pruned by retention)
+          </span>
+        </dd>
+
+        <dt>materialization key</dt>
+        <dd data-testid="observatory-point-mkey" className="mono">
+          {point.materialization_key}{" "}
+          <span className="dim">(copied at write time — attribution that survives retention)</span>
+        </dd>
+
+        <dt>reorg posture at compute</dt>
+        <dd data-testid="observatory-point-epochs">
+          {point.max_epoch_at_compute - point.acked_epoch <= 0 ? (
+            <>none unacked</>
+          ) : (
+            <span className="crit-t">
+              {String(point.max_epoch_at_compute - point.acked_epoch)} unacked epoch(s) — acked{" "}
+              {String(point.acked_epoch)} of {String(point.max_epoch_at_compute)}
+            </span>
+          )}{" "}
+          <span className="dim">(the stamp pair copied from the observed batch&apos;s watermark vector)</span>
+        </dd>
+
         <dt>debt (usd)</dt>
         <dd>
           {usd(point.debt_usd)}
@@ -128,6 +156,7 @@ function DetailBody({
               <th>rate index</th>
               <th>asset</th>
               <th>value (raw decimal)</th>
+              <th>scale</th>
               <th>its OWN as-of block</th>
               <th>note</th>
             </tr>
@@ -141,6 +170,13 @@ function DetailBody({
                   <span className="dim">{truncateAddress(rate.asset)}</span>
                 </td>
                 <td>{rate.value}</td>
+                <td data-testid="observatory-rate-scale">
+                  {rate.scale === "unstated" ? (
+                    <span className="dim">unstated — kind outside the known vocabulary</span>
+                  ) : (
+                    rate.scale
+                  )}
+                </td>
                 <td>{formatBlock(rate.as_of_block)}</td>
                 <td className="dim">{rate.note}</td>
               </tr>

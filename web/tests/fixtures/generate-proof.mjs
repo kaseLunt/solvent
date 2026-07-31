@@ -141,6 +141,14 @@ emitJson("evidence-manifest.json", evidenceExample);
   dmWeld.rows_exact = 26; // the SAME 3 rows: the drift is real in the data
   if (rec.gated_exact + rec.gated_drift !== rec.gated_rows) die("derived receipt is internally inconsistent");
   if (dmWeld.rows_compared - dmWeld.rows_exact !== rec.gated_drift) die("derived weld delta does not carry the drift");
+  // The 1.2.0 wire status stays CONSISTENT with the doctored receipt (the
+  // server derives it from the same conjunction, so a fixture where the two
+  // disagreed would be the contradiction case, not the failed-receipt case).
+  failed.proof_subject = {
+    status: "rejected",
+    detail: `receipt verdict "fail" (exit 1)`,
+    pin: rec.comparison_sha256,
+  };
   emitJson("evidence-proof-failed.json", failed);
 }
 
@@ -150,6 +158,11 @@ emitJson("evidence-manifest.json", evidenceExample);
   noReceipt.reconcile = null;
   noReceipt.reconcile_unavailable_reason =
     "no committed receipt artifact is present in this deployment";
+  noReceipt.proof_subject = {
+    status: "unavailable",
+    detail: noReceipt.reconcile_unavailable_reason,
+    pin: null, // no receipt, no pin — never fabricated
+  };
   emitJson("evidence-no-receipt.json", noReceipt);
 }
 
@@ -162,6 +175,7 @@ emitJson("evidence-manifest.json", evidenceExample);
   const noBatch = structuredClone(evidenceExample);
   noBatch.substrate = null;
   noBatch.substrate_unavailable_reason = message;
+  noBatch.live_subject = { status: "no_batch", reason: message };
   emitJson("evidence-no-batch.json", noBatch);
 }
 
@@ -215,6 +229,8 @@ const samplePathFor = (operationId, wirePath, example) => {
       return `/v1/prices/${example.asset}`;
     case "runBookScenario":
       return `/v1/scenarios/${example.scenario_id}/run-book`;
+    case "getBatch":
+      return `/v1/batches/${example.batch_id}`;
     default:
       return wirePath;
   }

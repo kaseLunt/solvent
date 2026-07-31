@@ -22,7 +22,8 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": "1500000000000000000",
-      "amount_decimals": 18,
+      "amount_unit": "aave_scaled",
+      "amount_decimals": null,
       "liquidation": null
     },
     {
@@ -38,8 +39,9 @@
       "account": "0xccCc000000000000000000000000000000000003",
       "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
       "symbol": "USDC",
-      "amount": "1200000000",
-      "amount_decimals": 6,
+      "amount": "1199403000",
+      "amount_unit": "dm_normalized_debt",
+      "amount_decimals": null,
       "liquidation": null
     },
     {
@@ -56,7 +58,8 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": "-500000000000000000",
-      "amount_decimals": 18,
+      "amount_unit": "aave_scaled",
+      "amount_decimals": null,
       "liquidation": null
     }
   ],

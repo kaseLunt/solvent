@@ -186,11 +186,21 @@ test("provenance on a point: the bucket record pins as-of, watermark and rate as
   await expect(detail).toContainText("$412.790672");
   await expect(detail).toContainText("captured from the newest COMPLETE risk batch");
 
-  // The rate snapshot carries its OWN as-of block, not the bucket's.
+  // The observation provenance (1.2.0): the observed batch and its key.
+  await expect(detail).toContainText("#41");
+  await expect(page.getByTestId("observatory-point-mkey")).toContainText(
+    "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+  );
+  await expect(page.getByTestId("observatory-point-epochs")).toContainText("none unacked");
+
+  // The rate snapshot carries its OWN as-of block, not the bucket's — and its
+  // scale from the closed per-kind vocabulary (the 1.2.0 contract example's
+  // DM interest index).
   const rates = page.getByTestId("observatory-rates");
-  await expect(rates).toContainText("borrow_apy");
+  await expect(rates).toContainText("borrow_index");
+  await expect(rates).toContainText("index-1e18");
   await expect(rates).toContainText("USDC");
-  await expect(rates).toContainText("50000000000000000");
+  await expect(rates).toContainText("1050000000000000000");
   await expect(rates).toContainText("154,793,990");
 });
 

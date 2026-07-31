@@ -21,24 +21,29 @@
       "account": "0xAAaA000000000000000000000000000000000001",
       "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       "symbol": "USDC",
-      "amount": "-2500000000",
-      "amount_decimals": 6,
+      "amount": "-2499100000",
+      "amount_unit": "aave_scaled",
+      "amount_decimals": null,
       "liquidation": {
         "liquidator": "0xBBbB000000000000000000000000000000000002",
         "debt_asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         "debt_repaid": "2500000000",
         "debt_decimals": 6,
+        "deficit_paired": false,
+        "before_debt_usd": null,
+        "interest_index": null,
         "seized": [
           {
             "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
             "symbol": "weETH",
             "amount": "656250000000000000",
-            "decimals": 18
+            "decimals": 18,
+            "bonus": null
           }
         ],
-        "realized_bonus_bps": "500",
+        "realized_bonus_bps": null,
         "configured_bonus_bps": "500",
-        "note": "extracted from the event's own structured payload; realized bonus is compared against the configured bonus AT THIS EVENT's effective params, not today's."
+        "note": "extracted from the event's own structured payload; amounts are in each asset's own token units. `configured_bonus_bps` is the ledger's bonus AT THIS EVENT's effective params; `realized_bonus_bps` would need event-time prices this service does not re-read, so it is null — never estimated."
       }
     },
     {
@@ -55,6 +60,7 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": null,
+      "amount_unit": "none",
       "amount_decimals": null,
       "liquidation": null
     }

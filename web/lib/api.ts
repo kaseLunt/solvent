@@ -47,3 +47,21 @@ export function getSolventClient(): SolventClient {
 export function createSolventClient(baseUrl: string): SolventClient {
   return new SolventClient({ baseUrl });
 }
+
+const byBase = new Map<string, SolventClient>();
+
+/**
+ * The shared client FOR A GIVEN ORIGIN — the delegation seam the lib/*-data
+ * modules use now that @solvent/client wraps their endpoints (their OWED
+ * notes are discharged). Memoized per base URL; the default origin shares
+ * `getSolventClient()`'s singleton semantics.
+ */
+export function solventClientFor(baseUrl: string): SolventClient {
+  const key = baseUrl.replace(/\/+$/, "");
+  let client = byBase.get(key);
+  if (client === undefined) {
+    client = new SolventClient({ baseUrl: key });
+    byBase.set(key, client);
+  }
+  return client;
+}

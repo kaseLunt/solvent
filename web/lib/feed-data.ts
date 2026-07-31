@@ -23,17 +23,12 @@
 //
 //   AMOUNT UNITS — an event's `amount` is the engine's own ACCOUNTING unit,
 //   not a display token amount. The closed unit set (`FeedAmountUnit`) is
-//   internal/store/p5_events.go's `EventAmountUnit` verbatim:
-//   dm_normalized_debt / aave_scaled / none / opaque.
+//   the contract's `EventAmountUnit` (internal/store/p5_events.go's
+//   vocabulary, on the wire since 1.2.0): dm_normalized_debt / aave_scaled /
+//   none / opaque — welded compile-time BOTH WAYS below.
 //
-// OWED (C2 item 3, the contract-corrections wave): the committed
-// api/openapi.yaml still describes the PRE-amendment shape — no `amount_unit`
-// field, no order-mode disclosure, `since_block` "applied per chain". When C2
-// lands and the client regenerates, `FeedChainEvent`'s local `amount_unit`
-// extension collapses into the generated `ChainEvent` and this comment block
-// shrinks to a pointer. Until then the extension is OPTIONAL and read-only:
-// a pre-C2 wire simply never sends it. generate-feed.mjs watches the
-// contract and says so the moment the field appears.
+// (C2 landed: the formerly-OWED `amount_unit` extension collapsed into the
+// generated `ChainEvent`, which now carries the field as required.)
 
 import type { components, operations } from "@solvent/client";
 import {
@@ -83,34 +78,37 @@ export const EVENT_DISPLAY_TYPES = Object.keys(
 ) as readonly EventDisplayType[];
 
 /**
- * The closed semantic-unit set for an event's `amount` — from
- * internal/store/p5_events.go (`EventAmountUnit`), verbatim; C2 item 3 puts
- * it on the wire.
+ * The closed semantic-unit set for an event's `amount` — the generated
+ * contract's `EventAmountUnit`, welded total BOTH WAYS (the same
+ * `Record<…, true>` law as the display vocabulary above): a unit the
+ * contract adds breaks this compile, and a unit it drops breaks it too.
  */
-export const FEED_AMOUNT_UNITS = [
-  "none",
-  "dm_normalized_debt",
-  "aave_scaled",
-  "opaque",
-] as const;
-export type FeedAmountUnit = (typeof FEED_AMOUNT_UNITS)[number];
+type WireAmountUnit = components["schemas"]["EventAmountUnit"];
 
+const FEED_AMOUNT_UNIT_SET = {
+  none: true,
+  dm_normalized_debt: true,
+  aave_scaled: true,
+  opaque: true,
+} as const satisfies Record<WireAmountUnit, true>;
+
+export const FEED_AMOUNT_UNITS = Object.keys(FEED_AMOUNT_UNIT_SET) as readonly FeedAmountUnit[];
+export type FeedAmountUnit = WireAmountUnit;
+
+/**
+ * Narrow a wire tag to the known closed set. The generated type says the
+ * union is total, but the wire's statement is still preserved verbatim at
+ * runtime: an out-of-set tag renders as itself, never coerced into a known
+ * unit (feed-view owns that rendering law).
+ */
 export function isKnownAmountUnit(unit: string): unit is FeedAmountUnit {
   return (FEED_AMOUNT_UNITS as readonly string[]).includes(unit);
 }
 
-/**
- * One feed row: the generated contract row plus the OWED unit tag. The tag
- * is typed `string` (not the closed union) on purpose: the wire's statement
- * is preserved verbatim, and rendering narrows through
- * `isKnownAmountUnit` — an out-of-set tag renders verbatim as itself,
- * never coerced into a known unit.
- */
-export type FeedChainEvent = ChainEvent & { amount_unit?: string };
+/** One feed row — the generated contract row, `amount_unit` included. */
+export type FeedChainEvent = ChainEvent;
 
-export type FeedEventsResponse = Omit<EventsResponse, "events"> & {
-  events: FeedChainEvent[];
-};
+export type FeedEventsResponse = EventsResponse;
 
 // ---------------------------------------------------------------------------
 // Scope: what one feed walk asks for. Mode is DERIVED, never stored twice.
@@ -156,7 +154,7 @@ export async function fetchFeedPage(
   signal?: AbortSignal,
 ): Promise<FeedEventsResponse> {
   assertFeedScopeLawful(scope);
-  const page = await fetchEvents(
+  return fetchEvents(
     baseUrl,
     {
       limit,
@@ -167,9 +165,6 @@ export async function fetchFeedPage(
     },
     signal,
   );
-  // The cast ONLY widens rows with the optional owed field; nothing is
-  // parsed or reshaped here (see the OWED note in the file header).
-  return page as FeedEventsResponse;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,8 +17,15 @@ import { EM_DASH } from "../../lib/format";
 import type { FeedChainEvent } from "../../lib/feed-data";
 import { FEED_UNITS } from "../fixtures/feed";
 
-/** A minimal row builder over the fixture's first (aave_scaled) row. */
-function row(overrides: Partial<FeedChainEvent>): FeedChainEvent {
+/**
+ * A minimal row builder over the fixture's first (aave_scaled) row.
+ * `amount_unit` is widened to plain string so the OUT-OF-SET runtime cases
+ * (the wire's bytes are the authority, not the generated union) stay
+ * constructible.
+ */
+function row(
+  overrides: Partial<Omit<FeedChainEvent, "amount_unit">> & { amount_unit?: string },
+): FeedChainEvent {
   return { ...FEED_UNITS.events[0], ...overrides } as FeedChainEvent;
 }
 
@@ -82,14 +89,18 @@ test.describe("feedAmount", () => {
     expect(amount.unitChip).toBe("none");
   });
 
-  test("pre-C2 wire (no tag): the committed contract's own claim — asset units", () => {
+  test("an ABSENT tag (off-1.2.0 wire) is drift: raw verbatim, never an unlicensed scale", () => {
     const amount = feedAmount(
       row({ amount: "-2500000000", amount_decimals: 6, amount_unit: undefined }),
     );
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.display).toBe("-2500"); // exact formatUnits, trimmed
-    expect(amount.unitChip).toBeNull();
+    // amount_decimals are NOT applied: the field is required since 1.2.0, so
+    // its absence means the wire is outside the contract and no scale is
+    // licensed for the figure.
+    expect(amount.display).toBe("-2500000000");
+    expect(amount.unitChip).toBe("no unit tag");
+    expect(amount.unitTitle).toContain("wire drift");
   });
 
   test("NO amount rendering ever contains a dollar sign", () => {

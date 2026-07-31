@@ -1,26 +1,28 @@
-// The Book table's row VIEW MODEL (W1).
+// The Book table's row VIEW MODEL (W1; C2 swapped the source).
 //
-// Shaped as EXACTLY the `PositionSummary` field set AMENDMENT 1/E will make
-// the /v1/positions wire type in C2 — engine, account, status, refusal code,
-// hf, liquidation verdict, totals, liq-distance, marks blocks — mapped today
-// from the full `Position` the C1 contract serves. When C2 lands, the swap is
-// a change to `toPositionRow` ONLY: every component renders `PositionRow`,
-// nothing downstream touches `Position`.
+// Mapped from the wire's lean `PositionSummary` (contract 1.2.0, AMENDMENT
+// 1/E) as served REFINED by @solvent/client — exactly the swap this file was
+// shaped for: every component renders `PositionRow`, and only `toPositionRow`
+// changed when the wire type landed.
 //
 // Honesty laws carried here:
 //   - the verdict comes from `positionVerdict` (each engine's OWN comparator:
-//     Aave on the wad, DM's strict boolean; refused → unknowable). The UI
+//     Aave on the wad, DM's sealed verdict; refused → unknowable). The UI
 //     never re-derives eligibility from a display ratio.
 //   - `ratio` is DISPLAY-precision, for the warn band only (lib/severity).
 //   - null totals stay null (em dash downstream, never 0).
 //   - the DM hf num/den is a DISCLOSURE (maxBorrowLT/borrowings), labeled so.
+//   - the wire's `liq_distance` is the boundary statement; the client-side
+//     verdict remains authoritative for `breached` (both sides derive the
+//     same law from the same batch fields, so this is a cross-check, not a
+//     second opinion).
 
 import {
   healthFactorRatio,
   parseDecimal,
   positionVerdict,
   type LiquidationVerdict,
-  type Position,
+  type RefinedPositionSummary,
 } from "@solvent/client";
 // Relative imports (not the @/ alias): this module is exercised by the unit
 // specs under Playwright's transpiler as well as by Next.
@@ -78,7 +80,7 @@ function displayRatio(num: bigint, den: bigint): number | null {
   return Number(num) / denominator;
 }
 
-function rowHF(position: Position): RowHF {
+function rowHF(position: RefinedPositionSummary): RowHF {
   const hf = position.health_factor;
   if (hf === null) return { display: null, ratio: null, infinite: false, disclosureOnly: false };
   if (hf.infinite) return { display: null, ratio: null, infinite: true, disclosureOnly: false };
@@ -100,44 +102,44 @@ function rowHF(position: Position): RowHF {
   };
 }
 
-function rowLiqDistance(position: Position, verdict: LiquidationVerdict): RowLiqDistance {
-  const lp = position.liquidation_price;
-  if (lp === null) return { kind: "none", reason: position.refusal?.code ?? null };
-  if (lp.already_breached || verdict === "liquidatable") return { kind: "breached" };
-  if (lp.never_liquidatable) return { kind: "never", reason: lp.reason ?? null };
-  if (!lp.in_factor || lp.scale_factor_num === null || lp.scale_factor_den === null) {
-    return { kind: "none", reason: lp.reason ?? null };
+function rowLiqDistance(
+  position: RefinedPositionSummary,
+  verdict: LiquidationVerdict,
+): RowLiqDistance {
+  const ld = position.liq_distance;
+  // The engine's own verdict stays authoritative for crit: a wire "distance"
+  // under a liquidatable verdict folds to breached — the same fold the
+  // server applies, kept here as the honest-UI cross-check.
+  if (ld.kind === "breached" || verdict === "liquidatable") return { kind: "breached" };
+  if (ld.kind === "never") return { kind: "never", reason: ld.reason };
+  if (ld.kind === "none") return { kind: "none", reason: ld.reason };
+  if (ld.scale_factor_num === null || ld.scale_factor_den === null) {
+    return { kind: "none", reason: ld.reason };
   }
   const display = factorDistancePercent(
-    parseDecimal(lp.scale_factor_num),
-    parseDecimal(lp.scale_factor_den),
+    parseDecimal(ld.scale_factor_num),
+    parseDecimal(ld.scale_factor_den),
   );
   if (display === null) return { kind: "none", reason: null };
-  const firstFactorAsset = lp.factor_assets[0];
-  const leg =
-    firstFactorAsset === undefined
-      ? undefined
-      : position.legs.find((candidate) => candidate.asset === firstFactorAsset);
-  return { kind: "distance", display, assetLabel: leg?.symbol ?? null };
+  return { kind: "distance", display, assetLabel: ld.factor_symbol ?? null };
 }
 
-function rowMarks(position: Position): Mark[] {
-  const asOf = position.as_of;
+function rowMarks(position: RefinedPositionSummary): Mark[] {
   const marks: Mark[] = [
-    { letter: "B", block: asOf.balances_block },
-    { letter: "P", block: asOf.params_block },
+    { letter: "B", block: position.balances_block },
+    { letter: "P", block: position.params_block },
   ];
   // The sweep mark belongs to engines that HAVE a sweeper (the Debt Manager).
   // sweep_block 0 there is an ABSENT sweep (S ∅ — e.g. SWEEP_NEVER), rendered
   // visibly; on Aave there is no sweeper and no S mark at all.
   if (position.engine === "debt_manager") {
-    marks.push({ letter: "S", block: asOf.sweep_block > 0 ? asOf.sweep_block : null });
+    marks.push({ letter: "S", block: position.sweep_block > 0 ? position.sweep_block : null });
   }
   return marks;
 }
 
-/** Map one wire `Position` to the summary row. C2 swaps ONLY this function. */
-export function toPositionRow(position: Position): PositionRow {
+/** Map one refined wire `PositionSummary` to the table row. */
+export function toPositionRow(position: RefinedPositionSummary): PositionRow {
   const verdict = positionVerdict(position);
   return {
     engine: position.engine,
@@ -148,8 +150,8 @@ export function toPositionRow(position: Position): PositionRow {
     hf: rowHF(position),
     verdict,
     totals: {
-      collateral: position.total_collateral_base ?? position.collateral_value_usd,
-      debt: position.total_debt_base ?? position.borrowings,
+      collateral: position.total_collateral,
+      debt: position.total_debt,
       decimals: position.value_decimals,
     },
     liqDistance: rowLiqDistance(position, verdict),

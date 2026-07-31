@@ -1,24 +1,18 @@
-// Typed access to GET /v1/evidence — the one C1 read endpoint the
-// hand-written @solvent/client does not wrap yet (the inspector-data.ts
-// pattern, applied to the Proof Center).
+// Typed access to GET /v1/evidence — THINNED TO DELEGATION (the OWED note is
+// discharged): @solvent/client wraps the endpoint, so this file no longer
+// owns fetch mechanics. What it still owns:
 //
-// This file is the ONE seam where that wire body is parsed, and it stays
-// inside the client's laws rather than around them: the body is typed by the
-// client's GENERATED contract type (`components["schemas"]["EvidenceResponse"]`
-// from api/openapi.yaml — no hand-shaped wire types), and a non-2xx answer is
-// a typed error carrying the envelope's own code, never a partial body.
-//
-// It also owns the PUBLISHABILITY check: /v1/evidence's contract says "this
-// surface serves no endpoint URL and no DSN" (committed artifacts name
-// endpoints by ENVIRONMENT VARIABLE only). `findEndpointLeaks` makes that a
-// testable predicate; the Proof Center refuses to render a manifest string
-// that fails it, and the unit suite runs it over the committed artifacts the
-// manifest cites.
-//
-// OWED: when @solvent/client grows an `evidence()` method, this file thins to
-// delegation.
+//   - the Proof Center's error contract (`ProofFetchError`, carrying the
+//     envelope's own code and retry-after);
+//   - the PUBLISHABILITY check: /v1/evidence's contract says "this surface
+//     serves no endpoint URL and no DSN" (committed artifacts name endpoints
+//     by ENVIRONMENT VARIABLE only). `findEndpointLeaks` makes that a
+//     testable predicate; the Proof Center refuses to render a manifest
+//     string that fails it, and the unit suite runs it over the committed
+//     artifacts the manifest cites.
 
-import type { components } from "@solvent/client";
+import { SolventHttpError, type components } from "@solvent/client";
+import { solventClientFor } from "./api";
 
 export type EvidenceResponse = components["schemas"]["EvidenceResponse"];
 export type SubstrateRef = components["schemas"]["SubstrateRef"];
@@ -26,6 +20,8 @@ export type ReconcileSummary = components["schemas"]["ReconcileSummary"];
 export type ReconcileWeld = components["schemas"]["ReconcileWeld"];
 export type FeedsRegistry = components["schemas"]["FeedsRegistry"];
 export type ProbeRecord = components["schemas"]["ProbeRecord"];
+export type ProofSubject = components["schemas"]["ProofSubject"];
+export type LiveSubject = components["schemas"]["LiveSubject"];
 
 /** A non-2xx answer from /v1/evidence, with the envelope's own code. */
 export class ProofFetchError extends Error {
@@ -57,32 +53,22 @@ export async function fetchEvidence(
   baseUrl: string,
   signal?: AbortSignal,
 ): Promise<EvidenceResponse> {
-  const url = `${baseUrl}/v1/evidence`;
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const raw = await response.text();
-  if (!response.ok) {
-    let code: string | null = null;
-    let message = raw.slice(0, 200);
-    let retryAfterSeconds: number | null = null;
-    try {
-      const body = JSON.parse(raw) as {
-        error?: { code?: unknown; message?: unknown; retry_after_seconds?: unknown };
-      };
-      if (typeof body.error?.code === "string") code = body.error.code;
-      if (typeof body.error?.message === "string") message = body.error.message;
-      if (typeof body.error?.retry_after_seconds === "number") {
-        retryAfterSeconds = body.error.retry_after_seconds;
-      }
-    } catch {
-      // Not the contract envelope; keep the truncated raw body as the message.
+  try {
+    return await solventClientFor(baseUrl).evidence(signal);
+  } catch (error) {
+    if (error instanceof SolventHttpError) {
+      // The envelope's own message, verbatim (the client's .message prefixes
+      // status and code, which this error's own formatting already does).
+      throw new ProofFetchError(
+        error.url,
+        error.status,
+        error.code,
+        error.body.error.message,
+        error.retryAfterSeconds,
+      );
     }
-    throw new ProofFetchError(url, response.status, code, message, retryAfterSeconds);
+    throw error;
   }
-  return JSON.parse(raw) as EvidenceResponse;
 }
 
 // ---------------------------------------------------------------------------

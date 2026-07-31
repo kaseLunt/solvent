@@ -64,85 +64,18 @@
         "note": "the Debt Manager has no on-chain health factor: `num/den` is the exact ratio maxBorrowLT/borrowings, a disclosure. The liquidation test is the strict boolean `liquidatable`."
       },
       "liquidatable": true,
-      "total_collateral_base": null,
-      "total_debt_base": null,
-      "weighted_lt_sum": null,
-      "avg_lt_bps": null,
-      "collateral_value_usd": "4000000000",
-      "max_borrow_lt": "3200000000",
-      "borrowings": "4200000000",
-      "legs": [
-        {
-          "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
-          "symbol": "weETH",
-          "decimals": 18,
-          "live_debt": null,
-          "live_collateral": null,
-          "debt_base": null,
-          "collateral_base": null,
-          "weighted_lt": null,
-          "used_as_collateral": null,
-          "debt_index_block": null,
-          "collateral_index_block": null,
-          "amount": "1000000000000000000",
-          "value_usd": "4000000000",
-          "max_borrow_contribution": "3200000000",
-          "liq_threshold": "80000000000000000000",
-          "liq_bonus": "1000000000000000000"
-        }
-      ],
-      "price_inputs": [
-        {
-          "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
-          "chain_id": 10,
-          "source": "priceproviderv2",
-          "provenance": "engine-exact",
-          "value": "4000000000",
-          "decimals": 6,
-          "block_number": 154796540,
-          "source_as_of": "2026-07-29T09:59:30Z",
-          "budget_seconds": 180,
-          "verdict": "fresh",
-          "age_seconds": 30,
-          "fresh": true,
-          "note": "within this input's own budget at compute time."
-        }
-      ],
-      "as_of": {
-        "balances_block": 154796552,
-        "params_block": 154796552,
-        "sweep_block": 154796500,
-        "oldest_price_input": "2026-07-29T09:59:30Z",
-        "stale_price_inputs": false,
-        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      "total_collateral": "4000000000",
+      "total_debt": "4200000000",
+      "liq_distance": {
+        "kind": "breached",
+        "scale_factor_num": null,
+        "scale_factor_den": null,
+        "factor_asset": null,
+        "reason": null
       },
-      "liquidation_price": {
-        "in_factor": true,
-        "never_liquidatable": false,
-        "scale_factor_num": "4200000000",
-        "scale_factor_den": "3200000000",
-        "already_breached": true,
-        "prices": [
-          {
-            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
-            "current_price": "4000000000",
-            "price_decimals": 6,
-            "price_floor": "5250000000",
-            "lowest_healthy_price": "5250000000"
-          }
-        ],
-        "factor_assets": [
-          "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
-        ],
-        "held_assets": [
-          "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
-        ],
-        "boundary_is_healthy": true,
-        "per_token_floor_omitted": false,
-        "diagnostic": false,
-        "axis": "eth_usd",
-        "note": "at exactly this price the position is HEALTHY on both engines — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
-      }
+      "balances_block": 154796552,
+      "params_block": 154796552,
+      "sweep_block": 154796500
     },
     {
       "engine": "debt_manager",
@@ -157,29 +90,24 @@
       "flags": [],
       "health_factor": null,
       "liquidatable": null,
-      "total_collateral_base": null,
-      "total_debt_base": null,
-      "weighted_lt_sum": null,
-      "avg_lt_bps": null,
-      "collateral_value_usd": null,
-      "max_borrow_lt": null,
-      "borrowings": "1500000000",
-      "legs": [],
-      "price_inputs": [],
-      "as_of": {
-        "balances_block": 154796552,
-        "params_block": 154796552,
-        "sweep_block": 0,
-        "oldest_price_input": null,
-        "stale_price_inputs": false,
-        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      "total_collateral": null,
+      "total_debt": "1500000000",
+      "liq_distance": {
+        "kind": "none",
+        "scale_factor_num": null,
+        "scale_factor_den": null,
+        "factor_asset": null,
+        "reason": "SWEEP_NEVER"
       },
-      "liquidation_price": null
+      "balances_block": 154796552,
+      "params_block": 154796552,
+      "sweep_block": 0
     }
   ],
   "next_cursor": null,
   "notes": [
     "every row on this page was drawn from batch 1; `next_cursor` is bound to that batch and answers 409 once it is superseded as the newest servable batch.",
-    "refused rows are ROWS: they stay on the page, named, and counted."
+    "refused rows are ROWS: they stay on the page, named, and counted.",
+    "rows are the lean PositionSummary; the FULL Position (legs, price inputs, liquidation-price solve) is served by /v1/address/{addr}."
   ]
 }

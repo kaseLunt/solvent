@@ -377,7 +377,8 @@ export function legEvidence(
 }
 
 // ---------------------------------------------------------------------------
-// /v1/evidence-derived builders (W6, ADDITIVE) — the Proof Center's chains.
+// /v1/evidence-derived builders (W6; C2 gave the split WIRE FIELDS) — the
+// Proof Center's chains.
 //
 // THE SPLIT IS THE PRODUCT (plan AMENDMENT 1): a manifest carries TWO
 // subjects and they are never one identity —
@@ -390,9 +391,14 @@ export function legEvidence(
 //                  materialization key, substrate digest — WATERMARKED,
 //                  never reconcile-welded.
 //
-// The proof marker ("proven") is granted by proofSubjectStatus ONLY when the
-// receipt's own verdict is an unqualified pass; the live subject is
-// OPERATIONAL unconditionally. Exactness never transfers between them.
+// Since contract 1.2.0 the wire CARRIES the status (`proof_subject.status`,
+// `live_subject.status`). This module reads the wire field AND keeps W6's
+// derivation as a CROSS-CHECK: the status semantics are the receipt's own
+// strict conjunction, so the two must agree — and when they do not, the
+// contradiction renders LOUDLY (never the badge; honest-UI law). The proof
+// marker ("proven") is granted ONLY when both the wire and the derivation say
+// accepted; the live subject is OPERATIONAL unconditionally. Exactness never
+// transfers between them.
 // ---------------------------------------------------------------------------
 
 export type EvidenceManifest = components["schemas"]["EvidenceResponse"];
@@ -414,8 +420,11 @@ export type ProofSubjectStatus =
  * of its row count) demotes to `rejected` with the violation named: this
  * surface would rather call a contradictory receipt rejected than launder it
  * into a proof.
+ *
+ * Kept as the CROSS-CHECK against the wire's `proof_subject.status` —
+ * `proofSubjectStatus` below is the consumer entry point.
  */
-export function proofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStatus {
+export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStatus {
   const reconcile = manifest.reconcile;
   if (reconcile === null) {
     return { kind: "unavailable", reason: manifest.reconcile_unavailable_reason ?? NO_REASON };
@@ -453,17 +462,81 @@ export function proofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStat
   return { kind: "accepted", reconcile };
 }
 
+/**
+ * The proof subject's status — the WIRE's `proof_subject.status`, accepted
+ * only when W6's derived conjunction agrees with it.
+ *
+ * On agreement the derived result (with its rich payload) is returned. On
+ * CONTRADICTION the answer is never the badge: the strictest honest arm wins,
+ * and the contradiction is named in the detail so it renders loudly — a
+ * manifest that cannot agree with its own receipt does not get to look
+ * proven.
+ */
+export function proofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStatus {
+  const derived = deriveProofSubjectStatus(manifest);
+  // A wire outside the 1.2.0 contract carries no proof_subject; the
+  // derivation then stands alone (the generated type says the field is
+  // required, but the wire's own bytes are the authority).
+  const wire = manifest.proof_subject as EvidenceManifest["proof_subject"] | undefined;
+  if (wire === undefined || wire.status === derived.kind) {
+    return derived;
+  }
+  const contradiction =
+    `CONTRADICTION — the wire's proof_subject.status "${wire.status}" contradicts the ` +
+    `receipt's own conjunction "${derived.kind}"; refusing the proof badge and rendering ` +
+    `the contradiction`;
+  if (derived.kind === "unavailable") {
+    return { kind: "unavailable", reason: `${contradiction} (derived reason: ${derived.reason})` };
+  }
+  return {
+    kind: "rejected",
+    reconcile: derived.reconcile,
+    detail: derived.kind === "rejected" ? `${contradiction} (derived detail: ${derived.detail})` : contradiction,
+  };
+}
+
 /** The live subject's status. `no-batch` is a first-class state, not an error. */
 export type LiveSubjectStatus =
   | { kind: "serving"; substrate: ManifestSubstrate }
   | { kind: "no-batch"; reason: string };
 
-export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus {
+/**
+ * Derive the live subject's status from the substrate's own presence — the
+ * cross-check against the wire's `live_subject.status`.
+ */
+export function deriveLiveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus {
   const substrate = manifest.substrate;
   if (substrate === null) {
     return { kind: "no-batch", reason: manifest.substrate_unavailable_reason ?? NO_REASON };
   }
   return { kind: "serving", substrate };
+}
+
+/**
+ * The live subject's status — wire field cross-checked against the
+ * substrate's own presence. A contradictory manifest NEVER claims a serving
+ * batch: the contradiction renders as `no-batch` with the reason named.
+ */
+export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus {
+  const derived = deriveLiveSubjectStatus(manifest);
+  const wire = manifest.live_subject as EvidenceManifest["live_subject"] | undefined;
+  if (wire === undefined) return derived;
+  const wireKind = wire.status === "serving" ? "serving" : "no-batch";
+  if (wireKind === derived.kind) return derived;
+  if (derived.kind === "serving") {
+    return {
+      kind: "no-batch",
+      reason:
+        `CONTRADICTION — the wire's live_subject.status "${wire.status}" contradicts a ` +
+        `non-null substrate; refusing to claim a serving batch under a contradictory manifest`,
+    };
+  }
+  return {
+    kind: "no-batch",
+    reason:
+      `CONTRADICTION — the wire claims "serving" while substrate is null; ` +
+      `refusing to claim a serving batch (derived reason: ${derived.reason})`,
+  };
 }
 
 /** The proof pin: the receipt's own comparison sha, shortened for display. */

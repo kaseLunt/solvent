@@ -39,7 +39,15 @@
 //         the spec's scale facts (aave: low-count/large-ticket);
 //       - the rate row echoes the example's row VERBATIM except: engine
 //         echoed, as_of_block = last_block - 10 (the contract's own law that
-//         an index's as-of can trail the bucket);
+//         an index's as-of can trail the bucket); kind/scale re-registered
+//         to the aave vocabulary (liquidity_index / ray-1e27 — the closed
+//         per-kind scale table);
+//       - observation provenance (1.2.0): batch_id = a monotone id per
+//         bucket in the example's own register (captured.batch_id − 3 + i);
+//         materialization_key = the example's key suffixed with the engine
+//         and hour (documented mechanical delta — the key is opaque);
+//         acked_epoch / max_epoch_at_compute echoed from the example's
+//         captured bucket (0/0);
 //       - envelope: from = the series' own first bucket, to/step_seconds
 //         null, served_at + notes echoed verbatim (the note is the
 //         contract's general withheld-bucket law, kept as served).
@@ -139,6 +147,10 @@ const aavePoints = HOURS.map((hour, i) => {
   return {
     bucket_start: `${day}T${hour}:00:00Z`,
     last_block: lastBlock,
+    batch_id: captured.batch_id - 3 + i,
+    materialization_key: `${captured.materialization_key}-aave-${hour}00`,
+    acked_epoch: captured.acked_epoch,
+    max_epoch_at_compute: captured.max_epoch_at_compute,
     refused: false,
     refusal_code: null,
     accounts: ACCOUNTS[i],
@@ -150,6 +162,9 @@ const aavePoints = HOURS.map((hour, i) => {
       {
         ...exampleRate,
         engine: "aave_v3_etherfi",
+        // The aave engine's own kind + its closed-table scale.
+        kind: "liquidity_index",
+        scale: "ray-1e27",
         as_of_block: lastBlock - 10,
       },
     ],

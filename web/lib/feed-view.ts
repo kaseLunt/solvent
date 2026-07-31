@@ -11,8 +11,10 @@
 //     integer verbatim — even `amount_decimals` is an interpretation the
 //     unit does not license;
 //   - a null amount is "record-only" — a different statement from zero;
-//   - a pre-C2 wire (no unit tag) renders the committed contract's own
-//     claim: the asset's units, formatted by `amount_decimals`.
+//   - an ABSENT tag (a wire outside the 1.2.0 contract, which made
+//     `amount_unit` required) is WIRE DRIFT: the raw integer renders
+//     verbatim with the drift named — never formatted through a scale the
+//     wire did not license.
 //
 // Nothing in this module produces a "$" — that is asserted in
 // tests/unit/feed-view.spec.ts, not just promised here.
@@ -37,18 +39,20 @@ export type FeedAmount =
 export function feedAmount(event: FeedChainEvent): FeedAmount {
   if (event.amount === null) return { kind: "record-only" };
   const symbol = event.symbol ?? null;
-  const unit = event.amount_unit;
+  // The generated type makes amount_unit required; the runtime guard stays
+  // because the wire's own bytes are the authority, not our types.
+  const unit = event.amount_unit as string | undefined;
 
   if (unit === undefined) {
-    // Pre-C2 wire: the committed contract states `amount` is the asset's own
-    // units. Render that claim — the wire's, not ours.
+    // A wire outside the 1.2.0 contract (the field is required there). The
+    // raw integer renders verbatim with the drift NAMED — formatting it
+    // through amount_decimals would assert a scale nobody licensed.
     return {
       kind: "amount",
-      display: renderNullableDecimal(event.amount, {
-        decimals: event.amount_decimals ?? undefined,
-      }),
-      unitChip: null,
-      unitTitle: null,
+      display: event.amount,
+      unitChip: "no unit tag",
+      unitTitle:
+        "the wire carried no amount_unit — required since contract 1.2.0. Rendered verbatim as wire drift, never formatted through an unlicensed scale",
       symbol,
     };
   }

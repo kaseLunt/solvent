@@ -22,9 +22,9 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": "1500000000000000000",
-      "amount_decimals": 18,
-      "liquidation": null,
-      "amount_unit": "aave_scaled"
+      "amount_unit": "aave_scaled",
+      "amount_decimals": null,
+      "liquidation": null
     },
     {
       "chain_id": 10,
@@ -39,10 +39,10 @@
       "account": "0xccCc000000000000000000000000000000000003",
       "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
       "symbol": "USDC",
-      "amount": "1200000000",
-      "amount_decimals": 6,
-      "liquidation": null,
-      "amount_unit": "dm_normalized_debt"
+      "amount": "1199403000",
+      "amount_unit": "dm_normalized_debt",
+      "amount_decimals": null,
+      "liquidation": null
     },
     {
       "chain_id": 1,
@@ -58,9 +58,9 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": null,
+      "amount_unit": "none",
       "amount_decimals": null,
-      "liquidation": null,
-      "amount_unit": "none"
+      "liquidation": null
     },
     {
       "chain_id": 1,
@@ -76,9 +76,9 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "amount": "123456789",
+      "amount_unit": "opaque",
       "amount_decimals": 6,
-      "liquidation": null,
-      "amount_unit": "opaque"
+      "liquidation": null
     }
   ],
   "next_cursor": null,

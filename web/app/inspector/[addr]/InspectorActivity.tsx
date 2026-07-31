@@ -3,12 +3,16 @@
 // ADDRESS ACTIVITY (spec §3.2): the account's own durable chain actions from
 // GET /v1/events?account= — custodied events, never invented. Block-time
 // honesty: a null block_time renders the BLOCK NUMBER (renderBlockTime),
-// never an invented or interpolated timestamp.
+// never an invented or interpolated timestamp. Amount honesty: rows render
+// through the Feed's `feedAmount` law (W5's sibling note, discharged with the
+// 1.2.0 `amount_unit`) — the engine's own accounting unit is NAMED beside the
+// value, never shown as a display token amount.
 
 import { EngineChip } from "@/components/EngineChip";
 import { AddressMono } from "@/components/AddressMono";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "@/lib/format";
 import { txExplorerUrl, type ChainEvent } from "@/lib/inspector-data";
+import { feedAmount } from "@/lib/feed-view";
 import styles from "../inspector.module.css";
 
 export interface InspectorActivityProps {
@@ -19,12 +23,23 @@ export interface InspectorActivityProps {
   onLoadMore: () => void;
 }
 
-function amountLabel(event: ChainEvent): string {
-  if (event.amount === null) return "record-only";
-  const amount = renderNullableDecimal(event.amount, {
-    decimals: event.amount_decimals ?? undefined,
-  });
-  return `${amount} ${event.symbol ?? ""}`.trim();
+function ActivityAmount({ event }: { event: ChainEvent }) {
+  const amount = feedAmount(event);
+  if (amount.kind === "record-only") {
+    return <span className="dim">record-only</span>;
+  }
+  return (
+    <>
+      <b>{amount.display}</b>
+      {amount.unitChip !== null && (
+        <span className="mono dim" data-testid="activity-amount-unit" title={amount.unitTitle ?? undefined}>
+          {" "}
+          {amount.unitChip}
+        </span>
+      )}
+      {amount.symbol !== null && <span className="mono dim"> {amount.symbol}</span>}
+    </>
+  );
 }
 
 function TxLink({ event }: { event: ChainEvent }) {
@@ -92,7 +107,9 @@ export function InspectorActivity({ events, loading, error, hasMore, onLoadMore 
                 {event.type}
               </span>
               <span className={styles.feedBody}>
-                <b>{amountLabel(event)}</b>
+                <span data-testid="activity-amount">
+                  <ActivityAmount event={event} />
+                </span>
                 <EngineChip engine={event.engine} />
                 <span className="mono dim">
                   {event.block_time === null ? "" : `block ${formatBlock(event.block_number)} · `}

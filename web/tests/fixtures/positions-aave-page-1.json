@@ -66,90 +66,25 @@
         "note": "compare against 1e18 ON THE WAD; do not re-derive a float from num/den to decide eligibility."
       },
       "liquidatable": null,
-      "total_collateral_base": "800000000000",
-      "total_debt_base": "600000000000",
-      "weighted_lt_sum": "6480000000000000",
-      "avg_lt_bps": "8100",
-      "collateral_value_usd": null,
-      "max_borrow_lt": null,
-      "borrowings": null,
-      "legs": [
-        {
-          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-          "symbol": "weETH",
-          "decimals": 18,
-          "live_debt": null,
-          "live_collateral": "2000000000000000000",
-          "debt_base": null,
-          "collateral_base": "800000000000",
-          "weighted_lt": "6480000000000000",
-          "used_as_collateral": true,
-          "debt_index_block": null,
-          "collateral_index_block": 25635618,
-          "amount": null,
-          "value_usd": null,
-          "max_borrow_contribution": null,
-          "liq_threshold": "8100",
-          "liq_bonus": "10500"
-        }
-      ],
-      "price_inputs": [
-        {
-          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-          "chain_id": 1,
-          "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
-          "provenance": "adapter-output",
-          "value": "400000000000",
-          "decimals": 8,
-          "block_number": 25635610,
-          "source_as_of": "2026-07-29T09:56:30Z",
-          "budget_seconds": 180,
-          "verdict": "stale",
-          "age_seconds": 210,
-          "fresh": false,
-          "note": "older than its budget but within the ceiling: COMPUTED AND FLAGGED, and the flag propagates into every aggregate containing it."
-        }
-      ],
-      "as_of": {
-        "balances_block": 25635618,
-        "params_block": 25635600,
-        "sweep_block": 0,
-        "oldest_price_input": "2026-07-29T09:56:30Z",
-        "stale_price_inputs": true,
-        "note": "each leg additionally carries its OWN rate-index as-of block."
-      },
-      "liquidation_price": {
-        "in_factor": true,
-        "never_liquidatable": false,
+      "total_collateral": "800000000000",
+      "total_debt": "600000000000",
+      "liq_distance": {
+        "kind": "distance",
         "scale_factor_num": "6000000000000000",
         "scale_factor_den": "6480000000000000",
-        "already_breached": false,
-        "prices": [
-          {
-            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-            "current_price": "400000000000",
-            "price_decimals": 8,
-            "price_floor": "370370370370",
-            "lowest_healthy_price": "370370370371"
-          }
-        ],
-        "factor_assets": [
-          "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
-        ],
-        "held_assets": [
-          "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
-        ],
-        "boundary_is_healthy": true,
-        "per_token_floor_omitted": false,
-        "diagnostic": false,
-        "axis": "eth_usd",
-        "note": "at exactly this price the position is HEALTHY — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
-      }
+        "factor_asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "factor_symbol": "weETH",
+        "reason": null
+      },
+      "balances_block": 25635618,
+      "params_block": 25635600,
+      "sweep_block": 0
     }
   ],
   "next_cursor": "MS5saXFfZGlzdGFuY2UuMQ",
   "notes": [
     "every row on this page was drawn from batch 1; `next_cursor` is bound to that batch and answers 409 once it is superseded as the newest servable batch.",
-    "refused rows are ROWS: they stay on the page, named, and counted."
+    "refused rows are ROWS: they stay on the page, named, and counted.",
+    "rows are the lean PositionSummary; the FULL Position (legs, price inputs, liquidation-price solve) is served by /v1/address/{addr}."
   ]
 }

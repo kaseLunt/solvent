@@ -1,26 +1,18 @@
-// Typed access to GET /v1/observatory/series — the C1 read endpoint the
-// hand-written @solvent/client does not wrap yet (it wraps /v1/observatory,
-// the per-batch endpoint, but not the durable rollup series).
+// Typed access to GET /v1/observatory/series — THINNED TO DELEGATION (the
+// OWED note is discharged): @solvent/client wraps the endpoint, so this file
+// no longer owns fetch mechanics. What it still owns:
 //
-// This file is the ONE seam where that wire body is parsed, and it stays
-// inside the client's laws rather than around them (the lib/inspector-data.ts
-// pattern):
-//
-//   - the body and the query are typed EXCLUSIVELY by the client's GENERATED
-//     contract types (`components` / `operations` from api/openapi.yaml — no
-//     hand-shaped wire types; the engine union is the contract's own enum);
-//   - non-2xx answers surface the contract envelope's own `code`, so the
-//     surface can render the rollup's honest degraded state (`unavailable` —
-//     a deployment whose database predates the observatory migration) as a
-//     NAMED state keyed on the contract vocabulary, not on an HTTP status
-//     the handler wave might still be choosing;
-//   - nothing here re-shapes, sorts, averages or fills the series — the wire
-//     body passes through verbatim; lib/observatory-series.ts owns the axis.
-//
-// OWED: when @solvent/client grows an `observatorySeries()` method, this file
-// thins to delegation.
+//   - the Observatory's error contract (`ObservatoryFetchError` /
+//     `isRollupUnavailable`): the rollup's honest degraded state
+//     (`unavailable` — a deployment whose database predates the observatory
+//     migration) stays a NAMED state keyed on the contract vocabulary;
+//   - the re-exported generated contract types the surface is written
+//     against. Nothing here re-shapes, sorts, averages or fills the series —
+//     the wire body passes through verbatim; lib/observatory-series.ts owns
+//     the axis.
 
-import type { components, operations } from "@solvent/client";
+import { SolventHttpError, type components, type operations } from "@solvent/client";
+import { solventClientFor } from "./api";
 
 export type ObservatorySeriesResponse = components["schemas"]["ObservatorySeriesResponse"];
 export type ObservatorySeriesPoint = components["schemas"]["ObservatorySeriesPoint"];
@@ -77,30 +69,21 @@ export async function fetchObservatorySeries(
   query: ObservatorySeriesQuery,
   signal?: AbortSignal,
 ): Promise<ObservatorySeriesResponse> {
-  const params = new URLSearchParams();
-  params.set("engine", query.engine);
-  if (query.from !== undefined) params.set("from", query.from);
-  if (query.to !== undefined) params.set("to", query.to);
-  if (query.step !== undefined) params.set("step", String(query.step));
-  const url = `${baseUrl}/v1/observatory/series?${params.toString()}`;
-
-  const response = await fetch(url, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    ...(signal === undefined ? {} : { signal }),
-  });
-  const raw = await response.text();
-  if (!response.ok) {
-    let code: string | null = null;
-    let message = raw.slice(0, 200);
-    try {
-      const body = JSON.parse(raw) as { error?: { code?: unknown; message?: unknown } };
-      if (typeof body.error?.code === "string") code = body.error.code;
-      if (typeof body.error?.message === "string") message = body.error.message;
-    } catch {
-      // Not the contract envelope; keep the truncated raw body as the message.
+  try {
+    return await solventClientFor(baseUrl).observatorySeries(
+      {
+        engine: query.engine,
+        ...(query.from === undefined ? {} : { from: query.from }),
+        ...(query.to === undefined ? {} : { to: query.to }),
+        ...(query.step === undefined ? {} : { step: query.step }),
+      },
+      signal,
+    );
+  } catch (error) {
+    if (error instanceof SolventHttpError) {
+      // The envelope's own message, verbatim — rendered, not paraphrased.
+      throw new ObservatoryFetchError(error.url, error.status, error.code, error.body.error.message);
     }
-    throw new ObservatoryFetchError(url, response.status, code, message);
+    throw error;
   }
-  return JSON.parse(raw) as ObservatorySeriesResponse;
 }

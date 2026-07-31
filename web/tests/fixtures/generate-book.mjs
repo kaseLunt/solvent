@@ -19,10 +19,15 @@
 //       GET /v1/positions 200 example  -> positions-aave-page-1.json
 //       BatchSuperseded 409 example    -> batch-superseded.json
 //
-//  3. COMPOSED pages — the /v1/positions example's envelope around canonical
-//     Position rows lifted BYTE-IDENTICAL from the validated address
-//     fixtures (all sources pin batch id 1, so composed pages stay
-//     batch-consistent; deltas are mechanical envelope echoes only):
+//  3. COMPOSED pages — the /v1/positions example's envelope around
+//     PositionSummary rows PROJECTED from the canonical Position rows of the
+//     validated address fixtures (all sources pin batch id 1, so composed
+//     pages stay batch-consistent). The projection (`summarize` below) is
+//     the SAME field-selection the server documents for the 1.2.0 summary:
+//     engine-mapped totals (aave: total_collateral_base/total_debt_base;
+//     dm: collateral_value_usd/borrowings), the liq_distance fold over the
+//     row's own solve flags and verdict, and the as_of block trio — nothing
+//     invented, every value the canonical row's own:
 //       positions-aave-page-2.json — the refused aave row
 //         (address-aave-refused.json), next_cursor null.
 //       positions-dm-page-1.json   — the liquidatable DM row
@@ -101,7 +106,7 @@ if (supersededExample === undefined) {
 }
 emit("batch-superseded.json", supersededExample);
 
-// --- 3: composed pages from canonical rows ---------------------------------
+// --- 3: composed pages from canonical rows (projected to PositionSummary) --
 
 const positionOf = (fixture) => {
   const rows = readClientFixture(fixture).positions;
@@ -112,9 +117,89 @@ const positionOf = (fixture) => {
   return rows[0];
 };
 
-const aaveRefused = positionOf("address-aave-refused.json");
-const dmComputed = positionOf("address-dm.json"); // liquidatable: true — the crit row
-const dmRefused = positionOf("address-dm-refused.json");
+const WAD = 10n ** 18n;
+
+/**
+ * The server's documented 1.2.0 projection, applied to a canonical FULL
+ * Position row: field selection + the liq_distance fold. Every value is the
+ * canonical row's own; nothing is invented.
+ */
+const summarize = (position) => {
+  const isAave = position.engine === "aave_v3_etherfi";
+  const hf = position.health_factor;
+  const liquidatable =
+    position.liquidatable === true ||
+    (hf !== null && hf !== undefined && !hf.infinite && hf.wad !== null && hf.wad !== undefined &&
+      BigInt(hf.wad) < WAD);
+  const lp = position.liquidation_price ?? null;
+
+  let liq_distance;
+  if (lp === null) {
+    liq_distance = {
+      kind: "none",
+      scale_factor_num: null,
+      scale_factor_den: null,
+      factor_asset: null,
+      reason: position.refusal === null ? null : position.refusal.code,
+    };
+  } else if (lp.already_breached || liquidatable) {
+    liq_distance = {
+      kind: "breached",
+      scale_factor_num: null,
+      scale_factor_den: null,
+      factor_asset: null,
+      reason: null,
+    };
+  } else if (lp.never_liquidatable) {
+    liq_distance = {
+      kind: "never",
+      scale_factor_num: null,
+      scale_factor_den: null,
+      factor_asset: null,
+      reason: lp.reason ?? null,
+    };
+  } else if (!lp.in_factor || lp.scale_factor_num === null || lp.scale_factor_den === null) {
+    liq_distance = {
+      kind: "none",
+      scale_factor_num: null,
+      scale_factor_den: null,
+      factor_asset: null,
+      reason: lp.reason ?? null,
+    };
+  } else {
+    const factorAsset = lp.factor_assets[0] ?? null;
+    const leg = position.legs.find((candidate) => candidate.asset === factorAsset);
+    liq_distance = {
+      kind: "distance",
+      scale_factor_num: lp.scale_factor_num,
+      scale_factor_den: lp.scale_factor_den,
+      factor_asset: factorAsset,
+      ...(leg?.symbol === undefined ? {} : { factor_symbol: leg.symbol }),
+      reason: null,
+    };
+  }
+
+  return {
+    engine: position.engine,
+    account: position.account,
+    status: position.status,
+    value_decimals: position.value_decimals,
+    refusal: position.refusal,
+    flags: position.flags,
+    health_factor: position.health_factor,
+    liquidatable: position.liquidatable,
+    total_collateral: isAave ? position.total_collateral_base : position.collateral_value_usd,
+    total_debt: isAave ? position.total_debt_base : position.borrowings,
+    liq_distance,
+    balances_block: position.as_of.balances_block,
+    params_block: position.as_of.params_block,
+    sweep_block: position.as_of.sweep_block,
+  };
+};
+
+const aaveRefused = summarize(positionOf("address-aave-refused.json"));
+const dmComputed = summarize(positionOf("address-dm.json")); // liquidatable: true — the crit row
+const dmRefused = summarize(positionOf("address-dm-refused.json"));
 
 emit("positions-aave-page-2.json", {
   ...positionsExample,

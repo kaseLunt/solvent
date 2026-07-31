@@ -36,16 +36,15 @@
 //       feed-empty.json          — a well-formed filter that matches nothing:
 //         events [], next_cursor null. An empty page is a real answer.
 //
-//  3. feed-units.json — the OWED C2 unit-tag cases (AMENDMENT 1 item B).
-//     The committed contract does NOT yet carry `amount_unit`; the closed
-//     set (none / dm_normalized_debt / aave_scaled / opaque) is
-//     `internal/store/p5_events.go`'s `EventAmountUnit` VERBATIM, and each
-//     row's tag follows that file's classification maps for its raw_type
+//  3. feed-units.json — the unit-tag cases (AMENDMENT 1 item B; on the wire
+//     since contract 1.2.0). The closed set (none / dm_normalized_debt /
+//     aave_scaled / opaque) is the contract's `EventAmountUnit` —
+//     `internal/store/p5_events.go`'s vocabulary verbatim — and each row's
+//     tag follows that file's classification maps for its raw_type
 //     (aave_borrow → aave_scaled; borrow → dm_normalized_debt;
 //     collateral flag → none). The `opaque` row deliberately carries
 //     amount_decimals to pin that the UI refuses to APPLY them under an
-//     opaque unit. This generator watches the contract and announces when
-//     C2 lands (see below).
+//     opaque unit.
 //
 //  4. Error envelopes (`ErrorBody` shape, additionalProperties false):
 //       feed-error-bad-cursor.json — code bad_request; the message is the
@@ -94,14 +93,16 @@ try {
 
 const contract = YAML.parse(readFileSync(contractPath, "utf8"));
 
-// --- the C2 watch: announce the moment `amount_unit` reaches the contract --
+// --- the C2 weld: `amount_unit` is ON the contract (landed with 1.2.0).
+// The inverted watch: this generator now FAILS if the field ever leaves the
+// contract, because every emitted row carries it.
 const chainEventProps = contract?.components?.schemas?.ChainEvent?.properties ?? {};
-if ("amount_unit" in chainEventProps) {
-  console.log(
-    "NOTE: api/openapi.yaml's ChainEvent now carries `amount_unit` — C2 item 3 has landed.\n" +
-      "      Fold the tag into the generated types (drop lib/feed-data.ts's local extension)\n" +
-      "      and regenerate feed-units.json from the contract's own example.",
+if (!("amount_unit" in chainEventProps)) {
+  console.error(
+    "generate-feed.mjs: api/openapi.yaml's ChainEvent no longer carries `amount_unit` —\n" +
+      "the 1.2.0 unit vocabulary these fixtures encode has left the contract. Revisit.",
   );
+  process.exit(1);
 }
 
 // --- 1: the verbatim /v1/events example ------------------------------------
@@ -133,11 +134,12 @@ if (paramsExample === undefined) {
 const [PARAMS_AAVE, PARAMS_DM] = paramsExample.params;
 
 // --- a light weld: every emitted row satisfies the contract's OWN row shape
-//     (required list + closed property set), with `amount_unit` as the ONE
-//     documented owed exception. Composition can therefore not drift. -------
+//     (required list + closed property set — `amount_unit` is required since
+//     1.2.0, so the weld enforces it on every composed row). Composition can
+//     therefore not drift. --------------------------------------------------
 
 const rowRequired = contract?.components?.schemas?.ChainEvent?.required ?? [];
-const rowKnownKeys = new Set([...Object.keys(chainEventProps), "amount_unit"]);
+const rowKnownKeys = new Set(Object.keys(chainEventProps));
 function checkRows(name, body) {
   for (const row of body.events) {
     for (const key of rowRequired) {
@@ -194,6 +196,7 @@ const aaveSupplyUntimed = {
   asset: WEETH.asset,
   symbol: WEETH.symbol,
   amount: null, // record-only (the store maps aave_supply's delta unit to `none`)
+  amount_unit: "none", // the classification map's tag for aave_supply, verbatim
   amount_decimals: null,
   liquidation: null,
 };
@@ -218,7 +221,8 @@ const aaveBorrowTimed = {
   type: "borrow",
   raw_type: "aave_borrow",
   amount: "1500000000000000000",
-  amount_decimals: WEETH.decimals,
+  amount_unit: "aave_scaled", // aaveEventDisplay["aave_borrow"].DeltaUnit, verbatim
+  amount_decimals: null, // an accounting-unit delta asserts no display scale
 };
 const dmBorrowTimed = {
   ...clone(DM_BORROW),
@@ -290,13 +294,20 @@ const dmLiquidation = {
     debt_asset: null, // DM debt is USD-valued, not one asset — null, not guessed
     debt_repaid: "1000000000",
     debt_decimals: 6,
+    // The DM event's own payload facts (1.2.0): pre-liquidation USD-6 figure
+    // and the 1e18-scaled interest index at the event.
+    before_debt_usd: "2000000000",
+    interest_index: "1040000000000000000",
+    deficit_paired: null, // the DM has no deficit-pairing concept — withheld, never "false"
     seized: [
-      { asset: WEETH.asset, symbol: WEETH.symbol, amount: "250000000000000000", decimals: 18 },
-      { asset: DM_BORROW.asset, symbol: DM_BORROW.symbol, amount: "120000000", decimals: 6 },
+      // Per-element realized bonus, verbatim in the CONTRACT's own 100e18
+      // denomination — never converted to bps.
+      { asset: WEETH.asset, symbol: WEETH.symbol, amount: "250000000000000000", decimals: 18, bonus: "5000000000000000000" },
+      { asset: DM_BORROW.asset, symbol: DM_BORROW.symbol, amount: "120000000", decimals: 6, bonus: "5000000000000000000" },
     ],
-    realized_bonus_bps: null, // NOT establishable from this payload — never estimated
+    realized_bonus_bps: null, // 100e18-denominated on seized[].bonus — never a silent unit conversion
     configured_bonus_bps: "500",
-    note: "extracted from the event's own structured payload; a bonus the payload cannot establish is null, never estimated.",
+    note: "extracted from the event's own structured payload; a bonus the payload cannot establish in bps is null, never estimated — each seizure's own realized bonus serves verbatim in the contract's 100e18 denomination.",
   },
 };
 
@@ -320,7 +331,8 @@ emit(
   }),
 );
 
-// --- 3: the OWED unit-tag cases (internal/store/p5_events.go, verbatim set) --
+// --- 3: the unit-tag cases (the contract's EventAmountUnit vocabulary,
+//     internal/store/p5_events.go's classification verbatim) ----------------
 const unitAaveScaled = {
   ...clone(aaveBorrowTimed),
   amount_unit: "aave_scaled", // aaveEventDisplay["aave_borrow"].DeltaUnit

@@ -9,6 +9,10 @@
     {
       "bucket_start": "2026-07-29T08:00:00Z",
       "last_block": 154794000,
+      "batch_id": 41,
+      "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
       "refused": false,
       "refusal_code": null,
       "accounts": 3,
@@ -21,8 +25,9 @@
           "engine": "debt_manager",
           "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
           "symbol": "USDC",
-          "kind": "borrow_apy",
-          "value": "50000000000000000",
+          "kind": "borrow_index",
+          "scale": "index-1e18",
+          "value": "1050000000000000000",
           "as_of_block": 154793990,
           "note": "as of its OWN last update, which can trail the bucket."
         }
@@ -31,6 +36,10 @@
     {
       "bucket_start": "2026-07-29T09:00:00Z",
       "last_block": 154796552,
+      "batch_id": 42,
+      "materialization_key": "e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025f0b3",
+      "acked_epoch": 0,
+      "max_epoch_at_compute": 0,
       "refused": true,
       "refusal_code": "FLAG_CUSTODY_UNPROVEN",
       "accounts": null,
