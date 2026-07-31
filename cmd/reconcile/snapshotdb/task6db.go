@@ -27,6 +27,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/kaselunt/solvent/internal/store"
 )
 
@@ -327,6 +329,27 @@ type Task6Data struct {
 	// any-never-swept-gates law was stochastic on borrower arrival; the lawful
 	// form needs the arrival block.
 	DMFirstDebtBlock map[string]uint64
+	// DMSweepCycles is the PER-GENERATION sweep-cycle witness (Wave H4a, Codex
+	// F2): the engine's sweep_generations row plus per-generation attempt-block
+	// aggregates over snapshot_sweeps. The never-swept race guard consumes THIS
+	// — never the fleet's minimum historical success block, which is a floor
+	// over many generations: one stale straggler success pins that floor
+	// forever, and a borrower a later COMPLETED generation genuinely skipped
+	// then classifies "honest race" (a pass-that-should-fail). See
+	// dmNeverSweptRace in cmd/reconcile for the decision law.
+	DMSweepCycles T6SweepCycles
+	// DMParamLedger is the FULL DM collateral-config event ledger prefix at
+	// P_op — the raw config_set/removed/added rows in (block, log_index, seq)
+	// order (Wave H4a, Codex F4). store.DMParamsAsOf(P) COLLAPSES the ledger
+	// to the latest P-effective row per asset, so filtering that view by
+	// EffectiveBlock <= S cannot reconstruct the S-effective config whenever a
+	// token's config changed (or was removed/re-added) inside (S, P]. The
+	// S-clock welds fold THIS prefix independently at S instead.
+	// DMParamLedgerRead distinguishes "collected, possibly empty" from a
+	// fixture that never ran Stage A — the gate refuses the S-clock param cut
+	// when it is false.
+	DMParamLedger     []T6DMParamEvent
+	DMParamLedgerRead bool
 
 	// Backtest: one row per frozen frame case, keyed "<txhex>:<logindex>".
 	Backtest map[string]T6BacktestRow
@@ -403,6 +426,13 @@ func collectTask6(ctx context.Context, q store.Querier, prm Params, cfg FeedRegi
 		if t.DMFirstDebtBlock, err = collectFirstDebtBlocks(ctx, q, DMEngine, pinOP); err != nil {
 			return nil, err
 		}
+		if t.DMSweepCycles, err = collectSweepCycles(ctx, q, DMEngine); err != nil {
+			return nil, err
+		}
+		if t.DMParamLedger, err = collectDMParamLedger(ctx, q, pinOP); err != nil {
+			return nil, err
+		}
+		t.DMParamLedgerRead = true
 		if err := collectBacktest(ctx, q, prm.BacktestKeys, t.Backtest); err != nil {
 			return nil, err
 		}
@@ -742,6 +772,156 @@ func collectFirstDebtBlocks(ctx context.Context, q store.Querier, engine string,
 			return nil, fmt.Errorf("scan first debt block: %w", err)
 		}
 		out[acct] = uint64(block)
+	}
+	return out, rows.Err()
+}
+
+// T6GenerationSpan is one sweep generation's attempt-block aggregate over the
+// snapshot_sweeps rows whose LAST attempt was stamped by that generation.
+//
+// HONESTY BOUNDS, stated because the race law leans on them: an account
+// re-attempted by a LATER generation loses its earlier attempt row (the table
+// keeps only the last attempt), so a generation's visible span can SHRINK
+// over time — MinAttemptBlock is an upper bound on the generation's true
+// first-attempt block, never a lower one. The race guard therefore uses
+// MinAttemptBlock <= B only as a POSITIVE witness that the generation opened
+// at or before B (an attempt can only execute after its generation opened),
+// and treats the absence of such a witness as sticky evidence that GATES —
+// never as proof of the opposite.
+type T6GenerationSpan struct {
+	MinAttemptBlock uint64 `json:"min_attempt_block"`
+	MaxAttemptBlock uint64 `json:"max_attempt_block"`
+	Rows            int64  `json:"rows"`
+}
+
+// T6SweepCycles is the engine-level sweep-cycle witness (Wave H4a, Codex F2).
+type T6SweepCycles struct {
+	// Read is true when Stage A actually collected this witness. A hand-built
+	// fixture that never ran the collector reads false, and the race guard
+	// fails CLOSED on it (missing cycle evidence gates, never discloses).
+	Read bool `json:"read"`
+	// HaveGenerationRow is true when sweep_generations carries a row for the
+	// engine — false means no sweep generation has EVER been opened.
+	HaveGenerationRow bool `json:"have_generation_row"`
+	// CurrentGeneration / CurrentCompleted mirror the engine row:
+	// current_generation and (completed_at IS NOT NULL). Only the CURRENT
+	// generation's completion is durably knowable — opening the next
+	// generation overwrites the stamp, and a rewind bumps the generation
+	// WITHOUT completing it, so a past generation's completion status is
+	// sticky evidence by construction.
+	CurrentGeneration uint64 `json:"current_generation"`
+	CurrentCompleted  bool   `json:"current_completed"`
+	// Generations aggregates snapshot_sweeps attempt blocks per generation
+	// (see T6GenerationSpan for the visibility bounds).
+	Generations map[uint64]T6GenerationSpan `json:"generations"`
+}
+
+// collectSweepCycles reads the per-generation sweep-cycle witness inside the
+// same snapshot transaction as everything else. Both reads are tiny: one row
+// from sweep_generations and a GROUP BY over the distinct generation values
+// still present in snapshot_sweeps (a handful — later generations overwrite
+// earlier stamps).
+func collectSweepCycles(ctx context.Context, q store.Querier, engine string) (T6SweepCycles, error) {
+	out := T6SweepCycles{Read: true, Generations: map[uint64]T6GenerationSpan{}}
+	var gen int64
+	var completed bool
+	switch err := q.QueryRow(ctx, `
+		SELECT current_generation, (completed_at IS NOT NULL)
+		FROM sweep_generations WHERE engine = $1`, engine).Scan(&gen, &completed); err {
+	case nil:
+		out.HaveGenerationRow = true
+		out.CurrentGeneration = uint64(gen)
+		out.CurrentCompleted = completed
+	case pgx.ErrNoRows:
+		// A missing row is a FACT (no sweep generation has ever been opened),
+		// not an error.
+	default:
+		return T6SweepCycles{}, fmt.Errorf("task6 sweep-generation row: %w", err)
+	}
+	rows, err := q.Query(ctx, `
+		SELECT generation, MIN(last_attempt_block), MAX(last_attempt_block), COUNT(*)
+		FROM snapshot_sweeps
+		WHERE engine = $1
+		GROUP BY generation`, engine)
+	if err != nil {
+		return T6SweepCycles{}, fmt.Errorf("task6 sweep-cycle spans: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var g, minB, maxB, n int64
+		if err := rows.Scan(&g, &minB, &maxB, &n); err != nil {
+			return T6SweepCycles{}, fmt.Errorf("scan sweep-cycle span: %w", err)
+		}
+		out.Generations[uint64(g)] = T6GenerationSpan{
+			MinAttemptBlock: uint64(minB), MaxAttemptBlock: uint64(maxB), Rows: n,
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return T6SweepCycles{}, fmt.Errorf("iterate sweep-cycle spans: %w", err)
+	}
+	return out, nil
+}
+
+// T6DMParamEvent is one raw DM collateral-config ledger event (Wave H4a,
+// Codex F4) — the same rows store.DMParamsAsOf folds, kept UNFOLDED so any
+// historical cut S <= P_op stays reconstructable in Stage B.
+type T6DMParamEvent struct {
+	ChainID   uint64 `json:"chain_id"`
+	AssetHex  string `json:"asset"`
+	EventType string `json:"event_type"`
+	Block     uint64 `json:"block_number"`
+	LogIndex  uint32 `json:"log_index"`
+	TxHashHex string `json:"tx_hash"`
+	// The config_set payload fields, nil when the payload omits the key
+	// (absent is absent, never zero — the store's own parsing discipline).
+	LTV          *big.Int `json:"-"`
+	LiqThreshold *big.Int `json:"-"`
+	LiqBonus     *big.Int `json:"-"`
+}
+
+// collectDMParamLedger reads the FULL DM config event ledger prefix at the
+// pin, ordered exactly as store.DMParamsAsOf orders it — hand-written SQL per
+// this package's discipline (the header comment: reconcile must not race the
+// wave that owns internal/store), reading only position_events through the
+// one snapshot transaction's Querier.
+func collectDMParamLedger(ctx context.Context, q store.Querier, pin uint64) ([]T6DMParamEvent, error) {
+	rows, err := q.Query(ctx, `
+		SELECT chain_id, encode(asset,'hex'), event_type, block_number, log_index, encode(tx_hash,'hex'),
+		       payload->>'ltv', payload->>'liquidation_threshold', payload->>'liquidation_bonus'
+		FROM position_events
+		WHERE engine = $1 AND block_number <= $2
+		  AND event_type IN ('collateral_token_config_set', 'collateral_token_removed', 'collateral_token_added')
+		ORDER BY block_number, log_index, seq`, DMEngine, int64(pin))
+	if err != nil {
+		return nil, fmt.Errorf("task6 dm param ledger at %d: %w", pin, err)
+	}
+	defer rows.Close()
+	var out []T6DMParamEvent
+	for rows.Next() {
+		var e T6DMParamEvent
+		var chainID, block int64
+		var logIndex int32
+		var ltv, lt, bonus *string
+		if err := rows.Scan(&chainID, &e.AssetHex, &e.EventType, &block, &logIndex, &e.TxHashHex,
+			&ltv, &lt, &bonus); err != nil {
+			return nil, fmt.Errorf("scan dm param ledger event: %w", err)
+		}
+		e.ChainID, e.Block, e.LogIndex = uint64(chainID), uint64(block), uint32(logIndex)
+		for _, f := range []struct {
+			text *string
+			dst  **big.Int
+			name string
+		}{{ltv, &e.LTV, "ltv"}, {lt, &e.LiqThreshold, "liquidation_threshold"}, {bonus, &e.LiqBonus, "liquidation_bonus"}} {
+			if f.text == nil {
+				continue
+			}
+			v, err := numericText(*f.text)
+			if err != nil {
+				return nil, fmt.Errorf("dm param ledger %s at %d/%d: %s: %w", e.AssetHex, e.Block, e.LogIndex, f.name, err)
+			}
+			*f.dst = v
+		}
+		out = append(out, e)
 	}
 	return out, rows.Err()
 }

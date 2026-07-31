@@ -201,6 +201,10 @@ var exportedAPIAllowlist = map[string]bool{
 	// because cmd/reconcile's gate classifies on it (classifyDMSweep) — plain
 	// integers and a status string, no capability.
 	"T6SweepState": true, "T6Witness": true,
+	// Wave H4a (Codex F2/F4): the per-generation sweep-cycle witness and the
+	// raw DM config ledger event. Plain data both — uint64s, bools, strings,
+	// *big.Int values; no func- or interface-typed field, no capability.
+	"T6SweepCycles": true, "T6GenerationSpan": true, "T6DMParamEvent": true,
 	"FeedRegistry": true, "FeedSpec": true,
 	// consts
 	"DMEngine": true, "AaveEngine": true, "AaveParamEngine": true,

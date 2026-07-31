@@ -141,6 +141,8 @@ const (
 	dmPinVectorSource          = "DebtManager.collateralOf(user)@pinHash(P_op)"
 	dmDebtFoldAtSSource        = "position_events(engine=debt_manager, side=debt) SUM(delta) <= S(account) — the Stage-A correlated aggregate inside the snapshot tx"
 	dmFirstDebtSource          = "position_events(engine=debt_manager, side=debt) MIN(block_number) per account <= P_op (first debt event, Stage-A)"
+	dmSweepCycleSource         = "sweep_generations(current_generation, completed_at) + snapshot_sweeps per-generation attempt-block spans (Stage-A, the sweep-cycle witness)"
+	dmParamLedgerSource        = "position_events DM config ledger (collateral_token_config_set/removed/added) FULL raw prefix <= P_op (Stage-A, re-foldable at any S)"
 	dmSweepAgeClockSource      = "headerTime@P_op and headerTime@ownSweepBlock(S(account)) through the pinned reader (the sweep-age clock)"
 	dmServingPostureSource     = "internal/risk.ComputeDMHealth watermark refusal (requireWatermarks REQUIRES Marks.SweepBlock) — the serving posture CONSUMED as a read, never asserted"
 )
@@ -153,7 +155,7 @@ func dmGateFrame() *gateFrame {
 		derived(dmCollateralSnapshotSource,
 			"the swept collateral amounts (the CashLens collateralOf multicall, which nets pending withdrawals) our sweeper persisted — the thing under test on the collateral side. Declared at S(account) because that IS their clock: the sweeper executes at its own block and ApplySweepBatch replaces the legs wholesale. Declaring these @P_op was accept-r4's FALSE declaration (chain-truth ruling 08:55): it hid that the maxBorrow leg welds a sample-clock input against pin-clock chain state, which is why that leg carries the three-state verdict law (classifyDMMaxBorrow) instead of a single-clock compareExact"),
 		derived("dm_param_history (position_events collateral_token_config_set) ledger prefix <= P_op, folded by riskfeed.FoldParams",
-			"the liquidation thresholds our DM event custody produced, HUNDRED_PERCENT-denominated, folded by the SAME function riskd folds with. The own-clock discrimination weld re-cuts the SAME ledger at <= S(account), so both clocks fold one custody chain"),
+			"the liquidation thresholds our DM event custody produced, HUNDRED_PERCENT-denominated, folded by the SAME function riskd folds with. This is the PIN fold; the own-clock welds fold the SAME custody chain at <= S(account) from the RAW Stage-A ledger prefix (the dmParamLedgerSource below) — the collapsed pin view cannot be re-cut at S (Wave H4a, Codex F4)"),
 		derived("snapshot_sweeps.last_success_block per account, FILTERED at the run pin",
 			"the SweepBlock watermark. ComputeDMHealth REQUIRES it: DM collateral is sweep-dominated (~1h) while prices are 60s, so a boolean served without it would sit a fresh badge over hour-stale collateral. It carries THE SAME pin filter as the collateral legs — an unfiltered watermark certifies legs the pin cannot see and manufactures false liquidatable verdicts (T6SweepState)"),
 		pinned("DebtManager.getCurrentIndex(borrowToken)@pinHash(P_op)",
@@ -188,6 +190,10 @@ func dmGateFrame() *gateFrame {
 			"the S-clock debt input for the boolean custody weld: per (account, asset), the Σ of our custodied debt deltas at block_number <= S(account), pre-collected inside the one snapshot transaction because Stage B cannot know which booleans flip until the DB is closed (the F5 seam)"),
 		derived(dmFirstDebtSource,
 			"each borrower's arrival edge for the never-swept race arithmetic (risk-quant's correction: any-never-swept-gates was stochastic on borrower arrival; the lawful form asks whether a sweep cycle both started after this block and completed before the pin)"),
+		derived(dmSweepCycleSource,
+			"the CYCLE-SPECIFIC witness the never-swept race decision consumes (Wave H4a, Codex F2): the engine's sweep_generations row and the per-generation attempt-block spans over snapshot_sweeps. The fleet's MINIMUM historical success block is NOT a cycle witness — one stale straggler success pins that floor across generations, and a borrower a later COMPLETED generation genuinely skipped would classify honest-race (a pass-that-should-fail). Honest-race is claimable ONLY on positive per-generation evidence that no cycle both opened after the arrival edge and completed at or below the pin; missing or sticky cycle evidence GATES"),
+		derived(dmParamLedgerSource,
+			"the FULL DM config event ledger prefix at P_op, kept RAW so the S-clock welds can fold it independently at each S(account) (Wave H4a, Codex F4). Filtering the COLLAPSED pin fold (latest P-effective row per asset) by EffectiveBlock <= S cannot reconstruct S when a token's config changed — or was removed/re-added — inside (S, P]: the S-effective row is gone from the collapsed view, so ordinary parameter motion would fail the honest S weld"),
 		pinned(dmSweepAgeClockSource,
 			"the chain-time sweep age for the freshness-budget conjunct (v): headerTime(P_op) minus headerTime(S(account)), judged against the sweeper-cadence bound (§7). Motion OUTSIDE the budget is a freshness violation and gates THERE — never absorbed as motion"),
 		committed(dmServingPostureSource,
@@ -511,12 +517,19 @@ func sweepExclusionInvariant(st snapshotdb.T6SweepState) bool {
 //	               consumed read (risk.ComputeDMHealth with the account's own
 //	               inputs and SweepBlock=0 must refuse — the 0xe957…bf20
 //	               posture), never asserted;
-//	AGE GUARD      derived from the sweeper's own schedule as the fleet's
-//	               pin-filtered watermarks witness it (dmNeverSweptRace): no
-//	               sweep cycle both started after the account's first
-//	               debt-event block and completed before P_op → an honest
-//	               race → disclosed coverage-gap (gated=false); a completed
-//	               cycle that skipped the account → sweeper defect, GATED;
+//	AGE GUARD      derived from the sweeper's own PER-GENERATION state
+//	               (dmNeverSweptRace, Wave H4a Codex F2): honest-race is
+//	               claimable ONLY on a cycle-specific witness that NO sweep
+//	               generation both opened after the account's first
+//	               debt-event block and completed at or below P_op →
+//	               disclosed coverage-gap (gated=false); a completed
+//	               generation that skipped the account — or missing/sticky
+//	               cycle evidence — → GATED. (The Wave-H3 shape compared the
+//	               arrival edge against the fleet's MINIMUM historical
+//	               success block, which is not a cycle: one stale straggler
+//	               success pinned that floor across generations, and a
+//	               borrower a later completed generation genuinely skipped
+//	               classified honest-race — a pass-that-should-fail.);
 //	CENSUS         the class carries its denominator, and coverage-gaps
 //	               exceeding ~1% of the borrower census gate as
 //	               sweeper-health — a STOPPED sweeper classifies every new
@@ -563,15 +576,14 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 			"the serving posture the MOTION license and the never-swept disclosure both rest on has broken: a DM boolean can be produced without the account's sweep watermark, so a surface could serve the bare boolean. D-013 always-fix; every disclosure below this line is suspect until internal/risk requires the watermark again"))
 	}
 
-	// The fleet's pin-filtered watermark floor: the sweep-cycle witness the
-	// race arithmetic consumes (a full cycle completed after block B implies
-	// every member's pin-visible watermark exceeds B).
-	fleetMin := uint64(0)
-	for _, st := range t6.DMSweepByAccount {
-		if st.AtOrBelowPin > 0 && (fleetMin == 0 || st.AtOrBelowPin < fleetMin) {
-			fleetMin = st.AtOrBelowPin
-		}
-	}
+	// The sweep-cycle witness the race arithmetic consumes: per-generation
+	// state from Stage A (Wave H4a, Codex F2). NOT the fleet's minimum
+	// historical success block — that floor spans generations, so one stale
+	// straggler success (an account with an old success and recent failures)
+	// pins it below every later borrower's arrival forever, and a borrower a
+	// later COMPLETED generation genuinely skipped would classify honest-race.
+	cycles := t6.DMSweepCycles
+	f.use(dmSweepCycleSource)
 	f.use(dmFirstDebtSource)
 
 	abovePin, neverGated, coverageGaps, invariantBreaks := 0, 0, 0, 0
@@ -607,12 +619,13 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 				firstDebt = t6.DMFirstDebtBlock[acct]
 			}
 			refused, refusalProof := refuse(acct, borrowers[acct])
-			race := dmNeverSweptRace(firstDebt, fleetMin)
+			race, raceWitness := dmNeverSweptRace(firstDebt, c.pinOP, cycles)
 			ev := map[string]string{
 				"last_attempt_status": st.Status,
 				"attempt_state":       attemptState,
 				"first_debt_block":    fmt.Sprintf("%d", firstDebt),
-				"cycle_arithmetic":    fmt.Sprintf("fleet min pin-visible watermark %d vs first debt block %d at pin %d: a completed cycle inside (first-debt, pin] exists iff the fleet floor exceeds the arrival edge", fleetMin, firstDebt, c.pinOP),
+				"cycle_witness":       raceWitness,
+				"sweep_cycle_state":   dmSweepCycleSummary(cycles),
 				"refusal_proof":       refusalProof,
 			}
 			row := p3Row{
@@ -633,13 +646,13 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 				row.Verdict = verdictUnscannable
 				row.Gated = false
 				row.Class = "never-swept-coverage-gap(honest-race)"
-				row.Note = "DISCLOSED, not gated: no sweep cycle both started after this account's first debt event and completed before the pin (the fleet's own watermarks are the witness), so the sweeper has not yet OWED this account a visit — an honest race on borrower arrival, self-healing on the next completed pass. The served surface PROVABLY refuses the account meanwhile (the consumed refusal read above), so no wrong answer can be served. The census row below carries the denominator: a STOPPED sweeper classifies every arrival as a race per row and fails there en masse (the vacuous-pass guard)"
+				row.Note = "DISCLOSED, not gated: the sweeper's own PER-GENERATION state positively witnesses that no sweep generation both opened after this account's first debt event and completed at or below the pin (the cycle_witness evidence), so the sweeper has not yet OWED this account a visit — an honest race on borrower arrival, self-healing on the next completed pass. The served surface PROVABLY refuses the account meanwhile (the consumed refusal read above), so no wrong answer can be served. The census row below carries the denominator: a STOPPED sweeper classifies every arrival as a race per row and fails there en masse (the vacuous-pass guard)"
 			default:
 				neverGated++
 				row.Verdict = verdictUnscannable
 				row.Gated = true
 				row.Class = sweepNever
-				row.Note = "GATED: a full sweep cycle started after this account's first debt event and completed before the pin (every fleet watermark exceeds the arrival edge) and the sweeper STILL never read this account — older than one completed cycle is a sweeper defect, not a race. The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
+				row.Note = "GATED: no cycle-specific witness clears the sweeper — either a sweep generation opened after this account's first debt event, completed at or below the pin, and STILL never read this account (a sweeper defect, not a race), or the per-generation evidence is missing/sticky, and missing cycle evidence is GATED, never disclosed (Wave H4a, Codex F2). The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
 			}
 			rows = append(rows, row)
 		}
@@ -665,8 +678,35 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 		rows[len(rows)-1].Verdict = verdictDrift
 		rows[len(rows)-1].Class = "exclusion-discards-evidence"
 	}
-	rows = append(rows, dmNeverSweptCensusRow(coverageGaps, neverGated, len(accounts), fleetMin, c.pinOP))
+	rows = append(rows, dmNeverSweptCensusRow(coverageGaps, neverGated, len(accounts), cycles, c.pinOP))
 	return rows, excluded
+}
+
+// dmSweepCycleSummary renders the Stage-A sweep-cycle witness for evidence
+// fields — the reviewer-readable statement of WHICH generation state the race
+// arithmetic consumed.
+func dmSweepCycleSummary(cy snapshotdb.T6SweepCycles) string {
+	if !cy.Read {
+		return "UNREAD: Stage A did not collect the sweep-cycle witness"
+	}
+	if !cy.HaveGenerationRow {
+		return "no sweep_generations row: no sweep generation has ever been opened"
+	}
+	state := "open"
+	if cy.CurrentCompleted {
+		state = "completed"
+	}
+	gens := make([]uint64, 0, len(cy.Generations))
+	for g := range cy.Generations {
+		gens = append(gens, g)
+	}
+	sort.Slice(gens, func(i, j int) bool { return gens[i] < gens[j] })
+	spans := make([]string, 0, len(gens))
+	for _, g := range gens {
+		s := cy.Generations[g]
+		spans = append(spans, fmt.Sprintf("g%d: %d row(s), attempts [%d, %d]", g, s.Rows, s.MinAttemptBlock, s.MaxAttemptBlock))
+	}
+	return fmt.Sprintf("current generation %d (%s); visible attempt spans: %s", cy.CurrentGeneration, state, strings.Join(spans, "; "))
 }
 
 // dmNeverSweptCensusRow is the never-swept class's standing census with its
@@ -674,20 +714,20 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 // sweeper turns every arriving borrower into a per-row honest race, and only
 // the population can refute that. Coverage-gaps exceeding ~1% of the borrower
 // census gate as sweeper-health.
-func dmNeverSweptCensusRow(coverageGaps, gated, borrowerCensus int, fleetMin, pin uint64) p3Row {
+func dmNeverSweptCensusRow(coverageGaps, gated, borrowerCensus int, cy snapshotdb.T6SweepCycles, pin uint64) p3Row {
 	row := p3Row{
 		Gate: gateDMBoolean, Subject: "cohort:never-swept", Leg: "standing-census",
 		Expected: fmt.Sprintf("coverage-gaps <= ~1%% of the borrower census (%d)", borrowerCensus),
 		Actual:   fmt.Sprintf("%d disclosed coverage-gap(s), %d gated never-swept", coverageGaps, gated),
 		Gated:    true,
 		Evidence: map[string]string{
-			"denominator":                fmt.Sprintf("%d derived borrowers", borrowerCensus),
-			"fleet_min_watermark_at_pin": fmt.Sprintf("%d", fleetMin),
-			"pin":                        fmt.Sprintf("%d", pin),
-			"disclosed_coverage_gaps":    fmt.Sprintf("%d", coverageGaps),
-			"gated_never_swept":          fmt.Sprintf("%d", gated),
+			"denominator":             fmt.Sprintf("%d derived borrowers", borrowerCensus),
+			"sweep_cycle_state":       dmSweepCycleSummary(cy),
+			"pin":                     fmt.Sprintf("%d", pin),
+			"disclosed_coverage_gaps": fmt.Sprintf("%d", coverageGaps),
+			"gated_never_swept":       fmt.Sprintf("%d", gated),
 		},
-		Note: "the never-swept census denominator (risk-quant's correction): each coverage-gap is individually proven an honest race (refusal-weld + cycle arithmetic), and this row is the guard that fails a STOPPED sweeper en masse — a sweeper that stops makes every new borrower a per-row race, which only the population count can refute",
+		Note: "the never-swept census denominator (risk-quant's correction): each coverage-gap is individually proven an honest race (refusal-weld + the per-generation cycle witness), and this row is the guard that fails a STOPPED sweeper en masse — a sweeper that stops makes every new borrower a per-row race, which only the population count can refute",
 	}
 	if dmMotionPopulationGate(coverageGaps, borrowerCensus) {
 		row.Verdict = verdictDrift
@@ -1294,10 +1334,16 @@ const (
 //
 // The strict-> discrimination stays OWN-CLOCK: conjuncts (iii) and (iv) both
 // recompute the SAME strict inequality (ComputeDMHealth's own `>`,
-// internal/risk/dm.go:141) at two chain-attested endpoints, so an
-// inequality-direction defect (a >= where > belongs) fails the S weld and the
-// P substitution before any MOTION classification is reachable — a MOTION
-// class can never excuse an inequality-direction defect.
+// internal/risk/dm.go:141) at two chain-attested endpoints. What that
+// GUARANTEES is bounded and stated honestly (Wave H4a, Codex's note): an
+// inequality-direction defect (a >= where > belongs) flips the boolean only
+// where an endpoint sits at EXACT equality, so the welds detect it exactly
+// when either chain-attested endpoint lands on the boundary — which is what
+// the equality unit test (TestDMStrictInequalityEqualityIsHealthy) pins, and
+// why the nearest-boundary account is a MANDATORY cohort member: it is the
+// sharpest available probe of the boundary, not a proof the welds catch every
+// >= at every input. Off-boundary endpoints weld identically under > and >=,
+// and the conjuncts make no stronger claim.
 //
 // There is NO count tolerance here: each row is individually proven, and the
 // population-level census (dmMotionCensusRow) gates separately.
@@ -1379,27 +1425,184 @@ func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
 	return motionCount*100 > evaluableCount
 }
 
-// dmNeverSweptRace is the never-swept AGE GUARD derived from the sweeper's own
-// schedule as the fleet's pin-filtered watermarks witness it (risk-quant's
-// correction: any-never-swept-gates is stochastic on borrower arrival).
+// dmNeverSweptRace is the never-swept AGE GUARD, decided from the sweeper's
+// own PER-GENERATION state (Wave H4a, Codex F2 — replacing the Wave-H3
+// fleet-minimum shape, which could FALSE-PASS: the fleet's minimum historical
+// success block is a floor over MANY generations, so one stale straggler
+// success — an account with an old success and recent failed attempts —
+// pinned it below every later borrower's arrival forever, and a borrower a
+// later COMPLETED generation genuinely skipped classified "honest race").
 //
-// A COMPLETED CYCLE strictly inside (firstDebt, pin] implies every fleet
-// member's pin-visible watermark exceeds firstDebt — a full pass refreshed the
-// whole registry after this account arrived and still skipped it, which is a
-// sweeper defect, GATED. When some member's watermark still predates the
-// arrival, no full cycle has completed since the account entered the registry:
-// the gap is an honest race and the row is a disclosed coverage-gap.
+// THE LAW: honest-race is claimable ONLY on a positive cycle-specific witness
+// that NO sweep generation both opened after the account's first-debt block
+// and completed at or below the pin. Anything unprovable GATES — missing or
+// sticky cycle evidence is never disclosed.
 //
-// firstDebt == 0 (arrival unknown) fails CLOSED: a race cannot be claimed for
-// an account whose arrival edge custody cannot state. fleetMinWatermark == 0
-// (no pin-visible success anywhere) is the stopped-sweeper shape — the race
-// arm holds per row, and the census denominator row is the guard that fails
-// it en masse (the vacuous-pass guard both rulings require).
-func dmNeverSweptRace(firstDebt, fleetMinWatermark uint64) bool {
+// WHAT THE SCHEMA CAN AND CANNOT STATE (studied, not assumed):
+// sweep_generations keeps ONE row per engine — current_generation, opened_at,
+// completed_at (wall-clock; opening the next generation overwrites the stamp,
+// and a rewind bumps the generation WITHOUT completing it), so only the
+// CURRENT generation's completion is durably knowable, and no generation's
+// open/complete BLOCK is recorded anywhere. snapshot_sweeps keeps each
+// account's LAST attempt (generation, last_attempt_block), so per-generation
+// attempt spans are reconstructable but can only SHRINK as later generations
+// overwrite rows. Three sound derivations survive those bounds:
+//
+//	(1) an attempt row of generation g at block a proves open(g) <= a
+//	    (attempts execute only after their generation opens), and opens are
+//	    monotone in g — so ANY attempt by a generation >= K at or below B
+//	    proves open(K) <= B and hence open(g) <= B for every g <= K;
+//	(2) the CURRENT generation's rows are complete (nothing overwrites them),
+//	    so when it is stamped complete, max(last_attempt_block) over them IS
+//	    its completion block;
+//	(3) K — the newest generation that could have completed at or below the
+//	    pin — is the current generation when (2) puts its completion at or
+//	    below the pin, else the one before it (later generations open later,
+//	    so proving open(K) <= firstDebt clears every candidate at once).
+//
+// firstDebt == 0 (arrival unknown) fails CLOSED. No generation row at all
+// means no cycle has EVER completed — race proven structurally per row, and
+// the census denominator guard is what fails a stopped/never-started sweeper
+// en masse (the vacuous-pass guard both rulings require).
+//
+// The returned witness string is the receipt: it states WHICH generation
+// evidence carried the decision, and the per-account evidence field prints it.
+func dmNeverSweptRace(firstDebt, pin uint64, cy snapshotdb.T6SweepCycles) (bool, string) {
 	if firstDebt == 0 {
-		return false
+		return false, "arrival edge unknown (no custodied first debt block at or below the pin): a race cannot be claimed for an account whose arrival custody cannot state — fails closed"
 	}
-	return fleetMinWatermark <= firstDebt
+	if !cy.Read {
+		return false, "Stage A did not collect the sweep-cycle witness (DMSweepCycles unread): missing cycle evidence is GATED, never disclosed"
+	}
+	if !cy.HaveGenerationRow {
+		return true, "no sweep_generations row: no sweep generation has ever been opened, so no cycle can have completed since this account arrived — the stopped/never-started-sweeper shape, which the census denominator guard fails en masse"
+	}
+	// K = the newest generation that could have completed at or below the pin.
+	k := cy.CurrentGeneration
+	if cy.CurrentCompleted {
+		span, ok := cy.Generations[k]
+		switch {
+		case !ok:
+			return false, fmt.Sprintf("generation %d is stamped complete but no snapshot_sweeps row witnesses any of its attempts: sticky cycle evidence — a race needs a positive per-generation witness, so this GATES", k)
+		case span.MaxAttemptBlock > pin:
+			// The current generation completed ABOVE the pin (its rows are
+			// complete, so the max attempt block is its true completion
+			// block): it is not a candidate; the one before it is.
+			k--
+		}
+	} else {
+		// The current generation is still open: it has completed nothing.
+		k--
+	}
+	if k == 0 {
+		return true, fmt.Sprintf("current generation %d has completed nothing at or below pin %d and no earlier generation exists: no cycle can both have opened after the arrival edge %d and completed at or below the pin", cy.CurrentGeneration, pin, firstDebt)
+	}
+	// The opening-edge witness for K: any attempt by a generation >= K at or
+	// below the arrival edge proves open(K) <= firstDebt (derivation 1), and
+	// then EVERY candidate generation <= K opened at or before the arrival —
+	// no cycle has been OWED this account yet.
+	for g := k; g <= cy.CurrentGeneration; g++ {
+		if span, ok := cy.Generations[g]; ok && span.Rows > 0 && span.MinAttemptBlock <= firstDebt {
+			return true, fmt.Sprintf("generation %d attempted at block %d <= first debt block %d, so generation %d (the newest that could have completed at or below pin %d) opened at or before the arrival — no completed cycle has been owed this account", g, span.MinAttemptBlock, firstDebt, k, pin)
+		}
+	}
+	return false, fmt.Sprintf("no attempt by generation >= %d is witnessed at or below the arrival edge %d: either a completed generation opened after this account arrived and still skipped it (a sweeper defect), or the opening edge is unwitnessable — both GATE, because missing or sticky cycle evidence is never disclosed", k, firstDebt)
+}
+
+// dmParamsAtBlock folds the FULL raw DM config ledger prefix at `block` into
+// the effective ParamRow set — the SAME latest-wins / removal / re-addition
+// semantics as store.DMParamsAsOf (internal/store/risk.go), replayed over the
+// Stage-A raw rows so ANY historical cut S <= P_op is reconstructable:
+//
+//   - collateral_token_config_set replaces the asset's effective row;
+//   - collateral_token_removed hides the asset (the last config row is KEPT,
+//     exactly as the store keeps it);
+//   - collateral_token_added un-hides it, REVIVING the pre-removal config row
+//     without a new row of its own.
+//
+// This is deliberately NOT a call into internal/store (the sibling wave owns
+// that package; the gate reads the ledger through cmd/reconcile's own Stage-A
+// SQL per the package's standing precedent) — but the semantics are the
+// store's, and the transition tests in wave_h4a_fixes_test.go pin all three
+// arms against the collapsed-filter shape this replaces.
+func dmParamsAtBlock(ledger []snapshotdb.T6DMParamEvent, block uint64) []store.ParamRow {
+	type entry struct {
+		row     store.ParamRow
+		removed bool
+		present bool
+	}
+	byAsset := map[string]*entry{}
+	var order []string
+	for _, ev := range ledger {
+		if ev.Block > block {
+			continue
+		}
+		e, ok := byAsset[ev.AssetHex]
+		if !ok {
+			e = &entry{}
+			byAsset[ev.AssetHex] = e
+			order = append(order, ev.AssetHex)
+		}
+		switch ev.EventType {
+		case "collateral_token_removed":
+			e.removed = true
+			continue
+		case "collateral_token_added":
+			e.removed = false
+			continue
+		}
+		asset, err := hex.DecodeString(ev.AssetHex)
+		if err != nil {
+			// Stage A encodes the hex itself; an undecodable asset would be a
+			// collector defect. Refusing the row (leaving the asset absent) is
+			// the fail-closed direction: the S weld then refuses loudly on the
+			// missing param rather than folding a fabricated one.
+			continue
+		}
+		tx, _ := hex.DecodeString(ev.TxHashHex)
+		e.row = store.ParamRow{
+			Engine:            dmEngine,
+			ChainID:           ev.ChainID,
+			Asset:             asset,
+			LTV:               ev.LTV,
+			LiqThreshold:      ev.LiqThreshold,
+			LiqBonus:          ev.LiqBonus,
+			EffectiveBlock:    ev.Block,
+			EffectiveLogIndex: ev.LogIndex,
+			SourceEvent:       ev.EventType,
+			TxHash:            tx,
+		}
+		e.present = true
+		e.removed = false
+	}
+	var out []store.ParamRow
+	for _, key := range order {
+		e := byAsset[key]
+		if !e.present || e.removed {
+			continue
+		}
+		out = append(out, e.row)
+	}
+	// The caller folds a (block, log_index)-ordered ledger; keep the contract.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].EffectiveBlock != out[j].EffectiveBlock {
+			return out[i].EffectiveBlock < out[j].EffectiveBlock
+		}
+		return out[i].EffectiveLogIndex < out[j].EffectiveLogIndex
+	})
+	return out
+}
+
+// dmFoldParamsAtS is the S-clock param fold the own-clock welds consume: the
+// raw ledger cut at S, folded by the ONE fold implementation riskd folds with.
+// A Task6 snapshot without the raw ledger (a fixture that predates Wave H4a,
+// or a wiring gap) REFUSES rather than falling back to filtering the
+// collapsed pin view — the fallback IS the F4 defect.
+func dmFoldParamsAtS(t6 *snapshotdb.Task6Data, s uint64) ([]risk.ParamRow, error) {
+	if t6 == nil || !t6.DMParamLedgerRead {
+		return nil, fmt.Errorf("Stage A did not collect the raw DM config ledger (DMParamLedgerRead=false): the S-clock param cut cannot be reconstructed from the collapsed pin fold (Wave H4a, Codex F4)")
+	}
+	return riskfeed.FoldParams(dmEngine, 10, dmParamsAtBlock(t6.DMParamLedger, s))
 }
 
 // dmOwnClockProbe names one account the discrimination read is issued for.
@@ -1621,18 +1824,19 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 			}
 		}
 
-		// The param ledger re-cut at S: the SAME custody chain, the SAME fold.
-		var ledgerAtS []store.ParamRow
-		for _, r := range c.t6.DMParams {
-			if r.EffectiveBlock <= s {
-				ledgerAtS = append(ledgerAtS, r)
-			}
-		}
-		foldedAtS, err := riskfeed.FoldParams(dmEngine, 10, ledgerAtS)
+		// The param ledger re-cut at S: the SAME custody chain, the SAME fold —
+		// folded from the FULL raw Stage-A ledger prefix, never by filtering
+		// the collapsed pin view (Wave H4a, Codex F4: DMParamsAsOf(P) keeps
+		// only each asset's newest P-effective row, so a token whose config
+		// changed — or was removed/re-added — inside (S, P] has no S-effective
+		// row left to filter, and ordinary parameter motion would fail the
+		// honest S weld as a wrong rejection).
+		foldedAtS, err := dmFoldParamsAtS(c.t6, s)
 		if err != nil {
 			fail("fold dm param ledger at S: " + err.Error())
 			continue
 		}
+		f.use(dmParamLedgerSource)
 
 		for _, p := range group {
 			r := &dmOwnClockResult{Block: s, Hash: hash, AgeKnown: ageKnown, AgeSeconds: ageSeconds}

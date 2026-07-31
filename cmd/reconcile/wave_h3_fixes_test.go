@@ -323,24 +323,87 @@ func TestDMMotionPopulationGate(t *testing.T) {
 // fleet's own watermarks, attempt-state disclosed, census denominator
 // carried.
 func TestNeverSweptReshape(t *testing.T) {
-	t.Run("the race arithmetic", func(t *testing.T) {
-		require.False(t, dmNeverSweptRace(0, 100), "unknown arrival fails CLOSED")
-		require.True(t, dmNeverSweptRace(200, 0), "no pin-visible fleet success = no completed cycle (the stopped-sweeper shape — the census guard owns it)")
-		require.True(t, dmNeverSweptRace(200, 200), "a fleet member's watermark AT the arrival edge: the pass since arrival has not provably completed")
-		require.True(t, dmNeverSweptRace(200, 150), "a member predating the arrival = no completed cycle since arrival = honest race")
-		require.False(t, dmNeverSweptRace(200, 300),
-			"m5 kill: every fleet watermark above the arrival edge proves a completed cycle that SKIPPED the account — a sweeper defect, gated")
+	t.Run("the race arithmetic (Wave H4a F2: per-generation, never fleet-min)", func(t *testing.T) {
+		const pin = uint64(1000)
+		cy := func(g uint64, completed bool, spans map[uint64]snapshotdb.T6GenerationSpan) snapshotdb.T6SweepCycles {
+			return snapshotdb.T6SweepCycles{
+				Read: true, HaveGenerationRow: true,
+				CurrentGeneration: g, CurrentCompleted: completed,
+				Generations: spans,
+			}
+		}
+		span := func(min, max uint64) snapshotdb.T6GenerationSpan {
+			return snapshotdb.T6GenerationSpan{MinAttemptBlock: min, MaxAttemptBlock: max, Rows: 2}
+		}
+
+		race, _ := dmNeverSweptRace(0, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(50, 900)}))
+		require.False(t, race, "unknown arrival fails CLOSED")
+
+		race, why := dmNeverSweptRace(200, pin, snapshotdb.T6SweepCycles{})
+		require.False(t, race, "Stage A never collected the cycle witness: missing cycle evidence GATES, never discloses")
+		require.Contains(t, why, "unread")
+
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepCycles{Read: true})
+		require.True(t, race, "no sweep_generations row = no generation EVER opened = no completed cycle can exist (the stopped/never-started-sweeper shape — the census guard owns it en masse)")
+		require.Contains(t, why, "no sweep_generations row")
+
+		race, _ = dmNeverSweptRace(200, pin, cy(1, false, map[uint64]snapshotdb.T6GenerationSpan{1: span(500, 900)}))
+		require.True(t, race, "generation 1 still open and nothing before it: no cycle can have completed since the arrival")
+
+		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 900)}))
+		require.True(t, race, "the last pin-completed generation ATTEMPTED at or below the arrival edge, so it opened before the account arrived: an honest race")
+
+		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(250, 900)}))
+		require.False(t, race,
+			"m1 kill: generation 3 completed at or below the pin and every witnessed attempt sits ABOVE the arrival edge — a completed cycle since arrival that skipped the account is a sweeper defect, GATED")
+		require.Contains(t, why, "skipped")
+
+		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+			2: span(150, 400), 3: span(950, pin+200),
+		}))
+		require.True(t, race, "the current generation completed ABOVE the pin (invisible to this run); generation 2 — the newest pin-completable candidate — is witnessed opening at or before the arrival")
+
+		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+			2: span(300, 400), 3: span(950, pin+200),
+		}))
+		require.False(t, race, "same shape but generation 2's witnessed opening edge sits above the arrival: unprovable race GATES")
+
+		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{2: span(150, 400)}))
+		require.False(t, race, "a generation stamped complete with NO visible attempt rows is sticky cycle evidence: GATED, never disclosed")
+		require.Contains(t, why, "sticky")
+
+		// THE F2 FALSE-PASS, reconstructed at the unit level: a stale straggler
+		// success at block 100 pinned the OLD fleet-min floor below the
+		// arrival (100 <= 200 => "race"), while the per-generation witness
+		// says generation 3 opened at 250 — after the borrower — and completed
+		// at 280, below the pin. The account it skipped must GATE.
+		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+			3: span(250, 280),
+		}))
+		require.False(t, race,
+			"the fleet-min shape false-passed exactly here: an old success below the arrival edge is not a cycle witness")
 	})
 
 	const pin = uint64(154963224)
 	newBorrower := "d1fdf1bcb29d8709d1b2b82cc108d2a0755f8ce9"
-	base := func(fleetWatermark uint64, firstDebt uint64, attempted bool, status string) (*p3Ctx, *snapshotdb.Task6Data, map[string]*big.Int) {
+	// base seeds one swept fleet member plus the never-swept borrower, with a
+	// COMPLETED generation whose witnessed opening edge is genMin — the
+	// per-generation witness the H4a race law consumes (the fleet member's
+	// watermark no longer decides anything).
+	base := func(genMin uint64, firstDebt uint64, attempted bool, status string) (*p3Ctx, *snapshotdb.Task6Data, map[string]*big.Int) {
 		c := &p3Ctx{pinOP: pin, o: &options{}}
 		t6 := &snapshotdb.Task6Data{
 			DMSweepByAccount: map[string]snapshotdb.T6SweepState{
-				"aaaa": {AtOrBelowPin: fleetWatermark, Newest: fleetWatermark, LegsAtOrBelowPin: 1, Status: "success", Attempted: true},
+				"aaaa": {AtOrBelowPin: genMin, Newest: genMin, LegsAtOrBelowPin: 1, Status: "success", Attempted: true},
 			},
 			DMFirstDebtBlock: map[string]uint64{newBorrower: firstDebt},
+			DMSweepCycles: snapshotdb.T6SweepCycles{
+				Read: true, HaveGenerationRow: true,
+				CurrentGeneration: 3, CurrentCompleted: true,
+				Generations: map[uint64]snapshotdb.T6GenerationSpan{
+					3: {MinAttemptBlock: genMin, MaxAttemptBlock: genMin + 50, Rows: 1},
+				},
+			},
 		}
 		if attempted {
 			t6.DMSweepByAccount[newBorrower] = snapshotdb.T6SweepState{Attempted: true, Status: status}
@@ -358,10 +421,11 @@ func TestNeverSweptReshape(t *testing.T) {
 	}
 
 	t.Run("honest race: disclosed coverage-gap, refusal CONSUMED, evidence complete", func(t *testing.T) {
-		// The fleet's watermark floor predates the borrower's arrival: no
-		// cycle has completed since it entered the registry. The census is
-		// padded past 100 borrowers so the population guard (owned by the
-		// en-masse subtest below) stays quiet and the per-row law is isolated.
+		// The completed generation's witnessed opening edge predates the
+		// borrower's arrival: no cycle has completed since it entered the
+		// registry. The census is padded past 100 borrowers so the population
+		// guard (owned by the en-masse subtest below) stays quiet and the
+		// per-row law is isolated.
 		c, t6, borrowers := base(pin-5000, pin-1000, false, "")
 		for i := 0; i < 120; i++ {
 			key := fmt.Sprintf("%040x", 0xf000+i)
@@ -379,14 +443,17 @@ func TestNeverSweptReshape(t *testing.T) {
 			"the refusal-weld is a CONSUMED read of risk.ComputeDMHealth — the proof string is the receipt")
 		require.Contains(t, r.Evidence["refusal_proof"], "SweepBlock")
 		require.Contains(t, r.Evidence["attempt_state"], "never-attempted")
-		require.Contains(t, r.Evidence["cycle_arithmetic"], "fleet min")
+		require.Contains(t, r.Evidence["cycle_witness"], "generation",
+			"the race receipt names the generation evidence that carried the decision")
+		require.NotEmpty(t, r.Evidence["sweep_cycle_state"])
 		require.NotEmpty(t, r.Evidence["first_debt_block"])
 		require.Zero(t, tallyP3(rows), "race + refusal-proven adds NO gated failure")
 	})
 
 	t.Run("completed cycle since arrival: GATED sweeper defect (m5 kill)", func(t *testing.T) {
-		// Every fleet watermark exceeds the arrival edge: a full pass
-		// completed after the borrower arrived and still skipped it.
+		// The completed generation's witnessed opening edge sits ABOVE the
+		// arrival: a full pass opened after the borrower arrived, completed
+		// below the pin, and still skipped it.
 		c, t6, borrowers := base(pin-100, pin-1000, true, "error")
 		rows, excluded := classifySweepTestimony(c, nil, t6, borrowers, nil)
 		require.True(t, excluded[newBorrower])
@@ -443,6 +510,10 @@ func TestDMGateFrameDeclaresTheBooleanLegSources(t *testing.T) {
 	require.Equal(t, frameDerived, names[dmDebtFoldAtSSource],
 		"the Stage-A debt fold at S is OUR state under test on the S-clock side")
 	require.Equal(t, frameDerived, names[dmFirstDebtSource])
+	require.Equal(t, frameDerived, names[dmSweepCycleSource],
+		"the per-generation sweep-cycle witness (Wave H4a F2) is declared derived state")
+	require.Equal(t, frameDerived, names[dmParamLedgerSource],
+		"the raw DM config ledger prefix (Wave H4a F4) is declared derived state")
 	require.Equal(t, framePinned, names[dmSweepAgeClockSource])
 	require.Equal(t, frameCommitted, names[dmServingPostureSource],
 		"the serving posture is committed code, consumed as a read")
