@@ -3100,3 +3100,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   bearing schema; wireHistoryPoint + strip-proof test discharging the
   H3-owed gap; client regen; Inspector history hover carries the mark).
   Round 3 closing review on the pair after both land → fresh-pin retry.
+- **H4a+H4b LANDED AS A PAIR; ROUND 3 CLOSING REVIEW IN FLIGHT (15:12)**:
+  joint gate green everywhere (reconcile/snapshotdb/api Go suites -p 1,
+  client 310/310 w/ byte-identical drift regen, web 210/1-skip). Landed
+  as two commits, pushed through ae998e0. H4a: cycle-witness race law
+  (fleet-min GONE from the predicate; honest-race only on a positive
+  generation witness; Codex's failed-straggler scenario committed as the
+  regression proving old-raced/new-gates), digest-bound retro proof (11
+  refusal arms; status honestly outside the hash scope, nothing relaxed),
+  full-ledger S param fold (dmFoldParamsAtS REFUSES without the raw
+  ledger — the collapsed fallback IS the defect; resurrection transition
+  case proven); live retro re-run PASS artifact-bound. H4b: contract
+  1.2.1 (AddressHistoryPoint.sweep_block REQUIRED from store truth — the
+  store already retained it, nothing fabricated), the EXHAUSTIVE
+  mechanical disclosure law test (licensed-bit walk, re-clocking voids
+  outer vouching, injected bare-verdict fixture proved load-bearing under
+  the hand-list mutant, orphan-carrier check), strip-proof discharged,
+  DM history hovers carry S-marks. Mutations 3/3 + 2/2 KILLED. PINNED
+  FOR ADJUDICATION (exact set, cannot grow or vanish): three count-class
+  disclosure gaps (observatory point + series, batch permalink
+  liquidatable_positions) + H4a's disclosed accept-r4 collapsed param
+  filter — all handed to Codex round 3 to adjudicate under the bar.
+  On SHIP → the fresh-pin acceptance retry (the receipt run).
