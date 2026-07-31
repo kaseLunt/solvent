@@ -2645,3 +2645,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (exact hover values on the risk map, hover on computed sparkline points,
   map states its own as-of, histogram eligible-bucket form cue) + TASTE
   12-14 (round-decade ticks, connector semantics, inline-style → classes).
+- **W4/W5/W6 LANDED — ALL SIX SURFACES ON MAIN (22:40)**: joint serial gate
+  over the full tree (design fixes + three new surfaces + nav decision):
+  typecheck/lint/build 0, e2e 158 passed / 1 env-gated skip / 0 failed.
+  Four-commit train pushed (HEAD 20c094c): design-pass MUST-FIX set → W4
+  Observatory (remount-on-switch engine separation; captured/withheld/
+  absent bucket axis w/ absence only BETWEEN wire rows; degraded keys on
+  contract code not HTTP status) → W5 Feed (two-mode ordering w/ disclosed
+  UNTIMED TAIL + ORDERING DRIFT guard; unit-tag honesty w/ $-sweep test;
+  cursors never cross modes; posture never history) → W6 Proof Center +
+  Developers (proof/live split as a DERIVATION LAW until C2 gives wire
+  fields — accepted only on the receipt's own strict conjunction;
+  clipboard-verified materialization-key CopyChip; Developers generated
+  verbatim from the yaml w/ a re-extracting fidelity spec; leak
+  sanitization in generator AND at render; EvidenceDrawer lifted to
+  components/ w/ 9/9 post-move regression; integrator nav decision:
+  /proof in SECONDARY_TABS, two-route shape pending W7 review). W5 found
+  REAL CONTRACT DRIFT: committed C1 /v1/events still describes the
+  PRE-amendment semantics the landed B1 store corrected — W5 built to the
+  corrected law, welded its vocabulary compile-time both ways so C2's
+  reconciliation breaks loudly, and refuses to render the wire's outdated
+  notes[]. C2 ACCUMULATED BRIEF (dispatch after B3 lands): amount_unit on
+  ChainEvent; /v1/events ordering prose + notes[]; display-vocabulary
+  reconciliation; LiquidationDetail missing DM fields (DeficitPaired,
+  before_debt_usd, interest_index, per-seizure bonus); batch_id/
+  materialization_key/epochs on ObservatorySeriesPoint + RateIndex scale
+  + range/step param; PositionSummary; GET /v1/batches/{id}; evidence
+  proof/live wire split; prices chain identity; v4-proposal registry;
+  optional GET /v1/scenarios. W7 REGISTER: design SHOULD-FIX 7-11 (11
+  first: history gap-insertion for closed-position absence — confirmed
+  against the B1 reader), TASTE 12-14, W1 stampline → /proof link,
+  InspectorActivity adopts feedAmount when amount_unit lands, Oracle
+  Monitor panel (AMENDMENT-1 item H, named follow-up). STILL IN FLIGHT:
+  B3 handlers, acceptance retry 4 (past preflight, 23 min into the 45-min
+  budget).
