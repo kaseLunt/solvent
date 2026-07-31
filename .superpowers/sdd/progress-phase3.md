@@ -2593,3 +2593,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   default path only), regression test simulates the WebIDL rule and was
   proven RED against the unbound capture; 293/293. Wave workarounds
   (book-client/inspector-client/labClient) get deleted at W-landing time.
+- **W1/W2/W3 LANDED; W4/W5/W6 DISPATCHED (22:10)**: W3 reported green (76
+  passed: flagship depeg contrast keyed off DATA not scenario-id, untrimmed
+  18-decimal bit-identity visible, bigint-exact rationals never silently
+  rounded, sealed six-way run-book outcome union w/ honest-404 panel proven
+  to need zero UI change when the endpoint ships). Integrator collapsed all
+  three wave fetch-workaround seams onto the fixed shared client
+  (getSolventClient; seams deleted UNLANDED) and ran the serial standard-
+  config gate on the joint tree: typecheck/lint/build 0, e2e 76 passed /
+  1 env-gated skip / 0 failed. Landed as three named commits + pushed (HEAD
+  b3c399b); tree clean. Design pass on W1/W2 charts IN FLIGHT under the
+  upgraded charter (W3's charts join in a follow-up message to the same
+  director instance). W4 Observatory / W5 Feed / W6 Proof Center+Developers
+  dispatched CONCURRENTLY on the clean base with per-wave isolated
+  playwright configs (ports 3411/3511/3611 — the shared-.next churn lesson
+  encoded), disjoint ownership partitions, and the load-bearing laws inline:
+  W4 = engine separation absolute, absent-bucket-over-fabricated, V4 gates
+  NOTHING; W5 = AMENDMENT-1 cross-chain ordering (untimed tail disclosed,
+  since_block engine-scoped only), unit-tags never fake USD; W6 = the
+  proof_subject/live_subject split renders as two subjects, sanctioned
+  EvidenceDrawer lift to components/, Developers at Stripe-docs polish.
+  Six concurrent: B3 handlers, design pass, W4, W5, W6, acceptance retry 4
+  (delayed launch ~22:17 w/ verdict-free pacing).
