@@ -2448,6 +2448,54 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   persona created (~/.claude/agents/solvent-design.md — canon + honest-
   rendering law + anti-canon). Re-derive at ~24.2M concurrently; acceptance
   fires on catch-up; E1 paperwork follows it.
+- **RE-DERIVE COMPLETE + STEP 6 VERIFIED** (21:02): walk caught the head
+  (25,650,314; ~2h05m for ~5.02M blocks, zero RPC). Flag ledger 98 enabled
+  + 75 disabled = **EXACTLY 173 — the predicted count to the row**;
+  covered_from_block 20,625,519 (audited genesis); revision 2; binding
+  stamped; daemon readyz ready:true healthy — full self-heal post-rewind.
+  STEP 7: first attempt honestly REFUSED by the schema gate (go run
+  compiled the working tree which carries B1/B2's uncommitted P5 migrations
+  00015-00017 → binary expects 17, live DB correctly at 14) — the
+  acceptance must come from the COMMITTED P3 tree; relaunched from a pinned
+  worktree (C:/wtclose/p3accept @ c966f84, .env copied, isolated scratch
+  solvent_test_accept) — running.
+- **P5 MID-FLIGHT CORRECTION PASS** (21:05, Codex plan review via the
+  owner — adopted in full as plan AMENDMENT 1, 3c0f58e): (1) serial-writer
+  model now STATED (waves never commit; one integrator claim); (2)
+  cross-chain feed ordering was WRONG in C1 (block heights incomparable —
+  OP would bury ETH) → B1 corrected mid-flight (single-engine by block;
+  cross-engine by block_time w/ chain-aware tiebreak, timeless rows after,
+  disclosed; unit-tagged amounts incl. 'opaque'); (3) block_headers reorg
+  law → B2 corrected mid-flight (deletion joins the EXISTING rewind tx;
+  event-bearing-reorg test; bounded missing-header retry); (4) observatory
+  points from COMPLETE risk batches only (never raw derived state; absent
+  bucket over fabricated bucket) → B2 corrected; (5) C2 contract-corrections
+  task queued (PositionSummary, exposures + bounded risk-map, evidence
+  proof/live split + status, GET /v1/batches/{id} permalinks, prices chain
+  identity, v4-proposal registry artifact); (6) **the plan's
+  nothing-is-money-math line was WRONG** — run-book upgraded to the FULL
+  adversarial train, risk_scenarios materialization considered; (7) blast
+  radius deferred unless honestly backed; (8) W7 gains the UI state-matrix
+  acceptance test. Two consultants converged again; both in-flight waves
+  acked the corrections in their next tool rounds.
+- **W0 DESIGN PASS: SHIP, zero MUST-FIX** (solvent-design's first ruling,
+  ~10min; independently re-ran the 16/16 suite AND mechanically diffed
+  every token block against the canon — byte-identical confirmed). Two
+  BLESSINGS: the vector-only Ribbon ("makes the fake state unrepresentable
+  at the type level... blessed as the canonical replacement for the mock's
+  LIVE chip") and the chart honesty floors (null-gap sparkline; the 1.5px
+  residual floor so nonzero bad debt cannot vanish). WARN BAND RULED: 1.1,
+  five conditions (UI-only forever; strict-below boundary; disclosure
+  wherever warn renders; per-row only, never aggregates; changes route back
+  through the desk). SHOULD-FIX assigned to waves: Lab promoted to primary
+  tabs (W1), warn gets an outlined-square form cue (W1), drawer body-scroll
+  lock (W2). TASTE noted (shell width, marks commas — keep w/ comment,
+  dead transition, unused .frame). SURFACE WAVES W1 (Book) / W2 (Inspector)
+  / W3 (Scenario Lab) DISPATCHED in parallel on disjoint routes (21:12) —
+  design findings folded into briefs; W1's table view-models the coming
+  PositionSummary; W3's book-mode renders the honest not-yet-served state
+  until the run-book train closes. SIX agents concurrent (B1, B2, W1, W2,
+  W3, the acceptance run) — peak session width.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
