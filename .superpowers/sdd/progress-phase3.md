@@ -3009,3 +3009,39 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   boolean weld failing while the collateral certificate passes = the
   composition law diverging = custody drift immediately. risk-quant's
   parallel ruling pending; fix wave dispatches on convergence.
+- **RISK-QUANT RULING CONVERGES; WAVE H3 DISPATCHED WITH THE UNION
+  (13:10)**: risk-quant independently reached the same three-state shape
+  with its own doctrine line — "a comparison is a weld only if both sides
+  are the same fact at the same clock"; near the boundary the boolean is
+  a step function (infinite sensitivity — no staleness bound translates
+  into a boolean error bound), so the pin-clock gate measures whether a
+  boundary-adjacent user moved money, not the pipeline, and A PASS UNDER
+  A STOCHASTIC GATE CERTIFIES THE DRAW, NOT THE SYSTEM (vacuous green by
+  the institutional route). The license to stop gating is CONDITIONAL:
+  (1) the served surface structurally attaches the disclosure — evidence
+  not assertion (schema/code cite + pinning test; any surface serving
+  the bare boolean collapses the license into a D-013 always-fix); (2)
+  staleness bounded not merely labeled (each motion row inside its
+  freshness budget); (3) every flip proven mechanical PER ROW. Its added
+  obligation: the Law@P PIN-VECTOR SUBSTITUTION — recompute scalar AND
+  boolean over the chain's own pin vector; the flip becomes a theorem of
+  two chain-attested endpoints, the motion IS vector@P − vector@S.
+  DIVERGENCE RESOLVED BY UNION: chain-truth's S-clock boolean custody
+  weld AND risk-quant's pin-vector substitution are both conjuncts (the
+  stronger set wins). Never-swept: risk-quant CORRECTED the blessed
+  shape — any-never-swept-gates is stochastic on borrower arrival; the
+  lawful form is refusal-weld (consumed read, not assertion) + age guard
+  derived from the sweeper's own schedule (race window → disclosed
+  coverage-gap; else gated) + census denominator. Transport retry
+  doctrine written down: hash-anchored reads make a same-pin retry THE
+  SAME EXPERIMENT COMPLETED (cannot benefit from a quieter market —
+  precisely what distinguishes it from condemned (b)); the receipt is
+  ONE completed run, the aborted artifact RETAINED AND CITED as
+  superseded (kept red draws are anti-reroll evidence; preserved to
+  scratch accept-r5-aborted/). WAVE H3 DISPATCHED: the union law (six
+  MOTION conjuncts incl. both consultants' welds), note-text fix,
+  motion census + ~1% sweeper-health population gate, never-swept
+  reshape, frame declarations, serving-surface disclosure proof,
+  retry-pin taint determination, retroactive classification of the two
+  accounts at the finalized pins (the empirical half), 5 designed
+  mutants. Codex round → same-pin retry (if untainted) after it lands.
