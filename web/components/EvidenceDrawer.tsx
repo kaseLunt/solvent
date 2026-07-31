@@ -2,13 +2,16 @@
 
 // The reusable explain-this-number drawer: a Drawer fed by a TYPED
 // EvidenceDescriptor (lib/evidence.ts). The Inspector builds descriptors from
-// positions; W6's Proof Center reuses this component (and the descriptor
-// type) for /v1/evidence-backed chains — nothing here knows about positions.
+// positions; the Proof Center (W6) builds them from /v1/evidence — nothing
+// here knows about positions or manifests.
+//
+// Lifted from app/inspector/[addr]/ in W6 (the sanctioned move): the
+// component and its styles now live in components/, shared by both surfaces.
 
 import type { ReactNode } from "react";
-import { Drawer } from "@/components/Drawer";
+import { Drawer } from "./Drawer";
 import type { EvidenceDescriptor, EvidenceTone } from "@/lib/evidence";
-import styles from "../inspector.module.css";
+import styles from "./evidence.module.css";
 
 const TONE_CLASS: Record<EvidenceTone, string | undefined> = {
   default: undefined,

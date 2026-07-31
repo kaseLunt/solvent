@@ -39,7 +39,7 @@ import { Stampline, StampItem } from "@/components/Stampline";
 import { InspectorPositionCard } from "./InspectorPositionCard";
 import { InspectorHistory, type HistoryState } from "./InspectorHistory";
 import { InspectorActivity } from "./InspectorActivity";
-import { EvidenceDrawer } from "./EvidenceDrawer";
+import { EvidenceDrawer } from "@/components/EvidenceDrawer";
 import styles from "../inspector.module.css";
 
 type AddressState =

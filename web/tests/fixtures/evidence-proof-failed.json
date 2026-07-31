@@ -1,0 +1,59 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "service": {
+    "name": "solvent-api",
+    "version": "748c09d1e2f3",
+    "schema_version": 16,
+    "algorithm_revision": 4,
+    "scenario_config_version": "v1",
+    "registry_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "seizure_model": "pro-rata-over-counted-collateral"
+  },
+  "commit": "748c09d1e2f3",
+  "substrate": {
+    "batch_id": 1,
+    "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+    "substrate_digest": "b23c2c4c182300512dcefa20f0fbf3740ac24077271059e1bd32511fec5f7ab5",
+    "note": "the digest is computed over the batch's INPUTS — the risk rows, consulted prices and consulted collateral flags — so two batches with identical substrate digests were computed from identical evidence."
+  },
+  "feeds_registry": {
+    "path": "recon/feeds.json",
+    "registry_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "file_sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    "note": "`registry_fingerprint` is computed over the ASSEMBLED registry (the identity the batches are bound to); `file_sha256` is the committed file's bytes as deployed."
+  },
+  "reconcile": {
+    "schema": "solvent.reconcile.drift-report/v1",
+    "result": "fail",
+    "exit_code": 1,
+    "finished_at": "2026-07-29T02:14:07Z",
+    "gated_rows": 87,
+    "gated_exact": 84,
+    "gated_drift": 3,
+    "advisory_rows": 21,
+    "welds": [
+      {
+        "engine": "debt_manager",
+        "rows_compared": 29,
+        "rows_exact": 26
+      },
+      {
+        "engine": "aave_v3_etherfi",
+        "rows_compared": 14,
+        "rows_exact": 14
+      }
+    ],
+    "comparison_sha256": "5f0b3e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025",
+    "artifact_path": "roadmap/evidence/artifacts/w1-reconcile/drift-report.json",
+    "note": "read from the COMMITTED receipt artifact; the reconcile itself ran against a pinned block, not at request time."
+  },
+  "probe_records": [
+    {
+      "path": "recon/p3-probes.md",
+      "note": "probe records name endpoints by environment variable only — publishable by construction."
+    }
+  ],
+  "notes": [
+    "this manifest is deploy-bound: every field is carried by the build, persisted by a batch, or read from a committed artifact. Nothing here is measured at request time."
+  ]
+}

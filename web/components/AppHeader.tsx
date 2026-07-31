@@ -18,8 +18,11 @@ const PRIMARY_TABS = [
   { href: "/feed", label: "Feed" },
 ] as const;
 
-/** Developers is the only secondary destination on the nav bar. */
-const SECONDARY_TABS = [{ href: "/developers", label: "Developers" }] as const;
+/** Secondary destinations: the proof/docs register, after the surfaces. */
+const SECONDARY_TABS = [
+  { href: "/proof", label: "Proof" },
+  { href: "/developers", label: "Developers" },
+] as const;
 
 /**
  * The real product header. The mockup's window chrome (titlebar + appnav)

@@ -250,6 +250,7 @@ test("Lab rides the PRIMARY nav register (design ruling)", async ({ page }) => {
     "Lab",
     "Observatory",
     "Feed",
+    "Proof",
     "Developers",
   ]);
 });

@@ -14,7 +14,15 @@ const SURFACES = [
   { path: "/developers", name: "Developers" },
 ] as const;
 
-const NAV_LABELS = ["Book", "Inspector", "Observatory", "Feed", "Lab", "Developers"] as const;
+const NAV_LABELS = [
+  "Book",
+  "Inspector",
+  "Observatory",
+  "Feed",
+  "Lab",
+  "Proof",
+  "Developers",
+] as const;
 
 test("root redirects to the Book", async ({ page }) => {
   await page.goto("/");

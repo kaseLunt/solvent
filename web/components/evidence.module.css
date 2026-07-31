@@ -1,0 +1,113 @@
+/* EvidenceDrawer + ExplainButton styles — the shared explain-this-number
+ * vocabulary, lifted with the component out of the Inspector tree (W6).
+ *
+ * Every rule here is the Inspector's own kv/formula grammar VERBATIM
+ * (app/inspector/inspector.module.css — mockup vocabulary, concept HTML lines
+ * 183–202), copied so the SHARED component owns its styles instead of
+ * reaching into a surface's module. The drawer must render identically on the
+ * Inspector and the Proof Center. */
+
+/* ---- kv rows (mockup .kv) ---- */
+
+.kv {
+  padding: 6px 0;
+}
+
+.kvRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 6px 14px;
+  font-size: var(--fs-table);
+}
+
+.kvRow + .kvRow {
+  border-top: 1px solid var(--line);
+}
+
+.k {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.v {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.vOk {
+  color: var(--ok);
+}
+
+.vWarn {
+  color: var(--warn);
+}
+
+.vCrit {
+  color: var(--crit);
+}
+
+.vDim {
+  color: var(--ink-3);
+}
+
+/* ---- section heading ---- */
+
+.sectionHead {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: var(--sp-6) 0 10px;
+}
+
+/* ---- the formula block (mockup .formula) ---- */
+
+.formula {
+  margin: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.formula b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- explain-this-number affordance ---- */
+
+.explain {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 3px;
+}
+
+.explain:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+/* ---- disclosure caption ---- */
+
+.disclosure {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}

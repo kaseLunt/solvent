@@ -1,0 +1,312 @@
+/* Proof Center (W6) — the Truth layer's culminating surface. The mockup's
+ * card/kv vocabulary, with ONE addition of its own: the two-subject grid.
+ * The proof card and the live card must read as different instruments — the
+ * split is the product, and the styling carries it: the proof card is
+ * accent-ruled (the PROOF badge's color), the live card is ok-ruled with the
+ * live pulse. Neither may borrow the other's rule. */
+
+.head {
+  max-width: 720px;
+  margin-bottom: var(--sp-5);
+}
+
+.head h1 {
+  font-size: var(--fs-h2);
+  letter-spacing: var(--track-tight);
+  margin: 0 0 8px;
+}
+
+.head p {
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  margin: 0;
+}
+
+/* ---- loading / unavailable ---- */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-4);
+}
+
+.emptyReason {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  color: var(--ink-2);
+}
+
+.warnStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  border: 1px solid var(--crit);
+  border-radius: var(--r-md);
+  background: var(--crit-bg);
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  margin-bottom: var(--sp-4);
+}
+
+.warnStrip b {
+  color: var(--crit);
+  letter-spacing: var(--track-label);
+}
+
+/* ---- the two-subject grid ---- */
+
+.subjects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+  align-items: start;
+  margin-bottom: var(--sp-4);
+}
+
+@media (max-width: 940px) {
+  .subjects {
+    grid-template-columns: 1fr;
+  }
+}
+
+.subjectCard {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+/* The proof subject: accent top rule — the PROOF badge's color. */
+.proofCard {
+  border-top: 3px solid var(--accent);
+}
+
+/* The live subject: ok top rule — the LIVE chip's color. */
+.liveCard {
+  border-top: 3px solid var(--ok);
+}
+
+.subjectTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.subjectTitle b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.subjectCaption {
+  padding: 8px 14px 0;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.subjectBody {
+  padding: 4px 0 10px;
+}
+
+/* Section head INSIDE a card: tighter than the drawer's. */
+.cardSection {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 12px 14px 2px;
+}
+
+/* ---- status chips (loud states) ---- */
+
+.statusChip {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  white-space: nowrap;
+}
+
+.statusOk {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.statusCrit {
+  color: var(--crit);
+  border-color: var(--crit);
+  background: var(--crit-bg);
+}
+
+.statusRefused {
+  color: var(--ink-2);
+  border-style: dashed;
+  border-color: var(--ink-3);
+  background: var(--refused-bg);
+}
+
+.liveDot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .liveDot {
+    animation: proofPulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes proofPulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* ---- the non-inheritance strip: spans both subjects ---- */
+
+.splitStrip {
+  grid-column: 1 / -1;
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-md);
+  background: var(--refused-bg);
+  padding: 9px 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.splitStrip b {
+  color: var(--ink);
+  letter-spacing: var(--track-label);
+}
+
+/* ---- probe records + notes ---- */
+
+.recordList {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.recordItem {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 7px 14px;
+  font-size: var(--fs-table);
+}
+
+.recordItem + .recordItem {
+  border-top: 1px solid var(--line);
+}
+
+.recordPath {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink);
+}
+
+.recordNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.notesList {
+  list-style: none;
+  margin: 0;
+  padding: 6px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- raw JSON (global raw-view law) ---- */
+
+.rawToggle {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  margin-top: var(--sp-3);
+}
+
+.rawToggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.rawJson {
+  margin: var(--sp-3) 0 0;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--term-bg);
+  color: var(--term-ink);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+/* ---- inline identifier + copy pairing ---- */
+
+.ident {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.identText {
+  overflow-wrap: anywhere;
+}
+
+.crossLink {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  color: var(--ink-2);
+}
+
+.crossLink a {
+  color: var(--accent);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}

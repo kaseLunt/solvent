@@ -42,7 +42,7 @@ import { displayHf, displayRatio } from "@/lib/history-series";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
 import { hfSeverity } from "@/lib/severity";
 import type { ChainEvent, ParamChange } from "@/lib/inspector-data";
-import { ExplainButton } from "./EvidenceDrawer";
+import { ExplainButton } from "@/components/EvidenceDrawer";
 import styles from "../inspector.module.css";
 
 const WARN_DISCLOSURE = "warn band <1.1 — presentation band, not an engine threshold";
