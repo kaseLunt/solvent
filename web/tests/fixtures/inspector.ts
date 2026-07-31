@@ -336,6 +336,7 @@ export const HISTORY: Schemas["AddressHistoryResponse"] = {
           batch_id: 2,
           computed_at: "2026-07-29T10:00:00Z",
           balances_block: 25635618,
+          sweep_block: 0,
           status: "computed",
           refusal: null,
           health_factor: {
@@ -353,6 +354,7 @@ export const HISTORY: Schemas["AddressHistoryResponse"] = {
           batch_id: 1,
           computed_at: "2026-07-29T09:45:00Z",
           balances_block: 25635540,
+          sweep_block: 0,
           status: "refused",
           refusal: {
             code: "G1",

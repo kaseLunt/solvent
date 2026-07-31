@@ -19,7 +19,14 @@
 //     the inserted gap the sparkline would draw a line straight across it;
 //   - values are DISPLAY-PRECISION geometry only. Crit/severity is never
 //     derived from them (lib/severity.ts law) and exact numbers belong in
-//     adjacent mono text.
+//     adjacent mono text;
+//   - the SWEEP MARK travels with every Debt Manager point (contract 1.2.1:
+//     each point carries its OWN batch's persisted `sweep_block` — the
+//     collateral clock behind that point's `liquidatable` verdict). A DM
+//     point's hover title carries `S <block>` — or `S ∅` when 0, an ABSENT
+//     sweep disclosed, never "swept at genesis" — so the mixed-clock
+//     disclosure reaches the human (book-row marks grammar: Aave has no
+//     sweeper and therefore no S mark).
 //
 // HONEST BOUNDARY (ruling 11): the wire does NOT enumerate the covered
 // window's full retained-batch id set — `/v1/address/{addr}/history` carries
@@ -94,8 +101,24 @@ export function displayHf(hf: HealthFactor): string | null {
   return ratio === null ? null : `≈${ratio.toFixed(4)}`;
 }
 
-function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
+/**
+ * The sweep mark a Debt Manager point's hover title carries (contract 1.2.1):
+ * the POINT's own persisted `sweep_block` — the collateral clock behind that
+ * point's `liquidatable` verdict — as `S <block>`, or `S ∅` when 0 (an
+ * ABSENT sweep, disclosed, never "swept at genesis"). Empty on every other
+ * engine: Aave has no sweeper and no S mark (book-row marks grammar).
+ */
+function sweepMark(engineName: string, point: AddressHistoryPoint): string {
+  if (engineName !== "debt_manager") return "";
+  return point.sweep_block > 0 ? ` · S ${formatBlock(point.sweep_block)}` : " · S ∅";
+}
+
+function entryForPoint(point: AddressHistoryPoint, engineName: string): HistorySeriesEntry {
   const batchId = point.batch_id;
+  // The sweep disclosure travels with EVERY persisted DM point — the verdict
+  // rides computed points, and a refused point's S ∅ is the same absent-sweep
+  // truth the refusal names.
+  const sweep = sweepMark(engineName, point);
   if (point.status === "refused") {
     const code = point.refusal?.code ?? "unnamed";
     const detail = point.refusal?.detail ?? "";
@@ -103,7 +126,7 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
       batchId,
       kind: "refused",
       value: null,
-      title: `batch ${String(batchId)} — REFUSED · ${code}${detail === "" ? "" : ` — ${detail}`}`,
+      title: `batch ${String(batchId)} — REFUSED · ${code}${detail === "" ? "" : ` — ${detail}`}${sweep}`,
       display: `REFUSED · ${code}`,
     };
   }
@@ -113,7 +136,7 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} — no health factor published for this point`,
+      title: `batch ${String(batchId)} — no health factor published for this point${sweep}`,
       display: EM_DASH,
     };
   }
@@ -122,7 +145,7 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
       batchId,
       kind: "infinite",
       value: null,
-      title: `batch ${String(batchId)} — ∞ (no debt; the ratio is unbounded and has no finite geometry)`,
+      title: `batch ${String(batchId)} — ∞ (no debt; the ratio is unbounded and has no finite geometry)${sweep}`,
       display: "∞",
     };
   }
@@ -132,7 +155,7 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} — health factor carries neither wad nor num/den`,
+      title: `batch ${String(batchId)} — health factor carries neither wad nor num/den${sweep}`,
       display: EM_DASH,
     };
   }
@@ -141,7 +164,7 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
     batchId,
     kind: "computed",
     value,
-    title: `batch ${String(batchId)} · HF ${display} @ block ${formatBlock(point.balances_block)}`,
+    title: `batch ${String(batchId)} · HF ${display} @ block ${formatBlock(point.balances_block)}${sweep}`,
     display,
   };
 }
@@ -195,7 +218,7 @@ export function buildHistorySeries(
 ): HistorySeries {
   const byBatch = new Map<number, HistorySeriesEntry>();
   for (const point of engine.points) {
-    byBatch.set(point.batch_id, entryForPoint(point));
+    byBatch.set(point.batch_id, entryForPoint(point, engine.engine));
   }
   for (const batchId of engine.withheld_batch_ids) {
     if (byBatch.has(batchId)) continue;

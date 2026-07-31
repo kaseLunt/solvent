@@ -3,6 +3,12 @@
 // gap saying "cannot be established"; ∞ has no finite geometry; a WITNESSED
 // batch with no row is a NO-ROW gap (ruling 11 — a closed position's absence
 // breaks the line); nothing is ever interpolated across any of them.
+//
+// Plus the SWEEP-MARK law (contract 1.2.1): every Debt Manager point's hover
+// title carries the point's OWN persisted sweep watermark — `S <block>`, or
+// `S ∅` when 0 (an absent sweep disclosed, never "swept at genesis") — so
+// the collateral clock behind the DM `liquidatable` verdict reaches the
+// human. Aave has no sweeper and no S mark (book-row marks grammar).
 
 import { expect, test } from "@playwright/test";
 import {
@@ -132,6 +138,60 @@ test("knownBatchAxis: the union of every engine's points, withheld ids and the v
     ],
   };
   expect(knownBatchAxis(widened)).toEqual([1, 2, 5, 6, 7]);
+});
+
+// ---------------------------------------------------------------------------
+// The sweep-mark law (contract 1.2.1) — the DM verdict's collateral clock
+// reaches the hover title; Aave never wears an S mark.
+// ---------------------------------------------------------------------------
+
+const REFUSED =
+  ENGINE.points[1] ??
+  (() => {
+    throw new Error("fixture invariant: refused point expected");
+  })();
+if (REFUSED.status !== "refused") {
+  throw new Error("fixture invariant: oldest point is the refused one");
+}
+
+/** A Debt Manager series built from the fixture's points (types intact). */
+const DM_ENGINE = {
+  ...ENGINE,
+  engine: "debt_manager",
+  value_decimals: 6,
+  points: [
+    // A swept, liquidatable account: the verdict's own collateral clock.
+    { ...COMPUTED, liquidatable: true, sweep_block: 154796490 },
+    // A SWEEP_NEVER refusal: sweep_block 0 is the absent sweep, disclosed.
+    { ...REFUSED, sweep_block: 0 },
+  ],
+};
+
+test("a DM point's hover title carries its OWN sweep watermark — S <block>", () => {
+  const series = buildHistorySeries(DM_ENGINE);
+  const computed = series.entries.find((entry) => entry.kind === "computed");
+  expect(computed?.title).toContain("S 154,796,490");
+});
+
+test("a DM sweep_block of 0 is S ∅ — an absent sweep disclosed, never 'swept at genesis'", () => {
+  const series = buildHistorySeries(DM_ENGINE);
+  const refused = series.entries.find((entry) => entry.kind === "refused");
+  expect(refused?.title).toContain("REFUSED · G1");
+  expect(refused?.title).toContain("S ∅");
+  // A COMPUTED point with an unswept clock discloses the same absence.
+  const unswept = buildHistorySeries({
+    ...DM_ENGINE,
+    points: [{ ...COMPUTED, liquidatable: true, sweep_block: 0 }],
+  });
+  expect(unswept.entries[0]?.title).toContain("S ∅");
+});
+
+test("Aave points never carry an S mark — no sweeper, no sweep clock", () => {
+  const series = buildHistorySeries(ENGINE);
+  for (const title of series.titles) {
+    expect(title).not.toContain("· S ");
+    expect(title).not.toContain("S ∅");
+  }
 });
 
 test("displayRatio prefers the wad and falls back to num/den at display precision", () => {

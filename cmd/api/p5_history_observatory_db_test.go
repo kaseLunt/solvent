@@ -42,6 +42,28 @@ func TestAddressHistoryServesPersistedPointsNewestFirst(t *testing.T) {
 	require.Equal(t, fxAaveCollateralBase, newest["total_collateral_base"])
 	require.Equal(t, fxAaveDebtBase, newest["total_debt_base"])
 	require.Nil(t, newest["liquidatable"], "Aave has no strict boolean — null, never false")
+	require.Equal(t, float64(0), newest["sweep_block"],
+		"contract 1.2.1: every point carries its sweep watermark; Aave has no sweeper, so 0 is the disclosed absence")
+
+	// The DM series: each point's watermark is ITS batch's persisted
+	// sweep_block, beside the strict verdict it clocks — never the newest
+	// batch's stamp (the mixed-clock lie the 1.2.1 field exists to prevent).
+	dmOut := f.getJSON(t, "/v1/address/"+fxAcctDM.Hex()+"/history", "/v1/address/{addr}/history")
+	var dm map[string]any
+	for _, e := range asList(t, dmOut["engines"]) {
+		if asMap(t, e)["engine"] == "debt_manager" {
+			dm = asMap(t, e)
+		}
+	}
+	require.NotNil(t, dm)
+	dmPoints := asList(t, dm["points"])
+	require.Len(t, dmPoints, 2)
+	for _, p := range dmPoints {
+		pt := asMap(t, p)
+		require.Equal(t, true, pt["liquidatable"], "the fixture's DM row is liquidatable at par")
+		require.Equal(t, float64(fxDMSweepBlock), pt["sweep_block"],
+			"the point's OWN persisted sweep watermark travels with the verdict")
+	}
 }
 
 // TestAddressHistoryRefusedBatchesArePointsNotGaps: an account the batch
@@ -67,6 +89,8 @@ func TestAddressHistoryRefusedBatchesArePointsNotGaps(t *testing.T) {
 	require.Nil(t, pt["liquidatable"], "a refused row's verdict is WITHHELD — null, never false")
 	require.Equal(t, "1500000000", pt["total_debt_base"], "the persisted debt the batch did record still serves")
 	require.Nil(t, pt["total_collateral_base"], "unswept collateral is UNKNOWN — null, never zero")
+	require.Equal(t, float64(0), pt["sweep_block"],
+		"a SWEEP_NEVER refusal's watermark is 0 — an ABSENT sweep rendered visibly, never 'swept at genesis'")
 }
 
 // TestAddressHistoryWithheldWindowSemantics: a batch in which an engine's book

@@ -37,12 +37,22 @@ import (
 )
 
 type wireHistoryPoint struct {
-	BatchID       int64             `json:"batch_id"`
-	ComputedAt    time.Time         `json:"computed_at"`
-	BalancesBlock uint64            `json:"balances_block"`
-	Status        string            `json:"status"`
-	Refusal       *wireRefusal      `json:"refusal"`
-	HealthFactor  *wireHealthFactor `json:"health_factor"`
+	BatchID       int64     `json:"batch_id"`
+	ComputedAt    time.Time `json:"computed_at"`
+	BalancesBlock uint64    `json:"balances_block"`
+	// SweepBlock is the account's own last successful collateral sweep AS
+	// PERSISTED IN THIS POINT's batch — the collateral clock behind this
+	// point's Liquidatable verdict, carried per point exactly as
+	// PositionSummary carries it per row (contract 1.2.1). 0 on Aave (no
+	// sweeper) and on a never-swept Debt Manager account: an ABSENT sweep,
+	// disclosed, never "swept at genesis". A point's verdict is from ITS OWN
+	// batch, so the envelope's newest-batch watermarks cannot vouch for it —
+	// serving the verdict without this watermark is the mixed-clock boolean
+	// the MOTION license forbids.
+	SweepBlock   uint64            `json:"sweep_block"`
+	Status       string            `json:"status"`
+	Refusal      *wireRefusal      `json:"refusal"`
+	HealthFactor *wireHealthFactor `json:"health_factor"`
 	// Liquidatable is the Debt Manager's strict verdict at that batch. Null on
 	// Aave, and null on a refused row — a withheld verdict, never "false".
 	Liquidatable        *bool   `json:"liquidatable"`
@@ -157,6 +167,7 @@ func (s *server) handleAddressHistory(w http.ResponseWriter, r *http.Request) {
 			BatchID:       pt.BatchID,
 			ComputedAt:    pt.ComputedAt,
 			BalancesBlock: uint64(p.BalancesBlock),
+			SweepBlock:    uint64(p.SweepBlock),
 			Status:        p.Status,
 			Liquidatable:  p.Liquidatable,
 		}

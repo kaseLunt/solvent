@@ -20,7 +20,7 @@ openapi: 3.0.3
 
 info:
   title: Solvent Risk API
-  version: "1.2.0"
+  version: "1.2.1"
   description: |
     A read-only public view of ether.fi lending risk across two engines: the Aave
     v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
@@ -359,6 +359,7 @@ paths:
                       - batch_id: 2
                         computed_at: "2026-07-29T10:00:00Z"
                         balances_block: 25635618
+                        sweep_block: 0
                         status: "computed"
                         refusal: null
                         health_factor:
@@ -373,6 +374,7 @@ paths:
                       - batch_id: 1
                         computed_at: "2026-07-29T09:45:00Z"
                         balances_block: 25635540
+                        sweep_block: 0
                         status: "refused"
                         refusal:
                           code: "G1"
@@ -2794,8 +2796,8 @@ components:
       type: object
       additionalProperties: false
       required:
-        [batch_id, computed_at, balances_block, status, refusal, health_factor,
-         liquidatable, total_collateral_base, total_debt_base]
+        [batch_id, computed_at, balances_block, sweep_block, status, refusal,
+         health_factor, liquidatable, total_collateral_base, total_debt_base]
       description: |
         One PERSISTED batch row for the address on one engine. A refused batch
         is a point, not a gap: the position existed and could not honestly be
@@ -2804,6 +2806,21 @@ components:
         batch_id: { type: integer, format: int64 }
         computed_at: { type: string, format: date-time }
         balances_block: { type: integer, format: int64 }
+        sweep_block:
+          type: integer
+          format: int64
+          description: |
+            The account's own last successful collateral sweep AS PERSISTED IN
+            THIS POINT's batch — the collateral clock behind this point's
+            `liquidatable` verdict (worst-case ~1.5h behind the 60-second
+            price samples), carried per point exactly as `PositionSummary`
+            carries it per row. 0 on engines without a sweeper (Aave), and 0
+            for a Debt Manager account that had never been swept at that
+            batch — an ABSENT sweep, rendered visibly, never as "swept at
+            genesis". A history point serves a verdict from ITS OWN batch, so
+            the newest batch's envelope watermarks cannot vouch for it; the
+            verdict without this per-point watermark would be a mixed-clock
+            boolean wearing pin truth.
         status: { type: string, enum: [computed, refused] }
         refusal:
           nullable: true

@@ -1534,6 +1534,21 @@ export interface components {
             computed_at: string;
             /** Format: int64 */
             balances_block: number;
+            /**
+             * Format: int64
+             * @description The account's own last successful collateral sweep AS PERSISTED IN
+             *     THIS POINT's batch — the collateral clock behind this point's
+             *     `liquidatable` verdict (worst-case ~1.5h behind the 60-second
+             *     price samples), carried per point exactly as `PositionSummary`
+             *     carries it per row. 0 on engines without a sweeper (Aave), and 0
+             *     for a Debt Manager account that had never been swept at that
+             *     batch — an ABSENT sweep, rendered visibly, never as "swept at
+             *     genesis". A history point serves a verdict from ITS OWN batch, so
+             *     the newest batch's envelope watermarks cannot vouch for it; the
+             *     verdict without this per-point watermark would be a mixed-clock
+             *     boolean wearing pin truth.
+             */
+            sweep_block: number;
             /** @enum {string} */
             status: "computed" | "refused";
             refusal: components["schemas"]["Refusal"] | null;
@@ -2523,6 +2538,7 @@ export interface operations {
                      *               "batch_id": 2,
                      *               "computed_at": "2026-07-29T10:00:00Z",
                      *               "balances_block": 25635618,
+                     *               "sweep_block": 0,
                      *               "status": "computed",
                      *               "refusal": null,
                      *               "health_factor": {
@@ -2540,6 +2556,7 @@ export interface operations {
                      *               "batch_id": 1,
                      *               "computed_at": "2026-07-29T09:45:00Z",
                      *               "balances_block": 25635540,
+                     *               "sweep_block": 0,
                      *               "status": "refused",
                      *               "refusal": {
                      *                 "code": "G1",
