@@ -2532,3 +2532,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   structurally (required set or NOT NULL flag) + CHECK all-or-nothing sweep column
   group + completeness negatives incl. partial-null, with Aave no-sweeper positive
   control preserved. t5r2 → locked-dir list. Task 5 stays OPEN pending round 3.
+- **COMPACT CHECKPOINT (21:36)**: B2 REPORTED COMPLETE, NOT YET LANDED — its
+  tree coexists with B1's uncommitted work and the schema-version pin bump
+  (17) lives in B1's files, so **B1+B2 land together** (two sequential
+  commits from the jointly-verified tree) when B1 reports. B2 essentials:
+  corrections applied+proven (rewind deletes headers in the SAME tx at
+  store.go:377; bounded retry sweep every 8 rounds; rollup batch-sourced w/
+  materialization_key + watermark vector, m4 kills the derived-state
+  mutant); 4/4 mutants killed; suites ok (store 206s / indexer / backfill);
+  post-ship op: SOLVENT_BACKFILL_BLOCKTIMES=1 go run ./cmd/backfill-blocktimes
+  -rate 8 (~346k headers ≈12h, resumable). IN FLIGHT: B1 (store readers,
+  corrected), W1 Book, W2 Inspector, W3 Lab (all mid-build), acceptance
+  RETRY (attempt 1 = honest exit 3, transient OP-RPC timeout; artifacts +
+  comparison sha256 0f9b2103… already written) in C:/wtclose/p3accept.
+  Persona solvent-design UPGRADED (developed composite: Tufte/Bostock/FT-
+  Economist/Bloomberg/Berkeley/Stripe/Linear/TradingView + chart laws +
+  four-state chart review; the W0 ruling stands). Wave outputs persist at
+  AppData\Local\Temp\claude\...\tasks\<id>.output: B1=a975d7387845b91cc
+  B2=a49a6b9777b7d298f W1=a16444b8ae83010a1 W2=a6d276addc3b1c2b4
+  W3=a28b41c4f248e207e accept=bt2ox1u0o. Pipeline on resume: land B1+B2 →
+  B3 handlers wave → land W1/W2/W3 (+ design pass on their charts under
+  the upgraded charter) → acceptance result → E1 paperwork (W2 receipt,
+  W3-object, D-014, ROADMAP, rescope) → C2 contract wave → W4/W5/W6.
