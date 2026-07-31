@@ -313,6 +313,7 @@ export function BookPositions() {
           engine={engine}
           rows={rows}
           totalPositions={envelope === null ? null : envelope.totalPositions}
+          batch={envelope === null ? null : envelope.batch}
         />
       </div>
     </section>

@@ -12,9 +12,23 @@
 //     as a gap saying "cannot be established" — never "no position";
 //   - an INFINITE health factor (no debt) has no finite geometry; it is a gap
 //     that says ∞, not a plotted lie;
+//   - a batch the response itself WITNESSES (another engine's row, a withheld
+//     listing, the vantage batch) in which this engine has neither a point nor
+//     a withheld entry is a NO-ROW gap (design ruling 11): a closed-then-
+//     reopened position's absence is neither a point nor withheld, and without
+//     the inserted gap the sparkline would draw a line straight across it;
 //   - values are DISPLAY-PRECISION geometry only. Crit/severity is never
 //     derived from them (lib/severity.ts law) and exact numbers belong in
 //     adjacent mono text.
+//
+// HONEST BOUNDARY (ruling 11): the wire does NOT enumerate the covered
+// window's full retained-batch id set — `/v1/address/{addr}/history` carries
+// only per-engine points and withheld ids (see cmd/api/p5_history.go: the
+// window is read server-side and never serialized). The axis here is
+// therefore the KNOWN ids the response itself witnesses; a retained batch no
+// part of the response mentions cannot be told apart from an unminted id, so
+// no gap is fabricated for it. CONTRACT GAP, reported: the response should
+// carry the covered batch-id set for a complete axis.
 //
 // Pure functions — pinned by tests/unit/history-series.spec.ts.
 
@@ -22,7 +36,13 @@ import { formatUnits, type HealthFactor } from "@solvent/client";
 import type { AddressHistoryEngine, AddressHistoryPoint } from "./inspector-data";
 import { EM_DASH, formatBlock } from "./format";
 
-export type HistoryEntryKind = "computed" | "refused" | "withheld" | "infinite" | "unpublished";
+export type HistoryEntryKind =
+  | "computed"
+  | "refused"
+  | "withheld"
+  | "infinite"
+  | "unpublished"
+  | "no-row";
 
 export interface HistorySeriesEntry {
   batchId: number;
@@ -126,15 +146,53 @@ function entryForPoint(point: AddressHistoryPoint): HistorySeriesEntry {
   };
 }
 
+/** The slice of `AddressHistoryResponse` the batch axis is derived from. */
+export interface HistoryAxisSource {
+  batch: { id: number };
+  engines: readonly {
+    points: readonly { batch_id: number }[];
+    withheld_batch_ids: readonly number[];
+  }[];
+}
+
 /**
- * Build the sparkline series for one engine's history: points and
- * withheld-batch holes merged onto one batch-id axis, oldest first.
+ * The KNOWN batch-id axis of one history response: every batch id the wire
+ * itself witnesses — each engine's points, each engine's withheld list, and
+ * the vantage batch the response is served from (all of them retained-window
+ * members by the handler's construction). Sorted ascending, unique.
+ *
+ * This is deliberately NOT "the retained set" — see the honest-boundary note
+ * in this file's header: an id no part of the response mentions is unknowable
+ * here, so gaps are inserted only at these witnessed ids.
+ */
+export function knownBatchAxis(response: HistoryAxisSource): number[] {
+  const ids = new Set<number>([response.batch.id]);
+  for (const engine of response.engines) {
+    for (const point of engine.points) ids.add(point.batch_id);
+    for (const batchId of engine.withheld_batch_ids) ids.add(batchId);
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
+/**
+ * Build the sparkline series for one engine's history: points,
+ * withheld-batch holes and NO-ROW gaps merged onto one batch-id axis,
+ * oldest first.
  *
  * A batch id present in BOTH `points` and `withheld_batch_ids` keeps the
  * point (a persisted row is evidence; the list entry would be a service
  * inconsistency this renderer does not paper over).
+ *
+ * `knownBatchIds` (ruling 11) is the response-level axis from
+ * `knownBatchAxis`: a known id absent from BOTH this engine's points and its
+ * withheld list becomes a NO-ROW gap — the account has no persisted row at
+ * that batch, which is an ABSENCE, never a value, and the line breaks there
+ * instead of drawing across it.
  */
-export function buildHistorySeries(engine: AddressHistoryEngine): HistorySeries {
+export function buildHistorySeries(
+  engine: AddressHistoryEngine,
+  knownBatchIds: readonly number[] = [],
+): HistorySeries {
   const byBatch = new Map<number, HistorySeriesEntry>();
   for (const point of engine.points) {
     byBatch.set(point.batch_id, entryForPoint(point));
@@ -149,6 +207,19 @@ export function buildHistorySeries(engine: AddressHistoryEngine): HistorySeries 
         `batch ${String(batchId)} — ${engine.engine} book withheld — ` +
         `cannot be established (never "no position")`,
       display: "withheld",
+    });
+  }
+  for (const batchId of knownBatchIds) {
+    if (byBatch.has(batchId)) continue;
+    byBatch.set(batchId, {
+      batchId,
+      kind: "no-row",
+      value: null,
+      title:
+        `batch ${String(batchId)} — no row in this batch: this account has no persisted ` +
+        `${engine.engine} row here (an absence, not a value — the line breaks rather than ` +
+        `drawing across it)`,
+      display: "no row",
     });
   }
   const entries = [...byBatch.values()].sort((a, b) => a.batchId - b.batchId);

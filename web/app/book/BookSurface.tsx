@@ -11,6 +11,7 @@
 // DegradationBanner own the app-level layer and are NOT duplicated here.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   UnavailableError,
   type BookResponse,
@@ -153,7 +154,12 @@ export function BookSurface() {
             label="key"
             value={EM_DASH}
             tone="dim"
-            note="(materialization key is served by /v1/evidence — W6; not fabricated here)"
+            note={
+              <>
+                (materialization key is served by /v1/evidence —{" "}
+                <Link href="/proof">see /proof</Link>; not fabricated here)
+              </>
+            }
           />
           <StampItem
             label="coverage"

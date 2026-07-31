@@ -175,6 +175,20 @@
   align-items: start;
 }
 
+/* Grid items may shrink below their content's min-content (the formula
+   block's longest line was silently widening the whole page at mobile
+   widths — the pre then scrolls INTERNALLY via its own overflow-x). Found
+   by the W7 state-matrix responsive cell. */
+.split > * {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 800px) {
   .split {
     grid-template-columns: 1fr;

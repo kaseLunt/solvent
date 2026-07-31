@@ -48,7 +48,7 @@ export function MarksStamp({ marks }: { marks: readonly Mark[] }) {
   return (
     <span className={styles.marks}>
       {clauses.map((clause, index) => (
-        <span key={clause + String(index)}>
+        <span key={clause + String(index)} className={styles.marksClause}>
           {index > 0 && " · "}
           {clause.endsWith("∅") ? (
             <>

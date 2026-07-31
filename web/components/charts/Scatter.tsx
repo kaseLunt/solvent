@@ -25,6 +25,15 @@ export interface ScatterProps {
   /** Grid line count per axis. */
   gridLines?: number;
   /**
+   * Caller-supplied labeled x ticks (design TASTE 12 — e.g. round decades on
+   * a log axis: 5 → "100k", 6 → "1M"). Ticks OUTSIDE the data domain are
+   * dropped — the honest-scale law: the domain fits the data and ticks never
+   * stretch it. When at least one tick lands in-domain, tick gridlines and
+   * labels REPLACE the uniform vertical grid and the raw-extreme x edge
+   * labels; otherwise the default edge labels stand.
+   */
+  xTicks?: readonly { value: number; label: string }[];
+  /**
    * Optional horizontal reference line (e.g. y = 0 — the liquidation
    * boundary). The value is FORCED into the y-domain so the boundary is
    * always on the chart, even when every point sits on one side of it: an
@@ -52,6 +61,7 @@ export function Scatter({
   formatX = (v) => String(v),
   formatY = (v) => String(v),
   gridLines = 4,
+  xTicks,
   yReference,
   label,
 }: ScatterProps) {
@@ -83,6 +93,11 @@ export function Scatter({
 
   const ticks = Array.from({ length: gridLines + 1 }, (_, i) => i / gridLines);
 
+  // Labeled x ticks, in-domain only (TASTE 12). When present they carry the
+  // vertical grid AND the x value labels; the raw-extreme edge labels drop.
+  const inDomainXTicks = (xTicks ?? []).filter((t) => t.value >= xMin && t.value <= xMax);
+  const useXTicks = inDomainXTicks.length > 0;
+
   return (
     <svg
       className={styles.chart}
@@ -102,23 +117,53 @@ export function Scatter({
           y2={margin.top + plotH * t}
         />
       ))}
-      {ticks.map((t) => (
-        <line
-          key={`v${String(t)}`}
-          className={styles.grid}
-          x1={margin.left + plotW * t}
-          x2={margin.left + plotW * t}
-          y1={margin.top}
-          y2={margin.top + plotH}
-        />
-      ))}
+      {!useXTicks &&
+        ticks.map((t) => (
+          <line
+            key={`v${String(t)}`}
+            className={styles.grid}
+            x1={margin.left + plotW * t}
+            x2={margin.left + plotW * t}
+            y1={margin.top}
+            y2={margin.top + plotH}
+          />
+        ))}
+      {useXTicks &&
+        inDomainXTicks.map((tick) => (
+          <g key={`xt${String(tick.value)}`} data-testid="scatter-x-tick">
+            <line
+              className={styles.grid}
+              x1={px(tick.value)}
+              x2={px(tick.value)}
+              y1={margin.top}
+              y2={margin.top + plotH}
+            />
+            <text
+              className={styles.axisLabel}
+              x={px(tick.value)}
+              y={height - 16}
+              textAnchor="middle"
+            >
+              {tick.label}
+            </text>
+          </g>
+        ))}
 
-      <text className={styles.axisLabel} x={margin.left} y={height - 4}>
-        {formatX(xMin)}
-      </text>
-      <text className={styles.axisLabel} x={margin.left + plotW} y={height - 4} textAnchor="end">
-        {formatX(xMax)}
-      </text>
+      {!useXTicks && (
+        <>
+          <text className={styles.axisLabel} x={margin.left} y={height - 4}>
+            {formatX(xMin)}
+          </text>
+          <text
+            className={styles.axisLabel}
+            x={margin.left + plotW}
+            y={height - 4}
+            textAnchor="end"
+          >
+            {formatX(xMax)}
+          </text>
+        </>
+      )}
       <text className={styles.axisLabel} x={margin.left - 6} y={margin.top + plotH} textAnchor="end">
         {formatY(yMin)}
       </text>
@@ -146,17 +191,17 @@ export function Scatter({
       {yReference !== undefined && (
         <g data-testid="scatter-reference">
           <line
+            className={styles.refLine}
             x1={margin.left}
             x2={margin.left + plotW}
             y1={py(yReference.value)}
             y2={py(yReference.value)}
-            style={{ stroke: "var(--crit)", strokeWidth: 1, strokeDasharray: "3 3", opacity: 0.55 }}
           />
           <text
+            className={styles.refLabel}
             x={margin.left + plotW}
             y={Math.max(margin.top + 8, py(yReference.value) - 4)}
             textAnchor="end"
-            style={{ fontFamily: "var(--mono)", fontSize: 9, fill: "var(--crit)", opacity: 0.75 }}
           >
             {yReference.label}
           </text>

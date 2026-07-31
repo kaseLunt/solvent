@@ -12,10 +12,11 @@
 // (deterministic bins + named top-N outliers). When that endpoint lands, this
 // client-side projection over loaded pages is replaced by it.
 
-import { parseDecimal, formatUnits } from "@solvent/client";
+import { parseDecimal, formatUnits, type Batch } from "@solvent/client";
 import { Scatter, type ScatterPoint } from "@/components/charts/Scatter";
 import { hfSeverity } from "@/lib/severity";
 import { truncateAddress } from "@/lib/format";
+import { renderEngineAmount } from "@/lib/book-format";
 import type { PositionRow } from "./positionRow";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
@@ -45,14 +46,39 @@ function debtForGeometry(row: PositionRow): number | null {
   return Math.log10(numeric);
 }
 
+/** "1k" / "100k" / "1M" for a base-10 exponent; `1e{k}` outside the named range. */
+function decadeLabel(exponent: number): string {
+  if (exponent < 0 || exponent > 14) return `1e${String(exponent)}`;
+  const suffix = ["", "k", "M", "B", "T"][Math.floor(exponent / 3)] ?? "";
+  return `${String(10 ** (exponent % 3))}${suffix}`;
+}
+
+/**
+ * Round-decade x ticks over a log10 axis (design TASTE 12): every integer
+ * exponent inside the plotted range, thinned by stride when dense so labels
+ * fit — every shown tick is still a true decade. The Scatter drops any tick
+ * outside its data domain (the honest-scale law stays the chart's).
+ */
+function decadeTicks(xs: readonly number[]): { value: number; label: string }[] {
+  if (xs.length === 0) return [];
+  const lo = Math.ceil(Math.min(...xs));
+  const hi = Math.floor(Math.max(...xs));
+  const all: { value: number; label: string }[] = [];
+  for (let k = lo; k <= hi; k += 1) all.push({ value: k, label: decadeLabel(k) });
+  const stride = Math.ceil(all.length / 8);
+  return stride <= 1 ? all : all.filter((_, index) => index % stride === 0);
+}
+
 export interface BookRiskMapProps {
   engine: string;
   rows: readonly PositionRow[];
   /** `total_positions` from the page envelope (null on a withheld engine). */
   totalPositions: number | null;
+  /** The page envelope's batch — the map's own as-of (null before a page lands). */
+  batch: Batch | null;
 }
 
-export function BookRiskMap({ engine, rows, totalPositions }: BookRiskMapProps) {
+export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMapProps) {
   const points: ScatterPoint[] = [];
   let unplottable = 0;
 
@@ -63,13 +89,23 @@ export function BookRiskMap({ engine, rows, totalPositions }: BookRiskMapProps) 
       unplottable += 1;
       continue;
     }
+    // Hover title (design SHOULD-FIX 7): truncated address · EXACT debt via
+    // the SAME renderer as the table's Debt column · the liq-distance display
+    // string — never the log-geometry float.
     points.push({
       id: row.account,
       x,
       y,
       severity: hfSeverity({ verdict: row.verdict, ratio: row.hf.ratio, infinite: row.hf.infinite }),
-      title: `${truncateAddress(row.account)} · debt 1e${x.toFixed(1)} · ${
-        row.liqDistance.kind === "breached" ? "liquidatable" : row.liqDistance.kind === "distance" ? row.liqDistance.display : "?"
+      title: `${truncateAddress(row.account)} · debt ${renderEngineAmount(
+        row.totals.debt,
+        row.totals.decimals,
+      )} · ${
+        row.liqDistance.kind === "breached"
+          ? "liquidatable"
+          : row.liqDistance.kind === "distance"
+            ? row.liqDistance.display
+            : "?"
       }`,
     });
   }
@@ -79,10 +115,23 @@ export function BookRiskMap({ engine, rows, totalPositions }: BookRiskMapProps) 
       ? `${String(rows.length)} loaded / total withheld`
       : `${String(rows.length)} loaded / ${String(totalPositions)} total`;
 
+  // The map states its OWN as-of (design SHOULD-FIX 9): the page envelope's
+  // batch identity, with supersession disclosed — never a borrowed or
+  // implied global freshness.
+  const asOfLabel =
+    batch === null
+      ? "as-of —"
+      : `as-of batch #${String(batch.id)}${
+          batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""
+        }`;
+
   return (
     <div className={styles.panel} data-testid="book-risk-map">
       <div className={styles.panelHead}>
         <span>risk map · {engine}</span>
+        <span className={styles.comparator} data-testid="risk-map-as-of">
+          {asOfLabel}
+        </span>
         <span className={styles.comparator}>{loadedLabel}</span>
       </div>
       <div className={styles.panelBody}>
@@ -100,6 +149,7 @@ export function BookRiskMap({ engine, rows, totalPositions }: BookRiskMapProps) 
             yLabel="liq. distance %"
             formatX={(value) => `1e${value.toFixed(1)}`}
             formatY={(value) => `${value.toFixed(0)}%`}
+            xTicks={decadeTicks(points.map((point) => point.x))}
             yReference={{ value: 0, label: "0 — liquidatable" }}
           />
         )}

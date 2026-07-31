@@ -46,6 +46,29 @@
   stroke-dasharray: 1 2;
 }
 
+/* Reference line + label — ONE treatment shared by Sparkline and Scatter
+   (design TASTE 14: the dashed crit-toned hairline with a direct mono label
+   lives here, not in per-component inline styles). */
+.refLine {
+  stroke: var(--crit);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.55;
+}
+
+.refLabel {
+  font-family: var(--mono);
+  font-size: 9px;
+  fill: var(--crit);
+  opacity: 0.75;
+}
+
+/* Invisible full-height hover target carrying a point's <title> (design
+   SHOULD-FIX 8): fill is transparent, NOT none, so hover survives. */
+.hitTarget {
+  fill: transparent;
+}
+
 .dotOk {
   fill: var(--ok);
 }

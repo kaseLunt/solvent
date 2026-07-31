@@ -295,6 +295,12 @@
   fill: var(--crit);
 }
 
+/* The eligible-bucket FORM cue (design SHOULD-FIX 10): the .sev.crit-style
+   8px filled square before the bucket label — form beyond hue. */
+.histEligibleMark {
+  fill: var(--crit);
+}
+
 .histBaseline {
   stroke: var(--line);
   stroke-width: 1;

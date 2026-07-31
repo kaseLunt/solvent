@@ -84,6 +84,14 @@
   font-weight: 600;
 }
 
+/* The comparator-block variant (design TASTE 14 — this override lives here,
+   not inline): the section head above already draws the rule, so the block's
+   own top border drops; contract prose WRAPS rather than pans off-screen. */
+.comparatorFormula {
+  border-top: none;
+  white-space: pre-wrap;
+}
+
 /* ---- explain-this-number affordance ---- */
 
 .explain {

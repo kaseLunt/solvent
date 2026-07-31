@@ -25,7 +25,9 @@ export interface SparklineProps {
    * Per-point hover text (SVG `<title>`), aligned index-for-index with
    * `values`. Rendered on GAP ticks — the reason a point could not be
    * established (a refusal, a withheld book) travels with the gap instead of
-   * being interpolated over.
+   * being interpolated over — AND on invisible full-height hit rects over
+   * FINITE points (design SHOULD-FIX 8), so a computed value's exact hover
+   * text is as reachable as a gap's reason.
    */
   pointTitles?: ReadonlyArray<string | null>;
 }
@@ -98,18 +100,18 @@ export function Sparkline({
       {referenceValue !== undefined && Number.isFinite(referenceValue) && (
         <g data-testid="sparkline-reference">
           <line
+            className={styles.refLine}
             x1={pad}
             x2={width - pad}
             y1={y(referenceValue)}
             y2={y(referenceValue)}
-            style={{ stroke: "var(--crit)", strokeWidth: 1, strokeDasharray: "3 3", opacity: 0.55 }}
           />
           {referenceLabel !== undefined && (
             <text
+              className={styles.refLabel}
               x={width - pad}
               y={Math.max(8, y(referenceValue) - 3)}
               textAnchor="end"
-              style={{ fontFamily: "var(--mono)", fontSize: 9, fill: "var(--crit)", opacity: 0.75 }}
             >
               {referenceLabel}
             </text>
@@ -153,6 +155,31 @@ export function Sparkline({
       {endDot && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
         <circle className={styles.endDot} cx={x(lastIndex)} cy={y(lastValue)} r={2.2} />
       )}
+      {/* Invisible per-index hit rects (SHOULD-FIX 8): width = step, full
+          height, transparent fill — a FINITE point's hover text is as
+          reachable as a gap tick's. Rendered last so they sit on top; a rect
+          spans only to the midpoints toward its neighbors, so gap ticks keep
+          their own hover. */}
+      {pointTitles !== undefined &&
+        values.map((value, index) => {
+          if (value === null || !Number.isFinite(value)) return null;
+          const title = pointTitles[index];
+          if (title === null || title === undefined) return null;
+          const hitW = step > 0 ? step : width - pad * 2;
+          return (
+            <rect
+              key={`hit-${String(index)}`}
+              className={styles.hitTarget}
+              data-testid="sparkline-hit"
+              x={x(index) - hitW / 2}
+              y={0}
+              width={hitW}
+              height={height}
+            >
+              <title>{title}</title>
+            </rect>
+          );
+        })}
     </svg>
   );
 }

@@ -3,14 +3,17 @@
 // HF HISTORY (spec §3.2): per-engine sparkline across retained batches, from
 // GET /v1/address/{addr}/history. The series builder (lib/history-series)
 // enforces the null-gap law — a refused point is a GAP carrying its named
-// reason, a withheld batch is a GAP saying "cannot be established", and
-// nothing is ever interpolated across either. The HF = 1.0 reference line is
-// each engine's own boundary VISUALIZED, not a re-derived verdict.
+// reason, a withheld batch is a GAP saying "cannot be established", a
+// witnessed batch with no row for this engine is a NO-ROW gap (ruling 11 —
+// a closed position's absence must break the line, not be drawn across),
+// and nothing is ever interpolated across any of them. The HF = 1.0
+// reference line is each engine's own boundary VISUALIZED, not a re-derived
+// verdict.
 
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { Sparkline } from "@/components/charts/Sparkline";
-import { buildHistorySeries } from "@/lib/history-series";
+import { buildHistorySeries, knownBatchAxis } from "@/lib/history-series";
 import { renderLookupOutcome } from "@/lib/format";
 import type { HistoryLookup } from "@/lib/inspector-data";
 import styles from "../inspector.module.css";
@@ -75,7 +78,11 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
         </p>
       )}
       {lookup.response.engines.map((engine) => {
-        const series = buildHistorySeries(engine);
+        // Ruling 11: the response-level KNOWN batch axis, so a batch another
+        // engine (or the vantage batch) witnesses in which THIS engine has
+        // neither a point nor a withheld entry breaks the line as a NO-ROW
+        // gap instead of being drawn across.
+        const series = buildHistorySeries(engine, knownBatchAxis(lookup.response));
         // Engine-conditional reference semantics (design ruling 6): 1.0 IS
         // the aave engine's own boundary (wad strictly < 1e18), but the DM
         // series plots the num/den DISCLOSURE ratio — its verdict is the
@@ -112,8 +119,10 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
               referenceLabel="1.0"
             />
             <div className={styles.historyLegend}>
-              a gap is a REFUSED or WITHHELD point — hover the tick for its named reason; the line
-              never interpolates across one. {referenceLegend}
+              a gap is a REFUSED, WITHHELD or NO-ROW point — hover any tick for its named reason,
+              or any plotted point for its value and block; the line never interpolates across a
+              gap. gaps mark only batches this response itself witnesses — the wire does not
+              enumerate the full retained set. {referenceLegend}
             </div>
           </div>
         );

@@ -60,7 +60,7 @@ export function EvidenceDrawer({ descriptor, onClose }: EvidenceDrawerProps) {
           ))}
 
           <div className={styles.sectionHead}>COMPARATOR — VERBATIM</div>
-          <pre className={styles.formula} style={{ borderTop: "none", whiteSpace: "pre-wrap" }}>
+          <pre className={`${styles.formula} ${styles.comparatorFormula}`}>
             {descriptor.comparator}
           </pre>
 

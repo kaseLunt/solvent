@@ -76,6 +76,26 @@ function EnginePanel({ histogram, wadScale }: { histogram: EngineHistogram; wadS
               eligibleTint && bucket.upper_wad !== null && parseDecimal(bucket.upper_wad) <= wadScale;
             return (
               <g key={bucket.label}>
+                {/* Eligible-territory FORM cue (design SHOULD-FIX 10): sub-1.00
+                    buckets on the wad comparator lead with an 8px filled
+                    crit square (the .sev.crit form) — severity is color AND
+                    form, never hue alone. Bucket-level, so it marks the
+                    eligible region of the axis even when the bucket is empty. */}
+                {belowOne && (
+                  <rect
+                    className={styles.histEligibleMark}
+                    data-testid="hist-eligible-mark"
+                    x={0}
+                    y={y + 2}
+                    width={8}
+                    height={8}
+                    rx={1}
+                  >
+                    <title>
+                      eligible territory — the engine liquidates strictly below 1.00 on the wad
+                    </title>
+                  </rect>
+                )}
                 <text className={styles.histLabel} x={LABEL_W} y={y + 10} textAnchor="end">
                   {bucket.label}
                 </text>
