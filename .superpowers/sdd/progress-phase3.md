@@ -2350,6 +2350,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   re-widened) in the durable transcript convention. Reviewer notification
   plumbing hiccuped (final report reached the coordinator only on
   re-delivery; three stale sleep echoes after) — content unaffected.
+- **CREATE-ERROR FIX LANDED — c644dc9** (3 files +275/−9; both-ways exact;
+  integrator independently re-ran — green). Geth shape verified AT THE
+  PINNED MODULE SOURCE before citing (processOutput nils To only on the
+  error path which also sets f.Error; omitempty makes the wire spelling
+  absent-or-non-empty; To unconditional at capture; every frame passes
+  processOutput once) — the to-less-no-error create is chain-impossible
+  for this tracer. One conditional: to==nil valid iff create-family AND
+  non-empty error; the chain-impossible blessed fixture REPLACED with a
+  genuine failed-create; regression (d) both legs (no error / empty-string
+  error); successful-create stays clean. Durable r14.md: mE re-cut (new
+  hash, r13's noted superseded, 14-subtest kill), mF re-widened (killed by
+  exactly the two (d) legs and NOTHING else — sole-load-bearing-killer
+  proof). Real captures independently swept: 3 create frames total, all
+  with to present — no STOP. 31/31 unmodified; suite green. ROUND 15
+  (closing) dispatched: t6r15 @ c644dc9, base 705e0d9 — verify the geth
+  cites at the module cache, the exactly-the-tracer's-behavior question
+  (can a failed create retain to?), r14.md self-consistency, 3-file sweep;
+  the brief notes fifteen rounds of accumulated scrutiny and instructs
+  M/L findings be judged against D-013's disclosure mechanism.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
