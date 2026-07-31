@@ -318,14 +318,30 @@ func marshalDoc(t *testing.T, doc map[string]any) []byte {
 	return raw
 }
 
+// sealDoc embeds the doc's OWN recomputed comparison hash (the canonical law
+// from artifact.go) and returns the sealed bytes plus that digest. Bar
+// subtests seal AFTER mutating so identity passes honestly and the bar under
+// test is the one that fires; identity subtests mutate AFTER sealing.
+func sealDoc(t *testing.T, doc map[string]any) ([]byte, string) {
+	t.Helper()
+	var report driftReport
+	require.NoError(t, json.Unmarshal(marshalDoc(t, doc), &report))
+	h, err := comparisonHash(&report)
+	require.NoError(t, err)
+	doc["comparison_sha256"] = h
+	// comparison_sha256 sits outside the hash scope, so re-embedding it does
+	// not change the recomputed value.
+	return marshalDoc(t, doc), h
+}
+
 // TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift is the m3 kill
 // (Codex round 2, finding 3): the previous refutation required only a
 // NONEMPTY subset, so a truncated artifact — or the wrong artifact entirely —
 // still produced a green refutation. The loader now refuses anything short of
 // the full identified row set, and this test proves each bar fails CLOSED.
 func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
-	complete := marshalDoc(t, acceptR4SyntheticDoc())
-	targets, err := parseAcceptR4Artifact(complete)
+	complete, completeSHA := sealDoc(t, acceptR4SyntheticDoc())
+	targets, err := parseAcceptR4ArtifactAgainst(complete, completeSHA)
 	require.NoError(t, err)
 	require.Len(t, targets.dm, acceptR4DMSubjects)
 	require.Len(t, targets.census, acceptR4CensusSubjects)
@@ -334,7 +350,8 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 		doc := acceptR4SyntheticDoc()
 		rows := doc["p3_task6"].(map[string]any)["rows"].([]map[string]any)
 		doc["p3_task6"].(map[string]any)["rows"] = rows[1:] // drop one DM row: 232/233
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err, "a truncated artifact must not refute (Codex round 2, finding 3)")
 		require.Contains(t, err.Error(), "COMPLETENESS failed")
 		require.Contains(t, err.Error(), "232")
@@ -343,17 +360,43 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 		doc := acceptR4SyntheticDoc()
 		rows := doc["p3_task6"].(map[string]any)["rows"].([]map[string]any)
 		doc["p3_task6"].(map[string]any)["rows"] = rows[:len(rows)-1] // drop one census row: 23/24
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "COMPLETENESS failed")
 		require.Contains(t, err.Error(), "23 unique zero-debt")
 	})
 	t.Run("a wrong comparison_sha256 FAILS", func(t *testing.T) {
+		// Embedded digest of zeros: even when the caller ASKS for zeros, the
+		// recompute bar refuses first — no self-report is ever trusted.
 		doc := acceptR4SyntheticDoc()
 		doc["comparison_sha256"] = strings.Repeat("00", 32)
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		_, err := parseAcceptR4ArtifactAgainst(marshalDoc(t, doc), strings.Repeat("00", 32))
 		require.Error(t, err, "the refutation is judged against the run's OWN artifact, never a substitute")
 		require.Contains(t, err.Error(), "ARTIFACT IDENTITY failed")
+	})
+	t.Run("a mutated scoped row with a STALE digest FAILS (Codex round 3 kill)", func(t *testing.T) {
+		doc := acceptR4SyntheticDoc()
+		raw, sha := sealDoc(t, doc)
+		// Mutate one scoped row AFTER sealing: the embedded digest is now a
+		// self-report about bytes that no longer exist. The recompute bar
+		// must refuse — the self-reported string alone would have passed.
+		rows := doc["p3_task6"].(map[string]any)["rows"].([]map[string]any)
+		rows[0]["expected_chain"] = "999999"
+		mutated := marshalDoc(t, doc)
+		require.NotEqual(t, raw, mutated)
+		_, err := parseAcceptR4ArtifactAgainst(mutated, sha)
+		require.Error(t, err, "a doctored row under a copied digest must refuse")
+		require.Contains(t, err.Error(), "recomputed comparison hash")
+	})
+	t.Run("the round-2 substitute construction FAILS (copied accept-r4 digest)", func(t *testing.T) {
+		// Codex round 2 proved a synthetic 233+24 document carrying the
+		// COPIED accept-r4 digest parsed successfully. That exact
+		// construction must now refuse at the recompute bar.
+		doc := acceptR4SyntheticDoc() // embeds acceptR4ComparisonSHA verbatim
+		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		require.Error(t, err, "a substitute wearing the copied digest must refuse")
+		require.Contains(t, err.Error(), "recomputed comparison hash")
 	})
 	t.Run("a drifted pin FAILS", func(t *testing.T) {
 		doc := acceptR4SyntheticDoc()
@@ -361,7 +404,8 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 			{"chain": "op", "block": acceptR4PinOP + 1, "hash": acceptR4HashOP},
 			{"chain": "eth", "block": acceptR4PinETH, "hash": acceptR4HashETH},
 		}
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "ARTIFACT IDENTITY failed")
 	})
@@ -370,7 +414,8 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 		doc["pins"] = []map[string]any{
 			{"chain": "eth", "block": acceptR4PinETH, "hash": acceptR4HashETH},
 		}
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "does not carry both accept-r4 pins")
 	})
@@ -378,7 +423,8 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 		doc := acceptR4SyntheticDoc()
 		rows := doc["p3_task6"].(map[string]any)["rows"].([]map[string]any)
 		rows[1] = rows[0] // 233 rows, 232 unique subjects
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "duplicate")
 	})
@@ -389,7 +435,8 @@ func TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift(t *testing.T) {
 			"gate": gateDMBoolean, "subject": rows[0]["subject"], "leg": "getMaxBorrowAmount(user,false)",
 			"verdict": verdictDrift, "expected_chain": "1000", "actual_derived": "1000",
 		}
-		_, err := parseAcceptR4Artifact(marshalDoc(t, doc))
+		raw, sha := sealDoc(t, doc)
+		_, err := parseAcceptR4ArtifactAgainst(raw, sha)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "EQUAL pin values")
 	})

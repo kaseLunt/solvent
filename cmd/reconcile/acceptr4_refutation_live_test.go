@@ -128,6 +128,14 @@ type acceptR4Targets struct {
 // are unit-testable without the live environment (and mutation-killable: the
 // m3 mutant deletes a bar and the truncation test must notice).
 func parseAcceptR4Artifact(raw []byte) (acceptR4Targets, error) {
+	return parseAcceptR4ArtifactAgainst(raw, acceptR4ComparisonSHA)
+}
+
+// parseAcceptR4ArtifactAgainst carries the bars with the expected digest
+// parameterized so each completeness bar stays unit-testable on synthetic
+// fixtures sealed with their OWN recomputed digest. The live path always
+// pins wantSHA to the accept-r4 record.
+func parseAcceptR4ArtifactAgainst(raw []byte, wantSHA string) (acceptR4Targets, error) {
 	var doc struct {
 		ComparisonSHA256 string `json:"comparison_sha256"`
 		Pins             []struct {
@@ -149,10 +157,29 @@ func parseAcceptR4Artifact(raw []byte) (acceptR4Targets, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return acceptR4Targets{}, fmt.Errorf("the artifact does not parse: %w", err)
 	}
-	// Bar (a): artifact identity.
-	if doc.ComparisonSHA256 != acceptR4ComparisonSHA {
+	// Bar (a1): bytes integrity — the digest is RECOMPUTED from the supplied
+	// artifact under the canonical hash-scope/redaction law (comparisonHash,
+	// artifact.go), never trusted from the artifact's own self-report. A
+	// substitute document that copies the digest string while changing any
+	// scoped row recomputes to a different hash and refuses here (Codex
+	// round 3: the self-reported string was a vacuous identity bar).
+	var report driftReport
+	if err := json.Unmarshal(raw, &report); err != nil {
+		return acceptR4Targets{}, fmt.Errorf("the artifact does not parse as a drift report: %w", err)
+	}
+	recomputed, err := comparisonHash(&report)
+	if err != nil {
+		return acceptR4Targets{}, fmt.Errorf("recomputing the comparison hash over the supplied artifact: %w", err)
+	}
+	if recomputed != doc.ComparisonSHA256 {
+		return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: recomputed comparison hash %q != embedded %q — the artifact's rows are not the bytes its digest claims",
+			recomputed, doc.ComparisonSHA256)
+	}
+	// Bar (a2): it is THE artifact — the (now proven-embedded) digest must be
+	// the recorded accept-r4 comparison hash.
+	if doc.ComparisonSHA256 != wantSHA {
 		return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: comparison_sha256 %q is not the accept-r4 record %q — the refutation is judged against the run's own artifact, never a substitute",
-			doc.ComparisonSHA256, acceptR4ComparisonSHA)
+			doc.ComparisonSHA256, wantSHA)
 	}
 	opOK, ethOK := false, false
 	for _, p := range doc.Pins {

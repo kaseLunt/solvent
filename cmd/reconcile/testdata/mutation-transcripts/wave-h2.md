@@ -149,3 +149,18 @@ truncated artifact must not refute (Codex round 2, finding 3)`.
 Every restore verified byte-identical to the fixed-file sha256 recorded
 above (`dc474227…` / `d2d7bd80…` / `042b8bdf…`). Kill suite on the fixed
 tree after the loop: `ok github.com/kaselunt/solvent/cmd/reconcile 1.211s`.
+
+## m4 (round 3) — the recompute bar deleted
+
+Spec: disable `if recomputed != doc.ComparisonSHA256` (the a1 bar) so the
+identity check falls back to trusting the self-reported string — the exact
+round-3 finding. Expected kills: "a mutated scoped row with a STALE digest
+FAILS" and "the round-2 substitute construction FAILS".
+
+Execution: mutant applied via sed (guard short-circuited with `false &&`);
+`go test -run TestAcceptR4ArtifactBars` → FAIL (both kill subtests fired,
+naming the recomputed-hash bar). Restore applied and verified by CONTENT
+(zero mutant remnants by grep; git diff vs HEAD shows exactly the intended
+round-3 insertion; full suite green) — byte-level sha differed pre/post
+because sed normalized line endings on rewrite; git autocrlf renormalizes
+at commit. KILLED.

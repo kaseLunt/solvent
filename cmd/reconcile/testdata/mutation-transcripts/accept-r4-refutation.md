@@ -189,3 +189,27 @@ larger payloads) plus 2 pin-clock batches through `SOLVENT_RECON_RPC_OP` —
 113s wall. Part B: one reserve-state batch + one 120-call subject batch
 through `SOLVENT_RECON_RPC_ETH` — 7s wall. No rate-limit backoff was
 triggered.
+
+## v3 — the identity bar recomputes (Codex round 3)
+
+Codex round 3 (the closing review of the v2 bars) found the identity bar
+VACUOUS: it compared the artifact's self-reported comparison_sha256 string
+to the recorded constant and never recomputed the canonical hash over the
+supplied bytes — a substitute document carrying the copied digest parsed
+successfully (Codex proved it with a synthetic 233+24-row construction).
+Remedy: parseAcceptR4ArtifactAgainst now unmarshals the raw artifact into
+the canonical driftReport and recomputes comparisonHash (artifact.go's
+hash-scope/redaction law); bar (a1) requires recomputed == embedded, bar
+(a2) requires embedded == the accept-r4 record. Row mutations are covered
+by the digest scope, which also discharges the "chainPin never consumed"
+sub-finding.
+
+Re-run under the strict law (2026-07-31, same artifact, same pins):
+- Round-trip proof: recomputed-over-the-real-artifact == embedded ==
+  38a57b3e… (the REAL-artifact subtest, PASS).
+- Part A PASS 113.33s: 233/233 recovered / same-input / vector
+  byte-identical / scalar bit-exact; 0 mismatch, 0 law-divergence, 0 unread.
+- Part B PASS 7.02s: 24/24 one-law non-members, 96/96 scaledBalanceOf.
+- New refusal tests: mutated-scoped-row-under-stale-digest REFUSED;
+  the round-2 substitute construction (copied accept-r4 digest) REFUSED;
+  zeros-digest REFUSED even when requested.
