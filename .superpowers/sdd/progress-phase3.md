@@ -2312,6 +2312,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   durable transcripts (testdata/mutation-transcripts convention). D-013
   retirement stands only after this lands — the reviewer is right that a
   fail-open scanner cannot retire anything.
+- **TRACE-STRICTNESS FIX LANDED — cab5b0c** (4 files +483/−36; both-ways
+  exact; integrator independently re-ran — green). Strict recursive frame
+  validation in the judging DFS itself, over every entry ≤ the case index,
+  BEFORE the anchor (a {} case tree refuses unread, not chain-impossible).
+  Type set enumerated from the go.sum-pinned geth v1.13.0 tracer with
+  file:line cites; `to` law type-shaped from the tracer's own nil-ing
+  behavior; input via hexutil.Decode (strict) — common.FromHex GONE from
+  judgment paths. SkipClass split: admin-continuity-unread for degraded
+  evidence, admin-continuity only for judged EPOCH findings (disclosed
+  reclass of anchor refusals). ALL 31 real captures scan clean under the
+  strict law unmodified — no capture-quality STOP. Red 13 subtests captured
+  the false pass verbatim; green 533/0/9. DURABLE TRANSCRIPT CONVENTION
+  BEGINS: testdata/mutation-transcripts/r13.md — mC re-cut (isolates the
+  evidence check) + mE (exactly the round-13 reversal: killed by 12
+  subtests while the pre-round-13 suite stays green under it — the mutant
+  proves the tests are precisely its detector). ROUND 14 (closing)
+  dispatched: t6r14 @ cab5b0c, base 086bf7f — tracer-shape verification
+  against the cites, scan-range law, transcript self-consistency, the
+  SkipClass reclass adjudication, cheap 4-file regression sweep.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
