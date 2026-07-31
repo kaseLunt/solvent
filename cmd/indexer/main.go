@@ -6,6 +6,7 @@
 //
 //	main.go             — flag wiring, the worker passes, the composition root (run)
 //	backoff.go          — per-worker retry backoff scheduling
+//	blocktimes.go       — the per-round block-time custody pass (P5: block_headers)
 //	collateral_bound.go — the collateral staleness bound and its cross-round state
 //	health.go           — the health surface (/readyz, /healthz, /health) and condition keys
 //	round_conditions.go — per-round health-condition composition
@@ -1314,6 +1315,12 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 	}
 
 	var runners []*runnerState
+	// custodyUnits collects the engines whose event-bearing blocks owe header
+	// custody (P5 block-time custody): the position engines and the param
+	// engine. The chainlink_feed engine is deliberately absent — price rows
+	// carry their own chain-asserted source_as_of, so nothing serves a header
+	// time for their blocks (see blocktimes.go).
+	var custodyUnits []custodyUnit
 	for _, spec := range specs {
 		var eng derive.Engine
 		var onRewind func()
@@ -1348,6 +1355,8 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 			}
 			runners = append(runners, &runnerState{r: pr})
 			consumers = append(consumers, frontierWatch{worker: pr.Name(), streams: spec.Streams, chainID: spec.ChainID})
+			custodyUnits = append(custodyUnits, custodyUnit{
+				engine: pr.Name(), chainID: spec.ChainID, source: store.EventBlocksParamHistory})
 			slog.Info("param derivation runner configured", "engine", spec.Engine,
 				"streams", len(spec.Streams), "startBlock", spec.StartBlock, "window", spec.Window)
 			continue
@@ -1360,8 +1369,25 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 		}
 		runners = append(runners, &runnerState{r: r})
 		consumers = append(consumers, frontierWatch{worker: r.Name(), streams: spec.Streams, chainID: spec.ChainID})
+		custodyUnits = append(custodyUnits, custodyUnit{
+			engine: r.Name(), chainID: spec.ChainID, source: store.EventBlocksPositionEvents})
 		slog.Info("derivation runner configured", "engine", spec.Engine, "streams", len(spec.Streams))
 	}
+
+	// Block-time custody (P5 Task B2): the bounded per-round pass that stores
+	// event-bearing blocks' header timestamps, pin-validated. Its fetches ride
+	// the SAME failover clients ingestion uses, so a slow-but-succeeding
+	// endpoint is never rotated away by custody traffic.
+	headerCustody := newHeaderCustodian(st, func(ctx context.Context, chainID, block uint64) (pinnedHeader, error) {
+		fc, ok := clientsByChainID[chainID]
+		if !ok {
+			return pinnedHeader{}, fmt.Errorf("no rpc client configured for chain %d", chainID)
+		}
+		return fetchPinnedHeader(ctx, fc, block)
+	}, custodyUnits)
+	slog.Info("block-time custody configured", "units", len(custodyUnits),
+		"capPerRound", headerCustodyCapPerRound,
+		"note", "header-fetch failures never block ingest; rows stay absent and cmd/backfill-blocktimes closes holes")
 
 	// Price ingestion (Task 8): one POLLER per chain carrying registry poll
 	// obligations (the engine-exact OP PriceProviderV2 assets, plus the ETH
@@ -1533,6 +1559,14 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 				anyAdvanced = true
 			}
 
+			// Block-time custody pass (P5): after the worker passes, so it sees
+			// the round's freshly committed windows and derived events. Bounded
+			// per round; a fetch failure leaves a row honestly absent and NEVER
+			// fails or blocks the round (blocktimes.go's failure law). It does
+			// not count as round progress — a custody backlog must not hold the
+			// hot loop open against the chain.
+			headerCustody.pass(ctx)
+
 			// Silent-stall pass: a worker that neither errors nor advances says
 			// nothing, and used to be invisible. This asks DURABLE storage when each
 			// cursor last moved, how far each raw-log consumer is behind the chain head
@@ -1569,6 +1603,20 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 				slog.Error("prune acked reorg epochs failed; will retry next tick", "err", err)
 			} else if pruned > 0 {
 				slog.Info("pruned fully-acknowledged reorg epochs", "rows", pruned)
+			}
+			// Observatory rollup tick (P5): observe the newest complete risk
+			// batch into the current hour's bucket. Idempotent and
+			// self-limiting (the store writes nothing unless the bucket or the
+			// batch changed), so once per tick is cadence enough; a failure is
+			// a log line and a retry next tick, never a round failure. found
+			// is deliberately not logged when false — no complete batch means
+			// no observation, which is riskd's state to report, not this loop's.
+			if res, found, err := st.WriteObservatoryPoints(ctx); err != nil {
+				slog.Error("observatory rollup failed; will retry next tick", "err", err)
+			} else if found && len(res.Engines) > 0 {
+				slog.Info("observatory point observed",
+					"bucket", res.Bucket.Format(time.RFC3339), "batch", res.BatchID,
+					"engines", fmt.Sprintf("%v", res.Engines))
 			}
 			if report := health.report(); !report.Ready {
 				slog.Warn("daemon NOT READY (/readyz is failing): a \"starting\" status means initialisation has not completed; terminal entries need a restart at upgraded code; recoverable entries clear when the feed resumes, a round lands, a cursor moves, or the dependency recovers",

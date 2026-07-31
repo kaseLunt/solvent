@@ -364,6 +364,19 @@ func (s *Store) Rewind(ctx context.Context, stream string, chainID uint64, toBlo
 		`DELETE FROM raw_logs WHERE chain_id = $1 AND block_number > $2`, chainID, toBlock); err != nil {
 		return fmt.Errorf("delete logs: %w", err)
 	}
+	// Block-time custody joins the SAME rewind transaction (P5 Task B2): a
+	// reorg orphans every custodied header above the rewind point — the height
+	// may be reused by a different block with a different hash and time — so
+	// the rows are deleted atomically with the raw logs whose pins vouched for
+	// them. This is the ONLY path that removes a header row; the write paths
+	// refuse a divergent overwrite outright (see migration 00015), and the
+	// re-walked range re-fetches under its new pins afterwards. Deleting here
+	// rather than on re-write is what makes an orphaned (height, stale-hash,
+	// stale-time) row unable to survive a reorg at all.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM block_headers WHERE chain_id = $1 AND block_number > $2`, chainID, toBlock); err != nil {
+		return fmt.Errorf("delete block headers: %w", err)
+	}
 	// Durable reorg coordination: record a reorg epoch INSIDE this same
 	// transaction, so the invalidation marker is atomic with the raw-log
 	// deletion — a crash after commit leaves derived state provably stale
