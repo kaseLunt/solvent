@@ -21,6 +21,20 @@ package main
 //       TestCapturedTraceScansReplayToTheirPinnedOutcome binds the same law
 //       over committed chain bytes.
 //
+//   mE  the round-13 strict-frame law reverted to accept-any-non-null-result
+//       (Codex round 13 HIGH): the strict walk gutted back to the pre-round-13
+//       lenient shape — frame type unchecked, `to` decoded with common.FromHex
+//       and malformed treated as non-targeting, `input` decoded with
+//       common.FromHex with hex errors silently discarded, absent-input
+//       checked only on proxy-targeting frames — so a degraded RPC answer
+//       (result:{}, a mangled proxy `to`, an undecodable selector-prefixed
+//       input) walks as CLEAN and an earlier setAdminImpl/upgrade execution
+//       hides behind it: the exact false pass Step A exists to prevent.
+//       KILLED BY: TestAdminTraceStrictFrameValidationLaw regression (a) — a
+//       {} result before the case must refuse admin-continuity-unread, and
+//       under the mutant it answers "" — with regressions (b) and (c) as
+//       independent killers for the `to` and `input` legs.
+//
 // Behavioural mutants only; a mutant that fails to compile is re-cut.
 // ---------------------------------------------------------------------------
 
@@ -202,6 +216,171 @@ func TestAdminTraceScanRefusalLaw(t *testing.T) {
 		fr := traceCallFrame{Type: tracePtr("CALL"), To: tracePtr(strings.ToLower(liveDMProxy.Hex()))}
 		entries[0] = mkEntry(traceOtherTx, traceCallFrame{Type: tracePtr("CALL"), To: tracePtr(strings.ToLower(traceSomeone.Hex())), Input: tracePtr("0x"), Calls: []traceCallFrame{fr}})
 		require.Contains(t, adminTraceScanRefusal(entries, traceCaseTx, liveDMProxy), "input field is ABSENT")
+	})
+}
+
+// selHex renders one scanned selector as 0x-prefixed hex — the raw-wire
+// spelling, for building envelope-level fixtures.
+func selHex(t *testing.T, name string) string {
+	t.Helper()
+	for _, s := range scannedAdminWriteSelectors {
+		if s.name == name {
+			return "0x" + hex.EncodeToString(s.id[:])
+		}
+	}
+	t.Fatalf("no scanned selector named %s", name)
+	return ""
+}
+
+// TestAdminTraceStrictFrameValidationLaw is the round-13 strict-frame law
+// (Codex round 13 HIGH) and mE's primary kill: every frame in every entry at
+// tx index <= the case's must be a RECOGNIZED callTracer frame with
+// type-appropriate strictly-decoded `to` and strictly-decoded 0x-prefixed
+// `input` — a present-but-empty result:{}, an absent or alien type, a missing
+// or mangled call-like `to`, or a non-strict input is admin-continuity-unread,
+// NEVER clean, because under the pre-round-13 code exactly these degraded
+// shapes scanned CLEAN and could hide an earlier setAdminImpl/upgrade
+// execution. Entries BEYOND the case index stay unjudged (the existing scope
+// law). Every fixture here drives the FULL production pair
+// (decodeTraceEnvelope -> adminTraceScanRefusal) over raw envelope bytes.
+func TestAdminTraceStrictFrameValidationLaw(t *testing.T) {
+	proxyLower := strings.ToLower(liveDMProxy.Hex())
+	someoneLower := strings.ToLower(traceSomeone.Hex())
+
+	// scan marshals raw entries and runs the production path end to end. The
+	// envelope decode must ACCEPT these shapes — it is the PRESENCE law only,
+	// and the strict frame law is the SCAN's, scoped to the case index,
+	// because entries beyond the case index must stay unjudged.
+	scan := func(t *testing.T, entries ...map[string]any) string {
+		t.Helper()
+		b, err := json.Marshal(entries)
+		require.NoError(t, err)
+		decoded, err := decodeTraceEnvelope(b)
+		require.NoError(t, err, "the envelope decode is the presence law only — strictness is the scan's, scoped to tx index <= the case's")
+		return adminTraceScanRefusal(decoded, traceCaseTx, liveDMProxy)
+	}
+
+	caseEntry := map[string]any{"txHash": traceCaseTx.Hex(), "result": map[string]any{
+		"type": "CALL", "to": someoneLower, "input": "0x",
+		"calls": []any{map[string]any{"type": "CALL", "to": proxyLower, "input": "0xea51516100"}},
+	}}
+
+	t.Run("regression (a): a present-but-EMPTY {} result before the case refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{}}, caseEntry)
+		require.NotEmpty(t, note,
+			"an earlier entry with an empty frame tree scanned CLEAN under the pre-round-13 code — the exact degraded-RPC false pass Step A exists to prevent")
+		require.Contains(t, note, "admin-continuity-unread")
+		require.Contains(t, note, traceOtherTx.Hex(), "the refusal names the unjudgeable tx")
+	})
+
+	t.Run("regression (b): a malformed proxy `to` (non-hex) carrying setAdminImpl calldata refuses unread", func(t *testing.T) {
+		mangled := proxyLower[:len(proxyLower)-2] + "zz" // the DM proxy with a non-hex tail
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": mangled, "input": selHex(t, "setAdminImpl") + strings.Repeat("00", 32),
+		}}, caseEntry)
+		require.NotEmpty(t, note,
+			"a mangled `to` was silently NON-TARGETING under common.FromHex — a frame that cannot be attributed to an address cannot be judged clean")
+		require.Contains(t, note, "admin-continuity-unread")
+	})
+
+	t.Run("regression (b): a wrong-length `to` refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": proxyLower[:len(proxyLower)-2], "input": "0x",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread")
+	})
+
+	t.Run("regression (c): selector-prefixed input with a non-hex tail refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": proxyLower, "input": selHex(t, "setAdminImpl") + "zz",
+		}}, caseEntry)
+		require.NotEmpty(t, note,
+			"an invalid selector-prefixed input decoded to NOTHING under common.FromHex and scanned clean")
+		require.Contains(t, note, "admin-continuity-unread")
+	})
+
+	t.Run("regression (c): selector-prefixed input with ODD length refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": proxyLower, "input": selHex(t, "setAdminImpl") + "a",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread")
+	})
+
+	t.Run("regression (c): a 0x-less input refuses unread — strict means PREFIXED", func(t *testing.T) {
+		bare := strings.TrimPrefix(selHex(t, "setAdminImpl"), "0x") + strings.Repeat("00", 32)
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": proxyLower, "input": bare,
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread",
+			"common.FromHex accepted the prefixless spelling — a non-wire spelling is a degraded answer, judged UNREAD, never silently normalized")
+	})
+
+	t.Run("an ABSENT frame type refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"to": someoneLower, "input": "0x01020304",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread")
+		require.Contains(t, note, "type")
+	})
+
+	t.Run("an UNRECOGNIZED frame type refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "SUICIDE", "to": someoneLower, "input": "0x",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread")
+		require.Contains(t, note, "SUICIDE", "the refusal names the alien type")
+	})
+
+	t.Run("a call-like frame with NO `to` refuses unread; a to-less CREATE is the tracer's own failed-create shape and stays clean", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "STATICCALL", "input": "0x",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread",
+			"callTracer sets `to` unconditionally for call-family and SELFDESTRUCT frames — absence is degradation, not a benign shape")
+
+		require.Empty(t, scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CREATE", "input": "0x60806040",
+		}}, caseEntry),
+			"processOutput NILs a failed CREATE/CREATE2's `to` (go-ethereum v1.13.0 eth/tracers/native/call.go:70-79) — the one legitimate absent-`to` shape must NOT refuse")
+	})
+
+	t.Run("a CREATE2 frame with a PRESENT but malformed `to` refuses unread", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CREATE2", "to": "0x1234", "input": "0x",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread",
+			"the create-family allowance is for ABSENCE only — a present `to` must strictly decode like any other")
+	})
+
+	t.Run("a NESTED malformed frame refuses — the validation is recursive", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CALL", "to": someoneLower, "input": "0x",
+			"calls": []any{map[string]any{"type": "CALL", "to": someoneLower, "input": "0x",
+				"calls": []any{map[string]any{}}}},
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread")
+		require.Contains(t, note, "depth 2", "the refusal names the frame depth")
+	})
+
+	t.Run("the case's OWN entry is inside the scanned range — a {} case result refuses unread, not the anchor text", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceCaseTx.Hex(), "result": map[string]any{}})
+		require.Contains(t, note, "admin-continuity-unread",
+			"the scanned range is tx index <= the case's, INCLUDING the case — an empty case tree is unjudgeable, and the anchor message would misdescribe a degraded trace as a chain-impossible one")
+	})
+
+	t.Run("the recognized vocabulary is EXACTLY callTracer's seven frame types", func(t *testing.T) {
+		require.Equal(t, map[string]bool{
+			"CALL": true, "CALLCODE": true, "DELEGATECALL": true, "STATICCALL": true,
+			"CREATE": true, "CREATE2": true, "SELFDESTRUCT": true,
+		}, recognizedTraceFrameTypes,
+			"the set is the tracer's own: CaptureStart opens CALL/CREATE (go-ethereum v1.13.0 call.go:129-143) and CaptureEnter is invoked only for the call family (evm.go:196,215,278,323,373), the create family (evm.go:459) and SELFDESTRUCT (instructions.go:826,842)")
+	})
+
+	t.Run("scope guard: a degraded entry BEYOND the case index stays unjudged (the existing law)", func(t *testing.T) {
+		require.Empty(t, scan(t, caseEntry,
+			map[string]any{"txHash": traceThirdTx.Hex(), "result": map[string]any{}},
+			map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{"type": "CALL", "to": "0xzz", "input": "notevenhex"}}),
+			"a post-boundary frame cannot rewrite the pre-boundary state the crossing is a function of — judging it would be a new law")
 	})
 }
 

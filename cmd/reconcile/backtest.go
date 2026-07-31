@@ -595,8 +595,17 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	f.use(srcBTAdminTrace)
 	if note := adminTraceScanRefusal(traceEntries, common.HexToHash(fc.TxHash), c.dmProxy); note != "" {
 		rows = append(rows, unreadRow(gateBacktest, key, "admin-continuity(admin-write frames @ tx index <= the case's)", note))
-		res.SkipClass = "admin-continuity"
-		res.Notes = append(res.Notes, "an admin-write call frame at or before this case's tx is CHAIN TRUTH requiring adjudication — the slot may have differed at the boundary from what the two-pin read certifies; reported by name, never absorbed into a verdict")
+		if strings.HasPrefix(note, "ADMIN-CONTINUITY EPOCH") {
+			// A JUDGED finding: an admin-write frame was observed.
+			res.SkipClass = "admin-continuity"
+			res.Notes = append(res.Notes, "an admin-write call frame at or before this case's tx is CHAIN TRUTH requiring adjudication — the slot may have differed at the boundary from what the two-pin read certifies; reported by name, never absorbed into a verdict")
+		} else {
+			// The scan could NOT judge (case tx absent, anchor broken, or a
+			// round-13 unjudgeable frame tree): degraded evidence classes as
+			// admin-continuity-unread — the same class as an untaken or
+			// undecodable trace — never as a chain-truth epoch finding.
+			res.SkipClass = "admin-continuity-unread"
+		}
 		return rows, res, nil
 	}
 

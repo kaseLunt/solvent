@@ -35,6 +35,19 @@
 // post-boundary write cannot rewrite the pre-boundary state the case's
 // crossing is a function of.
 //
+// THE STRICT-FRAME ADDENDUM (Codex round 13 HIGH): the law judges only what
+// it has VALIDATED. Every frame in every entry at tx index <= the case's must
+// be a recognized callTracer frame — the tracer's own seven-type vocabulary —
+// with a type-appropriate strictly-decoded `to` and a strictly-decoded
+// 0x-prefixed `input`. A present-but-empty result:{}, an absent or alien
+// type, a missing or mangled call-like `to`, or an undecodable input is
+// admin-continuity-unread, NEVER clean: under the pre-round-13 walk exactly
+// those degraded shapes read as non-targeting and a partial RPC answer could
+// hide an earlier setAdminImpl/upgrade execution behind a clean scan — the
+// precise false pass Step A exists to prevent. Frames beyond the case index
+// remain unjudged (the scope law above), which is why the strictness lives in
+// the scan and not in the envelope's presence decode.
+//
 // WITH TRACES, THE D-013 RESIDUAL IS RETIRED, NOT RECLASSIFIED (ruling): a
 // within-block swap-and-revert MUST place a setAdminImpl call frame in some
 // tx at or before the case's, and the scan sees every frame at every depth —
@@ -51,6 +64,7 @@ import (
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 // dmSetAdminImplABI carries setAdminImpl(address) — transcribed from the
@@ -145,10 +159,15 @@ type decodedTraceEntry struct {
 	Root   traceCallFrame
 }
 
-// decodeTraceEnvelope strictly decodes a raw debug_traceBlockByHash+callTracer
-// result. Every entry must carry txHash and result; an entry-level error
-// field is a provider statement that the tx did not trace — a non-answer for
-// a block the law must judge COMPLETELY, so it refuses.
+// decodeTraceEnvelope decodes a raw debug_traceBlockByHash+callTracer result
+// under the PRESENCE law: every entry must carry txHash and a non-null
+// result; an entry-level error field is a provider statement that the tx did
+// not trace — a non-answer for a block the law must judge COMPLETELY, so it
+// refuses. Presence is deliberately ALL this decode judges: the strict
+// recursive frame law (round 13) lives in adminTraceScanRefusal, scoped to tx
+// index <= the case's, because entries BEYOND the case index must stay
+// unjudged — a decode-time rejection of a degraded post-boundary entry would
+// be a new law.
 func decodeTraceEnvelope(raw []byte) ([]decodedTraceEntry, error) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" || trimmed == "null" {
@@ -181,43 +200,94 @@ func decodeTraceEnvelope(raw []byte) ([]decodedTraceEntry, error) {
 	return out, nil
 }
 
-// frameTargetsAdminWrite walks one frame tree and returns the FIRST admin-
-// write hit: a frame whose `to` is the DM proxy and whose input is prefixed
-// by one of the scanned selectors. depth is 0 at the tx root.
-func frameTargetsAdminWrite(fr traceCallFrame, dmProxy common.Address, depth int) (selector string, atDepth int, missingInput bool) {
-	if fr.To != nil {
-		toBytes := common.FromHex(*fr.To)
-		if len(toBytes) == 20 && common.BytesToAddress(toBytes) == dmProxy {
-			if fr.Input == nil {
-				// A frame TARGETING the proxy with no input field cannot be
-				// judged — the caller refuses rather than assumes clean.
-				return "", depth, true
-			}
-			in := common.FromHex(*fr.Input)
-			if len(in) >= 4 {
-				for _, s := range scannedAdminWriteSelectors {
-					if s.id[0] == in[0] && s.id[1] == in[1] && s.id[2] == in[2] && s.id[3] == in[3] {
-						return s.name, depth, false
-					}
-				}
+// recognizedTraceFrameTypes is callTracer's COMPLETE frame-type vocabulary,
+// enumerated from the go.sum-pinned tracer itself (go-ethereum v1.13.0): a
+// frame's `type` is its vm.OpCode rendered by TypeString()
+// (eth/tracers/native/call.go:62-64, marshaled as `type` by
+// gen_callframe_json.go:31/46), and frames are opened ONLY by CaptureStart —
+// CALL, or CREATE for a creation tx (call.go:129-143) — and CaptureEnter,
+// which the EVM invokes exclusively for CALL/CALLCODE/DELEGATECALL/STATICCALL
+// (core/vm/evm.go:196,215,278,323,373), CREATE/CREATE2 (evm.go:459, the
+// create-side typ) and SELFDESTRUCT (core/vm/instructions.go:826,842). A
+// frame claiming any other type is not a callTracer frame — it is a degraded
+// or foreign answer, and it refuses (round 13).
+var recognizedTraceFrameTypes = map[string]bool{
+	"CALL": true, "CALLCODE": true, "DELEGATECALL": true, "STATICCALL": true,
+	"CREATE": true, "CREATE2": true, "SELFDESTRUCT": true,
+}
+
+// frameTargetsAdminWrite walks one frame tree STRICTLY (the round-13 law:
+// mutation target mE): every frame must validate before it may be judged, and
+// any defect surfaces on the unread channel — never as a silent skip, because
+// "malformed" and "clean" reading the same was exactly the degraded-RPC false
+// pass Codex round 13 named. DFS order, first defect or admin-write hit wins:
+// selector names a scanned selector whose calldata targets the DM proxy;
+// unread describes an unjudgeable frame. depth is 0 at the tx root.
+//
+// The `to` law is type-shaped, per the tracer's own construction: CaptureStart
+// and CaptureEnter set To unconditionally on every frame (call.go:130-143 and
+// 206-215; for SELFDESTRUCT it is the beneficiary, instructions.go:826,842),
+// and the ONLY path that removes it is processOutput NIL-ing a FAILED
+// CREATE/CREATE2's To (call.go:70-79). So call-family and SELFDESTRUCT frames
+// REQUIRE `to`; create-family frames may omit it; and a present `to` must
+// strictly decode to exactly 20 bytes (hexFixed) whatever the type. `input`
+// is REQUIRED on every frame — the tracer marshals it unconditionally
+// (hexutil.Bytes, no omitempty: call.go:51), "0x" when empty — and must
+// decode under hexutil.Decode's strict law (0x prefix mandatory, even-length,
+// hex-only: common/hexutil/hexutil.go:60-72), which replaces common.FromHex —
+// the decoder that silently discarded hex errors.
+func frameTargetsAdminWrite(fr traceCallFrame, dmProxy common.Address, depth int) (selector string, atDepth int, unread string) {
+	if fr.Type == nil {
+		return "", depth, "the frame's type field is ABSENT (a present-but-empty {} result is not a traced frame)"
+	}
+	if !recognizedTraceFrameTypes[*fr.Type] {
+		return "", depth, fmt.Sprintf("frame type %q is outside callTracer's vocabulary (CALL/CALLCODE/DELEGATECALL/STATICCALL/CREATE/CREATE2/SELFDESTRUCT)", *fr.Type)
+	}
+	var target *common.Address
+	if fr.To == nil {
+		if *fr.Type != "CREATE" && *fr.Type != "CREATE2" {
+			return "", depth, fmt.Sprintf("a %s frame omits `to` — the tracer sets it unconditionally for call-family and SELFDESTRUCT frames, and only a FAILED CREATE/CREATE2 legitimately lacks it", *fr.Type)
+		}
+	} else {
+		b, err := hexFixed("frame to", *fr.To, 20)
+		if err != nil {
+			return "", depth, err.Error()
+		}
+		a := common.BytesToAddress(b)
+		target = &a
+	}
+	if fr.Input == nil {
+		return "", depth, "the frame's input field is ABSENT — an unjudgeable frame refuses, never assumes clean"
+	}
+	in, err := hexutil.Decode(*fr.Input)
+	if err != nil {
+		return "", depth, fmt.Sprintf("the frame's input %q does not strictly decode (%v) — a decode error is a refusal, never a skip", *fr.Input, err)
+	}
+	if target != nil && *target == dmProxy && len(in) >= 4 {
+		for _, s := range scannedAdminWriteSelectors {
+			if s.id[0] == in[0] && s.id[1] == in[1] && s.id[2] == in[2] && s.id[3] == in[3] {
+				return s.name, depth, ""
 			}
 		}
 	}
 	for _, c := range fr.Calls {
-		if sel, d, miss := frameTargetsAdminWrite(c, dmProxy, depth+1); sel != "" || miss {
-			return sel, d, miss
+		if sel, d, un := frameTargetsAdminWrite(c, dmProxy, depth+1); sel != "" || un != "" {
+			return sel, d, un
 		}
 	}
-	return "", 0, false
+	return "", 0, ""
 }
 
 // frameTouchesAddress reports whether any frame at any depth targets addr —
 // the case-tx anchor check (the case's own liquidation MUST have called the
 // DM proxy, so a trace claiming otherwise did not answer the question asked).
+// It runs AFTER the strict walk has validated the case's tree, and its own
+// decode is the same strict hexFixed one — a `to` that does not strictly
+// decode can never silently read as "does not touch" (round 13: no
+// common.FromHex anywhere in this file's judgment paths).
 func frameTouchesAddress(fr traceCallFrame, addr common.Address) bool {
 	if fr.To != nil {
-		toBytes := common.FromHex(*fr.To)
-		if len(toBytes) == 20 && common.BytesToAddress(toBytes) == addr {
+		if b, err := hexFixed("frame to", *fr.To, 20); err == nil && common.BytesToAddress(b) == addr {
 			return true
 		}
 	}
@@ -245,13 +315,18 @@ func adminTraceScanRefusal(entries []decodedTraceEntry, caseTx common.Hash, dmPr
 	if caseIdx < 0 {
 		return fmt.Sprintf("ADMIN-CONTINUITY SCAN refused: the case's own tx %s is ABSENT from the block trace — the response does not answer the question asked (the trace was requested at the case's stored pin, which contains that tx by custody)", caseTx.Hex())
 	}
-	if !frameTouchesAddress(entries[caseIdx].Root, dmProxy) {
-		return fmt.Sprintf("ADMIN-CONTINUITY SCAN refused: the case's own tx %s trace contains NO frame targeting the DM proxy — chain-impossible for a liquidation tx, so the trace does not answer the question asked", caseTx.Hex())
-	}
+	// THE ROUND-13 STRICT-FRAME LAW: strictness and judgment run in the SAME
+	// recursive pass over every entry at tx index <= the case's — no frame
+	// can be judged that was not validated, and no degraded frame can read as
+	// clean. This pass runs BEFORE the case-tx anchor check because the
+	// case's own entry is inside the scanned range: an empty or malformed
+	// case tree is admin-continuity-unread (a degraded answer), and the
+	// anchor's "chain-impossible" text would misdescribe it. Entries BEYOND
+	// the case index stay unjudged (the scope law).
 	for i := 0; i <= caseIdx; i++ {
-		sel, depth, missingInput := frameTargetsAdminWrite(entries[i].Root, dmProxy, 0)
-		if missingInput {
-			return fmt.Sprintf("ADMIN-CONTINUITY SCAN refused: tx index %d (%s) carries a frame targeting the DM proxy whose input field is ABSENT at depth %d — an unjudgeable frame refuses, never assumes clean", i, entries[i].TxHash.Hex(), depth)
+		sel, depth, unread := frameTargetsAdminWrite(entries[i].Root, dmProxy, 0)
+		if unread != "" {
+			return fmt.Sprintf("ADMIN-CONTINUITY SCAN refused: tx index %d (%s) carries an UNJUDGEABLE frame at depth %d — %s — admin-continuity-unread: a degraded or incomplete trace refuses, never reads as clean (Codex round 13: a present-but-incomplete frame tree must not impersonate a scanned one)", i, entries[i].TxHash.Hex(), depth, unread)
 		}
 		if sel != "" {
 			scope := "a tx preceding the case's"
@@ -260,6 +335,12 @@ func adminTraceScanRefusal(entries []decodedTraceEntry, caseTx common.Hash, dmPr
 			}
 			return fmt.Sprintf("ADMIN-CONTINUITY EPOCH: tx index %d (%s) — %s — carries a call frame at depth %d targeting the DM proxy with the %s selector (ABI-derived). This is the silent-slot-write path itself, observed as an EXECUTED frame: the admin implementation (or the core, via the upgrade entrypoints) may have differed at the case's boundary from what the two-pin read certifies. The case REFUSES — a real epoch boundary requiring chain-truth adjudication, never a verdict (chain-truth R12 Fork 2 Step A)", i, entries[i].TxHash.Hex(), scope, depth, sel)
 		}
+	}
+	// The case-tx anchor, judged over a now-VALIDATED tree: the case's own
+	// liquidation must have called the DM proxy, so a trace claiming
+	// otherwise did not answer the question asked.
+	if !frameTouchesAddress(entries[caseIdx].Root, dmProxy) {
+		return fmt.Sprintf("ADMIN-CONTINUITY SCAN refused: the case's own tx %s trace contains NO frame targeting the DM proxy — chain-impossible for a liquidation tx, so the trace does not answer the question asked", caseTx.Hex())
 	}
 	return ""
 }
