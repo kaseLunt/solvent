@@ -2615,3 +2615,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   EvidenceDrawer lift to components/, Developers at Stripe-docs polish.
   Six concurrent: B3 handlers, design pass, W4, W5, W6, acceptance retry 4
   (delayed launch ~22:17 w/ verdict-free pacing).
+- **DESIGN PASS: NOT-SHIP → 6 MUST-FIX APPLIED → SHIP (22:13)**: the
+  upgraded-charter chart review ruled the W1+W2 chart set NOT-SHIP on six
+  edge defects where doctrine meets pixels (the bones — geometry/display
+  split, null-gap law, refusal-first states — passed): (1) the 1.5px
+  waterfall floor FABRICATED ink for true zeros incl. "0.000000" slipping a
+  string compare; (2) waterfall margins clipped exact money strings (SVG
+  overflow hides the loss); (3) scatter warn marks were filled while their
+  own legend showed outlined — a legend lying about itself; (4) the risk
+  map's auto-fit y-domain could push the liquidation floor OFF the chart;
+  (5) a single computed point between gaps rendered zero ink (dead M-only
+  path); (6) the DM history card borrowed Aave's 1.0 "own boundary" caption
+  onto a disclosure ratio — the shared-comparator implication the engine-
+  separation law forbids. Integrator applied all six verbatim in the main
+  tree (W4 shared-chart-file freeze messaged first): zero-aware barW +
+  /[1-9]/ exact-zero gate; margins 110/155 + "×1.00 unshocked" grammar +
+  counts to a new dim sub gutter line; outlined .dotWarn (transparent not
+  none — hover survives); Scatter yReference forced-in-domain w/
+  "0 — liquidatable"; isolated-point circles; engine-conditional reference
+  legends (then hardened per-engine-keyed w/ no-claim fallback — the
+  director's follow-up nit). Director RE-VERIFIED each closure incl. the
+  wire id and ruled SHIP. Typecheck tree-wide + scoped lint clean; the fix
+  commit rides the joint serial gate with the W4/W5/W6 landings (no .next
+  churn on in-flight waves). FORWARD REGISTER → W7 (first priority): ruling
+  11 CONFIRMED-warranted — /v1/address history serves points only for
+  batches where the account has rows, so a closed-then-reopened position's
+  absence is neither point nor withheld and the sparkline would draw a line
+  across it; gap-insertion in history-series.ts. Then SHOULD-FIX 7-10
+  (exact hover values on the risk map, hover on computed sparkline points,
+  map states its own as-of, histogram eligible-bucket form cue) + TASTE
+  12-14 (round-decade ticks, connector semantics, inline-style → classes).
