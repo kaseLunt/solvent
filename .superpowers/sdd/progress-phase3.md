@@ -2679,3 +2679,36 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   Monitor panel (AMENDMENT-1 item H, named follow-up). STILL IN FLIGHT:
   B3 handlers, acceptance retry 4 (past preflight, 23 min into the 45-min
   budget).
+- **ACCEPTANCE RETRY 4: COMPLETED — HONEST FAIL, 283 GATED (overnight,
+  diagnosed 08:30)**: the first-ever COMPLETED -p3-gates full-census
+  acceptance run (pins eth 25650676 / op 154938071, comparison sha256
+  38a57b3e…, artifacts secured to session scratch accept-r4/ before the
+  worktree was removed). CORE RECONCILE IS EXACT EVERYWHERE: DM 29/29 +
+  aggregate Σ exact, Aave 14/14, goldens exact, dm_param_weld 60/0,
+  registry 45/0, freshness 1.000, invariants 0, and the corrected
+  feeds.json heartbeat budgets PASSED their gate (with disclosed
+  qualifiers). The 283 failures are all in the NEW P3 Task-6 gate set on
+  its first full-census contact with live reality: dm_boolean_weld
+  getMaxBorrowAmount 233/28,622 (both directions — 100 high/133 low,
+  tails −99.8%…+1609%, median ≈0: NOT a uniform price lag; collateral-set/
+  composition divergence is the leading hypothesis since debt custody is
+  proven exact), aave_hf zero-debt census 24+1 (derived asserts holders
+  chain denies), input_frame_law 3/3 (frame-ledger bookkeeping defects in
+  the gates themselves: two stale declarations, one undeclared consumed
+  source — harness bugs on their face), backtest 6, tokenconfig 16.
+  THREE DIAGNOSIS LANES DISPATCHED in parallel: hands-on exemplar
+  dissection (3 DM + 2 census exemplars, both sides reproduced from live
+  DB SELECTs + callAtHash at the pins, read-only discipline), risk-quant
+  frame consult (hypothesis ranking, floor-then-sum divergence suspects,
+  the evidence standard for harness-bug vs custody-drift verdicts),
+  chain-truth custody ruling (census population law, which surfaces the
+  zero-RPC re-derive could have rebuilt differently, gate snapshot-
+  isolation discipline). NO fixes until the classification lands.
+- **OVERNIGHT MECHANICS**: claim lease expired 07:27 — renewed via
+  claim.py through 2026-08-01T15:25Z after removing the finished p3accept
+  worktree registration (single-worktree invariant; artifacts copied out
+  FIRST); claim commit isolated per the rule; B3 then landed `4ff42a7`
+  (integrator verification: build/vet/fmt clean, cmd/api ok 81s -p 1) and
+  pushed. B3's cutover ops note recorded: liquidation rows for seized
+  assets outside recon/feeds.json refuse loudly — registry coverage must
+  precede I3.
