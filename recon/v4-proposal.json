@@ -1,0 +1,53 @@
+{
+  "schema": "solvent.recon.v4-proposal/v1",
+  "purpose": "The Aave V4 whitelabel proposal's IDENTITY, pinned as data (P5 plan AMENDMENT 1 item 7). This registry GATES NOTHING: no ingest, serving or governance behavior waits on it. It exists so the Observatory's readiness panel cites a committed, hash-pinned record instead of an unbacked UI claim, and so 'the proposal' always means one identified document at one identified version.",
+  "gates": "nothing",
+  "proposal": {
+    "title": "[ARFC] Deploy a Dedicated Aave V4 Whitelabel Instance fully managed by EtherFi on OP Mainnet to Power Ether.fi Cash",
+    "forum": "governance.aave.com",
+    "source_url": "https://governance.aave.com/t/arfc-deploy-a-dedicated-aave-v4-whitelabel-instance-fully-managed-by-etherfi-on-op-mainnet-to-power-ether-fi-cash/25314",
+    "topic_id": 25314,
+    "author": "ether.fi",
+    "posted_at": "2026-07-14T22:37:30Z",
+    "stage": "ARFC",
+    "stage_note": "No AIP executed and no contract addresses exist as of retrieval; Solvent's Observatory therefore runs with the Debt Manager as the hot engine and 'V4 cutover pending' (spec section 6 degradation mode). Re-check the thread for the AIP/payload before any cutover work.",
+    "forum_post_version": 1,
+    "headline_terms": [
+      "dedicated EtherFi-operated Aave V4 hub on OP Mainnet as the credit backend for Ether.fi Cash",
+      "targeting deployment within July 2026 per the ARFC text",
+      "$175M initial cap",
+      "20% reserve-factor revenue share",
+      "dedicated GHO GSM"
+    ]
+  },
+  "governance_trail": [
+    {
+      "stage": "TEMP CHECK",
+      "source_url": "https://governance.aave.com/t/temp-check-deploy-a-dedicated-aave-v4-whitelabel-instance-fully-managed-by-etherfi-on-op-mainnet-to-power-ether-fi-cash/25267",
+      "posted_at": "2026-07-03",
+      "outcome": "snapshot passed",
+      "snapshot_url": "https://snapshot.org/#/s:aavedao.eth/proposal/0xf4019e2bfcf1c15460957fa47078402edd10af000139725178f34b6a50b476f8",
+      "cited_by": "recon/report.md (Day-0 recon, 2026-07-21) and the ARFC post itself"
+    },
+    {
+      "stage": "ARFC",
+      "source_url": "https://governance.aave.com/t/arfc-deploy-a-dedicated-aave-v4-whitelabel-instance-fully-managed-by-etherfi-on-op-mainnet-to-power-ether-fi-cash/25314",
+      "posted_at": "2026-07-14T22:37:30Z",
+      "outcome": "posted; no AIP executed at retrieval"
+    }
+  ],
+  "capture": {
+    "retrieved_at": "2026-07-31",
+    "method": "Discourse topic JSON API (topic 25314, post_stream.posts[0].cooked), captured verbatim",
+    "captured_file": "recon/v4-proposal-arfc-post1.html",
+    "content_sha256": "96af98916a1ed937d7161f5b30bfdb70ee09498efedce2f31bc46452c684f2b1",
+    "content_note": "The hash binds THIS COMMITTED CAPTURE of the ARFC's first post (its Discourse 'cooked' HTML at forum post version 1), not the live thread — a forum thread is a mutable pointer, so the hash travels with the bytes it hashed. Re-capture and append a new registry version if the post's version moves."
+  },
+  "versions": [
+    {
+      "registry_version": 1,
+      "recorded_at": "2026-07-31",
+      "change": "initial capture: ARFC stage, forum post version 1"
+    }
+  ]
+}

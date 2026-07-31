@@ -6,8 +6,19 @@
 //
 // NOT PUBLISHED. `private: true` holds until P5. See README.md.
 
-export { SolventClient } from "./client.js";
-export type { FetchLike, ResponseLike, SolventClientOptions } from "./client.js";
+export { ENGINE_NAMES, SolventClient } from "./client.js";
+export type {
+  EngineName,
+  EventsQuery,
+  FetchLike,
+  ObservatorySeriesQuery,
+  ParamsQuery,
+  PositionsQuery,
+  PositionsSort,
+  PricesQuery,
+  ResponseLike,
+  SolventClientOptions,
+} from "./client.js";
 
 export { fetchEventSource } from "./fetch-event-source.js";
 export type {
@@ -30,13 +41,22 @@ export type {
 } from "./sse.js";
 
 export { isDefinitiveNegative, lookup } from "./lookup.js";
-export type { AddressLookup, Lookup, LookupBearing, LookupOutcome, StressLookup } from "./lookup.js";
+export type {
+  AddressLookup,
+  HistoryLookup,
+  Lookup,
+  LookupBearing,
+  LookupOutcome,
+  StressLookup,
+} from "./lookup.js";
 
 export {
   collateralUse,
   liquidationVerdict,
   refineLeg,
   refinePosition,
+  refinePositionsResponse,
+  refinePositionSummary,
   refineProjection,
   refineProjectionHorizon,
   refineScenario,
@@ -49,6 +69,8 @@ export type {
   RefinedBody,
   RefinedLeg,
   RefinedPosition,
+  RefinedPositionsResponse,
+  RefinedPositionSummary,
   RefinedProjection,
   RefinedProjectionHorizon,
   RefinedScenario,
@@ -59,6 +81,7 @@ export type {
 export {
   AbsentQuantityError,
   BadRequestError,
+  BatchSupersededError,
   ContractInvariantError,
   DecimalFormatError,
   HeartbeatTimeoutError,

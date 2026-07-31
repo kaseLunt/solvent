@@ -63,6 +63,7 @@
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "symbol": "weETH",
       "kind": "liquidity_index",
+      "scale": "ray-1e27",
       "value": "1023456789012345678901234567",
       "as_of_block": 25634718,
       "note": "as-of-last-ReserveDataUpdated: this index can trail the derive cursor. `as_of_block` is its OWN as-of and is the only honest freshness statement about it."

@@ -1,0 +1,239 @@
+<p><strong>Author:</strong><a href="https://ether.fi/" rel="noopener nofollow ugc"> Ether.Fi</a></p>
+<p><strong>Date:</strong> 2026-07-14</p>
+<p>Temp Check discussion:<a href="https://governance.aave.com/t/temp-check-deploy-a-dedicated-aave-v4-whitelabel-instance-fully-managed-by-etherfi-on-op-mainnet-to-power-ether-fi-cash/25267"> [TEMP CHECK] Deploy a Dedicated Aave V4 Whitelabel Instance fully managed by EtherFi on OP Mainnet to Power Ether.fi Cash</a></p>
+<p>Temp Check Snapshot (passed):<a href="https://snapshot.org/#/s:aavedao.eth/proposal/0xf4019e2bfcf1c15460957fa47078402edd10af000139725178f34b6a50b476f8" rel="noopener nofollow ugc"> Snapshot vote</a></p>
+<hr>
+<h2><a name="p-64825-summary-1" class="anchor" href="#p-64825-summary-1" aria-label="Heading link"></a><strong>Summary</strong></h2>
+<p>Following the successful TEMP CHECK Snapshot, this ARFC formalizes the deployment of a dedicated, EtherFi-operated Aave V4 hub on OP Mainnet to serve as the credit backend for EtherFi Cash, our Visa card product used by tens of thousands of cardholders. The instance replaces the bespoke borrow/lend market (“Debt Manager”) that powers Cash today.</p>
+<p>The instance is isolated and borrow-whitelisted: borrowing is restricted exclusively to EtherFi Cash users, while EtherFi operates it end to end - configuration, risk parameters, liquidity, and growth - while Aave provides the V4 deployment and operating license and earns a share of the revenue the instance generates. Because the instance is ring-fenced and EtherFi-run, Aave carries the upside without taking on the market’s day-to-day risk.</p>
+<p>The proposal carries a substantial commercial package contributed by EtherFi and the Optimism Foundation, detailed in the Commercial Terms section: a 20% revenue share to the Aave DAO, GHO integration into EtherFi Cash, an Aave-deployed GHO GSM on OP Mainnet, full migration of the EtherFi Debt Manager, up to $175M in assets at launch, and product exclusivity to Aave V4.</p>
+<p>Relative to the Temp Check, this ARFC adds: (i) the hub-and-spoke topology, (ii) the operating model and permissions matrix, naming Nonce Capital as independent risk admin, (iii) the Debt Manager migration approach, (iv) the reference parameter baseline from the current Cash configuration, (v) a launch reserve set that mirrors the full current Cash collateral configuration, including LiquidEUR and LiquidRWA (both already live in the Debt Manager), and (vi) responses to feedback raised during the Temp Check stage.</p>
+<h2><a name="p-64825-motivation-2" class="anchor" href="#p-64825-motivation-2" aria-label="Heading link"></a><strong>Motivation</strong></h2>
+<p><strong>EtherFi Cash today.</strong> Cash lets cardholders spend against both yield-bearing and non-yield bearing collateral at the point of sale: they borrow a stablecoin to settle a card transaction while preserving their underlying asset exposure. It runs in production on OP Mainnet on a custom, non-pooled borrow/lend market with roughly $25M in active borrows across 16+ collateral assets and a high-frequency, low-ticket, well-distributed borrow profile. We are targeting roughly $500M in assets on the instance by the end of 2026.</p>
+<p><strong>Why migrate to Aave V4.</strong> Maintaining a bespoke lending engine is increasingly operationally taxing. Migrating to a dedicated Aave V4 instance lets EtherFi inherit audited, battle-tested infrastructure and governance machinery while preserving the Cash product surface (User Safes, Credit/Debit modes, settlement) above it.</p>
+<p><strong>Why this is a fit for Aave.</strong></p>
+<ul>
+<li>
+<p><strong>Pure-upside revenue.</strong> Aave shares in the borrow revenue of a live consumer product without committing pool liquidity or balance sheet to it. At our end-2026 target scale, the instance is projected to generate an estimated $5-6M in annual reserve-factor revenue, 20% of which accrues directly to the Aave DAO and compounds as the Cash book grows.</p>
+</li>
+<li>
+<p><strong>Direct GHO adoption.</strong> GHO becomes a supply/borrow reserve on the instance after GHO is deployed on OP Mainnet, with an Aave-deployed GSM strengthening GHO’s peg and liquidity on OP Mainnet.</p>
+</li>
+<li>
+<p><strong>GHO as a spend currency.</strong> Beyond being a listed reserve, GHO could, at the Aave DAO’s discretion, be enabled as a deposit/spend asset in Cash, subject to sufficient GHO liquidity to support the Cash program as expected, turning card volume into organic GHO demand.</p>
+</li>
+<li>
+<p><strong>Real-world spend footprint.</strong> Aave extends into consumer card settlement, anchored by a product with tens of thousands of active cardholders.</p>
+</li>
+<li>
+<p><strong>Net new on-chain activity on OP Mainnet,</strong> with exclusivity to Aave V4 for the Cash product.</p>
+</li>
+</ul>
+<p>Aave Labs supports deploying the instance and providing the operating license. The Temp Check Snapshot has passed, confirming community sentiment; this ARFC finalizes the specification with service-provider input ahead of an AIP.</p>
+<h2><a name="p-64825-clarifications-following-temp-check-feedback-3" class="anchor" href="#p-64825-clarifications-following-temp-check-feedback-3" aria-label="Heading link"></a><strong>Clarifications Following Temp Check Feedback</strong></h2>
+<p>We thank delegates for the engagement on the Temp Check thread. The questions raised broadly fall into four areas, addressed below.</p>
+<p><strong>1. Allocation of responsibility.</strong> EtherFi is the operator of EtherFi Cash and of the instance, and bears operational, legal and regulatory responsibility for the Cash product: configuration, risk parameters, oracles, asset onboarding, liquidity, liquidator infrastructure, and cardholder-facing operations. The Aave DAO’s role is limited to licensing the V4 codebase for a whitelisted, isolated deployment; the DAO does not operate the instance, set its parameters, custody user funds, or market the Cash product, and the operating license reflects this allocation of responsibility and ring-fencing explicitly.</p>
+<p><strong>2. Term, renegotiation, and exit.</strong> As stated in the Temp Check, Aave provides the V4 codebase under license for a 2-year initial term. The operating license includes customary renewal provisions and defined termination rights for each party, together with contractual obligations on EtherFi to wind the instance down in an orderly, user-protective manner on termination or expiry, facilitating the repayment, migration, and offboarding of user positions. Optionality is therefore not one-way: both sides hold defined renegotiation and exit paths, and the DAO’s economic interests are contractually protected for the duration of the term.</p>
+<p><strong>3. Revenue assumptions and net contribution to the DAO.</strong> To clarify the revenue base: the $5-6M estimate refers to total instance reserve-factor revenue (the V4 “Liquidity Fee”) at the end-2026 target scale, of which the Aave DAO receives 20%, approximately $1.0-1.2M annually at that scale, growing with the Cash book.</p>
+<ul>
+<li>
+<p><strong>Target instance assets (end-2026):</strong> ~$500M</p>
+</li>
+<li>
+<p><strong>Revenue base:</strong> all instance protocol revenue (Liquidity Fee, liquidation fees, SVR, other fee streams). Projection below covers the Liquidity Fee component only.</p>
+</li>
+<li>
+<p><strong>Projected annual reserve-factor revenue at target scale:</strong> ~$5-6M</p>
+</li>
+<li>
+<p><strong>Aave DAO share (20%):</strong> ~$1.0-1.2M per year</p>
+</li>
+</ul>
+<p>On cost allocation: Aave’s contribution is limited to the V4 deployment, the operating license, and the GHO GSM; instance operations, risk management, liquidity sourcing, incentives, monitoring, and liquidator infrastructure are borne by EtherFi per the Commercial Terms. The DAO bears no ongoing operating costs for the instance, so the 20% share is substantially net revenue to the DAO.</p>
+<p><strong>4. Framework categorization.</strong> This deployment is a whitelabel instance, comparable in structure to Tydro (a dedicated, operator-managed V4 deployment under license), not a friendly fork. Consideration to the Aave DAO takes the form of the 20% share of all instance revenues, product exclusivity to Aave V4, GHO integration and the GSM footprint on OP Mainnet, and the launch capitalization package, including the $1.2M joint incentive commitment EtherFi has made together with the Optimism Foundation, rather than token consideration.</p>
+<h2><a name="p-64825-specification-4" class="anchor" href="#p-64825-specification-4" aria-label="Heading link"></a><strong>Specification</strong></h2>
+<h3><a name="p-64825-architecture-5" class="anchor" href="#p-64825-architecture-5" aria-label="Heading link"></a><strong>Architecture</strong></h3>
+<p>A dedicated Aave V4 deployment on OP Mainnet, one of V4’s first Layer 2 targets, consisting of one Liquidity Hub and, at launch, a single spoke listing the full current Cash collateral set. The instance is whitelisted and isolated from Aave’s shared liquidity and all other Aave markets. Borrow access is permissioned: only EtherFi Cash Users may open borrow positions on the instance. Supply access is not restricted to cardholders, allowing third-party liquidity provision (e.g., the Optimism Foundation’s launch deposit). EtherFi operates the instance end to end and is responsible for collateral listing, risk parameters, oracles, and ongoing risk management. Aave provides the V4 codebase under license for a 2-year initial term, but is not responsible for the instance’s assets, configuration, or risk.</p>
+<ul>
+<li>
+<p><strong>Hub:</strong> EtherFi Cash Hub (OP Mainnet), the instance’s sole Liquidity Hub.</p>
+</li>
+<li>
+<p><strong>Spoke:</strong> Cash Spoke, a single spoke at launch, listing the full current Cash collateral set.</p>
+</li>
+<li>
+<p><strong>Collateral:</strong> weETH, wETH, eBTC, USDC, USDT, EURC, frxUSD, GHO, ETHFI, sETHFI, eUSD, OP, beHYPE, wHYPE, LiquidETH, LiquidBTC, LiquidUSD, LiquidReserve, LiquidEUR, LiquidRWA</p>
+</li>
+<li>
+<p><strong>Borrowable:</strong> USDC, GHO (pending deployment)</p>
+</li>
+</ul>
+<p>Additional spokes may be introduced over time via the risk-admin role as the Cash book grows and V4 architecture evolves.</p>
+<h3><a name="p-64825-operating-model-permissions-6" class="anchor" href="#p-64825-operating-model-permissions-6" aria-label="Heading link"></a><strong>Operating Model &amp; Permissions</strong></h3>
+<p>EtherFi acts as operator and will authorize Nonce Capital as the independent risk admin for the instance. Nonce Capital serves as curator of the <a href="http://ether.fi" rel="noopener nofollow ugc">ether.fi</a> Liquid vault suite, bringing direct familiarity with the Cash collateral set while remaining organizationally independent of the operator. EtherFi may additionally engage further service providers over time to provide supplementary review of the market. The risk admin holds authority over:</p>
+<ul>
+<li>
+<p>Collateral listing and de-listing</p>
+</li>
+<li>
+<p>Oracle selection (Chainlink, RedStone, or otherwise) and configuration</p>
+</li>
+<li>
+<p>Collateral factors, liquidation thresholds, and liquidation bonus configuration per asset</p>
+</li>
+<li>
+<p>Interest rate models, supporting both utilization-curve and fixed-rate reserves</p>
+</li>
+<li>
+<p>Add caps, draw caps, and pause states</p>
+</li>
+</ul>
+<p><strong>Division of responsibilities:</strong></p>
+<ul>
+<li>
+<p><strong>EtherFi (Operator):</strong> executes instance configuration; proposes collateral listings, oracles, and risk parameters to the risk admin; owns liquidity sourcing, market growth, and liquidator infrastructure.</p>
+</li>
+<li>
+<p><strong>Nonce Capital (Independent Risk Admin):</strong> approves and configures all risk-relevant changes per the authorities listed above.</p>
+</li>
+<li>
+<p><strong>Aave Labs:</strong> provides the V4 deployment and operating license; deploys the GHO GSM on OP Mainnet.</p>
+</li>
+<li>
+<p><strong>Aave DAO:</strong> ratifies the deployment via governance; governs GHO facilitation; receives the 20% revenue share, settled automatically on-chain.</p>
+</li>
+</ul>
+<h3><a name="p-64825-launch-collateral-set-7" class="anchor" href="#p-64825-launch-collateral-set-7" aria-label="Heading link"></a><strong>Launch Collateral Set</strong></h3>
+<p>Launch reserves mirror the existing Cash collateral set, with streamlined additions over time via the risk-admin role:</p>
+<ul>
+<li>
+<p><em>ETH-likes:</em> weETH, wETH</p>
+</li>
+<li>
+<p><em>BTC-likes:</em> eBTC</p>
+</li>
+<li>
+<p><em>Stables:</em> USDC, USDT, EURC, frxUSD, GHO</p>
+</li>
+<li>
+<p><em>EtherFi platform, Optimism &amp; HYPE:</em> ETHFI / sETHFI, eUSD, OP, beHYPE, wHYPE</p>
+</li>
+<li>
+<p><em>Liquid vault receipts:</em> LiquidETH, LiquidBTC, LiquidUSD, LiquidReserve, LiquidEUR, LiquidRWA</p>
+</li>
+</ul>
+<p><strong>Borrow reserves.</strong> USDC and GHO, each added as both a supply and a borrowable asset. GHO is enabled upon GHO’s deployment on OP Mainnet.</p>
+<h3><a name="p-64825-risk-parameters-8" class="anchor" href="#p-64825-risk-parameters-8" aria-label="Heading link"></a><strong>Risk Parameters</strong></h3>
+<p>Initial parameters are intended to mirror the current Cash Debt Manager configuration as closely as V4 mechanics permit, providing continuity for the migrated book. The current production configuration on OP Mainnet, which serves as the reference baseline, is as follows (see the<a href="https://help.ether.fi/en/articles/304388-how-does-collateral-and-borrowing-work" rel="noopener nofollow ugc"> Cash collateral &amp; borrowing documentation</a>):<br>
+<strong>Asset</strong><br>
+LTV | Liquidation Threshold | Liquidation Bonus<br>
+<strong>USDC</strong><br>
+90% | 95% | 1%<br>
+<strong>USDT</strong><br>
+90% | 95% | 1%<br>
+<strong>EURC</strong><br>
+90% | 95% | 1%<br>
+<strong>frxUSD</strong><br>
+90% | 95% | 1%<br>
+<strong>weETH</strong><br>
+55% | 75% | 3.5%<br>
+<strong>wETH</strong><br>
+55% | 75% | 3.5%<br>
+<strong>eBTC</strong><br>
+52% | 72% | 5%<br>
+<strong>eUSD</strong><br>
+80% | 90% | 2%<br>
+<strong>ETHFI / sETHFI</strong><br>
+20% | 50% | 5%<br>
+<strong>OP</strong><br>
+20% | 50% | 5%<br>
+<strong>wHYPE</strong><br>
+45% | 65% | 4%<br>
+<strong>beHYPE</strong><br>
+40% | 60% | 5%<br>
+<strong>LiquidETH</strong><br>
+50% | 70% | 5%<br>
+<strong>LiquidBTC</strong><br>
+50% | 70% | 5%<br>
+<strong>LiquidUSD</strong><br>
+80% | 90% | 2%<br>
+<strong>LiquidReserve</strong><br>
+80% | 90% | 2%<br>
+<strong>LiquidEUR</strong><br>
+70% | 90% | 2%<br>
+<strong>LiquidRWA</strong><br>
+70% | 90% | 2%</p>
+<p>GHO parameters will be set by Nonce Capital upon GHO’s deployment on OP Mainnet.</p>
+<h3><a name="p-64825-interest-rate-models-9" class="anchor" href="#p-64825-interest-rate-models-9" aria-label="Heading link"></a><strong>Interest Rate Models</strong></h3>
+<p>Reserves support both standard two-slope utilization-curve IRMs and fixed-rate configurations where appropriate for the Cash borrow profile. Initial IRM parameters will be published alongside the parameter set above.</p>
+<h3><a name="p-64825-oracles-10" class="anchor" href="#p-64825-oracles-10" aria-label="Heading link"></a><strong>Oracles</strong></h3>
+<p>Oracle providers (Chainlink, RedStone, or otherwise) will be selected and configured per asset by Nonce Capital, with exchange-rate pricing and appropriate safeguards applied to collateral where suitable.</p>
+<h3><a name="p-64825-liquidations-11" class="anchor" href="#p-64825-liquidations-11" aria-label="Heading link"></a><strong>Liquidations</strong></h3>
+<p>The instance uses Aave V4’s standard partial liquidation behavior, including the dynamic liquidation bonus mechanism. EtherFi adapts its existing liquidator tooling to the V4 flow prior to migration.</p>
+<h3><a name="p-64825-migration-from-the-debt-manager-12" class="anchor" href="#p-64825-migration-from-the-debt-manager-12" aria-label="Heading link"></a><strong>Migration from the Debt Manager</strong></h3>
+<p>EtherFi will migrate the existing Cash book (~$25M in active borrows across 16+ collateral assets) from the Debt Manager to the V4 instance via a phased migration over a short window, organized in cohorts to validate that risk controls (oracle configuration, caps, liquidator tooling, and monitoring) are functioning as intended before the full book transitions. The Cash product surface (User Safes, Credit/Debit modes, settlement) is preserved unchanged above the new credit backend; the migration is designed to be invisible at the cardholder level.</p>
+<h2><a name="p-64825-commercial-terms-13" class="anchor" href="#p-64825-commercial-terms-13" aria-label="Heading link"></a><strong>Commercial Terms</strong></h2>
+<p>The following package has been aligned between EtherFi, the Optimism Foundation, and Aave Labs to strengthen the instance at launch. Final mechanics are subject to this governance process and service-provider review.</p>
+<ul>
+<li>
+<p><strong>Revenue share to Aave DAO:</strong> 80-20 EtherFi / Aave on the totality of protocol revenue generated by the instance. The 20% share applies to all instance revenue streams, including: (i) reserve-factor (Liquidity Fee) revenue on instance borrows; (ii) liquidation fees accruing to the protocol; (iii) oracle value recapture proceeds attributable to the instance (e.g., Chainlink SVR), net of any oracle-provider share; and (iv) any other current or future protocol fee streams the instance generates. 20% of each stream flows to the Aave treasury, settled automatically. This split reflects the long-standing, proven relationship between EtherFi and Aave, together with Aave V4 serving as the sole lending and borrowing market for EtherFi Cash.</p>
+</li>
+<li>
+<p><strong>GHO integration:</strong> GHO supported on the instance as both a supply and a borrowable reserve once GHO is deployed on OP Mainnet. Aave deploys a GHO GSM on Optimism.</p>
+</li>
+<li>
+<p><strong>GHO as a spend currency:</strong> at the Aave DAO’s discretion and conditional on sufficient GHO liquidity for the Cash program, GHO may also be added as a spendable/deposit asset within Cash itself, converting a portion of card usage into direct GHO demand.</p>
+</li>
+<li>
+<p><strong>Assets at launch:</strong> EtherFi brings up to $175M in assets to the instance at launch, with a clear path to grow significantly from there.</p>
+</li>
+<li>
+<p><strong>Exclusivity:</strong> EtherFi Cash will exclusively use Aave V4 lending markets as its DeFi lending protocol.</p>
+</li>
+<li>
+<p><strong>Launch capitalization (EtherFi &amp; Optimism Foundation funded):</strong></p>
+<ul>
+<li>
+<p>$20M supplied from the Optimism Foundation Treasury into the instance.</p>
+</li>
+<li>
+<p>$1.2M joint incentive package, directed toward deposits and/or borrows across any asset.</p>
+</li>
+<li>
+<p>$5M strategic GHO position, taken via the GHO GSM, shared by the Optimism Foundation and EtherFi, held for 6 months, after which continuation is at each party’s discretion.</p>
+</li>
+</ul>
+</li>
+</ul>
+<p>Taken together, the three parties contribute in distinct capacities: Aave provides the V4 codebase license, deployment, and GHO infrastructure; the Optimism Foundation and EtherFi jointly provide the launch capital, incentives, and initial asset base; and EtherFi alone operates the instance end to end with revenue flow back to the Aave DAO via the agreed reserve-factor share.</p>
+<h2><a name="p-64825-useful-links-14" class="anchor" href="#p-64825-useful-links-14" aria-label="Heading link"></a><strong>Useful Links</strong></h2>
+<ul>
+<li>
+<p>Temp Check discussion:<a href="https://governance.aave.com/t/temp-check-deploy-a-dedicated-aave-v4-whitelabel-instance-fully-managed-by-etherfi-on-op-mainnet-to-power-ether-fi-cash/25267"> governance.aave.com thread</a></p>
+</li>
+<li>
+<p>Temp Check Snapshot:<a href="https://snapshot.org/#/s:aavedao.eth/proposal/0xf4019e2bfcf1c15460957fa47078402edd10af000139725178f34b6a50b476f8" rel="noopener nofollow ugc"> snapshot.org proposal</a></p>
+</li>
+<li>
+<p>EtherFi Cash collateral &amp; borrowing documentation:<a href="https://help.ether.fi/en/articles/304388-how-does-collateral-and-borrowing-work" rel="noopener nofollow ugc"> help.ether.fi</a></p>
+</li>
+<li>
+<p>EtherFi:<a href="https://ether.fi/" rel="noopener nofollow ugc"> ether.fi</a></p>
+</li>
+</ul>
+<h2><a name="p-64825-next-steps-15" class="anchor" href="#p-64825-next-steps-15" aria-label="Heading link"></a><strong>Next Steps</strong></h2>
+<ol>
+<li>
+<p>Gather community feedback;</p>
+</li>
+<li>
+<p>Escalate the proposal to the ARFC Snapshot stage.</p>
+</li>
+<li>
+<p>If the ARFC Snapshot outcome is YAE, publish an AIP vote for final confirmation and enforcement of the proposal, targeting a July 2026 deployment to meet the Cash product handoff from the current Debt Manager.</p>
+</li>
+</ol>
+<h2><a name="p-64825-disclaimer-16" class="anchor" href="#p-64825-disclaimer-16" aria-label="Heading link"></a><strong>Disclaimer</strong></h2>
+<p>This proposal is submitted by EtherFi as the operator of EtherFi Cash and the proposer of the instance. This material contains forward looking statements regarding design, functionality, and performance; actual results may differ materially from those expressed or implied. The commercial terms reflect agreements with Aave Labs and the Optimism Foundation; all terms and parameters are subject to this governance process and service-provider review. EtherFi is not compensated by any third party for submitting this proposal.</p>
+<h2><a name="p-64825-copyright-17" class="anchor" href="#p-64825-copyright-17" aria-label="Heading link"></a><strong>Copyright</strong></h2>
+<p>Copyright and related rights waived via<a href="https://creativecommons.org/publicdomain/zero/1.0/" rel="noopener nofollow ugc"> CC0</a>.</p>

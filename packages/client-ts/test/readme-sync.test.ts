@@ -64,6 +64,7 @@ import type {
   LiquidationVerdict,
   RefinedLeg,
   RefinedPosition,
+  RefinedPositionSummary,
   RefinedProjectionHorizon,
   RefinedStressState,
 } from "../src/index.js";
@@ -130,15 +131,20 @@ export const SEALED_FIELD_NAMES = [
   // Wire nullable verdicts (`boolean | null` in src/generated/schema.ts):
   // `null` means A STATEMENT IS WITHHELD, so `!field` renders "withheld" as a
   // definitive answer — the falsiness class the refinement exists to seal.
-  "found", // AddressResponse.found / StressResponse.found — three-valued existence
-  "liquidatable", // Position.liquidatable / StressState.liquidatable
+  "found", // AddressResponse / StressResponse / AddressHistoryResponse .found — three-valued existence
+  "liquidatable", // Position / StressState / PositionSummary / AddressHistoryPoint .liquidatable
   "used_as_collateral", // Leg.used_as_collateral
   "becomes_liquidatable", // ProjectionHorizon.becomes_liquidatable
+  // LiquidationDetail.deficit_paired (contract 1.2.0): Aave's same-tx
+  // DeficitCreated pairing marker. Null on Debt Manager rows means NOT
+  // APPLICABLE, so `!detail.deficit_paired` would read a withheld statement
+  // as "not paired" — the same falsiness class.
+  "deficit_paired",
   // Refined string-union verdicts (the sealed vocabularies in src/refine.ts):
   // hazardous under `!` for the OPPOSITE reason — never null, every non-empty
   // token truthy, so `!p.liquidation_verdict` is dead code that reads as a
   // verdict and collapses all three tokens into one branch.
-  "liquidation_verdict", // RefinedPosition / RefinedStressState / RefinedProjectionHorizon
+  "liquidation_verdict", // RefinedPosition / RefinedStressState / RefinedProjectionHorizon / RefinedPositionSummary
   "collateral_use", // RefinedLeg
 ] as const;
 
@@ -272,6 +278,7 @@ type KeysWithExactValue<T, V> = {
 /** Every sealed-union verdict field on the refined shapes in src/refine.ts. */
 type RefinedVerdictFields =
   | KeysWithExactValue<RefinedPosition, LiquidationVerdict>
+  | KeysWithExactValue<RefinedPositionSummary, LiquidationVerdict>
   | KeysWithExactValue<RefinedStressState, LiquidationVerdict>
   | KeysWithExactValue<RefinedProjectionHorizon, LiquidationVerdict>
   | KeysWithExactValue<RefinedLeg, CollateralUse>;

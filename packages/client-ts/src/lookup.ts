@@ -49,7 +49,7 @@
 
 import { ContractInvariantError } from "./errors.js";
 import { refineBody, type RefinedBody } from "./refine.js";
-import type { AddressResponse, EngineRefusal, StressResponse } from "./types.js";
+import type { AddressHistoryResponse, AddressResponse, EngineRefusal, StressResponse } from "./types.js";
 
 /** The three states, named. `unknowable` is never "no position". */
 export type LookupOutcome = "found" | "not-found" | "unknowable";
@@ -118,6 +118,12 @@ export type Lookup<T extends LookupBearing> =
 
 export type AddressLookup = Lookup<AddressResponse>;
 export type StressLookup = Lookup<StressResponse>;
+/**
+ * `/v1/address/{addr}/history` carries the SAME three-valued `found`
+ * contract, evaluated over the covered window, and is served through the
+ * same sealed union.
+ */
+export type HistoryLookup = Lookup<AddressHistoryResponse>;
 
 /**
  * Read a three-valued lookup as a discriminated union.

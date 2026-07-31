@@ -20,8 +20,13 @@ import {
   DecimalFormatError,
   PrecisionLossError,
 } from "./errors.js";
-import { liquidationVerdict, type LiquidationVerdict, type RefinedPosition } from "./refine.js";
-import type { HealthFactor, Position } from "./types.js";
+import {
+  liquidationVerdict,
+  type LiquidationVerdict,
+  type RefinedPosition,
+  type RefinedPositionSummary,
+} from "./refine.js";
+import type { HealthFactor, Position, PositionSummary } from "./types.js";
 import { WAD } from "./types.js";
 
 /** The contract's `Decimal` pattern, verbatim: `^-?[0-9]+$`. */
@@ -276,7 +281,9 @@ export function aaveVerdictFromWad(hfWad: string | null): LiquidationVerdict {
  * Accepts both the RAW wire position (`addressRaw()`) and the refined position
  * the primary `address()` path serves; the verdict is the same either way.
  */
-export function positionVerdict(position: Position | RefinedPosition): LiquidationVerdict {
+export function positionVerdict(
+  position: Position | RefinedPosition | PositionSummary | RefinedPositionSummary,
+): LiquidationVerdict {
   const strict =
     "liquidation_verdict" in position
       ? position.liquidation_verdict

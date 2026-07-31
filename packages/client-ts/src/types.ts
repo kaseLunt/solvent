@@ -21,6 +21,16 @@ export type ObservatoryResponse = Schemas["ObservatoryResponse"];
 export type MetaResponse = Schemas["MetaResponse"];
 export type StreamPayload = Schemas["StreamPayload"];
 export type ErrorBody = Schemas["ErrorBody"];
+export type PositionsResponse = Schemas["PositionsResponse"];
+export type BatchSupersededBody = Schemas["BatchSupersededBody"];
+export type AddressHistoryResponse = Schemas["AddressHistoryResponse"];
+export type EventsResponse = Schemas["EventsResponse"];
+export type ParamsResponse = Schemas["ParamsResponse"];
+export type PricesResponse = Schemas["PricesResponse"];
+export type RunBookResponse = Schemas["RunBookResponse"];
+export type ObservatorySeriesResponse = Schemas["ObservatorySeriesResponse"];
+export type EvidenceResponse = Schemas["EvidenceResponse"];
+export type BatchResponse = Schemas["BatchResponse"];
 
 // --- Envelope + posture ----------------------------------------------------
 
@@ -72,6 +82,59 @@ export type Shortfall = Schemas["Shortfall"];
 export type Projection = Schemas["Projection"];
 export type ProjectionHorizon = Schemas["ProjectionHorizon"];
 
+// --- Positions page (batch-stable pagination) ------------------------------
+
+export type PositionSummary = Schemas["PositionSummary"];
+export type LiqDistance = Schemas["LiqDistance"];
+
+// --- Address history --------------------------------------------------------
+
+export type AddressHistoryEngine = Schemas["AddressHistoryEngine"];
+export type AddressHistoryPoint = Schemas["AddressHistoryPoint"];
+
+// --- Events feed ------------------------------------------------------------
+
+export type ChainEvent = Schemas["ChainEvent"];
+export type EventDisplayType = Schemas["EventDisplayType"];
+export type EventAmountUnit = Schemas["EventAmountUnit"];
+export type EventFilter = Schemas["EventFilter"];
+export type LiquidationDetail = Schemas["LiquidationDetail"];
+export type SeizedCollateral = Schemas["SeizedCollateral"];
+
+// --- Parameter timeline -----------------------------------------------------
+
+export type ParamChange = Schemas["ParamChange"];
+export type ParamField = Schemas["ParamField"];
+
+// --- Price history ----------------------------------------------------------
+
+export type PriceSeries = Schemas["PriceSeries"];
+export type PricePoint = Schemas["PricePoint"];
+export type QuarantinedRange = Schemas["QuarantinedRange"];
+
+// --- Book-wide scenario run -------------------------------------------------
+
+export type RunBookEngine = Schemas["RunBookEngine"];
+export type RunBookAggregate = Schemas["RunBookAggregate"];
+
+// --- Observatory rollup series ----------------------------------------------
+
+export type ObservatorySeriesPoint = Schemas["ObservatorySeriesPoint"];
+
+// --- Evidence manifest ------------------------------------------------------
+
+export type SubstrateRef = Schemas["SubstrateRef"];
+export type FeedsRegistry = Schemas["FeedsRegistry"];
+export type ReconcileSummary = Schemas["ReconcileSummary"];
+export type ReconcileWeld = Schemas["ReconcileWeld"];
+export type ProbeRecord = Schemas["ProbeRecord"];
+export type ProofSubject = Schemas["ProofSubject"];
+export type LiveSubject = Schemas["LiveSubject"];
+
+// --- Batch permalink --------------------------------------------------------
+
+export type BatchAggregate = Schemas["BatchAggregate"];
+
 // --- Observatory + meta ----------------------------------------------------
 
 export type ObservatoryPoint = Schemas["ObservatoryPoint"];
@@ -101,6 +164,22 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 /** `price_inputs[].verdict` — how a price input was judged against its own budget. */
 export const PRICE_VERDICTS = ["fresh", "stale", "over-ceiling", "missing", "no-as-of", "reorg-unacked"] as const;
 export type PriceVerdict = (typeof PRICE_VERDICTS)[number];
+
+/**
+ * `events[].amount_unit` — the closed semantic-unit set of a feed row's
+ * `amount` (the engine's own ACCOUNTING unit, never a display token amount).
+ *
+ * The `Record` weld makes this total BOTH ways against the generated union: a
+ * unit the contract adds breaks this compile (missing key), and a unit the
+ * contract drops breaks it too (excess key).
+ */
+const EVENT_AMOUNT_UNIT_SET = {
+  none: true,
+  dm_normalized_debt: true,
+  aave_scaled: true,
+  opaque: true,
+} as const satisfies Record<EventAmountUnit, true>;
+export const EVENT_AMOUNT_UNITS = Object.keys(EVENT_AMOUNT_UNIT_SET) as readonly EventAmountUnit[];
 
 /** `hf_histogram.engines[].comparator` — the quantity the buckets are computed on. */
 export const HISTOGRAM_COMPARATORS = ["hf_wad", "hf_num/hf_den"] as const;
@@ -144,7 +223,7 @@ export type HeartbeatGrade = (typeof HEARTBEAT_GRADES)[number];
 export const SEIZURE_MODEL = "pro-rata-over-counted-collateral" as const;
 
 /** `info.version` of the contract this client was generated from. */
-export const CONTRACT_VERSION = "1.1.0" as const;
+export const CONTRACT_VERSION = "1.2.0" as const;
 
 /** WAD (1e18) — the scale health factors and grid factors are published at. */
 export const WAD = 10n ** 18n;

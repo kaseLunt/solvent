@@ -169,6 +169,37 @@ export class InternalError extends SolventHttpError {
   override readonly name = "InternalError";
 }
 
+/**
+ * 409 `batch_superseded` — the presented cursor is bound to a batch that is no
+ * longer the newest servable batch.
+ *
+ * The honest reaction is a VISIBLE restart from page one, never a page
+ * silently mixing rows from two materializations — which is exactly what this
+ * status exists to prevent. Both batch ids are carried so the caller can say
+ * precisely what happened when it restarts.
+ *
+ * Not a `SolventHttpError` subclass: the 409 body is the contract's own
+ * `BatchSupersededBody`, not the shared error envelope, and a retry policy
+ * must not treat "restart your pagination" as a generic HTTP failure.
+ */
+export class BatchSupersededError extends SolventError {
+  override readonly name = "BatchSupersededError";
+  readonly url: string;
+  readonly status = 409;
+  readonly code = "batch_superseded";
+  /** The batch the presented cursor was minted against. */
+  readonly cursorBatchId: number;
+  /** Null in the race where no batch is servable at answer time (a retry then meets a 503). */
+  readonly currentBatchId: number | null;
+
+  constructor(url: string, message: string, cursorBatchId: number, currentBatchId: number | null) {
+    super(`409 batch_superseded: ${message}`);
+    this.url = url;
+    this.cursorBatchId = cursorBatchId;
+    this.currentBatchId = currentBatchId;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Contract compatibility.
 // ---------------------------------------------------------------------------

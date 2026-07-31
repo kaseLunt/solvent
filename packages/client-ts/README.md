@@ -126,20 +126,64 @@ async function main(): Promise<void> {
 }
 ```
 
-### The six routes
+### The routes
 
 | Method | Route |
 | --- | --- |
 | `client.book()` | `GET /v1/book` — aggregates, HF histogram, liquidation waterfall, bad-debt line |
+| `client.positions(query)` | `GET /v1/positions` — one **batch-stable** page of one engine's book, as lean `PositionSummary` rows with the verdict **refined** (`liquidation_verdict`, no nullable boolean). A superseded cursor throws `BatchSupersededError` naming BOTH batch ids — restart from page one, visibly |
 | `client.address(addr)` | `GET /v1/address/{addr}` — positions, as-ofs, per-input price disclosures, as a **discriminated lookup** |
 | `client.addressStress(addr)` | `GET /v1/address/{addr}/stress` — the committed scenario set, as a **discriminated lookup** |
-| `client.addressRaw(addr)` / `client.addressStressRaw(addr)` | The same routes' **raw wire bodies** — the ONLY surface carrying the unrefined verdict keys: `found` still `boolean \| null`, and `liquidatable` / `used_as_collateral` / `becomes_liquidatable` still nullable booleans. No invariant enforcement. For persistence and forensics, never for rendering |
+| `client.addressHistory(addr)` | `GET /v1/address/{addr}/history` — persisted per-batch points, newest first, as a **discriminated lookup** (the same three-valued `found` contract) |
+| `client.addressRaw(addr)` / `client.addressStressRaw(addr)` / `client.addressHistoryRaw(addr)` / `client.positionsRaw(query)` | The same routes' **raw wire bodies** — the ONLY surface carrying the unrefined verdict keys: `found` still `boolean \| null`, and `liquidatable` / `used_as_collateral` / `becomes_liquidatable` still nullable booleans. No invariant enforcement. For persistence and forensics, never for rendering |
+| `client.events(query)` | `GET /v1/events` — the durable chain-action feed. Amounts are the engine's own **accounting deltas** named by the closed `amount_unit` vocabulary — never display token amounts. A cross-engine `sinceBlock` is refused **locally**: block heights are incomparable across chains |
+| `client.params(query)` | `GET /v1/params` — the parameter timeline (append-only provenance ledger) |
+| `client.prices(asset, query)` | `GET /v1/prices/{asset}` — the retained price ledger; quarantined rows served WITH their reasons; `chains` names the custody chains consulted |
+| `client.runBookScenario(id)` | `POST /v1/scenarios/{id}/run-book` — one committed scenario over the whole book (computed on request, writes nothing) |
 | `client.observatory({ limit })` | `GET /v1/observatory` — per-engine TVL, counts, rate indexes |
+| `client.observatorySeries(query)` | `GET /v1/observatory/series` — the durable rollup, exact captured buckets only (a stride serves every Nth bucket verbatim, never an average) |
+| `client.batch(id)` | `GET /v1/batches/{id}` — a batch's permalink: identity + servability; a pruned id is a 404 that DISCLOSES retention |
+| `client.evidence()` | `GET /v1/evidence` — the deploy-bound manifest with the two-subject split: `proof_subject` (the committed receipt's own strict conjunction, at its pin) vs `live_subject` (the serving batch's watermarked identity) |
 | `client.stream(opts)` | `GET /v1/stream` — SSE |
 | `client.meta()` | `GET /v1/meta` — watermark vector, reorg posture, price state, constants |
 
 An address with no position answers `200`, not `404`: "no position in this batch"
 is an **answer**, and it arrives with the batch that answered it.
+
+### Batch-stable pagination, and the honest restart
+
+`/v1/positions` pages are drawn entirely from ONE batch, and the cursor is
+bound to it. When a newer batch supersedes it mid-walk, the server answers
+409 — and this client makes that a typed restart signal rather than a generic
+failure:
+
+```ts
+async function walkBook(): Promise<void> {
+  let cursor: string | undefined;
+  for (;;) {
+    try {
+      const page = await client.positions({ engine: "debt_manager", ...(cursor === undefined ? {} : { cursor }) });
+      for (const row of page.positions) {
+        // The verdict is the sealed union — narrowing requires `===`, and a
+        // withheld verdict can never be `!`-read as safe.
+        if (row.liquidation_verdict === "liquidatable") flag(row.account);
+      }
+      if (page.next_cursor === null) return;
+      cursor = page.next_cursor;
+    } catch (error) {
+      if (error instanceof BatchSupersededError) {
+        // A newer materialization landed: restart from page one, visibly.
+        // A page silently mixing two materializations is exactly what the
+        // 409 exists to prevent.
+        announceRestart(error.cursorBatchId, error.currentBatchId);
+        cursor = undefined;
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+```
 
 ### `found` is three-valued, and `!found` is a bug
 

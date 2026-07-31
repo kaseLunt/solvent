@@ -52,6 +52,12 @@ export interface paths {
          *     Refused rows are ROWS here, exactly as they are in the aggregates:
          *     filtering them out would un-count the positions the book could not
          *     honestly value.
+         *
+         *     Rows are the LEAN `PositionSummary` (AMENDMENT 1/E): the ranked
+         *     page's own fields — status, refusal, health factor, verdict, totals,
+         *     boundary distance, as-of marks — without the per-leg and per-price
+         *     fan-out. The FULL `Position` (legs, price inputs, liquidation-price
+         *     solve, per-input provenance) stays on `/v1/address/{addr}`.
          */
         get: operations["getPositions"];
         put?: never;
@@ -190,17 +196,44 @@ export interface paths {
         /**
          * The durable chain-action feed — borrows, repays, supplies, withdrawals, liquidations
          * @description A cursor-paginated read of `position_events` — durably custodied,
-         *     reorg-aware chain actions, NEVER invented events. Rows are ordered
-         *     (block_number, tx_hash, log_index, seq) DESC across both engines.
+         *     reorg-aware chain actions, NEVER invented events.
+         *
+         *     THE TWO-MODE ORDERING LAW: block heights are incomparable ACROSS
+         *     chains (ETH ~25.6M and OP ~154M say nothing about time relative to
+         *     each other), so ordering depends on the request's scope:
+         *
+         *       * an ENGINE-SCOPED page (`engine` names exactly one engine, hence
+         *         one chain) is ordered (block_number, tx_hash, log_index, seq)
+         *         DESC — heights are comparable within one chain; exact and
+         *         complete.
+         *       * a CROSS-ENGINE page (no `engine`) is ordered by custodied
+         *         `block_time` DESC with the deterministic chain-aware tiebreak
+         *         (chain_id, block_number, tx_hash, log_index, seq) DESC; rows
+         *         WITHOUT a custodied block_time sort AFTER every timed row in a
+         *         DISCLOSED untimed tail — never interleaved by incomparable
+         *         heights, never given an invented time. The tail's internal order
+         *         is the tiebreak alone, NOT chronology.
+         *
+         *     Header custody can land between two pages of one cross-engine walk,
+         *     promoting a row from the untimed tail into the timed section: each
+         *     page is internally exact, but the feed is a live surface, not a
+         *     pinned batch.
+         *
+         *     `since_block` is meaningful ONLY engine-scoped: a height bound across
+         *     two chains with incomparable heights means nothing, and a
+         *     cross-engine request carrying it is refused with 400.
          *
          *     `type` is the closed DISPLAY vocabulary; `raw_type` is the engine's own
          *     event name, verbatim. Every raw event type either maps to a display
-         *     type or is EXPLICITLY bookkeeping-filtered from this feed (aToken
-         *     mints/burns/transfers, rate-index updates, residue zeroing, migration
-         *     genesis imports); parameter-change events are served by `/v1/params`,
-         *     not here. That mapping is total and welded to the closed per-engine
-         *     type sets — an unmapped event type is a service failure, not a silent
-         *     omission.
+         *     type or is EXPLICITLY excluded from this feed with its reason recorded
+         *     (see `EventDisplayType`); parameter-change events are served by
+         *     `/v1/params`, not here. That mapping is total and welded to the closed
+         *     per-engine type sets — an unmapped event type is a service failure,
+         *     not a silent omission.
+         *
+         *     `amount` is the engine's own CUSTODIED accounting delta, verbatim, and
+         *     `amount_unit` names its closed semantic unit — it is NOT a
+         *     display-ready token amount (see `EventAmountUnit`).
          *
          *     `block_time` is the header time of the event's block under block-header
          *     custody. It is NULL until the header is custodied — NEVER fabricated,
@@ -340,10 +373,58 @@ export interface paths {
          *     approximated. Committed artifacts name endpoints by environment
          *     variable only; this surface serves no endpoint URL and no DSN.
          *
+         *     THE TWO SUBJECTS (AMENDMENT 1): the manifest separates
+         *     `proof_subject` — the pinned, exactly-reproducible acceptance
+         *     evidence (the committed reconcile receipt and the identity it speaks
+         *     for) — from `live_subject` — the currently-serving batch's
+         *     watermarked identity. They are never one identity: a live batch must
+         *     never read as reconciled-exact, and the proof's exactness lives only
+         *     at its pin. `proof_subject.status` encodes the receipt's own strict
+         *     conjunction (see `ProofSubject`).
+         *
          *     Answers 200 even when no batch is servable: the manifest describes the
          *     DEPLOYMENT, and `substrate` states batch absence with its reason.
          */
         get: operations["getEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/batches/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One batch's permalink — envelope identity and servability status
+         * @description The permanent identity record of ONE risk batch: its materialization
+         *     key, substrate digest, counts and per-engine aggregate rollups, plus a
+         *     SERVABILITY verdict relative to the batch that is serving now. This is
+         *     the drawer-pin permalink: a batch id captured from any surface can be
+         *     resolved to the identity it had, for as long as retention keeps it.
+         *
+         *     Servability is a statement, not a filter:
+         *       * `newest_servable` — this batch is the one every live surface is
+         *         serving right now.
+         *       * `superseded_retained` — the batch is retained and COMPLETE, but a
+         *         newer servable batch exists; its rows are immutable history.
+         *       * `unservable_incomplete` — the batch's row exists but fails the
+         *         completeness predicate (a torn restore, a partial write); its
+         *         aggregates are WITHHELD (null) rather than served as a plausible
+         *         rollup of a book nobody may read.
+         *
+         *     A pruned or never-existing id is a 404 whose message DISCLOSES
+         *     retention: batches are pruned on a retention window, and "not found"
+         *     here means "not retained (or never existed)", never "there was no
+         *     such materialization".
+         */
+        get: operations["getBatch"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1024,11 +1105,22 @@ export interface components {
             engine: string;
             asset: components["schemas"]["Address"];
             symbol?: string;
+            /** @description The custodied index kind — `variable_borrow_index` / `liquidity_index` (Aave, per ReserveDataUpdated) or `borrow_index` (the Debt Manager's per-token interest index). */
             kind: string;
+            /**
+             * @description The value's own denomination, from the closed per-kind vocabulary:
+             *     `ray-1e27` for Aave's reserve indexes, `index-1e18` for the Debt
+             *     Manager's interest index (the USD-6 view of a normalized amount
+             *     is value × index ÷ 1e18). `unstated` is the fail-honest tag for a
+             *     kind outside the known vocabulary — the raw decimal still serves
+             *     verbatim, and no scale is invented for it.
+             * @enum {string}
+             */
+            scale: "ray-1e27" | "index-1e18" | "unstated";
             value: components["schemas"]["Decimal"];
             /**
              * Format: int64
-             * @description The index's OWN as-of. It updates only on ReserveDataUpdated and can trail the derive cursor.
+             * @description The index's OWN as-of. It updates only on its own admin/update event and can trail the derive cursor.
              */
             as_of_block: number;
             note: string;
@@ -1354,8 +1446,13 @@ export interface components {
             refusal: components["schemas"]["EngineRefusal"] | null;
             /** @description Rows in this engine's book on this batch, refused rows INCLUDED. NULL on a withheld engine, never 0. */
             total_positions: number | null;
-            /** @description The page, in `sort` order. Refused rows are rows here, exactly as they are in the aggregates. */
-            positions: components["schemas"]["Position"][];
+            /**
+             * @description The page, in `sort` order, as LEAN `PositionSummary` rows
+             *     (AMENDMENT 1/E) — the full `Position` stays on
+             *     `/v1/address/{addr}`. Refused rows are rows here, exactly as they
+             *     are in the aggregates.
+             */
+            positions: components["schemas"]["PositionSummary"][];
             /**
              * @description OPAQUE token for the next page, bound to `batch.id`; null on the
              *     last page. Presenting it after the batch is superseded as the
@@ -1363,6 +1460,67 @@ export interface components {
              */
             next_cursor: string | null;
             notes: string[];
+        };
+        /**
+         * @description A row's distance to ITS OWN engine's liquidation boundary, lean. The
+         *     exact rational scale factor (num/den) is the wire's statement;
+         *     rendering a percentage from it is display-precision work that belongs
+         *     to the consumer's display layer, never to eligibility decisions.
+         */
+        LiqDistance: {
+            /**
+             * @description `distance` — the factor-level closed-form solve holds; the exact
+             *     scale-factor rational is served. `breached` — the boundary is
+             *     behind the current price, or the engine's own verdict already
+             *     says liquidatable. `never` — no finite down-move on the axis
+             *     reaches the boundary. `none` — no distance is published (refused
+             *     row, no reconstructable solve, or an out-of-factor position);
+             *     `reason` names why when the service knows.
+             * @enum {string}
+             */
+            kind: "distance" | "breached" | "never" | "none";
+            /** @description Non-null exactly on kind `distance` — the boundary price multiple's exact numerator. */
+            scale_factor_num: components["schemas"]["NullableDecimal"];
+            scale_factor_den: components["schemas"]["NullableDecimal"];
+            /** @description The axis's leading factor asset, when a distance is served. */
+            factor_asset: components["schemas"]["Address"] | null;
+            factor_symbol?: string;
+            /** @description Why no distance is served (`never`/`none`), when known. Null otherwise — never invented. */
+            reason: string | null;
+        };
+        /**
+         * @description The lean `/v1/positions` row (AMENDMENT 1/E): engine, account, status,
+         *     named refusal, health factor, the engine's own strict verdict, totals
+         *     in the engine's OWN unit, boundary distance, and the as-of marks. The
+         *     FULL `Position` — legs, price inputs, the liquidation-price solve and
+         *     per-input provenance — is served by `/v1/address/{addr}`.
+         */
+        PositionSummary: {
+            engine: string;
+            account: components["schemas"]["Address"];
+            /** @enum {string} */
+            status: "computed" | "refused";
+            /** @description The scale of `total_collateral`/`total_debt` — the ENGINE's own decimals (Aave base 8, Debt Manager USD 6). */
+            value_decimals: number;
+            refusal: components["schemas"]["Refusal"] | null;
+            flags: string[];
+            health_factor: components["schemas"]["HealthFactor"] | null;
+            /** @description The Debt Manager's strict verdict. Null on Aave (the pool publishes a continuous health factor, not a strict boolean) and on refused rows — a withheld verdict, never "false". */
+            liquidatable: boolean | null;
+            /** @description The engine's OWN total at `value_decimals` — Aave's base-currency total, the Debt Manager's swept USD collateral value. Null stays null; never rendered as 0. */
+            total_collateral: components["schemas"]["NullableDecimal"];
+            /** @description The engine's OWN debt total at `value_decimals` — Aave's base-currency debt, the Debt Manager's borrowings. */
+            total_debt: components["schemas"]["NullableDecimal"];
+            liq_distance: components["schemas"]["LiqDistance"];
+            /** Format: int64 */
+            balances_block: number;
+            /** Format: int64 */
+            params_block: number;
+            /**
+             * Format: int64
+             * @description 0 on engines without a sweeper (Aave), and 0 for a Debt Manager account that has never been swept — an ABSENT sweep, rendered visibly, never as "swept at genesis".
+             */
+            sweep_block: number;
         };
         /**
          * @description One PERSISTED batch row for the address on one engine. A refused batch
@@ -1425,10 +1583,22 @@ export interface components {
             notes: string[];
         };
         /**
-         * @description The closed DISPLAY vocabulary. Every raw event type in each engine's
-         *     closed set either maps here or is EXPLICITLY bookkeeping-filtered from
-         *     the feed — the mapping is total, and an unmapped raw type is a service
-         *     failure, never a silent omission.
+         * @description The closed DISPLAY vocabulary — this feed's slice of the store's wider
+         *     display classification. Every raw event type in each engine's closed
+         *     set either maps here or is EXPLICITLY excluded with its reason
+         *     recorded — the mapping is total, and an unmapped raw type is a
+         *     service failure, never a silent omission.
+         *
+         *     THE VOCABULARY BRIDGE (owned by the server's closed maps, welded to
+         *     the store's classification): the store classifies every raw type into
+         *     display classes; this contract deliberately narrows the FEED to user
+         *     chain actions. The store classes `transfer` (aToken balance transfers
+         *     between users), `migration` (V1→V2 migration-genesis imports) and
+         *     `config` (parameter changes) are NOT feed rows here — transfers and
+         *     migration imports are treated as bookkeeping on this surface, and
+         *     parameter changes are served by `/v1/params`. The store's `bad_debt`
+         *     class serves here as `deficit_created`. An unmapped class reaching a
+         *     served row is a loud 500 (vocabulary drift), never a mislabeled row.
          *
          *     Mapping: `borrow` ⇐ aave_borrow, borrow · `repay` ⇐ aave_repay, repay ·
          *     `supply` ⇐ aave_supply, supplied · `withdraw` ⇐ aave_withdraw,
@@ -1439,34 +1609,80 @@ export interface components {
          *     collateral toggles · `deficit_created` ⇐ aave_deficit_created, the
          *     pool's own bad-debt realization event.
          *
-         *     Bookkeeping-filtered (never feed rows): aToken mints, burns and
-         *     transfers (balance mechanics behind a supply/withdraw/liquidation),
-         *     rate-index updates, Debt Manager residue zeroing and migration-genesis
-         *     imports. Parameter-change events are served by `/v1/params`, not here.
+         *     Store-side bookkeeping (never display rows anywhere): aToken mints,
+         *     burns and record-only transfers (balance mechanics behind a
+         *     supply/withdraw/liquidation), rate-index updates, Debt Manager residue
+         *     zeroing, and the liquidation_collateral seizure fan-out (consumed by
+         *     the liquidation extract).
          * @enum {string}
          */
         EventDisplayType: "borrow" | "repay" | "supply" | "withdraw" | "liquidation" | "collateral_enabled" | "collateral_disabled" | "deficit_created";
+        /**
+         * @description The closed SEMANTIC UNIT of a row's `amount` — established from the
+         *     deriver source per raw type, never assumed (verbatim from the store's
+         *     unit vocabulary). The engines' internal accounting units are NOT
+         *     user-display token amounts:
+         *
+         *       * `dm_normalized_debt` — Debt Manager normalized debt units (18-dec
+         *         normalized; the USD-6 view is value × interest index ÷ 1e18 at
+         *         the event's index).
+         *       * `aave_scaled` — Aave ray-scaled aToken/variableDebtToken units
+         *         (nominal token amount = rayMul(scaled, live index)).
+         *       * `none` — the row is record-only (`amount` is null); any amounts it
+         *         carries are payload facts with their own documented units.
+         *       * `opaque` — the fail-honest tag for a delta whose unit could not be
+         *         established from the deriver source. Render the raw integer
+         *         verbatim; even decimals would be an interpretation.
+         *
+         *     A renderer that showed an `amount` as a token amount would misstate
+         *     both engines; this tag is what lets it be labeled honestly. Nothing
+         *     here is ever a USD figure.
+         * @enum {string}
+         */
+        EventAmountUnit: "none" | "dm_normalized_debt" | "aave_scaled" | "opaque";
         SeizedCollateral: {
             asset: components["schemas"]["Address"];
             symbol?: string;
             amount: components["schemas"]["Decimal"];
             decimals: number;
+            /**
+             * @description The realized bonus the CONTRACT ITSELF recorded for this seizure
+             *     element, verbatim from the event payload, in the Debt Manager's
+             *     OWN 100e18 percent denomination — NOT bps, and never
+             *     unit-converted here. Null on Aave rows: the pool publishes no
+             *     per-seizure realized bonus.
+             */
+            bonus: components["schemas"]["NullableDecimal"];
         };
         /**
          * @description The typed extract from a liquidation event's own structured payload.
          *     Nothing here is inferred: a field the payload does not establish is
-         *     null, never estimated.
+         *     null, never estimated. Engine-specific fields are null on the other
+         *     engine's rows — the two engines' liquidation semantics are never
+         *     blended.
          */
         LiquidationDetail: {
             liquidator: components["schemas"]["Address"];
             debt_asset: components["schemas"]["Address"] | null;
             debt_repaid: components["schemas"]["NullableDecimal"];
             debt_decimals: number | null;
-            /** @description Every collateral asset seized in this liquidation, one row per asset (the Debt Manager's seizure fan-out folds in here). */
+            /** @description The Debt Manager's own pre-liquidation debt figure (USD 6-dec), verbatim from the event payload. Null on Aave rows — the pool's event carries no such figure. */
+            before_debt_usd: components["schemas"]["NullableDecimal"];
+            /** @description The Debt Manager's interest index AT THIS EVENT, verbatim from the payload (1e18 scale; the USD-6 view of a normalized amount is value × index ÷ 1e18). Null on Aave rows. */
+            interest_index: components["schemas"]["NullableDecimal"];
+            /**
+             * @description Aave only — true when this liquidation shares its transaction
+             *     with a DeficitCreated event (the debt write-off lives on the
+             *     `deficit_created` row, not this one). Null on Debt Manager rows:
+             *     the engine has no deficit-pairing concept, and null is a withheld
+             *     statement, never "false".
+             */
+            deficit_paired: boolean | null;
+            /** @description Every collateral asset seized in this liquidation, one row per asset (the Debt Manager's seizure fan-out folds in here; a zero-amount tuple element enumerates untouched collateral and is not a seizure row). */
             seized: components["schemas"]["SeizedCollateral"][];
-            /** @description The bonus the liquidator actually realized, in bps, when the payload's amounts and the event-time prices establish it. Null otherwise — never estimated. */
+            /** @description The bonus the liquidator actually realized, in bps, ONLY when the payload's own facts establish it in bps. Neither engine's payload does today (the Debt Manager records its realized bonus per seizure element in its 100e18 denomination — served verbatim on `seized[].bonus` — and Aave's would need event-time prices this service does not re-read), so it is null — never estimated, never unit-converted into a plausible-looking number. */
             realized_bonus_bps: components["schemas"]["NullableDecimal"];
-            /** @description The configured bonus AT THIS EVENT's effective params (from the param timeline), not today's. Null when param custody does not cover the event's block. */
+            /** @description The configured bonus AT THIS EVENT's effective params (from the param timeline), not today's. Aave publishes bps; the Debt Manager's denomination is 100e18, not bps, so its rows serve null rather than a silent unit conversion. Null too when param custody does not cover the event's block. */
             configured_bonus_bps: components["schemas"]["NullableDecimal"];
             note: string;
         };
@@ -1499,8 +1715,21 @@ export interface components {
             /** @description Null on rows that carry no asset (e.g. a collateral-usage toggle). */
             asset: components["schemas"]["Address"] | null;
             symbol?: string;
-            /** @description The SIGNED custodied delta in the asset's own units (a repay is negative on the debt side). Null on record-only rows. Zero and null are different statements. */
+            /**
+             * @description The SIGNED custodied delta in the ENGINE's own ACCOUNTING unit,
+             *     verbatim — named by `amount_unit`, NOT a display-ready token
+             *     amount (a repay is negative on the debt side). Null on
+             *     record-only rows. Zero and null are different statements.
+             */
             amount: components["schemas"]["NullableDecimal"];
+            /** @description The closed semantic unit of `amount` — the store's own per-raw-type classification, verbatim. */
+            amount_unit: components["schemas"]["EventAmountUnit"];
+            /**
+             * @description Null on every row this contract serves: `amount` is the engine's
+             *     own accounting delta (see `amount_unit`), and asserting a token
+             *     display scale for it would misstate both engines. "No display
+             *     scale is asserted for this figure."
+             */
             amount_decimals: number | null;
             /** @description The typed per-class extract. Non-null exactly when `type` is `liquidation`. */
             liquidation: components["schemas"]["LiquidationDetail"] | null;
@@ -1520,7 +1749,14 @@ export interface components {
             filter: components["schemas"]["EventFilter"];
             /** @description The page size actually applied, echoed so a defaulted request still states it. */
             limit: number;
-            /** @description Ordered (block_number, tx_hash, log_index, seq) DESC across engines. Two chains' block numbers are not comparable as time. */
+            /**
+             * @description Engine-scoped pages: ordered (block_number, tx_hash, log_index,
+             *     seq) DESC — exact within one chain. Cross-engine pages: ordered
+             *     by custodied block_time DESC with the chain-aware tiebreak; rows
+             *     without a custodied time form a DISCLOSED untimed tail AFTER
+             *     every timed row. Two chains' block numbers are never comparable
+             *     as time.
+             */
             events: components["schemas"]["ChainEvent"][];
             /** @description OPAQUE keyset token for the next page; null when the feed is exhausted under the filter. */
             next_cursor: string | null;
@@ -1630,6 +1866,14 @@ export interface components {
             to_block: number | null;
             /** Format: int64 */
             step: number | null;
+            /**
+             * @description The CUSTODY CHAINS this answer consulted, by chain id — the
+             *     response's chain identity. Every served series names its own
+             *     `chain_id` from this set; an empty `series` still states exactly
+             *     where custody was looked for, so "no observations" can never be
+             *     mistaken for "one chain was never asked".
+             */
+            chains: number[];
             /** @description One series per (chain_id, source) key holding rows for this asset. Empty is a statement about CUSTODY, not a claim the asset has no price. */
             series: components["schemas"]["PriceSeries"][];
             notes: string[];
@@ -1691,6 +1935,23 @@ export interface components {
              * @description The engine's balances watermark at capture time — the bucket's own as-of, never a chain head observed later.
              */
             last_block: number;
+            /**
+             * Format: int64
+             * @description The COMPLETE risk batch this bucket observed. The batch itself may since have been pruned by retention; the id remains the observation's provenance.
+             */
+            batch_id: number;
+            /** @description The observed batch's deterministic materialization key, copied at write time — it survives batch retention, so the observation stays attributable after the batch is pruned. */
+            materialization_key: string;
+            /**
+             * Format: int64
+             * @description The engine's acknowledged reorg epoch in the observed batch's watermark vector, copied at write time.
+             */
+            acked_epoch: number;
+            /**
+             * Format: int64
+             * @description The chain's max recorded reorg epoch at the observed batch's compute time. A gap above `acked_epoch` means the bucket was captured under an unacknowledged reorg — the reorg-honesty stamp pair travels with the point.
+             */
+            max_epoch_at_compute: number;
             /** @description True when the engine's whole book was withheld at capture time. Totals are then null FOR THAT REASON, never 0. */
             refused: boolean;
             /** @description The engine refusal code behind a withheld bucket (e.g. FLAG_CUSTODY_UNPROVEN). Null when `refused` is false. */
@@ -1717,6 +1978,59 @@ export interface components {
             step_seconds: number | null;
             /** @description Oldest first. */
             points: components["schemas"]["ObservatorySeriesPoint"][];
+            notes: string[];
+        };
+        /**
+         * @description One engine's persisted rollup on one batch, lean. A WITHHELD engine's
+         *     aggregate serves NULL totals and names its refusal — the persisted
+         *     zeros behind a refusal mean WITHHELD, and republishing them as values
+         *     is exactly how an unproven book becomes "nothing at risk".
+         */
+        BatchAggregate: {
+            engine: string;
+            value_decimals: number;
+            positions: number;
+            computed_positions: number;
+            refused_positions: number;
+            flagged_positions: number;
+            /** @description Null on a withheld engine — a withheld book has no publishable liquidatable count, and 0 would be a claim. */
+            liquidatable_positions: number | null;
+            total_collateral: components["schemas"]["NullableDecimal"];
+            total_debt: components["schemas"]["NullableDecimal"];
+            refusal: components["schemas"]["EngineRefusal"] | null;
+        };
+        /**
+         * @description One batch's permanent identity record. Everything here is the batch's
+         *     OWN immutable row — nothing is recomputed — plus the live servability
+         *     verdict relative to the newest servable batch.
+         */
+        BatchResponse: {
+            /** Format: date-time */
+            served_at: string;
+            /** Format: int64 */
+            batch_id: number;
+            /** @enum {string} */
+            servability: "newest_servable" | "superseded_retained" | "unservable_incomplete";
+            servability_note: string;
+            /** Format: date-time */
+            computed_at: string;
+            producer: string;
+            status: string;
+            position_count: number;
+            refused_count: number;
+            flagged_count: number;
+            /** @description The batch's deterministic materialization identity — the same key /v1/evidence publishes for the serving batch. */
+            materialization_key: string;
+            /** @description Computed over the batch's INPUTS. Empty string when the batch predates substrate-digest custody — an honest gap, not a digest. */
+            substrate_digest: string;
+            /**
+             * @description The batch's per-engine rollups. NULL (not empty) on
+             *     `unservable_incomplete` — an incomplete batch's rollups may be
+             *     torn, and this surface withholds them with the reason in
+             *     `servability_note` rather than serving a plausible-looking
+             *     rollup.
+             */
+            aggregates: components["schemas"]["BatchAggregate"][] | null;
             notes: string[];
         };
         /**
@@ -1777,12 +2091,62 @@ export interface components {
             path: string;
             note: string;
         };
+        /**
+         * @description THE SPLIT IS THE PRODUCT (AMENDMENT 1): a manifest carries TWO
+         *     subjects and they are never one identity. The PROOF subject is the
+         *     pinned, exactly-reproducible acceptance evidence — the committed
+         *     reconcile receipt (served whole in `reconcile`) plus the build/config
+         *     identity it speaks for. `status` is the server's evaluation of the
+         *     receipt's OWN strict conjunction, and the same conjunction is
+         *     re-derivable from the served `reconcile` fields — a consumer that
+         *     finds the two in contradiction must render the contradiction loudly,
+         *     never the badge:
+         *
+         *       accepted    ⇔ result "pass" AND exit_code 0 AND gated_drift 0 AND
+         *                     gated_exact == gated_rows AND every weld
+         *                     rows_exact == rows_compared
+         *       rejected    — a receipt exists but fails the conjunction (an
+         *                     internally inconsistent receipt — a "pass" with
+         *                     drift — is REJECTED, never laundered into a proof);
+         *                     `detail` names the violated conjunct
+         *       unavailable — no committed receipt artifact in this deployment;
+         *                     `detail` carries the reason
+         *
+         *     The proof speaks for its pin and ONLY its pin: the currently-serving
+         *     batch is the LIVE subject and never inherits this exactness.
+         */
+        ProofSubject: {
+            /** @enum {string} */
+            status: "accepted" | "rejected" | "unavailable";
+            /** @description Why the receipt is rejected or unavailable — the violated conjunct or the absence reason. Empty exactly when `status` is `accepted`. */
+            detail: string;
+            /** @description The receipt's own `comparison_sha256` — the proof's pin. Non-null whenever a receipt is present (accepted OR rejected); null when unavailable. */
+            pin: string | null;
+        };
+        /**
+         * @description The LIVE subject: the currently-serving batch's identity (`substrate`
+         *     carries it — batch id, materialization key, substrate digest) under
+         *     its watermark vector. It is OPERATIONAL unconditionally — it never
+         *     wears the proof subject's exactness, and no comparator applies
+         *     between the two subjects.
+         */
+        LiveSubject: {
+            /**
+             * @description `serving` — `substrate` names the newest servable batch. `no_batch` — no complete batch is servable; a first-class state, not an error.
+             * @enum {string}
+             */
+            status: "serving" | "no_batch";
+            /** @description Why no batch is servable (`substrate_unavailable_reason`, mirrored). Empty exactly when `status` is `serving`. */
+            reason: string;
+        };
         EvidenceResponse: {
             /** Format: date-time */
             served_at: string;
             service: components["schemas"]["Service"];
             /** @description The build's VCS revision (Go build stamp), `-dirty` suffixed when the working tree was modified. NULL when the build carries no stamp — never guessed. */
             commit: string | null;
+            proof_subject: components["schemas"]["ProofSubject"];
+            live_subject: components["schemas"]["LiveSubject"];
             /** @description Null when no batch is servable; `substrate_unavailable_reason` then says why. */
             substrate: components["schemas"]["SubstrateRef"] | null;
             substrate_unavailable_reason?: string;
@@ -2007,91 +2371,26 @@ export interface operations {
                      *             "note": "compare against 1e18 ON THE WAD; do not re-derive a float from num/den to decide eligibility."
                      *           },
                      *           "liquidatable": null,
-                     *           "total_collateral_base": "800000000000",
-                     *           "total_debt_base": "600000000000",
-                     *           "weighted_lt_sum": "6480000000000000",
-                     *           "avg_lt_bps": "8100",
-                     *           "collateral_value_usd": null,
-                     *           "max_borrow_lt": null,
-                     *           "borrowings": null,
-                     *           "legs": [
-                     *             {
-                     *               "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-                     *               "symbol": "weETH",
-                     *               "decimals": 18,
-                     *               "live_debt": null,
-                     *               "live_collateral": "2000000000000000000",
-                     *               "debt_base": null,
-                     *               "collateral_base": "800000000000",
-                     *               "weighted_lt": "6480000000000000",
-                     *               "used_as_collateral": true,
-                     *               "debt_index_block": null,
-                     *               "collateral_index_block": 25635618,
-                     *               "amount": null,
-                     *               "value_usd": null,
-                     *               "max_borrow_contribution": null,
-                     *               "liq_threshold": "8100",
-                     *               "liq_bonus": "10500"
-                     *             }
-                     *           ],
-                     *           "price_inputs": [
-                     *             {
-                     *               "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-                     *               "chain_id": 1,
-                     *               "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
-                     *               "provenance": "adapter-output",
-                     *               "value": "400000000000",
-                     *               "decimals": 8,
-                     *               "block_number": 25635610,
-                     *               "source_as_of": "2026-07-29T09:56:30Z",
-                     *               "budget_seconds": 180,
-                     *               "verdict": "stale",
-                     *               "age_seconds": 210,
-                     *               "fresh": false,
-                     *               "note": "older than its budget but within the ceiling: COMPUTED AND FLAGGED, and the flag propagates into every aggregate containing it."
-                     *             }
-                     *           ],
-                     *           "as_of": {
-                     *             "balances_block": 25635618,
-                     *             "params_block": 25635600,
-                     *             "sweep_block": 0,
-                     *             "oldest_price_input": "2026-07-29T09:56:30Z",
-                     *             "stale_price_inputs": true,
-                     *             "note": "each leg additionally carries its OWN rate-index as-of block."
-                     *           },
-                     *           "liquidation_price": {
-                     *             "in_factor": true,
-                     *             "never_liquidatable": false,
+                     *           "total_collateral": "800000000000",
+                     *           "total_debt": "600000000000",
+                     *           "liq_distance": {
+                     *             "kind": "distance",
                      *             "scale_factor_num": "6000000000000000",
                      *             "scale_factor_den": "6480000000000000",
-                     *             "already_breached": false,
-                     *             "prices": [
-                     *               {
-                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-                     *                 "current_price": "400000000000",
-                     *                 "price_decimals": 8,
-                     *                 "price_floor": "370370370370",
-                     *                 "lowest_healthy_price": "370370370371"
-                     *               }
-                     *             ],
-                     *             "factor_assets": [
-                     *               "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
-                     *             ],
-                     *             "held_assets": [
-                     *               "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
-                     *             ],
-                     *             "boundary_is_healthy": true,
-                     *             "per_token_floor_omitted": false,
-                     *             "diagnostic": false,
-                     *             "axis": "eth_usd",
-                     *             "note": "at exactly this price the position is HEALTHY — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
-                     *           }
+                     *             "factor_asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *             "factor_symbol": "weETH",
+                     *             "reason": null
+                     *           },
+                     *           "balances_block": 25635618,
+                     *           "params_block": 25635600,
+                     *           "sweep_block": 0
                      *         }
                      *       ],
                      *       "next_cursor": "MS5saXFfZGlzdGFuY2UuMQ",
                      *       "notes": [
                      *         "every row on this page was drawn from batch 1; `next_cursor` is bound to that batch and answers 409 once it is superseded as the newest servable batch.",
-                     *         "refused rows are ROWS: they stay on the page, named, and counted."
+                     *         "refused rows are ROWS: they stay on the page, named, and counted.",
+                     *         "rows are the lean PositionSummary; the FULL Position (legs, price inputs, liquidation-price solve) is served by /v1/address/{addr}."
                      *       ]
                      *     }
                      */
@@ -2340,6 +2639,10 @@ export interface operations {
                      *         {
                      *           "bucket_start": "2026-07-29T08:00:00Z",
                      *           "last_block": 154794000,
+                     *           "batch_id": 41,
+                     *           "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+                     *           "acked_epoch": 0,
+                     *           "max_epoch_at_compute": 0,
                      *           "refused": false,
                      *           "refusal_code": null,
                      *           "accounts": 3,
@@ -2352,8 +2655,9 @@ export interface operations {
                      *               "engine": "debt_manager",
                      *               "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
                      *               "symbol": "USDC",
-                     *               "kind": "borrow_apy",
-                     *               "value": "50000000000000000",
+                     *               "kind": "borrow_index",
+                     *               "scale": "index-1e18",
+                     *               "value": "1050000000000000000",
                      *               "as_of_block": 154793990,
                      *               "note": "as of its OWN last update, which can trail the bucket."
                      *             }
@@ -2362,6 +2666,10 @@ export interface operations {
                      *         {
                      *           "bucket_start": "2026-07-29T09:00:00Z",
                      *           "last_block": 154796552,
+                     *           "batch_id": 42,
+                     *           "materialization_key": "e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025f0b3",
+                     *           "acked_epoch": 0,
+                     *           "max_epoch_at_compute": 0,
                      *           "refused": true,
                      *           "refusal_code": "FLAG_CUSTODY_UNPROVEN",
                      *           "accounts": null,
@@ -2397,7 +2705,12 @@ export interface operations {
                 account?: string;
                 /** @description Display-vocabulary filter, comma-separated. Absent means every display type. */
                 types?: components["schemas"]["EventDisplayType"][];
-                /** @description Inclusive lower bound on block_number, applied per chain. */
+                /**
+                 * @description Inclusive lower bound on block_number. ENGINE-SCOPED ONLY: it
+                 *     requires `engine`, because a height bound across two chains with
+                 *     incomparable heights is meaningless. A cross-engine request
+                 *     carrying it is a 400, never a silently misapplied filter.
+                 */
                 since_block?: number;
             };
             header?: never;
@@ -2436,24 +2749,29 @@ export interface operations {
                      *           "account": "0xAAaA000000000000000000000000000000000001",
                      *           "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
                      *           "symbol": "USDC",
-                     *           "amount": "-2500000000",
-                     *           "amount_decimals": 6,
+                     *           "amount": "-2499100000",
+                     *           "amount_unit": "aave_scaled",
+                     *           "amount_decimals": null,
                      *           "liquidation": {
                      *             "liquidator": "0xBBbB000000000000000000000000000000000002",
                      *             "debt_asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
                      *             "debt_repaid": "2500000000",
                      *             "debt_decimals": 6,
+                     *             "deficit_paired": false,
+                     *             "before_debt_usd": null,
+                     *             "interest_index": null,
                      *             "seized": [
                      *               {
                      *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
                      *                 "symbol": "weETH",
                      *                 "amount": "656250000000000000",
-                     *                 "decimals": 18
+                     *                 "decimals": 18,
+                     *                 "bonus": null
                      *               }
                      *             ],
-                     *             "realized_bonus_bps": "500",
+                     *             "realized_bonus_bps": null,
                      *             "configured_bonus_bps": "500",
-                     *             "note": "extracted from the event's own structured payload; realized bonus is compared against the configured bonus AT THIS EVENT's effective params, not today's."
+                     *             "note": "extracted from the event's own structured payload; amounts are in each asset's own token units. `configured_bonus_bps` is the ledger's bonus AT THIS EVENT's effective params; `realized_bonus_bps` would need event-time prices this service does not re-read, so it is null — never estimated."
                      *           }
                      *         },
                      *         {
@@ -2469,15 +2787,18 @@ export interface operations {
                      *           "account": "0xccCc000000000000000000000000000000000003",
                      *           "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
                      *           "symbol": "USDC",
-                     *           "amount": "1200000000",
-                     *           "amount_decimals": 6,
+                     *           "amount": "1199403000",
+                     *           "amount_unit": "dm_normalized_debt",
+                     *           "amount_decimals": null,
                      *           "liquidation": null
                      *         }
                      *       ],
                      *       "next_cursor": "MTU0Nzk2NDkwLjB4NTFmMC4zLjA",
                      *       "notes": [
-                     *         "`block_time` is null until the block's header is custodied — header time is chain-asserted or absent, never fabricated. Render the block number in the meantime.",
-                     *         "ordering is (block_number, tx_hash, log_index, seq) DESC across engines; the block numbers of two chains are not comparable as TIME."
+                     *         "`block_time` is null until the block's header is custodied — header time is chain-asserted or absent, never fabricated, and no database clock is ever substituted. Render the block number while it is null.",
+                     *         "engine-scoped pages order by (block_number, tx_hash, log_index, seq) DESC — exact within one chain. Cross-engine pages order by custodied block_time DESC; rows without a custodied time sort AFTER every timed row (their order there is a deterministic tiebreak, NOT chronology — two chains' block heights are incomparable as time).",
+                     *         "`amount` is the engine's own CUSTODIED accounting delta, verbatim, and `amount_unit` names its closed semantic unit: normalized debt units on the Debt Manager (USD-6 view = value x interest index / 1e18), ray-scaled token units on Aave. It is not a display-ready token amount, which is why `amount_decimals` is null.",
+                     *         "a cross-engine page's untimed tail can shrink between pages while header backfill runs: a row acquiring its time moves into the timed section. Each page is internally exact; the feed is a live surface, not a pinned batch."
                      *       ]
                      *     }
                      */
@@ -2618,6 +2939,10 @@ export interface operations {
                      *       "from_block": 25635500,
                      *       "to_block": null,
                      *       "step": null,
+                     *       "chains": [
+                     *         1,
+                     *         10
+                     *       ],
                      *       "series": [
                      *         {
                      *           "chain_id": 1,
@@ -2877,6 +3202,15 @@ export interface operations {
                      *         "seizure_model": "pro-rata-over-counted-collateral"
                      *       },
                      *       "commit": "748c09d1e2f3",
+                     *       "proof_subject": {
+                     *         "status": "accepted",
+                     *         "detail": "",
+                     *         "pin": "5f0b3e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025"
+                     *       },
+                     *       "live_subject": {
+                     *         "status": "serving",
+                     *         "reason": ""
+                     *       },
                      *       "substrate": {
                      *         "batch_id": 1,
                      *         "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
@@ -2926,6 +3260,92 @@ export interface operations {
                      *     }
                      */
                     "application/json": components["schemas"]["EvidenceResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getBatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The batch id, as served by any batch envelope. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The batch's identity and servability. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "batch_id": 1,
+                     *       "servability": "newest_servable",
+                     *       "servability_note": "this batch is the newest servable batch — every live surface is serving it.",
+                     *       "computed_at": "2026-07-29T10:00:00Z",
+                     *       "producer": "riskd",
+                     *       "status": "complete",
+                     *       "position_count": 4,
+                     *       "refused_count": 2,
+                     *       "flagged_count": 1,
+                     *       "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+                     *       "substrate_digest": "b23c2c4c182300512dcefa20f0fbf3740ac24077271059e1bd32511fec5f7ab5",
+                     *       "aggregates": [
+                     *         {
+                     *           "engine": "aave_v3_etherfi",
+                     *           "value_decimals": 8,
+                     *           "positions": 2,
+                     *           "computed_positions": 1,
+                     *           "refused_positions": 1,
+                     *           "flagged_positions": 1,
+                     *           "liquidatable_positions": 0,
+                     *           "total_collateral": "800000000000",
+                     *           "total_debt": "600000000000",
+                     *           "refusal": null
+                     *         },
+                     *         {
+                     *           "engine": "debt_manager",
+                     *           "value_decimals": 6,
+                     *           "positions": 2,
+                     *           "computed_positions": 1,
+                     *           "refused_positions": 1,
+                     *           "flagged_positions": 0,
+                     *           "liquidatable_positions": 1,
+                     *           "total_collateral": "4000000000",
+                     *           "total_debt": "4620000000",
+                     *           "refusal": null
+                     *         }
+                     *       ],
+                     *       "notes": [
+                     *         "this record is the batch's IDENTITY, not its rows: per-position pages are served batch-stable by /v1/positions while the batch is newest-servable.",
+                     *         "a withheld engine's aggregate serves NULL totals and names its refusal — persisted zeros under a refusal mean WITHHELD, never an empty healthy book."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["BatchResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            /**
+             * @description The batch id is not retained: either retention pruned it, or no
+             *     such batch ever existed — the message states the retention
+             *     disclosure. This is a statement about RETENTION, never a claim
+             *     that the materialization did not happen.
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             429: components["responses"]["RateLimited"];

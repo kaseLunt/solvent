@@ -44,6 +44,8 @@ import { ContractInvariantError } from "./errors.js";
 import type {
   Leg,
   Position,
+  PositionsResponse,
+  PositionSummary,
   Projection,
   ProjectionHorizon,
   Scenario,
@@ -159,6 +161,21 @@ export interface RefinedScenario extends Omit<Scenario, "results"> {
   results: RefinedScenarioResult[];
 }
 
+/**
+ * A lean `/v1/positions` row with `liquidatable` sealed into
+ * `liquidation_verdict` — the SAME law as `RefinedPosition`, applied to the
+ * `PositionSummary` shape the 1.2.0 contract serves on the page (AMENDMENT
+ * 1/E). The summary carries no legs, so there is nothing else to refine.
+ */
+export interface RefinedPositionSummary extends Omit<PositionSummary, "liquidatable"> {
+  liquidation_verdict: LiquidationVerdict;
+}
+
+/** A positions page whose rows are refined. */
+export interface RefinedPositionsResponse extends Omit<PositionsResponse, "positions"> {
+  positions: RefinedPositionSummary[];
+}
+
 // ---------------------------------------------------------------------------
 // The structure mappers. Destructure-rest, so the raw keys are absent at
 // runtime, not merely retyped; everything outside the class passes through
@@ -207,6 +224,21 @@ export function refineScenarioResult(result: ScenarioResult): RefinedScenarioRes
 export function refineScenario(scenario: Scenario): RefinedScenario {
   const { results, ...rest } = scenario;
   return { ...rest, results: results.map(refineScenarioResult) };
+}
+
+export function refinePositionSummary(row: PositionSummary): RefinedPositionSummary {
+  const { liquidatable, ...rest } = row;
+  return { ...rest, liquidation_verdict: liquidationVerdict(liquidatable) };
+}
+
+/**
+ * Refine one positions page: rows come back with the sealed verdict union and
+ * WITHOUT the raw nullable-boolean field — the primary `positions()` method's
+ * body. The unrefined wire body stays behind `positionsRaw()`.
+ */
+export function refinePositionsResponse(body: PositionsResponse): RefinedPositionsResponse {
+  const { positions, ...rest } = body;
+  return { ...rest, positions: positions.map(refinePositionSummary) };
 }
 
 // ---------------------------------------------------------------------------
