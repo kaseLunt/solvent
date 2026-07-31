@@ -1,28 +1,13 @@
 import type { Metadata } from "next";
-import { SurfacePlaceholder } from "@/components/SurfacePlaceholder";
+import { BookSurface } from "./BookSurface";
 
 export const metadata: Metadata = { title: "Book" };
 
+/**
+ * The Book route (W1). All data arrives client-side through @solvent/client
+ * (and lib/positions for the C1 /v1/positions seam) — nothing is fetched at
+ * build time, so a static shell never bakes in a stale batch.
+ */
 export default function BookPage() {
-  return (
-    <SurfacePlaceholder
-      eyebrow="1 · Book"
-      name="Book"
-      description={
-        <>
-          The whole position set, one glance: per-engine stat rows with coverage denominators,
-          HF histograms on their own comparators, the liquidation waterfall, the cursor-paginated
-          position table, and the risk map. Refused rows stay visible — an honest book shows what
-          it refuses to price.
-        </>
-      }
-      fedBy={
-        <>
-          <b>GET /v1/book</b> · <b>GET /v1/positions</b> (batch-stable cursor) · updates via{" "}
-          <b>SSE event: batch</b>
-        </>
-      }
-      wave="W1"
-    />
-  );
+  return <BookSurface />;
 }

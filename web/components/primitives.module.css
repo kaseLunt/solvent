@@ -70,8 +70,12 @@
   background: var(--ok);
 }
 
+/* Warn is an OUTLINED square (design ruling, W1): warn/ok must not differ by
+ * hue alone, so the warn swatch differs in FORM — 1.5px --warn border,
+ * transparent fill — while ok/crit stay filled. */
 .sev.warn {
-  background: var(--warn);
+  background: transparent;
+  border: 1.5px solid var(--warn);
 }
 
 .sev.crit {

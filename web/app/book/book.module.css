@@ -1,0 +1,384 @@
+/* Book surface (W1) — the mockup's Book section translated onto the scaffold:
+ * dense panels, mono captions, severity as color + form, refusals styled as
+ * first-class UI. Only book-specific layout lives here; atoms come from the
+ * shared component modules. */
+
+.head {
+  max-width: 720px;
+  margin-bottom: var(--sp-5);
+}
+
+.head h1 {
+  font-size: var(--fs-h2);
+  letter-spacing: var(--track-tight);
+  margin: 0 0 8px;
+}
+
+.head p {
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  margin: 0;
+}
+
+.section {
+  margin: 0 0 var(--sp-6);
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 10px;
+}
+
+.sectionHead h2 {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  margin: 0;
+}
+
+.sectionNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- per-engine stat rows ---- */
+
+.engineBlock {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-3);
+}
+
+.engineHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.statrow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-3);
+}
+
+@media (max-width: 800px) {
+  .statrow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.unitNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin: 10px 0 0;
+}
+
+/* ---- panels (histogram / waterfall / census) ---- */
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+@media (max-width: 900px) {
+  .panelGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.panelHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+
+.panelHead .comparator {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--accent);
+}
+
+.panelBody {
+  padding: var(--sp-4);
+}
+
+.panelNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin: 10px 0 0;
+}
+
+.emptyReason {
+  padding: var(--sp-5);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-3);
+}
+
+/* ---- warning / refusal / notice strips ---- */
+
+.warnStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+}
+
+.warnStrip b {
+  color: var(--warn);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+}
+
+.refusalStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-sm);
+  background: var(--refused-bg);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+}
+
+.notice b {
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+}
+
+/* ---- the warn-band disclosure (design ruling, W1) ---- */
+
+.warnDisclosure {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.warnDisclosure i {
+  font-style: normal;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--warn);
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+
+/* ---- positions controls ---- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  margin-bottom: var(--sp-3);
+}
+
+.controlGroup {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.controlLabel {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-right: 4px;
+}
+
+.chipButton {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--panel);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chipButton:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chipButton.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--chip-bg);
+}
+
+/* ---- histogram svg ---- */
+
+.histLabel {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-3);
+}
+
+.histCount {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-2);
+}
+
+.histBar {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+.histBarEligible {
+  fill: var(--crit);
+}
+
+.histBaseline {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.histAside {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.histAside .badge {
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-xs);
+  padding: 1px 7px;
+  color: var(--ink-2);
+}
+
+/* ---- waterfall ---- */
+
+.heldFlat {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.heldFlat li {
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+}
+
+/* ---- risk map ---- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: baseline;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.legendSwatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: baseline;
+}
+
+.legendSwatch.ok {
+  background: var(--ok);
+}
+
+.legendSwatch.crit {
+  background: var(--crit);
+}
+
+.legendSwatch.dimmed {
+  background: var(--ink-3);
+}
+
+/* the warn legend swatch mirrors the ruling's outlined form */
+.legendSwatch.warn {
+  background: transparent;
+  border: 1.5px solid var(--warn);
+}
+
+/* ---- footer status fragments ---- */
+
+.footStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: baseline;
+}

@@ -6,24 +6,25 @@ import { PostureRibbon } from "./PostureRibbon";
 import { ThemeToggle } from "./ThemeToggle";
 import styles from "./header.module.css";
 
-/** The four primary surfaces (spec §3) in tab order. */
+/**
+ * The five primary surfaces in tab order (design ruling, W1): the Lab is the
+ * flagship demo surface and cannot live in the overflow register.
+ */
 const PRIMARY_TABS = [
   { href: "/book", label: "Book" },
   { href: "/inspector", label: "Inspector" },
+  { href: "/lab", label: "Lab" },
   { href: "/observatory", label: "Observatory" },
   { href: "/feed", label: "Feed" },
 ] as const;
 
-/** Lab and Developers ride the same nav bar as secondary destinations. */
-const SECONDARY_TABS = [
-  { href: "/lab", label: "Lab" },
-  { href: "/developers", label: "Developers" },
-] as const;
+/** Developers is the only secondary destination on the nav bar. */
+const SECONDARY_TABS = [{ href: "/developers", label: "Developers" }] as const;
 
 /**
  * The real product header. The mockup's window chrome (titlebar + appnav)
  * translated honestly: no fake browser dots, no fake address bar — a brand
- * block, the four-tab appnav with the mockup's accent-underline active state,
+ * block, the five-tab appnav with the mockup's accent-underline active state,
  * and the integrity Ribbon slot fed by live stream posture.
  */
 export function AppHeader() {

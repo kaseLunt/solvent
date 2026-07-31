@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "batch_superseded",
+    "message": "the cursor was minted against batch 1, which is no longer the newest servable batch; restart pagination",
+    "cursor_batch_id": 1,
+    "current_batch_id": 2
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 5,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass."
+    }
+  },
+  "engine": "aave_v3_etherfi",
+  "sort": "liq_distance",
+  "limit": 1,
+  "refused": false,
+  "refusal": null,
+  "total_positions": 2,
+  "positions": [
+    {
+      "engine": "aave_v3_etherfi",
+      "account": "0xBbbb000000000000000000000000000000000002",
+      "status": "refused",
+      "value_decimals": 8,
+      "refusal": {
+        "code": "G1",
+        "detail": "aave health: no usable price input for asset 0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "note": "G1: no usable price input for the named asset — absent, carrying no chain-asserted as-of, or older than the ceiling (2x the budget). An unpriced asset is REFUSED, never silently dropped."
+      },
+      "flags": [],
+      "health_factor": null,
+      "liquidatable": null,
+      "total_collateral_base": null,
+      "total_debt_base": null,
+      "weighted_lt_sum": null,
+      "avg_lt_bps": null,
+      "collateral_value_usd": null,
+      "max_borrow_lt": null,
+      "borrowings": null,
+      "legs": [
+        {
+          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "symbol": "weETH",
+          "decimals": 18,
+          "live_debt": null,
+          "live_collateral": "500000000000000000",
+          "debt_base": null,
+          "collateral_base": null,
+          "weighted_lt": null,
+          "used_as_collateral": true,
+          "debt_index_block": null,
+          "collateral_index_block": 25635618,
+          "amount": null,
+          "value_usd": null,
+          "max_borrow_contribution": null,
+          "liq_threshold": null,
+          "liq_bonus": null
+        }
+      ],
+      "price_inputs": [
+        {
+          "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+          "chain_id": 1,
+          "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+          "provenance": "adapter-output",
+          "value": null,
+          "decimals": null,
+          "block_number": null,
+          "source_as_of": null,
+          "budget_seconds": 180,
+          "verdict": "missing",
+          "age_seconds": null,
+          "fresh": false,
+          "note": "no usable row at all: REFUSED (G1). The asset is named on the position that refused because of it."
+        }
+      ],
+      "as_of": {
+        "balances_block": 25635618,
+        "params_block": 25635600,
+        "sweep_block": 0,
+        "oldest_price_input": null,
+        "stale_price_inputs": false,
+        "note": "each leg additionally carries its OWN rate-index as-of block: `rate_indexes` updates only on ReserveDataUpdated and can trail the balances cursor, so one balances watermark over an old index would hide the debt leg's true shelf life (design spec §5, Codex round 1 [H5])."
+      },
+      "liquidation_price": null
+    }
+  ],
+  "next_cursor": null,
+  "notes": [
+    "every row on this page was drawn from batch 1; `next_cursor` is bound to that batch and answers 409 once it is superseded as the newest servable batch.",
+    "refused rows are ROWS: they stay on the page, named, and counted."
+  ]
+}

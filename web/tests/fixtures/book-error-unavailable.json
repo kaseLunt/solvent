@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unavailable",
+    "message": "no complete risk batch is available. This is a statement about the SERVICE, NOT a claim that the book is empty.",
+    "retry_after_seconds": 5
+  }
+}
