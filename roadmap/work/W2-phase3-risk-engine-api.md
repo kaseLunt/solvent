@@ -29,6 +29,8 @@ allowed_paths:
   - .env.example
   - .github/workflows/ci.yml
   - .gitignore
+  - web/**
+  - deploy/**
 deliverables:
   - docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md
   - docs/specs/2026-07-28-solvent-phase3-risk-engine-api-design.md
