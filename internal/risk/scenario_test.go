@@ -33,6 +33,7 @@ func TestLoadScenariosCoversTheV1Set(t *testing.T) {
 	}
 	require.Equal(t, []string{
 		"btc_leg_minus_20",
+		"dm_composition_census",
 		"dm_rate_horizon_plus_200bps",
 		"eth_minus_10",
 		"eth_minus_20",
@@ -109,11 +110,22 @@ func TestScenarioSetSpecificShapes(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, btc.Shocks, 1, "one axis instance, so the correlation is structural")
 	require.Equal(t, AxisAssetUSD, btc.Shocks[0].Axis)
-	require.Len(t, btc.Propagation, 2)
+	require.Len(t, btc.Propagation, 3, "liquidBTC + eBTC + their WBTC-on-OP base (Wave S)")
 	for _, p := range btc.Propagation {
 		require.Len(t, p.RespondsTo, 1)
 		require.Equal(t, btc.Shocks[0].ref(), p.RespondsTo[0],
-			"liquidBTC and eBTC must respond to the SAME axis instance")
+			"liquidBTC, eBTC and their WBTC base must respond to the SAME axis instance")
+	}
+	// Wave S: the two composites claim the DEPLOYED WBTC-on-OP base.
+	wbtcOP := "0x68f180fcCe6836688e9084f035309E29Bf0A2095"
+	for _, p := range btc.Propagation {
+		switch common.HexToAddress(p.Asset) {
+		case dLiqBTC, dEBTC:
+			require.Equal(t, common.HexToAddress(wbtcOP), common.HexToAddress(p.BaseAsset),
+				"%s composes under WBTC-on-OP at the accept-r4 pin", p.Symbol)
+		case common.HexToAddress(wbtcOP):
+			require.Empty(t, p.BaseAsset, "WBTC-on-OP is USD-terminal at the pin")
+		}
 	}
 
 	ethfi, err := LoadScenario("ethfi_minus_50")
@@ -139,7 +151,23 @@ func TestScenarioSetSpecificShapes(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, sc.Shocks, 1)
 		require.Equal(t, AxisETHUSD, sc.Shocks[0].Axis)
-		require.Len(t, sc.Propagation, 4, "weETH+WETH+liquidETH on OP, weETH on ETH")
+		require.Len(t, sc.Propagation, 5,
+			"weETH+WETH+liquidETH+the native-ETH sentinel base on OP, weETH on ETH (Wave S)")
+		// Wave S: the two OP composites claim the deployed native-ETH sentinel
+		// base; the sentinel itself and WETH stay USD-terminal.
+		ethSentinel := common.HexToAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
+		for _, p := range sc.Propagation {
+			if p.ChainID != 10 {
+				continue
+			}
+			switch common.HexToAddress(p.Asset) {
+			case dWeETH, dLiqETH:
+				require.Equal(t, ethSentinel, common.HexToAddress(p.BaseAsset),
+					"%s: %s composes under the native-ETH sentinel at the accept-r4 pin", id, p.Symbol)
+			default:
+				require.Empty(t, p.BaseAsset, "%s: %s is USD-terminal at the pin", id, p.Symbol)
+			}
+		}
 	}
 }
 
@@ -963,6 +991,8 @@ func TestCommittedStableScenariosDeclareTheRightTransforms(t *testing.T) {
 			require.Len(t, r.RespondsTo, 1)
 			require.Equal(t, AxisStableUSD, r.RespondsTo[0].Axis)
 			require.Equal(t, strings.ToLower(dUSDC.Hex()), strings.ToLower(r.RespondsTo[0].Asset))
+			require.Equal(t, dUSDC, common.HexToAddress(r.BaseAsset),
+				"Wave S: base_asset restates the USDC base named by responds_to")
 			require.Contains(t, r.Note, "PriceProviderV2.sol:268-271")
 
 			// eUSD is baseAsset=0 (a direct USD lens) and is correctly absent

@@ -28,7 +28,8 @@
           "axis": "weeth_eth_rate"
         }
       ],
-      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283)"
+      "base_asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283); base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(weETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     },
     {
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
@@ -52,6 +53,7 @@
     "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
     "the mechanism that would cause a 5 percent rate drop (slashing, an exploit, a withdrawal-queue discount) is not modeled; only its mark effect is",
-    "eETH/weETH withdrawal-queue behaviour and any redemption gating"
+    "eETH/weETH withdrawal-queue behaviour and any redemption gating",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json"
   ]
 }

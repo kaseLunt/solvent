@@ -185,8 +185,33 @@ type AssetResponse struct {
 	// Mutually exclusive with StableSnap, matching the chain: a config with a
 	// baseAsset may not also be isStableToken (PriceProviderV2.sol:354,
 	// StableTokenCannotHaveBaseAsset).
-	BaseStableSnap bool   `json:"base_stable_snap,omitempty"`
-	Note           string `json:"note,omitempty"`
+	BaseStableSnap bool `json:"base_stable_snap,omitempty"`
+	// BaseAsset is the model's committed claim about the DEPLOYED composition
+	// graph: the PriceProviderV2 tokenConfig(asset).baseAsset this asset's
+	// price composes under. Omitted ("") claims USD-terminal (baseAsset = 0x0
+	// on chain) — the terminal claim has exactly one spelling, by omission.
+	//
+	// ADDITIVE Wave-S schema extension (accept-r4 tokenconfig_sweep findings):
+	// the original schema could state a base claim only for STABLE bases
+	// (base_stable_snap names the base through responds_to), so assets that
+	// compose under a NON-stable base — weETH and liquidETH (native-ETH
+	// sentinel base), liquidBTC and eBTC (WBTC base), sETHFI (ETHFI base),
+	// weEUR (EURC base) — could only be claimed USD-terminal, which is exactly
+	// the base-composition drift the sweep gated. A non-stable base does not
+	// snap (PriceProviderV2.price multiplies rate x basePrice linearly), so
+	// this field changes NO ApplyScenario arithmetic: propagation through the
+	// base's axis is already the linear default. It is a claim surface,
+	// consumed by the reconcile sweep's base-composition weld
+	// (cmd/reconcile loadScenarioBaseClaims) and welded against the pinned
+	// chain reads by this package's own tests
+	// (testdata/tokenconfig_accept_r4.json).
+	//
+	// Validate enforces: a non-zero hex address different from the asset
+	// itself; mutually exclusive with stable_snap (the same chain law as
+	// above); and on a base_stable_snap row it must agree with the
+	// responds_to stable, because one asset cannot compose under two bases.
+	BaseAsset string `json:"base_asset,omitempty"`
+	Note      string `json:"note,omitempty"`
 }
 
 // MarketRealizationSpec is the market-value axis carried as scenario data. It
@@ -405,6 +430,25 @@ func (s Scenario) Validate() error {
 			// DESIGN, rather than silently snapping the whole product.
 			if len(r.RespondsTo) != 1 || r.RespondsTo[0].Axis != AxisStableUSD {
 				return bad("%s: propagation[%d] (%s): base_stable_snap requires exactly one responds_to entry on the %s axis (the stable base)", s.ID, i, r.Asset, AxisStableUSD)
+			}
+		}
+		if r.BaseAsset != "" {
+			// The Wave-S base-composition claim (see the field's doc comment).
+			if !common.IsHexAddress(r.BaseAsset) {
+				return bad("%s: propagation[%d] (%s): base_asset %q is not a hex address", s.ID, i, r.Asset, r.BaseAsset)
+			}
+			base := common.HexToAddress(r.BaseAsset)
+			if base == (common.Address{}) {
+				return bad("%s: propagation[%d] (%s): base_asset is the zero address — a USD-terminal claim is made by OMITTING base_asset, so the claim has exactly one spelling", s.ID, i, r.Asset)
+			}
+			if base == common.HexToAddress(r.Asset) {
+				return bad("%s: propagation[%d] (%s): base_asset names the asset itself — a self-composition is a cycle, not a claim", s.ID, i, r.Asset)
+			}
+			if r.StableSnap {
+				return bad("%s: propagation[%d] (%s): stable_snap and base_asset are mutually exclusive — on chain a config with a baseAsset may not be isStableToken (PriceProviderV2 StableTokenCannotHaveBaseAsset)", s.ID, i, r.Asset)
+			}
+			if r.BaseStableSnap && base != common.HexToAddress(r.RespondsTo[0].Asset) {
+				return bad("%s: propagation[%d] (%s): base_stable_snap names its stable base through responds_to (%s) and base_asset (%s) disagrees — one asset cannot compose under two bases", s.ID, i, r.Asset, r.RespondsTo[0].Asset, r.BaseAsset)
 			}
 		}
 		for j, a := range r.RespondsTo {

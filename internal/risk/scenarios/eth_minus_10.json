@@ -28,7 +28,8 @@
           "axis": "weeth_eth_rate"
         }
       ],
-      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283)"
+      "base_asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283); base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(weETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     },
     {
       "asset": "0x4200000000000000000000000000000000000006",
@@ -50,7 +51,19 @@
           "axis": "eth_usd"
         }
       ],
-      "note": "accountant lens getRate() over an ETH base (recon/derivation-notes.md:284); the probe census counts liquidETH inside the 47 percent ETH-linked share"
+      "base_asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "note": "accountant lens getRate() over an ETH base (recon/derivation-notes.md:284); the probe census counts liquidETH inside the 47 percent ETH-linked share; base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(liquidETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
+    },
+    {
+      "asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "chain_id": 10,
+      "symbol": "ETH",
+      "responds_to": [
+        {
+          "axis": "eth_usd"
+        }
+      ],
+      "note": "PriceProviderV2's native-ETH sentinel, the base weETH and liquidETH compose under (isBaseAsset=true at the accept-r4 pin). Its own config is USD-terminal (baseAsset=0x0) behind the same Chainlink ETH/USD proxy as WETH (oracle 0x13e3Ee699D1909E989722E753853AE30b17e08c5), so it marks one-for-one on the eth_usd axis"
     },
     {
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
@@ -73,7 +86,7 @@
     "liquidator liquidity, gas costs, execution latency and cascade dynamics",
     "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
-    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
     "the weETH redemption rate is held at its current sample; a real ETH drawdown large enough to cause slashing would also move it",
     "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
   ]

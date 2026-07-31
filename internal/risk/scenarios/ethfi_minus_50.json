@@ -38,7 +38,8 @@
           "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"
         }
       ],
-      "note": "accountant lens with an ETHFI base composition; moves one-for-one with ETHFI on the mark"
+      "base_asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+      "note": "accountant lens with an ETHFI base composition; moves one-for-one with ETHFI on the mark; base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(sETHFI).baseAsset = ETHFI at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     }
   ],
   "out_of_model": [
@@ -47,7 +48,7 @@
     "liquidator liquidity, gas costs, execution latency and cascade dynamics",
     "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
-    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
     "the sETHFI/ETHFI accountant rate is held flat; a 50 percent ETHFI drawdown is assumed not to change the staking rate",
     "reflexivity between the token price and the protocol's own risk parameters"
   ]

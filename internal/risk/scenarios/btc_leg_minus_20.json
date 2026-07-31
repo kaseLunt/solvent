@@ -26,7 +26,8 @@
           "asset": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
         }
       ],
-      "note": "accountant lens with a WBTC base composition (recon/derivation-notes.md:284)"
+      "base_asset": "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
+      "note": "accountant lens with a WBTC base composition (recon/derivation-notes.md:284); base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(liquidBTC).baseAsset = WBTC-on-OP 0x68f180fcCe6836688e9084f035309E29Bf0A2095 at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     },
     {
       "asset": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
@@ -38,7 +39,20 @@
           "asset": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
         }
       ],
-      "note": "accountant lens with a WBTC base composition"
+      "base_asset": "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
+      "note": "accountant lens with a WBTC base composition; base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(eBTC).baseAsset = WBTC-on-OP 0x68f180fcCe6836688e9084f035309E29Bf0A2095 at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
+    },
+    {
+      "asset": "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
+      "chain_id": 10,
+      "symbol": "WBTC",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599"
+        }
+      ],
+      "note": "WBTC on OP, the base asset liquidBTC and eBTC compose under (isBaseAsset=true at the accept-r4 pin; its own config is USD-terminal behind Chainlink WBTC/USD 0xD702DD976Fb76Fffc2D3963D037dfDae5b04E593). NOT in the chain collateral/borrow universe at the pin - the sweep's transitive closure reaches it, so its claim is committed here. It marks one-for-one on the same BTC/USD axis instance this scenario shocks"
     }
   ],
   "out_of_model": [
@@ -47,7 +61,7 @@
     "liquidator liquidity, gas costs, execution latency and cascade dynamics",
     "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
-    "per-lens baseAsset composition is read from recon/derivation-notes.md:284 plus the probe census's ETH-linked aggregation, not from a per-token on-chain baseAsset read",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
     "the axis key 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599 is WBTC on Ethereum mainnet and is used here ONLY as the BTC/USD unit of account; it is not a held collateral asset on either engine",
     "the liquidBTC and eBTC accountant rates are held flat against BTC"
   ]

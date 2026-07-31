@@ -1,0 +1,181 @@
+{
+  "id": "dm_composition_census",
+  "version": "v1",
+  "label": "DM composition census - previously unclaimed assets, explicitly held",
+  "description": "The accept-r4 tokenconfig_sweep proved the v1 matrices stale against the chain universe: the provider priced eleven assets no scenario named, so every stress run held their TVL flat BY OMISSION (oracle-sentinel R4's named failure). The adjudicated principle is that absent-claim-by-omission is the defect and explicit-claim-or-explicit-decision is the fix. This scenario is that record: every previously unclaimed configured DM asset gets a propagation row whose composition (base_asset, stable flags, axis) is derived mechanically from PriceProviderV2.tokenConfig at the accept-r4 OP pin, and every axis it introduces is shocked by the EXPLICIT factor 1/1 - the disclosed decision to hold each mark, chosen over an invented stress magnitude. weEUR carries no axis of its own: it composes under EURC (a NON-stable base, so no snap) and responds to EURC's axis linearly.",
+  "path_assumption": "no move is asserted: every shock in this census is the explicit factor 1/1, so each named mark is held at its current sample BY DECISION, disclosed in the applied-shock record rather than in the held-flat list",
+  "engines": [
+    "debt_manager"
+  ],
+  "shocks": [
+    {
+      "axis": "asset_usd",
+      "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0x4200000000000000000000000000000000000042",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+      "factor_num": 1,
+      "factor_den": 1
+    },
+    {
+      "axis": "asset_usd",
+      "asset": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E",
+      "factor_num": 1,
+      "factor_den": 1
+    }
+  ],
+  "propagation": [
+    {
+      "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+      "chain_id": 10,
+      "symbol": "liquidRWA",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(liquidRWA) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, push feed 0xd5aaE6ac1a9ed4BE5DcC1fc172EDeFFd5B6d8080 with maxStaleness 604800 (7 days). Idiosyncratic USD axis; explicitly held at 1/1 - an invented RWA shock magnitude would be fabrication"
+    },
+    {
+      "asset": "0x4200000000000000000000000000000000000042",
+      "chain_id": 10,
+      "symbol": "OP",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0x4200000000000000000000000000000000000042"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(OP) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, Chainlink OP/USD 0x0D276FC14719f9292D5C1eA2198673d1f4269246. Idiosyncratic USD axis; explicitly held at 1/1 pending a sized OP leg (JUDGMENT recorded, not invented)"
+    },
+    {
+      "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+      "chain_id": 10,
+      "symbol": "eUSD",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(eUSD) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=FALSE - a direct USD accountant lens (getRate 0x679aefce), NOT a snapped stable despite the name, so it does NOT join the stable_snap set and the stable-depeg scenarios correctly hold it. Its axis is asset_usd, never stable_usd"
+    },
+    {
+      "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+      "chain_id": 10,
+      "symbol": "beHYPE",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(beHYPE) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, own push feed 0x666a9807C632fFAA335C58C724bff38278392ec6 (price() 0xa035b1fe). The provider declares NO shared HYPE base, so no joint HYPE axis is claimed (see out_of_model)"
+    },
+    {
+      "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+      "chain_id": 10,
+      "symbol": "EURC",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(EURC) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=FALSE, isBaseAsset=true (weEUR's base), push feed 0x2B132ce03411Da6d3A73A93aA259d232FE525af9. EUR-denominated: no USD snap applies despite the stablecoin name, so its axis is asset_usd (effectively EUR/USD) and it must NOT join the stable_snap set"
+    },
+    {
+      "asset": "0xcC476B1a49bcDf5192561e87b6Fb8ea78aa28C13",
+      "chain_id": 10,
+      "symbol": "weEUR",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11"
+        }
+      ],
+      "base_asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+      "note": "PriceProviderV2.tokenConfig(weEUR) at the accept-r4 pin: baseAsset=EURC 0xDCB612005417Dc906fF72c87DF732e5a90D49e11. The base is NOT isStableToken, so no snap fires (base_stable_snap does NOT apply): weEUR = rate x price(EURC) linearly, the same shape as sETHFI over ETHFI. It responds to EURC's axis one-for-one with the lens rate held flat"
+    },
+    {
+      "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+      "chain_id": 10,
+      "symbol": "liquidRESERVE",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, oracle 0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356. TWIN HAZARD: a second, DISTINCT liquidRESERVE deployment (0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898) shares this symbol and oracle - this row claims THIS address only; the twin has its own row and its own axis instance, keyed by address, never symbol"
+    },
+    {
+      "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+      "chain_id": 10,
+      "symbol": "liquidRESERVE",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, oracle 0x58dDf77A329CcbE2F4C2114C64ed9E12Ec8a1356. TWIN HAZARD: the second liquidRESERVE deployment - see the 0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a row; claims are keyed by address, never symbol"
+    },
+    {
+      "asset": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E",
+      "chain_id": 10,
+      "symbol": "WHYPE",
+      "responds_to": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E"
+        }
+      ],
+      "note": "PriceProviderV2.tokenConfig(WHYPE) at the accept-r4 pin: baseAsset=0x0 (USD-terminal), isStableToken=false, own push feed 0x370F16a9D36CDBe3f364beb3449109242325E941 (price() 0xa035b1fe). The provider declares NO shared HYPE base with beHYPE, so no joint HYPE axis is claimed (see out_of_model)"
+    }
+  ],
+  "out_of_model": [
+    "stress magnitudes for the census assets: NO shock is asserted for liquidRWA, OP, eUSD, beHYPE, WHYPE, EURC, weEUR or either liquidRESERVE - the 1/1 factors are the explicit, disclosed decision to hold each mark, adjudicated preferable to an invented magnitude (accept-r4: explicit-claim-or-explicit-decision closes the omission defect; a sized shock for any of these is future scenario work, not a default)",
+    "JUDGMENT (flagged, conservative): beHYPE and WHYPE are economically HYPE-linked, but PriceProviderV2 declares NO shared base for them at the pin (each carries its own push oracle, baseAsset=0x0), so each gets its OWN axis and no joint HYPE/USD axis is claimed - the correlation judgment is recorded here instead of invented",
+    "JUDGMENT (flagged, conservative): eUSD and EURC are claimed exactly as the chain declares them (isStableToken=false, so NEITHER joins the stable_snap set); if governance later flips either to isStableToken, the stable-set weld will catch the drift in both directions (risk-quant R4.1)",
+    "EUR/USD market risk: EURC's axis is effectively EUR/USD and weEUR composes over it; no EUR scenario is asserted",
+    "the two liquidRESERVE deployments share one symbol and one oracle but are DISTINCT tokens; every claim and every axis instance here is keyed by ADDRESS, never symbol (the twin hazard recorded in the accept-r4 adjudication)",
+    "liquidRWA is marked by a push feed with maxStaleness 604800 (7 days) at the pin; RWA marking latency and NAV-vs-market divergence are not modeled",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
+    "oracle lag and heartbeat behaviour: the census holds marks at their current sample; the real feeds update on deviation or heartbeat"
+  ]
+}
