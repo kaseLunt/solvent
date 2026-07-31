@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "rate_limited",
+    "message": "rate limit exceeded: this surface admits 20 requests per second per client address, burst 40",
+    "retry_after_seconds": 3
+  }
+}

@@ -1,0 +1,221 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xccCc000000000000000000000000000000000003",
+  "scenario_config_version": "v1",
+  "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
+  "scenarios": [
+    {
+      "id": "dm_rate_horizon_plus_200bps",
+      "version": "v1",
+      "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+      "description": "A rate change does not move a spot health factor, so this ships as a closed-form HORIZON PROJECTION, never as a spot shock.",
+      "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "borrow_apy",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "borrower behaviour: no repayment, no top-up, no new borrowing over the horizon",
+        "the Aave engine is excluded (utilization-driven rates over a residual dust book)"
+      ],
+      "results": [
+        {
+          "engine": "debt_manager",
+          "account": "0xccCc000000000000000000000000000000000003",
+          "applicable": true,
+          "before": {
+            "health_factor_wad": null,
+            "health_factor_num": "3200000000",
+            "health_factor_den": "4200000000",
+            "infinite": false,
+            "liquidatable": true,
+            "eligible": true,
+            "collateral_usd": "4000000000",
+            "debt_usd": "4200000000",
+            "max_borrow_lt": "3200000000"
+          },
+          "after": {
+            "health_factor_wad": null,
+            "health_factor_num": "3200000000",
+            "health_factor_den": "4200000000",
+            "infinite": false,
+            "liquidatable": true,
+            "eligible": true,
+            "collateral_usd": "4000000000",
+            "debt_usd": "4200000000",
+            "max_borrow_lt": "3200000000"
+          },
+          "applied_shocks": [],
+          "held_flat": [],
+          "market_realization": null,
+          "projection": {
+            "label": "PROJECTION",
+            "basis": "delta-only",
+            "annual_delta_bps": 200,
+            "apy_observed_at_block": 154796552,
+            "prices_held_flat": true,
+            "horizons": [
+              {
+                "horizon_seconds": 2592000,
+                "debt_usd": "4200000000",
+                "projected_usd": "4206904109",
+                "additional_interest_usd": "6904109",
+                "becomes_liquidatable": true
+              },
+              {
+                "horizon_seconds": 7776000,
+                "debt_usd": "4200000000",
+                "projected_usd": "4220712328",
+                "additional_interest_usd": "20712328",
+                "becomes_liquidatable": true
+              }
+            ],
+            "note": "DELTA-ONLY: this is the additional interest the +200bps step contributes over the horizon. A batch carries no borrow-APY observation and this service makes no chain calls, so the base accrual is absent. No time-to-liquidatable is published from a path that would understate debt growth."
+          }
+        }
+      ]
+    },
+    {
+      "id": "stable_depeg_0995_in_band",
+      "version": "v1",
+      "label": "Stablecoin depeg to 0.995 (inside the snap band)",
+      "description": "The Debt Manager's stable snap band is OPEN — (990000, 1010000) exclusive — so 0.995 is swallowed and this is a true no-op on a weETH-only position.",
+      "path_assumption": "instantaneous mark at the shocked level",
+      "engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "stable_usd",
+          "factor_num": 995,
+          "factor_den": 1000
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)"
+      ],
+      "results": [
+        {
+          "engine": "debt_manager",
+          "account": "0xccCc000000000000000000000000000000000003",
+          "applicable": true,
+          "before": {
+            "health_factor_wad": null,
+            "health_factor_num": "3200000000",
+            "health_factor_den": "4200000000",
+            "infinite": false,
+            "liquidatable": true,
+            "eligible": true,
+            "collateral_usd": "4000000000",
+            "debt_usd": "4200000000",
+            "max_borrow_lt": "3200000000"
+          },
+          "after": {
+            "health_factor_wad": null,
+            "health_factor_num": "3200000000",
+            "health_factor_den": "4200000000",
+            "infinite": false,
+            "liquidatable": true,
+            "eligible": true,
+            "collateral_usd": "4000000000",
+            "debt_usd": "4200000000",
+            "max_borrow_lt": "3200000000"
+          },
+          "applied_shocks": [],
+          "held_flat": [],
+          "market_realization": null,
+          "projection": null
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Shocks are EXACT rationals applied to primitive axes and propagated through each engine's actual pricing transforms.",
+    "Assets the propagation matrix does not cover are named in `held_flat` rather than silently held at their pre-shock price."
+  ]
+}

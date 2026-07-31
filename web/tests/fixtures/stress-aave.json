@@ -1,0 +1,260 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xAAaA000000000000000000000000000000000001",
+  "scenario_config_version": "v1",
+  "found": true,
+  "lookup_complete": true,
+  "withheld_engines": [],
+  "lookup_complete_note": "every engine was available to be consulted for this lookup, so `found` is a definitive answer.",
+  "scenarios": [
+    {
+      "id": "eth_minus_30",
+      "version": "v1",
+      "label": "ETH -30 percent",
+      "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "eth_usd",
+          "factor_num": 70,
+          "factor_den": 100
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+      ],
+      "results": [
+        {
+          "engine": "aave_v3_etherfi",
+          "account": "0xAAaA000000000000000000000000000000000001",
+          "applicable": true,
+          "before": {
+            "health_factor_wad": "1080000000000000000",
+            "health_factor_num": "6480000000000000",
+            "health_factor_den": "6000000000000000",
+            "infinite": false,
+            "liquidatable": null,
+            "eligible": false,
+            "collateral_usd": "800000000000",
+            "debt_usd": "600000000000",
+            "max_borrow_lt": null
+          },
+          "after": {
+            "health_factor_wad": "756000000000000000",
+            "health_factor_num": "4536000000000000",
+            "health_factor_den": "6000000000000000",
+            "infinite": false,
+            "liquidatable": null,
+            "eligible": true,
+            "collateral_usd": "560000000000",
+            "debt_usd": "600000000000",
+            "max_borrow_lt": null
+          },
+          "applied_shocks": [
+            {
+              "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+              "chain_id": 1,
+              "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+              "factor_num": "70",
+              "factor_den": "100",
+              "before": "400000000000",
+              "after": "280000000000",
+              "snapped": false,
+              "base_snapped": false,
+              "cap_bound": false
+            }
+          ],
+          "held_flat": [
+            {
+              "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+              "chain_id": 1,
+              "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+              "value": "100000000"
+            }
+          ],
+          "market_realization": null,
+          "projection": null
+        }
+      ]
+    },
+    {
+      "id": "weeth_market_depeg_oracles_held",
+      "version": "v1",
+      "label": "weETH market depeg to 0.95 (oracles held)",
+      "description": "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable.",
+      "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+      "engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "shocks": [],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order and would take the least-impaired asset first, so this is neutral rather than conservative"
+      ],
+      "results": [
+        {
+          "engine": "aave_v3_etherfi",
+          "account": "0xAAaA000000000000000000000000000000000001",
+          "applicable": true,
+          "before": {
+            "health_factor_wad": "1080000000000000000",
+            "health_factor_num": "6480000000000000",
+            "health_factor_den": "6000000000000000",
+            "infinite": false,
+            "liquidatable": null,
+            "eligible": false,
+            "collateral_usd": "800000000000",
+            "debt_usd": "600000000000",
+            "max_borrow_lt": null
+          },
+          "after": {
+            "health_factor_wad": "1080000000000000000",
+            "health_factor_num": "6480000000000000",
+            "health_factor_den": "6000000000000000",
+            "infinite": false,
+            "liquidatable": null,
+            "eligible": false,
+            "collateral_usd": "800000000000",
+            "debt_usd": "600000000000",
+            "max_borrow_lt": null
+          },
+          "applied_shocks": [],
+          "held_flat": [],
+          "market_realization": {
+            "hfs_unchanged": true,
+            "execution_shortfall_usd": "0",
+            "bad_debt_at_liquidation_usd": "0",
+            "usd_decimals": 8,
+            "seizure_model": "pro-rata-over-counted-collateral",
+            "note": "market value is NOT an oracle mark: neither protocol reads a secondary-market price, so this scenario moves NO health factor (`hfs_unchanged` asserts it). The output is the gap the protocol is not seeing."
+          },
+          "projection": null
+        }
+      ]
+    },
+    {
+      "id": "dm_rate_horizon_plus_200bps",
+      "version": "v1",
+      "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+      "description": "A rate change does not move a spot health factor, so this ships as a closed-form HORIZON PROJECTION, never as a spot shock.",
+      "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "borrow_apy",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "borrower behaviour: no repayment, no top-up, no new borrowing over the horizon",
+        "the Aave engine is excluded (utilization-driven rates over a residual dust book)"
+      ],
+      "results": [
+        {
+          "engine": "aave_v3_etherfi",
+          "account": "0xAAaA000000000000000000000000000000000001",
+          "applicable": false,
+          "reason": "scenario dm_rate_horizon_plus_200bps is not defined for engine aave_v3_etherfi",
+          "before": null,
+          "after": null,
+          "applied_shocks": [],
+          "held_flat": [],
+          "market_realization": null,
+          "projection": null
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Shocks are EXACT rationals applied to primitive axes and propagated through each engine's actual pricing transforms.",
+    "Assets the propagation matrix does not cover are named in `held_flat` rather than silently held at their pre-shock price."
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "served_at": "2026-07-29T10:00:00Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 0,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 2,
+    "refused_count": 1,
+    "refused_engines": [
+      "aave_v3_etherfi"
+    ],
+    "flagged_count": 0,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "aave_param",
+        "chain_id": 1,
+        "last_block": 25635600,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "prices:poll:1",
+        "chain_id": 1,
+        "last_block": 25635610,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      },
+      {
+        "engine": "prices:poll:10",
+        "chain_id": 10,
+        "last_block": 154796540,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
+    }
+  },
+  "address": "0xAAaA000000000000000000000000000000000001",
+  "scenario_config_version": "v1",
+  "found": null,
+  "lookup_complete": false,
+  "withheld_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "lookup_complete_note": "one or more engines are withheld and could not be consulted, so this lookup is INCOMPLETE. `found: null` means the answer cannot be established — never that no position exists; `found: true` under an incomplete lookup is a FLOOR, not a total.",
+  "scenarios": [],
+  "notes": [
+    "Shocks are EXACT rationals applied to primitive axes and propagated through each engine's actual pricing transforms.",
+    "Assets the propagation matrix does not cover are named in `held_flat` rather than silently held at their pre-shock price."
+  ]
+}
