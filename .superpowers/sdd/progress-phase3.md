@@ -2823,3 +2823,33 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   the 5, claims for the ~11 unclaimed assets, derived from chain
   tokenConfig w/ judgment calls flagged). Codex adversarial round on
   Wave H before any fresh acceptance (proof surface, D-013 program).
+- **FIX PROGRAM LANDED — SEVEN-COMMIT TRAIN (10:25)**: joint gate green
+  across the whole tree (build+vet clean; reconcile+snapshotdb+risk+api ok
+  -p 1; client 310/310; web 158/0/1-skip). Pushed through a85fe16:
+  9b330c7 Wave S (scenario matrices closed over the chain universe;
+  base_asset schema extension; census scenario ×1/1 explicit holds; twin
+  liquidRESERVE by address; 5/5 mutants) → 4ff71f0 Wave H (the six
+  adjudicated proof-surface fixes; SAME-PIN REFUTATION 257/257 — all 233
+  DM inputs recovered from the snapshots history table and proven the
+  unchanged accept-r4 vectors, own-clock welds 233/233 bit-exact across 72
+  sweep blocks w/ the custody-drift arm EMPTY; census 24/24 one-law
+  non-members w/ 96/96 scaledBalanceOf welds; 4/4 mutants; committed
+  re-runnable refutation test) → f57d855 W2 scope +recon/v4-proposal*
+  (owner-ack: AMENDMENT 1 adoption 3c0f58e) → f70817c claim rescope gen-13
+  (isolated) → 529642d C2 contract 1.2.0 + client (310 tests, nine
+  methods, sealed-field law extended) → 539a268 C2 handlers (+integrator
+  scenario-count pin 11→12 reconciliation for the census scenario) →
+  a85fe16 C2 web (welds discharged; evidence derivation kept as a loud
+  cross-check). Wave H flagged stale-status ghosts (cmd/reconcile main.go/
+  pgxdsn.go) — investigated: pgxdsn.go is COMMITTED round-16/19 history,
+  main.go clean; no stray actor. CODEX ADVERSARIAL ROUND DISPATCHED on
+  12db60e..4ff71f0 (the proof surface; D-013 bar verbatim; attack order:
+  can sample-gap absorb real drift, own-clock law fidelity, census flag
+  semantics vs Aave, candidate-set bounds, refutation-test soundness,
+  binding-read every-path, ob3 predicate narrowness, Wave S validation).
+  On SHIP → fresh acceptance run (must pass at its new pin while the
+  same-pin refutation stands) → E1 paperwork. Owed arms tracked: unpriced
+  historical legs (B6 margin-2053 priority), implWitnessDeviation
+  StorageAtHash follow-up, store reader gaps (batch-by-id, anchor_block),
+  batch-scoped position pages, book exposures + GET /v1/scenarios,
+  migration_genesis feed-visibility product call.
