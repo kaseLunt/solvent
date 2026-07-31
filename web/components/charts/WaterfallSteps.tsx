@@ -89,6 +89,24 @@ export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: Wa
         y1={margin.top}
         y2={height - margin.bottom}
       />
+      {/* Connector ink renders BEFORE data ink (design pass, z-order law):
+          reference lines paint UNDER bars and money labels, so a hairline
+          can never strike through an exact value string. */}
+      {connectorPairs.map(([from, to]) => {
+        const yFrom = margin.top + from * rowHeight + 6 + (rowHeight - 12);
+        const yTo = margin.top + to * rowHeight + 6;
+        return (
+          <line
+            key={`connector-${String(from)}-${String(to)}`}
+            className={styles.connector}
+            data-testid="waterfall-connector"
+            x1={margin.left + barW(steps[from]?.value ?? 0)}
+            x2={margin.left + barW(steps[to]?.value ?? 0)}
+            y1={yFrom}
+            y2={yTo}
+          />
+        );
+      })}
       {steps.map((step, index) => {
         const y = margin.top + index * rowHeight;
         const barH = rowHeight - 12;
@@ -119,21 +137,6 @@ export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: Wa
               {step.display}
             </text>
           </g>
-        );
-      })}
-      {connectorPairs.map(([from, to]) => {
-        const yFrom = margin.top + from * rowHeight + 6 + (rowHeight - 12);
-        const yTo = margin.top + to * rowHeight + 6;
-        return (
-          <line
-            key={`connector-${String(from)}-${String(to)}`}
-            className={styles.connector}
-            data-testid="waterfall-connector"
-            x1={margin.left + barW(steps[from]?.value ?? 0)}
-            x2={margin.left + barW(steps[to]?.value ?? 0)}
-            y1={yFrom}
-            y2={yTo}
-          />
         );
       })}
     </svg>

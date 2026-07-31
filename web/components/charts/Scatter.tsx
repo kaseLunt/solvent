@@ -140,7 +140,10 @@ export function Scatter({
             />
             <text
               className={styles.axisLabel}
-              x={px(tick.value)}
+              // Clamp so the rightmost label's glyphs never shave past the
+              // chart edge (design pass: a clipped glyph reads as an
+              // instrument defect). 10px mono ≈ 6px/char; half-width 3.
+              x={Math.min(px(tick.value), width - 2 - tick.label.length * 3)}
               y={height - 16}
               textAnchor="middle"
             >
