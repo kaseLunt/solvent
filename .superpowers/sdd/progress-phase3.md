@@ -2712,3 +2712,40 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   pushed. B3's cutover ops note recorded: liquidation rows for seized
   assets outside recon/feeds.json refuse loudly — registry coverage must
   precede I3.
+- **RISK-QUANT RULING ON ACCEPT-R4 (08:42)**: verdict NUMBERS DO NOT HOLD
+  for the acceptance surface — the FAIL is honest and stands; core custody
+  welds hold everywhere they were read at their own clock. The decisive
+  reframe: every failing gate welds a SAMPLE-CLOCK input against PIN-CLOCK
+  chain state. dm_boolean_weld (B1): the collateral vector is the leg's
+  ONLY non-pin-anchored input (sweep-sampled snapshot; params 60/0 exact,
+  prices pinned calls, no DB price rows) — both-direction card-spend-sized
+  deltas with clean LT preimages ($100.00×0.95, $13.00×0.95), and
+  dm_gate.go:20-31 records the SAME clock defect found once before;
+  rounding refuted by the floor-envelope theorem (smallest delta 7,799
+  units vs ≤~40 envelope); AND zero failures on the liquidatable boolean
+  itself (46/46) — the served verdicts survived at this pin, the
+  intermediate quantity drifted. Sharpest check ordered: pin-vector
+  substitution (collateralOf@pin fed to the recompute) + own-sweep-block
+  custody read + affirmative gap-event census. Zero-debt census (B2): the
+  chain DENIES the collateral leg (totalCollateralBase==0; only-chain 0
+  proves no missed borrowers) — mechanisms: value-floor dust/collateral-
+  bit-off (harness predicate mismatch, both sides true at pin) vs
+  1-scaled-wei burn residue (REAL deriver bug); Σ-weld exactness has ZERO
+  power here (aToken transfers change no Σ). input_frame_law (B3): the
+  stale aggregator declaration is the phase-change GUARD — must be
+  CONSUMED, never deleted; never-seen provenance must be nailed to protect
+  the empty-set probe. tokenconfig (B4): committed scenario-model defects
+  (11 held-flat assets + 5 composition-law disagreements weETH/liquidBTC/
+  eBTC/sETHFI/liquidETH — the stress engine's propagation vs the
+  provider's composition graph) — a real risk-surface catch; fix =
+  author the matrices. backtest (B5): 5 unpriced historical legs (B6
+  singleton margin only 2,053 USD-6 — priority) + 1 third-branch-shape
+  case (read the tx). EVIDENCE STANDARDS pinned: harness-bug verdict needs
+  same-pin reproduction + own-clock custody exoneration + law citation;
+  custody-drift verdict needs own-clock divergence; REFUSED: fresh-pin
+  pass alone, any epsilon over the 233 (tolerance-as-carpet), census
+  repair by predicate assimilation without a recorded ruling, frame repair
+  by deletion. Legit fix shapes for B1: sweep-at-pin acceptance
+  choreography (stronger) or split-weld (custody at own clock + freshness
+  disclosure). Frame forwarded mid-flight to the dissection wave with the
+  exact discriminators.
