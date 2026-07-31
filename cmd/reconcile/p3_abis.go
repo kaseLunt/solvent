@@ -67,9 +67,15 @@ var poolUserAccountDataABI = mustParseABI(`[{
 // DataTypes.UserConfigurationMap, i.e. a single packed uint256. Provenance:
 // Aave v3 IPool + DataTypes.sol. Bit law: for reserve index i,
 // bit 2i = borrowing, bit 2i+1 = using-as-collateral (UserConfiguration.sol).
-// This read is the Aave gate's DECLARED input:pinned-read for collateral
-// flags — chain-truth R5.5: the event-derived flag witness is the
-// collateral-flag micro-wave's deliverable and is NOT consumed here.
+// This read is the Aave gate's DECLARED input:pinned-read for the HF
+// computation's collateral flags (chain-truth R5.5). The event-derived flag
+// witness (store.CollateralFlagsAsOf over the custodied
+// aave_collateral_enabled/disabled events) has since LANDED and IS consumed —
+// by the census predicate, as the DERIVED side of the one-law zero-debt census
+// (the accept-r4 fix, chain-truth ruling ledger 08:55). The two sources meet
+// exactly where they should: the pinned bitmap holds up the HF weld, the
+// derived fold holds up the census, and a flag disagreement between them
+// surfaces as a census difference with a scaledBalanceOf weld beside it.
 // Selector 0x4417a583.
 var poolUserConfigurationABI = mustParseABI(`[{
 	"type": "function", "name": "getUserConfiguration", "stateMutability": "view",
@@ -112,6 +118,35 @@ var poolGetConfigurationABI = mustParseABI(`[{
 var poolNormalizedIncomeABI = mustParseABI(`[{
 	"type": "function", "name": "getReserveNormalizedIncome", "stateMutability": "view",
 	"inputs": [{"name": "asset", "type": "address"}],
+	"outputs": [{"name": "", "type": "uint256"}]
+}]`)
+
+// poolGetReserveATokenABI: getReserveAToken(asset) → address. Provenance: Aave
+// v3.2+ IPool (the deployed ether.fi Pool is a v3.3-line instance —
+// recon/derivation-notes.md; the accessor was introduced when ReserveData
+// dropped the token addresses from the struct). It resolves the aToken the
+// balance-census weld reads scaledBalanceOf through, AT THE PIN — never from
+// the registry, and never from the param ledger under test. Verified live at
+// pin 25,650,676: getReserveAToken(USDC) answers the walked atoken-usdc stream
+// address. Selector 0xcff027d9.
+var poolGetReserveATokenABI = mustParseABI(`[{
+	"type": "function", "name": "getReserveAToken", "stateMutability": "view",
+	"inputs": [{"name": "asset", "type": "address"}],
+	"outputs": [{"name": "", "type": "address"}]
+}]`)
+
+// aTokenScaledBalanceOfABI: scaledBalanceOf(user) → uint256. Provenance: Aave
+// v3 IScaledBalanceToken. The BALANCE-CENSUS weld's chain side (chain-truth
+// ruling, ledger 08:55): the one-law census gates membership on the collateral
+// FLAG, and a flag that is OFF would otherwise MASK a wrong scaled balance —
+// both sides say non-member while the balance itself is wrong, and the
+// aggregate Σ weld has ZERO power against transfers (an aToken transfer moves
+// two accounts and no total). Reading the raw scaled balance per
+// census-disagreeing / flag-masked account converts aggregate-only evidence
+// into per-account proof, bit-exact, zero tolerance. Selector 0x1da24f3e.
+var aTokenScaledBalanceOfABI = mustParseABI(`[{
+	"type": "function", "name": "scaledBalanceOf", "stateMutability": "view",
+	"inputs": [{"name": "user", "type": "address"}],
 	"outputs": [{"name": "", "type": "uint256"}]
 }]`)
 

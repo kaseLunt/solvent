@@ -1,0 +1,71 @@
+{
+  "_provenance": [
+    "The PRIOR-PASS-DRAINED third-shape witness (obligation 3, accept-r4 fix wave H).",
+    "Decoded from the OP tx receipt via eth_getTransactionReceipt on 2026-07-31 —",
+    "read directly from the chain to CONFIRM the shape before modelling it, per the",
+    "adjudicated fix program (dissection verdict 08:58). The tx carries TWO Liquidated",
+    "events for the same (account, USDC debt): pass 1 (log 184) seizes every live",
+    "balance whole (partial branch = whole balance: USDC, USDT and WETH legs); pass 2",
+    "(log 187) then walks a FULLY-DRAINED book — liquidatedAmt 0, all fifteen elements",
+    "zero — over parent-frame balances that were nonzero at N-1. The deployed loop's",
+    "arithmetic at zero balances: totalCollateral - maxBonus = 0 < cAFD selects",
+    "PARTIAL (DebtManagerCore.sol:625-638), amount = totalCollateral = 0, credit 0,",
+    "the preference array is exhausted, remainingDebt stays u0, liquidatedAmt = 0.",
+    "The falsifiable content of the shape is the per-token equality",
+    "parentBalance == sum(prior same-tx seizures) — asserted by tryPriorPassDrained",
+    "and pinned here so a widened wildcard cannot pass this population vacuously."
+  ],
+  "chain_id": 10,
+  "block_number": 150057202,
+  "block_hash": "0x9e536de1af09f42ee10c674b850dbe452db3d8222bd61b9792b1288c8af4f8e5",
+  "tx_hash": "0x846bd1cb53cdc3a8d1e3910631c48d8f93e74423d29d02395e46a87406d04a17",
+  "tx_index": 14,
+  "account": "0x7d829d50aaf400b8b29b3b311f4ad70ad819dc6e",
+  "liquidator": "0x4d81ce1dd1b1e10f96313e080bf7b12136ff7e76",
+  "debt_token": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+  "prior_pass": {
+    "log_index": 184,
+    "before_debt_usd6": "3802718",
+    "liquidated_usd6": "1818781",
+    "elements": [
+      { "token": "0x0b2c639c533813f4aa9d7837caf62653d097ff85", "amount": "1125200", "bonus": "11141" },
+      { "token": "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", "amount": "386857", "bonus": "3831" },
+      { "token": "0x80eede496655fb9047dd39d9f418d5483ed600df", "amount": "0", "bonus": "0" },
+      { "token": "0x08c6f91e2b681faf5e17227f2a44c307b3c1364c", "amount": "0", "bonus": "0" },
+      { "token": "0x939778d83b46b456224a33fb59630b11dec56663", "amount": "0", "bonus": "0" },
+      { "token": "0xdcb612005417dc906ff72c87df732e5a90d49e11", "amount": "0", "bonus": "0" },
+      { "token": "0x5a7facb970d094b6c7ff1df0ea68d99e6e73cbff", "amount": "0", "bonus": "0" },
+      { "token": "0x4200000000000000000000000000000000000006", "amount": "152142334693194", "bonus": "5144909868852" },
+      { "token": "0x657e8c867d8b37dcc18fa4caead9c45eb088c642", "amount": "0", "bonus": "0" },
+      { "token": "0x5f46d540b6ed704c3c8789105f30e075aa900726", "amount": "0", "bonus": "0" },
+      { "token": "0xf0bb20865277abd641a307ece5ee04e79073416c", "amount": "0", "bonus": "0" },
+      { "token": "0xd83e3d560ba6f05094d9d8b3eb8aaea571d1864e", "amount": "0", "bonus": "0" },
+      { "token": "0xa519afbc91986c0e7501d7e34968fee51cd901ac", "amount": "0", "bonus": "0" },
+      { "token": "0xe0080d2f853ecddbd81a643dc10da075df26fd3f", "amount": "0", "bonus": "0" },
+      { "token": "0x86b5780b606940eb59a062aa85a07959518c0161", "amount": "0", "bonus": "0" }
+    ]
+  },
+  "case_pass": {
+    "log_index": 187,
+    "before_debt_usd6": "1983937",
+    "liquidated_usd6": "0",
+    "elements": [
+      { "token": "0x0b2c639c533813f4aa9d7837caf62653d097ff85", "amount": "0", "bonus": "0" },
+      { "token": "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", "amount": "0", "bonus": "0" },
+      { "token": "0x80eede496655fb9047dd39d9f418d5483ed600df", "amount": "0", "bonus": "0" },
+      { "token": "0x08c6f91e2b681faf5e17227f2a44c307b3c1364c", "amount": "0", "bonus": "0" },
+      { "token": "0x939778d83b46b456224a33fb59630b11dec56663", "amount": "0", "bonus": "0" },
+      { "token": "0xdcb612005417dc906ff72c87df732e5a90d49e11", "amount": "0", "bonus": "0" },
+      { "token": "0x5a7facb970d094b6c7ff1df0ea68d99e6e73cbff", "amount": "0", "bonus": "0" },
+      { "token": "0x4200000000000000000000000000000000000006", "amount": "0", "bonus": "0" },
+      { "token": "0x657e8c867d8b37dcc18fa4caead9c45eb088c642", "amount": "0", "bonus": "0" },
+      { "token": "0x5f46d540b6ed704c3c8789105f30e075aa900726", "amount": "0", "bonus": "0" },
+      { "token": "0xf0bb20865277abd641a307ece5ee04e79073416c", "amount": "0", "bonus": "0" },
+      { "token": "0xd83e3d560ba6f05094d9d8b3eb8aaea571d1864e", "amount": "0", "bonus": "0" },
+      { "token": "0xa519afbc91986c0e7501d7e34968fee51cd901ac", "amount": "0", "bonus": "0" },
+      { "token": "0xe0080d2f853ecddbd81a643dc10da075df26fd3f", "amount": "0", "bonus": "0" },
+      { "token": "0x86b5780b606940eb59a062aa85a07959518c0161", "amount": "0", "bonus": "0" }
+    ]
+  },
+  "parent_balances_note": "Pass 1 took the PARTIAL branch on every live leg, and the partial branch seizes the WHOLE balance (amount = totalCollateral). The account's parent-frame (N-1) balances are therefore exactly pass 1's amounts: USDC 1125200, USDT 386857, WETH 152142334693194, all other tokens 0 — which is what the drained-shape equality parentBalance == sum(prior same-tx seizures) asserts per element."
+}

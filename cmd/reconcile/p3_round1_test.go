@@ -53,6 +53,7 @@ func TestProductionGateFramesHaveZeroViolations(t *testing.T) {
 	_, _ = v.residue()
 	_ = v.storedBlockHash()
 	_ = v.sameBlockEarlier()
+	_ = v.priorSeizedByAsset()
 	// The next-pass source and every pinned read are consumed by the gate body;
 	// this test proves the ACCESSOR-backed derived set is complete, which is where
 	// both round-1 violations were.
@@ -275,11 +276,24 @@ func TestScenarioBaseClaimsLoadFromTheCommittedDefinitions(t *testing.T) {
 	require.Equal(t, common.Address{}, usdc.Base, "a snapped stable is priced in USD directly")
 	require.True(t, usdc.Stable)
 
-	// And a non-composed asset expects a ZERO base — the direction that catches a
-	// token quietly ACQUIRING a base.
+	// weETH's committed claim carries an EXPLICIT base_asset (the Wave-S schema
+	// extension): the deployed tokenConfig composes weETH over the ETH sentinel,
+	// and the loader must consume that claim rather than defaulting the asset to
+	// USD-terminal — the pre-extension expectation here (ZERO base) was exactly
+	// accept-r4's base-composition-difference finding.
 	weethOP := common.HexToAddress("0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF")
-	if w, ok := claims[weethOP]; ok {
-		require.Equal(t, common.Address{}, w.Base)
+	ethSentinel := common.HexToAddress("0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE")
+	w, ok := claims[weethOP]
+	require.True(t, ok, "weETH must carry a committed composition claim")
+	require.Equal(t, ethSentinel, w.Base,
+		"the loader must consume the explicit base_asset claim (present = the deployed tokenConfig.baseAsset)")
+	require.Contains(t, w.Explanation, "base_asset")
+
+	// The USD-terminal direction still exists — WETH claims no base, and the
+	// zero expectation is what catches a token quietly ACQUIRING one.
+	wethOP := common.HexToAddress("0x4200000000000000000000000000000000000006")
+	if cw, ok := claims[wethOP]; ok {
+		require.Equal(t, common.Address{}, cw.Base)
 	}
 }
 

@@ -23,10 +23,32 @@
 // else is declared pinned. With that frame, healthFactor,
 // totalCollateralBase and totalDebtBase weld BIT-EXACT.
 //
-// Collateral flags are a PINNED getUserConfiguration read this task
-// (chain-truth R5.5): the event-derived flag witness is the collateral-flag
-// micro-wave's deliverable, is not in custody yet at this HEAD, and consuming
-// riskd's assume-true posture here would weld our own guess.
+// Collateral flags reach this gate through TWO doors, deliberately distinct:
+// the HF weld's flags are a PINNED getUserConfiguration read (chain-truth
+// R5.5), while the ZERO-DEBT CENSUS's derived side folds the flag from the
+// CUSTODIED aave_collateral_enabled/disabled events (store.CollateralFlagsAsOf;
+// never-enabled defaults OFF under genesis-complete custody).
+//
+// CENSUS ONE-LAW CORRECTION (accept-r4, 2026-07-31, 24 zero-debt census
+// failures). The derived census predicate was FLAG-BLIND (any positive scaled
+// collateral leg) while the chain's is flag-gated and value-projected
+// (getUserAccountData.totalCollateralBase sums only flag-ON reserves and floors
+// dust to zero in base units) — two predicates asserted as one census. The
+// dissection proved both directions clean at the data level: chain scaled ==
+// derived scaled EXACT on both exemplars, getUserConfiguration == 0x0, one
+// subject NEVER-enabled (USDC does not auto-enable on this market), one
+// EXPLICITLY disabled with the aave_collateral_disabled event IN CUSTODY at
+// block 22,551,863. The fix folds the derived membership under the CHAIN'S OWN
+// law: scaled balance > 0 AND using-as-collateral ON (from the custodied event
+// fold) AND the flag-gated value projection > 0 (the same ComputeAaveHealth
+// output that welds totalCollateralBase bit-exact). This predicate choice is
+// the ADJUDICATED law (chain-truth ruling, ledger 08:55) — recorded here so it
+// reads as what it is, not as an assimilation-to-green: the alternative
+// (keeping the flag-blind predicate) asserts a census the chain provably does
+// not have. The residual the flag gate would otherwise open — a flag that is
+// OFF masking a WRONG balance, invisible to the Σ weld because transfers move
+// no total — is closed by the per-account scaledBalanceOf@pin weld over every
+// census-disagreeing and flag-masked candidate, bit-exact, zero tolerance.
 package main
 
 import (
@@ -41,6 +63,7 @@ import (
 	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/riskfeed"
+	"github.com/kaselunt/solvent/internal/store"
 )
 
 // maxUint256 is `type(uint256).max` — what the Pool returns for
@@ -92,6 +115,17 @@ var neverSeenSubjects = []string{
 // neverSeenSeed is the committed derivation seed, printed in the report.
 const neverSeenSeed = "solvent-p3-task6-neverseen-v1"
 
+// Frame-source names shared between the declaration and every f.use, so the
+// declaration and the consumption cannot drift apart (accept-r4's aave_hf frame
+// violation was exactly that drift: the committed never-seen list was declared
+// and consumed, but the consumption never recorded itself).
+const (
+	aaveNeverSeenListSource = "never-seen subject list (sha256 of " + neverSeenSeed + "|i, first 20 bytes)"
+	aaveFlagLedgerSource    = "position_events(engine=aave_v3_etherfi) collateral-flag ledger (aave_collateral_enabled/aave_collateral_disabled), latest-wins fold <= P_eth"
+	aaveReserveATokenSource = "Pool.getReserveAToken(asset)@pinHash(P_eth)"
+	aaveScaledBalanceSource = "AToken.scaledBalanceOf(user)@pinHash(P_eth) for census-disagreeing and flag-masked candidates plus a nonzero control"
+)
+
 // neverSeenBytes returns the subjects as raw bytes for Stage A.
 func neverSeenBytes() [][]byte {
 	out := make([][]byte, 0, len(neverSeenSubjects))
@@ -112,6 +146,8 @@ func aaveGateFrame() *gateFrame {
 			"the liquidation thresholds our PoolConfigurator custody produced, folded by the SAME function riskd folds with (one implementation of 'what is the effective parameter set')"),
 		derived("raw_logs candidate universe (walked Aave addresses, user slots topics[3]/topics[4], <= P_eth)",
 			"the INDEPENDENT census side: every account custody has ever seen as an Aave user, taken from raw events rather than from the fold under test. Codex round 1 finding 3 - a census computed from position_balances compared the cohort to itself, so an account the fold dropped vanished from BOTH sides at once"),
+		derived(aaveFlagLedgerSource,
+			"the DERIVED collateral flag, folded latest-wins from the custodied Pool event pair (never-enabled = OFF, a chain fact under genesis-complete custody, store/collateralflags.go). It is the zero-debt census's flag source under the ONE law (chain-truth ruling, ledger 08:55): the chain's census is flag-gated and value-projected, so a flag-blind derived predicate asserts a census the chain does not have"),
 		derived("position_events+position_balances absence for the never-seen subjects",
 			"the DB half of the phantom-debt probe: risk-quant R3 requires BOTH sides clean"),
 		derived("raw_logs absence for the never-seen subjects (chain 1, wide predicate: address, any topic's low 20 bytes, anywhere in data)",
@@ -127,7 +163,11 @@ func aaveGateFrame() *gateFrame {
 		pinned("AaveOracle.getAssetPrice(asset)@pinHash(P_eth)",
 			"the gate price: pinned, because a stored 60-second adapter sample judged against a pin at another block launders sample-gap uncertainty through integer arithmetic (risk-quant R1)"),
 		pinned("Pool.getUserConfiguration(user)@pinHash(P_eth)",
-			"the collateral flags. THIS TASK's authoritative source (chain-truth R5.5); it becomes the WELD PARTNER for the event-derived flag once the collateral-flag micro-wave lands"),
+			"the HF weld's collateral flags (chain-truth R5.5). The event-derived flag fold HAS landed and is consumed beside it — by the census predicate, as its derived side — so a flag disagreement between the two doors surfaces as a census difference with a scaledBalanceOf weld beside it, never as a silent substitution"),
+		pinned(aaveReserveATokenSource,
+			"the aToken behind each reserve, resolved AT THE PIN through the Pool's own accessor (v3.2+ IPool) — never from the registry and never from the param ledger under test, because the balance-census weld's read target must not come from the custody it is checking"),
+		pinned(aaveScaledBalanceSource,
+			"the BALANCE-CENSUS weld (chain-truth ruling, ledger 08:55): the raw scaled balance per census-disagreeing / flag-masked account, bit-exact zero tolerance. It closes the flag-off masking residual the one-law census opens — the Σ weld has zero power against transfers — and converts aggregate-only evidence into per-account proof. A nonzero control keeps the read provably live on an all-agreeing run"),
 		pinned("Pool.getUserEMode(user)@pinHash(P_eth)",
 			"asserted == 0 per cohort account and GATED: a nonzero category means the whole HF branch is the wrong law, which is a failure, not a skip"),
 		pinned("Pool.getUserAccountData(user)@pinHash(P_eth)",
@@ -136,7 +176,7 @@ func aaveGateFrame() *gateFrame {
 			"the base-currency scale (8) the price inputs are tagged with. It is a CLAIM, and the weld is what tests it: a wrong scale cannot produce an exact totalCollateralBase"),
 		committed("recon/feeds.json asset decimals (Aave reserves)",
 			"welded against Pool.getConfiguration's decimals bits — a wrong 10^dec denominator is a 10^n price error, not a rounding difference (risk-quant R4.5)"),
-		committed("never-seen subject list (sha256 of "+neverSeenSeed+"|i, first 20 bytes)",
+		committed(aaveNeverSeenListSource,
 			"the empty-set probe cohort, reproducible from the repository alone"),
 	)
 }
@@ -151,9 +191,15 @@ type aaveCohort struct {
 	// both directions of a disagreement are measured (Codex round 1, finding 3).
 	Candidates []common.Address
 	// DerivedFinite / DerivedZeroDebt are the FOLD's classification, kept separate
-	// from the chain's so the two can actually disagree.
+	// from the chain's so the two can actually disagree. DerivedZeroDebt is
+	// filled RAW (flag-blind: any positive collateral leg) by buildAaveCohort and
+	// REPLACED by the gate with the one-law membership (flag-gated,
+	// value-projected — the chain's own census law) once the pinned reserve
+	// state needed for the value projection is in hand; RawZeroDebt keeps the
+	// flag-blind set so the masked difference stays observable.
 	DerivedFinite   map[common.Address]bool
 	DerivedZeroDebt map[common.Address]bool
+	RawZeroDebt     map[common.Address]bool
 	// Control is a known-NONZERO subject included in every all-zero multicall
 	// chunk (chain-truth R1.4): a chunk of all zeros with no nonzero control is
 	// testimony indistinguishable from a lying default.
@@ -197,8 +243,10 @@ func buildAaveCohort(t6 *snapshotdb.Task6Data) aaveCohort {
 		c.Finite = append(c.Finite, common.HexToAddress(a))
 	}
 	c.DerivedZeroDebt = map[common.Address]bool{}
+	c.RawZeroDebt = map[common.Address]bool{}
 	for _, a := range t6.AaveZeroDebtCensus {
 		c.DerivedZeroDebt[common.HexToAddress(a)] = true
+		c.RawZeroDebt[common.HexToAddress(a)] = true
 		c.ZeroDebt = append(c.ZeroDebt, common.HexToAddress(a))
 	}
 	for _, s := range neverSeenSubjects {
@@ -289,6 +337,135 @@ func censusWeldRows(c aaveCohort, chainDebt, chainColl map[common.Address]bool,
 	return rows
 }
 
+// buildDerivedFlagMap folds the collateral-flag ledger rows into a
+// per-(account, reserve) view for the census predicate. A pair with NO row is
+// never-enabled, which the law reads as OFF — a chain fact under
+// genesis-complete custody, not a default (store/collateralflags.go).
+func buildDerivedFlagMap(rows []store.CollateralFlagRow) map[string]map[common.Address]bool {
+	out := map[string]map[common.Address]bool{}
+	for _, r := range rows {
+		key := hex.EncodeToString(r.User)
+		m := out[key]
+		if m == nil {
+			m = map[common.Address]bool{}
+			out[key] = m
+		}
+		m[common.BytesToAddress(r.Reserve)] = r.Enabled
+	}
+	return out
+}
+
+// derivedCensusReserves clones the HF weld's reserve inputs with the DERIVED
+// flag fold substituted for the pinned bitmap — the one-law census's value
+// projection input. Dropping the fold here (using the raw balances flag-blind)
+// is exactly the accept-r4 regression, so this function is deliberately small
+// enough to unit-test and mutate in isolation.
+func derivedCensusReserves(reserves []risk.AaveReserve, flags map[common.Address]bool) []risk.AaveReserve {
+	out := make([]risk.AaveReserve, len(reserves))
+	for i, r := range reserves {
+		r.UsedAsCollateral = flags[r.Asset] // nil map => false => never-enabled is OFF
+		out[i] = r
+	}
+	return out
+}
+
+// scaledBalanceControl picks the deterministic nonzero control for the
+// balance-census weld: the first measured candidate carrying a positive derived
+// scaled collateral leg. Zero address means no candidate qualifies (and the
+// weld set is then whatever the disagreement sets produced).
+func scaledBalanceControl(candidates []common.Address, measured map[common.Address]bool,
+	legs map[string]map[common.Address][2]*big.Int) common.Address {
+	for _, a := range candidates {
+		if !measured[a] {
+			continue
+		}
+		for _, pair := range legs[hex.EncodeToString(a.Bytes())] {
+			if pair[1] != nil && pair[1].Sign() > 0 {
+				return a
+			}
+		}
+	}
+	return common.Address{}
+}
+
+// runScaledBalanceCensusWeld reads aToken.scaledBalanceOf(user) at the pin for
+// every account in the weld set, across every reserve, and welds each against
+// the derived scaled collateral leg (absent leg = zero) bit-exactly.
+func runScaledBalanceCensusWeld(ctx context.Context, c *p3Ctx, f *gateFrame,
+	weldReason map[common.Address]string, reserves []common.Address,
+	aTokenByReserve map[common.Address]common.Address,
+	legs map[string]map[common.Address][2]*big.Int) []p3Row {
+	var rows []p3Row
+	if len(weldReason) == 0 {
+		return rows
+	}
+	accounts := make([]common.Address, 0, len(weldReason))
+	for a := range weldReason {
+		accounts = append(accounts, a)
+	}
+	accounts = sortAddrSlice(accounts)
+
+	var calls []multicallCall
+	type tag struct {
+		acct    common.Address
+		reserve common.Address
+	}
+	var tags []tag
+	for _, a := range accounts {
+		for _, r := range reserves {
+			at := aTokenByReserve[r]
+			if at == (common.Address{}) {
+				rows = append(rows, unreadRow(gateAaveHF, a.Hex(), "scaledBalanceOf(census weld) reserve "+r.Hex(),
+					"the reserve's aToken did not resolve at the pin (getReserveAToken), so the balance-census weld through it cannot be read"))
+				continue
+			}
+			d, err := aTokenScaledBalanceOfABI.Pack("scaledBalanceOf", a)
+			if err != nil {
+				rows = append(rows, unreadRow(gateAaveHF, a.Hex(), "scaledBalanceOf(census weld) reserve "+r.Hex(), err.Error()))
+				continue
+			}
+			calls, tags = append(calls, multicallCall{Target: at, CallData: d}), append(tags, tag{acct: a, reserve: r})
+		}
+	}
+	if len(calls) == 0 {
+		return rows
+	}
+	res, _, err := c.ethR.multicall(ctx, "p3:aave:scaledBalanceCensusWeld", c.pinETH, c.hashETH, calls)
+	if err != nil {
+		for _, tg := range tags {
+			rows = append(rows, unreadRow(gateAaveHF, tg.acct.Hex(), "scaledBalanceOf(census weld) reserve "+tg.reserve.Hex(),
+				"the balance-census multicall did not answer: "+err.Error()))
+		}
+		return rows
+	}
+	for i, tg := range tags {
+		subject := tg.acct.Hex()
+		leg := "scaledBalanceOf(census weld) reserve " + tg.reserve.Hex()
+		if !res[i].Success {
+			rows = append(rows, unreadRow(gateAaveHF, subject, leg, "scaledBalanceOf reverted at the pin"))
+			continue
+		}
+		chainScaled, err := unpackUint256Strict(aTokenScaledBalanceOfABI, "scaledBalanceOf", res[i].ReturnData)
+		if err != nil {
+			rows = append(rows, unreadRow(gateAaveHF, subject, leg, err.Error()))
+			continue
+		}
+		f.use(aaveScaledBalanceSource)
+		derived := new(big.Int)
+		if pair, ok := legs[hex.EncodeToString(tg.acct.Bytes())][tg.reserve]; ok && pair[1] != nil {
+			derived = pair[1]
+		}
+		row := compareExact(gateAaveHF, subject, leg, chainScaled, derived, "balance-census-difference")
+		if row.Evidence == nil {
+			row.Evidence = map[string]string{}
+		}
+		row.Evidence["weld_reason"] = weldReason[tg.acct]
+		row.Evidence["law"] = "bit-exact, zero tolerance: the raw scaled balance is the fold's own unit, so any difference is a fold defect the flag-gated census would otherwise mask (chain-truth ruling, ledger 08:55 — the Σ weld has zero power against transfers)"
+		rows = append(rows, row)
+	}
+	return rows
+}
+
 // zeroControlChunks builds a call list in which position i ≡ 0 (mod
 // multicallChunkSize) is ALWAYS the nonzero control, so the fixed 15-call
 // chunking puts a control in EVERY chunk. Returns the calls plus, for each
@@ -337,10 +514,14 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	}
 
 	type reserveState struct {
-		config    aaveReserveConfig
-		income    *big.Int
-		varDebt   *big.Int
-		price     *big.Int
+		config  aaveReserveConfig
+		income  *big.Int
+		varDebt *big.Int
+		price   *big.Int
+		// aToken is the pin-resolved token behind the reserve, for the
+		// balance-census weld; the zero address means the read did not decode
+		// and every scaledBalanceOf weld through it refuses.
+		aToken    common.Address
 		haveAll   bool
 		readNotes []string
 	}
@@ -374,6 +555,10 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 			return nil, err
 		}
 		add("price", r, c.reg.AaveOracle, d)
+		if d, err = poolGetReserveATokenABI.Pack("getReserveAToken", r); err != nil {
+			return nil, err
+		}
+		add("atoken", r, c.aavePool, d)
 	}
 	res, _, err := c.ethR.multicall(ctx, "p3:aave:reserveState", c.pinETH, c.hashETH, calls)
 	if err != nil {
@@ -382,6 +567,11 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	for i, tg := range tags {
 		st := states[tg.reserve]
 		if !res[i].Success {
+			if tg.kind == "atoken" {
+				// Refuses only the balance-census weld through this reserve; the
+				// HF weld's haveAll must not depend on the v3.2+ accessor.
+				continue
+			}
 			st.readNotes = append(st.readNotes, tg.kind+" reverted at the pin")
 			continue
 		}
@@ -412,6 +602,17 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 				continue
 			}
 			f.use("AaveOracle.getAssetPrice(asset)@pinHash(P_eth)")
+		case "atoken":
+			// A failed aToken resolution refuses only the balance-census weld
+			// through this reserve (recorded there), never the HF weld: haveAll
+			// stays independent of it, so a v-line without the accessor cannot
+			// silently degrade the primary gate.
+			v, err := unpackAddressStrict(poolGetReserveATokenABI, "getReserveAToken", res[i].ReturnData)
+			if err != nil {
+				continue
+			}
+			st.aToken = v
+			f.use(aaveReserveATokenSource)
 		}
 	}
 	for _, r := range reserves {
@@ -473,11 +674,20 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	f.use("recon/feeds.json aaveoracle priceDecimals")
 	f.use("raw_logs candidate universe (walked Aave addresses, user slots topics[3]/topics[4], <= P_eth)")
 
+	// The DERIVED collateral-flag fold — the census predicate's flag source
+	// under the one law. Absence means never-enabled means OFF.
+	flagMap := buildDerivedFlagMap(t6.AaveCollateralFlags)
+	f.use(aaveFlagLedgerSource)
+
 	// The CHAIN's own classification of every candidate, kept separate from the
 	// fold's so the two can disagree (Codex round 1, finding 3).
 	chainHasDebt := map[common.Address]bool{}
 	chainHasCollateral := map[common.Address]bool{}
 	measuredOK := map[common.Address]bool{}
+	// derivedFlagCollValue is the one-law census's VALUE PROJECTION per
+	// candidate: TotalCollateralBase computed over the DERIVED flag fold instead
+	// of the pinned bitmap. nil = not computable (the refusal row already gates).
+	derivedFlagCollValue := map[string]*big.Int{}
 
 	for _, acct := range measured {
 		key := hex.EncodeToString(acct.Bytes())
@@ -535,6 +745,17 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 				"library-refusal",
 				"internal/risk refused to compute over the declared frame. A refusal is a GATED failure here: the served surface would refuse the same account, so the book has a position we cannot value"))
 			continue
+		}
+
+		// The one-law census's value projection: the SAME computation with the
+		// DERIVED flag fold substituted for the pinned bitmap. Its
+		// TotalCollateralBase is the chain's value-space law over OUR flags —
+		// what decides flag-on-but-value-floors-to-zero (chain-truth ruling,
+		// ledger 08:55).
+		inDerived := in
+		inDerived.Reserves = derivedCensusReserves(in.Reserves, flagMap[key])
+		if gotDerived, derr := risk.ComputeAaveHealth(inDerived); derr == nil {
+			derivedFlagCollValue[key] = gotDerived.TotalCollateralBase
 		}
 
 		rows = append(rows, compareExact(gateAaveHF, subject, "totalCollateralBase",
@@ -595,8 +816,63 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 		}
 	}
 
+	// ---- the ONE-LAW derived zero-debt census ------------------------------
+	// Membership := no derived debt AND scaled collateral > 0 with the DERIVED
+	// flag ON AND the flag-gated value projection > 0 — the chain's own census
+	// law (getUserAccountData sums only flag-ON reserves in base units). This
+	// predicate choice is the ADJUDICATED law (chain-truth ruling, ledger
+	// 08:55), not an assimilation-to-green: the flag-blind predicate asserted a
+	// census the chain provably does not have, over accounts whose data both
+	// sides agreed on exactly.
+	rawZeroCount := len(cohort.ZeroDebt)
+	oneLawZero := map[common.Address]bool{}
+	cohort.ZeroDebt = nil
+	for _, a := range cohort.Candidates {
+		v := derivedFlagCollValue[hex.EncodeToString(a.Bytes())]
+		if v != nil && v.Sign() > 0 && !cohort.DerivedFinite[a] {
+			oneLawZero[a] = true
+			cohort.ZeroDebt = append(cohort.ZeroDebt, a)
+		}
+	}
+	cohort.DerivedZeroDebt = oneLawZero
+
 	// ---- the census weld: INDEPENDENT candidates vs the derived fold -------
 	rows = append(rows, censusWeldRows(cohort, chainHasDebt, chainHasCollateral, measuredOK)...)
+
+	// ---- the balance-census weld: scaledBalanceOf@pin, per account ---------
+	// The flag gate above REMOVES accounts from the census, and a removed
+	// account with a WRONG scaled balance would be invisible: both sides say
+	// non-member, and the aggregate Σ weld has zero power against transfers.
+	// So every candidate the one law reclassified (flag-masked) and every
+	// candidate still disagreeing with the chain gets its raw scaled balances
+	// read at the pin and welded bit-exactly, per reserve — aggregate evidence
+	// converted into per-account proof (chain-truth ruling, ledger 08:55). A
+	// nonzero control keeps the read provably live when the sets are empty.
+	weldReason := map[common.Address]string{}
+	for _, a := range cohort.Candidates {
+		if !measuredOK[a] {
+			continue // account-state already gated weld-unread; no classification exists to disagree with
+		}
+		if cohort.RawZeroDebt[a] != oneLawZero[a] {
+			weldReason[a] = "flag-masked: the flag-blind raw census carried this account and the one-law census does not"
+		}
+		chainZero := chainHasCollateral[a] && !chainHasDebt[a]
+		if oneLawZero[a] != chainZero {
+			if weldReason[a] != "" {
+				weldReason[a] += "; "
+			}
+			weldReason[a] += "census-disagreeing: the one-law derived membership still differs from the chain's"
+		}
+	}
+	control := scaledBalanceControl(cohort.Candidates, measuredOK, legsByAccount)
+	if control != (common.Address{}) && weldReason[control] == "" {
+		weldReason[control] = "nonzero control: proves the scaledBalanceOf read live against this archive"
+	}
+	aTokenByReserve := map[common.Address]common.Address{}
+	for r, st := range states {
+		aTokenByReserve[r] = st.aToken
+	}
+	rows = append(rows, runScaledBalanceCensusWeld(ctx, c, f, weldReason, reserves, aTokenByReserve, legsByAccount)...)
 
 	// ---- cohort floors, census-welded --------------------------------------
 	rows = append(rows, cohortFloorRow(gateAaveHF, "aave-finite-hf-borrowers",
@@ -605,7 +881,8 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 			cohort.CensusFinite, cohort.CensusFinite, cohort.CensusZero)))
 	rows = append(rows, cohortFloorRow(gateAaveHF, "aave-zero-debt(marker mapping)",
 		len(cohort.ZeroDebt), aaveZeroDebtFloor, aaveZeroDebtFloor,
-		fmt.Sprintf("accounts with positive derived collateral and no positive debt leg; each welds the marker<->type(uint256).max mapping explicitly. Derived census: %d candidates", cohort.CensusZero)))
+		fmt.Sprintf("ONE-LAW members (no derived debt; scaled collateral > 0 with the DERIVED flag ON; flag-gated value projection > 0 — the chain's own census law, chain-truth ruling ledger 08:55); each welds the marker<->type(uint256).max mapping explicitly. Raw flag-blind candidates: %d; one-law members: %d; flag-masked (removed, scaledBalanceOf-welded instead): %d",
+			rawZeroCount, len(cohort.ZeroDebt), rawZeroCount-len(cohort.ZeroDebt))))
 
 	if sharpnessWitness == "" {
 		rows = append(rows, p3Row{
@@ -734,6 +1011,13 @@ func runNeverSeenProbe(ctx context.Context, c *p3Ctx, f *gateFrame, cohort aaveC
 	}
 	f.use("position_events+position_balances absence for the never-seen subjects")
 	f.use("raw_logs absence for the never-seen subjects (chain 1, wide predicate: address, any topic's low 20 bytes, anywhere in data)")
+	// The COMMITTED list itself is the probe's cohort source, consumed right
+	// here where cohort.NeverSeen (built from it) drives every probe call.
+	// accept-r4's aave_hf frame violation was this line's absence: the probe
+	// provably ran, but the declaration went unconsumed — pure bookkeeping,
+	// closed by recording the consumption at the consumption site (the source
+	// name is a shared const so declaration and use cannot drift again).
+	f.use(aaveNeverSeenListSource)
 
 	controlData, err := poolUserAccountDataABI.Pack("getUserAccountData", cohort.Control)
 	if err != nil {

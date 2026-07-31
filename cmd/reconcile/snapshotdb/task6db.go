@@ -143,6 +143,16 @@ type T6BacktestRow struct {
 	NextPassLogIndex      *uint32  `json:"next_pass_log_index,omitempty"`
 	NextPassBeforeDebtUSD *big.Int `json:"-"`
 	NextPassBeforeText    string   `json:"next_pass_before_debt_usd,omitempty"`
+	// PriorSeizedByAsset sums, per collateral token (hex, no 0x), the amounts
+	// EARLIER Liquidated events in the SAME tx seized from this account — all
+	// prior passes, any debt token, because every pass drains one shared
+	// collateral pool. It is the derived side of obligation 3's THIRD shape
+	// (accept-r4, the 846bd1cb…:187 singleton): a liquidatedAmt=0 pass emitting
+	// all-zero elements over NONZERO parent balances is legitimate exactly when
+	// the prior passes provably took the whole balance, and this fold is what
+	// makes that provable instead of assumed.
+	PriorSeizedByAsset map[string]*big.Int `json:"-"`
+	PriorSeizedText    map[string]string   `json:"prior_seized_by_asset,omitempty"`
 }
 
 // T6Seizure is one userCollateralLiquidated element as the deriver recorded it
@@ -274,6 +284,16 @@ type Task6Data struct {
 	// riskfeed.FoldParams in cmd/reconcile (ONE implementation of "what is the
 	// effective parameter set", shared with riskd).
 	AaveParams []store.ParamRow
+	// AaveCollateralFlags is the DERIVED collateral-flag ledger folded
+	// latest-wins at P_eth (store.CollateralFlagsAsOf over the custodied
+	// aave_collateral_enabled / aave_collateral_disabled events; a pair with NO
+	// row means never-enabled, which is the chain fact OFF under
+	// genesis-complete custody). It is the census predicate's flag source: the
+	// accept-r4 zero-debt census was flag-blind while the chain's is flag-gated
+	// value-projected, and the ADJUDICATED one-law fix (chain-truth ruling,
+	// ledger 08:55) folds membership from THESE events — data already in
+	// custody, both dissection exemplars classifying correctly from it.
+	AaveCollateralFlags []store.CollateralFlagRow
 
 	// DM: normalized debt legs and swept collateral legs at P_op.
 	DMDebtLegs []T6Leg
@@ -327,6 +347,9 @@ func collectTask6(ctx context.Context, q store.Querier, prm Params, cfg FeedRegi
 		}
 		if t.AaveParams, err = store.ParamsAsOfQ(ctx, q, AaveParamEngine, 1, pinETH); err != nil {
 			return nil, fmt.Errorf("aave param ledger at %d: %w", pinETH, err)
+		}
+		if t.AaveCollateralFlags, err = store.CollateralFlagsAsOf(ctx, q, AaveEngine, 1, pinETH); err != nil {
+			return nil, fmt.Errorf("aave collateral-flag ledger at %d: %w", pinETH, err)
 		}
 		if t.AdapterRows, t.AdapterAnchorTotals, err = collectAdapterRows(ctx, q, cfg, pinETH, prm.AdapterRowsPerReserve); err != nil {
 			return nil, err
@@ -469,6 +492,16 @@ func collectAaveCandidates(ctx context.Context, q store.Querier, chainID int64, 
 // candidate universe above supplies the other, and the gate welds them against
 // pinned chain classification. Doing it here rather than in SQL keeps ONE
 // definition of "borrower" (a positive debt leg) on the derived side.
+//
+// The zeroDebt slice is the RAW, FLAG-BLIND candidate set (any positive
+// collateral leg, no debt leg). It is deliberately NOT the census membership:
+// accept-r4 proved the chain's zero-debt census is flag-gated and
+// value-projected, so the gate recomputes membership under the ONE law
+// (scaled balance > 0 AND collateral flag ON, folded from AaveCollateralFlags,
+// AND the flag-gated value projection > 0) — see runAaveHFGate. The raw set
+// survives because the accounts the one law REMOVES are exactly the accounts
+// whose balance defects the flag gate would mask, and each of them gets a
+// per-account scaledBalanceOf weld at the pin.
 func censusFromLegs(legs []T6Leg) (borrowers, zeroDebt []string) {
 	hasDebt := map[string]bool{}
 	hasColl := map[string]bool{}
@@ -804,6 +837,40 @@ func collectBacktest(ctx context.Context, q store.Querier, keys []string, out ma
 			  AND log_index < $4`, raw, account, asset, int32(logIdx)).Scan(&priorLog); err == nil && priorLog != nil {
 			v := uint32(*priorLog)
 			row.PriorPassLogIndex = &v
+		}
+
+		// PRIOR SEIZURES, summed per asset over EVERY earlier same-tx pass for
+		// this account (any debt token — seizures drain one shared collateral
+		// pool). The drained-book proof's derived side; see PriorSeizedByAsset.
+		psrows, err := q.Query(ctx, `
+			SELECT encode(asset,'hex'), COALESCE(SUM((payload->>'amount')::numeric),0)::text
+			FROM position_events
+			WHERE engine = 'debt_manager' AND chain_id = 10 AND tx_hash = $1
+			  AND account = $2 AND event_type = 'liquidation_collateral'
+			  AND log_index < $3
+			GROUP BY 1`, raw, account, int32(logIdx))
+		if err != nil {
+			return fmt.Errorf("case %s prior seizures: %w", key, err)
+		}
+		row.PriorSeizedByAsset = map[string]*big.Int{}
+		row.PriorSeizedText = map[string]string{}
+		for psrows.Next() {
+			var assetHex, sumText string
+			if err := psrows.Scan(&assetHex, &sumText); err != nil {
+				psrows.Close()
+				return fmt.Errorf("scan case %s prior seizure: %w", key, err)
+			}
+			v, err := numericText(sumText)
+			if err != nil {
+				psrows.Close()
+				return fmt.Errorf("case %s prior seizure sum: %w", key, err)
+			}
+			row.PriorSeizedByAsset[assetHex] = v
+			row.PriorSeizedText[assetHex] = sumText
+		}
+		psrows.Close()
+		if err := psrows.Err(); err != nil {
+			return fmt.Errorf("iterate case %s prior seizures: %w", key, err)
 		}
 
 		// NEXT PASS: the immediately following Liquidated for the same (account,

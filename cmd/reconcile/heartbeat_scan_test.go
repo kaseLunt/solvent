@@ -100,25 +100,23 @@ func ladderVerdict(maxGap, heartbeat, grace int64) string {
 	}
 }
 
-// TestPhaseChangeCheckTriggerConditions pins chain-truth R4.2's two triggers:
-// a gap > 2x the published heartbeat, and a gap open-ended at the scan head.
-// Getting this wrong in either direction is bad: too narrow and a phase change
-// is reported as a heartbeat violation; too wide and every feed pays for an
-// extra pinned read.
+// TestPhaseChangeCheckTriggerConditions is RETIRED and inverted: the trigger
+// law it used to pin ("consult the proxy only for a gap > 2x the heartbeat or
+// an open-ended head") was accept-r4's b3 defect — those triggers NEVER fire on
+// healthy feeds, so all four grades were issued with NO proxy-binding read at
+// all while the frame's declared proxy.aggregator() source sat permanently
+// unconsumed (chain-truth ruling 08:55: DANGEROUS CONFIRMED). The binding read
+// is now UNCONDITIONAL per stream per run; the structural pin lives in
+// TestProxyBindingReadIsUnconditional (wave_h_fixes_test.go). What survives
+// here is the fail-closed half the old test also carried: a mismatch is a
+// re-resolution verdict, never a heartbeat violation and never a pass.
 func TestPhaseChangeCheckTriggerConditions(t *testing.T) {
-	needs := func(maxGap, headGap, heartbeat, grace int64) bool {
-		return maxGap > 2*heartbeat || (heartbeat > 0 && headGap > heartbeat+grace)
-	}
-	// The observed PYUSD-class gap (7 days against a claimed 24h heartbeat) is
-	// > 2x and MUST consult the proxy first.
-	require.True(t, needs(604896, 0, 86400, 3600), "a 7-day gap against a 24h claim is >2x and needs the phase check")
-	// The observed FRAX-class gap (1.98 days) is NOT > 2x, so it is a genuine
-	// heartbeat verdict without a phase read.
-	require.False(t, needs(170712, 0, 86400, 3600), "1.98 days is under 2x a 24h heartbeat")
-	// An open-ended head gap triggers it regardless of the max gap.
-	require.True(t, needs(1000, 200000, 86400, 3600), "a stalled head triggers the phase check on its own")
-	// A healthy weETH-class feed triggers nothing.
-	require.False(t, needs(3732, 1200, 3600, 1800))
+	require.True(t, verdictIsFailure(verdictReResolution),
+		"a re-pointed proxy is a gated custody-config failure")
+	require.NotEqual(t, verdictReResolution, verdictBudgetFalsified,
+		"a phase change must never be reported as a heartbeat violation")
+	require.False(t, passingVerdicts[verdictReResolution],
+		"a phase change is never a pass")
 }
 
 // TestUnscannableWhenThePhaseCheckCannotBePerformed is the fail-closed direction:

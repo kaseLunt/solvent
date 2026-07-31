@@ -44,6 +44,8 @@ func TestP3SelectorsArePinned(t *testing.T) {
 		{"decimals", erc20DecimalsABI, "decimals", "decimals()", "313ce567"},
 		{"aggregator", chainlinkProxyAggregatorABI, "aggregator", "aggregator()", "245a7bfc"},
 		{"getBlockHash", multicall3GetBlockHashABI, "getBlockHash", "getBlockHash(uint256)", "ee82ac5e"},
+		{"getReserveAToken", poolGetReserveATokenABI, "getReserveAToken", "getReserveAToken(address)", "cff027d9"},
+		{"scaledBalanceOf", aTokenScaledBalanceOfABI, "scaledBalanceOf", "scaledBalanceOf(address)", "1da24f3e"},
 	}
 	for _, tc := range cases {
 		m, ok := tc.a.Methods[tc.method]

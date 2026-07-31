@@ -73,6 +73,8 @@ func backtestFrame_() *gateFrame {
 			"custody's stored pin, compared byte-for-byte with the COMMITTED frame's block_hash"),
 		derived(srcBTWitnesses,
 			"the ONLY witnesses permitted to explain an eligibility flip (chain-truth R1's three-state law); anything else is UNEXPLAINED"),
+		derived(srcBTPriorSeizures,
+			"obligation 3's THIRD-shape proof: a PRIOR-PASS-DRAINED zero-credit pass emits all-zero elements over nonzero parent balances, and each element is legitimate exactly when parentBalance == the sum of what earlier same-tx passes seized. The frozen frame commits a case with a prior pass (846bd1cb…:187), so this source is deterministically consumed every run"),
 		pinned("Multicall3.getBlockHash(N-1)@pinHash(N)",
 			"the parent hash as block N's OWN state asserts it (the BLOCKHASH opcode executed inside the pinned call) — the honest N-1 pin, never a number->hash resolution"),
 		pinned("DebtManager.collateralOf(user)@parentHash(N-1)",
@@ -136,6 +138,13 @@ const (
 	srcBTStoredHash = "raw_logs.block_hash for the case's own (tx, log_index)"
 	srcBTWitnesses  = "raw_logs same-block rows with a LOWER log_index"
 	srcBTNextPass   = "position_events(event_type=liquidation).payload.before_debt_usd of the NEXT pass (same tx, account, debt token)"
+	// srcBTPriorSeizures is obligation 3's THIRD-shape proof source (accept-r4,
+	// the 846bd1cb…:187 singleton): the per-asset sum of what EARLIER same-tx
+	// passes seized from this account. A liquidatedAmt=0 pass emitting all-zero
+	// elements over nonzero PARENT balances is legitimate exactly when the
+	// prior passes provably drained the book — proven from custody, never
+	// assumed (tryPriorPassDrained).
+	srcBTPriorSeizures = "position_events(event_type=liquidation_collateral).payload.amount summed per asset over EARLIER same-tx passes (log_index < the case's)"
 
 	// The L2 basket-continuity sources (chain-truth basket-continuity ruling).
 	srcBTExecCollateralOf = "DebtManager.collateralOf(user)@pinHash(N)"
@@ -235,6 +244,18 @@ func (v *backtestView) sameBlockWitnesses() []snapshotdb.T6Witness {
 }
 
 func (v *backtestView) priorPassLogIndex() *uint32 { return v.row.PriorPassLogIndex }
+
+// priorSeizedByAsset is the drained-book proof's derived side (obligation 3,
+// third shape): what earlier same-tx passes seized from this account, per
+// token. Keys are addresses; a token with no prior seizure reads zero.
+func (v *backtestView) priorSeizedByAsset() map[common.Address]*big.Int {
+	v.f.use(srcBTPriorSeizures)
+	out := map[common.Address]*big.Int{}
+	for hexAddr, amt := range v.row.PriorSeizedByAsset {
+		out[common.HexToAddress(hexAddr)] = amt
+	}
+	return out
+}
 
 // nextPass is obligation 4's expected value for a FIRST pass. It is an ACCESSOR
 // (Codex round 2, finding H1) because residueWeld previously copied v.row and read
@@ -1326,7 +1347,7 @@ func deployedTakesPartial(e preparedSeizure, u *big.Int) bool {
 // passes - and it never consumed LiquidatedUSD at all, so the elements were never
 // tied to the debt the contract actually liquidated.
 //
-// Now the budget is the anchor. Two determinate shapes:
+// Now the budget is the anchor. THREE determinate shapes:
 //
 //   - the last element took the FINAL branch => remainingDebt == 0 =>
 //     u0 == liquidatedAmt EXACTLY. The walk reproduces every element from u0
@@ -1336,6 +1357,16 @@ func deployedTakesPartial(e preparedSeizure, u *big.Int) bool {
 //   - every element took the PARTIAL branch (the preference array ran out) =>
 //     liquidatedAmt == sum of floor((amount-bonus) x P / 10^dec), one exact
 //     equation over all elements that a proportionally-wrong pair cannot satisfy.
+//   - PRIOR-PASS-DRAINED (the accept-r4 third shape, confirmed from the
+//     846bd1cb…:187 receipt): a SECOND same-tx pass walks a book the earlier
+//     passes fully drained — every live balance is zero, so every element takes
+//     PARTIAL over an empty balance, credits nothing, and liquidatedAmt == 0
+//     with ALL-ZERO elements over parent balances that were NONZERO at N-1.
+//     Its predicate is tryPriorPassDrained's, and its falsifiable content is
+//     the per-token equality parentBalance == Σ prior same-tx seizures — a
+//     recognized shape with its OWN proof obligation, never a widened wildcard
+//     (a zero-amount element stays illegitimate wherever the residual balance
+//     cannot be proven zero from custody).
 func reconstructSeizures(key string, v *backtestView, parent parentFrame,
 	decimals map[common.Address]uint8, f *gateFrame) []p3Row {
 	var rows []p3Row
@@ -1418,8 +1449,30 @@ func reconstructSeizures(key string, v *backtestView, parent parentFrame,
 	// ambiguity is DISCLOSED rather than silently resolved. Neither holding gates.
 	allPartial, allPartialRows, allPartialWhy := tryAllPartial(key, elems, liquidated, partialOf)
 	finalTerm, finalRows, finalWhy := tryFinalTerminated(key, elems, liquidated, partialOf, finalOf, f)
+	// The third shape is only reachable at a zero budget, where FINAL-TERMINATED
+	// is impossible by the contract (u0 == 0 reverts), so the two never overlap.
+	drained, drainedRows, drainedWhy := false, []p3Row(nil), "liquidatedAmt is nonzero, so the loop credited debt and the zero-credit drained shape does not apply"
+	if liquidated.Sign() == 0 {
+		drained, drainedRows, drainedWhy = tryPriorPassDrained(key, elems, liquidated,
+			v.priorPassLogIndex() != nil, v.priorSeizedByAsset())
+	}
 
 	switch {
+	case drained && !allPartial:
+		return append(rows, drainedRows...)
+	case allPartial && drained:
+		// Every parent balance is zero AND the prior passes seized nothing: the
+		// two readings produce identical all-zero element rows. Emit once and
+		// disclose, exactly like the FINAL boundary below.
+		rows = append(rows, allPartialRows...)
+		rows = append(rows, p3Row{
+			Gate: gateBacktest, Subject: key, Leg: "obligation3: branch shape is observationally AMBIGUOUS",
+			Expected: "exactly one of {ALL-PARTIAL, PRIOR-PASS-DRAINED} consistent with the emitted elements",
+			Actual:   "BOTH are consistent (every parent balance zero and every prior seizure zero)",
+			Verdict:  verdictEvidence, Gated: false,
+			Note: "at this degenerate point the drained proof and the all-partial identities assert the same all-zero numbers, so the shape LABEL is not determined by the observation; disclosed rather than silently resolved (the round-2 M5 discipline applied to the third shape)",
+		})
+		return rows
 	case allPartial && !finalTerm:
 		return append(rows, allPartialRows...)
 	case finalTerm && !allPartial:
@@ -1441,13 +1494,83 @@ func reconstructSeizures(key string, v *backtestView, parent parentFrame,
 	default:
 		rows = append(rows, driftRow(gateBacktest, key, "obligation3: branch shape",
 			"the emitted elements follow from ONE of the deployed shapes at the liquidatedAmt budget",
-			"neither shape reproduces them", "seizure-shape-inconsistent",
+			"no shape reproduces them", "seizure-shape-inconsistent",
 			"ALL-PARTIAL rejected because: "+allPartialWhy+" | FINAL-TERMINATED rejected because: "+finalWhy+
-				". Because the budget is anchored to liquidatedAmt, a proportionally-wrong pair lands here rather than passing"))
+				" | PRIOR-PASS-DRAINED rejected because: "+drainedWhy+
+				". Because the budget is anchored to liquidatedAmt (and the drained shape to prior-pass custody), a proportionally-wrong pair lands here rather than passing"))
 		// The per-element diagnostics from the closer hypothesis are still useful.
-		rows = append(rows, finalRows...)
+		if liquidated.Sign() == 0 {
+			rows = append(rows, drainedRows...)
+		} else {
+			rows = append(rows, finalRows...)
+		}
 		return rows
 	}
+}
+
+// tryPriorPassDrained tests the PRIOR-PASS-DRAINED hypothesis — obligation 3's
+// third recognized shape (accept-r4; the 846bd1cb…:187 receipt is the committed
+// witness, testdata/ob3-zero-credit-vector.json). The deployed loop, walked
+// against a book whose every live balance an earlier same-tx pass drained,
+// takes PARTIAL at every element (bal=0 => totalCollateral - maxBonus = 0 <
+// cAFD, DebtManagerCore.sol:625-638), seizes the whole empty balance, credits
+// nothing, exhausts the preference array and emits liquidatedAmt = 0 with
+// all-zero elements — over PARENT balances that were nonzero at N-1.
+//
+// The predicate is deliberately NARROW (a widened wildcard here would turn this
+// population's dominant shape into a vacuous pass, the exact hazard the
+// u0==0 refusal in tryFinalTerminated protects):
+//
+//  1. liquidatedAmt == 0 (the caller only evaluates it there);
+//  2. EVERY element emitted amount == 0 AND bonus == 0;
+//  3. an EARLIER same-tx Liquidated exists for this account;
+//  4. per element token, parentBalance == Σ prior same-tx seizure amounts —
+//     the residual balance the pass walked is provably zero FROM CUSTODY.
+//     Anything else (an in-block deposit, a partial drain, a missing prior
+//     event) fails the equality and the shape is rejected, gated.
+func tryPriorPassDrained(key string, elems []preparedSeizure, liquidated *big.Int,
+	hasPriorPass bool, priorSeized map[common.Address]*big.Int) (bool, []p3Row, string) {
+	var rows []p3Row
+	if liquidated.Sign() != 0 {
+		return false, nil, "liquidatedAmt is nonzero, so the loop credited debt and the zero-credit drained shape does not apply"
+	}
+	for _, e := range elems {
+		if e.s.Amount.Sign() != 0 || e.s.Bonus.Sign() != 0 {
+			return false, nil, fmt.Sprintf("element %d emitted a nonzero amount/bonus, which a zero-credit walk cannot produce", e.s.Seq)
+		}
+	}
+	if !hasPriorPass {
+		return false, nil, "no earlier same-tx Liquidated exists for this account, so a fully-drained book cannot be proven from prior-pass custody"
+	}
+	ok, why := true, ""
+	for _, e := range elems {
+		prior := priorSeized[e.tok]
+		if prior == nil {
+			prior = new(big.Int)
+		}
+		subject := fmt.Sprintf("%s element %d %s", key, e.s.Seq, e.tok.Hex())
+		row := compareExact(gateBacktest, subject,
+			"obligation3: drained-book zero element — parent balance == Σ prior same-tx seizures",
+			e.bal, prior, "seizure-drained-residual")
+		row.Note = "PRIOR-PASS-DRAINED: the zero element is legitimate exactly because the residual balance at this pass is provably zero — the parent-frame balance equals what the earlier same-tx passes seized (custodied liquidation_collateral fold). " + row.Note
+		rows = append(rows, row)
+		if row.Verdict != verdictExact {
+			ok, why = false, fmt.Sprintf("element %d: parent balance %s != prior same-tx seized %s — the residual balance is NOT provably zero, so the zero element is not legitimate", e.s.Seq, e.bal, prior)
+		}
+	}
+	budget := compareExact(gateBacktest, key,
+		"obligation3: liquidatedAmt == credited sum == 0 (zero-credit walk)",
+		liquidated, new(big.Int), "seizure-budget-drained")
+	budget.Evidence = map[string]string{
+		"shape":    "PRIOR-PASS-DRAINED (a later same-tx pass over a fully-drained book: every element PARTIAL over an empty balance)",
+		"elements": fmt.Sprintf("%d", len(elems)),
+		"law":      "bal=0 => totalCollateral - maxBonus = 0 < cAFD selects PARTIAL, amount = totalCollateral = 0, credit 0 (DebtManagerCore.sol:613-658); remainingDebt stays u0, so liquidatedAmt = u0 - remainingDebt = 0",
+	}
+	rows = append(rows, budget)
+	if budget.Verdict != verdictExact {
+		ok, why = false, "liquidatedAmt is not zero under the zero-credit identity"
+	}
+	return ok, rows, why
 }
 
 // tryAllPartial tests the ALL-PARTIAL hypothesis: every element took the partial

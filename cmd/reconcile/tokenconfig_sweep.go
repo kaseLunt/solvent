@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -60,7 +59,16 @@ type scenarioPropagation struct {
 	Symbol         string `json:"symbol"`
 	StableSnap     bool   `json:"stable_snap"`
 	BaseStableSnap bool   `json:"base_stable_snap"`
-	RespondsTo     []struct {
+	// BaseAsset is the model's committed claim about the DEPLOYED composition
+	// (internal/risk/scenario.go AssetResponse.BaseAsset, the Wave-S schema
+	// extension): present = the deployed tokenConfig.baseAsset for this asset;
+	// omitted = USD-terminal. The internal/risk loader enforces its validation
+	// laws (non-zero, not self, mutually exclusive with stable_snap per the
+	// chain's own StableTokenCannotHaveBaseAsset, agreement with responds_to on
+	// base_stable_snap rows); this loader re-checks the ones that would corrupt
+	// the weld's EXPECTED side, because a conflicted expectation welds nothing.
+	BaseAsset string `json:"base_asset,omitempty"`
+	RespondsTo []struct {
 		Axis  string `json:"axis"`
 		Asset string `json:"asset"`
 	} `json:"responds_to"`
@@ -76,6 +84,7 @@ type scenarioFile struct {
 type scenarioBaseClaim struct {
 	Base        common.Address
 	Stable      bool
+	Symbol      string
 	FromID      string
 	Explanation string
 }
@@ -106,7 +115,14 @@ func loadScenarioBaseClaims(dir string) (map[common.Address]scenarioBaseClaim, e
 				continue // the provider swept here is the OP Debt Manager's
 			}
 			asset := common.HexToAddress(pr.Asset)
-			claim := scenarioBaseClaim{FromID: sf.ID, Stable: pr.StableSnap}
+			claim := scenarioBaseClaim{FromID: sf.ID, Stable: pr.StableSnap, Symbol: pr.Symbol}
+			declaredBase := common.Address{}
+			if pr.BaseAsset != "" {
+				declaredBase = common.HexToAddress(pr.BaseAsset)
+				if declaredBase == (common.Address{}) {
+					return nil, fmt.Errorf("scenario %s: asset %s declares base_asset as the zero address — a USD-terminal claim is made by OMITTING base_asset, so the claim has exactly one spelling", sf.ID, pr.Asset)
+				}
+			}
 			switch {
 			case pr.BaseStableSnap:
 				var named common.Address
@@ -118,10 +134,22 @@ func loadScenarioBaseClaims(dir string) (map[common.Address]scenarioBaseClaim, e
 				if named == (common.Address{}) {
 					return nil, fmt.Errorf("scenario %s: asset %s declares base_stable_snap with no responds_to asset, so the composition claim names no base", sf.ID, pr.Asset)
 				}
+				if declaredBase != (common.Address{}) && declaredBase != named {
+					return nil, fmt.Errorf("scenario %s: asset %s names its stable base through responds_to (%s) and base_asset (%s) disagrees — a conflicted expectation welds nothing", sf.ID, pr.Asset, named.Hex(), declaredBase.Hex())
+				}
 				claim.Base = named
 				claim.Explanation = "base_stable_snap: the model values this asset as rate x snap(base), so the provider must name that base"
 			case pr.StableSnap:
+				if declaredBase != (common.Address{}) {
+					return nil, fmt.Errorf("scenario %s: asset %s declares BOTH stable_snap and base_asset — mutually exclusive by the chain's own law (PriceProviderV2 StableTokenCannotHaveBaseAsset)", sf.ID, pr.Asset)
+				}
 				claim.Explanation = "stable_snap: the model snaps this asset's own price, so it must be USD-denominated (baseAsset = 0)"
+			case declaredBase != (common.Address{}):
+				// The Wave-S schema extension: an explicit committed composition
+				// claim (present = the deployed tokenConfig.baseAsset; the claim
+				// files carry the pinned-read citations).
+				claim.Base = declaredBase
+				claim.Explanation = "base_asset: the scenario matrices commit this asset's deployed composition explicitly, so the provider must name exactly this base"
 			default:
 				claim.Explanation = "no base claim in the scenario matrices, so the model values this asset directly in USD (baseAsset = 0)"
 			}
@@ -144,11 +172,18 @@ func loadScenarioBaseClaims(dir string) (map[common.Address]scenarioBaseClaim, e
 // canonicalScenarioDir is where ApplyScenario's committed configs live.
 const canonicalScenarioDir = "internal/risk/scenarios"
 
-// dmStableSnapSet is the model's snap set — the assets internal/risk applies
-// the stable 1e6 snap to. Stable-set equality is asserted in BOTH directions
-// (risk-quant R4.1): an unexpected stable is a snap the model does not apply; a
-// missing one is a snap it invents.
-var dmStableSnapSet = []string{"USDC", "USDT", "frxUSD"}
+// The model's stable snap set is DERIVED from loadScenarioBaseClaims — the
+// stable_snap rows of the very files ApplyScenario consumes — never restated
+// here. A hardcoded copy lived at this spot until accept-r4: the gate whose own
+// declared-source text says claims are "loaded from the files ApplyScenario
+// consumes rather than restated here" was consuming a restatement, which the
+// frame ledger caught as an undeclared source and chain-truth ranked latent
+// drift-capable (ruling 08:55; fix = derive from loadScenarioBaseClaims,
+// delete the copy). Stable-set equality is still asserted in BOTH directions
+// (risk-quant R4.1) — an unexpected stable is a snap the model does not apply;
+// a missing one is a snap it invents — and it is asserted in ADDRESS space,
+// because the book carries twin symbols (two liquidRESERVE addresses) that a
+// symbol-keyed weld would collapse.
 
 // tokenConfigFrame declares the sweep's input frame. It declares NO
 // derived-under-test source, and says why: frameNoDerivedJustified carries the
@@ -170,10 +205,16 @@ func tokenConfigFrame() *gateFrame {
 			"the DISCLOSED SUBSTITUTE for chain-truth R3.2's eth_getStorageAt(EIP-1967 impl slot) read — see implWitnessDeviation"),
 		committed("recon/feeds.json DM asset set, symbols, decimals, provider address",
 			"the registry half of the swept union, and the stable-set / composition claims the invariants are judged against"),
-		committed("internal/risk/scenarios/*.json propagation rows (stable_snap, base_stable_snap, responds_to)",
-			"the MODEL's OWN claims, loaded from the files ApplyScenario consumes rather than restated here. R4.1/R4.2 make them chain-welded rather than author-asserted, and the base-composition EQUALITY is what closes the lens-composition class"),
+		committed(scenarioClaimsSource,
+			"the MODEL's OWN claims, loaded from the files ApplyScenario consumes and NEVER restated here (accept-r4 removed the hardcoded snap-set copy this very gate carried). The stable snap set, the explicit base_asset composition claims and the base-composition equality all derive from this one source. R4.1/R4.2 make them chain-welded rather than author-asserted, and the base-composition EQUALITY is what closes the lens-composition class"),
 	)
 }
+
+// scenarioClaimsSource is the ONE declared source every scenario-derived
+// expectation (snap set, base composition, stable flags) is consumed under —
+// shared const so the declaration and the f.use cannot drift (the accept-r4
+// tokenconfig frame violation was an undeclared restatement of this source).
+const scenarioClaimsSource = "internal/risk/scenarios/*.json propagation rows (stable_snap, base_stable_snap, base_asset, responds_to)"
 
 // implWitnessDeviation is the honest statement of the ONE chain-truth item this
 // wave could not implement as specified, recorded in the artifact rather than
@@ -208,7 +249,6 @@ func runTokenConfigSweep(ctx context.Context, c *p3Ctx, chainUniverse []common.A
 	f := c.frames.add(tokenConfigFrame())
 	var rows []p3Row
 	f.use("recon/feeds.json DM asset set, symbols, decimals, provider address")
-	f.use("internal/risk scenario snap set {USDC, USDT, frxUSD} and the base-composition claims")
 
 	// The swept set is the UNION (chain-truth R3.3): sweeping only feeds.json
 	// would be a silent cap, because a chain-configured token missing from our
@@ -439,43 +479,8 @@ func runTokenConfigSweep(ctx context.Context, c *p3Ctx, chainUniverse []common.A
 		evidence = append(evidence, row)
 	}
 
-	// ---- R4.1 stable-set equality, BOTH directions -------------------------
-	chainStable := map[string]bool{}
-	for t, cfg := range configs {
-		if cfg.IsStableToken {
-			sym := "0x" + hexLower(t.Hex())
-			if reg := c.reg.DM[t]; reg != nil {
-				sym = reg.Symbol
-			}
-			chainStable[sym] = true
-		}
-	}
-	modelStable := map[string]bool{}
-	for _, s := range dmStableSnapSet {
-		modelStable[s] = true
-	}
-	for _, s := range unionKeys(chainStable, modelStable) {
-		switch {
-		case chainStable[s] && !modelStable[s]:
-			rows = append(rows, p3Row{
-				Gate: gateTokenConfig, Subject: "stable-set:" + s, Leg: "isStableToken",
-				Expected: "isStableToken=true on chain", Actual: "NOT in the model's snap set",
-				Verdict: verdictDrift, Gated: true, Class: "unexpected-stable",
-				Note: "an unexpected stable is a snap the model does not apply: the engine snaps this token's price to 1e6 and our valuation does not (risk-quant R4.1)",
-			})
-		case modelStable[s] && !chainStable[s]:
-			rows = append(rows, p3Row{
-				Gate: gateTokenConfig, Subject: "stable-set:" + s, Leg: "isStableToken",
-				Expected: "isStableToken=true on chain (the model applies the snap)", Actual: "false or absent on chain",
-				Verdict: verdictDrift, Gated: true, Class: "missing-stable",
-				Note: "a missing stable is a snap the model INVENTS: we would snap a price the engine does not (risk-quant R4.1)",
-			})
-		default:
-			rows = append(rows, exactRow(gateTokenConfig, "stable-set:"+s, "isStableToken", "true", "true"))
-		}
-	}
-
-	// ---- R4.2 base-composition EQUALITY vs the scenario claims -------------
+	// ---- the scenario claims: the ONE declared source for every model-side
+	// expectation below (snap set, stable flags, base composition) ------------
 	claims, cerr := loadScenarioBaseClaims(c.scenarioDir())
 	if cerr != nil {
 		rows = append(rows, p3Row{
@@ -483,10 +488,61 @@ func runTokenConfigSweep(ctx context.Context, c *p3Ctx, chainUniverse []common.A
 			Expected: "a loadable, conflict-free expected asset->base mapping from the scenario definitions",
 			Actual:   cerr.Error(),
 			Verdict:  verdictWeldUnread, Gated: true, Class: "scenario-claims-unreadable",
-			Note: "without the model's own claims there is no expected side for the base-composition weld, and printing the observed tree alone is exactly the enumeration-without-comparison the round-1 finding named",
+			Note: "without the model's own claims there is no expected side for the base-composition weld OR the stable-set weld (both derive from this one source since accept-r4 deleted the hardcoded snap-set copy), and printing the observed tree alone is exactly the enumeration-without-comparison the round-1 finding named",
 		})
 	} else {
-		f.use("internal/risk/scenarios/*.json propagation rows (stable_snap, base_stable_snap, responds_to)")
+		f.use(scenarioClaimsSource)
+
+		// ---- R4.1 stable-set equality, BOTH directions, in ADDRESS space ----
+		// The model's snap set is DERIVED from the claims (the stable_snap rows
+		// of the files ApplyScenario consumes) — the hardcoded restatement this
+		// section carried until accept-r4 is deleted (chain-truth ruling 08:55).
+		// Address space, not symbols: the book has twin-symbol assets (two
+		// liquidRESERVE addresses) a symbol key would collapse, and eUSD / EURC
+		// are isStableToken=FALSE on chain despite their names.
+		stableLabel := func(t common.Address) string {
+			if reg := c.reg.DM[t]; reg != nil {
+				return reg.Symbol + " " + t.Hex()
+			}
+			if cl, ok := claims[t]; ok && cl.Symbol != "" {
+				return cl.Symbol + " " + t.Hex()
+			}
+			return t.Hex()
+		}
+		chainStable := map[common.Address]bool{}
+		for t, cfg := range configs {
+			if cfg.IsStableToken {
+				chainStable[t] = true
+			}
+		}
+		modelStable := map[common.Address]bool{}
+		for t, cl := range claims {
+			if cl.Stable {
+				modelStable[t] = true
+			}
+		}
+		for _, t := range sortedAddrs(unionAddrSets(chainStable, modelStable)) {
+			switch {
+			case chainStable[t] && !modelStable[t]:
+				rows = append(rows, p3Row{
+					Gate: gateTokenConfig, Subject: "stable-set:" + stableLabel(t), Leg: "isStableToken",
+					Expected: "isStableToken=true on chain", Actual: "NOT in the model's snap set (derived from the scenario claims)",
+					Verdict: verdictDrift, Gated: true, Class: "unexpected-stable",
+					Note: "an unexpected stable is a snap the model does not apply: the engine snaps this token's price to 1e6 and our valuation does not (risk-quant R4.1)",
+				})
+			case modelStable[t] && !chainStable[t]:
+				rows = append(rows, p3Row{
+					Gate: gateTokenConfig, Subject: "stable-set:" + stableLabel(t), Leg: "isStableToken",
+					Expected: "isStableToken=true on chain (the model applies the snap)", Actual: "false or absent on chain",
+					Verdict: verdictDrift, Gated: true, Class: "missing-stable",
+					Note: "a missing stable is a snap the model INVENTS: we would snap a price the engine does not (risk-quant R4.1)",
+				})
+			default:
+				rows = append(rows, exactRow(gateTokenConfig, "stable-set:"+stableLabel(t), "isStableToken", "true", "true"))
+			}
+		}
+
+		// ---- R4.2 base-composition EQUALITY vs the scenario claims ----------
 		claimed := map[common.Address]bool{}
 		for a := range claims {
 			claimed[a] = true
@@ -647,22 +703,6 @@ func addrSetFromMap(in map[common.Address]bool) map[common.Address]bool {
 			out[a] = true
 		}
 	}
-	return out
-}
-
-func unionKeys(a, b map[string]bool) []string {
-	set := map[string]bool{}
-	for k := range a {
-		set[k] = true
-	}
-	for k := range b {
-		set[k] = true
-	}
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
-	}
-	sort.Strings(out)
 	return out
 }
 

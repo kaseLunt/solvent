@@ -57,6 +57,12 @@ const (
 	// pass and NOT a fail on its own — it is listed individually with its
 	// margin, and the case's own obligation verdicts still decide.
 	verdictMarginal = "marginal-disclosed"
+	// verdictSampleGap: the DM maxBorrow leg's middle state (classifyDMMaxBorrow,
+	// adjudicated on accept-r4): the pin-clock values differ but the own-clock
+	// weld at the account's own sweep block is bit-exact, so the delta is
+	// eventless basket motion inside the sweep->pin gap. Disclosed individually
+	// with magnitude and sweep age; never a failure and never an epsilon.
+	verdictSampleGap = "sample-gap-disclosed"
 )
 
 // p3Row is ONE comparison across every Task-6 gate. A single shape keeps the
@@ -146,6 +152,7 @@ var passingVerdicts = map[string]bool{
 	verdictProvenanceUpgrade: true, // B3's BEST outcome: max gap within the heartbeat
 	verdictQualifier:         true, // within the declared operator grace, disclosed
 	verdictMarginal:          true, // intra-block flip WITH a proven custodied witness
+	verdictSampleGap:         true, // own-clock weld bit-exact; the pin delta is disclosed sweep-age motion
 }
 
 // verdictIsFailure decides one row. Gated is a separate axis: an ungated row is

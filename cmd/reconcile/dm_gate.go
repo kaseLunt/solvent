@@ -29,6 +29,27 @@
 // frozen-literal test cohort compared across ~45 minutes; that test now reads its
 // derived side live inside ONE snapshot (p3_dm_live_test.go). No claim about the
 // sweeper's data quality survives from that finding.
+//
+// SECOND CLOCK CORRECTION, same defect family, found by accept-r4 (2026-07-31,
+// 233 getMaxBorrowAmount drifts over 28,622 census welds). The frame DECLARED
+// the swept collateral amounts @P_op. That declaration was FALSE: the sweeper's
+// multicall executes at each account's OWN sweep block S(account) and
+// ApplySweepBatch replaces the legs wholesale, so the persisted vector is
+// @S(account), never @P_op — the maxBorrow leg was silently welding a
+// SAMPLE-CLOCK input against PIN-CLOCK chain state. Three independent lanes
+// converged on the classification (chain-truth ruling 08:55, risk-quant ruling
+// 08:42, read-only dissection 08:58): the sweeper's custody is EXACT at its own
+// clock (own-clock collateralOf byte-identical to the persisted snapshot 5/5),
+// the recompute law is exact (pin-vector substitution reproduces
+// getMaxBorrowAmount@pin bit-exactly 5/5), and the 233 were eventless basket
+// motion inside the sweep→pin gap (a plain ERC20 transfer moves DM collateral
+// with 0 raw logs, by design — the same motion collateral_spot_reads labels
+// "expected, report-only BY CONSTRUCTION"). The fix is the THREE-STATE verdict
+// law in classifyDMMaxBorrow: a verdict class with its own discrimination read,
+// NOT a fourth tolerance — risk-quant refused any epsilon over the 233 as
+// tolerance-as-carpet, and the three-tolerance law stands untouched. The
+// BOOLEAN leg (liquidatable, strict >) stays gated at the pin: it is the served
+// product and it welded 46/46 through the same gap.
 package main
 
 import (
@@ -45,6 +66,7 @@ import (
 	"github.com/kaselunt/solvent/cmd/reconcile/snapshotdb"
 	"github.com/kaselunt/solvent/internal/risk"
 	"github.com/kaselunt/solvent/internal/riskfeed"
+	"github.com/kaselunt/solvent/internal/store"
 )
 
 // R3's DM composition floors.
@@ -56,15 +78,24 @@ const (
 	dmCohortTotalBackstop = 25
 )
 
+// The own-clock discrimination read's frame-source names, shared between the
+// declaration and every f.use so the two cannot drift into a frame violation.
+const (
+	dmCollateralSnapshotSource = "position_balances(source=snapshot, engine=debt_manager, side=collateral).amount@S(account) (the sweep block, NOT the run pin)"
+	dmOwnClockMaxBorrowSource  = "DebtManager.getMaxBorrowAmount(user,false)@ownSweepBlockHash(S(account))"
+	dmOwnClockPriceSource      = "DebtManager.convertCollateralTokenToUsd(token, 10^dec)@ownSweepBlockHash(S(account))"
+	dmOwnClockHeaderSource     = "headerHash@ownSweepBlock(S(account)) resolved through the pinned reader"
+)
+
 // dmGateFrame declares the gate's exhaustive input frame.
 func dmGateFrame() *gateFrame {
 	return newGateFrame(gateDMBoolean,
 		derived("position_balances(source=event, engine=debt_manager, side=debt).amount@P_op",
 			"the NORMALIZED debt our DB fold produced — the thing under test on the debt side"),
-		derived("position_balances(source=snapshot, engine=debt_manager, side=collateral).amount@P_op",
-			"the swept collateral amounts (CashLens.getUserTotalCollateral, which nets pending withdrawals) our sweeper persisted — the thing under test on the collateral side"),
+		derived(dmCollateralSnapshotSource,
+			"the swept collateral amounts (the CashLens collateralOf multicall, which nets pending withdrawals) our sweeper persisted — the thing under test on the collateral side. Declared at S(account) because that IS their clock: the sweeper executes at its own block and ApplySweepBatch replaces the legs wholesale. Declaring these @P_op was accept-r4's FALSE declaration (chain-truth ruling 08:55): it hid that the maxBorrow leg welds a sample-clock input against pin-clock chain state, which is why that leg carries the three-state verdict law (classifyDMMaxBorrow) instead of a single-clock compareExact"),
 		derived("dm_param_history (position_events collateral_token_config_set) ledger prefix <= P_op, folded by riskfeed.FoldParams",
-			"the liquidation thresholds our DM event custody produced, HUNDRED_PERCENT-denominated, folded by the SAME function riskd folds with"),
+			"the liquidation thresholds our DM event custody produced, HUNDRED_PERCENT-denominated, folded by the SAME function riskd folds with. The own-clock discrimination weld re-cuts the SAME ledger at <= S(account), so both clocks fold one custody chain"),
 		derived("snapshot_sweeps.last_success_block per account, FILTERED at the run pin",
 			"the SweepBlock watermark. ComputeDMHealth REQUIRES it: DM collateral is sweep-dominated (~1h) while prices are 60s, so a boolean served without it would sit a fresh badge over hour-stale collateral. It carries THE SAME pin filter as the collateral legs — an unfiltered watermark certifies legs the pin cannot see and manufactures false liquidatable verdicts (T6SweepState)"),
 		pinned("DebtManager.getCurrentIndex(borrowToken)@pinHash(P_op)",
@@ -78,7 +109,13 @@ func dmGateFrame() *gateFrame {
 		pinned("DebtManager.liquidatable(user)@pinHash(P_op)",
 			"the CHAIN side of the boolean weld — the expected side"),
 		pinned("DebtManager.getMaxBorrowAmount(user,false)@pinHash(P_op)",
-			"the chain's own threshold-weighted collateral, welded exactly against our MaxBorrowLT so a boolean disagreement localises to a token instead of reading as 'the boolean differs'"),
+			"the chain's own threshold-weighted collateral at the pin. The collateral vector under it is @S(account), so this leg is judged by the THREE-STATE law: bit-exact when the weld holds at one clock; sample-gap(disclosed) when the own-clock weld at S passes and only the pin value differs; snapshot-custody-drift(gated) when the own-clock weld itself fails"),
+		pinned(dmOwnClockMaxBorrowSource,
+			"the own-clock DISCRIMINATION read: getMaxBorrowAmount re-read at blockHash(S(account)) for every pin-drifting member plus one always-on control. The dissection proved the sweeper byte-exact at this clock; a failure here is real custody drift and flips the verdict (chain-truth ruling 08:55). S is deep-finalized, so the hash-bound read is as strong as the pin reads"),
+		pinned(dmOwnClockPriceSource,
+			"the engine-exact price AT S(account), feeding the own-clock recompute the same way the pin price feeds the pin recompute (internal/risk/dm.go:102-134, the per-token floor-then-sum law DebtManagerCore.sol:139-165)"),
+		pinned(dmOwnClockHeaderSource,
+			"the number->hash resolution for S(account) so the own-clock reads are hash-bound. S sits below the run pin and is deep-finalized"),
 		pinned("DebtManager.borrowingOf(user).total@pinHash(P_op)",
 			"the chain's own live debt total, welded exactly against our index-replayed value"),
 		committed("cohort sampling seed = the OP pin's block hash (a chain fact, echoed in the report)",
@@ -140,7 +177,7 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 	for _, l := range t6.DMCollLegs {
 		collByAccount[l.AccountHex] = append(collByAccount[l.AccountHex], l)
 	}
-	f.use("position_balances(source=snapshot, engine=debt_manager, side=collateral).amount@P_op")
+	f.use(dmCollateralSnapshotSource)
 	f.use("snapshot_sweeps.last_success_block per account, FILTERED at the run pin")
 
 	// Live debt USD from OUR normalized debt and the PINNED index, per token,
@@ -265,7 +302,7 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 	}
 
 	// ---- chain weld over the cohort ---------------------------------------
-	weldRows, err := weldDMCohort(ctx, c, f, cohort, healthByAccount)
+	weldRows, err := weldDMCohort(ctx, c, f, cohort, healthByAccount, st, collByAccount, debtUSDByAccount)
 	rows = append(rows, weldRows...)
 	if err != nil {
 		return rows, err
@@ -779,9 +816,253 @@ func readDMTokenState(ctx context.Context, c *p3Ctx, universe, borrow []common.A
 	return decimals, prices, indexes, bad, nil
 }
 
+// dmOwnClockResult is one account's own-clock discrimination weld: the chain's
+// getMaxBorrowAmount at blockHash(S(account)) beside our recompute over the SAME
+// persisted vector with S-clock prices and the param ledger re-cut at S.
+type dmOwnClockResult struct {
+	Block    uint64
+	Hash     common.Hash
+	ChainMax *big.Int
+	OurMax   *big.Int
+	// Err is non-empty when either side could not be produced (a reverted or
+	// undecodable read, a param fold failure, a library refusal). The classifier
+	// turns it into weld-unread — "cannot verify" is never advisory.
+	Err string
+}
+
+// classifyDMMaxBorrow is the THREE-STATE verdict law for the maxBorrow leg
+// (adjudicated: chain-truth ruling 08:55 + risk-quant ruling 08:42 + the
+// dissection verdict 08:58 on accept-r4). It is a pure function so the law is
+// unit-tested and mutation-killable in isolation.
+//
+//	bit-exact               the weld holds at ONE clock: the pin values agree.
+//	sample-gap(disclosed)   the pin values differ but the own-clock weld at
+//	                        S(account) is bit-exact: the persisted vector is the
+//	                        chain's own state at its own clock, and the pin delta
+//	                        is eventless basket motion inside the sweep->pin gap
+//	                        — the same motion collateral_spot_reads labels
+//	                        report-only BY CONSTRUCTION. Disclosed with
+//	                        magnitude and sweep age, never gated.
+//	snapshot-custody-drift  the own-clock weld ITSELF fails: the persisted
+//	                        vector disagrees with the chain at its own clock.
+//	                        That is real custody drift and it GATES.
+//
+// This is a verdict class with its own read, NOT a fourth tolerance: any
+// epsilon over the pin delta was refused as tolerance-as-carpet, and the
+// three-tolerance law stands untouched.
+func classifyDMMaxBorrow(pinChain, ours *big.Int, own *dmOwnClockResult) (verdict, class string) {
+	if pinChain.Cmp(ours) == 0 {
+		return verdictExact, ""
+	}
+	if own == nil || own.Err != "" {
+		return verdictWeldUnread, "own-clock-read-unread"
+	}
+	if own.ChainMax.Cmp(own.OurMax) == 0 {
+		return verdictSampleGap, verdictSampleGap
+	}
+	return verdictDrift, "snapshot-custody-drift"
+}
+
+// dmOwnClockProbe names one account the discrimination read is issued for.
+type dmOwnClockProbe struct {
+	acct   common.Address
+	key    string
+	sweep  uint64
+	reason string
+}
+
+// runDMOwnClockWelds performs the own-clock discrimination welds, grouped by
+// sweep block so accounts sharing an S share one hash resolution and one
+// multicall. Every failure is recorded per account, never fatal: a dead read at
+// one S must not erase the classification of every other account.
+func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dmOwnClockProbe,
+	st dmTokenState, coll map[string][]snapshotdb.T6Leg, debtUSD map[string]*big.Int) map[string]*dmOwnClockResult {
+	out := map[string]*dmOwnClockResult{}
+	if len(probes) == 0 {
+		return out
+	}
+	byS := map[uint64][]dmOwnClockProbe{}
+	for _, p := range probes {
+		byS[p.sweep] = append(byS[p.sweep], p)
+	}
+	sweeps := make([]uint64, 0, len(byS))
+	for s := range byS {
+		sweeps = append(sweeps, s)
+	}
+	sort.Slice(sweeps, func(i, j int) bool { return sweeps[i] < sweeps[j] })
+
+	for _, s := range sweeps {
+		group := byS[s]
+		fail := func(note string) {
+			for _, p := range group {
+				out[p.key] = &dmOwnClockResult{Block: s, Err: note}
+			}
+		}
+		if s == 0 {
+			fail("no successful sweep at or below the pin, so there is no own clock to weld at")
+			continue
+		}
+		hash, _, err := c.opR.headerHash(ctx, s)
+		if err != nil {
+			fail(fmt.Sprintf("headerHash(%d) did not resolve: %v", s, err))
+			continue
+		}
+		f.use(dmOwnClockHeaderSource)
+
+		// The token set the recompute needs at S: the union of the group's
+		// persisted legs. Decimals are the pin reads (an ERC20's decimals is
+		// immutable by convention; a token that changed them between S and the pin
+		// would fail this weld loudly, which is the correct direction).
+		tokenSet := map[common.Address]bool{}
+		for _, p := range group {
+			for _, l := range coll[p.key] {
+				tokenSet[common.HexToAddress(l.AssetHex)] = true
+			}
+		}
+		tokens := sortedAddrs(tokenSet)
+
+		var calls []multicallCall
+		type tag struct {
+			kind string
+			acct common.Address
+			tok  common.Address
+		}
+		var tags []tag
+		bad := false
+		for _, p := range group {
+			d, err := dmGetMaxBorrowAmountABI.Pack("getMaxBorrowAmount", p.acct, false)
+			if err != nil {
+				fail("pack getMaxBorrowAmount: " + err.Error())
+				bad = true
+				break
+			}
+			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "max", acct: p.acct})
+		}
+		if bad {
+			continue
+		}
+		for _, t := range tokens {
+			dec, ok := st.decimals[t]
+			if !ok {
+				// The pin pass could not read this token's decimals; the account
+				// carrying it was already refused as position-unvaluable at the pin,
+				// so a probe reaching here is a bookkeeping error surfaced per account
+				// below by the missing price.
+				continue
+			}
+			d, err := dmConvertCollateralToUsdABI.Pack("convertCollateralTokenToUsd", t, pow10Big(dec))
+			if err != nil {
+				fail("pack convertCollateralTokenToUsd: " + err.Error())
+				bad = true
+				break
+			}
+			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "price", tok: t})
+		}
+		if bad {
+			continue
+		}
+		res, _, err := c.opR.multicall(ctx, fmt.Sprintf("p3:dm:ownClockWeld@%d", s), s, hash, calls)
+		if err != nil {
+			fail(fmt.Sprintf("own-clock multicall at %d did not answer: %v", s, err))
+			continue
+		}
+		chainMaxAt := map[common.Address]*big.Int{}
+		priceAt := map[common.Address]*big.Int{}
+		readNote := map[common.Address]string{}
+		for i, tg := range tags {
+			if !res[i].Success {
+				if tg.kind == "max" {
+					readNote[tg.acct] = "getMaxBorrowAmount reverted at S"
+				}
+				// A reverted price at S surfaces as a per-account refusal below.
+				continue
+			}
+			switch tg.kind {
+			case "max":
+				v, err := unpackUint256Strict(dmGetMaxBorrowAmountABI, "getMaxBorrowAmount", res[i].ReturnData)
+				if err != nil {
+					readNote[tg.acct] = err.Error()
+					continue
+				}
+				chainMaxAt[tg.acct] = v
+				f.use(dmOwnClockMaxBorrowSource)
+			case "price":
+				v, err := unpackUint256Strict(dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", res[i].ReturnData)
+				if err != nil {
+					continue
+				}
+				priceAt[tg.tok] = v
+				f.use(dmOwnClockPriceSource)
+			}
+		}
+
+		// The param ledger re-cut at S: the SAME custody chain, the SAME fold.
+		var ledgerAtS []store.ParamRow
+		for _, r := range c.t6.DMParams {
+			if r.EffectiveBlock <= s {
+				ledgerAtS = append(ledgerAtS, r)
+			}
+		}
+		foldedAtS, err := riskfeed.FoldParams(dmEngine, 10, ledgerAtS)
+		if err != nil {
+			fail("fold dm param ledger at S: " + err.Error())
+			continue
+		}
+
+		for _, p := range group {
+			r := &dmOwnClockResult{Block: s, Hash: hash}
+			out[p.key] = r
+			if note := readNote[p.acct]; note != "" {
+				r.Err = note
+				continue
+			}
+			cm := chainMaxAt[p.acct]
+			if cm == nil {
+				r.Err = "getMaxBorrowAmount produced no decoded value at S"
+				continue
+			}
+			in := risk.DMInput{
+				Account: p.acct,
+				DebtUSD: orZeroBig(debtUSD[p.key]),
+				Params:  foldedAtS,
+				Marks:   risk.Watermarks{BalancesBlock: s, ParamsBlock: s, SweepBlock: s},
+			}
+			refused := ""
+			for _, l := range coll[p.key] {
+				tok := common.HexToAddress(l.AssetHex)
+				dec, okDec := st.decimals[tok]
+				pr := priceAt[tok]
+				if !okDec || pr == nil {
+					refused = "collateral token 0x" + l.AssetHex + " has no own-clock price and/or pinned decimals"
+					break
+				}
+				in.Collateral = append(in.Collateral, risk.DMCollateral{Asset: tok, Amount: l.Amount, Decimals: dec})
+				in.Prices = append(in.Prices, risk.PriceInput{
+					ChainID: 10, Asset: tok, Source: "dm:convertCollateralTokenToUsd@ownSweepBlock", Block: s,
+					Value: pr, Decimals: 6, Provenance: risk.ProvenanceEngineExact, Fresh: true,
+				})
+			}
+			if refused != "" {
+				r.Err = refused
+				continue
+			}
+			h, err := risk.ComputeDMHealth(in)
+			if err != nil {
+				r.Err = "internal/risk refused at S: " + err.Error()
+				continue
+			}
+			r.ChainMax, r.OurMax = cm, h.MaxBorrowLT
+		}
+	}
+	return out
+}
+
 // weldDMCohort welds the boolean, the threshold-weighted collateral and the
-// live debt total against the chain, per cohort member.
-func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubject, health map[string]risk.DMHealth) ([]p3Row, error) {
+// live debt total against the chain, per cohort member. The maxBorrow leg is
+// judged by the three-state law (classifyDMMaxBorrow); the boolean and debt
+// legs stay single-clock pin welds.
+func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubject, health map[string]risk.DMHealth,
+	st dmTokenState, coll map[string][]snapshotdb.T6Leg, debtUSD map[string]*big.Int) ([]p3Row, error) {
 	var rows []p3Row
 	if len(cohort) == 0 {
 		return rows, nil
@@ -849,6 +1130,46 @@ func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubjec
 	f.use("DebtManager.borrowingOf(user).total@pinHash(P_op)")
 	f.use("cohort sampling seed = the OP pin's block hash (a chain fact, echoed in the report)")
 
+	// ---- the own-clock discrimination probes -------------------------------
+	// Every member whose pin-clock maxBorrow weld drifts gets the own-clock
+	// read, PLUS one always-on CONTROL: the first weldable member with a sweep
+	// block and at least one persisted leg. The control keeps the discrimination
+	// read alive (and its frame sources consumed) on an all-exact run — a
+	// discrimination read that only ever fires on failure is a read nobody has
+	// proven the archive can still serve.
+	probeReason := map[string]string{}
+	var probes []dmOwnClockProbe
+	addProbe := func(s dmSubject, reason string) {
+		key := hex.EncodeToString(s.Account.Bytes())
+		if prev, ok := probeReason[key]; ok {
+			probeReason[key] = prev + "+" + reason
+			return
+		}
+		probeReason[key] = reason
+		probes = append(probes, dmOwnClockProbe{
+			acct: s.Account, key: key,
+			sweep:  c.t6.DMSweepByAccount[key].AtOrBelowPin,
+			reason: reason,
+		})
+	}
+	controlKey := ""
+	for _, s := range cohort {
+		acct := hex.EncodeToString(s.Account.Bytes())
+		h := health[acct]
+		cm := chainMax[s.Account]
+		if cm == nil || h.MaxBorrowLT == nil {
+			continue
+		}
+		if cm.Cmp(h.MaxBorrowLT) != 0 {
+			addProbe(s, "pin-drift")
+		}
+		if controlKey == "" && c.t6.DMSweepByAccount[acct].AtOrBelowPin > 0 && len(coll[acct]) > 0 {
+			controlKey = acct
+			addProbe(s, "control")
+		}
+	}
+	ownResults := runDMOwnClockWelds(ctx, c, f, probes, st, coll, debtUSD)
+
 	for _, s := range cohort {
 		subject := s.Account.Hex()
 		acct := hex.EncodeToString(s.Account.Bytes())
@@ -858,8 +1179,10 @@ func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubjec
 		}
 		h := health[acct]
 		if cm := chainMax[s.Account]; cm != nil && h.MaxBorrowLT != nil {
-			rows = append(rows, compareExact(gateDMBoolean, subject, "getMaxBorrowAmount(user,false)",
-				cm, h.MaxBorrowLT, "per-token-floor-then-sum"))
+			rows = append(rows, dmMaxBorrowRow(c, subject, acct, cm, h.MaxBorrowLT, ownResults[acct]))
+		}
+		if acct == controlKey {
+			rows = append(rows, dmOwnClockControlRow(subject, probeReason[acct], ownResults[acct]))
 		}
 		if cd := chainDebt[s.Account]; cd != nil && h.Borrowings != nil {
 			rows = append(rows, compareExact(gateDMBoolean, subject, "borrowingOf(user).total",
@@ -888,6 +1211,67 @@ func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubjec
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// dmMaxBorrowRow renders one maxBorrow leg under the three-state law.
+func dmMaxBorrowRow(c *p3Ctx, subject, acct string, pinChain, ours *big.Int, own *dmOwnClockResult) p3Row {
+	verdict, class := classifyDMMaxBorrow(pinChain, ours, own)
+	switch verdict {
+	case verdictExact:
+		return exactRow(gateDMBoolean, subject, "getMaxBorrowAmount(user,false)", pinChain.String(), ours.String())
+	case verdictWeldUnread:
+		why := "the pin values differ and the own-clock discrimination read did not answer"
+		if own != nil && own.Err != "" {
+			why += ": " + own.Err
+		}
+		return unreadRow(gateDMBoolean, subject, "getMaxBorrowAmount(user,false) own-clock read", why)
+	}
+	sweep := c.t6.DMSweepByAccount[acct].AtOrBelowPin
+	delta := new(big.Int).Sub(ours, pinChain)
+	row := p3Row{
+		Gate: gateDMBoolean, Subject: subject, Leg: "getMaxBorrowAmount(user,false)",
+		Expected: pinChain.String(), Actual: ours.String(),
+		Verdict: verdict, Gated: true, Class: class,
+		Evidence: map[string]string{
+			"delta_usd6(ours-chain@pin)": delta.String(),
+			"sweep_block":                fmt.Sprintf("%d", sweep),
+			"sweep_age_blocks":           fmt.Sprintf("%d", c.pinOP-sweep),
+			"own_clock_hash":             own.Hash.Hex(),
+			"own_clock_chain_max":        own.ChainMax.String(),
+			"own_clock_our_max":          own.OurMax.String(),
+		},
+	}
+	if verdict == verdictSampleGap {
+		row.Note = "SAMPLE GAP, disclosed and not gated: the own-clock weld at the account's own sweep block S is BIT-EXACT (the persisted vector is the chain's own state at its own clock; recompute law internal/risk/dm.go:102-134 against getMaxBorrowAmount, DebtManagerCore.sol:139-165), so the pin delta is eventless basket motion inside the sweep->pin gap — the motion collateral_spot_reads labels report-only BY CONSTRUCTION. A verdict class with its own read, never a fourth tolerance (chain-truth ruling 08:55; risk-quant refused any epsilon over this population as tolerance-as-carpet)"
+	} else {
+		row.Note = "SNAPSHOT CUSTODY DRIFT, gated: the persisted collateral vector disagrees with the chain AT ITS OWN CLOCK. This is the arm the dissection found empty (own-clock weld byte-exact 5/5) — a row here is a real sweeper-custody defect, not a clock artifact, and it flips the accept-r4 classification"
+	}
+	return row
+}
+
+// dmOwnClockControlRow is the always-on control's own row: proof the
+// discrimination read is live against this archive even on an all-exact run.
+func dmOwnClockControlRow(subject, reason string, own *dmOwnClockResult) p3Row {
+	if own == nil || own.Err != "" {
+		why := "the control's own-clock weld did not answer"
+		if own != nil && own.Err != "" {
+			why += ": " + own.Err
+		}
+		return unreadRow(gateDMBoolean, subject, "own-clock-control", why)
+	}
+	if own.ChainMax.Cmp(own.OurMax) == 0 {
+		row := exactRow(gateDMBoolean, subject, "own-clock-control",
+			own.ChainMax.String(), own.OurMax.String())
+		row.Note = "the ALWAYS-ON own-clock control (" + reason + "): getMaxBorrowAmount at blockHash(S) welds bit-exact against our recompute over the persisted vector, proving the discrimination read live and the archive serving S-clock state this run"
+		row.Evidence = map[string]string{
+			"own_clock_block": fmt.Sprintf("%d", own.Block),
+			"own_clock_hash":  own.Hash.Hex(),
+		}
+		return row
+	}
+	return driftRow(gateDMBoolean, subject, "own-clock-control",
+		own.ChainMax.String(), own.OurMax.String(), "snapshot-custody-drift",
+		"the CONTROL account's own-clock weld failed: the persisted vector disagrees with the chain at its own sweep block — real custody drift on the account chosen precisely because it was expected clean")
 }
 
 func marginText(m *big.Int) string {

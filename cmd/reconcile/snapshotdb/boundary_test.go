@@ -812,6 +812,12 @@ var auditedStoreEntryPoints = map[string]bool{
 	"AaveIntervalEventCount":             true,
 	"AsOfEventSums":                      true,
 	"AssetNetSums":                       true,
+	// CollateralFlagsAsOf (Wave H, the one-law census fix): a read-only
+	// DISTINCT ON fold over position_events through the Querier it is handed —
+	// no dial, no retry, no second connection. It is the census predicate's
+	// derived flag source (chain-truth ruling, ledger 08:55) and runs inside
+	// the same snapshot transaction as every other Stage-A read.
+	"CollateralFlagsAsOf":                true,
 	"CollateralHistoryDocsAtLastSuccess": true,
 	"CountReconRows":                     true,
 	"DMParamsAsOf":                       true,

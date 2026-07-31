@@ -23,10 +23,21 @@
 //  2. AGGREGATOR PHASE CHANGE — the trap that MIMICS a violation. We walk RAW
 //     aggregators; a Chainlink proxy re-points aggregator() on a phase change,
 //     which makes our aggregator go permanently quiet while the feed lives on
-//     at a new address. Any gap open-ended at the scan head, and any gap > 2x
-//     the published heartbeat, consults a pinned proxy.aggregator() FIRST. A
-//     mismatch is "stream requires re-resolution" — its own failure class, NOT
-//     a heartbeat verdict and NOT a pass.
+//     at a new address. The pinned proxy.aggregator() read is UNCONDITIONAL —
+//     one per stream per run — and feeds.json's aggregator is WELDED against
+//     its answer. A mismatch is "stream requires re-resolution" — its own
+//     failure class, NOT a heartbeat verdict and NOT a pass.
+//
+//     UNCONDITIONAL is an accept-r4 correction (adjudicated, chain-truth
+//     ruling 08:55 frame finding b3 — ranked DANGEROUS CONFIRMED). The first
+//     version fired the read only when a gap exceeded 2x the heartbeat or the
+//     head was open-ended, which NEVER fires on healthy feeds — so all four
+//     grades that run were issued with NO proxy-binding read at all, while the
+//     frame ledger's declared proxy.aggregator() source sat permanently
+//     unconsumed: a red an operator learns to wave through. Four callAtHash
+//     reads per run are negligible; the unconditional read is cheaper AND
+//     stronger than a conditional-source ledger kind, which the ruling
+//     explicitly refused to add.
 //  3. Only the residual is the feed's own behaviour.
 //
 // Gap arithmetic runs on `source_as_of` — the round's own `updatedAt`, chain
@@ -62,7 +73,7 @@ func heartbeatFrame() *gateFrame {
 		pinned("header time @pinHash(custody-domain boundary block = min(ingest cursor, P_eth))",
 			"the CHAIN-TIME endpoint the head interval is measured to. A header advances with the chain even when every feed has stopped, which the feed population's own newest write does not — so a chain-wide oracle outage cannot receive a provenance upgrade (Codex round 2, finding H3)"),
 		pinned("Chainlink proxy.aggregator()@pinHash(P_eth)",
-			"the phase-change check, consulted FIRST for any gap open-ended at the scan head or > 2x the published heartbeat"),
+			"the proxy-binding weld, read UNCONDITIONALLY once per stream per run and welded against feeds.json's aggregator claim. Conditional variants never fire on healthy feeds, so grades were issued with no binding read at all while this declaration sat permanently unconsumed (accept-r4; chain-truth ruling 08:55 ranked that DANGEROUS CONFIRMED and refused a conditional-source ledger kind)"),
 		committed("recon/feeds.json heartbeatSeconds, graceSeconds, startBlock, proxy per stream",
 			"the PUBLISHED budget this scan can refute, and the domain's lower bound"),
 	)
@@ -133,6 +144,41 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 			RawLogs: scan.RawLogCount, RawBlocks: scan.RawDistinctBlocks,
 			MissingAsOf: scan.MissingAsOf,
 		}
+
+		// THE UNCONDITIONAL PROXY-BINDING READ — one per stream per run, before
+		// any verdict of any kind, including the unscannable early exits. The
+		// conditional version (fire only when a gap exceeded 2x the heartbeat or
+		// the head was open-ended) never fired on healthy feeds, so accept-r4's
+		// four grades were all issued with NO binding read (chain-truth ruling
+		// 08:55: DANGEROUS CONFIRMED; fix = unconditional, and do NOT add a
+		// conditional-source frame kind).
+		bindingOK, phaseMismatch := false, false
+		agg, note, err := readProxyAggregator(ctx, c, common.HexToAddress("0x"+scan.ProxyHex))
+		if err != nil {
+			return rows, verdicts, err
+		}
+		if note != "" {
+			rows = append(rows, unreadRow(gateHeartbeat, v.Aggregator, "proxy-binding (proxy.aggregator()@pin)", note))
+		} else {
+			v.PhaseChecked = true
+			v.PhaseAggregator = agg.Hex()
+			f.use("Chainlink proxy.aggregator()@pinHash(P_eth)")
+			bindingOK = true
+			if strings.EqualFold(hexLower(agg.Hex()), scan.AggregatorHex) {
+				rows = append(rows, exactRow(gateHeartbeat, v.Aggregator,
+					"proxy-binding: feeds.json aggregator == proxy.aggregator()@pin",
+					agg.Hex(), "0x"+scan.AggregatorHex))
+			} else {
+				phaseMismatch = true
+				rows = append(rows, p3Row{
+					Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "proxy-binding: feeds.json aggregator == proxy.aggregator()@pin",
+					Expected: agg.Hex(), Actual: "0x" + scan.AggregatorHex,
+					Verdict: verdictReResolution, Gated: true, Class: verdictReResolution,
+					Note: "STREAM REQUIRES RE-RESOLUTION — a CUSTODY-CONFIG fact, gated as its own failure class. It is NOT a heartbeat violation (our aggregator went quiet because the proxy re-pointed, and the feed lives on at a new address) and it is NOT a pass (we are walking an address that no longer serves the feed). Config repair stays MANUAL",
+				})
+			}
+		}
+
 		upper := scan.IngestCursor
 		if upper == 0 || upper > c.pinETH {
 			upper = c.pinETH
@@ -249,51 +295,21 @@ func runHeartbeatScan(ctx context.Context, c *p3Ctx, now time.Time) ([]p3Row, []
 		// exactly the thing a freshness budget claims cannot happen.
 		v.JudgedMaxGapSeconds, v.JudgedMaxIsHead = judgedMaxGap(v.MaxGapSeconds, v.HeadGapSeconds, v.HeadGapIsChainTime)
 
-		// An OPEN-ENDED gap at the scan head ALWAYS consults the phase check: a
-		// permanently quiet walked aggregator is indistinguishable from a re-pointed
-		// proxy without it (chain-truth R4.2), and that is precisely the case where
-		// guessing wrong is worst.
-		headOpenEnded := !v.HeadGapIsChainTime ||
-			(scan.Heartbeat > 0 && v.HeadGapSeconds > scan.Heartbeat)
-		needPhaseCheck := v.JudgedMaxGapSeconds > 2*scan.Heartbeat || headOpenEnded
-		phaseMismatch := false
-		if needPhaseCheck && scan.ProxyHex != "" {
-			v.PhaseChecked = true
-			agg, note, err := readProxyAggregator(ctx, c, common.HexToAddress("0x"+scan.ProxyHex))
-			if err != nil {
-				return rows, verdicts, err
-			}
-			if note != "" {
-				rows = append(rows, unreadRow(gateHeartbeat, v.Aggregator, "proxy.aggregator() phase check", note))
-				// A phase check we could not perform is NOT permission to issue a
-				// heartbeat verdict: the whole point is that the two explanations
-				// are indistinguishable without it.
-				v.Verdict = verdictUnscannable
-				v.ProvenanceGrade = "published-not-verified (unchanged)"
-				v.BudgetSeconds = scan.Heartbeat + scan.Grace
-				verdicts = append(verdicts, v)
-				continue
-			}
-			v.PhaseAggregator = agg.Hex()
-			f.use("Chainlink proxy.aggregator()@pinHash(P_eth)")
-			if !strings.EqualFold(hexLower(agg.Hex()), scan.AggregatorHex) {
-				phaseMismatch = true
-			}
-		}
-
 		switch {
 		case phaseMismatch:
+			// The gated re-resolution row was emitted at the binding weld above;
+			// here it only decides the stream's verdict fields.
 			v.Verdict = verdictReResolution
 			v.ProvenanceGrade = "published-not-verified (the walked aggregator is no longer the proxy's aggregator)"
 			v.BudgetSeconds = scan.Heartbeat + scan.Grace
-			rows = append(rows, p3Row{
-				Gate: gateHeartbeat, Subject: v.Aggregator, Leg: "phase-change check",
-				Expected: "the proxy's aggregator() at the pin == the walked raw aggregator",
-				Actual:   v.PhaseAggregator,
-				Verdict:  verdictReResolution, Gated: true, Class: verdictReResolution,
-				Note:     "STREAM REQUIRES RE-RESOLUTION — a CUSTODY-CONFIG fact, gated as its own failure class. It is NOT a heartbeat violation (our aggregator went quiet because the proxy re-pointed, and the feed lives on at a new address) and it is NOT a pass (we are walking an address that no longer serves the feed). Config repair stays MANUAL",
-				Evidence: map[string]string{"max_gap_seconds": fmt.Sprintf("%d", v.MaxGapSeconds), "head_gap_seconds": fmt.Sprintf("%d", v.HeadGapSeconds)},
-			})
+		case !bindingOK:
+			// A binding read that did not answer is NOT permission to issue a
+			// heartbeat verdict: a permanently quiet walked aggregator is
+			// indistinguishable from a re-pointed proxy without it. The gated
+			// unread row was emitted at the binding weld above.
+			v.Verdict = verdictUnscannable
+			v.ProvenanceGrade = "published-not-verified (unchanged: the proxy-binding read did not answer, so a stall cannot be told from a phase change)"
+			v.BudgetSeconds = scan.Heartbeat + scan.Grace
 		case !v.HeadGapIsChainTime:
 			// The head interval could not be measured in chain time, so the feed's
 			// CURRENT silence is unknown. "Cannot verify" is never advisory.

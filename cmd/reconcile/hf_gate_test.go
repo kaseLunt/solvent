@@ -226,6 +226,7 @@ func TestEveryVerdictHasATallyClass(t *testing.T) {
 		verdictOnlyInChain, verdictOnlyInRegistry, verdictAnomaly, verdictEvidence,
 		verdictProvenanceUpgrade, verdictQualifier, verdictBudgetFalsified,
 		verdictReResolution, verdictUnscannable, verdictUnexplained, verdictMarginal,
+		verdictSampleGap,
 	}
 	for _, v := range all {
 		inFail := failingVerdicts[v]
