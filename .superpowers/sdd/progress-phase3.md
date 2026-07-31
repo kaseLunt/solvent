@@ -2749,3 +2749,43 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   choreography (stronger) or split-weld (custody at own clock + freshness
   disclosure). Frame forwarded mid-flight to the dissection wave with the
   exact discriminators.
+- **CHAIN-TRUTH RULING ON ACCEPT-R4 (08:55): CUSTODY HOLDS** — converges
+  with risk-quant at source level. (1) Zero-debt census 24+1 = GATE-LAW
+  DEFECT proven by the run's own data: population shared by construction
+  (union cohort, both directions measured), but derived predicate is raw
+  scaled-balance (flag-blind, value-blind) while chain's is flag-gated
+  price-projected — and NO totalCollateralBase drift row exists for any
+  of the 24 (chain said 0, our compute over the SAME derived legs + pinned
+  getUserConfiguration said 0): flag-off/dust accounts, zero custody
+  drift; skew structurally impossible (pins resolved inside the one
+  repeatable-read tx). Fix: split into a scaledBalanceOf@pin balance-
+  census weld (closes the flag-off masking residual — a one-arm gate in
+  miniature) + marker census under ONE law (the chain's). (2) DM 233 =
+  the frame's @P_op declaration is FALSE — snapshot amounts are
+  @S(account); the netting channel is un-custodied lens reads by design
+  (CashEventEmitter deliberately unwalked); the maintenance rewind was
+  Aave-chain-1 only, so the pause merely AGED the DM sweeps — hours-wide
+  gap, 233 basket movements, boolean weld intact because all sat far from
+  the boundary. Fix: correct the frame + three-state verdict (bit-exact /
+  sample-gap-disclosed w/ own-clock discrimination read / snapshot-
+  custody-drift-gated) — a verdict class with its own read, NOT a fourth
+  tolerance. BLOCKING FIRST READ: CashLens.getUserTotalCollateral at
+  blockHash(S) for the worst-tail account 0x5C99e546… — bit-equal ⇒
+  custody excluded; unequal ⇒ verdict flips to CUSTODY BREAKS. (3) Frame
+  findings ranked: b3 heartbeat = DANGEROUS CONFIRMED for this run (all
+  four grades issued with NO proxy-binding read — needPhaseCheck never
+  fires on healthy feeds, permanent-red frame violation training
+  operators to wave it through; fix = UNCONDITIONAL per-stream binding
+  read, do NOT add a conditional-source ledger kind); tokenconfig =
+  latent drift-capable (hardcoded dmStableSnapSet restates the model in
+  the gate that brags it doesn't; fix = derive from loadScenarioBaseClaims,
+  delete the copy); aave never-seen = pure bookkeeping (probe provably
+  ran; one-line f.use). (4) Timing law: NO snapshot-isolation gap — the
+  T6 gates are structurally stronger than Task 9's fixed shape (single
+  repeatable-read tx, pins resolved inside it, gates receive plain
+  values). (5) The 16 tokenconfig rows STAND as real product findings:
+  scenario matrices stale vs the chain universe (beHYPE, WHYPE, eUSD,
+  EURC, weEUR, liquidRESERVE×2, liquidRWA, OP, WBTC, ETH-sentinel
+  unclaimed; weETH/liquidBTC/eBTC/sETHFI/liquidETH compositions disagree
+  with deployed). Awaiting the dissection wave's own-clock empirics to
+  close the loop; fix waves stage after it reports.
