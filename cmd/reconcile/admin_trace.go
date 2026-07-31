@@ -46,7 +46,12 @@
 // hide an earlier setAdminImpl/upgrade execution behind a clean scan — the
 // precise false pass Step A exists to prevent. Frames beyond the case index
 // remain unjudged (the scope law above), which is why the strictness lives in
-// the scan and not in the envelope's presence decode.
+// the scan and not in the envelope's presence decode. The ROUND-14 NARROWING
+// (Codex round 14 HIGH): the create-family absent-`to` allowance demands its
+// evidence — the tracer removes a create's `to` ONLY in processOutput's
+// error arm, which has already set the frame's non-empty `error`
+// (call.go:70-79) — so a to-less CREATE/CREATE2 without a non-empty `error`
+// is admin-continuity-unread, never clean.
 //
 // WITH TRACES, THE D-013 RESIDUAL IS RETIRED, NOT RECLASSIFIED (ruling): a
 // within-block swap-and-revert MUST place a setAdminImpl call frame in some
@@ -133,11 +138,17 @@ const adminContinuityEvidence = "two-pin slot read clean AND trace-frame scan cl
 
 // traceCallFrame is one callTracer frame, PRESENCE-TRACKED like every other
 // wire decode in this package: consumed fields are pointers so an omitted
-// field surfaces as absent, never as a plausible zero.
+// field surfaces as absent, never as a plausible zero. Error is the frame's
+// own failure statement — the tracer marshals it under omitempty
+// (call.go:53), so on the wire it is either ABSENT (the frame succeeded) or
+// non-empty (processOutput set err.Error(), call.go:76); presence-tracking
+// it is what lets the create-family `to` exemption demand its evidence
+// (round 14).
 type traceCallFrame struct {
 	Type  *string          `json:"type"`
 	To    *string          `json:"to"`
 	Input *string          `json:"input"`
+	Error *string          `json:"error"`
 	Calls []traceCallFrame `json:"calls"`
 }
 
@@ -228,9 +239,16 @@ var recognizedTraceFrameTypes = map[string]bool{
 // and CaptureEnter set To unconditionally on every frame (call.go:130-143 and
 // 206-215; for SELFDESTRUCT it is the beneficiary, instructions.go:826,842),
 // and the ONLY path that removes it is processOutput NIL-ing a FAILED
-// CREATE/CREATE2's To (call.go:70-79). So call-family and SELFDESTRUCT frames
-// REQUIRE `to`; create-family frames may omit it; and a present `to` must
-// strictly decode to exactly 20 bytes (hexFixed) whatever the type. `input`
+// CREATE/CREATE2's To — an arm entered only on err != nil, which has ALREADY
+// set f.Error = err.Error() before the nil-ing (call.go:70-79), marshaled
+// under omitempty so the wire carries it non-empty or not at all
+// (call.go:53). So call-family and SELFDESTRUCT frames REQUIRE `to`; a
+// create-family frame may omit it ONLY while carrying that arm's non-empty
+// `error` (Codex round 14: an error-less to-less create is a shape the
+// tracer cannot emit — blessing it let a degraded answer drop `to`, `error`
+// and the nested calls of a SUCCESSFUL creation and scan clean, concealing
+// an admin-write child frame); and a present `to` must strictly decode to
+// exactly 20 bytes (hexFixed) whatever the type. `input`
 // is REQUIRED on every frame — the tracer marshals it unconditionally
 // (hexutil.Bytes, no omitempty: call.go:51), "0x" when empty — and must
 // decode under hexutil.Decode's strict law (0x prefix mandatory, even-length,
@@ -247,6 +265,9 @@ func frameTargetsAdminWrite(fr traceCallFrame, dmProxy common.Address, depth int
 	if fr.To == nil {
 		if *fr.Type != "CREATE" && *fr.Type != "CREATE2" {
 			return "", depth, fmt.Sprintf("a %s frame omits `to` — the tracer sets it unconditionally for call-family and SELFDESTRUCT frames, and only a FAILED CREATE/CREATE2 legitimately lacks it", *fr.Type)
+		}
+		if fr.Error == nil || *fr.Error == "" {
+			return "", depth, fmt.Sprintf("a %s frame omits `to` WITHOUT a tracer error — processOutput NILs a create's `to` only in its error arm, which has already set a non-empty `error` (go-ethereum v1.13.0 call.go:70-79, marshaled under omitempty: call.go:53), so an error-less to-less create is not a shape the tracer can emit: a degraded answer that drops `to`, `error` and the nested calls of a SUCCESSFUL creation must refuse, never scan clean", *fr.Type)
 		}
 	} else {
 		b, err := hexFixed("frame to", *fr.To, 20)

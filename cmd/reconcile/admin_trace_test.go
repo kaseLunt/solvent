@@ -34,6 +34,24 @@ package main
 //       {} result before the case must refuse admin-continuity-unread, and
 //       under the mutant it answers "" — with regressions (b) and (c) as
 //       independent killers for the `to` and `input` legs.
+//       (Round 14: re-cut against the error-tracking code — the same
+//       pre-round-13 lenient reversal, which necessarily also drops the
+//       round-14 error conjunct; new hash and kill in
+//       testdata/mutation-transcripts/r14.md.)
+//
+//   mF  the create-family `to` exemption widened back (Codex round 14 HIGH:
+//       the error-tracking conjunct dropped): a to-less CREATE/CREATE2
+//       accepted WITHOUT a tracer error, although processOutput NILs a
+//       create's `to` only in its error arm, where it has already set a
+//       non-empty `error` (go-ethereum v1.13.0 call.go:70-79) — so a degraded
+//       response that drops `to`, `error` and the nested calls of a
+//       SUCCESSFUL creation scans clean and can conceal an admin-write child
+//       frame.
+//       KILLED BY: TestAdminTraceStrictFrameValidationLaw regression (d) —
+//       the no-error to-less create must refuse admin-continuity-unread, and
+//       under the mutant it answers "". Everything else (including the
+//       failed-create clean fixture and the 31/31 captured replay) stays
+//       green under mF, proving regression (d) is the load-bearing killer.
 //
 // Behavioural mutants only; a mutant that fails to compile is re-cut.
 // ---------------------------------------------------------------------------
@@ -241,7 +259,12 @@ func selHex(t *testing.T, name string) string {
 // NEVER clean, because under the pre-round-13 code exactly these degraded
 // shapes scanned CLEAN and could hide an earlier setAdminImpl/upgrade
 // execution. Entries BEYOND the case index stay unjudged (the existing scope
-// law). Every fixture here drives the FULL production pair
+// law). The round-14 narrowing (Codex round 14 HIGH, mF's kill) lives in
+// regression (d): the create-family absent-`to` allowance is conditioned on
+// the frame's own non-empty `error` — the only tracer path that removes a
+// create's `to` is processOutput's error arm, which has already set the
+// error it marshals (call.go:70-79, omitempty at call.go:53). Every fixture
+// here drives the FULL production pair
 // (decodeTraceEnvelope -> adminTraceScanRefusal) over raw envelope bytes.
 func TestAdminTraceStrictFrameValidationLaw(t *testing.T) {
 	proxyLower := strings.ToLower(liveDMProxy.Hex())
@@ -331,17 +354,46 @@ func TestAdminTraceStrictFrameValidationLaw(t *testing.T) {
 		require.Contains(t, note, "SUICIDE", "the refusal names the alien type")
 	})
 
-	t.Run("a call-like frame with NO `to` refuses unread; a to-less CREATE is the tracer's own failed-create shape and stays clean", func(t *testing.T) {
+	t.Run("a call-like frame with NO `to` refuses unread", func(t *testing.T) {
 		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
 			"type": "STATICCALL", "input": "0x",
 		}}, caseEntry)
 		require.Contains(t, note, "admin-continuity-unread",
 			"callTracer sets `to` unconditionally for call-family and SELFDESTRUCT frames — absence is degradation, not a benign shape")
+	})
 
+	t.Run("a FAILED create (`to` absent, non-empty error) is the tracer's own shape and stays clean", func(t *testing.T) {
 		require.Empty(t, scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
-			"type": "CREATE", "input": "0x60806040",
+			"type": "CREATE", "input": "0x60806040", "error": "out of gas",
 		}}, caseEntry),
-			"processOutput NILs a failed CREATE/CREATE2's `to` (go-ethereum v1.13.0 eth/tracers/native/call.go:70-79) — the one legitimate absent-`to` shape must NOT refuse")
+			"processOutput NILs a failed CREATE/CREATE2's `to` in the SAME arm that sets its non-empty error (go-ethereum v1.13.0 eth/tracers/native/call.go:70-79) — the one legitimate absent-`to` shape must NOT refuse")
+	})
+
+	t.Run("a SUCCESSFUL create (`to` present, no error) stays clean", func(t *testing.T) {
+		require.Empty(t, scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CREATE2", "to": someoneLower, "input": "0x60806040",
+		}}, caseEntry),
+			"a successful creation carries the deployed address as `to` and no error — the ordinary clean create shape")
+	})
+
+	t.Run("regression (d): a to-less create with NO error refuses unread — geth cannot emit that shape", func(t *testing.T) {
+		for _, typ := range []string{"CREATE", "CREATE2"} {
+			note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+				"type": typ, "input": "0x60806040",
+			}}, caseEntry)
+			require.NotEmpty(t, note,
+				"round 14: a to-less %s WITHOUT a tracer error was blessed clean, although processOutput removes `to` only when it also sets the frame's non-empty error (call.go:70-79) — a degraded response that drops `to`, `error` and the nested calls of a SUCCESSFUL creation could conceal an admin-write child frame behind a clean scan", typ)
+			require.Contains(t, note, "admin-continuity-unread")
+			require.Contains(t, note, "WITHOUT a tracer error", "the refusal names the missing evidence")
+		}
+	})
+
+	t.Run("regression (d): a to-less create with a PRESENT-but-EMPTY error refuses unread — omitempty means the empty spelling is not a wire shape", func(t *testing.T) {
+		note := scan(t, map[string]any{"txHash": traceOtherTx.Hex(), "result": map[string]any{
+			"type": "CREATE", "input": "0x60806040", "error": "",
+		}}, caseEntry)
+		require.Contains(t, note, "admin-continuity-unread",
+			"the tracer marshals `error` under omitempty (call.go:53), so an empty error string never reaches the wire — a present-but-empty error is a foreign answer, not evidence that creation failed")
 	})
 
 	t.Run("a CREATE2 frame with a PRESENT but malformed `to` refuses unread", func(t *testing.T) {
