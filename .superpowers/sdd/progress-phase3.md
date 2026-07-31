@@ -3045,3 +3045,31 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   retry-pin taint determination, retroactive classification of the two
   accounts at the finalized pins (the empirical half), 5 designed
   mutants. Codex round → same-pin retry (if untainted) after it lands.
+- **WAVE H3 LANDED (14:05, b73a436)**: the boolean three-state law
+  implemented as the six-conjunct UNION of both rulings and verified —
+  RETROACTIVE PROOF IS THE HEADLINE: both flagged accounts classify
+  MOTION with full evidence via a committed hash-anchored opt-in live
+  test at the accept-r5 pins. The verdict triangles came out
+  true/false/false with the mixed pairing liquidatable while BOTH pure
+  clocks are healthy (each account grew debt AND collateral after S) —
+  exactly the three-way print the ruling ordered, and empirical proof
+  the old gate was measuring user behavior. Motion ledgers reconcile
+  bit-exact (single-token USDC deltas; Σ +32.09/+195.50 USD-6-weighted).
+  Margin fields structurally absent from the facts struct
+  (reflection-tested); m3's margin-cutoff mutant devoured the whole law
+  when applied — the epsilon is impossible, not just refused. Never-swept
+  reshaped (refusal-weld consumed + posture probe + schedule age guard +
+  census); seven frame sources declared AND consumed every run; Stage-A
+  debt-fold-at-S correlated aggregate inside the snapshot tx. PIN
+  DETERMINATION: -pin-op/-pin-eth are mustTaint (TestFlagSurfaceClosed)
+  — the verdict-bearing retry goes at FRESH pins under the new law; the
+  same-pin doctrine is discharged evidentially by the retro test
+  (non-verdict-bearing) and the aborted artifact stays cited as
+  superseded. 5/5 mutants killed; suites green. Owed: cmd/api
+  strip-proof pinning test (serving-surface disclosure gap — reported,
+  not crossed); -race pending toolchain; Stage-A live cost watched next
+  run. CODEX ROUND DISPATCHED on 6a869bc..b73a436 (attack order: can
+  MOTION absorb a real defect; strict-> preservation structural;
+  race-guard stickiness; population-gate arithmetic; retro-test bars;
+  frame consumption every run; faithfulness sweep vs both rulings).
+  On SHIP → fresh-pin acceptance retry → E1.
