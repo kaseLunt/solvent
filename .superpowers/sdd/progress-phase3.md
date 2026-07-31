@@ -2971,3 +2971,41 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   condemns it), (c) asymmetric gating of false NEGATIVES only. No gate
   change, no retry until they rule. W7 landed + the director's SHIP with
   z-order/clamp fixes (8bfc394) precede this entry.
+- **CHAIN-TRUTH RULING: BOOLEAN LEG → OPTION (a) AMENDED (13:06)**: the
+  doctrine line is proven-sample-motion vs unexplained-divergence, never
+  quantity-vs-boolean — disclosure covers a boolean IF (1) proven faithful
+  at its own clock, (2) motion proven not presumed, (3) disclosed at the
+  boolean's OWN granularity (direction + margin; a freshness footnote is
+  NOT enough — the counter-argument's legitimate kernel honored in the
+  shape). The product serves the PAIR (verdict, sweep watermark) — the
+  gate was asking the pin a question the product answers at S; gating the
+  pin-clock boolean re-litigates the settled snapshot-architecture
+  decision stochastically by dice. (b) REJECTED (a gate whose failure
+  probability is weather is not a gate; rerun-until-quiet trains alert
+  fatigue). (c) REJECTED, kernel conceded (asymmetry belongs in the
+  measurement surface, not the gating predicate). THE SHAPE: liquidatable
+  becomes three-state; boundary-crossing-motion (disclosed, gated=false)
+  reachable ONLY through FOUR conjuncts — the maxBorrow sample-gap
+  certificate; borrowingOf EXACT at pin (debt is same-clock: any
+  disagreement is drift); the NEW S-clock boolean custody weld
+  (ComputeDMHealth over ALL inputs at S — Stage-A pre-collects the
+  per-account debt-fold-at-S inside the snapshot tx via one correlated
+  aggregate — welded bit-exact against liquidatable(user)@blockHash(S));
+  and boolean-granular evidence (direction-tagged class strings w/ the
+  false-negative louder, the VERDICT TRIANGLE served/chain@pin/chain@S,
+  both margins, sweep age, certificate ref). GUARDRAIL: gated=false is
+  NOT an epsilon — margin appears in evidence only, never the predicate.
+  ALSO BLOCKING: fix the weldDMCohort note text (its "two inputs weld
+  exactly" precondition was FALSE for both rows — a misdiagnosis printed
+  into the artifact is D-013 always-fix); standing aggregate
+  cohort:boundary-crossing-motion (count by direction, margins, max
+  sweep age) GATED at population level (~1% = sweeper-health, where
+  weather is refuted by its own frequency). Never-swept blessed (+
+  last_attempt_status empty vs failed distinction, minor). Transport
+  unreads blessed retry-clearing ("cannot verify is never advisory" held
+  under a local DNS outage; rotation could not have salvaged these).
+  SEQUENCING: land the shape BEFORE the retry — a quiet retry would be
+  the (b) dice coming up friendly. Escalation trigger recorded: S-clock
+  boolean weld failing while the collateral certificate passes = the
+  composition law diverging = custody drift immediately. risk-quant's
+  parallel ruling pending; fix wave dispatches on convergence.
