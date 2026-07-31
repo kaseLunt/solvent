@@ -2882,3 +2882,24 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   WAVE H2 DISPATCHED with the three remedies + strengthened refutation
   re-run + 3 designed mutants (incl. the counterbalancing-wrong-rows
   kill). Round 2 closing review after it lands.
+- **CODEX ROUND 2: NOT-SHIP ON ONE FINDING → INTEGRATOR FIX → ROUND 3
+  DISPATCHED (11:55)**: round 2 verified every H2 remedy held (vector law
+  total and exact, drift verdict unsoftenable downstream, pair universe
+  complete, kill tests genuine) EXCEPT one remaining vacuity: the
+  refutation's identity bar TRUSTED the artifact's self-reported
+  comparison_sha256 string — Codex proved a synthetic 233+24 substitute
+  carrying the copied digest parsed successfully. Integrator fixed inline
+  (single contained finding, test-file change reusing the canonical law):
+  parseAcceptR4ArtifactAgainst recomputes comparisonHash over the supplied
+  bytes (a1 recomputed==embedded, a2 embedded==the record); synthetic
+  fixtures sealed with their own digest so every bar stays individually
+  exercised; the exact round-2 substitute construction and a stale-digest
+  row mutation pinned as refusal tests; m4 mutant (bar deleted) KILLED;
+  round-trip over the real artifact PROVEN (recomputed == embedded ==
+  38a57b3e…); live refutation re-run PASS under the strict law (Part A
+  113s 233/233 vector-identical / 0 mismatch / 0 unread; Part B 7s 24/24
+  + 96/96). Landed 6f23452, pushed. Codex round 3 closing review in
+  flight on f220360..6f23452. Round-2 mechanics disclosed: the reviewer
+  worktree removal hit a Windows lock from job-scoped helper processes —
+  killed scoped pids, orphan dir removed, registration verified clean
+  (the reviewer-brief cleanup clause now covers this path explicitly).
