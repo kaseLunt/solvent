@@ -2412,6 +2412,19 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   monitor armed (60s cadence) until the walk catches the raw head
   (~25.65M); then step 6 (verify 173 flag rows + stamp + binding) and
   step 7 (make reconcile acceptance).
+- **OWNER DECISION (2026-07-30 19:11, ratified in the owner's own words):
+  P5 BEFORE P4.** "i am much more interested in getting phase 5 done than
+  4. can we do the ui first" — approved; and on the watch-page coupling
+  the owner selected **descope watch from MVP**: the P5 MVP ships book +
+  inspector + Observatory against the shipped P3 API; the watch page
+  arrives WITH P4 later, designed against its real backend (zero throwaway
+  work). P4 (alerts) defers until after launch. Formal decision file
+  (D-014) + ROADMAP re-sequencing belong to the P3-exit/P5-entry paperwork
+  (roadmap/decisions is outside the current claim scope; the P5 work
+  object needs a rescope anyway). P5 planning enters the standard cycle
+  (brainstorm → spec → plan) with docs/specs/2026-07-29-p5-ui-concept.html
+  + IDEA-002 as the committed design reference ("that UI looks really
+  beautiful. i want the real UI to look very similar" — 2026-07-29).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
