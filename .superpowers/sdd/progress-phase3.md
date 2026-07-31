@@ -2853,3 +2853,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   StorageAtHash follow-up, store reader gaps (batch-by-id, anchor_block),
   batch-scoped position pages, book exposures + GET /v1/scenarios,
   migration_genesis feed-visibility product call.
+- **CODEX ROUND 1 ON THE PROOF SURFACE: NOT-SHIP, 3 FIX-WORTHY (10:54)**:
+  scope held exact at 12db60e..4ff71f0 (reviewer disclosed a dispatch
+  deviation: task-mode with explicit range instead of review-mode, because
+  the worktree HEAD sat past the range end and review-mode would have
+  contaminated the diff with the C2 train — correct call, disclosed per
+  the wedge norm). All three findings are the same defect shape: THE
+  COMMITTED PROOF IS WEAKER THAN THE DIAGNOSIS THAT JUSTIFIED IT. (1)
+  dm_gate own-clock weld proves only the risk-weighted SCALAR at S — two
+  wrong rows whose price×LT cancel at S classify sample-gap while their
+  pin divergence is excused; the dissection byte-compared the VECTOR, the
+  gate must too (collateralOf@blockHash(S) vs the persisted document,
+  zero tolerance; sample-gap reachable only on vector match). (2) the
+  balance-census weld selects by MEMBERSHIP FLIP — a wrong derived
+  balance in a flag-OFF reserve on a borrower (or on a mixed-reserve
+  zero-debt account) is never welded anywhere; selection must be per
+  (account, reserve): every positive derived balance masked OFF joins the
+  scaledBalanceOf weld. (3) the refutation test passes on a NONEMPTY
+  SUBSET (missing history accumulated, ≥1 exact suffices, Aave lane
+  nonempty-not-24) — the actual run was complete but the committed proof
+  is vacuous under truncation; must require artifact identity + exactly
+  233+24 unique targets + complete recovery + zero unread. Codex also
+  CLEARED the highest-stakes questions: no ComputeDMHealth-vs-contract
+  divergence (flooring order, decimals, thresholds, summation), no
+  binding-read bypass, ob3 predicate holds. Note (not fix-worthy,
+  disclosed): base_asset A→B→A cycles pass validation; harmless today
+  (BaseAsset outside ApplyScenario; live sweep gates chained bases).
+  WAVE H2 DISPATCHED with the three remedies + strengthened refutation
+  re-run + 3 designed mutants (incl. the counterbalancing-wrong-rows
+  kill). Round 2 closing review after it lands.
