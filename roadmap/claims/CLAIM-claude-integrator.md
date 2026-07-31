@@ -1,13 +1,13 @@
 ---
-claim_id: 6fe2b79d-8fc8-4721-b521-0dbcbdd24dca
-generation: 11
+claim_id: 8c263fe2-7c13-471e-8200-f958b816b998
+generation: 12
 agent: claude-integrator
 task: W2
 status: active
 integrator: true
 branch: main
 worktree_id: 391b6a12-eb13-597c-bc9a-37240d9dfd29
-base_commit: 63e09da3f44317905cbec8c08a21dd53d45c1487
+base_commit: 51f9a849a85b4610b60278568af1eb79ae8d3c81
 allowed_paths:
   - docs/plans/**
   - docs/specs/**
@@ -19,6 +19,8 @@ allowed_paths:
   - config/**
   - api/**
   - packages/**
+  - web/**
+  - deploy/**
   - go.mod
   - go.sum
   - .superpowers/sdd/**
@@ -28,10 +30,10 @@ allowed_paths:
   - .env.example
   - .github/workflows/ci.yml
   - .gitignore
-scope_hash: sha256:6932c55c31a894b5c9a343b32bf541bf51eb0597329670d1404ecb2b11c817c0
-issued_at: 2026-07-29T07:40:40Z
-lease_expires: 2026-07-31T09:53:46Z
-updated_at: 2026-07-31T01:53:46Z
+scope_hash: sha256:7826381c15960226924a0b1410761a29e2e144ebfabca1ad76cf38e7dc43c0ab
+issued_at: 2026-07-31T03:27:07Z
+lease_expires: 2026-07-31T13:27:07Z
+updated_at: 2026-07-31T03:27:07Z
 ---
 
 # Claim: claude-integrator -> W2
