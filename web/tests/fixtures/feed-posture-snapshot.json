@@ -1,0 +1,48 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 5,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass."
+    }
+  },
+  "listener_connected": true,
+  "poll_interval_seconds": 15,
+  "note": "snapshot-on-connect: the base frame every connection receives before any tick."
+}

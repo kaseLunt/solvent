@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "events page: cursor was minted for a engine-scoped page but this request is cross-engine-mode — engine-scoped and cross-engine pages rank by different keys and their cursors are not interchangeable"
+  }
+}

@@ -1,28 +1,14 @@
 import type { Metadata } from "next";
-import { SurfacePlaceholder } from "@/components/SurfacePlaceholder";
+import { FeedSurface } from "./FeedSurface";
 
 export const metadata: Metadata = { title: "Feed" };
 
+/**
+ * The Feed route (W5). All data arrives client-side — history through
+ * lib/feed-data (the /v1/events seam under the AMENDMENT-1 ordering and
+ * unit laws), live posture through the global SSE provider — so a static
+ * shell never bakes in a stale page.
+ */
 export default function FeedPage() {
-  return (
-    <SurfacePlaceholder
-      eyebrow="5 · Feed"
-      name="Feed"
-      description={
-        <>
-          Durable chain actions + live posture: borrows, repays, liquidations from reorg-aware
-          custody (never invented events), each with tx hash, block, and real header time — a
-          null <span className="mono">block_time</span> renders the block number, never an
-          invented timestamp. Live batch ticks via SSE show CURRENT posture only; posture history
-          arrives with P4&apos;s durable outbox.
-        </>
-      }
-      fedBy={
-        <>
-          <b>GET /v1/events</b> (cursor-paginated) · <b>GET /v1/stream</b> (SSE, live posture)
-        </>
-      }
-      wave="W5"
-    />
-  );
+  return <FeedSurface />;
 }

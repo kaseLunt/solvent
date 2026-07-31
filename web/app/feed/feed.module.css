@@ -1,0 +1,463 @@
+/* Feed surface (W5) — the concept's .feed / .feed-item grammar (lines
+ * 231–244) on the shared tokens, plus the live-posture strip, the untimed-
+ * tail divider, and the honest state strips (refusals are first-class UI).
+ * Only feed-specific layout lives here; atoms come from shared modules. */
+
+.head {
+  max-width: 720px;
+  margin-bottom: var(--sp-5);
+}
+
+.head h1 {
+  font-size: var(--fs-h2);
+  letter-spacing: var(--track-tight);
+  margin: 0 0 8px;
+}
+
+.head p {
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  margin: 0;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: var(--sp-5) 0 10px;
+}
+
+.sectionHead h2 {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  margin: 0;
+}
+
+.sectionNote {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- live posture strip (SSE — CURRENT connection only, never history) ---- */
+
+.liveStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 10px 14px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.liveLabel {
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.liveChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.liveChip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+
+.liveOk {
+  color: var(--ok);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .liveOk i {
+    animation: feedPulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes feedPulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+.liveWarn {
+  color: var(--warn);
+}
+
+.liveDown {
+  color: var(--crit);
+}
+
+.liveStrip b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.liveLaw {
+  flex-basis: 100%;
+  color: var(--ink-3);
+}
+
+/* ---- controls (book vocabulary: chip buttons + labels) ---- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-bottom: var(--sp-3);
+}
+
+.controlGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.controlLabel {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-right: 4px;
+}
+
+.chipButton {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.chipButton:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chipButton.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.sinceBlock {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.sinceInput {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  width: 130px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.sinceInput::placeholder {
+  color: var(--ink-3);
+}
+
+/* The stated impossibility (cross-engine since_block) — dim, not an error. */
+.impossible {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  max-width: 520px;
+}
+
+/* ---- ordering disclosure ---- */
+
+.orderNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin: 0 0 8px;
+}
+
+.orderNote b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+/* ---- the feed list (concept .feed / .feed-item) ---- */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.feedItem {
+  display: flex;
+  gap: 14px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-table);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.feedItem:last-child {
+  border-bottom: none;
+}
+
+.feedTime {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  min-width: 150px;
+}
+
+.feedTag {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-tag);
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  min-width: 110px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tagInfo {
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+
+.tagCrit {
+  background: var(--crit);
+  color: var(--panel);
+}
+
+.feedBody {
+  flex: 1;
+  min-width: 240px;
+  color: var(--ink-2);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.feedBody b {
+  color: var(--ink);
+  font-weight: 550;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.unitChip {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.txLink {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  color: var(--ink-3);
+}
+
+.txLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* ---- the untimed tail divider (cross-engine disclosure) ---- */
+
+.untimedDivider {
+  padding: 8px 14px;
+  border-top: 1px dashed var(--ink-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--refused-bg);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.untimedDivider b {
+  letter-spacing: var(--track-label);
+  color: var(--ink);
+}
+
+/* ---- liquidation detail (expandable ledger extract) ---- */
+
+.detailToggle {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ink-3);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.detailToggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.detail {
+  flex-basis: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  color: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.detail b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.detailRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+
+.detailNote {
+  color: var(--ink-3);
+}
+
+/* ---- honest state strips ---- */
+
+.warnStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+}
+
+.warnStrip b {
+  color: var(--warn);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+}
+
+.refusalStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  border: 1px dashed var(--crit);
+  border-radius: var(--r-sm);
+  background: var(--refused-bg);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+}
+
+.refusalStrip b {
+  color: var(--crit);
+  font-weight: 600;
+  letter-spacing: var(--track-refused);
+}
+
+.emptyReason {
+  padding: var(--sp-5);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-3);
+}
+
+/* ---- footer ---- */
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  padding: 10px 2px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.loadMore {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.loadMore:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

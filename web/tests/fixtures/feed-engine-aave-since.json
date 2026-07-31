@@ -1,0 +1,47 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "filter": {
+    "engine": "aave_v3_etherfi",
+    "account": null,
+    "types": [],
+    "since_block": 25635600
+  },
+  "limit": 2,
+  "events": [
+    {
+      "chain_id": 1,
+      "engine": "aave_v3_etherfi",
+      "block_number": 25635601,
+      "block_time": "2026-07-29T09:57:11Z",
+      "tx_hash": "0x9c33269e9d8f01d1db494ca4cf693c99377f78f9628c1b74d5a1a8592e0f2a11",
+      "log_index": 42,
+      "seq": 0,
+      "type": "liquidation",
+      "raw_type": "aave_liquidation_call",
+      "account": "0xAAaA000000000000000000000000000000000001",
+      "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "symbol": "USDC",
+      "amount": "-2500000000",
+      "amount_decimals": 6,
+      "liquidation": {
+        "liquidator": "0xBBbB000000000000000000000000000000000002",
+        "debt_asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "debt_repaid": "2500000000",
+        "debt_decimals": 6,
+        "seized": [
+          {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "amount": "656250000000000000",
+            "decimals": 18
+          }
+        ],
+        "realized_bonus_bps": "500",
+        "configured_bonus_bps": "500",
+        "note": "extracted from the event's own structured payload; realized bonus is compared against the configured bonus AT THIS EVENT's effective params, not today's."
+      }
+    }
+  ],
+  "next_cursor": null,
+  "notes": []
+}

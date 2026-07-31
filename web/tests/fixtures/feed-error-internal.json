@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "internal",
+    "message": "the service failed to build the response"
+  }
+}

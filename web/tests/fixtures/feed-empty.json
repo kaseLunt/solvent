@@ -1,0 +1,15 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "filter": {
+    "engine": null,
+    "account": null,
+    "types": [
+      "deficit_created"
+    ],
+    "since_block": null
+  },
+  "limit": 50,
+  "events": [],
+  "next_cursor": null,
+  "notes": []
+}

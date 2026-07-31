@@ -1,0 +1,65 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "filter": {
+    "engine": null,
+    "account": null,
+    "types": [],
+    "since_block": null
+  },
+  "limit": 3,
+  "events": [
+    {
+      "chain_id": 1,
+      "engine": "aave_v3_etherfi",
+      "block_number": 25635601,
+      "block_time": "2026-07-29T09:57:11Z",
+      "tx_hash": "0x2b8a1f0e6c33269e9d8f01d1db494ca4cf693c99377f78f9628c1b74d5a1a859",
+      "log_index": 2,
+      "seq": 0,
+      "type": "borrow",
+      "raw_type": "aave_borrow",
+      "account": "0xAAaA000000000000000000000000000000000001",
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "amount": "1500000000000000000",
+      "amount_decimals": 18,
+      "liquidation": null
+    },
+    {
+      "chain_id": 10,
+      "engine": "debt_manager",
+      "block_number": 154796490,
+      "block_time": "2026-07-29T09:56:40Z",
+      "tx_hash": "0x51f0b3e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a7702",
+      "log_index": 7,
+      "seq": 0,
+      "type": "borrow",
+      "raw_type": "borrow",
+      "account": "0xccCc000000000000000000000000000000000003",
+      "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+      "symbol": "USDC",
+      "amount": "1200000000",
+      "amount_decimals": 6,
+      "liquidation": null
+    },
+    {
+      "chain_id": 1,
+      "engine": "aave_v3_etherfi",
+      "block_number": 25635500,
+      "block_time": "2026-07-29T09:55:02Z",
+      "tx_hash": "0x2b8a1f0e6c33269e9d8f01d1db494ca4cf693c99377f78f9628c1b74d5a1a859",
+      "log_index": 9,
+      "seq": 0,
+      "type": "repay",
+      "raw_type": "aave_repay",
+      "account": "0xAAaA000000000000000000000000000000000001",
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "symbol": "weETH",
+      "amount": "-500000000000000000",
+      "amount_decimals": 18,
+      "liquidation": null
+    }
+  ],
+  "next_cursor": null,
+  "notes": []
+}
