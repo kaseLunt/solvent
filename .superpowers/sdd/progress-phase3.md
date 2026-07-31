@@ -3073,3 +3073,30 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   race-guard stickiness; population-gate arithmetic; retro-test bars;
   frame consumption every run; faithfulness sweep vs both rulings).
   On SHIP → fresh-pin acceptance retry → E1.
+- **CODEX ON H3: NOT-SHIP, 4 FINDINGS; H4a+H4b DISPATCHED PARALLEL
+  (14:21)**: (1) HIGH, and OUTSIDE the harness — AddressHistoryPoint
+  REQUIRES liquidatable but OMITS sweep_block (wireHistoryPoint emits
+  only BalancesBlock): a bare mixed-clock boolean on the history wire
+  collapses the MOTION license's premise exactly as the rulings warned
+  ("any surface serving the bare boolean collapses the license"). (2)
+  HIGH — the never-swept race guard's fleet-min floor can FALSE-PASS a
+  genuinely skipped borrower (a stale straggler success pins the floor;
+  a later-arriving account skipped by completed generations classifies
+  honest-race; 1 row passes the census) — the cycle-specific witness is
+  required, missing evidence gates. (3) HIGH — the retro live test
+  hardcodes accounts/values instead of loading the retained accept-r5
+  artifact through the H2 recomputed-digest bars — a vacuous-green
+  empirical claim shape. (4) MEDIUM — the S-clock param cut filters the
+  COLLAPSED DMParamsAsOf(P) snapshot (latest-per-asset), which cannot
+  reconstruct S across config changes between S and P → wrong rejection
+  during ordinary parameter motion; the full ledger prefix must fold
+  independently at S. Codex also confirmed the strict-> equality test
+  holds (the both-welds-detect->= comment overstated; soften). WAVES
+  DISPATCHED (disjoint zones, parallel): H4a = cmd/reconcile findings
+  2/3/4 + comment fix, 3 designed mutants incl. the failed-straggler
+  kill; H4b = the serving-surface train (contract 1.2.1: AddressHistory-
+  Point gains the REQUIRED sweep watermark mirroring PositionSummary;
+  THE EXHAUSTIVE mechanical contract test over every liquidatable-
+  bearing schema; wireHistoryPoint + strip-proof test discharging the
+  H3-owed gap; client regen; Inspector history hover carries the mark).
+  Round 3 closing review on the pair after both land → fresh-pin retry.
