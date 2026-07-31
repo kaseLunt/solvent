@@ -226,14 +226,18 @@ func TestEveryVerdictHasATallyClass(t *testing.T) {
 		verdictOnlyInChain, verdictOnlyInRegistry, verdictAnomaly, verdictEvidence,
 		verdictProvenanceUpgrade, verdictQualifier, verdictBudgetFalsified,
 		verdictReResolution, verdictUnscannable, verdictUnexplained, verdictMarginal,
-		verdictSampleGap,
+		verdictSampleGap, verdictBoundaryMotion,
 	}
 	for _, v := range all {
 		inFail := failingVerdicts[v]
 		inPass := passingVerdicts[v]
-		if v == verdictEvidence {
+		if v == verdictEvidence || v == verdictBoundaryMotion {
 			// Evidence rows are never gated, so they are outside both sets by
 			// construction; asserting that keeps the exemption explicit.
+			// boundary-crossing-motion shares the posture DELIBERATELY (Wave
+			// H3): it is ALWAYS emitted gated=false, and keeping it out of
+			// passingVerdicts means a defect that ever emits it GATED fails
+			// closed through verdictIsFailure — asserted below.
 			require.False(t, inFail, "%s must not be classified as failing", v)
 			require.False(t, inPass, "%s is ungated evidence and needs no pass class", v)
 			continue
@@ -241,6 +245,13 @@ func TestEveryVerdictHasATallyClass(t *testing.T) {
 		require.NotEqual(t, inFail, inPass,
 			"verdict %q must be in EXACTLY one of failingVerdicts / passingVerdicts", v)
 	}
+	// The fail-closed guarantee the motion verdict's exemption rests on: a
+	// GATED motion row (which classifyDMBoolean can never emit) would COUNT.
+	require.True(t, verdictIsFailure(verdictBoundaryMotion),
+		"boundary-crossing-motion outside passingVerdicts fails closed if ever emitted gated")
+	require.Equal(t, 1, tallyP3([]p3Row{{Gated: true, Verdict: verdictBoundaryMotion}}))
+	require.Zero(t, tallyP3([]p3Row{{Gated: false, Verdict: verdictBoundaryMotion}}),
+		"the lawful (ungated) motion row never counts")
 	// And the predicate agrees with the sets, for every verdict.
 	for _, v := range all {
 		if passingVerdicts[v] {

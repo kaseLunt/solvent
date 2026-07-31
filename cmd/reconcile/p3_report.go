@@ -72,6 +72,30 @@ func renderP3Text(p *p3Result) string {
 		}
 	}
 
+	// The DISCLOSED classes (Wave H3): boundary-crossing motion and never-swept
+	// coverage-gaps are ungated EVIDENCE rows, but a disclosure a reviewer
+	// cannot see in the human artifact is not a disclosure — printed verbatim,
+	// uncapped (both classes are bounded by their own population gates).
+	var disclosed []p3Row
+	for _, r := range p.Rows {
+		if r.Verdict == verdictBoundaryMotion || strings.Contains(r.Class, "never-swept-coverage-gap") {
+			disclosed = append(disclosed, r)
+		}
+	}
+	if len(disclosed) > 0 {
+		b.WriteString("\n  DISCLOSED CLASSES (ungated evidence rows, each INDIVIDUALLY proven; the census rows below gate their populations):\n")
+		for _, r := range disclosed {
+			fmt.Fprintf(&b, "  - [%s] %s / %s: %s\n      expected(chain)=%s\n      actual(derived)=%s\n      class=%s\n",
+				r.Verdict, r.Gate, r.Leg, r.Subject, r.Expected, r.Actual, r.Class)
+			if r.Note != "" {
+				fmt.Fprintf(&b, "      %s\n", r.Note)
+			}
+			for _, k := range sortedMapKeys(r.Evidence) {
+				fmt.Fprintf(&b, "      %s = %s\n", k, r.Evidence[k])
+			}
+		}
+	}
+
 	// Cohort floors, always printed whether they passed or not.
 	b.WriteString("\n  COHORT FLOORS (population-derived, census-welded):\n")
 	for _, r := range p.Rows {

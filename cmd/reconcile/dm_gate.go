@@ -48,8 +48,32 @@
 // law in classifyDMMaxBorrow: a verdict class with its own discrimination read,
 // NOT a fourth tolerance — risk-quant refused any epsilon over the 233 as
 // tolerance-as-carpet, and the three-tolerance law stands untouched. The
-// BOOLEAN leg (liquidatable, strict >) stays gated at the pin: it is the served
-// product and it welded 46/46 through the same gap.
+// BOOLEAN leg (liquidatable, strict >) initially stayed a single-clock pin
+// weld: it welded 46/46 through the same gap that run.
+//
+// THIRD CLOCK CORRECTION — THE BOOLEAN LEG (Wave H3, adjudicated 2026-07-31:
+// chain-truth + risk-quant boolean-leg rulings, the UNION). The accept-r5
+// fresh run produced the PREDICTED case: two liquidatable false positives
+// whose maxBorrow legs proved honest motion (sample-gap with the vector
+// certificate) — the pin-clock boolean gate was re-litigating the settled
+// snapshot architecture stochastically (~0-3 per 9.5k per draw; near the
+// boundary the boolean is a step function, so no staleness bound translates
+// into a boolean error bound, and A PASS UNDER A STOCHASTIC GATE CERTIFIES
+// THE DRAW, NOT THE SYSTEM). The product serves the PAIR (verdict, sweep
+// watermark); the gate was asking the pin a question the product answers at
+// S. liquidatable is therefore THREE-STATE (classifyDMBoolean): EXACT;
+// boundary-crossing-motion (gated=false, evidence) reachable ONLY through
+// constructive per-row proof — the sample-gap certificate, debt EXACT at pin,
+// the S-CLOCK BOOLEAN CUSTODY WELD (ComputeDMHealth over ALL inputs at S vs
+// liquidatable@blockHash(S)), the Law@P PIN-VECTOR SUBSTITUTION (scalar AND
+// boolean over the chain's own pin vector vs getMaxBorrowAmount@P and
+// liquidatable@P), and the sweep age inside the cadence budget — and DRIFT/
+// weld-unread for everything else, with the S-weld-fails-over-passing-
+// certificate case ESCALATED as custody drift (the composition law diverging
+// from chain). NO margin appears in ANY predicate; a standing census row
+// gates the population at ~1% (sweeper-health); the never-swept law is
+// reshaped the same wave (refusal-weld + cycle arithmetic + census
+// denominator — see classifySweepTestimony).
 //
 // VECTOR STRENGTHENING of the own-clock weld (Codex round 2 on the proof
 // surface, finding 1, 2026-07-31). Wave H's committed own-clock weld proved
@@ -81,6 +105,7 @@ import (
 	"math/big"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -107,6 +132,17 @@ const (
 	dmOwnClockVectorSource     = "DebtManager.collateralOf(user)@ownSweepBlockHash(S(account))"
 	dmOwnClockPriceSource      = "DebtManager.convertCollateralTokenToUsd(token, 10^dec)@ownSweepBlockHash(S(account))"
 	dmOwnClockHeaderSource     = "headerHash@ownSweepBlock(S(account)) resolved through the pinned reader"
+	// Wave-H3 boolean-leg sources (the adjudicated three-state liquidatable
+	// law — chain-truth conjunct iii, risk-quant conjunct iv, and the
+	// never-swept reshape). Declared here so the declaration and every f.use
+	// share one spelling.
+	dmSClockLiquidatableSource = "DebtManager.liquidatable(user)@ownSweepBlockHash(S(account))"
+	dmSClockIndexSource        = "DebtManager.getCurrentIndex(borrowToken)@ownSweepBlockHash(S(account))"
+	dmPinVectorSource          = "DebtManager.collateralOf(user)@pinHash(P_op)"
+	dmDebtFoldAtSSource        = "position_events(engine=debt_manager, side=debt) SUM(delta) <= S(account) — the Stage-A correlated aggregate inside the snapshot tx"
+	dmFirstDebtSource          = "position_events(engine=debt_manager, side=debt) MIN(block_number) per account <= P_op (first debt event, Stage-A)"
+	dmSweepAgeClockSource      = "headerTime@P_op and headerTime@ownSweepBlock(S(account)) through the pinned reader (the sweep-age clock)"
+	dmServingPostureSource     = "internal/risk.ComputeDMHealth watermark refusal (requireWatermarks REQUIRES Marks.SweepBlock) — the serving posture CONSUMED as a read, never asserted"
 )
 
 // dmGateFrame declares the gate's exhaustive input frame.
@@ -142,6 +178,20 @@ func dmGateFrame() *gateFrame {
 			"the number->hash resolution for S(account) so the own-clock reads are hash-bound. S sits below the run pin and is deep-finalized"),
 		pinned("DebtManager.borrowingOf(user).total@pinHash(P_op)",
 			"the chain's own live debt total, welded exactly against our index-replayed value"),
+		pinned(dmSClockLiquidatableSource,
+			"the S-CLOCK BOOLEAN CUSTODY WELD's chain side (chain-truth conjunct iii, boolean-leg ruling): risk.ComputeDMHealth recomputed over ALL inputs at S — the Stage-A debt fold at S bridged through getCurrentIndex@S, the persisted collateral vector, params re-cut <= S, engine prices @S — must weld BIT-EXACT against liquidatable(user)@blockHash(S). A failure here over a PASSING collateral certificate is the composition law diverging from chain: custody drift, ESCALATE immediately"),
+		pinned(dmSClockIndexSource,
+			"the interest index AT S that bridges the Stage-A normalized debt fold at S to the USD-6 debt the S-clock boolean weld consumes — the same shape the pin-side bridge uses with getCurrentIndex@pin"),
+		pinned(dmPinVectorSource,
+			"the Law@P PIN-VECTOR SUBSTITUTION (risk-quant conjunct iv, boolean-leg ruling): the chain's OWN enumerated netted collateral vector at the pin (DebtManagerCore.sol:170-183). The scalar AND the boolean are recomputed over THIS vector with the run's pinned prices/params/decimals and the welded debt@P, and must equal getMaxBorrowAmount@P and liquidatable@P bit-exact — the flip then is a theorem of two chain-attested endpoints, and the motion IS vector@P minus vector@S"),
+		derived(dmDebtFoldAtSSource,
+			"the S-clock debt input for the boolean custody weld: per (account, asset), the Σ of our custodied debt deltas at block_number <= S(account), pre-collected inside the one snapshot transaction because Stage B cannot know which booleans flip until the DB is closed (the F5 seam)"),
+		derived(dmFirstDebtSource,
+			"each borrower's arrival edge for the never-swept race arithmetic (risk-quant's correction: any-never-swept-gates was stochastic on borrower arrival; the lawful form asks whether a sweep cycle both started after this block and completed before the pin)"),
+		pinned(dmSweepAgeClockSource,
+			"the chain-time sweep age for the freshness-budget conjunct (v): headerTime(P_op) minus headerTime(S(account)), judged against the sweeper-cadence bound (§7). Motion OUTSIDE the budget is a freshness violation and gates THERE — never absorbed as motion"),
+		committed(dmServingPostureSource,
+			"the MOTION license's premise (risk-quant B4): the served surface structurally attaches the sweep watermark to every DM boolean — internal/risk requireWatermarks refuses a SweepBlock-less compute (internal/risk/dm.go:49-58), and the API contract carries it as a REQUIRED field (api/openapi.yaml AsOf.sweep_block; PositionSummary.sweep_block). Consumed as a READ every run: the gate calls ComputeDMHealth with SweepBlock=0 and requires the refusal; the same read proves each never-swept account is refused by the serving path rather than asserted to be"),
 		committed("cohort sampling seed = the OP pin's block hash (a chain fact, echoed in the report)",
 			"the sampled remainder's ordering. The seed is not operator-chosen: overriding it taints the run"),
 	)
@@ -228,7 +278,7 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 	// from the evaluable universe rather than scored over discarded collateral —
 	// see T6SweepState for the defect this closes and the 199-account measurement.
 	var evaluable []string
-	sweepRows, excluded := classifySweepTestimony(c, t6, debtUSDByAccount)
+	sweepRows, excluded := classifySweepTestimony(c, f, t6, debtUSDByAccount, folded)
 	rows = append(rows, sweepRows...)
 	for acct := range debtUSDByAccount {
 		if !excluded[acct] {
@@ -326,11 +376,22 @@ func runDMBooleanGate(ctx context.Context, c *p3Ctx, st dmTokenState) ([]p3Row, 
 	}
 
 	// ---- chain weld over the cohort ---------------------------------------
-	weldRows, err := weldDMCohort(ctx, c, f, cohort, healthByAccount, st, collByAccount, debtUSDByAccount)
+	weldRows, err := weldDMCohort(ctx, c, f, cohort, healthByAccount, st, collByAccount, debtUSDByAccount,
+		folded, len(evaluable))
 	rows = append(rows, weldRows...)
 	if err != nil {
 		return rows, err
 	}
+
+	// ---- the serving-surface disclosure receipt (risk-quant B4) -------------
+	// The MOTION license's premise, stated as a frame-level fact with its
+	// citations: the served boolean is STRUCTURALLY accompanied by its sweep
+	// watermark. The posture itself is CONSUMED as a read every run
+	// (classifySweepTestimony's refusal probe against dmServingPostureSource);
+	// this row is the receipt line the artifact carries.
+	rows = append(rows, evidenceRow(gateDMBoolean, "serving-surface", "boolean-disclosure-structure",
+		"the (verdict, sweep watermark) PAIR is the served product",
+		"risk-quant B4, the motion license's premise: internal/risk.ComputeDMHealth REQUIRES Marks.SweepBlock (requireWatermarks, internal/risk/dm.go:49-58) — the risk batch cannot produce a DM boolean without the account's own sweep watermark; the API contract carries the marks as REQUIRED fields (api/openapi.yaml: AsOf requires sweep_block; PositionSummary requires sweep_block; Position requires as_of), and cmd/api's cross-surface pin asserts the /v1/positions row's sweep_block equals the /v1/address as_of (p5_positions_db_test.go). The gate additionally CONSUMES the refusal posture as a read each run: ComputeDMHealth with SweepBlock=0 must refuse, or the run gates as serving-posture-broken"))
 
 	// ---- cohort floors, census-welded --------------------------------------
 	rows = append(rows, cohortFloorRow(gateDMBoolean, "dm-live-liquidatable(ALL)",
@@ -440,7 +501,33 @@ func sweepExclusionInvariant(st snapshotdb.T6SweepState) bool {
 
 // classifySweepTestimony emits the per-account testimony rows and returns the
 // set of accounts EXCLUDED from the evaluable universe.
-func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[string]*big.Int) ([]p3Row, map[string]bool) {
+//
+// NEVER-SWEPT RESHAPE (Wave H3, risk-quant's correction of the blessed shape):
+// any-never-swept-gates was STOCHASTIC ON BORROWER ARRIVAL — a borrower who
+// arrives between two sweep passes fails the run through no defect anywhere.
+// The lawful form is three conjuncts per never-swept account:
+//
+//	REFUSAL-WELD   the served surface's refusal of the account is PROVEN by a
+//	               consumed read (risk.ComputeDMHealth with the account's own
+//	               inputs and SweepBlock=0 must refuse — the 0xe957…bf20
+//	               posture), never asserted;
+//	AGE GUARD      derived from the sweeper's own schedule as the fleet's
+//	               pin-filtered watermarks witness it (dmNeverSweptRace): no
+//	               sweep cycle both started after the account's first
+//	               debt-event block and completed before P_op → an honest
+//	               race → disclosed coverage-gap (gated=false); a completed
+//	               cycle that skipped the account → sweeper defect, GATED;
+//	CENSUS         the class carries its denominator, and coverage-gaps
+//	               exceeding ~1% of the borrower census gate as
+//	               sweeper-health — a STOPPED sweeper classifies every new
+//	               borrower as an honest race per row, and this is the
+//	               vacuous-pass guard that fails it en masse.
+//
+// last_attempt_status distinguishes never-attempted from attempted-and-failed
+// (chain-truth's minor): Stage A now reads zero-success snapshot_sweeps rows
+// too, so the attempt state is a fact, not an inference.
+func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, borrowers map[string]*big.Int,
+	folded []risk.ParamRow) ([]p3Row, map[string]bool) {
 	var rows []p3Row
 	excluded := map[string]bool{}
 	accounts := make([]string, 0, len(borrowers))
@@ -449,7 +536,45 @@ func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[st
 	}
 	sort.Strings(accounts)
 
-	abovePin, never, invariantBreaks := 0, 0, 0
+	// The serving-posture PROBE, always-on (the frame source must be consumed
+	// every run, and the MOTION license's premise must hold every run): a
+	// SweepBlock-less compute must refuse. If it does not, the serving surface
+	// can produce a bare boolean over collateral of unknown freshness — the
+	// license collapses (risk-quant B4, D-013 always-fix) and the run gates.
+	refuse := func(acctHex string, debt *big.Int) (bool, string) {
+		in := risk.DMInput{
+			Account: common.HexToAddress(acctHex),
+			DebtUSD: orZeroBig(debt),
+			Params:  folded,
+			Marks:   risk.Watermarks{BalancesBlock: c.pinOP, ParamsBlock: c.pinOP, SweepBlock: 0},
+		}
+		_, err := risk.ComputeDMHealth(in)
+		if err == nil {
+			return false, ""
+		}
+		return true, err.Error()
+	}
+	f.use(dmServingPostureSource)
+	if ok, _ := refuse("0000000000000000000000000000000000000001", big.NewInt(1)); !ok {
+		rows = append(rows, driftRow(gateDMBoolean, "serving-posture", "sweepless-compute-refusal",
+			"risk.ComputeDMHealth(SweepBlock=0) refuses",
+			"the compute SUCCEEDED without a sweep watermark",
+			"serving-posture-broken",
+			"the serving posture the MOTION license and the never-swept disclosure both rest on has broken: a DM boolean can be produced without the account's sweep watermark, so a surface could serve the bare boolean. D-013 always-fix; every disclosure below this line is suspect until internal/risk requires the watermark again"))
+	}
+
+	// The fleet's pin-filtered watermark floor: the sweep-cycle witness the
+	// race arithmetic consumes (a full cycle completed after block B implies
+	// every member's pin-visible watermark exceeds B).
+	fleetMin := uint64(0)
+	for _, st := range t6.DMSweepByAccount {
+		if st.AtOrBelowPin > 0 && (fleetMin == 0 || st.AtOrBelowPin < fleetMin) {
+			fleetMin = st.AtOrBelowPin
+		}
+	}
+	f.use(dmFirstDebtSource)
+
+	abovePin, neverGated, coverageGaps, invariantBreaks := 0, 0, 0, 0
 	for _, acct := range accounts {
 		st := t6.DMSweepByAccount[acct]
 		switch classifyDMSweep(st, c.pinOP) {
@@ -472,16 +597,51 @@ func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[st
 				},
 			})
 		case sweepNever:
-			never++
 			excluded[acct] = true
-			rows = append(rows, p3Row{
+			attemptState := "never-attempted (no snapshot_sweeps row)"
+			if st.Attempted {
+				attemptState = fmt.Sprintf("attempted-and-failed (last_attempt_status=%q)", st.Status)
+			}
+			var firstDebt uint64
+			if t6.DMFirstDebtBlock != nil {
+				firstDebt = t6.DMFirstDebtBlock[acct]
+			}
+			refused, refusalProof := refuse(acct, borrowers[acct])
+			race := dmNeverSweptRace(firstDebt, fleetMin)
+			ev := map[string]string{
+				"last_attempt_status": st.Status,
+				"attempt_state":       attemptState,
+				"first_debt_block":    fmt.Sprintf("%d", firstDebt),
+				"cycle_arithmetic":    fmt.Sprintf("fleet min pin-visible watermark %d vs first debt block %d at pin %d: a completed cycle inside (first-debt, pin] exists iff the fleet floor exceeds the arrival edge", fleetMin, firstDebt, c.pinOP),
+				"refusal_proof":       refusalProof,
+			}
+			row := p3Row{
 				Gate: gateDMBoolean, Subject: "0x" + acct, Leg: "collateral-testimony-at-pin",
 				Expected: "at least one successful collateral sweep at any height",
 				Actual:   "no successful sweep has ever completed for this account",
-				Verdict:  verdictUnscannable, Gated: true, Class: sweepNever,
-				Note:     "GATED, unlike sweep-above-pin: a borrower the sweeper has NEVER successfully read is a persistent hole rather than a clock difference, and the served surface would refuse it too (the 0xe957...bf20 posture). Re-pinning cannot fix it",
-				Evidence: map[string]string{"last_attempt_status": st.Status},
-			})
+				Evidence: ev,
+			}
+			switch {
+			case !refused:
+				neverGated++
+				row.Verdict = verdictDrift
+				row.Gated = true
+				row.Class = "never-swept(served-without-refusal)"
+				row.Note = "GATED AND LOUD: the serving posture did NOT refuse this sweepless account — the surface would serve a boolean over collateral of unknown freshness (the wrong answer, served). The refusal-weld is a CONSUMED read of risk.ComputeDMHealth, never an assertion (risk-quant's never-swept correction)"
+			case race:
+				coverageGaps++
+				row.Verdict = verdictUnscannable
+				row.Gated = false
+				row.Class = "never-swept-coverage-gap(honest-race)"
+				row.Note = "DISCLOSED, not gated: no sweep cycle both started after this account's first debt event and completed before the pin (the fleet's own watermarks are the witness), so the sweeper has not yet OWED this account a visit — an honest race on borrower arrival, self-healing on the next completed pass. The served surface PROVABLY refuses the account meanwhile (the consumed refusal read above), so no wrong answer can be served. The census row below carries the denominator: a STOPPED sweeper classifies every arrival as a race per row and fails there en masse (the vacuous-pass guard)"
+			default:
+				neverGated++
+				row.Verdict = verdictUnscannable
+				row.Gated = true
+				row.Class = sweepNever
+				row.Note = "GATED: a full sweep cycle started after this account's first debt event and completed before the pin (every fleet watermark exceeds the arrival edge) and the sweeper STILL never read this account — older than one completed cycle is a sweeper defect, not a race. The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
+			}
+			rows = append(rows, row)
 		}
 		// The exclusion must be structurally justified, whichever arm produced it.
 		if !sweepExclusionInvariant(t6.DMSweepByAccount[acct]) {
@@ -493,10 +653,11 @@ func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[st
 				"an excluded account has collateral legs the pin CAN see, so the exclusion is discarding evidence rather than admitting we have none. Either the watermark filter and the leg filter disagree, or the sweep table and position_balances have drifted apart"))
 		}
 	}
+	never := neverGated + coverageGaps
 	rows = append(rows, p3Row{
 		Gate: gateDMBoolean, Subject: "cohort:collateral-testimony", Leg: "evaluable-universe",
 		Expected: fmt.Sprintf("%d derived borrowers", len(accounts)),
-		Actual:   fmt.Sprintf("%d evaluable, %d excluded sweep-above-pin (not gated), %d excluded never-swept (gated)", len(accounts)-abovePin-never, abovePin, never),
+		Actual:   fmt.Sprintf("%d evaluable, %d excluded sweep-above-pin (not gated), %d excluded never-swept (%d gated, %d disclosed coverage-gap)", len(accounts)-abovePin-never, abovePin, never, neverGated, coverageGaps),
 		Verdict:  verdictExact, Gated: true,
 		Note: "the evaluable universe every cohort floor below is judged against. The sweep-above-pin exclusions are a duty-cycle property of pinning below the sweeper's head (~2% of accounts at a ~34% duty cycle when this was measured); they are disclosed rather than gated, and the per-account invariant above proves each one discarded nothing the pin could see",
 	})
@@ -504,7 +665,37 @@ func classifySweepTestimony(c *p3Ctx, t6 *snapshotdb.Task6Data, borrowers map[st
 		rows[len(rows)-1].Verdict = verdictDrift
 		rows[len(rows)-1].Class = "exclusion-discards-evidence"
 	}
+	rows = append(rows, dmNeverSweptCensusRow(coverageGaps, neverGated, len(accounts), fleetMin, c.pinOP))
 	return rows, excluded
+}
+
+// dmNeverSweptCensusRow is the never-swept class's standing census with its
+// DENOMINATOR — the vacuous-pass guard both rulings require: a stopped
+// sweeper turns every arriving borrower into a per-row honest race, and only
+// the population can refute that. Coverage-gaps exceeding ~1% of the borrower
+// census gate as sweeper-health.
+func dmNeverSweptCensusRow(coverageGaps, gated, borrowerCensus int, fleetMin, pin uint64) p3Row {
+	row := p3Row{
+		Gate: gateDMBoolean, Subject: "cohort:never-swept", Leg: "standing-census",
+		Expected: fmt.Sprintf("coverage-gaps <= ~1%% of the borrower census (%d)", borrowerCensus),
+		Actual:   fmt.Sprintf("%d disclosed coverage-gap(s), %d gated never-swept", coverageGaps, gated),
+		Gated:    true,
+		Evidence: map[string]string{
+			"denominator":                fmt.Sprintf("%d derived borrowers", borrowerCensus),
+			"fleet_min_watermark_at_pin": fmt.Sprintf("%d", fleetMin),
+			"pin":                        fmt.Sprintf("%d", pin),
+			"disclosed_coverage_gaps":    fmt.Sprintf("%d", coverageGaps),
+			"gated_never_swept":          fmt.Sprintf("%d", gated),
+		},
+		Note: "the never-swept census denominator (risk-quant's correction): each coverage-gap is individually proven an honest race (refusal-weld + cycle arithmetic), and this row is the guard that fails a STOPPED sweeper en masse — a sweeper that stops makes every new borrower a per-row race, which only the population count can refute",
+	}
+	if dmMotionPopulationGate(coverageGaps, borrowerCensus) {
+		row.Verdict = verdictDrift
+		row.Class = "sweeper-health"
+		return row
+	}
+	row.Verdict = verdictExact
+	return row
 }
 
 // dmCensusCoverageRow asserts that the chain-side census actually covered every
@@ -865,6 +1056,26 @@ type dmOwnClockResult struct {
 	// when the vector proof already failed: a proven vector mismatch is custody
 	// drift whatever the scalar legs managed to do.
 	Err string
+
+	// --- the S-CLOCK BOOLEAN CUSTODY WELD (Wave H3, chain-truth conjunct iii)
+	// risk.ComputeDMHealth recomputed over ALL inputs at S: the Stage-A debt
+	// fold at S bridged through getCurrentIndex@blockHash(S), the persisted
+	// collateral vector, params re-cut <= S, engine prices @S — welded
+	// bit-exact against liquidatable(user)@blockHash(S).
+	BoolRead        bool // liquidatable(user)@S answered and decoded
+	ChainLiqS       bool // the chain's own boolean at S
+	OursLiqComputed bool // the full S-clock recompute produced a boolean
+	OursLiqS        bool // ComputeDMHealth(all inputs at S).Liquidatable
+	DebtUSDAtS      *big.Int
+	// BoolErr names why the boolean weld specifically could not be produced,
+	// kept separate from Err so the scalar law check's semantics are untouched.
+	BoolErr string
+
+	// --- the sweep-age clock (Wave H3, freshness conjunct v)
+	// headerTime(P_op) − headerTime(S), chain time. AgeKnown=false means one
+	// of the header reads did not answer — "cannot verify", never a default.
+	AgeKnown   bool
+	AgeSeconds int64
 }
 
 // dmPersistedVector folds an account's persisted snapshot legs into the
@@ -985,6 +1196,212 @@ func classifyDMMaxBorrow(pinChain, ours *big.Int, own *dmOwnClockResult) (verdic
 	return verdictSampleGap, verdictSampleGap
 }
 
+// dmPinVectorResult is one account's Law@P PIN-VECTOR SUBSTITUTION (risk-quant
+// conjunct iv, boolean-leg ruling): the chain's OWN enumerated netted
+// collateral vector read at pinHash(P_op), with the scalar AND the boolean
+// recomputed over it using the run's pinned prices/params/decimals and the
+// welded debt@P. When both weld bit-exact against getMaxBorrowAmount@P and
+// liquidatable@P, the flip is a theorem of two chain-attested endpoints and
+// the motion IS vector@P − vector@S.
+type dmPinVectorResult struct {
+	Read bool   // collateralOf@pinHash answered and decoded
+	Err  string // why the substitution could not be produced (weld-unread)
+
+	ScalarP    *big.Int // our recompute of the LT-weighted scalar over the CHAIN pin vector
+	BoolP      bool     // our recompute of the strict > boolean over the CHAIN pin vector + welded debt@P
+	ScalarWeld bool     // ScalarP == getMaxBorrowAmount(user,false)@pinHash
+	BoolWeld   bool     // BoolP == liquidatable(user)@pinHash
+
+	// The motion ledger: per-token LT-weighted USD-6 contribution deltas
+	// (vector@P − vector@S, both sides through the SAME per-token
+	// floor-then-sum law with the run's pinned prices and params), their sum,
+	// and whether the sum reconciles arithmetically to
+	// getMaxBorrowAmount@P − ourMax(mixed) — the number whose sign and size
+	// produce the flip.
+	PerTokenDeltas []string
+	DeltaSum       *big.Int
+	Reconciles     bool
+}
+
+// dmBooleanFacts is the pure classifier's input — every conjunct of the
+// adjudicated three-state liquidatable law as an already-established fact.
+//
+// GUARDRAIL (both consultants, verbatim): there is DELIBERATELY NO MARGIN
+// FIELD in this struct and no numeric threshold anywhere in the classifier.
+// The disclosed class is reachable ONLY through constructive per-row proof —
+// margins are evidence the rows print, never a predicate input. An epsilon
+// here would be the tolerance-as-carpet both rulings refused.
+type dmBooleanFacts struct {
+	Ours  bool // the served mixed-clock verdict (ComputeDMHealth over debt@P + collateral@S)
+	Chain bool // liquidatable(user)@pinHash(P_op)
+
+	// Conjunct (i): the account's maxBorrow leg classified sample-gap-disclosed
+	// THIS run with the full certificate (vector byte-identical at
+	// blockHash(S) + scalar law recompute) — the verdict classifyDMMaxBorrow
+	// produced for the leg row.
+	MaxBorrowLegVerdict string
+	// Conjunct (ii): borrowingOf(user).total@pinHash welds EXACT against our
+	// index-replayed debt. Debt is same-clock event-derived — any disagreement
+	// is drift, never motion.
+	DebtExactAtPin bool
+	// Conjunct (iii) + (v): the own-clock result carrying the S-clock boolean
+	// custody weld and the sweep-age clock.
+	Own *dmOwnClockResult
+	// Conjunct (iv): the Law@P pin-vector substitution.
+	PinVec *dmPinVectorResult
+	// Conjunct (v)'s budget: the sweeper-cadence freshness bound in seconds
+	// (§7, the daemon's own persisted cadence). <= 0 means no budget was
+	// resolvable — "cannot verify", never a free pass.
+	BudgetSeconds int64
+}
+
+// The boolean leg's class strings. Direction-tagged (the boolean's OWN
+// granularity, chain-truth's evidence obligation): a false NEGATIVE at pin is
+// the risk-hiding direction and is rendered louder.
+const (
+	dmDirectionFalsePositive = "false-positive-at-pin"
+	dmDirectionFalseNegative = "false-negative-at-pin"
+	// dmClassSClockCustodyDrift is the ESCALATION arm, named per chain-truth:
+	// the S-clock boolean weld failing while the collateral certificate passes
+	// is the composition law diverging from chain — custody drift immediately,
+	// never motion and never a retry.
+	dmClassSClockCustodyDrift = "s-clock-boolean-custody-drift(composition-law-diverges-from-chain-at-S; ESCALATE)"
+)
+
+// classifyDMBoolean is the adjudicated THREE-STATE law for liquidatable
+// (strict >) — the union of the chain-truth and risk-quant boolean-leg
+// rulings, the stronger conjunct set everywhere. Pure so the law is
+// unit-tested and mutation-killable in isolation.
+//
+//	EXACT                      derived == liquidatable(user)@pinHash. Unchanged.
+//	boundary-crossing-motion   gated=false, evidence: reachable ONLY through
+//	                           ALL of, per account —
+//	                           (i)   the maxBorrow leg sample-gap-disclosed
+//	                                 with the full vector certificate;
+//	                           (ii)  debt EXACT at pin;
+//	                           (iii) the S-clock boolean custody weld:
+//	                                 ComputeDMHealth over ALL inputs at S,
+//	                                 bit-exact against liquidatable@S;
+//	                           (iv)  the Law@P pin-vector substitution: scalar
+//	                                 AND boolean over the chain's own pin
+//	                                 vector weld bit-exact, and the per-token
+//	                                 delta reconciles to the flip;
+//	                           (v)   the row's own sweep age inside the
+//	                                 freshness budget.
+//	DRIFT / weld-unread        anything else, gated. An S-clock weld failure
+//	                           over a PASSING collateral certificate is
+//	                           dmClassSClockCustodyDrift (ESCALATE).
+//
+// The strict-> discrimination stays OWN-CLOCK: conjuncts (iii) and (iv) both
+// recompute the SAME strict inequality (ComputeDMHealth's own `>`,
+// internal/risk/dm.go:141) at two chain-attested endpoints, so an
+// inequality-direction defect (a >= where > belongs) fails the S weld and the
+// P substitution before any MOTION classification is reachable — a MOTION
+// class can never excuse an inequality-direction defect.
+//
+// There is NO count tolerance here: each row is individually proven, and the
+// population-level census (dmMotionCensusRow) gates separately.
+func classifyDMBoolean(fx dmBooleanFacts) (verdict, class string, gated bool, reasons []string) {
+	if fx.Ours == fx.Chain {
+		return verdictExact, "", true, nil
+	}
+	direction := dmDirectionFalsePositive
+	if fx.Chain && !fx.Ours {
+		direction = dmDirectionFalseNegative
+	}
+
+	// Conjunct (i): without the sample-gap certificate the pin difference has
+	// no proven mechanical cause — the disagreement localises to the quantity
+	// legs and gates as plain boolean drift.
+	if fx.MaxBorrowLegVerdict != verdictSampleGap {
+		return verdictDrift, "boolean-direction(" + direction + ")", true,
+			[]string{fmt.Sprintf("conjunct (i) failed: the maxBorrow leg classified %q, not %s — motion is provable only through the full sample-gap certificate (vector byte-identical at S + scalar law recompute)", fx.MaxBorrowLegVerdict, verdictSampleGap)}
+	}
+	// Conjunct (ii): debt is same-clock event-derived. Any disagreement is
+	// drift, never motion.
+	if !fx.DebtExactAtPin {
+		return verdictDrift, "boolean-direction(" + direction + ")", true,
+			[]string{"conjunct (ii) failed: borrowingOf(user).total@pin does not weld EXACT against our index-replayed debt — debt is same-clock event-derived, so any disagreement is drift, never motion"}
+	}
+	// Conjunct (iii): the S-clock boolean custody weld.
+	if fx.Own == nil || !fx.Own.BoolRead || !fx.Own.OursLiqComputed {
+		why := "the S-clock boolean custody weld was not produced"
+		if fx.Own != nil && fx.Own.BoolErr != "" {
+			why += ": " + fx.Own.BoolErr
+		}
+		return verdictWeldUnread, "s-clock-boolean-weld-unread", true, []string{why}
+	}
+	if fx.Own.OursLiqS != fx.Own.ChainLiqS {
+		// The collateral certificate PASSED (conjunct i) and the composition
+		// law still disagrees with the chain at the one clock where every
+		// input is proven identical: the law itself diverges. ESCALATE.
+		return verdictDrift, dmClassSClockCustodyDrift, true,
+			[]string{fmt.Sprintf("conjunct (iii) FAILED over a PASSING collateral certificate: ComputeDMHealth over all-S inputs says liquidatable=%v while liquidatable(user)@blockHash(S) says %v — the composition law diverging from chain is custody drift, escalated immediately (chain-truth, boolean-leg ruling)", fx.Own.OursLiqS, fx.Own.ChainLiqS)}
+	}
+	// Conjunct (iv): the Law@P pin-vector substitution.
+	if fx.PinVec == nil || !fx.PinVec.Read {
+		why := "the pin-vector substitution was not produced"
+		if fx.PinVec != nil && fx.PinVec.Err != "" {
+			why += ": " + fx.PinVec.Err
+		}
+		return verdictWeldUnread, "pin-vector-substitution-unread", true, []string{why}
+	}
+	if fx.PinVec.Err != "" {
+		return verdictWeldUnread, "pin-vector-substitution-unread", true, []string{fx.PinVec.Err}
+	}
+	if !fx.PinVec.ScalarWeld || !fx.PinVec.BoolWeld {
+		return verdictDrift, "pin-vector-law-divergence(" + direction + ")", true,
+			[]string{fmt.Sprintf("conjunct (iv) failed: over the CHAIN's own pin vector with the run's pinned prices/params/decimals and the welded debt@P, scalar weld=%v boolean weld=%v — the law@P substitution must reproduce getMaxBorrowAmount@P AND liquidatable@P bit-exact", fx.PinVec.ScalarWeld, fx.PinVec.BoolWeld)}
+	}
+	if !fx.PinVec.Reconciles {
+		return verdictDrift, "motion-not-reconciled(" + direction + ")", true,
+			[]string{"conjunct (iv) failed: the per-token LT-weighted vector delta does not arithmetically produce the flip (Σ per-token deltas != getMaxBorrowAmount@P − ourMax(mixed))"}
+	}
+	// Conjunct (v): the freshness budget. Motion OUTSIDE the budget is a
+	// freshness violation and gates THERE — never absorbed as motion.
+	if !fx.Own.AgeKnown || fx.BudgetSeconds <= 0 {
+		return verdictWeldUnread, "sweep-age-unread", true,
+			[]string{"conjunct (v) unprovable: the sweep-age clock (headerTime@P_op − headerTime@S) or the cadence budget was not available — a motion row cannot be disclosed without its bounded staleness"}
+	}
+	if fx.Own.AgeSeconds > fx.BudgetSeconds {
+		return verdictDrift, "motion-outside-freshness-budget(" + direction + ")", true,
+			[]string{fmt.Sprintf("conjunct (v) failed: sweep age %ds exceeds the sweeper-cadence budget %ds — this row's staleness is a freshness defect, not weather", fx.Own.AgeSeconds, fx.BudgetSeconds)}
+	}
+	return verdictBoundaryMotion, "boolean-boundary-crossing(motion-proven, " + direction + ")", false, nil
+}
+
+// dmMotionPopulationGate is the population-level guard on the disclosed class
+// (both rulings): a MOTION count exceeding ~1% of the evaluable universe is
+// weather refuted by its own frequency — the sweep cadence collapsing — and
+// gates as sweeper-health. No count tolerance exists on the rows themselves;
+// this is a census over individually-proven rows.
+func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
+	return motionCount*100 > evaluableCount
+}
+
+// dmNeverSweptRace is the never-swept AGE GUARD derived from the sweeper's own
+// schedule as the fleet's pin-filtered watermarks witness it (risk-quant's
+// correction: any-never-swept-gates is stochastic on borrower arrival).
+//
+// A COMPLETED CYCLE strictly inside (firstDebt, pin] implies every fleet
+// member's pin-visible watermark exceeds firstDebt — a full pass refreshed the
+// whole registry after this account arrived and still skipped it, which is a
+// sweeper defect, GATED. When some member's watermark still predates the
+// arrival, no full cycle has completed since the account entered the registry:
+// the gap is an honest race and the row is a disclosed coverage-gap.
+//
+// firstDebt == 0 (arrival unknown) fails CLOSED: a race cannot be claimed for
+// an account whose arrival edge custody cannot state. fleetMinWatermark == 0
+// (no pin-visible success anywhere) is the stopped-sweeper shape — the race
+// arm holds per row, and the census denominator row is the guard that fails
+// it en masse (the vacuous-pass guard both rulings require).
+func dmNeverSweptRace(firstDebt, fleetMinWatermark uint64) bool {
+	if firstDebt == 0 {
+		return false
+	}
+	return fleetMinWatermark <= firstDebt
+}
+
 // dmOwnClockProbe names one account the discrimination read is issued for.
 type dmOwnClockProbe struct {
 	acct   common.Address
@@ -1013,6 +1430,11 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 	}
 	sort.Slice(sweeps, func(i, j int) bool { return sweeps[i] < sweeps[j] })
 
+	// The sweep-age clock's pin endpoint (conjunct v), read ONCE for the whole
+	// probe set. A failed read leaves every age unknown — "cannot verify" for
+	// any motion candidate, never a default age.
+	pinTime, _, pinTimeErr := c.opR.headerTime(ctx, c.pinOP)
+
 	for _, s := range sweeps {
 		group := byS[s]
 		fail := func(note string) {
@@ -1030,6 +1452,16 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 			continue
 		}
 		f.use(dmOwnClockHeaderSource)
+
+		// The sweep-age clock's S endpoint. S is deep-finalized, same posture
+		// as the headerHash resolution above.
+		ageKnown, ageSeconds := false, int64(0)
+		if pinTimeErr == nil {
+			if sTime, _, err := c.opR.headerTime(ctx, s); err == nil {
+				ageKnown, ageSeconds = true, int64(pinTime)-int64(sTime)
+				f.use(dmSweepAgeClockSource)
+			}
+		}
 
 		// The token set the recompute needs at S: the union of the group's
 		// persisted legs. Decimals are the pin reads (an ERC20's decimals is
@@ -1067,6 +1499,31 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				break
 			}
 			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "vector", acct: p.acct})
+			// The S-CLOCK BOOLEAN CUSTODY WELD's chain side (conjunct iii):
+			// liquidatable(user) at the account's own sweep hash.
+			if d, err = dmLiquidatableABI.Pack("liquidatable", p.acct); err != nil {
+				fail("pack liquidatable: " + err.Error())
+				bad = true
+				break
+			}
+			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "bool", acct: p.acct})
+		}
+		if bad {
+			continue
+		}
+		// The interest index AT S for every borrow token: the bridge from the
+		// Stage-A normalized debt fold at S to the USD-6 debt the boolean weld
+		// consumes — the same bridge shape the pin side uses. The whole borrow
+		// universe is packed (bounded, single-digit) rather than a per-account
+		// subset so the read is alive whenever any probe runs.
+		for _, t := range st.borrow {
+			d, err := dmGetCurrentIndexABI.Pack("getCurrentIndex", t)
+			if err != nil {
+				fail("pack getCurrentIndex: " + err.Error())
+				bad = true
+				break
+			}
+			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "index", tok: t})
 		}
 		if bad {
 			continue
@@ -1100,8 +1557,12 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 		chainVecAt := map[common.Address][]tokenAmount{}
 		vecDecoded := map[common.Address]bool{}
 		priceAt := map[common.Address]*big.Int{}
+		indexAt := map[common.Address]*big.Int{}
+		chainLiqAt := map[common.Address]bool{}
+		liqDecoded := map[common.Address]bool{}
 		readNote := map[common.Address]string{}
 		vectorNote := map[common.Address]string{}
+		boolNote := map[common.Address]string{}
 		for i, tg := range tags {
 			if !res[i].Success {
 				switch tg.kind {
@@ -1109,8 +1570,11 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 					readNote[tg.acct] = "getMaxBorrowAmount reverted at S"
 				case "vector":
 					vectorNote[tg.acct] = "collateralOf reverted at S"
+				case "bool":
+					boolNote[tg.acct] = "liquidatable reverted at S"
 				}
-				// A reverted price at S surfaces as a per-account refusal below.
+				// A reverted price or index at S surfaces as a per-account
+				// refusal below.
 				continue
 			}
 			switch tg.kind {
@@ -1131,6 +1595,22 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				chainVecAt[tg.acct] = list
 				vecDecoded[tg.acct] = true
 				f.use(dmOwnClockVectorSource)
+			case "bool":
+				v, err := unpackBoolStrict(dmLiquidatableABI, "liquidatable", res[i].ReturnData)
+				if err != nil {
+					boolNote[tg.acct] = err.Error()
+					continue
+				}
+				chainLiqAt[tg.acct] = v
+				liqDecoded[tg.acct] = true
+				f.use(dmSClockLiquidatableSource)
+			case "index":
+				v, err := unpackUint256Strict(dmGetCurrentIndexABI, "getCurrentIndex", res[i].ReturnData)
+				if err != nil {
+					continue
+				}
+				indexAt[tg.tok] = v
+				f.use(dmSClockIndexSource)
 			case "price":
 				v, err := unpackUint256Strict(dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", res[i].ReturnData)
 				if err != nil {
@@ -1155,8 +1635,18 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 		}
 
 		for _, p := range group {
-			r := &dmOwnClockResult{Block: s, Hash: hash}
+			r := &dmOwnClockResult{Block: s, Hash: hash, AgeKnown: ageKnown, AgeSeconds: ageSeconds}
 			out[p.key] = r
+			// The S-clock boolean's CHAIN side, recorded first so a refusal on
+			// any later leg still leaves the read-presence fact honest.
+			if note := boolNote[p.acct]; note != "" {
+				r.BoolErr = note
+			} else if liqDecoded[p.acct] {
+				r.BoolRead = true
+				r.ChainLiqS = chainLiqAt[p.acct]
+			} else {
+				r.BoolErr = "liquidatable produced no decoded value at S"
+			}
 			// The CUSTODY PROOF first: byte-compare the chain's own vector at S
 			// against the persisted document before any scalar leg can refuse.
 			// A vector that did not decode leaves VectorRead=false, which the
@@ -1184,9 +1674,54 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				r.Err = "getMaxBorrowAmount produced no decoded value at S"
 				continue
 			}
+			// The S-clock DEBT bridge (conjunct iii): the Stage-A fold at S
+			// through getCurrentIndex@S — the same bridge shape the pin side
+			// uses. A nil Stage-A map is a wiring/fixture gap and refuses the
+			// BOOLEAN weld only; a missing account entry is the honest zero
+			// (no debt events at or below the account's own S).
+			var debtS *big.Int
+			if c.t6 == nil || c.t6.DMDebtFoldAtS == nil {
+				if r.BoolErr == "" {
+					r.BoolErr = "Stage A did not collect the debt fold at S (DMDebtFoldAtS nil)"
+				}
+			} else {
+				f.use(dmDebtFoldAtSSource)
+				debtS = new(big.Int)
+				folds := c.t6.DMDebtFoldAtS[p.key]
+				tokHexes := make([]string, 0, len(folds))
+				for tokHex := range folds {
+					tokHexes = append(tokHexes, tokHex)
+				}
+				sort.Strings(tokHexes)
+				for _, tokHex := range tokHexes {
+					n := folds[tokHex]
+					if n == nil || n.Sign() == 0 {
+						continue
+					}
+					idx := indexAt[common.HexToAddress("0x"+tokHex)]
+					if idx == nil {
+						debtS = nil
+						if r.BoolErr == "" {
+							r.BoolErr = "no decoded getCurrentIndex@S for borrow token 0x" + tokHex
+						}
+						break
+					}
+					debtS.Add(debtS, mulDivFloor(n, idx))
+				}
+			}
+			// ONE compute over ALL inputs at S when the debt bridge produced:
+			// the boolean then IS ComputeDMHealth's own strict > — the served
+			// composition law, never a re-implementation. When the bridge
+			// refused, the compute falls back to the pin debt so the SCALAR law
+			// check (debt-independent) keeps its established semantics, and the
+			// boolean stays honestly unproduced.
+			computeDebt := orZeroBig(debtUSD[p.key])
+			if debtS != nil {
+				computeDebt = debtS
+			}
 			in := risk.DMInput{
 				Account: p.acct,
-				DebtUSD: orZeroBig(debtUSD[p.key]),
+				DebtUSD: computeDebt,
 				Params:  foldedAtS,
 				Marks:   risk.Watermarks{BalancesBlock: s, ParamsBlock: s, SweepBlock: s},
 			}
@@ -1215,6 +1750,159 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				continue
 			}
 			r.ChainMax, r.OurMax = cm, h.MaxBorrowLT
+			if debtS != nil {
+				// Every input at S: the boolean is the compute's own verdict.
+				r.OursLiqComputed = true
+				r.OursLiqS = h.Liquidatable
+				r.DebtUSDAtS = debtS
+			}
+		}
+	}
+	return out
+}
+
+// runDMPinVectorSubstitution performs the Law@P PIN-VECTOR SUBSTITUTION
+// (risk-quant conjunct iv) for the named subjects: collateralOf(user) read at
+// the RUN PIN's hash — the chain's own enumerated netted vector
+// (DebtManagerCore.sol:170-183) — then the scalar and the boolean recomputed
+// over THAT vector with the run's pinned prices/params/decimals and the
+// welded chain debt@P, welded bit-exact against getMaxBorrowAmount@P and
+// liquidatable@P. Every failure is recorded per account, never fatal.
+func runDMPinVectorSubstitution(ctx context.Context, c *p3Ctx, f *gateFrame, subjects []common.Address,
+	st dmTokenState, folded []risk.ParamRow, chainDebt, chainMax map[common.Address]*big.Int,
+	chainBool map[common.Address]bool, health map[string]risk.DMHealth) map[string]*dmPinVectorResult {
+	out := map[string]*dmPinVectorResult{}
+	if len(subjects) == 0 {
+		return out
+	}
+	var calls []multicallCall
+	for _, a := range subjects {
+		d, err := dmCollateralOfABI.Pack("collateralOf", a)
+		if err != nil {
+			for _, a2 := range subjects {
+				out[hex.EncodeToString(a2.Bytes())] = &dmPinVectorResult{Err: "pack collateralOf: " + err.Error()}
+			}
+			return out
+		}
+		calls = append(calls, multicallCall{Target: c.dmProxy, CallData: d})
+	}
+	res, _, err := c.opR.multicall(ctx, "p3:dm:pinVectorSubstitution", c.pinOP, c.hashOP, calls)
+	if err != nil {
+		for _, a := range subjects {
+			out[hex.EncodeToString(a.Bytes())] = &dmPinVectorResult{Err: fmt.Sprintf("pin-vector multicall did not answer: %v", err)}
+		}
+		return out
+	}
+	for i, a := range subjects {
+		key := hex.EncodeToString(a.Bytes())
+		r := &dmPinVectorResult{}
+		out[key] = r
+		if !res[i].Success {
+			r.Err = "collateralOf reverted at the pin"
+			continue
+		}
+		list, _, err := unpackTokenAmountList(dmCollateralOfABI, "collateralOf", res[i].ReturnData)
+		if err != nil {
+			r.Err = "collateralOf did not decode at the pin: " + err.Error()
+			continue
+		}
+		r.Read = true
+		f.use(dmPinVectorSource)
+
+		// The chain's pin vector, normalized exactly like the persisted
+		// document (zero-drop, duplicate-add) so both endpoints are the same
+		// document shape.
+		pinVec := map[common.Address]*big.Int{}
+		for _, e := range list {
+			if e.Amount == nil || e.Amount.Sign() == 0 {
+				continue
+			}
+			if prev, ok := pinVec[e.Token]; ok {
+				pinVec[e.Token] = new(big.Int).Add(prev, e.Amount)
+			} else {
+				pinVec[e.Token] = new(big.Int).Set(e.Amount)
+			}
+		}
+
+		cd, cm := chainDebt[a], chainMax[a]
+		if cd == nil || cm == nil {
+			r.Err = "the pin-side borrowingOf/getMaxBorrowAmount legs are unavailable — the substitution has nothing chain-attested to weld against"
+			continue
+		}
+		in := risk.DMInput{
+			Account: a,
+			DebtUSD: cd, // the WELDED chain debt@P (conjunct ii holds it equal to ours)
+			Params:  folded,
+			Marks:   risk.Watermarks{BalancesBlock: c.pinOP, ParamsBlock: c.pinOP, SweepBlock: c.pinOP},
+		}
+		refused := ""
+		for _, tok := range sortedAddrs(func() map[common.Address]bool {
+			set := map[common.Address]bool{}
+			for t := range pinVec {
+				set[t] = true
+			}
+			return set
+		}()) {
+			dec, okDec := st.decimals[tok]
+			p := st.prices[tok]
+			if !okDec || p == nil {
+				refused = "pin-vector token " + tok.Hex() + " has no pinned price and/or decimals"
+				break
+			}
+			in.Collateral = append(in.Collateral, risk.DMCollateral{Asset: tok, Amount: pinVec[tok], Decimals: dec})
+			in.Prices = append(in.Prices, risk.PriceInput{
+				ChainID: 10, Asset: tok, Source: "dm:convertCollateralTokenToUsd@pin", Block: c.pinOP,
+				Value: p, Decimals: 6, Provenance: risk.ProvenanceEngineExact, Fresh: true,
+			})
+		}
+		if refused != "" {
+			r.Err = refused
+			continue
+		}
+		h, err := risk.ComputeDMHealth(in)
+		if err != nil {
+			r.Err = "internal/risk refused over the pin vector: " + err.Error()
+			continue
+		}
+		r.ScalarP, r.BoolP = h.MaxBorrowLT, h.Liquidatable
+		r.ScalarWeld = r.ScalarP.Cmp(cm) == 0
+		r.BoolWeld = r.BoolP == chainBool[a]
+
+		// The MOTION LEDGER: per-token LT-weighted USD-6 contribution deltas,
+		// vector@P − vector@S(mixed), both through ComputeDMHealth's own
+		// per-token floor-then-sum law with the same pinned prices and params.
+		mixed, okMixed := health[key]
+		if okMixed && mixed.MaxBorrowLT != nil {
+			contribP := map[common.Address]*big.Int{}
+			for _, cv := range h.Collateral {
+				contribP[cv.Asset] = cv.MaxBorrowContribution
+			}
+			contribS := map[common.Address]*big.Int{}
+			for _, cv := range mixed.Collateral {
+				contribS[cv.Asset] = cv.MaxBorrowContribution
+			}
+			union := map[common.Address]bool{}
+			for t := range contribP {
+				union[t] = true
+			}
+			for t := range contribS {
+				union[t] = true
+			}
+			sum := new(big.Int)
+			for _, tok := range sortedAddrs(union) {
+				p, sv := orZeroBig(contribP[tok]), orZeroBig(contribS[tok])
+				d := new(big.Int).Sub(p, sv)
+				sum.Add(sum, d)
+				if d.Sign() != 0 {
+					r.PerTokenDeltas = append(r.PerTokenDeltas,
+						fmt.Sprintf("%s: ΔLT-weighted %s USD-6 (P %s − S %s, Δamount × pinned price through the LT law)", tok.Hex(), d, p, sv))
+				}
+			}
+			r.DeltaSum = sum
+			// The flip's arithmetic: Σ per-token deltas must BE the distance
+			// between the chain's own scalar at P and the mixed scalar the
+			// served verdict used.
+			r.Reconciles = sum.Cmp(new(big.Int).Sub(cm, mixed.MaxBorrowLT)) == 0
 		}
 	}
 	return out
@@ -1222,12 +1910,17 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 
 // weldDMCohort welds the boolean, the threshold-weighted collateral and the
 // live debt total against the chain, per cohort member. The maxBorrow leg is
-// judged by the three-state law (classifyDMMaxBorrow); the boolean and debt
-// legs stay single-clock pin welds.
+// judged by the three-state law (classifyDMMaxBorrow); the debt leg stays a
+// single-clock pin weld; the BOOLEAN leg is judged by the adjudicated
+// three-state law (classifyDMBoolean, Wave H3).
 func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubject, health map[string]risk.DMHealth,
-	st dmTokenState, coll map[string][]snapshotdb.T6Leg, debtUSD map[string]*big.Int) ([]p3Row, error) {
+	st dmTokenState, coll map[string][]snapshotdb.T6Leg, debtUSD map[string]*big.Int,
+	folded []risk.ParamRow, evaluableCount int) ([]p3Row, error) {
 	var rows []p3Row
 	if len(cohort) == 0 {
+		// The standing motion census exists EVERY run — an empty cohort still
+		// states its zero.
+		rows = append(rows, dmMotionCensusRow(nil, evaluableCount, 0))
 		return rows, nil
 	}
 	var calls []multicallCall
@@ -1333,6 +2026,41 @@ func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubjec
 	}
 	ownResults := runDMOwnClockWelds(ctx, c, f, probes, st, coll, debtUSD)
 
+	// ---- the Law@P pin-vector substitution subjects -------------------------
+	// Every member whose pin-clock boolean FLIPS (the only rows the motion law
+	// can classify), PLUS the always-on control — the substitution read stays
+	// alive and its frame source consumed on an all-exact run, same doctrine
+	// as the own-clock control.
+	var pinVecSubjects []common.Address
+	seenPV := map[common.Address]bool{}
+	addPV := func(a common.Address) {
+		if !seenPV[a] {
+			seenPV[a] = true
+			pinVecSubjects = append(pinVecSubjects, a)
+		}
+	}
+	for _, s := range cohort {
+		acct := hex.EncodeToString(s.Account.Bytes())
+		if _, bad := unread[s.Account]; bad {
+			continue
+		}
+		if h, ok := health[acct]; ok && h.Liquidatable != chainBool[s.Account] {
+			addPV(s.Account)
+		}
+		if acct == controlKey {
+			addPV(s.Account)
+		}
+	}
+	pinVecs := runDMPinVectorSubstitution(ctx, c, f, pinVecSubjects, st, folded, chainDebt, chainMax, chainBool, health)
+
+	// The freshness budget (conjunct v): the sweeper-cadence bound §7 resolved
+	// in Phase 1 — the daemon's own persisted cadence, never an operator knob.
+	var budgetSeconds int64
+	if c.p1 != nil {
+		budgetSeconds = int64(c.p1.freshBound / time.Second)
+	}
+
+	var motions []dmMotionStat
 	for _, s := range cohort {
 		subject := s.Account.Hex()
 		acct := hex.EncodeToString(s.Account.Bytes())
@@ -1341,39 +2069,184 @@ func weldDMCohort(ctx context.Context, c *p3Ctx, f *gateFrame, cohort []dmSubjec
 			continue
 		}
 		h := health[acct]
+		maxLegVerdict := ""
 		if cm := chainMax[s.Account]; cm != nil && h.MaxBorrowLT != nil {
-			rows = append(rows, dmMaxBorrowRow(c, subject, acct, cm, h.MaxBorrowLT, ownResults[acct]))
+			mrow := dmMaxBorrowRow(c, subject, acct, cm, h.MaxBorrowLT, ownResults[acct])
+			maxLegVerdict = mrow.Verdict
+			rows = append(rows, mrow)
 		}
 		if acct == controlKey {
 			rows = append(rows, dmOwnClockControlRow(subject, probeReason[acct], ownResults[acct]))
 		}
+		debtExact := false
 		if cd := chainDebt[s.Account]; cd != nil && h.Borrowings != nil {
 			rows = append(rows, compareExact(gateDMBoolean, subject, "borrowingOf(user).total",
 				cd, h.Borrowings, "index-replayed-debt"))
+			debtExact = cd.Cmp(h.Borrowings) == 0
 		}
 		ours, chain := h.Liquidatable, chainBool[s.Account]
+		fx := dmBooleanFacts{
+			Ours: ours, Chain: chain,
+			MaxBorrowLegVerdict: maxLegVerdict,
+			DebtExactAtPin:      debtExact,
+			Own:                 ownResults[acct],
+			PinVec:              pinVecs[acct],
+			BudgetSeconds:       budgetSeconds,
+		}
+		verdict, class, gated, reasons := classifyDMBoolean(fx)
 		row := p3Row{
 			Gate: gateDMBoolean, Subject: subject, Leg: "liquidatable(strict >)",
-			Expected: fmt.Sprintf("%v", chain), Actual: fmt.Sprintf("%v", ours), Gated: true,
+			Expected: fmt.Sprintf("%v", chain), Actual: fmt.Sprintf("%v", ours),
+			Verdict: verdict, Gated: gated, Class: class,
 			Evidence: map[string]string{
 				"cohort_reasons": fmt.Sprint(s.Reasons),
 				"margin_usd6":    marginText(s.Margin),
 			},
 		}
-		if ours == chain {
-			row.Verdict = verdictExact
-		} else {
-			row.Verdict = verdictDrift
-			row.Class = "boolean-direction"
-			if ours && !chain {
-				row.Note = "FALSE POSITIVE direction: we would raise a liquidation alert the chain refuses. Localise with the getMaxBorrowAmount and borrowingOf legs above — a boolean disagreement whose two inputs both weld exactly is a strict-inequality bug, not an input problem"
-			} else {
-				row.Note = "FALSE NEGATIVE direction: the chain says liquidatable and we do not. This is the alert product's worst failure and is gated at head; the realized-liquidation backtest is the historical half of the same direction (neither substitutes for the other, risk-quant R2)"
+		switch verdict {
+		case verdictExact:
+			// unchanged: the bit-exact arm needs no note.
+		case verdictBoundaryMotion:
+			motion := dmMotionStat{
+				direction:  class,
+				margin:     s.Margin,
+				ageBlocks:  c.pinOP - fx.Own.Block,
+				ageSeconds: fx.Own.AgeSeconds,
 			}
+			motions = append(motions, motion)
+			dmMotionEvidence(&row, fx, s, chainDebt[s.Account], chainMax[s.Account], c.pinOP, budgetSeconds)
+			row.Note = dmMotionNote(fx)
+		case verdictWeldUnread:
+			row.Note = "read-presence is a first-class fact: " + strings.Join(reasons, "; ") +
+				" — a boolean flip whose motion proof cannot be completed is GATED, never disclosed (chain-truth R1.5: cannot-verify is never advisory)"
+		default:
+			row.Note = dmBooleanDriftNote(fx, class, reasons)
 		}
 		rows = append(rows, row)
 	}
+	rows = append(rows, dmMotionCensusRow(motions, evaluableCount, budgetSeconds))
 	return rows, nil
+}
+
+// dmMotionStat is one MOTION row's census contribution.
+type dmMotionStat struct {
+	direction  string
+	margin     *big.Int
+	ageBlocks  uint64
+	ageSeconds int64
+}
+
+// dmMotionEvidence fills the evidence a MOTION row owes at the boolean's own
+// granularity (chain-truth conjunct vi): the VERDICT TRIANGLE, margins at both
+// clocks, the sweep age against its budget, the per-token motion ledger and
+// the certificate references.
+func dmMotionEvidence(row *p3Row, fx dmBooleanFacts, s dmSubject, chainDebt, chainMax *big.Int, pin uint64, budgetSeconds int64) {
+	own, pv := fx.Own, fx.PinVec
+	row.Evidence["verdict_triangle"] = fmt.Sprintf(
+		"served(mixed-clock)=%v chain@pin=%v chain@S=%v — the mixed verdict may equal neither pure clock; all three printed",
+		fx.Ours, fx.Chain, own.ChainLiqS)
+	row.Evidence["margin_mixed_usd6"] = marginText(s.Margin)
+	if chainDebt != nil && chainMax != nil {
+		row.Evidence["margin_at_pin_usd6(chain, debt-maxBorrowLT)"] = new(big.Int).Sub(chainDebt, chainMax).String()
+	}
+	if own.DebtUSDAtS != nil && own.OurMax != nil {
+		row.Evidence["margin_at_S_usd6(debt@S-maxBorrowLT@S)"] = new(big.Int).Sub(own.DebtUSDAtS, own.OurMax).String()
+	}
+	row.Evidence["sweep_block"] = fmt.Sprintf("%d", own.Block)
+	row.Evidence["sweep_age_blocks"] = fmt.Sprintf("%d", pin-own.Block)
+	row.Evidence["sweep_age_seconds"] = fmt.Sprintf("%d (budget %ds — inside; fleet freshness green is a run precondition)", own.AgeSeconds, budgetSeconds)
+	row.Evidence["motion_ledger"] = strings.Join(pv.PerTokenDeltas, "; ")
+	row.Evidence["motion_sum_usd6"] = fmt.Sprintf("%s == getMaxBorrowAmount@P − ourMax(mixed): the motion IS vector@P − vector@S, both endpoints chain-attested", pv.DeltaSum)
+	row.Evidence["certificate"] = fmt.Sprintf(
+		"maxBorrow leg sample-gap-disclosed with the vector certificate at S: collateralOf@%s byte-identical to the persisted document (%d leg(s)); S-clock boolean weld EXACT; pin-vector substitution scalar+boolean EXACT",
+		own.Hash.Hex(), own.VectorLegs)
+	row.Evidence["serving_disclosure"] = "the served surface structurally attaches the sweep watermark to every DM boolean: internal/risk requireWatermarks(Marks.SweepBlock) refuses a sweepless compute (internal/risk/dm.go:49-58); api/openapi.yaml carries AsOf.sweep_block and PositionSummary.sweep_block as REQUIRED contract fields"
+}
+
+// dmMotionNote renders a MOTION row's note, direction-tagged with the false
+// negative LOUDER (the risk-hiding direction).
+func dmMotionNote(fx dmBooleanFacts) string {
+	base := "every conjunct of the motion proof holds: the sample-gap certificate (vector byte-identical at S + scalar law recompute), debt EXACT at pin, the S-clock boolean custody weld (ComputeDMHealth over ALL inputs at S == liquidatable@blockHash(S)), the Law@P pin-vector substitution (scalar AND boolean over the CHAIN's own pin vector bit-exact against getMaxBorrowAmount@P and liquidatable@P), and the sweep age inside the cadence budget. The flip is a theorem of two chain-attested endpoints; the product serves the (verdict, sweep watermark) PAIR and this row is that pair's honest disclosure at the pin. NO margin appears in any predicate — margins are evidence only, never an epsilon (both rulings)"
+	if fx.Chain && !fx.Ours {
+		return "BOUNDARY-CROSSING MOTION, FALSE NEGATIVE AT PIN — THE RISK-HIDING DIRECTION, disclosed loudly: the chain calls this account liquidatable at the pin and the served (sweep-clock) verdict does not, because collateral left the account inside the sweep->pin gap. A subsequent on-chain liquidation of this account lands in the realized-liquidation backtest frame (the historical half of the same direction, risk-quant R2) — cross-reference it there. " + base
+	}
+	return "BOUNDARY-CROSSING MOTION, false positive at pin, disclosed and not gated: collateral entered the account inside the sweep->pin gap, so the served (sweep-clock) verdict raises an alert the pin refuses. " + base
+}
+
+// dmBooleanDriftNote is the D-013 note fix (boolean-leg ruling, always-fix):
+// the old note claimed "a boolean disagreement whose two inputs both weld
+// exactly is a strict-inequality bug" UNCONDITIONALLY — false for the
+// accept-r5 rows, whose maxBorrow legs were sample-gap. The note now branches
+// on the ACTUAL quantity-leg verdicts and prints the strict-inequality
+// diagnosis only in the one state where it is true.
+func dmBooleanDriftNote(fx dmBooleanFacts, class string, reasons []string) string {
+	direction := "FALSE POSITIVE direction: we would raise a liquidation alert the chain refuses."
+	if fx.Chain && !fx.Ours {
+		direction = "FALSE NEGATIVE direction — RISK-HIDING, the alert product's worst failure, gated at head: the chain says liquidatable and we do not. A subsequent on-chain liquidation of this account lands in the realized-liquidation backtest frame (the historical half of the same direction, risk-quant R2) — cross-reference it there."
+	}
+	if class == dmClassSClockCustodyDrift {
+		return direction + " ESCALATE: " + strings.Join(reasons, "; ")
+	}
+	if fx.MaxBorrowLegVerdict == verdictExact && fx.DebtExactAtPin {
+		return direction + " Both quantity legs weld EXACTLY at the pin, so this IS a strict-inequality bug in the composition law (a >= where > belongs, or an inverted comparison) — the one state where this diagnosis is true, which is why the note now branches on the actual leg verdicts (D-013: the accept-r5 artifact printed it over sample-gap legs, where it was false)"
+	}
+	legState := fmt.Sprintf("getMaxBorrowAmount leg verdict %q; borrowingOf leg exact=%v", fx.MaxBorrowLegVerdict, fx.DebtExactAtPin)
+	return direction + " The quantity legs do NOT both weld exactly at the pin (" + legState + ") — the boolean disagreement localises to those inputs, and MOTION was not provable: " + strings.Join(reasons, "; ")
+}
+
+// dmMotionCensusRow is the STANDING boundary-crossing-motion census, emitted
+// every run (a zero is a statement): count by direction, margin extremes, the
+// worst sweep age, the evaluable denominator — and the POPULATION gate: a
+// motion count exceeding ~1% of the evaluable universe gates as
+// sweeper-health, because weather refuted by its own frequency is the sweep
+// cadence collapsing (both rulings).
+func dmMotionCensusRow(motions []dmMotionStat, evaluableCount int, budgetSeconds int64) p3Row {
+	fp, fn := 0, 0
+	var minMargin, maxMargin *big.Int
+	maxAgeBlocks, maxAgeSeconds := uint64(0), int64(0)
+	for _, m := range motions {
+		if strings.Contains(m.direction, dmDirectionFalseNegative) {
+			fn++
+		} else {
+			fp++
+		}
+		if m.margin != nil {
+			if minMargin == nil || m.margin.Cmp(minMargin) < 0 {
+				minMargin = m.margin
+			}
+			if maxMargin == nil || m.margin.Cmp(maxMargin) > 0 {
+				maxMargin = m.margin
+			}
+		}
+		if m.ageBlocks > maxAgeBlocks {
+			maxAgeBlocks = m.ageBlocks
+		}
+		if m.ageSeconds > maxAgeSeconds {
+			maxAgeSeconds = m.ageSeconds
+		}
+	}
+	row := p3Row{
+		Gate: gateDMBoolean, Subject: "cohort:boundary-crossing-motion", Leg: "standing-census",
+		Expected: fmt.Sprintf("<= ~1%% of the evaluable universe (%d borrowers)", evaluableCount),
+		Actual:   fmt.Sprintf("%d motion row(s): %d false-positive-at-pin, %d false-negative-at-pin", len(motions), fp, fn),
+		Gated:    true,
+		Evidence: map[string]string{
+			"count_false_positive_at_pin": fmt.Sprintf("%d", fp),
+			"count_false_negative_at_pin": fmt.Sprintf("%d", fn),
+			"min_margin_usd6":             marginText(minMargin),
+			"max_margin_usd6":             marginText(maxMargin),
+			"max_sweep_age":               fmt.Sprintf("%d blocks / %d seconds (budget %ds)", maxAgeBlocks, maxAgeSeconds, budgetSeconds),
+			"denominator":                 fmt.Sprintf("%d evaluable borrowers", evaluableCount),
+		},
+		Note: "the standing motion census: every MOTION row below it is INDIVIDUALLY proven (no count tolerance exists on the class), and this row is the population-level gate — a disclosed class whose frequency refutes the weather explanation is the sweep cadence collapsing, and that is a sweeper-health failure, not more weather",
+	}
+	if dmMotionPopulationGate(len(motions), evaluableCount) {
+		row.Verdict = verdictDrift
+		row.Class = "sweeper-health"
+		return row
+	}
+	row.Verdict = verdictExact
+	return row
 }
 
 // dmMaxBorrowRow renders one maxBorrow leg under the three-state law.

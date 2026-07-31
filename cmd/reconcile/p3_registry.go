@@ -63,6 +63,17 @@ const (
 	// eventless basket motion inside the sweep->pin gap. Disclosed individually
 	// with magnitude and sweep age; never a failure and never an epsilon.
 	verdictSampleGap = "sample-gap-disclosed"
+	// verdictBoundaryMotion: the liquidatable BOOLEAN's disclosed state
+	// (classifyDMBoolean, the Wave-H3 boolean-leg ruling — chain-truth +
+	// risk-quant union): the pin-clock boolean flips, and EVERY conjunct of
+	// the motion proof holds (sample-gap certificate, debt exact, the S-clock
+	// boolean custody weld, the Law@P pin-vector substitution, the freshness
+	// budget). ALWAYS emitted gated=false — it is evidence at the boolean's
+	// own granularity, never a pass NOR a count the tally may absorb.
+	// Deliberately in NEITHER closed verdict set: an ungated row never counts,
+	// and if a defect ever emits this verdict GATED, verdictIsFailure fails
+	// closed — the safe direction.
+	verdictBoundaryMotion = "boundary-crossing-motion"
 )
 
 // p3Row is ONE comparison across every Task-6 gate. A single shape keeps the

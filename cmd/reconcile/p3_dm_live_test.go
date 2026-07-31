@@ -124,7 +124,7 @@ func TestLiveDMBooleanWeldOverOneSnapshotAndItsOwnPin(t *testing.T) {
 
 	// Exclude accounts with no collateral testimony AT THE PIN — the same
 	// classification the gate applies, so this test also covers that fix.
-	_, excluded := classifySweepTestimony(c, snap.Task6, debtUSD)
+	_, excluded := classifySweepTestimony(c, nil, snap.Task6, debtUSD, nil)
 	collByAccount := map[string][]snapshotdb.T6Leg{}
 	for _, l := range snap.Task6.DMCollLegs {
 		collByAccount[l.AccountHex] = append(collByAccount[l.AccountHex], l)

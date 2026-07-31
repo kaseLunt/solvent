@@ -146,10 +146,10 @@ func TestSweepWatermarkIsPinFilteredAgainstTheLiveCollector(t *testing.T) {
 	require.Equal(t, sweepAbovePin, classifyDMSweep(vs, c.pinOP))
 	require.Equal(t, sweepEvaluable, classifyDMSweep(cs, c.pinOP))
 
-	rows, excluded := classifySweepTestimony(c, snap.Task6, map[string]*big.Int{
+	rows, excluded := classifySweepTestimony(c, nil, snap.Task6, map[string]*big.Int{
 		victimHex:  big.NewInt(40310720),
 		controlHex: big.NewInt(1),
-	})
+	}, nil)
 	require.True(t, excluded[victimHex],
 		"the victim must be EXCLUDED and refused, never scored as liquidatable over discarded collateral. The chain called this account HEALTHY with $59.22 of threshold-weighted collateral")
 	require.False(t, excluded[controlHex])

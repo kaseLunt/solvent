@@ -113,7 +113,7 @@ func TestSweepAbovePinIsDisclosedNotGatedAndNeverSweptIsGated(t *testing.T) {
 	}}
 	borrowers := map[string]*big.Int{"aa": big.NewInt(1), "bb": big.NewInt(1), "cc": big.NewInt(1)}
 
-	rows, excluded := classifySweepTestimony(c, t6, borrowers)
+	rows, excluded := classifySweepTestimony(c, nil, t6, borrowers, nil)
 	require.True(t, excluded["aa"], "sweep-above-pin is excluded from the evaluable universe")
 	require.True(t, excluded["bb"], "never-swept is excluded too")
 	require.False(t, excluded["cc"], "an account swept at or below the pin stays evaluable")
@@ -167,7 +167,7 @@ func TestExcludedAccountsNeverReachTheBooleanWeld(t *testing.T) {
 		// The probe's own subject, with its real live debt: $40.31.
 		"9fd6c4daf4e021e34bf6cbf6b451ae000d046747": big.NewInt(40310720),
 	}
-	_, excluded := classifySweepTestimony(c, t6, borrowers)
+	_, excluded := classifySweepTestimony(c, nil, t6, borrowers, nil)
 	require.True(t, excluded["9fd6c4daf4e021e34bf6cbf6b451ae000d046747"],
 		"the probe's F2 subject must be EXCLUDED at a pin below its sweep, not scored as liquidatable over collateral the pin cannot see. The chain called it HEALTHY with $59.22 of threshold-weighted collateral")
 	require.Len(t, excluded, 1)

@@ -303,8 +303,30 @@ type Task6Data struct {
 	// the SweepBlock watermark ComputeDMHealth REQUIRES (a boolean served over
 	// collateral whose freshness is unknown is the posture riskd refuses), with
 	// the pin discipline that keeps it in step with the leg filter. See
-	// T6SweepState for the defect this replaced.
+	// T6SweepState for the defect this replaced. Since Wave H3 it also carries
+	// rows whose last_success_block is 0 — an ATTEMPTED-and-failed account is a
+	// different fact from a never-attempted one (chain-truth minor, boolean-leg
+	// ruling), and the never-swept classifier discloses which.
 	DMSweepByAccount map[string]T6SweepState
+	// DMDebtFoldAtS is the S-CLOCK debt fold (Wave H3, chain-truth conjunct
+	// iii of the boolean-leg ruling): per account with a PIN-VISIBLE sweep
+	// watermark S(account), the per-asset Σ of position_events debt deltas at
+	// block_number <= S(account). Collected here — inside the one
+	// repeatable-read snapshot transaction — because Stage B cannot know which
+	// accounts' booleans flip until the chain reads run, and by then the DB is
+	// closed (the F5 seam). One correlated aggregate joining position_events
+	// to the pin-filtered snapshot_sweeps watermark supplies the whole
+	// evaluable universe up front. A nil map means Stage A never collected it
+	// (a wiring or fixture gap — the gate refuses the S-clock boolean weld as
+	// unread); a present map with a missing account means the account had NO
+	// debt events at or below its own S, which is the honest zero.
+	DMDebtFoldAtS map[string]map[string]*big.Int
+	// DMFirstDebtBlock is each derived borrower's FIRST debt-event block at or
+	// below the pin (Wave H3, risk-quant's never-swept correction): the
+	// arrival edge the sweep-cycle race arithmetic is judged against. The
+	// any-never-swept-gates law was stochastic on borrower arrival; the lawful
+	// form needs the arrival block.
+	DMFirstDebtBlock map[string]uint64
 
 	// Backtest: one row per frozen frame case, keyed "<txhex>:<logindex>".
 	Backtest map[string]T6BacktestRow
@@ -373,6 +395,12 @@ func collectTask6(ctx context.Context, q store.Querier, prm Params, cfg FeedRegi
 		// The watermark is filtered at the SAME pin as the legs, and is handed the
 		// visible legs so the exclusion stays checkable (T6SweepState).
 		if err := collectSweepBlocks(ctx, q, DMEngine, pinOP, t.DMSweepByAccount, t.DMCollLegs); err != nil {
+			return nil, err
+		}
+		if t.DMDebtFoldAtS, err = collectDebtFoldAtS(ctx, q, DMEngine, pinOP); err != nil {
+			return nil, err
+		}
+		if t.DMFirstDebtBlock, err = collectFirstDebtBlocks(ctx, q, DMEngine, pinOP); err != nil {
 			return nil, err
 		}
 		if err := collectBacktest(ctx, q, prm.BacktestKeys, t.Backtest); err != nil {
@@ -599,10 +627,22 @@ type T6SweepState struct {
 	// the most recent SUCCESS, so an account whose latest attempt failed still
 	// has honest collateral testimony from that success.
 	Status string `json:"last_attempt_status"`
+	// Attempted is true when snapshot_sweeps carries ANY row for the account —
+	// including a row with zero successes. never-attempted vs
+	// attempted-and-failed are different facts about the sweeper (chain-truth's
+	// never-swept minor, Wave H3), and only the row's presence can tell them
+	// apart.
+	Attempted bool `json:"attempted"`
 }
 
 // collectSweepBlocks reads each account's collateral-testimony state, with the
 // watermark filtered at THE SAME PIN as the legs.
+//
+// Rows with last_success_block = 0 are READ TOO (Wave H3): they are the
+// ATTEMPTED-and-failed accounts, whose existence — and last_attempt_status —
+// is what distinguishes a sweeper that tried and failed from a sweeper that
+// never reached the account at all (chain-truth's never-swept minor). The pin
+// discipline is untouched: a zero watermark stays a zero watermark.
 func collectSweepBlocks(ctx context.Context, q store.Querier, engine string, pin uint64,
 	out map[string]T6SweepState, legs []T6Leg) error {
 	visibleLegs := map[string]int{}
@@ -610,9 +650,9 @@ func collectSweepBlocks(ctx context.Context, q store.Querier, engine string, pin
 		visibleLegs[l.AccountHex]++
 	}
 	rows, err := q.Query(ctx, `
-		SELECT encode(account,'hex'), last_success_block, status
+		SELECT encode(account,'hex'), COALESCE(last_success_block, 0), status
 		FROM snapshot_sweeps
-		WHERE engine = $1 AND last_success_block > 0`, engine)
+		WHERE engine = $1`, engine)
 	if err != nil {
 		return fmt.Errorf("task6 sweep state: %w", err)
 	}
@@ -623,7 +663,7 @@ func collectSweepBlocks(ctx context.Context, q store.Querier, engine string, pin
 		if err := rows.Scan(&acct, &block, &status); err != nil {
 			return fmt.Errorf("scan sweep state: %w", err)
 		}
-		st := T6SweepState{Newest: uint64(block), Status: status, LegsAtOrBelowPin: visibleLegs[acct]}
+		st := T6SweepState{Newest: uint64(block), Status: status, LegsAtOrBelowPin: visibleLegs[acct], Attempted: true}
 		// THE PIN FILTER. A sweep above the pin certifies nothing a pinned read
 		// can see, so it does not become a watermark.
 		if st.Newest <= pin {
@@ -632,6 +672,78 @@ func collectSweepBlocks(ctx context.Context, q store.Querier, engine string, pin
 		out[acct] = st
 	}
 	return rows.Err()
+}
+
+// collectDebtFoldAtS is the Wave-H3 Stage-A correlated aggregate: for every
+// account whose sweep watermark is pin-visible, the per-asset normalized debt
+// fold CUT AT THAT ACCOUNT'S OWN SWEEP BLOCK — Σ delta over position_events
+// at block_number <= S(account), S taken from the pin-filtered
+// snapshot_sweeps watermark.
+//
+// WHY UP FRONT AND FOR EVERYONE: the S-clock boolean custody weld (chain-truth
+// conjunct iii) needs the debt input AT S for any account whose pin-clock
+// boolean flips, but which accounts flip is only known in Stage B, after the
+// chain reads — and the F5 seam closed the database before the first of those.
+// So the fold is collected for the whole watermarked universe inside the
+// snapshot transaction. The cut is block_number <= S: the sweeper's multicall
+// executes at S, so borrowingOf@S reflects every event through the end of S.
+func collectDebtFoldAtS(ctx context.Context, q store.Querier, engine string, pin uint64) (map[string]map[string]*big.Int, error) {
+	rows, err := q.Query(ctx, `
+		SELECT encode(pe.account,'hex'), encode(pe.asset,'hex'), COALESCE(SUM(pe.delta),0)::text
+		FROM position_events pe
+		JOIN snapshot_sweeps sw
+		  ON sw.engine = pe.engine AND sw.account = pe.account
+		WHERE pe.engine = $1 AND pe.side = 'debt' AND pe.delta IS NOT NULL
+		  AND COALESCE(sw.last_success_block, 0) > 0 AND sw.last_success_block <= $2
+		  AND pe.block_number <= sw.last_success_block
+		GROUP BY 1, 2`, engine, int64(pin))
+	if err != nil {
+		return nil, fmt.Errorf("task6 debt fold at S: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]map[string]*big.Int{}
+	for rows.Next() {
+		var acct, asset, sumText string
+		if err := rows.Scan(&acct, &asset, &sumText); err != nil {
+			return nil, fmt.Errorf("scan debt fold at S: %w", err)
+		}
+		v, err := numericText(sumText)
+		if err != nil {
+			return nil, fmt.Errorf("debt fold at S for %s/%s: %w", acct, asset, err)
+		}
+		if out[acct] == nil {
+			out[acct] = map[string]*big.Int{}
+		}
+		out[acct][asset] = v
+	}
+	return out, rows.Err()
+}
+
+// collectFirstDebtBlocks reads each derived borrower's FIRST debt-event block
+// at or below the pin — the arrival edge the never-swept race arithmetic is
+// judged against (risk-quant's correction: whether the sweeper OWED the
+// account a visit depends on when the account arrived relative to the
+// sweeper's own completed cycles, never on the bare fact of arrival).
+func collectFirstDebtBlocks(ctx context.Context, q store.Querier, engine string, pin uint64) (map[string]uint64, error) {
+	rows, err := q.Query(ctx, `
+		SELECT encode(account,'hex'), MIN(block_number)
+		FROM position_events
+		WHERE engine = $1 AND side = 'debt' AND block_number <= $2
+		GROUP BY 1`, engine, int64(pin))
+	if err != nil {
+		return nil, fmt.Errorf("task6 first debt blocks: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]uint64{}
+	for rows.Next() {
+		var acct string
+		var block int64
+		if err := rows.Scan(&acct, &block); err != nil {
+			return nil, fmt.Errorf("scan first debt block: %w", err)
+		}
+		out[acct] = uint64(block)
+	}
+	return out, rows.Err()
 }
 
 // collectBacktest reads the derived side of every frozen frame case.
