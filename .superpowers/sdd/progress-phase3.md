@@ -2289,6 +2289,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   law, trace-evidence honesty (gunzip + re-scan verification, single-
   serving-endpoint question), slot-derivation + byte-copy re-proof checks,
   mC re-cut plausibility, full prior-law regression sweep.
+- CODEX ROUND 13 ON TASK 6 (session 019fb57e-305e-7421-a8a4-70a52a6dae1c,
+  ~18min, t6r13 @ b845c72, base 78cda4d): needs-attention — 1H, the LAST
+  known defect: the trace decoder FAILS OPEN — decodeTraceEnvelope accepts
+  {} as a frame, frameTargetsAdminWrite treats missing/malformed `to` as
+  non-targeting, common.FromHex silently discards hex errors → a degraded
+  RPC response with an incomplete frame tree scans CLEAN instead of
+  refusing (the exact false pass Step A exists to prevent). Everything
+  else CONFORMED: Addendum-2 code-hash + Law-0 arms, genuine nested frame
+  trees (reviewer gunzipped: 30 files/31 cases, max depth 20), hermetic
+  code-byte proof load-bearing, ERC1967 derivation + all three byte
+  lengths/keccaks independently matched, endpoint-order parity between
+  production and capture verified, mutants plausible, mD correctly N/A,
+  NO prior-law regressions. Reviewer also asked for DURABLE mutation
+  evidence (transcripts committed, not report-only) — adopted as a new
+  convention. TRACE-STRICTNESS WAVE dispatched: recursive frame validation
+  through the case index (recognized type set from the callTracer
+  definition, type-appropriate strict `to`, strict 0x hex input — decode
+  error = refusal never skip), {} / malformed-to / invalid-hex regressions,
+  real-fixture compatibility guard (STOP if a real capture fails strict —
+  capture-quality fact, not a test to weaken), mC re-cut + new mE under
+  durable transcripts (testdata/mutation-transcripts convention). D-013
+  retirement stands only after this lands — the reviewer is right that a
+  fail-open scanner cannot retire anything.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
