@@ -2425,6 +2425,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (brainstorm → spec → plan) with docs/specs/2026-07-29-p5-ui-concept.html
   + IDEA-002 as the committed design reference ("that UI looks really
   beautiful. i want the real UI to look very similar" — 2026-07-29).
+- **P5 OPENED IN PARALLEL WITH THE P3 CLOSE** (2026-07-30 20:14-20:28, all owner-
+  ratified in-session). Spec e3ea19f (docs/specs/2026-07-30-solvent-phase5-web-
+  design.md — verifiable-risk-control positioning, six surfaces, contract
+  corrections normative, Codex product-consult adopted w/ the Feed amendment
+  both consultants converged on); plan d247b93 (docs/plans/2026-07-30-solvent-
+  phase5-web.md — parallel DAG, contract-first, endpoint shapes pinned).
+  SCALE CORRECTION recorded: Cash = 9,744 accounts (9,738 open debtors) — the
+  earlier "70 positions" conflated the mockup's illustrative data + Aave-only
+  censuses; live risk tables were empty until tonight's migrations. Owner
+  approvals: P5-before-P4; watch→FEED (durable chain actions + LIVE-only
+  posture; alerts P4); public live-data deploy; small VPS + purchased domain;
+  approach A; header-time custody proper; feeds.json budgets fixed BEFORE the
+  acceptance (09d496e — "a failing run to re-derive known numbers is
+  ceremony"); W2 scope expanded +web/** +deploy/** under CONTROL_PLANE_OWNER_
+  REVIEWED=1 citing the recorded approval (51f9a84; rescope 0ff0b67 gen-12;
+  full W3 handoff still owed at E1 post-acceptance). DISPATCHED IN PARALLEL
+  20:27: C1 contract wave (openapi additions + client regen), B1 store
+  readers (migration 00017 reserved), B2 daemon additions (00015/00016 +
+  ingest header capture + rollup + backfill-blocktimes cmd), W0 web scaffold
+  (tokens from the canon, truth primitives, CI web job). solvent-design
+  persona created (~/.claude/agents/solvent-design.md — canon + honest-
+  rendering law + anti-canon). Re-derive at ~24.2M concurrently; acceptance
+  fires on catch-up; E1 paperwork follows it.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
