@@ -2945,3 +2945,29 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   wrapping) + the ObservatorySeriesChart TASTE-14 scope question. Owed:
   W6b Oracle Monitor named follow-up. Acceptance run still in flight
   (~32 min into the 45-min budget).
+- **FRESH ACCEPTANCE: 283 → 16, ABORTED ON A LOCAL BLIP; ONE ADJUDICATION
+  OPEN (13:00)**: the first run over the repaired gate set (pins eth
+  25654850 / op 154963224, comparison 4fb7b0ac…) ran the full evidence
+  pass and ABORTED only at the final rewind re-check — a LOCALHOST DNS
+  lookup timeout (exit 3, honest refusal; the artifact structurally
+  cannot read as a pass). THE FIXES VALIDATE LIVE: census one-law 0/1147
+  failed (was 25), heartbeat unconditional binding 0/12 (was frame-red),
+  tokenconfig 0/76 (Wave S's matrices consumed; was 16), dm_param 60/0,
+  maxBorrow three-state law over 29,278 rows with ZERO custody-drift and
+  ZERO law-divergence. The 16 residual: 13 backtest weld-unreads all
+  transport-other context-deadline (the same end-of-run network hiccup —
+  retry-clearing), 1 never-swept NEW borrower (honestly gated; the
+  served surface refuses it too; self-heals on sweep), and 2 liquidatable
+  boolean FALSE-POSITIVES (margins $15.08/$70.84) — THE PREDICTED CASE:
+  the boolean welds at pin over sweep-clock collateral, so boundary-
+  crossing motion in the gap gates stochastically (~0-3 per 9.5k per
+  draw). The gate's own note misdiagnoses it as a strict-inequality bug;
+  the maxBorrow leg proved honest motion (sample-gap w/ vector match) for
+  those accounts. ADJUDICATION SENT to both standing consultants (they
+  carry full context): (a) boolean gains own-clock discrimination w/
+  pin-difference as a disclosed boundary-crossing-motion class (the
+  product serves sweep marks with every verdict), (b) keep gating +
+  rerun for a quiet draw (institutionalized dice, their own standard
+  condemns it), (c) asymmetric gating of false NEGATIVES only. No gate
+  change, no retry until they rule. W7 landed + the director's SHIP with
+  z-order/clamp fixes (8bfc394) precede this entry.
