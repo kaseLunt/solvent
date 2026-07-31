@@ -1,0 +1,457 @@
+/* Inspector — mockup vocabulary verbatim: .split / .card / .kv / .formula
+ * (concept HTML lines 183–202) plus the feed-item grammar for address
+ * activity, and the honest state blocks (refusal styling is first-class UI). */
+
+/* ---- landing: address entry ---- */
+
+.entryForm {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  max-width: 620px;
+  margin-top: var(--sp-4);
+}
+
+.entryInput {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.entryInput::placeholder {
+  color: var(--ink-3);
+}
+
+.entryButton {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 9px 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.entryButton:hover {
+  filter: brightness(1.08);
+}
+
+.refusal {
+  display: inline-block;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-refused);
+  border: 1px dashed var(--crit);
+  border-radius: var(--r-xs);
+  padding: 4px 9px;
+  color: var(--crit);
+  background: var(--refused-bg);
+}
+
+.entryLaw {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.recent {
+  margin-top: var(--sp-5);
+}
+
+.recentLabel {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.recentList {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recentItem a {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  background: var(--panel);
+  color: var(--ink-2);
+}
+
+.recentItem a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- [addr]: page chrome ---- */
+
+.addrHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: var(--sp-4);
+}
+
+.addrHead h1 {
+  margin: 0;
+  letter-spacing: var(--track-tight);
+}
+
+.sectionHead {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: var(--sp-6) 0 10px;
+}
+
+/* ---- honest state blocks ---- */
+
+.stateCard {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 16px 18px;
+  max-width: 760px;
+}
+
+.stateCard h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  letter-spacing: var(--track-tight);
+}
+
+.stateCard p {
+  margin: 6px 0 0;
+  font-size: var(--fs-body);
+  color: var(--ink-2);
+}
+
+.stateRefused {
+  border-style: dashed;
+  border-color: var(--ink-3);
+  background: var(--refused-bg);
+}
+
+.withheldList {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ---- position split cards (mockup .split/.card/.kv) ---- */
+
+.positionBlock {
+  margin-top: var(--sp-4);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.cardTitle {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kv {
+  padding: 6px 0;
+}
+
+.kvRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 6px 14px;
+  font-size: var(--fs-table);
+}
+
+.kvRow + .kvRow {
+  border-top: 1px solid var(--line);
+}
+
+.k {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.v {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.vOk {
+  color: var(--ok);
+}
+
+.vWarn {
+  color: var(--warn);
+}
+
+.vCrit {
+  color: var(--crit);
+}
+
+.vDim {
+  color: var(--ink-3);
+}
+
+/* ---- verdict chip (price freshness renders as its own state, never hidden) ---- */
+
+.verdict {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--line);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+
+.verdictOk {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.verdictWarn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.verdictCrit {
+  color: var(--crit);
+  border-color: var(--crit);
+}
+
+/* ---- the formula block (mockup .formula) ---- */
+
+.formula {
+  margin: 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  line-height: 1.7;
+  color: var(--ink-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.formula b {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- explain-this-number affordance ---- */
+
+.explain {
+  font: inherit;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline dotted var(--ink-3);
+  text-underline-offset: 3px;
+}
+
+.explain:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+}
+
+/* ---- warn-band disclosure ---- */
+
+.disclosure {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- history ---- */
+
+.historyCard {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: 12px 14px;
+}
+
+.historyMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.historyLegend {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- address activity (mockup .feed-item grammar) ---- */
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.feedItem {
+  display: flex;
+  gap: 14px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-table);
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.feedItem:last-child {
+  border-bottom: none;
+}
+
+.feedTime {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  min-width: 150px;
+}
+
+.feedTag {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-tag);
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  min-width: 96px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tagInfo {
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+
+.tagCrit {
+  background: var(--crit);
+  color: var(--panel);
+}
+
+.feedBody {
+  color: var(--ink-2);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.feedBody b {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.txLink {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  color: var(--ink-3);
+}
+
+.txLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.loadMore {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.loadMore:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sectionNote {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}

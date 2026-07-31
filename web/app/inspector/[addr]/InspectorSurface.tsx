@@ -1,0 +1,329 @@
+"use client";
+
+// The Inspector surface for one address: three-valued `found` rendered AT THE
+// PAGE LEVEL (spec §3.2, honest-UI law 1). The three states are three
+// DIFFERENT statements and never conflate:
+//
+//   found       → the position layout (a floor, disclosed, when incomplete)
+//   not-found   → "no position in this batch" WITH the lookup-completeness
+//                 that entitles the service to say so
+//   unknowable  → "cannot be established", the withheld engines NAMED —
+//                 never the definitive negative
+//
+// A failed request is a fourth, separate statement ("lookup unavailable") —
+// an error is not an answer.
+
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  ContractInvariantError,
+  RateLimitedError,
+  SolventHttpError,
+  UnavailableError,
+  type AddressLookup,
+} from "@solvent/client";
+import { getSolventClient, solventBaseUrl } from "@/lib/api";
+import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
+import {
+  fetchAddressHistory,
+  fetchEvents,
+  fetchParams,
+  type ChainEvent,
+  type ParamChange,
+} from "@/lib/inspector-data";
+import { useCursorPages } from "@/lib/pagination";
+import type { EvidenceDescriptor } from "@/lib/evidence";
+import { AddressMono } from "@/components/AddressMono";
+import { RefusedTag } from "@/components/RefusedTag";
+import { Stampline, StampItem } from "@/components/Stampline";
+import { InspectorPositionCard } from "./InspectorPositionCard";
+import { InspectorHistory, type HistoryState } from "./InspectorHistory";
+import { InspectorActivity } from "./InspectorActivity";
+import { EvidenceDrawer } from "./EvidenceDrawer";
+import styles from "../inspector.module.css";
+
+type AddressState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; lookup: AddressLookup };
+
+function describeLookupError(cause: unknown): string {
+  if (cause instanceof UnavailableError) {
+    return "no servable batch — the service refuses to answer from nothing (503)";
+  }
+  if (cause instanceof RateLimitedError) {
+    const retry = cause.retryAfterSeconds;
+    return `rate limited (429)${retry === null ? "" : ` — retry after ${String(retry)}s`}`;
+  }
+  if (cause instanceof ContractInvariantError) {
+    return `the response contradicts its own contract — refusing to render it (${cause.message})`;
+  }
+  if (cause instanceof SolventHttpError) {
+    return `${String(cause.status)} ${cause.code}: ${cause.message}`;
+  }
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+export function InspectorSurface({ addr }: { addr: string }) {
+  const valid = isAddress(addr);
+  // Results are keyed by the address they answer FOR: a result for another
+  // address is simply not this page's state (derived loading — no synchronous
+  // setState-in-effect reset, and a stale answer can never leak across a
+  // navigation).
+  const [addressResult, setAddressResult] = useState<{ for: string; state: AddressState } | null>(null);
+  const [historyResult, setHistoryResult] = useState<{ for: string; state: HistoryState } | null>(null);
+  const [paramsByEngine, setParamsByEngine] = useState<Record<string, ParamChange[]>>({});
+  const [paramsErrors, setParamsErrors] = useState<Record<string, string>>({});
+  const [evidence, setEvidence] = useState<EvidenceDescriptor | null>(null);
+
+  const addressState: AddressState =
+    addressResult !== null && addressResult.for === addr ? addressResult.state : { status: "loading" };
+  const historyState: HistoryState =
+    historyResult !== null && historyResult.for === addr ? historyResult.state : { status: "loading" };
+
+  // --- the position lookup (via @solvent/client's sealed outcome union) ---
+  useEffect(() => {
+    if (!valid) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    getSolventClient()
+      .address(addr, controller.signal)
+      .then(
+        (lookup) => {
+          if (!cancelled) setAddressResult({ for: addr, state: { status: "ready", lookup } });
+        },
+        (cause: unknown) => {
+          if (!cancelled) {
+            setAddressResult({ for: addr, state: { status: "error", message: describeLookupError(cause) } });
+          }
+        },
+      );
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [addr, valid]);
+
+  // --- HF history (same three-valued law, via lookup()) ---
+  useEffect(() => {
+    if (!valid) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    fetchAddressHistory(solventBaseUrl(), addr, { limit: 100, signal: controller.signal }).then(
+      (lookup) => {
+        if (!cancelled) setHistoryResult({ for: addr, state: { status: "ready", lookup } });
+      },
+      (cause: unknown) => {
+        if (!cancelled) {
+          setHistoryResult({ for: addr, state: { status: "error", message: describeLookupError(cause) } });
+        }
+      },
+    );
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [addr, valid]);
+
+  // --- param-timeline provenance, one fetch per engine with a position ---
+  const readyLookup = addressState.status === "ready" ? addressState.lookup : null;
+  useEffect(() => {
+    if (readyLookup === null || readyLookup.outcome !== "found") return;
+    const engines = [...new Set(readyLookup.response.positions.map((p) => p.engine))];
+    let cancelled = false;
+    const controller = new AbortController();
+    for (const engine of engines) {
+      fetchParams(solventBaseUrl(), { engine }, controller.signal).then(
+        (response) => {
+          if (cancelled) return;
+          setParamsByEngine((previous) => ({ ...previous, [engine]: response.params }));
+        },
+        (cause: unknown) => {
+          if (cancelled) return;
+          setParamsErrors((previous) => ({
+            ...previous,
+            [engine]: cause instanceof Error ? cause.message : String(cause),
+          }));
+        },
+      );
+    }
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [readyLookup]);
+
+  // --- address activity (cursor-paged) ---
+  const fetchActivityPage = useCallback(
+    async (cursor: string | null, signal: AbortSignal) => {
+      const page = await fetchEvents(
+        solventBaseUrl(),
+        { account: addr, limit: 25, ...(cursor === null ? {} : { cursor }) },
+        signal,
+      );
+      return { rows: page.events, nextCursor: page.next_cursor };
+    },
+    [addr],
+  );
+  const activity = useCursorPages<ChainEvent, string>(fetchActivityPage);
+  const { loadMore: loadActivity } = activity;
+  useEffect(() => {
+    if (valid) loadActivity();
+  }, [valid, loadActivity]);
+
+  const closeEvidence = useCallback(() => {
+    setEvidence(null);
+  }, []);
+
+  // --- the strict address law: an invalid segment is an inline refusal ---
+  if (!valid) {
+    return (
+      <section>
+        <p className="eyebrow">2 · Inspector</p>
+        <h1>Inspector</h1>
+        <p className={styles.refusal} role="alert" data-testid="address-refusal">
+          REFUSED · &quot;{addr.slice(0, 64)}&quot; is not an address — the contract requires 0x +
+          exactly 40 hex digits, verbatim. Nothing was looked up: an invalid input is never
+          coerced into a different account.
+        </p>
+        <p style={{ marginTop: 14 }}>
+          <Link className="mono" href="/inspector">
+            ← back to address entry
+          </Link>
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <div className={styles.addrHead}>
+        <p className="eyebrow" style={{ margin: 0 }}>
+          2 · Inspector
+        </p>
+        <h1>
+          <AddressMono address={addr} />
+        </h1>
+      </div>
+
+      {addressState.status === "loading" && (
+        <p className="mono dim">querying the newest servable batch…</p>
+      )}
+
+      {addressState.status === "error" && (
+        <div className={`${styles.stateCard} ${styles.stateRefused}`} role="alert">
+          <h2>lookup unavailable</h2>
+          <p className="mono">{addressState.message}</p>
+          <p className="mono dim">
+            an error is not an answer: this is neither &quot;no position&quot; nor a position.
+          </p>
+        </div>
+      )}
+
+      {addressState.status === "ready" && <FoundBlock lookup={addressState.lookup} />}
+
+      {addressState.status === "ready" && addressState.lookup.outcome === "found" && (
+        <>
+          {addressState.lookup.response.positions.map((position) => (
+            <InspectorPositionCard
+              key={`${position.engine}·${position.account}`}
+              position={position}
+              batch={addressState.lookup.response.batch}
+              paramChanges={paramsByEngine[position.engine] ?? null}
+              paramsError={paramsErrors[position.engine] ?? null}
+              activity={activity.rows}
+              onExplain={setEvidence}
+            />
+          ))}
+          <Stampline>
+            <StampItem label="batch" value={String(addressState.lookup.response.batch.id)} />
+            <StampItem
+              label="lookup"
+              value={addressState.lookup.complete ? "complete" : "FLOOR"}
+              tone={addressState.lookup.complete ? "ok" : "warn"}
+            />
+            {addressState.lookup.response.batch.watermarks.map((stamp) => (
+              <StampItem
+                key={stamp.engine}
+                label={stamp.engine}
+                value={`@${formatBlock(stamp.last_block)}`}
+              />
+            ))}
+            {addressState.lookup.response.batch.supersession.superseded && (
+              <StampItem label="posture" value="SUPERSEDED" tone="warn" />
+            )}
+          </Stampline>
+        </>
+      )}
+
+      <InspectorHistory state={historyState} />
+
+      <InspectorActivity
+        events={activity.rows}
+        loading={activity.loading}
+        error={activity.error}
+        hasMore={activity.hasMore}
+        onLoadMore={activity.loadMore}
+      />
+
+      <EvidenceDrawer descriptor={evidence} onClose={closeEvidence} />
+    </section>
+  );
+}
+
+/** The three-valued page-level statement (plus the floor disclosure on found). */
+function FoundBlock({ lookup }: { lookup: AddressLookup }) {
+  switch (lookup.outcome) {
+    case "found":
+      return (
+        <>
+          <p className="mono dim" data-testid="found-positive">
+            outcome · {renderLookupOutcome("found")} — {String(lookup.response.positions.length)}{" "}
+            position(s) in batch {String(lookup.response.batch.id)}
+          </p>
+          {!lookup.complete && (
+            <div className={`${styles.stateCard} ${styles.stateRefused}`} data-testid="found-floor">
+              <p className="mono">
+                FLOOR, not a total — these engines could not be consulted:{" "}
+                {lookup.withheldEngines.map((refusal) => refusal.engine).join(", ")}. More positions
+                may exist behind them.
+              </p>
+            </div>
+          )}
+        </>
+      );
+    case "not-found":
+      return (
+        <div className={styles.stateCard} data-testid="found-negative">
+          <h2>no position in this batch</h2>
+          <p>
+            A definitive answer, and here is what entitles the service to it: the lookup was{" "}
+            <b>complete</b> — every engine was available to be asked in batch{" "}
+            <span className="mono">{String(lookup.response.batch.id)}</span>, and none withheld its
+            book (withheld engines: none).
+          </p>
+          <p className="mono dim">{lookup.note}</p>
+        </div>
+      );
+    case "unknowable":
+      return (
+        <div className={`${styles.stateCard} ${styles.stateRefused}`} data-testid="found-unknowable">
+          <h2>cannot be established</h2>
+          <p>
+            The answer to &quot;does this address hold a position?&quot; cannot be established:
+            an engine&apos;s whole book is withheld in the newest servable batch. This is a
+            statement about the service&apos;s coverage — it is NEVER the definitive negative.
+          </p>
+          <ul className={styles.withheldList}>
+            {lookup.withheldEngines.map((refusal) => (
+              <li key={refusal.engine}>
+                <RefusedTag reason={`${refusal.engine} · ${refusal.code}`} />{" "}
+                <span className="mono dim">{refusal.detail}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mono dim">{lookup.note}</p>
+        </div>
+      );
+  }
+}

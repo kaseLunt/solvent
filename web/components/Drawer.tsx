@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import styles from "./drawer.module.css";
 
 export interface DrawerProps {
@@ -19,10 +26,34 @@ const FOCUSABLE =
  * opens its evidentiary chain here. Keyboard-accessible: focus moves in on
  * open, Escape closes, Tab cycles inside, focus restores on close. Motion is
  * disabled under prefers-reduced-motion (CSS).
+ *
+ * While open, BODY SCROLL IS LOCKED (`overflow: hidden` on `document.body`
+ * for the open lifetime; the prior inline value is restored on close AND on
+ * unmount-while-open) — the page behind a modal drawer must not scroll.
+ *
+ * Entry animates via mount-then-open: the panel mounts in its closed pose and
+ * the `.open` class lands on the next frame, so the CSS transitions actually
+ * run (they were dead code when the element mounted already-open). Exit is
+ * deliberately immediate — the drawer unmounts on close.
  */
 export function Drawer({ open, onClose, title, children }: DrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  // Mount-then-open: false on mount, true one frame later, so the
+  // opacity/transform transitions in drawer.module.css have a start state.
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      setEntered(true);
+    });
+    return () => {
+      // Reset in cleanup so the NEXT open animates from the closed pose again.
+      cancelAnimationFrame(frame);
+      setEntered(false);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -30,6 +61,18 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
     panelRef.current?.focus();
     return () => {
       restoreRef.current?.focus();
+    };
+  }, [open]);
+
+  // Body scroll lock for the open lifetime. The cleanup restores the PRIOR
+  // inline value (usually ""), so a close and an unmount-while-open both put
+  // the document back exactly as found.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
     };
   }, [open]);
 
@@ -61,12 +104,13 @@ export function Drawer({ open, onClose, title, children }: DrawerProps) {
 
   if (!open) return null;
 
+  const openClass = entered ? ` ${styles.open}` : "";
   return (
     <>
-      <div className={`${styles.backdrop} ${styles.open}`} onClick={onClose} aria-hidden />
+      <div className={`${styles.backdrop}${openClass}`} onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
-        className={`${styles.panel} ${styles.open}`}
+        className={`${styles.panel}${openClass}`}
         role="dialog"
         aria-modal="true"
         aria-label={typeof title === "string" ? title : "detail drawer"}
