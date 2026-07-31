@@ -2369,6 +2369,28 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (can a failed create retain to?), r14.md self-consistency, 3-file sweep;
   the brief notes fifteen rounds of accumulated scrutiny and instructs
   M/L findings be judged against D-013's disclosure mechanism.
+- **TASK 6 CLOSED — SHIP. THE P3 REVIEW PROGRAM IS COMPLETE: 4 OF 4**
+  (round 15, session 019fb5d3-6577-7de2-867c-fdf0d0c67a4a, ~7min, t6r15 @
+  c644dc9, base 705e0d9): "approve — SHIP. No material residual found. The
+  narrowed absent-to exemption matches pinned geth behavior; an impossible
+  failed-create with to present follows normal strict validation and is
+  not falsely refused. Production-path fixtures, mutation hashes/kill
+  lists, 30-envelope capture sweep, digest, and registry continuity all
+  check out." Reviewer independently re-verified the geth shape claim and
+  re-swept the 30 envelopes (3 create frames, all successful with to).
+  Static-audit caveat (sandbox blocked go) discharged as always: the
+  integrator executed the full suite before c644dc9. FIFTEEN ROUNDS:
+  r1 contact/censuses → r2 composition seams → r3 ABI topic0s → r4
+  causation (Proven=transition) → r5 production composition → r6
+  parent/boundary split + eventless collateral → ruling → r7 interim
+  posture → r8 decode-layer (pre-L2 SHIP) → L2 wave → r9 transient tokens
+  (+chain-truth convergence) → r10 lifecycle round-trip → r11 admin
+  provenance → R12 ruling (three-surface epoch, trace law, D-013
+  withdrawal) → r13 fail-open scanner → r14 create-error arm → r15 SHIP.
+  Two NORMATIVE chain-truth rulings + two addenda, 31 hermetic continuity
+  captures, 30 trace envelopes, 3 code-byte pins, durable mutation
+  transcripts. SCOREBOARD: Task 7 ✓ / flag-custody ✓ / Task 8 ✓ /
+  Task 6 ✓. NEXT: the PRE-AUTHORIZED maintenance window executes NOW.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
