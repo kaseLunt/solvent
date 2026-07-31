@@ -2903,3 +2903,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   worktree removal hit a Windows lock from job-scoped helper processes —
   killed scoped pids, orphan dir removed, registration verified clean
   (the reviewer-brief cleanup clause now covers this path explicitly).
+- **CODEX ROUND 3: SHIP, ZERO FINDINGS — PROOF SURFACE CLOSED (12:09)**:
+  "No material false-pass or vacuous-green path found: comparisonHash
+  covers every pin/P3-row field consumed by the refutation, sealDoc
+  preserves bar isolation, comparison_sha256 is outside hash scope, and
+  both refusal tests genuinely kill m4." Three rounds, strictly
+  converging: 3 findings → 1 → 0. The acceptance proof surface now
+  carries: the vector-gated three-state DM law, the per-(account,reserve)
+  balance-census weld, the recomputed-digest refutation bars, all
+  mutation-killed, all landed through 6f23452.
+- **POST-SHIP OP EXECUTED + FRESH ACCEPTANCE LAUNCHED (12:14)**: the
+  fresh acceptance's schema gate refused honestly (live DB at 14, HEAD
+  expects exactly 17 — reconcile never migrates), so the RECORDED
+  post-ship op ran under the pre-authorized window: HEAD indexer built,
+  daemon swapped (pid 68984 → 123768, prev binaries kept as
+  solvent-indexer-prev/-prev2), migrations applied at startup — OK 00015
+  (18ms) / 00016 (16ms) / 00017 (400ms), goose 17 — block-header custody
+  now live. Startup log shows the familiar honest RPC-pressure walking
+  (pinned-read discards + backoff, self-healing). Fresh acceptance
+  relaunched from the pinned worktree C:/wtclose/p3accept2 @ 8591d0d
+  (verdict-free pacing). W7 wave (design register: ruling 11 first,
+  SHOULD-FIX 7-10, TASTE 12-14, stampline→/proof link + the state-matrix
+  test) dispatched in parallel. On acceptance PASS → E1 paperwork.
