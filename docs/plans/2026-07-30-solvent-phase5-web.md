@@ -204,3 +204,69 @@ Estimated shape: backend lane ≈ 3–5 waves; web lane ≈ 7 waves; review trai
 Every endpoint has named params/response fields above; every surface names its data sources;
 mutants named per task; fixture rule (openapi-example-generated) stated; the only TBDs are
 the two owner actions (VPS, domain) — external by nature.
+
+## AMENDMENT 1 (2026-07-30 21:05) — correction pass from the external plan review
+
+Adopted in full; items 2/3/4 were delivered as mid-flight corrections to B1/B2.
+
+**A. Execution model, stated precisely (review item 1):** the repository REMAINS
+serial-writer. "Lanes" are implementation agents that NEVER commit; every commit lands
+through the single integrator claim after verification and both-ways staging. Waves operate
+on disjoint file sets within the one worktree; a wave's uncommitted work is not authority.
+This is the model the whole project has run under — now stated in the plan.
+
+**B. Feed ordering (item 2 — B1 corrected mid-flight):** cross-chain block heights are
+incomparable. Single-engine queries order by (block, tx, log, seq); CROSS-ENGINE queries
+order by block_time with chain-aware deterministic tiebreaks, timeless rows after timed rows,
+disclosed. since_block is engine/chain-scoped only. Event amounts carry an explicit semantic
+unit (raw token / normalized debt / usd6 / opaque) — never assumed display-ready.
+
+**C. Block-time reorg law (item 3 — B2 corrected mid-flight):** block_headers deletion joins
+the EXISTING rewind transaction (no orphaned header at a reused height); silent overwrite
+stays refused; periodic bounded retry for missing headers so transient failures don't leave
+block_time null forever; event-bearing-reorg test required.
+
+**D. Observatory points source (item 4 — B2 corrected mid-flight):** points derive ONLY from
+the newest COMPLETE risk batch (aggregates + watermark vector + materialization identity +
+refusal/coverage posture retained per point; source batch_id kept). Never from raw derived
+state; an uncovered bucket is absent, never fabricated.
+
+**E. Task C2 (new — contract corrections wave, dispatch after B1/B2 land):**
+1. `PositionSummary` (lean: engine, account, status, refusal code, hf, liquidatable verdict,
+   totals, liq-distance, marks blocks) replaces full `Position` in /v1/positions responses;
+   full Position stays on /v1/address.
+2. Book exposures: per-asset collateral/debt concentration aggregates (extend /v1/book or a
+   /v1/book/exposures route) + a BOUNDED risk-map representation (deterministic bins +
+   named top-N outliers — never "download the book to draw a scatter").
+3. /v1/events ordering + unit fields per (B).
+4. /v1/prices/{asset} gains chain identity.
+5. /v1/evidence separates `proof_subject` (hash-bound pins, tested commit/config) from
+   `live_subject` (current watermarked batch + materialization identity) + evidence status
+   current|stale|unavailable — a live batch must never read as reconciled-exact.
+6. Batch permalinks: GET /v1/batches/{id} (positions/aggregates of a RETAINED batch; 404
+   with retention disclosure when expired) — the drawer-pin demo's missing API support.
+7. `recon/v4-proposal.json`: versioned proposal registry (source URL, forum version,
+   retrieval date, status, content hash) — the Observatory readiness panel's sourced
+   artifact; a wave captures it with citations.
+8. Client regen + sealed-field law per usual.
+
+**F. Review posture correction (item 8):** the plan's "nothing here is money-math" line is
+WRONG for `POST /v1/scenarios/{id}/run-book` — book-wide aggregation of eligible debt /
+shortfall / bad debt over ~10k positions is correctness-critical and gets the FULL
+adversarial review train (D-006/D-013 discipline, mutation floor, adversarial rounds to
+SHIP), not a lane-batched pass. Prefer materializing results into the existing (unpopulated)
+`risk_scenarios` table keyed to the batch over per-request recompute — decide in the wave
+with the reviewer.
+
+**G. Blast radius (item 7):** the Observatory's param-change blast-radius annotation is
+DEFERRED TO PHASE 2 unless a thin honest computation lands with C2 (affected-position counts
+for a hypothetical param change = a scenario-machinery query, not a UI-side guess). The
+readiness panel ships without it if need be — no unbacked UI promises.
+
+**H. Oracle Monitor ownership (item 7):** the price-history/oracle panel UI is explicitly
+part of Task W6 (Proof Center wave) — named owner, no orphan surface.
+
+**I. UI state-matrix acceptance (review addendum):** W7 gains a matrix test: no-batch,
+unavailable/recovered SSE, stale last-good, 429, BATCH_SUPERSEDED, withheld engine,
+found:null, never-swept collateral, empty tables, responsive breakpoints — each state
+rendered per the honest-UI laws, asserted in Playwright.
