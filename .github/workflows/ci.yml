@@ -63,3 +63,39 @@ jobs:
         run: psql "$SOLVENT_DATABASE_URL" -c "CREATE DATABASE solvent_test OWNER solvent;"
       - name: test -race
         run: go test -race -count=1 -p 1 ./...
+  # The P5 web app (web/, Next.js over @solvent/client). @solvent/client is a
+  # file: symlink into packages/client-ts whose dist/ is built on demand by
+  # web's ensure-client pre-script — hence the client-ts npm ci first.
+  # NEXT_PUBLIC_SHOW_STYLEGUIDE compiles the /styleguide specimen route into
+  # the production bundle so the smoke e2e can walk every base component.
+  web:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SHOW_STYLEGUIDE: "1"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            packages/client-ts/package-lock.json
+      - name: install (client-ts)
+        run: npm ci
+        working-directory: packages/client-ts
+      - name: install (web)
+        run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: build
+        run: npm run build
+      - name: playwright install
+        run: npx playwright install --with-deps chromium
+      - name: unit + smoke e2e
+        run: npm run test:e2e
