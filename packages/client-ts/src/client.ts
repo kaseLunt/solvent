@@ -119,7 +119,12 @@ export class SolventClient {
             "(Node 18+ has it built in)",
         );
       }
-      this.fetchImpl = global;
+      // Bind the captured global: calling it later as `this.fetchImpl(...)`
+      // would otherwise pass the client instance as `this`, and browsers
+      // enforce `this === globalThis` on fetch ("Illegal invocation").
+      // Node's undici tolerates the unbound call, which is why only real
+      // browsers surfaced this.
+      this.fetchImpl = global.bind(globalThis) as FetchLike;
     } else {
       this.fetchImpl = injected;
     }

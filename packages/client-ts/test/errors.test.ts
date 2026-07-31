@@ -330,6 +330,30 @@ describe("caller mistakes are refused locally, before a request exists", () => {
     expect(() => new SolventClient({ baseUrl: "" })).toThrow(SolventUsageError);
   });
 
+  it("binds the captured global fetch (browsers throw Illegal invocation on a wrong `this`)", async () => {
+    // Browser WebIDL semantics: a method call with `this` = undefined/null
+    // falls back to the global, but any OTHER `this` (e.g. the client
+    // instance, via `this.fetchImpl(...)`) throws "Illegal invocation".
+    // Node's undici ignores `this`, so only this simulation catches the
+    // unbound capture.
+    const mock = mockFetch({ "/v1/book": { body: fixtureBytes(FIXTURE_FILES.book) } });
+    const g = globalThis as { fetch?: unknown };
+    const saved = g.fetch;
+    g.fetch = function (this: unknown, ...args: unknown[]) {
+      if (this !== globalThis && this !== undefined && this !== null) {
+        throw new TypeError("Illegal invocation");
+      }
+      return (mock.fetch as (...a: unknown[]) => unknown)(...args);
+    };
+    try {
+      const client = new SolventClient({ baseUrl: BASE });
+      await client.book();
+    } finally {
+      g.fetch = saved;
+    }
+    expect(mock.calls).toEqual([`${BASE}/v1/book`]);
+  });
+
   it("strips a trailing slash from the baseUrl so paths never double up", async () => {
     const mock = mockFetch({ "/v1/book": { body: fixtureBytes(FIXTURE_FILES.book) } });
     const client = new SolventClient({ baseUrl: `${BASE}//`, fetch: mock.fetch });
