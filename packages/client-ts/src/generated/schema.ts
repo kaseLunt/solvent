@@ -27,6 +27,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The position table — cursor-paginated, batch-stable, one engine at a time
+         * @description A page of the requested ENGINE's book, drawn entirely from ONE batch.
+         *
+         *     The response pins the batch every row came from, and `next_cursor` is
+         *     BOUND to that batch: it encodes (batch id, rank) opaquely, and a client
+         *     must treat it as a token, not a structure. When the pinned batch is no
+         *     longer the newest servable batch, presenting its cursor answers **409
+         *     `batch_superseded`** and the client restarts from page one — an honest
+         *     restart, never a page silently mixing two materializations.
+         *
+         *     Engines are never blended, so `engine` is REQUIRED: a single ranked list
+         *     over two comparators (Aave's wad vs the Debt Manager's strict boolean)
+         *     would be a cross-engine ordering this service refuses to invent.
+         *
+         *     Refused rows are ROWS here, exactly as they are in the aggregates:
+         *     filtering them out would un-count the positions the book could not
+         *     honestly value.
+         */
+        get: operations["getPositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/address/{addr}": {
         parameters: {
             query?: never;
@@ -69,6 +104,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/address/{addr}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One address's health factor, totals and refusals across retained batches
+         * @description Per-batch points for one address, newest batch first, one series per
+         *     engine. Every point is a PERSISTED row from a retained batch — nothing
+         *     is recomputed for this response, so the history is exactly what was
+         *     served at the time, including the batches that REFUSED the position.
+         *
+         *     `found` carries the same three-valued contract as `/v1/address`, and a
+         *     withheld engine leaves a NAMED hole: a batch in which an engine's whole
+         *     book was withheld has no row for any account on that engine, so such
+         *     batches are listed per series in `withheld_batch_ids` — a missing point
+         *     there means "could not be established at that batch", never "no
+         *     position at that batch".
+         */
+        get: operations["getAddressHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/observatory": {
         parameters: {
             query?: never;
@@ -78,6 +143,207 @@ export interface paths {
         };
         /** Per-engine TVL, counts and rate indexes across recent batches */
         get: operations["getObservatory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/observatory/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The durable per-engine rollup — debt, collateral, accounts and rates over time
+         * @description Points from the `observatory_points` rollup, oldest first: per-engine
+         *     aggregates captured on an hourly bucket so the migration record persists
+         *     beyond the batch-retention window. Each point states what the engine's
+         *     book looked like AT ITS BUCKET — a bucket captured while the engine's
+         *     whole book was withheld carries null totals and names the refusal,
+         *     never zeros.
+         *
+         *     A `step_seconds` larger than the native bucket serves every Nth bucket
+         *     VERBATIM. Nothing here is averaged, interpolated or smoothed: a served
+         *     point is always an exact captured row.
+         */
+        get: operations["getObservatorySeries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The durable chain-action feed — borrows, repays, supplies, withdrawals, liquidations
+         * @description A cursor-paginated read of `position_events` — durably custodied,
+         *     reorg-aware chain actions, NEVER invented events. Rows are ordered
+         *     (block_number, tx_hash, log_index, seq) DESC across both engines.
+         *
+         *     `type` is the closed DISPLAY vocabulary; `raw_type` is the engine's own
+         *     event name, verbatim. Every raw event type either maps to a display
+         *     type or is EXPLICITLY bookkeeping-filtered from this feed (aToken
+         *     mints/burns/transfers, rate-index updates, residue zeroing, migration
+         *     genesis imports); parameter-change events are served by `/v1/params`,
+         *     not here. That mapping is total and welded to the closed per-engine
+         *     type sets — an unmapped event type is a service failure, not a silent
+         *     omission.
+         *
+         *     `block_time` is the header time of the event's block under block-header
+         *     custody. It is NULL until the header is custodied — NEVER fabricated,
+         *     never substituted with a database clock. Render the block number when
+         *     it is null.
+         */
+        get: operations["getEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/params": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The parameter timeline — every custodied risk-parameter change, with provenance
+         * @description A cursor-paginated read of the parameter ledger: Aave collateral
+         *     configuration changes from `param_history` and Debt Manager
+         *     configuration events, each pinned to its (effective_block,
+         *     effective_log_index) and tx hash. The ledger is APPEND-ONLY: each row
+         *     records only what its own event said. A field the event did not speak
+         *     to is simply absent from `fields` — never back-filled.
+         *
+         *     `prior` is the prior value THE EVENT ITSELF carried, when it carried
+         *     one; null otherwise. A prior is never reconstructed by ledger lookback
+         *     into this field — the timeline shows what the chain said, and a
+         *     consumer wanting the preceding value reads the preceding row.
+         *
+         *     Rows are ordered (effective_block, effective_log_index) DESC per
+         *     engine, interleaved across engines by block DESC.
+         */
+        get: operations["getParams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/prices/{asset}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Custodied price observations for one asset, with validity and provenance
+         * @description The retained price ledger for one asset address, grouped into one
+         *     series per (chain_id, source) key. Every row carries its own validity
+         *     verdict: quarantined rows (`valid: false`) are RETAINED and SERVED with
+         *     their reasons — a quarantine is evidence, not garbage — and each series
+         *     summarizes its quarantined block ranges so a renderer cannot miss them.
+         *
+         *     Downsampling (`step`) never averages: each returned point is an exact
+         *     custodied row, taken every `step` blocks. In particular no served value
+         *     is ever synthesized across a VALIDITY BOUNDARY — a quarantined
+         *     observation never contributes to a valid-looking point, and a
+         *     valid-invalid-valid sequence downsamples to exact rows from each
+         *     segment, never to a blend that papers over the quarantine.
+         *
+         *     `source_as_of` is the chain-asserted as-of. Database insert time is
+         *     never substituted; a row with no as-of says so with null.
+         */
+        get: operations["getPriceHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/scenarios/{id}/run-book": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * One committed scenario evaluated against the WHOLE book
+         * @description Book-wide aggregate stress: the named scenario from the COMMITTED set —
+         *     the same eleven `/v1/address/{addr}/stress` serves, no arbitrary user
+         *     scenarios — evaluated over every reconstructable position of the newest
+         *     servable batch, reduced to per-engine aggregates.
+         *
+         *     POST because the evaluation is computed on request over the whole book;
+         *     it writes nothing. The scenario id must name a committed scenario:
+         *     anything else is a 404, never a silently empty run.
+         *
+         *     Deltas are labeled DELTA-ONLY: they are the scenario's own
+         *     contribution, after minus before, over the positions in the run.
+         *     Scenarios whose axis moves no oracle mark assert `hfs_unchanged` in
+         *     `market_realization`; rate scenarios ship as PROJECTIONS with the same
+         *     delta-only basis as the address-level surface. Engines whose whole book
+         *     is withheld are named in `excluded_engines` and appear nowhere else —
+         *     an absence with no name is exactly the silent hole this surface must
+         *     not have.
+         */
+        post: operations["runBookScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The deploy-bound evidence manifest — what this deployment is, exactly
+         * @description The manifest that binds THIS deployment to its evidence: build commit,
+         *     schema version, registry fingerprint, algorithm revision, scenario
+         *     config version, the newest servable batch's substrate digest and
+         *     materialization key, the feeds registry hash, the last committed
+         *     reconcile receipt's summary, and the committed probe records.
+         *
+         *     Everything here is either carried by the build, persisted by a batch,
+         *     or read from a COMMITTED artifact. Nothing is measured at request time,
+         *     and absent evidence is stated with null and a reason — never
+         *     approximated. Committed artifacts name endpoints by environment
+         *     variable only; this surface serves no endpoint URL and no DSN.
+         *
+         *     Answers 200 even when no batch is servable: the manifest describes the
+         *     DEPLOYMENT, and `substrate` states batch absence with its reason.
+         */
+        get: operations["getEvidence"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1041,6 +1307,492 @@ export interface components {
             from: number;
             to: number;
         };
+        /** @description A 0x-prefixed 32-byte transaction hash. */
+        TxHash: string;
+        /**
+         * @description The 409 body for a cursor whose batch is no longer the newest servable
+         *     batch. Its own shape rather than `ErrorBody` because it must NAME both
+         *     batches: a client told only "conflict" cannot distinguish a stale
+         *     cursor from its own bug.
+         */
+        BatchSupersededBody: {
+            error: {
+                /** @enum {string} */
+                code: "batch_superseded";
+                message: string;
+                /**
+                 * Format: int64
+                 * @description The batch the presented cursor was minted against.
+                 */
+                cursor_batch_id: number;
+                /**
+                 * Format: int64
+                 * @description The batch a restarted pagination would read. Null in the race where no batch is servable at answer time (a retry then meets a 503).
+                 */
+                current_batch_id: number | null;
+            };
+        };
+        PositionsResponse: {
+            /** Format: date-time */
+            served_at: string;
+            /** @description The batch EVERY row on this page was drawn from. `next_cursor` is bound to it. */
+            batch: components["schemas"]["Batch"];
+            engine: string;
+            /**
+             * @description The ranking actually applied, echoed so a defaulted request still states its order.
+             * @enum {string}
+             */
+            sort: "liq_distance" | "debt" | "hf" | "status";
+            /** @description The page size actually applied, echoed so a defaulted request still states it. */
+            limit: number;
+            /**
+             * @description True when the requested ENGINE's whole book is withheld on this
+             *     batch. `positions` is then empty FOR THAT REASON — never because
+             *     the book is empty — and `total_positions` is null.
+             */
+            refused: boolean;
+            refusal: components["schemas"]["EngineRefusal"] | null;
+            /** @description Rows in this engine's book on this batch, refused rows INCLUDED. NULL on a withheld engine, never 0. */
+            total_positions: number | null;
+            /** @description The page, in `sort` order. Refused rows are rows here, exactly as they are in the aggregates. */
+            positions: components["schemas"]["Position"][];
+            /**
+             * @description OPAQUE token for the next page, bound to `batch.id`; null on the
+             *     last page. Presenting it after the batch is superseded as the
+             *     newest servable batch answers 409 `batch_superseded`.
+             */
+            next_cursor: string | null;
+            notes: string[];
+        };
+        /**
+         * @description One PERSISTED batch row for the address on one engine. A refused batch
+         *     is a point, not a gap: the position existed and could not honestly be
+         *     valued, and this history preserves that distinction.
+         */
+        AddressHistoryPoint: {
+            /** Format: int64 */
+            batch_id: number;
+            /** Format: date-time */
+            computed_at: string;
+            /** Format: int64 */
+            balances_block: number;
+            /** @enum {string} */
+            status: "computed" | "refused";
+            refusal: components["schemas"]["Refusal"] | null;
+            health_factor: components["schemas"]["HealthFactor"] | null;
+            /** @description The Debt Manager's strict verdict at that batch. Null on Aave, and null on a refused row — a withheld verdict, never "false". */
+            liquidatable: boolean | null;
+            total_collateral_base: components["schemas"]["NullableDecimal"];
+            total_debt_base: components["schemas"]["NullableDecimal"];
+        };
+        AddressHistoryEngine: {
+            engine: string;
+            value_decimals: number;
+            /** @description Newest batch first. */
+            points: components["schemas"]["AddressHistoryPoint"][];
+            /**
+             * @description Batches in the covered window where this ENGINE's whole book was
+             *     withheld. Such a batch has no row for ANY account on the engine, so
+             *     a missing point at one of these ids means "could not be
+             *     established" — never "no position at that batch". Without this
+             *     list, an engine-wide refusal would be indistinguishable from an
+             *     account that closed its position.
+             */
+            withheld_batch_ids: number[];
+            note: string;
+        };
+        AddressHistoryResponse: {
+            /** Format: date-time */
+            served_at: string;
+            /** @description The NEWEST servable batch — the vantage this history is served from. Each point carries its own batch identity. */
+            batch: components["schemas"]["Batch"];
+            address: components["schemas"]["Address"];
+            limit: number;
+            engines: components["schemas"]["AddressHistoryEngine"][];
+            /**
+             * @description THREE-VALUED, with the same contract as `/v1/address`, evaluated
+             *     over the covered window: `true` — at least one persisted point
+             *     exists; `false` — a definitive negative, every engine consultable
+             *     in every covered batch and no row anywhere; `null` — the answer
+             *     cannot be established, because an engine's book was withheld
+             *     somewhere in the window. **Never render null as "no position".**
+             */
+            found: boolean | null;
+            lookup_complete: boolean;
+            /** @description Engines withheld in the NEWEST servable batch. Per-batch holes inside the window are named per series in `withheld_batch_ids`. */
+            withheld_engines: components["schemas"]["EngineRefusal"][];
+            lookup_complete_note: string;
+            notes: string[];
+        };
+        /**
+         * @description The closed DISPLAY vocabulary. Every raw event type in each engine's
+         *     closed set either maps here or is EXPLICITLY bookkeeping-filtered from
+         *     the feed — the mapping is total, and an unmapped raw type is a service
+         *     failure, never a silent omission.
+         *
+         *     Mapping: `borrow` ⇐ aave_borrow, borrow · `repay` ⇐ aave_repay, repay ·
+         *     `supply` ⇐ aave_supply, supplied · `withdraw` ⇐ aave_withdraw,
+         *     withdraw_borrow_token · `liquidation` ⇐ aave_liquidation_call,
+         *     liquidation (the Debt Manager's per-collateral seizure fan-out rows
+         *     fold into the liquidation row's `seized` extract) ·
+         *     `collateral_enabled`/`collateral_disabled` ⇐ the Aave usage-as-
+         *     collateral toggles · `deficit_created` ⇐ aave_deficit_created, the
+         *     pool's own bad-debt realization event.
+         *
+         *     Bookkeeping-filtered (never feed rows): aToken mints, burns and
+         *     transfers (balance mechanics behind a supply/withdraw/liquidation),
+         *     rate-index updates, Debt Manager residue zeroing and migration-genesis
+         *     imports. Parameter-change events are served by `/v1/params`, not here.
+         * @enum {string}
+         */
+        EventDisplayType: "borrow" | "repay" | "supply" | "withdraw" | "liquidation" | "collateral_enabled" | "collateral_disabled" | "deficit_created";
+        SeizedCollateral: {
+            asset: components["schemas"]["Address"];
+            symbol?: string;
+            amount: components["schemas"]["Decimal"];
+            decimals: number;
+        };
+        /**
+         * @description The typed extract from a liquidation event's own structured payload.
+         *     Nothing here is inferred: a field the payload does not establish is
+         *     null, never estimated.
+         */
+        LiquidationDetail: {
+            liquidator: components["schemas"]["Address"];
+            debt_asset: components["schemas"]["Address"] | null;
+            debt_repaid: components["schemas"]["NullableDecimal"];
+            debt_decimals: number | null;
+            /** @description Every collateral asset seized in this liquidation, one row per asset (the Debt Manager's seizure fan-out folds in here). */
+            seized: components["schemas"]["SeizedCollateral"][];
+            /** @description The bonus the liquidator actually realized, in bps, when the payload's amounts and the event-time prices establish it. Null otherwise — never estimated. */
+            realized_bonus_bps: components["schemas"]["NullableDecimal"];
+            /** @description The configured bonus AT THIS EVENT's effective params (from the param timeline), not today's. Null when param custody does not cover the event's block. */
+            configured_bonus_bps: components["schemas"]["NullableDecimal"];
+            note: string;
+        };
+        ChainEvent: {
+            /** Format: int64 */
+            chain_id: number;
+            engine: string;
+            /** Format: int64 */
+            block_number: number;
+            /**
+             * Format: date-time
+             * @description The block's HEADER time under block-header custody — chain-asserted
+             *     or absent. NULL until the header is custodied: header time is never
+             *     fabricated, and a database clock is never substituted for it.
+             *     Render the block number while this is null.
+             */
+            block_time: string | null;
+            tx_hash: components["schemas"]["TxHash"];
+            /** Format: int64 */
+            log_index: number;
+            /**
+             * Format: int64
+             * @description Intra-log sequence for events one log fans out into. 0 for ordinary events.
+             */
+            seq: number;
+            type: components["schemas"]["EventDisplayType"];
+            /** @description The engine's own event type, verbatim from custody (e.g. `aave_liquidation_call`, `borrow`). */
+            raw_type: string;
+            account: components["schemas"]["Address"];
+            /** @description Null on rows that carry no asset (e.g. a collateral-usage toggle). */
+            asset: components["schemas"]["Address"] | null;
+            symbol?: string;
+            /** @description The SIGNED custodied delta in the asset's own units (a repay is negative on the debt side). Null on record-only rows. Zero and null are different statements. */
+            amount: components["schemas"]["NullableDecimal"];
+            amount_decimals: number | null;
+            /** @description The typed per-class extract. Non-null exactly when `type` is `liquidation`. */
+            liquidation: components["schemas"]["LiquidationDetail"] | null;
+        };
+        /** @description The filter actually applied, echoed so a defaulted request still states its scope. */
+        EventFilter: {
+            engine: string | null;
+            account: components["schemas"]["Address"] | null;
+            /** @description Empty means every display type. */
+            types: components["schemas"]["EventDisplayType"][];
+            /** Format: int64 */
+            since_block: number | null;
+        };
+        EventsResponse: {
+            /** Format: date-time */
+            served_at: string;
+            filter: components["schemas"]["EventFilter"];
+            /** @description The page size actually applied, echoed so a defaulted request still states it. */
+            limit: number;
+            /** @description Ordered (block_number, tx_hash, log_index, seq) DESC across engines. Two chains' block numbers are not comparable as time. */
+            events: components["schemas"]["ChainEvent"][];
+            /** @description OPAQUE keyset token for the next page; null when the feed is exhausted under the filter. */
+            next_cursor: string | null;
+            notes: string[];
+        };
+        /**
+         * @description One field ONE EVENT spoke to. Exactly one of `value` and `address` is
+         *     non-null (a risk parameter is numeric; a token/strategy binding is an
+         *     address). The ledger is append-only: a field the event did not mention
+         *     is absent from the row entirely, never back-filled.
+         */
+        ParamField: {
+            /** @description e.g. `ltv`, `liq_threshold`, `liq_bonus`, `emode_category`, `atoken`, `variable_debt_token`, `strategy`, `borrow_apy`, or a Debt Manager config field. */
+            name: string;
+            value: components["schemas"]["NullableDecimal"];
+            address: components["schemas"]["Address"] | null;
+            /** @description The prior value THE EVENT ITSELF carried, when it carried one. Null otherwise — a prior is never reconstructed by ledger lookback into this field. */
+            prior: components["schemas"]["NullableDecimal"];
+            /** @description The ENGINE's own denomination, named per field — e.g. `bps` (Aave, 1e4 scale), `per-second-1e18`, `address`, `count`. No cross-engine normalization exists. */
+            unit: string;
+        };
+        ParamChange: {
+            engine: string;
+            /** Format: int64 */
+            chain_id: number;
+            /** @description Null on an engine-global change (e.g. the Debt Manager's borrow APY). */
+            asset: components["schemas"]["Address"] | null;
+            symbol?: string;
+            fields: components["schemas"]["ParamField"][];
+            /** Format: int64 */
+            effective_block: number;
+            /** Format: int64 */
+            effective_log_index: number;
+            /** @description The chain event this row was derived from, verbatim (e.g. `CollateralConfigurationChanged`, `borrow_apy_set`). */
+            source_event: string;
+            tx_hash: components["schemas"]["TxHash"];
+            /**
+             * Format: date-time
+             * @description Header time under block-header custody; null until custodied, never fabricated.
+             */
+            block_time: string | null;
+        };
+        ParamsResponse: {
+            /** Format: date-time */
+            served_at: string;
+            /** @description The engine filter applied, or null for both. */
+            engine: string | null;
+            /** @description The asset filter applied, or null for all. */
+            asset: components["schemas"]["Address"] | null;
+            /** @description Ordered (effective_block, effective_log_index) DESC, interleaved across engines by block DESC. */
+            params: components["schemas"]["ParamChange"][];
+            /** @description OPAQUE keyset token; null when the timeline is exhausted under the filter. */
+            next_cursor: string | null;
+            notes: string[];
+        };
+        PricePoint: {
+            /** Format: int64 */
+            block_number: number;
+            value: components["schemas"]["NullableDecimal"];
+            /**
+             * Format: int64
+             * @description The poll anchor binding this observation to a custodied block hash, when one survives. Null is a provenance statement, not a gap to hide.
+             */
+            anchor_block: number | null;
+            /**
+             * Format: date-time
+             * @description The chain-asserted as-of. Database insert time is never substituted; null means the row carries none.
+             */
+            source_as_of: string | null;
+            valid: boolean;
+            /** @description Named when `valid` is false; empty when valid. A quarantined row is RETAINED and served with its reason — never deleted, never smoothed away. */
+            invalid_reason: string;
+        };
+        /** @description A contiguous block range of quarantined rows in this series, summarized so a renderer cannot miss it even when `step` skips the rows themselves. */
+        QuarantinedRange: {
+            /** Format: int64 */
+            from_block: number;
+            /** Format: int64 */
+            to_block: number;
+            /** Format: int64 */
+            rows: number;
+            reasons: components["schemas"]["Count"][];
+        };
+        PriceSeries: {
+            /** Format: int64 */
+            chain_id: number;
+            asset: components["schemas"]["Address"];
+            symbol?: string;
+            source: string;
+            owner_engine: string;
+            /** @description engine-exact, adapter-output, uncapped-feed or ratio-reference — derived from the source key, same vocabulary as `/v1/meta`. */
+            provenance: string;
+            decimals: number;
+            /** @description Ascending by block. Every point is an EXACT custodied row — downsampling selects, it never averages, and never across a validity boundary. */
+            points: components["schemas"]["PricePoint"][];
+            quarantined_ranges: components["schemas"]["QuarantinedRange"][];
+            note: string;
+        };
+        PricesResponse: {
+            /** Format: date-time */
+            served_at: string;
+            asset: components["schemas"]["Address"];
+            source: string | null;
+            /** Format: int64 */
+            from_block: number | null;
+            /** Format: int64 */
+            to_block: number | null;
+            /** Format: int64 */
+            step: number | null;
+            /** @description One series per (chain_id, source) key holding rows for this asset. Empty is a statement about CUSTODY, not a claim the asset has no price. */
+            series: components["schemas"]["PriceSeries"][];
+            notes: string[];
+        };
+        /** @description One engine's book reduced at one side of the shock, in the engine's OWN unit and decimals. Never summed across engines. */
+        RunBookAggregate: {
+            accounts: number;
+            eligible_accounts: number;
+            total_collateral_usd: components["schemas"]["Decimal"];
+            total_debt_usd: components["schemas"]["Decimal"];
+            /** @description Debt ELIGIBLE for liquidation. Realized is less than or equal to eligible. */
+            eligible_debt_usd: components["schemas"]["Decimal"];
+            collateral_at_risk_usd: components["schemas"]["Decimal"];
+            bad_debt_usd: components["schemas"]["Decimal"];
+        };
+        RunBookEngine: {
+            engine: string;
+            usd_decimals: number;
+            before: components["schemas"]["RunBookAggregate"];
+            after: components["schemas"]["RunBookAggregate"];
+            newly_eligible_accounts: number;
+            /** @description DELTA-ONLY — after minus before, the scenario's own contribution over the positions in the run. Can be negative. */
+            eligible_debt_delta_usd: components["schemas"]["Decimal"];
+            /** @description DELTA-ONLY, same basis. */
+            bad_debt_delta_usd: components["schemas"]["Decimal"];
+            /** @description Present when the scenario carries a market-realization axis; its `hfs_unchanged` asserts that no oracle mark moved. */
+            market_realization: components["schemas"]["Shortfall"] | null;
+            /** @description Present on rate scenarios — a PROJECTION over time on the delta-only basis, never a spot shock. */
+            projection: components["schemas"]["Projection"] | null;
+            note: string;
+        };
+        RunBookResponse: {
+            /** Format: date-time */
+            served_at: string;
+            batch: components["schemas"]["Batch"];
+            scenario_config_version: string;
+            scenario_id: string;
+            scenario_version: string;
+            label: string;
+            description: string;
+            path_assumption: string;
+            shocks: components["schemas"]["Shock"][];
+            out_of_model: string[];
+            applied_shocks: components["schemas"]["AppliedShock"][];
+            /** @description Every price input no propagation row described, book-wide. Empty is the claim that the matrix covered the whole run. */
+            held_flat: components["schemas"]["HeldFlat"][];
+            engines: components["schemas"]["RunBookEngine"][];
+            /** @description Engines whose WHOLE book is withheld. Absent from `engines` entirely — and named here so the absence cannot be silent. */
+            excluded_engines: components["schemas"]["EngineRefusal"][];
+            /** @description The audit of what reached the run's arithmetic — the same fail-closed coverage claim `/v1/book` carries. */
+            coverage: components["schemas"]["BookCoverage"];
+            notes: string[];
+        };
+        ObservatorySeriesPoint: {
+            /** Format: date-time */
+            bucket_start: string;
+            /**
+             * Format: int64
+             * @description The engine's balances watermark at capture time — the bucket's own as-of, never a chain head observed later.
+             */
+            last_block: number;
+            /** @description True when the engine's whole book was withheld at capture time. Totals are then null FOR THAT REASON, never 0. */
+            refused: boolean;
+            /** @description The engine refusal code behind a withheld bucket (e.g. FLAG_CUSTODY_UNPROVEN). Null when `refused` is false. */
+            refusal_code: string | null;
+            accounts: number | null;
+            /** @description Refused POSITION ROWS in the bucket. Zero on a withheld engine with no rows behind it — which is why `refused` exists on the point itself. */
+            refused_positions: number;
+            liquidatable_positions: number | null;
+            debt_usd: components["schemas"]["NullableDecimal"];
+            collateral_usd: components["schemas"]["NullableDecimal"];
+            /** @description The rate-index snapshot captured with the bucket. Each index carries its OWN as-of block. */
+            rates: components["schemas"]["RateIndex"][];
+        };
+        ObservatorySeriesResponse: {
+            /** Format: date-time */
+            served_at: string;
+            engine: string;
+            usd_decimals: number;
+            /** Format: date-time */
+            from: string | null;
+            /** Format: date-time */
+            to: string | null;
+            /** @description The stride actually applied; null when every native bucket is served. A stride serves every Nth captured bucket VERBATIM — never an average. */
+            step_seconds: number | null;
+            /** @description Oldest first. */
+            points: components["schemas"]["ObservatorySeriesPoint"][];
+            notes: string[];
+        };
+        /**
+         * @description The newest servable batch's deterministic identity. The
+         *     materialization key is unique per materialization; the substrate
+         *     digest is computed over the batch's INPUTS (risk rows, consulted
+         *     prices, consulted collateral flags), so two batches with equal digests
+         *     were computed from identical evidence.
+         */
+        SubstrateRef: {
+            /** Format: int64 */
+            batch_id: number;
+            materialization_key: string;
+            /** @description Empty string when the batch predates substrate-digest custody — an honest gap, not a digest. */
+            substrate_digest: string;
+            note: string;
+        };
+        FeedsRegistry: {
+            path: string;
+            /** @description Computed over the ASSEMBLED registry (sorted per-feed identity lines) — the identity batches are bound to. Identical to `service.registry_fingerprint` by construction. */
+            registry_fingerprint: string;
+            /** @description SHA-256 of the committed registry file's bytes, as deployed. */
+            file_sha256: string;
+            note: string;
+        };
+        ReconcileWeld: {
+            engine: string;
+            rows_compared: number;
+            rows_exact: number;
+        };
+        /**
+         * @description The last COMMITTED reconcile receipt's summary — read from the
+         *     committed drift-report artifact, never recomputed at request time. The
+         *     reconcile ran against pinned blocks; this is its record, not a live
+         *     claim.
+         */
+        ReconcileSummary: {
+            /** @description The artifact's self-declared schema, e.g. `solvent.reconcile.drift-report/v1`. */
+            schema: string;
+            /** @description The artifact's own verdict — `pass` when every gated row welded exact. */
+            result: string;
+            /** @description The run's exit code: 0 pass, 1 verdict fail, 2 precondition, 3 retryable, 4 usage. */
+            exit_code: number;
+            /** Format: date-time */
+            finished_at: string;
+            gated_rows: number;
+            gated_exact: number;
+            gated_drift: number;
+            advisory_rows: number;
+            welds: components["schemas"]["ReconcileWeld"][];
+            /** @description The artifact's own content hash over its hash-scoped sections, so the summary served here can be checked against the committed file. */
+            comparison_sha256: string;
+            artifact_path: string;
+            note: string;
+        };
+        ProbeRecord: {
+            /** @description Repository path of a committed probe record. Probe records name endpoints by ENVIRONMENT VARIABLE only — publishable by construction. */
+            path: string;
+            note: string;
+        };
+        EvidenceResponse: {
+            /** Format: date-time */
+            served_at: string;
+            service: components["schemas"]["Service"];
+            /** @description The build's VCS revision (Go build stamp), `-dirty` suffixed when the working tree was modified. NULL when the build carries no stamp — never guessed. */
+            commit: string | null;
+            /** @description Null when no batch is servable; `substrate_unavailable_reason` then says why. */
+            substrate: components["schemas"]["SubstrateRef"] | null;
+            substrate_unavailable_reason?: string;
+            feeds_registry: components["schemas"]["FeedsRegistry"];
+            /** @description Null when no committed receipt artifact is present in this deployment; `reconcile_unavailable_reason` then says so. Absent evidence is stated, never approximated. */
+            reconcile: components["schemas"]["ReconcileSummary"] | null;
+            reconcile_unavailable_reason?: string;
+            probe_records: components["schemas"]["ProbeRecord"][];
+            notes: string[];
+        };
     };
     responses: {
         /** @description The request was malformed. */
@@ -1094,6 +1846,30 @@ export interface components {
                 "application/json": components["schemas"]["ErrorBody"];
             };
         };
+        /**
+         * @description The cursor is bound to a batch that is no longer the newest servable
+         *     batch. The client restarts pagination from page one against the fresh
+         *     batch — an honest restart. A page silently mixing rows from two
+         *     materializations is exactly what this status exists to prevent.
+         */
+        BatchSuperseded: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "error": {
+                 *         "code": "batch_superseded",
+                 *         "message": "the cursor was minted against batch 1, which is no longer the newest servable batch; restart pagination",
+                 *         "cursor_batch_id": 1,
+                 *         "current_batch_id": 2
+                 *       }
+                 *     }
+                 */
+                "application/json": components["schemas"]["BatchSupersededBody"];
+            };
+        };
     };
     parameters: {
         /** @description A 0x-prefixed 20-byte address. Validated strictly; a malformed address is a 400, never a silently different account. */
@@ -1123,6 +1899,207 @@ export interface operations {
                     "application/json": components["schemas"]["BookResponse"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["NoBatch"];
+        };
+    };
+    getPositions: {
+        parameters: {
+            query: {
+                /** @description Which engine's book to page. The two books are never blended into one ranking. */
+                engine: "aave_v3_etherfi" | "debt_manager";
+                /**
+                 * @description The `next_cursor` of the previous page, verbatim. OPAQUE — it encodes
+                 *     (batch id, rank) and is bound to the batch that minted it; a cursor
+                 *     whose batch has been superseded answers 409 rather than a mixed-batch
+                 *     page. A malformed cursor is a 400.
+                 */
+                cursor?: string;
+                /** @description Page size. Defaults to 50. */
+                limit?: number;
+                /**
+                 * @description Ranking within the engine's own comparator. Defaults to
+                 *     `liq_distance` — nearest to its OWN engine's liquidation boundary
+                 *     first. Ties break on (account) so the order is total and the cursor
+                 *     deterministic.
+                 */
+                sort?: "liq_distance" | "debt" | "hf" | "status";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One batch-stable page of the engine's book. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "batch": {
+                     *         "id": 1,
+                     *         "computed_at": "2026-07-29T10:00:00Z",
+                     *         "age_seconds": 5,
+                     *         "producer": "riskd",
+                     *         "status": "complete",
+                     *         "position_count": 4,
+                     *         "refused_count": 2,
+                     *         "refused_engines": [],
+                     *         "flagged_count": 1,
+                     *         "watermarks": [
+                     *           {
+                     *             "engine": "aave_v3_etherfi",
+                     *             "chain_id": 1,
+                     *             "last_block": 25635618,
+                     *             "acked_epoch": 0,
+                     *             "max_epoch_at_compute": 0,
+                     *             "sweep": null
+                     *           },
+                     *           {
+                     *             "engine": "debt_manager",
+                     *             "chain_id": 10,
+                     *             "last_block": 154796552,
+                     *             "acked_epoch": 0,
+                     *             "max_epoch_at_compute": 0,
+                     *             "sweep": {
+                     *               "rows": 3,
+                     *               "failed": 1,
+                     *               "success_sum": "309593004",
+                     *               "max_updated_at": "2026-07-29T09:40:00Z",
+                     *               "age_seconds": 1200,
+                     *               "generation": 4,
+                     *               "generation_open": false
+                     *             }
+                     *           }
+                     *         ],
+                     *         "supersession": {
+                     *           "superseded": false,
+                     *           "legs": [],
+                     *           "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass."
+                     *         }
+                     *       },
+                     *       "engine": "aave_v3_etherfi",
+                     *       "sort": "liq_distance",
+                     *       "limit": 1,
+                     *       "refused": false,
+                     *       "refusal": null,
+                     *       "total_positions": 2,
+                     *       "positions": [
+                     *         {
+                     *           "engine": "aave_v3_etherfi",
+                     *           "account": "0xAAaA000000000000000000000000000000000001",
+                     *           "status": "computed",
+                     *           "value_decimals": 8,
+                     *           "refusal": null,
+                     *           "flags": [
+                     *             "stale_price"
+                     *           ],
+                     *           "health_factor": {
+                     *             "wad": "1080000000000000000",
+                     *             "num": "6480000000000000",
+                     *             "den": "6000000000000000",
+                     *             "infinite": false,
+                     *             "note": "compare against 1e18 ON THE WAD; do not re-derive a float from num/den to decide eligibility."
+                     *           },
+                     *           "liquidatable": null,
+                     *           "total_collateral_base": "800000000000",
+                     *           "total_debt_base": "600000000000",
+                     *           "weighted_lt_sum": "6480000000000000",
+                     *           "avg_lt_bps": "8100",
+                     *           "collateral_value_usd": null,
+                     *           "max_borrow_lt": null,
+                     *           "borrowings": null,
+                     *           "legs": [
+                     *             {
+                     *               "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *               "symbol": "weETH",
+                     *               "decimals": 18,
+                     *               "live_debt": null,
+                     *               "live_collateral": "2000000000000000000",
+                     *               "debt_base": null,
+                     *               "collateral_base": "800000000000",
+                     *               "weighted_lt": "6480000000000000",
+                     *               "used_as_collateral": true,
+                     *               "debt_index_block": null,
+                     *               "collateral_index_block": 25635618,
+                     *               "amount": null,
+                     *               "value_usd": null,
+                     *               "max_borrow_contribution": null,
+                     *               "liq_threshold": "8100",
+                     *               "liq_bonus": "10500"
+                     *             }
+                     *           ],
+                     *           "price_inputs": [
+                     *             {
+                     *               "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *               "chain_id": 1,
+                     *               "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+                     *               "provenance": "adapter-output",
+                     *               "value": "400000000000",
+                     *               "decimals": 8,
+                     *               "block_number": 25635610,
+                     *               "source_as_of": "2026-07-29T09:56:30Z",
+                     *               "budget_seconds": 180,
+                     *               "verdict": "stale",
+                     *               "age_seconds": 210,
+                     *               "fresh": false,
+                     *               "note": "older than its budget but within the ceiling: COMPUTED AND FLAGGED, and the flag propagates into every aggregate containing it."
+                     *             }
+                     *           ],
+                     *           "as_of": {
+                     *             "balances_block": 25635618,
+                     *             "params_block": 25635600,
+                     *             "sweep_block": 0,
+                     *             "oldest_price_input": "2026-07-29T09:56:30Z",
+                     *             "stale_price_inputs": true,
+                     *             "note": "each leg additionally carries its OWN rate-index as-of block."
+                     *           },
+                     *           "liquidation_price": {
+                     *             "in_factor": true,
+                     *             "never_liquidatable": false,
+                     *             "scale_factor_num": "6000000000000000",
+                     *             "scale_factor_den": "6480000000000000",
+                     *             "already_breached": false,
+                     *             "prices": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "current_price": "400000000000",
+                     *                 "price_decimals": 8,
+                     *                 "price_floor": "370370370370",
+                     *                 "lowest_healthy_price": "370370370371"
+                     *               }
+                     *             ],
+                     *             "factor_assets": [
+                     *               "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+                     *             ],
+                     *             "held_assets": [
+                     *               "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+                     *             ],
+                     *             "boundary_is_healthy": true,
+                     *             "per_token_floor_omitted": false,
+                     *             "diagnostic": false,
+                     *             "axis": "eth_usd",
+                     *             "note": "at exactly this price the position is HEALTHY — liquidation begins strictly below it. Render `lowest_healthy_price`, the conservative ceil."
+                     *           }
+                     *         }
+                     *       ],
+                     *       "next_cursor": "MS5saXFfZGlzdGFuY2UuMQ",
+                     *       "notes": [
+                     *         "every row on this page was drawn from batch 1; `next_cursor` is bound to that batch and answers 409 once it is superseded as the newest servable batch.",
+                     *         "refused rows are ROWS: they stay on the page, named, and counted."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["PositionsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            409: components["responses"]["BatchSuperseded"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["NoBatch"];
@@ -1186,6 +2163,118 @@ export interface operations {
             503: components["responses"]["NoBatch"];
         };
     };
+    getAddressHistory: {
+        parameters: {
+            query?: {
+                /** @description Number of retained batches to cover, newest first. Defaults to 100. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description A 0x-prefixed 20-byte address. Validated strictly; a malformed address is a 400, never a silently different account. */
+                addr: components["parameters"]["Addr"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The address's per-engine history across retained batches. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "batch": {
+                     *         "id": 2,
+                     *         "computed_at": "2026-07-29T10:00:00Z",
+                     *         "age_seconds": 5,
+                     *         "producer": "riskd",
+                     *         "status": "complete",
+                     *         "position_count": 4,
+                     *         "refused_count": 2,
+                     *         "refused_engines": [],
+                     *         "flagged_count": 1,
+                     *         "watermarks": [
+                     *           {
+                     *             "engine": "aave_v3_etherfi",
+                     *             "chain_id": 1,
+                     *             "last_block": 25635618,
+                     *             "acked_epoch": 0,
+                     *             "max_epoch_at_compute": 0,
+                     *             "sweep": null
+                     *           }
+                     *         ],
+                     *         "supersession": {
+                     *           "superseded": false,
+                     *           "legs": [],
+                     *           "note": "evaluated against a live read of the cursor and epoch tables."
+                     *         }
+                     *       },
+                     *       "address": "0xAAaA000000000000000000000000000000000001",
+                     *       "limit": 100,
+                     *       "engines": [
+                     *         {
+                     *           "engine": "aave_v3_etherfi",
+                     *           "value_decimals": 8,
+                     *           "points": [
+                     *             {
+                     *               "batch_id": 2,
+                     *               "computed_at": "2026-07-29T10:00:00Z",
+                     *               "balances_block": 25635618,
+                     *               "status": "computed",
+                     *               "refusal": null,
+                     *               "health_factor": {
+                     *                 "wad": "1080000000000000000",
+                     *                 "num": "6480000000000000",
+                     *                 "den": "6000000000000000",
+                     *                 "infinite": false,
+                     *                 "note": "compare against 1e18 ON THE WAD."
+                     *               },
+                     *               "liquidatable": null,
+                     *               "total_collateral_base": "800000000000",
+                     *               "total_debt_base": "600000000000"
+                     *             },
+                     *             {
+                     *               "batch_id": 1,
+                     *               "computed_at": "2026-07-29T09:45:00Z",
+                     *               "balances_block": 25635540,
+                     *               "status": "refused",
+                     *               "refusal": {
+                     *                 "code": "G1",
+                     *                 "detail": "weETH/aaveoracle price input missing at compute time",
+                     *                 "note": "a refused batch is a POINT in this history, not a gap: the position existed and could not honestly be valued."
+                     *               },
+                     *               "health_factor": null,
+                     *               "liquidatable": null,
+                     *               "total_collateral_base": null,
+                     *               "total_debt_base": null
+                     *             }
+                     *           ],
+                     *           "withheld_batch_ids": [],
+                     *           "note": "points are persisted rows from retained batches, newest first; nothing is recomputed for this response."
+                     *         }
+                     *       ],
+                     *       "found": true,
+                     *       "lookup_complete": true,
+                     *       "withheld_engines": [],
+                     *       "lookup_complete_note": "every engine was available in the newest servable batch, so `found` is a definitive answer there; older points speak only for their own batches.",
+                     *       "notes": [
+                     *         "retention bounds this history: batches outside the retention window are gone from this surface, and their absence is stated by `limit`, never rendered as a flat line."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["AddressHistoryResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["NoBatch"];
+        };
+    };
     getObservatory: {
         parameters: {
             query?: {
@@ -1208,6 +2297,637 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getObservatorySeries: {
+        parameters: {
+            query: {
+                engine: "aave_v3_etherfi" | "debt_manager";
+                /** @description Inclusive lower bound on bucket start. Unbounded when absent. */
+                from?: string;
+                /** @description Inclusive upper bound on bucket start. Unbounded when absent. */
+                to?: string;
+                /**
+                 * @description Stride in seconds. The rollup's native bucket is hourly (3600); a
+                 *     larger step serves every Nth captured bucket verbatim — never an
+                 *     average of the buckets it skips.
+                 */
+                step?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rollup series for one engine. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "engine": "debt_manager",
+                     *       "usd_decimals": 6,
+                     *       "from": "2026-07-29T08:00:00Z",
+                     *       "to": null,
+                     *       "step_seconds": null,
+                     *       "points": [
+                     *         {
+                     *           "bucket_start": "2026-07-29T08:00:00Z",
+                     *           "last_block": 154794000,
+                     *           "refused": false,
+                     *           "refusal_code": null,
+                     *           "accounts": 3,
+                     *           "refused_positions": 1,
+                     *           "liquidatable_positions": 1,
+                     *           "debt_usd": "309593004",
+                     *           "collateral_usd": "412790672",
+                     *           "rates": [
+                     *             {
+                     *               "engine": "debt_manager",
+                     *               "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                     *               "symbol": "USDC",
+                     *               "kind": "borrow_apy",
+                     *               "value": "50000000000000000",
+                     *               "as_of_block": 154793990,
+                     *               "note": "as of its OWN last update, which can trail the bucket."
+                     *             }
+                     *           ]
+                     *         },
+                     *         {
+                     *           "bucket_start": "2026-07-29T09:00:00Z",
+                     *           "last_block": 154796552,
+                     *           "refused": true,
+                     *           "refusal_code": "FLAG_CUSTODY_UNPROVEN",
+                     *           "accounts": null,
+                     *           "refused_positions": 0,
+                     *           "liquidatable_positions": null,
+                     *           "debt_usd": null,
+                     *           "collateral_usd": null,
+                     *           "rates": []
+                     *         }
+                     *       ],
+                     *       "notes": [
+                     *         "a withheld bucket carries NULL totals and names its refusal code: a rollup that rendered an unproven book as zero debt would fabricate the exact reassurance this surface exists to withhold."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ObservatorySeriesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getEvents: {
+        parameters: {
+            query?: {
+                /** @description The `next_cursor` of the previous page, verbatim. OPAQUE. A malformed cursor is a 400. */
+                cursor?: string;
+                /** @description Page size. Defaults to 50. */
+                limit?: number;
+                engine?: "aave_v3_etherfi" | "debt_manager";
+                /** @description Restrict to one account's own actions. */
+                account?: string;
+                /** @description Display-vocabulary filter, comma-separated. Absent means every display type. */
+                types?: components["schemas"]["EventDisplayType"][];
+                /** @description Inclusive lower bound on block_number, applied per chain. */
+                since_block?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the feed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "filter": {
+                     *         "engine": null,
+                     *         "account": null,
+                     *         "types": [],
+                     *         "since_block": null
+                     *       },
+                     *       "limit": 2,
+                     *       "events": [
+                     *         {
+                     *           "chain_id": 1,
+                     *           "engine": "aave_v3_etherfi",
+                     *           "block_number": 25635601,
+                     *           "block_time": "2026-07-29T09:57:11Z",
+                     *           "tx_hash": "0x9c33269e9d8f01d1db494ca4cf693c99377f78f9628c1b74d5a1a8592e0f2a11",
+                     *           "log_index": 42,
+                     *           "seq": 0,
+                     *           "type": "liquidation",
+                     *           "raw_type": "aave_liquidation_call",
+                     *           "account": "0xAAaA000000000000000000000000000000000001",
+                     *           "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                     *           "symbol": "USDC",
+                     *           "amount": "-2500000000",
+                     *           "amount_decimals": 6,
+                     *           "liquidation": {
+                     *             "liquidator": "0xBBbB000000000000000000000000000000000002",
+                     *             "debt_asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                     *             "debt_repaid": "2500000000",
+                     *             "debt_decimals": 6,
+                     *             "seized": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "symbol": "weETH",
+                     *                 "amount": "656250000000000000",
+                     *                 "decimals": 18
+                     *               }
+                     *             ],
+                     *             "realized_bonus_bps": "500",
+                     *             "configured_bonus_bps": "500",
+                     *             "note": "extracted from the event's own structured payload; realized bonus is compared against the configured bonus AT THIS EVENT's effective params, not today's."
+                     *           }
+                     *         },
+                     *         {
+                     *           "chain_id": 10,
+                     *           "engine": "debt_manager",
+                     *           "block_number": 154796490,
+                     *           "block_time": null,
+                     *           "tx_hash": "0x51f0b3e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a7702",
+                     *           "log_index": 7,
+                     *           "seq": 0,
+                     *           "type": "borrow",
+                     *           "raw_type": "borrow",
+                     *           "account": "0xccCc000000000000000000000000000000000003",
+                     *           "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+                     *           "symbol": "USDC",
+                     *           "amount": "1200000000",
+                     *           "amount_decimals": 6,
+                     *           "liquidation": null
+                     *         }
+                     *       ],
+                     *       "next_cursor": "MTU0Nzk2NDkwLjB4NTFmMC4zLjA",
+                     *       "notes": [
+                     *         "`block_time` is null until the block's header is custodied — header time is chain-asserted or absent, never fabricated. Render the block number in the meantime.",
+                     *         "ordering is (block_number, tx_hash, log_index, seq) DESC across engines; the block numbers of two chains are not comparable as TIME."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getParams: {
+        parameters: {
+            query?: {
+                engine?: "aave_v3_etherfi" | "debt_manager";
+                /** @description Restrict to one asset's parameter changes. */
+                asset?: string;
+                /** @description The `next_cursor` of the previous page, verbatim. OPAQUE. A malformed cursor is a 400. */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of the parameter timeline. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "engine": null,
+                     *       "asset": null,
+                     *       "params": [
+                     *         {
+                     *           "engine": "aave_v3_etherfi",
+                     *           "chain_id": 1,
+                     *           "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *           "symbol": "weETH",
+                     *           "fields": [
+                     *             {
+                     *               "name": "ltv",
+                     *               "value": "7800",
+                     *               "address": null,
+                     *               "prior": null,
+                     *               "unit": "bps"
+                     *             },
+                     *             {
+                     *               "name": "liq_threshold",
+                     *               "value": "8100",
+                     *               "address": null,
+                     *               "prior": null,
+                     *               "unit": "bps"
+                     *             },
+                     *             {
+                     *               "name": "liq_bonus",
+                     *               "value": "10500",
+                     *               "address": null,
+                     *               "prior": null,
+                     *               "unit": "bps"
+                     *             }
+                     *           ],
+                     *           "effective_block": 25635600,
+                     *           "effective_log_index": 12,
+                     *           "source_event": "CollateralConfigurationChanged",
+                     *           "tx_hash": "0x2b8a1f0e6c33269e9d8f01d1db494ca4cf693c99377f78f9628c1b74d5a1a859",
+                     *           "block_time": "2026-07-29T09:57:00Z"
+                     *         },
+                     *         {
+                     *           "engine": "debt_manager",
+                     *           "chain_id": 10,
+                     *           "asset": null,
+                     *           "fields": [
+                     *             {
+                     *               "name": "borrow_apy",
+                     *               "value": "50000000000000000",
+                     *               "address": null,
+                     *               "prior": "40000000000000000",
+                     *               "unit": "per-second-1e18"
+                     *             }
+                     *           ],
+                     *           "effective_block": 154790000,
+                     *           "effective_log_index": 3,
+                     *           "source_event": "borrow_apy_set",
+                     *           "tx_hash": "0x7702a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a51f0b3e2",
+                     *           "block_time": null
+                     *         }
+                     *       ],
+                     *       "next_cursor": null,
+                     *       "notes": [
+                     *         "denominations are the ENGINE's own and are named per field: Aave publishes bps (1e4 scale); the Debt Manager's percent scale is 100e18. No cross-engine normalization exists.",
+                     *         "`block_time` is null until the block's header is custodied — never fabricated."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["ParamsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getPriceHistory: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one price source key, verbatim (e.g. `aaveoracle:0x...`, `priceproviderv2`, `chainlink:0x...`). */
+                source?: string;
+                from_block?: number;
+                to_block?: number;
+                /** @description Block stride. Serves every row whose block clears the previous served row by at least `step` — exact rows, never averages. */
+                step?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The asset's address. Strictly validated; a malformed address is a 400. */
+                asset: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The asset's price series, one per (chain, source) key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *       "source": null,
+                     *       "from_block": 25635500,
+                     *       "to_block": null,
+                     *       "step": null,
+                     *       "series": [
+                     *         {
+                     *           "chain_id": 1,
+                     *           "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *           "symbol": "weETH",
+                     *           "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+                     *           "owner_engine": "aave_v3_etherfi",
+                     *           "provenance": "adapter-output",
+                     *           "decimals": 8,
+                     *           "points": [
+                     *             {
+                     *               "block_number": 25635550,
+                     *               "value": "399800000000",
+                     *               "anchor_block": null,
+                     *               "source_as_of": "2026-07-29T09:44:30Z",
+                     *               "valid": false,
+                     *               "invalid_reason": "unverifiable after a reorg: no surviving poll anchor covers this observation"
+                     *             },
+                     *             {
+                     *               "block_number": 25635610,
+                     *               "value": "400000000000",
+                     *               "anchor_block": 25635609,
+                     *               "source_as_of": "2026-07-29T09:56:30Z",
+                     *               "valid": true,
+                     *               "invalid_reason": ""
+                     *             }
+                     *           ],
+                     *           "quarantined_ranges": [
+                     *             {
+                     *               "from_block": 25635550,
+                     *               "to_block": 25635550,
+                     *               "rows": 1,
+                     *               "reasons": [
+                     *                 {
+                     *                   "key": "unverifiable after a reorg: no surviving poll anchor covers this observation",
+                     *                   "count": 1
+                     *                 }
+                     *               ]
+                     *             }
+                     *           ],
+                     *           "note": "quarantined rows are retained and served with their reasons; they are never deleted and never smoothed into the valid series."
+                     *         }
+                     *       ],
+                     *       "notes": [
+                     *         "an asset with no custodied observations answers with an empty `series` — an ANSWER about custody, not a claim that the asset has no price.",
+                     *         "downsampling serves exact rows and never averages, least of all across a validity boundary."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["PricesResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    runBookScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A committed scenario id, e.g. `weeth_market_depeg_oracles_held`. An unknown id is a 404. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The book-wide result for this scenario. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "batch": {
+                     *         "id": 1,
+                     *         "computed_at": "2026-07-29T10:00:00Z",
+                     *         "age_seconds": 5,
+                     *         "producer": "riskd",
+                     *         "status": "complete",
+                     *         "position_count": 4,
+                     *         "refused_count": 2,
+                     *         "refused_engines": [],
+                     *         "flagged_count": 1,
+                     *         "watermarks": [
+                     *           {
+                     *             "engine": "aave_v3_etherfi",
+                     *             "chain_id": 1,
+                     *             "last_block": 25635618,
+                     *             "acked_epoch": 0,
+                     *             "max_epoch_at_compute": 0,
+                     *             "sweep": null
+                     *           },
+                     *           {
+                     *             "engine": "debt_manager",
+                     *             "chain_id": 10,
+                     *             "last_block": 154796552,
+                     *             "acked_epoch": 0,
+                     *             "max_epoch_at_compute": 0,
+                     *             "sweep": {
+                     *               "rows": 3,
+                     *               "failed": 1,
+                     *               "success_sum": "309593004",
+                     *               "max_updated_at": "2026-07-29T09:40:00Z",
+                     *               "age_seconds": 1200,
+                     *               "generation": 4,
+                     *               "generation_open": false
+                     *             }
+                     *           }
+                     *         ],
+                     *         "supersession": {
+                     *           "superseded": false,
+                     *           "legs": [],
+                     *           "note": "a superseded batch is still served: the flag is the contract."
+                     *         }
+                     *       },
+                     *       "scenario_config_version": "v1",
+                     *       "scenario_id": "weeth_market_depeg_oracles_held",
+                     *       "scenario_version": "v1",
+                     *       "label": "weETH market depeg to 0.95 (oracles held)",
+                     *       "description": "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable.",
+                     *       "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+                     *       "shocks": [],
+                     *       "out_of_model": [
+                     *         "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+                     *         "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order, so this is neutral rather than conservative"
+                     *       ],
+                     *       "applied_shocks": [],
+                     *       "held_flat": [],
+                     *       "engines": [
+                     *         {
+                     *           "engine": "aave_v3_etherfi",
+                     *           "usd_decimals": 8,
+                     *           "before": {
+                     *             "accounts": 1,
+                     *             "eligible_accounts": 0,
+                     *             "total_collateral_usd": "800000000000",
+                     *             "total_debt_usd": "600000000000",
+                     *             "eligible_debt_usd": "0",
+                     *             "collateral_at_risk_usd": "0",
+                     *             "bad_debt_usd": "0"
+                     *           },
+                     *           "after": {
+                     *             "accounts": 1,
+                     *             "eligible_accounts": 0,
+                     *             "total_collateral_usd": "800000000000",
+                     *             "total_debt_usd": "600000000000",
+                     *             "eligible_debt_usd": "0",
+                     *             "collateral_at_risk_usd": "0",
+                     *             "bad_debt_usd": "0"
+                     *           },
+                     *           "newly_eligible_accounts": 0,
+                     *           "eligible_debt_delta_usd": "0",
+                     *           "bad_debt_delta_usd": "0",
+                     *           "market_realization": {
+                     *             "hfs_unchanged": true,
+                     *             "execution_shortfall_usd": "40000000000",
+                     *             "bad_debt_at_liquidation_usd": "0",
+                     *             "usd_decimals": 8,
+                     *             "seizure_model": "pro-rata-over-counted-collateral",
+                     *             "note": "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it). The output is the gap the protocol is not seeing."
+                     *           },
+                     *           "projection": null,
+                     *           "note": "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
+                     *         },
+                     *         {
+                     *           "engine": "debt_manager",
+                     *           "usd_decimals": 6,
+                     *           "before": {
+                     *             "accounts": 1,
+                     *             "eligible_accounts": 1,
+                     *             "total_collateral_usd": "4000000000",
+                     *             "total_debt_usd": "4620000000",
+                     *             "eligible_debt_usd": "4200000000",
+                     *             "collateral_at_risk_usd": "4000000000",
+                     *             "bad_debt_usd": "239603961"
+                     *           },
+                     *           "after": {
+                     *             "accounts": 1,
+                     *             "eligible_accounts": 1,
+                     *             "total_collateral_usd": "4000000000",
+                     *             "total_debt_usd": "4620000000",
+                     *             "eligible_debt_usd": "4200000000",
+                     *             "collateral_at_risk_usd": "4000000000",
+                     *             "bad_debt_usd": "239603961"
+                     *           },
+                     *           "newly_eligible_accounts": 0,
+                     *           "eligible_debt_delta_usd": "0",
+                     *           "bad_debt_delta_usd": "0",
+                     *           "market_realization": {
+                     *             "hfs_unchanged": true,
+                     *             "execution_shortfall_usd": "200000000",
+                     *             "bad_debt_at_liquidation_usd": "0",
+                     *             "usd_decimals": 6,
+                     *             "seizure_model": "pro-rata-over-counted-collateral",
+                     *             "note": "same axis, this engine's own 6-decimal USD."
+                     *           },
+                     *           "projection": null,
+                     *           "note": "delta-only: zero deltas here are THE FINDING — HFs are bit-identical while realized proceeds fall."
+                     *         }
+                     *       ],
+                     *       "excluded_engines": [],
+                     *       "coverage": {
+                     *         "batch_positions": 4,
+                     *         "in_book": 2,
+                     *         "refused_in_batch": 2,
+                     *         "excluded_by_this_layer": 0,
+                     *         "excluded": [],
+                     *         "withheld_engines": [],
+                     *         "stress_coverage_is_full": true,
+                     *         "note": "every position the batch carries reached the run; the two refused rows are named in the batch's own counts and enter no arithmetic."
+                     *       },
+                     *       "notes": [
+                     *         "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["RunBookResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["NoBatch"];
+        };
+    };
+    getEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deployment's evidence manifest. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "served_at": "2026-07-29T10:00:05Z",
+                     *       "service": {
+                     *         "name": "solvent-api",
+                     *         "version": "748c09d1e2f3",
+                     *         "schema_version": 16,
+                     *         "algorithm_revision": 4,
+                     *         "scenario_config_version": "v1",
+                     *         "registry_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     *         "seizure_model": "pro-rata-over-counted-collateral"
+                     *       },
+                     *       "commit": "748c09d1e2f3",
+                     *       "substrate": {
+                     *         "batch_id": 1,
+                     *         "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
+                     *         "substrate_digest": "b23c2c4c182300512dcefa20f0fbf3740ac24077271059e1bd32511fec5f7ab5",
+                     *         "note": "the digest is computed over the batch's INPUTS — the risk rows, consulted prices and consulted collateral flags — so two batches with identical substrate digests were computed from identical evidence."
+                     *       },
+                     *       "feeds_registry": {
+                     *         "path": "recon/feeds.json",
+                     *         "registry_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                     *         "file_sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+                     *         "note": "`registry_fingerprint` is computed over the ASSEMBLED registry (the identity the batches are bound to); `file_sha256` is the committed file's bytes as deployed."
+                     *       },
+                     *       "reconcile": {
+                     *         "schema": "solvent.reconcile.drift-report/v1",
+                     *         "result": "pass",
+                     *         "exit_code": 0,
+                     *         "finished_at": "2026-07-29T02:14:07Z",
+                     *         "gated_rows": 87,
+                     *         "gated_exact": 87,
+                     *         "gated_drift": 0,
+                     *         "advisory_rows": 21,
+                     *         "welds": [
+                     *           {
+                     *             "engine": "debt_manager",
+                     *             "rows_compared": 29,
+                     *             "rows_exact": 29
+                     *           },
+                     *           {
+                     *             "engine": "aave_v3_etherfi",
+                     *             "rows_compared": 14,
+                     *             "rows_exact": 14
+                     *           }
+                     *         ],
+                     *         "comparison_sha256": "5f0b3e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025",
+                     *         "artifact_path": "roadmap/evidence/artifacts/w1-reconcile/drift-report.json",
+                     *         "note": "read from the COMMITTED receipt artifact; the reconcile itself ran against a pinned block, not at request time."
+                     *       },
+                     *       "probe_records": [
+                     *         {
+                     *           "path": "recon/p3-probes.md",
+                     *           "note": "probe records name endpoints by environment variable only — publishable by construction."
+                     *         }
+                     *       ],
+                     *       "notes": [
+                     *         "this manifest is deploy-bound: every field is carried by the build, persisted by a batch, or read from a committed artifact. Nothing here is measured at request time."
+                     *       ]
+                     *     }
+                     */
+                    "application/json": components["schemas"]["EvidenceResponse"];
+                };
+            };
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalError"];
         };
