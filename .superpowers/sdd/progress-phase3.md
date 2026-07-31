@@ -2554,3 +2554,42 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   B3 handlers wave → land W1/W2/W3 (+ design pass on their charts under
   the upgraded charter) → acceptance result → E1 paperwork (W2 receipt,
   W3-object, D-014, ROADMAP, rescope) → C2 contract wave → W4/W5/W6.
+- **B1+B2 LANDED (21:52)**: B1 reported complete (8 readers; batch-pinned
+  cursor w/ typed refusals; two-mode events ordering law — engine-scoped by
+  height, cross-engine by block_time NULLS LAST w/ since_block REJECTED;
+  unit-tagged deltas from a closed set; go/ast-welded TOTAL display
+  vocabulary; validity-split price downsampling exposing NO aggregates over
+  invalid runs; 4/4 mutants killed incl. one that first SURVIVED and forced
+  a test hardening — recorded in p5-b1.md). Integrator verification on the
+  joint tree: build+vet clean, store 191s / indexer / backfill all green
+  (-p 1, solvent_test). Landed as the designed pair: `18339de` (B2 custody
+  substrate, 00015/00016, rewind-tx header deletion, backfill tool) then
+  `dc5c844` (B1 readers, 00017, schema welds 14→17 — pair green at head).
+  Pushed. B3 handlers wave DISPATCHED against the C1 contract + landed
+  readers.
+- **ACCEPTANCE: three distinct transient causes, OP rotation exhausted
+  (21:52)**: retry 2 = exit 3, Alchemy 429 CU/s on callAtHash mid-run
+  (comparison sha256 53477969… written — the drift comparison itself never
+  disagreed); retry 3 = exit 2 at PREFLIGHT, chain-id verify hit endpoint
+  1's free-plan cap (verify-all-endpoints is the fork-split defense, so one
+  exhausted provider refuses the whole run — correct behavior). Retry 4
+  queued after a ~20-min breather with verdict-free pacing flags
+  (-rps 1.0 -timeout 45m -rpc-attempts 8; the round-11 flag-surface closure
+  classifies all three as taint-free). If still capped → owner decision on
+  OP RPC capacity (paid tier or second key).
+- **W2+W1 REPORTED GREEN (21:55)**: W2 Inspector (56/56 isolated: three-
+  valued found rendering w/ "no position" NOWHERE on the unknowable page;
+  engine-correct formula blocks; descriptor-fed EvidenceDrawer marked
+  operational-not-proven; drawer scroll-lock ruling closed; strict address
+  law both entries). W1 Book (77/77: rulings 1–3 verbatim — Lab in primary
+  tabs, warn outlined-square, derived warn-band disclosure at table+legend
+  level; PositionSummary-shaped rows ready for C2; materialization key
+  honestly em-dashed as "served by /v1/evidence"; 409 restart visible and
+  atomic). Both hold for W3 + one serial full-suite verification before
+  landing. W2 found a LATENT W0 BUG driving a real browser: SolventClient
+  captured globalThis.fetch UNBOUND — browsers enforce WebIDL this-coercion
+  ("Illegal invocation"), undici tolerates it, so 292 Node tests never saw
+  it. Integrator fixed at the capture (`2ab0f22`, global.bind(globalThis),
+  default path only), regression test simulates the WebIDL rule and was
+  proven RED against the unbound capture; 293/293. Wave workarounds
+  (book-client/inspector-client/labClient) get deleted at W-landing time.
