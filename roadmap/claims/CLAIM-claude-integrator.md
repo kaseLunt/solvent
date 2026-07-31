@@ -1,26 +1,26 @@
 ---
-claim_id: 8c263fe2-7c13-471e-8200-f958b816b998
-generation: 12
+claim_id: 1c51b480-68b9-4e8d-a46b-3be0ef06405f
+generation: 13
 agent: claude-integrator
 task: W2
 status: active
 integrator: true
 branch: main
 worktree_id: 391b6a12-eb13-597c-bc9a-37240d9dfd29
-base_commit: 51f9a849a85b4610b60278568af1eb79ae8d3c81
+base_commit: f57d8553fa2fd3c96d25f73d4c4f692469b404b1
 allowed_paths:
   - docs/plans/**
   - docs/specs/**
   - recon/derivation-notes.md
   - recon/p3-probes.md
   - recon/feeds.json
+  - recon/v4-proposal.json
+  - recon/v4-proposal-arfc-post1.html
   - internal/**
   - cmd/**
   - config/**
   - api/**
   - packages/**
-  - web/**
-  - deploy/**
   - go.mod
   - go.sum
   - .superpowers/sdd/**
@@ -30,10 +30,12 @@ allowed_paths:
   - .env.example
   - .github/workflows/ci.yml
   - .gitignore
-scope_hash: sha256:7826381c15960226924a0b1410761a29e2e144ebfabca1ad76cf38e7dc43c0ab
-issued_at: 2026-07-31T03:27:07Z
-lease_expires: 2026-08-01T15:25:01Z
-updated_at: 2026-07-31T15:25:01Z
+  - web/**
+  - deploy/**
+scope_hash: sha256:e05502c0edaf2a3ab2e27a10e1b245c8f84f8a9779e8e5aedb6b8d0ec2d4e7d4
+issued_at: 2026-07-31T17:20:27Z
+lease_expires: 2026-08-01T01:20:27Z
+updated_at: 2026-07-31T17:20:27Z
 ---
 
 # Claim: claude-integrator -> W2
