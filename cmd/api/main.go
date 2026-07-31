@@ -577,6 +577,7 @@ func (s *server) routes() {
 	mux.HandleFunc("GET /v1/params", s.handleParams)
 	mux.HandleFunc("GET /v1/prices/{asset}", s.handlePrices)
 	mux.HandleFunc("POST /v1/scenarios/{id}/run-book", s.handleRunBook)
+	mux.HandleFunc("GET /v1/batches/{id}", s.handleBatch)
 	mux.HandleFunc("GET /v1/evidence", s.handleEvidence)
 	mux.HandleFunc("GET /v1/stream", s.handleStream)
 	mux.HandleFunc("GET /v1/meta", s.handleMeta)

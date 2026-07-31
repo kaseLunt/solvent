@@ -639,7 +639,9 @@ func TestStressServesExactRecomputableValues(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &body))
 	require.Equal(t, "v1", str(t, body, "scenario_config_version"))
 	scenarios := arr(t, body, "scenarios")
-	require.Len(t, scenarios, 11, "the whole committed scenario set must be evaluated, not a subset")
+	// 12 = the 11 stress scenarios + dm_composition_census (Wave S: the
+	// explicit-claim-or-explicit-decision record whose axes shock ×1/1).
+	require.Len(t, scenarios, 12, "the whole committed scenario set must be evaluated, not a subset")
 
 	// ETH −30%: weETH 4000.00000000 × 70/100 = 2800.00000000, so
 	// collateral = 2 × 2800 = 5600.00000000, weighted = 5600×0.81 = 4536,

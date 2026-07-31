@@ -1547,10 +1547,33 @@ type wireRateIndex struct {
 	Asset  string `json:"asset"`
 	Symbol string `json:"symbol,omitempty"`
 	Kind   string `json:"kind"`
-	Value  string `json:"value"`
+	// Scale is the value's own denomination, from the closed per-kind
+	// vocabulary (rateIndexScale). Never inferred from the value's magnitude.
+	Scale string `json:"scale"`
+	Value string `json:"value"`
 	// AsOfBlock is the index's OWN as-of. It can trail the derive cursor badly.
 	AsOfBlock uint64 `json:"as_of_block"`
 	Note      string `json:"note"`
+}
+
+// rateIndexScale names one rate-index kind's denomination — the CLOSED
+// vocabulary the contract's RateIndex.scale enum mirrors. The kinds are the
+// derivers' own (internal/derive/runner.go's rateKind* constants): Aave's
+// reserve indexes are ray (1e27); the Debt Manager's interest index is
+// 1e18-scaled (the USD-6 view of a normalized amount is value·index/1e18).
+// A kind outside the vocabulary serves the fail-honest "unstated" — the raw
+// decimal still serves verbatim, and no scale is invented for it (the
+// history rollup can carry a kind newer than this build's vocabulary, and a
+// serving refusal there would black out history to punish a label).
+func rateIndexScale(kind string) string {
+	switch kind {
+	case "variable_borrow_index", "liquidity_index":
+		return "ray-1e27"
+	case "borrow_index":
+		return "index-1e18"
+	default:
+		return "unstated"
+	}
 }
 
 type observatoryResponse struct {
@@ -1635,6 +1658,7 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 			Engine:    ix.Engine,
 			Asset:     asset.Hex(),
 			Kind:      ix.Kind,
+			Scale:     rateIndexScale(ix.Kind),
 			Value:     orZeroString(ix.Value),
 			AsOfBlock: ix.Block,
 			Note:      "as-of-last-ReserveDataUpdated: this index can trail the derive cursor. `as_of_block` is its OWN as-of and is the only honest freshness statement about it.",

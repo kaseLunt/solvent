@@ -69,14 +69,19 @@ type wirePriceSeries struct {
 }
 
 type pricesResponse struct {
-	ServedAt  time.Time         `json:"served_at"`
-	Asset     string            `json:"asset"`
-	Source    *string           `json:"source"`
-	FromBlock *int64            `json:"from_block"`
-	ToBlock   *int64            `json:"to_block"`
-	Step      *int64            `json:"step"`
-	Series    []wirePriceSeries `json:"series"`
-	Notes     []string          `json:"notes"`
+	ServedAt  time.Time `json:"served_at"`
+	Asset     string    `json:"asset"`
+	Source    *string   `json:"source"`
+	FromBlock *int64    `json:"from_block"`
+	ToBlock   *int64    `json:"to_block"`
+	Step      *int64    `json:"step"`
+	// Chains names the CUSTODY CHAINS this answer consulted — the response's
+	// chain identity. An empty `series` still states exactly where custody
+	// was looked for, so "no observations" can never be mistaken for "one
+	// chain was never asked".
+	Chains []uint64          `json:"chains"`
+	Series []wirePriceSeries `json:"series"`
+	Notes  []string          `json:"notes"`
 }
 
 func (s *server) handlePrices(w http.ResponseWriter, r *http.Request) {
@@ -165,11 +170,13 @@ func (s *server) handlePrices(w http.ResponseWriter, r *http.Request) {
 		FromBlock: fromEcho,
 		ToBlock:   toEcho,
 		Step:      stepEcho,
+		Chains:    chains,
 		Series:    []wirePriceSeries{},
 		Notes: []string{
 			"an asset with no custodied observations answers with an empty `series` — an ANSWER about custody, not a claim that the asset has no price.",
 			"downsampling serves EXACT custodied rows and never averages; the stride restarts at every validity boundary, so a quarantined observation never contributes to a valid-looking point and each validity segment serves at least one exact row.",
 			"`source_as_of` is the chain-asserted as-of; database insert time is never substituted. `anchor_block` is the poll anchor binding the observation to a custodied block hash; null is a provenance statement, not a gap.",
+			"`chains` names the custody chains this answer consulted; each series carries its own `chain_id` from that set.",
 		},
 	}
 	if source != "" {

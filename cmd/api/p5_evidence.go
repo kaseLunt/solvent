@@ -101,12 +101,73 @@ type wireSubstrateRef struct {
 	Note               string `json:"note"`
 }
 
+// wireProofSubject / wireLiveSubject are the manifest's TWO SUBJECTS
+// (AMENDMENT 1): the pinned, exactly-reproducible acceptance evidence vs the
+// currently-serving batch's watermarked identity. They are never one identity
+// — a live batch must never read as reconciled-exact.
+type wireProofSubject struct {
+	// Status is the receipt's OWN strict conjunction, evaluated server-side:
+	// accepted | rejected | unavailable. The same conjunction is re-derivable
+	// from the served `reconcile` fields — a consumer finding the two in
+	// contradiction must render the contradiction, never the badge.
+	Status string `json:"status"`
+	// Detail names the violated conjunct (rejected) or the absence reason
+	// (unavailable); empty exactly on accepted.
+	Detail string `json:"detail"`
+	// Pin is the receipt's own comparison sha — non-nil whenever a receipt is
+	// present, accepted or rejected.
+	Pin *string `json:"pin"`
+}
+
+type wireLiveSubject struct {
+	// Status: serving | no_batch. `no_batch` is a first-class state.
+	Status string `json:"status"`
+	// Reason mirrors substrate_unavailable_reason; empty exactly on serving.
+	Reason string `json:"reason"`
+}
+
+// proofSubjectFrom evaluates the committed receipt's OWN strict conjunction —
+// result "pass", exit 0, zero gated drift, every gated row exact, every
+// per-engine weld whole. An internally inconsistent receipt (a "pass" with
+// drift) is REJECTED with the violated conjunct named: this surface would
+// rather call a contradictory receipt rejected than launder it into a proof.
+func proofSubjectFrom(reconcile *wireReconcileSummary, unavailableReason string) wireProofSubject {
+	if reconcile == nil {
+		reason := unavailableReason
+		if reason == "" {
+			reason = "no committed reconcile receipt artifact is present in this deployment."
+		}
+		return wireProofSubject{Status: "unavailable", Detail: reason}
+	}
+	pin := strPtr(reconcile.ComparisonSHA256)
+	rejected := func(detail string) wireProofSubject {
+		return wireProofSubject{Status: "rejected", Detail: detail, Pin: pin}
+	}
+	if reconcile.Result != "pass" {
+		return rejected(fmt.Sprintf("receipt verdict %q (exit %d)", reconcile.Result, reconcile.ExitCode))
+	}
+	if reconcile.ExitCode != 0 {
+		return rejected(fmt.Sprintf("verdict \"pass\" with exit code %d — internally inconsistent receipt", reconcile.ExitCode))
+	}
+	if reconcile.GatedDrift != 0 || reconcile.GatedExact != reconcile.GatedRows {
+		return rejected(fmt.Sprintf("gated %d/%d exact, drift %d", reconcile.GatedExact, reconcile.GatedRows, reconcile.GatedDrift))
+	}
+	for _, weld := range reconcile.Welds {
+		if weld.RowsExact != weld.RowsCompared {
+			return rejected(fmt.Sprintf("%s weld %d/%d exact", weld.Engine, weld.RowsExact, weld.RowsCompared))
+		}
+	}
+	return wireProofSubject{Status: "accepted", Pin: pin}
+}
+
 type evidenceResponse struct {
 	ServedAt time.Time   `json:"served_at"`
 	Service  wireService `json:"service"`
 	// Commit is the build's VCS revision, `-dirty` suffixed when the working
 	// tree was modified; null when the build carries no stamp — never guessed.
 	Commit                     *string               `json:"commit"`
+	ProofSubject               wireProofSubject      `json:"proof_subject"`
+	LiveSubject                wireLiveSubject       `json:"live_subject"`
 	Substrate                  *wireSubstrateRef     `json:"substrate"`
 	SubstrateUnavailableReason string                `json:"substrate_unavailable_reason,omitempty"`
 	FeedsRegistry              wireFeedsRegistry     `json:"feeds_registry"`
@@ -150,12 +211,15 @@ func (s *server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 		Notes: []string{
 			"this manifest is deploy-bound: every field is carried by the build, persisted by a batch, or read from a committed artifact. Nothing here is measured at request time.",
 			"absent evidence is stated with null and a reason — never approximated. Committed artifacts name endpoints by environment variable only; this surface serves no endpoint URL and no DSN.",
+			"THE TWO SUBJECTS are never one identity: `proof_subject` is the committed receipt's own strict conjunction AT ITS PIN; `live_subject` is the serving batch's watermarked identity. A live batch never reads as reconciled-exact, and the proof's exactness never transfers.",
 		},
 	}
+	out.ProofSubject = proofSubjectFrom(s.evidence.Reconcile, s.evidence.ReconcileUnavailable)
 	if s.version != "devel" {
 		out.Commit = strPtr(s.version)
 	}
 	if inputs.HasBatch {
+		out.LiveSubject = wireLiveSubject{Status: "serving"}
 		out.Substrate = &wireSubstrateRef{
 			BatchID:            inputs.BatchID,
 			MaterializationKey: inputs.MaterializationKey,
@@ -164,6 +228,7 @@ func (s *server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		out.SubstrateUnavailableReason = "no complete risk batch is servable: either the materializer has not run, or every batch present fails the completeness predicate. The manifest describes the DEPLOYMENT either way."
+		out.LiveSubject = wireLiveSubject{Status: "no_batch", Reason: out.SubstrateUnavailableReason}
 	}
 	if s.evidence.Reconcile == nil {
 		reason := s.evidence.ReconcileUnavailable

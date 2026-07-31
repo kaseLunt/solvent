@@ -20,16 +20,15 @@ package main
 // until the header is custodied. This layer NEVER substitutes a database clock
 // — the null is the honest state and the client renders the block number.
 //
-// # Amounts are the CUSTODIED deltas, verbatim
+// # Amounts are the CUSTODIED deltas, verbatim, with their unit NAMED
 //
 // FeedEvent.Delta is the engine's own accounting unit (Debt Manager: normalized
-// debt; Aave: ray-scaled token units) — NOT a display-ready token amount, and
-// the store tags each row's unit (DeltaUnit). The pinned 1.1.0 contract has no
-// per-row unit field (that is amendment C2's correction), so this layer serves
-// the delta VERBATIM with `amount_decimals: null` — "no display scale is
-// asserted for this figure" — and states the unit law in the response notes.
-// Rescaling the delta into token units here would be exactly the re-derivation
-// this service refuses everywhere else.
+// debt; Aave: ray-scaled token units) — NOT a display-ready token amount. The
+// 1.2.0 contract carries the store's unit tag verbatim per row (`amount_unit`,
+// the closed EventAmountUnit vocabulary), and `amount_decimals` stays null —
+// "no display scale is asserted for this figure". Rescaling the delta into
+// token units here would be exactly the re-derivation this service refuses
+// everywhere else.
 
 import (
 	"fmt"
@@ -119,14 +118,29 @@ type wireSeizedCollateral struct {
 	Symbol   string `json:"symbol,omitempty"`
 	Amount   string `json:"amount"`
 	Decimals int    `json:"decimals"`
+	// Bonus is the realized bonus the CONTRACT ITSELF recorded for this
+	// seizure element, verbatim from the payload, in the Debt Manager's own
+	// 100e18 percent denomination — NOT bps, never unit-converted. Null on
+	// Aave rows (the pool publishes no per-seizure realized bonus).
+	Bonus *string `json:"bonus"`
 }
 
 type wireLiquidationDetail struct {
-	Liquidator   string                 `json:"liquidator"`
-	DebtAsset    *string                `json:"debt_asset"`
-	DebtRepaid   *string                `json:"debt_repaid"`
-	DebtDecimals *int                   `json:"debt_decimals"`
-	Seized       []wireSeizedCollateral `json:"seized"`
+	Liquidator   string  `json:"liquidator"`
+	DebtAsset    *string `json:"debt_asset"`
+	DebtRepaid   *string `json:"debt_repaid"`
+	DebtDecimals *int    `json:"debt_decimals"`
+	// BeforeDebtUSD / InterestIndex are the Debt Manager's own payload facts
+	// (USD 6-dec figure; 1e18-scaled index at the event) — null on Aave rows,
+	// whose event carries neither.
+	BeforeDebtUSD *string `json:"before_debt_usd"`
+	InterestIndex *string `json:"interest_index"`
+	// DeficitPaired is Aave-only: true when this liquidation shares its tx
+	// with a DeficitCreated event (the write-off lives on the deficit_created
+	// row). Null on Debt Manager rows — no such concept, a withheld
+	// statement, never "false".
+	DeficitPaired *bool                  `json:"deficit_paired"`
+	Seized        []wireSeizedCollateral `json:"seized"`
 	// RealizedBonusBps is served ONLY when the payload's own facts establish it
 	// in bps. Neither engine's payload does today (the Debt Manager records its
 	// realized bonus in its 100e18 denomination, and Aave's would need
@@ -155,11 +169,14 @@ type wireChainEvent struct {
 	Asset       *string    `json:"asset"`
 	Symbol      string     `json:"symbol,omitempty"`
 	Amount      *string    `json:"amount"`
+	// AmountUnit is the store's own per-raw-type unit classification,
+	// VERBATIM (EventAmountUnit): the closed vocabulary that lets a renderer
+	// label the delta honestly instead of showing it as a token amount.
+	AmountUnit string `json:"amount_unit"`
 	// AmountDecimals is null on every row this build serves: `amount` is the
 	// engine's own custodied accounting delta (normalized debt on the Debt
 	// Manager, ray-scaled units on Aave), and asserting a token display scale
-	// for it would misstate both engines. The unit vocabulary lands on the
-	// contract with amendment C2.
+	// for it would misstate both engines. The unit is named by AmountUnit.
 	AmountDecimals *int                   `json:"amount_decimals"`
 	Liquidation    *wireLiquidationDetail `json:"liquidation"`
 }
@@ -296,7 +313,7 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		Notes: []string{
 			"`block_time` is null until the block's header is custodied — header time is chain-asserted or absent, never fabricated, and no database clock is ever substituted. Render the block number while it is null.",
 			"engine-scoped pages order by (block_number, tx_hash, log_index, seq) DESC — exact within one chain. Cross-engine pages order by custodied block_time DESC; rows without a custodied time sort AFTER every timed row (their order there is a deterministic tiebreak, NOT chronology — two chains' block heights are incomparable as time).",
-			"`amount` is the engine's own CUSTODIED accounting delta, verbatim: normalized debt units on the Debt Manager (USD-6 view = value x interest index / 1e18), ray-scaled token units on Aave. It is not a display-ready token amount, which is why `amount_decimals` is null; the per-row unit vocabulary is a coming contract amendment.",
+			"`amount` is the engine's own CUSTODIED accounting delta, verbatim, and `amount_unit` names its closed semantic unit: normalized debt units on the Debt Manager (USD-6 view = value x interest index / 1e18), ray-scaled token units on Aave. It is not a display-ready token amount, which is why `amount_decimals` is null.",
 			"a cross-engine page's untimed tail can shrink between pages while header backfill runs: a row acquiring its time moves into the timed section. Each page is internally exact; the feed is a live surface, not a pinned batch.",
 		},
 	}
@@ -333,6 +350,10 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			Account:     common.BytesToAddress(e.Account).Hex(),
 			Asset:       hexAddrPtr(e.Asset),
 			Amount:      bigStr(e.Delta),
+			// The store's unit classification, VERBATIM — never re-derived
+			// here, never defaulted: an empty unit would be store-side drift
+			// and the contract's closed enum would refuse it loudly.
+			AmountUnit: string(e.DeltaUnit),
 		}
 		if len(e.Asset) > 0 {
 			if spec, ok := s.registry.Spec(e.Engine, common.BytesToAddress(e.Asset)); ok {
@@ -373,6 +394,10 @@ func (s *server) wireLiquidation(r *http.Request, e store.FeedEvent) (*wireLiqui
 		// The Debt Manager's liquidation figure is its own USD-6 quantity, from
 		// the event's payload — a value, not a token amount.
 		out.DebtDecimals = intPtr(engineValueDecimals[risk.DMEngine])
+		// The event's own pre-liquidation debt figure and interest index,
+		// verbatim payload facts (USD-6; 1e18-scaled index).
+		out.BeforeDebtUSD = bigStr(d.BeforeDebtUSD)
+		out.InterestIndex = bigStr(d.InterestIndex)
 		for _, sz := range d.Seized {
 			// The contract's Liquidated event enumerates EVERY supported
 			// collateral token with zero tuple elements for the ones it did not
@@ -385,6 +410,9 @@ func (s *server) wireLiquidation(r *http.Request, e store.FeedEvent) (*wireLiqui
 			wsz := wireSeizedCollateral{
 				Asset:  common.BytesToAddress(sz.Asset).Hex(),
 				Amount: orZeroString(sz.Amount),
+				// The per-element realized bonus the CONTRACT recorded, in its
+				// own 100e18 denomination — verbatim, never converted to bps.
+				Bonus: bigStr(sz.Bonus),
 			}
 			spec, ok := s.registry.Spec(e.Engine, common.BytesToAddress(sz.Asset))
 			if !ok {
@@ -394,9 +422,13 @@ func (s *server) wireLiquidation(r *http.Request, e store.FeedEvent) (*wireLiqui
 			wsz.Decimals = int(spec.Decimals)
 			out.Seized = append(out.Seized, wsz)
 		}
-		out.Note = "extracted from the event's own structured payload. `debt_repaid` is the Debt Manager's USD-6 figure; seized amounts are each token's own units (the event's zero-amount tuple elements enumerate untouched collateral and are not seizures; the full fan-out stays custodied). The realized bonus the contract recorded is in its 100e18 denomination, not bps, so `realized_bonus_bps` is null rather than a unit conversion; the configured bonus is likewise 100e18-denominated and served on /v1/params, not converted here."
+		out.Note = "extracted from the event's own structured payload. `debt_repaid`/`before_debt_usd` are the Debt Manager's USD-6 figures and `interest_index` its 1e18-scaled index at the event; seized amounts are each token's own units (the event's zero-amount tuple elements enumerate untouched collateral and are not seizures; the full fan-out stays custodied). Each seizure's `bonus` is the realized bonus the contract recorded IN ITS 100e18 DENOMINATION, not bps — which is why `realized_bonus_bps` is null rather than a unit conversion; the configured bonus is likewise 100e18-denominated and served on /v1/params, not converted here."
 	case risk.AaveEngine:
 		out.DebtRepaid = bigStr(d.DebtToCover)
+		// The same-tx DeficitCreated pairing is an Aave payload fact — a total
+		// boolean there (the deriver always writes it), null on DM rows.
+		paired := d.DeficitPaired
+		out.DeficitPaired = &paired
 		if len(e.Asset) > 0 {
 			if spec, ok := s.registry.Spec(e.Engine, common.BytesToAddress(e.Asset)); ok {
 				out.DebtDecimals = intPtr(int(spec.Decimals))
@@ -420,7 +452,7 @@ func (s *server) wireLiquidation(r *http.Request, e store.FeedEvent) (*wireLiqui
 			return nil, err
 		}
 		out.ConfiguredBonusBps = configured
-		out.Note = "extracted from the event's own structured payload; amounts are in each asset's own token units. `configured_bonus_bps` is the ledger's bonus AT THIS EVENT's effective params, decoded from Aave's own encoding (liquidationBonus 10500 = a 500bps premium); null when param custody does not cover the event's block. `realized_bonus_bps` would need event-time prices this service does not re-read, so it is null — never estimated."
+		out.Note = "extracted from the event's own structured payload; amounts are in each asset's own token units. `configured_bonus_bps` is the ledger's bonus AT THIS EVENT's effective params, decoded from Aave's own encoding (liquidationBonus 10500 = a 500bps premium); null when param custody does not cover the event's block. `realized_bonus_bps` would need event-time prices this service does not re-read, so it is null — never estimated. `deficit_paired` marks a same-tx DeficitCreated: the write-off lives on the deficit_created row, not this one."
 	}
 	return out, nil
 }

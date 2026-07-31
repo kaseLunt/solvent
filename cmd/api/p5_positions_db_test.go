@@ -36,13 +36,31 @@ func TestPositionsPageServesTheEngineBook(t *testing.T) {
 	require.Equal(t, "computed", first["status"])
 	hf := asMap(t, first["health_factor"])
 	require.Equal(t, fxAaveHFWad, hf["wad"], "the page serves the batch's own persisted wad")
-	require.Len(t, asList(t, first["legs"]), 2, "rows are the FULL Position shape: legs travel with the page")
-	require.Len(t, asList(t, first["price_inputs"]), 2)
+	// Rows are the LEAN PositionSummary (1.2.0): no leg/price fan-out on the
+	// page — the FULL Position stays on /v1/address.
+	require.NotContains(t, first, "legs", "the summary carries no legs")
+	require.NotContains(t, first, "price_inputs", "the summary carries no price inputs")
+	// The summary's totals are the ENGINE's own quantities: Aave's base pair
+	// at the row's own value_decimals.
+	require.Equal(t, float64(8), first["value_decimals"])
+	require.NotNil(t, first["total_collateral"])
+	require.NotNil(t, first["total_debt"])
+	// The as-of marks travel with the row.
+	require.NotNil(t, first["balances_block"])
+	require.NotNil(t, first["params_block"])
+	// The boundary distance is the closed vocabulary; a computed healthy Aave
+	// row with a factor-level solve serves the EXACT rational pair.
+	liq := asMap(t, first["liq_distance"])
+	require.Contains(t, []string{"distance", "breached", "never", "none"}, liq["kind"])
 
 	require.Equal(t, fxAcctAaveRef.Hex(), second["account"])
 	require.Equal(t, "refused", second["status"])
 	refusal := asMap(t, second["refusal"])
 	require.Equal(t, "G1", refusal["code"])
+	// A refused row's distance is `none` NAMING the refusal — never a number.
+	refLiq := asMap(t, second["liq_distance"])
+	require.Equal(t, "none", refLiq["kind"])
+	require.Equal(t, "G1", refLiq["reason"], "a refused row's absent distance names its refusal code")
 
 	// The batch pin is on the wire.
 	batch := asMap(t, out["batch"])
@@ -153,8 +171,11 @@ func TestPositionsPageWithheldEngineIsRefusedNeverEmpty(t *testing.T) {
 }
 
 // TestPositionsPageRowsMatchTheAddressSurface: the SAME account served by the
-// page and by /v1/address must carry the SAME persisted numbers — two surfaces,
-// one materialization.
+// page and by /v1/address must carry the SAME persisted numbers — two
+// surfaces, one materialization. The page's lean summary maps the engine's
+// OWN quantities onto its one totals pair (DM: collateral_value_usd →
+// total_collateral, borrowings → total_debt), so the weld compares across
+// that documented mapping.
 func TestPositionsPageRowsMatchTheAddressSurface(t *testing.T) {
 	f := newP5Fixture(t)
 
@@ -169,7 +190,35 @@ func TestPositionsPageRowsMatchTheAddressSurface(t *testing.T) {
 		}
 	}
 	require.NotNil(t, addrRow)
-	for _, field := range []string{"account", "status", "borrowings", "max_borrow_lt", "collateral_value_usd", "liquidatable", "value_decimals"} {
+	for _, field := range []string{"account", "status", "liquidatable", "value_decimals"} {
 		require.Equal(t, addrRow[field], pageRow[field], "field %s must be identical across the two surfaces", field)
 	}
+	require.Equal(t, addrRow["collateral_value_usd"], pageRow["total_collateral"],
+		"the DM summary's total_collateral IS the address surface's collateral_value_usd")
+	require.Equal(t, addrRow["borrowings"], pageRow["total_debt"],
+		"the DM summary's total_debt IS the address surface's borrowings")
+	addrAsOf := asMap(t, addrRow["as_of"])
+	require.Equal(t, addrAsOf["balances_block"], pageRow["balances_block"])
+	require.Equal(t, addrAsOf["params_block"], pageRow["params_block"])
+	require.Equal(t, addrAsOf["sweep_block"], pageRow["sweep_block"])
+}
+
+// TestPositionsPageLiqDistanceBreachedNeverServesANumber: a row the engine's
+// OWN comparator already judges liquidatable serves `breached` — never a
+// "distance" wearing an exact rational that would read as headroom.
+func TestPositionsPageLiqDistanceBreachedNeverServesANumber(t *testing.T) {
+	f := newP5Fixture(t)
+
+	out := f.getJSON(t, "/v1/positions?engine=debt_manager", "/v1/positions")
+	rows := asList(t, out["positions"])
+	require.NotEmpty(t, rows)
+	// liq_distance sort: the liquidatable account (negative headroom) leads.
+	first := asMap(t, rows[0])
+	require.Equal(t, fxAcctDM.Hex(), first["account"])
+	require.Equal(t, true, first["liquidatable"])
+	liq := asMap(t, first["liq_distance"])
+	require.Equal(t, "breached", liq["kind"],
+		"the engine's own strict boolean says liquidatable — the distance MUST fold to breached")
+	require.Nil(t, liq["scale_factor_num"], "a breached row serves no scale factor")
+	require.Nil(t, liq["scale_factor_den"])
 }

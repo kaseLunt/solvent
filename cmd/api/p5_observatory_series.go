@@ -40,6 +40,14 @@ type observatoryRateEntry struct {
 type wireObservatorySeriesPoint struct {
 	BucketStart time.Time `json:"bucket_start"`
 	LastBlock   uint64    `json:"last_block"`
+	// Observation provenance (1.2.0): which batch the bucket observed — the
+	// id, the deterministic materialization key (it SURVIVES batch retention,
+	// so the observation stays attributable after the batch is pruned) and
+	// the reorg-honesty stamp pair copied from the batch's watermark vector.
+	BatchID            int64  `json:"batch_id"`
+	MaterializationKey string `json:"materialization_key"`
+	AckedEpoch         int64  `json:"acked_epoch"`
+	MaxEpochAtCompute  int64  `json:"max_epoch_at_compute"`
 	// Refused is true when the engine's whole book was withheld at capture
 	// time. Totals are then null FOR THAT REASON, never 0.
 	Refused     bool    `json:"refused"`
@@ -146,6 +154,7 @@ func (s *server) handleObservatorySeries(w http.ResponseWriter, r *http.Request)
 			"a withheld bucket carries NULL totals and names its refusal code: a rollup that rendered an unproven book as zero debt would fabricate the exact reassurance this surface exists to withhold.",
 			"every served point is an exact captured bucket, oldest first; a `step` larger than the native hour serves every Nth captured bucket VERBATIM — nothing is averaged, interpolated or smoothed.",
 			"each point's `last_block` is the engine's balances watermark AT CAPTURE TIME — the bucket's own as-of, never a chain head observed later — and each rate index carries its OWN as-of block.",
+			"each point names the batch it observed (`batch_id`, `materialization_key`) and the reorg-honesty stamp pair copied from that batch's watermark vector; the materialization key survives batch retention, so an observation stays attributable after its batch is pruned.",
 		},
 	}
 	if len(points) > 0 {
@@ -185,10 +194,14 @@ func (s *server) handleObservatorySeries(w http.ResponseWriter, r *http.Request)
 // as values is exactly how an unproven book becomes "nothing at risk".
 func wireObservatoryPointFrom(p store.ObservatoryPoint) (wireObservatorySeriesPoint, error) {
 	out := wireObservatorySeriesPoint{
-		BucketStart:      p.BucketStart,
-		LastBlock:        p.LastBlock,
-		RefusedPositions: p.RefusedPositions,
-		Rates:            []wireRateIndex{},
+		BucketStart:        p.BucketStart,
+		LastBlock:          p.LastBlock,
+		BatchID:            p.BatchID,
+		MaterializationKey: p.MaterializationKey,
+		AckedEpoch:         p.AckedEpoch,
+		MaxEpochAtCompute:  p.MaxEpochAtCompute,
+		RefusedPositions:   p.RefusedPositions,
+		Rates:              []wireRateIndex{},
 	}
 	if p.RefusalCode != "" {
 		out.Refused = true
@@ -221,6 +234,7 @@ func wireObservatoryPointFrom(p store.ObservatoryPoint) (wireObservatorySeriesPo
 					Engine:    p.Engine,
 					Asset:     common.BytesToAddress(assetBytes).Hex(),
 					Kind:      kind,
+					Scale:     rateIndexScale(kind),
 					Value:     entry.Value,
 					AsOfBlock: uint64(entry.Block),
 					Note:      "as of its OWN last update (ReserveDataUpdated / the DM admin event), which can trail the bucket.",

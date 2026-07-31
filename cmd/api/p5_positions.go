@@ -16,15 +16,20 @@ package main
 //   - `hf` on the Debt Manager is a 400: there is no DM health factor, and
 //     inventing an ordering for it would blend the engines' comparators.
 //
-// Rows are the FULL Position shape (legs, price inputs, as-ofs, liquidation
-// price), reusing /v1/address's wirePosition path — including reconstruction,
-// so a row this layer cannot rebuild is served as a refusal naming
-// API_RECONSTRUCTION_MISMATCH exactly as it is everywhere else. Task C2
-// replaces this with the lean PositionSummary; the seam is positionsPageBody,
-// which is the ONLY place the row shape is chosen.
+// Rows are the LEAN PositionSummary (contract 1.2.0, AMENDMENT 1/E): the
+// ranked page's own fields — status, refusal, health factor, verdict, totals
+// in the engine's OWN unit, boundary distance, as-of marks — without the
+// per-leg and per-price fan-out (the FULL Position stays on /v1/address).
+// Each summary is a PURE PROJECTION of the full wirePosition row, which
+// therefore remains the single place row semantics (refusal wording,
+// reconstruction refusals, HF notes, the liquidation-price solve) are chosen:
+// the projection selects fields, it never re-derives them — except the
+// boundary-distance kind, which folds the solve's own flags and the engine's
+// own comparator into the closed LiqDistance vocabulary below.
 
 import (
 	"errors"
+	"math/big"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,12 +49,145 @@ type positionsResponse struct {
 	// Refused is true when the requested ENGINE's whole book is withheld on
 	// this batch. `positions` is then empty FOR THAT REASON — never because the
 	// book is empty — and `total_positions` is null, never 0.
-	Refused        bool               `json:"refused"`
-	Refusal        *wireEngineRefusal `json:"refusal"`
-	TotalPositions *int               `json:"total_positions"`
-	Positions      []wirePosition     `json:"positions"`
-	NextCursor     *string            `json:"next_cursor"`
-	Notes          []string           `json:"notes"`
+	Refused        bool                  `json:"refused"`
+	Refusal        *wireEngineRefusal    `json:"refusal"`
+	TotalPositions *int                  `json:"total_positions"`
+	Positions      []wirePositionSummary `json:"positions"`
+	NextCursor     *string               `json:"next_cursor"`
+	Notes          []string              `json:"notes"`
+}
+
+// wireLiqDistance is the contract's closed LiqDistance vocabulary: the row's
+// distance to ITS OWN engine's liquidation boundary, lean. The exact rational
+// scale factor is the wire's statement — rendering a percentage from it is
+// the consumer's display-precision work, never an eligibility decision.
+type wireLiqDistance struct {
+	Kind           string  `json:"kind"`
+	ScaleFactorNum *string `json:"scale_factor_num"`
+	ScaleFactorDen *string `json:"scale_factor_den"`
+	FactorAsset    *string `json:"factor_asset"`
+	FactorSymbol   string  `json:"factor_symbol,omitempty"`
+	Reason         *string `json:"reason"`
+}
+
+// wirePositionSummary is the lean /v1/positions row (AMENDMENT 1/E).
+type wirePositionSummary struct {
+	Engine        string            `json:"engine"`
+	Account       string            `json:"account"`
+	Status        string            `json:"status"`
+	ValueDecimals int16             `json:"value_decimals"`
+	Refusal       *wireRefusal      `json:"refusal"`
+	Flags         []string          `json:"flags"`
+	HealthFactor  *wireHealthFactor `json:"health_factor"`
+	Liquidatable  *bool             `json:"liquidatable"`
+	// TotalCollateral/TotalDebt are the ENGINE's own totals at ValueDecimals
+	// — Aave's base-currency pair, the Debt Manager's swept collateral value
+	// and borrowings. Null stays null; never rendered as 0.
+	TotalCollateral *string         `json:"total_collateral"`
+	TotalDebt       *string         `json:"total_debt"`
+	LiqDistance     wireLiqDistance `json:"liq_distance"`
+	BalancesBlock   uint64          `json:"balances_block"`
+	ParamsBlock     uint64          `json:"params_block"`
+	SweepBlock      uint64          `json:"sweep_block"`
+}
+
+// wadOne is 1e18 — the boundary the Aave wad comparator compares against.
+var wadOne = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+
+// summaryLiquidatable applies each engine's OWN comparator to the full row:
+// the Debt Manager's strict boolean verbatim; Aave's wad-vs-1e18 comparison
+// ON THE WAD (never a re-derived float). false covers both "not liquidatable"
+// and "no verdict publishable" — its only consumer is the breached-arm fold
+// below, where an unpublishable verdict must not manufacture a breach.
+func summaryLiquidatable(full wirePosition) bool {
+	if full.Liquidatable != nil {
+		return *full.Liquidatable
+	}
+	hf := full.HealthFactor
+	if hf == nil || hf.Infinite || hf.Wad == nil {
+		return false
+	}
+	wad, ok := new(big.Int).SetString(*hf.Wad, 10)
+	if !ok {
+		return false
+	}
+	return wad.Cmp(wadOne) < 0
+}
+
+// liqDistance folds the liquidation-price solve (or its absence) into the
+// closed LiqDistance vocabulary. Nothing here re-solves anything: every
+// input is the solve's own flag or the row's own verdict field.
+func (s *server) liqDistance(full wirePosition) wireLiqDistance {
+	lp := full.LiquidationPrice
+	if lp == nil {
+		// No solve: a refused row (including reconstruction refusals) names
+		// its refusal code as the reason; otherwise the absence stands bare.
+		var reason *string
+		if full.Refusal != nil {
+			reason = strPtr(full.Refusal.Code)
+		}
+		return wireLiqDistance{Kind: "none", Reason: reason}
+	}
+	if lp.AlreadyBreached || summaryLiquidatable(full) {
+		return wireLiqDistance{Kind: "breached"}
+	}
+	if lp.NeverLiquidatable {
+		return wireLiqDistance{Kind: "never", Reason: strPtrNonEmpty(lp.Reason)}
+	}
+	if !lp.InFactor || lp.ScaleFactorNum == nil || lp.ScaleFactorDen == nil {
+		return wireLiqDistance{Kind: "none", Reason: strPtrNonEmpty(lp.Reason)}
+	}
+	out := wireLiqDistance{
+		Kind:           "distance",
+		ScaleFactorNum: lp.ScaleFactorNum,
+		ScaleFactorDen: lp.ScaleFactorDen,
+	}
+	if len(lp.FactorAssets) > 0 {
+		out.FactorAsset = strPtr(lp.FactorAssets[0])
+		if spec, ok := s.registry.Spec(full.Engine, common.HexToAddress(lp.FactorAssets[0])); ok {
+			out.FactorSymbol = spec.Symbol
+		}
+	}
+	return out
+}
+
+func strPtrNonEmpty(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return strPtr(v)
+}
+
+// positionSummary projects the FULL wire row — built by the SAME
+// s.wirePosition path /v1/address serves, reconstruction refusals included —
+// onto the lean page shape. Selection only; the full row stays the one place
+// row semantics are chosen.
+func (s *server) positionSummary(v *batchView, p *positionRow) wirePositionSummary {
+	full := s.wirePosition(v, p)
+	out := wirePositionSummary{
+		Engine:        full.Engine,
+		Account:       full.Account,
+		Status:        full.Status,
+		ValueDecimals: full.ValueDecimals,
+		Refusal:       full.Refusal,
+		Flags:         full.Flags,
+		HealthFactor:  full.HealthFactor,
+		Liquidatable:  full.Liquidatable,
+		BalancesBlock: full.AsOf.BalancesBlock,
+		ParamsBlock:   full.AsOf.ParamsBlock,
+		SweepBlock:    full.AsOf.SweepBlock,
+	}
+	// The engine's OWN totals under the summary's one name pair —
+	// value_decimals states the scale, and the quantities are never blended
+	// across engines (an Aave row never serves a USD-6 figure and vice versa).
+	switch full.Engine {
+	case risk.AaveEngine:
+		out.TotalCollateral, out.TotalDebt = full.TotalCollateralBase, full.TotalDebtBase
+	case risk.DMEngine:
+		out.TotalCollateral, out.TotalDebt = full.CollateralValueUSD, full.Borrowings
+	}
+	out.LiqDistance = s.liqDistance(full)
+	return out
 }
 
 // batchSupersededBody is the 409's own shape: it must NAME both batches, so a
@@ -220,11 +358,12 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		Engine:    engine,
 		Sort:      sortName,
 		Limit:     limit,
-		Positions: []wirePosition{},
+		Positions: []wirePositionSummary{},
 		Notes: []string{
 			"every row on this page was drawn from batch " + strconv.FormatInt(batchID, 10) +
 				"; `next_cursor` is bound to that batch and answers 409 `batch_superseded` once it is no longer the newest servable batch. Restart from page one on 409 — a page mixing two materializations is exactly what that status exists to prevent.",
 			"refused rows are ROWS: they stay on the page, named and counted, exactly as they are counted in every aggregate.",
+			"rows are the lean PositionSummary; the FULL Position (legs, price inputs, liquidation-price solve, per-input provenance) is served by /v1/address/{addr}.",
 		},
 	}
 
@@ -275,7 +414,7 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 				"page row "+common.BytesToAddress(sp.Account).Hex()+" is absent from the child-row read of the same batch", nil)
 			return
 		}
-		out.Positions = append(out.Positions, s.wirePosition(v, p))
+		out.Positions = append(out.Positions, s.positionSummary(v, p))
 	}
 	if page.NextCursor != "" {
 		nc := page.NextCursor

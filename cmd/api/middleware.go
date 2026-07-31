@@ -221,7 +221,7 @@ func (s *statusSniffer) WriteHeader(status int) {
 		// produced the JSON envelope has set the JSON content type.
 		if ct := s.Header().Get("Content-Type"); ct == "" || strings.HasPrefix(ct, "text/plain") {
 			s.suppress = true
-			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/positions, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/address/{addr}/history, /v1/observatory, /v1/observatory/series, /v1/events, /v1/params, /v1/prices/{asset}, /v1/scenarios/{id}/run-book, /v1/evidence, /v1/stream and /v1/meta"
+			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/positions, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/address/{addr}/history, /v1/observatory, /v1/observatory/series, /v1/events, /v1/params, /v1/prices/{asset}, /v1/scenarios/{id}/run-book, /v1/batches/{id}, /v1/evidence, /v1/stream and /v1/meta"
 			if status == http.StatusMethodNotAllowed {
 				code, msg = codeBadRequest, "this API is read-only: only GET, HEAD and OPTIONS are accepted (plus POST on /v1/scenarios/{id}/run-book, which computes and writes nothing)"
 			}
