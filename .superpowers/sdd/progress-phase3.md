@@ -3122,3 +3122,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   liquidatable_positions) + H4a's disclosed accept-r4 collapsed param
   filter — all handed to Codex round 3 to adjudicate under the bar.
   On SHIP → the fresh-pin acceptance retry (the receipt run).
+- **CODEX ROUND 4 ON THE H4 PAIR: NOT-SHIP, 3 FIX-WORTHY + 1 ACCEPTED
+  (15:36)**: (1) HIGH — the cycle-witness law still leaks: a generation
+  OPEN when a borrower arrives is OWED that borrower (SweepWorkBatch
+  re-queries the registry per batch and completes only on an empty
+  query), so MinAttemptBlock ≤ firstDebt proves opening-before-arrival,
+  not completion-before-arrival — the 100/200/300 overlap scenario
+  discloses a genuinely skipped borrower. Fix: gate any never-swept
+  borrower overlapping a completed generation until arrival-vs-
+  completion evidence exists. (2) HIGH — Codex ADJUDICATED the three
+  pinned count surfaces FIX-WORTHY under the bar (ordinary public reads
+  serving liquidatable-derived counts with no sweep clock — a count read
+  as belonging to its displayed time while aggregating unnamed sweep
+  cuts): the sweep watermark wires into ObservatoryPoint,
+  ObservatorySeriesPoint, BatchResponse from store truth, and the
+  exact-three exemption comes OUT of the law test. (3) MEDIUM — the law
+  test itself can green through a REQUIRED-BUT-EMPTY array
+  (watermarks: [] licenses via the unreachable item type) and nullable
+  hops: cardinality + nullable-hop rejection + negative controls. (4)
+  LOW accepted-and-disclosed — the legacy accept-r4 collapsed filter
+  stands for the retained artifact (no config motion in those windows);
+  replace before any reuse. H5a (reconcile: the overlap gate + the
+  100/200/300 regression) and H5b (the count-surface train: store-truth
+  determination, likely migration 00018 w/ sweep columns on
+  observatory_points + honest NULL backfill for pruned sources, welds
+  17→18, contract 1.2.2, law-test hardening) DISPATCHED PARALLEL.
+  NOTE: 00018 landing means the live DB needs one more daemon-applied
+  migration before the receipt run (additive, seconds, pre-authorized
+  class). Round 5 on the pair after landing → THEN the fresh-pin
+  acceptance receipt run.
