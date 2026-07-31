@@ -280,6 +280,18 @@ func (s *server) refresh(ctx context.Context) (*batchView, error) {
 // always whole — an address response still has to disclose which batch it came
 // from and whether that batch is superseded.
 func (s *server) readBatch(ctx context.Context, account []byte) (*batchView, error) {
+	if account == nil {
+		return s.readBatchAccounts(ctx, nil)
+	}
+	return s.readBatchAccounts(ctx, [][]byte{account})
+}
+
+// readBatchAccounts is readBatch generalized to an ACCOUNT SET — the P5
+// positions page needs the full child rows (legs, price inputs, param witness,
+// reconstruction) for up to one page of accounts at a time, and a per-account
+// loop would be one snapshot per row. nil means "every account"; an EMPTY
+// non-nil set means "no child rows" (the envelope and aggregates still read).
+func (s *server) readBatchAccounts(ctx context.Context, accounts [][]byte) (*batchView, error) {
 	batch, found, err := s.store.NewestCompleteBatch(ctx)
 	if err != nil {
 		return nil, err
@@ -309,13 +321,13 @@ func (s *server) readBatch(ctx context.Context, account []byte) (*batchView, err
 	if v.Sweeps, err = store.RiskSweepStateFor(ctx, tx, s.sweptEngines()); err != nil {
 		return nil, err
 	}
-	if v.Positions, err = readPositions(ctx, tx, batch.ID, account); err != nil {
+	if v.Positions, err = readPositions(ctx, tx, batch.ID, accounts); err != nil {
 		return nil, err
 	}
-	if err := attachLegs(ctx, tx, batch.ID, account, v.Positions); err != nil {
+	if err := attachLegs(ctx, tx, batch.ID, accounts, v.Positions); err != nil {
 		return nil, err
 	}
-	if err := attachPrices(ctx, tx, batch.ID, account, v.Positions); err != nil {
+	if err := attachPrices(ctx, tx, batch.ID, accounts, v.Positions); err != nil {
 		return nil, err
 	}
 	if v.Aggregates, err = readAggregates(ctx, tx, batch.ID); err != nil {
@@ -342,16 +354,16 @@ func positionKey(engine string, account []byte) string {
 	return engine + "/" + common.BytesToAddress(account).Hex()
 }
 
-func readPositions(ctx context.Context, q store.Querier, batchID int64, account []byte) ([]*positionRow, error) {
+func readPositions(ctx context.Context, q store.Querier, batchID int64, accounts [][]byte) ([]*positionRow, error) {
 	const base = `SELECT engine, account, status, refusal_code, refusal_detail, refusal_asset, flags,
 	        value_decimals, hf_num::text, hf_den::text, hf_wad::text, hf_infinite,
 	        total_collateral_base::text, total_debt_base::text, weighted_lt_sum::text, avg_lt_bps::text,
 	        collateral_value_usd::text, max_borrow_lt::text, borrowings::text, liquidatable,
 	        balances_block, params_block, sweep_block, oldest_price_input, stale_price_inputs
 	   FROM risk_positions
-	  WHERE batch_id = $1 AND ($2::bytea IS NULL OR account = $2)
+	  WHERE batch_id = $1 AND ($2::bytea[] IS NULL OR account = ANY($2::bytea[]))
 	  ORDER BY engine, account`
-	rows, err := q.Query(ctx, base, batchID, account)
+	rows, err := q.Query(ctx, base, batchID, accounts)
 	if err != nil {
 		return nil, fmt.Errorf("read risk positions: %w", err)
 	}
@@ -388,7 +400,7 @@ func readPositions(ctx context.Context, q store.Querier, batchID int64, account 
 	return out, nil
 }
 
-func attachLegs(ctx context.Context, q store.Querier, batchID int64, account []byte, positions []*positionRow) error {
+func attachLegs(ctx context.Context, q store.Querier, batchID int64, accounts [][]byte, positions []*positionRow) error {
 	rows, err := q.Query(ctx,
 		`SELECT engine, account, asset, decimals,
 		        scaled_debt::text, scaled_collateral::text, live_debt::text, live_collateral::text,
@@ -397,8 +409,8 @@ func attachLegs(ctx context.Context, q store.Querier, batchID int64, account []b
 		        amount::text, value_usd::text, max_borrow_contribution::text,
 		        liq_threshold::text, liq_bonus::text
 		   FROM risk_position_legs
-		  WHERE batch_id = $1 AND ($2::bytea IS NULL OR account = $2)
-		  ORDER BY engine, account, asset`, batchID, account)
+		  WHERE batch_id = $1 AND ($2::bytea[] IS NULL OR account = ANY($2::bytea[]))
+		  ORDER BY engine, account, asset`, batchID, accounts)
 	if err != nil {
 		return fmt.Errorf("read risk position legs: %w", err)
 	}
@@ -446,14 +458,14 @@ func attachLegs(ctx context.Context, q store.Querier, batchID int64, account []b
 	return nil
 }
 
-func attachPrices(ctx context.Context, q store.Querier, batchID int64, account []byte, positions []*positionRow) error {
+func attachPrices(ctx context.Context, q store.Querier, batchID int64, accounts [][]byte, positions []*positionRow) error {
 	rows, err := q.Query(ctx,
 		`SELECT engine, account, asset, chain_id, source, provenance,
 		        value::text, decimals, block_number, source_as_of,
 		        budget_seconds, verdict, age_seconds
 		   FROM risk_price_inputs
-		  WHERE batch_id = $1 AND ($2::bytea IS NULL OR account = $2)
-		  ORDER BY engine, account, asset, source`, batchID, account)
+		  WHERE batch_id = $1 AND ($2::bytea[] IS NULL OR account = ANY($2::bytea[]))
+		  ORDER BY engine, account, asset, source`, batchID, accounts)
 	if err != nil {
 		return fmt.Errorf("read risk price inputs: %w", err)
 	}

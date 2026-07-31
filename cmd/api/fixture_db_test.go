@@ -177,6 +177,18 @@ var (
 
 func newAPIFixture(t *testing.T) *apiFixture {
 	t.Helper()
+	f := newBareAPIFixture(t)
+	f.seedSubstrate(t)
+	f.batchID = f.seedBatch(t, "fixture-materialization-1")
+	f.startServer(t)
+	return f
+}
+
+// newBareAPIFixture connects, migrates and truncates — the seeding order is
+// the caller's (the P5 fixture applies position_events through the production
+// writer BEFORE the substrate pass stamps the cursors).
+func newBareAPIFixture(t *testing.T) *apiFixture {
+	t.Helper()
 	ctx := context.Background()
 	dsn := apiTestDSN(t)
 	require.NoError(t, store.Migrate(ctx, dsn))
@@ -191,18 +203,14 @@ func newAPIFixture(t *testing.T) *apiFixture {
 
 	_, err = admin.Exec(ctx, `TRUNCATE position_events, position_balances, derive_cursors, prices,
 		price_poll_anchors, snapshots, snapshot_sweeps, sweep_generations, rate_indexes,
-		reorg_epochs, raw_logs, ingest_cursors, param_history`)
+		reorg_epochs, raw_logs, ingest_cursors, param_history, block_headers, observatory_points`)
 	require.NoError(t, err)
 	_, err = admin.Exec(ctx, `TRUNCATE risk_batches, risk_batch_watermarks, risk_positions,
 		risk_position_legs, risk_price_inputs, risk_batch_aggregates, risk_scenarios, risk_waterfall
 		RESTART IDENTITY CASCADE`)
 	require.NoError(t, err)
 
-	f := &apiFixture{ctx: ctx, dsn: dsn, store: s, admin: admin}
-	f.seedSubstrate(t)
-	f.batchID = f.seedBatch(t, "fixture-materialization-1")
-	f.startServer(t)
-	return f
+	return &apiFixture{ctx: ctx, dsn: dsn, store: s, admin: admin}
 }
 
 // seedSubstrate lays down the live-read surfaces: the cursor vector the
@@ -230,9 +238,17 @@ func (f *apiFixture) seedSubstrate(t *testing.T) {
 		if c.covered > 0 {
 			covered = int64(c.covered)
 		}
+		// Upsert, not insert: the P5 fixture applies position_events through
+		// store.ApplyDerived (the production writer) BEFORE this substrate
+		// pass, and ApplyDerived creates the position engines' cursor rows —
+		// this stamps them to the fixture's exact heights either way.
 		_, err := f.admin.Exec(f.ctx,
 			`INSERT INTO derive_cursors (engine, chain_id, last_block, acked_epoch, covered_from_block, decoder_revision)
-			 VALUES ($1,$2,$3,0,$4,$5)`, c.engine, c.chain, int64(c.block), covered, c.rev)
+			 VALUES ($1,$2,$3,0,$4,$5)
+			 ON CONFLICT (engine) DO UPDATE SET chain_id = EXCLUDED.chain_id,
+			     last_block = EXCLUDED.last_block, acked_epoch = EXCLUDED.acked_epoch,
+			     covered_from_block = EXCLUDED.covered_from_block, decoder_revision = EXCLUDED.decoder_revision`,
+			c.engine, c.chain, int64(c.block), covered, c.rev)
 		require.NoError(t, err)
 	}
 
@@ -316,13 +332,18 @@ func (f *apiFixture) seedSubstrate(t *testing.T) {
 		int64(fxParamEffectiveBlock), "CollateralConfigurationChanged", hash32(0x51))
 	require.NoError(t, err)
 
+	// The payload carries the old_* keys because the DERIVER always writes
+	// them for collateral_token_config_set (debtmanager.go's recordOnly) — a
+	// seeded row without them would be a row production code cannot produce,
+	// and the P5 param-timeline decoder rightly refuses it as corrupt.
 	_, err = f.admin.Exec(f.ctx,
 		`INSERT INTO position_events (chain_id, engine, block_number, tx_hash, log_index, seq,
 		                              event_type, account, asset, side, payload)
 		 VALUES ($1,$2,$3,$4,0,0,'collateral_token_config_set',$5,$6,'',$7::jsonb)`,
 		int64(fxOPChain), risk.DMEngine, int64(fxDMParamEffectiveBlock), hash32(0x52),
 		fxWeETHOp.Bytes(), fxWeETHOp.Bytes(),
-		`{"ltv":"70000000000000000000","liquidation_threshold":"`+fxDMLiqThreshold+`","liquidation_bonus":"`+fxDMLiqBonus+`"}`)
+		`{"ltv":"70000000000000000000","liquidation_threshold":"`+fxDMLiqThreshold+`","liquidation_bonus":"`+fxDMLiqBonus+`",`+
+			`"old_ltv":"60000000000000000000","old_liquidation_threshold":"75000000000000000000","old_liquidation_bonus":"2000000000000000000"}`)
 	require.NoError(t, err)
 
 	// Rate indexes: two heights for one key, so the observatory surface has to pick
@@ -406,11 +427,18 @@ func (f *apiFixture) seedBatch(t *testing.T, key string) int64 {
 // startServer wires the real handler chain over the seeded database.
 func (f *apiFixture) startServer(t *testing.T) {
 	t.Helper()
+	f.startServerWithFeeds(t, fxFeeds())
+}
+
+// startServerWithFeeds is startServer with a caller-chosen registry (the P5
+// fixture registers the extra assets its captured liquidation rows seize).
+func (f *apiFixture) startServerWithFeeds(t *testing.T, feeds *config.Feeds) {
+	t.Helper()
 	s := fxServer(t)
-	registry, err := riskfeed.NewRegistry(fxFeeds())
+	registry, err := riskfeed.NewRegistry(feeds)
 	require.NoError(t, err)
 	s.registry = registry
-	s.feeds = fxFeeds()
+	s.feeds = feeds
 	s.store = f.store
 	s.version = "test"
 	require.NoError(t, s.requireSchema(f.ctx))

@@ -133,7 +133,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
 		h.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Last-Event-ID")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
@@ -150,21 +150,43 @@ func cors(next http.Handler) http.Handler {
 
 // readOnly refuses every method that is not a read.
 //
-// The router's patterns are all `GET`, so net/http would already answer 405 —
-// this exists so the refusal is a PROPERTY OF THE SERVICE rather than a
+// The router's patterns are almost all `GET`, so net/http would already answer
+// 405 — this exists so the refusal is a PROPERTY OF THE SERVICE rather than a
 // consequence of how the routes happen to be spelled, and so the 405 carries the
 // same JSON envelope as every other error.
+//
+// The ONE admitted POST is /v1/scenarios/{id}/run-book, which is per-request
+// COMPUTE over the newest servable batch and writes nothing — the read-only
+// property is still enforced structurally by TestAPIIssuesNoWritingSQL, which
+// scans this package's SQL, and by the SELECT-only database role in
+// production. POST here is a statement about request semantics (the evaluation
+// is computed on demand), never about mutation.
 func readOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		switch {
+		case r.Method == http.MethodGet, r.Method == http.MethodHead, r.Method == http.MethodOptions:
+			next.ServeHTTP(w, r)
+		case r.Method == http.MethodPost && isRunBookPath(r.URL.Path):
 			next.ServeHTTP(w, r)
 		default:
 			w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 			writeError(w, http.StatusMethodNotAllowed, codeBadRequest,
-				"this API is read-only: "+r.Method+" is not accepted on any route", nil)
+				"this API is read-only: "+r.Method+" is not accepted on this route "+
+					"(the one POST is /v1/scenarios/{id}/run-book, which computes and writes nothing)", nil)
 		}
 	})
+}
+
+// isRunBookPath matches /v1/scenarios/{id}/run-book with a NON-EMPTY single
+// path segment for {id}. It is deliberately narrow: the read-only gate opens
+// for exactly the one computed route, not for a path family.
+func isRunBookPath(path string) bool {
+	rest, ok := strings.CutPrefix(path, "/v1/scenarios/")
+	if !ok {
+		return false
+	}
+	id, ok := strings.CutSuffix(rest, "/run-book")
+	return ok && id != "" && !strings.Contains(id, "/")
 }
 
 // notFoundJSON turns net/http's text 404/405 into the JSON envelope.
@@ -199,9 +221,9 @@ func (s *statusSniffer) WriteHeader(status int) {
 		// produced the JSON envelope has set the JSON content type.
 		if ct := s.Header().Get("Content-Type"); ct == "" || strings.HasPrefix(ct, "text/plain") {
 			s.suppress = true
-			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/observatory, /v1/stream and /v1/meta"
+			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/positions, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/address/{addr}/history, /v1/observatory, /v1/observatory/series, /v1/events, /v1/params, /v1/prices/{asset}, /v1/scenarios/{id}/run-book, /v1/evidence, /v1/stream and /v1/meta"
 			if status == http.StatusMethodNotAllowed {
-				code, msg = codeBadRequest, "this API is read-only: only GET, HEAD and OPTIONS are accepted"
+				code, msg = codeBadRequest, "this API is read-only: only GET, HEAD and OPTIONS are accepted (plus POST on /v1/scenarios/{id}/run-book, which computes and writes nothing)"
 			}
 			s.Header().Set("Content-Type", "application/json; charset=utf-8")
 			s.ResponseWriter.WriteHeader(status)

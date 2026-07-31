@@ -90,6 +90,21 @@ const (
 	defaultObservatoryLimit = 50
 	maxObservatoryLimit     = 500
 
+	// P5 page bounds, matching api/openapi.yaml's declared parameter ranges.
+	defaultPositionsLimit = 50
+	maxPositionsLimit     = 200
+	defaultEventsLimit    = 50
+	maxEventsLimit        = 200
+	defaultHistoryLimit   = 100
+	maxHistoryLimit       = 500
+	// defaultParamsLimit is server-owned: /v1/params declares no limit
+	// parameter, so the page size is a policy of this deployment.
+	defaultParamsLimit = 50
+	// maxObservatorySeriesPoints bounds one rollup read. The rollup is hourly,
+	// so this covers ~2.3 years per request; a request that hits the cap gets a
+	// NOTE saying so rather than a silent truncation.
+	maxObservatorySeriesPoints = 20_000
+
 	// defaultWaterfallScenario is the axis the book's waterfall walks. ETH is
 	// the factor essentially the whole book is exposed to (weETH = rate × ETH by
 	// construction), so it is the one grid whose monotonicity invariant is
@@ -182,6 +197,12 @@ type server struct {
 	waterfallScenario risk.Scenario
 
 	cfg serverConfig
+
+	// evidence is the deploy-bound half of /v1/evidence: the committed feeds
+	// file's hash, the committed reconcile receipt's summary and the committed
+	// probe-record paths, all read ONCE at startup. Nothing in it is measured
+	// at request time — that is the point.
+	evidence evidenceStatics
 
 	version       string
 	schemaVersion int64
@@ -347,6 +368,15 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 		return nil, fmt.Errorf("api: waterfall scenario %q is not in the committed scenario set", sc.WaterfallScenario)
 	}
 
+	// The evidence statics are read from the deployed tree ONCE, here. An
+	// unreadable feeds file is a startup failure (the registry above was built
+	// from it, so its hash must be computable); an absent reconcile receipt or
+	// probe record is NOT — absence is served as null with its reason.
+	evidence, err := loadEvidenceStatics(".", feedsPath, reconcileArtifactPath())
+	if err != nil {
+		return nil, err
+	}
+
 	return &server{
 		registry:          registry,
 		feeds:             feeds,
@@ -354,6 +384,7 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 		byID:              byID,
 		waterfallScenario: grid,
 		cfg:               sc,
+		evidence:          evidence,
 		version:           buildVersion(),
 	}, nil
 }
@@ -528,14 +559,25 @@ func (s *server) requireSchema(ctx context.Context) error {
 	return nil
 }
 
-// routes registers the v1 surface. Every pattern is a GET: there is no mutating
-// endpoint, and there is no auth because there is nothing to authorize.
+// routes registers the v1 surface. Every pattern is a read: the one POST —
+// /v1/scenarios/{id}/run-book — is computed on request over the whole book and
+// WRITES NOTHING (it is POST because the evaluation is per-request compute,
+// not because it mutates). There is no auth because there is nothing to
+// authorize.
 func (s *server) routes() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/book", s.handleBook)
+	mux.HandleFunc("GET /v1/positions", s.handlePositions)
 	mux.HandleFunc("GET /v1/address/{addr}", s.handleAddress)
 	mux.HandleFunc("GET /v1/address/{addr}/stress", s.handleStress)
+	mux.HandleFunc("GET /v1/address/{addr}/history", s.handleAddressHistory)
 	mux.HandleFunc("GET /v1/observatory", s.handleObservatory)
+	mux.HandleFunc("GET /v1/observatory/series", s.handleObservatorySeries)
+	mux.HandleFunc("GET /v1/events", s.handleEvents)
+	mux.HandleFunc("GET /v1/params", s.handleParams)
+	mux.HandleFunc("GET /v1/prices/{asset}", s.handlePrices)
+	mux.HandleFunc("POST /v1/scenarios/{id}/run-book", s.handleRunBook)
+	mux.HandleFunc("GET /v1/evidence", s.handleEvidence)
 	mux.HandleFunc("GET /v1/stream", s.handleStream)
 	mux.HandleFunc("GET /v1/meta", s.handleMeta)
 	s.mux = mux

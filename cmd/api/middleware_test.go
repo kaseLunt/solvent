@@ -168,7 +168,11 @@ func TestCORSIsOpenAndPreflightIsAnswered(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, pre.Code)
 	require.Equal(t, "*", pre.Header().Get("Access-Control-Allow-Origin"))
 	require.Contains(t, pre.Header().Get("Access-Control-Allow-Methods"), "GET")
-	require.NotContains(t, pre.Header().Get("Access-Control-Allow-Methods"), "POST")
+	// POST joined the preflight vocabulary with P5's one computed route
+	// (/v1/scenarios/{id}/run-book). The READ-ONLY property is enforced by the
+	// readOnly middleware per path, not by hiding the method from CORS — a
+	// browser must be able to preflight the run-book POST.
+	require.Contains(t, pre.Header().Get("Access-Control-Allow-Methods"), "POST")
 }
 
 func TestReadOnlyRefusesMutatingMethods(t *testing.T) {
