@@ -50,6 +50,27 @@
 // tolerance-as-carpet, and the three-tolerance law stands untouched. The
 // BOOLEAN leg (liquidatable, strict >) stays gated at the pin: it is the served
 // product and it welded 46/46 through the same gap.
+//
+// VECTOR STRENGTHENING of the own-clock weld (Codex round 2 on the proof
+// surface, finding 1, 2026-07-31). Wave H's committed own-clock weld proved
+// only the risk-weighted SCALAR at S: getMaxBorrowAmount@blockHash(S) against
+// the recompute over the persisted vector. That is WEAKER than the diagnosis
+// that justified it — the dissection byte-compared the VECTOR (own-clock
+// collateralOf vs the persisted snapshot, 5/5 byte-identical), and two wrong
+// snapshot rows whose price×LT products cancel at S (two stables swapped or
+// offset with equal price and LT) keep the scalar exact, classify
+// sample-gap-disclosed, and excuse the real corruption's pin-clock mismatch.
+// The committed gate now performs the dissection's own read: collateralOf
+// (user)@blockHash(S) — the EXACT read the sweeper persists
+// (internal/snapshot/snapshot.go:634; DebtManagerCore.sol:170-183) — and
+// BYTE-COMPARES the (token, amount) pairs against the persisted snapshot
+// document, order-insensitive by token address, zero tolerance
+// (compareDMCollateralVector). sample-gap(disclosed) is reachable ONLY when
+// the vector matches; ANY vector mismatch is snapshot-custody-drift and
+// GATES. The scalar recompute stays as a secondary law check: a vector match
+// with a scalar mismatch is a divergence in the recompute law itself
+// (own-clock-law-divergence), gated separately so custody and law cannot
+// blur.
 package main
 
 import (
@@ -83,6 +104,7 @@ const (
 const (
 	dmCollateralSnapshotSource = "position_balances(source=snapshot, engine=debt_manager, side=collateral).amount@S(account) (the sweep block, NOT the run pin)"
 	dmOwnClockMaxBorrowSource  = "DebtManager.getMaxBorrowAmount(user,false)@ownSweepBlockHash(S(account))"
+	dmOwnClockVectorSource     = "DebtManager.collateralOf(user)@ownSweepBlockHash(S(account))"
 	dmOwnClockPriceSource      = "DebtManager.convertCollateralTokenToUsd(token, 10^dec)@ownSweepBlockHash(S(account))"
 	dmOwnClockHeaderSource     = "headerHash@ownSweepBlock(S(account)) resolved through the pinned reader"
 )
@@ -109,9 +131,11 @@ func dmGateFrame() *gateFrame {
 		pinned("DebtManager.liquidatable(user)@pinHash(P_op)",
 			"the CHAIN side of the boolean weld — the expected side"),
 		pinned("DebtManager.getMaxBorrowAmount(user,false)@pinHash(P_op)",
-			"the chain's own threshold-weighted collateral at the pin. The collateral vector under it is @S(account), so this leg is judged by the THREE-STATE law: bit-exact when the weld holds at one clock; sample-gap(disclosed) when the own-clock weld at S passes and only the pin value differs; snapshot-custody-drift(gated) when the own-clock weld itself fails"),
+			"the chain's own threshold-weighted collateral at the pin. The collateral vector under it is @S(account), so this leg is judged by the verdict law in classifyDMMaxBorrow: bit-exact when the weld holds at one clock; sample-gap(disclosed) when only the pin value differs AND the own-clock VECTOR proof at S is byte-identical AND the scalar check holds; snapshot-custody-drift(gated) on any vector mismatch; own-clock-law-divergence(gated) when a matching vector still recomputes differently"),
 		pinned(dmOwnClockMaxBorrowSource,
-			"the own-clock DISCRIMINATION read: getMaxBorrowAmount re-read at blockHash(S(account)) for every pin-drifting member plus one always-on control. The dissection proved the sweeper byte-exact at this clock; a failure here is real custody drift and flips the verdict (chain-truth ruling 08:55). S is deep-finalized, so the hash-bound read is as strong as the pin reads"),
+			"the own-clock DISCRIMINATION read's SCALAR law check: getMaxBorrowAmount re-read at blockHash(S(account)) for every pin-drifting member plus one always-on control. The dissection proved the sweeper byte-exact at this clock; a failure here over a matching vector is a divergence in the recompute law itself (own-clock-law-divergence, gated). S is deep-finalized, so the hash-bound read is as strong as the pin reads"),
+		pinned(dmOwnClockVectorSource,
+			"the own-clock CUSTODY PROOF (Codex round 2, finding 1): collateralOf(user) — the EXACT read the sweeper persists (internal/snapshot/snapshot.go:634; DebtManagerCore.sol:170-183) — re-issued at blockHash(S(account)) and BYTE-COMPARED as (token, amount) pairs against the persisted snapshot document, order-insensitive by token address, zero tolerance. sample-gap(disclosed) is reachable ONLY when this vector matches: the scalar recompute alone is weaker than the diagnosis (two wrong rows whose price×LT products cancel at S keep the scalar exact), so any vector mismatch is snapshot-custody-drift and GATES"),
 		pinned(dmOwnClockPriceSource,
 			"the engine-exact price AT S(account), feeding the own-clock recompute the same way the pin price feeds the pin recompute (internal/risk/dm.go:102-134, the per-token floor-then-sum law DebtManagerCore.sol:139-165)"),
 		pinned(dmOwnClockHeaderSource,
@@ -817,35 +841,121 @@ func readDMTokenState(ctx context.Context, c *p3Ctx, universe, borrow []common.A
 }
 
 // dmOwnClockResult is one account's own-clock discrimination weld: the chain's
-// getMaxBorrowAmount at blockHash(S(account)) beside our recompute over the SAME
-// persisted vector with S-clock prices and the param ledger re-cut at S.
+// own collateral VECTOR at blockHash(S(account)) byte-compared against the
+// persisted snapshot document (the custody proof), plus getMaxBorrowAmount at
+// the same hash beside our recompute over the SAME persisted vector with
+// S-clock prices and the param ledger re-cut at S (the scalar law check).
 type dmOwnClockResult struct {
 	Block    uint64
 	Hash     common.Hash
 	ChainMax *big.Int
 	OurMax   *big.Int
-	// Err is non-empty when either side could not be produced (a reverted or
+	// VectorRead / VectorMatch / VectorDiff are the CUSTODY PROOF (Codex round
+	// 2, finding 1): collateralOf(user)@blockHash(S) decoded and byte-compared
+	// against the persisted document. VectorRead=false means the proof was not
+	// produced, and the classifier refuses to reach sample-gap without it.
+	// VectorLegs counts the persisted legs compared, for the evidence column.
+	VectorRead  bool
+	VectorMatch bool
+	VectorDiff  string
+	VectorLegs  int
+	// Err is non-empty when a side could not be produced (a reverted or
 	// undecodable read, a param fold failure, a library refusal). The classifier
-	// turns it into weld-unread — "cannot verify" is never advisory.
+	// turns it into weld-unread — "cannot verify" is never advisory — EXCEPT
+	// when the vector proof already failed: a proven vector mismatch is custody
+	// drift whatever the scalar legs managed to do.
 	Err string
 }
 
-// classifyDMMaxBorrow is the THREE-STATE verdict law for the maxBorrow leg
-// (adjudicated: chain-truth ruling 08:55 + risk-quant ruling 08:42 + the
-// dissection verdict 08:58 on accept-r4). It is a pure function so the law is
-// unit-tested and mutation-killable in isolation.
+// dmPersistedVector folds an account's persisted snapshot legs into the
+// (token → amount) map the byte-compare consumes. Duplicate rows (never
+// observed; defensive) accumulate additively, mirroring the sweeper's own
+// decodeCollateralOf normalization.
+func dmPersistedVector(legs []snapshotdb.T6Leg) map[common.Address]*big.Int {
+	out := map[common.Address]*big.Int{}
+	for _, l := range legs {
+		tok := common.HexToAddress(l.AssetHex)
+		if prev, ok := out[tok]; ok {
+			out[tok] = new(big.Int).Add(prev, l.Amount)
+		} else {
+			out[tok] = new(big.Int).Set(l.Amount)
+		}
+	}
+	return out
+}
+
+// compareDMCollateralVector is the own-clock CUSTODY PROOF's comparison law
+// (Codex round 2, finding 1): the (token, amount) pairs of
+// collateralOf(user)@blockHash(S) against the persisted snapshot document,
+// order-insensitive by token address, ZERO tolerance. Zero-amount chain
+// entries are dropped and duplicate entries accumulate additively BEFORE
+// comparing — the SAME normalization the sweeper applies when it persists
+// (internal/snapshot decodeCollateralOf: absence IS zero under wholesale
+// replacement) — so the comparison is persisted-document vs
+// would-be-persisted-document, byte for byte. Both directions are mismatches:
+// a chain token the document lacks and a document token the chain lacks.
+func compareDMCollateralVector(chain []tokenAmount, persisted map[common.Address]*big.Int) (match bool, diff string) {
+	chainVec := map[common.Address]*big.Int{}
+	for _, e := range chain {
+		if e.Amount == nil || e.Amount.Sign() == 0 {
+			continue
+		}
+		if prev, ok := chainVec[e.Token]; ok {
+			chainVec[e.Token] = new(big.Int).Add(prev, e.Amount)
+		} else {
+			chainVec[e.Token] = new(big.Int).Set(e.Amount)
+		}
+	}
+	union := map[common.Address]bool{}
+	for t := range chainVec {
+		union[t] = true
+	}
+	for t := range persisted {
+		union[t] = true
+	}
+	var diffs []string
+	for _, tok := range sortedAddrs(union) {
+		c, p := chainVec[tok], persisted[tok]
+		switch {
+		case c == nil:
+			diffs = append(diffs, fmt.Sprintf("%s: persisted %s, ABSENT from collateralOf@S", tok.Hex(), p))
+		case p == nil:
+			diffs = append(diffs, fmt.Sprintf("%s: collateralOf@S %s, ABSENT from the persisted document", tok.Hex(), c))
+		case c.Cmp(p) != 0:
+			diffs = append(diffs, fmt.Sprintf("%s: collateralOf@S %s != persisted %s", tok.Hex(), c, p))
+		}
+	}
+	if len(diffs) > 0 {
+		return false, strings.Join(diffs, "; ")
+	}
+	return true, ""
+}
+
+// classifyDMMaxBorrow is the verdict law for the maxBorrow leg (adjudicated:
+// chain-truth ruling 08:55 + risk-quant ruling 08:42 + the dissection verdict
+// 08:58 on accept-r4; VECTOR-strengthened by Codex round 2 finding 1). It is a
+// pure function so the law is unit-tested and mutation-killable in isolation.
 //
-//	bit-exact               the weld holds at ONE clock: the pin values agree.
-//	sample-gap(disclosed)   the pin values differ but the own-clock weld at
-//	                        S(account) is bit-exact: the persisted vector is the
-//	                        chain's own state at its own clock, and the pin delta
-//	                        is eventless basket motion inside the sweep->pin gap
-//	                        — the same motion collateral_spot_reads labels
-//	                        report-only BY CONSTRUCTION. Disclosed with
-//	                        magnitude and sweep age, never gated.
-//	snapshot-custody-drift  the own-clock weld ITSELF fails: the persisted
-//	                        vector disagrees with the chain at its own clock.
-//	                        That is real custody drift and it GATES.
+//	bit-exact                 the weld holds at ONE clock: the pin values agree.
+//	sample-gap(disclosed)     the pin values differ, the own-clock VECTOR at
+//	                          S(account) is byte-identical to the persisted
+//	                          document (the custody proof), AND the scalar law
+//	                          check holds. The pin delta is eventless basket
+//	                          motion inside the sweep->pin gap — the same
+//	                          motion collateral_spot_reads labels report-only
+//	                          BY CONSTRUCTION. Disclosed with magnitude and
+//	                          sweep age, never gated. Reachable ONLY through a
+//	                          vector match: the scalar alone is weaker than the
+//	                          diagnosis (two wrong rows whose price×LT products
+//	                          cancel at S keep the scalar exact).
+//	snapshot-custody-drift    the VECTOR disagrees at the account's own clock:
+//	                          real custody drift, GATED — whatever the scalar
+//	                          legs produced, including a canceling match.
+//	own-clock-law-divergence  the vector matches byte-for-byte but the scalar
+//	                          recompute disagrees with getMaxBorrowAmount@S:
+//	                          custody is exonerated by the vector and the
+//	                          divergence is in the recompute law itself. GATED,
+//	                          named separately so custody and law cannot blur.
 //
 // This is a verdict class with its own read, NOT a fourth tolerance: any
 // epsilon over the pin delta was refused as tolerance-as-carpet, and the
@@ -854,13 +964,25 @@ func classifyDMMaxBorrow(pinChain, ours *big.Int, own *dmOwnClockResult) (verdic
 	if pinChain.Cmp(ours) == 0 {
 		return verdictExact, ""
 	}
+	// The CUSTODY PROOF outranks everything below: a proven vector mismatch at
+	// S is real drift even when the scalar legs could not be produced (Err set
+	// by a refused price or a reverted getMaxBorrowAmount changes nothing the
+	// vector already proved).
+	if own != nil && own.VectorRead && !own.VectorMatch {
+		return verdictDrift, "snapshot-custody-drift"
+	}
 	if own == nil || own.Err != "" {
 		return verdictWeldUnread, "own-clock-read-unread"
 	}
-	if own.ChainMax.Cmp(own.OurMax) == 0 {
-		return verdictSampleGap, verdictSampleGap
+	if !own.VectorRead {
+		// No custody proof was produced and no error explains why: sample-gap
+		// is unreachable without the vector, so this is "cannot verify".
+		return verdictWeldUnread, "own-clock-read-unread"
 	}
-	return verdictDrift, "snapshot-custody-drift"
+	if own.ChainMax.Cmp(own.OurMax) != 0 {
+		return verdictDrift, "own-clock-law-divergence"
+	}
+	return verdictSampleGap, verdictSampleGap
 }
 
 // dmOwnClockProbe names one account the discrimination read is issued for.
@@ -937,6 +1059,14 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				break
 			}
 			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "max", acct: p.acct})
+			// The CUSTODY PROOF: the exact read the sweeper persists
+			// (collateralOf, internal/snapshot/snapshot.go:634), re-issued at S.
+			if d, err = dmCollateralOfABI.Pack("collateralOf", p.acct); err != nil {
+				fail("pack collateralOf: " + err.Error())
+				bad = true
+				break
+			}
+			calls, tags = append(calls, multicallCall{Target: c.dmProxy, CallData: d}), append(tags, tag{kind: "vector", acct: p.acct})
 		}
 		if bad {
 			continue
@@ -967,12 +1097,18 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 			continue
 		}
 		chainMaxAt := map[common.Address]*big.Int{}
+		chainVecAt := map[common.Address][]tokenAmount{}
+		vecDecoded := map[common.Address]bool{}
 		priceAt := map[common.Address]*big.Int{}
 		readNote := map[common.Address]string{}
+		vectorNote := map[common.Address]string{}
 		for i, tg := range tags {
 			if !res[i].Success {
-				if tg.kind == "max" {
+				switch tg.kind {
+				case "max":
 					readNote[tg.acct] = "getMaxBorrowAmount reverted at S"
+				case "vector":
+					vectorNote[tg.acct] = "collateralOf reverted at S"
 				}
 				// A reverted price at S surfaces as a per-account refusal below.
 				continue
@@ -986,6 +1122,15 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 				}
 				chainMaxAt[tg.acct] = v
 				f.use(dmOwnClockMaxBorrowSource)
+			case "vector":
+				list, _, err := unpackTokenAmountList(dmCollateralOfABI, "collateralOf", res[i].ReturnData)
+				if err != nil {
+					vectorNote[tg.acct] = err.Error()
+					continue
+				}
+				chainVecAt[tg.acct] = list
+				vecDecoded[tg.acct] = true
+				f.use(dmOwnClockVectorSource)
 			case "price":
 				v, err := unpackUint256Strict(dmConvertCollateralToUsdABI, "convertCollateralTokenToUsd", res[i].ReturnData)
 				if err != nil {
@@ -1012,6 +1157,24 @@ func runDMOwnClockWelds(ctx context.Context, c *p3Ctx, f *gateFrame, probes []dm
 		for _, p := range group {
 			r := &dmOwnClockResult{Block: s, Hash: hash}
 			out[p.key] = r
+			// The CUSTODY PROOF first: byte-compare the chain's own vector at S
+			// against the persisted document before any scalar leg can refuse.
+			// A vector that did not decode leaves VectorRead=false, which the
+			// classifier turns into weld-unread; a vector MISMATCH is custody
+			// drift whatever the scalar legs below produce.
+			if note := vectorNote[p.acct]; note != "" {
+				r.Err = note
+			} else if vecDecoded[p.acct] {
+				persisted := dmPersistedVector(coll[p.key])
+				r.VectorRead = true
+				r.VectorLegs = len(persisted)
+				r.VectorMatch, r.VectorDiff = compareDMCollateralVector(chainVecAt[p.acct], persisted)
+			} else {
+				r.Err = "collateralOf produced no decoded value at S"
+			}
+			if r.Err != "" {
+				continue
+			}
 			if note := readNote[p.acct]; note != "" {
 				r.Err = note
 				continue
@@ -1228,50 +1391,79 @@ func dmMaxBorrowRow(c *p3Ctx, subject, acct string, pinChain, ours *big.Int, own
 	}
 	sweep := c.t6.DMSweepByAccount[acct].AtOrBelowPin
 	delta := new(big.Int).Sub(ours, pinChain)
+	ev := map[string]string{
+		"delta_usd6(ours-chain@pin)": delta.String(),
+		"sweep_block":                fmt.Sprintf("%d", sweep),
+		"sweep_age_blocks":           fmt.Sprintf("%d", c.pinOP-sweep),
+		"own_clock_hash":             own.Hash.Hex(),
+	}
+	if own.VectorRead {
+		if own.VectorMatch {
+			ev["own_clock_vector"] = fmt.Sprintf("match: collateralOf@S byte-identical to the persisted document (%d leg(s), order-insensitive, zero tolerance)", own.VectorLegs)
+		} else {
+			ev["own_clock_vector"] = "MISMATCH: " + own.VectorDiff
+		}
+	} else {
+		ev["own_clock_vector"] = "not produced"
+	}
+	// The scalar legs can be absent when the vector proof already decided the
+	// verdict (a refused own-clock price cannot un-prove a vector mismatch).
+	if own.ChainMax != nil {
+		ev["own_clock_chain_max"] = own.ChainMax.String()
+	}
+	if own.OurMax != nil {
+		ev["own_clock_our_max"] = own.OurMax.String()
+	}
 	row := p3Row{
 		Gate: gateDMBoolean, Subject: subject, Leg: "getMaxBorrowAmount(user,false)",
 		Expected: pinChain.String(), Actual: ours.String(),
 		Verdict: verdict, Gated: true, Class: class,
-		Evidence: map[string]string{
-			"delta_usd6(ours-chain@pin)": delta.String(),
-			"sweep_block":                fmt.Sprintf("%d", sweep),
-			"sweep_age_blocks":           fmt.Sprintf("%d", c.pinOP-sweep),
-			"own_clock_hash":             own.Hash.Hex(),
-			"own_clock_chain_max":        own.ChainMax.String(),
-			"own_clock_our_max":          own.OurMax.String(),
-		},
+		Evidence: ev,
 	}
-	if verdict == verdictSampleGap {
-		row.Note = "SAMPLE GAP, disclosed and not gated: the own-clock weld at the account's own sweep block S is BIT-EXACT (the persisted vector is the chain's own state at its own clock; recompute law internal/risk/dm.go:102-134 against getMaxBorrowAmount, DebtManagerCore.sol:139-165), so the pin delta is eventless basket motion inside the sweep->pin gap — the motion collateral_spot_reads labels report-only BY CONSTRUCTION. A verdict class with its own read, never a fourth tolerance (chain-truth ruling 08:55; risk-quant refused any epsilon over this population as tolerance-as-carpet)"
-	} else {
-		row.Note = "SNAPSHOT CUSTODY DRIFT, gated: the persisted collateral vector disagrees with the chain AT ITS OWN CLOCK. This is the arm the dissection found empty (own-clock weld byte-exact 5/5) — a row here is a real sweeper-custody defect, not a clock artifact, and it flips the accept-r4 classification"
+	switch class {
+	case verdictSampleGap:
+		row.Note = "SAMPLE GAP, disclosed and not gated: the own-clock weld at the account's own sweep block S is BIT-EXACT ON THE VECTOR — collateralOf@blockHash(S) byte-identical to the persisted document, order-insensitive, zero tolerance (Codex round 2 finding 1: the scalar alone can be kept exact by canceling wrong rows) — AND on the scalar law check (recompute internal/risk/dm.go:102-134 against getMaxBorrowAmount, DebtManagerCore.sol:139-165). The pin delta is eventless basket motion inside the sweep->pin gap — the motion collateral_spot_reads labels report-only BY CONSTRUCTION. A verdict class with its own read, never a fourth tolerance (chain-truth ruling 08:55; risk-quant refused any epsilon over this population as tolerance-as-carpet)"
+	case "own-clock-law-divergence":
+		row.Note = "OWN-CLOCK LAW DIVERGENCE, gated: the persisted vector IS byte-identical to collateralOf at the account's own sweep block (custody exonerated by the vector proof), but the scalar recompute over that proven-identical vector disagrees with getMaxBorrowAmount@S — the divergence is in the recompute law itself (internal/risk/dm.go:102-134 vs DebtManagerCore.sol:139-165), the arm pin-vector substitution found empty 5/5 in the dissection"
+	default:
+		row.Note = "SNAPSHOT CUSTODY DRIFT, gated: the persisted collateral VECTOR disagrees with collateralOf(user) at the account's OWN sweep block — byte-compare, order-insensitive, zero tolerance. This is the arm the dissection found empty (own-clock vector byte-identical 5/5) — a row here is a real sweeper-custody defect, not a clock artifact, and it flips the accept-r4 classification. The vector proof decides regardless of the scalar: two wrong rows whose price×LT products cancel at S keep the scalar exact and are exactly what this comparison exists to catch (Codex round 2, finding 1)"
 	}
 	return row
 }
 
-// dmOwnClockControlRow is the always-on control's own row: proof the
-// discrimination read is live against this archive even on an all-exact run.
+// dmOwnClockControlRow is the always-on control's own row: proof BOTH
+// discrimination reads — the collateralOf vector proof and the
+// getMaxBorrowAmount scalar check — are live against this archive even on an
+// all-exact run.
 func dmOwnClockControlRow(subject, reason string, own *dmOwnClockResult) p3Row {
-	if own == nil || own.Err != "" {
+	if own == nil || own.Err != "" || !own.VectorRead {
 		why := "the control's own-clock weld did not answer"
 		if own != nil && own.Err != "" {
 			why += ": " + own.Err
+		} else if own != nil && !own.VectorRead {
+			why += ": the collateralOf vector proof was not produced"
 		}
 		return unreadRow(gateDMBoolean, subject, "own-clock-control", why)
+	}
+	if !own.VectorMatch {
+		return driftRow(gateDMBoolean, subject, "own-clock-control",
+			"collateralOf@S byte-identical to the persisted document", own.VectorDiff, "snapshot-custody-drift",
+			"the CONTROL account's own-clock VECTOR proof failed: the persisted document disagrees with collateralOf at its own sweep block — real custody drift on the account chosen precisely because it was expected clean (Codex round 2, finding 1: the vector is the custody proof)")
 	}
 	if own.ChainMax.Cmp(own.OurMax) == 0 {
 		row := exactRow(gateDMBoolean, subject, "own-clock-control",
 			own.ChainMax.String(), own.OurMax.String())
-		row.Note = "the ALWAYS-ON own-clock control (" + reason + "): getMaxBorrowAmount at blockHash(S) welds bit-exact against our recompute over the persisted vector, proving the discrimination read live and the archive serving S-clock state this run"
+		row.Note = "the ALWAYS-ON own-clock control (" + reason + "): collateralOf at blockHash(S) byte-identical to the persisted document (" + fmt.Sprintf("%d leg(s)", own.VectorLegs) + ", the custody proof) AND getMaxBorrowAmount at the same hash welds bit-exact against our recompute over it, proving both discrimination reads live and the archive serving S-clock state this run"
 		row.Evidence = map[string]string{
-			"own_clock_block": fmt.Sprintf("%d", own.Block),
-			"own_clock_hash":  own.Hash.Hex(),
+			"own_clock_block":  fmt.Sprintf("%d", own.Block),
+			"own_clock_hash":   own.Hash.Hex(),
+			"own_clock_vector": fmt.Sprintf("match (%d persisted leg(s))", own.VectorLegs),
 		}
 		return row
 	}
 	return driftRow(gateDMBoolean, subject, "own-clock-control",
-		own.ChainMax.String(), own.OurMax.String(), "snapshot-custody-drift",
-		"the CONTROL account's own-clock weld failed: the persisted vector disagrees with the chain at its own sweep block — real custody drift on the account chosen precisely because it was expected clean")
+		own.ChainMax.String(), own.OurMax.String(), "own-clock-law-divergence",
+		"the CONTROL account's scalar law check failed over a vector the custody proof holds byte-identical: the recompute law itself diverges from getMaxBorrowAmount at S — a law defect surfaced by the account chosen precisely because it was expected clean")
 }
 
 func marginText(m *big.Int) string {

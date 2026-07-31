@@ -97,3 +97,95 @@ hashes plus 2 pin-clock batches (~460 inner calls total) through
 reserve-state batch + one 120-call subject batch through
 `SOLVENT_RECON_RPC_ETH` — 7.5s wall. No rate-limit backoff was triggered.
 
+---
+
+# v2 — the STRENGTHENED refutation (Wave H2, Codex round 2 remedies)
+
+The section above records the Wave-H run and is retained UNCHANGED as
+history. Codex round 1 on the proof surface found the committed refutation
+VACUOUS UNDER TRUNCATION (finding 3): missing DM history was accumulated
+rather than failed, a nonempty `reproducible` subset sufficed, own-clock
+unread was allowed if >=1 weld landed, and the Aave lane required a nonempty
+target set rather than exactly 24 — a run proving 1/233, or fed a truncated
+artifact, stayed green. The Wave-H execution above happened to be complete
+(233/233 + 24/24), but the committed proof did not REQUIRE it. It also
+proved only the risk-weighted SCALAR at S (finding 1): two wrong rows whose
+price×LT products cancel at S kept the scalar exact.
+
+## What v2 requires (hard bars, each a test failure when missed)
+
+- **(a) Artifact identity**: `comparison_sha256` must equal
+  `38a57b3eb111af13ff57b9d67d27c5c89f7ef3666deb2840058f6d960a88778d` and the
+  artifact's own pins must be exactly op 154938071 /
+  `0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc`, eth
+  25650676 /
+  `0x8197fee7a752a5e22d20c3d05e57ec510779753ff949f29343f46860d969d147`.
+- **(b) Complete target sets**: exactly 233 unique DM subjects and exactly
+  24 unique census subjects, duplicates refused, drift rows with equal pin
+  values refused.
+- **(c) Complete input recovery**: any missing snapshots-history document is
+  a FAILURE (`require.Empty(missingHistory)`), and `reproducible` must equal
+  233.
+- **(d) Zero unread**: every headerHash, every multicall, every per-account
+  read must answer; each miss is a `t.Errorf` naming the account plus a
+  final `require.Zero`.
+- **(e) The F1 VECTOR proof per account**: `collateralOf(user)` at
+  blockHash(S(account)) — the exact read the sweeper persists
+  (internal/snapshot/snapshot.go:634; DebtManagerCore.sol:170-183) —
+  byte-compared against the recovered accept-r4 document
+  (`compareDMCollateralVector`: order-insensitive by token, zero-amount
+  entries dropped exactly as the sweeper drops them, zero tolerance), THEN
+  the scalar law check. Every DM row must land in exactly the
+  sample-gap-disclosed-with-vector-match state (`require.Equal(233,
+  vectorExact)` and `require.Equal(233, ownExact)`), or the test fails
+  naming the account.
+
+The bars are enforced in `parseAcceptR4Artifact` (returns errors, so the
+bars themselves are unit-tested without the live environment:
+`TestAcceptR4ArtifactBarsRefuseTruncationAndIdentityDrift` proves truncated
+row sets, wrong sha256, drifted/missing pins, duplicated subjects and
+equal-value drift rows each fail CLOSED) and in the live test bodies
+(wave-h2.md mutant m3: the completeness bar deleted -> KILLED).
+
+## v2 execution — 2026-07-31, live DB (SELECT-only) + recon RPC, both PASS
+
+`TestAcceptR4SamePinRefutationDMMaxBorrow` (PASS, 113.42s):
+
+```
+targets: 233 dm maxBorrow drift rows (artifact identity + completeness bars passed)
+accept-r4 vectors recovered from snapshots HISTORY: 233/233 (live watermark re-swept above the pin: 233 — the live legs are gone, the history rows are not; missing history: 0)
+same-input proof: 233/233 reproducible vectors reproduce the artifact's actual_derived bit-exactly at the pin
+distinct sweep blocks S: 72 (S is deep-finalized; each group shares one hash resolution and one multicall)
+own-clock welds over the 233: vector byte-identical 233, vector mismatch 0; scalar bit-exact 233, law-divergence 0, unread 0; sweep age (blocks) min 124 max 2499
+```
+
+| class | count | meaning |
+|---|---|---|
+| artifact identity | PASS | comparison_sha256 + both pins verified before any target was read |
+| input recovery | **233/233, 0 missing (hard bar)** | every accept-r4 collateral vector recovered from the snapshots history table |
+| same-input proof | **233/233 bit-exact** | pin recompute over the recovered vector reproduces the artifact's `actual_derived` exactly |
+| **VECTOR byte-compare @hash(S)** | **233/233 byte-identical, 0 mismatch** | `collateralOf(user)@blockHash(S)` vs the persisted document, order-insensitive, zero tolerance — the dissection's 5/5 hand check generalized to the full 233 IN THE COMMITTED GATE LAW (Codex round 2, finding 1) |
+| scalar law check @hash(S) | **233/233 bit-exact, 0 law-divergence** | recompute with prices@S and the param ledger re-cut at <= S equals `getMaxBorrowAmount@blockHash(S)`, across 72 distinct sweep blocks, ages 124-2499 |
+| unread | **0 (hard bar)** | every headerHash, multicall and per-account read answered |
+
+`TestAcceptR4SamePinRefutationZeroDebtCensus` (PASS, 7.00s):
+
+```
+targets: 24 zero-debt census rows (artifact identity + completeness bars passed)
+reserves at the accept-r4 pin: 4
+collateral-flag ledger rows at the pin: 94
+one-law non-members: 24/24; chain zero-collateral confirmed: 24/24; scaledBalanceOf welds bit-exact: 96/96
+flag provenance: never-enabled (no fold row) 22, explicit flag row(s) in custody 2
+```
+
+All three per-class equalities are now REQUIRED (`require.Equal(24, ...)` x2
+and `require.Equal(24*4, weldExact)`), not merely logged.
+
+## RPC cost (names only, per the brief)
+
+Part A: 72 headerHash resolutions + 72 own-clock multicalls (each now
+carrying one extra collateralOf call per account — same request count as v1,
+larger payloads) plus 2 pin-clock batches through `SOLVENT_RECON_RPC_OP` —
+113s wall. Part B: one reserve-state batch + one 120-call subject batch
+through `SOLVENT_RECON_RPC_ETH` — 7s wall. No rate-limit backoff was
+triggered.

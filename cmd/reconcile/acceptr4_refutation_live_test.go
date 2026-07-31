@@ -1,15 +1,36 @@
-// The accept-r4 SAME-PIN REFUTATION (Wave H's evidence standard, adjudicated):
-// the corrected gate laws, fed the UNCHANGED accept-r4 inputs at the SAME pin
-// hashes, must classify every previously-failing row correctly —
+// The accept-r4 SAME-PIN REFUTATION (Wave H's evidence standard, adjudicated;
+// HARDENED to the non-vacuous bars by Codex round 2 finding 3): the corrected
+// gate laws, fed the UNCHANGED accept-r4 inputs at the SAME pin hashes, must
+// classify every previously-failing row correctly —
 //
-//   - the 233 dm_boolean_weld getMaxBorrowAmount drifts -> own-clock bit-exact
-//     at each account's own sweep block S (the discrimination read) with the
-//     pin delta classified sample-gap(disclosed); ANY own-clock failure is
-//     snapshot-custody-drift and FAILS this test loudly, because it flips the
+//   - the 233 dm_boolean_weld getMaxBorrowAmount drifts -> at each account's
+//     own sweep block S, the collateralOf VECTOR byte-identical to the
+//     persisted document (the F1 custody proof) AND the scalar recompute
+//     bit-exact against getMaxBorrowAmount@blockHash(S), with the pin delta
+//     classified sample-gap(disclosed); ANY vector mismatch or scalar failure
+//     FAILS this test loudly, naming the account, because it flips the
 //     adjudicated verdict;
 //   - the 24 aave_hf zero-debt census differences -> correctly classified
 //     NON-members under the one-law census (flag-gated, value-projected), with
 //     the per-account aToken.scaledBalanceOf@pinHash weld passing bit-exact.
+//
+// THE NON-VACUOUS BARS (Codex round 2, finding 3 — the previous version
+// passed on a NONEMPTY SUBSET: missing history was accumulated, >=1 exact
+// sufficed, and the Aave lane required nonempty rather than exactly 24; a run
+// proving 1/233, or fed a truncated artifact, stayed green):
+//
+//	(a) ARTIFACT IDENTITY — the artifact's own comparison_sha256 must equal
+//	    the accept-r4 record, and its pins must be exactly op 154938071 /
+//	    0xaf91dd4b… and eth 25650676 / 0x8197fee7…;
+//	(b) COMPLETE TARGET SETS — exactly 233 unique DM subjects and exactly 24
+//	    unique census subjects extracted from the artifact, each accounted for
+//	    in the final classification counts;
+//	(c) COMPLETE INPUT RECOVERY — any missing history row is a FAILURE, never
+//	    an accumulated log line;
+//	(d) ZERO UNREAD — every weld answers; an unread read is a FAILURE;
+//	(e) EVERY DM row lands in exactly the sample-gap-disclosed-with-vector-
+//	    match state (vector byte-identical AND scalar bit-exact at S), or the
+//	    test fails naming the account.
 //
 // A fresh-pin pass alone proves nothing (adjudicated), which is why this test
 // re-reads the accept-r4 derived state (SELECT-only, strictly read-only DSN,
@@ -57,14 +78,23 @@ import (
 	"github.com/kaselunt/solvent/internal/store"
 )
 
-// The accept-r4 pins (progress-phase3.md, ACCEPTANCE RETRY 4; comparison
-// sha256 38a57b3e…).
+// The accept-r4 pins and identity (progress-phase3.md, ACCEPTANCE RETRY 4).
 const (
 	acceptR4PinOP    = uint64(154938071)
 	acceptR4HashOP   = "0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc"
 	acceptR4PinETH   = uint64(25650676)
 	acceptR4HashETH  = "0x8197fee7a752a5e22d20c3d05e57ec510779753ff949f29343f46860d969d147"
 	acceptR4Artifact = "SOLVENT_ACCEPT_R4_ARTIFACT"
+	// acceptR4ComparisonSHA is the run's own comparison_sha256, recorded in the
+	// ledger at completion — the artifact-identity bar (Codex round 2, finding
+	// 3): a refutation judged against a different or truncated artifact proves
+	// nothing about accept-r4.
+	acceptR4ComparisonSHA = "38a57b3eb111af13ff57b9d67d27c5c89f7ef3666deb2840058f6d960a88778d"
+	// acceptR4DMSubjects / acceptR4CensusSubjects are the EXACT unique-subject
+	// counts of the accept-r4 failure sets. The refutation requires equality,
+	// never nonemptiness: 1/233 is not a refutation.
+	acceptR4DMSubjects     = 233
+	acceptR4CensusSubjects = 24
 )
 
 func requireRefute(t *testing.T) string {
@@ -79,20 +109,32 @@ func requireRefute(t *testing.T) string {
 	return p
 }
 
+type acceptR4DMTarget struct {
+	account  string
+	chainPin *big.Int
+	oursPin  *big.Int
+}
+
 type acceptR4Targets struct {
-	dm []struct {
-		account  string
-		chainPin *big.Int
-		oursPin  *big.Int
-	}
+	dm     []acceptR4DMTarget
 	census []string
 }
 
-func loadAcceptR4Targets(t *testing.T, path string) acceptR4Targets {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	require.NoError(t, err)
+// parseAcceptR4Artifact enforces the ARTIFACT-IDENTITY and COMPLETENESS bars
+// (Codex round 2, finding 3) before returning a single target: the wrong
+// artifact, drifted pins, a truncated row set, duplicate subjects or an
+// unparseable value each REFUSE the whole refutation with an error naming the
+// defect. It returns an error rather than asserting so the bars themselves
+// are unit-testable without the live environment (and mutation-killable: the
+// m3 mutant deletes a bar and the truncation test must notice).
+func parseAcceptR4Artifact(raw []byte) (acceptR4Targets, error) {
 	var doc struct {
+		ComparisonSHA256 string `json:"comparison_sha256"`
+		Pins             []struct {
+			Block uint64 `json:"block"`
+			Chain string `json:"chain"`
+			Hash  string `json:"hash"`
+		} `json:"pins"`
 		P3 struct {
 			Rows []struct {
 				Gate     string `json:"gate"`
@@ -104,24 +146,78 @@ func loadAcceptR4Targets(t *testing.T, path string) acceptR4Targets {
 			} `json:"rows"`
 		} `json:"p3_task6"`
 	}
-	require.NoError(t, json.Unmarshal(raw, &doc))
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return acceptR4Targets{}, fmt.Errorf("the artifact does not parse: %w", err)
+	}
+	// Bar (a): artifact identity.
+	if doc.ComparisonSHA256 != acceptR4ComparisonSHA {
+		return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: comparison_sha256 %q is not the accept-r4 record %q — the refutation is judged against the run's own artifact, never a substitute",
+			doc.ComparisonSHA256, acceptR4ComparisonSHA)
+	}
+	opOK, ethOK := false, false
+	for _, p := range doc.Pins {
+		switch p.Chain {
+		case "op":
+			if p.Block != acceptR4PinOP || !strings.EqualFold(p.Hash, acceptR4HashOP) {
+				return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: op pin %d/%s is not the accept-r4 pin %d/%s", p.Block, p.Hash, acceptR4PinOP, acceptR4HashOP)
+			}
+			opOK = true
+		case "eth":
+			if p.Block != acceptR4PinETH || !strings.EqualFold(p.Hash, acceptR4HashETH) {
+				return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: eth pin %d/%s is not the accept-r4 pin %d/%s", p.Block, p.Hash, acceptR4PinETH, acceptR4HashETH)
+			}
+			ethOK = true
+		}
+	}
+	if !opOK || !ethOK {
+		return acceptR4Targets{}, fmt.Errorf("ARTIFACT IDENTITY failed: the artifact does not carry both accept-r4 pins (op present=%v, eth present=%v)", opOK, ethOK)
+	}
+	// Bar (b): the complete unique target sets.
 	var out acceptR4Targets
+	seenDM := map[string]bool{}
+	seenCensus := map[string]bool{}
 	for _, r := range doc.P3.Rows {
 		if r.Gate == gateDMBoolean && r.Leg == "getMaxBorrowAmount(user,false)" && r.Verdict == verdictDrift {
+			key := hexLower(r.Subject)
+			if seenDM[key] {
+				return acceptR4Targets{}, fmt.Errorf("duplicate dm_boolean_weld drift subject %s — the artifact is not the accept-r4 row set", r.Subject)
+			}
+			seenDM[key] = true
 			c, ok1 := new(big.Int).SetString(r.Expected, 10)
 			o, ok2 := new(big.Int).SetString(r.Actual, 10)
-			require.True(t, ok1 && ok2, "artifact row %s carries non-integer values", r.Subject)
-			out.dm = append(out.dm, struct {
-				account  string
-				chainPin *big.Int
-				oursPin  *big.Int
-			}{r.Subject, c, o})
+			if !ok1 || !ok2 {
+				return acceptR4Targets{}, fmt.Errorf("artifact row %s carries non-integer values (%q vs %q)", r.Subject, r.Expected, r.Actual)
+			}
+			if c.Cmp(o) == 0 {
+				return acceptR4Targets{}, fmt.Errorf("artifact row %s claims verdict=drift with EQUAL pin values %s — not an accept-r4 drift row", r.Subject, c)
+			}
+			out.dm = append(out.dm, acceptR4DMTarget{account: r.Subject, chainPin: c, oursPin: o})
 		}
 		if r.Gate == gateAaveHF && strings.HasPrefix(r.Leg, "census(zero-debt)") && r.Verdict == verdictDrift {
+			key := hexLower(r.Subject)
+			if seenCensus[key] {
+				return acceptR4Targets{}, fmt.Errorf("duplicate zero-debt census drift subject %s — the artifact is not the accept-r4 row set", r.Subject)
+			}
+			seenCensus[key] = true
 			out.census = append(out.census, r.Subject)
 		}
 	}
-	return out
+	if len(out.dm) != acceptR4DMSubjects {
+		return acceptR4Targets{}, fmt.Errorf("COMPLETENESS failed: %d unique dm_boolean_weld drift subjects, want exactly %d — a truncated artifact must not refute (Codex round 2, finding 3)", len(out.dm), acceptR4DMSubjects)
+	}
+	if len(out.census) != acceptR4CensusSubjects {
+		return acceptR4Targets{}, fmt.Errorf("COMPLETENESS failed: %d unique zero-debt census drift subjects, want exactly %d — a truncated artifact must not refute (Codex round 2, finding 3)", len(out.census), acceptR4CensusSubjects)
+	}
+	return out, nil
+}
+
+func loadAcceptR4Targets(t *testing.T, path string) acceptR4Targets {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	targets, err := parseAcceptR4Artifact(raw)
+	require.NoError(t, err, "the artifact-identity and completeness bars are hard preconditions: a refutation over the wrong or truncated artifact proves nothing")
+	return targets
 }
 
 func refuteDB(t *testing.T, ctx context.Context) *pgx.Conn {
@@ -136,12 +232,12 @@ func refuteDB(t *testing.T, ctx context.Context) *pgx.Conn {
 	return conn
 }
 
-// TestAcceptR4SamePinRefutationDMMaxBorrow is Part A: the 233.
+// TestAcceptR4SamePinRefutationDMMaxBorrow is Part A: ALL 233, each landing in
+// exactly the sample-gap-disclosed-with-vector-match state.
 func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 	artifact := requireRefute(t)
 	targets := loadAcceptR4Targets(t, artifact)
-	require.NotEmpty(t, targets.dm, "the artifact must carry the dm_boolean_weld drift rows")
-	t.Logf("targets: %d dm maxBorrow drift rows", len(targets.dm))
+	t.Logf("targets: %d dm maxBorrow drift rows (artifact identity + completeness bars passed)", len(targets.dm))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
 	defer cancel()
@@ -202,10 +298,13 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 	}
 	t.Logf("accept-r4 vectors recovered from snapshots HISTORY: %d/%d (live watermark re-swept above the pin: %d — the live legs are gone, the history rows are not; missing history: %d)",
 		len(reproducible), len(targets.dm), resweptLive, len(missingHistory))
-	for _, a := range missingHistory {
-		t.Logf("  irreproducible (no collateral history document at or below the pin): %s", a)
-	}
-	require.NotEmpty(t, reproducible, "no account is reproducible — the refutation cannot run")
+	// Bar (c): COMPLETE input recovery. A missing history row is a FAILURE —
+	// the previous accumulate-and-continue posture let a run proving 1/233
+	// stay green (Codex round 2, finding 3).
+	require.Empty(t, missingHistory,
+		"COMPLETE INPUT RECOVERY failed: %d account(s) have no collateral history document at or below the pin — the refutation cannot claim the 233 over a subset", len(missingHistory))
+	require.Len(t, reproducible, acceptR4DMSubjects,
+		"every one of the %d artifact subjects must be recovered", acceptR4DMSubjects)
 
 	// The DM param ledger (event custody, append-only) at the pin; re-cut at S.
 	params, err := store.DMParamsAsOf(ctx, conn, acceptR4PinOP)
@@ -279,13 +378,14 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 	t.Logf("distinct sweep blocks S: %d (S is deep-finalized; each group shares one hash resolution and one multicall)", len(sweeps))
 
 	ownExact, ownDrift, ownUnread := 0, 0, 0
+	vectorExact, vectorMismatch := 0, 0
 	minAge, maxAge := uint64(0), uint64(0)
 	for _, s := range sweeps {
 		group := byS[s]
 		hashS, _, err := r.headerHash(ctx, s)
 		if err != nil {
 			ownUnread += len(group)
-			t.Logf("  UNREAD: headerHash(%d): %v (%d accounts)", s, err, len(group))
+			t.Errorf("UNREAD (bar d): headerHash(%d): %v (%d accounts)", s, err, len(group))
 			continue
 		}
 		gtok := map[common.Address]bool{}
@@ -295,6 +395,10 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 			}
 		}
 		gtokens := sortedAddrs(gtok)
+		// Call layout at S: [0, len(group)) getMaxBorrowAmount;
+		// [len(group), len(group)+len(gtokens)) prices;
+		// [len(group)+len(gtokens), ...) collateralOf — the F1 CUSTODY PROOF,
+		// the exact read the sweeper persists, byte-compared below.
 		var calls []multicallCall
 		for _, st := range group {
 			d, err := dmGetMaxBorrowAmountABI.Pack("getMaxBorrowAmount", st.addr, false)
@@ -306,10 +410,15 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 			require.NoError(t, err)
 			calls = append(calls, multicallCall{Target: c.dmProxy, CallData: d})
 		}
+		for _, st := range group {
+			d, err := dmCollateralOfABI.Pack("collateralOf", st.addr)
+			require.NoError(t, err)
+			calls = append(calls, multicallCall{Target: c.dmProxy, CallData: d})
+		}
 		res, _, err := r.multicall(ctx, fmt.Sprintf("refute:ownClock@%d", s), s, hashS, calls)
 		if err != nil {
 			ownUnread += len(group)
-			t.Logf("  UNREAD: multicall@%d: %v (%d accounts)", s, err, len(group))
+			t.Errorf("UNREAD (bar d): multicall@%d: %v (%d accounts)", s, err, len(group))
 			continue
 		}
 		pricesS := map[common.Address]*big.Int{}
@@ -329,22 +438,46 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 		}
 		foldedS, err := riskfeed.FoldParams(dmEngine, 10, cut)
 		require.NoError(t, err)
+		vecBase := len(group) + len(gtokens)
 		for i, st := range group {
+			// The VECTOR first (bar e / the F1 custody proof): collateralOf at
+			// blockHash(S) byte-compared against the recovered accept-r4
+			// document, order-insensitive by token, zero tolerance.
+			vr := res[vecBase+i]
+			if !vr.Success {
+				ownUnread++
+				t.Errorf("UNREAD (bar d): %s collateralOf reverted at S=%d", st.addr.Hex(), s)
+				continue
+			}
+			vec, _, err := unpackTokenAmountList(dmCollateralOfABI, "collateralOf", vr.ReturnData)
+			if err != nil {
+				ownUnread++
+				t.Errorf("UNREAD (bar d): %s collateralOf at S=%d did not decode: %v", st.addr.Hex(), s, err)
+				continue
+			}
+			match, diff := compareDMCollateralVector(vec, st.legs)
+			if !match {
+				vectorMismatch++
+				t.Errorf("SNAPSHOT CUSTODY DRIFT (VECTOR, verdict FLIPS): %s S=%d — %s", st.addr.Hex(), s, diff)
+				continue
+			}
+			vectorExact++
+			// Then the scalar law check over the proven-identical vector.
 			if !res[i].Success {
 				ownUnread++
-				t.Logf("  UNREAD: %s getMaxBorrowAmount reverted at S=%d", st.addr.Hex(), s)
+				t.Errorf("UNREAD (bar d): %s getMaxBorrowAmount reverted at S=%d", st.addr.Hex(), s)
 				continue
 			}
 			chainS, err := unpackUint256Strict(dmGetMaxBorrowAmountABI, "getMaxBorrowAmount", res[i].ReturnData)
 			if err != nil {
 				ownUnread++
-				t.Logf("  UNREAD: %s: %v", st.addr.Hex(), err)
+				t.Errorf("UNREAD (bar d): %s: %v", st.addr.Hex(), err)
 				continue
 			}
 			oursS := recompute(st.legs, pricesS, foldedS, s)
 			if oursS == nil {
 				ownUnread++
-				t.Logf("  UNREAD: %s own-clock recompute refused at S=%d", st.addr.Hex(), s)
+				t.Errorf("UNREAD (bar d): %s own-clock recompute refused at S=%d", st.addr.Hex(), s)
 				continue
 			}
 			if chainS.Cmp(oursS) == 0 {
@@ -358,26 +491,35 @@ func TestAcceptR4SamePinRefutationDMMaxBorrow(t *testing.T) {
 				}
 			} else {
 				ownDrift++
-				t.Errorf("SNAPSHOT CUSTODY DRIFT (verdict FLIPS): %s S=%d chain@S=%s ours@S=%s — the persisted vector disagrees with the chain at its OWN clock",
+				t.Errorf("OWN-CLOCK LAW DIVERGENCE (verdict FLIPS): %s S=%d chain@S=%s ours@S=%s — the vector matches byte-for-byte, so the divergence is in the recompute law itself",
 					st.addr.Hex(), s, chainS, oursS)
 			}
 		}
 	}
-	t.Logf("own-clock welds over the reproducible set: bit-exact %d, custody-drift %d, unread %d; sweep age (blocks) min %d max %d",
-		ownExact, ownDrift, ownUnread, minAge, maxAge)
+	t.Logf("own-clock welds over the %d: vector byte-identical %d, vector mismatch %d; scalar bit-exact %d, law-divergence %d, unread %d; sweep age (blocks) min %d max %d",
+		len(reproducible), vectorExact, vectorMismatch, ownExact, ownDrift, ownUnread, minAge, maxAge)
+	// Bars (d) and (e): zero unread, zero drift, and EVERY subject in the
+	// sample-gap-disclosed-with-vector-match state — equality with 233, never
+	// nonemptiness (Codex round 2, finding 3).
+	require.Zero(t, vectorMismatch,
+		"ANY vector mismatch at S is real sweeper-custody drift and flips the accept-r4 classification")
 	require.Zero(t, ownDrift,
-		"ANY own-clock failure is real sweeper-custody drift and flips the accept-r4 classification — report loudly")
-	require.Equal(t, len(reproducible), ownExact+ownUnread,
-		"every reproducible account must be classified (exact or unread), never dropped")
-	require.Positive(t, ownExact, "at least one own-clock weld must land or nothing was refuted")
+		"ANY scalar failure over a matching vector is a recompute-law divergence and flips the accept-r4 classification")
+	require.Zero(t, ownUnread,
+		"ZERO UNREAD is a hard bar (Codex round 2, finding 3): an unanswered weld is not a refutation")
+	require.Equal(t, acceptR4DMSubjects, vectorExact,
+		"all %d accept-r4 vectors must byte-compare identical at their own S", acceptR4DMSubjects)
+	require.Equal(t, acceptR4DMSubjects, ownExact,
+		"all %d DM rows must land in exactly the sample-gap-disclosed-with-vector-match state", acceptR4DMSubjects)
 }
 
-// TestAcceptR4SamePinRefutationZeroDebtCensus is Part B: the 24.
+// TestAcceptR4SamePinRefutationZeroDebtCensus is Part B: ALL 24, each
+// accounted for — exactly 24 unique subjects (the loader's completeness bar),
+// every read answered, every weld bit-exact.
 func TestAcceptR4SamePinRefutationZeroDebtCensus(t *testing.T) {
 	artifact := requireRefute(t)
 	targets := loadAcceptR4Targets(t, artifact)
-	require.NotEmpty(t, targets.census, "the artifact must carry the zero-debt census drift rows")
-	t.Logf("targets: %d zero-debt census rows", len(targets.census))
+	t.Logf("targets: %d zero-debt census rows (artifact identity + completeness bars passed)", len(targets.census))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -558,4 +700,14 @@ func TestAcceptR4SamePinRefutationZeroDebtCensus(t *testing.T) {
 		nonMember, len(targets.census), chainZero, len(targets.census),
 		weldExact, len(targets.census)*len(reserves))
 	t.Logf("flag provenance: never-enabled (no fold row) %d, explicit flag row(s) in custody %d", neverEnabled, explicitOff)
+	// Bars (b), (d), (e) for the Aave lane: EXACTLY 24, each accounted for —
+	// equality, never nonemptiness (Codex round 2, finding 3). The per-read
+	// requires above already make any unread or inexact weld a hard failure;
+	// these equalities prove no subject was skipped on the way.
+	require.Equal(t, acceptR4CensusSubjects, nonMember,
+		"all %d census subjects must classify one-law NON-members", acceptR4CensusSubjects)
+	require.Equal(t, acceptR4CensusSubjects, chainZero,
+		"all %d census subjects must re-confirm chain zero collateral at the pin hash", acceptR4CensusSubjects)
+	require.Equal(t, acceptR4CensusSubjects*len(reserves), weldExact,
+		"the scaledBalanceOf weld must be bit-exact for every (subject, reserve) pair — %d x %d", acceptR4CensusSubjects, len(reserves))
 }

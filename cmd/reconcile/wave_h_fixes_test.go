@@ -36,12 +36,16 @@ import (
 // --- fix 1: the DM maxBorrow three-state verdict law -------------------------
 
 // TestClassifyDMMaxBorrowThreeStateLaw pins the adjudicated classifier
-// (chain-truth ruling 08:55): bit-exact at one clock; sample-gap DISCLOSED when
-// only the pin differs and the own-clock weld holds; snapshot-custody-drift
-// GATED when the own-clock weld itself fails; weld-unread when the
-// discrimination read did not answer. The mutant this kills (m1) collapses the
-// middle state — the dangerous direction being own-clock FAILURE reported as a
-// disclosed sample gap.
+// (chain-truth ruling 08:55; VECTOR-strengthened per Codex round 2 finding 1):
+// bit-exact at one clock; sample-gap DISCLOSED only when the pin differs, the
+// own-clock VECTOR proof matches AND the scalar check holds;
+// snapshot-custody-drift GATED on any vector mismatch; own-clock-law-divergence
+// GATED when a matching vector still recomputes differently; weld-unread when
+// the discrimination reads did not answer. The mutant this kills (m1 of
+// wave-h.md) collapses the middle state — the dangerous direction being
+// own-clock FAILURE reported as a disclosed sample gap. (The wave-h2 m1
+// mutant — the vector proof dropped back to scalar-only — is killed by
+// TestClassifyDMMaxBorrowRequiresTheVector.)
 func TestClassifyDMMaxBorrowThreeStateLaw(t *testing.T) {
 	pin := big.NewInt(1000)
 	ours := big.NewInt(1000)
@@ -50,17 +54,27 @@ func TestClassifyDMMaxBorrowThreeStateLaw(t *testing.T) {
 	require.Empty(t, cls)
 
 	ours = big.NewInt(900)
-	own := &dmOwnClockResult{Block: 42, ChainMax: big.NewInt(900), OurMax: big.NewInt(900)}
+	own := &dmOwnClockResult{Block: 42, ChainMax: big.NewInt(900), OurMax: big.NewInt(900),
+		VectorRead: true, VectorMatch: true, VectorLegs: 2}
 	v, cls = classifyDMMaxBorrow(pin, ours, own)
 	require.Equal(t, verdictSampleGap, v,
-		"pin drift + own-clock bit-exact = SAMPLE GAP, a verdict class with its own read, never a tolerance")
+		"pin drift + own-clock vector match + scalar bit-exact = SAMPLE GAP, a verdict class with its own read, never a tolerance")
 	require.Equal(t, verdictSampleGap, cls)
 	require.False(t, verdictIsFailure(v), "a disclosed sample gap must not reach the exit code")
 
-	own = &dmOwnClockResult{Block: 42, ChainMax: big.NewInt(901), OurMax: big.NewInt(900)}
+	own = &dmOwnClockResult{Block: 42, ChainMax: big.NewInt(901), OurMax: big.NewInt(900),
+		VectorRead: true, VectorMatch: true, VectorLegs: 2}
 	v, cls = classifyDMMaxBorrow(pin, ours, own)
 	require.Equal(t, verdictDrift, v,
-		"an own-clock weld failure is REAL custody drift — the arm the dissection found empty, and the arm that flips the accept-r4 classification if it ever fills")
+		"a scalar failure over a MATCHING vector is a recompute-law divergence — gated, named separately so custody and law cannot blur")
+	require.Equal(t, "own-clock-law-divergence", cls)
+	require.True(t, verdictIsFailure(v))
+
+	own = &dmOwnClockResult{Block: 42, ChainMax: big.NewInt(900), OurMax: big.NewInt(900),
+		VectorRead: true, VectorMatch: false, VectorDiff: "0xA: collateralOf@S 1 != persisted 2"}
+	v, cls = classifyDMMaxBorrow(pin, ours, own)
+	require.Equal(t, verdictDrift, v,
+		"a vector mismatch is REAL custody drift — the arm the dissection found empty, and the arm that flips the accept-r4 classification if it ever fills")
 	require.Equal(t, "snapshot-custody-drift", cls)
 	require.True(t, verdictIsFailure(v))
 
@@ -87,6 +101,8 @@ func TestDMGateFrameDeclaresTheSweepClockTruth(t *testing.T) {
 	require.NotContains(t, dmCollateralSnapshotSource, "@P_op",
 		"declaring the sweep vector @P_op was accept-r4's FALSE declaration")
 	require.Equal(t, framePinned, names[dmOwnClockMaxBorrowSource])
+	require.Equal(t, framePinned, names[dmOwnClockVectorSource],
+		"the collateralOf vector proof (Codex round 2, finding 1) must be a declared pinned read")
 	require.Equal(t, framePinned, names[dmOwnClockPriceSource])
 	require.Equal(t, framePinned, names[dmOwnClockHeaderSource])
 }

@@ -49,6 +49,24 @@
 // OFF masking a WRONG balance, invisible to the Σ weld because transfers move
 // no total — is closed by the per-account scaledBalanceOf@pin weld over every
 // census-disagreeing and flag-masked candidate, bit-exact, zero tolerance.
+//
+// PER-(ACCOUNT, RESERVE) SELECTION CORRECTION (Codex round 2 on the proof
+// surface, finding 2, 2026-07-31). Wave H's committed weld selected
+// candidates by MEMBERSHIP FLIP (RawZeroDebt != oneLawZero) plus census
+// disagreement — WEAKER than the residual it claimed to close. A borrower
+// with debt has both memberships false; a zero-debt account with one enabled
+// and one disabled reserve is true in both; in either shape a WRONG derived
+// balance in a flag-OFF reserve is ignored by the pinned HF computation,
+// never enters the weld set, and acceptance passes over wrong stored
+// collateral. The masking condition is per (account, reserve), not per
+// account — so the selection now is too (selectMaskedBalancePairs): EVERY
+// positive derived scaled-collateral balance whose folded flag is OFF at the
+// pin joins the scaledBalanceOf@pinHash weld, and so does every pair the
+// PINNED bitmap masks (folded ON, pinned OFF — the same invisibility through
+// the other flag door, on borrowers where no census row would ever surface
+// the disagreement). Bit-exact, zero tolerance; the batch is finite (positive
+// derived balances with a masked flag at the pin) and its size is disclosed
+// on the selection row.
 package main
 
 import (
@@ -57,6 +75,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 
@@ -123,7 +142,7 @@ const (
 	aaveNeverSeenListSource = "never-seen subject list (sha256 of " + neverSeenSeed + "|i, first 20 bytes)"
 	aaveFlagLedgerSource    = "position_events(engine=aave_v3_etherfi) collateral-flag ledger (aave_collateral_enabled/aave_collateral_disabled), latest-wins fold <= P_eth"
 	aaveReserveATokenSource = "Pool.getReserveAToken(asset)@pinHash(P_eth)"
-	aaveScaledBalanceSource = "AToken.scaledBalanceOf(user)@pinHash(P_eth) for census-disagreeing and flag-masked candidates plus a nonzero control"
+	aaveScaledBalanceSource = "AToken.scaledBalanceOf(user)@pinHash(P_eth) for census-disagreeing, flag-masked and per-(account,reserve) masked-balance candidates plus a nonzero control"
 )
 
 // neverSeenBytes returns the subjects as raw bytes for Stage A.
@@ -167,7 +186,7 @@ func aaveGateFrame() *gateFrame {
 		pinned(aaveReserveATokenSource,
 			"the aToken behind each reserve, resolved AT THE PIN through the Pool's own accessor (v3.2+ IPool) — never from the registry and never from the param ledger under test, because the balance-census weld's read target must not come from the custody it is checking"),
 		pinned(aaveScaledBalanceSource,
-			"the BALANCE-CENSUS weld (chain-truth ruling, ledger 08:55): the raw scaled balance per census-disagreeing / flag-masked account, bit-exact zero tolerance. It closes the flag-off masking residual the one-law census opens — the Σ weld has zero power against transfers — and converts aggregate-only evidence into per-account proof. A nonzero control keeps the read provably live on an all-agreeing run"),
+			"the BALANCE-CENSUS weld (chain-truth ruling, ledger 08:55; per-(account,reserve) selection per Codex round 2 finding 2): the raw scaled balance per census-disagreeing / flag-masked account PLUS every (account, reserve) pair whose positive derived balance is masked at the pin (folded flag OFF, or pinned bitmap OFF), bit-exact zero tolerance. Membership flips are NOT the masking condition — a borrower with a wrong flag-OFF balance flips nothing — so selection operates on the pairs themselves. It closes the flag-off masking residual the one-law census opens — the Σ weld has zero power against transfers — and converts aggregate-only evidence into per-account proof. A nonzero control keeps the read provably live on an all-agreeing run"),
 		pinned("Pool.getUserEMode(user)@pinHash(P_eth)",
 			"asserted == 0 per cohort account and GATED: a nonzero category means the whole HF branch is the wrong law, which is a failure, not a skip"),
 		pinned("Pool.getUserAccountData(user)@pinHash(P_eth)",
@@ -386,6 +405,74 @@ func scaledBalanceControl(candidates []common.Address, measured map[common.Addre
 		}
 	}
 	return common.Address{}
+}
+
+// maskedPairSelection is the per-(account, reserve) balance-census selection
+// (Codex round 2, finding 2), with the counts the disclosure row prints.
+type maskedPairSelection struct {
+	// Pairs maps each selected account to the reserves whose positive derived
+	// balance is masked at the pin, in reserve-list order.
+	Pairs map[common.Address][]common.Address
+	// PairCount is the total number of masked (account, reserve) pairs.
+	PairCount int
+	// FoldedOff counts pairs whose DERIVED (folded) flag is OFF — the Codex
+	// round 2 remedy's mandated set.
+	FoldedOff int
+	// PinnedOnlyOff counts pairs whose folded flag is ON but whose PINNED
+	// bitmap flag is OFF: the same invisibility through the other flag door
+	// (the pinned HF weld ignores the balance on both sides), which on a
+	// borrower never surfaces as any census row.
+	PinnedOnlyOff int
+}
+
+// selectMaskedBalancePairs selects, per (account, reserve), every POSITIVE
+// derived scaled-collateral balance that no bit-exact weld would otherwise
+// see: the folded flag is OFF (the value projection ignores it) or the pinned
+// bitmap flag is OFF (the pinned HF computation ignores it on BOTH sides).
+//
+// THE DEFECT THIS CLOSES (Codex round 2, finding 2): selection by membership
+// flip. A borrower with debt has RawZeroDebt == oneLawZero == false; a
+// zero-debt account with one enabled and one disabled reserve is true in
+// both; neither flips, so a wrong derived balance in a flag-OFF reserve was
+// never welded anywhere and acceptance passed over wrong stored collateral.
+// The masking condition is a property of the PAIR, so the selection is too.
+// It is a pure function so the law is unit-tested and mutation-killable in
+// isolation.
+func selectMaskedBalancePairs(candidates []common.Address, measured map[common.Address]bool,
+	reserves []common.Address, legs map[string]map[common.Address][2]*big.Int,
+	foldedFlags map[string]map[common.Address]bool,
+	pinnedOn func(acct, reserve common.Address) bool) maskedPairSelection {
+	sel := maskedPairSelection{Pairs: map[common.Address][]common.Address{}}
+	for _, a := range candidates {
+		if !measured[a] {
+			// account-state already gated weld-unread; a pinned read for it did
+			// not decode, so no honest chain side exists to weld against.
+			continue
+		}
+		key := hex.EncodeToString(a.Bytes())
+		for _, r := range reserves {
+			pair := legs[key][r]
+			if pair[1] == nil || pair[1].Sign() <= 0 {
+				continue
+			}
+			foldedOff := !foldedFlags[key][r] // nil map => never-enabled => OFF
+			pinnedOff := !pinnedOn(a, r)
+			if !foldedOff && !pinnedOff {
+				// The balance enters both the value projection and the pinned
+				// HF weld; it is not masked and the totalCollateralBase weld
+				// already tests it.
+				continue
+			}
+			sel.Pairs[a] = append(sel.Pairs[a], r)
+			sel.PairCount++
+			if foldedOff {
+				sel.FoldedOff++
+			} else {
+				sel.PinnedOnlyOff++
+			}
+		}
+	}
+	return sel
 }
 
 // runScaledBalanceCensusWeld reads aToken.scaledBalanceOf(user) at the pin for
@@ -839,7 +926,7 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 	// ---- the census weld: INDEPENDENT candidates vs the derived fold -------
 	rows = append(rows, censusWeldRows(cohort, chainHasDebt, chainHasCollateral, measuredOK)...)
 
-	// ---- the balance-census weld: scaledBalanceOf@pin, per account ---------
+	// ---- the balance-census weld: scaledBalanceOf@pin ----------------------
 	// The flag gate above REMOVES accounts from the census, and a removed
 	// account with a WRONG scaled balance would be invisible: both sides say
 	// non-member, and the aggregate Σ weld has zero power against transfers.
@@ -864,6 +951,30 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 			weldReason[a] += "census-disagreeing: the one-law derived membership still differs from the chain's"
 		}
 	}
+	// PER-(ACCOUNT, RESERVE) selection (Codex round 2, finding 2): membership
+	// flips are NOT the masking condition. Every positive derived balance
+	// whose folded flag is OFF at the pin — and every pair the pinned bitmap
+	// masks the same way — joins the weld, borrowers included.
+	masked := selectMaskedBalancePairs(cohort.Candidates, measuredOK, reserves, legsByAccount, flagMap,
+		func(a, r common.Address) bool {
+			return decodeAaveUserConfiguration(userConfig[a], reserveIndex[r]).UsedAsCollateral
+		})
+	maskedAccounts := make([]common.Address, 0, len(masked.Pairs))
+	for a := range masked.Pairs {
+		maskedAccounts = append(maskedAccounts, a)
+	}
+	for _, a := range sortAddrSlice(maskedAccounts) {
+		names := make([]string, 0, len(masked.Pairs[a]))
+		for _, r := range masked.Pairs[a] {
+			names = append(names, r.Hex())
+		}
+		reason := "masked-balance pair(s): positive derived scaled collateral the pin cannot otherwise weld (folded flag OFF and/or pinned bitmap OFF) in reserve(s) " +
+			strings.Join(names, ",") + " — per-(account,reserve) selection, Codex round 2 finding 2"
+		if weldReason[a] != "" {
+			weldReason[a] += "; "
+		}
+		weldReason[a] += reason
+	}
 	control := scaledBalanceControl(cohort.Candidates, measuredOK, legsByAccount)
 	if control != (common.Address{}) && weldReason[control] == "" {
 		weldReason[control] = "nonzero control: proves the scaledBalanceOf read live against this archive"
@@ -873,6 +984,18 @@ func runAaveHFGate(ctx context.Context, c *p3Ctx) ([]p3Row, error) {
 		aTokenByReserve[r] = st.aToken
 	}
 	rows = append(rows, runScaledBalanceCensusWeld(ctx, c, f, weldReason, reserves, aTokenByReserve, legsByAccount)...)
+	// The selection's honest bound, disclosed (Codex round 2, finding 2): the
+	// batch is finite — positive derived balances with a masked flag at the
+	// pin — and its composition is printed so a reviewer can audit the cost
+	// and the coverage in one place.
+	rows = append(rows, p3Row{
+		Gate: gateAaveHF, Subject: "census:balance-weld", Leg: "masked-balance-selection(per account x reserve)",
+		Expected: "every positive derived scaled-collateral balance whose folded flag is OFF at the pin (plus every pinned-bitmap-OFF pair) joins the scaledBalanceOf weld",
+		Actual: fmt.Sprintf("%d masked pair(s) across %d account(s): folded-flag-OFF %d, pinned-only-OFF %d; weld batch %d account(s) x %d reserve(s) = %d scaledBalanceOf read(s)",
+			masked.PairCount, len(masked.Pairs), masked.FoldedOff, masked.PinnedOnlyOff, len(weldReason), len(reserves), len(weldReason)*len(reserves)),
+		Verdict: verdictExact, Gated: true,
+		Note: "the balance-census weld's selection law: masking is a property of the (account, reserve) pair — a borrower with a wrong flag-OFF balance flips no membership and disagrees with no census, so selection by membership flip (the Wave-H shape) left it unwelded and acceptance passed over wrong stored collateral. Selection now operates on the pairs themselves; the flip-selected and census-disagreeing accounts and the nonzero control remain in the set",
+	})
 
 	// ---- cohort floors, census-welded --------------------------------------
 	rows = append(rows, cohortFloorRow(gateAaveHF, "aave-finite-hf-borrowers",
