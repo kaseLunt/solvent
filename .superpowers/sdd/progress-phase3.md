@@ -2391,6 +2391,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   captures, 30 trace envelopes, 3 code-byte pins, durable mutation
   transcripts. SCOREBOARD: Task 7 ✓ / flag-custody ✓ / Task 8 ✓ /
   Task 6 ✓. NEXT: the PRE-AUTHORIZED maintenance window executes NOW.
+- **MAINTENANCE WINDOW — STEPS 1-5 EXECUTED** (2026-07-30 ~18:54-19:03,
+  under the 2026-07-29 pre-authorization). (1) solvent-indexer.exe pid
+  32100 stopped cleanly. (2) new binary built from the fully-shipped tree
+  (21,767,680 bytes) — build-next-then-swap, prior binary kept as
+  solvent-indexer-prev.exe (the 7/29 build). (3) relaunch: two failed
+  attempts first (hidden-powershell lacked .env → daemon refused
+  SOLVENT_DATABASE_URL-not-set, honest fail-closed; PS 5.1 *>> also wrote
+  UTF-16 junk into the operator log — left in place, logs are history;
+  cmd-with-bare-name didn't resolve) — landed via batch file + env-loaded
+  parent, pid 68984, cmd append = raw bytes. (4) migrations 00013+00014
+  applied on startup, goose at 14; healthz/readyz live (status starting →
+  readiness after one full round; step discards = the known endpoint-
+  pinning retries). (5) RewindDerived(aave_v3_etherfi, chain 1,
+  20,625,518) committed via a transient in-module tool (cmd/rewind-t6-
+  maint, deleted after) — zero-RPC re-derive running: cursor 20,645,518
+  → 20,695,518 within minutes, covered_from_block = 20,625,519 (the
+  audited genesis), decoder_revision 2, coverage binding stamped.
+  Flag rows accumulate as the walk reaches the weETH era. Background
+  monitor armed (60s cadence) until the walk catches the raw head
+  (~25.65M); then step 6 (verify 173 flag rows + stamp + binding) and
+  step 7 (make reconcile acceptance).
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
