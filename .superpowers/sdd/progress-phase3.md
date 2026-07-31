@@ -2331,6 +2331,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   dispatched: t6r14 @ cab5b0c, base 086bf7f — tracer-shape verification
   against the cites, scan-range law, transcript self-consistency, the
   SkipClass reclass adjudication, cheap 4-file regression sweep.
+- CODEX ROUND 14 ON TASK 6 (session 019fb5b2-ed39-76a0-a0b7-91683e24a47c,
+  ~13min, t6r14 @ cab5b0c, base 086bf7f): needs-attention — 1H, ultra-
+  narrow: the create-family `to` exemption is a hair too wide — geth nils
+  `to` ONLY on failed creates (processOutput error path, which ALSO sets
+  the frame's error field); the strict law didn't presence-track `error`,
+  so a degraded response dropping to+error+children from a successful
+  creation scans clean (and the new test blessed a shape geth cannot emit:
+  to-less CREATE with no error). Type set, scan range, SkipClass split,
+  fixture compatibility, mutation hashes ALL checked out. CREATE-ERROR FIX
+  WAVE dispatched (one conditional + fixtures): presence-track error;
+  to-less CREATE/CREATE2 valid ONLY with non-empty tracer error (geth
+  call.go:70-79 cite verified against the module cache before citing);
+  blessing fixture replaced with a genuine failed-create shape; no-error
+  variant = refusal regression; successful-create (to present) stays
+  clean; STOP if any real capture carries a to-less no-error create (would
+  falsify the geth-shape claim); mE re-cut with new hash + mF (exemption
+  re-widened) in the durable transcript convention. Reviewer notification
+  plumbing hiccuped (final report reached the coordinator only on
+  re-delivery; three stale sleep echoes after) — content unaffected.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
