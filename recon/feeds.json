@@ -315,8 +315,8 @@
         "proxy": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
         "startBlock": 20188117,
         "priceDecimals": 8,
-        "heartbeatSeconds": 86400,
-        "graceSeconds": 3600
+        "heartbeatSeconds": 259200,
+        "graceSeconds": 43200
       }
     },
     {
@@ -332,8 +332,8 @@
         "proxy": "0x8f1dF6D7F2db73eECE86a18b4381F4707b918FB1",
         "startBlock": 19626469,
         "priceDecimals": 8,
-        "heartbeatSeconds": 86400,
-        "graceSeconds": 3600
+        "heartbeatSeconds": 604800,
+        "graceSeconds": 86400
       }
     },
     {
@@ -349,8 +349,8 @@
         "proxy": "0xB9E1E3A9feFf48998E45Fa90847ed4D467E8BcfD",
         "startBlock": 20191185,
         "priceDecimals": 8,
-        "heartbeatSeconds": 86400,
-        "graceSeconds": 3600
+        "heartbeatSeconds": 172800,
+        "graceSeconds": 43200
       }
     },
     {
