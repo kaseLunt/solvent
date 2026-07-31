@@ -28,7 +28,7 @@ import (
 // currentSchemaVersion is the highest embedded migration. Bumping it is part of
 // adding a migration, and the upgrade-path tests below assert against it so a new
 // migration cannot land without its own upgrade proof.
-const currentSchemaVersion = 14
+const currentSchemaVersion = 17
 
 // seedDerivedPre00014 writes a derived window the way a PRE-00014 BINARY would:
 // raw SQL over the columns that existed before the derivation-coverage columns did.
