@@ -15,6 +15,8 @@ allowed_paths:
   - recon/derivation-notes.md
   - recon/p3-probes.md
   - recon/feeds.json
+  - recon/v4-proposal.json
+  - recon/v4-proposal-arfc-post1.html
   - internal/**
   - cmd/**
   - config/**
