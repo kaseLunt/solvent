@@ -2925,3 +2925,23 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (verdict-free pacing). W7 wave (design register: ruling 11 first,
   SHOULD-FIX 7-10, TASTE 12-14, stampline→/proof link + the state-matrix
   test) dispatched in parallel. On acceptance PASS → E1 paperwork.
+- **W7 LANDED (12:46)**: the design register discharged + the 43-cell
+  state matrix (1bd5b51, serial gate 207/0/1-skip — suite grew from 158).
+  Ruling 11 landed as the HONEST-BOUNDARY version: the wire does not
+  enumerate the covered batch-id set, so no-row gaps insert only for
+  response-witnessed ids (points ∪ withheld ∪ vantage batch), the legend
+  discloses the boundary, and the newest edge can always break (the
+  stale-value-carried-forward lie dies) — CONTRACT GAP recorded for the
+  API register: AddressHistoryResponse should carry the covered batch-id
+  LIST (non-contiguous possible). SHOULD-FIX 7-10 + TASTE 12-14 all
+  landed verbatim (exact-debt hover, finite-point hit rects, map states
+  its own as-of, eligible-bucket form cue, decade ticks, FT connector
+  doctrine, shared .refLine/.refLabel classes, stampline→/proof link).
+  THE MATRIX EARNED ITS KEEP IMMEDIATELY: two real responsive defects
+  caught and fixed (inspector .split unusable at 390px — 260px document
+  overflow; MarksStamp blanket nowrap). Four judgment items sent to the
+  standing design director (empty-eligible-bucket square semantics,
+  decade-tick clearance, connector-through-residual reading, Marks
+  wrapping) + the ObservatorySeriesChart TASTE-14 scope question. Owed:
+  W6b Oracle Monitor named follow-up. Acceptance run still in flight
+  (~32 min into the 45-min budget).
