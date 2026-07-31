@@ -1,0 +1,145 @@
+/* Integrity Ribbon + posture chip + degradation banner.
+ * Derived from the mockup's .live chip and .titlebar vocabulary. */
+
+.ribbon {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+}
+
+.badge.live {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.badge.proof {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.badge.waiting {
+  color: var(--ink-3);
+  border-style: dashed;
+}
+
+.badge.degraded {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.badge.down {
+  color: var(--crit);
+  border-color: var(--crit);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dot.pulse {
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: 0.35;
+    }
+  }
+}
+
+/* The watermark VECTOR: one chip per named as-of. Never a single fake block. */
+.asOf {
+  color: var(--ink-3);
+}
+
+.asOf b {
+  color: var(--ink-2);
+  font-weight: 500;
+}
+
+.asOf b.ok {
+  color: var(--ok);
+}
+
+.asOf b.warn {
+  color: var(--warn);
+}
+
+.asOf b.crit {
+  color: var(--crit);
+}
+
+.asOf b.dim {
+  color: var(--ink-3);
+}
+
+/* ---- degradation banner ---- */
+.banner {
+  border-bottom: 1px solid var(--line);
+  background: var(--crit-bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+}
+
+.banner.warn {
+  background: var(--refused-bg);
+}
+
+.bannerInner {
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  padding: 8px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+}
+
+.bannerTag {
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  background: var(--crit);
+  color: var(--panel);
+}
+
+.bannerTag.warnTag {
+  background: var(--warn);
+}
+
+.bannerBody {
+  color: var(--ink-2);
+}
+
+.bannerBody b {
+  color: var(--ink);
+  font-weight: 550;
+}

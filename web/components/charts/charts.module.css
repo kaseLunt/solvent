@@ -1,0 +1,101 @@
+/* SVG chart primitives — the mockup's dense mono-grid panel aesthetic:
+ * hairline grid in --line, restrained accent strokes, mono axis labels. */
+
+.chart {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.frame {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-4);
+  overflow-x: auto;
+}
+
+.grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.axisLabel {
+  font-family: var(--mono);
+  font-size: 10px;
+  fill: var(--ink-3);
+  letter-spacing: 0.06em;
+}
+
+.line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.endDot {
+  fill: var(--accent);
+}
+
+.gapTick {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 1 2;
+}
+
+.dotOk {
+  fill: var(--ok);
+}
+
+.dotWarn {
+  fill: var(--warn);
+}
+
+.dotCrit {
+  fill: var(--crit);
+}
+
+.dotDim {
+  fill: var(--ink-3);
+}
+
+.barFlow {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+.barOk {
+  fill: var(--ok);
+  opacity: 0.85;
+}
+
+.barCrit {
+  fill: var(--crit);
+}
+
+.connector {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.baseline {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.valueLabel {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-2);
+}
+
+.stepLabel {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-3);
+}

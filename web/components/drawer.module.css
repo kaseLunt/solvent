@@ -1,0 +1,85 @@
+/* Drawer — the explain-this-number slide-over. Panel styling follows the
+ * mockup's .card / .kv vocabulary; motion respects prefers-reduced-motion. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 27, 0.35);
+  z-index: 40;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.backdrop.open {
+  opacity: 1;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(420px, 92vw);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 200ms ease;
+}
+
+.panel.open {
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .panel {
+    transition: none;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.close {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.body {
+  overflow-y: auto;
+  padding: var(--sp-4);
+  font-size: var(--fs-table);
+}

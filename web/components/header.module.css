@@ -1,0 +1,110 @@
+/* AppHeader — the mockup's window chrome translated to a real product header:
+ * no fake browser dots; brand + four-tab appnav + integrity Ribbon slot. */
+
+.header {
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.topRow {
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 10px 20px 0;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.wordmark {
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  color: var(--ink);
+}
+
+.wordmark span {
+  color: var(--accent);
+}
+
+.tagline {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ribbonSlot {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.navRow {
+  max-width: var(--shell-max);
+  margin: 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 4px 20px 0;
+  font-size: 13px;
+  overflow-x: auto;
+}
+
+/* mockup .appnav span */
+.tab {
+  padding: 7px 14px 9px;
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--ink-2);
+}
+
+.tab.on {
+  color: var(--ink);
+  border-color: var(--accent);
+  font-weight: 550;
+}
+
+.secondary {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+}
+
+.secondary .tab {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+}
+
+.themeToggle {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.themeToggle:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

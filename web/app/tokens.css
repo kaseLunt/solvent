@@ -1,0 +1,156 @@
+/*
+ * Solvent design tokens.
+ *
+ * Extracted from the visual canon: docs/specs/2026-07-29-p5-ui-concept.html.
+ * Every palette value below is the mockup's value verbatim — fidelity beats
+ * invention. Structural tokens (spacing / radius / type scale) are named from
+ * the mockup's hand-tuned pixel values so components stop hardcoding them.
+ *
+ * Theme law (the mockup's own pattern, kept exactly):
+ *   1. :root           — light values (the default).
+ *   2. @media (prefers-color-scheme: dark) — dark values for OS-dark users.
+ *   3. :root[data-theme="light"] / :root[data-theme="dark"] — explicit
+ *      override that WINS IN BOTH DIRECTIONS because attribute selectors
+ *      out-specify the bare :root inside the media query.
+ */
+
+:root {
+  /* ---- palette (mockup :root, verbatim) ---- */
+  --bg: #f4f6f6;
+  --panel: #ffffff;
+  --panel-2: #eef1f2;
+  --ink: #1a2327;
+  --ink-2: #56676e;
+  --ink-3: #8a979c;
+  --line: #d8dfe1;
+  --accent: #2e7d8c;
+  --accent-ink: #ffffff;
+  --ok: #2e8c5a;
+  --warn: #b07c1f;
+  --crit: #c24438;
+  --crit-bg: rgba(194, 68, 56, 0.07);
+  --refused-bg: rgba(138, 151, 156, 0.1);
+  --chip-bg: #e6ecee;
+  --term-bg: #10181b;
+  --term-ink: #c7d4d8;
+  --term-dim: #6b7d84;
+  --term-ok: #63b98a;
+  --term-accent: #5ab3c4;
+  --shadow: 0 1px 2px rgba(16, 24, 27, 0.06), 0 8px 24px rgba(16, 24, 27, 0.07);
+
+  /* ---- type stacks (mockup, verbatim) ---- */
+  --mono: "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* ---- type scale (named from the mockup's hand-tuned sizes) ---- */
+  --fs-h1: 30px; /* page h1 */
+  --fs-h2: 20px; /* surface-head h2 */
+  --fs-lede: 15.5px; /* lede paragraph */
+  --fs-body: 14.5px; /* surface-head p */
+  --fs-note: 13.5px; /* note block */
+  --fs-table: 13px; /* table cells, kv rows, feed items */
+  --fs-mono: 12px; /* .mono cells, term body */
+  --fs-mono-sm: 11.5px; /* addr chip, scenario chips, fed-by, formula */
+  --fs-caption: 11px; /* stat sub, stampline, eyebrow, feed time */
+  --fs-label: 10.5px; /* thead th, stat k, card h4, chips/tags */
+  --fs-badge: 10px; /* PROJECTION badge */
+  --fs-stat: 21px; /* stat value */
+  --fs-hf: 12.5px; /* hf value */
+
+  /* ---- letter-spacing (mockup) ---- */
+  --track-eyebrow: 0.14em;
+  --track-label: 0.1em; /* stat k, card h4, live chip, badge */
+  --track-th: 0.09em; /* thead th */
+  --track-tag: 0.06em; /* feed tag */
+  --track-refused: 0.05em; /* refused tag */
+  --track-tight: -0.01em; /* h1/h2/stat value */
+
+  /* ---- spacing scale (named from the mockup's recurring paddings) ---- */
+  --sp-1: 4px; /* chip vertical pad */
+  --sp-2: 8px; /* gaps between chips, scopebar */
+  --sp-3: 12px; /* statrow gap, cell x-pad step */
+  --sp-4: 14px; /* card pads, split gap, stampline gaps */
+  --sp-5: 18px; /* .pad — window content padding */
+  --sp-6: 24px;
+  --sp-7: 36px;
+  --sp-8: 56px; /* page header vertical */
+
+  /* ---- radius (mockup) ---- */
+  --r-xs: 3px; /* engine chip, sev swatch, tags */
+  --r-sm: 4px; /* addr chip, scenario chips */
+  --r-md: 6px; /* cards, stats, tablewrap, stampline */
+  --r-lg: 8px; /* window frame, terminal */
+
+  /* ---- layout ---- */
+  --shell-max: 1180px; /* app shell width (mockup main: 1060 + window pads) */
+  --table-min: 860px; /* mockup table min-width */
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* mockup @media dark block, verbatim (term-* stay constant by design) */
+    --bg: #0c1215;
+    --panel: #131c20;
+    --panel-2: #0f171a;
+    --ink: #dbe5e8;
+    --ink-2: #93a5ab;
+    --ink-3: #5f7178;
+    --line: #223034;
+    --accent: #5ab3c4;
+    --accent-ink: #0c1215;
+    --ok: #63b98a;
+    --warn: #d0a04a;
+    --crit: #d96a5d;
+    --crit-bg: rgba(217, 106, 93, 0.1);
+    --refused-bg: rgba(95, 113, 120, 0.12);
+    --chip-bg: #1b262b;
+    --term-bg: #0a0f12;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+}
+
+/* Explicit theme override — wins over the media query in BOTH directions. */
+:root[data-theme="light"] {
+  --bg: #f4f6f6;
+  --panel: #ffffff;
+  --panel-2: #eef1f2;
+  --ink: #1a2327;
+  --ink-2: #56676e;
+  --ink-3: #8a979c;
+  --line: #d8dfe1;
+  --accent: #2e7d8c;
+  --accent-ink: #ffffff;
+  --ok: #2e8c5a;
+  --warn: #b07c1f;
+  --crit: #c24438;
+  --crit-bg: rgba(194, 68, 56, 0.07);
+  --refused-bg: rgba(138, 151, 156, 0.1);
+  --chip-bg: #e6ecee;
+  --term-bg: #10181b;
+  --shadow: 0 1px 2px rgba(16, 24, 27, 0.06), 0 8px 24px rgba(16, 24, 27, 0.07);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0c1215;
+  --panel: #131c20;
+  --panel-2: #0f171a;
+  --ink: #dbe5e8;
+  --ink-2: #93a5ab;
+  --ink-3: #5f7178;
+  --line: #223034;
+  --accent: #5ab3c4;
+  --accent-ink: #0c1215;
+  --ok: #63b98a;
+  --warn: #d0a04a;
+  --crit: #d96a5d;
+  --crit-bg: rgba(217, 106, 93, 0.1);
+  --refused-bg: rgba(95, 113, 120, 0.12);
+  --chip-bg: #1b262b;
+  --term-bg: #0a0f12;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}

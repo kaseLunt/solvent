@@ -1,0 +1,104 @@
+/* DataTable — the mockup's .tablewrap / table pattern, verbatim sizes. */
+
+.wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.wrapScroll {
+  overflow-y: auto;
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-table);
+  min-width: var(--table-min);
+}
+
+.table thead th {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-th);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  text-align: left;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  white-space: nowrap;
+  /* Sticky within the wrapper's scroll region (when maxHeight is set). */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.table tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.num {
+  text-align: right;
+}
+
+.rowCrit td {
+  background: var(--crit-bg);
+}
+
+.rowRefused td {
+  background: var(--refused-bg);
+  color: var(--ink-3);
+}
+
+.empty {
+  padding: var(--sp-5);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.loadMore {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-refused);
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+
+.loadMore:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.loadMore:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -1,0 +1,216 @@
+/* Small atoms — mockup patterns verbatim: .stat, .engine, .hf/.sev,
+ * .refused-tag, .projection, .stampline, feed .tag. */
+
+/* ---- StatCard (.stat) ---- */
+.stat {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  background: var(--panel);
+}
+
+.statLabel {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.statValue {
+  font-size: var(--fs-stat);
+  font-weight: 600;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--track-tight);
+}
+
+.statValue.ok {
+  color: var(--ok);
+}
+
+.statValue.warn {
+  color: var(--warn);
+}
+
+.statValue.crit {
+  color: var(--crit);
+}
+
+.statSub {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+/* ---- EngineChip (.engine) ---- */
+.engine {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  padding: 2px 7px;
+  border-radius: var(--r-xs);
+  background: var(--chip-bg);
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+/* ---- SeverityHF (.sev + .hf) ---- */
+.sev {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: baseline;
+}
+
+.sev.ok {
+  background: var(--ok);
+}
+
+.sev.warn {
+  background: var(--warn);
+}
+
+.sev.crit {
+  background: var(--crit);
+}
+
+.hf {
+  font-weight: 600;
+  font-family: var(--mono);
+  font-size: var(--fs-hf);
+  font-variant-numeric: tabular-nums;
+}
+
+.hf.ok {
+  color: var(--ok);
+}
+
+.hf.warn {
+  color: var(--warn);
+}
+
+.hf.crit {
+  color: var(--crit);
+}
+
+.hf.none {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* ---- RefusedTag (.refused-tag) ---- */
+.refusedTag {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-refused);
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-xs);
+  padding: 2px 7px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* ---- ProjectionBadge (.projection) ---- */
+.projection {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  letter-spacing: var(--track-label);
+  padding: 2px 6px;
+  border-radius: var(--r-xs);
+  background: var(--warn);
+  color: var(--panel);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+/* ---- Stampline (.stampline) ---- */
+.stampline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  padding: 10px 14px;
+  margin-top: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.stampItem b {
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.stampItem b.ok {
+  color: var(--ok);
+}
+
+.stampItem b.warn {
+  color: var(--warn);
+}
+
+.stampItem b.crit {
+  color: var(--crit);
+}
+
+.stampItem b.dim {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* ---- MarksStamp ---- */
+.marks {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.marksAbsent {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* ---- AddressMono ---- */
+.address {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  white-space: nowrap;
+}
+
+.addressLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.copyButton {
+  font-family: var(--mono);
+  font-size: var(--fs-badge);
+  line-height: 1;
+  padding: 2px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--panel);
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.copyButton:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.copyButton.copied {
+  color: var(--ok);
+  border-color: var(--ok);
+}

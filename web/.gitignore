@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# playwright
+playwright-report/
+test-results/
+
+# typescript build info
+*.tsbuildinfo
+
+# local env
+.env*.local
+
+# vercel
+.vercel/
+
+# NOTE: next-env.d.ts is deliberately COMMITTED (not ignored): CI typechecks
+# before building, and the CSS-module + Next global type declarations it
+# references must exist for `tsc --noEmit` to pass on a clean checkout.
