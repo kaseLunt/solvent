@@ -2257,6 +2257,38 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   reclassification. R12 FIX WAVE dispatched implementing the ruling as
   spec (probes first w/ STOP points; mutation floor mA-mD incl. the
   core-impl-dropped and disclosure-dropped mutants).
+- **R12 FIX LANDED — b845c72** (81 files +3,496/−94: code_epoch/admin_trace/
+  dm_surface NEW, 31 continuity fixtures re-captured, 30 gzipped trace
+  fixtures, 3 committed code-byte copies, probe + pin records; both-ways
+  exact; integrator independently re-ran — green; wave ran ~56min incl. two
+  park-resume cycles on its own background captures). FORK 1: three-surface
+  code-hash constancy — blockHash-form eth_getCode probed (12 identical
+  reads/surface, both endpoints), audited constants proxy e428fca7… /
+  ERC1967-resolved core impl df7eab5a… (0x03923479…4a19, 18,156B) / admin
+  impl 58d08134… dual-provider established and recorded; ERC1967 slot
+  derivation pinned; refusal classes decode-authority-{unread,epoch,head-
+  epoch} (head = preflightExit posture); hermetic re-proof from committed
+  byte copies + production-path capture replay; certification-limits text
+  VERBATIM as a pinned constant. FORK 2: Law 0 both arms (ERC1967 upgrade
+  events refuse BEFORE the switch w/ precedence over membership; foreign
+  topic0s refuse in default; 21-set welded both directions; in-surface
+  non-replay pinned unchanged). **STEP A LANDED — the D-013 residual is
+  RETIRED**: endpoint[0] 403s debug_ but endpoint[1] serves through the
+  ordered failover; strict presence-gated callTracer decode; frame-level
+  selector law (any depth, index-bound, case-tx over-refused, ABI-derived
+  setAdminImpl/upgradeTo/upgradeToAndCall w/ OZ-v5 absence asserted);
+  untraceable case → admin-continuity-unread, never degrades. Every
+  adversary-only claim replaced with quoted-and-refuted + retirement
+  (NotContains-pinned). Evidence: admin_impl_epoch revised + siblings
+  decode_authority + admin_continuity. 31/31: continuity proven, scans
+  CLEAN, six hashes == constants, head STOPs passed — no real epoch
+  anywhere in the frame. Mutants mA/mA2/mB/mB2/mC killed (mC re-cut
+  behavioural); mD correctly N/A (Step B not taken). 285 top-level/0/9
+  opt-in (every skip run opted-in during the wave). ROUND 13 (closing)
+  dispatched: t6r13 @ b845c72, base 78cda4d — ruling conformance law-by-
+  law, trace-evidence honesty (gunzip + re-scan verification, single-
+  serving-endpoint question), slot-derivation + byte-copy re-proof checks,
+  mC re-cut plausibility, full prior-law regression sweep.
 - PROMOTION LANDED — 8ae5774 (2026-07-29 17:04, 2 files +107/−140 net-negative). The
   harness holds NO gate implementation of its own (riskGate/requiredCursor/gateVerdict
   deleted, grep-verified). GateEpochs exercised through riskd's REAL call path — both
