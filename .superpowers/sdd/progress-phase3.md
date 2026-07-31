@@ -2789,3 +2789,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   unclaimed; weETH/liquidBTC/eBTC/sETHFI/liquidETH compositions disagree
   with deployed). Awaiting the dissection wave's own-clock empirics to
   close the loop; fix waves stage after it reports.
+- **DISSECTION VERDICT — DIAGNOSIS CLOSED, ALL LANES CONVERGE (08:58)**:
+  read-only forensics (SELECT-only session, eth_call at pins/EIP-1898,
+  throwaway tools in scratch). DM 233 = classification (d): cross-clock
+  weld the gate should have refused. PROOF: own-clock collateralOf at each
+  exemplar's sweep block BYTE-IDENTICAL to the persisted snapshot 5/5
+  (sweeper custody exact — the blocking read came back bit-equal, custody
+  drift EXCLUDED); pin-vector substitution reproduces
+  getMaxBorrowAmount@pin BIT-EXACTLY 5/5 (recompute law exonerated
+  wholesale); sweep-age regression monotone (0.0009 at <300 blocks →
+  0.0415 at ≥2400); the $100.00×0.95 exemplar = plain ERC20 transfer in
+  the gap (0 raw_logs — eventless motion, invisible by design); the
+  collateral_spot_reads sibling instrument already labels the same motion
+  "expected, report-only BY CONSTRUCTION". Boolean leg 0 failures
+  anywhere, but exemplar 0018 shows a 130-block-fresh sweep straddling a
+  $13 spend — margin luck, not guarantee. Census 24 = classification (c):
+  both exemplars chain scaled == derived EXACT (261 dust scaled; and
+  4,778,330 + 2e15) with getUserConfiguration=0x0 — one NEVER-enabled
+  (USDC no auto-enable on this market), one EXPLICITLY disabled with the
+  aave_collateral_disabled event IN CUSTODY at block 22,551,863. The
+  derived predicate is flag-blind; the data to fix it is already
+  custodied. Secondary: tokenconfig 16 = missing base-composition claims
+  (weETH under eth_minus_10, liquidBTC/eBTC under btc_leg_minus_20 etc.);
+  backtest = obligation3 degenerate zero-budget loop shape the model
+  lacks + 5 fail-closed unpriced parent-frame legs. NOT A SINGLE WRONG DB
+  ROW AT ITS OWN AS-OF. FIX PROGRAM DISPATCHED: Wave H (cmd/reconcile
+  proof-surface: dm frame truth @S + own-clock weld restructure w/
+  three-state verdict, census one-law + scaledBalanceOf weld, b3
+  unconditional proxy-binding read, tokenconfig snap-set de-hardcode,
+  f.use one-liner, obligation3 third shape, same-pin refutation
+  transcript vs the accept-r4 artifacts as the evidence standard) and
+  Wave S (internal/risk scenario matrices: base-composition claims for
+  the 5, claims for the ~11 unclaimed assets, derived from chain
+  tokenConfig w/ judgment calls flagged). Codex adversarial round on
+  Wave H before any fresh acceptance (proof surface, D-013 program).
