@@ -30,8 +30,8 @@ allowed_paths:
   - .gitignore
 scope_hash: sha256:6932c55c31a894b5c9a343b32bf541bf51eb0597329670d1404ecb2b11c817c0
 issued_at: 2026-07-29T07:40:40Z
-lease_expires: 2026-07-31T01:40:25Z
-updated_at: 2026-07-30T17:40:25Z
+lease_expires: 2026-07-31T09:53:46Z
+updated_at: 2026-07-31T01:53:46Z
 ---
 
 # Claim: claude-integrator -> W2
