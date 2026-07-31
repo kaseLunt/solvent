@@ -1,0 +1,317 @@
+/* Observatory surface (W4) — the single-engine deep-dive over the durable
+ * rollup. Mirrors the mockup register the other surfaces translated: dense
+ * panels, mono captions, refusals as first-class UI. Only observatory-specific
+ * layout lives here; atoms come from the shared component modules. */
+
+.head {
+  max-width: 720px;
+  margin-bottom: var(--sp-5);
+}
+
+.head h1 {
+  font-size: var(--fs-h2);
+  letter-spacing: var(--track-tight);
+  margin: 0 0 8px;
+}
+
+.head p {
+  color: var(--ink-2);
+  font-size: var(--fs-body);
+  margin: 0;
+}
+
+/* ---- engine switcher ---- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  margin-bottom: var(--sp-4);
+}
+
+.controlLabel {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-right: 4px;
+}
+
+.chipButton {
+  font-family: var(--mono);
+  font-size: var(--fs-mono-sm);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  color: var(--ink-2);
+  background: var(--panel);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chipButton:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chipButton.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--chip-bg);
+}
+
+.controlNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+/* ---- panels ---- */
+
+.panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  margin-bottom: var(--sp-4);
+}
+
+.panelHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+
+.panelBody {
+  padding: var(--sp-4);
+}
+
+.emptyReason {
+  padding: var(--sp-5);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-3);
+}
+
+/* ---- newest-bucket strip ---- */
+
+.newestCaption {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.statrow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+@media (max-width: 800px) {
+  .statrow {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ---- chart grid ---- */
+
+.chartGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+@media (max-width: 900px) {
+  .chartGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.asOf {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  align-items: baseline;
+  margin: 0 0 var(--sp-4);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.legendSwatchWarn {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--warn);
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: baseline;
+  background: transparent;
+}
+
+.legendTick {
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  border-left: 1px dashed var(--ink-3);
+  margin-right: 6px;
+  vertical-align: text-bottom;
+}
+
+.legendLine {
+  display: inline-block;
+  width: 14px;
+  height: 0;
+  border-top: 1.5px solid var(--accent);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ---- point detail ---- */
+
+.kvGrid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+}
+
+.kvGrid dt {
+  color: var(--ink-3);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  align-self: baseline;
+}
+
+.kvGrid dd {
+  margin: 0;
+  color: var(--ink);
+}
+
+.detailNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin: 10px 0 0;
+}
+
+.ratesTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  margin-top: var(--sp-3);
+}
+
+.ratesTable th {
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  text-align: left;
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.ratesTable td {
+  padding: 5px 10px 5px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: baseline;
+}
+
+.ratesTable td.dim {
+  color: var(--ink-3);
+}
+
+/* ---- refusal / warning / notes ---- */
+
+.refusalPanel {
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-md);
+  background: var(--refused-bg);
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  color: var(--ink-2);
+}
+
+.refusalPanel h2 {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+
+.refusalPanel p {
+  margin: 8px 0 0;
+}
+
+.warnStrip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
+  padding: 8px 12px;
+  margin: 0 0 var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink);
+}
+
+.warnStrip b {
+  color: var(--warn);
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+}
+
+.notes {
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
+.notes li {
+  padding: 3px 0;
+}
+
+.notes li::before {
+  content: "· ";
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "unavailable",
+    "message": "observatory series: observatory_points does not exist on this database — the rollup (Task B2, migration 00016) has not been applied"
+  }
+}

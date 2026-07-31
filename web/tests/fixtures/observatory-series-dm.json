@@ -1,0 +1,47 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "engine": "debt_manager",
+  "usd_decimals": 6,
+  "from": "2026-07-29T08:00:00Z",
+  "to": null,
+  "step_seconds": null,
+  "points": [
+    {
+      "bucket_start": "2026-07-29T08:00:00Z",
+      "last_block": 154794000,
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 3,
+      "refused_positions": 1,
+      "liquidatable_positions": 1,
+      "debt_usd": "309593004",
+      "collateral_usd": "412790672",
+      "rates": [
+        {
+          "engine": "debt_manager",
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "kind": "borrow_apy",
+          "value": "50000000000000000",
+          "as_of_block": 154793990,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-07-29T09:00:00Z",
+      "last_block": 154796552,
+      "refused": true,
+      "refusal_code": "FLAG_CUSTODY_UNPROVEN",
+      "accounts": null,
+      "refused_positions": 0,
+      "liquidatable_positions": null,
+      "debt_usd": null,
+      "collateral_usd": null,
+      "rates": []
+    }
+  ],
+  "notes": [
+    "a withheld bucket carries NULL totals and names its refusal code: a rollup that rendered an unproven book as zero debt would fabricate the exact reassurance this surface exists to withhold."
+  ]
+}

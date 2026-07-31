@@ -1,0 +1,101 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "engine": "aave_v3_etherfi",
+  "usd_decimals": 8,
+  "from": "2026-07-29T06:00:00Z",
+  "to": null,
+  "step_seconds": null,
+  "points": [
+    {
+      "bucket_start": "2026-07-29T06:00:00Z",
+      "last_block": 25635000,
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 5,
+      "refused_positions": 0,
+      "liquidatable_positions": 0,
+      "debt_usd": "61918600800",
+      "collateral_usd": "82558134400",
+      "rates": [
+        {
+          "engine": "aave_v3_etherfi",
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "kind": "borrow_apy",
+          "value": "50000000000000000",
+          "as_of_block": 25634990,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-07-29T07:00:00Z",
+      "last_block": 25635300,
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 5,
+      "refused_positions": 0,
+      "liquidatable_positions": 1,
+      "debt_usd": "92877901200",
+      "collateral_usd": "123837201600",
+      "rates": [
+        {
+          "engine": "aave_v3_etherfi",
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "kind": "borrow_apy",
+          "value": "50000000000000000",
+          "as_of_block": 25635290,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-07-29T08:00:00Z",
+      "last_block": 25635600,
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 6,
+      "refused_positions": 1,
+      "liquidatable_positions": 1,
+      "debt_usd": "92877901200",
+      "collateral_usd": "123837201600",
+      "rates": [
+        {
+          "engine": "aave_v3_etherfi",
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "kind": "borrow_apy",
+          "value": "50000000000000000",
+          "as_of_block": 25635590,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    },
+    {
+      "bucket_start": "2026-07-29T10:00:00Z",
+      "last_block": 25635900,
+      "refused": false,
+      "refusal_code": null,
+      "accounts": 6,
+      "refused_positions": 0,
+      "liquidatable_positions": 0,
+      "debt_usd": "61918600800",
+      "collateral_usd": "82558134400",
+      "rates": [
+        {
+          "engine": "aave_v3_etherfi",
+          "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+          "symbol": "USDC",
+          "kind": "borrow_apy",
+          "value": "50000000000000000",
+          "as_of_block": 25635890,
+          "note": "as of its OWN last update, which can trail the bucket."
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "a withheld bucket carries NULL totals and names its refusal code: a rollup that rendered an unproven book as zero debt would fabricate the exact reassurance this surface exists to withhold."
+  ]
+}
