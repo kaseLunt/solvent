@@ -45,19 +45,28 @@ function engineSteps(waterfall: Waterfall, engine: string): WaterfallStep[] {
       (candidate) => candidate.engine === engine,
     );
     if (at === undefined) continue;
+    // Label grammar budgeted to the primitive's gutter (design ruling 2):
+    // "×1.00 unshocked" — no parentheses, no "eligible" (the panel head
+    // already says "cumulative eligible debt"); counts move to the dim sub
+    // line so the money string stands alone after the bar and never clips.
     const label = factorLabel(point.factor, waterfall.grid_scale);
-    const unshocked = point.index === 0 ? " (unshocked)" : "";
+    const unshocked = point.index === 0 ? " unshocked" : "";
     steps.push({
-      label: `${label}${unshocked} eligible`,
+      label: `${label}${unshocked}`,
+      sub: `${String(at.cumulative_eligible_accounts)} acct`,
       value: geometry(at.cumulative_debt_eligible_usd, at.usd_decimals),
-      display: `${usd(at.cumulative_debt_eligible_usd, at.usd_decimals)} · ${String(at.cumulative_eligible_accounts)} acct`,
+      display: usd(at.cumulative_debt_eligible_usd, at.usd_decimals),
       kind: "flow",
     });
-    if (at.cumulative_bad_debt_usd !== "0") {
+    // Exact string surgery, not a literal compare: a wire form like
+    // "0.000000" is still zero, and a floored zero would fabricate a crit
+    // residual bar for bad debt that does not exist (design ruling 1).
+    if (/[1-9]/.test(at.cumulative_bad_debt_usd)) {
       steps.push({
         label: `${label} bad debt`,
+        sub: `${String(at.insolvent_if_liquidated_accounts)} insolvent`,
         value: geometry(at.cumulative_bad_debt_usd, at.usd_decimals),
-        display: `${usd(at.cumulative_bad_debt_usd, at.usd_decimals)} · ${String(at.insolvent_if_liquidated_accounts)} insolvent`,
+        display: usd(at.cumulative_bad_debt_usd, at.usd_decimals),
         kind: "residual",
       });
     }

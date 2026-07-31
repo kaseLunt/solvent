@@ -58,20 +58,23 @@ export function Sparkline({
   const x = (index: number) => pad + index * step;
   const y = (value: number) => height - pad - ((value - min) / span) * (height - pad * 2);
 
-  // Segments between gaps; each renders as its own path.
-  const segments: string[] = [];
-  let current: string[] = [];
+  // Segments between gaps; each renders as its own path. A segment of ONE
+  // point renders as a small circle instead — a lone SVG moveto draws no ink,
+  // and an established value silently vanishing is the exact inverse of the
+  // null-gap law (the floor doctrine applies to points too).
+  const segments: { cx: number; cy: number }[][] = [];
+  let current: { cx: number; cy: number }[] = [];
   const gapIndexes: number[] = [];
   values.forEach((value, index) => {
     if (value === null || !Number.isFinite(value)) {
-      if (current.length > 0) segments.push(current.join(" "));
+      if (current.length > 0) segments.push(current);
       current = [];
       gapIndexes.push(index);
       return;
     }
-    current.push(`${current.length === 0 ? "M" : "L"}${x(index).toFixed(2)},${y(value).toFixed(2)}`);
+    current.push({ cx: x(index), cy: y(value) });
   });
-  if (current.length > 0) segments.push(current.join(" "));
+  if (current.length > 0) segments.push(current);
 
   let lastIndex = -1;
   for (let i = values.length - 1; i >= 0; i -= 1) {
@@ -126,9 +129,27 @@ export function Sparkline({
           {pointTitles?.[index] != null && <title>{pointTitles[index]}</title>}
         </line>
       ))}
-      {segments.map((d, index) => (
-        <path key={index} className={styles.line} d={d} />
-      ))}
+      {segments.map((segment, index) => {
+        const only = segment.length === 1 ? segment[0] : undefined;
+        return only !== undefined ? (
+          <circle
+            key={index}
+            className={styles.endDot}
+            data-testid="sparkline-isolated-point"
+            cx={only.cx}
+            cy={only.cy}
+            r={1.8}
+          />
+        ) : (
+          <path
+            key={index}
+            className={styles.line}
+            d={segment
+              .map((p, i) => `${i === 0 ? "M" : "L"}${p.cx.toFixed(2)},${p.cy.toFixed(2)}`)
+              .join(" ")}
+          />
+        );
+      })}
       {endDot && lastValue !== null && lastValue !== undefined && lastIndex >= 0 && (
         <circle className={styles.endDot} cx={x(lastIndex)} cy={y(lastValue)} r={2.2} />
       )}

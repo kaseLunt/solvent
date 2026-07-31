@@ -50,8 +50,13 @@
   fill: var(--ok);
 }
 
+/* Warn is an outlined square (the W0 severity ruling: color AND form —
+   warn/ok must never differ by hue alone), matching the .sev.warn atom and
+   the legend swatch that explains these marks. */
 .dotWarn {
-  fill: var(--warn);
+  fill: transparent;
+  stroke: var(--warn);
+  stroke-width: 1.5;
 }
 
 .dotCrit {
@@ -98,4 +103,11 @@
   font-family: var(--mono);
   font-size: 10.5px;
   fill: var(--ink-3);
+}
+
+.stepSub {
+  font-family: var(--mono);
+  font-size: 9px;
+  fill: var(--ink-3);
+  opacity: 0.8;
 }

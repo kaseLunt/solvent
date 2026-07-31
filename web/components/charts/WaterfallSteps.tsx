@@ -12,6 +12,11 @@ export interface WaterfallStep {
   /** The exact display string, e.g. "$2,904,332.10". */
   display: string;
   /**
+   * Optional dim second line in the LABEL gutter (e.g. "3 acct"). Keeps the
+   * money string alone after the bar so the longest value never clips.
+   */
+  sub?: string;
+  /**
    * flow      — value moved through the waterfall (accent)
    * cleared   — debt cleared (ok)
    * residual  — residual bad debt (crit; the step that must never hide)
@@ -29,16 +34,23 @@ export interface WaterfallStepsProps {
 
 /**
  * The liquidation waterfall as horizontal step bars with dashed connectors —
- * the mockup's dense panel look. A `residual` step renders crit and is never
- * dropped, however small: bars have a 1.5px minimum so a nonzero residual
- * cannot vanish into zero pixels.
+ * the mockup's dense panel look. The floor doctrine has two directions: a
+ * NONZERO step (especially a residual) has a 1.5px minimum so it can never
+ * vanish into zero pixels — and a TRUE ZERO draws no ink at all, because a
+ * floored zero would fabricate a nonzero bar (design ruling: misleading ink
+ * is worse than decorative ink).
  */
 export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: WaterfallStepsProps) {
-  const margin = { top: 4, right: 120, bottom: 4, left: 150 };
+  // Margins are budgeted to the longest real strings: left holds the label
+  // grammar ("×1.00 unshocked"), right holds the mono money string placed
+  // after the LONGEST bar ("$2,904,332.10"). SVG overflow is hidden, so a
+  // clipped string would silently lose the exact value.
+  const margin = { top: 4, right: 155, bottom: 4, left: 110 };
   const plotW = width - margin.left - margin.right;
   const height = margin.top + margin.bottom + steps.length * rowHeight;
   const maxValue = Math.max(...steps.map((s) => Math.abs(s.value)), 1);
-  const barW = (value: number) => Math.max((Math.abs(value) / maxValue) * plotW, 1.5);
+  const barW = (value: number) =>
+    value === 0 ? 0 : Math.max((Math.abs(value) / maxValue) * plotW, 1.5);
 
   const kindClass = (kind: WaterfallStep["kind"]) =>
     kind === "residual" ? styles.barCrit : kind === "cleared" ? styles.barOk : styles.barFlow;
@@ -68,11 +80,21 @@ export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: Wa
             <text
               className={styles.stepLabel}
               x={margin.left - 8}
-              y={y + rowHeight / 2 + 3}
+              y={y + rowHeight / 2 + (step.sub !== undefined ? -1 : 3)}
               textAnchor="end"
             >
               {step.label}
             </text>
+            {step.sub !== undefined && (
+              <text
+                className={styles.stepSub}
+                x={margin.left - 8}
+                y={y + rowHeight / 2 + 9}
+                textAnchor="end"
+              >
+                {step.sub}
+              </text>
+            )}
             <rect className={kindClass(step.kind)} x={margin.left} y={y + 6} width={w} height={barH} />
             <text className={styles.valueLabel} x={margin.left + w + 8} y={y + rowHeight / 2 + 3}>
               {step.display}

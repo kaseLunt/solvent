@@ -100,6 +100,7 @@ export function BookRiskMap({ engine, rows, totalPositions }: BookRiskMapProps) 
             yLabel="liq. distance %"
             formatX={(value) => `1e${value.toFixed(1)}`}
             formatY={(value) => `${value.toFixed(0)}%`}
+            yReference={{ value: 0, label: "0 — liquidatable" }}
           />
         )}
         <div className={styles.legend}>

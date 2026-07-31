@@ -76,6 +76,20 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
       )}
       {lookup.response.engines.map((engine) => {
         const series = buildHistorySeries(engine);
+        // Engine-conditional reference semantics (design ruling 6): 1.0 IS
+        // the aave engine's own boundary (wad strictly < 1e18), but the DM
+        // series plots the num/den DISCLOSURE ratio — its verdict is the
+        // engine's strict boolean, and a shared "own boundary" caption would
+        // imply the shared comparator the engine-separation law forbids.
+        // Each branch keys on ITS engine id (never an else-inherits): a
+        // future engine outside the sealed set gets the no-claim fallback,
+        // not a borrowed caption.
+        const referenceLegend =
+          engine.engine === "aave_v3_etherfi"
+            ? "reference line: 1.0 — the engine's own boundary (wad strictly < 1e18)."
+            : engine.engine === "debt_manager"
+              ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings — the verdict is the engine's strict boolean (equality healthy), not this chart."
+              : "reference line: 1.0 — a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
         return (
           <div key={engine.engine} className={styles.historyCard} data-testid={`history-${engine.engine}`}>
             <div className={styles.historyMeta}>
@@ -99,8 +113,7 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
             />
             <div className={styles.historyLegend}>
               a gap is a REFUSED or WITHHELD point — hover the tick for its named reason; the line
-              never interpolates across one. reference line: HF = 1.0 (this engine&apos;s own
-              boundary; verdicts come from the engine, not from this chart).
+              never interpolates across one. {referenceLegend}
             </div>
           </div>
         );

@@ -24,6 +24,15 @@ export interface ScatterProps {
   formatY?: (value: number) => string;
   /** Grid line count per axis. */
   gridLines?: number;
+  /**
+   * Optional horizontal reference line (e.g. y = 0 — the liquidation
+   * boundary). The value is FORCED into the y-domain so the boundary is
+   * always on the chart, even when every point sits on one side of it: an
+   * auto-fit domain that clips the floor fabricates proximity drama.
+   * Drawn as a dashed crit-toned hairline with a direct mono label, matching
+   * the Sparkline's reference treatment.
+   */
+  yReference?: { value: number; label: string };
   label: string;
 }
 
@@ -43,6 +52,7 @@ export function Scatter({
   formatX = (v) => String(v),
   formatY = (v) => String(v),
   gridLines = 4,
+  yReference,
   label,
 }: ScatterProps) {
   const margin = { top: 8, right: 10, bottom: 30, left: 44 };
@@ -51,10 +61,11 @@ export function Scatter({
 
   const xs = points.map((p) => p.x);
   const ys = points.map((p) => p.y);
+  const yDomain = yReference !== undefined ? [...ys, yReference.value] : ys;
   const xMin = xs.length > 0 ? Math.min(...xs) : 0;
   const xMax = xs.length > 0 ? Math.max(...xs) : 1;
-  const yMin = ys.length > 0 ? Math.min(...ys) : 0;
-  const yMax = ys.length > 0 ? Math.max(...ys) : 1;
+  const yMin = yDomain.length > 0 ? Math.min(...yDomain) : 0;
+  const yMax = yDomain.length > 0 ? Math.max(...yDomain) : 1;
   const xSpan = xMax - xMin || 1;
   const ySpan = yMax - yMin || 1;
 
@@ -131,6 +142,26 @@ export function Scatter({
       >
         {yLabel}
       </text>
+
+      {yReference !== undefined && (
+        <g data-testid="scatter-reference">
+          <line
+            x1={margin.left}
+            x2={margin.left + plotW}
+            y1={py(yReference.value)}
+            y2={py(yReference.value)}
+            style={{ stroke: "var(--crit)", strokeWidth: 1, strokeDasharray: "3 3", opacity: 0.55 }}
+          />
+          <text
+            x={margin.left + plotW}
+            y={Math.max(margin.top + 8, py(yReference.value) - 4)}
+            textAnchor="end"
+            style={{ fontFamily: "var(--mono)", fontSize: 9, fill: "var(--crit)", opacity: 0.75 }}
+          >
+            {yReference.label}
+          </text>
+        </g>
+      )}
 
       {points.map((point) => (
         <rect
