@@ -171,8 +171,8 @@ func TestSchemaVersionMatchesEmbeddedExpectation(t *testing.T) {
 	s := testDeriveStore(t)
 	expected, err := ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.EqualValues(t, 18, expected,
-		"embedded expected is currently 18 (P5 wave: 00015 block_headers + 00016 observatory_points from Task B2, 00017 p5 read indexes from Task B1, 00018 observatory sweep stamp from wave H5b)")
+	require.EqualValues(t, 19, expected,
+		"embedded expected is currently 19 (P5 wave: 00015 block_headers + 00016 observatory_points from Task B2, 00017 p5 read indexes from Task B1, 00018 observatory sweep stamp from wave H5b, 00019 two-valued sweep CHECK from wave H6b)")
 	got, err := SchemaVersion(context.Background(), s.pool)
 	require.NoError(t, err)
 	require.Equal(t, expected, got)

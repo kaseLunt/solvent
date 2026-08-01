@@ -34,8 +34,8 @@ func TestSchemaGateRefusesAMismatchedDatabase(t *testing.T) {
 
 	want, err := store.ExpectedSchemaVersion()
 	require.NoError(t, err)
-	require.Equal(t, int64(18), want,
-		"this build's queries are written against migration 18 (P5: 00015 block_headers, 00016 observatory_points, 00017 read indexes, 00018 observatory sweep stamp); if the migration set moved, this expectation and the operator runbook both need updating deliberately")
+	require.Equal(t, int64(19), want,
+		"this build's queries are written against migration 19 (P5: 00015 block_headers, 00016 observatory_points, 00017 read indexes, 00018 observatory sweep stamp, 00019 two-valued sweep CHECK); if the migration set moved, this expectation and the operator runbook both need updating deliberately")
 
 	s := &server{store: st}
 	require.NoError(t, s.requireSchema(ctx), "the migrated scratch database must satisfy the gate")
