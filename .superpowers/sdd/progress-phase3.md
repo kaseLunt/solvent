@@ -3199,3 +3199,42 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   keep the leg merge separable, no cmd/reconcile, no in-place 00018).
   Round 6 on the H6 set after landing → THEN the fresh-pin acceptance
   receipt run.
+- **H6a LANDED; riskd FIRST-CONTACT PAIR LANDED; BATCH 2 LIVE; DAEMON +
+  API RESTARTED; H6b DISPATCHED (17:55)**: H6a = ecd365d (integrator
+  gate re-run independently: build/vet/test green; diff verified — the
+  attempted-row guard sits AHEAD of every exemption path, six H5a
+  conjuncts byte-untouched; the rule is deliberately UNQUALIFIED because
+  snapshot_sweeps keeps only the LAST attempt so generation attribution
+  is unwitnessable in both directions — round-17 unqualified-rules
+  precedent; mutant killed, transcript committed). riskd first-contact
+  wave: root cause (b) PROVEN LIVE — assembleDM emitted debt + collateral
+  legs separately per asset and 7,503 of ~9,700 DM accounts hold USDC on
+  both sides (the whole book, not an edge). Landed as the separable pair
+  a04481f (riskfeed legIdx fold into the schema's one-row-both-sides
+  model; HF/maxBorrow bit-identical — hand-derived totals, three
+  Σ-welds, control differential; also fixes mergeDMLegs
+  double-decoration; 2 mutants killed) + a214d4e (api reconstruction:
+  nil-amount pure-debt legs are NOT phantom zero-collateral — pre-fix
+  the API would have false-refused ALL 44 computed rows of the only
+  live batch via eqBig(0,nil); new debt-side weld Σ live_debt ==
+  borrowings; 1 mutant, 3 tamper subtests). Zero refusal/coverage
+  plumbing added (the diagnostics adjacency was pre-existing
+  flag-custody code); no store change; no migration; AlgorithmRevision
+  correctly unbumped (a colliding pre-fix batch cannot exist — the
+  write always failed). Integrator re-ran the gate: build ./... clean,
+  riskfeed ok, cmd/api ok 109s (-p 1). LIVE: batch 2 committed (9,806
+  positions, 9,762 honest G1 over-ceiling refusals — the price poller
+  had been DOWN since the 17:20 migration swap; designed posture, not a
+  bug). OPS: solvent-indexer.exe restarted (clean 17:20 shutdown
+  confirmed in log first); API swapped to the a214d4e build (the
+  running binary predated the reconstruction fix and would false-refuse
+  computed rows); riskd -once re-queued after price rounds to compute
+  the full book (7,503 merged-leg accounts exercise a04481f live). H6b
+  DISPATCHED (findings 2-4: one repeatable-read tx + fail-closed
+  cardinality rejection on the batch permalink; migration 00019 with
+  IS TRUE/IS FALSE constraint semantics + welds 18→19 + live daemon
+  migration owed to the integrator; allOf merged-object analysis +
+  sibling-arm negative control; contract pinned at 1.2.2). Owed/noted:
+  batch id 1 burned by the crashed pre-fix attempt (cosmetic);
+  open-generation sweep-age ~17min observation deferred to a future
+  wave; round 6 covers c683515..H6b-head as one range.
