@@ -44,6 +44,21 @@ import (
 // about this service.
 var errNoBatch = errors.New("no complete risk batch is available yet")
 
+// errCompleteBatchNoAggregates / errCompleteBatchNoStamps are the fail-closed
+// cardinality refusals (wave H8, the permalink's H6b second defense ported to
+// the batch read layer). Inside one snapshot these states are unreachable
+// through WriteRiskBatch — a complete batch always carries its aggregates and
+// its stamped engine set — so reading back ZERO aggregate rows or an EMPTY
+// watermark vector for a batch that PASSED the completeness predicate is a
+// hand-written or torn "complete" batch (a restore, a manual edit), and
+// serving it would publish a complete book with nothing in it. POSITION-count
+// zero is legal and stays served: an honest empty book has aggregates saying
+// so — the refusal is about aggregates and stamps, never about positions.
+var (
+	errCompleteBatchNoAggregates = errors.New("passed the completeness predicate but carries no aggregate rows — refusing to serve a complete batch as an empty healthy book (a hand-written or torn state)")
+	errCompleteBatchNoStamps     = errors.New("passed the completeness predicate but carries no watermark stamps — refusing to serve its counts without their sweep clock")
+)
+
 // refusalReconstruction is the refusal code this package raises against ITSELF.
 //
 // It fires when the position rebuilt from the batch's persisted rows does not
@@ -304,25 +319,60 @@ func (s *server) readBatch(ctx context.Context, account []byte) (*batchView, err
 // loop would be one snapshot per row. nil means "every account"; an EMPTY
 // non-nil set means "no child rows" (the envelope and aggregates still read).
 func (s *server) readBatchAccounts(ctx context.Context, accounts [][]byte) (*batchView, error) {
-	batch, found, err := s.store.NewestCompleteBatch(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return nil, errNoBatch
-	}
-
+	// ONE SNAPSHOT FOR EVERY STAGE, BATCH RESOLUTION INCLUDED (wave H8 — the
+	// shape-sibling of the permalink's H6b fix, promoted from that wave's
+	// survey). This used to resolve the newest complete batch on the POOL and
+	// only then open the snapshot for the child reads — and batches are
+	// PRUNABLE. A retention prune landing between the two statements deleted
+	// the resolved batch, and every child read then returned EMPTY without
+	// error: positions, aggregates and params all read zero rows, the
+	// stamped-engine check below passed VACUOUSLY, and /v1/book and
+	// /v1/address served an apparently-successful empty book. Resolving
+	// INSIDE the snapshot makes the served batch "newest complete AT SNAPSHOT
+	// TIME" — strictly more coherent (one database instant end to end): the
+	// pre-prune batch serves WHOLE, or the resolution honestly finds the
+	// next-newest batch or errNoBatch — never a torn mixture.
 	tx, err := s.store.BeginRiskSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	v := &batchView{Batch: batch}
+	v := &batchView{}
 	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&v.Now); err != nil {
 		return nil, fmt.Errorf("read database clock: %w", err)
 	}
 	v.Now = v.Now.UTC()
+
+	batch, found, err := store.NewestCompleteBatchQ(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errNoBatch
+	}
+	v.Batch = batch
+	// FAIL CLOSED ON THE STAMP VECTOR (H6b's second remedy, ported): the
+	// completeness predicate requires a non-empty required-engine set with
+	// every member stamped, so an empty vector on a batch that passed it is a
+	// torn read or a hand-written row — and every sweep and age disclosure in
+	// this view hangs off these stamps.
+	if len(batch.Watermarks) == 0 {
+		return nil, fmt.Errorf("batch %d %w", batch.ID, errCompleteBatchNoStamps)
+	}
+
+	// TEST SEAM (nil in production): the retention-prune interleave point —
+	// after the batch resolution, before the child reads. The snapshot is
+	// already established (the clock read above was this transaction's first
+	// statement), so a prune fired here must be invisible to every read
+	// below. Same atomic shape as batchInterleave, for the same reason: a
+	// test arms it while a server goroutine reads it. See
+	// book_prune_race_db_test.go.
+	if s.bookInterleave != nil {
+		if p := s.bookInterleave.Load(); p != nil && *p != nil {
+			(*p)()
+		}
+	}
 
 	if v.Cursors, err = store.DeriveCursorStates(ctx, tx); err != nil {
 		return nil, err
@@ -344,6 +394,15 @@ func (s *server) readBatchAccounts(ctx context.Context, accounts [][]byte) (*bat
 	}
 	if v.Aggregates, err = readAggregates(ctx, tx, batch.ID); err != nil {
 		return nil, err
+	}
+	// FAIL CLOSED ON CARDINALITY (H6b's second remedy, ported). Inside one
+	// snapshot this state is unreachable through WriteRiskBatch — a complete
+	// batch always carries its aggregates — so an empty set here is a
+	// hand-written or torn "complete" batch, and serving it would publish an
+	// empty healthy book that nothing in the store backs. Zero POSITIONS stay
+	// legal: an honest empty book is exactly a batch whose aggregates say so.
+	if len(v.Aggregates) == 0 {
+		return nil, fmt.Errorf("batch %d %w", batch.ID, errCompleteBatchNoAggregates)
 	}
 	// EVERY ENGINE THIS VIEW SERVES MUST BE STAMPED ON THE BATCH'S OWN VECTOR
 	// (1.2.2): each aggregate row and each degradation-posture row serves its

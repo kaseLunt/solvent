@@ -223,6 +223,14 @@ type server struct {
 	// p5_batches_prune_race_db_test.go. The same atomic shape as readFailure,
 	// for the same reason: a test arms it while a server goroutine reads it.
 	batchInterleave *atomic.Pointer[func()]
+
+	// bookInterleave is the SAME seam for readBatchAccounts — fired between
+	// the newest-complete-batch resolution and the child reads, which is the
+	// retention-prune interleave point of wave H8 (the /v1/book–/v1/address
+	// sibling of the permalink's finding). Nil in production (unexported, no
+	// configuration path); see readBatchAccounts and
+	// book_prune_race_db_test.go.
+	bookInterleave *atomic.Pointer[func()]
 }
 
 // apiDSN resolves the service's database URL.

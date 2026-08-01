@@ -1662,8 +1662,19 @@ type RiskBatch struct {
 // a manual delete or a hand-written row can, and this is what stands between
 // those and a served number.
 func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error) {
+	return NewestCompleteBatchQ(ctx, s.pool)
+}
+
+// NewestCompleteBatchQ is NewestCompleteBatch against a caller-supplied
+// querier — the same convention as CompleteBatchIDs — so a serving path can
+// resolve the batch INSIDE the same REPEATABLE READ snapshot its child reads
+// run in (wave H8, the shape-sibling of the permalink's H6b fix). Resolving
+// on the pool and reading children in a later transaction leaves a window in
+// which a retention prune deletes the resolved batch, and the children then
+// read back EMPTY without error — an apparently-successful empty book.
+func NewestCompleteBatchQ(ctx context.Context, q Querier) (RiskBatch, bool, error) {
 	var b RiskBatch
-	err := s.pool.QueryRow(ctx, `
+	err := q.QueryRow(ctx, `
 		SELECT b.id, b.computed_at, b.status, b.position_count, b.refused_count, b.flagged_count, b.producer,
 		       COALESCE((SELECT array_agg(a.engine ORDER BY a.engine)
 		                 FROM risk_batch_aggregates a
@@ -1681,7 +1692,7 @@ func (s *Store) NewestCompleteBatch(ctx context.Context) (RiskBatch, bool, error
 	}
 	b.ComputedAt = b.ComputedAt.UTC()
 
-	rows, err := s.pool.Query(ctx,
+	rows, err := q.Query(ctx,
 		`SELECT engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
 		        sweep_rows, sweep_failed, sweep_success_sum::text, sweep_max_updated_at,
 		        sweep_generation, sweep_generation_open, sweep_applicable
