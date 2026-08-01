@@ -3361,3 +3361,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   never excluded law in contract text, 3 mutants) DISPATCHED. Named
   proposals pending owner/integrator adjudication: E-2 risk-map
   endpoint; HeldFlat enrichment; dust-echo fields.
+- **W-UX-B LANDED (e794bb0); CONTRACT TRAIN 1.3.0 LANDED (26f3f01 +
+  ca12af2 weld regen); W-UX-D IN FLIGHT (20:30)**: W-UX-B (web defects,
+  ruling points 9-12): SORTS_BY_ENGINE (DM never offers hf), ONE
+  normalizer over URL state (the doomed engine+sort pair can never fire
+  - first fetch is born normalized), engine-switch remap + dim ack
+  line, error-taxonomy branching (4xx -> refusal register with the
+  API sentence verbatim and NO retry; transport keeps retry), DM
+  header "HF - disclosure"; 13 unit + 16 e2e green on the wave config
+  (:3811, w2-w6 convention); integrator re-verified tsc + 13/13.
+  W-UX-A (contract train): /v1/positions gains min_value (exclusion
+  law IN THE CONTRACT TEXT: refused/NULL-total rows never excluded;
+  total_positions = qualifying count while in force) + dir (absolute
+  axis semantics; canonical directions documented; account tie-break
+  always asc) + limit 1000; cursor binds 6 fields (resolved dir - the
+  absent-dir cursor interchanges with its canonical spelling); NUMERIC-
+  exact compare; client regen byte-identical 312/312; mutants 3/3;
+  sweep law 7/7 untripped; deploy-boundary note: pre-train 4-field
+  cursors answer the malformed-cursor 400 (documented restart
+  behavior). Integrator re-ran positions+law suites and client verify
+  independently, landed by name, regenerated web/lib/proof-contract
+  .gen.ts against 1.3.0 (fidelity 7/7). W-UX-D (charts supplement)
+  running in web/; W-UX-C (table redesign) dispatches when D lands
+  (file overlap: dust.ts, BookSurface, BookRiskMap). Acceptance
+  receipt run still in flight (monitor armed).
