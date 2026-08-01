@@ -625,7 +625,7 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 				firstDebt = t6.DMFirstDebtBlock[acct]
 			}
 			refused, refusalProof := refuse(acct, borrowers[acct])
-			race, raceWitness := dmNeverSweptRace(firstDebt, c.pinOP, cycles)
+			race, raceWitness := dmNeverSweptRace(firstDebt, c.pinOP, st, cycles)
 			ev := map[string]string{
 				"last_attempt_status": st.Status,
 				"attempt_state":       attemptState,
@@ -658,7 +658,7 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 				row.Verdict = verdictUnscannable
 				row.Gated = true
 				row.Class = sweepNever
-				row.Note = "GATED: no completion-edge witness clears the sweeper — either a generation completed at or below the pin while OPEN at or after this account's arrival (its first-debt block overlaps the open span: SweepWorkBatch re-queries the registry every batch, so that generation was OWED this borrower and STILL never read it — a sweeper defect, not a race), or the per-generation evidence is missing/sticky/ambiguous, and unprovable chronology is GATED, never disclosed (Wave H4a Codex F2; Wave H5a Codex round 4). The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
+				row.Note = "GATED: no completion-edge witness clears the sweeper — either the account's OWN sweep row witnesses an attempt (the cycle REACHED it and failed: a failure never widens into an exemption, Wave H6a Codex round 5), or a generation completed at or below the pin while OPEN at or after this account's arrival (its first-debt block overlaps the open span: SweepWorkBatch re-queries the registry every batch, so that generation was OWED this borrower and STILL never read it — a sweeper defect, not a race), or the per-generation evidence is missing/sticky/ambiguous, and unprovable chronology is GATED, never disclosed (Wave H4a Codex F2; Wave H5a Codex round 4). The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
 			}
 			rows = append(rows, row)
 		}
@@ -1449,6 +1449,20 @@ func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
 // Anything unprovable GATES — missing, sticky, or AMBIGUOUS chronology is
 // never disclosed.
 //
+// THE H6a CONJUNCT (Wave H6a, Codex round 5 HIGH — a failed attempt must not
+// launder into a race): the exemption is additionally unavailable to any
+// account whose OWN snapshot_sweeps row says attempted=true, whatever the
+// completion-edge arithmetic says. The completion edge only proves the cycle
+// never OBSERVED a chain containing the borrower's debt; the account's own
+// attempt row proves the cycle REACHED the account regardless (RPC exec-block
+// lag — the same residue named under derivation 2 — can stamp the attempt
+// below the arrival edge, making 200 > 100 look like a coverage gap while the
+// row proves sampling). Sampled-and-failed is a sweeper/coverage failure,
+// never a race; and because snapshot_sweeps keeps only the LAST attempt, the
+// surviving row cannot be scoped to the pin-completed generation in either
+// direction — so ANY attempt fails closed. The check lives HERE, in the
+// classifier, so every caller inherits it.
+//
 // WHY THE H4a OPENING-EDGE WITNESS WAS WRONG (the round-4 defect): H4a
 // treated "generation K attempted at some block <= firstDebt" (open(K) <=
 // arrival) as proof the borrower arrived too late for K. But
@@ -1510,12 +1524,26 @@ func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
 // The returned witness string is the receipt: it states WHICH generation
 // evidence carried the decision and prints the completion-edge arithmetic,
 // and the per-account cycle_witness evidence field carries it.
-func dmNeverSweptRace(firstDebt, pin uint64, cy snapshotdb.T6SweepCycles) (bool, string) {
+func dmNeverSweptRace(firstDebt, pin uint64, st snapshotdb.T6SweepState, cy snapshotdb.T6SweepCycles) (bool, string) {
 	if firstDebt == 0 {
 		return false, "arrival edge unknown (no custodied first debt block at or below the pin): a race cannot be claimed for an account whose arrival custody cannot state — fails closed"
 	}
 	if !cy.Read {
 		return false, "Stage A did not collect the sweep-cycle witness (DMSweepCycles unread): missing cycle evidence is GATED, never disclosed"
+	}
+	// The account's OWN testimony precedes EVERY exemption path (Wave H6a,
+	// Codex round 5 HIGH): a snapshot_sweeps row with attempted=true is a
+	// positive witness that the sweeper REACHED this account — the cycle
+	// sampled it and never succeeded. The never-reached exemption exists ONLY
+	// for accounts no completed cycle could have sampled, and the surviving
+	// row cannot be scoped to a generation (snapshot_sweeps keeps only the
+	// LAST attempt, so a later re-attempt erases a completed-generation
+	// attempt — generation-scoped attribution is unwitnessable in BOTH
+	// directions). A failure must never widen into an exemption: any
+	// attempted account fails CLOSED, whatever the completion-edge
+	// arithmetic below would have said.
+	if st.Attempted {
+		return false, fmt.Sprintf("the account's own snapshot_sweeps row witnesses attempted=true (last_attempt_status=%q): the sweeper REACHED this account and exhausted retries without ever succeeding, so it was not beyond any completed cycle's reach — RPC exec-block lag can stamp that attempt below the first-debt block, which is exactly how a failed sweep would launder into completion-edge disclosure. The never-reached race exemption is unavailable to an attempted account; a failure never widens into an exemption — GATED (Wave H6a, Codex round 5)", st.Status)
 	}
 	if !cy.HaveGenerationRow {
 		return true, "no sweep_generations row: no sweep generation has ever been opened, so no cycle can have completed since this account arrived — the stopped/never-started-sweeper shape, which the census denominator guard fails en masse"

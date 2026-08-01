@@ -336,52 +336,52 @@ func TestNeverSweptReshape(t *testing.T) {
 			return snapshotdb.T6GenerationSpan{MinAttemptBlock: min, MaxAttemptBlock: max, Rows: 2}
 		}
 
-		race, _ := dmNeverSweptRace(0, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(50, 900)}))
+		race, _ := dmNeverSweptRace(0, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(50, 900)}))
 		require.False(t, race, "unknown arrival fails CLOSED")
 
-		race, why := dmNeverSweptRace(200, pin, snapshotdb.T6SweepCycles{})
+		race, why := dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},snapshotdb.T6SweepCycles{})
 		require.False(t, race, "Stage A never collected the cycle witness: missing cycle evidence GATES, never discloses")
 		require.Contains(t, why, "unread")
 
-		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepCycles{Read: true})
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},snapshotdb.T6SweepCycles{Read: true})
 		require.True(t, race, "no sweep_generations row = no generation EVER opened = no completed cycle can exist (the stopped/never-started-sweeper shape — the census guard owns it en masse)")
 		require.Contains(t, why, "no sweep_generations row")
 
-		race, _ = dmNeverSweptRace(200, pin, cy(1, false, map[uint64]snapshotdb.T6GenerationSpan{1: span(500, 900)}))
+		race, _ = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(1, false, map[uint64]snapshotdb.T6GenerationSpan{1: span(500, 900)}))
 		require.True(t, race, "generation 1 still open and nothing before it: no cycle can have completed since the arrival")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 900)}))
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 900)}))
 		require.False(t, race,
 			"Wave H5a (Codex round 4): the H4a opening-edge heuristic disclosed this (attempt 150 <= arrival 200), but the arrival OVERLAPS generation 3's open span [150, 900] — SweepWorkBatch re-queries the registry every batch, so the still-open generation was OWED this borrower and completed without attempting it: GATE")
 		require.Contains(t, why, "OWED")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(250, 900)}))
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(250, 900)}))
 		require.False(t, race,
 			"m1 kill: generation 3 completed at or below the pin with its whole witnessed span above the arrival edge — a completed cycle since arrival that skipped the account is a sweeper defect, GATED")
 		require.Contains(t, why, "skipped")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 180)}))
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 180)}))
 		require.True(t, race,
 			"the H5a disclosure path: generation 3's witnessed completion edge (180) sits strictly below the arrival (200) — every pin-completed cycle closed before this account existed")
 		require.Contains(t, why, "completion edge")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 200)}))
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{3: span(150, 200)}))
 		require.False(t, race,
 			"the exact-edge boundary: arrival == completion edge is overlap, not after — ambiguous chronology GATES")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
 			2: span(150, 400), 3: span(950, pin+200),
 		}))
 		require.False(t, race,
 			"Wave H5a: the current generation completed ABOVE the pin, so the pin-completable candidate is generation 2 — a NON-CURRENT generation, whose completion edge the schema does not persist (its span only shrinks). The H4a shape disclosed this on generation 2's opening edge; unwitnessable chronology GATES")
 		require.Contains(t, why, "not the current generation")
 
-		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+		race, _ = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
 			2: span(300, 400), 3: span(950, pin+200),
 		}))
 		require.False(t, race, "same shape with generation 2's whole span above the arrival: still no completion witness for a non-current generation — GATES")
 
-		race, why = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{2: span(150, 400)}))
+		race, why = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{2: span(150, 400)}))
 		require.False(t, race, "a generation stamped complete with NO visible attempt rows is sticky cycle evidence: GATED, never disclosed")
 		require.Contains(t, why, "sticky")
 
@@ -390,7 +390,7 @@ func TestNeverSweptReshape(t *testing.T) {
 		// arrival (100 <= 200 => "race"), while the per-generation witness
 		// says generation 3 opened at 250 — after the borrower — and completed
 		// at 280, below the pin. The account it skipped must GATE.
-		race, _ = dmNeverSweptRace(200, pin, cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
+		race, _ = dmNeverSweptRace(200, pin, snapshotdb.T6SweepState{},cy(3, true, map[uint64]snapshotdb.T6GenerationSpan{
 			3: span(250, 280),
 		}))
 		require.False(t, race,
