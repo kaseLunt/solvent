@@ -3385,3 +3385,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   running in web/; W-UX-C (table redesign) dispatches when D lands
   (file overlap: dust.ts, BookSurface, BookRiskMap). Acceptance
   receipt run still in flight (monitor armed).
+- **OVERNIGHT REBOOT RECOVERY; W-UX-C LANDED (0b75eed) — THE P5 UX
+  TRAIN IS COMPLETE; ACCEPTANCE r7 IN FLIGHT (13:00 Aug 1)**: the
+  machine rebooted ~22:32 killing Postgres/daemon/API/web AND
+  acceptance r6 — r6 autopsy: result aborted, ZERO real drift (29/29
+  custody exact, 29,294 boolean welds clean, 1,147 Aave HF welds
+  clean); all 22 failures transport-starved reads from the dying
+  machine + the recurring localhost-DNS flake at the rewind re-check
+  (the same shape that killed r5); artifacts preserved in session
+  scratchpad accept-r6-aborted/. RECOVERY: Docker+Postgres restarted,
+  daemon+API rebuilt at HEAD (1.3.0/schema19/rev5), web rebuilt on
+  :3111, derive-cursor 13h39m lag chewed in ~9 min, preflight GREEN,
+  batch 5 committed (9,828/0/30, fresh prices). r7 LAUNCHED 12:24 with
+  the ROOT-CAUSE fix: localhost→127.0.0.1 in-shell substitution (env
+  only, .env untouched; direct go run because make re-includes .env),
+  awake-hours-only launch policy adopted. W-UX-C LANDED as 0b75eed
+  (integrator re-ran: 180 unit default, 313 wave config, typecheck
+  clean): dust chips off/<1/<100/<1k default <1 → min_value bigint;
+  clickable per-engine header sorting (two-state, dir; DM HF header
+  stays plain disclosure); refused-first chip; URL mirror with
+  orphaned-dir normalizer rule (a deep-linked dir never survives a
+  sort remap — caught RED by e2e); PAGE_LIMIT 200 + sentinel auto-load
+  gated on error===null + DOM windowing ~100 rows; batch-guarded
+  footer ledger (hidden count never blends batches; Σ bound → exact at
+  exhaustion; liquidatable line in crit whenever agg > loaded); the
+  three micro-rulings (zero-member all-dust gate at call sites,
+  partial axis unified on usd-log, held-flat prose pluralizes);
+  micro-4 verified (DensityMap ticks already integer-decade). :3111
+  restarted at 0b75eed — the owner's entire 7-request feedback batch
+  is now live. Wave-flagged items for the next design pass:
+  {step} rendering grammar pinned for cheap re-rule; dust-off
+  fallback when /v1/book fails (louder disclosure?);
+  heldFlatDetailsSummary invariance carve-out. NEXT: r7 verdict →
+  receipt commit + E1 paperwork; Codex review of the UX range
+  (e794bb0..0b75eed) queued behind the receipt.
