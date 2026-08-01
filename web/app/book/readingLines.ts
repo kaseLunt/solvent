@@ -26,14 +26,26 @@ function usd(value: string, decimals: number): string {
   return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
 }
 
-/** "Σ eligible debt $4,200[· all dust]" — em dash when the Σ is withheld. */
+/**
+ * "Σ eligible debt $4,200[· all dust]" — em dash when the Σ is withheld.
+ *
+ * Zero-member gate (W-UX-C micro-ruling 1): "· all dust" renders ONLY when
+ * the annotated member count (`eligible_positions`) is > 0 — the adjective
+ * needs members to describe. The Σ itself still renders: $0 over a computed
+ * class is honest. The guard lives HERE at the call-site helper both reading
+ * lines share, never inside `sumProvablyDust`.
+ */
 export function eligibleDebtFragment(badDebt: BadDebt | undefined): string {
   if (badDebt === undefined || badDebt.eligible_debt_usd === null) {
     return `Σ eligible debt ${EM_DASH}`;
   }
-  const dust = sumProvablyDust(badDebt.eligible_debt_usd, badDebt.usd_decimals)
-    ? ALL_DUST_SUFFIX
-    : "";
+  // A NULL member count is an unknowable membership — not > 0, so no suffix.
+  const dust =
+    badDebt.eligible_positions !== null &&
+    badDebt.eligible_positions > 0 &&
+    sumProvablyDust(badDebt.eligible_debt_usd, badDebt.usd_decimals)
+      ? ALL_DUST_SUFFIX
+      : "";
   return `Σ eligible debt ${usd(badDebt.eligible_debt_usd, badDebt.usd_decimals)}${dust}`;
 }
 

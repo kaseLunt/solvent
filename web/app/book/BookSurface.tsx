@@ -10,7 +10,7 @@
 // surface's own state with the server's message — the global PostureRibbon /
 // DegradationBanner own the app-level layer and are NOT duplicated here.
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   UnavailableError,
@@ -53,12 +53,25 @@ function gatePosture(engines: number, refused: readonly EngineRefusal[]): string
 
 export function BookSurface() {
   const [state, setState] = useState<BookState>({ phase: "loading" });
+  const controllerRef = useRef<AbortController | null>(null);
+  /** The batch id of the /v1/book response currently rendered. */
+  const bookBatchRef = useRef<number | null>(null);
+  /** The last batch id the table reported — the heal-once guard. */
+  const reportedBatchRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  // Fetch (or RE-fetch) /v1/book. A refetch keeps the current book on screen
+  // until the fresh one lands — the aggregates stay whichever batch they
+  // honestly are, and the table's batch guard discloses any mismatch.
+  const loadBook = useCallback(() => {
+    controllerRef.current?.abort();
     const controller = new AbortController();
+    controllerRef.current = controller;
     getSolventClient()
       .book(controller.signal)
-      .then((book) => { setState({ phase: "ok", book }); })
+      .then((book) => {
+        bookBatchRef.current = book.batch.id;
+        setState({ phase: "ok", book });
+      })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         if (cause instanceof UnavailableError) {
@@ -71,8 +84,26 @@ export function BookSurface() {
         }
         setState({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
       });
-    return () => { controller.abort(); };
   }, []);
+
+  useEffect(() => {
+    loadBook();
+    return () => { controllerRef.current?.abort(); };
+  }, [loadBook]);
+
+  // The table's pages landed on a batch (W-UX-C): when it differs from the
+  // book we hold — e.g. after a 409 restart onto a fresh batch — re-fetch
+  // /v1/book so the footer's batch guard HEALS instead of pinning a
+  // permanent mismatch. Once per reported id, so a server still serving the
+  // old book cannot be hammered.
+  const handleTableBatch = useCallback(
+    (batchId: number) => {
+      if (reportedBatchRef.current === batchId) return;
+      reportedBatchRef.current = batchId;
+      if (bookBatchRef.current !== null && bookBatchRef.current !== batchId) loadBook();
+    },
+    [loadBook],
+  );
 
   return (
     <>
@@ -144,9 +175,19 @@ export function BookSurface() {
           own posture) even while /v1/book is degraded. The Suspense boundary
           is useSearchParams' static-prerender contract: the table hydrates
           client-side with the REAL query string, normalized before its first
-          fetch (W-UX-B part 10). */}
+          fetch (W-UX-B part 10). The aggregates feed (W-UX-C) hands it the
+          batch-guarded counts and the decimals the dust filter composes
+          min_value from — its first walk waits for /v1/book to SETTLE, ok or
+          failed, and never on a stall alone. */}
       <Suspense fallback={null}>
-        <BookPositions />
+        <BookPositions
+          bookFeed={{
+            settled: state.phase !== "loading",
+            batchId: state.phase === "ok" ? state.book.batch.id : null,
+            aggregates: state.phase === "ok" ? state.book.engines : null,
+          }}
+          onBatchChange={handleTableBatch}
+        />
       </Suspense>
 
       {state.phase === "ok" && (

@@ -36,7 +36,8 @@ import {
   type PositionsEngine,
 } from "@/lib/positions";
 import { toPositionRow, type PositionRow } from "./positionRow";
-import { buildRiskBins } from "./riskBins";
+import { buildRiskBins, usdExponentLabel } from "./riskBins";
+import { dustMapLegend, type ActiveDustStep } from "./dust";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
 
@@ -68,17 +69,12 @@ function debtForGeometry(row: PositionRow): number | null {
   return Math.log10(numeric);
 }
 
-/** "1k" / "100k" / "1M" for a base-10 exponent; `1e{k}` outside the named range. */
-function decadeLabel(exponent: number): string {
-  if (exponent < 0 || exponent > 14) return `1e${String(exponent)}`;
-  const suffix = ["", "k", "M", "B", "T"][Math.floor(exponent / 3)] ?? "";
-  return `${String(10 ** (exponent % 3))}${suffix}`;
-}
-
 /**
  * Round-decade x ticks over a log10 axis (design TASTE 12): every integer
  * exponent inside the plotted range, thinned by stride when dense so labels
- * fit — every shown tick is still a true decade. The Scatter drops any tick
+ * fit — every shown tick is still a true decade. Labels come from the SAME
+ * $-prefixed vocabulary as the DensityMap's axis (W-UX-C micro-ruling 2:
+ * one panel never wears two unit vocabularies). The Scatter drops any tick
  * outside its data domain (the honest-scale law stays the chart's).
  */
 function decadeTicks(xs: readonly number[]): { value: number; label: string }[] {
@@ -86,7 +82,7 @@ function decadeTicks(xs: readonly number[]): { value: number; label: string }[] 
   const lo = Math.ceil(Math.min(...xs));
   const hi = Math.floor(Math.max(...xs));
   const all: { value: number; label: string }[] = [];
-  for (let k = lo; k <= hi; k += 1) all.push({ value: k, label: decadeLabel(k) });
+  for (let k = lo; k <= hi; k += 1) all.push({ value: k, label: usdExponentLabel(k) });
   const stride = Math.ceil(all.length / 8);
   return stride <= 1 ? all : all.filter((_, index) => index % stride === 0);
 }
@@ -108,13 +104,35 @@ type WalkState =
 export interface BookRiskMapProps {
   engine: PositionsEngine;
   rows: readonly PositionRow[];
-  /** `total_positions` from the page envelope (null on a withheld engine). */
+  /**
+   * `total_positions` from the page envelope (null on a withheld engine).
+   * Under an active dust step this is the QUALIFYING count.
+   */
   totalPositions: number | null;
   /** The page envelope's batch — the map's own as-of (null before a page lands). */
   batch: Batch | null;
+  /**
+   * The table's active dust step (W-UX-C handoff) — null when off. The map
+   * legend then discloses that dust is excluded AT THE SOURCE: this map
+   * shows the filtered walk only. The parent keys this component by
+   * engine AND dust, so a step change can never splice two filters.
+   */
+  dustStep?: ActiveDustStep | null;
+  /** The composed min_value the table's walk carries — the FULL walk carries the same. */
+  minValue?: string;
+  /** aggregate.positions from /v1/book, same-batch-guarded upstream (null when unknown). */
+  onBookCount?: number | null;
 }
 
-export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMapProps) {
+export function BookRiskMap({
+  engine,
+  rows,
+  totalPositions,
+  batch,
+  dustStep = null,
+  minValue,
+  onBookCount = null,
+}: BookRiskMapProps) {
   const [walk, setWalk] = useState<WalkState>({ phase: "idle" });
   /** The supersession notice — the BookPositions grammar, verbatim, visible. */
   const [notice, setNotice] = useState<string | null>(null);
@@ -152,6 +170,10 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
           const response = await fetchPositionsPage({
             engine,
             cursor,
+            // The SAME filter as the table's walk: under an active dust step
+            // the FULL book is the full FILTERED book — never a vector mixing
+            // two filters.
+            ...(minValue === undefined ? {} : { minValue }),
             limit: WALK_LIMIT,
             signal: controller.signal,
           });
@@ -205,7 +227,7 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
         return;
       }
     }
-  }, [engine]);
+  }, [engine, minValue]);
 
   // ---- FULL mode: the binned density map over the complete vector --------
   const fullRows = walk.phase === "full" ? walk.rows : null;
@@ -242,10 +264,16 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
     });
   }
 
+  // The three-part coverage label (W-UX-C handoff): loaded rows / the walk's
+  // QUALIFYING denominator / the unfiltered on-book count from /v1/book
+  // (same-batch-guarded upstream, em dash when unknown — never a borrowed
+  // count).
   const loadedLabel =
     totalPositions === null
       ? `${String(rows.length)} loaded / total withheld`
-      : `${String(rows.length)} loaded / ${String(totalPositions)} total`;
+      : `${String(rows.length)} loaded / ${String(totalPositions)} qualifying / ${
+          onBookCount === null ? EM_DASH : String(onBookCount)
+        } on book`;
 
   // The map states its OWN as-of (design SHOULD-FIX 9): the page envelope's
   // batch identity, with supersession disclosed — never a borrowed or
@@ -364,6 +392,9 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
                     positive debt
                   </span>
                 )}
+                {dustStep !== null && (
+                  <span data-testid="risk-map-dust-legend">{dustMapLegend(dustStep)}</span>
+                )}
               </div>
             </>
           )
@@ -374,12 +405,16 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
             the map.
           </div>
         ) : (
+          // Axis unification (W-UX-C micro-ruling 2): the partial Scatter
+          // wears the SAME vocabulary as the DensityMap — "debt (usd, log)"
+          // with $-prefixed true-decade ticks. One panel, one unit
+          // vocabulary, in both states.
           <Scatter
-            label={`risk map for ${engine}: debt (log10, engine unit) vs liquidation distance`}
+            label={`risk map for ${engine}: debt (usd, log) vs liquidation distance`}
             points={points}
-            xLabel="debt (engine unit, log10)"
+            xLabel="debt (usd, log)"
             yLabel="liq. distance %"
-            formatX={(value) => `1e${value.toFixed(1)}`}
+            formatX={usdExponentLabel}
             formatY={(value) => `${value.toFixed(0)}%`}
             xTicks={decadeTicks(points.map((point) => point.x))}
             yReference={{ value: 0, label: "0 — liquidatable" }}
@@ -408,6 +443,9 @@ export function BookRiskMap({ engine, rows, totalPositions, batch }: BookRiskMap
                 {String(unplottable)} loaded row(s) not plottable (refused, no debt, or no solvable
                 distance) — counted, not dropped
               </span>
+            )}
+            {dustStep !== null && (
+              <span data-testid="risk-map-dust-legend">{dustMapLegend(dustStep)}</span>
             )}
           </div>
         )}

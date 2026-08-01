@@ -31,6 +31,7 @@ import {
   BOOK_ENGINE_REFUSED,
   BOOK_ERROR_UNAVAILABLE,
   POSITIONS_AAVE_PAGE_1,
+  POSITIONS_AAVE_PAGE_2,
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
 import {
@@ -98,11 +99,15 @@ async function mockStreamBody(page: Page, body: string): Promise<void> {
 
 async function mockBookOk(page: Page): Promise<void> {
   await page.route("**/v1/book", (route) => fulfillJson(route, BOOK));
+  // Cursor-aware: the W-UX-C sentinel walks short books to exhaustion on its
+  // own, so the cursor page must terminate (PAGE_2 carries next_cursor null).
   await page.route("**/v1/positions*", (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("engine") === "debt_manager")
       return fulfillJson(route, POSITIONS_DM_PAGE_1);
-    return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+    if (url.searchParams.get("cursor") === null)
+      return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+    return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
   });
 }
 
@@ -328,18 +333,22 @@ const MATRIX: Cell[] = [
     mock: async (page) => {
       await muteStream(page);
       await page.route("**/v1/book", (route) => fulfillJson(route, BOOK));
+      let cursorRequests = 0;
       await page.route("**/v1/positions*", (route) => {
         const url = new URL(route.request().url());
         if (url.searchParams.get("cursor") === null)
           return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
-        return fulfillJson(route, BATCH_SUPERSEDED, 409);
+        // First cursor presentation answers 409; the restarted walk's cursor
+        // is honored (the W-UX-C sentinel drives both without a click).
+        cursorRequests += 1;
+        if (cursorRequests === 1) return fulfillJson(route, BATCH_SUPERSEDED, 409);
+        return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
       });
     },
     act: async (page) => {
       await expect(
         page.getByRole("table", { name: "positions for aave_v3_etherfi" }),
       ).toContainText("0xAAaA…0001");
-      await page.getByRole("button", { name: "LOAD MORE" }).click();
     },
     verify: async (page) => {
       const notice = page.getByTestId("batch-superseded-notice");
@@ -367,7 +376,12 @@ const MATRIX: Cell[] = [
       const refusedRow = table.getByRole("row").filter({ hasText: "0xddDD…0004" });
       await expect(refusedRow).toContainText("—");
       await expect(refusedRow).not.toContainText("$0");
-      await expect(page.getByText("2 of 2 rows")).toBeVisible();
+      // The refused row is COUNTED in the W-UX-C accounting: it qualifies
+      // under the dust step (refused rows are never dust) and stays in every
+      // denominator.
+      await expect(page.getByTestId("positions-accounting")).toHaveText(
+        "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort liq_distance ▲",
+      );
     },
   },
   {

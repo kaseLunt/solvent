@@ -105,11 +105,10 @@ test("refused position rows are visible inline with their named reason", async (
 
   const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
   await expect(table).toContainText("0xAAaA…0001"); // page 1: the computed row
-  await expect(table.getByRole("row")).toHaveCount(2); // header + 1 row
 
-  await page.getByRole("button", { name: "LOAD MORE" }).click();
-
-  // Page 2's refused row is a ROW: visible, tinted, named — never filtered.
+  // Page 2 arrives via the walk-end sentinel (W-UX-C point 13) — the short
+  // walk auto-fills without a click; LOAD MORE remains only as the fallback.
+  // Its refused row is a ROW: visible, tinted, named — never filtered.
   await expect(table).toContainText("0xBbbb…0002");
   await expect(table).toContainText("REFUSED · G1");
   // Its totals are em dashes, never zeros.
@@ -117,7 +116,12 @@ test("refused position rows are visible inline with their named reason", async (
   await expect(refusedRow).toContainText("—");
   await expect(refusedRow).not.toContainText("$0");
   await expect(page.getByText("end of pages")).toBeVisible();
-  await expect(page.getByText("2 of 2 rows")).toBeVisible();
+  // The W-UX-C footer accounting: loaded / qualifying under the default dust
+  // step, the hidden count (0 here — nothing below the step), the on-book
+  // aggregate, and the sort with its canonical direction glyph.
+  await expect(page.getByTestId("positions-accounting")).toHaveText(
+    "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort liq_distance ▲",
+  );
 });
 
 test("the DM engine page: crit only from the strict boolean; refused row named", async ({ page }) => {
@@ -189,9 +193,9 @@ test("a monotone waterfall renders NO violation strip; held_flat and projection 
   const heldFlat = page.getByTestId("waterfall-held-flat");
   await expect(heldFlat).toContainText("0xA0b8…eB48"); // the held-flat USDC input
   // W-UX-D caption (a): the counted-disclosure pattern — always-visible
-  // summary + "held flat — {n} inputs named" (the deeper copy pins live in
-  // book-charts.spec.ts).
-  await expect(heldFlat).toContainText("1 price inputs held flat");
+  // summary (SINGULAR at n=1, W-UX-C micro-ruling 3) + "held flat — {n}
+  // inputs named" (the deeper copy pins live in book-charts.spec.ts).
+  await expect(heldFlat).toContainText("1 price input held flat");
   await expect(heldFlat).toContainText("held flat — 1 inputs named");
 });
 
@@ -210,6 +214,7 @@ test("a waterfall monotonicity violation is SURFACED, naming the offending point
 
 test("409 BATCH_SUPERSEDED: a visible notice and an honest restart from page one", async ({ page }) => {
   let pageOneRequests = 0;
+  let cursorRequests = 0;
   await mockBook(page, BOOK);
   await page.route("**/v1/positions*", (route) => {
     const url = new URL(route.request().url());
@@ -217,15 +222,17 @@ test("409 BATCH_SUPERSEDED: a visible notice and an honest restart from page one
       pageOneRequests += 1;
       return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
     }
-    return fulfillJson(route, BATCH_SUPERSEDED, 409);
+    // The FIRST cursor presentation answers 409 (its batch was superseded);
+    // the restarted walk's cursor is honored — the sentinel (W-UX-C) drives
+    // both continuations without a click.
+    cursorRequests += 1;
+    if (cursorRequests === 1) return fulfillJson(route, BATCH_SUPERSEDED, 409);
+    return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
   });
   await openBook(page);
 
   const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
   await expect(table).toContainText("0xAAaA…0001");
-  expect(pageOneRequests).toBe(1);
-
-  await page.getByRole("button", { name: "LOAD MORE" }).click();
 
   const notice = page.getByTestId("batch-superseded-notice");
   await expect(notice).toBeVisible();
@@ -247,8 +254,11 @@ test("the warn-band disclosure is carried at table and legend level", async ({ p
   await expect(page.getByTestId("positions-warn-disclosure")).toContainText(WARN_DISCLOSURE);
   await expect(page.getByTestId("risk-map-warn-disclosure")).toContainText(WARN_DISCLOSURE);
 
-  // The risk map is bounded and says so: what's loaded, of the batch total.
-  await expect(page.getByTestId("book-risk-map")).toContainText("1 loaded / 2 total");
+  // The risk map is bounded and says so (W-UX-C handoff): loaded rows, the
+  // walk's qualifying denominator, and the unfiltered on-book count.
+  await expect(page.getByTestId("book-risk-map")).toContainText(
+    "2 loaded / 2 qualifying / 2 on book",
+  );
 });
 
 test("Lab rides the PRIMARY nav register (design ruling)", async ({ page }) => {
@@ -297,32 +307,40 @@ test("NO SERVABLE BATCH renders the refusal honestly — never a book of zeroes"
 // rendering (the design ruling's part B, verbatim).
 // ---------------------------------------------------------------------------
 
-test("the DM view never OFFERS hf — not in the sort control, not as a header", async ({ page }) => {
+test("the DM view never OFFERS hf — no sortable header, no affordance", async ({ page }) => {
   await mockBook(page, BOOK);
   await mockPositions(page);
   await openBook(page);
 
-  // Aave offers the full contract enum, hf included.
-  await expect(page.getByRole("button", { name: "hf", exact: true })).toBeVisible();
+  // Aave offers the full per-engine vocabulary IN THE HEADERS (W-UX-C):
+  // Health factor is a sortable button on the Aave view only.
   const aaveTable = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
-  await expect(aaveTable.getByRole("columnheader", { name: "Health factor" })).toBeVisible();
+  const aaveHf = aaveTable.getByRole("columnheader", { name: "Health factor" });
+  await expect(aaveHf).toBeVisible();
+  await expect(aaveHf.getByRole("button")).toHaveCount(1);
+  await expect(aaveTable.getByRole("button", { name: "Debt", exact: true })).toBeVisible();
+  await expect(aaveTable.getByRole("button", { name: "Liq. distance" })).toBeVisible();
 
   await page.getByRole("button", { name: "debt_manager" }).click();
 
-  // The hf control is GONE — not disabled, not present.
-  await expect(page.getByRole("button", { name: "hf", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "liq_distance" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "debt", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "status", exact: true })).toBeVisible();
-
   // The DM header reads the disclosure, carries the title, and is NOT
-  // clickable/sortable-looking (no button, no link inside the header cell).
+  // clickable/sortable-looking (no button, no link inside the header cell) —
+  // while Debt and Liq. distance STAY sortable on the DM view.
   const dmTable = page.getByRole("table", { name: "positions for debt_manager" });
   const header = dmTable.getByRole("columnheader", { name: "HF — disclosure" });
   await expect(header).toBeVisible();
   await expect(header.locator("span")).toHaveAttribute("title", HF_DISCLOSURE_TITLE);
   await expect(header.locator("button, a")).toHaveCount(0);
   await expect(dmTable.getByRole("columnheader", { name: "Health factor" })).toHaveCount(0);
+  await expect(dmTable.getByRole("button", { name: "Debt", exact: true })).toBeVisible();
+  await expect(dmTable.getByRole("button", { name: "Liq. distance" })).toBeVisible();
+  // Plain columns never look clickable: no button in Engine/Account/
+  // Collateral/Marks headers.
+  for (const name of ["Engine", "Account", "Collateral", "Marks"]) {
+    await expect(
+      dmTable.getByRole("columnheader", { name, exact: true }).getByRole("button"),
+    ).toHaveCount(0);
+  }
 });
 
 test("engine switch while sort=hf remaps to liq_distance — acknowledgment, ZERO doomed requests", async ({ page }) => {
@@ -340,22 +358,23 @@ test("engine switch while sort=hf remaps to liq_distance — acknowledgment, ZER
   });
   await openBook(page);
 
-  // Arm the defect: aave + hf is a legal pair.
-  await page.getByRole("button", { name: "hf", exact: true }).click();
-  await expect(page.getByRole("button", { name: "hf", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // Arm the defect: aave + hf is a legal pair — the Health factor HEADER is
+  // the sort control now (W-UX-C).
+  const aaveTable = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
+  await aaveTable.getByRole("button", { name: "Health factor" }).click();
+  await expect(
+    aaveTable.getByRole("columnheader", { name: "Health factor" }),
+  ).toHaveAttribute("aria-sort", "ascending");
 
   await page.getByRole("button", { name: "debt_manager" }).click();
 
-  // The remap happened: liq_distance is active and the DM page rendered.
-  await expect(page.getByRole("button", { name: "liq_distance" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  // The remap happened: liq_distance is active (canonical ascending, shown
+  // on its header) and the DM page rendered.
   const dmTable = page.getByRole("table", { name: "positions for debt_manager" });
   await expect(dmTable).toContainText("0xccCc…0003");
+  await expect(
+    dmTable.getByRole("columnheader", { name: "Liq. distance" }),
+  ).toHaveAttribute("aria-sort", "ascending");
 
   // The acknowledgment: static, dim, in the controls region — NOT the loud
   // notice slot (that register is reserved for supersession), NOT a toast.
@@ -368,7 +387,7 @@ test("engine switch while sort=hf remaps to liq_distance — acknowledgment, ZER
   expect(doomed).toBe(0);
 
   // It clears on the next sort/engine interaction.
-  await page.getByRole("button", { name: "debt", exact: true }).click();
+  await dmTable.getByRole("button", { name: "Debt", exact: true }).click();
   await expect(page.getByTestId("sort-remap-ack")).toHaveCount(0);
 });
 
@@ -400,10 +419,11 @@ test("?engine=debt_manager&sort=hf normalizes BEFORE the first fetch — zero 40
   expect(sortsRequested.length).toBeGreaterThan(0);
   expect(sortsRequested).toEqual(sortsRequested.map(() => "liq_distance"));
 
-  // history.replaceState fixed the deep link — the URL no longer carries hf.
-  await expect(page).toHaveURL(/sort=liq_distance/);
+  // history.replaceState fixed the deep link. DEFAULTS ARE OMITTED (W-UX-C
+  // part 15): the remapped sort IS the contract default, so the sort param
+  // disappears entirely while the non-default engine stays.
   await expect(page).toHaveURL(/engine=debt_manager/);
-  expect(page.url()).not.toContain("sort=hf");
+  await expect.poll(() => page.url()).not.toContain("sort=");
 });
 
 test("a 4xx renders the refusal register — envelope code, verbatim message, NO retry button", async ({ page }) => {

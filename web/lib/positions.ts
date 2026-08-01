@@ -19,6 +19,7 @@ import {
   RateLimitedError,
   SolventHttpError,
   UnavailableError,
+  type PositionsDir,
   type RefinedPositionsResponse,
   type components,
 } from "@solvent/client";
@@ -58,6 +59,77 @@ export const POSITIONS_SORT_DIRECTIONS: Record<PositionsSort, PositionsSortDirec
   hf: "asc",
   status: "refused-first",
 };
+
+/** The contract's `dir` enum re-exported beside the sort vocabulary. */
+export type { PositionsDir };
+
+/**
+ * The sort's canonical direction ON THE WIRE (contract 1.3.0 `dir`): absent
+ * means canonical, so this is the value the UI never sends. `status` has no
+ * asc/desc form — refused-first IS its canonical ranking — so it maps to
+ * null.
+ */
+export function canonicalWireDir(sort: PositionsSort): PositionsDir | null {
+  const direction = POSITIONS_SORT_DIRECTIONS[sort];
+  return direction === "refused-first" ? null : direction;
+}
+
+/** The exact flip of the canonical direction — the ONLY dir the UI ever sends. */
+export function reversedWireDir(sort: PositionsSort): PositionsDir | null {
+  const canonical = canonicalWireDir(sort);
+  if (canonical === null) return null;
+  return canonical === "asc" ? "desc" : "asc";
+}
+
+/**
+ * The URL `dir` param normalizer (W-UX-C, extending W-UX-B's deep-link
+ * normalizer): the header cycle is TWO-STATE — canonical or its exact
+ * reverse — so `reversed` is the whole state. A present-but-canonical dir is
+ * a default and defaults are omitted from the URL (`rewritten`); an unknown
+ * value falls away; `sort=status` (refused-first) carries no direction
+ * affordance, so any dir under it is dropped rather than composed into a
+ * request the UI's vocabulary cannot represent.
+ */
+export function normalizeDirParam(
+  rawDir: string | null,
+  sort: PositionsSort,
+): { reversed: boolean; rewritten: boolean } {
+  if (rawDir === null) return { reversed: false, rewritten: false };
+  if (rawDir !== "asc" && rawDir !== "desc") return { reversed: false, rewritten: true };
+  const canonical = canonicalWireDir(sort);
+  if (canonical === null) return { reversed: false, rewritten: true };
+  if (rawDir === canonical) return { reversed: false, rewritten: true };
+  return { reversed: true, rewritten: false };
+}
+
+/** `normalizePositionsQuery` + the dir extension, composed as ONE decision. */
+export interface NormalizedBookTableQuery extends NormalizedPositionsQuery {
+  /** True when the deep link legally reverses the FINAL sort's canonical direction. */
+  reversed: boolean;
+}
+
+/**
+ * The engine/sort/dir normalization the Book table runs before its first
+ * fetch. One composition rule beyond the parts: a `dir` that arrived UNDER A
+ * SORT THAT HAD TO CHANGE (the doomed DM/hf remap, or an unknown sort
+ * falling to the default) is ORPHANED — it described a different ranking
+ * axis, and dropping it is honest where reinterpreting it against the
+ * fallback sort would invent an ordering nobody asked for. A dir with NO
+ * sort param stays live: it reverses the default sort, which is exactly
+ * what it says.
+ */
+export function normalizeBookTableQuery(
+  rawEngine: string | null,
+  rawSort: string | null,
+  rawDir: string | null,
+): NormalizedBookTableQuery {
+  const base = normalizePositionsQuery(rawEngine, rawSort);
+  const sortSurvived = rawSort === null || rawSort === base.sort;
+  const dir = sortSurvived
+    ? normalizeDirParam(rawDir, base.sort)
+    : { reversed: false, rewritten: rawDir !== null };
+  return { ...base, reversed: dir.reversed, rewritten: base.rewritten || dir.rewritten };
+}
 
 /**
  * The static acknowledgment rendered when sort `hf` is remapped for the DM —
@@ -150,6 +222,14 @@ export function classifyPositionsFailure(cause: Error): PositionsFailure {
 export interface PositionsPageParams {
   engine: PositionsEngine;
   sort?: PositionsSort;
+  /** Ranking direction (1.3.0). Omit for the sort's canonical direction. */
+  dir?: PositionsDir;
+  /**
+   * Position-size floor (1.3.0): a decimal integer string in the ENGINE's own
+   * value unit at its `value_decimals` — the dust chips compose it as
+   * step × 10^value_decimals, exact bigint, never a float.
+   */
+  minValue?: string;
   /** The previous page's `next_cursor`, verbatim. Omit for page one. */
   cursor?: string | null;
   limit?: number;
@@ -168,6 +248,8 @@ export async function fetchPositionsPage(params: PositionsPageParams): Promise<P
     {
       engine: params.engine,
       ...(params.sort === undefined ? {} : { sort: params.sort }),
+      ...(params.dir === undefined ? {} : { dir: params.dir }),
+      ...(params.minValue === undefined ? {} : { minValue: params.minValue }),
       ...(params.cursor === undefined || params.cursor === null ? {} : { cursor: params.cursor }),
       ...(params.limit === undefined ? {} : { limit: params.limit }),
     },

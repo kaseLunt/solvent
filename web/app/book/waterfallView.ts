@@ -52,9 +52,14 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     const percent =
       point.index === 0 ? "unshocked" : gridPercentLabel(point.factor, waterfall.grid_scale);
     const times = factorTimesLabel(point.factor, waterfall.grid_scale);
-    const eligibleDust = sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
-      ? ALL_DUST_SUFFIX
-      : "";
+    // Zero-member gate (W-UX-C micro-ruling 1): the suffix renders only when
+    // the counted class HAS members — "0 acct · all dust" described nobody.
+    // The Σ still prints in full, however small.
+    const eligibleDust =
+      at.cumulative_eligible_accounts > 0 &&
+      sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
+        ? ALL_DUST_SUFFIX
+        : "";
     steps.push({
       label: percent,
       sub: `${times} · ${groupDecimalString(String(at.cumulative_eligible_accounts))} acct${eligibleDust}`,
@@ -66,9 +71,12 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     // "0.000000" is still zero, and a floored zero would fabricate a crit
     // residual bar for bad debt that does not exist (design ruling 1).
     if (/[1-9]/.test(at.cumulative_bad_debt_usd)) {
-      const badDebtDust = sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
-        ? ALL_DUST_SUFFIX
-        : "";
+      // Same zero-member gate on the residual's own count.
+      const badDebtDust =
+        at.insolvent_if_liquidated_accounts > 0 &&
+        sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
+          ? ALL_DUST_SUFFIX
+          : "";
       steps.push({
         label: `${percent} bad debt`,
         sub: `${groupDecimalString(String(at.insolvent_if_liquidated_accounts))} insolvent${badDebtDust}`,

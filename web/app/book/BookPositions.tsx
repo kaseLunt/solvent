@@ -1,7 +1,8 @@
 "use client";
 
-// The position table (spec §3.1): DataTable + useCursorPages over
-// GET /v1/positions — cursor-paginated, BATCH-STABLE, one engine at a time.
+// The position table (spec §3.1 + the solvent-design MAIN ruling part C,
+// W-UX-C): DataTable + useCursorPages over GET /v1/positions —
+// cursor-paginated, BATCH-STABLE, one engine at a time.
 //
 //   - `engine` is a REQUIRED param: the two books are never blended into one
 //     ranking, so the toggle switches whole walks (reset + refetch).
@@ -9,19 +10,45 @@
 //   - crit row tone comes ONLY from the engine's sealed verdict.
 //   - 409 BATCH_SUPERSEDED → a VISIBLE one-line notice + reset() + restart
 //     from page one — the honest restart, never a silent refresh and never a
-//     page mixing two materializations.
-//   - the risk map below is fed from the SAME loaded pages, bounded and
-//     labeled (C2's bounded-bins endpoint replaces it — see BookRiskMap).
-//   - sorts are PER-ENGINE vocabulary (W-UX-B): the DM never offers `hf`;
-//     an engine switch or deep link carrying an undefined sort remaps to the
-//     contract default with a dim acknowledgment — the API's honest 400 is
-//     never provoked, and when a request IS refused (4xx) it renders in the
-//     refusal register with the server's sentence verbatim and NO retry.
+//     page mixing two materializations. The fresh batch id travels UP via
+//     `onBatchChange` so the surface can re-fetch /v1/book and heal the
+//     footer's batch guard.
+//   - SORTING lives in the column headers (part C, points 7/8/15): Debt /
+//     Liq. distance / Health factor (Aave only) are two-state buttons —
+//     first click is the column's canonical direction, the second click the
+//     exact reverse (the API `dir` param), a column switch resets to that
+//     column's canonical, and there is NO third unsorted state. The chip row
+//     shrinks to engine, dust, and ONE standalone "refused first" chip
+//     (sort=status) whose activation clears every header indicator.
+//   - DUST (points 1/2/14): chips off/<1/<100/<1k, DEFAULT <1, composed as
+//     the API `min_value` = step × 10^value_decimals (exact bigint, the
+//     ACTIVE engine's decimals from the /v1/book aggregate — which is why
+//     the first walk waits for /v1/book to settle). Refused and null-valued
+//     rows are never hidden; hidden rows stay counted in every aggregate.
+//   - DISCLOSURE (points 3/5): the footer accounts for loaded/qualifying/
+//     hidden/on-book on ONE batch — the hidden count exists only when
+//     /v1/book's batch id === the page envelope's, mismatches say so, and a
+//     withheld engine's dust disclosure renders NOTHING, never a zero.
+//   - PAGINATION (point 13): pages of 200, the table scrolls internally
+//     (~70vh) under its sticky header with the footer always visible, an
+//     IntersectionObserver sentinel ~600px above the walk end auto-loads —
+//     iff hasMore && !loading && error === null, NEVER across an error —
+//     windowed rendering keeps the DOM at ~100 rows, and LOAD MORE stays as
+//     the fallback. No numbered pager, no page-size control.
+//   - deep links normalize BEFORE the first fetch (?engine&sort&dir&dust,
+//     defaults omitted, history.replaceState) — the request the API would
+//     refuse is never composed, and when one IS refused (4xx) it renders in
+//     the refusal register with the server's sentence verbatim and NO retry.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import type { Batch } from "@solvent/client";
-import { DataTable, LoadMoreFooter, type Column } from "@/components/DataTable";
+import { formatUnits, parseDecimal, type Aggregate, type Batch } from "@solvent/client";
+import {
+  DataTable,
+  LoadMoreFooter,
+  type Column,
+  type ColumnSortState,
+} from "@/components/DataTable";
 import { AddressMono } from "@/components/AddressMono";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
@@ -30,23 +57,51 @@ import { MarksStamp } from "@/components/MarksStamp";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
 import {
   BatchSupersededError,
+  canonicalWireDir,
   classifyPositionsFailure,
   fetchPositionsPage,
-  normalizePositionsQuery,
+  normalizeBookTableQuery,
   POSITIONS_ENGINES,
+  reversedWireDir,
   SORT_HF_REMAP_ACK,
   SORTS_BY_ENGINE,
   type PositionsEngine,
   type PositionsSort,
 } from "@/lib/positions";
-import { renderEngineAmount } from "@/lib/book-format";
+import { groupDecimalString, renderEngineAmount } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import {
+  DUST_CHIP_LABELS,
+  DUST_DEFAULT_STEP,
+  DUST_GROUP_TITLE,
+  DUST_STEPS,
+  dustBoundInteger,
+  dustDisclosureBound,
+  dustDisclosureExact,
+  dustStepAmount,
+  dustThresholdInteger,
+  emptyFilteredWalk,
+  FOOTER_REFUSED_NEVER_DUST,
+  footerAccountingDust,
+  footerAccountingOff,
+  hiddenBelowStepSegment,
+  hiddenCountMismatch,
+  liquidatableDisclosureTail,
+  normalizeDustParam,
+  REFUSED_FIRST_CHIP_TITLE,
+  type ActiveDustStep,
+  type DustStep,
+} from "./dust";
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { BookRiskMap } from "./BookRiskMap";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
 
-const PAGE_LIMIT = 50;
+/** Pages of 200 (ruling point 13) — the windowed table absorbs the depth. */
+const PAGE_LIMIT = 200;
+/** The windowing seam's fixed row height (9+9 padding + line + hairline). */
+const ROW_HEIGHT = 37;
+const OVERSCAN = 20;
 
 /** The page envelope facts the table must disclose beyond its rows. */
 interface PageEnvelope {
@@ -55,6 +110,20 @@ interface PageEnvelope {
   refusalCode: string | null;
   refusalDetail: string | null;
   totalPositions: number | null;
+}
+
+/** What the surface's /v1/book fetch feeds the table (batch-guarded counts). */
+export interface BookAggregateFeed {
+  /**
+   * True once /v1/book has SETTLED (served or failed). The dust filter's
+   * min_value needs the engine's value_decimals from the aggregate, so the
+   * first walk waits for this — a failed book settles too and the walk then
+   * runs unfiltered rather than never.
+   */
+  settled: boolean;
+  /** /v1/book's own batch id — the footer's batch guard. Null when unserved. */
+  batchId: number | null;
+  aggregates: readonly Aggregate[] | null;
 }
 
 function liqDistanceCell(row: PositionRow) {
@@ -88,13 +157,43 @@ function liqDistanceCell(row: PositionRow) {
 const HF_DISCLOSURE_TITLE =
   "maxBorrowLT/borrowings — a disclosure only; the verdict is the engine's strict boolean";
 
+interface SortComposition {
+  engine: PositionsEngine;
+  sort: PositionsSort;
+  reversed: boolean;
+  onSort: (candidate: PositionsSort) => void;
+}
+
+/**
+ * A column's sort affordance, composed with SORTS_BY_ENGINE: only sorts the
+ * engine DEFINES become buttons, the active column carries its aria-sort +
+ * glyph, and refused-first (sort=status) clears every indicator while the
+ * headers stay clickable — clicking one exits it.
+ */
+function headerSort(
+  candidate: PositionsSort,
+  { engine, sort, reversed, onSort }: SortComposition,
+): ColumnSortState | undefined {
+  if (!SORTS_BY_ENGINE[engine].includes(candidate)) return undefined;
+  const active = sort === candidate;
+  const wire = reversed ? reversedWireDir(candidate) : canonicalWireDir(candidate);
+  return {
+    direction: active ? (wire === "asc" ? "ascending" : "descending") : null,
+    onSort: () => {
+      onSort(candidate);
+    },
+  };
+}
+
 /**
  * The table is single-engine, so the HF column header is the engine's own
  * (design ruling, W-UX-B part 12): the DM's reads "HF — disclosure" with the
  * disclosure title — plain text, never clickable/sortable-looking — while the
- * Aave view keeps "Health factor". No per-cell dagger.
+ * Aave view keeps "Health factor" (a sortable header, W-UX-C). No per-cell
+ * dagger.
  */
-function positionColumns(engine: PositionsEngine): ReadonlyArray<Column<PositionRow>> {
+function positionColumns(composition: SortComposition): ReadonlyArray<Column<PositionRow>> {
+  const { engine } = composition;
   return [
     { id: "engine", header: "Engine", cell: (row) => <EngineChip engine={row.engine} /> },
     {
@@ -112,6 +211,7 @@ function positionColumns(engine: PositionsEngine): ReadonlyArray<Column<Position
       id: "debt",
       header: "Debt",
       align: "right",
+      sort: headerSort("debt", composition),
       cell: (row) => renderEngineAmount(row.totals.debt, row.totals.decimals),
     },
     {
@@ -123,6 +223,7 @@ function positionColumns(engine: PositionsEngine): ReadonlyArray<Column<Position
           "Health factor"
         ),
       align: "right",
+      ...(engine === "debt_manager" ? {} : { sort: headerSort("hf", composition) }),
       cell: (row) =>
         row.status === "refused" ? (
           <span title={row.refusalDetail ?? undefined}>
@@ -139,25 +240,47 @@ function positionColumns(engine: PositionsEngine): ReadonlyArray<Column<Position
           </span>
         ),
     },
-    { id: "liq-distance", header: "Liq. distance", align: "right", cell: liqDistanceCell },
+    {
+      id: "liq-distance",
+      header: "Liq. distance",
+      align: "right",
+      sort: headerSort("liq_distance", composition),
+      cell: liqDistanceCell,
+    },
     { id: "marks", header: "Marks", cell: (row) => <MarksStamp marks={row.marks} /> },
   ];
 }
 
-export function BookPositions() {
-  // Deep-link normalization (W-UX-B part 10): URL state parses through ONE
-  // normalizer BEFORE the first fetch — unknown enum values fall to the
-  // contract defaults, and engine=debt_manager&sort=hf remaps to
-  // liq_distance, so the request the API would honestly refuse is NEVER
-  // composed. (useSearchParams requires the Suspense boundary the caller
-  // provides; the initializer runs once, before any fetch can fire.)
+export interface BookPositionsProps {
+  bookFeed: BookAggregateFeed;
+  /** Fired when a page lands on a batch — the surface heals /v1/book with it. */
+  onBatchChange?: (batchId: number) => void;
+}
+
+export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
+  // Deep-link normalization (W-UX-B part 10, extended by W-UX-C part 15):
+  // URL state parses through ONE normalizer BEFORE the first fetch — unknown
+  // enum values fall to the contract defaults, engine=debt_manager&sort=hf
+  // remaps to liq_distance, dir normalizes onto the two-state cycle, and
+  // dust onto its step vocabulary — so the request the API would honestly
+  // refuse is NEVER composed. (useSearchParams requires the Suspense boundary
+  // the caller provides; the initializer runs once, before any fetch can
+  // fire.)
   const searchParams = useSearchParams();
-  const [initialQuery] = useState(() =>
-    normalizePositionsQuery(searchParams.get("engine"), searchParams.get("sort")),
-  );
+  const [initialQuery] = useState(() => {
+    const base = normalizeBookTableQuery(
+      searchParams.get("engine"),
+      searchParams.get("sort"),
+      searchParams.get("dir"),
+    );
+    const dustParam = normalizeDustParam(searchParams.get("dust"));
+    return { ...base, dust: dustParam.dust };
+  });
 
   const [engine, setEngine] = useState<PositionsEngine>(initialQuery.engine);
   const [sort, setSort] = useState<PositionsSort>(initialQuery.sort);
+  const [reversed, setReversed] = useState<boolean>(initialQuery.reversed);
+  const [dust, setDust] = useState<DustStep>(initialQuery.dust);
   const [envelope, setEnvelope] = useState<PageEnvelope | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The static, dim remap acknowledgment (controls region — NOT the notice
@@ -166,6 +289,19 @@ export function BookPositions() {
   const [sortAck, setSortAck] = useState<string | null>(
     initialQuery.hfRemapped ? SORT_HF_REMAP_ACK : null,
   );
+
+  // The active engine's aggregate from /v1/book — decimals for the dust
+  // threshold, and (batch-guarded) the unfiltered counts.
+  const aggregate = useMemo(
+    () => bookFeed.aggregates?.find((candidate) => candidate.engine === engine) ?? null,
+    [bookFeed.aggregates, engine],
+  );
+  const valueDecimals = aggregate?.value_decimals ?? null;
+  const dustThreshold = valueDecimals === null ? null : dustThresholdInteger(dust, valueDecimals);
+  const minValue = dustThreshold === null ? undefined : dustThreshold.toString();
+  /** Dust is ACTIVE only when a min_value actually rides the requests. */
+  const dustActive = dust !== "off" && minValue !== undefined;
+  const wireDir = reversed ? reversedWireDir(sort) : null;
 
   // `resetRef` lets fetchPage restart the walk on 409 without a stale-closure
   // dependency on the hook it feeds.
@@ -177,6 +313,8 @@ export function BookPositions() {
         const response = await fetchPositionsPage({
           engine,
           sort,
+          ...(wireDir === null ? {} : { dir: wireDir }),
+          ...(minValue === undefined ? {} : { minValue }),
           cursor,
           limit: PAGE_LIMIT,
           signal,
@@ -208,7 +346,7 @@ export function BookPositions() {
         throw cause;
       }
     },
-    [engine, sort],
+    [engine, sort, wireDir, minValue],
   );
 
   const { rows, hasMore, loading, error, loadMore, reset } = useCursorPages<PositionRow, string>(
@@ -218,20 +356,41 @@ export function BookPositions() {
     resetRef.current = reset;
   }, [reset]);
 
-  // When normalization had to intervene, mirror the fix into the URL —
-  // history.replaceState, an external-system update only — so the corrected
-  // state is what a copied link carries. Present params are corrected in
-  // place; absent params stay absent.
+  // The page batch travels UP (W-UX-D handoff): after a 409 restart lands on
+  // a fresh batch, the surface re-fetches /v1/book so the footer's batch
+  // guard heals instead of pinning a permanent mismatch.
+  const envelopeBatchId = envelope === null ? null : envelope.batch.id;
   useEffect(() => {
-    if (!initialQuery.rewritten) return;
-    const url = new URL(window.location.href);
-    if (url.searchParams.has("engine")) url.searchParams.set("engine", initialQuery.engine);
-    if (url.searchParams.has("sort")) url.searchParams.set("sort", initialQuery.sort);
-    window.history.replaceState(window.history.state, "", url);
-  }, [initialQuery]);
+    if (envelopeBatchId !== null && onBatchChange !== undefined) onBatchChange(envelopeBatchId);
+  }, [envelopeBatchId, onBatchChange]);
 
-  // A changed engine/sort is a NEW walk: drop the old one entirely (handler
-  // context, so no setState-in-effect cascade).
+  // URL MIRROR (part C, point 15): ?engine&sort&dir&dust with defaults
+  // omitted, via history.replaceState — one external-system update per state
+  // change, no history spam, and a normalized deep link is rewritten to its
+  // canonical form before anything else can copy it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const apply = (key: string, value: string | null) => {
+      if (value === null) url.searchParams.delete(key);
+      else url.searchParams.set(key, value);
+    };
+    apply("engine", engine === "aave_v3_etherfi" ? null : engine);
+    apply("sort", sort === "liq_distance" ? null : sort);
+    apply("dir", reversed ? reversedWireDir(sort) : null);
+    apply("dust", dust === DUST_DEFAULT_STEP ? null : dust);
+    if (url.href !== window.location.href) {
+      window.history.replaceState(window.history.state, "", url);
+    }
+  }, [engine, sort, reversed, dust]);
+
+  // A changed engine/sort/dir/dust is a NEW walk: drop the old one entirely
+  // (handler context, so no setState-in-effect cascade).
+  const startNewWalk = useCallback(() => {
+    setEnvelope(null);
+    setNotice(null);
+    reset();
+  }, [reset]);
+
   const switchEngine = (candidate: PositionsEngine) => {
     if (candidate === engine) return;
     setEngine(candidate);
@@ -241,29 +400,72 @@ export function BookPositions() {
       setSortAck(null);
     } else {
       setSort("liq_distance");
+      setReversed(false);
       setSortAck(SORT_HF_REMAP_ACK);
     }
-    setEnvelope(null);
-    setNotice(null);
-    reset();
+    startNewWalk();
   };
-  const switchSort = (candidate: PositionsSort) => {
-    if (candidate === sort) return;
-    setSort(candidate);
+
+  // The header click cycle (part C, point 7): first click = the column's
+  // canonical direction, second click reverses, a column switch resets to
+  // canonical — TWO-STATE, no third unsorted click. Clicking any header
+  // exits refused-first.
+  const applyHeaderSort = useCallback(
+    (candidate: PositionsSort) => {
+      setSortAck(null);
+      if (sort === candidate) {
+        setReversed((value) => !value);
+      } else {
+        setSort(candidate);
+        setReversed(false);
+      }
+      setEnvelope(null);
+      setNotice(null);
+      reset();
+    },
+    [sort, reset],
+  );
+
+  const applyRefusedFirst = () => {
+    if (sort === "status") return;
+    setSort("status");
+    setReversed(false);
     setSortAck(null);
-    setEnvelope(null);
-    setNotice(null);
-    reset();
+    startNewWalk();
   };
 
-  // First page loads automatically (state is born normalized, so the first
-  // fetch already carries the remapped sort); errors stop the walk until
-  // acted on.
-  useEffect(() => {
-    if (rows.length === 0 && hasMore && !loading && error === null) loadMore();
-  }, [rows.length, hasMore, loading, error, loadMore]);
+  const switchDust = (candidate: DustStep) => {
+    if (candidate === dust) return;
+    setDust(candidate);
+    startNewWalk();
+  };
 
-  const columns = useMemo(() => positionColumns(engine), [engine]);
+  // First page loads automatically once /v1/book settles (state is born
+  // normalized AND the dust threshold needs the aggregate's decimals, so the
+  // first fetch already carries the composed min_value); errors stop the
+  // walk until acted on.
+  useEffect(() => {
+    if (!bookFeed.settled) return;
+    if (rows.length === 0 && hasMore && !loading && error === null) loadMore();
+  }, [bookFeed.settled, rows.length, hasMore, loading, error, loadMore]);
+
+  // The sentinel's load policy (part C, point 13): the table reports
+  // visibility; THIS effect fires loadMore iff hasMore && !loading &&
+  // error === null — an error is never auto-loaded across, and the first
+  // page belongs to the gated effect above.
+  const [sentinelVisible, setSentinelVisible] = useState(false);
+  const handleEndSentinel = useCallback((visible: boolean) => {
+    setSentinelVisible(visible);
+  }, []);
+  useEffect(() => {
+    if (!sentinelVisible || rows.length === 0) return;
+    if (hasMore && !loading && error === null) loadMore();
+  }, [sentinelVisible, rows.length, hasMore, loading, error, loadMore]);
+
+  const columns = useMemo(
+    () => positionColumns({ engine, sort, reversed, onSort: applyHeaderSort }),
+    [engine, sort, reversed, applyHeaderSort],
+  );
 
   // The failure taxonomy (W-UX-B part 11): a refused request and a failed
   // transport are different facts and render in different registers. 409
@@ -271,6 +473,100 @@ export function BookPositions() {
   const failure =
     error !== null && !(error instanceof BatchSupersededError)
       ? classifyPositionsFailure(error)
+      : null;
+
+  // ---- the footer's batch-guarded accounting (part C, points 3/5) --------
+  const sameBatch =
+    bookFeed.batchId !== null && envelope !== null && bookFeed.batchId === envelope.batch.id;
+  const aggForBatch = sameBatch ? aggregate : null;
+  const aggServed = aggForBatch !== null && !aggForBatch.refused ? aggForBatch : null;
+
+  /** Exact engine-unit display for a bigint at the aggregate's decimals. */
+  const engineAmount = useCallback(
+    (value: bigint): string =>
+      groupDecimalString(formatUnits(value.toString(), valueDecimals ?? 0, { trim: true })),
+    [valueDecimals],
+  );
+
+  const hidden =
+    dustActive && aggServed !== null && envelope !== null && envelope.totalPositions !== null
+      ? aggServed.positions - envelope.totalPositions
+      : null;
+
+  let hiddenSegment = "";
+  if (dustActive && envelope !== null && envelope.totalPositions !== null) {
+    if (hidden !== null) {
+      hiddenSegment = hiddenBelowStepSegment(hidden);
+    } else if (bookFeed.batchId !== null && !sameBatch) {
+      hiddenSegment = hiddenCountMismatch(bookFeed.batchId, envelope.batch.id);
+    }
+  }
+
+  const qualifyingDisplay =
+    envelope === null || envelope.totalPositions === null
+      ? EM_DASH
+      : String(envelope.totalPositions);
+  const onBookDisplay = aggServed === null ? EM_DASH : String(aggServed.positions);
+  const wireDirDisplay = reversed ? reversedWireDir(sort) : canonicalWireDir(sort);
+  const sortSuffix =
+    wireDirDisplay === null ? sort : `${sort} ${wireDirDisplay === "asc" ? "▲" : "▼"}`;
+
+  const accounting = dustActive
+    ? footerAccountingDust(
+        rows.length,
+        qualifyingDisplay,
+        dust as ActiveDustStep,
+        hiddenSegment,
+        onBookDisplay,
+        sortSuffix,
+      )
+    : footerAccountingOff(rows.length, qualifyingDisplay, onBookDisplay, sortSuffix);
+
+  // The dust disclosure span (hidden > 0): the Σ-debt BOUND while pages
+  // remain, upgraded to the EXACT Σ (bookΣ − loadedΣ, same batch, bigint) at
+  // walk exhaustion. A withheld engine (total null) rendered NOTHING above,
+  // so this span never fabricates a zero.
+  const loadedComputedDebt = useMemo(() => {
+    let sum = 0n;
+    for (const row of rows) {
+      if (row.status === "computed" && row.totals.debt !== null) {
+        sum += parseDecimal(row.totals.debt);
+      }
+    }
+    return sum;
+  }, [rows]);
+
+  let disclosureText: string | null = null;
+  if (dustActive && hidden !== null && hidden > 0 && valueDecimals !== null) {
+    const step = dust as ActiveDustStep;
+    const bookDebt =
+      aggServed !== null && aggServed.total_debt !== null
+        ? parseDecimal(aggServed.total_debt)
+        : null;
+    const exhausted = !hasMore && error === null;
+    const exact =
+      exhausted && bookDebt !== null && bookDebt - loadedComputedDebt >= 0n
+        ? bookDebt - loadedComputedDebt
+        : null;
+    disclosureText =
+      exact !== null
+        ? dustDisclosureExact(hidden, dustStepAmount(step), engineAmount(exact))
+        : dustDisclosureBound(
+            hidden,
+            dustStepAmount(step),
+            engineAmount(dustBoundInteger(step, valueDecimals, hidden)),
+          );
+  }
+
+  // The liquidatable line (same batch, count in crit tone): rendered whenever
+  // the aggregate's verdict count exceeds the loaded liquidatable rows.
+  const loadedLiquidatable = useMemo(
+    () => rows.reduce((count, row) => (row.verdict === "liquidatable" ? count + 1 : count), 0),
+    [rows],
+  );
+  const liqDisclosure =
+    aggServed !== null && aggServed.liquidatable_positions > loadedLiquidatable
+      ? { aggregate: aggServed.liquidatable_positions, loaded: loadedLiquidatable }
       : null;
 
   const empty =
@@ -282,9 +578,21 @@ export function BookPositions() {
         ? failure.register === "transport"
           ? `page fetch failed — ${failure.message}`
           : `request refused — ${failure.code}: ${failure.message}`
-        : loading || rows.length === 0
-          ? "loading the first page…"
-          : "no rows on this page";
+        : dustActive &&
+            hidden !== null &&
+            hidden > 0 &&
+            envelope !== null &&
+            envelope.totalPositions === 0 &&
+            valueDecimals !== null &&
+            !loading
+          ? emptyFilteredWalk(
+              dust as ActiveDustStep,
+              hidden,
+              engineAmount(dustBoundInteger(dust as ActiveDustStep, valueDecimals, hidden)),
+            )
+          : loading || rows.length === 0
+            ? "loading the first page…"
+            : "no rows on this page";
 
   return (
     <section className={styles.section} aria-label="position table">
@@ -310,20 +618,30 @@ export function BookPositions() {
             </button>
           ))}
         </span>
-        <span className={styles.controlGroup}>
-          <span className={styles.controlLabel}>sort</span>
-          {SORTS_BY_ENGINE[engine].map((candidate) => (
+        <span className={styles.controlGroup} title={DUST_GROUP_TITLE} data-testid="dust-group">
+          <span className={styles.controlLabel}>dust</span>
+          {DUST_STEPS.map((candidate) => (
             <button
               key={candidate}
               type="button"
-              className={candidate === sort ? `${styles.chipButton} ${styles.on}` : styles.chipButton}
-              aria-pressed={candidate === sort}
-              onClick={() => { switchSort(candidate); }}
+              className={candidate === dust ? `${styles.chipButton} ${styles.on}` : styles.chipButton}
+              aria-pressed={candidate === dust}
+              onClick={() => { switchDust(candidate); }}
             >
-              {candidate}
+              {DUST_CHIP_LABELS[candidate]}
             </button>
           ))}
         </span>
+        <button
+          type="button"
+          className={sort === "status" ? `${styles.chipButton} ${styles.on}` : styles.chipButton}
+          aria-pressed={sort === "status"}
+          title={REFUSED_FIRST_CHIP_TITLE}
+          data-testid="refused-first-chip"
+          onClick={applyRefusedFirst}
+        >
+          refused first
+        </button>
         {sortAck !== null && (
           <span className={styles.sortAck} data-testid="sort-remap-ack">
             {sortAck}
@@ -369,6 +687,10 @@ export function BookPositions() {
         rowTone={(row) =>
           row.status === "refused" ? "refused" : row.verdict === "liquidatable" ? "crit" : "default"
         }
+        maxHeight="70vh"
+        windowing={{ rowHeight: ROW_HEIGHT, overscan: OVERSCAN }}
+        onEndSentinel={handleEndSentinel}
+        scrollRegionLabel={`positions for ${engine} — scrollable rows`}
         ariaLabel={`positions for ${engine}`}
         empty={empty}
         footer={
@@ -378,20 +700,33 @@ export function BookPositions() {
             onLoadMore={loadMore}
             status={
               <span className={styles.footStatus}>
-                <span>
-                  {String(rows.length)} of{" "}
-                  {envelope === null || envelope.totalPositions === null
-                    ? EM_DASH
-                    : String(envelope.totalPositions)}{" "}
-                  rows · sort {sort}
-                </span>
+                <span data-testid="positions-accounting">{accounting}</span>
+                {disclosureText !== null && (
+                  <span data-testid="dust-disclosure">
+                    {disclosureText}
+                    <button
+                      type="button"
+                      className={styles.chipButton}
+                      data-testid="dust-show"
+                      onClick={() => { switchDust("off"); }}
+                    >
+                      show
+                    </button>
+                  </span>
+                )}
+                {liqDisclosure !== null && (
+                  <span data-testid="liquidatable-disclosure">
+                    <span className="crit-t">{String(liqDisclosure.aggregate)}</span>
+                    {liquidatableDisclosureTail(liqDisclosure.loaded)}
+                  </span>
+                )}
                 {envelope !== null && (
                   <span>
                     batch #{String(envelope.batch.id)}
                     {envelope.batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""}
                   </span>
                 )}
-                <span>refused rows stay visible and counted</span>
+                <span>{FOOTER_REFUSED_NEVER_DUST}</span>
               </span>
             }
           />
@@ -399,15 +734,19 @@ export function BookPositions() {
       />
 
       <div style={{ marginTop: "var(--sp-3)" }}>
-        {/* Keyed by engine (W-UX-D §16): a switch remounts the map, so the
-            full-book walk state can never leak across engines — per-engine
-            panels never share an axis, or a vector. */}
+        {/* Keyed by engine AND dust step (W-UX-D §16 + the W-UX-C handoff):
+            a switch of either remounts the map, so the full-book walk state
+            can never leak across engines OR across dust filters — the map
+            only ever shows ONE filtered walk. */}
         <BookRiskMap
-          key={engine}
+          key={`${engine}:${dust}`}
           engine={engine}
           rows={rows}
           totalPositions={envelope === null ? null : envelope.totalPositions}
           batch={envelope === null ? null : envelope.batch}
+          dustStep={dustActive ? (dust as ActiveDustStep) : null}
+          minValue={minValue}
+          onBookCount={aggServed === null ? null : aggServed.positions}
         />
       </div>
     </section>

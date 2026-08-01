@@ -7,8 +7,17 @@
   background: var(--panel);
 }
 
-.wrapScroll {
-  overflow-y: auto;
+/* The internal scroll region (W-UX-C point 13): rows scroll under the sticky
+ * header while the footer accounting stays outside, always visible. Keyboard-
+ * reachable (tabIndex=0, role=region) with the global focus ring drawn
+ * INSIDE the border radius. */
+.scrollRegion {
+  overflow: auto;
+}
+
+.scrollRegion:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .table {
@@ -49,6 +58,41 @@
 
 .num {
   text-align: right;
+}
+
+/* Sortable column headers (W-UX-C points 7/15): the header IS a button —
+ * same th typography, hover/active in accent, native Enter/Space, the global
+ * focus-visible ring. Plain th's keep the default cursor by never becoming
+ * buttons. */
+.sortButton {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.sortButton:hover {
+  color: var(--accent);
+}
+
+/* The ▲/▼ indicator — accent-colored, ONLY on the active column. */
+.sortGlyph {
+  color: var(--accent);
+  font-size: 9px;
+}
+
+/* Windowing spacer rows: pure scroll geometry, no cell chrome. */
+.spacerRow td {
+  padding: 0;
+  border: 0;
 }
 
 .rowCrit td {

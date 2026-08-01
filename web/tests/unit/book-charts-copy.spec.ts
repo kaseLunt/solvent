@@ -89,17 +89,19 @@ test.describe("waterfall step grammar (§18)", () => {
     });
   });
 
-  test("aave steps: a zero-Σ census wears the literal all-dust proof; a true zero residual draws no step", () => {
+  test("aave steps: zero members means NO all-dust suffix — the Σ still renders; a true zero residual draws no step", () => {
     const steps = buildWaterfallSteps(fixtureWaterfall(), "aave_v3_etherfi");
-    // Σ eligible at ×1.00 is "0" — provably < $10 by the ruling's literal
-    // arithmetic, so the sub carries the suffix (pinned; vacuous case flagged
-    // to design in the wave report).
+    // Σ eligible at ×1.00 is "0" over ZERO accounts. The vacuous form is
+    // RULED OUT (W-UX-C micro-ruling 1): "all dust" needs members to
+    // describe, so the suffix is gated on the annotated count while the
+    // exact $0 still prints — an honest zero over a computed class.
     expect(steps[0]).toMatchObject({
       label: "unshocked",
-      sub: "×1.00 · 0 acct · all dust",
+      sub: "×1.00 · 0 acct",
       display: "$0",
       kind: "flow",
     });
+    expect(steps[0]?.sub).not.toContain("all dust");
     // −10%: real money, no dust suffix.
     expect(steps[1]).toMatchObject({
       label: "−10%",
@@ -169,9 +171,11 @@ test.describe("histogram reading lines (§17) — computed, never asserted", () 
   const dmBadDebt = BOOK.bad_debt[1];
 
   test("the aave line: sub-1.00 bucket sum over the computed denominator, Σ eligible debt", () => {
+    // Zero eligible members (W-UX-C micro-ruling 1): NO "· all dust" over an
+    // empty class — the $0 Σ still renders, honest over a computed book.
     expect(histogramReadingLine(aaveHist, aaveAgg, aaveBadDebt, WAD)).toBe(
       "What this shows: how many accounts sit at each health factor. 0 of 1 are below 1.00, " +
-        "where the engine may liquidate — Σ eligible debt $0 · all dust.",
+        "where the engine may liquidate — Σ eligible debt $0.",
     );
   });
 
@@ -261,6 +265,16 @@ test.describe("the ruling's copy, pinned verbatim", () => {
     );
     expect(heldFlatDetailsSummary(3)).toBe("held flat — 3 inputs named");
     expect(HELD_FLAT_VALUE_HEADER).toBe("held value (source's raw units — unscaled by design)");
+  });
+
+  test("held-flat summary pluralizes: singular prose at n = 1 (W-UX-C micro-ruling 3)", () => {
+    expect(heldFlatSummary(1)).toBe(
+      "1 price input held flat — the scenario did not move these prices; positions priced by " +
+        "them are stressed at stale marks. A blind spot, not a zero.",
+    );
+    // The counted label-value line may stay invariant — pinned so the ruling's
+    // scope is deliberate.
+    expect(heldFlatDetailsSummary(1)).toBe("held flat — 1 inputs named");
   });
 
   test("collateral-at-risk reader caption and wire-notes summary", () => {

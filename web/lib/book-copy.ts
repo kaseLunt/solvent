@@ -19,10 +19,15 @@ export const ELIGIBLE_REALIZED_GLOSS =
   "closes can be less — the Debt Manager liquidates in two passes: half the debt, then " +
   "the remainder.";
 
-/** Caption (a) — the always-visible held-flat summary, verbatim template. */
+/**
+ * Caption (a) — the always-visible held-flat summary, verbatim template.
+ * Count-aware (W-UX-C micro-ruling 3): "1 price input held flat" at n = 1 —
+ * prose pluralizes; label-value grammar elsewhere may stay invariant.
+ */
 export function heldFlatSummary(n: number): string {
+  const head = n === 1 ? "1 price input held flat" : `${String(n)} price inputs held flat`;
   return (
-    `${String(n)} price inputs held flat — the scenario did not move these prices; ` +
+    `${head} — the scenario did not move these prices; ` +
     "positions priced by them are stressed at stale marks. A blind spot, not a zero."
   );
 }

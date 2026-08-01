@@ -79,9 +79,11 @@ test("reading lines render per panel from the served /v1/book values", async ({ 
   await mockPositions(page);
   await openBook(page);
 
+  // Zero eligible members ⇒ NO "· all dust" (W-UX-C micro-ruling 1): the
+  // adjective needs members to describe; the $0 Σ still renders.
   await expect(page.getByTestId("hist-reading-aave_v3_etherfi")).toHaveText(
     "What this shows: how many accounts sit at each health factor. 0 of 1 are below 1.00, " +
-      "where the engine may liquidate — Σ eligible debt $0 · all dust.",
+      "where the engine may liquidate — Σ eligible debt $0.",
   );
   await expect(page.getByTestId("hist-reading-debt_manager")).toHaveText(
     "What this shows: how many accounts sit at each borrow-headroom ratio — a disclosure, " +
@@ -99,9 +101,12 @@ test("reading lines render per panel from the served /v1/book values", async ({ 
   await expect(page.getByTestId("book-stats-debt_manager")).toContainText(
     "of computed positions, engine's own comparator · Σ eligible debt $4,200",
   );
-  await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toContainText(
-    "of computed positions, engine's own comparator · Σ eligible debt $0 · all dust",
+  const aaveCard = page.getByTestId("book-stats-aave_v3_etherfi");
+  await expect(aaveCard).toContainText(
+    "of computed positions, engine's own comparator · Σ eligible debt $0",
   );
+  // The inverted zero-member pin: no vacuous "all dust" over zero members.
+  await expect(aaveCard).not.toContainText("all dust");
 });
 
 test("MUTATE the fixture and the reading lines change — computed, not hardcoded", async ({
@@ -201,7 +206,7 @@ test("held flat (Book): the counted-disclosure pattern, raw units by design", as
   const heldFlat = page.getByTestId("waterfall-held-flat");
   // The always-visible summary, verbatim.
   await expect(heldFlat.getByTestId("held-flat-summary")).toHaveText(
-    "1 price inputs held flat — the scenario did not move these prices; positions priced by " +
+    "1 price input held flat — the scenario did not move these prices; positions priced by " +
       "them are stressed at stale marks. A blind spot, not a zero.",
   );
   // The counted details line; open it and check the table.
@@ -241,15 +246,20 @@ test("NO auto-walk on page load — the full book moves only on the ONE explicit
   await mockBook(page, BOOK);
   await page.route("**/v1/positions*", (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("limit") === "200") walkRequests += 1;
+    // The table pages at limit=200 too (W-UX-C point 13); the map's walk is
+    // the request WITHOUT a sort param — the table always ranks explicitly.
+    if (url.searchParams.get("sort") === null) walkRequests += 1;
     if (url.searchParams.get("cursor") === null)
       return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
     return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
   });
   await openBook(page);
 
-  // The table walked its own pages; the map stayed partial and labeled.
-  await expect(page.getByTestId("book-risk-map")).toContainText("1 loaded / 2 total");
+  // The table walked its own pages (the sentinel fills short walks); the map
+  // stayed partial and labeled with the three-part coverage grammar.
+  await expect(page.getByTestId("book-risk-map")).toContainText(
+    "2 loaded / 2 qualifying / 2 on book",
+  );
   await expect(page.getByTestId("risk-map-partial-label")).toHaveText(
     "partial — plots the table's loaded pages",
   );
@@ -264,8 +274,8 @@ test("load full book: live progress, completed header, Scatter→DensityMap swap
   await mockBook(page, BOOK);
   await page.route("**/v1/positions*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("limit") !== "200") {
-      // The table's own pages.
+    if (url.searchParams.get("sort") !== null) {
+      // The table's own pages (it always sends sort; the walk never does).
       if (url.searchParams.get("cursor") === null)
         return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
       return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
@@ -279,7 +289,7 @@ test("load full book: live progress, completed header, Scatter→DensityMap swap
 
   // Partial mode first: the Scatter renders the loaded pages.
   await expect(
-    page.getByRole("img", { name: /risk map for aave_v3_etherfi: debt \(log10, engine unit\)/ }),
+    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
   ).toBeVisible();
 
   await page.getByTestId("load-full-book").click();
@@ -300,7 +310,7 @@ test("load full book: live progress, completed header, Scatter→DensityMap swap
   const density = page.getByTestId("density-map");
   await expect(density).toBeVisible();
   await expect(
-    page.getByRole("img", { name: /risk map for aave_v3_etherfi: debt \(log10, engine unit\)/ }),
+    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
   ).toHaveCount(0);
 
   // One computed row → one bin, with the exact per-bin title grammar.
@@ -335,7 +345,7 @@ test("409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page
   await mockBook(page, BOOK);
   await page.route("**/v1/positions*", (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("limit") !== "200") {
+    if (url.searchParams.get("sort") !== null) {
       if (url.searchParams.get("cursor") === null)
         return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
       return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
@@ -370,7 +380,7 @@ test("abort mid-walk: the labeled partial state returns", async ({ page }) => {
   await mockBook(page, BOOK);
   await page.route("**/v1/positions*", async (route) => {
     const url = new URL(route.request().url());
-    if (url.searchParams.get("limit") !== "200") {
+    if (url.searchParams.get("sort") !== null) {
       if (url.searchParams.get("cursor") === null)
         return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
       return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
@@ -398,7 +408,7 @@ test("abort mid-walk: the labeled partial state returns", async ({ page }) => {
   await expect(page.getByTestId("risk-map-partial-label")).toBeVisible();
   await expect(page.getByTestId("load-full-book")).toBeVisible();
   await expect(
-    page.getByRole("img", { name: /risk map for aave_v3_etherfi: debt \(log10, engine unit\)/ }),
+    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
   ).toBeVisible();
   await expect(page.getByTestId("density-map")).toHaveCount(0);
 });
@@ -438,7 +448,7 @@ test("Lab held flat (address mode): counted details, raw-units header", async ({
 
   const heldFlat = page.getByTestId("held-flat");
   await expect(heldFlat.getByTestId("held-flat-summary")).toHaveText(
-    "1 price inputs held flat — the scenario did not move these prices; positions priced by " +
+    "1 price input held flat — the scenario did not move these prices; positions priced by " +
       "them are stressed at stale marks. A blind spot, not a zero.",
   );
   const summary = heldFlat.locator("summary");
