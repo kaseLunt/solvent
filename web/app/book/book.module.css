@@ -272,6 +272,17 @@
   background: var(--chip-bg);
 }
 
+/* The sort-remap acknowledgment (design ruling, W-UX-B): a static, dim line
+   in the controls region — the secondary register in BOTH themes via the
+   theme-scoped ink vars. NOT the notice slot (reserved for supersession),
+   never a toast. Clears on the next sort/engine interaction. */
+.sortAck {
+  flex-basis: 100%;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+}
+
 /* ---- histogram svg ---- */
 
 .histLabel {

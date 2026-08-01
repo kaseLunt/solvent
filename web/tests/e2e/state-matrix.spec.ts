@@ -278,7 +278,12 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       await expect(page.getByTestId("book-no-batch")).toContainText("NO SERVABLE BATCH");
       await expect(page.getByTestId("book-no-batch")).toContainText("statement about the SERVICE");
-      await expect(page.getByText("PAGE FETCH FAILED", { exact: true })).toBeVisible();
+      // The positions table refuses in the refusal register (W-UX-B): the
+      // server's sentence verbatim, its own retry named, NO retry button.
+      const refusal = page.getByTestId("positions-refusal");
+      await expect(refusal).toContainText("REFUSED · unavailable");
+      await expect(refusal).toContainText("retry after 5s");
+      await expect(refusal.getByRole("button")).toHaveCount(0);
       // No aggregate zeroes appear anywhere on the degraded surface.
       await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
     },

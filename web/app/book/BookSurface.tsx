@@ -10,7 +10,7 @@
 // surface's own state with the server's message — the global PostureRibbon /
 // DegradationBanner own the app-level layer and are NOT duplicated here.
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   UnavailableError,
@@ -134,8 +134,13 @@ export function BookSurface() {
       )}
 
       {/* The position table walks its own endpoint; it renders (and states its
-          own posture) even while /v1/book is degraded. */}
-      <BookPositions />
+          own posture) even while /v1/book is degraded. The Suspense boundary
+          is useSearchParams' static-prerender contract: the table hydrates
+          client-side with the REAL query string, normalized before its first
+          fetch (W-UX-B part 10). */}
+      <Suspense fallback={null}>
+        <BookPositions />
+      </Suspense>
 
       {state.phase === "ok" && (
         <Stampline>

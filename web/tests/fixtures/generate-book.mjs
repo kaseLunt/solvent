@@ -14,6 +14,7 @@
 //       book.json                      -> book.json
 //       book-engine-refused.json       -> book-engine-refused.json
 //       errors/unavailable.json        -> book-error-unavailable.json
+//       errors/bad-request.json        -> book-error-bad-request.json
 //
 //  2. VERBATIM extracts of `api/openapi.yaml`'s own inline examples:
 //       GET /v1/positions 200 example  -> positions-aave-page-1.json
@@ -65,6 +66,7 @@ const COPIES = [
   ["book.json", "book.json"],
   ["book-engine-refused.json", "book-engine-refused.json"],
   [path.join("errors", "unavailable.json"), "book-error-unavailable.json"],
+  [path.join("errors", "bad-request.json"), "book-error-bad-request.json"],
 ];
 for (const [source, target] of COPIES) {
   copyFileSync(path.join(clientFixtures, source), path.join(here, target));

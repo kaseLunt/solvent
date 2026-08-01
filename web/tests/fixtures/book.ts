@@ -49,3 +49,6 @@ export const BATCH_SUPERSEDED: Schemas["BatchSupersededBody"] = load("batch-supe
 
 /** The 503 no-servable-batch envelope (client fixture, contract-validated). */
 export const BOOK_ERROR_UNAVAILABLE: Schemas["ErrorBody"] = load("book-error-unavailable.json");
+
+/** The 400 bad-request envelope (client fixture, contract-validated). */
+export const BOOK_ERROR_BAD_REQUEST: Schemas["ErrorBody"] = load("book-error-bad-request.json");

@@ -21,12 +21,21 @@ import {
   BATCH_SUPERSEDED,
   BOOK,
   BOOK_ENGINE_REFUSED,
+  BOOK_ERROR_BAD_REQUEST,
   BOOK_ERROR_UNAVAILABLE,
   BOOK_MONOTONICITY_VIOLATION,
   POSITIONS_AAVE_PAGE_1,
   POSITIONS_AAVE_PAGE_2,
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
+
+/** The ruling's acknowledgment copy, verbatim (W-UX-B part 9). */
+const SORT_REMAP_ACK =
+  'sort "hf" is not defined for debt_manager — reset to liq_distance. The Debt Manager ' +
+  "publishes a strict liquidatable boolean, not a health factor.";
+
+const HF_DISCLOSURE_TITLE =
+  "maxBorrowLT/borrowings — a disclosure only; the verdict is the engine's strict boolean";
 
 const WARN_DISCLOSURE = "presentation band < 1.1 — not an engine threshold";
 
@@ -265,8 +274,168 @@ test("NO SERVABLE BATCH renders the refusal honestly — never a book of zeroes"
   await expect(noBatch).toContainText("NO SERVABLE BATCH");
   await expect(noBatch).toContainText("statement about the SERVICE");
 
-  // The positions table states its failure instead of pretending emptiness.
-  await expect(page.getByText("PAGE FETCH FAILED", { exact: true })).toBeVisible();
+  // The positions table refuses honestly — the refusal register with the
+  // server's message VERBATIM and its own retry instruction; NO retry button
+  // (a 503 is the service's statement, not a transport accident to hammer).
+  const refusal = page.getByTestId("positions-refusal");
+  await expect(refusal).toBeVisible();
+  await expect(refusal).toContainText("REFUSED · unavailable");
+  await expect(refusal).toContainText("no complete risk batch is available");
+  await expect(refusal).toContainText("retry after 5s");
+  await expect(refusal.getByRole("button")).toHaveCount(0);
+  await expect(page.getByText("PAGE FETCH FAILED", { exact: true })).toHaveCount(0);
   // No aggregate zeroes appear anywhere on the degraded surface.
   await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// W-UX-B — per-engine sort vocabulary, deep-link normalization, refusal
+// rendering (the design ruling's part B, verbatim).
+// ---------------------------------------------------------------------------
+
+test("the DM view never OFFERS hf — not in the sort control, not as a header", async ({ page }) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page);
+
+  // Aave offers the full contract enum, hf included.
+  await expect(page.getByRole("button", { name: "hf", exact: true })).toBeVisible();
+  const aaveTable = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
+  await expect(aaveTable.getByRole("columnheader", { name: "Health factor" })).toBeVisible();
+
+  await page.getByRole("button", { name: "debt_manager" }).click();
+
+  // The hf control is GONE — not disabled, not present.
+  await expect(page.getByRole("button", { name: "hf", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "liq_distance" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "debt", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "status", exact: true })).toBeVisible();
+
+  // The DM header reads the disclosure, carries the title, and is NOT
+  // clickable/sortable-looking (no button, no link inside the header cell).
+  const dmTable = page.getByRole("table", { name: "positions for debt_manager" });
+  const header = dmTable.getByRole("columnheader", { name: "HF — disclosure" });
+  await expect(header).toBeVisible();
+  await expect(header.locator("span")).toHaveAttribute("title", HF_DISCLOSURE_TITLE);
+  await expect(header.locator("button, a")).toHaveCount(0);
+  await expect(dmTable.getByRole("columnheader", { name: "Health factor" })).toHaveCount(0);
+});
+
+test("engine switch while sort=hf remaps to liq_distance — acknowledgment, ZERO doomed requests", async ({ page }) => {
+  let doomed = 0;
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("engine") === "debt_manager" && url.searchParams.get("sort") === "hf") {
+      doomed += 1;
+      return fulfillJson(route, BOOK_ERROR_BAD_REQUEST, 400);
+    }
+    if (url.searchParams.get("engine") === "debt_manager") return fulfillJson(route, POSITIONS_DM_PAGE_1);
+    if (url.searchParams.get("cursor") === null) return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+    return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
+  });
+  await openBook(page);
+
+  // Arm the defect: aave + hf is a legal pair.
+  await page.getByRole("button", { name: "hf", exact: true }).click();
+  await expect(page.getByRole("button", { name: "hf", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  await page.getByRole("button", { name: "debt_manager" }).click();
+
+  // The remap happened: liq_distance is active and the DM page rendered.
+  await expect(page.getByRole("button", { name: "liq_distance" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  const dmTable = page.getByRole("table", { name: "positions for debt_manager" });
+  await expect(dmTable).toContainText("0xccCc…0003");
+
+  // The acknowledgment: static, dim, in the controls region — NOT the loud
+  // notice slot (that register is reserved for supersession), NOT a toast.
+  const ack = page.getByTestId("sort-remap-ack");
+  await expect(ack).toBeVisible();
+  await expect(ack).toHaveText(SORT_REMAP_ACK);
+  await expect(page.getByTestId("batch-superseded-notice")).toHaveCount(0);
+
+  // The doomed request NEVER fired.
+  expect(doomed).toBe(0);
+
+  // It clears on the next sort/engine interaction.
+  await page.getByRole("button", { name: "debt", exact: true }).click();
+  await expect(page.getByTestId("sort-remap-ack")).toHaveCount(0);
+});
+
+test("?engine=debt_manager&sort=hf normalizes BEFORE the first fetch — zero 400s, URL rewritten", async ({ page }) => {
+  let doomed = 0;
+  const sortsRequested: Array<string | null> = [];
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", (route) => {
+    const url = new URL(route.request().url());
+    sortsRequested.push(url.searchParams.get("sort"));
+    if (url.searchParams.get("engine") === "debt_manager" && url.searchParams.get("sort") === "hf") {
+      doomed += 1;
+      return fulfillJson(route, BOOK_ERROR_BAD_REQUEST, 400);
+    }
+    return fulfillJson(route, POSITIONS_DM_PAGE_1);
+  });
+  await muteStream(page);
+  await page.goto("/book?engine=debt_manager&sort=hf");
+
+  // The DM book rendered from the NORMALIZED walk, acknowledgment shown.
+  const dmTable = page.getByRole("table", { name: "positions for debt_manager" });
+  await expect(dmTable).toContainText("0xccCc…0003");
+  const ack = page.getByTestId("sort-remap-ack");
+  await expect(ack).toBeVisible();
+  await expect(ack).toHaveText(SORT_REMAP_ACK);
+
+  // The doomed request NEVER fired; every fetch carried the remapped sort.
+  expect(doomed).toBe(0);
+  expect(sortsRequested.length).toBeGreaterThan(0);
+  expect(sortsRequested).toEqual(sortsRequested.map(() => "liq_distance"));
+
+  // history.replaceState fixed the deep link — the URL no longer carries hf.
+  await expect(page).toHaveURL(/sort=liq_distance/);
+  await expect(page).toHaveURL(/engine=debt_manager/);
+  expect(page.url()).not.toContain("sort=hf");
+});
+
+test("a 4xx renders the refusal register — envelope code, verbatim message, NO retry button", async ({ page }) => {
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", (route) => fulfillJson(route, BOOK_ERROR_BAD_REQUEST, 400));
+  await openBook(page);
+
+  const refusal = page.getByTestId("positions-refusal");
+  await expect(refusal).toBeVisible();
+  await expect(refusal).toContainText("REFUSED · bad_request");
+  // The API's sentence VERBATIM (the fixture envelope's own message)…
+  await expect(refusal).toContainText(BOOK_ERROR_BAD_REQUEST.error.message);
+  // …plus the ruling's trailing copy.
+  await expect(refusal).toContainText(
+    "adjust the controls; retrying the identical request cannot succeed.",
+  );
+  // NO retry button anywhere in the refusal register, and no transport strip.
+  await expect(refusal.getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "retry" })).toHaveCount(0);
+  await expect(page.getByText("PAGE FETCH FAILED", { exact: true })).toHaveCount(0);
+});
+
+test("a network failure keeps the transport strip WITH retry — the one honest retry", async ({ page }) => {
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", (route) => route.abort());
+  await openBook(page);
+
+  await expect(page.getByText("PAGE FETCH FAILED", { exact: true })).toBeVisible();
+  const retry = page.getByRole("button", { name: "retry" });
+  await expect(retry).toBeVisible();
+  await expect(page.getByTestId("positions-refusal")).toHaveCount(0);
+
+  // And the retry is honest: once the transport heals, it loads the page.
+  await page.unroute("**/v1/positions*");
+  await mockPositions(page);
+  await retry.click();
+  const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
+  await expect(table).toContainText("0xAAaA…0001");
 });

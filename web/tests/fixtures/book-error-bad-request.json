@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "addr must be a 0x-prefixed 20-byte address"
+  }
+}
