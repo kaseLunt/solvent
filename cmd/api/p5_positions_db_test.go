@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -92,21 +93,129 @@ func TestPositionsPageParameterRefusals(t *testing.T) {
 	f := newP5Fixture(t)
 
 	for name, path := range map[string]string{
-		"missing engine":     "/v1/positions",
-		"unknown engine":     "/v1/positions?engine=compound",
-		"unknown sort":       "/v1/positions?engine=aave_v3_etherfi&sort=apy",
-		"hf on debt_manager": "/v1/positions?engine=debt_manager&sort=hf",
-		"limit too large":    "/v1/positions?engine=aave_v3_etherfi&limit=201",
-		"malformed cursor":   "/v1/positions?engine=aave_v3_etherfi&cursor=%21%21not-a-cursor",
+		"missing engine":           "/v1/positions",
+		"unknown engine":           "/v1/positions?engine=compound",
+		"unknown sort":             "/v1/positions?engine=aave_v3_etherfi&sort=apy",
+		"hf on debt_manager":       "/v1/positions?engine=debt_manager&sort=hf",
+		"limit too large":          "/v1/positions?engine=aave_v3_etherfi&limit=1001",
+		"malformed cursor":         "/v1/positions?engine=aave_v3_etherfi&cursor=%21%21not-a-cursor",
+		"unknown dir":              "/v1/positions?engine=aave_v3_etherfi&dir=sideways",
+		"min_value not an integer": "/v1/positions?engine=aave_v3_etherfi&min_value=1.5",
+		"min_value negative":       "/v1/positions?engine=aave_v3_etherfi&min_value=-3",
 	} {
 		out := f.getStatusJSON(t, path, "/v1/positions", http.StatusBadRequest)
 		require.Equal(t, "bad_request", asMap(t, out["error"])["code"], name)
 	}
 
 	// The DM hf refusal names the reason rather than silently substituting a
-	// sort — the store's ErrPositionsSortUnsupported surfaced.
+	// sort — the store's ErrPositionsSortUnsupported surfaced. UNCHANGED by
+	// 1.3.0: dir and min_value never invent a DM health-factor ordering.
 	out := f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=hf", "/v1/positions", http.StatusBadRequest)
 	require.Contains(t, asMap(t, out["error"])["message"], "not defined for engine")
+
+	// The min_value refusal NAMES the parameter and its grammar.
+	bad := f.getStatusJSON(t, "/v1/positions?engine=aave_v3_etherfi&min_value=1e9", "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, bad["error"])["message"], "min_value")
+
+	// And the dir refusal names its closed vocabulary.
+	badDir := f.getStatusJSON(t, "/v1/positions?engine=aave_v3_etherfi&dir=ascending", "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, badDir["error"])["message"], "asc | desc")
+}
+
+// Contract 1.3.0: the relaxed page bound. 1000 is a page, 1001 is the house
+// refusal, and the OLD ceiling's first illegal value (201) is now legal —
+// the bound moved in the contract, not just in prose.
+func TestPositionsPageLimitBoundIs1000(t *testing.T) {
+	f := newP5Fixture(t)
+
+	out := f.getJSON(t, "/v1/positions?engine=aave_v3_etherfi&limit=1000", "/v1/positions")
+	require.Equal(t, float64(1000), out["limit"], "the applied page size is echoed")
+	out = f.getJSON(t, "/v1/positions?engine=aave_v3_etherfi&limit=201", "/v1/positions")
+	require.Equal(t, float64(201), out["limit"], "the old ceiling's first illegal value is legal under the relaxed bound")
+
+	bad := f.getStatusJSON(t, "/v1/positions?engine=aave_v3_etherfi&limit=1001", "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, bad["error"])["message"], "1..1000")
+}
+
+// Contract 1.3.0 min_value at the API: the exclusion law's serving half. The
+// fixture's Aave book is one computed row (totals 8e11/6e11 at 8 decimals)
+// and one REFUSED row with NULL totals; the DM book mirrors it in USD-6.
+func TestPositionsPageMinValueNeverExcludesRefusedRows(t *testing.T) {
+	f := newP5Fixture(t)
+
+	// At the boundary: max(coll, debt) == min_value → strict < keeps the row.
+	out := f.getJSON(t, "/v1/positions?engine=aave_v3_etherfi&min_value="+fxAaveCollateralBase, "/v1/positions")
+	require.Equal(t, float64(2), out["total_positions"], "a row exactly AT min_value stays — the exclusion is strict <")
+	require.Len(t, asList(t, out["positions"]), 2)
+
+	// One unit above the computed row's max: the computed row is excluded,
+	// the REFUSED row (NULL totals) REMAINS, and total_positions becomes the
+	// QUALIFYING count — the denominator of THIS walk, not the book's total.
+	out = f.getJSON(t, "/v1/positions?engine=aave_v3_etherfi&min_value=800000000001", "/v1/positions")
+	require.Equal(t, float64(1), out["total_positions"], "min_value present: total_positions counts QUALIFYING rows only")
+	rows := asList(t, out["positions"])
+	require.Len(t, rows, 1)
+	only := asMap(t, rows[0])
+	require.Equal(t, fxAcctAaveRef.Hex(), only["account"],
+		"the REFUSED row is never excluded by a size floor — an unknowable is not a small number")
+	require.Equal(t, "refused", only["status"])
+	// The interaction is disclosed on the wire.
+	foundNote := false
+	for _, n := range asList(t, out["notes"]) {
+		if s, ok := n.(string); ok && strings.Contains(s, "QUALIFYING") {
+			foundNote = true
+		}
+	}
+	require.True(t, foundNote, "a min_value page names its qualifying-count semantics in notes")
+
+	// The DM filter runs in the DM's OWN unit (USD-6) over ITS totals pair
+	// (collateral_value_usd / borrowings): one unit above the computed row's
+	// max leaves only the refused row.
+	dm := f.getJSON(t, "/v1/positions?engine=debt_manager&min_value=4200000001", "/v1/positions")
+	require.Equal(t, float64(1), dm["total_positions"])
+	require.Equal(t, fxAcctDMRef.Hex(), asMap(t, asList(t, dm["positions"])[0])["account"])
+
+	// Absent min_value: the engine aggregate's own total, semantics unchanged.
+	out = f.getJSON(t, "/v1/positions?engine=aave_v3_etherfi", "/v1/positions")
+	require.Equal(t, float64(2), out["total_positions"])
+}
+
+// Contract 1.3.0 dir at the API: an explicit non-canonical direction reverses
+// the walk (the account tie-break stays ascending — proven at the store
+// layer), absent dir serves the canonical direction, and the cursor binds the
+// FULL query (engine, sort, dir, min_value) — changing any of them mid-walk
+// is the house 400, never a silently re-ranked page.
+func TestPositionsPageDirReversesAndTheCursorBindsTheQuery(t *testing.T) {
+	f := newP5Fixture(t)
+
+	// debt's canonical direction IS desc: absent dir and explicit desc serve
+	// the same first row — dir is absolute, never relative.
+	canonical := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=debt&limit=1", "/v1/positions")
+	explicit := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=debt&dir=desc&limit=1", "/v1/positions")
+	require.Equal(t, fxAcctDM.Hex(), asMap(t, asList(t, canonical["positions"])[0])["account"])
+	require.Equal(t,
+		asMap(t, asList(t, canonical["positions"])[0])["account"],
+		asMap(t, asList(t, explicit["positions"])[0])["account"],
+		"absent dir IS the canonical direction (debt → desc)")
+
+	// dir=asc reverses: the refused row (unrankable, canonical-last) leads.
+	page1 := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=debt&dir=asc&limit=1", "/v1/positions")
+	require.Equal(t, fxAcctDMRef.Hex(), asMap(t, asList(t, page1["positions"])[0])["account"],
+		"dir=asc on debt reverses the canonical desc ranking")
+	cursor, ok := page1["next_cursor"].(string)
+	require.True(t, ok, "a full page with rows remaining mints a cursor")
+
+	// The SAME cursor under a different dir: the house 400 naming the law.
+	out := f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=debt&dir=desc&limit=1&cursor="+url.QueryEscape(cursor), "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, out["error"])["message"], "cursor does not match this request")
+	// …and under a min_value it was not minted with: the same refusal.
+	out = f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=debt&dir=asc&min_value=1&limit=1&cursor="+url.QueryEscape(cursor), "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, out["error"])["message"], "cursor does not match this request")
+
+	// Presented verbatim, the walk continues to the computed row.
+	page2 := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=debt&dir=asc&limit=1&cursor="+url.QueryEscape(cursor), "/v1/positions")
+	require.Equal(t, fxAcctDM.Hex(), asMap(t, asList(t, page2["positions"])[0])["account"])
+	require.Nil(t, page2["next_cursor"])
 }
 
 // TestPositionsPageAnswers409WhenTheCursorBatchIsSuperseded is the honest

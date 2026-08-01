@@ -13,6 +13,7 @@ export type {
   FetchLike,
   ObservatorySeriesQuery,
   ParamsQuery,
+  PositionsDir,
   PositionsQuery,
   PositionsSort,
   PricesQuery,

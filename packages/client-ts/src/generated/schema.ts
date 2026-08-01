@@ -1479,7 +1479,14 @@ export interface components {
              */
             refused: boolean;
             refusal: components["schemas"]["EngineRefusal"] | null;
-            /** @description Rows in this engine's book on this batch, refused rows INCLUDED. NULL on a withheld engine, never 0. */
+            /**
+             * @description Rows in this engine's book on this batch, refused rows INCLUDED.
+             *     NULL on a withheld engine, never 0. When `min_value` is present
+             *     this is the QUALIFYING count — the denominator of THIS walk under
+             *     the exclusion law (refused rows and NULL-total rows always
+             *     qualify) — while the unfiltered engine total remains
+             *     `aggregate.positions` on `/v1/book`.
+             */
             total_positions: number | null;
             /**
              * @description The page, in `sort` order, as LEAN `PositionSummary` rows
@@ -2364,10 +2371,14 @@ export interface operations {
                 /** @description Which engine's book to page. The two books are never blended into one ranking. */
                 engine: "aave_v3_etherfi" | "debt_manager";
                 /**
-                 * @description The `next_cursor` of the previous page, verbatim. OPAQUE — it encodes
-                 *     (batch id, rank) and is bound to the batch that minted it; a cursor
-                 *     whose batch has been superseded answers 409 rather than a mixed-batch
-                 *     page. A malformed cursor is a 400.
+                 * @description The `next_cursor` of the previous page, verbatim. OPAQUE — it
+                 *     encodes (batch id, rank) and is bound to the batch AND the exact
+                 *     query that minted it: (engine, sort, dir, min_value). A cursor
+                 *     whose batch has been superseded answers 409 rather than a
+                 *     mixed-batch page; a cursor presented under a different (engine,
+                 *     sort, dir, min_value) than it was minted for is a 400 — replaying
+                 *     a rank into a different ranking would silently serve garbage. A
+                 *     malformed cursor is a 400.
                  */
                 cursor?: string;
                 /** @description Page size. Defaults to 50. */
@@ -2379,6 +2390,33 @@ export interface operations {
                  *     deterministic.
                  */
                 sort?: "liq_distance" | "debt" | "hf" | "status";
+                /**
+                 * @description Ranking direction. ABSENT means the sort's own CANONICAL direction,
+                 *     which this contract states explicitly: `liq_distance` → asc
+                 *     (nearest to the boundary first), `debt` → desc (largest debt
+                 *     first), `hf` → asc (lowest health factor first), `status` →
+                 *     refused-first (desc on the refused axis). The non-canonical
+                 *     direction serves the EXACT REVERSE of the canonical ranking —
+                 *     except the account tie-break, which ALWAYS ranks ascending, so
+                 *     equal sort keys order identically in both directions and the
+                 *     cursor stays deterministic.
+                 */
+                dir?: "asc" | "desc";
+                /**
+                 * @description Position-size floor, a decimal integer string in the ENGINE'S OWN
+                 *     value unit at its `value_decimals` (Aave base-currency 8, Debt
+                 *     Manager USD 6 — the same unit as the row's `total_collateral` /
+                 *     `total_debt` pair). THE EXCLUSION LAW: a row is excluded iff
+                 *     `status = computed` AND both totals are non-null AND
+                 *     max(total_collateral, total_debt) < min_value. REFUSED rows and
+                 *     rows with a NULL total are NEVER excluded — an unknowable is not a
+                 *     small number, and a size filter that hid refusals would un-count
+                 *     the positions the book could not honestly value. When `min_value`
+                 *     is present, `total_positions` counts QUALIFYING rows only (it is
+                 *     this walk's denominator); the UNFILTERED engine total remains
+                 *     `aggregate.positions` on `/v1/book`.
+                 */
+                min_value?: string;
             };
             header?: never;
             path?: never;

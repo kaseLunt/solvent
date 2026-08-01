@@ -239,6 +239,38 @@ describe("positions() — refined rows, batch-stable pagination", () => {
     ).rejects.toBeInstanceOf(SolventUsageError);
     expect(mock.calls).toHaveLength(0);
   });
+
+  it("serializes dir and min_value (1.3.0) onto the query, and the limit bound is 1000", async () => {
+    const { client, mock } = clientWith({
+      "/v1/positions": { body: JSON.stringify(positionsBody) },
+    });
+    await client.positions({
+      engine: "debt_manager",
+      sort: "debt",
+      dir: "asc",
+      minValue: "1000000",
+      limit: 1000,
+    });
+    const url = new URL(mock.calls[0]!);
+    expect(url.searchParams.get("dir")).toBe("asc");
+    expect(url.searchParams.get("min_value")).toBe("1000000");
+    expect(url.searchParams.get("limit")).toBe("1000");
+  });
+
+  it("refuses limit 1001 and a malformed minValue LOCALLY — never sent", async () => {
+    const { client, mock } = clientWith({});
+    await expect(
+      client.positions({ engine: "debt_manager", limit: 1001 }),
+    ).rejects.toBeInstanceOf(SolventUsageError);
+    // The contract's ^[0-9]+$ pattern: no fractions, no signs, no exponents —
+    // min_value is a decimal integer in the engine's own value unit.
+    for (const bad of ["1.5", "-3", "+3", "1e9", ""]) {
+      await expect(
+        client.positions({ engine: "debt_manager", minValue: bad }),
+      ).rejects.toBeInstanceOf(SolventUsageError);
+    }
+    expect(mock.calls).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------

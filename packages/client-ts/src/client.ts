@@ -104,6 +104,12 @@ const ADDRESS_PATTERN = /^0[xX][0-9a-fA-F]{40}$/;
 /** The contract's committed-scenario-id pattern, verbatim. */
 const SCENARIO_ID_PATTERN = /^[a-z0-9_]{1,64}$/;
 
+/**
+ * The contract's `min_value` pattern (1.3.0), verbatim: a bare decimal
+ * integer string in the ENGINE's own value unit at its `value_decimals`.
+ */
+const MIN_VALUE_PATTERN = /^[0-9]+$/;
+
 /** Enough of a malformed body to diagnose it; a proxy's HTML page is not worth keeping whole. */
 const RAW_BODY_LIMIT = 2048;
 
@@ -137,14 +143,34 @@ export type PositionsSort = NonNullable<
   NonNullable<operations["getPositions"]["parameters"]["query"]>["sort"]
 >;
 
+/** The positions ranking-direction vocabulary (1.3.0), verbatim from the contract. */
+export type PositionsDir = NonNullable<
+  NonNullable<operations["getPositions"]["parameters"]["query"]>["dir"]
+>;
+
 export interface PositionsQuery {
   /** REQUIRED — the two engines' books are never blended into one ranking. */
   engine: EngineName;
   /** Defaults server-side to `liq_distance`. */
   sort?: PositionsSort;
-  /** The previous page's `next_cursor`, verbatim. OPAQUE, batch-bound. */
+  /**
+   * Ranking direction (1.3.0), ABSOLUTE on the sort's own axis. Absent means
+   * the sort's canonical direction — liq_distance→asc, debt→desc, hf→asc,
+   * status→refused-first — and the account tie-break always ranks ascending.
+   */
+  dir?: PositionsDir;
+  /**
+   * Position-size floor (1.3.0): a decimal integer string in the ENGINE's
+   * own value unit at its `value_decimals`. REFUSED rows and NULL-total rows
+   * are NEVER excluded — an unknowable is not a small number — and
+   * `total_positions` becomes the QUALIFYING count while it is in force.
+   * Validated locally against the contract's `^[0-9]+$` pattern, never sent
+   * malformed.
+   */
+  minValue?: string;
+  /** The previous page's `next_cursor`, verbatim. OPAQUE — bound to the batch AND the (engine, sort, dir, min_value) that minted it. */
   cursor?: string;
-  /** 1..200. Defaults server-side to 50. */
+  /** 1..1000. Defaults server-side to 50. */
   limit?: number;
 }
 
@@ -377,9 +403,13 @@ export class SolventClient {
   async positionsRaw(query: PositionsQuery, signal?: AbortSignal): Promise<PositionsResponse> {
     const params = new URLSearchParams({ engine: this.checkEngine(query.engine) });
     if (query.sort !== undefined) params.set("sort", query.sort);
+    if (query.dir !== undefined) params.set("dir", query.dir);
+    if (query.minValue !== undefined) {
+      params.set("min_value", this.checkMinValue(query.minValue));
+    }
     if (query.cursor !== undefined) params.set("cursor", query.cursor);
     if (query.limit !== undefined) {
-      this.checkIntRange("limit", query.limit, 1, 200);
+      this.checkIntRange("limit", query.limit, 1, 1000);
       params.set("limit", String(query.limit));
     }
     return this.get<PositionsResponse>(`/v1/positions?${params.toString()}`, signal);
@@ -623,6 +653,19 @@ export class SolventClient {
       );
     }
     return engine;
+  }
+
+  private checkMinValue(minValue: string): string {
+    if (typeof minValue !== "string" || !MIN_VALUE_PATTERN.test(minValue)) {
+      throw new SolventUsageError(
+        "minValue",
+        minValue,
+        `minValue must be a decimal integer string (the contract's ^[0-9]+$ pattern, in the ` +
+          `engine's own value unit at its value_decimals), got ${JSON.stringify(minValue)}. ` +
+          `Refused locally rather than sent`,
+      );
+    }
+    return minValue;
   }
 
   private checkIntRange(field: string, value: number, min: number, max: number): void {

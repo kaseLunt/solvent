@@ -109,7 +109,7 @@ func TestPositionsPageSortSemantics(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := s.PositionsPage(ctx, batchID, tc.engine, tc.sort, "", 50)
+			res, err := s.PositionsPage(ctx, batchID, tc.engine, tc.sort, PositionDirCanonical, "", "", 50)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, pageAccounts(res))
 			require.Empty(t, res.NextCursor)
@@ -118,20 +118,24 @@ func TestPositionsPageSortSemantics(t *testing.T) {
 	}
 
 	t.Run("hf on debt_manager is refused, not invented", func(t *testing.T) {
-		_, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHF, "", 50)
+		_, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHF, PositionDirCanonical, "", "", 50)
 		require.ErrorIs(t, err, ErrPositionsSortUnsupported)
 	})
 	t.Run("unknown engine / sort / limit", func(t *testing.T) {
-		_, err := s.PositionsPage(ctx, batchID, "aave", PositionSortDebt, "", 50)
+		_, err := s.PositionsPage(ctx, batchID, "aave", PositionSortDebt, PositionDirCanonical, "", "", 50)
 		require.ErrorContains(t, err, "unknown engine")
-		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, "size", "", 50)
+		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, "size", PositionDirCanonical, "", "", 50)
 		require.ErrorContains(t, err, "unknown sort")
-		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, "", 0)
+		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, PositionDirCanonical, "", "", 0)
 		require.ErrorContains(t, err, "limit must be positive")
+		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, PositionDir("sideways"), "", "", 50)
+		require.ErrorContains(t, err, "unknown dir")
+		_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, PositionDirCanonical, "1.5", "", 50)
+		require.ErrorContains(t, err, "min_value")
 	})
 
 	// Refusal rows stay first-class: visible, code carried.
-	res, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortStatus, "", 1)
+	res, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortStatus, PositionDirCanonical, "", "", 1)
 	require.NoError(t, err)
 	require.Equal(t, "refused", res.Positions[0].Status)
 	require.Equal(t, "G1", res.Positions[0].RefusalCode)
@@ -143,13 +147,13 @@ func TestPositionsPagePaginationIsExact(t *testing.T) {
 	batchID, err := s.WriteRiskBatch(ctx, p5Book(10))
 	require.NoError(t, err)
 
-	full, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, "", 50)
+	full, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 50)
 	require.NoError(t, err)
 
 	var walked []string
 	cursor := ""
 	for {
-		page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, cursor, 2)
+		page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", cursor, 2)
 		require.NoError(t, err)
 		walked = append(walked, pageAccounts(page)...)
 		if page.NextCursor == "" {
@@ -174,22 +178,22 @@ func TestPositionsPageCursorIsNotInterchangeable(t *testing.T) {
 	batchID, err := s.WriteRiskBatch(ctx, p5Book(10))
 	require.NoError(t, err)
 
-	page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, "", 2)
+	page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 2)
 	require.NoError(t, err)
 	require.NotEmpty(t, page.NextCursor)
 
 	// Different sort: silently re-ranking under the old rank would produce a
 	// garbage page — refused.
-	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, page.NextCursor, 2)
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortDebt, PositionDirCanonical, "", page.NextCursor, 2)
 	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
 	// Different engine.
-	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, page.NextCursor, 2)
+	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", page.NextCursor, 2)
 	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
 	// Different batch.
-	_, err = s.PositionsPage(ctx, batchID+1, riskAaveEngine, PositionSortLiqDistance, page.NextCursor, 2)
+	_, err = s.PositionsPage(ctx, batchID+1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", page.NextCursor, 2)
 	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
 	// Foreign cursor (another reader's tag).
-	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance,
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "",
 		p5EncodeCursor("p5ev1", "1", "2", "aa", "3", "4"), 2)
 	require.Error(t, err)
 }
@@ -204,11 +208,11 @@ func TestPositionsPageIsBatchStableUnderConcurrentNewerBatch(t *testing.T) {
 	batch1, err := s.WriteRiskBatch(ctx, p5Book(10))
 	require.NoError(t, err)
 
-	full, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, "", 50)
+	full, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 50)
 	require.NoError(t, err)
 
 	// Page 1 of the pinned batch.
-	page1, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, "", 2)
+	page1, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 2)
 	require.NoError(t, err)
 	require.NotEmpty(t, page1.NextCursor)
 
@@ -238,9 +242,9 @@ func TestPositionsPageIsBatchStableUnderConcurrentNewerBatch(t *testing.T) {
 	require.Greater(t, batch2, batch1)
 
 	// The walk continues on the PINNED batch, undisturbed.
-	page2, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, page1.NextCursor, 2)
+	page2, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", page1.NextCursor, 2)
 	require.NoError(t, err)
-	page3, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, page2.NextCursor, 2)
+	page3, err := s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", page2.NextCursor, 2)
 	require.NoError(t, err)
 	walked := append(append(pageAccounts(page1), pageAccounts(page2)...), pageAccounts(page3)...)
 	require.Equal(t, pageAccounts(full), walked,
@@ -269,7 +273,7 @@ func TestPositionsPagePrunedBatchRefusesLoudly(t *testing.T) {
 	_, err = s.WriteRiskBatch(ctx, p5Book(1))
 	require.NoError(t, err)
 
-	_, err = s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, "", 2)
+	_, err = s.PositionsPage(ctx, batch1, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 2)
 	require.ErrorIs(t, err, ErrPositionsBatchMissing)
 }
 
@@ -278,4 +282,207 @@ func TestBatchStillNewestServableWithNoBatches(t *testing.T) {
 	still, err := s.BatchStillNewestServable(context.Background(), 1)
 	require.NoError(t, err)
 	require.False(t, still)
+}
+
+// ---------------------------------------------------------------------------
+// Contract 1.3.0 (wave W-UX-A): dir + min_value + the extended cursor binding.
+// ---------------------------------------------------------------------------
+
+// p5BookWithDustRefusal is p5Book plus one Aave row that is REFUSED yet
+// carries dust-sized persisted totals (coll 1, debt 1 at 8 decimals) — the
+// discriminating row for the never-excluded law: a size filter that treated
+// its dust totals as a small position would hide a refusal.
+func p5BookWithDustRefusal(retention int) RiskBatchWrite {
+	w := p5Book(retention)
+	w.Positions = append(w.Positions, RiskPositionWrite{
+		Engine: riskAaveEngine, Account: addr20(0x06), Status: RiskPositionRefused,
+		RefusalCode: "G1", RefusalDetail: "price budget exceeded", ValueDecimals: 8,
+		TotalCollateralBase: big.NewInt(1), TotalDebtBase: big.NewInt(1),
+		BalancesBlock: 25_000_000, ParamsBlock: 25_000_000,
+	})
+	w.Aggregates[0].Positions = 6
+	w.Aggregates[0].RefusedPositions = 2
+	return w
+}
+
+// THE DIRECTION LAW (contract 1.3.0): `dir` is an ABSOLUTE direction on the
+// sort's own axis; absent means the sort's canonical direction (liq_distance
+// asc, hf asc, debt desc, status refused-first). The non-canonical direction
+// is the EXACT REVERSE of the canonical ranking — except the account
+// tie-break, which ALWAYS ranks ascending, so equal sort keys order
+// identically in both directions and the cursor stays deterministic.
+func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+	batchID, err := s.WriteRiskBatch(ctx, p5Book(10))
+	require.NoError(t, err)
+
+	cases := []struct {
+		name   string
+		engine string
+		sort   PositionSort
+		dir    PositionDir
+		want   []string
+	}{
+		// Aave liq_distance desc: the exact reverse of [01 05 02 03 04] —
+		// EXCEPT the 1.05 tie {01,05}, which still breaks account-ASC (a
+		// naive full reversal would serve 05 before 01).
+		{"aave liq_distance desc", riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, []string{"04", "03", "02", "01", "05"}},
+		{"aave hf desc", riskAaveEngine, PositionSortHF, PositionDirDesc, []string{"04", "03", "02", "01", "05"}},
+		// Aave debt asc (the NON-canonical direction for debt): reverse of
+		// [02 01 05 03 04] — refused first, NULL debt next, then ascending.
+		{"aave debt asc", riskAaveEngine, PositionSortDebt, PositionDirAsc, []string{"04", "03", "05", "01", "02"}},
+		// Aave status asc = refused-LAST (canonical is refused-first).
+		{"aave status asc", riskAaveEngine, PositionSortStatus, PositionDirAsc, []string{"03", "02", "01", "05", "04"}},
+		// DM reversals — no ties, so exact reversals throughout.
+		{"dm liq_distance desc", riskDMEngine, PositionSortLiqDistance, PositionDirDesc, []string{"13", "16", "12", "11"}},
+		{"dm debt asc", riskDMEngine, PositionSortDebt, PositionDirAsc, []string{"13", "16", "12", "11"}},
+		{"dm status asc", riskDMEngine, PositionSortStatus, PositionDirAsc, []string{"16", "12", "11", "13"}},
+		// The EXPLICIT canonical direction serves the canonical ranking —
+		// `dir` is absolute, never relative: debt's canonical IS desc.
+		{"aave debt desc is canonical", riskAaveEngine, PositionSortDebt, PositionDirDesc, []string{"02", "01", "05", "03", "04"}},
+		{"aave liq_distance asc is canonical", riskAaveEngine, PositionSortLiqDistance, PositionDirAsc, []string{"01", "05", "02", "03", "04"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := s.PositionsPage(ctx, batchID, tc.engine, tc.sort, tc.dir, "", "", 50)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, pageAccounts(res))
+		})
+	}
+
+	// ABSENT dir = the canonical direction, for ALL FOUR sorts on both
+	// engines: the defaulted walk and the explicit-canonical walk are the
+	// same ranking, row for row.
+	canonical := map[PositionSort]PositionDir{
+		PositionSortLiqDistance: PositionDirAsc,
+		PositionSortHF:          PositionDirAsc,
+		PositionSortDebt:        PositionDirDesc,
+		PositionSortStatus:      PositionDirDesc,
+	}
+	for _, engine := range []string{riskAaveEngine, riskDMEngine} {
+		for sort, dir := range canonical {
+			if engine == riskDMEngine && sort == PositionSortHF {
+				continue // no DM health factor; the refusal has its own test
+			}
+			absent, err := s.PositionsPage(ctx, batchID, engine, sort, PositionDirCanonical, "", "", 50)
+			require.NoError(t, err)
+			explicit, err := s.PositionsPage(ctx, batchID, engine, sort, dir, "", "", 50)
+			require.NoError(t, err)
+			require.Equal(t, pageAccounts(explicit), pageAccounts(absent),
+				"%s/%s: absent dir must serve the canonical direction %q", engine, sort, dir)
+		}
+	}
+
+	// hf on the Debt Manager stays refused regardless of direction.
+	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHF, PositionDirDesc, "", "", 50)
+	require.ErrorIs(t, err, ErrPositionsSortUnsupported)
+}
+
+// THE EXCLUSION LAW (contract 1.3.0): a row is excluded iff status=computed
+// AND both of the ENGINE's own totals are non-null AND max(coll, debt) <
+// min_value. Refused rows and NULL-total rows are NEVER excluded — an
+// unknowable is not a small number — and the boundary is STRICT: a row
+// exactly AT min_value stays.
+func TestPositionsPageMinValueExclusionLaw(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+	batchID, err := s.WriteRiskBatch(ctx, p5BookWithDustRefusal(10))
+	require.NoError(t, err)
+
+	// min_value == A1's own max (coll 3e11): A1 stays (strict <), A5 (max
+	// 1e11) is excluded, 03 keeps its NULL debt, 04 keeps its NULL totals,
+	// and 06 — REFUSED wearing dust totals — stays: the never-excluded arm.
+	res, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "300000000000", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"01", "02", "03", "04", "06"}, pageAccounts(res))
+	require.Contains(t, pageAccounts(res), "06",
+		"a REFUSED row with dust-sized persisted totals must NEVER be excluded by min_value")
+	require.Contains(t, pageAccounts(res), "03",
+		"a row with a NULL total must NEVER be excluded by min_value")
+	require.NotNil(t, res.QualifyingPositions, "min_value present: the walk's denominator must be served")
+	require.Equal(t, 5, *res.QualifyingPositions, "total counts QUALIFYING rows only (6 rows, 1 excluded)")
+
+	// A floor above every computed row: ONLY the unknowables remain — the
+	// refused rows and the NULL-total row. An unknowable is not a small number.
+	res, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "999999999999999", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"03", "04", "06"}, pageAccounts(res))
+	require.Equal(t, 3, *res.QualifyingPositions)
+
+	// min_value absent: no denominator is minted — the caller serves the
+	// engine aggregate's own total, semantics unchanged.
+	res, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 50)
+	require.NoError(t, err)
+	require.Nil(t, res.QualifyingPositions)
+
+	// The DM filter reads the DM's OWN totals pair (collateral_value_usd /
+	// borrowings, USD-6): floor 2000 excludes 12 (max 1500), keeps 11 exactly
+	// AT the boundary (max 2000), 16 (max 9000) and the refused 13.
+	res, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "2000", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"11", "16", "13"}, pageAccounts(res))
+	require.Equal(t, 3, *res.QualifyingPositions)
+
+	// Pagination under min_value: the rank walks the QUALIFYING set, and the
+	// union of pages equals the filtered full walk exactly.
+	full, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "300000000000", "", 50)
+	require.NoError(t, err)
+	var walked []string
+	cursor := ""
+	for {
+		page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "300000000000", cursor, 2)
+		require.NoError(t, err)
+		walked = append(walked, pageAccounts(page)...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	require.Equal(t, pageAccounts(full), walked)
+}
+
+// THE EXTENDED CURSOR BINDING (contract 1.3.0): the cursor pins (batch,
+// engine, sort, dir, min_value, rank) — presenting it under ANY different
+// (dir, min_value) is ErrPositionsCursorMismatch, exactly as it always was
+// for (batch, engine, sort). Replaying a rank into a different ranking or a
+// different qualifying set would silently serve garbage.
+func TestPositionsPageCursorBindsDirAndMinValue(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+	batchID, err := s.WriteRiskBatch(ctx, p5Book(10))
+	require.NoError(t, err)
+
+	page, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, "300000000000", "", 2)
+	require.NoError(t, err)
+	require.NotEmpty(t, page.NextCursor)
+
+	// Different dir.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirAsc, "300000000000", page.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+	// Absent dir resolves to liq_distance's canonical asc — still not the
+	// desc the cursor was minted under.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "300000000000", page.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+	// Different min_value.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, "300000000001", page.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+	// min_value dropped mid-walk.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, "", page.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+	// The SAME (dir, min_value): the walk continues.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, "300000000000", page.NextCursor, 2)
+	require.NoError(t, err)
+
+	// A cursor minted with dir ABSENT binds the RESOLVED canonical
+	// direction, so presenting it with the explicit canonical dir is the
+	// SAME walk — the binding is to the ranking, not to the spelling.
+	defaulted, err := s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 2)
+	require.NoError(t, err)
+	require.NotEmpty(t, defaulted.NextCursor)
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirAsc, "", defaulted.NextCursor, 2)
+	require.NoError(t, err)
+	// …and the desc spelling still mismatches it.
+	_, err = s.PositionsPage(ctx, batchID, riskAaveEngine, PositionSortLiqDistance, PositionDirDesc, "", defaulted.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
 }

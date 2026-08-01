@@ -3,8 +3,9 @@ package main
 // GET /v1/positions — the position table, cursor-paginated and BATCH-STABLE.
 //
 // The page is drawn entirely from ONE batch. The cursor is minted by the store
-// (internal/store.PositionsPage) and pins (batch, engine, sort, rank); this
-// layer's job is the supersession law around it:
+// (internal/store.PositionsPage) and pins (batch, engine, sort, dir,
+// min_value, rank) — contract 1.3.0 extended the binding to the direction and
+// the size floor; this layer's job is the supersession law around it:
 //
 //   - a cursor whose pinned batch is no longer the NEWEST SERVABLE batch
 //     answers 409 `batch_superseded` naming BOTH batch ids — the client
@@ -31,6 +32,7 @@ import (
 	"errors"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -232,6 +234,12 @@ var positionsSorts = map[string]store.PositionSort{
 	"status":       store.PositionSortStatus,
 }
 
+// positionsMinValueRe is the contract's min_value grammar (1.3.0): a bare
+// decimal integer string in the ENGINE's own value unit at its
+// value_decimals. Validated HERE so the refusal is the house 400 naming the
+// parameter; the store re-checks defensively.
+var positionsMinValueRe = regexp.MustCompile(`^[0-9]+$`)
+
 func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -256,6 +264,29 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
 			"unknown sort "+strconv.Quote(sortName)+": the vocabulary is liq_distance | debt | hf | status", nil)
+		return
+	}
+
+	// dir (1.3.0): an ABSOLUTE direction on the sort's own axis. Absent means
+	// the sort's canonical direction (liq_distance→asc, debt→desc, hf→asc,
+	// status→refused-first); the store resolves the default so the cursor
+	// binds the ranking actually walked.
+	dirName := q.Get("dir")
+	switch dirName {
+	case "", "asc", "desc":
+	default:
+		writeError(w, http.StatusBadRequest, codeBadRequest,
+			"unknown dir "+strconv.Quote(dirName)+": the vocabulary is asc | desc (absent means the sort's canonical direction)", nil)
+		return
+	}
+
+	// min_value (1.3.0): the position-size floor, a decimal integer string in
+	// the ENGINE's own value unit at its value_decimals. The exclusion law
+	// lives in the store; the GRAMMAR is refused here, naming the parameter.
+	minValue := q.Get("min_value")
+	if minValue != "" && !positionsMinValueRe.MatchString(minValue) {
+		writeError(w, http.StatusBadRequest, codeBadRequest,
+			"min_value "+strconv.Quote(minValue)+" is not a decimal integer string (^[0-9]+$): it is a floor in the ENGINE's own value unit at its value_decimals, and it never excludes refused or NULL-total rows — an unknowable is not a small number", nil)
 		return
 	}
 
@@ -304,7 +335,7 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The ranked page, from the store's batch-stable reader.
-	page, err := s.store.PositionsPage(r.Context(), batchID, engine, sort, cursor, limit)
+	page, err := s.store.PositionsPage(r.Context(), batchID, engine, sort, store.PositionDir(dirName), minValue, cursor, limit)
 	switch {
 	case err == nil:
 	case errors.Is(err, store.ErrPositionsSortUnsupported):
@@ -314,7 +345,7 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, store.ErrPositionsCursorMismatch):
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"cursor does not match this request: "+err.Error()+" — a cursor is bound to the (engine, sort) it was minted for; do not change parameters mid-pagination.", nil)
+			"cursor does not match this request: "+err.Error()+" — a cursor is bound to the (engine, sort, dir, min_value) it was minted for; do not change parameters mid-pagination.", nil)
 		return
 	case errors.Is(err, store.ErrPositionsBatchMissing):
 		// The pinned batch was pruned between the supersession probe and the
@@ -397,7 +428,21 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, out)
 		return
 	}
+	// total_positions: the engine aggregate's persisted total (refused rows
+	// INCLUDED) — except under min_value, where it is the QUALIFYING count,
+	// the denominator of THIS walk. The unfiltered engine total remains
+	// aggregate.positions on /v1/book, and the note names the interaction.
 	total := agg.Positions
+	if minValue != "" {
+		if page.QualifyingPositions == nil {
+			writeError(w, http.StatusInternalServerError, codeInternal,
+				"the positions page served no qualifying count under min_value — store defect", nil)
+			return
+		}
+		total = *page.QualifyingPositions
+		out.Notes = append(out.Notes,
+			"min_value is in force: `total_positions` is the QUALIFYING count under the exclusion law — refused rows and NULL-total rows ALWAYS qualify (an unknowable is not a small number). The unfiltered engine total remains `aggregate.positions` on /v1/book.")
+	}
 	out.TotalPositions = &total
 
 	// Reorder the fully-read rows into the page's rank order.

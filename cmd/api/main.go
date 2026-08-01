@@ -92,7 +92,7 @@ const (
 
 	// P5 page bounds, matching api/openapi.yaml's declared parameter ranges.
 	defaultPositionsLimit = 50
-	maxPositionsLimit     = 200
+	maxPositionsLimit     = 1000
 	defaultEventsLimit    = 50
 	maxEventsLimit        = 200
 	defaultHistoryLimit   = 100
