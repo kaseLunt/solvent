@@ -3238,3 +3238,39 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   batch id 1 burned by the crashed pre-fix attempt (cosmetic);
   open-generation sweep-age ~17min observation deferred to a future
   wave; round 6 covers c683515..H6b-head as one range.
+- **BATCH 3 LIVE (FULL BOOK); H6b LANDED; LIVE DB AT SCHEMA 19; ROUND 6
+  DISPATCHED (18:35)**: after the daemon restart the queued riskd -once
+  committed batch 3 — 9,807 positions, 0 refused, 31 flagged, the DM
+  watermark carrying its full sweep stamp (generation 79 CLOSED, 9,766
+  rows, 0 failed) — the a04481f merged-leg write path proven live across
+  the 7,503 both-sides accounts; all six web surfaces serve real data.
+  (riskd WARNed it ran under SOLVENT_DATABASE_URL, not the SELECT-only
+  SOLVENT_RISKD_DATABASE_URL role — wire before VPS deploy.) H6b LANDED
+  as b9cbde6 (store: 00019 two-valued CHECK — IS TRUE/IS FALSE spelling,
+  00018 byte-identical on disk per the 00003 incident law, ADD
+  CONSTRAINT validates existing rows deliberately, welds 18→19 in all
+  four files, negative regressions prove the v18 admission AND the v19
+  rejection) + d7f7624 (api: handleBatch reads ONE REPEATABLE READ
+  snapshot — served_at is the tx clock, servability via
+  CompleteBatchIDs in the same snapshot — and a complete batch reading
+  back zero aggregates or zero stamps is REFUSED with a named 500;
+  batchInterleave seam pins the prune-race regression; flattenAllOf
+  merges arms before licensing with a sibling-arm negative control +
+  positive mirror, oneOf/anyOf deliberately per-arm). Mutants 3/3
+  KILLED; contract pinned 1.2.2 (openapi.yaml untouched). Integrator
+  gate re-run independently: build/vet clean, store ok 197s, api ok
+  79s (-p 1), reconcile weld by name PASS. LANDING FRICTION: the
+  integrator lease expired mid-landing — the control plane blocked the
+  commit correctly; renewed 24h and committed the claim ALONE (704fe73)
+  after deregistering the spent p3accept2 acceptance worktree
+  (single-worktree invariant; its dirty accept-r5-aborted drift
+  artifacts copied to session scratchpad first). OPS: daemon + API
+  rebuilt at d7f7624 and swapped; the daemon applied 00019 at boot;
+  /v1/meta serves schema_version 19; batch 3 still serving. OWED
+  (carried): readBatchAccounts pool-side NewestCompleteBatch
+  (theoretical F2 shape-sibling, unreachable at retention 5000 —
+  report-only per the wave's survey); -race over cmd/api once a gcc
+  toolchain lands. CODEX ROUND 6 DISPATCHED: closing adversarial review
+  over c683515..d7f7624 (H6a + the riskd first-contact pair + H6b) —
+  verify all four round-5 findings closed AND fresh eyes on the new
+  complex ranges. On SHIP → the fresh-pin acceptance receipt run.
