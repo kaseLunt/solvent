@@ -83,7 +83,20 @@ import (
 //	    code, and NewestCompleteBatch would still report RefusedEngines=[] and
 //	    RefusedCount=0. That is the original vacuous green, re-entered through the
 //	    adoption path rather than through the account loop.
-const AlgorithmRevision = 4
+//	5 — THE DM USD SCALE BECAME STRUCTURAL (Codex round 6 [HIGH]). Revision 4
+//	    inferred a DM position's value_decimals from its price witnesses
+//	    (risk.indexPrices), so a debt-only position after a successful sweep
+//	    that observed EMPTY collateral — zero witnesses consulted — persisted
+//	    value_decimals 0 over USD-6 borrowings. Live batch 3 carries 44 such
+//	    rows ($0.000001 of debt each, served as $1 each: a 10^6 overstatement),
+//	    under an engine aggregate correctly declared at 6. Revision 5 declares
+//	    risk.DMUsdDecimals at both layers and refuses witnesses at any other
+//	    scale (ErrWrongPriceScale). The bump is REQUIRED by this file's own
+//	    rule — what value_decimals MEANS on those rows changes — and by the
+//	    concrete adoption hole: over unchanged substrate a rev-4 vector derives
+//	    the rev-4 key, so an unbumped corrected binary would ADOPT batch 3 and
+//	    keep serving the mislabeled rows under the fixed release's name.
+const AlgorithmRevision = 5
 
 // THE AUDITED PREMISES OF THE COLLATERAL LAW.
 //
@@ -876,7 +889,7 @@ func assembleDM(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, 
 	base := store.RiskPositionWrite{
 		Engine:        engine,
 		Account:       a.account,
-		ValueDecimals: 6, // Debt Manager USD
+		ValueDecimals: risk.DMUsdDecimals, // Debt Manager USD — STRUCTURAL, never witness-inferred
 		BalancesBlock: a.balanceBlk,
 		ParamsBlock:   a.paramBlk,
 	}
@@ -1027,7 +1040,17 @@ func assembleDM(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, 
 	p := base
 	p.Status = store.RiskPositionComputed
 	p.Flags = dedupe(flags)
-	p.ValueDecimals = h.UsdDecimals
+	// THE SCALE IS THE ENGINE'S CONSTANT, written as the constant (Codex
+	// round 6 [HIGH]). The pre-fix line here copied h.UsdDecimals, which the
+	// engine then inferred from the price witnesses — and a debt-only
+	// position after a successful sweep that observed EMPTY collateral
+	// consults NO witnesses, so the inferred 0 overwrote the correct USD-6
+	// this row was initialized with: 44 live rows in batch 3 served $0.000001
+	// of debt as $1 each. ComputeDMHealth now declares DMUsdDecimals itself
+	// and refuses witnesses at any other scale, so this line and h.UsdDecimals
+	// cannot disagree; writing the constant makes the independence from the
+	// witness set structural at BOTH layers.
+	p.ValueDecimals = risk.DMUsdDecimals
 	p.CollateralValueUSD = h.CollateralValueUSD
 	p.MaxBorrowLT = h.MaxBorrowLT
 	p.Borrowings = h.Borrowings
@@ -1127,7 +1150,7 @@ func refuseWithPrices(base store.RiskPositionWrite, code, detail string, asset [
 // exists to protect.
 func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRefusals map[string]string) []store.RiskEngineAggregate {
 	order := []EngineBinding{cfg.Aave, cfg.DM}
-	decimals := map[string]uint8{cfg.Aave.Engine: 8, cfg.DM.Engine: 6}
+	decimals := map[string]uint8{cfg.Aave.Engine: 8, cfg.DM.Engine: risk.DMUsdDecimals}
 	acc := map[string]*store.RiskEngineAggregate{}
 	for _, b := range order {
 		acc[b.Engine] = &store.RiskEngineAggregate{

@@ -158,6 +158,29 @@ func TestReconstructDMMergedLegReproducesThePersistedVerdict(t *testing.T) {
 	require.True(t, h.Liquidatable, "$4,200 of debt against a $3,205.792439 threshold is liquidatable")
 }
 
+// TestReconstructDMDebtOnlyReproducesTheStructuralScale is the serve-side
+// positive for Codex round 6 [HIGH]: the debt-only position (nonzero debt, a
+// successful sweep that observed EMPTY collateral, zero price witnesses)
+// reconstructs, verifies, and recomputes to the engine's STRUCTURAL USD-6
+// scale — the value an inferred-from-witnesses scale collapses to 0.
+func TestReconstructDMDebtOnlyReproducesTheStructuralScale(t *testing.T) {
+	s := fxServer(t)
+	p := fxDMDebtOnlyPosition()
+
+	in, err := s.reconstruct(p)
+	require.NoError(t, err)
+	require.NotNil(t, in.DM)
+	require.Empty(t, in.DM.Collateral, "the sweep observed an empty Safe; there is no collateral entry to rebuild")
+	require.NoError(t, verifyReconstruction(p, in, fxParamWitness()))
+
+	h, err := risk.ComputeDMHealth(*in.DM)
+	require.NoError(t, err)
+	require.Equal(t, uint8(6), h.UsdDecimals,
+		"the recomputation must declare USD-6 with ZERO witnesses consulted — the scale is the engine's, not the witness set's")
+	require.True(t, h.Liquidatable)
+	require.Equal(t, fxDMDebtOnlyBorrowings, h.Borrowings.String())
+}
+
 // TestReconstructDMPureDebtLegIsNotPhantomCollateral pins the debt-only shape:
 // a borrowing account with NO swept balance of the borrow token persists a leg
 // whose amount is NULL, and the reconstruction must NOT feed it in as a
@@ -199,6 +222,12 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 			"infinite claimed over a real ratio": func(p *positionRow) {
 				p.HFInfinite = true
 			},
+			"value_decimals zeroed": func(p *positionRow) {
+				// The Aave arm of the scale weld: the persisted label must
+				// match the witness-backed base-currency scale the
+				// recomputation derives.
+				p.ValueDecimals = 0
+			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				p := fxAavePosition()
@@ -228,6 +257,18 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				// A value_usd on a leg with no amount is a served number the
 				// recomputation never produces — verified absent, not assumed.
 				p.Legs[0].ValueUSD = big.NewInt(1)
+			},
+			"value_decimals zeroed": func(p *positionRow) {
+				// THE SCALE WELD (Codex round 6 [HIGH]): a DM row whose
+				// value_decimals differs from the engine's declared USD-6
+				// labels every money column at the wrong magnitude — $4,200
+				// of borrowings reads as $4.2B. Refused, never served.
+				p.ValueDecimals = 0
+			},
+			"value_decimals inflated": func(p *positionRow) {
+				// The other direction: 12 understates by 10^6. The weld is an
+				// equality against the engine's declared scale, not a floor.
+				p.ValueDecimals = 12
 			},
 		} {
 			t.Run(name, func(t *testing.T) {
@@ -268,6 +309,21 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				require.Error(t, verifyReconstruction(p, in, fxParamWitness()))
 			})
 		}
+	})
+
+	// THE LIVE DEFECT'S EXACT SHAPE: a debt-only DM row persisted at
+	// value_decimals 0 — byte-for-byte what the revision-4 assembler wrote for
+	// 44 accounts in live batch 3. Every OTHER field of this row is internally
+	// consistent (debt sum, HF, liquidatable all verify), which is precisely
+	// why the sums-only verification served it: only the scale weld can refuse
+	// it.
+	t.Run("debt manager debt-only wrong scale", func(t *testing.T) {
+		p := fxDMDebtOnlyPosition()
+		p.ValueDecimals = 0
+		in, err := s.reconstruct(p)
+		require.NoError(t, err)
+		require.Error(t, verifyReconstruction(p, in, fxParamWitness()),
+			"a served DM position whose value_decimals differs from the engine's declared scale must be REFUSED, never served")
 	})
 }
 

@@ -27,6 +27,7 @@ package risk
 // a lossy scaled integer.
 
 import (
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -38,6 +39,21 @@ import (
 var dmPriceClasses = map[string]bool{
 	ProvenanceEngineExact: true,
 }
+
+// DMUsdDecimals is the Debt Manager's USD scale, and it is STRUCTURAL: every
+// DM money figure — borrowings (floor(normalized × index / 1e18), NORMATIVE
+// per the recon derivation notes), collateral values, maxBorrow thresholds —
+// is USD 6-dec by construction, before any price witness is consulted.
+//
+// It is a DECLARED CONSTANT and never inferred from the witness set (Codex
+// round 6 [HIGH]): a debt-only position after a successful sweep that
+// observed EMPTY collateral consults ZERO witnesses, and a scale inferred
+// from an empty set collapses to 0 — relabeling $1,000 of USD-6 debt as
+// $1,000,000,000. Live batch 3 carried 44 such rows. The converse obligation
+// is enforced beside it: a witness at any OTHER scale is refused
+// (ErrWrongPriceScale), so the declaration can never silently disagree with
+// the arithmetic performed under it.
+const DMUsdDecimals uint8 = 6
 
 // ComputeDMHealth evaluates one Safe's Debt Manager position.
 //
@@ -65,15 +81,25 @@ func ComputeDMHealth(in DMInput) (DMHealth, error) {
 		Marks:        in.Marks,
 	}
 
-	prices, usdDecimals, err := indexPrices(op, DMEngine, in.Prices, dmPriceClasses)
+	prices, witnessDecimals, err := indexPrices(op, DMEngine, in.Prices, dmPriceClasses)
 	if err != nil {
 		return DMHealth{}, err
+	}
+	// THE SCALE IS DECLARED, NOT INFERRED (Codex round 6 [HIGH]). Witnesses
+	// must MATCH the declaration rather than define it: with zero witnesses
+	// (the debt-only-after-empty-sweep shape) an inferred scale is 0, and a
+	// witness at any other scale would make CollateralValueUSD a figure the
+	// declared label lies about. indexPrices already refuses a MIXED set, so
+	// checking its one uniform value against the constant covers every input.
+	if len(in.Prices) > 0 && witnessDecimals != DMUsdDecimals {
+		return DMHealth{}, assetErr(op, DMEngine, in.Prices[0].Asset, ErrWrongPriceScale,
+			fmt.Sprintf("witness decimals %d, engine scale %d", witnessDecimals, DMUsdDecimals))
 	}
 	params, err := indexParams(op, DMEngine, DMEngine, in.Params)
 	if err != nil {
 		return DMHealth{}, err
 	}
-	out.UsdDecimals = usdDecimals
+	out.UsdDecimals = DMUsdDecimals
 
 	borrowings := orZero(in.DebtUSD)
 	if borrowings.Sign() < 0 {

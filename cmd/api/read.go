@@ -852,6 +852,17 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness
 		if err != nil {
 			return fmt.Errorf("recompute refused the reconstructed position: %w", err)
 		}
+		// THE SCALE WELD, Aave arm. Aave's scale is legitimately the oracle
+		// base currency's, carried by the price witnesses — and every computed
+		// Aave position consumed at least one (a nonzero leg with no witness
+		// is a refusal, an all-zero account is not a position), so the
+		// recomputed BaseDecimals is always witness-backed here. The persisted
+		// label must match it, or the row's money columns mean something other
+		// than what they say — the same corruption class the DM arm refuses.
+		if uint8(p.ValueDecimals) != h.BaseDecimals {
+			return fmt.Errorf("position value_decimals %d, the recomputed base-currency scale is %d — the row's money columns are labeled at the wrong magnitude",
+				p.ValueDecimals, h.BaseDecimals)
+		}
 		if h.IsInfinite != p.HFInfinite {
 			return fmt.Errorf("reconstructed health factor is infinite=%v, the batch persisted infinite=%v", h.IsInfinite, p.HFInfinite)
 		}
@@ -907,6 +918,19 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness
 		h, err := risk.ComputeDMHealth(*in.DM)
 		if err != nil {
 			return fmt.Errorf("recompute refused the reconstructed position: %w", err)
+		}
+		// THE SCALE WELD (Codex round 6 [HIGH]). The sums below verify the
+		// MAGNITUDES; this verifies what the magnitudes MEAN. A DM row whose
+		// value_decimals differs from the engine's declared USD scale labels
+		// every money column 10^|Δ| off — live batch 3 carried 44 rows at 0
+		// over USD-6 borrowings, and a sums-only verification served them,
+		// because every sum was internally consistent under the wrong label.
+		// h.UsdDecimals is the engine's own structural declaration
+		// (risk.DMUsdDecimals), independent of the witness set, so the
+		// comparison holds for the debt-only shape that consults no witnesses.
+		if uint8(p.ValueDecimals) != h.UsdDecimals {
+			return fmt.Errorf("position value_decimals %d, the Debt Manager's declared USD scale is %d — the row's money columns are labeled at the wrong magnitude",
+				p.ValueDecimals, h.UsdDecimals)
 		}
 		if p.Liquidatable == nil {
 			return errors.New("the batch persisted no liquidatable verdict for a computed Debt Manager position")

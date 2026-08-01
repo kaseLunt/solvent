@@ -1132,6 +1132,55 @@ func TestAssembleDMSuccessfulSweepComputes(t *testing.T) {
 	require.NotContains(t, p.Flags, FlagSweepStale)
 }
 
+// TestAssembleDMDebtOnlyAfterEmptySweepCarriesUSD6Scale is the Codex round-6
+// [HIGH] regression: nonzero debt plus a SUCCESSFUL sweep that observed EMPTY
+// collateral — a state ApplySweepBatch explicitly supports, and the live
+// book's actual shape for 44 accounts in batch 3. Such a position consults NO
+// price witnesses, so a scale inferred from witnesses collapses to 0 and the
+// assignment overwrites the correct USD-6 the position was initialized with:
+// borrowings 1000000000 served at value_decimals 0 reads as $1,000,000,000
+// instead of $1,000, while the engine aggregate (whose scale is declared, not
+// inferred) correctly stays at 6. The DM USD scale is STRUCTURAL and must
+// survive an empty witness set.
+func TestAssembleDMDebtOnlyAfterEmptySweepCarriesUSD6Scale(t *testing.T) {
+	in := dmInputs()
+	// Nonzero debt and nothing else: the sweep RAN and SUCCEEDED, and what it
+	// observed was an empty Safe — no snapshot collateral row exists.
+	in.Balances = []store.RiskBalanceRow{
+		bal(risk.DMEngine, acctA, opUSDC, sideDebt, sourceEvent, "1000000000", 154_796_552),
+	}
+	in.Sweeps = []store.RiskSweepRow{{
+		Engine: risk.DMEngine, Account: acctA.Bytes(), Status: "success",
+		LastAttemptBlock: 154_790_000, LastSuccessBlock: 154_790_000, UpdatedAt: fixtureTime,
+	}}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.DMEngine, acctA)
+	require.Equal(t, store.RiskPositionComputed, p.Status)
+	require.Equal(t, "1000000000", p.Borrowings.String())
+	require.Equal(t, "0", p.CollateralValueUSD.String(),
+		"the sweep SAW empty collateral: zero is a known zero here, not an unknown")
+	require.NotNil(t, p.Liquidatable)
+	require.True(t, *p.Liquidatable)
+	require.EqualValues(t, 154_790_000, p.SweepBlock)
+	require.EqualValues(t, 6, p.ValueDecimals,
+		"the DM USD scale is STRUCTURAL (6), never inferred from price witnesses — with none consulted it must still be 6")
+
+	// And the row's scale must AGREE with the engine aggregate that sums it:
+	// batch 3 served 44 rows at scale 0 under an aggregate at scale 6, so the
+	// same borrowings figure carried two meanings at once.
+	var agg *store.RiskEngineAggregate
+	for i := range res.Aggregates {
+		if res.Aggregates[i].Engine == risk.DMEngine {
+			agg = &res.Aggregates[i]
+		}
+	}
+	require.NotNil(t, agg)
+	require.EqualValues(t, agg.ValueDecimals, p.ValueDecimals,
+		"a position's value_decimals must equal its engine aggregate's — one number, one meaning")
+}
+
 // TestAssembleDMNeverSweptRefusesRatherThanServingZeroCollateral is the
 // `0xe957…bf20` posture at the row level: an account whose collateral has never
 // been read holds an UNKNOWN amount, and HF≈0 over it is a false liquidation

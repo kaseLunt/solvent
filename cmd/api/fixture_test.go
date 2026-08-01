@@ -73,6 +73,7 @@ var (
 	fxAcctAaveRef  = common.HexToAddress("0xBbBb000000000000000000000000000000000002")
 	fxAcctDM       = common.HexToAddress("0xCcCc000000000000000000000000000000000003")
 	fxAcctDMRef    = common.HexToAddress("0xDddd000000000000000000000000000000000004")
+	fxAcctDMDebt   = common.HexToAddress("0x4444000000000000000000000000000000000044")
 	fxAcctUnknown  = common.HexToAddress("0xEeEe000000000000000000000000000000000005")
 	fxAaveSource   = "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
 	fxDMSource     = "priceproviderv2"
@@ -120,6 +121,10 @@ const (
 	fxDMBorrowings    = "4200000000"
 	fxDMHFNum         = "3200000000"
 	fxDMHFDen         = "4200000000"
+	// The DEBT-ONLY shape (Codex round 6 [HIGH]): nonzero debt, a successful
+	// sweep that observed EMPTY collateral, no price witnesses at all. $1,000
+	// at USD-6 — the figure the pre-fix scale-0 label inflated to $1B.
+	fxDMDebtOnlyBorrowings = "1000000000"
 	fxDMBadDebtAtPar  = "239603961"
 	fxDMAtRiskAtPar   = "4000000000"
 	fxAaveDebtAt90    = "600000000000"
@@ -367,6 +372,41 @@ func fxDMMergedPosition() *positionRow {
 				BudgetSeconds: fxPriceBudgetSecs, Verdict: riskfeed.VerdictFresh, AgeSeconds: i64p(fxDMWeETHAge),
 			},
 		},
+	}
+}
+
+// fxDMDebtOnlyPosition is the DEBT-ONLY Debt Manager shape (Codex round 6
+// [HIGH], wave H7): nonzero debt after a SUCCESSFUL sweep observed EMPTY
+// collateral — ApplySweepBatch explicitly supports that state, and live
+// batch 3 carried 44 such rows. It consults NO price witnesses, which is
+// exactly what made the pre-fix assembler relabel its USD-6 borrowings with
+// value_decimals 0. Like fxDMMergedPosition it is NOT part of fxPositions;
+// it exists for the reconstruction round trip and the serve-time scale weld.
+func fxDMDebtOnlyPosition() *positionRow {
+	return &positionRow{
+		Engine:             risk.DMEngine,
+		Account:            fxAcctDMDebt.Bytes(),
+		Status:             store.RiskPositionComputed,
+		Flags:              []string{},
+		ValueDecimals:      6,
+		HFNum:              bi("0"),
+		HFDen:              bi(fxDMDebtOnlyBorrowings),
+		CollateralValueUSD: bi("0"),
+		MaxBorrowLT:        bi("0"),
+		Borrowings:         bi(fxDMDebtOnlyBorrowings),
+		Liquidatable:       boolp(true),
+		BalancesBlock:      fxDMBlock,
+		ParamsBlock:        fxDMBlock,
+		SweepBlock:         fxDMSweepBlock,
+		// ONE pure-debt leg: the borrow token with no swept balance behind it.
+		// The USD figures' scale is the position's value_decimals; the leg's
+		// own decimals stay the USD figure's 6 exactly as assembleDM writes it.
+		Legs: []legRow{{
+			Engine: risk.DMEngine, Account: fxAcctDMDebt.Bytes(), Asset: fxUSDCOp.Bytes(), Decimals: 6,
+			ScaledDebt: bi(fxDMDebtOnlyBorrowings), LiveDebt: bi(fxDMDebtOnlyBorrowings),
+			DebtIndexBlock: u64p(fxDMBlock),
+		}},
+		Prices: []store.RiskBatchPriceInput{},
 	}
 }
 

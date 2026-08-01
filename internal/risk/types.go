@@ -152,6 +152,13 @@ var (
 	// ErrMixedPriceDecimals: price inputs on one surface disagree on decimals.
 	// Summing an 8-dec base value with an 18-dec one is silent corruption.
 	ErrMixedPriceDecimals = errors.New("risk: price inputs disagree on decimals")
+	// ErrWrongPriceScale: a price input whose decimals differ from the scale
+	// the consuming engine DECLARES (the Debt Manager's DMUsdDecimals). Where
+	// the engine's USD scale is structural, a witness at any other scale
+	// values collateral at a magnitude the row's own label then lies about —
+	// the same corruption class as ErrMixedPriceDecimals, judged against a
+	// constant instead of the first witness seen (Codex round 6 [HIGH]).
+	ErrWrongPriceScale = errors.New("risk: price input decimals differ from the engine's declared USD scale")
 	// ErrNonPositivePrice: a price value at or below zero. The store already
 	// quarantines these (migration 00005 CHECK); this is the second wall.
 	ErrNonPositivePrice = errors.New("risk: price value is not positive")

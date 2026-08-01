@@ -954,3 +954,59 @@ func TestProjectDMDebtRequiresAPYObservationBlock(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// The USD scale is STRUCTURAL — declared by the engine, never inferred from
+// price witnesses (Codex round 6 [HIGH], wave H7).
+// ---------------------------------------------------------------------------
+
+// TestComputeDMHealthDebtOnlyCarriesStructuralUSD6Scale is the engine half of
+// the round-6 finding: a borrower retains nonzero debt after a SUCCESSFUL
+// sweep observed EMPTY collateral — a state ApplySweepBatch explicitly
+// supports and the live book actually contains (batch 3: 44 such rows). The
+// input then carries NO price witnesses, and a scale inferred from witnesses
+// collapses to 0, relabeling USD-6 debt as a raw integer: borrowings
+// 1000000000 at decimals 0 reads as $1,000,000,000 instead of $1,000. Every
+// DM money figure is USD 6-dec BY CONSTRUCTION (recon derivation notes,
+// NORMATIVE), so the scale is the engine's own declaration and must not
+// depend on which witnesses happened to be consulted.
+func TestComputeDMHealthDebtOnlyCarriesStructuralUSD6Scale(t *testing.T) {
+	h, err := ComputeDMHealth(DMInput{
+		Marks:   testDMMarks,
+		Account: acctA,
+		DebtUSD: mustBig(t, "1000000000"), // $1,000 at USD-6
+		// No collateral, no prices: the successful sweep saw an empty Safe.
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint8(6), h.UsdDecimals,
+		"the DM USD scale is STRUCTURAL (6); with zero witnesses an inferred scale is 0 and the debt is served 10^6 times too large")
+	requireBig(t, "1000000000", h.Borrowings)
+	requireBig(t, "0", h.CollateralValueUSD)
+	requireBig(t, "0", h.MaxBorrowLT)
+	require.True(t, h.Liquidatable, "debt over zero counted collateral is strictly liquidatable")
+	require.False(t, h.IsInfinite)
+	requireBig(t, "0", h.HealthFactor.Num)
+}
+
+// TestComputeDMHealthRefusesAWitnessNotAtTheEngineScale is the declaration's
+// converse obligation: once UsdDecimals is DECLARED to be 6, a witness at any
+// other scale would make CollateralValueUSD a number the label lies about
+// (a USD-8 witness inflates it 100x while the row still says 6). Such an
+// input is REFUSED, never silently absorbed — the same posture as
+// ErrMixedPriceDecimals, applied against the engine's own constant.
+func TestComputeDMHealthRefusesAWitnessNotAtTheEngineScale(t *testing.T) {
+	p := enginePrice(dUSDC, "100000000")
+	p.Decimals = 8 // not the engine's USD-6
+	_, err := ComputeDMHealth(DMInput{
+		Marks:   testDMMarks,
+		Account: acctA,
+		DebtUSD: mustBig(t, "1000000"),
+		Collateral: []DMCollateral{
+			{Asset: dUSDC, Amount: mustBig(t, "1000000"), Decimals: 6},
+		},
+		Params: []ParamRow{dmParam(dUSDC, "95000000000000000000", "1000000000000000000")},
+		Prices: []PriceInput{p},
+	})
+	require.Error(t, err,
+		"a witness at USD-8 under the declared USD-6 scale values collateral 100x high; it must be refused, not absorbed")
+}

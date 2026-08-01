@@ -55,7 +55,7 @@ func identityOf(t *testing.T, f *riskdFixture, batchID int64) storedIdentity {
 // TestRiskdDoesNotAdoptALegacyRevisionBatchOverTheEmptyUnprovenState is the round-3
 // [high] regression.
 //
-// MUTANT THIS KILLS: revert AlgorithmRevision to 3. The pass then derives the legacy
+// MUTANT THIS KILLS: revert AlgorithmRevision to 4. The pass then derives the legacy
 // key, ADOPTS the legacy batch, no new batch is written, and the served summary keeps
 // reporting an unrefused Aave engine over an explicitly unproven ledger.
 func TestRiskdDoesNotAdoptALegacyRevisionBatchOverTheEmptyUnprovenState(t *testing.T) {
@@ -76,11 +76,11 @@ func TestRiskdDoesNotAdoptALegacyRevisionBatchOverTheEmptyUnprovenState(t *testi
 	// legacy key below would be a fabrication.
 	require.Equal(t, id.key, materializationKey(id.vector, id.digest),
 		"the identity key formula must match production's, or this test proves nothing")
-	require.Contains(t, id.vector, "rev=4;", "the current revision is serialized in the vector")
+	require.Contains(t, id.vector, "rev=5;", "the current revision is serialized in the vector")
 
-	// ---- Rewrite it into what a REVISION-3 binary would have left behind: the same
-	// materialization, keyed at rev 3, with NO engine refusal on the rollup.
-	legacyVector := strings.Replace(id.vector, "rev=4;", "rev=3;", 1)
+	// ---- Rewrite it into what a REVISION-4 binary would have left behind: the same
+	// materialization, keyed at rev 4, with NO engine refusal on the rollup.
+	legacyVector := strings.Replace(id.vector, "rev=5;", "rev=4;", 1)
 	require.NotEqual(t, id.vector, legacyVector)
 	legacyKey := materializationKey(legacyVector, id.digest)
 	require.NotEqual(t, id.key, legacyKey)
@@ -163,9 +163,9 @@ func TestRiskdRevisionIsSerializedIntoEveryBatchVector(t *testing.T) {
 	require.NoError(t, err)
 	id := identityOf(t, f, res.BatchID)
 
-	require.Contains(t, id.vector, "rev=4;",
-		"riskfeed.AlgorithmRevision must be 4 AND actually serialized; bump the constant and this expectation together")
-	require.NotContains(t, id.vector, "rev=3;")
+	require.Contains(t, id.vector, "rev=5;",
+		"riskfeed.AlgorithmRevision must be 5 AND actually serialized; bump the constant and this expectation together")
+	require.NotContains(t, id.vector, "rev=4;")
 
 	// And GenesisBlock — the round-3 [medium] — is in the binding, so a corrected
 	// start block cannot adopt a batch computed under the old bar. The WALKED SURFACE
