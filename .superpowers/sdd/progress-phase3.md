@@ -3274,3 +3274,27 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   over c683515..d7f7624 (H6a + the riskd first-contact pair + H6b) —
   verify all four round-5 findings closed AND fresh eyes on the new
   complex ranges. On SHIP → the fresh-pin acceptance receipt run.
+- **CODEX ROUND 6: R5-F1..F4 ALL CLOSED; NOT-SHIP ON ONE FRESH HIGH —
+  DEBT-ONLY DM SCALE; H7 DISPATCHED (18:58)**: Codex confirmed all four
+  round-5 remedies closed (attempt bit sourced from actual snapshot-row
+  presence and short-circuits every true-returning exemption; the batch
+  race test truly crosses a retention delete; migration 19 preserves
+  the three legal states without editing 18; no remaining allOf
+  false-green path found). Review STATIC (worktree Go build cache
+  unwritable — suites re-run owed to the integrator gate, which already
+  ran them at landing). THE FRESH FINDING (HIGH, clears the bar as
+  wrong-data-surfaced): a debt-only DM position — honest state: nonzero
+  debt, successful sweep observed EMPTY collateral (ApplySweepBatch
+  supports it) — gets its USD scale INFERRED from price witnesses that
+  don't exist: indexPrices returns decimals=0 which OVERWRITES the
+  correct USD-6 constant (assemble.go:1030), and reconstruction
+  verifies the debt SUM but never the SCALE, so /v1/address and
+  /v1/positions can serve $1,000 of USD-6 debt as $1 billion while the
+  engine aggregate stays correct at 6. The a04481f merge made the full
+  book commit, so batch 3 MAY BE SERVING THIS NOW. WAVE H7 DISPATCHED:
+  quantify the live blast radius first (SELECT-only), make the DM USD
+  scale a structural constant independent of price witnesses, add the
+  reconstruction SCALE WELD (wrong scale → refusal, the backstop that
+  would have caught this), adjudicate AlgorithmRevision 4→5 if any
+  batch-3 row is affected, 2 mutants, then the sanctioned riskd -once
+  → batch 4 supersedes. Round 7 closing review after landing.
