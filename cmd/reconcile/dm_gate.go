@@ -191,7 +191,7 @@ func dmGateFrame() *gateFrame {
 		derived(dmFirstDebtSource,
 			"each borrower's arrival edge for the never-swept race arithmetic (risk-quant's correction: any-never-swept-gates was stochastic on borrower arrival; the lawful form asks whether a sweep cycle both started after this block and completed before the pin)"),
 		derived(dmSweepCycleSource,
-			"the CYCLE-SPECIFIC witness the never-swept race decision consumes (Wave H4a, Codex F2): the engine's sweep_generations row and the per-generation attempt-block spans over snapshot_sweeps. The fleet's MINIMUM historical success block is NOT a cycle witness — one stale straggler success pins that floor across generations, and a borrower a later COMPLETED generation genuinely skipped would classify honest-race (a pass-that-should-fail). Honest-race is claimable ONLY on positive per-generation evidence that no cycle both opened after the arrival edge and completed at or below the pin; missing or sticky cycle evidence GATES"),
+			"the CYCLE-SPECIFIC witness the never-swept race decision consumes (Wave H4a Codex F2, tightened by Wave H5a Codex round 4): the engine's sweep_generations row and the per-generation attempt-block spans over snapshot_sweeps. The fleet's MINIMUM historical success block is NOT a cycle witness (one stale straggler success pins that floor across generations), and a candidate generation's OPENING edge does not clear it either — SweepWorkBatch re-queries the registry every batch and completes only on an EMPTY query, so a generation still open at the borrower's arrival is OWED that borrower. Honest-race is claimable ONLY on completion-edge arithmetic: the arrival edge strictly exceeds the witnessed completion edge of the newest pin-completed generation; overlapping, missing, sticky or ambiguous cycle evidence GATES"),
 		derived(dmParamLedgerSource,
 			"the FULL DM config event ledger prefix at P_op, kept RAW so the S-clock welds can fold it independently at each S(account) (Wave H4a, Codex F4). Filtering the COLLAPSED pin fold (latest P-effective row per asset) by EffectiveBlock <= S cannot reconstruct S when a token's config changed — or was removed/re-added — inside (S, P]: the S-effective row is gone from the collapsed view, so ordinary parameter motion would fail the honest S weld"),
 		pinned(dmSweepAgeClockSource,
@@ -518,18 +518,24 @@ func sweepExclusionInvariant(st snapshotdb.T6SweepState) bool {
 //	               inputs and SweepBlock=0 must refuse — the 0xe957…bf20
 //	               posture), never asserted;
 //	AGE GUARD      derived from the sweeper's own PER-GENERATION state
-//	               (dmNeverSweptRace, Wave H4a Codex F2): honest-race is
-//	               claimable ONLY on a cycle-specific witness that NO sweep
-//	               generation both opened after the account's first
-//	               debt-event block and completed at or below P_op →
-//	               disclosed coverage-gap (gated=false); a completed
-//	               generation that skipped the account — or missing/sticky
-//	               cycle evidence — → GATED. (The Wave-H3 shape compared the
-//	               arrival edge against the fleet's MINIMUM historical
-//	               success block, which is not a cycle: one stale straggler
-//	               success pinned that floor across generations, and a
-//	               borrower a later completed generation genuinely skipped
-//	               classified honest-race — a pass-that-should-fail.);
+//	               (dmNeverSweptRace; Wave H4a Codex F2, tightened by Wave
+//	               H5a Codex round 4): honest-race is claimable ONLY on
+//	               completion-edge arithmetic — the account's first-debt
+//	               block strictly exceeds the witnessed completion edge of
+//	               the newest generation completed at or below P_op →
+//	               disclosed coverage-gap (gated=false); a first-debt block
+//	               that OVERLAPS a completed generation's open span, a
+//	               completed generation that skipped the account, or
+//	               missing/sticky/ambiguous cycle evidence → GATED. (The
+//	               Wave-H3 shape compared the arrival edge against the
+//	               fleet's MINIMUM historical success block — one stale
+//	               straggler success pinned that floor across generations.
+//	               The Wave-H4a shape cleared a candidate on its OPENING
+//	               edge (open(K) <= arrival), but SweepWorkBatch re-queries
+//	               the registry every batch and completes only on an EMPTY
+//	               query, so a generation still open at the arrival is OWED
+//	               the borrower — the opening-edge disclosure was a
+//	               pass-that-should-fail too.);
 //	CENSUS         the class carries its denominator, and coverage-gaps
 //	               exceeding ~1% of the borrower census gate as
 //	               sweeper-health — a STOPPED sweeper classifies every new
@@ -646,13 +652,13 @@ func classifySweepTestimony(c *p3Ctx, f *gateFrame, t6 *snapshotdb.Task6Data, bo
 				row.Verdict = verdictUnscannable
 				row.Gated = false
 				row.Class = "never-swept-coverage-gap(honest-race)"
-				row.Note = "DISCLOSED, not gated: the sweeper's own PER-GENERATION state positively witnesses that no sweep generation both opened after this account's first debt event and completed at or below the pin (the cycle_witness evidence), so the sweeper has not yet OWED this account a visit — an honest race on borrower arrival, self-healing on the next completed pass. The served surface PROVABLY refuses the account meanwhile (the consumed refusal read above), so no wrong answer can be served. The census row below carries the denominator: a STOPPED sweeper classifies every arrival as a race per row and fails there en masse (the vacuous-pass guard)"
+				row.Note = "DISCLOSED, not gated: the sweeper's own PER-GENERATION state positively witnesses that this account arrived AFTER the completion edge of the newest generation completed at or below the pin (the cycle_witness evidence prints the completion-edge arithmetic, Wave H5a), so no completed cycle has ever OWED this account a visit — an honest race on borrower arrival, self-healing on the next completed pass. The served surface PROVABLY refuses the account meanwhile (the consumed refusal read above), so no wrong answer can be served. The census row below carries the denominator: a STOPPED sweeper classifies every arrival as a race per row and fails there en masse (the vacuous-pass guard)"
 			default:
 				neverGated++
 				row.Verdict = verdictUnscannable
 				row.Gated = true
 				row.Class = sweepNever
-				row.Note = "GATED: no cycle-specific witness clears the sweeper — either a sweep generation opened after this account's first debt event, completed at or below the pin, and STILL never read this account (a sweeper defect, not a race), or the per-generation evidence is missing/sticky, and missing cycle evidence is GATED, never disclosed (Wave H4a, Codex F2). The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
+				row.Note = "GATED: no completion-edge witness clears the sweeper — either a generation completed at or below the pin while OPEN at or after this account's arrival (its first-debt block overlaps the open span: SweepWorkBatch re-queries the registry every batch, so that generation was OWED this borrower and STILL never read it — a sweeper defect, not a race), or the per-generation evidence is missing/sticky/ambiguous, and unprovable chronology is GATED, never disclosed (Wave H4a Codex F2; Wave H5a Codex round 4). The served surface refuses the account (consumed read above), so the failure is the pipeline's coverage, not a served wrong answer. Re-pinning cannot fix it"
 			}
 			rows = append(rows, row)
 		}
@@ -1431,34 +1437,70 @@ func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
 // success block is a floor over MANY generations, so one stale straggler
 // success — an account with an old success and recent failed attempts —
 // pinned it below every later borrower's arrival forever, and a borrower a
-// later COMPLETED generation genuinely skipped classified "honest race").
+// later COMPLETED generation genuinely skipped classified "honest race";
+// tightened by Wave H5a, Codex round 4 HIGH — replacing H4a's OPENING-EDGE
+// heuristic, which could ALSO false-pass, see THE LAW below).
 //
-// THE LAW: honest-race is claimable ONLY on a positive cycle-specific witness
-// that NO sweep generation both opened after the account's first-debt block
-// and completed at or below the pin. Anything unprovable GATES — missing or
-// sticky cycle evidence is never disclosed.
+// THE LAW (Wave H5a, Codex round 4 HIGH — the completion-edge reversal of
+// the H4a opening-edge heuristic): honest-race is claimable ONLY when the
+// account's first-debt block strictly EXCEEDS the witnessed COMPLETION EDGE
+// of the newest generation completed at or below the pin — i.e. the borrower
+// provably arrived AFTER every pin-completed cycle had already closed.
+// Anything unprovable GATES — missing, sticky, or AMBIGUOUS chronology is
+// never disclosed.
+//
+// WHY THE H4a OPENING-EDGE WITNESS WAS WRONG (the round-4 defect): H4a
+// treated "generation K attempted at some block <= firstDebt" (open(K) <=
+// arrival) as proof the borrower arrived too late for K. But
+// store.SweepWorkBatch dynamically RE-QUERIES the debt registry on every
+// batch, and Step completes a generation only after an EMPTY query — so a
+// borrower appearing while a generation is still OPEN is OWED by that
+// generation. Concretely: generation 7 attempts a peer at block 100, the
+// borrower's first debt lands at 200, another attempt lands at 300,
+// generation 7 completes at or below the pin without ever attempting the
+// borrower. The H4a predicate disclosed honest-race (100 <= 200) — a
+// pass-that-should-fail. A first-debt block that OVERLAPS a completed
+// generation's open span now GATES.
 //
 // WHAT THE SCHEMA CAN AND CANNOT STATE (studied, not assumed):
 // sweep_generations keeps ONE row per engine — current_generation, opened_at,
 // completed_at (wall-clock; opening the next generation overwrites the stamp,
 // and a rewind bumps the generation WITHOUT completing it), so only the
 // CURRENT generation's completion is durably knowable, and no generation's
-// open/complete BLOCK is recorded anywhere. snapshot_sweeps keeps each
-// account's LAST attempt (generation, last_attempt_block), so per-generation
-// attempt spans are reconstructable but can only SHRINK as later generations
-// overwrite rows. Three sound derivations survive those bounds:
+// open/complete BLOCK is recorded anywhere. The account's registry-insertion
+// generation is NOT persisted either. snapshot_sweeps keeps each account's
+// LAST attempt (generation, last_attempt_block), so per-generation attempt
+// spans are reconstructable but can only SHRINK as later generations
+// overwrite rows. The derivations that survive those bounds:
 //
-//	(1) an attempt row of generation g at block a proves open(g) <= a
-//	    (attempts execute only after their generation opens), and opens are
-//	    monotone in g — so ANY attempt by a generation >= K at or below B
-//	    proves open(K) <= B and hence open(g) <= B for every g <= K;
-//	(2) the CURRENT generation's rows are complete (nothing overwrites them),
-//	    so when it is stamped complete, max(last_attempt_block) over them IS
-//	    its completion block;
-//	(3) K — the newest generation that could have completed at or below the
-//	    pin — is the current generation when (2) puts its completion at or
-//	    below the pin, else the one before it (later generations open later,
-//	    so proving open(K) <= firstDebt clears every candidate at once).
+//	(1) K — the newest generation that could have completed at or below the
+//	    pin — is the current generation when its complete row set puts its
+//	    last attempt at or below the pin, else the one before it (a last
+//	    attempt ABOVE the pin proves the completion edge is above the pin,
+//	    because completion follows the last attempt).
+//	(2) the CURRENT generation's rows are complete (nothing overwrites
+//	    them), so when it is stamped complete, max(last_attempt_block) over
+//	    them is its COMPLETION-EDGE WITNESS: the last chain state any of its
+//	    attempts observed. PROVEN by that witness: every attempt of the
+//	    generation executed strictly below a first-debt block that exceeds
+//	    it — the generation never observed a chain containing this
+//	    borrower's debt, and no earlier generation (all of which closed
+//	    before this one opened) did either. INFERRED, not proven (justified
+//	    against snapshot.Step's actual loop, and the reason the edge is a
+//	    witness rather than a stamp): the stamp lands in the Step round
+//	    immediately after the last applied batch (pull-empty -> stamp), so
+//	    the only unwitnessed residue is that one bounded round plus any RPC
+//	    exec-block lag — a borrower whose debt event landed AND was ingested
+//	    into the registry inside that residue would be indistinguishable.
+//	    Everything at or below the edge needs no inference at all: the
+//	    generation was provably still open at or after the arrival, and
+//	    SweepWorkBatch's dynamic re-query means it was OWED the borrower.
+//	(3) a NON-CURRENT generation has NO completion witness at all: its
+//	    surviving span can only shrink, so its max surviving attempt block
+//	    only LOWER-bounds its completion edge (never upper-bounds it), and
+//	    exec-block lag on a later generation's rows breaks any
+//	    cross-generation bound. A candidate K that is not the current
+//	    generation therefore GATES — its chronology is unwitnessable.
 //
 // firstDebt == 0 (arrival unknown) fails CLOSED. No generation row at all
 // means no cycle has EVER completed — race proven structurally per row, and
@@ -1466,7 +1508,8 @@ func dmMotionPopulationGate(motionCount, evaluableCount int) bool {
 // en masse (the vacuous-pass guard both rulings require).
 //
 // The returned witness string is the receipt: it states WHICH generation
-// evidence carried the decision, and the per-account evidence field prints it.
+// evidence carried the decision and prints the completion-edge arithmetic,
+// and the per-account cycle_witness evidence field carries it.
 func dmNeverSweptRace(firstDebt, pin uint64, cy snapshotdb.T6SweepCycles) (bool, string) {
 	if firstDebt == 0 {
 		return false, "arrival edge unknown (no custodied first debt block at or below the pin): a race cannot be claimed for an account whose arrival custody cannot state — fails closed"
@@ -1486,27 +1529,33 @@ func dmNeverSweptRace(firstDebt, pin uint64, cy snapshotdb.T6SweepCycles) (bool,
 			return false, fmt.Sprintf("generation %d is stamped complete but no snapshot_sweeps row witnesses any of its attempts: sticky cycle evidence — a race needs a positive per-generation witness, so this GATES", k)
 		case span.MaxAttemptBlock > pin:
 			// The current generation completed ABOVE the pin (its rows are
-			// complete, so the max attempt block is its true completion
-			// block): it is not a candidate; the one before it is.
+			// complete, so its last attempt above the pin puts its completion
+			// edge above the pin): it is not a candidate; the one before it is.
 			k--
+		default:
+			// The ONLY durably witnessed completion edge (derivation 2): the
+			// current generation is stamped complete, its row set is complete,
+			// and its last attempt sits at or below the pin. The completion
+			// edge is max(last_attempt_block); the race law is strict
+			// completion-edge arithmetic against the arrival.
+			if firstDebt > span.MaxAttemptBlock {
+				return true, fmt.Sprintf("completion-edge arithmetic: first debt block %d > completion edge %d of generation %d (the newest generation completed at or below pin %d; witnessed attempt span [%d, %d] over its complete row set) — every cycle that ever completed at or below the pin had already closed before this account arrived, so no completed cycle has been owed it (residual inference: the one-Step stamp gap past the last attempt, documented at dmNeverSweptRace)", firstDebt, span.MaxAttemptBlock, k, pin, span.MinAttemptBlock, span.MaxAttemptBlock)
+			}
+			return false, fmt.Sprintf("completion-edge arithmetic: first debt block %d <= completion edge %d of generation %d (completed at or below pin %d; witnessed attempt span [%d, %d]) — the generation was still OPEN at or after this account's arrival, and SweepWorkBatch re-queries the registry every batch and completes only on an EMPTY query, so an open generation is OWED every arriving borrower: it completed without ever attempting this account, which is either a skipped registered borrower (a sweeper defect) or an arrival-vs-registration chronology the schema cannot witness — both GATE (Wave H5a, Codex round 4: the H4a opening-edge heuristic disclosed exactly this overlap)", firstDebt, span.MaxAttemptBlock, k, pin, span.MinAttemptBlock, span.MaxAttemptBlock)
 		}
 	} else {
 		// The current generation is still open: it has completed nothing.
 		k--
 	}
 	if k == 0 {
-		return true, fmt.Sprintf("current generation %d has completed nothing at or below pin %d and no earlier generation exists: no cycle can both have opened after the arrival edge %d and completed at or below the pin", cy.CurrentGeneration, pin, firstDebt)
+		return true, fmt.Sprintf("current generation %d has completed nothing at or below pin %d and no earlier generation exists: no cycle can have completed at or below the pin since this account arrived at %d — the sweep owing it is still in flight", cy.CurrentGeneration, pin, firstDebt)
 	}
-	// The opening-edge witness for K: any attempt by a generation >= K at or
-	// below the arrival edge proves open(K) <= firstDebt (derivation 1), and
-	// then EVERY candidate generation <= K opened at or before the arrival —
-	// no cycle has been OWED this account yet.
-	for g := k; g <= cy.CurrentGeneration; g++ {
-		if span, ok := cy.Generations[g]; ok && span.Rows > 0 && span.MinAttemptBlock <= firstDebt {
-			return true, fmt.Sprintf("generation %d attempted at block %d <= first debt block %d, so generation %d (the newest that could have completed at or below pin %d) opened at or before the arrival — no completed cycle has been owed this account", g, span.MinAttemptBlock, firstDebt, k, pin)
-		}
-	}
-	return false, fmt.Sprintf("no attempt by generation >= %d is witnessed at or below the arrival edge %d: either a completed generation opened after this account arrived and still skipped it (a sweeper defect), or the opening edge is unwitnessable — both GATE, because missing or sticky cycle evidence is never disclosed", k, firstDebt)
+	// K is not the current generation (the current one is open, or completed
+	// above the pin): no persisted completion edge exists for it (derivation
+	// 3) — a non-current generation's surviving span only LOWER-bounds its
+	// completion edge, and no upper bound survives at all, so whether it
+	// closed before or after this account arrived is unwitnessable.
+	return false, fmt.Sprintf("generation %d is the newest candidate to have completed at or below pin %d, but it is not the current generation and the schema persists NO completion edge for a non-current generation (its surviving attempt span can only shrink, lower-bounding — never upper-bounding — the edge): whether it closed before or after the arrival edge %d, or completed at all, is unwitnessable, and a completed generation that skipped a registered borrower is a sweeper defect — missing or ambiguous chronology GATES, never discloses", k, pin, firstDebt)
 }
 
 // dmParamsAtBlock folds the FULL raw DM config ledger prefix at `block` into
