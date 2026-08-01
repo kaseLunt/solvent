@@ -26,6 +26,10 @@ package main
 //	  weETH 1e18 held, price 4000.000000, LT 80e18/100e18, bonus 1e18 (additive, 1%)
 //	    value_usd               = floor(1e18 x 4000000000 / 1e18) = 4000000000  ($4,000)
 //	    max_borrow_contribution = floor(4000000000 x 80e18/100e18) = 3200000000  ($3,200)
+//	  USDC 4200000000 normalized borrowed, borrow index 1e18 (identity)
+//	    live_debt = floor(4200000000 x 1e18 / 1e18) = 4200000000  ($4,200)
+//	    (a PURE DEBT leg: no swept USDC collateral behind it, so amount /
+//	    value_usd / max_borrow_contribution are NULL — absent, not zero)
 //	  borrowings = 4200000000 ($4,200) > 3200000000  =>  LIQUIDATABLE
 //	    recoverable = floor(4000000000 x 100e18/101e18)           = 3960396039
 //	    bad debt    = 4200000000 - 3960396039                     =  239603961
@@ -61,6 +65,7 @@ var (
 	fxWeETHEth = common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") // weETH on ETH (Aave)
 	fxUSDCEth  = common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") // USDC on ETH (Aave debt)
 	fxWeETHOp  = common.HexToAddress("0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF") // weETH on OP (Debt Manager)
+	fxUSDCOp   = common.HexToAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85") // USDC on OP (Debt Manager borrow token)
 
 	fxOracle = common.HexToAddress("0x43b64f28A678944E0655404B0B98E443851cC34F") // AaveOracle
 
@@ -110,26 +115,40 @@ const (
 	fxAaveHFNum          = "6480000000000000"
 	fxAaveHFDen          = "6000000000000000" // 1e4 x 6e11
 
-	fxDMCollateralUSD  = "4000000000"
-	fxDMMaxBorrowLT    = "3200000000"
-	fxDMBorrowings     = "4200000000"
-	fxDMHFNum          = "3200000000"
-	fxDMHFDen          = "4200000000"
-	fxDMBadDebtAtPar   = "239603961"
-	fxDMAtRiskAtPar    = "4000000000"
-	fxAaveDebtAt90     = "600000000000"
-	fxAaveAtRiskAt90   = "630000000000"
-	fxDMBadDebtAt90    = "635643565"
-	fxDMAtRiskAt90     = "3600000000"
-	fxAaveLTBps        = "8100"
-	fxAaveBonusBps     = "10500"
-	fxDMLiqThreshold   = "80000000000000000000" // 80e18 over HUNDRED_PERCENT = 100e18
-	fxDMLiqBonus       = "1000000000000000000"  // 1e18 additive => 1%
-	fxAaveWeETHAmount  = "2000000000000000000"
-	fxAaveUSDCDebt     = "6000000000"
-	fxDMWeETHAmount    = "1000000000000000000"
-	fxAaveWeETHCollBse = "800000000000"
-	fxAaveUSDCDebtBase = "600000000000"
+	fxDMCollateralUSD = "4000000000"
+	fxDMMaxBorrowLT   = "3200000000"
+	fxDMBorrowings    = "4200000000"
+	fxDMHFNum         = "3200000000"
+	fxDMHFDen         = "4200000000"
+	fxDMBadDebtAtPar  = "239603961"
+	fxDMAtRiskAtPar   = "4000000000"
+	fxAaveDebtAt90    = "600000000000"
+	fxAaveAtRiskAt90  = "630000000000"
+	fxDMBadDebtAt90   = "635643565"
+	fxDMAtRiskAt90    = "3600000000"
+	fxAaveLTBps       = "8100"
+	fxAaveBonusBps    = "10500"
+	fxDMLiqThreshold  = "80000000000000000000" // 80e18 over HUNDRED_PERCENT = 100e18
+	fxDMLiqBonus      = "1000000000000000000"  // 1e18 additive => 1%
+	// The merged-leg fixture (borrow token held as collateral, both sides on
+	// ONE row — the live book's normal shape). Hand-derived:
+	//	USDC value_usd     = floor(7240549 × 1000000 / 1e6)  = 7240549
+	//	USDC contribution  = floor(7240549 × 80e18 / 100e18) = 5792439
+	//	collateral total   = 4000000000 + 7240549            = 4007240549
+	//	max borrow total   = 3200000000 + 5792439            = 3205792439
+	//	borrowings 4200000000 > 3205792439                   => LIQUIDATABLE
+	fxDMUSDCLiqThreshold = "80000000000000000000"
+	fxDMUSDCAmount       = "7240549"
+	fxDMUSDCValueUSD     = "7240549"
+	fxDMUSDCContribution = "5792439"
+	fxDMUSDCPrice        = "1000000" // $1.000000, 6-dec
+	fxDMMergedCollateral = "4007240549"
+	fxDMMergedMaxBorrow  = "3205792439"
+	fxAaveWeETHAmount    = "2000000000000000000"
+	fxAaveUSDCDebt       = "6000000000"
+	fxDMWeETHAmount      = "1000000000000000000"
+	fxAaveWeETHCollBse   = "800000000000"
+	fxAaveUSDCDebtBase   = "600000000000"
 )
 
 // fxBase is the fixture's reference instant. Stored timestamps are relative to it
@@ -261,12 +280,25 @@ func fxDMPosition() *positionRow {
 		ParamsBlock:        fxDMBlock,
 		SweepBlock:         fxDMSweepBlock,
 		OldestPriceInput:   timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
-		Legs: []legRow{{
-			Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxWeETHOp.Bytes(), Decimals: 18,
-			Amount: bi(fxDMWeETHAmount), ValueUSD: bi(fxDMCollateralUSD),
-			MaxBorrowContribution: bi(fxDMMaxBorrowLT),
-			LiqThreshold:          bi(fxDMLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
-		}},
+		// TWO legs, because that is what riskd writes for a borrowing account:
+		// the borrow token's PURE DEBT leg (amount and the collateral outputs
+		// NULL — absent, not zero) and the swept collateral's leg. The debt-side
+		// weld in verifyReconstruction demands Σ live_debt == borrowings, so a
+		// fixture that persisted borrowings with no debt leg behind them would
+		// be a state the daemon cannot produce AND one the serve layer refuses.
+		Legs: []legRow{
+			{
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxUSDCOp.Bytes(), Decimals: 6,
+				ScaledDebt: bi(fxDMBorrowings), LiveDebt: bi(fxDMBorrowings),
+				DebtIndexBlock: u64p(fxDMBlock),
+			},
+			{
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxWeETHOp.Bytes(), Decimals: 18,
+				Amount: bi(fxDMWeETHAmount), ValueUSD: bi(fxDMCollateralUSD),
+				MaxBorrowContribution: bi(fxDMMaxBorrowLT),
+				LiqThreshold:          bi(fxDMLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
+			},
+		},
 		Prices: []store.RiskBatchPriceInput{{
 			Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxWeETHOp.Bytes(),
 			ChainID: int64(fxOPChain), Source: fxDMSource, Provenance: risk.ProvenanceEngineExact,
@@ -274,6 +306,67 @@ func fxDMPosition() *positionRow {
 			SourceAsOf:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
 			BudgetSeconds: fxPriceBudgetSecs, Verdict: riskfeed.VerdictFresh, AgeSeconds: i64p(fxDMWeETHAge),
 		}},
+	}
+}
+
+// fxDMMergedPosition is the borrow-token-held-as-collateral shape — USDC on
+// BOTH sides of one position, carried by ONE merged leg, exactly as
+// riskfeed.assembleDM writes it (risk_position_legs' primary key has no side
+// column, so two rows for one asset is a duplicate-key write failure; the
+// first full-book riskd pass died there, 2026-07-31). It is NOT part of
+// fxPositions — the aggregate counts across the suite stay untouched — and
+// exists for the reconstruction round trip: the serve layer must read the
+// merged row ONCE, count both sides, and reproduce every persisted number.
+func fxDMMergedPosition() *positionRow {
+	return &positionRow{
+		Engine:             risk.DMEngine,
+		Account:            fxAcctDM.Bytes(),
+		Status:             store.RiskPositionComputed,
+		Flags:              []string{},
+		ValueDecimals:      6,
+		HFNum:              bi(fxDMMergedMaxBorrow),
+		HFDen:              bi(fxDMBorrowings),
+		CollateralValueUSD: bi(fxDMMergedCollateral),
+		MaxBorrowLT:        bi(fxDMMergedMaxBorrow),
+		Borrowings:         bi(fxDMBorrowings),
+		Liquidatable:       boolp(true),
+		BalancesBlock:      fxDMBlock,
+		ParamsBlock:        fxDMBlock,
+		SweepBlock:         fxDMSweepBlock,
+		OldestPriceInput:   timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+		Legs: []legRow{
+			{
+				// THE MERGED LEG: debt fields AND collateral fields on one row.
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxUSDCOp.Bytes(), Decimals: 6,
+				ScaledDebt: bi(fxDMBorrowings), LiveDebt: bi(fxDMBorrowings),
+				DebtIndexBlock: u64p(fxDMBlock),
+				Amount:         bi(fxDMUSDCAmount), ValueUSD: bi(fxDMUSDCValueUSD),
+				MaxBorrowContribution: bi(fxDMUSDCContribution),
+				LiqThreshold:          bi(fxDMUSDCLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
+			},
+			{
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxWeETHOp.Bytes(), Decimals: 18,
+				Amount: bi(fxDMWeETHAmount), ValueUSD: bi(fxDMCollateralUSD),
+				MaxBorrowContribution: bi(fxDMMaxBorrowLT),
+				LiqThreshold:          bi(fxDMLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
+			},
+		},
+		Prices: []store.RiskBatchPriceInput{
+			{
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxUSDCOp.Bytes(),
+				ChainID: int64(fxOPChain), Source: fxDMSource, Provenance: risk.ProvenanceEngineExact,
+				Value: bi(fxDMUSDCPrice), Decimals: i16p(6), BlockNumber: i64p(fxDMPriceBlock),
+				SourceAsOf:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+				BudgetSeconds: fxPriceBudgetSecs, Verdict: riskfeed.VerdictFresh, AgeSeconds: i64p(fxDMWeETHAge),
+			},
+			{
+				Engine: risk.DMEngine, Account: fxAcctDM.Bytes(), Asset: fxWeETHOp.Bytes(),
+				ChainID: int64(fxOPChain), Source: fxDMSource, Provenance: risk.ProvenanceEngineExact,
+				Value: bi(fxDMWeETHPrice), Decimals: i16p(6), BlockNumber: i64p(fxDMPriceBlock),
+				SourceAsOf:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+				BudgetSeconds: fxPriceBudgetSecs, Verdict: riskfeed.VerdictFresh, AgeSeconds: i64p(fxDMWeETHAge),
+			},
+		},
 	}
 }
 
@@ -323,6 +416,14 @@ func fxParamWitness() *paramWitness {
 				fxWeETHOp: {
 					Engine: risk.DMEngine, ChainID: fxOPChain, Asset: fxWeETHOp,
 					LiqThreshold: bi(fxDMLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
+					EffectiveBlock: fxDMParamEffectiveBlock, Source: "position_events",
+				},
+				// USDC is BOTH the borrow token and a collateral token — the
+				// live book's normal shape. The merged-leg fixture's threshold
+				// weld needs the ledger to assert USDC's own config.
+				fxUSDCOp: {
+					Engine: risk.DMEngine, ChainID: fxOPChain, Asset: fxUSDCOp,
+					LiqThreshold: bi(fxDMUSDCLiqThreshold), LiqBonus: bi(fxDMLiqBonus),
 					EffectiveBlock: fxDMParamEffectiveBlock, Source: "position_events",
 				},
 			},

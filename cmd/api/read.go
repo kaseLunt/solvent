@@ -739,11 +739,23 @@ func (s *server) reconstruct(p *positionRow) (risk.PositionInput, error) {
 		}
 		for _, l := range p.Legs {
 			asset := common.BytesToAddress(l.Asset)
-			in.Collateral = append(in.Collateral, risk.DMCollateral{
-				Asset:    asset,
-				Amount:   cloneOrZero(l.Amount),
-				Decimals: uint8(l.Decimals),
-			})
+			// A leg with NO amount is a PURE DEBT leg — the borrow token with no
+			// swept balance behind it. Its debt is already inside DebtUSD (the
+			// position's borrowings), and it must NOT become a zero-amount
+			// collateral entry: `amount` NULL is "this leg has no collateral
+			// side", not "this leg holds zero", and a phantom zero entry would
+			// make the recomputation emit collateral outputs (zeros) that the
+			// persisted leg honestly does not carry. A leg carrying BOTH sides —
+			// the merged shape assembleDM writes for a borrow token held as
+			// collateral — has a non-NULL amount and flows through here as a
+			// collateral entry like any other.
+			if l.Amount != nil {
+				in.Collateral = append(in.Collateral, risk.DMCollateral{
+					Asset:    asset,
+					Amount:   new(big.Int).Set(l.Amount),
+					Decimals: uint8(l.Decimals),
+				})
+			}
 			if l.LiqThreshold != nil {
 				in.Params = append(in.Params, risk.ParamRow{
 					Engine:         risk.DMEngine,
@@ -920,8 +932,33 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness
 		for _, cv := range h.Collateral {
 			byAsset[cv.Asset] = cv
 		}
+		// The DEBT-SIDE WELD accumulates alongside the per-leg collateral
+		// checks: every borrow leg's live_debt must sum EXACTLY to the
+		// borrowings the health factor divided by. The collateral side is
+		// welded per leg below; without this sum the debt legs would be served
+		// numbers nothing verifies — and a leg merge that silently dropped a
+		// debt side (the borrow token held as collateral carries BOTH sides on
+		// one row) would be invisible.
+		liveDebtSum := new(big.Int)
 		for _, l := range p.Legs {
 			asset := common.BytesToAddress(l.Asset)
+			if l.LiveDebt != nil {
+				liveDebtSum.Add(liveDebtSum, l.LiveDebt)
+			}
+			if l.Amount == nil {
+				// A PURE DEBT leg has no collateral side and therefore no
+				// collateral outputs to compare. That absence is VERIFIED, not
+				// assumed: a value_usd or max_borrow_contribution on it would be
+				// a served number the recomputation never produces.
+				if l.ValueUSD != nil || l.MaxBorrowContribution != nil {
+					return fmt.Errorf("leg %s carries collateral outputs (value_usd %s, max_borrow_contribution %s) with no collateral amount behind them",
+						asset.Hex(), showBig(l.ValueUSD), showBig(l.MaxBorrowContribution))
+				}
+				if err := weldLegParams(w, risk.DMEngine, p.ParamsBlock, asset, l); err != nil {
+					return err
+				}
+				continue
+			}
 			cv, ok := byAsset[asset]
 			if !ok {
 				return fmt.Errorf("leg %s is absent from the recomputation", asset.Hex())
@@ -935,6 +972,10 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness
 			if err := weldLegParams(w, risk.DMEngine, p.ParamsBlock, asset, l); err != nil {
 				return err
 			}
+		}
+		if liveDebtSum.Cmp(cloneOrZero(p.Borrowings)) != 0 {
+			return fmt.Errorf("legs' live_debt sums to %s, the batch persisted borrowings %s — a debt side was dropped or double-counted",
+				liveDebtSum, showBig(p.Borrowings))
 		}
 		return nil
 	}

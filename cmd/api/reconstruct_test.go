@@ -131,6 +131,51 @@ func TestReconstructDMReproducesThePersistedVerdict(t *testing.T) {
 	require.True(t, h.Liquidatable, "$4,200 of debt against a $3,200 threshold is liquidatable, strictly")
 }
 
+// TestReconstructDMMergedLegReproducesThePersistedVerdict is the serve-side
+// half of the borrow-token-held-as-collateral fix: USDC carries BOTH sides on
+// ONE leg row (the shape riskfeed.assembleDM writes for 7,503 of ~9,700 live
+// DM accounts), and the reconstruction must read that row ONCE — one
+// collateral entry, both sides counted, every persisted number reproduced
+// exactly.
+func TestReconstructDMMergedLegReproducesThePersistedVerdict(t *testing.T) {
+	s := fxServer(t)
+	p := fxDMMergedPosition()
+
+	in, err := s.reconstruct(p)
+	require.NoError(t, err)
+	require.NotNil(t, in.DM)
+	require.Len(t, in.DM.Collateral, 2,
+		"the merged USDC row is ONE collateral entry; the pure numbers already carry its debt side via borrowings")
+	require.NoError(t, verifyReconstruction(p, in, fxParamWitness()))
+
+	h, err := risk.ComputeDMHealth(*in.DM)
+	require.NoError(t, err)
+	require.Equal(t, fxDMMergedCollateral, h.CollateralValueUSD.String(),
+		"$4,000 weETH + $7.240549 USDC — the borrow token's collateral side counts")
+	require.Equal(t, fxDMMergedMaxBorrow, h.MaxBorrowLT.String(),
+		"floor(4000000000 x 80/100) + floor(7240549 x 80/100) = 3200000000 + 5792439")
+	require.Equal(t, fxDMBorrowings, h.Borrowings.String())
+	require.True(t, h.Liquidatable, "$4,200 of debt against a $3,205.792439 threshold is liquidatable")
+}
+
+// TestReconstructDMPureDebtLegIsNotPhantomCollateral pins the debt-only shape:
+// a borrowing account with NO swept balance of the borrow token persists a leg
+// whose amount is NULL, and the reconstruction must NOT feed it in as a
+// zero-amount collateral entry — "no collateral side" and "zero collateral"
+// are different statements, and the phantom entry made verifyReconstruction
+// refuse every such account (value_usd 0 versus <absent>).
+func TestReconstructDMPureDebtLegIsNotPhantomCollateral(t *testing.T) {
+	s := fxServer(t)
+	p := fxDMPosition() // carries the pure USDC debt leg + the weETH collateral leg
+
+	in, err := s.reconstruct(p)
+	require.NoError(t, err)
+	require.NotNil(t, in.DM)
+	require.Len(t, in.DM.Collateral, 1, "only the weETH leg has a collateral side")
+	require.Equal(t, fxWeETHOp, in.DM.Collateral[0].Asset)
+	require.NoError(t, verifyReconstruction(p, in, fxParamWitness()))
+}
+
 // TestVerifyReconstructionRejectsEveryTamperedField is the discriminating negative
 // for the guard: if the persisted row disagrees with the recomputation in ANY
 // compared field, the position must be refused rather than served.
@@ -175,9 +220,48 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				p.MaxBorrowLT = new(big.Int).Sub(p.MaxBorrowLT, big.NewInt(1))
 			},
 			"liquidatable verdict absent": func(p *positionRow) { p.Liquidatable = nil },
+			"debt leg live_debt off by one": func(p *positionRow) {
+				// The debt-side weld: Σ legs' live_debt must equal borrowings.
+				p.Legs[0].LiveDebt = new(big.Int).Add(p.Legs[0].LiveDebt, big.NewInt(1))
+			},
+			"phantom collateral outputs on a pure debt leg": func(p *positionRow) {
+				// A value_usd on a leg with no amount is a served number the
+				// recomputation never produces — verified absent, not assumed.
+				p.Legs[0].ValueUSD = big.NewInt(1)
+			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				p := fxDMPosition()
+				tamper(p)
+				in, err := s.reconstruct(p)
+				require.NoError(t, err)
+				require.Error(t, verifyReconstruction(p, in, fxParamWitness()))
+			})
+		}
+	})
+
+	// THE MERGED LEG'S OWN NEGATIVES: dropping either side of the
+	// borrow-token-held-as-collateral row must refuse the position — these are
+	// the wave's two named mutants, pinned at the serve layer.
+	t.Run("debt manager merged leg", func(t *testing.T) {
+		for name, tamper := range map[string]func(*positionRow){
+			"debt side dropped from the merged leg": func(p *positionRow) {
+				p.Legs[0].ScaledDebt = nil
+				p.Legs[0].LiveDebt = nil // Σ live_debt collapses to 0 ≠ borrowings
+			},
+			"collateral side dropped from the merged leg": func(p *positionRow) {
+				p.Legs[0].Amount = nil
+				p.Legs[0].ValueUSD = nil
+				p.Legs[0].MaxBorrowContribution = nil
+				// The recomputation now values only weETH: collateral_value_usd
+				// and max_borrow_lt both disagree with the persisted totals.
+			},
+			"merged leg live_debt halved": func(p *positionRow) {
+				p.Legs[0].LiveDebt = new(big.Int).Rsh(p.Legs[0].LiveDebt, 1)
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				p := fxDMMergedPosition()
 				tamper(p)
 				in, err := s.reconstruct(p)
 				require.NoError(t, err)
