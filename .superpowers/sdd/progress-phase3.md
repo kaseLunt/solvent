@@ -3151,3 +3151,51 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   migration before the receipt run (additive, seconds, pre-authorized
   class). Round 5 on the pair after landing → THEN the fresh-pin
   acceptance receipt run.
+- **H5a+H5b LANDED AS A PAIR; LIVE DB AT SCHEMA 18; LOCAL UI SERVING
+  (17:03)**: joint gate green after diagnosing the 00018 backfill
+  failure to post-edit 00013 drift in three derived scratch DBs
+  (solvent_test_reconepoch/_recongate/_reconsweeppin re-armed; live DB
+  verified clean READ-ONLY first: all 7 sweep columns present, empty
+  observatory_points). Landed f12018e (H5a: completion-edge witness
+  replaces the opening-edge heuristic) + c683515 (H5b: migration 00018
+  sweep clocks on observatory_points w/ honest NULL backfill for pruned
+  sources, welds 17→18, contract 1.2.2, law-test cardinality +
+  nullable-hop hardening), pushed. Mutations 3/3 KILLED. Live DB
+  daemon-migrated to goose 18. API up :8080 (honest no-batch refusals),
+  web up :3111 (all six surfaces 200). riskd -once FIRST PRODUCTION
+  CONTACT FAILED: duplicate risk_position_legs PK — a DM account with
+  the same asset on both sides emits two USDC legs; the schema's row
+  model carries both sides in ONE row and the fixtures (1-4 positions)
+  never held the shape. Diagnosis+fix wave dispatched (merge preferred;
+  HF/maxBorrow-unchanged must be PROVEN; riskd -once live is the wave's
+  one sanctioned write; clause-4 authority to fix a second first-contact
+  bug in the same layer). Owner one-pager artifact published.
+- **CODEX ROUND 5 ON THE H5 PAIR: NOT-SHIP, 4 FIX-WORTHY (17:25)**:
+  (1) HIGH — failed sweep attempts launder into the never-reached race
+  exemption: the never-swept branch ignores the account's OWN
+  attempted=true/status=failed row in the completed generation (max
+  attempt 100, first debt 200 → classified coverage gap, ungated; a
+  padded census leaves the failure unsampled → false-green reconcile).
+  Fail closed: an attempted account WAS reached. (2) HIGH — the batch
+  permalink handler reads identity/completeness/aggregates/watermarks
+  in separate queries; a retention prune between stages serves a
+  COMPLETE batch as aggregates:[] and the stamp loop passes vacuously
+  on zero rows (wrong empty-book answer to an honest reader). One
+  repeatable-read tx + reject empty/inconsistent cardinality on a
+  complete batch. (3) MEDIUM — the 00018 CHECK passes UNKNOWN
+  (sweep_applicable=NULL with full stamp payload satisfies no branch
+  and fails none) while the reader treats the row as unrecorded and
+  ignores the stamp — a vacuous guard; needs IS TRUE/IS FALSE semantics
+  via a NEW migration (00018 is applied live; an in-place edit re-runs
+  the 00013 scratch-drift fiasco). (4) MEDIUM — the contract law test
+  analyzes allOf arms independently: batch_id in one arm + the count in
+  a sibling arm keeps the outer license — merged-object analysis + a
+  sibling-arm negative control. ALL FOUR FIX-WORTHY under the bar
+  (1 = pass-that-should-fail, 2 = wrong data served, 3 = vacuous guard,
+  4 = vacuous green). H6a (finding 1, cmd/reconcile — disjoint zone)
+  DISPATCHED NOW; H6b (findings 2-4, cmd/api + internal/store) QUEUED
+  behind the riskd first-contact wave, which owns those packages at
+  this hour (scope-check sent: justify the refusal/coverage plumbing,
+  keep the leg merge separable, no cmd/reconcile, no in-place 00018).
+  Round 6 on the H6 set after landing → THEN the fresh-pin acceptance
+  receipt run.
