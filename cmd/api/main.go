@@ -215,6 +215,14 @@ type server struct {
 	// readFailure is a TEST-ONLY injected read error for the SSE read-health latch.
 	// Nil in production; see server.refresh.
 	readFailure *atomic.Pointer[error]
+
+	// batchInterleave is a TEST-ONLY hook the batch permalink handler runs
+	// between its identity/servability stage and its aggregate/vector reads —
+	// the retention-prune interleave point of Codex round-5 finding 2. Nil in
+	// production (unexported, no configuration path); see handleBatch and
+	// p5_batches_prune_race_db_test.go. The same atomic shape as readFailure,
+	// for the same reason: a test arms it while a server goroutine reads it.
+	batchInterleave *atomic.Pointer[func()]
 }
 
 // apiDSN resolves the service's database URL.

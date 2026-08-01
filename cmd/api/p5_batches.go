@@ -100,15 +100,36 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	now, err := s.dbNow(ctx)
+
+	// ONE SNAPSHOT FOR EVERY STAGE (wave H6b, Codex round-5 finding 2).
+	//
+	// Identity, servability, aggregates and the watermark vector used to be
+	// read through SEPARATE pool queries — and batches are PRUNABLE. An honest
+	// request for the oldest retained batch could read its identity and
+	// complete status, race with the next WriteRiskBatch retention prune, and
+	// then read EMPTY aggregate/vector sets without error: a supposedly
+	// complete batch served with `aggregates: []`, which the contract cannot
+	// tell from an honest answer. Under `REPEATABLE READ, READ ONLY` every
+	// stage reads one database instant, so the answer is either the WHOLE
+	// batch (it was retained when the request began — pin truth) or the 404
+	// retention disclosure — never a torn mixture. The isolation level lives
+	// in BeginRiskSnapshot, its one home.
+	tx, err := s.store.BeginRiskSnapshot(ctx)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 		return
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var out batchResponse
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&out.ServedAt); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "read database clock: "+err.Error(), nil)
+		return
+	}
+	out.ServedAt = out.ServedAt.UTC()
 
 	// The batch's own immutable identity row.
-	var out batchResponse
-	err = s.store.Querier().QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT id, computed_at, producer, status, position_count, refused_count, flagged_count,
 		       materialization_key, substrate_digest
 		  FROM risk_batches WHERE id = $1`, id).
@@ -124,35 +145,28 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 		return
 	}
-	out.ServedAt = now
 	out.ComputedAt = out.ComputedAt.UTC()
 	out.Producer = sanitize(out.Producer)
 
-	// Servability, through the store's ONE completeness authority.
-	newest, foundNewest, err := s.store.NewestCompleteBatch(ctx)
+	// Servability, through the store's ONE completeness authority, read in
+	// the SAME snapshot as the identity above. CompleteBatchIDs returns
+	// newest-first, so ids[0] names exactly the batch NewestCompleteBatch
+	// would serve — from this snapshot, which is the point.
+	ids, err := store.CompleteBatchIDs(ctx, tx, batchServabilityProbeLimit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 		return
 	}
 	complete := false
-	if foundNewest && newest.ID == id {
-		complete = true
-	} else {
-		ids, err := store.CompleteBatchIDs(ctx, s.store.Querier(), batchServabilityProbeLimit)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
-			return
-		}
-		for _, cid := range ids {
-			if cid == id {
-				complete = true
-				break
-			}
+	for _, cid := range ids {
+		if cid == id {
+			complete = true
+			break
 		}
 	}
 
 	switch {
-	case foundNewest && newest.ID == id:
+	case complete && ids[0] == id:
 		out.Servability = "newest_servable"
 		out.ServabilityNote = "this batch is the newest servable batch — every live surface is serving it."
 	case complete:
@@ -168,19 +182,43 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 		"a withheld engine's aggregate serves NULL totals and names its refusal — persisted zeros under a refusal mean WITHHELD, never an empty healthy book.",
 	}
 
+	// TEST SEAM (nil in production): the retention-prune interleave point —
+	// after the identity/servability reads, before the aggregate/vector reads.
+	// See p5_batches_prune_race_db_test.go.
+	if s.batchInterleave != nil {
+		if p := s.batchInterleave.Load(); p != nil && *p != nil {
+			(*p)()
+		}
+	}
+
 	if complete {
-		aggs, err := readAggregates(ctx, s.store.Querier(), id)
+		aggs, err := readAggregates(ctx, tx, id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 			return
 		}
 		// The batch's own watermark stamps, for the per-aggregate sweep
-		// disclosure (1.2.2). The same supplemental-SELECT pattern as the
-		// identity row above; watermark rows cascade with the batch, so a
-		// retained complete batch always has them.
-		vectors, err := readBatchWatermarkVectors(ctx, s.store.Querier(), []int64{id})
+		// disclosure (1.2.2) — same snapshot again.
+		vectors, err := readBatchWatermarkVectors(ctx, tx, []int64{id})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+			return
+		}
+		// FAIL CLOSED ON CARDINALITY (finding 2's second remedy). Inside one
+		// snapshot these states are unreachable through WriteRiskBatch — a
+		// complete batch always carries its aggregates and its stamped engine
+		// set — so an empty set here is a hand-written or torn "complete"
+		// batch (a restore, a manual edit), and serving it as `aggregates: []`
+		// would publish a complete book with nothing in it, which nothing in
+		// the store backs.
+		if len(aggs) == 0 {
+			writeError(w, http.StatusInternalServerError, codeInternal,
+				"batch "+strconv.FormatInt(id, 10)+" passed the completeness predicate but carries no aggregate rows — refusing to serve a complete batch as an empty book (a hand-written or torn state)", nil)
+			return
+		}
+		if len(vectors[id]) == 0 {
+			writeError(w, http.StatusInternalServerError, codeInternal,
+				"batch "+strconv.FormatInt(id, 10)+" passed the completeness predicate but carries no watermark stamps — refusing to serve its counts without their sweep clock", nil)
 			return
 		}
 		stampByEngine := map[string]store.RiskBatchWatermark{}
@@ -207,7 +245,7 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 				ComputedPositions: a.ComputedPositions,
 				RefusedPositions:  a.RefusedPositions,
 				FlaggedPositions:  a.FlaggedPositions,
-				Sweep:             wireSweepFrom(now, stamp.Sweep),
+				Sweep:             wireSweepFrom(out.ServedAt, stamp.Sweep),
 			}
 			if a.RefusalCode != "" {
 				// WITHHELD: the same rule every serving surface applies.
@@ -224,6 +262,10 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 			wireAggs = append(wireAggs, wa)
 		}
 		out.Aggregates = &wireAggs
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, "commit permalink snapshot: "+err.Error(), nil)
+		return
 	}
 	writeJSON(w, out)
 }

@@ -258,6 +258,33 @@ type visitKey struct {
 	licensed bool
 }
 
+// allOfArm is one member of a flattened allOf composition: the schema plus
+// the component name the walk attributes its properties to.
+type allOfArm struct {
+	s    *openapi3.Schema
+	name string
+}
+
+// flattenAllOf returns s followed by every schema reachable through nested
+// allOf membership (through refs and the nullable wrapper), each paired with
+// its own component name. allOf is COMPOSITION — every arm's properties land
+// on the SAME wire object — so the walk analyzes the arms as one merged
+// object (wave H6b, Codex round-5 finding 4). The cycle guard is on schema
+// identity; a single-member nullable wrapper among the members is collapsed
+// by deref before the member is recorded, exactly as everywhere else.
+func flattenAllOf(s *openapi3.Schema, name string, seen map[*openapi3.Schema]bool) []allOfArm {
+	if s == nil || seen[s] {
+		return nil
+	}
+	seen[s] = true
+	arms := []allOfArm{{s: s, name: name}}
+	for _, member := range s.AllOf {
+		m, mName := deref(member, name)
+		arms = append(arms, flattenAllOf(m, mName, seen)...)
+	}
+	return arms
+}
+
 func (st *sweepState) walk(ref *openapi3.SchemaRef, name string, licensed bool, depth int, seen map[visitKey]bool) {
 	s, name := deref(ref, name)
 	if s == nil || depth > 40 {
@@ -268,37 +295,67 @@ func (st *sweepState) walk(ref *openapi3.SchemaRef, name string, licensed bool, 
 		return
 	}
 	seen[k] = true
-	if name != "" {
-		st.reached[name] = true
+
+	// allOf IS COMPOSITION, AND THE ANALYSIS IS OVER THE MERGED OBJECT (wave
+	// H6b, Codex round-5 finding 4). A per-arm walk let a schema split
+	// `batch_id` into one arm and a bare liquidatable count into a sibling
+	// arm: no single arm both re-clocked and carried the count, so the
+	// count-bearing arm kept the outer envelope's license and the law
+	// greened vacuously — while the merged wire object is self-clocked and
+	// serves the count bare. Required properties and re-clock fields
+	// therefore apply across ALL arms before any descent. (oneOf/anyOf stay
+	// per-arm below, deliberately: union arms are ALTERNATIVE values, and a
+	// consumer holding one arm has only that arm's evidence in hand.)
+	arms := flattenAllOf(s, name, map[*openapi3.Schema]bool{})
+	merged := &openapi3.Schema{Properties: openapi3.Schemas{}}
+	for _, a := range arms {
+		if a.name != "" {
+			st.reached[a.name] = true
+		}
+		merged.Required = append(merged.Required, a.s.Required...)
+		for propName, prop := range a.s.Properties {
+			if _, dup := merged.Properties[propName]; !dup {
+				merged.Properties[propName] = prop
+			}
+		}
 	}
 
-	// The licensing transition, in order: attaching wins (a re-clocked schema
-	// carrying its OWN watermark is exactly the 1.2.1 AddressHistoryPoint);
-	// re-clocking WITHOUT attaching voids any outer vouching.
-	if attachesSweepEvidence(s, 0, map[*openapi3.Schema]bool{}) {
+	// The licensing transition, in order, over the MERGED object: attaching
+	// wins (a re-clocked schema carrying its OWN watermark is exactly the
+	// 1.2.1 AddressHistoryPoint); re-clocking WITHOUT attaching voids any
+	// outer vouching.
+	if attachesSweepEvidence(merged, 0, map[*openapi3.Schema]bool{}) {
 		licensed = true
-	} else if reclocks(s) {
+	} else if reclocks(merged) {
 		licensed = false
 	}
 
-	for propName, prop := range s.Properties {
-		if liquidatableFamily(propName) && !licensed {
-			v := lawViolation{Root: st.root, Schema: name, Property: propName, Boolean: isBooleanTyped(prop)}
-			st.violations[v.key()] = v
+	// One wire object, one visit per property name: the first declaring arm
+	// carries the attribution (the outer schema is arm zero).
+	visited := map[string]bool{}
+	for _, a := range arms {
+		for propName, prop := range a.s.Properties {
+			if visited[propName] {
+				continue
+			}
+			visited[propName] = true
+			if liquidatableFamily(propName) && !licensed {
+				v := lawViolation{Root: st.root, Schema: a.name, Property: propName, Boolean: isBooleanTyped(prop)}
+				st.violations[v.key()] = v
+			}
+			st.walk(prop, a.name+"."+propName, licensed, depth+1, seen)
 		}
-		childName := name + "." + propName
-		st.walk(prop, childName, licensed, depth+1, seen)
-	}
-	if s.Items != nil {
-		st.walk(s.Items, name+"[]", licensed, depth+1, seen)
-	}
-	for _, group := range [][]*openapi3.SchemaRef{s.AllOf, s.AnyOf, s.OneOf} {
-		for _, member := range group {
-			st.walk(member, name, licensed, depth+1, seen)
+		if a.s.Items != nil {
+			st.walk(a.s.Items, a.name+"[]", licensed, depth+1, seen)
 		}
-	}
-	if s.AdditionalProperties.Schema != nil {
-		st.walk(s.AdditionalProperties.Schema, name+".*", licensed, depth+1, seen)
+		for _, group := range [][]*openapi3.SchemaRef{a.s.AnyOf, a.s.OneOf} {
+			for _, member := range group {
+				st.walk(member, a.name, licensed, depth+1, seen)
+			}
+		}
+		if a.s.AdditionalProperties.Schema != nil {
+			st.walk(a.s.AdditionalProperties.Schema, a.name+".*", licensed, depth+1, seen)
+		}
 	}
 }
 
@@ -658,4 +715,82 @@ func TestLiquidatableDisclosureLawChecksEachUnionArmIndependently(t *testing.T) 
 		"the arm that carries its own required sweep_block satisfies the law")
 	require.True(t, hitsSchema(violations, "BareArmFixture", "liquidatable"),
 		"the bare arm must be flagged: its sibling's evidence is not in the consumer's hands when THIS arm is the value on the wire")
+}
+
+// TestLiquidatableDisclosureLawMergesAllOfArmsBeforeLicensing is wave H6b's
+// sibling-arm control (Codex round-5 finding 4): allOf is COMPOSITION, not
+// choice — every arm's properties land on the SAME wire object, so the
+// analysis must apply required properties and re-clock fields across the
+// MERGED object before descending. A schema that places `batch_id` in one
+// allOf arm and a bare `liquidatable_positions` in a sibling arm is, merged,
+// a self-clocked row serving a count with no sweep evidence — the same
+// mixed-clock defect as AddressHistoryPoint under 1.2.0, merely split across
+// arms. A walker that detects the re-clock only from each node's OWN
+// Required list and then visits each arm independently with the inherited
+// license never sees the two facts in one place: the clock arm re-clocks
+// (and carries no count), the count arm keeps the outer envelope's license,
+// and the law greens vacuously. This is the designed-mutant kill for
+// wave-h6b M3 (per-arm analysis restored).
+//
+// Note the asymmetry with oneOf/anyOf (the union-arm control above): union
+// arms are ALTERNATIVE values and must be judged independently, because a
+// consumer holds only one arm's value; allOf arms are ONE value and must be
+// judged jointly, because a consumer holds all of them at once.
+func TestLiquidatableDisclosureLawMergesAllOfArmsBeforeLicensing(t *testing.T) {
+	doc := loadFreshContract(t)
+
+	clockArm := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"batch_id"},
+		Properties: openapi3.Schemas{
+			"batch_id": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}),
+		},
+	}
+	countArm := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"liquidatable_positions"},
+		Properties: openapi3.Schemas{
+			"liquidatable_positions": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}),
+		},
+	}
+	doc.Components.Schemas["SplitClockArmFixture"] = openapi3.NewSchemaRef("", clockArm)
+	doc.Components.Schemas["SplitCountArmFixture"] = openapi3.NewSchemaRef("", countArm)
+
+	row := &openapi3.Schema{
+		AllOf: openapi3.SchemaRefs{
+			openapi3.NewSchemaRef("#/components/schemas/SplitClockArmFixture", clockArm),
+			openapi3.NewSchemaRef("#/components/schemas/SplitCountArmFixture", countArm),
+		},
+	}
+
+	// Under a response that DOES carry the batch envelope, exactly like the
+	// bare-boolean control: the licence the merged re-clock must void is
+	// really in force when the walk reaches the rows.
+	batchRef, ok := doc.Components.Schemas["Batch"]
+	require.True(t, ok, "the contract must declare the Batch envelope")
+	envelope := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"batch", "rows"},
+		Properties: openapi3.Schemas{
+			"batch": openapi3.NewSchemaRef("#/components/schemas/Batch", batchRef.Value),
+			"rows": openapi3.NewSchemaRef("", &openapi3.Schema{
+				Type:  &openapi3.Types{openapi3.TypeArray},
+				Items: openapi3.NewSchemaRef("", row),
+			}),
+		},
+	}
+
+	violations := sweepExtraRoot(doc, "GET /v1/__split_clock 200 application/json", openapi3.NewSchemaRef("", envelope))
+	require.True(t, hitsSchema(violations, "SplitCountArmFixture", "liquidatable_positions"),
+		"the count split into a sibling allOf arm was NOT flagged: the merged object requires batch_id, so it is self-clocked and the outer envelope cannot vouch for it — a per-arm walk has bypassed the exhaustive law")
+
+	// The positive mirror: the SAME split composition whose clock arm also
+	// REQUIRES its own sweep_block is the AddressHistoryPoint form merely
+	// composed — the merged object attaches, and the law demands evidence,
+	// not a ban on composition.
+	clockArm.Required = append(clockArm.Required, "sweep_block")
+	clockArm.Properties["sweep_block"] = openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}})
+	violations = sweepExtraRoot(doc, "GET /v1/__split_clock 200 application/json", openapi3.NewSchemaRef("", envelope))
+	require.False(t, hitsSchema(violations, "SplitCountArmFixture", "liquidatable_positions"),
+		"a composed row whose merged required set reaches sweep_block satisfies the law and must not be flagged")
 }
