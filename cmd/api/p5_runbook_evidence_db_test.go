@@ -241,7 +241,7 @@ func TestEvidenceServesTheDeployBoundManifest(t *testing.T) {
 	out := f.getJSON(t, "/v1/evidence", "/v1/evidence")
 	svc := asMap(t, out["service"])
 	require.Equal(t, "solvent-api", svc["name"])
-	require.Equal(t, float64(17), svc["schema_version"], "the P5 schema pin")
+	require.Equal(t, float64(18), svc["schema_version"], "the P5 schema pin (18: 00018 observatory sweep stamp, wave H5b)")
 	require.Equal(t, f.srv.registry.Fingerprint(), svc["registry_fingerprint"])
 	require.Equal(t, "test", out["commit"], "the build stamp, served verbatim")
 

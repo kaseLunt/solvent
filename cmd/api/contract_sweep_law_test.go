@@ -52,14 +52,20 @@ package main
 // envelope-clocked aggregate/stress surfaces, whose verdicts are computed AT
 // the envelope batch the watermark vector stamps.
 //
-// # The standing count gaps, pinned — never silently absorbed
+// # Zero gaps, both classes (wave H5b)
 //
-// The sweep finds three STANDING violations in today's contract, all on the
-// derived COUNT (`liquidatable_positions`, integer), none on the boolean
-// verdict class. They are pinned below as an EXACT set: a fourth gap fails
-// this test immediately, and fixing one fails it too until the pin shrinks —
-// the list can only be edited deliberately, in the open. The boolean class
-// has NO pin and admits ZERO violations, ever.
+// Wave H4b's sweep found three STANDING violations on the derived COUNT
+// class (`liquidatable_positions` on the observatory point, the observatory
+// series bucket and the batch permalink's aggregate) and pinned them as an
+// exact set. Wave H5b closed all three in contract 1.2.2 (Codex round-4
+// finding 2: ObservatoryPoint gained its batch's `watermarks` vector,
+// ObservatorySeriesPoint and BatchAggregate gained `sweep`) and the pin
+// shrank to EMPTY. The walk now admits ZERO violations of either class, and
+// this file also holds the walker itself to structure (finding 3): a
+// licensing chain refuses NULLABLE intermediate hops and refuses arrays the
+// contract does not require non-empty (minItems >= 1) — `watermarks: null`
+// and `watermarks: []` both satisfy `required: [watermarks]`, and neither is
+// evidence.
 
 import (
 	"fmt"
@@ -152,6 +158,24 @@ func isBooleanTyped(ref *openapi3.SchemaRef) bool {
 // s (through refs, the nullable wrapper and array items) reaches a required
 // property named in sweepEvidenceNames. Only REQUIRED properties count: an
 // optional watermark is an assertion a server may omit, not structure.
+//
+// # Carrier hops are held to structure, not to names (wave H5b, Codex round-4
+// finding 3)
+//
+// The TERMINAL of a chain may be nullable — `Stamp.sweep: null` is the
+// DISCLOSED "this engine has no sweeper", an attached absence. But an
+// INTERMEDIATE hop that can vanish is no evidence at all, and the walk
+// refuses to license through one:
+//
+//   - a NULLABLE hop voids the chain: a server may serve `null` there and
+//     every field "required" beneath it evaporates while the walk still
+//     counted it (`watermarks: null` satisfies `required: [watermarks]`);
+//   - an ARRAY hop licenses only when the contract REQUIRES it non-empty
+//     (minItems >= 1): `watermarks: []` also satisfies `required:
+//     [watermarks]`, and an empty vector is a licence with no evidence
+//     behind it. The cardinality must live in the CONTRACT — a walker that
+//     merely assumed non-emptiness would green a contract whose servers may
+//     legally serve the empty array.
 func attachesSweepEvidence(s *openapi3.Schema, depth int, seen map[*openapi3.Schema]bool) bool {
 	if s == nil || depth > 8 || seen[s] {
 		return false
@@ -172,14 +196,31 @@ func attachesSweepEvidence(s *openapi3.Schema, depth int, seen map[*openapi3.Sch
 		if !required[name] {
 			continue
 		}
+		// The nullable-hop check runs BEFORE deref: the contract's nullable
+		// wrapper (`nullable: true, allOf: [$ref]`) carries its nullability on
+		// the outer node, which deref looks through.
+		if prop != nil && prop.Value != nil && prop.Value.Nullable {
+			continue
+		}
 		child, _ := deref(prop, "")
-		if child == nil {
+		if child == nil || child.Nullable {
 			continue
 		}
 		// An array chain (Batch.watermarks -> Stamp[]): the items are what the
-		// wire serves, so the chain continues through them.
+		// wire serves, so the chain continues through them — but only when the
+		// contract requires the array non-empty, and only through non-nullable
+		// items.
 		if child.Items != nil {
+			if child.MinItems < 1 {
+				continue
+			}
+			if child.Items.Value != nil && child.Items.Value.Nullable {
+				continue
+			}
 			items, _ := deref(child.Items, "")
+			if items == nil || items.Nullable {
+				continue
+			}
 			if attachesSweepEvidence(items, depth+1, seen) {
 				return true
 			}
@@ -331,27 +372,21 @@ func TestLiquidatableDisclosureLawSweepsTheWholeContract(t *testing.T) {
 	require.Empty(t, booleans,
 		"BARE BOOLEAN VERDICT(S) in the contract: a DM liquidatable boolean is served without its sweep watermark structurally attached — 'any surface serving the bare boolean collapses the license'")
 
-	// THE PINNED STANDING GAPS — the derived-count class, EXACT set equality.
-	// All three are `liquidatable_positions` (integer) on self-clocked or
-	// unstamped surfaces: the observatory point (its own batch_id clock, no
-	// sweep stamp), the observatory series bucket (bucket clock, balances
-	// watermark only) and the batch permalink's aggregate (the batch's own
-	// clock, no watermark vector). REPORTED as contract disclosure gaps —
-	// pinned so they can neither grow nor silently vanish.
-	got := map[string]bool{}
+	// ZERO STANDING GAPS — the derived-count class too. Wave H4b pinned three
+	// count-class violations (the observatory point's Aggregate, the
+	// observatory series bucket, the batch permalink's aggregate — all
+	// `liquidatable_positions` on self-clocked surfaces with no sweep stamp);
+	// wave H5b closed all three in 1.2.2 (ObservatoryPoint.watermarks,
+	// ObservatorySeriesPoint.sweep, BatchAggregate.sweep — Codex round-4
+	// finding 2) and the pin shrank to EMPTY, deliberately. From here the law
+	// admits no violation of either class: a count without its sweep clock is
+	// the same mixed-clock lie as a bare boolean, only aggregated.
+	var gaps []string
 	for _, v := range violations {
-		got[v.key()] = true
+		gaps = append(gaps, v.key())
 	}
-	want := map[string]bool{}
-	for _, k := range []string{
-		"GET /v1/observatory 200 application/json | Aggregate | liquidatable_positions",
-		"GET /v1/observatory/series 200 application/json | ObservatorySeriesPoint | liquidatable_positions",
-		"GET /v1/batches/{id} 200 application/json | BatchAggregate | liquidatable_positions",
-	} {
-		want[k] = true
-	}
-	require.Equal(t, want, got,
-		"the standing-gap pin no longer matches the sweep: a NEW liquidatable-family field is being served without sweep evidence (fix the contract, never the pin), or a pinned gap was fixed (shrink the pin deliberately)")
+	require.Empty(t, gaps,
+		"liquidatable-family field(s) served without sweep evidence in scope: the contract closed this class in 1.2.2 (wave H5b) and it stays closed — attach the sweep watermark to the new surface (fix the contract, never this test)")
 
 	// ORPHAN-CARRIER CHECK: every component schema carrying a
 	// liquidatable-family property must be reachable from some served root —
@@ -477,4 +512,150 @@ func sweepExtraRoot(doc *openapi3.T, rootName string, ref *openapi3.SchemaRef) [
 	st := &sweepState{root: rootName, violations: map[string]lawViolation{}, reached: map[string]bool{}}
 	st.walk(ref, "", false, 0, map[visitKey]bool{})
 	return flattenViolations(st.violations)
+}
+
+// hitsSchema reports whether the violation set flags (schema, property).
+func hitsSchema(violations []lawViolation, schema, property string) bool {
+	for _, v := range violations {
+		if v.Schema == schema && v.Property == property {
+			return true
+		}
+	}
+	return false
+}
+
+// TestLiquidatableDisclosureLawRefusesAnEmptyableWatermarkArray is finding
+// 3's cardinality control (wave H5b): `watermarks: []` satisfies `required:
+// [watermarks]`, so an envelope whose watermark array the contract does NOT
+// require non-empty (no minItems) is a licence with no evidence behind it —
+// the walker must refuse to license through it, and must license the SAME
+// shape once minItems >= 1 makes the evidence structural. This is also the
+// regression pin on Batch.watermarks' own minItems: the walker half of the
+// law is only honest while the contract half carries the cardinality.
+func TestLiquidatableDisclosureLawRefusesAnEmptyableWatermarkArray(t *testing.T) {
+	doc := loadFreshContract(t)
+
+	stampRef, ok := doc.Components.Schemas["Stamp"]
+	require.True(t, ok, "the contract must declare the Stamp schema")
+
+	row := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"liquidatable_positions"},
+		Properties: openapi3.Schemas{
+			"liquidatable_positions": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}),
+		},
+	}
+	doc.Components.Schemas["EmptyableCarrierRowFixture"] = openapi3.NewSchemaRef("", row)
+
+	watermarks := &openapi3.Schema{
+		Type:  &openapi3.Types{openapi3.TypeArray},
+		Items: openapi3.NewSchemaRef("#/components/schemas/Stamp", stampRef.Value),
+		// NO MinItems: the servable empty vector — the defect under test.
+	}
+	envelope := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"watermarks", "rows"},
+		Properties: openapi3.Schemas{
+			"watermarks": openapi3.NewSchemaRef("", watermarks),
+			"rows": openapi3.NewSchemaRef("", &openapi3.Schema{
+				Type:  &openapi3.Types{openapi3.TypeArray},
+				Items: openapi3.NewSchemaRef("#/components/schemas/EmptyableCarrierRowFixture", row),
+			}),
+		},
+	}
+
+	violations := sweepExtraRoot(doc, "GET /v1/__emptyable_carrier 200 application/json", openapi3.NewSchemaRef("", envelope))
+	require.True(t, hitsSchema(violations, "EmptyableCarrierRowFixture", "liquidatable_positions"),
+		"a required watermark array WITHOUT minItems licensed the subtree: `watermarks: []` satisfies the requirement, so the walker granted a licence a server can legally serve no evidence for")
+
+	// The positive mirror: the same envelope with the cardinality in the
+	// contract IS evidence, and the law demands evidence, not a ban.
+	watermarks.MinItems = 1
+	violations = sweepExtraRoot(doc, "GET /v1/__emptyable_carrier 200 application/json", openapi3.NewSchemaRef("", envelope))
+	require.False(t, hitsSchema(violations, "EmptyableCarrierRowFixture", "liquidatable_positions"),
+		"with minItems >= 1 the watermark vector is structurally non-empty and must license the subtree")
+}
+
+// TestLiquidatableDisclosureLawRefusesANullableCarrierHop is finding 3's
+// nullable-hop control (wave H5b): a REQUIRED but NULLABLE carrier satisfies
+// its requirement with `null`, so every sweep field beneath it may legally
+// vanish — licensing through it is void. The TERMINAL may still be nullable
+// (`Stamp.sweep: null` is the disclosed "no sweeper" absence); only the hops
+// must be solid.
+func TestLiquidatableDisclosureLawRefusesANullableCarrierHop(t *testing.T) {
+	doc := loadFreshContract(t)
+
+	carrier := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"sweep_block"},
+		Properties: openapi3.Schemas{
+			"sweep_block": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}),
+		},
+	}
+	doc.Components.Schemas["NullableCarrierFixture"] = openapi3.NewSchemaRef("", carrier)
+
+	point := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"as_of", "liquidatable"},
+		Properties: openapi3.Schemas{
+			// The contract's nullable-wrapper form: nullable on the OUTER node,
+			// the evidence one $ref beneath it.
+			"as_of": openapi3.NewSchemaRef("", &openapi3.Schema{
+				Nullable: true,
+				AllOf:    openapi3.SchemaRefs{openapi3.NewSchemaRef("#/components/schemas/NullableCarrierFixture", carrier)},
+			}),
+			"liquidatable": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}),
+		},
+	}
+	doc.Components.Schemas["NullableCarrierPointFixture"] = openapi3.NewSchemaRef("", point)
+
+	root := openapi3.NewSchemaRef("#/components/schemas/NullableCarrierPointFixture", point)
+	violations := sweepExtraRoot(doc, "GET /v1/__nullable_carrier 200 application/json", root)
+	require.True(t, hitsSchema(violations, "NullableCarrierPointFixture", "liquidatable"),
+		"a NULLABLE required carrier licensed the subtree: `as_of: null` satisfies the requirement and takes the sweep evidence with it — the boolean beside it is bare")
+
+	// The positive mirror: the identical chain with a solid hop licenses.
+	point.Properties["as_of"] = openapi3.NewSchemaRef("#/components/schemas/NullableCarrierFixture", carrier)
+	violations = sweepExtraRoot(doc, "GET /v1/__nullable_carrier 200 application/json", root)
+	require.False(t, hitsSchema(violations, "NullableCarrierPointFixture", "liquidatable"),
+		"a non-nullable required carrier reaching sweep_block is exactly the Position.as_of form and must license")
+}
+
+// TestLiquidatableDisclosureLawChecksEachUnionArmIndependently is finding 3's
+// per-union-arm control (wave H5b): one arm's sweep evidence must never leak
+// a licence to a sibling arm — a consumer holding the OTHER arm's value has
+// no watermark in hand.
+func TestLiquidatableDisclosureLawChecksEachUnionArmIndependently(t *testing.T) {
+	doc := loadFreshContract(t)
+
+	licensed := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"sweep_block", "liquidatable"},
+		Properties: openapi3.Schemas{
+			"sweep_block":  openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeInteger}}),
+			"liquidatable": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}),
+		},
+	}
+	bare := &openapi3.Schema{
+		Type:     &openapi3.Types{openapi3.TypeObject},
+		Required: []string{"liquidatable"},
+		Properties: openapi3.Schemas{
+			"liquidatable": openapi3.NewSchemaRef("", &openapi3.Schema{Type: &openapi3.Types{openapi3.TypeBoolean}}),
+		},
+	}
+	doc.Components.Schemas["LicensedArmFixture"] = openapi3.NewSchemaRef("", licensed)
+	doc.Components.Schemas["BareArmFixture"] = openapi3.NewSchemaRef("", bare)
+
+	union := &openapi3.Schema{
+		OneOf: openapi3.SchemaRefs{
+			openapi3.NewSchemaRef("#/components/schemas/LicensedArmFixture", licensed),
+			openapi3.NewSchemaRef("#/components/schemas/BareArmFixture", bare),
+		},
+	}
+
+	violations := sweepExtraRoot(doc, "GET /v1/__union_arms 200 application/json", openapi3.NewSchemaRef("", union))
+	require.False(t, hitsSchema(violations, "LicensedArmFixture", "liquidatable"),
+		"the arm that carries its own required sweep_block satisfies the law")
+	require.True(t, hitsSchema(violations, "BareArmFixture", "liquidatable"),
+		"the bare arm must be flagged: its sibling's evidence is not in the consumer's hands when THIS arm is the value on the wire")
 }

@@ -1,7 +1,8 @@
 package store
 
 // P5 Task B2: the OBSERVATORY ROLLUP writer — the store surface over
-// migration 00016's observatory_points table.
+// migration 00016's observatory_points table (extended by 00018, which adds
+// the per-engine SWEEP STAMP to the copied watermark vector; wave H5b).
 //
 // A point is an OBSERVATION of the newest COMPLETE risk batch at write time
 // (the migration documents the full posture: points outlive their batches,
@@ -80,11 +81,21 @@ func (s *Store) WriteObservatoryPoints(ctx context.Context) (ObservatoryWriteRes
 		INSERT INTO observatory_points
 		    (bucket_start, engine, observed_at, batch_id, batch_computed_at, materialization_key,
 		     chain_id, last_block, acked_epoch, max_epoch_at_compute,
+		     sweep_applicable, sweep_rows, sweep_failed, sweep_success_sum,
+		     sweep_max_updated_at, sweep_generation, sweep_generation_open,
 		     value_decimals, positions, computed_positions, refused_positions,
 		     flagged_positions, liquidatable_positions, total_collateral, total_debt,
 		     refusal_code, refusal_detail, rates)
 		SELECT date_trunc('hour', now()), a.engine, now(), n.id, n.computed_at, n.materialization_key,
 		       w.chain_id, w.last_block, w.acked_epoch, w.max_epoch_at_compute,
+		       -- The SWEEP STAMP travels with the vector (migration 00018): the
+		       -- liquidatable count below aggregates a sweep-cut, and a point that
+		       -- copied the cursor pair but dropped the sweep state would serve
+		       -- that count with no clock naming the cut. Copied VERBATIM from the
+		       -- batch's own stamp — never re-read from live sweep tables, for the
+		       -- same reason the totals are never recomputed (the m5 mutant).
+		       w.sweep_applicable, w.sweep_rows, w.sweep_failed, w.sweep_success_sum,
+		       w.sweep_max_updated_at, w.sweep_generation, w.sweep_generation_open,
 		       a.value_decimals, a.positions, a.computed_positions, a.refused_positions,
 		       a.flagged_positions, a.liquidatable_positions, a.total_collateral, a.total_debt,
 		       a.refusal_code, a.refusal_detail,
@@ -109,6 +120,13 @@ func (s *Store) WriteObservatoryPoints(ctx context.Context) (ObservatoryWriteRes
 		    last_block             = EXCLUDED.last_block,
 		    acked_epoch            = EXCLUDED.acked_epoch,
 		    max_epoch_at_compute   = EXCLUDED.max_epoch_at_compute,
+		    sweep_applicable       = EXCLUDED.sweep_applicable,
+		    sweep_rows             = EXCLUDED.sweep_rows,
+		    sweep_failed           = EXCLUDED.sweep_failed,
+		    sweep_success_sum      = EXCLUDED.sweep_success_sum,
+		    sweep_max_updated_at   = EXCLUDED.sweep_max_updated_at,
+		    sweep_generation       = EXCLUDED.sweep_generation,
+		    sweep_generation_open  = EXCLUDED.sweep_generation_open,
 		    value_decimals         = EXCLUDED.value_decimals,
 		    positions              = EXCLUDED.positions,
 		    computed_positions     = EXCLUDED.computed_positions,

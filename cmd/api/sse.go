@@ -159,6 +159,12 @@ type wireDegradationEngine struct {
 	LiquidatablePositions int         `json:"liquidatable_positions"`
 	Refusals              []wireCount `json:"refusals"`
 	Flags                 []wireCount `json:"flags"`
+	// Sweep is this engine's sweep stamp on the batch the posture describes
+	// (1.2.2): the liquidatable count above belongs to that sweep-cut, and
+	// the stamp travels ON THE ROW because the stream's envelope batch is
+	// nullable (`unavailable` frames) and cannot structurally vouch for it.
+	// Null means the engine HAS no collateral sweep — a recorded absence.
+	Sweep *wireSweepStamp `json:"sweep"`
 }
 
 type wireDegradation struct {
@@ -283,6 +289,7 @@ func degradation(v *batchView, env wireBatch) wireDegradation {
 	for _, a := range v.Aggregates {
 		byEngine[a.Engine] = a
 	}
+	sweeps := v.sweepStamps()
 	for _, e := range sorted {
 		out.Engines = append(out.Engines, wireDegradationEngine{
 			Engine:                e,
@@ -291,6 +298,7 @@ func degradation(v *batchView, env wireBatch) wireDegradation {
 			LiquidatablePositions: byEngine[e].LiquidatablePositions,
 			Refusals:              counts(refusals[e]),
 			Flags:                 counts(flags[e]),
+			Sweep:                 wireSweepFrom(v.Now, sweeps[e]),
 		})
 	}
 	legs := map[string]bool{}

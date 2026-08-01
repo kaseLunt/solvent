@@ -57,10 +57,17 @@ type wireBatchAggregate struct {
 	// the persisted zeros behind a refusal mean WITHHELD, and republishing
 	// them as values is exactly how an unproven book becomes "nothing at
 	// risk".
-	LiquidatablePositions *int               `json:"liquidatable_positions"`
-	TotalCollateral       *string            `json:"total_collateral"`
-	TotalDebt             *string            `json:"total_debt"`
-	Refusal               *wireEngineRefusal `json:"refusal"`
+	LiquidatablePositions *int `json:"liquidatable_positions"`
+	// Sweep is this engine's sweep stamp on THIS batch's watermark vector
+	// (1.2.2): the permalink's rollups speak for the batch's own clock, so
+	// the sweep-cut behind the liquidatable count is named on the row
+	// itself. Null means the engine HAS no collateral sweep (Aave) — never
+	// "unrecorded": watermark rows live exactly as long as their batch, so
+	// a served aggregate always has its stamp.
+	Sweep           *wireSweepStamp    `json:"sweep"`
+	TotalCollateral *string            `json:"total_collateral"`
+	TotalDebt       *string            `json:"total_debt"`
+	Refusal         *wireEngineRefusal `json:"refusal"`
 }
 
 type batchResponse struct {
@@ -167,8 +174,32 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 			return
 		}
+		// The batch's own watermark stamps, for the per-aggregate sweep
+		// disclosure (1.2.2). The same supplemental-SELECT pattern as the
+		// identity row above; watermark rows cascade with the batch, so a
+		// retained complete batch always has them.
+		vectors, err := readBatchWatermarkVectors(ctx, s.store.Querier(), []int64{id})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+			return
+		}
+		stampByEngine := map[string]store.RiskBatchWatermark{}
+		for _, m := range vectors[id] {
+			stampByEngine[m.Engine] = m
+		}
 		wireAggs := make([]wireBatchAggregate, 0, len(aggs))
 		for _, a := range aggs {
+			// FAIL CLOSED on a missing stamp: a complete batch stamps every
+			// consumed engine, so an aggregate row with no watermark row is a
+			// hand-written or torn state — and serving its liquidatable count
+			// with `sweep: null` would CLAIM "this engine has no sweeper",
+			// which nothing in the store backs.
+			stamp, stamped := stampByEngine[a.Engine]
+			if !stamped {
+				writeError(w, http.StatusInternalServerError, codeInternal,
+					"batch "+strconv.FormatInt(id, 10)+" carries an aggregate for engine "+a.Engine+" but no watermark stamp for it — refusing to serve the rollup without the sweep clock its counts belong to", nil)
+				return
+			}
 			wa := wireBatchAggregate{
 				Engine:            a.Engine,
 				ValueDecimals:     int(a.ValueDecimals),
@@ -176,6 +207,7 @@ func (s *server) handleBatch(w http.ResponseWriter, r *http.Request) {
 				ComputedPositions: a.ComputedPositions,
 				RefusedPositions:  a.RefusedPositions,
 				FlaggedPositions:  a.FlaggedPositions,
+				Sweep:             wireSweepFrom(now, stamp.Sweep),
 			}
 			if a.RefusalCode != "" {
 				// WITHHELD: the same rule every serving surface applies.

@@ -132,33 +132,49 @@ func batchEnvelope(v *batchView) wireBatch {
 		Watermarks:     []wireStamp{},
 	}
 	for _, m := range v.Batch.Watermarks {
-		st := wireStamp{
-			Engine:            m.Engine,
-			ChainID:           m.ChainID,
-			LastBlock:         m.LastBlock,
-			AckedEpoch:        m.AckedEpoch,
-			MaxEpochAtCompute: m.MaxEpochAtCompute,
-		}
-		if m.Sweep != nil {
-			sw := &wireSweepStamp{
-				Rows:           m.Sweep.Rows,
-				Failed:         m.Sweep.Failed,
-				SuccessSum:     orZeroString(m.Sweep.SuccessSum),
-				Generation:     m.Sweep.Generation,
-				GenerationOpen: m.Sweep.GenerationOpen,
-			}
-			if m.Sweep.HasUpdatedAt {
-				t := m.Sweep.MaxUpdatedAt.UTC()
-				sw.MaxUpdatedAt = &t
-				age := ageSeconds(v.Now, t)
-				sw.AgeSeconds = &age
-			}
-			st.Sweep = sw
-		}
-		out.Watermarks = append(out.Watermarks, st)
+		out.Watermarks = append(out.Watermarks, wireStampFrom(v.Now, m))
 	}
 	out.Supersession = supersession(v)
 	return out
+}
+
+// wireStampFrom renders one persisted engine stamp — cursor vector plus sweep
+// stamp — for the wire. Shared by every surface that serves a watermark
+// vector (the batch envelope, /v1/observatory's per-point vectors), so the
+// Stamp shape cannot fork between them.
+func wireStampFrom(now time.Time, m store.RiskBatchWatermark) wireStamp {
+	return wireStamp{
+		Engine:            m.Engine,
+		ChainID:           m.ChainID,
+		LastBlock:         m.LastBlock,
+		AckedEpoch:        m.AckedEpoch,
+		MaxEpochAtCompute: m.MaxEpochAtCompute,
+		Sweep:             wireSweepFrom(now, m.Sweep),
+	}
+}
+
+// wireSweepFrom renders a persisted sweep stamp, or nil for the DISCLOSED
+// "this engine has no sweeper" absence. `age_seconds` is DB-now minus the
+// stamp's own max_updated_at — the stamp itself is immutable evidence; only
+// its age is measured at serve time.
+func wireSweepFrom(now time.Time, s *store.RiskSweepWatermark) *wireSweepStamp {
+	if s == nil {
+		return nil
+	}
+	sw := &wireSweepStamp{
+		Rows:           s.Rows,
+		Failed:         s.Failed,
+		SuccessSum:     orZeroString(s.SuccessSum),
+		Generation:     s.Generation,
+		GenerationOpen: s.GenerationOpen,
+	}
+	if s.HasUpdatedAt {
+		t := s.MaxUpdatedAt.UTC()
+		sw.MaxUpdatedAt = &t
+		age := ageSeconds(now, t)
+		sw.AgeSeconds = &age
+	}
+	return sw
 }
 
 // supersession runs the three legs of design spec §4 against the LIVE cursor and

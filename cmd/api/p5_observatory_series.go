@@ -48,6 +48,15 @@ type wireObservatorySeriesPoint struct {
 	MaterializationKey string `json:"materialization_key"`
 	AckedEpoch         int64  `json:"acked_epoch"`
 	MaxEpochAtCompute  int64  `json:"max_epoch_at_compute"`
+	// The engine's sweep stamp in the observed batch's watermark vector,
+	// copied at capture time (1.2.2, migration 00018) — the bucket's
+	// liquidatable count belongs to this sweep-cut, not to the bucket's
+	// block/time clocks. SweepRecorded false is the pre-00018 point whose
+	// batch was pruned before the backfill: the record genuinely does not
+	// exist, and a null there is UNRECORDED — never "this engine has no
+	// sweeper", which is what a null under SweepRecorded=true means.
+	SweepRecorded bool            `json:"sweep_recorded"`
+	Sweep         *wireSweepStamp `json:"sweep"`
 	// Refused is true when the engine's whole book was withheld at capture
 	// time. Totals are then null FOR THAT REASON, never 0.
 	Refused     bool    `json:"refused"`
@@ -155,6 +164,7 @@ func (s *server) handleObservatorySeries(w http.ResponseWriter, r *http.Request)
 			"every served point is an exact captured bucket, oldest first; a `step` larger than the native hour serves every Nth captured bucket VERBATIM — nothing is averaged, interpolated or smoothed.",
 			"each point's `last_block` is the engine's balances watermark AT CAPTURE TIME — the bucket's own as-of, never a chain head observed later — and each rate index carries its OWN as-of block.",
 			"each point names the batch it observed (`batch_id`, `materialization_key`) and the reorg-honesty stamp pair copied from that batch's watermark vector; the materialization key survives batch retention, so an observation stays attributable after its batch is pruned.",
+			"each point's `sweep` is the observed batch's own sweep stamp, copied at capture time: Debt Manager collateral is sweep-sourced, so the bucket's liquidatable count belongs to that sweep-cut, not to the bucket's block or time clocks. `sweep_recorded: false` marks pre-00018 history whose batch was pruned before the stamp could be recovered — an absent record, disclosed, never rendered as \"no sweeper\".",
 		},
 	}
 	if len(points) > 0 {
@@ -171,7 +181,7 @@ func (s *server) handleObservatorySeries(w http.ResponseWriter, r *http.Request)
 		if step > 0 && served && p.BucketStart.Before(lastServed.Add(time.Duration(step)*time.Second)) {
 			continue
 		}
-		wp, err := wireObservatoryPointFrom(p)
+		wp, err := wireObservatoryPointFrom(now, p)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 			return
@@ -192,7 +202,11 @@ func (s *server) handleObservatorySeries(w http.ResponseWriter, r *http.Request)
 // wireObservatoryPointFrom renders one captured bucket. A refused bucket's
 // totals are null — the persisted zeros mean WITHHELD, and republishing them
 // as values is exactly how an unproven book becomes "nothing at risk".
-func wireObservatoryPointFrom(p store.ObservatoryPoint) (wireObservatorySeriesPoint, error) {
+//
+// `now` is the response's database clock, used ONLY for the sweep stamp's
+// age_seconds (DB-now minus the stamp) — every other field is the bucket's
+// immutable capture-time record.
+func wireObservatoryPointFrom(now time.Time, p store.ObservatoryPoint) (wireObservatorySeriesPoint, error) {
 	out := wireObservatorySeriesPoint{
 		BucketStart:        p.BucketStart,
 		LastBlock:          p.LastBlock,
@@ -200,6 +214,8 @@ func wireObservatoryPointFrom(p store.ObservatoryPoint) (wireObservatorySeriesPo
 		MaterializationKey: p.MaterializationKey,
 		AckedEpoch:         p.AckedEpoch,
 		MaxEpochAtCompute:  p.MaxEpochAtCompute,
+		SweepRecorded:      p.SweepRecorded,
+		Sweep:              wireSweepFrom(now, p.Sweep),
 		RefusedPositions:   p.RefusedPositions,
 		Rates:              []wireRateIndex{},
 	}

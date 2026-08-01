@@ -99,6 +99,8 @@ func TestObservatorySeriesPointsCarryObservationProvenance(t *testing.T) {
 		"the observed batch's deterministic key, copied at write time — attribution that survives retention")
 	require.Equal(t, float64(0), p0["acked_epoch"])
 	require.Equal(t, float64(0), p0["max_epoch_at_compute"])
+	require.Equal(t, true, p0["sweep_recorded"],
+		"a bucket captured under 00018 always records the sweep state — unrecorded is reserved for pre-00018 history")
 
 	rates := asList(t, p0["rates"])
 	require.Len(t, rates, 1)
@@ -157,6 +159,18 @@ func TestBatchPermalinkNewestServable(t *testing.T) {
 		"the batch's OWN persisted rollup, verbatim")
 	require.Equal(t, fxDMBorrowings, byEngine["debt_manager"]["total_debt"])
 	require.Nil(t, byEngine["debt_manager"]["refusal"])
+
+	// The per-aggregate sweep stamp (1.2.2): the permalink's rollups speak for
+	// the batch's OWN clock, so the sweep-cut behind the liquidatable count is
+	// named on the row — the batch's persisted stamp, verbatim.
+	require.Nil(t, byEngine["aave_v3_etherfi"]["sweep"],
+		"aave has no collateral sweep: a recorded null, never a stamp invented for it")
+	sw := asMap(t, byEngine["debt_manager"]["sweep"])
+	require.Equal(t, float64(3), sw["rows"])
+	require.Equal(t, float64(1), sw["failed"])
+	require.Equal(t, "309593004", sw["success_sum"])
+	require.Equal(t, float64(4), sw["generation"])
+	require.Equal(t, false, sw["generation_open"])
 }
 
 func TestBatchPermalinkSupersededBatchStaysResolvable(t *testing.T) {

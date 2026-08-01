@@ -127,6 +127,7 @@ export const book = {
       "refused_positions": 1,
       "flagged_positions": 1,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": false,
       "refusal": null,
       "total_collateral": "800000000000",
@@ -153,6 +154,15 @@ export const book = {
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
@@ -595,6 +605,7 @@ export const bookEngineRefused = {
       "refused_positions": 0,
       "flagged_positions": 0,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": true,
       "refusal": {
         "engine": "aave_v3_etherfi",
@@ -621,6 +632,15 @@ export const bookEngineRefused = {
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
@@ -2538,6 +2558,56 @@ export const observatory = {
       "batch_id": 1,
       "computed_at": "2026-07-29T10:00:00Z",
       "age_seconds": 0,
+      "watermarks": [
+        {
+          "engine": "aave_v3_etherfi",
+          "chain_id": 1,
+          "last_block": 25635618,
+          "acked_epoch": 0,
+          "max_epoch_at_compute": 0,
+          "sweep": null
+        },
+        {
+          "engine": "aave_param",
+          "chain_id": 1,
+          "last_block": 25635600,
+          "acked_epoch": 0,
+          "max_epoch_at_compute": 0,
+          "sweep": null
+        },
+        {
+          "engine": "prices:poll:1",
+          "chain_id": 1,
+          "last_block": 25635610,
+          "acked_epoch": 0,
+          "max_epoch_at_compute": 0,
+          "sweep": null
+        },
+        {
+          "engine": "debt_manager",
+          "chain_id": 10,
+          "last_block": 154796552,
+          "acked_epoch": 0,
+          "max_epoch_at_compute": 0,
+          "sweep": {
+            "rows": 3,
+            "failed": 1,
+            "success_sum": "309593004",
+            "max_updated_at": "2026-07-29T09:40:00Z",
+            "age_seconds": 1200,
+            "generation": 4,
+            "generation_open": false
+          }
+        },
+        {
+          "engine": "prices:poll:10",
+          "chain_id": 10,
+          "last_block": 154796540,
+          "acked_epoch": 0,
+          "max_epoch_at_compute": 0,
+          "sweep": null
+        }
+      ],
       "engines": [
         {
           "engine": "aave_v3_etherfi",
@@ -2547,6 +2617,7 @@ export const observatory = {
           "refused_positions": 1,
           "flagged_positions": 1,
           "liquidatable_positions": 0,
+          "sweep": null,
           "refused": false,
           "refusal": null,
           "total_collateral": "800000000000",
@@ -2573,6 +2644,15 @@ export const observatory = {
           "refused_positions": 1,
           "flagged_positions": 0,
           "liquidatable_positions": 1,
+          "sweep": {
+            "rows": 3,
+            "failed": 1,
+            "success_sum": "309593004",
+            "max_updated_at": "2026-07-29T09:40:00Z",
+            "age_seconds": 1200,
+            "generation": 4,
+            "generation_open": false
+          },
           "refused": false,
           "refusal": null,
           "total_collateral": "4000000000",
@@ -3209,6 +3289,7 @@ export const streamSnapshot = {
       "refused_positions": 1,
       "flagged_positions": 1,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": false,
       "refusal": null,
       "total_collateral": "800000000000",
@@ -3235,6 +3316,15 @@ export const streamSnapshot = {
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
@@ -3256,6 +3346,7 @@ export const streamSnapshot = {
         "refused_positions": 1,
         "flagged_positions": 1,
         "liquidatable_positions": 0,
+        "sweep": null,
         "refusals": [
           {
             "key": "G1",
@@ -3274,6 +3365,15 @@ export const streamSnapshot = {
         "refused_positions": 1,
         "flagged_positions": 0,
         "liquidatable_positions": 1,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        },
         "refusals": [
           {
             "key": "SWEEP_NEVER",
@@ -3370,6 +3470,7 @@ export const streamSnapshotRecovered = {
       "refused_positions": 1,
       "flagged_positions": 1,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": false,
       "refusal": null,
       "total_collateral": "800000000000",
@@ -3396,6 +3497,15 @@ export const streamSnapshotRecovered = {
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
@@ -3417,6 +3527,7 @@ export const streamSnapshotRecovered = {
         "refused_positions": 1,
         "flagged_positions": 1,
         "liquidatable_positions": 0,
+        "sweep": null,
         "refusals": [
           {
             "key": "G1",
@@ -3435,6 +3546,15 @@ export const streamSnapshotRecovered = {
         "refused_positions": 1,
         "flagged_positions": 0,
         "liquidatable_positions": 1,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        },
         "refusals": [
           {
             "key": "SWEEP_NEVER",
@@ -3532,6 +3652,7 @@ export const streamBatch = {
       "refused_positions": 1,
       "flagged_positions": 1,
       "liquidatable_positions": 0,
+      "sweep": null,
       "refused": false,
       "refusal": null,
       "total_collateral": "800000000000",
@@ -3558,6 +3679,15 @@ export const streamBatch = {
       "refused_positions": 1,
       "flagged_positions": 0,
       "liquidatable_positions": 1,
+      "sweep": {
+        "rows": 3,
+        "failed": 1,
+        "success_sum": "309593004",
+        "max_updated_at": "2026-07-29T09:40:00Z",
+        "age_seconds": 1200,
+        "generation": 4,
+        "generation_open": false
+      },
       "refused": false,
       "refusal": null,
       "total_collateral": "4000000000",
@@ -3579,6 +3709,7 @@ export const streamBatch = {
         "refused_positions": 1,
         "flagged_positions": 1,
         "liquidatable_positions": 0,
+        "sweep": null,
         "refusals": [
           {
             "key": "G1",
@@ -3597,6 +3728,15 @@ export const streamBatch = {
         "refused_positions": 1,
         "flagged_positions": 0,
         "liquidatable_positions": 1,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        },
         "refusals": [
           {
             "key": "SWEEP_NEVER",
@@ -3691,6 +3831,7 @@ export const streamDegradation = {
         "refused_positions": 1,
         "flagged_positions": 1,
         "liquidatable_positions": 0,
+        "sweep": null,
         "refusals": [
           {
             "key": "G1",
@@ -3709,6 +3850,15 @@ export const streamDegradation = {
         "refused_positions": 1,
         "flagged_positions": 0,
         "liquidatable_positions": 1,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        },
         "refusals": [
           {
             "key": "SWEEP_NEVER",

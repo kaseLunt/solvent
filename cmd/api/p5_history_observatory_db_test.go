@@ -208,6 +208,12 @@ func TestObservatorySeriesServesCapturedBucketsWithHonestWithholding(t *testing.
 	require.Equal(t, fxAaveCollateralBase, p0["collateral_usd"])
 	require.Equal(t, float64(2), p0["accounts"])
 	require.Equal(t, float64(fxAaveBlock), p0["last_block"], "the bucket's own as-of: the engine's balances watermark AT CAPTURE, never a later head")
+
+	// The sweep stamp (1.2.2): the aave engine's absence is RECORDED — the
+	// batch stated "no sweeper", which is a different fact from "the record
+	// does not exist" (sweep_recorded false).
+	require.Equal(t, true, p0["sweep_recorded"])
+	require.Nil(t, p0["sweep"], "aave has no collateral sweep: a recorded null, never a stamp invented for it")
 	rates := asList(t, p0["rates"])
 	require.Len(t, rates, 1)
 	r0 := asMap(t, rates[0])
@@ -224,15 +230,58 @@ func TestObservatorySeriesServesCapturedBucketsWithHonestWithholding(t *testing.
 	require.Nil(t, p2["collateral_usd"])
 	require.Nil(t, p2["accounts"])
 	require.Nil(t, p2["liquidatable_positions"])
+	require.Equal(t, true, p2["sweep_recorded"],
+		"withholding the BOOK never erases the watermark record: the stamp pair and the sweep record are batch facts, not book facts")
 
-	// The other engine's series is whole.
+	// The other engine's series is whole — and every DM bucket serves the
+	// observed batch's sweep stamp VERBATIM (the fixture stamp: rows 3,
+	// failed 1, success_sum 309593004, generation 4, closed), because the
+	// bucket's liquidatable count aggregates that sweep-cut.
 	dm := f.getJSON(t, "/v1/observatory/series?engine=debt_manager", "/v1/observatory/series")
 	dmPoints := asList(t, dm["points"])
 	require.Len(t, dmPoints, 3)
 	for _, p := range dmPoints {
-		require.Equal(t, false, asMap(t, p)["refused"])
+		pm := asMap(t, p)
+		require.Equal(t, false, pm["refused"])
+		require.Equal(t, true, pm["sweep_recorded"])
+		sw := asMap(t, pm["sweep"])
+		require.Equal(t, float64(3), sw["rows"])
+		require.Equal(t, float64(1), sw["failed"])
+		require.Equal(t, "309593004", sw["success_sum"], "a decimal STRING, the house no-floats law")
+		require.Equal(t, float64(4), sw["generation"])
+		require.Equal(t, false, sw["generation_open"])
+		require.NotNil(t, sw["max_updated_at"])
+		require.NotNil(t, sw["age_seconds"], "DB-now minus the stamp — the only serve-time quantity in the stamp")
 	}
 	require.Equal(t, float64(6), dm["usd_decimals"])
+}
+
+// TestObservatorySeriesUnrecordedSweepIsDisclosedNeverInvented: a pre-00018
+// bucket whose observed batch was pruned before the backfill has NO sweep
+// record — the wire serves `sweep_recorded: false` with a null stamp, never
+// "this engine has no sweeper" and never a fabricated stamp. The row is
+// doctored to the exact state migration 00018's backfill leaves such history
+// in: every sweep column NULL.
+func TestObservatorySeriesUnrecordedSweepIsDisclosedNeverInvented(t *testing.T) {
+	f := newP5Fixture(t)
+	seedObservatoryBuckets(t, f)
+
+	_, err := f.admin.Exec(f.ctx, `UPDATE observatory_points SET
+		sweep_applicable = NULL, sweep_rows = NULL, sweep_failed = NULL,
+		sweep_success_sum = NULL, sweep_max_updated_at = NULL,
+		sweep_generation = NULL, sweep_generation_open = NULL
+		WHERE engine = 'debt_manager'`)
+	require.NoError(t, err)
+
+	out := f.getJSON(t, "/v1/observatory/series?engine=debt_manager", "/v1/observatory/series")
+	points := asList(t, out["points"])
+	require.Len(t, points, 3)
+	for _, p := range points {
+		pm := asMap(t, p)
+		require.Equal(t, false, pm["sweep_recorded"],
+			"an unrecoverable pre-00018 record is DISCLOSED as unrecorded")
+		require.Nil(t, pm["sweep"], "and no stamp is invented for it")
+	}
 }
 
 func TestObservatorySeriesStrideServesEveryNthBucketVerbatim(t *testing.T) {

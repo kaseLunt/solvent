@@ -147,6 +147,42 @@ function DetailBody({
 
         <dt>liquidatable positions</dt>
         <dd>{count(point.liquidatable_positions)}</dd>
+
+        <dt>sweep stamp (the count&apos;s collateral clock)</dt>
+        <dd data-testid="observatory-point-sweep">
+          {!point.sweep_recorded ? (
+            <>
+              {EM_DASH}{" "}
+              <span className="dim">
+                unrecorded — this point predates migration 00018 and its batch was pruned before
+                the stamp could be recovered. an absent record, not &quot;no sweeper&quot;.
+              </span>
+            </>
+          ) : point.sweep === null ? (
+            <>
+              none{" "}
+              <span className="dim">
+                (recorded: this engine has no collateral sweep — its balances are event-derived)
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="mono">
+                {String(point.sweep.rows)} swept · {String(point.sweep.failed)} failed · gen{" "}
+                {String(point.sweep.generation)}
+                {point.sweep.generation_open ? " (pass in flight)" : " (pass complete)"}
+              </span>{" "}
+              <span className="dim">
+                — the observed batch&apos;s own sweep stamp; the liquidatable count above
+                aggregates THIS sweep-cut, not the bucket&apos;s block clock. last successful
+                write{" "}
+                {point.sweep.max_updated_at === null
+                  ? `${EM_DASH} (no successful write recorded)`
+                  : point.sweep.max_updated_at}
+              </span>
+            </>
+          )}
+        </dd>
       </dl>
 
       {point.rates.length > 0 ? (

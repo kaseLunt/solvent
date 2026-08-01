@@ -53,7 +53,18 @@ const batchEnvelope = {
   refused_count: 0,
   refused_engines: [],
   flagged_count: 0,
-  watermarks: [],
+  // Non-empty since 1.2.2: the contract requires the vector (minItems 1) —
+  // the sweep-disclosure law licenses liquidatable counts through it.
+  watermarks: [
+    {
+      engine: "debt_manager",
+      chain_id: 10,
+      last_block: 154796552,
+      acked_epoch: 0,
+      max_epoch_at_compute: 0,
+      sweep: null,
+    },
+  ],
   supersession: { superseded: false, legs: [], note: "n" },
 };
 
@@ -143,6 +154,16 @@ const batchBody = {
       refused_positions: 0,
       flagged_positions: 0,
       liquidatable_positions: 1,
+      // 1.2.2: the sweep-cut behind the liquidatable count, named on the row.
+      sweep: {
+        rows: 3,
+        failed: 1,
+        success_sum: "309593004",
+        max_updated_at: "2026-07-29T09:40:00Z",
+        age_seconds: 1200,
+        generation: 4,
+        generation_open: false,
+      },
       total_collateral: "4000000000",
       total_debt: "4620000000",
       refusal: null,

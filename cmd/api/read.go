@@ -147,6 +147,18 @@ type batchView struct {
 	Params *paramWitness
 }
 
+// sweepStamps returns the batch's per-engine sweep stamps, keyed by engine. A
+// PRESENT key holding nil is the recorded "this engine has no sweeper"
+// absence; readBatchAccounts has already refused any view whose served
+// engines are not all stamped, so a serving path's lookup cannot miss.
+func (v *batchView) sweepStamps() map[string]*store.RiskSweepWatermark {
+	out := map[string]*store.RiskSweepWatermark{}
+	for _, m := range v.Batch.Watermarks {
+		out[m.Engine] = m.Sweep
+	}
+	return out
+}
+
 // paramWitness is the effective param set the CUSTODIED LEDGER asserts, folded
 // per (engine, params_block) — an independent witness against which a batch's
 // persisted leg thresholds and bonuses are welded.
@@ -332,6 +344,28 @@ func (s *server) readBatchAccounts(ctx context.Context, accounts [][]byte) (*bat
 	}
 	if v.Aggregates, err = readAggregates(ctx, tx, batch.ID); err != nil {
 		return nil, err
+	}
+	// EVERY ENGINE THIS VIEW SERVES MUST BE STAMPED ON THE BATCH'S OWN VECTOR
+	// (1.2.2): each aggregate row and each degradation-posture row serves its
+	// engine's sweep stamp from it, and a row with no stamp cannot name the
+	// sweep-cut its liquidatable count belongs to. Unreachable through
+	// WriteRiskBatch (a complete batch stamps every consumed engine); fail
+	// CLOSED against hand-written or torn state here, once, rather than
+	// letting a serving path improvise `sweep: null` — which is the no-sweeper
+	// CLAIM, not an absence disclosure.
+	stamped := map[string]bool{}
+	for _, m := range batch.Watermarks {
+		stamped[m.Engine] = true
+	}
+	for _, a := range v.Aggregates {
+		if !stamped[a.Engine] {
+			return nil, fmt.Errorf("batch %d carries an aggregate for engine %s but no watermark stamp for it — refusing to serve its counts without the sweep clock they belong to", batch.ID, a.Engine)
+		}
+	}
+	for _, p := range v.Positions {
+		if !stamped[p.Engine] {
+			return nil, fmt.Errorf("batch %d carries a position for engine %s but no watermark stamp for it — refusing to serve its rows without the sweep clock they belong to", batch.ID, p.Engine)
+		}
 	}
 	// The param-ledger witness, read in the SAME snapshot as the rows it welds
 	// against so the two describe one instant of the database.
@@ -999,6 +1033,14 @@ func cloneOrZero(v *big.Int) *big.Int {
 type observatoryBatch struct {
 	BatchID    int64
 	ComputedAt time.Time
+	// Watermarks is THIS batch's stamped engine vector — cursor pair, epoch
+	// stamps AND the per-engine sweep stamp — read from
+	// risk_batch_watermarks in the same snapshot as the aggregates (1.2.2).
+	// The point re-clocks the response (its own batch_id/computed_at), so
+	// the envelope's vector cannot vouch for it; without its OWN vector the
+	// liquidatable counts below would aggregate a sweep-cut the surface
+	// never names.
+	Watermarks []store.RiskBatchWatermark
 	Aggregates []store.RiskEngineAggregate
 }
 
@@ -1110,9 +1152,92 @@ func readObservatorySeries(ctx context.Context, q store.Querier, ids []int64) ([
 		return nil, fmt.Errorf("iterate observatory series: %w", err)
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i] > order[j] })
+
+	vectors, err := readBatchWatermarkVectors(ctx, q, ids)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]observatoryBatch, 0, len(order))
 	for _, id := range order {
-		out = append(out, *byID[id])
+		b := byID[id]
+		b.Watermarks = vectors[id]
+		if len(b.Watermarks) == 0 {
+			// Structurally unreachable for a COMPLETE batch (the predicate
+			// requires a non-empty stamped engine set), so an empty vector here
+			// is a torn read and must fail loudly: the contract requires the
+			// vector (minItems 1) precisely because the point's liquidatable
+			// counts are licensed through it.
+			return nil, fmt.Errorf("observatory batch %d passed the completeness predicate but carries no watermark stamps — refusing to serve its counts without their sweep clock", id)
+		}
+		out = append(out, *b)
+	}
+	return out, nil
+}
+
+// readBatchWatermarkVectors reads the FULL stamped engine vector — cursor
+// pair, epoch stamps and sweep stamp — for each given batch id, keyed by
+// batch id and ordered by engine within each vector.
+//
+// The sweep columns are assembled under the same law as the store's own
+// batch reader: applicability is the ROW'S OWN statement (`sweep_applicable`),
+// never inferred from which columns happen to be non-null, and a nil Sweep
+// means the engine HAS no sweeper — a disclosed absence, not an empty stamp.
+func readBatchWatermarkVectors(ctx context.Context, q store.Querier, ids []int64) (map[int64][]store.RiskBatchWatermark, error) {
+	rows, err := q.Query(ctx, `
+		SELECT batch_id, engine, chain_id, last_block, acked_epoch, max_epoch_at_compute,
+		       sweep_rows, sweep_failed, sweep_success_sum::text, sweep_max_updated_at,
+		       sweep_generation, sweep_generation_open, sweep_applicable
+		  FROM risk_batch_watermarks
+		 WHERE batch_id = ANY($1::bigint[])
+		 ORDER BY batch_id, engine`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read batch watermark vectors: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64][]store.RiskBatchWatermark{}
+	for rows.Next() {
+		var batchID int64
+		var m store.RiskBatchWatermark
+		var sweepRows, sweepFailed, sweepGen *int64
+		var sweepSum *string
+		var sweepUpdated *time.Time
+		var sweepOpen *bool
+		var sweepApplicable bool
+		if err := rows.Scan(&batchID, &m.Engine, &m.ChainID, &m.LastBlock, &m.AckedEpoch, &m.MaxEpochAtCompute,
+			&sweepRows, &sweepFailed, &sweepSum, &sweepUpdated, &sweepGen, &sweepOpen,
+			&sweepApplicable); err != nil {
+			return nil, fmt.Errorf("scan batch watermark vector: %w", err)
+		}
+		if sweepApplicable {
+			sw := &store.RiskSweepWatermark{Engine: m.Engine}
+			if sweepRows != nil {
+				sw.Rows = *sweepRows
+			}
+			if sweepFailed != nil {
+				sw.Failed = *sweepFailed
+			}
+			if sweepSum != nil {
+				v, ok := new(big.Int).SetString(*sweepSum, 10)
+				if !ok {
+					return nil, fmt.Errorf("batch %d sweep_success_sum %q is not an integer", batchID, *sweepSum)
+				}
+				sw.SuccessSum = v
+			}
+			if sweepUpdated != nil {
+				sw.HasUpdatedAt, sw.MaxUpdatedAt = true, sweepUpdated.UTC()
+			}
+			if sweepGen != nil {
+				sw.Generation = uint64(*sweepGen)
+			}
+			if sweepOpen != nil {
+				sw.GenerationOpen = *sweepOpen
+			}
+			m.Sweep = sw
+		}
+		out[batchID] = append(out[batchID], m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate batch watermark vectors: %w", err)
 	}
 	return out, nil
 }

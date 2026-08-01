@@ -380,7 +380,14 @@ func TestSeededSuiteRejectsEmptyButValid(t *testing.T) {
 			"producer": "riskd", "status": "complete",
 			"position_count": float64(0), "refused_count": float64(0), "flagged_count": float64(0),
 			"refused_engines": []any{},
-			"watermarks":      []any{},
+			// One minimal stamp, not none: 1.2.2 requires the watermark vector
+			// non-empty (minItems 1 — the sweep-disclosure law licenses
+			// liquidatable counts through it), so "empty but valid" now means
+			// an empty BOOK under a stamped envelope.
+			"watermarks": []any{map[string]any{
+				"engine": "aave_v3_etherfi", "chain_id": float64(1), "last_block": float64(0),
+				"acked_epoch": float64(0), "max_epoch_at_compute": float64(0), "sweep": nil,
+			}},
 			"supersession": map[string]any{
 				"superseded": false, "legs": []any{}, "note": "n",
 			},
@@ -736,6 +743,21 @@ func TestObservatoryServesExactSeededSeries(t *testing.T) {
 	require.Equal(t, fxAaveDebtBase, str(t, byKey(t, engines, "engine", risk.AaveEngine), "total_debt"))
 	require.Equal(t, fxDMCollateralUSD, str(t, byKey(t, engines, "engine", risk.DMEngine), "total_collateral"))
 	require.EqualValues(t, 1, num(t, byKey(t, engines, "engine", risk.DMEngine), "liquidatable_positions"))
+
+	// 1.2.2: the point carries its batch's OWN watermark vector (the point
+	// re-clocks the response, so the envelope cannot vouch for it), and each
+	// engine row names the sweep-cut its liquidatable count aggregates.
+	stamps := arr(t, series[0], "watermarks")
+	require.Len(t, stamps, len(fxWatermarks()), "the FULL stamped engine set, not just the aggregate engines")
+	dmStamp := byKey(t, stamps, "engine", risk.DMEngine)
+	dmStampSweep := asMap(t, asMap(t, dmStamp)["sweep"])
+	require.Equal(t, "309593004", dmStampSweep["success_sum"], "the batch's persisted sweep stamp, verbatim")
+	dmRow := byKey(t, engines, "engine", risk.DMEngine)
+	dmRowSweep := asMap(t, asMap(t, dmRow)["sweep"])
+	require.Equal(t, float64(3), dmRowSweep["rows"])
+	require.Equal(t, "309593004", dmRowSweep["success_sum"])
+	require.Nil(t, asMap(t, byKey(t, engines, "engine", risk.AaveEngine))["sweep"],
+		"aave has no collateral sweep: a recorded null, never a stamp invented for it")
 
 	// The rate index: the NEWEST row per key, disclosing ITS OWN block — not the
 	// derive cursor's, which is 900 blocks higher.

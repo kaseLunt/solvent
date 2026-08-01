@@ -618,6 +618,20 @@ export interface components {
             flagged_positions: number;
             liquidatable_positions: number;
             /**
+             * @description This engine's sweep stamp on the batch this row rolls up (1.2.2)
+             *     — the same `SweepStamp` the batch envelope's `Stamp.sweep`
+             *     serves, read from the batch's own persisted watermark vector.
+             *     Debt Manager collateral is sweep-sourced, so
+             *     `liquidatable_positions` aggregates a SWEEP-CUT: the stamp
+             *     travels ON THE ROW so no carrier (the SSE stream's nullable
+             *     envelope included) can serve the count without the clock it
+             *     belongs to. Null means the engine HAS no collateral sweep
+             *     (Aave) — a recorded absence, never "unrecorded". `age_seconds`
+             *     inside the stamp is the database clock at serve time minus the
+             *     stamp.
+             */
+            sweep: components["schemas"]["SweepStamp"] | null;
+            /**
              * @description True when this ENGINE's whole book is withheld, whatever the position
              *     counts say. A reader that branches on nothing else must still be
              *     unable to mistake this for a healthy engine.
@@ -1099,6 +1113,18 @@ export interface components {
             computed_at: string;
             /** Format: int64 */
             age_seconds: number;
+            /**
+             * @description THIS batch's per-engine watermark vector — the same `Stamp` shape
+             *     the batch envelope serves, INCLUDING each engine's sweep stamp —
+             *     read from the store's persisted `risk_batch_watermarks` for the
+             *     point's own `batch_id` (1.2.2). The point carries its OWN batch
+             *     clock (`batch_id`, `computed_at`), so the response envelope
+             *     cannot vouch for it; without this vector its
+             *     `liquidatable_positions` counts would aggregate a sweep-cut the
+             *     surface never names. Non-empty by the completeness predicate: a
+             *     servable batch has at least one stamped engine.
+             */
+            watermarks: components["schemas"]["Stamp"][];
             engines: components["schemas"]["Aggregate"][];
         };
         RateIndex: {
@@ -1378,6 +1404,15 @@ export interface components {
             refused_positions: number;
             flagged_positions: number;
             liquidatable_positions: number;
+            /**
+             * @description This engine's sweep stamp on the batch the posture describes
+             *     (1.2.2). It travels ON THE ROW because the stream envelope's
+             *     `batch` is nullable (`unavailable` frames), so the envelope
+             *     cannot structurally vouch for the liquidatable count beside it.
+             *     Null means the engine HAS no collateral sweep — a recorded
+             *     absence.
+             */
+            sweep: components["schemas"]["SweepStamp"] | null;
             refusals: components["schemas"]["Count"][];
             flags: components["schemas"]["Count"][];
         };
@@ -1967,6 +2002,32 @@ export interface components {
              * @description The chain's max recorded reorg epoch at the observed batch's compute time. A gap above `acked_epoch` means the bucket was captured under an unacknowledged reorg — the reorg-honesty stamp pair travels with the point.
              */
             max_epoch_at_compute: number;
+            /**
+             * @description Whether the observed batch's SWEEP STAMP was captured with this
+             *     point (1.2.2, migration 00018). False ONLY on points written
+             *     before 00018 whose observed batch retention had already pruned
+             *     when the migration's backfill ran: the store genuinely cannot
+             *     know what stamp that batch carried, and this flag discloses the
+             *     absence rather than letting it impersonate "this engine has no
+             *     sweeper". Every point captured under 00018 is true.
+             */
+            sweep_recorded: boolean;
+            /**
+             * @description The engine's sweep stamp in the observed batch's watermark
+             *     vector, copied at capture time — the same `SweepStamp` the batch
+             *     envelope's `Stamp.sweep` serves, so the bucket's
+             *     `liquidatable_positions` count travels with the sweep-cut it
+             *     aggregates (Debt Manager collateral is sweep-sourced and
+             *     worst-case ~1.5h behind the bucket's block clock). Null carries
+             *     TWO disclosed absences, split by `sweep_recorded`: when
+             *     `sweep_recorded` is true, null means the engine HAS no collateral
+             *     sweep (Aave); when false, null means the record predates 00018
+             *     and is genuinely unrecoverable — never a claim about the engine.
+             *     `age_seconds` inside the stamp is the database clock at SERVE
+             *     time minus the stamp — the stamp itself is immutable capture-time
+             *     evidence.
+             */
+            sweep: components["schemas"]["SweepStamp"] | null;
             /** @description True when the engine's whole book was withheld at capture time. Totals are then null FOR THAT REASON, never 0. */
             refused: boolean;
             /** @description The engine refusal code behind a withheld bucket (e.g. FLAG_CUSTODY_UNPROVEN). Null when `refused` is false. */
@@ -2010,6 +2071,20 @@ export interface components {
             flagged_positions: number;
             /** @description Null on a withheld engine — a withheld book has no publishable liquidatable count, and 0 would be a claim. */
             liquidatable_positions: number | null;
+            /**
+             * @description This engine's sweep stamp on THIS batch's watermark vector
+             *     (1.2.2), read from the batch's own persisted
+             *     `risk_batch_watermarks` row — the same `SweepStamp` the batch
+             *     envelope's `Stamp.sweep` serves. The permalink's rollups speak
+             *     for the batch's OWN clock, which the live response envelope
+             *     cannot vouch for, so the sweep-cut behind
+             *     `liquidatable_positions` is named here. Null means the engine
+             *     HAS no collateral sweep (Aave) — never "unrecorded": watermark
+             *     rows are retained exactly as long as their batch, so a served
+             *     aggregate always has its stamp. `age_seconds` inside the stamp
+             *     is the database clock at serve time minus the stamp.
+             */
+            sweep: components["schemas"]["SweepStamp"] | null;
             total_collateral: components["schemas"]["NullableDecimal"];
             total_debt: components["schemas"]["NullableDecimal"];
             refusal: components["schemas"]["EngineRefusal"] | null;
@@ -2660,6 +2735,16 @@ export interface operations {
                      *           "materialization_key": "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9",
                      *           "acked_epoch": 0,
                      *           "max_epoch_at_compute": 0,
+                     *           "sweep_recorded": true,
+                     *           "sweep": {
+                     *             "rows": 3,
+                     *             "failed": 1,
+                     *             "success_sum": "464379000",
+                     *             "max_updated_at": "2026-07-29T07:58:40Z",
+                     *             "age_seconds": 7285,
+                     *             "generation": 12,
+                     *             "generation_open": false
+                     *           },
                      *           "refused": false,
                      *           "refusal_code": null,
                      *           "accounts": 3,
@@ -2687,6 +2772,16 @@ export interface operations {
                      *           "materialization_key": "e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025f0b3",
                      *           "acked_epoch": 0,
                      *           "max_epoch_at_compute": 0,
+                     *           "sweep_recorded": true,
+                     *           "sweep": {
+                     *             "rows": 3,
+                     *             "failed": 1,
+                     *             "success_sum": "464379000",
+                     *             "max_updated_at": "2026-07-29T08:58:40Z",
+                     *             "age_seconds": 3685,
+                     *             "generation": 13,
+                     *             "generation_open": true
+                     *           },
                      *           "refused": true,
                      *           "refusal_code": "FLAG_CUSTODY_UNPROVEN",
                      *           "accounts": null,
@@ -3324,6 +3419,7 @@ export interface operations {
                      *           "refused_positions": 1,
                      *           "flagged_positions": 1,
                      *           "liquidatable_positions": 0,
+                     *           "sweep": null,
                      *           "total_collateral": "800000000000",
                      *           "total_debt": "600000000000",
                      *           "refusal": null
@@ -3336,6 +3432,15 @@ export interface operations {
                      *           "refused_positions": 1,
                      *           "flagged_positions": 0,
                      *           "liquidatable_positions": 1,
+                     *           "sweep": {
+                     *             "rows": 3,
+                     *             "failed": 1,
+                     *             "success_sum": "464379000",
+                     *             "max_updated_at": "2026-07-29T09:58:40Z",
+                     *             "age_seconds": 85,
+                     *             "generation": 12,
+                     *             "generation_open": false
+                     *           },
                      *           "total_collateral": "4000000000",
                      *           "total_debt": "4620000000",
                      *           "refusal": null

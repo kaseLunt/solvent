@@ -74,12 +74,55 @@ func TestObservatorySeriesReadsEngineSeriesAscending(t *testing.T) {
 	require.NotEmpty(t, p.Rates, "the rates snapshot travels verbatim (at least '{}')")
 	require.False(t, p.BatchComputedAt.IsZero())
 
+	// The sweep stamp (00018): the aave engine's absence is RECORDED — the
+	// batch stated "no sweeper", which is not the unrecorded state.
+	require.True(t, p.SweepRecorded)
+	require.Nil(t, p.Sweep, "aave has no collateral sweep; nil Sweep under SweepRecorded=true is the disclosed no-sweeper state")
+
 	// Engines never blend: the DM series is its own, in its own scale.
 	dm, err := s.ObservatorySeries(ctx, riskDMEngine, nil, nil, 100)
 	require.NoError(t, err)
 	require.Len(t, dm, 2)
 	require.EqualValues(t, 6, dm[0].ValueDecimals)
 	require.Equal(t, 1, dm[0].RefusedPositions)
+
+	// The DM point serves the batch's sweep stamp VERBATIM (sampleBatch's DM
+	// watermark), so the bucket's liquidatable count travels with the
+	// sweep-cut it aggregates.
+	require.True(t, dm[0].SweepRecorded)
+	require.NotNil(t, dm[0].Sweep)
+	require.EqualValues(t, 2, dm[0].Sweep.Rows)
+	require.EqualValues(t, 1, dm[0].Sweep.Failed)
+	require.Equal(t, "309580000", dm[0].Sweep.SuccessSum.String())
+	require.True(t, dm[0].Sweep.HasUpdatedAt)
+	require.True(t, dm[0].Sweep.MaxUpdatedAt.Equal(time.Date(2026, 7, 29, 11, 59, 0, 0, time.UTC)))
+	require.EqualValues(t, 3, dm[0].Sweep.Generation)
+	require.False(t, dm[0].Sweep.GenerationOpen)
+}
+
+// TestObservatorySeriesDisclosesAnUnrecordedSweepStamp: a pre-00018 point
+// whose batch was pruned before the backfill has NO sweep record, and the
+// reader must serve that as SweepRecorded=false — never as "no sweeper",
+// which is a claim the store cannot back. The row is seeded the way the
+// migration leaves such history: every sweep column NULL.
+func TestObservatorySeriesDisclosesAnUnrecordedSweepStamp(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+
+	h := time.Date(2026, 7, 30, 9, 0, 0, 0, time.UTC)
+	seedObservatory(t, s, h)
+	_, err := s.pool.Exec(ctx, `UPDATE observatory_points SET
+		sweep_applicable = NULL, sweep_rows = NULL, sweep_failed = NULL,
+		sweep_success_sum = NULL, sweep_max_updated_at = NULL,
+		sweep_generation = NULL, sweep_generation_open = NULL
+		WHERE engine = $1`, riskDMEngine)
+	require.NoError(t, err)
+
+	dm, err := s.ObservatorySeries(ctx, riskDMEngine, nil, nil, 100)
+	require.NoError(t, err)
+	require.Len(t, dm, 1)
+	require.False(t, dm[0].SweepRecorded, "NULL sweep_applicable is the UNRECORDED state — pre-00018 history whose batch is gone")
+	require.Nil(t, dm[0].Sweep)
 }
 
 func TestObservatorySeriesRangeAndValidation(t *testing.T) {

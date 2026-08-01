@@ -193,6 +193,14 @@ test("provenance on a point: the bucket record pins as-of, watermark and rate as
   );
   await expect(page.getByTestId("observatory-point-epochs")).toContainText("none unacked");
 
+  // The sweep stamp (1.2.2): the observed batch's own sweep-cut, named
+  // beside the liquidatable count it clocks — the contract example's stamp,
+  // verbatim.
+  const sweep = page.getByTestId("observatory-point-sweep");
+  await expect(sweep).toContainText("3 swept · 1 failed · gen 12 (pass complete)");
+  await expect(sweep).toContainText("2026-07-29T07:58:40Z");
+  await expect(sweep).toContainText("aggregates THIS sweep-cut");
+
   // The rate snapshot carries its OWN as-of block, not the bucket's — and its
   // scale from the closed per-kind vocabulary (the 1.2.0 contract example's
   // DM interest index).
@@ -202,6 +210,35 @@ test("provenance on a point: the bucket record pins as-of, watermark and rate as
   await expect(rates).toContainText("USDC");
   await expect(rates).toContainText("1050000000000000000");
   await expect(rates).toContainText("154,793,990");
+});
+
+test("the sweep clock renders all three states honestly — stamped, recorded none, unrecorded", async ({ page }) => {
+  // (a) RECORDED NONE: the aave engine has no collateral sweep, and the
+  // record SAYS so — never an em dash, never an invented stamp.
+  await mockSeries(page);
+  await openObservatory(page);
+  const sweep = page.getByTestId("observatory-point-sweep");
+  await expect(sweep).toContainText("none");
+  await expect(sweep).toContainText("recorded: this engine has no collateral sweep");
+
+  // (b) UNRECORDED: a pre-00018 point whose batch was pruned before the
+  // backfill — the record is ABSENT, disclosed as such, and never rendered
+  // as the "no sweeper" claim (which the store cannot back) or as a stamp.
+  const unrecorded = {
+    ...OBSERVATORY_SERIES_DM,
+    points: OBSERVATORY_SERIES_DM.points.map((point) => ({
+      ...point,
+      sweep_recorded: false,
+      sweep: null,
+    })),
+  };
+  await page.route("**/v1/observatory/series*", (route) => fulfillJson(route, unrecorded));
+  await page.getByTestId("observatory-engine-debt_manager").click();
+
+  await expect(sweep).toContainText("—");
+  await expect(sweep).toContainText("unrecorded — this point predates migration 00018");
+  await expect(sweep).not.toContainText("no collateral sweep");
+  await expect(sweep).not.toContainText("swept ·");
 });
 
 test("a WITHHELD bucket stays visible with its named refusal — em dashes, never 0", async ({ page }) => {

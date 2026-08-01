@@ -39,6 +39,7 @@ interface Schema {
   allOf?: Schema[];
   minimum?: number;
   maximum?: number;
+  minItems?: number;
   description?: string;
   [key: string]: unknown;
 }
@@ -60,6 +61,7 @@ const SUPPORTED_KEYS = new Set([
   "allOf",
   "minimum",
   "maximum",
+  "minItems",
 ]);
 
 export interface Contract {
@@ -212,6 +214,14 @@ export function loadContract(contractPath: string): Contract {
         if (schema.items === undefined) {
           errors.push(`${path}: array schema has no \`items\``);
           return;
+        }
+        // 1.2.2: the sweep-disclosure law licenses liquidatable counts
+        // through required watermark arrays, so their non-emptiness is part
+        // of the CONTRACT (minItems) and this validator enforces it — an
+        // empty vector under minItems is a licence with no evidence behind
+        // it.
+        if (schema.minItems !== undefined && value.length < schema.minItems) {
+          errors.push(`${path}: array has ${value.length} item(s), below minItems ${schema.minItems}`);
         }
         value.forEach((element, i) => walk(schema.items as Schema, element, `${path}[${i}]`, errors));
         return;

@@ -49,6 +49,18 @@ type ObservatoryPoint struct {
 	AckedEpoch        int64
 	MaxEpochAtCompute int64
 
+	// The engine's SWEEP STAMP in the observed batch's watermark vector,
+	// copied at write time (00018). THREE STATES, kept distinguishable:
+	//
+	//   * SweepRecorded true, Sweep non-nil — the stamp, verbatim;
+	//   * SweepRecorded true, Sweep nil     — the batch RECORDED that this
+	//     engine has no collateral sweep (Aave) — a disclosed absence;
+	//   * SweepRecorded false (Sweep nil)   — the point predates 00018 and
+	//     its batch was pruned before the backfill could recover the stamp:
+	//     the record genuinely does not exist. NEVER rendered as "no sweeper".
+	SweepRecorded bool
+	Sweep         *RiskSweepWatermark
+
 	ValueDecimals         int16
 	Positions             int
 	ComputedPositions     int
@@ -88,6 +100,8 @@ func (s *Store) ObservatorySeries(ctx context.Context, engine string, from, to *
 
 	q := `SELECT bucket_start, engine, observed_at, batch_id, batch_computed_at, materialization_key,
 	             chain_id, last_block, acked_epoch, max_epoch_at_compute,
+	             sweep_applicable, sweep_rows, sweep_failed, sweep_success_sum::text,
+	             sweep_max_updated_at, sweep_generation, sweep_generation_open,
 	             value_decimals, positions, computed_positions, refused_positions,
 	             flagged_positions, liquidatable_positions,
 	             total_collateral::text, total_debt::text,
@@ -118,8 +132,15 @@ func (s *Store) ObservatorySeries(ctx context.Context, engine string, from, to *
 		var chainID, lastBlock int64
 		var tc, td string
 		var rates []byte
+		var sweepApplicable *bool
+		var sweepRows, sweepFailed, sweepGen *int64
+		var sweepSum *string
+		var sweepUpdated *time.Time
+		var sweepOpen *bool
 		if err := rows.Scan(&p.BucketStart, &p.Engine, &p.ObservedAt, &p.BatchID, &p.BatchComputedAt, &p.MaterializationKey,
 			&chainID, &lastBlock, &p.AckedEpoch, &p.MaxEpochAtCompute,
+			&sweepApplicable, &sweepRows, &sweepFailed, &sweepSum,
+			&sweepUpdated, &sweepGen, &sweepOpen,
 			&p.ValueDecimals, &p.Positions, &p.ComputedPositions, &p.RefusedPositions,
 			&p.FlaggedPositions, &p.LiquidatablePositions,
 			&tc, &td, &p.RefusalCode, &p.RefusalDetail, &rates); err != nil {
@@ -130,6 +151,41 @@ func (s *Store) ObservatorySeries(ctx context.Context, engine string, from, to *
 		p.BatchComputedAt = p.BatchComputedAt.UTC()
 		p.ChainID = uint64(chainID)
 		p.LastBlock = uint64(lastBlock)
+		// THE THREE SWEEP STATES (00018): a NULL sweep_applicable is a
+		// pre-00018 point whose stamp is unrecoverable — SweepRecorded false,
+		// never conflated with "this engine has no sweeper" (false). The
+		// stamp is assembled the same way NewestCompleteBatch assembles it:
+		// applicability is the ROW'S OWN statement, never inferred from which
+		// columns happen to be non-null.
+		if sweepApplicable != nil {
+			p.SweepRecorded = true
+			if *sweepApplicable {
+				sw := &RiskSweepWatermark{Engine: p.Engine}
+				if sweepRows != nil {
+					sw.Rows = *sweepRows
+				}
+				if sweepFailed != nil {
+					sw.Failed = *sweepFailed
+				}
+				if sweepSum != nil {
+					v, ok := new(big.Int).SetString(*sweepSum, 10)
+					if !ok {
+						return nil, fmt.Errorf("observatory sweep_success_sum %q is not an integer", *sweepSum)
+					}
+					sw.SuccessSum = v
+				}
+				if sweepUpdated != nil {
+					sw.HasUpdatedAt, sw.MaxUpdatedAt = true, sweepUpdated.UTC()
+				}
+				if sweepGen != nil {
+					sw.Generation = uint64(*sweepGen)
+				}
+				if sweepOpen != nil {
+					sw.GenerationOpen = *sweepOpen
+				}
+				p.Sweep = sw
+			}
+		}
 		var ok bool
 		if p.TotalCollateral, ok = new(big.Int).SetString(tc, 10); !ok {
 			return nil, fmt.Errorf("observatory total_collateral %q is not an integer", tc)

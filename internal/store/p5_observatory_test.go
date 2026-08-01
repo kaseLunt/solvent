@@ -21,6 +21,18 @@ package store
 //      copied from risk_batch_aggregates. KILLED by
 //      TestObservatoryPointsObserveTheBatchNotDerivedState, whose fixture
 //      makes the two DISAGREE and requires the batch's numbers verbatim.
+//   m5 (wave H5b, spec written BEFORE the loop; transcript at
+//      testdata/mutation-transcripts/h5b.md): the rollup's SWEEP-COPY is
+//      DROPPED — the writer stops copying the sweep stamp columns (00018)
+//      from risk_batch_watermarks, so every new point lands in the
+//      UNRECORDED state (sweep_applicable NULL) even though the batch's
+//      stamp is right there. The CHECK constraint cannot catch it (NULL is
+//      the legal pre-00018 state), which is exactly why
+//      TestWriteObservatoryPointsCopySweepStampVerbatim exists: it requires
+//      the DM point to carry the batch's stamp VERBATIM (applicable, rows,
+//      failed, success_sum, max_updated_at, generation, generation_open)
+//      and the Aave point to carry the RECORDED no-sweeper state
+//      (sweep_applicable false), never NULL.
 
 import (
 	"context"
@@ -51,6 +63,16 @@ type obsRow struct {
 	Rates           string
 	BucketStart     time.Time
 	ObservedAt      time.Time
+
+	// The 00018 sweep stamp, raw: pointers so the three states (unrecorded /
+	// no-sweeper / stamped) stay distinguishable in assertions.
+	SweepApplicable *bool
+	SweepRows       *int64
+	SweepFailed     *int64
+	SweepSum        *string
+	SweepUpdatedAt  *time.Time
+	SweepGen        *int64
+	SweepOpen       *bool
 }
 
 func readObsRows(t *testing.T, s *Store) map[string]obsRow {
@@ -60,7 +82,9 @@ func readObsRows(t *testing.T, s *Store) map[string]obsRow {
 		        max_epoch_at_compute, value_decimals, positions, computed_positions,
 		        refused_positions, flagged_positions, liquidatable_positions,
 		        total_collateral::text, total_debt::text, refusal_code, rates::text,
-		        bucket_start, observed_at
+		        bucket_start, observed_at,
+		        sweep_applicable, sweep_rows, sweep_failed, sweep_success_sum::text,
+		        sweep_max_updated_at, sweep_generation, sweep_generation_open
 		 FROM observatory_points ORDER BY engine, bucket_start`)
 	require.NoError(t, err)
 	defer rows.Close()
@@ -72,7 +96,9 @@ func readObsRows(t *testing.T, s *Store) map[string]obsRow {
 			&r.AckedEpoch, &r.MaxEpoch, &r.ValueDecimals,
 			&r.Positions, &r.Computed, &r.Refused, &r.Flagged, &r.Liquidatable,
 			&r.TotalCollateral, &r.TotalDebt, &r.RefusalCode, &r.Rates,
-			&r.BucketStart, &r.ObservedAt))
+			&r.BucketStart, &r.ObservedAt,
+			&r.SweepApplicable, &r.SweepRows, &r.SweepFailed, &r.SweepSum,
+			&r.SweepUpdatedAt, &r.SweepGen, &r.SweepOpen))
 		_, dup := out[engine]
 		require.False(t, dup, "one row per (bucket, engine): engine %s appeared twice", engine)
 		out[engine] = r
@@ -277,4 +303,56 @@ func TestObservatoryPointsObserveTheBatchNotDerivedState(t *testing.T) {
 	require.Equal(t, "300000000000", got[riskAaveEngine].TotalCollateral)
 	require.EqualValues(t, 25_635_618, got[riskAaveEngine].LastBlock,
 		"the as-of is the batch's watermark, not the live cursor the recompute would have stamped")
+}
+
+// TestWriteObservatoryPointsCopySweepStampVerbatim is the m5 killer (wave
+// H5b): the SWEEP STAMP is part of the copied watermark vector, and a writer
+// that drops the copy leaves every new point in the UNRECORDED state
+// (sweep_applicable NULL) — legal under the 00018 CHECK, because NULL is the
+// honest pre-00018 state, so only this test stands between the mutant and a
+// series whose liquidatable counts have no sweep clock.
+func TestWriteObservatoryPointsCopySweepStampVerbatim(t *testing.T) {
+	s := testP5Store(t)
+	ctx := context.Background()
+
+	_, err := s.WriteRiskBatch(ctx, sampleBatch(10))
+	require.NoError(t, err)
+	_, found, err := s.WriteObservatoryPoints(ctx)
+	require.NoError(t, err)
+	require.True(t, found)
+
+	got := readObsRows(t, s)
+
+	// The DM point carries the batch's stamp VERBATIM (sampleBatch's DM
+	// watermark: rows 2, failed 1, success_sum 309_580_000, max_updated_at
+	// 2026-07-29T11:59:00Z, generation 3, closed).
+	dm := got[riskDMEngine]
+	require.NotNil(t, dm.SweepApplicable, "a point written under 00018 is NEVER in the unrecorded state — that state is reserved for pre-00018 history (m5)")
+	require.True(t, *dm.SweepApplicable)
+	require.NotNil(t, dm.SweepRows)
+	require.EqualValues(t, 2, *dm.SweepRows)
+	require.NotNil(t, dm.SweepFailed)
+	require.EqualValues(t, 1, *dm.SweepFailed)
+	require.NotNil(t, dm.SweepSum)
+	require.Equal(t, "309580000", *dm.SweepSum)
+	require.NotNil(t, dm.SweepUpdatedAt)
+	require.True(t, dm.SweepUpdatedAt.UTC().Equal(time.Date(2026, 7, 29, 11, 59, 0, 0, time.UTC)),
+		"max_updated_at is the batch's own stamp, never a clock this writer invented")
+	require.NotNil(t, dm.SweepGen)
+	require.EqualValues(t, 3, *dm.SweepGen)
+	require.NotNil(t, dm.SweepOpen)
+	require.False(t, *dm.SweepOpen)
+
+	// The Aave point carries the RECORDED no-sweeper state: applicable false,
+	// every stamp column NULL. False and NULL are different statements —
+	// "this engine has no sweeper" versus "the record does not exist".
+	aave := got[riskAaveEngine]
+	require.NotNil(t, aave.SweepApplicable, "no-sweeper is a RECORDED fact, never the unrecorded NULL (m5)")
+	require.False(t, *aave.SweepApplicable)
+	require.Nil(t, aave.SweepRows)
+	require.Nil(t, aave.SweepFailed)
+	require.Nil(t, aave.SweepSum)
+	require.Nil(t, aave.SweepUpdatedAt)
+	require.Nil(t, aave.SweepGen)
+	require.Nil(t, aave.SweepOpen)
 }

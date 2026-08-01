@@ -42,6 +42,11 @@
 //         an index's as-of can trail the bucket); kind/scale re-registered
 //         to the aave vocabulary (liquidity_index / ray-1e27 — the closed
 //         per-kind scale table);
+//       - sweep provenance (1.2.2): `sweep_recorded: true` with
+//         `sweep: null` — the aave engine's RECORDED no-sweeper state (the
+//         contract's own disclosed absence; copying the DM example's stamp
+//         onto an engine that has no sweeper would be a lie, and
+//         `sweep_recorded: false` would claim the record predates 00018);
 //       - observation provenance (1.2.0): batch_id = a monotone id per
 //         bucket in the example's own register (captured.batch_id − 3 + i);
 //         materialization_key = the example's key suffixed with the engine
@@ -125,6 +130,12 @@ if (captured === undefined) {
   console.error("generate-observatory.mjs: the contract example lost its captured bucket");
   process.exit(1);
 }
+if (captured.sweep_recorded !== true || !captured.sweep) {
+  console.error(
+    "generate-observatory.mjs: the contract example's captured DM bucket lost its sweep stamp (1.2.2) — the sweep-provenance fixtures depend on it",
+  );
+  process.exit(1);
+}
 
 const day = captured.bucket_start.slice(0, 10); // the example's own day
 const to8 = (v) => (BigInt(v) * 100n).toString(); // 6dp -> 8dp, same USD magnitude
@@ -151,6 +162,12 @@ const aavePoints = HOURS.map((hour, i) => {
     materialization_key: `${captured.materialization_key}-aave-${hour}00`,
     acked_epoch: captured.acked_epoch,
     max_epoch_at_compute: captured.max_epoch_at_compute,
+    // 1.2.2 documented delta: the aave engine HAS no collateral sweep, so
+    // its recorded stamp is the disclosed null — `sweep_recorded: true`
+    // with `sweep: null` is the contract's own "no sweeper" state, distinct
+    // from the pre-00018 unrecorded state (`sweep_recorded: false`).
+    sweep_recorded: true,
+    sweep: null,
     refused: false,
     refusal_code: null,
     accounts: ACCOUNTS[i],

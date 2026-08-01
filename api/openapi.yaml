@@ -20,7 +20,7 @@ openapi: 3.0.3
 
 info:
   title: Solvent Risk API
-  version: "1.2.1"
+  version: "1.2.2"
   description: |
     A read-only public view of ether.fi lending risk across two engines: the Aave
     v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
@@ -479,6 +479,15 @@ paths:
                     materialization_key: "9a4a7c1de00b53219a6f2f41c86a77025f0b3e2a4c1d99e21b7a30e12cf5a2b9"
                     acked_epoch: 0
                     max_epoch_at_compute: 0
+                    sweep_recorded: true
+                    sweep:
+                      rows: 3
+                      failed: 1
+                      success_sum: "464379000"
+                      max_updated_at: "2026-07-29T07:58:40Z"
+                      age_seconds: 7285
+                      generation: 12
+                      generation_open: false
                     refused: false
                     refusal_code: null
                     accounts: 3
@@ -501,6 +510,15 @@ paths:
                     materialization_key: "e2a4c1d99e21b7a30e12cf5a2b9a4a7c1de00b53219a6f2f41c86a77025f0b3"
                     acked_epoch: 0
                     max_epoch_at_compute: 0
+                    sweep_recorded: true
+                    sweep:
+                      rows: 3
+                      failed: 1
+                      success_sum: "464379000"
+                      max_updated_at: "2026-07-29T08:58:40Z"
+                      age_seconds: 3685
+                      generation: 13
+                      generation_open: true
                     refused: true
                     refusal_code: "FLAG_CUSTODY_UNPROVEN"
                     accounts: null
@@ -1187,6 +1205,7 @@ paths:
                     refused_positions: 1
                     flagged_positions: 1
                     liquidatable_positions: 0
+                    sweep: null
                     total_collateral: "800000000000"
                     total_debt: "600000000000"
                     refusal: null
@@ -1197,6 +1216,14 @@ paths:
                     refused_positions: 1
                     flagged_positions: 0
                     liquidatable_positions: 1
+                    sweep:
+                      rows: 3
+                      failed: 1
+                      success_sum: "464379000"
+                      max_updated_at: "2026-07-29T09:58:40Z"
+                      age_seconds: 85
+                      generation: 12
+                      generation_open: false
                     total_collateral: "4000000000"
                     total_debt: "4620000000"
                     refusal: null
@@ -1476,6 +1503,12 @@ components:
         flagged_count: { type: integer }
         watermarks:
           type: array
+          # Non-empty BY CONTRACT: completeness requires at least one stamped
+          # engine (the store's predicate refuses a batch with none), and the
+          # sweep-disclosure law licenses liquidatable-family fields THROUGH
+          # this array — an empty vector would be a licence with no evidence
+          # behind it, so the cardinality is part of the contract.
+          minItems: 1
           items: { $ref: "#/components/schemas/Stamp" }
         supersession: { $ref: "#/components/schemas/Supersession" }
 
@@ -1495,7 +1528,7 @@ components:
       additionalProperties: false
       required:
         [engine, value_decimals, positions, computed_positions, refused_positions,
-         flagged_positions, liquidatable_positions, refused, refusal,
+         flagged_positions, liquidatable_positions, sweep, refused, refusal,
          total_collateral, total_debt, refusals, flags, unit_note]
       properties:
         engine: { type: string }
@@ -1505,6 +1538,21 @@ components:
         refused_positions: { type: integer }
         flagged_positions: { type: integer }
         liquidatable_positions: { type: integer }
+        sweep:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SweepStamp" }]
+          description: |
+            This engine's sweep stamp on the batch this row rolls up (1.2.2)
+            — the same `SweepStamp` the batch envelope's `Stamp.sweep`
+            serves, read from the batch's own persisted watermark vector.
+            Debt Manager collateral is sweep-sourced, so
+            `liquidatable_positions` aggregates a SWEEP-CUT: the stamp
+            travels ON THE ROW so no carrier (the SSE stream's nullable
+            envelope included) can serve the count without the clock it
+            belongs to. Null means the engine HAS no collateral sweep
+            (Aave) — a recorded absence, never "unrecorded". `age_seconds`
+            inside the stamp is the database clock at serve time minus the
+            stamp.
         refused:
           type: boolean
           description: |
@@ -2218,11 +2266,25 @@ components:
     ObservatoryPoint:
       type: object
       additionalProperties: false
-      required: [batch_id, computed_at, age_seconds, engines]
+      required: [batch_id, computed_at, age_seconds, watermarks, engines]
       properties:
         batch_id: { type: integer, format: int64 }
         computed_at: { type: string, format: date-time }
         age_seconds: { type: integer, format: int64 }
+        watermarks:
+          type: array
+          minItems: 1
+          description: |
+            THIS batch's per-engine watermark vector — the same `Stamp` shape
+            the batch envelope serves, INCLUDING each engine's sweep stamp —
+            read from the store's persisted `risk_batch_watermarks` for the
+            point's own `batch_id` (1.2.2). The point carries its OWN batch
+            clock (`batch_id`, `computed_at`), so the response envelope
+            cannot vouch for it; without this vector its
+            `liquidatable_positions` counts would aggregate a sweep-cut the
+            surface never names. Non-empty by the completeness predicate: a
+            servable batch has at least one stamped engine.
+          items: { $ref: "#/components/schemas/Stamp" }
         engines:
           type: array
           items: { $ref: "#/components/schemas/Aggregate" }
@@ -2575,12 +2637,22 @@ components:
     DegradationEngine:
       type: object
       additionalProperties: false
-      required: [engine, refused_positions, flagged_positions, liquidatable_positions, refusals, flags]
+      required: [engine, refused_positions, flagged_positions, liquidatable_positions, sweep, refusals, flags]
       properties:
         engine: { type: string }
         refused_positions: { type: integer }
         flagged_positions: { type: integer }
         liquidatable_positions: { type: integer }
+        sweep:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SweepStamp" }]
+          description: |
+            This engine's sweep stamp on the batch the posture describes
+            (1.2.2). It travels ON THE ROW because the stream envelope's
+            `batch` is nullable (`unavailable` frames), so the envelope
+            cannot structurally vouch for the liquidatable count beside it.
+            Null means the engine HAS no collateral sweep — a recorded
+            absence.
         refusals:
           type: array
           items: { $ref: "#/components/schemas/Count" }
@@ -3402,7 +3474,8 @@ components:
       additionalProperties: false
       required:
         [bucket_start, last_block, batch_id, materialization_key,
-         acked_epoch, max_epoch_at_compute, refused, refusal_code, accounts,
+         acked_epoch, max_epoch_at_compute, sweep_recorded, sweep,
+         refused, refusal_code, accounts,
          refused_positions, liquidatable_positions, debt_usd, collateral_usd,
          rates]
       properties:
@@ -3426,6 +3499,33 @@ components:
           type: integer
           format: int64
           description: The chain's max recorded reorg epoch at the observed batch's compute time. A gap above `acked_epoch` means the bucket was captured under an unacknowledged reorg — the reorg-honesty stamp pair travels with the point.
+        sweep_recorded:
+          type: boolean
+          description: |
+            Whether the observed batch's SWEEP STAMP was captured with this
+            point (1.2.2, migration 00018). False ONLY on points written
+            before 00018 whose observed batch retention had already pruned
+            when the migration's backfill ran: the store genuinely cannot
+            know what stamp that batch carried, and this flag discloses the
+            absence rather than letting it impersonate "this engine has no
+            sweeper". Every point captured under 00018 is true.
+        sweep:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SweepStamp" }]
+          description: |
+            The engine's sweep stamp in the observed batch's watermark
+            vector, copied at capture time — the same `SweepStamp` the batch
+            envelope's `Stamp.sweep` serves, so the bucket's
+            `liquidatable_positions` count travels with the sweep-cut it
+            aggregates (Debt Manager collateral is sweep-sourced and
+            worst-case ~1.5h behind the bucket's block clock). Null carries
+            TWO disclosed absences, split by `sweep_recorded`: when
+            `sweep_recorded` is true, null means the engine HAS no collateral
+            sweep (Aave); when false, null means the record predates 00018
+            and is genuinely unrecoverable — never a claim about the engine.
+            `age_seconds` inside the stamp is the database clock at SERVE
+            time minus the stamp — the stamp itself is immutable capture-time
+            evidence.
         refused:
           type: boolean
           description: True when the engine's whole book was withheld at capture time. Totals are then null FOR THAT REASON, never 0.
@@ -3476,7 +3576,7 @@ components:
       required:
         [engine, value_decimals, positions, computed_positions,
          refused_positions, flagged_positions, liquidatable_positions,
-         total_collateral, total_debt, refusal]
+         sweep, total_collateral, total_debt, refusal]
       description: |
         One engine's persisted rollup on one batch, lean. A WITHHELD engine's
         aggregate serves NULL totals and names its refusal — the persisted
@@ -3493,6 +3593,21 @@ components:
           type: integer
           nullable: true
           description: Null on a withheld engine — a withheld book has no publishable liquidatable count, and 0 would be a claim.
+        sweep:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SweepStamp" }]
+          description: |
+            This engine's sweep stamp on THIS batch's watermark vector
+            (1.2.2), read from the batch's own persisted
+            `risk_batch_watermarks` row — the same `SweepStamp` the batch
+            envelope's `Stamp.sweep` serves. The permalink's rollups speak
+            for the batch's OWN clock, which the live response envelope
+            cannot vouch for, so the sweep-cut behind
+            `liquidatable_positions` is named here. Null means the engine
+            HAS no collateral sweep (Aave) — never "unrecorded": watermark
+            rows are retained exactly as long as their batch, so a served
+            aggregate always has its stamp. `age_seconds` inside the stamp
+            is the database clock at serve time minus the stamp.
         total_collateral: { $ref: "#/components/schemas/NullableDecimal" }
         total_debt: { $ref: "#/components/schemas/NullableDecimal" }
         refusal:

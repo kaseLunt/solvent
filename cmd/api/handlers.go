@@ -93,6 +93,14 @@ type wireAggregate struct {
 	// with no vocabulary behind it is not a disclosure.
 	Refusals []wireCount `json:"refusals"`
 	Flags    []wireCount `json:"flags"`
+	// Sweep is this engine's sweep stamp on the batch the row rolls up
+	// (1.2.2): Debt Manager collateral is sweep-sourced, so the row's
+	// liquidatable count belongs to this sweep-cut — named on the ROW so no
+	// carrier (SSE included) can serve the count without it. Null means the
+	// engine HAS no collateral sweep (Aave) — a recorded absence, never
+	// "unrecorded": readBatchAccounts refuses a view whose engines are not
+	// all stamped.
+	Sweep *wireSweepStamp `json:"sweep"`
 	// UnitNote states the scale, because the two engines are never summed and a
 	// reader must not do it either.
 	UnitNote string `json:"unit_note"`
@@ -319,6 +327,7 @@ func (s *server) aggregates(v *batchView) []wireAggregate {
 		}
 	}
 
+	sweeps := v.sweepStamps()
 	out := make([]wireAggregate, 0, len(v.Aggregates))
 	for _, a := range v.Aggregates {
 		w := wireAggregate{
@@ -331,6 +340,7 @@ func (s *server) aggregates(v *batchView) []wireAggregate {
 			LiquidatablePositions: a.LiquidatablePositions,
 			Refusals:              counts(refusals[a.Engine]),
 			Flags:                 counts(flags[a.Engine]),
+			Sweep:                 wireSweepFrom(v.Now, sweeps[a.Engine]),
 			UnitNote: "values are integers at " + strconv.Itoa(int(a.ValueDecimals)) +
 				" decimals in this engine's own unit (Aave: the pool's base currency; Debt Manager: USD)",
 		}
@@ -1536,9 +1546,15 @@ func covers(engines []string, engine string) bool {
 // ---------------------------------------------------------------------------
 
 type wireObservatoryPoint struct {
-	BatchID    int64           `json:"batch_id"`
-	ComputedAt time.Time       `json:"computed_at"`
-	AgeSeconds int64           `json:"age_seconds"`
+	BatchID    int64     `json:"batch_id"`
+	ComputedAt time.Time `json:"computed_at"`
+	AgeSeconds int64     `json:"age_seconds"`
+	// Watermarks is THIS batch's stamped engine vector, sweep stamps
+	// included (1.2.2). The point carries its own batch clock, so the
+	// response envelope cannot vouch for it: without its own vector the
+	// per-engine liquidatable counts would aggregate a sweep-cut the surface
+	// never names (Codex round-4 finding 2).
+	Watermarks []wireStamp     `json:"watermarks"`
 	Engines    []wireAggregate `json:"engines"`
 }
 
@@ -1611,6 +1627,7 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 			"The series is the newest servable batches, newest first. Torn batches are excluded by the same completeness discipline the serving path applies, so the series never dips and recovers for a reason that is not on the chain.",
 			"Per-engine totals are in each engine's own unit and are never summed across engines.",
 			"A batch is a MATERIALIZER PASS, not a block: the cadence is riskd's, and the interval between two points is not a block interval.",
+			"Each point carries its batch's OWN watermark vector, sweep stamps included: Debt Manager collateral is sweep-sourced, so a point's liquidatable count belongs to the sweep-cut stamped in `watermarks`, not to the point's block or time clocks.",
 		},
 	}
 	for _, pt := range series {
@@ -1618,9 +1635,25 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 			BatchID:    pt.BatchID,
 			ComputedAt: pt.ComputedAt,
 			AgeSeconds: ageSeconds(now, pt.ComputedAt),
+			Watermarks: []wireStamp{},
 			Engines:    []wireAggregate{},
 		}
+		sweeps := map[string]*store.RiskSweepWatermark{}
+		for _, m := range pt.Watermarks {
+			p.Watermarks = append(p.Watermarks, wireStampFrom(now, m))
+			sweeps[m.Engine] = m.Sweep
+		}
 		for _, a := range pt.Aggregates {
+			// The same fail-closed law as readBatchAccounts: an aggregate row
+			// with no stamp on its own batch cannot name the sweep-cut its
+			// liquidatable count belongs to, and `sweep: null` would CLAIM
+			// "no sweeper" instead of disclosing the absence.
+			sw, stamped := sweeps[a.Engine]
+			if !stamped {
+				writeError(w, http.StatusInternalServerError, codeInternal,
+					"observatory batch "+strconv.FormatInt(pt.BatchID, 10)+" carries an aggregate for engine "+a.Engine+" but no watermark stamp for it — refusing to serve its counts without the sweep clock they belong to", nil)
+				return
+			}
 			e := wireAggregate{
 				Engine:                a.Engine,
 				ValueDecimals:         a.ValueDecimals,
@@ -1631,6 +1664,7 @@ func (s *server) handleObservatory(w http.ResponseWriter, r *http.Request) {
 				LiquidatablePositions: a.LiquidatablePositions,
 				Refusals:              []wireCount{},
 				Flags:                 []wireCount{},
+				Sweep:                 wireSweepFrom(now, sw),
 				UnitNote: "values are integers at " + strconv.Itoa(int(a.ValueDecimals)) +
 					" decimals in this engine's own unit",
 			}
