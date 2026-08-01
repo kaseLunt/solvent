@@ -889,6 +889,16 @@ func assembleDM(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, 
 	// tokens, USD 6-dec (recon derivation notes, NORMATIVE).
 	debtUSD := new(big.Int)
 	var legs []store.RiskLegWrite
+	// legIdx maps an asset to its row in `legs`, because ONE POSITION GETS ONE
+	// LEG PER ASSET. risk_position_legs' primary key is (batch, engine, account,
+	// asset) with no side column ON PURPOSE — the row is a union built to carry
+	// both sides of one asset. The Debt Manager's borrow token held as
+	// collateral is the NORMAL shape of this book, not an edge case (live
+	// census 2026-07-31: 7,503 of ~9,700 DM accounts hold USDC on BOTH sides),
+	// so appending a second row for the same asset is a duplicate-key write
+	// failure for most of the book — the first-ever full-book riskd pass died
+	// exactly there.
+	legIdx := map[common.Address]int{}
 	nonzero := false
 	for _, asset := range sortedAssets(a.assets) {
 		normalized := sideAmount(a.assets[asset], sideDebt, sourceEvent)
@@ -907,11 +917,12 @@ func assembleDM(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, 
 		b := idx.Block
 		legs = append(legs, store.RiskLegWrite{
 			Asset:          asset.Bytes(),
-			Decimals:       6, // the USD figure's scale; the token's own decimals are irrelevant to a normalized debt
+			Decimals:       6, // the USD figure's scale; overwritten with the token's own decimals if a collateral side joins this row below
 			ScaledDebt:     normalized,
 			LiveDebt:       live,
 			DebtIndexBlock: &b,
 		})
+		legIdx[asset] = len(legs) - 1
 	}
 
 	// Collateral: the sweep's snapshot rows, and only if a sweep ever succeeded.
@@ -956,12 +967,30 @@ func assembleDM(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput, 
 		amount := sideAmount(a.assets[asset], sideCollateral, sourceSnapshot)
 		collateral = append(collateral, risk.DMCollateral{Asset: asset, Amount: amount, Decimals: spec.Decimals})
 
-		leg := store.RiskLegWrite{Asset: asset.Bytes(), Decimals: spec.Decimals, Amount: amount}
-		if pr, ok := a.params[asset]; ok {
-			leg.LiqThreshold = pr.LiqThreshold
-			leg.LiqBonus = pr.LiqBonus
+		// ONE LEG PER ASSET: if the debt loop already opened a row for this
+		// asset (the borrow token held as collateral), the collateral side is
+		// FOLDED ONTO THAT ROW. Nothing is overwritten — the debt fields
+		// (ScaledDebt / LiveDebt / DebtIndexBlock) stay exactly as written, and
+		// the collateral fields land beside them, which is the union shape the
+		// schema was built for. Decimals becomes the token's own: `amount` is
+		// denominated in token units, while the debt figures are USD 6-dec
+		// regardless (their scale is the position's ValueDecimals, not the
+		// leg's).
+		if i, borrowed := legIdx[asset]; borrowed {
+			legs[i].Decimals = spec.Decimals
+			legs[i].Amount = amount
+			if pr, ok := a.params[asset]; ok {
+				legs[i].LiqThreshold = pr.LiqThreshold
+				legs[i].LiqBonus = pr.LiqBonus
+			}
+		} else {
+			leg := store.RiskLegWrite{Asset: asset.Bytes(), Decimals: spec.Decimals, Amount: amount}
+			if pr, ok := a.params[asset]; ok {
+				leg.LiqThreshold = pr.LiqThreshold
+				leg.LiqBonus = pr.LiqBonus
+			}
+			legs = append(legs, leg)
 		}
-		legs = append(legs, leg)
 
 		j, err := judge(a, spec)
 		if err != nil {

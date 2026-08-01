@@ -1215,6 +1215,141 @@ func TestAssembleDMLiquidatableIsStrict(t *testing.T) {
 	require.True(t, *p.Liquidatable, "one unit over is liquidatable")
 }
 
+// TestAssembleDMBorrowTokenHeldAsCollateralMergesToOneLeg is the live-book
+// reproduction of the first full-book riskd failure (2026-07-31): a Debt
+// Manager account holding the BORROW TOKEN as collateral — USDC on both sides
+// of one position. That is the NORMAL shape of the live book (7,503 of ~9,700
+// DM accounts), and the assembler used to emit a debt leg AND a collateral leg
+// keyed by the same asset, which is a duplicate-key write failure against
+// risk_position_legs' (batch, engine, account, asset) primary key.
+//
+// The law: ONE LEG PER ASSET, carrying BOTH sides, with neither side's
+// contribution dropped or overwritten. Every integer below is hand-derived:
+//
+//	USDC debt:       live = floor(1000000000 × 1e18 / 1e18)   = 1000000000  ($1,000)
+//	USDC collateral: value = floor(7240549 × 1000000 / 1e6)   =    7240549  ($7.240549)
+//	                 contribution = floor(7240549 × 80/100)   =    5792439
+//	weETH:           value = floor(1e18 × 3000000000 / 1e18)  = 3000000000  ($3,000)
+//	                 contribution = floor(3000000000 × 85/100)= 2550000000
+//	totals:          collateral 3007240549, maxBorrowLT 2555792439,
+//	                 borrowings 1000000000 ≤ 2555792439 => healthy
+//
+// MUTANTS THIS KILLS (the wave's two named ones):
+//   - the merge dropped back to double-insert → three legs with USDC twice,
+//     caught by the one-row-per-asset walk;
+//   - a merge that silently overwrites one side → the per-field exactness
+//     assertions on the merged leg AND the Σ-legs-equal-position-totals welds
+//     fail (a dropped debt side breaks Σ live_debt == borrowings; a dropped
+//     collateral side breaks Σ value_usd == collateral_value_usd and moves
+//     max_borrow_lt).
+func TestAssembleDMBorrowTokenHeldAsCollateralMergesToOneLeg(t *testing.T) {
+	in := dmInputs()
+	// USDC joins the COLLATERAL side of the same account that borrows it —
+	// exactly the position_balances shape the live SELECT showed for account
+	// 0x0003d7bf…: one row per (asset, side), no duplication in the substrate.
+	in.Balances = append(in.Balances,
+		bal(risk.DMEngine, acctA, opUSDC, sideCollateral, sourceSnapshot, "7240549", 154_790_000))
+	in.DMParams = append(in.DMParams, store.ParamRow{
+		Engine: risk.DMEngine, ChainID: 10, Asset: opUSDC.Bytes(),
+		LTV: bi("80000000000000000000"), LiqThreshold: bi("80000000000000000000"),
+		LiqBonus:       bi("1000000000000000000"),
+		EffectiveBlock: 150_000_000, EffectiveLogIndex: 1, SourceEvent: "collateral_token_config_set",
+	})
+	in.Prices = append(in.Prices, price(10, opUSDC, "priceproviderv2", "1000000", 6, 30*time.Second))
+	in.Sweeps = []store.RiskSweepRow{{
+		Engine: risk.DMEngine, Account: acctA.Bytes(), Status: "success",
+		LastAttemptBlock: 154_790_000, LastSuccessBlock: 154_790_000, UpdatedAt: fixtureTime,
+	}}
+
+	res, err := Assemble(in, fixtureConfig(t))
+	require.NoError(t, err)
+	p := findPosition(t, res, risk.DMEngine, acctA)
+	require.Equal(t, store.RiskPositionComputed, p.Status)
+
+	// The position's health arithmetic is EXACTLY the honest combination —
+	// both USDC sides count, neither shadows the other.
+	require.Equal(t, "3007240549", p.CollateralValueUSD.String())
+	require.Equal(t, "2555792439", p.MaxBorrowLT.String())
+	require.Equal(t, "1000000000", p.Borrowings.String())
+	require.False(t, *p.Liquidatable)
+	require.Equal(t, "2555792439", p.HFNum.String())
+	require.Equal(t, "1000000000", p.HFDen.String())
+
+	// ONE ROW PER ASSET — the duplicate-key reproduction. Before the merge
+	// this walk finds THREE legs, USDC twice.
+	require.Len(t, p.Legs, 2)
+	seen := map[string]int{}
+	for _, l := range p.Legs {
+		seen[common.BytesToAddress(l.Asset).Hex()]++
+	}
+	for asset, n := range seen {
+		require.Equal(t, 1, n,
+			"asset %s must appear on exactly one leg: (batch, engine, account, asset) is the primary key", asset)
+	}
+
+	// The merged USDC leg carries BOTH sides, field by field.
+	var usdcLeg, weethLeg store.RiskLegWrite
+	for _, l := range p.Legs {
+		switch common.BytesToAddress(l.Asset) {
+		case opUSDC:
+			usdcLeg = l
+		case opWeETH:
+			weethLeg = l
+		}
+	}
+	require.Equal(t, "1000000000", usdcLeg.ScaledDebt.String(), "debt side: normalized borrowing")
+	require.Equal(t, "1000000000", usdcLeg.LiveDebt.String(), "debt side: index-applied USD")
+	require.NotNil(t, usdcLeg.DebtIndexBlock)
+	require.EqualValues(t, 154_700_000, *usdcLeg.DebtIndexBlock)
+	require.Equal(t, "7240549", usdcLeg.Amount.String(), "collateral side: swept token units")
+	require.Equal(t, "7240549", usdcLeg.ValueUSD.String())
+	require.Equal(t, "5792439", usdcLeg.MaxBorrowContribution.String())
+	require.Equal(t, "80000000000000000000", usdcLeg.LiqThreshold.String())
+	require.Equal(t, "1000000000000000000", usdcLeg.LiqBonus.String())
+	require.EqualValues(t, 6, usdcLeg.Decimals, "amount is denominated in the token's own units")
+
+	// The weETH leg is untouched by the merge: collateral only, no debt fields.
+	require.Nil(t, weethLeg.ScaledDebt)
+	require.Nil(t, weethLeg.LiveDebt)
+	require.Equal(t, "1000000000000000000", weethLeg.Amount.String())
+	require.Equal(t, "3000000000", weethLeg.ValueUSD.String())
+	require.Equal(t, "2550000000", weethLeg.MaxBorrowContribution.String())
+
+	// THE Σ-WELDS: the leg rows must aggregate back to the served totals
+	// exactly. These are what make a silent one-side overwrite impossible —
+	// any dropped contribution breaks at least one of the three sums.
+	sumDebt, sumValue, sumContribution := new(big.Int), new(big.Int), new(big.Int)
+	for _, l := range p.Legs {
+		if l.LiveDebt != nil {
+			sumDebt.Add(sumDebt, l.LiveDebt)
+		}
+		if l.ValueUSD != nil {
+			sumValue.Add(sumValue, l.ValueUSD)
+		}
+		if l.MaxBorrowContribution != nil {
+			sumContribution.Add(sumContribution, l.MaxBorrowContribution)
+		}
+	}
+	require.Zero(t, sumDebt.Cmp(p.Borrowings), "Σ legs' live_debt must equal borrowings exactly")
+	require.Zero(t, sumValue.Cmp(p.CollateralValueUSD), "Σ legs' value_usd must equal collateral_value_usd exactly")
+	require.Zero(t, sumContribution.Cmp(p.MaxBorrowLT), "Σ legs' max_borrow_contribution must equal max_borrow_lt exactly")
+
+	// HF-UNCHANGED CONTROL: the same account WITHOUT the USDC collateral row
+	// computes borrowings identically and a maxBorrowLT lower by EXACTLY the
+	// USDC contribution — proving the merge changed leg PERSISTENCE only, and
+	// the health arithmetic is the sum of honest per-token contributions.
+	ctrl := dmInputs()
+	ctrl.Sweeps = in.Sweeps
+	ctrlRes, err := Assemble(ctrl, fixtureConfig(t))
+	require.NoError(t, err)
+	cp := findPosition(t, ctrlRes, risk.DMEngine, acctA)
+	require.Equal(t, "1000000000", cp.Borrowings.String())
+	require.Equal(t, "2550000000", cp.MaxBorrowLT.String())
+	require.Equal(t, "5792439",
+		new(big.Int).Sub(p.MaxBorrowLT, cp.MaxBorrowLT).String(),
+		"the merged position's threshold exceeds the control by exactly the USDC contribution")
+}
+
 // ---------------------------------------------------------------------------
 // Gates and aggregates.
 // ---------------------------------------------------------------------------
