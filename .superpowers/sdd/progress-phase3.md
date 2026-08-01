@@ -3298,3 +3298,37 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   would have caught this), adjudicate AlgorithmRevision 4→5 if any
   batch-3 row is affected, 2 mutants, then the sanctioned riskd -once
   → batch 4 supersedes. Round 7 closing review after landing.
+- **H7 LANDED (9ee3207); BATCH 4 LIVE AT REV 5; ROUND 7 + WEB DEFECT
+  WAVE DISPATCHED; P5 UX TRAIN OPENED (19:50)**: blast radius measured
+  BEFORE the fix: 44 batch-3 DM rows at value_decimals 0 — each
+  $0.000001 of debt served as $1 (10^6 overstatement), all flagged
+  liquidatable; the engine aggregate beside them was correct at 6.
+  Fix: risk.DMUsdDecimals=6 structural in ComputeDMHealth (witness set
+  at any other uniform scale REFUSED — ErrWrongPriceScale), assembly +
+  aggregate share the constant, stress/waterfall inherit; serve-side
+  scale weld in verifyReconstruction (DM: persisted != engine
+  declaration → API_RECONSTRUCTION_MISMATCH; Aave arm too — its
+  witness-derived 8 stays legitimate). AlgorithmRevision 4→5 (both
+  trigger clauses met; an unbumped binary would adopt batch 3 and
+  republish the wrong rows). Aave does NOT share the defect (every
+  computed Aave position consumes ≥1 witness by construction). Mutants
+  2/2 KILLED. Integrator re-ran the full gate independently (risk/
+  riskfeed/api/riskd all ok). Batch 4 live: 9,808 positions, all 9,761
+  DM rows at scale 6, key 36a7cc31…; the 44 accounts verified serving
+  correctly. API on :8080 swapped to the 9ee3207 build (arms the
+  weld); batch 3 retained as evidence per house law. CODEX ROUND 7
+  dispatched (closing on e17479e..9ee3207 + adversarial: other
+  RiskPositionWrite producers, MIXED witness sets, weld coverage
+  across all value_decimals surfaces, rev-transition adoption). P5 UX
+  TRAIN (task #24): solvent-design delivered the 18-point Book-table
+  ruling (dust filter server-side via additive min_value+dir params →
+  contract 1.3.0; virtualized sentinel auto-load at PAGE_LIMIT 200;
+  clickable per-engine sort headers replacing the chip row; refusal
+  register for 4xx; DM HF column header "HF — disclosure"; URL-param
+  persistence, localStorage rejected). Wave W-UX-B dispatched (web-only
+  defect fixes: SORTS_BY_ENGINE, deep-link normalizer, refusal
+  branching, DM header). Supplement ruling 16-18 requested (risk map
+  full-book source, histogram/waterfall comprehension + the owner's
+  three unparseable Lab captions: held-flat list, eligible-vs-realized,
+  non-monotone collateral-at-risk). Contract train A HELD until the
+  supplement lands so ONE 1.3.0 train carries every param.
