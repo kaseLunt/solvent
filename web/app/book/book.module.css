@@ -335,23 +335,116 @@
   color: var(--ink-2);
 }
 
-/* ---- waterfall ---- */
+/* ---- waterfall (W-UX-D §18 + captions a/b) ---- */
 
-.heldFlat {
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
+/* The eligible-vs-realized gloss: PRIMARY register (body ink, prose face) —
+   a reading sentence, not a mono caption. The wire's eligibility_note keeps
+   the dim panelNote register below it. */
+.gloss {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 0 0 10px;
+}
+
+/* One dim legend line under the waterfall panel grid. */
+.legendLine {
   font-family: var(--mono);
   font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin: 8px 0 0;
+}
+
+/* The always-visible held-flat summary (caption a) — readable, not dim. */
+.heldFlatSummary {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 72ch;
+  margin: 0;
+}
+
+/* The counted-disclosure pattern (LabOutOfModel's), Book-side. */
+.disclosure {
+  margin: var(--sp-3) 0 0;
+}
+
+.disclosure summary {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+
+.tableWrap {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow-x: auto;
+  background: var(--panel);
+  margin: var(--sp-2) 0 0;
+}
+
+.heldFlatTable {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--fs-caption);
+}
+
+.heldFlatTable th {
+  font-family: var(--mono);
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.heldFlatTable td {
+  padding: 5px 10px;
+  border-top: 1px solid var(--line);
   color: var(--ink-2);
 }
 
-.heldFlat li {
-  padding: 4px 0;
-  border-top: 1px solid var(--line);
+.heldFlatTable .num,
+.heldFlatTable th.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
-/* ---- risk map ---- */
+/* ---- risk map (W-UX-D §16: the full-book walk) ---- */
+
+/* Live walk progress: mono, in the panel head, primary ink so the running
+   numbers read as an instrument readout. */
+.walkProgress {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink);
+}
+
+/* Abort/failure disposition: dim, labeled, above the retained partial view. */
+.walkNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  padding: 8px 14px 0;
+}
+
+/* ---- histogram reading lines (W-UX-D §17) ---- */
+
+.readingLine {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 64ch;
+  margin: 0 0 10px;
+}
 
 .legend {
   display: flex;

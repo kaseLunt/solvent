@@ -9,70 +9,33 @@
 //   - `excluded_engines` are NAMED: an engine absent from the arithmetic with
 //     no name attached is exactly the silent hole this surface must not have.
 //   - `held_flat` is RENDERED: every price input the propagation matrix did
-//     not describe, listed verbatim.
+//     not describe, listed verbatim behind the counted-disclosure pattern
+//     (SUPPLEMENT caption a) — an always-visible summary, the named list one
+//     click away, values in the source's RAW units (the wire declares no
+//     decimals; scaling them would be fabrication).
 //   - residual bad debt uses the primitive's `residual` kind — it can never
-//     hide, however small.
+//     hide, however small; dust may only APPEND "· all dust", never suppress.
+//   - `at_risk_note` is NOT rendered here (SUPPLEMENT caption c): the series
+//     it governs is not drawn on this panel. It survives verbatim in the
+//     raw-JSON / Developers register.
 
-import { formatUnits, type Waterfall, type WaterfallEngine } from "@solvent/client";
-import { WaterfallSteps, type WaterfallStep } from "@/components/charts/WaterfallSteps";
+import type { Waterfall } from "@solvent/client";
+import { WaterfallSteps } from "@/components/charts/WaterfallSteps";
 import { EngineChip } from "@/components/EngineChip";
 import { ProjectionBadge } from "@/components/ProjectionBadge";
 import { RefusedTag } from "@/components/RefusedTag";
 import { AddressMono } from "@/components/AddressMono";
 import { groupDecimalString } from "@/lib/book-format";
+import {
+  BAD_DEBT_LEGEND,
+  ELIGIBLE_REALIZED_GLOSS,
+  HELD_FLAT_VALUE_HEADER,
+  heldFlatDetailsSummary,
+  heldFlatSummary,
+  WATERFALL_SECTION_NOTE,
+} from "@/lib/book-copy";
+import { buildWaterfallSteps, factorTimesLabel } from "./waterfallView";
 import styles from "./book.module.css";
-
-/** Display an exact USD amount: "$4,200" — string surgery, no float. */
-function usd(value: string, decimals: number): string {
-  return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
-}
-
-/** Geometry-only number for bar widths. Display strings stay exact. */
-function geometry(value: string, decimals: number): number {
-  return Number(formatUnits(value, decimals, { trim: true }));
-}
-
-/** ×0.90 label from the wad-scaled grid factor. */
-function factorLabel(factor: string, gridScale: string): string {
-  const display = formatUnits(factor, gridScale.length - 1, { trim: true });
-  return `×${display.includes(".") ? display : `${display}.00`}`;
-}
-
-function engineSteps(waterfall: Waterfall, engine: string): WaterfallStep[] {
-  const steps: WaterfallStep[] = [];
-  for (const point of waterfall.points) {
-    const at: WaterfallEngine | undefined = point.engines.find(
-      (candidate) => candidate.engine === engine,
-    );
-    if (at === undefined) continue;
-    // Label grammar budgeted to the primitive's gutter (design ruling 2):
-    // "×1.00 unshocked" — no parentheses, no "eligible" (the panel head
-    // already says "cumulative eligible debt"); counts move to the dim sub
-    // line so the money string stands alone after the bar and never clips.
-    const label = factorLabel(point.factor, waterfall.grid_scale);
-    const unshocked = point.index === 0 ? " unshocked" : "";
-    steps.push({
-      label: `${label}${unshocked}`,
-      sub: `${String(at.cumulative_eligible_accounts)} acct`,
-      value: geometry(at.cumulative_debt_eligible_usd, at.usd_decimals),
-      display: usd(at.cumulative_debt_eligible_usd, at.usd_decimals),
-      kind: "flow",
-    });
-    // Exact string surgery, not a literal compare: a wire form like
-    // "0.000000" is still zero, and a floored zero would fabricate a crit
-    // residual bar for bad debt that does not exist (design ruling 1).
-    if (/[1-9]/.test(at.cumulative_bad_debt_usd)) {
-      steps.push({
-        label: `${label} bad debt`,
-        sub: `${String(at.insolvent_if_liquidated_accounts)} insolvent`,
-        value: geometry(at.cumulative_bad_debt_usd, at.usd_decimals),
-        display: usd(at.cumulative_bad_debt_usd, at.usd_decimals),
-        kind: "residual",
-      });
-    }
-  }
-  return steps;
-}
 
 export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
   if (waterfall === null) {
@@ -103,8 +66,8 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
           {waterfall.axis}
         </h2>
         <ProjectionBadge />
-        <span className={styles.sectionNote}>
-          ×1.00 is the standing census; every lower grid point is a projection
+        <span className={styles.sectionNote} data-testid="waterfall-section-note">
+          {WATERFALL_SECTION_NOTE}
         </span>
       </div>
 
@@ -117,7 +80,7 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
               ? `#${String(waterfall.monotonicity.index)}`
               : "?"}
             {waterfall.monotonicity.factor !== undefined
-              ? ` (factor ${factorLabel(waterfall.monotonicity.factor, waterfall.grid_scale)})`
+              ? ` (factor ${factorTimesLabel(waterfall.monotonicity.factor, waterfall.grid_scale)})`
               : ""}
             {" — "}
             {waterfall.monotonicity.detail ?? "the debt-eligible series is not monotone"}. The points
@@ -138,6 +101,13 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
         </div>
       )}
 
+      {/* The eligible-vs-realized gloss (SUPPLEMENT caption b): the primary
+          register at the head of the panel area; the wire's own
+          eligibility_note stays rendered, dim, verbatim, below. */}
+      <p className={styles.gloss} data-testid="eligible-gloss">
+        {ELIGIBLE_REALIZED_GLOSS}
+      </p>
+
       <div className={styles.panelGrid}>
         {engineIds.map((engine) => (
           <div className={styles.panel} key={engine} data-testid={`book-waterfall-${engine}`}>
@@ -148,7 +118,7 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
             <div className={styles.panelBody}>
               <WaterfallSteps
                 label={`liquidation waterfall for ${engine}`}
-                steps={engineSteps(waterfall, engine)}
+                steps={buildWaterfallSteps(waterfall, engine)}
                 width={520}
                 rowHeight={28}
               />
@@ -156,6 +126,10 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
           </div>
         ))}
       </div>
+
+      <p className={styles.legendLine} data-testid="waterfall-bad-debt-legend">
+        {BAD_DEBT_LEGEND}
+      </p>
 
       <div className={styles.panel} style={{ marginTop: "var(--sp-3)" }}>
         <div className={styles.panelHead}>
@@ -167,17 +141,39 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
               empty — the claim that the matrix covered the whole book
             </span>
           ) : (
-            <ul className={styles.heldFlat}>
-              {waterfall.held_flat.map((held) => (
-                <li key={`${String(held.chain_id)}-${held.asset}-${held.source}`}>
-                  <AddressMono address={held.asset} copy={false} /> · chain {String(held.chain_id)} ·{" "}
-                  {held.source} · value {groupDecimalString(held.value)} (held at its current mark)
-                </li>
-              ))}
-            </ul>
+            <>
+              <p className={styles.heldFlatSummary} data-testid="held-flat-summary">
+                {heldFlatSummary(waterfall.held_flat.length)}
+              </p>
+              <details className={styles.disclosure}>
+                <summary>{heldFlatDetailsSummary(waterfall.held_flat.length)}</summary>
+                <div className={styles.tableWrap}>
+                  <table className={styles.heldFlatTable}>
+                    <thead>
+                      <tr>
+                        <th>held flat (matrix did not move this price)</th>
+                        <th>source</th>
+                        <th className={styles.num}>{HELD_FLAT_VALUE_HEADER}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {waterfall.held_flat.map((held) => (
+                        <tr key={`${String(held.chain_id)}-${held.asset}-${held.source}`}>
+                          <td>
+                            <AddressMono address={held.asset} copy={false} />{" "}
+                            <span className="mono dim">chain {String(held.chain_id)}</span>
+                          </td>
+                          <td className="mono dim">{held.source}</td>
+                          <td className={styles.num}>{groupDecimalString(held.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </>
           )}
           <p className={styles.panelNote}>{waterfall.eligibility_note}</p>
-          <p className={styles.panelNote}>{waterfall.at_risk_note}</p>
         </div>
       </div>
     </section>

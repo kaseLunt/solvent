@@ -4,6 +4,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { StatCard } from "@/components/StatCard";
 import { solventBaseUrl } from "@/lib/api";
+import { AT_RISK_READER_CAPTION, wireNotesSummary } from "@/lib/book-copy";
 import { renderNullableDecimal } from "@/lib/format";
 import {
   runBookScenario,
@@ -38,7 +39,14 @@ const AGGREGATE_ROWS = [
   { key: "total_collateral_usd", label: "total collateral", money: true },
   { key: "total_debt_usd", label: "total debt", money: true },
   { key: "eligible_debt_usd", label: "eligible debt", money: true },
-  { key: "collateral_at_risk_usd", label: "collateral at risk", money: true },
+  // SUPPLEMENT caption (c): the reader caption rides this row as its title —
+  // a dip in this series is honest arithmetic, not missing data.
+  {
+    key: "collateral_at_risk_usd",
+    label: "collateral at risk",
+    money: true,
+    title: AT_RISK_READER_CAPTION,
+  },
   { key: "bad_debt_usd", label: "bad debt", money: true },
 ] as const;
 
@@ -67,7 +75,7 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
           <tbody>
             {AGGREGATE_ROWS.map((row) => (
               <tr key={row.key}>
-                <td>{row.label}</td>
+                <td title={"title" in row ? row.title : undefined}>{row.label}</td>
                 <td className={styles.num}>{cell(row, "before")}</td>
                 <td className={styles.num}>{cell(row, "after")}</td>
               </tr>
@@ -185,11 +193,18 @@ function BookResult({ response }: { response: LabRunBook }) {
       </section>
 
       <LabOutOfModel items={response.out_of_model} />
-      {response.notes.map((note) => (
-        <p key={note} className={styles.noteText}>
-          {note}
-        </p>
-      ))}
+      {/* SUPPLEMENT caption (c): the wire notes stay VERBATIM, behind the
+          counted-disclosure pattern — counted always, one click to the text. */}
+      {response.notes.length > 0 && (
+        <details className={styles.disclosure} data-testid="book-wire-notes">
+          <summary>{wireNotesSummary(response.notes.length)}</summary>
+          <ul>
+            {response.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       <LabBatchStamp
         batch={response.batch}
         scenarioConfigVersion={response.scenario_config_version}

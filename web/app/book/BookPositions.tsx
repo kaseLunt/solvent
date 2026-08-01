@@ -399,7 +399,11 @@ export function BookPositions() {
       />
 
       <div style={{ marginTop: "var(--sp-3)" }}>
+        {/* Keyed by engine (W-UX-D §16): a switch remounts the map, so the
+            full-book walk state can never leak across engines — per-engine
+            panels never share an axis, or a vector. */}
         <BookRiskMap
+          key={engine}
           engine={engine}
           rows={rows}
           totalPositions={envelope === null ? null : envelope.totalPositions}

@@ -9,6 +9,11 @@ import {
 import { AddressMono } from "@/components/AddressMono";
 import { EngineChip } from "@/components/EngineChip";
 import { SeverityHF } from "@/components/SeverityHF";
+import {
+  HELD_FLAT_VALUE_HEADER,
+  heldFlatDetailsSummary,
+  heldFlatSummary,
+} from "@/lib/book-copy";
 import { formatFactor } from "@/lib/factor";
 import { EM_DASH } from "@/lib/format";
 import { WARN_HF_RATIO } from "@/lib/severity";
@@ -218,7 +223,13 @@ export function LabAppliedShocks({ shocks }: { shocks: readonly AppliedShock[] }
   );
 }
 
-/** `held_flat`, rendered — a named list, never a silent hold. */
+/**
+ * `held_flat`, rendered — a named list, never a silent hold. SUPPLEMENT
+ * caption (a): the counted-disclosure pattern (LabOutOfModel's) — an
+ * always-visible summary stating what a held-flat input MEANS, the named
+ * table one click away. Values stay in the source's RAW units: the wire
+ * declares no decimals, and scaling them to USD would be fabrication.
+ */
 export function LabHeldFlat({
   heldFlat,
   emptyClaim,
@@ -234,28 +245,36 @@ export function LabHeldFlat({
     );
   }
   return (
-    <div className={styles.tableWrap} data-testid="held-flat">
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>held flat (matrix did not move this price)</th>
-            <th>source</th>
-            <th className={styles.num}>held value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {heldFlat.map((held) => (
-            <tr key={`${held.asset}-${held.source}`}>
-              <td>
-                <AddressMono address={held.asset} copy={false} />{" "}
-                <span className="mono dim">chain {held.chain_id}</span>
-              </td>
-              <td className="mono dim">{held.source}</td>
-              <td className={styles.num}>{held.value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div data-testid="held-flat">
+      <p className={styles.caption} data-testid="held-flat-summary">
+        {heldFlatSummary(heldFlat.length)}
+      </p>
+      <details className={styles.disclosure}>
+        <summary>{heldFlatDetailsSummary(heldFlat.length)}</summary>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>held flat (matrix did not move this price)</th>
+                <th>source</th>
+                <th className={styles.num}>{HELD_FLAT_VALUE_HEADER}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {heldFlat.map((held) => (
+                <tr key={`${held.asset}-${held.source}`}>
+                  <td>
+                    <AddressMono address={held.asset} copy={false} />{" "}
+                    <span className="mono dim">chain {held.chain_id}</span>
+                  </td>
+                  <td className="mono dim">{held.source}</td>
+                  <td className={styles.num}>{held.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   );
 }

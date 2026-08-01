@@ -49,10 +49,12 @@ export interface WaterfallStepsProps {
  */
 export function WaterfallSteps({ steps, width = 560, rowHeight = 34, label }: WaterfallStepsProps) {
   // Margins are budgeted to the longest real strings: left holds the label
-  // grammar ("×1.00 unshocked"), right holds the mono money string placed
-  // after the LONGEST bar ("$2,904,332.10"). SVG overflow is hidden, so a
-  // clipped string would silently lose the exact value.
-  const margin = { top: 4, right: 155, bottom: 4, left: 110 };
+  // grammar and its dim sub ("−20% bad debt" over "9,738 insolvent · all
+  // dust" — W-UX-D §18 widened 110→120 so the longest sub never clips),
+  // right holds the mono money string placed after the LONGEST bar
+  // ("$2,904,332.10"). SVG overflow is hidden, so a clipped string would
+  // silently lose the exact value.
+  const margin = { top: 4, right: 155, bottom: 4, left: 120 };
   const RESIDUAL_INDENT = 10;
   const plotW = width - margin.left - margin.right - RESIDUAL_INDENT;
   const height = margin.top + margin.bottom + steps.length * rowHeight;

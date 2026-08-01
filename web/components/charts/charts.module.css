@@ -110,6 +110,77 @@
   stroke-dasharray: 2 3;
 }
 
+/* ---- risk-map density bins (W-UX-D §16) ---- */
+/* The QUANTIZED 4-step count ramp (thresholds 1 / 10 / 100 / 1,000):
+   opacity on CLASS fills over the theme accent — stepped, never a gradient,
+   no hardcoded hex, so both themes keep their own ink. */
+.binStep1 {
+  fill: var(--accent);
+  opacity: 0.16;
+}
+
+.binStep2 {
+  fill: var(--accent);
+  opacity: 0.34;
+}
+
+.binStep3 {
+  fill: var(--accent);
+  opacity: 0.58;
+}
+
+.binStep4 {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+/* Direct mono labels for the top-12 debt outliers. */
+.outlierLabel {
+  font-family: var(--mono);
+  font-size: 9px;
+  fill: var(--ink-2);
+}
+
+.densityLegend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.densityLegendSteps {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.binSwatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.binSwatchS1 {
+  opacity: 0.16;
+}
+
+.binSwatchS2 {
+  opacity: 0.34;
+}
+
+.binSwatchS3 {
+  opacity: 0.58;
+}
+
+.binSwatchS4 {
+  opacity: 0.85;
+}
+
 .baseline {
   stroke: var(--ink-3);
   stroke-width: 1;

@@ -126,8 +126,15 @@ export function BookSurface() {
             </div>
           )}
 
-          <BookStatRows engines={state.book.engines} />
-          <BookHistogram histogram={state.book.hf_histogram} />
+          {/* Aggregates + bad_debt travel down (SUPPLEMENT §17): the stat
+              rows and the histogram reading lines compute from the SAME
+              /v1/book response. */}
+          <BookStatRows engines={state.book.engines} badDebt={state.book.bad_debt} />
+          <BookHistogram
+            histogram={state.book.hf_histogram}
+            aggregates={state.book.engines}
+            badDebt={state.book.bad_debt}
+          />
           <BookWaterfall waterfall={state.book.waterfall} />
           <BookBadDebt badDebt={state.book.bad_debt} />
         </>

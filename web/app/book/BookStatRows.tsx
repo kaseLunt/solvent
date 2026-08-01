@@ -3,12 +3,13 @@
 // denominator is not a disclosure. Engines are NEVER combined: one block per
 // engine, no blended totals anywhere on this surface.
 
-import type { Aggregate } from "@solvent/client";
+import type { Aggregate, BadDebt } from "@solvent/client";
 import { StatCard } from "@/components/StatCard";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import { liquidatableCardSub } from "./readingLines";
 import styles from "./book.module.css";
 
 function refusalBreakdown(aggregate: Aggregate): string {
@@ -16,7 +17,13 @@ function refusalBreakdown(aggregate: Aggregate): string {
   return aggregate.refusals.map((count) => `${count.key} ×${String(count.count)}`).join(" · ");
 }
 
-function EngineStats({ aggregate }: { aggregate: Aggregate }) {
+function EngineStats({
+  aggregate,
+  badDebt,
+}: {
+  aggregate: Aggregate;
+  badDebt: BadDebt | undefined;
+}) {
   const denominator = `${String(aggregate.computed_positions)}/${String(aggregate.positions)} positions counted`;
 
   if (aggregate.refused) {
@@ -74,7 +81,9 @@ function EngineStats({ aggregate }: { aggregate: Aggregate }) {
               / {String(aggregate.computed_positions)}
             </>
           }
-          sub="of computed positions, engine's own comparator"
+          /* The Σ rides the count (SUPPLEMENT §17): never the adjective
+             without the Σ, never the count suppressed. */
+          sub={liquidatableCardSub(badDebt)}
         />
         <StatCard
           label="Refused"
@@ -88,14 +97,24 @@ function EngineStats({ aggregate }: { aggregate: Aggregate }) {
   );
 }
 
-export function BookStatRows({ engines }: { engines: readonly Aggregate[] }) {
+export function BookStatRows({
+  engines,
+  badDebt,
+}: {
+  engines: readonly Aggregate[];
+  badDebt: readonly BadDebt[];
+}) {
   return (
     <section className={styles.section} aria-label="per-engine aggregates">
       <div className={styles.sectionHead}>
         <h2>Aggregates — per engine, never combined</h2>
       </div>
       {engines.map((aggregate) => (
-        <EngineStats key={aggregate.engine} aggregate={aggregate} />
+        <EngineStats
+          key={aggregate.engine}
+          aggregate={aggregate}
+          badDebt={badDebt.find((candidate) => candidate.engine === aggregate.engine)}
+        />
       ))}
     </section>
   );

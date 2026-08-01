@@ -188,7 +188,11 @@ test("a monotone waterfall renders NO violation strip; held_flat and projection 
 
   const heldFlat = page.getByTestId("waterfall-held-flat");
   await expect(heldFlat).toContainText("0xA0b8…eB48"); // the held-flat USDC input
-  await expect(heldFlat).toContainText("held at its current mark");
+  // W-UX-D caption (a): the counted-disclosure pattern — always-visible
+  // summary + "held flat — {n} inputs named" (the deeper copy pins live in
+  // book-charts.spec.ts).
+  await expect(heldFlat).toContainText("1 price inputs held flat");
+  await expect(heldFlat).toContainText("held flat — 1 inputs named");
 });
 
 test("a waterfall monotonicity violation is SURFACED, naming the offending point", async ({ page }) => {

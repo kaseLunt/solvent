@@ -1,5 +1,6 @@
 import type { Shortfall } from "@solvent/client";
 import { StatCard } from "@/components/StatCard";
+import { ELIGIBLE_REALIZED_GLOSS } from "@/lib/book-copy";
 import { renderNullableDecimal } from "@/lib/format";
 import styles from "./lab.module.css";
 
@@ -38,7 +39,13 @@ export function LabRealization({ realization }: { realization: Shortfall }) {
         <StatCard
           label="Bad debt at liquidation"
           value={money(realization.bad_debt_at_liquidation_usd)}
-          sub="delta-only · realized ≤ eligible"
+          /* SUPPLEMENT caption (b): the eligible-vs-realized gloss rides the
+             "realized ≤ eligible" sub as its title. */
+          sub={
+            <span title={ELIGIBLE_REALIZED_GLOSS} data-testid="realized-leq-eligible">
+              delta-only · realized ≤ eligible
+            </span>
+          }
           tone={realization.bad_debt_at_liquidation_usd === "0" ? "default" : "crit"}
         />
       </div>

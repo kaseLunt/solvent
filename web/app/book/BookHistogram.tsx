@@ -9,13 +9,26 @@
 //   - `hf_num/hf_den` (Debt Manager): the buckets are a DISCLOSURE
 //     (maxBorrowLT/borrowings); eligibility comes from the strict boolean, so
 //     no bucket is crit-tinted here and the wire note stays visible.
+//   The tint ASYMMETRY is the design (SUPPLEMENT §17) — do not "fix" it.
+//
+// Each panel opens with a COMPUTED reading line (SUPPLEMENT §17): counts and
+// Σ eligible debt derived from the SAME /v1/book response — never asserted,
+// never hardcoded. The wire `note` stays VISIBLE in the dim panelNote
+// register below (no collapse, no tooltip-only doctrine).
 //
 // `refused_count` / `infinite_count` render BESIDE the buckets — rows the
 // histogram could not place are counted, never dropped.
 
-import { parseDecimal, type EngineHistogram, type Histogram } from "@solvent/client";
+import {
+  parseDecimal,
+  type Aggregate,
+  type BadDebt,
+  type EngineHistogram,
+  type Histogram,
+} from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
+import { histogramReadingLine } from "./readingLines";
 import styles from "./book.module.css";
 
 const BAR_MAX = 240;
@@ -23,7 +36,17 @@ const ROW_H = 18;
 const LABEL_W = 84;
 const COUNT_W = 40;
 
-function EnginePanel({ histogram, wadScale }: { histogram: EngineHistogram; wadScale: bigint }) {
+function EnginePanel({
+  histogram,
+  wadScale,
+  aggregate,
+  badDebt,
+}: {
+  histogram: EngineHistogram;
+  wadScale: bigint;
+  aggregate: Aggregate | undefined;
+  badDebt: BadDebt | undefined;
+}) {
   if (histogram.refused) {
     return (
       <div className={styles.panel} data-testid={`book-histogram-${histogram.engine}`}>
@@ -51,6 +74,11 @@ function EnginePanel({ histogram, wadScale }: { histogram: EngineHistogram; wadS
         <span className={styles.comparator}>comparator: {histogram.comparator}</span>
       </div>
       <div className={styles.panelBody}>
+        {/* The computed reading line (SUPPLEMENT §17) — primary register,
+            top of the panel body, derived from the same wire response. */}
+        <p className={styles.readingLine} data-testid={`hist-reading-${histogram.engine}`}>
+          {histogramReadingLine(histogram, aggregate, badDebt, wadScale)}
+        </p>
         <svg
           width={width}
           height={height}
@@ -125,7 +153,15 @@ function EnginePanel({ histogram, wadScale }: { histogram: EngineHistogram; wadS
   );
 }
 
-export function BookHistogram({ histogram }: { histogram: Histogram }) {
+export function BookHistogram({
+  histogram,
+  aggregates,
+  badDebt,
+}: {
+  histogram: Histogram;
+  aggregates: readonly Aggregate[];
+  badDebt: readonly BadDebt[];
+}) {
   const wadScale = parseDecimal(histogram.wad_scale);
   return (
     <section className={styles.section} aria-label="health-factor histogram per engine">
@@ -135,7 +171,13 @@ export function BookHistogram({ histogram }: { histogram: Histogram }) {
       </div>
       <div className={styles.panelGrid}>
         {histogram.engines.map((engine) => (
-          <EnginePanel key={engine.engine} histogram={engine} wadScale={wadScale} />
+          <EnginePanel
+            key={engine.engine}
+            histogram={engine}
+            wadScale={wadScale}
+            aggregate={aggregates.find((candidate) => candidate.engine === engine.engine)}
+            badDebt={badDebt.find((candidate) => candidate.engine === engine.engine)}
+          />
         ))}
       </div>
     </section>
