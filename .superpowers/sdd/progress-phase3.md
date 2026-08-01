@@ -3332,3 +3332,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   three unparseable Lab captions: held-flat list, eligible-vs-realized,
   non-monotone collateral-at-risk). Contract train A HELD until the
   supplement lands so ONE 1.3.0 train carries every param.
+- **CODEX ROUND 7: SHIP (e17479e..9ee3207); ACCEPTANCE RECEIPT RUN
+  LAUNCHED; SUPPLEMENT RULING IN; W-UX-A DISPATCHED (20:02)**: round 7
+  approve, NO material findings — static trace confirmed all DM
+  position writes USD-6, mixed/wrong witness scales refuse, stress/
+  waterfall consume the structural scale, both serving surfaces share
+  the welded reconstruction, rev 5 bound into the materialization key.
+  Below-bar note recorded: future non-8 Aave oracle configs should
+  re-evaluate the aggregate's fixed scale (registry + live evidence
+  are 8 today). Codex sandbox still could not write Go caches (GOTMPDIR
+  redirect denied) — static only; the integrator gate had already run
+  the full suites at landing. THE H-SAGA REVIEW TRAIN IS CLOSED: rounds
+  1-7, every finding either fixed-and-verified or accepted-and-
+  disclosed. FRESH-PIN ACCEPTANCE RECEIPT RUN LAUNCHED (babysitter
+  agent, main worktree, harness picks fresh pins; -rps 1.0 -timeout
+  45m -rpc-attempts 8; transient protocol: max 2 full relaunches,
+  partial-run pins never reused; artifacts land unstaged for the
+  integrator to commit). Design supplement 16-18 RECEIVED (risk map:
+  explicit load-full-book walk + deterministic client bins + crit rows
+  NEVER binned + top-12 named whales + USD log axis; DensityMap new
+  primitive, Scatter untouched; histogram/waterfall: computed reading
+  lines — never asserted — percent-primary shock labels, bad-debt
+  gloss, dust ANNOTATION never dust-hiding on projections; held-flat:
+  counted-details summary, NO client-side USD scaling — blocked on the
+  HeldFlat decimals+symbol proposal; at_risk_note deregistered from
+  primary as implementer prose). W-UX-A (contract train 1.3.0:
+  min_value + dir + limit 1000, cursor binds all params, refused/NULL
+  never excluded law in contract text, 3 mutants) DISPATCHED. Named
+  proposals pending owner/integrator adjudication: E-2 risk-map
+  endpoint; HeldFlat enrichment; dust-echo fields.
