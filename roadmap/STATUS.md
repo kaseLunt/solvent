@@ -1,12 +1,12 @@
 ---
-active_phase: P3
-active_task: W2
+active_phase: P5
+active_task: none
 project_state: active
 writer_mode: serial
 parallel_readers: allowed
 enforcement: bootstrap
 enforcement_evidence: []
-updated: 2026-07-28
+updated: 2026-08-01
 ---
 
 # STATUS — integration pointer
@@ -27,10 +27,16 @@ drift without changing authority.
 ## Current integration task
 
 Read `active_task` above. Its work object under `roadmap/work/` defines scope, acceptance, and
-handoff; the Phase 3 implementation plan and design spec are that work's first deliverables.
+handoff; the Phase 5 plan and design spec are committed, the six surfaces are built (UX train
+complete through `0b75eed`), and the remaining integration work is the public deploy + the
+carried owed items named in the work object's Handoff.
 
 ## Blockers
 
+- Owner actions (P5 deploy gate, spec §12): VPS account provisioning + domain purchase — gate
+  W3's deploy acceptance checks, not the local polish work.
+- The W2→W3 claim rescope is the integrator's next transition action after this train lands
+  (the claim still binds W2; doctor reports the mismatch until rescoped).
 - External: Aave V4 whitelabel AIP not yet executed (governance ARFC 2026-07-14) — gates the
   Observatory's second OP stream, not current work.
 - Enforcement is the **local pre-commit gate** (doctor + scope gate), which is the only path every
@@ -46,4 +52,6 @@ handoff; the Phase 3 implementation plan and design spec are that work's first d
 
 ## Next owner transition
 
-W1 achievement review at P2 exit: receipts stamped, evidence cross-checked, then P3 entry.
+W3 deploy gate: owner provisions the VPS account and purchases the domain (spec §12); then the
+P5 exit review at launch — public URL live, spec §11 stranger walk — followed by P4 entry
+(alerts + the watch page against its real backend, per D-014).
