@@ -13,7 +13,7 @@
 // A failed request is a fourth, separate statement ("lookup unavailable") —
 // an error is not an answer.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ContractInvariantError,
@@ -82,35 +82,72 @@ export function InspectorSurface({ addr }: { addr: string }) {
     addressResult !== null && addressResult.for === addr ? addressResult.state : { status: "loading" };
   const historyState: HistoryState =
     historyResult !== null && historyResult.for === addr ? historyResult.state : { status: "loading" };
+
+  // --- the position lookup (via @solvent/client's sealed outcome union) ---
+  //
+  // `keepOnFailure` (Wave R4) is for the RESUME re-fetch: a background
+  // reconcile may not make the page worse than it found it. A woken laptop
+  // whose network is not up yet must not trade a real position (rendered under
+  // an age that is still climbing, and still true) for "lookup unavailable".
+  // A FOREGROUND failure is still stated, in full — an error is not an answer.
+  const addressControllerRef = useRef<AbortController | null>(null);
+  const loadAddress = useCallback(
+    (options?: { keepOnFailure?: boolean }) => {
+      if (!valid) return;
+      const keepOnFailure = options?.keepOnFailure ?? false;
+      addressControllerRef.current?.abort();
+      const controller = new AbortController();
+      addressControllerRef.current = controller;
+      getSolventClient()
+        .address(addr, controller.signal)
+        .then(
+          (lookup) => {
+            if (!controller.signal.aborted) {
+              setAddressResult({ for: addr, state: { status: "ready", lookup } });
+            }
+          },
+          (cause: unknown) => {
+            if (controller.signal.aborted) return;
+            const failure = {
+              for: addr,
+              state: { status: "error" as const, message: describeLookupError(cause) },
+            };
+            setAddressResult((previous) =>
+              keepOnFailure &&
+              previous !== null &&
+              previous.for === addr &&
+              previous.state.status === "ready"
+                ? previous
+                : failure,
+            );
+          },
+        );
+    },
+    [addr, valid],
+  );
+
+  useEffect(() => {
+    loadAddress();
+    return () => {
+      addressControllerRef.current?.abort();
+    };
+  }, [loadAddress]);
+
   // Wave R3 (round-10 MEDIUM): THIS lookup's own batch age, anchored at
   // receipt and advanced on a minute tick — never a frozen number, and still
   // never a borrowed or implied as-of.
+  //
+  // Wave R4 (round-11 MEDIUM): and reconciled on RESUME against the wall clock
+  // as well as the monotonic one, with a background re-fetch of THIS lookup —
+  // the envelope that carries the age this page renders. Never another
+  // surface's, and never a spinner over the number already on screen.
+  const reloadAddressOnResume = useCallback(() => {
+    loadAddress({ keepOnFailure: true });
+  }, [loadAddress]);
   const liveAgeSeconds = useAnchoredAgeSeconds(
     addressState.status === "ready" ? addressState.lookup.response.batch.age_seconds : null,
+    reloadAddressOnResume,
   );
-
-  // --- the position lookup (via @solvent/client's sealed outcome union) ---
-  useEffect(() => {
-    if (!valid) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    getSolventClient()
-      .address(addr, controller.signal)
-      .then(
-        (lookup) => {
-          if (!cancelled) setAddressResult({ for: addr, state: { status: "ready", lookup } });
-        },
-        (cause: unknown) => {
-          if (!cancelled) {
-            setAddressResult({ for: addr, state: { status: "error", message: describeLookupError(cause) } });
-          }
-        },
-      );
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [addr, valid]);
 
   // --- HF history (same three-valued law, via lookup()) ---
   useEffect(() => {

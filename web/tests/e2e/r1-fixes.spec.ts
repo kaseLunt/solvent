@@ -126,10 +126,17 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
   // the outside-collateral-covers arm — that collateral moves, it is covered.
   // The sentence is now about REACHABILITY. tests/e2e/r3-fixes.spec.ts pins it
   // over a fixture carrying that very arm.
+  //
+  // WAVE R4 (round-11 MEDIUM) INVERTED IT AGAIN, and THIS test is where the
+  // defect was already on screen: the row above is the `position carries no
+  // debt` arm, and R3's legend still promised "interest or a parameter change
+  // can still cross". With zero borrowings there is no boundary for either to
+  // cross — the row's own hover says so. The legend is now reason-NEUTRAL and
+  // delegates; tests/e2e/r4-fixes.spec.ts asserts it TOGETHER with that hover.
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — interest or a parameter change can still cross; the HF column stays the " +
-      "verdict.",
+      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "reason. The HF column stays the verdict.",
   );
 
   const header = page

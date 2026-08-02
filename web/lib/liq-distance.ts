@@ -95,12 +95,26 @@ export function noPricePathTitle(reason: string | null | undefined): string {
  * the axis can REACH — which is exactly what the solver computed and is true
  * of all four arms at once: no counted collateral on the axis (a), the fall is
  * covered (b), there is no boundary to reach (c), and the unnamed case (d).
- * The two non-price paths stay named, and the HF column stays the verdict.
+ *
+ * WAVE R4 (Codex round-11 MEDIUM). The reachability clause was right; the
+ * clause after the dash was not. "interest or a parameter change can still
+ * cross" ASSERTS a live non-price path, and for arm (c) — `position carries no
+ * debt` — that is FALSE: with zero borrowings there is no liquidation boundary
+ * at all, so interest crosses nothing and a parameter change crosses nothing.
+ * The row's own hover said exactly that ("with zero borrowings there is no
+ * boundary to cross") one line below a legend promising the opposite.
+ *
+ * ONE legend sits over rows of every arm at once, so it may not assert any
+ * single arm's reason. It now states only the SCOPE of what was evaluated —
+ * price paths were, non-price paths were not — and hands the reason to the
+ * cell that actually has one. That is true over all four arms without
+ * claiming anything about any of them, and it points the reader at the hover
+ * rather than pre-empting it. The HF column stays the verdict.
  */
 export const NO_PRICE_PATH_LEGEND =
   "no price path = no downward move along the committed price axis reaches liquidation for " +
-  "this account — interest or a parameter change can still cross; the HF column stays the " +
-  "verdict.";
+  "this account — non-price paths are not evaluated here; each cell's hover names its " +
+  "reason. The HF column stays the verdict.";
 
 /** The Liq. distance column header's own title attribute. */
 export const LIQ_DISTANCE_HEADER_TITLE =

@@ -22,20 +22,31 @@ import {
 } from "../../lib/freshness";
 
 /**
- * A FAKE MONOTONIC CLOCK. `anchorWireAge` / `anchoredAgeSeconds` read
- * `performance.now()` — the monotonic reading, never a wall clock — so the
- * fake replaces exactly that and hands back an `advance` lever.
+ * A FAKE CLOCK FOR A NORMALLY-RUNNING TAB. `anchorWireAge` /
+ * `anchoredAgeSeconds` read `performance.now()` — the monotonic reading, which
+ * is still the primary source — and, since Wave R4, `Date.now()` as the sleep
+ * fallback. A tab that is awake sees both advance TOGETHER, which is what this
+ * lever does; every assertion below is therefore unchanged from R3.
+ *
+ * The cases where the two clocks DISAGREE — system sleep, bfcache, a stepped
+ * wall clock — are the round-11 finding and live in freshness-resume.spec.ts,
+ * which drives them independently.
  */
 function withFakeClock(run: (advanceMs: (ms: number) => void) => void): void {
-  const real = performance.now;
+  const realPerf = performance.now;
+  const realDate = Date.now;
   let t = 1_000;
+  let wall = 1_785_000_000_000;
   performance.now = () => t;
+  Date.now = () => wall;
   try {
     run((ms) => {
       t += ms;
+      wall += ms;
     });
   } finally {
-    performance.now = real;
+    performance.now = realPerf;
+    Date.now = realDate;
   }
 }
 
@@ -115,11 +126,14 @@ test("the anchor reads the MONOTONIC clock — `monotonicNowMs` is performance.n
 });
 
 test("a monotonic reading that goes BACKWARDS never rewinds the age", () => {
-  const anchor = { wireAgeSeconds: 300, receivedAtMs: 10_000 };
+  // Wave R4: the anchor carries BOTH receipt readings, so both must be handed
+  // to the pure function here. The wall reading is held at the receipt value,
+  // which isolates the monotonic behaviour this case is about.
+  const anchor = { wireAgeSeconds: 300, receivedAtMs: 10_000, receivedAtWallMs: 500_000 };
   // Elapsed floors at zero: an age is never rendered younger than the wire's.
-  expect(anchoredAgeSeconds(anchor, 9_000)).toBe(300);
-  expect(anchoredAgeSeconds(anchor, 10_000)).toBe(300);
-  expect(anchoredAgeSeconds(anchor, 11_500)).toBe(301.5);
+  expect(anchoredAgeSeconds(anchor, 9_000, 500_000)).toBe(300);
+  expect(anchoredAgeSeconds(anchor, 10_000, 500_000)).toBe(300);
+  expect(anchoredAgeSeconds(anchor, 11_500, 500_000)).toBe(301.5);
 });
 
 test("the MINUTE boundary is crossed while the page is open", () => {

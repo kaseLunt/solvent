@@ -56,12 +56,6 @@ function gatePosture(engines: number, refused: readonly EngineRefusal[]): string
 
 export function BookSurface() {
   const [state, setState] = useState<BookState>({ phase: "loading" });
-  // Wave R3 (round-10 MEDIUM): the batch's age ANCHORED at receipt, so the
-  // head line and the stampline keep counting instead of freezing at the
-  // number this response was built with.
-  const liveAgeSeconds = useAnchoredAgeSeconds(
-    state.phase === "ok" ? state.book.batch.age_seconds : null,
-  );
   const controllerRef = useRef<AbortController | null>(null);
   /** The batch id of the /v1/book response currently rendered. */
   const bookBatchRef = useRef<number | null>(null);
@@ -71,7 +65,14 @@ export function BookSurface() {
   // Fetch (or RE-fetch) /v1/book. A refetch keeps the current book on screen
   // until the fresh one lands — the aggregates stay whichever batch they
   // honestly are, and the table's batch guard discloses any mismatch.
-  const loadBook = useCallback(() => {
+  //
+  // `keepOnFailure` (Wave R4) is for the RESUME re-fetch: a background
+  // reconcile may not make the page worse than it found it. A woken laptop
+  // whose network is not up yet must not trade a real book (rendered under an
+  // age that is still climbing, and still true) for an error strip. A
+  // FOREGROUND failure is still stated, in full.
+  const loadBook = useCallback((options?: { keepOnFailure?: boolean }) => {
+    const keepOnFailure = options?.keepOnFailure ?? false;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -83,15 +84,15 @@ export function BookSurface() {
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
-        if (cause instanceof UnavailableError) {
-          setState({
-            phase: "no-batch",
-            message: cause.body.error.message,
-            retryAfterSeconds: cause.retryAfterSeconds,
-          });
-          return;
-        }
-        setState({ phase: "error", message: cause instanceof Error ? cause.message : String(cause) });
+        const failure: BookState =
+          cause instanceof UnavailableError
+            ? {
+                phase: "no-batch",
+                message: cause.body.error.message,
+                retryAfterSeconds: cause.retryAfterSeconds,
+              }
+            : { phase: "error", message: cause instanceof Error ? cause.message : String(cause) };
+        setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
       });
   }, []);
 
@@ -99,6 +100,24 @@ export function BookSurface() {
     loadBook();
     return () => { controllerRef.current?.abort(); };
   }, [loadBook]);
+
+  // Wave R3 (round-10 MEDIUM): the batch's age ANCHORED at receipt, so the
+  // head line and the stampline keep counting instead of freezing at the
+  // number this response was built with.
+  //
+  // Wave R4 (round-11 MEDIUM): and on a RESUME — bfcache restore, tab brought
+  // forward, window raised — the age is recomputed against both clocks
+  // immediately AND /v1/book is re-fetched in the background, because this
+  // surface owns that fetch. The clamped estimate holds the line meanwhile:
+  // no spinner over a stale number, and no "refreshing" claim, because the
+  // estimate is not a placeholder — it is a true statement about the batch.
+  const reloadBookOnResume = useCallback(() => {
+    loadBook({ keepOnFailure: true });
+  }, [loadBook]);
+  const liveAgeSeconds = useAnchoredAgeSeconds(
+    state.phase === "ok" ? state.book.batch.age_seconds : null,
+    reloadBookOnResume,
+  );
 
   // The table's pages landed on a batch (W-UX-C): when it differs from the
   // book we hold — e.g. after a 409 restart onto a fresh batch — re-fetch

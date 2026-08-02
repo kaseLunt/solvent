@@ -225,10 +225,18 @@ test("(3) the legend states REACHABILITY, and stops contradicting the covers hov
   await openBookWith(page, aavePageWithOutsideCovers());
 
   // The rendered legend, verbatim.
+  //
+  // WAVE R4 (round-11 MEDIUM) INVERTED THE TAIL OF THIS PIN. The REACHABILITY
+  // clause this test was written for is unchanged and still correct; what
+  // followed it — "interest or a parameter change can still cross" — asserted
+  // a live non-price path over EVERY row, including the no-debt arm where no
+  // boundary exists at all. The legend now states only the scope of the solve
+  // and hands each row's reason to its own hover, which is precisely where
+  // this test then reads it.
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — interest or a parameter change can still cross; the HF column stays the " +
-      "verdict.",
+      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "reason. The HF column stays the verdict.",
   );
 
   // THE DEFECT, named: for THIS row the shocked collateral does move — it is

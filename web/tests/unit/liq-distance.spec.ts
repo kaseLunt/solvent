@@ -82,10 +82,18 @@ test("the RENDERED legend and the column title carry the axis scope, verbatim", 
   // covered by collateral outside the factor. The legend now speaks of
   // REACHABILITY (what a downward move can reach) rather than of movement,
   // which is true of all four arms at once.
+  //
+  // WAVE R4 (round-11 MEDIUM): R3's legend still ASSERTED a live non-price
+  // path — "interest or a parameter change can still cross". That sentence is
+  // FALSE over a no-debt row: with zero borrowings there is no boundary, so
+  // interest crosses nothing and a parameter change crosses nothing. One
+  // legend sits over rows of every arm at once, so it may not assert any arm's
+  // reason; it states only the SCOPE of what was evaluated and hands the
+  // reason to the cell that owns one.
   expect(NO_PRICE_PATH_LEGEND).toBe(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — interest or a parameter change can still cross; the HF column stays the " +
-      "verdict.",
+      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "reason. The HF column stays the verdict.",
   );
   expect(LIQ_DISTANCE_HEADER_TITLE).toBe(
     "how far the named asset's price must fall to cross this engine's boundary — price axis only.",
@@ -101,7 +109,26 @@ test("the legend never claims the collateral does not MOVE — the covers arm co
   expect(noPricePathTitle(LIQ_NEVER_REASON_OUTSIDE_COVERS)).toContain(
     "no fall of the shocked asset alone reaches the boundary",
   );
-  // The two non-price paths stay named in the legend, as before.
-  expect(NO_PRICE_PATH_LEGEND).toContain("interest or a parameter change can still cross");
-  expect(NO_PRICE_PATH_LEGEND).toContain("the HF column stays the verdict");
+  expect(NO_PRICE_PATH_LEGEND).toContain("The HF column stays the verdict");
+});
+
+test("WAVE R4: the legend asserts NO non-price path — the no-debt row has none to assert", () => {
+  // THE DEFECT, stated as an arithmetic fact: `position carries no debt` means
+  // zero borrowings, so there is no liquidation boundary at all. A legend
+  // promising that "interest or a parameter change can still cross" was making
+  // a claim the wire contradicts, on the same screen, in the hover one row
+  // below it.
+  expect(NO_PRICE_PATH_LEGEND).not.toContain("interest or a parameter change can still cross");
+  expect(NO_PRICE_PATH_LEGEND).not.toContain("still cross");
+  // Reason-NEUTRAL: the legend names neither interest nor parameters as live.
+  expect(NO_PRICE_PATH_LEGEND).not.toContain("interest");
+  expect(NO_PRICE_PATH_LEGEND).not.toContain("parameter change");
+  // It states the SCOPE of the solve and delegates the reason to the hover.
+  expect(NO_PRICE_PATH_LEGEND).toContain("non-price paths are not evaluated here");
+  expect(NO_PRICE_PATH_LEGEND).toContain("each cell's hover names its reason");
+  // And the no-debt hover — the arm that broke the old legend — is unchanged
+  // and still says the boundary does not exist.
+  expect(noPricePathTitle(LIQ_NEVER_REASON_NO_DEBT)).toContain(
+    "with zero borrowings there is no boundary to cross",
+  );
 });
