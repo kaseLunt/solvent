@@ -28,6 +28,7 @@ export type EventsResponse = Schemas["EventsResponse"];
 export type ParamsResponse = Schemas["ParamsResponse"];
 export type PricesResponse = Schemas["PricesResponse"];
 export type RunBookResponse = Schemas["RunBookResponse"];
+export type ScenariosResponse = Schemas["ScenariosResponse"];
 export type ObservatorySeriesResponse = Schemas["ObservatorySeriesResponse"];
 export type EvidenceResponse = Schemas["EvidenceResponse"];
 export type BatchResponse = Schemas["BatchResponse"];
@@ -73,6 +74,14 @@ export type FactorPrice = Schemas["FactorPrice"];
 
 // --- Stress ----------------------------------------------------------------
 
+/**
+ * The COMMITTED half of a scenario — what `GET /v1/scenarios` serves, and
+ * exactly `Omit<Scenario, "results">`. The equality is welded at compile time
+ * in `test/scenarios.test.ts`: the two contract schemas are hand-written, and a
+ * field added to one and forgotten on the other would publish two different
+ * descriptions of one committed definition.
+ */
+export type ScenarioDefinition = Schemas["ScenarioDefinition"];
 export type Scenario = Schemas["Scenario"];
 export type ScenarioResult = Schemas["ScenarioResult"];
 export type StressState = Schemas["StressState"];
@@ -223,7 +232,7 @@ export type HeartbeatGrade = (typeof HEARTBEAT_GRADES)[number];
 export const SEIZURE_MODEL = "pro-rata-over-counted-collateral" as const;
 
 /** `info.version` of the contract this client was generated from. */
-export const CONTRACT_VERSION = "1.3.0" as const;
+export const CONTRACT_VERSION = "1.4.0" as const;
 
 /** WAD (1e18) — the scale health factors and grid factors are published at. */
 export const WAD = 10n ** 18n;

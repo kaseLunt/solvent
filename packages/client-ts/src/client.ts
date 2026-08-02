@@ -49,6 +49,7 @@ import {
   type PositionsResponse,
   type PricesResponse,
   type RunBookResponse,
+  type ScenariosResponse,
   type StressResponse,
 } from "./types.js";
 
@@ -508,6 +509,34 @@ export class SolventClient {
       withQuery(`/v1/prices/${this.checkAddress(asset)}`, params),
       signal,
     );
+  }
+
+  /**
+   * `GET /v1/scenarios` — the COMMITTED scenario set as DEFINITIONS: what each
+   * scenario shocks, on which axes, for which engines, under which path
+   * assumption, and what it explicitly does not model.
+   *
+   * Servable COLD. The set is configuration compiled into the service, so the
+   * response carries no batch envelope and answers 200 with no servable batch —
+   * unlike `addressStress()`, which is where these definitions used to have to
+   * be read from and which answers 503 before the materializer's first pass.
+   * A UI rendering scenario controls wants the vocabulary, not a verdict about
+   * somebody's position.
+   *
+   * Two fields carry weight a caller must not flatten. `engines` is the set of
+   * engines a scenario is DEFINED for — an engine absent from it is outside the
+   * scenario's model, which is NOT the same statement as a withheld engine (a
+   * refusal, named as one on the surfaces that evaluate); rendering the two
+   * alike would show a censored cell as an undefined one. And `shocks[]` are
+   * EXACT rationals (`factor_num`/`factor_den`), never floats — a 1/1 shock is
+   * a scenario whose information lives on another axis (a projection over time,
+   * or a market realization the oracles do not see).
+   *
+   * The entries are byte-for-byte the ones a stress response's `scenarios`
+   * array carries, minus that array's per-address `results`.
+   */
+  async scenarios(signal?: AbortSignal): Promise<ScenariosResponse> {
+    return this.get<ScenariosResponse>("/v1/scenarios", signal);
   }
 
   /**

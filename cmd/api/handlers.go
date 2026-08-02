@@ -1225,16 +1225,66 @@ type wireScenarioResult struct {
 	Projection *wireProjection `json:"projection"`
 }
 
+// wireScenarioDef is the COMMITTED-SET half of a scenario: everything the
+// definition itself asserts — what it shocks, on which axes, for which engines,
+// under which path assumption, and what it explicitly does NOT model — and
+// nothing about any address.
+//
+// It is the whole payload of GET /v1/scenarios and, embedded, the head of every
+// element of a stress response's `scenarios` array. ONE type and ONE serializer
+// (scenarioDefinition) for both, deliberately: two surfaces publishing the same
+// committed definitions through two serializers drift the day one of them grows
+// a field, and a client reading the other then renders a scenario that is not
+// the scenario the numbers were computed from. The embedding makes the wire
+// objects field-identical BY CONSTRUCTION; scenarios_db_test.go asserts it on
+// the wire anyway, because a construction argument nothing checks is a comment.
+type wireScenarioDef struct {
+	ID             string      `json:"id"`
+	Version        string      `json:"version"`
+	Label          string      `json:"label"`
+	Description    string      `json:"description"`
+	PathAssumption string      `json:"path_assumption"`
+	Engines        []string    `json:"engines"`
+	Shocks         []wireShock `json:"shocks"`
+	OutOfModel     []string    `json:"out_of_model"`
+}
+
+// wireScenario is one committed scenario AT AN ADDRESS: the definition
+// (embedded, so the wire object stays flat and field-for-field identical to the
+// listing's) plus the per-address results the stress surface computes.
 type wireScenario struct {
-	ID             string               `json:"id"`
-	Version        string               `json:"version"`
-	Label          string               `json:"label"`
-	Description    string               `json:"description"`
-	PathAssumption string               `json:"path_assumption"`
-	Engines        []string             `json:"engines"`
-	Shocks         []wireShock          `json:"shocks"`
-	OutOfModel     []string             `json:"out_of_model"`
-	Results        []wireScenarioResult `json:"results"`
+	wireScenarioDef
+	Results []wireScenarioResult `json:"results"`
+}
+
+// scenarioDefinition is THE serializer for a committed scenario's definition —
+// the single place a committed scenario becomes wire bytes.
+//
+// `engines` is load-bearing rather than decorative: it is how a reader tells
+// "this scenario is not defined for that engine" (a property of the DEFINITION —
+// most of the committed set is Debt-Manager-only) apart from "that engine's book
+// is withheld" (a refusal). Collapsing the two would make an undefined cell and
+// a censored cell look alike. `shocks[].axis` is load-bearing for the same
+// reason: it is the axis family a reader groups by, and the rate axis is the one
+// that ships as a projection rather than a spot mark.
+func scenarioDefinition(sc risk.Scenario) wireScenarioDef {
+	def := wireScenarioDef{
+		ID:             sc.ID,
+		Version:        sc.Version,
+		Label:          sc.Label,
+		Description:    sc.Description,
+		PathAssumption: sc.PathAssumption,
+		Engines:        orEmpty(sc.Engines),
+		OutOfModel:     orEmpty(sc.OutOfModel),
+		Shocks:         []wireShock{},
+	}
+	for _, sh := range sc.Shocks {
+		def.Shocks = append(def.Shocks, wireShock{
+			Axis: string(sh.Axis), Asset: sh.Asset,
+			FactorNum: sh.FactorNum, FactorDen: sh.FactorDen,
+		})
+	}
+	return def
 }
 
 type wireShock struct {
@@ -1296,22 +1346,11 @@ func (s *server) handleStress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, sc := range s.scenarios {
+		// The committed half comes from the SAME serializer GET /v1/scenarios
+		// serves; only `results` is this surface's own.
 		ws := wireScenario{
-			ID:             sc.ID,
-			Version:        sc.Version,
-			Label:          sc.Label,
-			Description:    sc.Description,
-			PathAssumption: sc.PathAssumption,
-			Engines:        orEmpty(sc.Engines),
-			OutOfModel:     orEmpty(sc.OutOfModel),
-			Shocks:         []wireShock{},
-			Results:        []wireScenarioResult{},
-		}
-		for _, sh := range sc.Shocks {
-			ws.Shocks = append(ws.Shocks, wireShock{
-				Axis: string(sh.Axis), Asset: sh.Asset,
-				FactorNum: sh.FactorNum, FactorDen: sh.FactorDen,
-			})
+			wireScenarioDef: scenarioDefinition(sc),
+			Results:         []wireScenarioResult{},
 		}
 		for _, p := range v.Positions {
 			ws.Results = append(ws.Results, s.stressOne(sc, p))

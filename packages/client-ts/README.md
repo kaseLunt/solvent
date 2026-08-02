@@ -15,7 +15,8 @@ wired up. See [Publishing (P5)](#publishing-p5).
 generated from it by [`openapi-typescript`](https://openapi-ts.dev); the
 hand-written layer is thin and does four things:
 
-- **`fetch`-based client** for the six routes, with zero runtime dependencies.
+- **`fetch`-based client** for every route in the contract, with zero runtime
+  dependencies.
 - **Typed errors** carrying machine-readable fields — a 429 with its
   `Retry-After`, a 503 that says it is about the *service* and not about an empty
   book, a network failure that is distinguishable from a server refusal, and a
@@ -139,7 +140,8 @@ async function main(): Promise<void> {
 | `client.events(query)` | `GET /v1/events` — the durable chain-action feed. Amounts are the engine's own **accounting deltas** named by the closed `amount_unit` vocabulary — never display token amounts. A cross-engine `sinceBlock` is refused **locally**: block heights are incomparable across chains |
 | `client.params(query)` | `GET /v1/params` — the parameter timeline (append-only provenance ledger) |
 | `client.prices(asset, query)` | `GET /v1/prices/{asset}` — the retained price ledger; quarantined rows served WITH their reasons; `chains` names the custody chains consulted |
-| `client.runBookScenario(id)` | `POST /v1/scenarios/{id}/run-book` — one committed scenario over the whole book (computed on request, writes nothing) |
+| `client.scenarios()` | `GET /v1/scenarios` — the committed scenario set as **definitions** (id, label, path assumption, `engines`, exact-rational `shocks`, `out_of_model`). Configuration, not batch data: **no batch envelope**, and servable before the materializer's first pass. `engines` is what a scenario is DEFINED for — an engine absent from it is outside the model, which is NOT a withheld engine |
+| `client.runBookScenario(id)` | `POST /v1/scenarios/{id}/run-book` — one committed scenario over the whole book (computed on request, writes nothing). The ids are exactly the ones `scenarios()` lists |
 | `client.observatory({ limit })` | `GET /v1/observatory` — per-engine TVL, counts, rate indexes |
 | `client.observatorySeries(query)` | `GET /v1/observatory/series` — the durable rollup, exact captured buckets only (a stride serves every Nth bucket verbatim, never an average) |
 | `client.batch(id)` | `GET /v1/batches/{id}` — a batch's permalink: identity + servability; a pruned id is a 404 that DISCLOSES retention |
@@ -498,6 +500,7 @@ client-ts:
 | `sse-server.test.ts` | The wire parser against a **real HTTP server** emitting the exact bytes `cmd/api/sse.go` writes: `event:`/`id:`/`data:` frames, `: heartbeat` comments, frames split across TCP reads, CRLF, CRLF split **between `\r` and `\n`** at every line boundary for every event type, a pre-snapshot tick dropped and recovered over the wire, repeated 200-then-close connections exhausting `maxAttempts`, comment-only connections exhausting `maxAttempts` without surfacing liveness, and a server that closes the connection. |
 | `refine.test.ts` | The verdict class as contract law: both mappings are TOTAL (`null` → `unknowable`, never a definitive token; a contract-impossible value is refused), every refined shape drops its raw key at the type level AND at runtime on every fixture, the primary paths serve refined bodies while the total boolean `eligible` passes through untouched, the round-3 trap lines no longer compile (permanent `@ts-expect-error`), `positionVerdict` agrees between a raw wire position and its refined image, and the raw accessors alone still carry the nullable booleans. |
 | `errors.test.ts` | The whole taxonomy above. |
+| `scenarios.test.ts` | The committed scenario listing (1.4.0), at three layers: a **type-level weld** — `ScenarioDefinition` IS `Omit<Scenario, "results">` and `Omit<RefinedScenario, "results">`, checked by `tsc` with its own anti-vacuity control, so the day the two hand-written contract schemas diverge this compile fails; a **runtime weld** — the committed `stress-aave.json` scenario entries, minus `results`, validate against the `/v1/scenarios` schema (and the unstripped entries are REJECTED, so the check is not comparing a shape with itself); and the route itself — `engines` and the exact-rational `shocks` survive verbatim, and a batch envelope is structurally refused. |
 | `drift.test.ts` | The contract-drift gate, plus package hygiene: zero runtime dependencies, exact dev-dependency pins, `private: true`, and the ESM exports map. |
 | `readme-sync.test.ts` | This README's fenced TypeScript is compiled documentation: every `ts` fence appears verbatim (modulo trailing whitespace) between markers in `examples/` — files the typecheck compiles against the real public surface — and every marked region appears here, so editing either side alone fails the suite; a regex-level docs lint (its scope stated honestly in the test) rejects `!`-falsiness on lookup/verdict values inside the fences, with its own anti-vacuity control. |
 

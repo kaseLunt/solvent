@@ -7,6 +7,7 @@
 //	read.go       — the batch read layer + the reconstruction of internal/risk inputs
 //	meta.go       — the watermark vector, three-leg supersession, /v1/meta
 //	handlers.go   — /v1/book, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/observatory
+//	scenarios.go  — /v1/scenarios: the committed scenario listing (config, not batch data)
 //	sse.go        — /v1/stream: snapshot-on-connect, batch ticks, degradation, heartbeat
 //	middleware.go — rate limit, CORS, read-only enforcement, string sanitization
 //
@@ -592,6 +593,7 @@ func (s *server) routes() {
 	mux.HandleFunc("GET /v1/events", s.handleEvents)
 	mux.HandleFunc("GET /v1/params", s.handleParams)
 	mux.HandleFunc("GET /v1/prices/{asset}", s.handlePrices)
+	mux.HandleFunc("GET /v1/scenarios", s.handleScenarios)
 	mux.HandleFunc("POST /v1/scenarios/{id}/run-book", s.handleRunBook)
 	mux.HandleFunc("GET /v1/batches/{id}", s.handleBatch)
 	mux.HandleFunc("GET /v1/evidence", s.handleEvidence)

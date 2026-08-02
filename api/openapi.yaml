@@ -20,7 +20,7 @@ openapi: 3.0.3
 
 info:
   title: Solvent Risk API
-  version: "1.3.0"
+  version: "1.4.0"
   description: |
     A read-only public view of ether.fi lending risk across two engines: the Aave
     v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
@@ -928,6 +928,110 @@ paths:
                   - "an asset with no custodied observations answers with an empty `series` — an ANSWER about custody, not a claim that the asset has no price."
                   - "downsampling serves exact rows and never averages, least of all across a validity boundary."
         "400": { $ref: "#/components/responses/BadRequest" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+        "500": { $ref: "#/components/responses/InternalError" }
+
+  /v1/scenarios:
+    get:
+      tags: [scenarios]
+      operationId: getScenarios
+      summary: The committed scenario set — the definitions themselves, servable cold
+      description: |
+        The COMMITTED scenario set as definitions: what each scenario shocks, on
+        which primitive axes, for which engines, under which path assumption,
+        and what it explicitly does NOT model.
+
+        This is CONFIGURATION, not batch data — the set is compiled into the
+        binary — so the response carries **no batch envelope** and answers 200
+        with no servable batch in the database at all. That is the point of the
+        route: the same definitions ride on every `/v1/address/{addr}/stress`
+        response, but reading them from there requires naming an address and
+        asking what would happen to it, and that route answers 503 before the
+        materializer's first pass. A client rendering scenario controls needs the
+        vocabulary, not a verdict about somebody's position.
+
+        `engines` is the set of engines a scenario is DEFINED for. An engine
+        absent from it is outside the scenario's model — a property of the
+        definition, and NOT the same statement as a withheld engine, which is a
+        refusal and is named as one on the surfaces that evaluate. Collapsing the
+        two would make an undefined cell and a censored cell look alike.
+
+        Shocks are EXACT rationals (`factor_num`/`factor_den`), never floats, and
+        a 1/1 shock is a scenario whose information lives on another axis — a
+        projection over time, or a market realization the oracles do not see.
+
+        Every `id` here is exactly what `POST /v1/scenarios/{id}/run-book`
+        accepts; an id absent from this listing is a 404 there rather than a
+        silently empty run.
+
+        The entries are byte-for-byte the entries a stress response's
+        `scenarios` array carries, minus that array's per-address `results` —
+        one serializer, asserted on the wire by `cmd/api`'s suite, so the two
+        surfaces cannot describe different scenarios.
+
+        The example below shows TWO of the committed set's entries (an
+        `asset_usd` shock and the rate-axis projection); a served listing carries
+        the whole set.
+      responses:
+        "200":
+          description: The committed scenario set.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScenariosResponse" }
+              example:
+                served_at: "2026-07-29T10:00:05Z"
+                scenario_config_version: "v1"
+                scenarios:
+                  - id: "ethfi_minus_50"
+                    version: "v1"
+                    label: "ETHFI -50 percent"
+                    description: "Idiosyncratic own-ecosystem-token shock. ETHFI collateral is correlated with exactly the stress states in which liquidations happen, and sETHFI is composed from ETHFI, so both move on one axis."
+                    path_assumption: "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes"
+                    engines:
+                      - "debt_manager"
+                    shocks:
+                      - axis: "asset_usd"
+                        asset: "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f"
+                        factor_num: 50
+                        factor_den: 100
+                    out_of_model:
+                      - "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat"
+                      - "deviation-trigger discreteness (a feed moves in rounds, not continuously)"
+                      - "liquidator liquidity, gas costs, execution latency and cascade dynamics"
+                      - "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md"
+                      - "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)"
+                      - "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json"
+                      - "the sETHFI/ETHFI accountant rate is held flat; a 50 percent ETHFI drawdown is assumed not to change the staking rate"
+                      - "reflexivity between the token price and the protocol's own risk parameters"
+                  - id: "dm_rate_horizon_plus_200bps"
+                    version: "v1"
+                    label: "Debt Manager borrow APY +200bps (PROJECTION)"
+                    description: "A rate change does not move a spot health factor, so this ships as a closed-form HORIZON PROJECTION, never as a spot shock. The Debt Manager's interest index is linear per second and borrowApy is admin-set, so debt(t) is closed-form: debt0 + floor(debt0 x apy x dt / 100e18). Collateral prices are held flat. The Aave engine is excluded: its rates are utilization-driven and its book is residual dust."
+                    path_assumption: "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon"
+                    engines:
+                      - "debt_manager"
+                    shocks:
+                      - axis: "borrow_apy"
+                        factor_num: 1
+                        factor_den: 1
+                    out_of_model:
+                      - "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat"
+                      - "deviation-trigger discreteness (a feed moves in rounds, not continuously)"
+                      - "liquidator liquidity, gas costs, execution latency and cascade dynamics"
+                      - "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md"
+                      - "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)"
+                      - "borrower behaviour: no repayment, no top-up, no new borrowing over the horizon"
+                      - "the closed form floors ONCE on the debt, while the chain floors the INDEX and then the debt - the two differ by at most a couple of units of USD 6-dec, which is why this result is labeled PROJECTION and never gated exact"
+                      - "the Aave engine is excluded (utilization-driven rates over a residual dust book)"
+                      - "governance behaviour: the APY is admin-set and could move again inside the horizon"
+                notes:
+                  - "this is the COMMITTED set, compiled into the binary — configuration, not batch data. It carries no batch envelope and is servable before any batch exists; a definition here says what WOULD be evaluated, never what the book is."
+                  - "the SAME definitions ride on every /v1/address/{addr}/stress response's `scenarios` array, serialized by the same code. That array carries per-address `results` in addition; nothing else differs, so the two surfaces cannot describe different scenarios."
+                  - "every `id` here is exactly what POST /v1/scenarios/{id}/run-book accepts. An id absent from this listing is a 404 there, never a silently empty run."
+                  - "`engines` is the set of engines a scenario is DEFINED for. An engine missing from it is out of the scenario's model — a property of the definition, and not the same statement as a withheld engine, which is a refusal and is named as one on the surfaces that evaluate."
+                  - "shocks are EXACT rationals: -30% is `factor_num` 70 over `factor_den` 100, never 0.7. There are no floats in this pipeline. A shock of 1/1 is a scenario whose information lives on another axis — a projection over time, or a market realization the oracles do not see."
+                  - "`out_of_model` is part of the definition, not a footnote: it names what the scenario does NOT model, and a shocked number read without it is a number read wrong."
+                  - "`scenario_config_version` versions the set as a whole, so a client caching results has one token to invalidate on. Files that disagree report MIXED(...) rather than a silently chosen version."
         "429": { $ref: "#/components/responses/RateLimited" }
         "500": { $ref: "#/components/responses/InternalError" }
 
@@ -2246,24 +2350,87 @@ components:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Projection" }]
 
-    Scenario:
+    ScenarioDefinition:
       type: object
       additionalProperties: false
-      required: [id, version, label, description, path_assumption, engines, shocks, out_of_model, results]
+      required: [id, version, label, description, path_assumption, engines, shocks, out_of_model]
+      description: |
+        One COMMITTED scenario's DEFINITION: what it shocks, on which primitive
+        axes, for which engines, under which path assumption, and what it
+        explicitly does not model. It says nothing about any address or any
+        batch — it is configuration compiled into the service.
+
+        This is the whole element of `GET /v1/scenarios`, and it is exactly
+        `Scenario` minus `results`. The two are kept in lockstep by the same Go
+        serializer (`cmd/api`'s `scenarioDefinition`, embedded in the stress
+        element type) and by a contract test that holds THESE TWO SCHEMAS to
+        "same properties, same required set, same per-property schema, plus
+        `results`". A field added to one and forgotten on the other would
+        publish two different descriptions of one committed definition.
       properties:
-        id: { type: string }
+        id:
+          type: string
+          description: The committed id — exactly what `POST /v1/scenarios/{id}/run-book` accepts.
         version: { type: string }
         label: { type: string }
         description: { type: string }
-        path_assumption: { type: string }
+        path_assumption:
+          type: string
+          description: The path the scenario assumes to the shocked state. A shocked number read without it is a number read wrong.
         engines:
           type: array
+          description: |
+            The engines this scenario is DEFINED for. An engine absent here is
+            outside the scenario's model — a property of the DEFINITION, and not
+            the same statement as a withheld engine (a refusal, named as one on
+            the surfaces that evaluate).
           items: { type: string }
         shocks:
           type: array
           items: { $ref: "#/components/schemas/Shock" }
         out_of_model:
           type: array
+          description: What the scenario does NOT model. Part of the definition, never a footnote.
+          items: { type: string }
+
+    Scenario:
+      type: object
+      additionalProperties: false
+      required: [id, version, label, description, path_assumption, engines, shocks, out_of_model, results]
+      description: |
+        One committed scenario AT AN ADDRESS: the `ScenarioDefinition` fields —
+        identical, field for field, to what `GET /v1/scenarios` serves — plus
+        the per-address `results` this surface computes. `results` is the ONLY
+        difference between the two.
+
+        The fields are spelled out rather than composed with `allOf` because
+        every object in this contract sets `additionalProperties: false`, and
+        composition under that rule validates nothing. The lockstep is enforced
+        by test instead — see `ScenarioDefinition`.
+      properties:
+        id:
+          type: string
+          description: The committed id — exactly what `POST /v1/scenarios/{id}/run-book` accepts.
+        version: { type: string }
+        label: { type: string }
+        description: { type: string }
+        path_assumption:
+          type: string
+          description: The path the scenario assumes to the shocked state. A shocked number read without it is a number read wrong.
+        engines:
+          type: array
+          description: |
+            The engines this scenario is DEFINED for. An engine absent here is
+            outside the scenario's model — a property of the DEFINITION, and not
+            the same statement as a withheld engine (a refusal, named as one on
+            the surfaces that evaluate).
+          items: { type: string }
+        shocks:
+          type: array
+          items: { $ref: "#/components/schemas/Shock" }
+        out_of_model:
+          type: array
+          description: What the scenario does NOT model. Part of the definition, never a footnote.
           items: { type: string }
         results:
           type: array
@@ -2295,6 +2462,33 @@ components:
         scenarios:
           type: array
           items: { $ref: "#/components/schemas/Scenario" }
+        notes:
+          type: array
+          items: { type: string }
+
+    ScenariosResponse:
+      type: object
+      additionalProperties: false
+      required: [served_at, scenario_config_version, scenarios, notes]
+      description: |
+        The committed scenario listing. NO batch envelope, deliberately: the set
+        is configuration compiled into the service, not a materialization, and
+        pinning it to a batch would be a claim the definitions do not make. That
+        is also why this response is servable with no batch in the database —
+        `served_at` is the database clock, and nothing else here is measured at
+        request time.
+      properties:
+        served_at: { type: string, format: date-time }
+        scenario_config_version:
+          type: string
+          description: |
+            The committed set's version AS A WHOLE — the same token `/v1/meta`,
+            `/v1/evidence` and every stress response publish, so a client
+            caching results has one thing to invalidate on. Files that disagree
+            report `MIXED(...)` rather than a silently chosen version.
+        scenarios:
+          type: array
+          items: { $ref: "#/components/schemas/ScenarioDefinition" }
         notes:
           type: array
           items: { type: string }
