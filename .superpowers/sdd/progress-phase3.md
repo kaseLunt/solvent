@@ -3455,3 +3455,25 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   first adversarial pass). On SHIP -> acceptance r10 (the receipt run:
   direct go run, 127.0.0.1 substitution, -rps 1.0 -timeout 120m
   -rpc-attempts 8, awake hours, session-owned background).
+- **ROUND 8 NOT-SHIP (1 vacuous green) → FIXED 1b56d77 → ROUND 9 SHIP;
+  r10 THE RECEIPT RUN LAUNCHED (18:55 Aug 1)**: round 8 approved zones
+  1 and 3 (H8 querier soundness, server/client dust predicate match)
+  but caught the H9 live re-adjudication test greening on no-error +
+  31-records while the certified verdicts were only t.Logf'd — a
+  skipped/mismatching case could exit 0 (vacuous green, HIGH).
+  Integrator fixed directly (small): per-case hard assertions —
+  Evaluated, true-at-parent, obligation-2 row present, verdict EXACT
+  with empty class, both completeness flags true. LIVE mutant-kill:
+  inverted expectation FAIL 384.6s; sha256-identical restore PASS
+  383.4s with assertions armed. Lease renewed en route (6a0e264,
+  committed alone). ROUND 9 (fresh session; resume unavailable): SHIP
+  on e794bb0..1b56d77 — join soundness verified (unique frozen-case
+  key = res.Key = obligation-2 Subject, exactly one row per evaluated
+  case; cardinality pinned; lowercase boolean spellings confirmed),
+  "no remaining substantive false-green path found." THE PRE-RECEIPT
+  REVIEW TRAIN IS CLOSED (rounds 1-9). r10 LAUNCHED with the proven
+  recipe (direct go run, 127.0.0.1 substitution, -rps 1.0 -timeout
+  120m -rpc-attempts 8, session-owned background, awake hours). On
+  PASS: commit the receipt artifacts + E1 paperwork (W2 receipt,
+  archive W2, W3-phase5 work object, D-014, ROADMAP/STATUS, claim
+  rescope).
