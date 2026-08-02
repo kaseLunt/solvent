@@ -259,10 +259,10 @@ func TestEvidenceServesTheDeployBoundManifest(t *testing.T) {
 	require.Equal(t, "solvent.reconcile.drift-report/v1", rec["schema"])
 	require.Equal(t, "pass", rec["result"])
 	require.Equal(t, float64(0), rec["exit_code"])
-	require.Equal(t, float64(87), rec["gated_rows"])
-	require.Equal(t, float64(87), rec["gated_exact"])
+	require.Equal(t, float64(30838), rec["gated_rows"])
+	require.Equal(t, float64(30838), rec["gated_exact"])
 	require.Equal(t, float64(0), rec["gated_drift"])
-	require.Equal(t, float64(21), rec["advisory_rows"])
+	require.Equal(t, float64(699), rec["advisory_rows"])
 	welds := map[string]map[string]any{}
 	for _, wd := range asList(t, rec["welds"]) {
 		m := asMap(t, wd)
