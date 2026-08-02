@@ -329,7 +329,7 @@ func measurePosition(pos PositionInput) (positionMeasure, error) {
 		legs := aaveBonusLegs(h)
 		m.engine = AaveEngine
 		m.usdDecimals = h.BaseDecimals
-		m.eligible = !h.IsInfinite && h.HealthFactorWad.Cmp(wadUnit) < 0
+		m.eligible = h.Liquidatable()
 		m.debt = orZero(h.TotalDebtBase)
 		m.collateralAtRisk = seizableValue(m.debt, legs)
 		m.badDebt = badDebtFrom(m.debt, recoverableDebt(legs), m.eligible)

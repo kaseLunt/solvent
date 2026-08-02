@@ -134,7 +134,23 @@ func cors(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("Access-Control-Allow-Origin", "*")
 		h.Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Last-Event-ID")
+		// Cache-Control IS ON THIS LIST (Wave R2 Finding B), and it is what made
+		// the live layer dead in every browser.
+		//
+		// `Cache-Control` is not a CORS-safelisted request header, so a client
+		// that sends it — the shipped SSE client did, on the /v1/stream fetch —
+		// triggers a preflight naming it in Access-Control-Request-Headers. This
+		// list did not contain it, the preflight failed, and the stream never
+		// connected from a browser at all. Nothing in Go or curl reproduces that:
+		// only a browser preflights.
+		//
+		// The client no longer sends it (the stream response declares
+		// `Cache-Control: no-cache, no-store` itself, so the request header was
+		// pure redundancy), and this line is the belt to that suspenders: a
+		// standard cache directive on a read-only public API is a request the
+		// server should simply tolerate, from any client, forever. Regression:
+		// TestCORSPreflightAllowsTheStreamsCacheControlHeader.
+		h.Set("Access-Control-Allow-Headers", "Content-Type, Accept, Last-Event-ID, Cache-Control")
 		h.Set("Access-Control-Max-Age", "600")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

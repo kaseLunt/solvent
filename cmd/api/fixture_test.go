@@ -190,6 +190,12 @@ func fxAavePosition() *positionRow {
 		HFNum:               bi(fxAaveHFNum),
 		HFDen:               bi(fxAaveHFDen),
 		HFWad:               bi(fxAaveHFWad),
+		// THE DERIVED VERDICT, WRITTEN (Wave R2 Finding A). HFWad is 1.08e18,
+		// above the bar, so the verdict is FALSE — a real boolean, not the NULL
+		// every pre-revision-6 batch carried. Omitting it here is what made this
+		// fixture agree with a broken daemon: the read-side verification had no
+		// Aave verdict to weld, so a served rollup could count anything it liked.
+		Liquidatable:        boolp(false),
 		TotalCollateralBase: bi(fxAaveCollateralBase),
 		TotalDebtBase:       bi(fxAaveDebtBase),
 		WeightedLTSum:       bi(fxAaveWeightedLTSum),

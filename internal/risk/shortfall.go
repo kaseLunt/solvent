@@ -189,12 +189,14 @@ func shortfallForPosition(oracle, realized PositionInput, ratios map[string]*big
 		collat = h1.TotalCollateralBase
 		debt = h1.TotalDebtBase
 		seizable = seizableValue(h1.TotalDebtBase, aaveBonusLegs(h1))
-		// STRICT: Aave liquidates only BELOW a health factor of exactly 1e18,
-		// so HF == 1e18 is healthy — the same boundary discipline as the Debt
-		// Manager's `debt > maxBorrowLT`.
+		// STRICT, and the law lives on AaveHealth.Liquidatable — see its doc for
+		// the boundary and for why the comparison is on the WAD. This site used to
+		// spell the comparison inline; riskfeed's assembler had no comparison at
+		// all, which is how the engine aggregate came to print 0 over a book this
+		// very function counted three eligible accounts in.
 		res.out = PositionShortfall{
 			Engine: AaveEngine, Account: h1.Account,
-			Liquidatable: !h1.IsInfinite && h1.HealthFactorWad.Cmp(wadUnit) < 0,
+			Liquidatable: h1.Liquidatable(),
 		}
 		for _, r := range h1.Reserves {
 			if r.CollateralBase == nil || r.CollateralBase.Sign() == 0 {

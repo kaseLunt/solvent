@@ -96,7 +96,34 @@ import (
 //	    concrete adoption hole: over unchanged substrate a rev-4 vector derives
 //	    the rev-4 key, so an unbumped corrected binary would ADOPT batch 3 and
 //	    keep serving the mislabeled rows under the fixed release's name.
-const AlgorithmRevision = 5
+//	6 — THE AAVE LIQUIDATION VERDICT BECAME A PERSISTED FACT (Wave R2 Finding A).
+//	    Revisions 1-5 persisted `liquidatable = NULL` on EVERY Aave position ever
+//	    computed — not as a refusal and not as an unknown, but because
+//	    `assembleAave` had no verdict to copy: the pool exposes no
+//	    `liquidatable(user)` boolean, so unlike DMHealth there was no field, and
+//	    the omission was invisible. `aggregate` counts only `true`, so the
+//	    engine's rollup published `liquidatable_positions: 0` while the SAME
+//	    payload's histogram put three accounts below HF 1.00 and its bad-debt
+//	    census called three eligible and three insolvent — those two surfaces
+//	    reconstruct the book and apply the derived law themselves
+//	    (waterfall.go/shortfall.go), which is why they were right and the rollup
+//	    was not. Revision 6 makes the law one function
+//	    (risk.AaveHealth.Liquidatable — strict, on the WAD) and persists its
+//	    result on every computed Aave row.
+//
+//	    The bump is REQUIRED by this file's own rule: what a persisted
+//	    `liquidatable` column MEANS on an Aave row changes from "always absent,
+//	    carries no claim" to "the engine's verdict at this batch". Live batches 3,
+//	    4 and 5 hold 47/47/46 computed Aave rows with the column NULL, three of
+//	    them per batch under HF 1.00 — rows the fixed code sets TRUE. And the
+//	    concrete adoption hole is the rev-4 and rev-5 hole exactly: over unchanged
+//	    substrate a rev-5 vector derives the rev-5 key, so an unbumped corrected
+//	    binary would ADOPT batch 5 and keep serving `liquidatable_positions: 0`
+//	    under the fixed release's name — the corrected verdict would never reach a
+//	    served number. Re-materialization under rev 6 is what heals the served
+//	    book; until it runs, the serve layer refuses those rows by name rather
+//	    than verifying them (cmd/api/read.go's Aave arm).
+const AlgorithmRevision = 6
 
 // THE AUDITED PREMISES OF THE COLLATERAL LAW.
 //
@@ -561,7 +588,11 @@ func Assemble(in store.RiskInputs, cfg AssembleConfig) (AssembleResult, error) {
 		engineRefusals[cfg.Aave.Engine] = flagCustodyRefusalDetail(cfg.Aave.Engine, cfg.Aave.GenesisBlock)
 	}
 
-	res.Aggregates = aggregate(res.Positions, cfg, engineRefusals)
+	aggregates, err := aggregate(res.Positions, cfg, engineRefusals)
+	if err != nil {
+		return AssembleResult{}, err
+	}
+	res.Aggregates = aggregates
 	return res, nil
 }
 
@@ -850,6 +881,20 @@ func assembleAave(a assembleArgs) (*store.RiskPositionWrite, *risk.PositionInput
 	p.WeightedLTSum = h.WeightedLTSum
 	p.AvgLTBps = h.AvgLiquidationThresholdBps
 	p.HFWad = h.HealthFactorWad
+	// THE VERDICT IS DERIVED, AND IT IS NEVER OMITTED (Wave R2 Finding A).
+	//
+	// Aave publishes no `liquidatable(user)` boolean, so unlike the Debt Manager
+	// arm below there is no field to copy — and that is exactly why this line was
+	// missing. Every Aave row of every batch persisted `liquidatable = NULL`,
+	// `aggregate` counts only `true`, and the engine rollup therefore printed
+	// `liquidatable_positions: 0` over a book whose own histogram put three
+	// accounts under HF 1.00 and whose own bad-debt census called three eligible
+	// and three insolvent. An unknown printed as a zero — except it was never
+	// unknown: risk.AaveHealth.Liquidatable is a total function of two fields
+	// already computed here, and internal/risk applied it twice (waterfall.go,
+	// shortfall.go) on the same numbers to produce those very counts.
+	liq := h.Liquidatable()
+	p.Liquidatable = &liq
 	p.HFInfinite = h.IsInfinite
 	if !h.IsInfinite {
 		p.HFNum, p.HFDen = h.HealthFactor.Num, h.HealthFactor.Den
@@ -1148,7 +1193,7 @@ func refuseWithPrices(base store.RiskPositionWrite, code, detail string, asset [
 // REFUSED POSITIONS CONTRIBUTE NOTHING TO THE SUMS and are counted separately.
 // Folding a refusal in as zero would understate exactly the book the refusal
 // exists to protect.
-func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRefusals map[string]string) []store.RiskEngineAggregate {
+func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRefusals map[string]string) ([]store.RiskEngineAggregate, error) {
 	order := []EngineBinding{cfg.Aave, cfg.DM}
 	decimals := map[string]uint8{cfg.Aave.Engine: 8, cfg.DM.Engine: risk.DMUsdDecimals}
 	acc := map[string]*store.RiskEngineAggregate{}
@@ -1174,7 +1219,31 @@ func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRe
 			continue
 		}
 		a.ComputedPositions++
-		if p.Liquidatable != nil && *p.Liquidatable {
+		// A COMPUTED POSITION WITHOUT A VERDICT IS REFUSED HERE, NOT COUNTED AS
+		// HEALTHY (Wave R2 Finding A, the structural half).
+		//
+		// The count below is a `*bool` deref, and the pre-fix line spelled it
+		// `p.Liquidatable != nil && *p.Liquidatable` — which silently folds an
+		// ABSENT verdict into the not-liquidatable arm. That is how an entire
+		// engine's book came to be summarized as `liquidatable_positions: 0`
+		// while the same batch's histogram and bad-debt census both counted three
+		// eligible accounts: nothing anywhere refused, and the zero was
+		// indistinguishable from an honest zero.
+		//
+		// Both engines now set the verdict on every computed row
+		// (assembleDM copies DMHealth.Liquidatable, assembleAave derives
+		// AaveHealth.Liquidatable), so this is unreachable today. It stays because
+		// the ONLY thing that made the original defect survivable was that no
+		// layer treated the absence as a fault — and this is the last layer that
+		// still can, since `aggregate` is the one place with an error to return
+		// and `RiskEngineAggregate` has no field in which an unknown could be
+		// disclosed instead. Failing the whole pass beats materializing a rollup
+		// that understates its own engine.
+		if p.Liquidatable == nil {
+			return nil, fmt.Errorf("riskfeed: engine %s account %x is COMPUTED but carries no liquidatable verdict: an absent verdict counted as not-liquidatable would understate this engine's rollup, which is the unknown-printed-as-zero the aggregate must never publish",
+				p.Engine, p.Account)
+		}
+		if *p.Liquidatable {
 			a.LiquidatablePositions++
 		}
 		if p.TotalCollateralBase != nil {
@@ -1202,7 +1271,7 @@ func aggregate(positions []store.RiskPositionWrite, cfg AssembleConfig, engineRe
 		}
 		out = append(out, a)
 	}
-	return out
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -228,6 +228,20 @@ func TestVerifyReconstructionRejectsEveryTamperedField(t *testing.T) {
 				// recomputation derives.
 				p.ValueDecimals = 0
 			},
+			// THE VERDICT WELD, both directions (Wave R2 Finding A). The
+			// fixture's HF wad is 1.08e18 — above the bar — so the honest
+			// verdict is false.
+			"liquidatable flipped": func(p *positionRow) {
+				p.Liquidatable = boolp(true)
+			},
+			// The pre-revision-6 shape: no verdict at all. Every live batch
+			// through 5 looks like this on every Aave row, and serving stress
+			// numbers off it is what let `liquidatable_positions: 0` stand
+			// beside a bad-debt census of 3. An absent verdict is refused by
+			// name, exactly as the Debt Manager arm has always refused it.
+			"liquidatable withheld (a legacy pre-rev-6 row)": func(p *positionRow) {
+				p.Liquidatable = nil
+			},
 		} {
 			t.Run(name, func(t *testing.T) {
 				p := fxAavePosition()

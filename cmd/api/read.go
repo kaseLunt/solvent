@@ -931,6 +931,29 @@ func verifyReconstruction(p *positionRow, in risk.PositionInput, w *paramWitness
 		if !h.IsInfinite && !eqBig(h.HealthFactorWad, p.HFWad) {
 			return fmt.Errorf("reconstructed health factor wad %s, the batch persisted %s", showBig(h.HealthFactorWad), showBig(p.HFWad))
 		}
+		// THE VERDICT WELD, Aave arm (Wave R2 Finding A) — the exact twin of the
+		// DM arm's below, and absent until now for the same reason the assembler
+		// never wrote the field: Aave's verdict is DERIVED, so there was nothing
+		// obvious to compare. It is a directly served disclosure (`liquidatable`
+		// on the position wire, and the engine rollup's count of it), and this
+		// function's own law is that a served disclosure which is not verified is
+		// a number this layer could get wrong without noticing.
+		//
+		// A NULL here is refused, not tolerated. Every batch materialized before
+		// AlgorithmRevision 6 carries NULL on every computed Aave row; rev 6
+		// guarantees the corrected binary cannot ADOPT such a batch, so the only
+		// way one reaches this line is a batch produced by a binary this one has
+		// already declared incompatible. Serving stress and waterfall numbers off
+		// it is precisely the "publish stress numbers for a book nobody computed"
+		// this verification exists to prevent — so the row becomes a visible,
+		// named API_RECONSTRUCTION_MISMATCH refusal, which is the honest reading
+		// of a stale batch and heals on the next materializer pass.
+		if p.Liquidatable == nil {
+			return errors.New("the batch persisted no liquidatable verdict for a computed Aave position: every batch below algorithm revision 6 carries none, and a rollup counting the absence as not-liquidatable is the unknown-printed-as-zero this layer must refuse rather than serve")
+		}
+		if h.Liquidatable() != *p.Liquidatable {
+			return fmt.Errorf("reconstructed liquidatable=%v, the batch persisted %v", h.Liquidatable(), *p.Liquidatable)
+		}
 		checks := []bigCheck{
 			{"total_collateral_base", h.TotalCollateralBase, p.TotalCollateralBase},
 			{"total_debt_base", h.TotalDebtBase, p.TotalDebtBase},

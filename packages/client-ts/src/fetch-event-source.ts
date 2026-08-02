@@ -104,9 +104,30 @@ class FetchEventSource implements EventSourceLike {
 
     let response: StreamResponseLike;
     try {
+      // ONLY CORS-SAFELISTED REQUEST HEADERS BY DEFAULT (Wave R2 Finding B).
+      //
+      // This used to also send `Cache-Control: no-store`. `Cache-Control` is not
+      // a CORS-safelisted request header, so sending it turns every stream
+      // connect into a PREFLIGHTED request — and the API's
+      // Access-Control-Allow-Headers list did not name it, so the preflight
+      // failed and the live layer never connected in any browser. Node and curl
+      // never preflight, so the whole test surface stayed green over a transport
+      // that was dead where it actually shipped.
+      //
+      // Dropping it costs nothing: `/v1/stream` sets `Cache-Control: no-cache,
+      // no-store` on the RESPONSE (cmd/api/sse.go), which is the header that
+      // actually governs caching of the stream, and it does so for every client
+      // regardless of what was requested. `Accept` with a MIME type in the
+      // safelist stays preflight-free.
+      //
+      // `options.headers` is still spread last and is still honoured verbatim —
+      // a caller who adds an `Authorization` or a custom header knowingly opts
+      // into a preflight. The server now allows `Cache-Control` too, so a client
+      // that sends it anyway works; this file simply no longer forces the
+      // round-trip on everyone.
       response = await impl(this.url, {
         method: "GET",
-        headers: { Accept: "text/event-stream", "Cache-Control": "no-store", ...this.options.headers },
+        headers: { Accept: "text/event-stream", ...this.options.headers },
         signal: this.controller.signal,
       });
     } catch (cause) {

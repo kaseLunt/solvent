@@ -41,7 +41,18 @@ func TestAddressHistoryServesPersistedPointsNewestFirst(t *testing.T) {
 	require.Equal(t, fxAaveHFWad, asMap(t, newest["health_factor"])["wad"], "the point is the PERSISTED row")
 	require.Equal(t, fxAaveCollateralBase, newest["total_collateral_base"])
 	require.Equal(t, fxAaveDebtBase, newest["total_debt_base"])
-	require.Nil(t, newest["liquidatable"], "Aave has no strict boolean — null, never false")
+	// Wave R2 Finding A inverted this assertion, and the assertion it replaces is
+	// worth naming: it read `require.Nil(..., "Aave has no strict boolean — null,
+	// never false")`. That is true of the CHAIN — the pool exposes no
+	// `liquidatable(user)` call — and it was silently taken to mean the VERDICT
+	// was unpublishable, which is how a null column became codified as intended
+	// behaviour on the read side while `/v1/book` published
+	// `liquidatable_positions: 0` over a book with three breached accounts. The
+	// verdict is derived (`HF < 1e18`, strict) and, since algorithm revision 6,
+	// persisted per row. The fixture's HF wad is 1.08e18 — above the bar — so the
+	// point carries a real FALSE.
+	require.Equal(t, false, newest["liquidatable"],
+		"Aave's verdict is derived and persisted since revision 6: false is a verdict, null was an omission")
 	require.Equal(t, float64(0), newest["sweep_block"],
 		"contract 1.2.1: every point carries its sweep watermark; Aave has no sweeper, so 0 is the disclosed absence")
 

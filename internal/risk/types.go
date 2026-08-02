@@ -706,6 +706,36 @@ type AaveHealth struct {
 }
 
 // DMCollateralValue is one Debt Manager collateral leg's contribution.
+// Liquidatable is the Aave engine's liquidation verdict, DERIVED — the pool
+// exposes no `liquidatable(user)` boolean the way the Debt Manager does, so the
+// verdict is the health factor's own comparison against the protocol's bar.
+//
+// STRICT: Aave liquidates only BELOW a health factor of exactly 1e18, so
+// HF == 1e18 is healthy — the same boundary discipline as the Debt Manager's
+// `debt > maxBorrowLT`. Zero debt (IsInfinite) is never liquidatable.
+//
+// THE COMPARISON IS ON THE WAD, never on a re-derived float and never on
+// HealthFactor.FloorScaled: component 7 is a half-up composite that can land one
+// wad ULP ABOVE the exact rational's floor on a carry vector (see
+// HealthFactorWad's own doc), so a re-derivation would disagree with the chain on
+// ~5e-5 of rows — at the ONE boundary where disagreement means a liquidation
+// verdict flips.
+//
+// # WHY THIS IS A METHOD RATHER THAN A FIELD
+//
+// It is a pure function of two fields ComputeAaveHealth already sets, so a field
+// would be a fourth place the law could be forgotten. It was forgotten once
+// already: riskfeed.assembleAave copied eleven fields off AaveHealth and, there
+// being no verdict among them, persisted `liquidatable = NULL` on every Aave row
+// of every batch — while waterfall.go and shortfall.go applied this exact
+// comparison inline and counted the same accounts as eligible. One payload then
+// carried three accounts under HF 1.00 in its histogram, three eligible and three
+// insolvent in its bad-debt census, and `liquidatable_positions: 0` in its engine
+// aggregate. Every caller now reads the law from here.
+func (h AaveHealth) Liquidatable() bool {
+	return !h.IsInfinite && h.HealthFactorWad != nil && h.HealthFactorWad.Cmp(wadUnit) < 0
+}
+
 type DMCollateralValue struct {
 	Asset    common.Address
 	Decimals uint8

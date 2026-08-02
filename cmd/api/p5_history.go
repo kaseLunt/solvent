@@ -53,8 +53,16 @@ type wireHistoryPoint struct {
 	Status       string            `json:"status"`
 	Refusal      *wireRefusal      `json:"refusal"`
 	HealthFactor *wireHealthFactor `json:"health_factor"`
-	// Liquidatable is the Debt Manager's strict verdict at that batch. Null on
-	// Aave, and null on a refused row — a withheld verdict, never "false".
+	// Liquidatable is the engine's liquidation verdict at that batch: the Debt
+	// Manager's strict `debt > maxBorrowLT` boolean, and — since algorithm
+	// revision 6 — Aave's derived `HF < 1e18` verdict (Wave R2 Finding A).
+	//
+	// Null on a REFUSED row, which is a withheld verdict and never "false". Null
+	// also on any Aave point from a batch below revision 6: those batches
+	// persisted no Aave verdict at all, and this surface reports the absence
+	// rather than back-deriving one, because a point must carry ITS OWN batch's
+	// verdict — re-deriving it here from today's law would be the mixed-clock lie
+	// SweepBlock exists to prevent, one field over.
 	Liquidatable        *bool   `json:"liquidatable"`
 	TotalCollateralBase *string `json:"total_collateral_base"`
 	TotalDebtBase       *string `json:"total_debt_base"`

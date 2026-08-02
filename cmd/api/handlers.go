@@ -1479,6 +1479,12 @@ func stateFromPersisted(p *positionRow) *wireStressState {
 	case risk.AaveEngine:
 		out.CollateralUSD = bigStr(p.TotalCollateralBase)
 		out.DebtUSD = bigStr(p.TotalDebtBase)
+		// Eligible is derived from the PERSISTED WAD rather than from
+		// p.Liquidatable, deliberately: the BEFORE state must describe the batch as
+		// it was materialized, and a batch below algorithm revision 6 carries no
+		// Aave verdict at all. The wad is the batch's own number under the batch's
+		// own law, so this stays honest across the revision boundary while
+		// out.Liquidatable above reports the column verbatim — present or absent.
 		out.Eligible = p.HFWad != nil && !p.HFInfinite && p.HFWad.Cmp(risk.WadUnit()) < 0
 	default:
 		out.CollateralUSD = bigStr(p.CollateralValueUSD)
@@ -1498,12 +1504,19 @@ func stateFromRecompute(pos risk.PositionInput) (*wireStressState, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The verdict is SERVED here, not just folded into Eligible (Wave R2
+		// Finding A, the stress-surface instance). The DM arm below has always set
+		// both; this arm set only Eligible, so the shocked Aave state went out with
+		// `liquidatable: null` beside an `eligible: true` — the same field left
+		// empty for the same reason, one surface over.
+		liq := h.Liquidatable()
 		out := &wireStressState{
 			HealthFactorWad: bigStr(h.HealthFactorWad),
 			Infinite:        h.IsInfinite,
 			CollateralUSD:   bigStr(h.TotalCollateralBase),
 			DebtUSD:         bigStr(h.TotalDebtBase),
-			Eligible:        !h.IsInfinite && h.HealthFactorWad != nil && h.HealthFactorWad.Cmp(risk.WadUnit()) < 0,
+			Liquidatable:    &liq,
+			Eligible:        liq,
 		}
 		if h.HealthFactor.Valid() && !h.HealthFactor.Infinite {
 			out.HealthFactorNum = bigStr(h.HealthFactor.Num)

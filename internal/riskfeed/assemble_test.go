@@ -268,6 +268,182 @@ func TestAssembleAaveHealthFactor(t *testing.T) {
 		"the witness carries its OWN as-of, not the balances cursor's")
 }
 
+// aaveLiquidatableFixture builds one Aave position whose health factor lands
+// EXACTLY on the protocol's bar, so the strict boundary can be walked in both
+// directions by moving a single scaled debt unit.
+//
+// Every integer is hand-derived, none read off the code under test:
+//
+//	live collateral = rayMulFloor(5e17, 1 RAY)                  = 5e17 weETH (0.5)
+//	collateral base = floor(5e17 × 250000000000 / 1e18)         = 125000000000  ($1250 @ 8dec)
+//	weighted LT sum = 125000000000 × 8000                       = 1e15
+//	live debt       = rayMulCeil(S, 1 RAY)                      = S USDC
+//	debt base       = ceil(S × 100000000 / 1e6)                 = 100·S   (exact, no remainder)
+//
+//	HF_wad = floor( floor((1e15 × 1e18 + ⌊D/2⌋) / D) / 1e4 ),  D = 100·S
+//
+//	S = 1000000000  → D = 100000000000  → HF_wad = 1000000000000000000  (exactly 1.00)
+//	S = 1000000001  → D = 100000000100  → HF_wad =  999999999000000001  (one unit under)
+func aaveLiquidatableFixture(scaledDebt string) store.RiskInputs {
+	in := baseInputs()
+	in.Balances = []store.RiskBalanceRow{
+		bal(risk.AaveEngine, acctA, weETH, sideCollateral, sourceEvent, "500000000000000000", 25_635_618),
+		bal(risk.AaveEngine, acctA, usdc, sideDebt, sourceEvent, scaledDebt, 25_635_618),
+	}
+	in.Indexes = []store.RiskRateIndexRow{
+		idx(risk.AaveEngine, weETH, kindLiquidityIndex, "1000000000000000000000000000", 25_600_000),
+		idx(risk.AaveEngine, usdc, kindVariableBorrowIndex, "1000000000000000000000000000", 25_610_000),
+	}
+	in.AaveParams = []store.ParamRow{
+		collateralConfigRow(weETH, 20_714_007, 5, "7500", "8000", "10600"),
+		collateralConfigRow(usdc, 20_714_100, 2, "7500", "7800", "10450"),
+	}
+	in.Prices = []store.RiskPriceRow{
+		price(1, weETH, fixtureOracleSource, "250000000000", 8, 30*time.Second),
+		price(1, usdc, fixtureOracleSource, "100000000", 8, 30*time.Second),
+	}
+	in.CollateralFlags = []store.CollateralFlagRow{collFlag(weETH, acctA, true, 20_714_007, 6)}
+	return in
+}
+
+// TestAssembleAavePersistsTheDerivedLiquidatableVerdict is Wave R2 Finding A's
+// regression, and it is a REGRESSION IN THE LITERAL SENSE: live batches 3, 4 and
+// 5 each carry 46-47 computed Aave rows with `liquidatable` NULL, three of them
+// per batch below HF 1.00. `/v1/book` served
+// `aave_v3_etherfi.liquidatable_positions: 0` while the SAME payload's histogram
+// counted 3 accounts in its `< 0.90` bucket and its bad-debt census reported
+// `eligible_positions: 3, insolvent_positions: 3`. The histogram and the census
+// were right: both reconstruct the book and apply the derived law themselves.
+// The rollup counted `*bool == true` over a column nobody ever wrote.
+//
+// The verdict was never unknowable. Aave publishes no `liquidatable(user)`
+// boolean, but the pool's bar is a comparison on a number this assembler already
+// computes and persists — which is why the fix is an assignment, not a new input.
+//
+// MUTANTS THIS KILLS:
+//   - the assignment deleted from `assembleAave` (byte-for-byte the code that
+//     shipped batches 3-5): every subtest fails on the nil verdict, and
+//     `Assemble` itself now errors out of `aggregate`'s guard;
+//   - the boundary loosened from `< 1e18` to `<= 1e18`: only the `exactly 1.00`
+//     subtest fails — which is the subtest that stops this test from degenerating
+//     into "the field is non-nil".
+func TestAssembleAavePersistsTheDerivedLiquidatableVerdict(t *testing.T) {
+	t.Run("exactly 1.00 is healthy (strict, like the Debt Manager's debt > maxBorrowLT)", func(t *testing.T) {
+		res, err := Assemble(aaveLiquidatableFixture("1000000000"), fixtureConfig(t))
+		require.NoError(t, err)
+
+		p := findPosition(t, res, risk.AaveEngine, acctA)
+		require.Equal(t, store.RiskPositionComputed, p.Status)
+		require.Equal(t, "1000000000000000000", p.HFWad.String(),
+			"the fixture must sit EXACTLY on the bar, or the strictness below proves nothing")
+		require.NotNil(t, p.Liquidatable,
+			"a computed Aave position must carry a verdict: NULL is what let the rollup print 0 over a breached book")
+		require.False(t, *p.Liquidatable, "HF == 1e18 is healthy: Aave liquidates STRICTLY below")
+
+		agg := findAggregate(t, res, risk.AaveEngine)
+		require.Equal(t, 1, agg.ComputedPositions)
+		require.Equal(t, 0, agg.LiquidatablePositions)
+	})
+
+	t.Run("one scaled debt unit under the bar is liquidatable, and the rollup counts it", func(t *testing.T) {
+		res, err := Assemble(aaveLiquidatableFixture("1000000001"), fixtureConfig(t))
+		require.NoError(t, err)
+
+		p := findPosition(t, res, risk.AaveEngine, acctA)
+		require.Equal(t, store.RiskPositionComputed, p.Status)
+		require.Equal(t, "999999999000000001", p.HFWad.String())
+		require.NotNil(t, p.Liquidatable)
+		require.True(t, *p.Liquidatable)
+
+		// THE WHOLE POINT: the rollup an operator reads must agree with the row.
+		agg := findAggregate(t, res, risk.AaveEngine)
+		require.Equal(t, 1, agg.ComputedPositions)
+		require.Equal(t, 1, agg.LiquidatablePositions,
+			"the engine aggregate must count the breached account: printing 0 over a book with a breached row is the unknown-as-zero this test exists for")
+	})
+
+	t.Run("zero debt is never liquidatable and still carries a verdict", func(t *testing.T) {
+		in := aaveLiquidatableFixture("1000000000")
+		// Collateral only: the infinite-health-factor shape, which is 34 of the
+		// live book's 46 Aave rows.
+		in.Balances = in.Balances[:1]
+		res, err := Assemble(in, fixtureConfig(t))
+		require.NoError(t, err)
+
+		p := findPosition(t, res, risk.AaveEngine, acctA)
+		require.True(t, p.HFInfinite, "no debt means the health factor is unbounded, never a big number")
+		require.NotNil(t, p.Liquidatable,
+			"undefined-because-unbounded is a KNOWN verdict — not liquidatable — and must be written, not omitted")
+		require.False(t, *p.Liquidatable)
+	})
+}
+
+// TestAggregateRefusesAComputedPositionWithNoVerdict is the structural half of
+// Finding A: the reason the defect was survivable for three batches was that NO
+// layer treated an absent verdict as a fault. `aggregate`'s count was
+// `p.Liquidatable != nil && *p.Liquidatable`, which folds an unknown into the
+// healthy arm and produces a zero indistinguishable from an honest one.
+//
+// Both assemblers now write the verdict on every computed row, so this is
+// unreachable through `Assemble` — which is exactly why it is exercised against
+// `aggregate` directly. A guard that can only be reached by the bug it prevents
+// is still the guard that would have named the bug.
+func TestAggregateRefusesAComputedPositionWithNoVerdict(t *testing.T) {
+	cfg := fixtureConfig(t)
+	liq := true
+
+	base := []store.RiskPositionWrite{{
+		Engine: risk.AaveEngine, Account: acctA.Bytes(),
+		Status: store.RiskPositionComputed, ValueDecimals: 8, Liquidatable: &liq,
+	}}
+	out, err := aggregate(base, cfg, map[string]string{})
+	require.NoError(t, err, "a fully-verdicted book aggregates normally")
+	require.Equal(t, 1, out[0].LiquidatablePositions)
+
+	// The same row with the verdict withheld — the exact shape batches 3-5 hold.
+	base[0].Liquidatable = nil
+	_, err = aggregate(base, cfg, map[string]string{})
+	require.Error(t, err,
+		"a COMPUTED position with no verdict must fail the pass, never be counted as not-liquidatable")
+	require.Contains(t, err.Error(), "no liquidatable verdict")
+
+	// A REFUSED row is different in kind: it has no verdict because it has no
+	// numbers at all, and it is counted as a refusal well before this guard.
+	base[0].Status = store.RiskPositionRefused
+	out, err = aggregate(base, cfg, map[string]string{})
+	require.NoError(t, err, "a refusal carries no verdict by construction and must not trip the guard")
+	require.Equal(t, 1, out[0].RefusedPositions)
+	require.Equal(t, 0, out[0].ComputedPositions)
+}
+
+// TestAaveRollupAgreesWithTheShortfallCensusOnTheSameBook pins the invariant the
+// live payload violated, at the seam where it violated it.
+//
+// `/v1/book` builds its engine rollup from the PERSISTED aggregate and its
+// bad-debt census from `risk.ExecutionShortfall` over the reconstructed book.
+// Both describe the same accounts under the same law, so an operator reads them
+// side by side. In batch 5 they disagreed absolutely: rollup 0, census 3.
+//
+// Neither surface could catch that alone — each was internally consistent. Only a
+// test that computes BOTH from one assembly can, which is what this is. It is
+// also the test that would have failed the day `assembleAave` was written, since
+// `AssembleResult.Book` and `AssembleResult.Aggregates` come out of the same call.
+func TestAaveRollupAgreesWithTheShortfallCensusOnTheSameBook(t *testing.T) {
+	res, err := Assemble(aaveLiquidatableFixture("1000000001"), fixtureConfig(t))
+	require.NoError(t, err)
+
+	agg := findAggregate(t, res, risk.AaveEngine)
+
+	sf, err := risk.ExecutionShortfall(res.Book, nil)
+	require.NoError(t, err)
+	census := sf.PerEngine[risk.AaveEngine]
+
+	require.Equal(t, 1, census.LiquidatablePositions,
+		"fixture guard: the census must see a breached account, or the agreement below is vacuous")
+	require.Equal(t, census.LiquidatablePositions, agg.LiquidatablePositions,
+		"the engine rollup and the bad-debt census describe the same accounts under the same law: batch 5 served 0 against 3")
+}
+
 // TestAssembleAaveNeverFetchesTheUncappedFeed is the structural half of the
 // adapter-output law: the uncapped row is not filtered downstream, it is never
 // asked for.

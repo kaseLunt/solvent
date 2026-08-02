@@ -175,6 +175,62 @@ func TestCORSIsOpenAndPreflightIsAnswered(t *testing.T) {
 	require.Contains(t, pre.Header().Get("Access-Control-Allow-Methods"), "POST")
 }
 
+// TestCORSPreflightAllowsTheStreamsCacheControlHeader is Wave R2 Finding B's
+// regression: the live layer was dead in every browser and green in every test.
+//
+// The shipped SSE client sent `Cache-Control: no-store` on its `/v1/stream`
+// fetch. `Cache-Control` is not a CORS-safelisted request header, so a browser
+// must preflight and must see the header echoed in Access-Control-Allow-Headers
+// before it will issue the real request. The list read
+// `Content-Type, Accept, Last-Event-ID`. The preflight failed, the stream never
+// opened, and NOTHING caught it — Go's httptest, curl and Node's fetch do not
+// preflight, so the entire SSE suite exercised a transport no browser could use.
+//
+// A preflight is a plain OPTIONS carrying Access-Control-Request-Method and
+// Access-Control-Request-Headers, and the browser's check is a case-insensitive
+// membership test over the response's allow-list. This test performs that check
+// itself rather than string-matching the header, so a reordering or a spacing
+// change cannot make it fail and a genuinely absent header cannot make it pass.
+//
+// MUTANT THIS KILLS: `Cache-Control` removed from cors()'s
+// Access-Control-Allow-Headers — the exact pre-fix line.
+func TestCORSPreflightAllowsTheStreamsCacheControlHeader(t *testing.T) {
+	h := cors(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("a preflight must be answered by the middleware, never forwarded to a handler")
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/stream", nil)
+	req.Header.Set("Origin", "https://solvent.example")
+	req.Header.Set("Access-Control-Request-Method", "GET")
+	// Exactly what a browser sends for the stream connect: the safelisted Accept
+	// alongside the non-safelisted Cache-Control that forces the preflight.
+	req.Header.Set("Access-Control-Request-Headers", "accept, cache-control")
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, "*", rec.Header().Get("Access-Control-Allow-Origin"))
+	require.Contains(t, rec.Header().Get("Access-Control-Allow-Methods"), "GET")
+
+	// The browser's own test, performed here: every requested header must appear
+	// in the allow-list, matched case-insensitively.
+	allowed := map[string]bool{}
+	for _, h := range strings.Split(rec.Header().Get("Access-Control-Allow-Headers"), ",") {
+		allowed[strings.ToLower(strings.TrimSpace(h))] = true
+	}
+	for _, want := range strings.Split(req.Header.Get("Access-Control-Request-Headers"), ",") {
+		name := strings.ToLower(strings.TrimSpace(want))
+		require.True(t, allowed[name],
+			"preflight for /v1/stream requested %q; the allow-list is %q — a browser refuses the connect and the live layer never opens",
+			name, rec.Header().Get("Access-Control-Allow-Headers"))
+	}
+
+	// Last-Event-ID keeps its place: it is what a browser sends on RESUME, and
+	// losing it would break reconnection rather than the first connect.
+	require.True(t, allowed["last-event-id"])
+}
+
 func TestReadOnlyRefusesMutatingMethods(t *testing.T) {
 	h := readOnly(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("a mutating method reached the handler")

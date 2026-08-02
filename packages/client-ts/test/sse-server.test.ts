@@ -141,6 +141,94 @@ function collect(url: string, options: StreamOptions = {}): Collector {
   };
 }
 
+// The CORS-safelisted request headers (Fetch standard §4.2.3). A request whose
+// author headers are all on this list is issued directly; ANY header outside it
+// forces the browser to preflight with OPTIONS first and to refuse the real
+// request unless the server echoes that header in Access-Control-Allow-Headers.
+//
+// Node and curl never preflight, which is exactly why this needed pinning:
+// `fetch-event-source.ts` sent `Cache-Control: no-store`, the API's allow-list
+// did not name it, and the live layer was dead in every browser while all 312
+// tests here stayed green over the same transport.
+const CORS_SAFELISTED_REQUEST_HEADERS = new Set([
+  "accept",
+  "accept-language",
+  "content-language",
+  "content-type",
+  "range",
+]);
+
+describe("the browser-reachability of the stream connect", () => {
+  it("sends ONLY CORS-safelisted headers, so no preflight is required (Wave R2 Finding B)", async () => {
+    const seen: Record<string, string | string[] | undefined>[] = [];
+    const server = createServer((req, res) => {
+      seen.push({ ...req.headers });
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        // The server declares no-store ITSELF — which is why the client never
+        // needed to ask for it, and why dropping the request header costs
+        // nothing in caching behaviour.
+        "Cache-Control": "no-cache, no-store",
+        Connection: "keep-alive",
+      });
+      res.flushHeaders();
+      res.write(frame("snapshot", fixtures.streamSnapshot, 1));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    const c = collect(`http://127.0.0.1:${port}/v1/stream`);
+    try {
+      await c.waitFor(1, "the snapshot frame");
+
+      expect(seen).toHaveLength(1);
+      const headers = seen[0] ?? {};
+      expect(headers["accept"]).toBe("text/event-stream");
+      expect(headers["cache-control"]).toBeUndefined();
+
+      // Node adds its own hop-by-hop headers (host, connection, …); only the
+      // ones the transport AUTHORS are subject to the safelist. Asserting the
+      // absence of `cache-control` alone would not catch a future addition, so
+      // the whole author set is checked against the standard's list.
+      const authored = Object.keys(headers).filter(
+        (h) => !["host", "connection", "accept-encoding", "sec-fetch-mode", "user-agent"].includes(h),
+      );
+      for (const name of authored) {
+        expect(
+          CORS_SAFELISTED_REQUEST_HEADERS.has(name),
+          `${name} is not CORS-safelisted: sending it forces a preflight, and a browser will refuse the stream unless cmd/api's Access-Control-Allow-Headers names it`,
+        ).toBe(true);
+      }
+    } finally {
+      c.stream.close();
+    }
+  });
+
+  it("still forwards caller-supplied headers verbatim (a knowing opt-in to a preflight)", async () => {
+    const seen: Record<string, string | string[] | undefined>[] = [];
+    const server = createServer((req, res) => {
+      seen.push({ ...req.headers });
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      res.flushHeaders();
+      res.write(frame("snapshot", fixtures.streamSnapshot, 1));
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+
+    const c = collect(`http://127.0.0.1:${port}/v1/stream`, {
+      eventSourceFactory: fetchEventSource({ headers: { "X-Solvent-Trace": "abc123" } }),
+    });
+    try {
+      await c.waitFor(1, "the snapshot frame");
+      expect(seen[0]?.["x-solvent-trace"]).toBe("abc123");
+    } finally {
+      c.stream.close();
+    }
+  });
+});
+
 describe("the wire parser against real SSE bytes", () => {
   it("reads snapshot, batch and degradation frames in order", async () => {
     const server = await sseServer();
