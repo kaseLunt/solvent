@@ -34,8 +34,8 @@ allowed_paths:
   - deploy/**
 scope_hash: sha256:e05502c0edaf2a3ab2e27a10e1b245c8f84f8a9779e8e5aedb6b8d0ec2d4e7d4
 issued_at: 2026-07-31T17:20:27Z
-lease_expires: 2026-08-02T01:30:38Z
-updated_at: 2026-08-01T01:30:38Z
+lease_expires: 2026-08-03T01:44:38Z
+updated_at: 2026-08-02T01:44:38Z
 ---
 
 # Claim: claude-integrator -> W2
