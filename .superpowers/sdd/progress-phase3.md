@@ -3477,3 +3477,96 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   PASS: commit the receipt artifacts + E1 paperwork (W2 receipt,
   archive W2, W3-phase5 work object, D-014, ROADMAP/STATUS, claim
   rescope).
+- **r10 PASSED — THE ACCEPTANCE RECEIPT LANDED (0c5f317); PHASE 3
+  EXITED (E1: cf4caac + 5e6fad7); W3 OPEN (overnight Aug 1→2)**: r10
+  completed clean on the proven recipe: PASS with 0 gated failures
+  over 30,838 gated + 699 advisory comparisons; drift-report sha256
+  a34d7a53…; pins eth 25664030 / op 155018419. Receipt artifacts
+  committed 0c5f317 (drift-report.json/.txt under
+  roadmap/evidence/artifacts/w1-reconcile/). E1a cf4caac: W2 closed ON
+  the receipt (E-w2-acceptance.md), claim released, P3 → Done. E1b
+  5e6fad7: W3 (Phase 5 public web — deploy + launch) opened, claim
+  reopened gen-14, D-014 (P5 before P4) accepted, STATUS → P5/W3. The
+  two-commit release/reopen precedent (30462fc/c7e5b77) held. Follow-
+  up 8fffea7: the runbook evidence test's stale pre-receipt pins
+  (87/21) now assert the receipt's real cardinalities (30838/699).
+- **TWO NEW PERSONAS; THE SIX-AUDIT FLEET; R-TRAIN LANDED (R1 6599d6b,
+  R2 e4d9b03, R3 016cc31, R4 d6ff1f0); ROUNDS 10–11 CLOSED (Aug 2)**:
+  owner batch 2 (HF History reads broken-sparse; Lab BOOK mode dead-
+  ends; header/column misalignment; risk map below the table; "never"
+  liq-distance on real-debt accounts — tons of them; duplicate page
+  headers; uneven tabs) + owner-directed persona expansion. Charters
+  written to ~/.claude/agents/: solvent-user (composite risk lead /
+  position holder / liquidator / cold visitor; honest-but-confusing =
+  MAJOR by law) and solvent-clarity (information-communication
+  director; finding-first titles, progressive disclosure, jargon
+  budget; form defers to solvent-design). Six audits (user + clarity
+  carriers, 3 opus archetypes, Codex cold-user + Codex code review;
+  owner directive: opus/codex only, no fable) reproduced every owner
+  finding and surfaced two BLOCKERs beyond them: (1) the Aave verdict
+  was NEVER ASSIGNED — absent counted as zero, so /v1/book said 0
+  liquidatable over a book whose own rows showed HF < 1 → R2 e4d9b03:
+  assembleAave sets p.Liquidatable via the one verdict law
+  (AaveHealth.Liquidatable(), strict HF < 1e18, nil-safe,
+  internal/risk/types.go), aggregate() REFUSES computed rows lacking a
+  verdict, AlgorithmRevision 5→6, batch 6 live at rev 6; (2) the SSE
+  stream had never worked in ANY browser — the client sent
+  Cache-Control on EventSource reconnects and the API's CORS preflight
+  allowlist rejected it → header allowlisted server-side; the
+  redundant client header dropped (sse.go already serves no-store).
+  Landing R2 required W3 AMENDMENT 1 (10f84cf: allowed_paths gains
+  internal/**, cmd/**, go.mod, go.sum) + claim rescope gen-15
+  (5c8fc9c). R1 6599d6b (43 files, the six-audit web train): "never" →
+  "no price path" tagged-union rendering with per-reason titles +
+  legend; freshness lines on every surface; Activity feed scaling
+  (raw base units → USD); nav renames Lab→Scenarios,
+  Observatory→History, Feed→Activity (owner approved); duplicate
+  eyebrow+H1 dedupe; DataTable sentinel walk-length fix (the
+  IntersectionObserver load bug). Codex ROUND 10 NOT-SHIP (Aave bonus
+  rendered 105% — masked by a non-wire test input; ages frozen at
+  paint; legend overclaimed reachability) → R3 016cc31: bonus-as-
+  premium per engine (Aave par-based 10500 → 5%; DM direct additive —
+  proven from fixture_test/backtest/p5_events), live-age monotonic
+  anchor + 60s tick. ROUND 11 NOT-SHIP (performance.now() pauses
+  through sleep/bfcache so ages under-state; no-debt rows made the
+  legend false) → R4 d6ff1f0: anchoredAgeSeconds = max(monotonic-
+  derived, wall-derived, per-receipt floor); AgeAnchor carries
+  receivedAtWallMs; pageshow/visibilitychange/focus reconcile
+  (RESUME_COALESCE_MS=5000, seeded from the receipt); keepOnFailure on
+  the resume path only; reason-neutral legend with per-cell hover
+  reasons. Rounds 10 and 11 are CLOSED.
+- **S1a LANDED (7dc1146 + WELD 78ee564): GET /v1/scenarios SERVED
+  COLD, CONTRACT 1.4.0; TWO REDESIGN RULINGS BANKED; LIVE STACK AT
+  HEAD; ROUND 12 DISPATCHED (16:30 Aug 2)**: S1a serves the committed
+  scenario set with NO batch dependency (the Lab's listing no longer
+  waits on a run); wireScenario = struct { wireScenarioDef; Results }
+  embed IS the serializer weld; contract 1.3.0 → 1.4.0 additive,
+  carrying engines[] and shocks[].axis (load-bearing for the Lab
+  matrix's not-covered ≠ withheld distinction); client scenarios() +
+  ExactlyEqual type weld; web proof-contract weld regenerated
+  (78ee564). Two implementation-ready rulings banked on task #25: (a)
+  DISTANCE/HEADROOM — one native distance per engine; headroom % =
+  (threshold-value − debt)/threshold-value with truncating bigint
+  helper; 7 bands (breached/0–2/2–5/5–10/10–25/25–50/>50); DM HF-
+  disclosure and Engine columns struck; price-path demoted to
+  hover/Inspector/Lab; sort renamed headroom with liq_distance as
+  deprecated alias (next contract bump 1.5.0 — S1a took 1.4.0); new DM
+  ORDER BY on USD headroom ratio; factor_symbol populated server-side;
+  the partial page-scatter dies; one hoisted auto-started walk;
+  WARN_HEADROOM_PCT=10. (b) SCENARIO DASHBOARD — whole-book-first Lab
+  (owner: "watch the charts change under different scenarios");
+  /v1/book waterfall proven byte-identical to run-book at same factors
+  (batch 6) → loss frontier ships cold; labDek cliff sentence;
+  LabMatrix scenario×engine grid (5 cell states, single-batch guard);
+  book mode default, no auto-run on bare arrival, ?scenario= deep-link
+  auto-runs; debt_manager becomes the default engine; B-splits: B1
+  before/after EngineHistogram, B2 movers[] (Aave by HF drop, DM by
+  debt-became-eligible), B3 collateral_by_asset. OPS: api-78ee564.exe
+  live on :8080 (GET /v1/scenarios serving; rev 6 / schema 19), web
+  rebuilt + restarted on :3111 at HEAD. CODEX ROUND 12 dispatched over
+  016cc31..78ee564 (R4 freshness math, S1a cold-path honesty, contract
+  triple-drift). NEXT: on SHIP → the two implementation waves on opus
+  serena-coder agents (headroom edit-list A first — ships value alone;
+  dashboard split A next); then riskd-as-a-service (the HF-History
+  sparseness root cause: batches only exist from manual -once runs);
+  W3 deploy checklist behind the owner's VPS + domain.
