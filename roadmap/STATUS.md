@@ -1,6 +1,6 @@
 ---
 active_phase: P5
-active_task: none
+active_task: W3
 project_state: active
 writer_mode: serial
 parallel_readers: allowed

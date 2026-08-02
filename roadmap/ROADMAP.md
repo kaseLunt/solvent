@@ -12,7 +12,7 @@
 | P2 | Positions & prices | Decode both engines into a two-engine position schema; oracle price ingestion; full backfill | Done |
 | P3 | Risk engine + API | Health-factor math proven against chain; stress engine; public REST/SSE API + npm client | Done |
 | P4 | Watch & alerts | Threshold registrations with Telegram/email delivery (watch page ships here per D-014) | Planned |
-| P5 | Web + launch | Next.js product (book, inspector, Observatory, watch); deploys; README landing; demo | **In progress** |
+| P5 | Web + launch | Next.js product (Book, Inspector, Scenario Lab, Observatory, Feed — watch descoped to P4 per D-014); deploys; README landing; demo — the MVP line | **In progress** |
 | P6 | Post-launch | Adoption, writeup circulation, optional weETH watch module | Parked |
 
 P1 attainment pointers (asserted here, derived from artifacts): tag `v0.1.0-foundation`, CI green at
@@ -33,9 +33,10 @@ claim the gate is automated unless a validator actually enforces it.
 | --- | --- | --- | --- | --- | --- |
 | W1 | Phase 2: positions & prices (plan + execution) | P2 | — | Suite green live-db; backfilled positions cross-checked on-chain | archived |
 | W2 | Phase 3: risk engine + API (plan + execution) | P3 | — | HF math exact vs chain at pins (both engines); suite green live-db; API contract tests green; pipeline-replay harness green | archived |
+| W3 | Phase 5: public web — deploy + launch (six surfaces built; ship them) | P5 | — | Six surfaces serve honestly at a public URL against the live API; web e2e green; deploy checklist attained (VPS, domain, scoped DB roles, @solvent/client published) | active |
 
 The rows above project `work/W1-phase2-positions-prices.md`,
-`work/W2-phase3-risk-engine-api.md`. A work object may not
+`work/W2-phase3-risk-engine-api.md`, and `work/W3-phase5-public-web.md`. A work object may not
 appear here before its file exists, and a hand-maintained status mismatch is an error. (W1 was
 archived at P3 entry and W2 at P5 entry — attainment records intact in their receipts
 `E-w1-acceptance` and `E-w2-acceptance`; the archival is the designed handling of
