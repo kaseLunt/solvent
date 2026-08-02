@@ -81,9 +81,20 @@ export function LabClient() {
 
   const inputValid = isAddress(input);
 
-  /** The committed set as the wire last served it (found lookups only). */
+  /**
+   * The committed set as the wire last served it.
+   *
+   * WAVE R1 ITEM 5 — THE DEAD END THIS FIXES: this used to require
+   * `outcome === "found"`. But the committed scenario set is a property of
+   * the DEPLOYMENT, not of the address: `/v1/address/{addr}/stress` carries
+   * `scenarios` on EVERY completed outcome — found, not-found and unknowable
+   * alike. Gating on `found` meant a reader who looked up an address with no
+   * position learned nothing AND left book mode permanently empty, with a
+   * message telling them to do the thing they had just done. Any completed
+   * lookup now teaches the list.
+   */
   const committed: readonly RefinedScenario[] = useMemo(() => {
-    if (phase.status !== "done" || phase.result.outcome !== "found") return [];
+    if (phase.status !== "done") return [];
     return phase.result.response.scenarios;
   }, [phase]);
 
@@ -119,7 +130,7 @@ export function LabClient() {
             setMode("address");
           }}
         >
-          address
+          one address
         </button>
         <button
           type="button"
@@ -130,7 +141,7 @@ export function LabClient() {
             setMode("book");
           }}
         >
-          book
+          whole book
         </button>
       </div>
 

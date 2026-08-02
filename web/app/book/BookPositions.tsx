@@ -94,6 +94,12 @@ import {
 } from "./dust";
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { BookRiskMap } from "./BookRiskMap";
+import {
+  LIQ_DISTANCE_HEADER_TITLE,
+  NO_PRICE_PATH_LABEL,
+  NO_PRICE_PATH_LEGEND,
+  noPricePathTitle,
+} from "@/lib/liq-distance";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
 
@@ -140,9 +146,12 @@ function liqDistanceCell(row: PositionRow) {
         </>
       );
     case "never":
+      // Wave R1 item 1: `never` was an unconditional safety claim the wire
+      // never made. The label is axis-scoped now, and the hover carries the
+      // wire's OWN reason inside a sentence naming what it does not exclude.
       return (
-        <span className="dim" title={row.liqDistance.reason ?? "no price can liquidate this position"}>
-          never
+        <span className="dim" title={noPricePathTitle(row.liqDistance.reason)}>
+          {NO_PRICE_PATH_LABEL}
         </span>
       );
     case "none":
@@ -242,7 +251,10 @@ function positionColumns(composition: SortComposition): ReadonlyArray<Column<Pos
     },
     {
       id: "liq-distance",
-      header: "Liq. distance",
+      // The title rides a <span> INSIDE the header so the accessible name
+      // stays the visible text ("Liq. distance") whether or not the header
+      // is a sort button — content wins over title in the accname algorithm.
+      header: <span title={LIQ_DISTANCE_HEADER_TITLE}>Liq. distance</span>,
       align: "right",
       sort: headerSort("liq_distance", composition),
       cell: liqDistanceCell,
@@ -453,14 +465,30 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   // visibility; THIS effect fires loadMore iff hasMore && !loading &&
   // error === null — an error is never auto-loaded across, and the first
   // page belongs to the gated effect above.
-  const [sentinelVisible, setSentinelVisible] = useState(false);
-  const handleEndSentinel = useCallback((visible: boolean) => {
-    setSentinelVisible(visible);
+  //
+  // WAVE R1: the report carries the WALK LENGTH it was measured at, and this
+  // policy acts only when that length is the one on screen. Without it, the
+  // visibility observed against the EMPTY table (sentinel a few pixels below
+  // a one-line "loading…" cell) survived the first page's arrival and pulled
+  // a second — sometimes a third — page nobody had scrolled toward. That
+  // raced the mock server in the suite and, on a real book, silently tripled
+  // the first request.
+  const [sentinel, setSentinel] = useState<{ visible: boolean; atLength: number }>({
+    visible: false,
+    atLength: -1,
+  });
+  const handleEndSentinel = useCallback((visible: boolean, atLength: number) => {
+    setSentinel((previous) =>
+      previous.visible === visible && previous.atLength === atLength
+        ? previous
+        : { visible, atLength },
+    );
   }, []);
   useEffect(() => {
-    if (!sentinelVisible || rows.length === 0) return;
+    if (!sentinel.visible || rows.length === 0) return;
+    if (sentinel.atLength !== rows.length) return;
     if (hasMore && !loading && error === null) loadMore();
-  }, [sentinelVisible, rows.length, hasMore, loading, error, loadMore]);
+  }, [sentinel, rows.length, hasMore, loading, error, loadMore]);
 
   const columns = useMemo(
     () => positionColumns({ engine, sort, reversed, onSort: applyHeaderSort }),
@@ -601,6 +629,11 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
           <i aria-hidden /> warn = {WARN_BAND_DISCLOSURE}
         </span>
+        {/* Wave R1 item 1: the label's meaning is RENDERED, not hover-only —
+            a reader without a mouse gets the same disclosure. */}
+        <span className={styles.sectionNote} data-testid="no-price-path-legend">
+          {NO_PRICE_PATH_LEGEND}
+        </span>
       </div>
 
       <div className={styles.controls}>
@@ -680,6 +713,27 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         </div>
       )}
 
+      {/* ORDER (Wave R1 item 8, ruling §II.1): controls → MAP → table →
+          footer. The map is the shape of the book; the table is the lookup.
+          A reader who must scroll 70vh of rows before seeing the shape reads
+          the rows without knowing what they are looking at.
+          Keyed by engine AND dust step (W-UX-D §16 + the W-UX-C handoff): a
+          switch of either remounts the map, so the full-book walk state can
+          never leak across engines OR across dust filters — the map only ever
+          shows ONE filtered walk. */}
+      <div style={{ marginBottom: "var(--sp-3)" }}>
+        <BookRiskMap
+          key={`${engine}:${dust}`}
+          engine={engine}
+          rows={rows}
+          totalPositions={envelope === null ? null : envelope.totalPositions}
+          batch={envelope === null ? null : envelope.batch}
+          dustStep={dustActive ? (dust as ActiveDustStep) : null}
+          minValue={minValue}
+          onBookCount={aggServed === null ? null : aggServed.positions}
+        />
+      </div>
+
       <DataTable
         columns={columns}
         rows={rows}
@@ -732,23 +786,6 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
           />
         }
       />
-
-      <div style={{ marginTop: "var(--sp-3)" }}>
-        {/* Keyed by engine AND dust step (W-UX-D §16 + the W-UX-C handoff):
-            a switch of either remounts the map, so the full-book walk state
-            can never leak across engines OR across dust filters — the map
-            only ever shows ONE filtered walk. */}
-        <BookRiskMap
-          key={`${engine}:${dust}`}
-          engine={engine}
-          rows={rows}
-          totalPositions={envelope === null ? null : envelope.totalPositions}
-          batch={envelope === null ? null : envelope.batch}
-          dustStep={dustActive ? (dust as ActiveDustStep) : null}
-          minValue={minValue}
-          onBookCount={aggServed === null ? null : aggServed.positions}
-        />
-      </div>
     </section>
   );
 }

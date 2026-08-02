@@ -87,8 +87,13 @@ export interface DataTableProps<Row> {
   maxHeight?: number | string;
   /** Slice rows to a windowed range (requires `maxHeight`). */
   windowing?: WindowingSeam;
-  /** Reports whether the walk's end sentinel is within ~600px of view. */
-  onEndSentinel?: (visible: boolean) => void;
+  /**
+   * Reports whether the walk's end sentinel is within ~600px of view, AND
+   * the walk length that visibility was measured against. The caller must
+   * compare that length to the rows it is about to act on: a visibility
+   * observed at a different length describes a layout that no longer exists.
+   */
+  onEndSentinel?: (visible: boolean, walkLength: number) => void;
   /** aria-label for the scroll region (defaults to `ariaLabel`). */
   scrollRegionLabel?: string;
   /** Rendered inside the wrapper below the table (pagination controls). */
@@ -138,12 +143,29 @@ export function DataTable<Row>({
   }, [scroll]);
 
   // The walk-end sentinel: visibility only — the caller owns the policy.
+  //
+  // WAVE R1: the observation is INVALIDATED whenever the walk's length
+  // changes. A visibility measured against an EMPTY table (where the sentinel
+  // sits a few pixels below a one-line "loading…" cell, comfortably inside
+  // the 600px margin) is not a statement about a table holding 200 rows —
+  // the sentinel has MOVED thousands of pixels. Left standing, that stale
+  // `true` raced the first page's arrival and auto-loaded a second (and
+  // sometimes a third) page nobody had scrolled toward. Reporting `false`
+  // before each fresh observation means the caller's load policy only ever
+  // sees a visibility measured against the layout it is deciding about.
+  //
+  // The length travels WITH the report because the reset alone is not enough:
+  // within one commit React flushes this child effect before the parent's,
+  // but the parent's effect closure already captured the PREVIOUS render's
+  // visibility. Only a length the caller can compare closes that window.
+  const walkLength = rows.length;
   useEffect(() => {
     const node = sentinelRef.current;
     if (node === null || onEndSentinel === undefined) return;
+    onEndSentinel(false, walkLength);
     const observer = new IntersectionObserver(
       (entries) => {
-        onEndSentinel(entries.some((entry) => entry.isIntersecting));
+        onEndSentinel(entries.some((entry) => entry.isIntersecting), walkLength);
       },
       { root: scrollRef.current, rootMargin: "0px 0px 600px 0px" },
     );
@@ -151,7 +173,7 @@ export function DataTable<Row>({
     return () => {
       observer.disconnect();
     };
-  }, [onEndSentinel, scroll]);
+  }, [onEndSentinel, scroll, walkLength]);
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     setScrollTop(event.currentTarget.scrollTop);

@@ -253,3 +253,135 @@ export function buildHistorySeries(
     newest: entries.length > 0 ? (entries[entries.length - 1] ?? null) : null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// WAVE R1 ITEM 11 — the history panel's COPY LAYER.
+//
+// THE DEFECT THIS FIXES: the panel said "{n} point(s), oldest → newest ·
+// covering {limit} retained batches" over a chart that was, on this
+// deployment, entirely empty — because every "point" was a gap. A reader saw
+// a count, an axis and no line, and had no way to learn that the count WAS
+// the gaps. The vocabulary now separates what PLOTS from what is merely
+// witnessed, and the all-gap and never-present cases get their own sentences
+// instead of an empty frame.
+// ---------------------------------------------------------------------------
+
+/** The section head — what the chart IS, in the reader's words. */
+export const HF_HISTORY_HEAD = "Health factor across batches";
+
+/** The one-line doctrine that stays VISIBLE. The rest moves behind a details. */
+export const HISTORY_DOCTRINE_LINE =
+  "gaps break the line — hover any tick for that batch's named reason.";
+
+/** The <details> summary carrying the full doctrine paragraph. */
+export const HISTORY_DOCTRINE_SUMMARY = "how gaps and the 1.0 line work";
+
+/**
+ * The Debt Manager's reference-line disclosure stays VISIBLE (not folded into
+ * the details): a 1.0 line over a DISCLOSURE ratio, on an engine whose verdict
+ * is a strict boolean, is exactly the conflation the surface must keep
+ * refusing in plain sight.
+ */
+export const DM_DISCLOSURE_LINE =
+  "1.0 here is a disclosure ratio, not the verdict — the engine's own boolean decides.";
+
+/** How one engine's witnessed axis breaks down. */
+export interface HistoryTally {
+  /** `w` — every witnessed batch on this engine's axis. */
+  witnessed: number;
+  /** `p` — entries that actually PLOT (a finite geometry value). */
+  plotted: number;
+  noRow: number;
+  refused: number;
+  withheld: number;
+  /** ∞ and unpublished — real gaps that are neither an absence nor a refusal. */
+  other: number;
+}
+
+export function tallyHistory(series: HistorySeries): HistoryTally {
+  const tally: HistoryTally = {
+    witnessed: series.entries.length,
+    plotted: 0,
+    noRow: 0,
+    refused: 0,
+    withheld: 0,
+    other: 0,
+  };
+  for (const entry of series.entries) {
+    if (entry.value !== null) {
+      tally.plotted += 1;
+      continue;
+    }
+    if (entry.kind === "no-row") tally.noRow += 1;
+    else if (entry.kind === "refused") tally.refused += 1;
+    else if (entry.kind === "withheld") tally.withheld += 1;
+    else tally.other += 1;
+  }
+  return tally;
+}
+
+/**
+ * TRUE when this engine has NO history for the account at all: the wire
+ * carried neither a persisted point nor a withheld batch for it, so every
+ * entry on the axis is a NO-ROW gap borrowed from other engines' batches.
+ *
+ * That is not a broken chart — it is "this account has never held a position
+ * on this engine in the retained window", and it deserves a sentence, not an
+ * empty frame with an axis.
+ */
+export function engineNeverPresent(engine: AddressHistoryEngine): boolean {
+  return engine.points.length === 0 && engine.withheld_batch_ids.length === 0;
+}
+
+/** The never-present line that REPLACES the whole chart frame. */
+export function engineNeverPresentLine(engineName: string): string {
+  return (
+    `no ${engineName} history — this address has never had a ${engineName} position in the ` +
+    `retained window.`
+  );
+}
+
+/** The newest readout when the newest witnessed batch has no row for this engine. */
+export function newestNoRowPhrase(engineName: string): string {
+  return `newest: none — no ${engineName} row in the newest witnessed batch`;
+}
+
+/**
+ * The meta line: what PLOTS out of what is WITNESSED, the newest readout, and
+ * the window the request asked for — three different numbers that the old
+ * "{n} point(s) … covering {limit} retained batches" ran together.
+ */
+export function historyMetaLine(
+  tally: HistoryTally,
+  newest: HistorySeriesEntry | null,
+  engineName: string,
+  limit: number,
+): string {
+  const newestPart =
+    newest !== null && newest.kind === "no-row"
+      ? newestNoRowPhrase(engineName)
+      : `newest: ${newest?.display ?? EM_DASH}`;
+  return (
+    `${String(tally.plotted)} of ${String(tally.witnessed)} witnessed batches plot · ` +
+    `${newestPart} · window: up to ${String(limit)} batches`
+  );
+}
+
+/**
+ * The text rendered INSIDE the frame when the engine has history but none of
+ * it plots — every witnessed batch is a gap. The breakdown is the point: a
+ * reader must be able to tell an absence from a refusal from a withheld book.
+ *
+ * The ruling names three classes; ∞/unpublished gaps are a fourth the ruling
+ * does not template, appended only when non-zero so the counts still sum to
+ * `w`. Reported, not improvised silently.
+ */
+export function allGapFrameText(tally: HistoryTally): string {
+  const other = tally.other > 0 ? ` · ${String(tally.other)} ∞/unpublished` : "";
+  return (
+    `nothing plots — all ${String(tally.witnessed)} witnessed batches are gaps for this engine ` +
+    `(${String(tally.noRow)} no-row · ${String(tally.refused)} refused · ` +
+    `${String(tally.withheld)} withheld${other}). A gap is an absence or a refusal, never a ` +
+    `zero; hover each tick for its named reason.`
+  );
+}

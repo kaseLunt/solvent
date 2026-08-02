@@ -69,7 +69,7 @@ export function BookBadDebt({ badDebt }: { badDebt: readonly BadDebt[] }) {
   return (
     <section className={styles.section} aria-label="bad-debt census">
       <div className={styles.sectionHead}>
-        <h2>Bad-debt census — standing, unshocked</h2>
+        <h2>Bad debt standing now</h2>
         <span className={styles.sectionNote}>
           a withheld engine is an em dash with its reason, never 0
         </span>

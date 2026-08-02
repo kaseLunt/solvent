@@ -1,7 +1,12 @@
 // Smoke: the W0 shell renders all six routes with the shared chrome — the
-// four-tab appnav + Lab/Developers, the brand block, and an HONEST posture
-// ribbon (with no API running it must say the stream is not delivering, and
-// must never render a fake LIVE).
+// five-tab appnav + the proof/docs register, the brand block, and an HONEST
+// posture ribbon (with no API running it must say the stream is not
+// delivering, and must never render a fake LIVE).
+//
+// WAVE R1 ITEM 13 inverted the nav-label pins: the tabs now read Scenarios /
+// History / Activity while the ROUTES are unchanged (/lab, /observatory,
+// /feed). Each surface's own H1 is asserted separately from its tab label,
+// which is exactly the pair the rename had to keep coherent.
 
 import { expect, test } from "@playwright/test";
 
@@ -17,9 +22,9 @@ const SURFACES = [
 const NAV_LABELS = [
   "Book",
   "Inspector",
-  "Observatory",
-  "Feed",
-  "Lab",
+  "Scenarios",
+  "History",
+  "Activity",
   "Proof",
   "Developers",
 ] as const;

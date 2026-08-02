@@ -37,6 +37,7 @@ import {
 } from "@/lib/positions";
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { buildRiskBins, usdExponentLabel } from "./riskBins";
+import { NO_PRICE_PATH_LABEL } from "@/lib/liq-distance";
 import { dustMapLegend, type ActiveDustStep } from "./dust";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
@@ -387,7 +388,8 @@ export function BookRiskMap({
                 {binned.aside.total > 0 && (
                   <span data-testid="risk-map-aside">
                     {String(binned.aside.total)} counted aside, not plotted —{" "}
-                    {String(binned.aside.never)} never · {String(binned.aside.none)} no solve ·{" "}
+                    {String(binned.aside.never)} {NO_PRICE_PATH_LABEL} ·{" "}
+                    {String(binned.aside.none)} no solve ·{" "}
                     {String(binned.aside.refused)} refused · {String(binned.aside.unplottable)} no
                     positive debt
                   </span>

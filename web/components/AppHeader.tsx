@@ -9,13 +9,21 @@ import styles from "./header.module.css";
 /**
  * The five primary surfaces in tab order (design ruling, W1): the Lab is the
  * flagship demo surface and cannot live in the overflow register.
+ *
+ * WAVE R1 ITEM 13 — the labels say what the destination CONTAINS, not what
+ * the team calls it. "Lab", "Observatory" and "Feed" are house words: a
+ * first-time reader cannot tell which of them holds price stress, which holds
+ * history, and which holds chain actions. ROUTES ARE UNCHANGED — /lab,
+ * /observatory and /feed keep their paths, so every existing link, bookmark
+ * and deep link still resolves; only the tab's words changed. The Lab page
+ * keeps its "Scenario Lab" H1, preserving the scent from tab to heading.
  */
 const PRIMARY_TABS = [
   { href: "/book", label: "Book" },
   { href: "/inspector", label: "Inspector" },
-  { href: "/lab", label: "Lab" },
-  { href: "/observatory", label: "Observatory" },
-  { href: "/feed", label: "Feed" },
+  { href: "/lab", label: "Scenarios" },
+  { href: "/observatory", label: "History" },
+  { href: "/feed", label: "Activity" },
 ] as const;
 
 /** Secondary destinations: the proof/docs register, after the surfaces. */

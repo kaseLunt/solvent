@@ -17,22 +17,22 @@ export const metadata: Metadata = { title: "Scenario Lab" };
 export default function LabPage() {
   return (
     <section>
+      {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro; the
+          endpoint provenance demoted to the page bottom. */}
       <div className={styles.head}>
-        <p className="eyebrow">3 · Scenario Lab</p>
         <h1>Scenario Lab</h1>
         <p>
-          Stress, priced honestly. The committed scenario set — no arbitrary sliders — applied
-          to one address or to the whole book, with every shock an exact rational, every
-          projection labeled a projection, every held-flat price named, and the oracle-blind
-          weETH depeg shown as what it is: health factors bit-identical while the market
-          realizes a shortfall the protocol is not seeing.
-        </p>
-        <p className={styles.fedBy}>
-          fed by <b>GET /v1/address/&#123;addr&#125;/stress</b> ·{" "}
-          <b>POST /v1/scenarios/&#123;id&#125;/run-book</b>
+          What would break this book: the committed stress scenarios — fixed, versioned shocks,
+          no sliders — run against one address or the whole book. Every shocked number is labeled
+          a projection; the flagship weETH depeg shows a real loss the protocol&apos;s own oracles
+          never see.
         </p>
       </div>
       <LabClient />
+      <p className={styles.fedByFoot}>
+        fed by <b>GET /v1/address/&#123;addr&#125;/stress</b> ·{" "}
+        <b>POST /v1/scenarios/&#123;id&#125;/run-book</b>
+      </p>
     </section>
   );
 }

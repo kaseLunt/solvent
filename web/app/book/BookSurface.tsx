@@ -22,6 +22,8 @@ import { getSolventClient } from "@/lib/api";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { RefusedTag } from "@/components/RefusedTag";
 import { formatBlock, EM_DASH } from "@/lib/format";
+import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
+import { BOOK_DEK_LOADING, bookDek } from "./bookDek";
 import { BookStatRows } from "./BookStatRows";
 import { BookHistogram } from "./BookHistogram";
 import { BookWaterfall } from "./BookWaterfall";
@@ -108,13 +110,26 @@ export function BookSurface() {
   return (
     <>
       <div className={styles.head}>
-        <p className="eyebrow">1 · Book</p>
         <h1>Book</h1>
-        <p>
-          Every account both engines cover — aggregates with their denominators, refusals named and
-          counted, and the position table on batch-stable pages. An honest book shows what it
-          refuses to price.
+        {/* THE VERDICT DEK (Wave R1 item 9): computed from the SAME /v1/book
+            response the cards render — never a static sentence about what the
+            surface is. Counts funnel through bookDek's single count source. */}
+        <p data-testid="book-dek">
+          {state.phase === "ok"
+            ? bookDek({
+                batchId: state.book.batch.id,
+                engines: state.book.engines,
+                badDebt: state.book.bad_debt,
+              })
+            : BOOK_DEK_LOADING}
         </p>
+        {/* FRESHNESS (Wave R1 item 3): the wire's own age, beside the batch
+            id, so "batch #5" can never be read as "now". */}
+        {state.phase === "ok" && (
+          <p className={styles.freshness} data-testid="book-freshness">
+            {batchFreshnessLine(state.book.batch)}
+          </p>
+        )}
       </div>
 
       {state.phase === "loading" && (
@@ -161,13 +176,6 @@ export function BookSurface() {
               rows and the histogram reading lines compute from the SAME
               /v1/book response. */}
           <BookStatRows engines={state.book.engines} badDebt={state.book.bad_debt} />
-          <BookHistogram
-            histogram={state.book.hf_histogram}
-            aggregates={state.book.engines}
-            badDebt={state.book.bad_debt}
-          />
-          <BookWaterfall waterfall={state.book.waterfall} />
-          <BookBadDebt badDebt={state.book.bad_debt} />
         </>
       )}
 
@@ -178,7 +186,10 @@ export function BookSurface() {
           fetch (W-UX-B part 10). The aggregates feed (W-UX-C) hands it the
           batch-guarded counts and the decimals the dust filter composes
           min_value from — its first walk waits for /v1/book to SETTLE, ok or
-          failed, and never on a stall alone. */}
+          failed, and never on a stall alone.
+
+          ORDER (Wave R1 item 8, ruling §II.1): the positions block sits ABOVE
+          the histogram — accounts first, distributions after. */}
       <Suspense fallback={null}>
         <BookPositions
           bookFeed={{
@@ -191,8 +202,27 @@ export function BookSurface() {
       </Suspense>
 
       {state.phase === "ok" && (
+        <>
+          <BookHistogram
+            histogram={state.book.hf_histogram}
+            aggregates={state.book.engines}
+            badDebt={state.book.bad_debt}
+          />
+          {/* CENSUS ABOVE THE WATERFALL (Wave R1 item 8): the standing loss is
+              a fact; the waterfall is a projection off it. Fact first. */}
+          <BookBadDebt badDebt={state.book.bad_debt} />
+          <BookWaterfall waterfall={state.book.waterfall} />
+        </>
+      )}
+
+      {state.phase === "ok" && (
         <Stampline>
-          <StampItem label="batch" value={`#${String(state.book.batch.id)}`} />
+          {/* The stampline carries the SAME freshness line as the head (Wave
+              R1 item 3) — its own `batch` label supplies the leading word. */}
+          <StampItem
+            label="batch"
+            value={<span data-testid="book-stamp-freshness">{batchFreshnessStamp(state.book.batch)}</span>}
+          />
           <StampItem
             label="marks"
             value={marksSummary(state.book.batch.watermarks)}

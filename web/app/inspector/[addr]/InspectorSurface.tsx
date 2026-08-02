@@ -24,6 +24,7 @@ import {
 } from "@solvent/client";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
+import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
 import {
   fetchAddressHistory,
   fetchEvents,
@@ -179,7 +180,14 @@ export function InspectorSurface({ addr }: { addr: string }) {
   if (!valid) {
     return (
       <section>
-        <p className="eyebrow">2 · Inspector</p>
+        {/* Wave R1 item 6: the numbered eyebrow was chrome that told the
+            reader nothing. Its slot becomes a real affordance — the way back
+            to address entry. */}
+        <p className={styles.backlink}>
+          <Link className="mono" href="/inspector">
+            ← Inspector
+          </Link>
+        </p>
         <h1>Inspector</h1>
         <p className={styles.refusal} role="alert" data-testid="address-refusal">
           REFUSED · &quot;{addr.slice(0, 64)}&quot; is not an address — the contract requires 0x +
@@ -198,13 +206,24 @@ export function InspectorSurface({ addr }: { addr: string }) {
   return (
     <section>
       <div className={styles.addrHead}>
-        <p className="eyebrow" style={{ margin: 0 }}>
-          2 · Inspector
+        {/* Wave R1 item 6 — the eyebrow slot becomes navigation. */}
+        <p className={styles.backlink} style={{ margin: 0 }}>
+          <Link className="mono" href="/inspector">
+            ← Inspector
+          </Link>
         </p>
         <h1>
           <AddressMono address={addr} />
         </h1>
       </div>
+
+      {/* FRESHNESS (Wave R1 item 3): the same line the Book carries, from
+          THIS lookup's own envelope — never a borrowed or implied as-of. */}
+      {addressState.status === "ready" && (
+        <p className={styles.freshness} data-testid="inspector-freshness">
+          {batchFreshnessLine(addressState.lookup.response.batch)}
+        </p>
+      )}
 
       {addressState.status === "loading" && (
         <p className="mono dim">querying the newest servable batch…</p>
@@ -236,7 +255,10 @@ export function InspectorSurface({ addr }: { addr: string }) {
             />
           ))}
           <Stampline>
-            <StampItem label="batch" value={String(addressState.lookup.response.batch.id)} />
+            <StampItem
+              label="batch"
+              value={batchFreshnessStamp(addressState.lookup.response.batch)}
+            />
             <StampItem
               label="lookup"
               value={addressState.lookup.complete ? "complete" : "FLOOR"}

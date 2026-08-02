@@ -43,15 +43,18 @@ export default function DevelopersPage() {
 
   return (
     <>
+      {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro.
+          The contract's own version stays, as a second line — it is the one
+          fact this page exists to pin. */}
       <div className={styles.head}>
-        <p className="eyebrow">7 · Developers</p>
         <h1>Developers</h1>
         <p>
-          {CONTRACT_META.title} v{CONTRACT_META.version} — read-only, zero-auth JSON over HTTPS.
-          Every response below is the committed contract&apos;s own example (source cited per
-          block); every money quantity is a decimal string; refusals are rows, not errors. Where a
-          handler and the contract disagree, the disagreement is a failure — not a documentation
-          lag.
+          The committed API contract, rendered from its own examples — read-only JSON, no auth,
+          every money value a decimal string. If a handler disagrees with this page, that is a
+          failure, not documentation lag.
+        </p>
+        <p className={styles.crossLink}>
+          {CONTRACT_META.title} v{CONTRACT_META.version}
         </p>
         <p className={styles.crossLink}>
           this deployment&apos;s evidence manifest, rendered → <Link href="/proof">Proof Center</Link>

@@ -15,6 +15,8 @@
 import type { Batch, PriceInput, RefinedLeg, RefinedPosition, Stamp } from "@solvent/client";
 import type { components } from "@solvent/client";
 import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
+import { paramPercent, paramScaleNote } from "./params-format";
+import { noPricePathTitle } from "./liq-distance";
 
 export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "dim";
 
@@ -215,13 +217,29 @@ export function totalEvidence(
   which: "collateral" | "debt",
   subject: string,
 ): EvidenceDescriptor {
-  const raw = which === "collateral" ? position.total_collateral_base : position.total_debt_base;
+  // ENGINE-CORRECT SOURCE (Wave R1 item 12): `total_*_base` are Aave's
+  // base-currency totals and are null on the Debt Manager, whose own totals
+  // ride `collateral_value_usd` / `borrowings`. The drawer names the field it
+  // actually read, so the card and its evidence can never disagree.
+  const isDm = position.engine === "debt_manager";
+  const field = isDm
+    ? which === "collateral"
+      ? "collateral_value_usd"
+      : "borrowings"
+    : `total_${which}_base`;
+  const raw = isDm
+    ? which === "collateral"
+      ? position.collateral_value_usd
+      : position.borrowings
+    : which === "collateral"
+      ? position.total_collateral_base
+      : position.total_debt_base;
   return positionNumberEvidence(position, batch, {
     title: which === "collateral" ? "EXPLAIN · TOTAL COLLATERAL" : "EXPLAIN · TOTAL DEBT",
     subject,
     rows: [
       {
-        label: `total_${which}_base (raw)`,
+        label: `${field} (raw)`,
         value: raw ?? `${EM_DASH} (null — not established; never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
@@ -293,8 +311,17 @@ export function liquidationPriceEvidence(
           ...(lp.already_breached
             ? [{ label: "already breached", value: "true — the boundary is behind the current price", tone: "crit" as const }]
             : []),
+          // Wave R1 item 2: the WIRE FIELD name (this is the evidence
+          // register — the field is what the reader came to check), with the
+          // axis-scoped statement the badge now carries, verbatim.
           ...(lp.never_liquidatable
-            ? [{ label: "never liquidatable", value: `true${lp.reason === undefined ? "" : ` — ${lp.reason}`}`, tone: "dim" as const }]
+            ? [
+                {
+                  label: "never_liquidatable (wire field)",
+                  value: `true — ${noPricePathTitle(lp.reason)}`,
+                  tone: "dim" as const,
+                },
+              ]
             : []),
         ];
   return positionNumberEvidence(position, batch, { title: "EXPLAIN · LIQUIDATION PRICE", subject, rows });
@@ -370,8 +397,24 @@ export function legEvidence(
             : `block ${formatBlock(leg.collateral_index_block)}`,
         tone: "dim",
       },
-      { label: "liq threshold", value: leg.liq_threshold === null ? EM_DASH : `${leg.liq_threshold} bps` },
-      { label: "liq bonus", value: leg.liq_bonus === null ? EM_DASH : `${leg.liq_bonus} bps` },
+      // Wave R1 item 12: the denomination is the ENGINE's (Aave bps · 1e4,
+      // Debt Manager 100e18). The raw wire value stays beside the percentage
+      // — this is the evidence register, where the exact integer is the
+      // point; what changed is that it is no longer mislabeled "bps".
+      {
+        label: `liq threshold (${paramScaleNote(position.engine)})`,
+        value:
+          leg.liq_threshold === null
+            ? EM_DASH
+            : `${paramPercent(leg.liq_threshold, position.engine)} — raw ${leg.liq_threshold}`,
+      },
+      {
+        label: `liq bonus (${paramScaleNote(position.engine)})`,
+        value:
+          leg.liq_bonus === null
+            ? EM_DASH
+            : `${paramPercent(leg.liq_bonus, position.engine)} — raw ${leg.liq_bonus}`,
+      },
     ],
   });
 }

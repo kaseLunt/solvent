@@ -18,13 +18,14 @@ import { useState } from "react";
 import { AddressMono } from "@/components/AddressMono";
 import { EngineChip } from "@/components/EngineChip";
 import { EM_DASH, formatBlock, renderBlockTime, renderNullableDecimal } from "@/lib/format";
+import { groupDecimalString } from "@/lib/book-format";
 import {
   splitUntimedTail,
   txExplorerUrl,
   type FeedChainEvent,
   type FeedOrderMode,
 } from "@/lib/feed-data";
-import { feedAmount, feedRowKey, feedTagTone, renderBps } from "@/lib/feed-view";
+import { RAW_UNITS_TAG, feedAmount, feedRowKey, feedTagTone, renderBps } from "@/lib/feed-view";
 import styles from "./feed.module.css";
 
 export interface FeedListProps {
@@ -34,6 +35,12 @@ export interface FeedListProps {
   ledger: boolean;
   /** Shown when `events` is empty — the reason, never silence. */
   empty: string;
+  /**
+   * Wave R1 item 4: each engine's `value_decimals` AS THE WIRE SERVED THEM
+   * (the SSE snapshot's aggregates). An engine absent from this map has no
+   * licensed scale and its amounts render raw, tagged — never guessed.
+   */
+  valueDecimals?: Readonly<Record<string, number>>;
 }
 
 function TxLink({ event }: { event: FeedChainEvent }) {
@@ -62,8 +69,14 @@ function TxLink({ event }: { event: FeedChainEvent }) {
   );
 }
 
-function Amount({ event }: { event: FeedChainEvent }) {
-  const amount = feedAmount(event);
+function Amount({
+  event,
+  valueDecimals,
+}: {
+  event: FeedChainEvent;
+  valueDecimals: number | null;
+}) {
+  const amount = feedAmount(event, { engineValueDecimals: valueDecimals });
   if (amount.kind === "record-only") {
     return <span className="dim">record-only</span>;
   }
@@ -77,6 +90,18 @@ function Amount({ event }: { event: FeedChainEvent }) {
           title={amount.unitTitle ?? undefined}
         >
           {amount.unitChip}
+        </span>
+      )}
+      {/* Wave R1 item 4: an unscaled integer NEVER renders bare — the reader
+          must be able to tell "no scale was licensed" from "the scale is
+          1". */}
+      {amount.rawUnits && (
+        <span
+          className={styles.unitChip}
+          data-testid="feed-amount-raw"
+          title={amount.unitTitle ?? undefined}
+        >
+          {RAW_UNITS_TAG}
         </span>
       )}
       {amount.symbol !== null && <span className="mono dim">{amount.symbol}</span>}
@@ -97,9 +122,11 @@ function LiquidationDetail({ event }: { event: FeedChainEvent }) {
         <b>
           {detail.debt_repaid === null
             ? EM_DASH
-            : renderNullableDecimal(detail.debt_repaid, {
-                decimals: detail.debt_decimals ?? undefined,
-              })}
+            : groupDecimalString(
+                renderNullableDecimal(detail.debt_repaid, {
+                  decimals: detail.debt_decimals ?? undefined,
+                }),
+              )}
         </b>
         {detail.debt_asset !== null && (
           <span className="dim" title={detail.debt_asset}>
@@ -114,7 +141,7 @@ function LiquidationDetail({ event }: { event: FeedChainEvent }) {
         ) : (
           detail.seized.map((leg) => (
             <b key={leg.asset}>
-              {renderNullableDecimal(leg.amount, { decimals: leg.decimals })}{" "}
+              {groupDecimalString(renderNullableDecimal(leg.amount, { decimals: leg.decimals }))}{" "}
               {leg.symbol ?? `${leg.asset.slice(0, 8)}…`}
             </b>
           ))
@@ -133,7 +160,15 @@ function LiquidationDetail({ event }: { event: FeedChainEvent }) {
   );
 }
 
-function FeedRow({ event, ledger }: { event: FeedChainEvent; ledger: boolean }) {
+function FeedRow({
+  event,
+  ledger,
+  valueDecimals,
+}: {
+  event: FeedChainEvent;
+  ledger: boolean;
+  valueDecimals: number | null;
+}) {
   const [open, setOpen] = useState(ledger);
   const tone = feedTagTone(event.type);
   const hasDetail = event.liquidation !== null;
@@ -146,7 +181,7 @@ function FeedRow({ event, ledger }: { event: FeedChainEvent; ledger: boolean }) 
         {event.type}
       </span>
       <span className={styles.feedBody}>
-        <Amount event={event} />
+        <Amount event={event} valueDecimals={valueDecimals} />
         <AddressMono address={event.account} href={`/inspector/${event.account}`} copy={false} />
         <EngineChip engine={event.engine} />
         <span className="mono dim">
@@ -174,7 +209,8 @@ function FeedRow({ event, ledger }: { event: FeedChainEvent; ledger: boolean }) 
   );
 }
 
-export function FeedList({ events, mode, ledger, empty }: FeedListProps) {
+export function FeedList({ events, mode, ledger, empty, valueDecimals = {} }: FeedListProps) {
+  const decimalsFor = (engine: string): number | null => valueDecimals[engine] ?? null;
   if (events.length === 0) {
     return (
       <div className={styles.feed}>
@@ -191,7 +227,12 @@ export function FeedList({ events, mode, ledger, empty }: FeedListProps) {
     return (
       <div className={styles.feed}>
         {events.map((event) => (
-          <FeedRow key={feedRowKey(event)} event={event} ledger={ledger} />
+          <FeedRow
+            key={feedRowKey(event)}
+            event={event}
+            ledger={ledger}
+            valueDecimals={decimalsFor(event.engine)}
+          />
         ))}
       </div>
     );
@@ -201,7 +242,12 @@ export function FeedList({ events, mode, ledger, empty }: FeedListProps) {
   return (
     <div className={styles.feed}>
       {timed.map((event) => (
-        <FeedRow key={feedRowKey(event)} event={event} ledger={ledger} />
+        <FeedRow
+            key={feedRowKey(event)}
+            event={event}
+            ledger={ledger}
+            valueDecimals={decimalsFor(event.engine)}
+          />
       ))}
       {untimed.length > 0 && (
         <>
@@ -219,7 +265,12 @@ export function FeedList({ events, mode, ledger, empty }: FeedListProps) {
             </div>
           )}
           {untimed.map((event) => (
-            <FeedRow key={feedRowKey(event)} event={event} ledger={ledger} />
+            <FeedRow
+            key={feedRowKey(event)}
+            event={event}
+            ledger={ledger}
+            valueDecimals={decimalsFor(event.engine)}
+          />
           ))}
         </>
       )}

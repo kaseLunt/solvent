@@ -40,6 +40,9 @@ import {
 } from "@/lib/evidence";
 import { displayHf, displayRatio } from "@/lib/history-series";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
+import { groupDecimalString } from "@/lib/book-format";
+import { legParamsLine, paramScaleNote } from "@/lib/params-format";
+import { NO_PRICE_PATH_LABEL, noPricePathTitle } from "@/lib/liq-distance";
 import { hfSeverity } from "@/lib/severity";
 import type { ChainEvent, ParamChange } from "@/lib/inspector-data";
 import { ExplainButton } from "@/components/EvidenceDrawer";
@@ -69,6 +72,52 @@ function verdictChipClass(verdict: string): string {
 
 function legLabel(leg: RefinedLeg): string {
   return leg.symbol ?? truncateAddress(leg.asset);
+}
+
+/**
+ * MONEY, with thousands separators (Wave R1 item 12). `renderNullableDecimal`
+ * places the decimal point exactly; this adds the grouping the reader needs
+ * to tell $14,479 from $1,447,900 at a glance. Null stays an em dash — the
+ * separator law never manufactures a zero.
+ */
+function money(
+  value: string | null,
+  options: { decimals?: number; prefix?: string } = {},
+): string {
+  const rendered = renderNullableDecimal(value, {
+    ...(options.decimals === undefined ? {} : { decimals: options.decimals }),
+  });
+  if (rendered === EM_DASH) return EM_DASH;
+  const grouped = groupDecimalString(rendered);
+  return options.prefix === undefined ? grouped : `${options.prefix}${grouped}`;
+}
+
+/**
+ * The Debt Manager publishes NO `total_collateral_base` / `total_debt_base`
+ * (those are Aave's base-currency totals): its own totals ride
+ * `collateral_value_usd` (Σ leg value_usd — the contract's
+ * `getCollateralValueInUsd`) and `borrowings`. The API's own stress layer
+ * reads exactly this pair as the DM's collateral/debt, so the card does too
+ * — the em dashes it used to render were a rendering bug, not an absence.
+ */
+function positionTotals(position: RefinedPosition): {
+  collateral: string | null;
+  debt: string | null;
+  /** True when the pair came from the engine-specific fields. */
+  engineSpecific: boolean;
+} {
+  if (position.engine === "debt_manager") {
+    return {
+      collateral: position.collateral_value_usd,
+      debt: position.borrowings,
+      engineSpecific: true,
+    };
+  }
+  return {
+    collateral: position.total_collateral_base,
+    debt: position.total_debt_base,
+    engineSpecific: false,
+  };
 }
 
 /** The newest param-timeline row speaking to this asset (rows arrive DESC). */
@@ -151,6 +200,11 @@ export function InspectorPositionCard({
   const provenances = [...new Set(position.price_inputs.map((input) => input.provenance))];
   const sources = [...new Set(position.price_inputs.map((input) => input.source.split(":")[0] ?? input.source))];
 
+  // Totals from the ENGINE's own fields, with separators (Wave R1 item 12).
+  const totals = positionTotals(position);
+  const totalCollateral = money(totals.collateral, { decimals: position.value_decimals });
+  const totalDebt = money(totals.debt, { decimals: position.value_decimals });
+
   const marks: Mark[] = [
     { letter: "B", block: position.as_of.balances_block },
     { letter: "P", block: position.as_of.params_block },
@@ -163,7 +217,7 @@ export function InspectorPositionCard({
   };
 
   const renderPriceRow = (input: PriceInput, index: number) => {
-    const value = renderNullableDecimal(input.value, input.decimals === null ? {} : { decimals: input.decimals });
+    const value = money(input.value, input.decimals === null ? {} : { decimals: input.decimals });
     return (
       <div className={styles.kvRow} key={`price·${input.source}·${String(index)}`}>
         <span className={styles.k}>{symbolForAsset(input.asset)} price</span>
@@ -199,8 +253,8 @@ export function InspectorPositionCard({
     const hasDebt = leg.live_debt !== null || leg.debt_base !== null;
     if (hasCollateral) {
       const amountRaw = leg.live_collateral ?? leg.amount;
-      const amount = renderNullableDecimal(amountRaw, { decimals: leg.decimals });
-      const base = renderNullableDecimal(leg.collateral_base ?? leg.value_usd, {
+      const amount = money(amountRaw, { decimals: leg.decimals });
+      const base = money(leg.collateral_base ?? leg.value_usd, {
         decimals: position.value_decimals,
       });
       rows.push(
@@ -225,8 +279,8 @@ export function InspectorPositionCard({
       );
     }
     if (hasDebt) {
-      const amount = renderNullableDecimal(leg.live_debt, { decimals: leg.decimals });
-      const base = renderNullableDecimal(leg.debt_base, { decimals: position.value_decimals });
+      const amount = money(leg.live_debt, { decimals: leg.decimals });
+      const base = money(leg.debt_base, { decimals: position.value_decimals });
       rows.push(
         <div className={styles.kvRow} key={`${leg.asset}·debt`}>
           <span className={styles.k}>{label} debt leg</span>
@@ -268,10 +322,14 @@ export function InspectorPositionCard({
       <Fragment key={`${leg.asset}·params`}>
         <div className={styles.kvRow}>
           <span className={styles.k}>{label} params</span>
-          <span className={styles.v}>
-            {leg.liq_threshold === null ? EM_DASH : `LT ${leg.liq_threshold}`}
-            {" · "}
-            {leg.liq_bonus === null ? EM_DASH : `bonus ${leg.liq_bonus}`} <span className={styles.vDim}>bps</span>
+          {/* Wave R1 item 12: percentages in the ENGINE's own denomination —
+              Aave publishes bps (1e4), the Debt Manager 100e18. The old
+              shared "bps" suffix rendered a DM 95% threshold as
+              "95000000000000000000 bps". The scale stays NAMED, never
+              normalized across engines. */}
+          <span className={styles.v} data-testid={`leg-params-${position.engine}`}>
+            {legParamsLine(leg.liq_threshold, leg.liq_bonus, position.engine)}{" "}
+            <span className={styles.vDim}>{paramScaleNote(position.engine)}</span>
           </span>
         </div>
         <div className={styles.kvRow}>
@@ -341,7 +399,7 @@ export function InspectorPositionCard({
     const value =
       first === undefined
         ? EM_DASH
-        : renderNullableDecimal(first.lowest_healthy_price, { decimals: first.price_decimals });
+        : money(first.lowest_healthy_price, { decimals: first.price_decimals });
     return (
       <div className={styles.kvRow}>
         <span className={styles.k}>Liquidation price</span>
@@ -359,7 +417,27 @@ export function InspectorPositionCard({
           </span>
           {lp.diagnostic && <span className={`${styles.verdict} ${styles.verdictWarn}`}>diagnostic</span>}
           {lp.already_breached && <span className={`${styles.verdict} ${styles.verdictCrit}`}>already breached</span>}
-          {lp.never_liquidatable && <span className={`${styles.verdict} ${styles.verdictOk}`}>never liquidatable</span>}
+          {/* Wave R1 item 2 — THE BLOCKER. `never_liquidatable` is AXIS-SCOPED:
+              the wire can and does carry `liquidatable: true` alongside it,
+              because the flag speaks about the price axis and the verdict
+              speaks about the account. The old badge read "NEVER
+              LIQUIDATABLE" in ok-green NEXT TO a liquidatable verdict.
+              Two fixes, both hard:
+                1. under a liquidatable verdict this slot renders NOTHING —
+                   the verdict row above already speaks, and a second, softer
+                   sentence beside it can only dilute it;
+                2. the vocabulary is the axis-scoped one, in the DIM register
+                   (never ok-green — "safe" is the claim this badge must stop
+                   making), with the wire's own reason in the hover. */}
+          {lp.never_liquidatable && verdict !== "liquidatable" && (
+            <span
+              className={`${styles.verdict} ${styles.verdictDim}`}
+              data-testid="no-price-path-badge"
+              title={noPricePathTitle(lp.reason)}
+            >
+              {NO_PRICE_PATH_LABEL}
+            </span>
+          )}
         </span>
       </div>
     );
@@ -395,12 +473,12 @@ export function InspectorPositionCard({
                             position,
                             batch,
                             "borrowings",
-                            renderNullableDecimal(position.borrowings, { decimals: position.value_decimals, prefix: "$" }),
+                            money(position.borrowings, { decimals: position.value_decimals, prefix: "$" }),
                           ),
                         );
                       }}
                     >
-                      {renderNullableDecimal(position.borrowings, { decimals: position.value_decimals, prefix: "$" })}
+                      {money(position.borrowings, { decimals: position.value_decimals, prefix: "$" })}
                     </ExplainButton>
                   </span>
                 </div>
@@ -415,12 +493,12 @@ export function InspectorPositionCard({
                             position,
                             batch,
                             "max_borrow_lt",
-                            renderNullableDecimal(position.max_borrow_lt, { decimals: position.value_decimals, prefix: "$" }),
+                            money(position.max_borrow_lt, { decimals: position.value_decimals, prefix: "$" }),
                           ),
                         );
                       }}
                     >
-                      {renderNullableDecimal(position.max_borrow_lt, { decimals: position.value_decimals, prefix: "$" })}
+                      {money(position.max_borrow_lt, { decimals: position.value_decimals, prefix: "$" })}
                     </ExplainButton>
                   </span>
                 </div>
@@ -454,24 +532,17 @@ export function InspectorPositionCard({
               </div>
             )}
 
-            {/* totals */}
+            {/* totals — ENGINE-CORRECT source (Wave R1 item 12) */}
             <div className={styles.kvRow}>
               <span className={styles.k}>Total collateral</span>
               <span className={styles.v}>
                 <ExplainButton
                   label="explain total collateral"
                   onExplain={() => {
-                    onExplain(
-                      totalEvidence(
-                        position,
-                        batch,
-                        "collateral",
-                        renderNullableDecimal(position.total_collateral_base, { decimals: position.value_decimals }),
-                      ),
-                    );
+                    onExplain(totalEvidence(position, batch, "collateral", totalCollateral));
                   }}
                 >
-                  {renderNullableDecimal(position.total_collateral_base, { decimals: position.value_decimals })}
+                  {totalCollateral}
                 </ExplainButton>{" "}
                 <span className={styles.vDim}>· {String(position.value_decimals)}-dec, engine&apos;s own unit</span>
               </span>
@@ -482,17 +553,10 @@ export function InspectorPositionCard({
                 <ExplainButton
                   label="explain total debt"
                   onExplain={() => {
-                    onExplain(
-                      totalEvidence(
-                        position,
-                        batch,
-                        "debt",
-                        renderNullableDecimal(position.total_debt_base, { decimals: position.value_decimals }),
-                      ),
-                    );
+                    onExplain(totalEvidence(position, batch, "debt", totalDebt));
                   }}
                 >
-                  {renderNullableDecimal(position.total_debt_base, { decimals: position.value_decimals })}
+                  {totalDebt}
                 </ExplainButton>
               </span>
             </div>

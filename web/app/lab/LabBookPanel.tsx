@@ -305,11 +305,15 @@ export function LabBookPanel({ scenarios, defaultScenarioId }: LabBookPanelProps
 
   if (scenarios.length === 0) {
     return (
+      // Wave R1 item 5: the empty state is now reachable ONLY pre-lookup —
+      // every completed outcome (found / not-found / unknowable) teaches the
+      // list — so the copy says exactly that, including the escape hatch the
+      // old copy hid: a not-found answer works too.
       <div className={styles.emptyState} data-testid="book-mode-no-set">
-        book-wide runs use the same committed scenario set — and the set renders from the
-        wire, never from a hardcoded list. Run an address stress once (ADDRESS mode) to load
-        the committed set from <span className="mono">GET /v1/address/{"{addr}"}/stress</span>;
-        its scenario ids are the only ids this panel will POST.
+        Book-wide stress uses the same committed scenario list as address mode, and this page
+        only learns that list from the wire — never from a hardcoded copy. Run one address
+        stress (any address — even a not-found answer carries the list) and the scenarios appear
+        here, ready to run book-wide.
       </div>
     );
   }

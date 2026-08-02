@@ -57,14 +57,13 @@ export function ObservatorySurface() {
 
   return (
     <>
+      {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro. */}
       <div className={styles.head}>
-        <p className="eyebrow">4 · Observatory</p>
         <h1>Observatory</h1>
         <p>
-          One engine, over time — the durable rollup that outlives batch retention. Every point
-          is a captured observation of the newest complete risk batch in its bucket; an hour
-          with no complete batch is a hole in the record, shown as a hole. This deep-dive grows
-          into the migration view as the record accumulates.
+          How each engine&apos;s book has moved, hour by hour, in a record that outlives batch
+          retention. An hour with no complete batch renders as a hole — never smoothed, never
+          zero.
         </p>
       </div>
 

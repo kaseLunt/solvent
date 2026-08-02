@@ -33,6 +33,13 @@
   border-color: var(--accent);
 }
 
+/* The batch-age suffix inside the LIVE badge (Wave R1 item 3): DIM, so the
+   eye reads LIVE as the stream's state and the suffix as a separate fact
+   about the batch — never one green sentence implying fresh numbers. */
+.badge.live .batchAge {
+  color: var(--ink-3);
+}
+
 .badge.waiting {
   color: var(--ink-3);
   border-style: dashed;

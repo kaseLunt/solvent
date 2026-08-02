@@ -60,6 +60,17 @@
   text-align: right;
 }
 
+/* Wave R1 item 7 — HEADER ALIGNMENT. `.table thead th` sets `text-align:
+   left` at specificity (0,1,2); the `.num` class alone is (0,1,0), so it
+   LOST on <th> and every numeric column header sat left over right-aligned
+   cells — the column's own axis broken at the top. This rule matches the
+   header selector's specificity and wins, so Collateral / Debt / HF / Liq.
+   distance read down one edge. Sortable headers are inline-flex buttons, and
+   an inline-level child obeys the th's text-align, so they move too. */
+.table thead th.num {
+  text-align: right;
+}
+
 /* Sortable column headers (W-UX-C points 7/15): the header IS a button —
  * same th typography, hover/active in accent, native Enter/Space, the global
  * focus-visible ring. Plain th's keep the default cursor by never becoming

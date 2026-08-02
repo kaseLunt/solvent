@@ -2,6 +2,7 @@
 
 import { usePosture } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
+import { ribbonBatchAgeSuffix } from "@/lib/freshness";
 import { Ribbon, type RibbonAsOf } from "./Ribbon";
 import styles from "./ribbon.module.css";
 
@@ -32,7 +33,17 @@ export function PostureRibbon() {
         });
       }
     }
-    return <Ribbon mode="live" asOfs={asOfs} superseded={posture.batch.supersession.superseded} />;
+    // Wave R1 item 3: LIVE describes the STREAM; the suffix describes the
+    // BATCH. A batch older than an hour says so, in the dim register, right
+    // where the reader is being told the connection is live.
+    return (
+      <Ribbon
+        mode="live"
+        asOfs={asOfs}
+        superseded={posture.batch.supersession.superseded}
+        batchAgeSuffix={ribbonBatchAgeSuffix(posture.batch.age_seconds)}
+      />
+    );
   }
 
   // No renderable batch: state the truth about the stream itself.

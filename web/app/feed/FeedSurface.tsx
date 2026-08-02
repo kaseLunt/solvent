@@ -17,8 +17,9 @@
 //   - a refused page (400 — e.g. a cursor minted for the other mode) renders
 //     the envelope's own words plus an honest restart from page one.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
+import { usePosture } from "@/lib/posture";
 import { solventBaseUrl } from "@/lib/api";
 import { EM_DASH } from "@/lib/format";
 import {
@@ -67,6 +68,20 @@ export function FeedSurface() {
   const [envelope, setEnvelope] = useState<FeedEnvelope | null>(null);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Wave R1 item 4: each engine's own `value_decimals`, FROM THE WIRE — the
+  // SSE snapshot's aggregates, the same numbers /v1/book publishes. The Feed
+  // does not fetch a second endpoint and does not hardcode a scale: an engine
+  // the stream has not (yet) described simply has no licensed scale, and its
+  // amounts render raw with the `raw units` tag.
+  const posture = usePosture();
+  const valueDecimals = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const aggregate of posture.engines ?? []) {
+      map[aggregate.engine] = aggregate.value_decimals;
+    }
+    return map;
+  }, [posture.engines]);
 
   const scope: FeedScope = {
     engine,
@@ -193,20 +208,24 @@ export function FeedSurface() {
 
   return (
     <>
+      {/* Wave R1 items 6 + 10: no numbered eyebrow; the adjudicated intro. */}
       <div className={styles.head}>
-        <p className="eyebrow">5 · Feed</p>
         <h1>Feed</h1>
         <p>
-          Durable chain actions from reorg-aware custody — borrows, repays, supplies, withdrawals,
-          liquidations — never invented events. Live posture rides the stream; history rides the
-          cursor. The two are different instruments and are labeled as such.
+          Chain actions as recorded — borrows, repays, supplies, withdrawals, liquidations. The
+          live strip shows the stream&apos;s posture now; the list below pages through durable
+          history — the two never blend.
         </p>
       </div>
 
       <FeedLiveStrip />
 
+      {/* Wave R1 item 13: the durable list's own head. The nav tab now reads
+          "Activity"; this head names the OTHER half of the surface, so the
+          live strip above and the paged record below stay two instruments
+          with two names — never one blended stream. */}
       <div className={styles.sectionHead}>
-        <h2>History — custodied chain actions, cursor pages</h2>
+        <h2>History — recorded chain actions</h2>
       </div>
 
       <div className={styles.controls}>
@@ -372,7 +391,13 @@ export function FeedSurface() {
         </div>
       )}
 
-      <FeedList events={rows} mode={mode} ledger={view === "ledger"} empty={emptyExhausted} />
+      <FeedList
+        events={rows}
+        mode={mode}
+        ledger={view === "ledger"}
+        empty={emptyExhausted}
+        valueDecimals={valueDecimals}
+      />
 
       <div className={styles.foot} data-testid="feed-foot">
         <span>

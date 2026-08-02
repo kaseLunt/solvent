@@ -25,6 +25,17 @@ export type RibbonProps =
       asOfs: readonly RibbonAsOf[];
       /** Current batch is superseded — render the warning inline. */
       superseded?: boolean;
+      /**
+       * Wave R1 item 3 — the batch-age suffix, e.g. `· batch 24h old`.
+       *
+       * TWO SUBJECTS, TWO STATEMENTS: `LIVE · WATERMARKED` describes the
+       * STREAM (it really is connected and delivering). The suffix describes
+       * the BATCH the stream is carrying (it really is a day old). Conflating
+       * them is how a live connection over a stale batch reads as fresh data.
+       * Null renders nothing — an absent suffix is not a freshness claim
+       * beyond what LIVE already says.
+       */
+      batchAgeSuffix?: string | null;
     }
   | {
       mode: "proof";
@@ -49,6 +60,11 @@ export function Ribbon(props: RibbonProps) {
       <span className={`${styles.badge} ${styles.live}`}>
         <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />
         LIVE · WATERMARKED
+        {props.batchAgeSuffix !== undefined && props.batchAgeSuffix !== null && (
+          <span className={styles.batchAge} data-testid="ribbon-batch-age">
+            {props.batchAgeSuffix}
+          </span>
+        )}
       </span>
       {props.superseded === true && (
         <span className={`${styles.badge} ${styles.degraded}`}>SUPERSEDED</span>

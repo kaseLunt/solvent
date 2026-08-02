@@ -261,21 +261,25 @@ test("the warn-band disclosure is carried at table and legend level", async ({ p
   );
 });
 
-test("Lab rides the PRIMARY nav register (design ruling)", async ({ page }) => {
+test("Scenarios (the Lab) rides the PRIMARY nav register (design ruling)", async ({ page }) => {
   await mockBook(page, BOOK);
   await mockPositions(page);
   await openBook(page);
 
   const nav = page.getByRole("navigation", { name: "app surfaces" });
+  // Wave R1 item 13: labels renamed, ORDER and routes unchanged.
   await expect(nav.getByRole("link")).toHaveText([
     "Book",
     "Inspector",
-    "Lab",
-    "Observatory",
-    "Feed",
+    "Scenarios",
+    "History",
+    "Activity",
     "Proof",
     "Developers",
   ]);
+  await expect(nav.getByRole("link", { name: "Scenarios" })).toHaveAttribute("href", "/lab");
+  await expect(nav.getByRole("link", { name: "History" })).toHaveAttribute("href", "/observatory");
+  await expect(nav.getByRole("link", { name: "Activity" })).toHaveAttribute("href", "/feed");
 });
 
 test("NO SERVABLE BATCH renders the refusal honestly — never a book of zeroes", async ({ page }) => {

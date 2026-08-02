@@ -20,6 +20,15 @@
   margin: 0;
 }
 
+/* The batch freshness line (Wave R1 item 3): mono, dim, directly under the
+   verdict dek — the age is a stamp, not prose. */
+.head p.freshness {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin-top: 8px;
+}
+
 .section {
   margin: 0 0 var(--sp-6);
 }

@@ -325,14 +325,14 @@ export function ProofSurface() {
 
   return (
     <>
+      {/* Wave R1 items 6 + 10: no numbered eyebrow, the H1 is the surface's
+          own name, and the intro is the adjudicated copy. */}
       <div className={styles.head}>
-        <p className="eyebrow">6 · Proof Center</p>
-        <h1>Proof Center</h1>
+        <h1>Proof</h1>
         <p>
-          The deploy-bound evidence manifest: what this deployment is, exactly. Two subjects,
-          rendered as two — the pinned proof (a committed reconcile receipt) and the live batch
-          (a watermarked identity). Every field is carried by the build, persisted by a batch, or
-          read from a committed artifact; nothing is measured at request time.
+          What this deployment is, exactly: the pinned proof of its last reconcile and the
+          identity of the batch it serves now. Nothing here is measured on request — every field
+          is carried by the build or persisted by a batch.
         </p>
         <p className={styles.crossLink}>
           contract + samples → <Link href="/developers">Developers</Link>

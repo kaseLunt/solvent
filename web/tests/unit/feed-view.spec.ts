@@ -10,9 +10,21 @@
 //     the unit tag exists to prevent;
 //   - severity: liquidation and deficit_created are crit (color + form);
 //     the display class itself always renders verbatim.
+//
+// WAVE R1 ITEM 4 extends the law with SCALE-BY-PROVENANCE. This API serves
+// `amount_decimals: null` on every row, so the old code rendered every amount
+// as a raw integer — a $22 borrow as `22064279`. Now:
+//   - dm_normalized_debt IS a fixed point at the engine's own value_decimals,
+//     so given that number FROM THE WIRE the decimal point is placed exactly
+//     (with thousands separators);
+//   - aave_scaled's scale is the TOKEN's decimals, which the event does not
+//     carry — so it stays RAW and gains the `raw units` tag. Substituting the
+//     engine's base-currency decimals there would be a fabrication;
+//   - every verbatim-rendered integer carries `rawUnits: true`, so the row
+//     can tag it and no unscaled number ever renders bare.
 
 import { expect, test } from "@playwright/test";
-import { feedAmount, feedTagTone, renderBps } from "../../lib/feed-view";
+import { RAW_UNITS_TAG, feedAmount, feedTagTone, renderBps } from "../../lib/feed-view";
 import { EM_DASH } from "../../lib/format";
 import type { FeedChainEvent } from "../../lib/feed-data";
 import { FEED_UNITS } from "../fixtures/feed";
@@ -60,25 +72,83 @@ test.describe("feedAmount", () => {
     expect(amount.unitTitle).toContain("never interpreted");
   });
 
-  test("aave_scaled: exact value with the unit named, never a token claim alone", () => {
+  test("aave_scaled WITHOUT leg decimals stays RAW and tagged — the engine's scale is a different unit", () => {
     const scaled = FEED_UNITS.events.find((event) => event.amount_unit === "aave_scaled");
-    const amount = feedAmount(scaled as FeedChainEvent);
+    expect(scaled?.amount_decimals).toBeNull();
+    // Even handed the Aave engine's own value_decimals (8, the pool's base
+    // currency), the ray-scaled TOKEN amount must not be divided by it.
+    const amount = feedAmount(scaled as FeedChainEvent, { engineValueDecimals: 8 });
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
+    expect(amount.display).toBe("1500000000000000000");
+    expect(amount.rawUnits).toBe(true);
     expect(amount.unitChip).toBe("aave-scaled");
     expect(amount.unitTitle).toContain("rayMul");
     expect(amount.unitTitle).toContain("never a USD figure");
   });
 
-  test("dm_normalized_debt: exact value with the unit named and the conversion stated", () => {
+  test("aave_scaled WITH leg decimals is placed exactly, with separators", () => {
+    const scaled = FEED_UNITS.events.find((event) => event.amount_unit === "aave_scaled");
+    const amount = feedAmount({ ...(scaled as FeedChainEvent), amount_decimals: 18 });
+    expect(amount.kind).toBe("amount");
+    if (amount.kind !== "amount") return;
+    expect(amount.display).toBe("1.5");
+    expect(amount.rawUnits).toBe(false);
+  });
+
+  test("dm_normalized_debt: the engine's value_decimals place the point, with separators", () => {
+    const normalized = FEED_UNITS.events.find(
+      (event) => event.amount_unit === "dm_normalized_debt",
+    );
+    const amount = feedAmount(normalized as FeedChainEvent, { engineValueDecimals: 6 });
+    expect(amount.kind).toBe("amount");
+    if (amount.kind !== "amount") return;
+    // 1199403000 at 6 decimals — the defect was rendering this as "1199403000".
+    expect(amount.display).toBe("1,199.403");
+    expect(amount.rawUnits).toBe(false);
+    expect(amount.unitChip).toBe("normalized debt");
+    expect(amount.unitTitle).toContain("interest index");
+  });
+
+  test("dm_normalized_debt with NO known engine scale stays raw and tagged — never guessed", () => {
     const normalized = FEED_UNITS.events.find(
       (event) => event.amount_unit === "dm_normalized_debt",
     );
     const amount = feedAmount(normalized as FeedChainEvent);
     expect(amount.kind).toBe("amount");
     if (amount.kind !== "amount") return;
-    expect(amount.unitChip).toBe("normalized debt");
-    expect(amount.unitTitle).toContain("interest index");
+    expect(amount.display).toBe("1199403000");
+    expect(amount.rawUnits).toBe(true);
+    expect(amount.unitTitle).toContain("raw integer");
+  });
+
+  test("the row's OWN amount_decimals win over the engine's", () => {
+    const normalized = FEED_UNITS.events.find(
+      (event) => event.amount_unit === "dm_normalized_debt",
+    );
+    const amount = feedAmount(
+      { ...(normalized as FeedChainEvent), amount_decimals: 3 },
+      { engineValueDecimals: 6 },
+    );
+    expect(amount.kind).toBe("amount");
+    if (amount.kind !== "amount") return;
+    expect(amount.display).toBe("1,199,403");
+  });
+
+  test("every VERBATIM integer is flagged rawUnits, so the row can tag it", () => {
+    expect(RAW_UNITS_TAG).toBe("raw units");
+    const rawCases: FeedChainEvent[] = [
+      FEED_UNITS.events.find((event) => event.amount_unit === "opaque") as FeedChainEvent,
+      row({ amount: "42", amount_decimals: 18, amount_unit: "none" }),
+      row({ amount: "5000000", amount_decimals: 6, amount_unit: "engine_v9_units" }),
+      row({ amount: "-2500000000", amount_decimals: 6, amount_unit: undefined }),
+    ];
+    for (const event of rawCases) {
+      const amount = feedAmount(event, { engineValueDecimals: 6 });
+      expect(amount.kind).toBe("amount");
+      if (amount.kind !== "amount") continue;
+      expect(amount.rawUnits).toBe(true);
+    }
   });
 
   test("`none` with a non-null amount is wire drift — raw + tag verbatim", () => {

@@ -80,10 +80,19 @@
   font-weight: 550;
 }
 
+/* Wave R1 item 6 — THE 631px VOID. `margin-left: auto` shoved the
+   proof/docs register to the far edge of a wide shell, so the nav read as
+   two unrelated widgets separated by an unexplained gulf. The groups now sit
+   in one row at normal tab spacing, separated by a VISIBLE hairline: one
+   navigation, two registers, and the register boundary is drawn rather than
+   implied by emptiness. */
 .secondary {
-  margin-left: auto;
   display: flex;
+  align-items: baseline;
   gap: 2px;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
 }
 
 .secondary .tab {

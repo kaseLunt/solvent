@@ -20,6 +20,7 @@
 // tests/unit/feed-view.spec.ts, not just promised here.
 
 import { EM_DASH, renderNullableDecimal } from "./format";
+import { groupDecimalString } from "./book-format";
 import { isKnownAmountUnit, type EventDisplayType, type FeedChainEvent } from "./feed-data";
 
 export type FeedAmount =
@@ -34,9 +35,54 @@ export type FeedAmount =
       unitTitle: string | null;
       /** Asset symbol context (rendered dim, after the chip), when carried. */
       symbol: string | null;
+      /**
+       * Wave R1 item 4: TRUE when `display` is the wire's raw integer because
+       * no scale is licensed for it. The row renders a `raw units` tag, so an
+       * unscaled integer can never be mistaken for a placed decimal.
+       */
+      rawUnits: boolean;
     };
 
-export function feedAmount(event: FeedChainEvent): FeedAmount {
+/**
+ * The scale the ENGINE's own value unit carries, when the caller knows it.
+ *
+ * WAVE R1 ITEM 4 — THE DEFECT: the Feed rendered `amount` through
+ * `amount_decimals`, which this API serves as NULL on every row (it says so
+ * in its own notes: the value "is not a display-ready token amount, which is
+ * why `amount_decimals` is null"). The result was a wall of raw integers: a
+ * $22 borrow rendered as `22064279`, indistinguishable from $22 million.
+ *
+ * The fix is scale-by-provenance, never scale-by-guess:
+ *
+ *   dm_normalized_debt — the Debt Manager's normalized-debt unit IS a
+ *     6-decimal fixed point (the USD-6 view is value × index ÷ 1e18, so the
+ *     value itself carries the engine's `value_decimals`). Given that number
+ *     FROM THE WIRE (`/v1/book`'s aggregate, or the SSE snapshot's), the
+ *     decimal point is placed exactly. Withheld → raw, tagged.
+ *
+ *   aave_scaled — ray-scaled aToken/variableDebtToken units, whose scale is
+ *     the TOKEN's decimals, not the engine's `value_decimals` (8, the pool's
+ *     base currency). The event payload carries no per-leg decimals, so
+ *     nothing licenses a scale: raw integer, `raw units` tag. Using the
+ *     engine's 8 here would be exactly the fabrication the ruling forbids.
+ *
+ * `amount_decimals`, when the wire DOES carry it, still wins — it is the
+ * row's own statement about itself.
+ */
+export interface FeedAmountScale {
+  /** The active engine's `value_decimals` from the wire, or null when unknown. */
+  engineValueDecimals?: number | null;
+}
+
+/** The tag rendered beside a verbatim integer — never a silent raw number. */
+export const RAW_UNITS_TAG = "raw units";
+
+/** Exact placement + thousands separators, via the shared money formatter. */
+function scaled(amount: string, decimals: number): string {
+  return groupDecimalString(renderNullableDecimal(amount, { decimals }));
+}
+
+export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): FeedAmount {
   if (event.amount === null) return { kind: "record-only" };
   const symbol = event.symbol ?? null;
   // The generated type makes amount_unit required; the runtime guard stays
@@ -54,6 +100,7 @@ export function feedAmount(event: FeedChainEvent): FeedAmount {
       unitTitle:
         "the wire carried no amount_unit — required since contract 1.2.0. Rendered verbatim as wire drift, never formatted through an unlicensed scale",
       symbol,
+      rawUnits: true,
     };
   }
 
@@ -67,6 +114,7 @@ export function feedAmount(event: FeedChainEvent): FeedAmount {
       unitTitle:
         "unit tag outside the known closed set (dm_normalized_debt / aave_scaled / none / opaque) — rendered verbatim, never interpreted",
       symbol,
+      rawUnits: true,
     };
   }
 
@@ -81,6 +129,7 @@ export function feedAmount(event: FeedChainEvent): FeedAmount {
         unitTitle:
           "the wire tagged this row record-only (unit `none`) yet carried an amount — rendered raw, never interpreted",
         symbol,
+        rawUnits: true,
       };
     case "opaque":
       return {
@@ -90,29 +139,43 @@ export function feedAmount(event: FeedChainEvent): FeedAmount {
         unitTitle:
           "the delta's unit could not be established from custody — the raw integer renders verbatim; even decimals would be an interpretation",
         symbol,
+        rawUnits: true,
       };
-    case "aave_scaled":
+    case "aave_scaled": {
+      // The scale of a ray-scaled aToken balance is the TOKEN's decimals.
+      // The event carries them or it does not; the ENGINE's value_decimals
+      // (the pool's base currency, 8) is a different unit entirely and is
+      // deliberately NOT substituted here.
+      const decimals = event.amount_decimals;
       return {
         kind: "amount",
-        display: renderNullableDecimal(event.amount, {
-          decimals: event.amount_decimals ?? undefined,
-        }),
+        display: decimals === null ? event.amount : scaled(event.amount, decimals),
         unitChip: "aave-scaled",
         unitTitle:
-          "ray-scaled aToken/variableDebtToken units — the nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
+          decimals === null
+            ? "ray-scaled aToken/variableDebtToken units, and this row carries NO decimals for the leg — the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
+            : "ray-scaled aToken/variableDebtToken units — the nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
         symbol,
+        rawUnits: decimals === null,
       };
-    case "dm_normalized_debt":
+    }
+    case "dm_normalized_debt": {
+      // Normalized debt IS a fixed point at the engine's own value_decimals
+      // (the USD-6 view is value × index ÷ 1e18). The row's own decimals win
+      // when present; otherwise the engine's, FROM THE WIRE; otherwise raw.
+      const decimals = event.amount_decimals ?? scale.engineValueDecimals ?? null;
       return {
         kind: "amount",
-        display: renderNullableDecimal(event.amount, {
-          decimals: event.amount_decimals ?? undefined,
-        }),
+        display: decimals === null ? event.amount : scaled(event.amount, decimals),
         unitChip: "normalized debt",
         unitTitle:
-          "Debt Manager normalized debt units — the USD-6 view is value × interest index ÷ 1e18 at the event's index; not converted here, never a USD figure",
+          decimals === null
+            ? "Debt Manager normalized debt units, and this deployment's value_decimals are not known to this page yet — the raw integer renders verbatim rather than through a guessed scale. The USD view is value × interest index ÷ 1e18 at the event's index; never a USD figure"
+            : "Debt Manager normalized debt units at the engine's own value_decimals — the USD view is value × interest index ÷ 1e18 at the event's index; not converted here, never a USD figure",
         symbol,
+        rawUnits: decimals === null,
       };
+    }
   }
 }
 
