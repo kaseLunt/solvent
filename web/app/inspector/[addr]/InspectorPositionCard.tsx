@@ -41,7 +41,7 @@ import {
 import { displayHf, displayRatio } from "@/lib/history-series";
 import { EM_DASH, formatBlock, renderNullableDecimal, truncateAddress } from "@/lib/format";
 import { groupDecimalString } from "@/lib/book-format";
-import { legParamsLine, paramScaleNote } from "@/lib/params-format";
+import { legParamsDisclosure, legParamsLine } from "@/lib/params-format";
 import { NO_PRICE_PATH_LABEL, noPricePathTitle } from "@/lib/liq-distance";
 import { hfSeverity } from "@/lib/severity";
 import type { ChainEvent, ParamChange } from "@/lib/inspector-data";
@@ -326,10 +326,19 @@ export function InspectorPositionCard({
               Aave publishes bps (1e4), the Debt Manager 100e18. The old
               shared "bps" suffix rendered a DM 95% threshold as
               "95000000000000000000 bps". The scale stays NAMED, never
-              normalized across engines. */}
+              normalized across engines.
+
+              Wave R3 (round-10 HIGH): the BONUS is now the PREMIUM it grants,
+              not the raw encoding read as a percentage — Aave's 10500 is a
+              1.05x multiplier, i.e. 5%, and rendering it as "105%" overstated
+              a liquidator's take twenty-one-fold. The raw multiplier moved
+              into the trailing disclosure beside the denomination, so the
+              wire integer is still on the page:
+
+                LT 81% · bonus 5% (multiplier 10500 bps · 1e4 scale) */}
           <span className={styles.v} data-testid={`leg-params-${position.engine}`}>
             {legParamsLine(leg.liq_threshold, leg.liq_bonus, position.engine)}{" "}
-            <span className={styles.vDim}>{paramScaleNote(position.engine)}</span>
+            <span className={styles.vDim}>{legParamsDisclosure(leg.liq_bonus, position.engine)}</span>
           </span>
         </div>
         <div className={styles.kvRow}>

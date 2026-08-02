@@ -76,11 +76,32 @@ test("every rendered sentence names a NON-price path that is still open", () => 
 });
 
 test("the RENDERED legend and the column title carry the axis scope, verbatim", () => {
+  // WAVE R3 (round-10 MEDIUM): the previous legend said "no committed price
+  // axis moves this account's collateral". For the outside-collateral-covers
+  // arm that is FALSE — the shocked collateral does move, it is simply
+  // covered by collateral outside the factor. The legend now speaks of
+  // REACHABILITY (what a downward move can reach) rather than of movement,
+  // which is true of all four arms at once.
   expect(NO_PRICE_PATH_LEGEND).toBe(
-    "no price path = no committed price axis moves this account's collateral — interest or a " +
-      "parameter change can still cross; the HF column stays the verdict.",
+    "no price path = no downward move along the committed price axis reaches liquidation for " +
+      "this account — interest or a parameter change can still cross; the HF column stays the " +
+      "verdict.",
   );
   expect(LIQ_DISTANCE_HEADER_TITLE).toBe(
     "how far the named asset's price must fall to cross this engine's boundary — price axis only.",
   );
+});
+
+test("the legend never claims the collateral does not MOVE — the covers arm contradicts that", () => {
+  // The hover for the covers arm says, correctly, that the shocked asset
+  // falling is not ENOUGH — never that nothing moves. The legend must not
+  // contradict the hover it sits above.
+  expect(NO_PRICE_PATH_LEGEND).not.toContain("moves this account's collateral");
+  expect(NO_PRICE_PATH_LEGEND).toContain("reaches liquidation");
+  expect(noPricePathTitle(LIQ_NEVER_REASON_OUTSIDE_COVERS)).toContain(
+    "no fall of the shocked asset alone reaches the boundary",
+  );
+  // The two non-price paths stay named in the legend, as before.
+  expect(NO_PRICE_PATH_LEGEND).toContain("interest or a parameter change can still cross");
+  expect(NO_PRICE_PATH_LEGEND).toContain("the HF column stays the verdict");
 });

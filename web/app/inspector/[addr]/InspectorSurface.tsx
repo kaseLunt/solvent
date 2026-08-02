@@ -25,6 +25,7 @@ import {
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
 import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
+import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import {
   fetchAddressHistory,
   fetchEvents,
@@ -81,6 +82,12 @@ export function InspectorSurface({ addr }: { addr: string }) {
     addressResult !== null && addressResult.for === addr ? addressResult.state : { status: "loading" };
   const historyState: HistoryState =
     historyResult !== null && historyResult.for === addr ? historyResult.state : { status: "loading" };
+  // Wave R3 (round-10 MEDIUM): THIS lookup's own batch age, anchored at
+  // receipt and advanced on a minute tick — never a frozen number, and still
+  // never a borrowed or implied as-of.
+  const liveAgeSeconds = useAnchoredAgeSeconds(
+    addressState.status === "ready" ? addressState.lookup.response.batch.age_seconds : null,
+  );
 
   // --- the position lookup (via @solvent/client's sealed outcome union) ---
   useEffect(() => {
@@ -221,7 +228,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
           THIS lookup's own envelope — never a borrowed or implied as-of. */}
       {addressState.status === "ready" && (
         <p className={styles.freshness} data-testid="inspector-freshness">
-          {batchFreshnessLine(addressState.lookup.response.batch)}
+          {batchFreshnessLine(addressState.lookup.response.batch, liveAgeSeconds ?? undefined)}
         </p>
       )}
 
@@ -257,7 +264,10 @@ export function InspectorSurface({ addr }: { addr: string }) {
           <Stampline>
             <StampItem
               label="batch"
-              value={batchFreshnessStamp(addressState.lookup.response.batch)}
+              value={batchFreshnessStamp(
+                addressState.lookup.response.batch,
+                liveAgeSeconds ?? undefined,
+              )}
             />
             <StampItem
               label="lookup"

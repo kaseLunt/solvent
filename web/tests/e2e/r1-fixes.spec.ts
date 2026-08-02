@@ -121,9 +121,15 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
 }) => {
   await openBookWith(page, aavePageWithNoPricePath("position carries no debt"));
 
+  // WAVE R3 (round-10 MEDIUM) INVERTED THIS PIN: the legend claimed "no
+  // committed price axis MOVES this account's collateral", which is false for
+  // the outside-collateral-covers arm — that collateral moves, it is covered.
+  // The sentence is now about REACHABILITY. tests/e2e/r3-fixes.spec.ts pins it
+  // over a fixture carrying that very arm.
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
-    "no price path = no committed price axis moves this account's collateral — interest or a " +
-      "parameter change can still cross; the HF column stays the verdict.",
+    "no price path = no downward move along the committed price axis reaches liquidation for " +
+      "this account — interest or a parameter change can still cross; the HF column stays the " +
+      "verdict.",
   );
 
   const header = page

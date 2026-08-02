@@ -82,10 +82,25 @@ export function noPricePathTitle(reason: string | null | undefined): string {
 /**
  * The RENDERED table-level legend (not hover-only): one line in the positions
  * section head, so the label is explained without a mouse.
+ *
+ * WAVE R3 (Codex round-10 MEDIUM). The previous sentence read "no committed
+ * price axis moves this account's collateral". That is a claim about MOVEMENT,
+ * and it is FALSE for arm (b): when collateral outside the factor already
+ * covers the debt, the shocked collateral moves perfectly well — the fall is
+ * simply absorbed before it reaches the boundary. The hover for that arm has
+ * always said so ("no fall of the shocked asset ALONE reaches the boundary"),
+ * so the legend was contradicting the tooltip it sits above.
+ *
+ * The replacement is a claim about REACHABILITY — what a downward move along
+ * the axis can REACH — which is exactly what the solver computed and is true
+ * of all four arms at once: no counted collateral on the axis (a), the fall is
+ * covered (b), there is no boundary to reach (c), and the unnamed case (d).
+ * The two non-price paths stay named, and the HF column stays the verdict.
  */
 export const NO_PRICE_PATH_LEGEND =
-  "no price path = no committed price axis moves this account's collateral — interest or a " +
-  "parameter change can still cross; the HF column stays the verdict.";
+  "no price path = no downward move along the committed price axis reaches liquidation for " +
+  "this account — interest or a parameter change can still cross; the HF column stays the " +
+  "verdict.";
 
 /** The Liq. distance column header's own title attribute. */
 export const LIQ_DISTANCE_HEADER_TITLE =

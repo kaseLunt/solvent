@@ -23,6 +23,7 @@ import { Stampline, StampItem } from "@/components/Stampline";
 import { RefusedTag } from "@/components/RefusedTag";
 import { formatBlock, EM_DASH } from "@/lib/format";
 import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
+import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { BOOK_DEK_LOADING, bookDek } from "./bookDek";
 import { BookStatRows } from "./BookStatRows";
 import { BookHistogram } from "./BookHistogram";
@@ -55,6 +56,12 @@ function gatePosture(engines: number, refused: readonly EngineRefusal[]): string
 
 export function BookSurface() {
   const [state, setState] = useState<BookState>({ phase: "loading" });
+  // Wave R3 (round-10 MEDIUM): the batch's age ANCHORED at receipt, so the
+  // head line and the stampline keep counting instead of freezing at the
+  // number this response was built with.
+  const liveAgeSeconds = useAnchoredAgeSeconds(
+    state.phase === "ok" ? state.book.batch.age_seconds : null,
+  );
   const controllerRef = useRef<AbortController | null>(null);
   /** The batch id of the /v1/book response currently rendered. */
   const bookBatchRef = useRef<number | null>(null);
@@ -127,7 +134,7 @@ export function BookSurface() {
             id, so "batch #5" can never be read as "now". */}
         {state.phase === "ok" && (
           <p className={styles.freshness} data-testid="book-freshness">
-            {batchFreshnessLine(state.book.batch)}
+            {batchFreshnessLine(state.book.batch, liveAgeSeconds ?? undefined)}
           </p>
         )}
       </div>
@@ -221,7 +228,11 @@ export function BookSurface() {
               R1 item 3) — its own `batch` label supplies the leading word. */}
           <StampItem
             label="batch"
-            value={<span data-testid="book-stamp-freshness">{batchFreshnessStamp(state.book.batch)}</span>}
+            value={
+              <span data-testid="book-stamp-freshness">
+                {batchFreshnessStamp(state.book.batch, liveAgeSeconds ?? undefined)}
+              </span>
+            }
           />
           <StampItem
             label="marks"

@@ -3,6 +3,7 @@
 import { usePosture } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
 import { ribbonBatchAgeSuffix } from "@/lib/freshness";
+import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { Ribbon, type RibbonAsOf } from "./Ribbon";
 import styles from "./ribbon.module.css";
 
@@ -16,6 +17,11 @@ import styles from "./ribbon.module.css";
  */
 export function PostureRibbon() {
   const posture = usePosture();
+  // Wave R3 (round-10 MEDIUM): the wire age ANCHORED at receipt and advanced
+  // on a minute tick, so the stale-batch suffix ENGAGES while the tab is open
+  // instead of testing a number frozen just short of the threshold. Called
+  // unconditionally, above every early return — hooks are not conditional.
+  const liveAgeSeconds = useAnchoredAgeSeconds(posture.batch?.age_seconds ?? null);
 
   if (posture.batch !== null && posture.unavailable === null) {
     const asOfs: RibbonAsOf[] = posture.batch.watermarks.map((stamp) => ({
@@ -41,7 +47,7 @@ export function PostureRibbon() {
         mode="live"
         asOfs={asOfs}
         superseded={posture.batch.supersession.superseded}
-        batchAgeSuffix={ribbonBatchAgeSuffix(posture.batch.age_seconds)}
+        batchAgeSuffix={ribbonBatchAgeSuffix(liveAgeSeconds ?? posture.batch.age_seconds)}
       />
     );
   }

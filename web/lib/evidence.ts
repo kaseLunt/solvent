@@ -15,7 +15,7 @@
 import type { Batch, PriceInput, RefinedLeg, RefinedPosition, Stamp } from "@solvent/client";
 import type { components } from "@solvent/client";
 import { EM_DASH, formatBlock, renderNullableDecimal } from "./format";
-import { paramPercent, paramScaleNote } from "./params-format";
+import { liqBonusEvidenceValue, paramPercent, paramScaleNote } from "./params-format";
 import { noPricePathTitle } from "./liq-distance";
 
 export type EvidenceTone = "default" | "ok" | "warn" | "crit" | "dim";
@@ -408,12 +408,14 @@ export function legEvidence(
             ? EM_DASH
             : `${paramPercent(leg.liq_threshold, position.engine)} — raw ${leg.liq_threshold}`,
       },
+      // Wave R3 (round-10 HIGH): the bonus is a par-based MULTIPLIER on Aave
+      // (10500 = 1.05x = a 5% premium) and the PREMIUM ITSELF on the Debt
+      // Manager. The register states the premium, the raw integer, and which
+      // of the two encodings that integer is — the reader never has to guess
+      // which engine's convention produced the digits.
       {
         label: `liq bonus (${paramScaleNote(position.engine)})`,
-        value:
-          leg.liq_bonus === null
-            ? EM_DASH
-            : `${paramPercent(leg.liq_bonus, position.engine)} — raw ${leg.liq_bonus}`,
+        value: liqBonusEvidenceValue(leg.liq_bonus, position.engine),
       },
     ],
   });
