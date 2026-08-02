@@ -146,6 +146,12 @@ func TestWaveH9ScopedBacktestReAdjudication(t *testing.T) {
 			margin:         row.Evidence["margin_usd6"],
 		}
 	}
+	// THE RECEIPT IS ASSERTED, NOT LOGGED (Codex round 8, HIGH — the vacuous
+	// green): a green exit from this test MUST establish the full 31/31
+	// exact claim. Every frozen case: evaluated (never skipped), eligible at
+	// the parent boundary, obligation-2 verdict EXACT with no class, and the
+	// basket complete in BOTH frames. The logs stay for the receipt; any
+	// deviation FAILS the test.
 	states := map[string]int{}
 	for _, res := range results {
 		state := res.EligibilityState
@@ -156,6 +162,13 @@ func TestWaveH9ScopedBacktestReAdjudication(t *testing.T) {
 		o := obl[res.Key]
 		t.Logf("case %s… fanout=%d | state=%s | o2 verdict=%q class=%q | margin_usd6=%s | parent_basket_complete=%s every_leg_priced_both_frames=%s",
 			res.Key[:16], res.Fanout, state, o.verdict, o.class, o.margin, o.basketComplete, o.everyLeg)
+		require.Truef(t, res.Evaluated, "case %s was SKIPPED:%s — a skipped case cannot support the 31/31 exact receipt", res.Key, res.SkipClass)
+		require.Equalf(t, "true-at-parent", res.EligibilityState, "case %s eligibility state %q — the receipt claims true-at-parent on every case", res.Key, res.EligibilityState)
+		require.Containsf(t, obl, res.Key, "case %s has no obligation-2 row — the eligibility weld never ran", res.Key)
+		require.Equalf(t, verdictExact, o.verdict, "case %s obligation-2 verdict %q (class %q) — the receipt claims EXACT on every case", res.Key, o.verdict, o.class)
+		require.Emptyf(t, o.class, "case %s carries failure class %q — an exact verdict carries none", res.Key, o.class)
+		require.Equalf(t, "true", o.basketComplete, "case %s parent_basket_complete=%q — an incomplete basket is the r9 defect itself", res.Key, o.basketComplete)
+		require.Equalf(t, "true", o.everyLeg, "case %s every_leg_priced_both_frames=%q — the exec frame must value the SAME complete basket", res.Key, o.everyLeg)
 	}
 	var summary []string
 	for s, n := range states {
