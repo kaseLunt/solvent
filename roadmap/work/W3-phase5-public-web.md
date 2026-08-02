@@ -11,6 +11,10 @@ blocked_by: []
 informs: [H0]
 allowed_paths:
   - web/**
+  - internal/**
+  - cmd/**
+  - go.mod
+  - go.sum
   - packages/client-ts/**
   - api/openapi.yaml
   - deploy/**
@@ -137,3 +141,5 @@ cd packages/client-ts && npm ci && npm run verify
   deploy-boundary note: pre-1.3.0 4-field cursors answer the malformed-cursor 400 on restart
   (documented behavior, not a defect); the Codex review of the UX range (`e794bb0..0b75eed`)
   is queued and still owed.
+
+AMENDMENT 1 (2026-08-02): allowed_paths gains the serving stack (internal/**, cmd/**, go.mod, go.sum). Basis: the owner-directed six-audit fix train (Waves R1/R2+) lands correctness fixes in the API/risk layers the deploy will serve - the Aave verdict-null aggregate defect and the stream CORS blocker are launch blockers, not post-launch work. Owner direction recorded in-session (2026-08-02 02:30-13:23).
