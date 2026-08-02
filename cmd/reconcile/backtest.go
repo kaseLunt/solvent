@@ -85,8 +85,8 @@ func backtestFrame_() *gateFrame {
 			"the thresholds and the liquidation bonus the deployed seizure branch used"),
 		pinned("ERC20.balanceOf(user, token)@parentHash(N-1)",
 			"the Safe balance the PARTIAL branch's `amount == totalCollateral` is judged against"),
-		pinned("ERC20.decimals(token)@pinHash(P_op)",
-			"the 10^dec conversion denominator (immutable, so the run pin is the cheapest honest place to read it)"),
+		pinned(srcBTDecimals,
+			"the 10^dec conversion denominator (immutable, so the run pin is the cheapest honest place to read it); for a frame token the pin-time universe no longer lists — delisted before the run pin — the SAME immutable fact is read at the case's own parent hash, where the token still answers (wave H9 decimals-gap closure)"),
 		pinned("DebtManager.borrowingOf(user, borrowToken)@pinHash(N)",
 			"the post-liquidation residue: obligation 4's chain side, read at the liquidation block itself"),
 		pinned(srcBTExecCollateralOf,
@@ -163,6 +163,15 @@ const (
 	// pre-boundary lifecycle event refuses the replay outright instead of
 	// being claimed covered here (round 11, M3).
 	srcBTSupportedSet = "DebtManager.getCollateralTokens()@parentHash(N-1) and @pinHash(N)"
+
+	// srcBTDecimals is the 10^dec denominator source. Decimals are immutable,
+	// so the run pin is the cheapest honest place to read them for every
+	// pin-time-listed token; a frame token OUTSIDE the pin-time universe (a
+	// token delisted before the run pin — the wave-H9 decimals-gap closure)
+	// reads the SAME immutable fact at the parent frame's own hash instead,
+	// where the delisted token still answers. One source, both shapes, both
+	// declared — never a silent skip of an unvaluable leg.
+	srcBTDecimals = "ERC20.decimals(token)@pinHash(P_op), and @parentHash(N-1) for frame tokens outside the pin-time universe"
 
 	// srcBTAdminImpl is the round-11 H1 read pair: ADMIN_IMPL_POSITION at both
 	// case pins, via the core's own accessor (admin_epoch.go has the whole
@@ -520,7 +529,15 @@ func runBacktestCase(ctx context.Context, c *p3Ctx, f *gateFrame, fc backtestCas
 	// the seized ones: obligation 2's intra-block recomputation values the parent's
 	// whole collateral basket at execution-frame prices, and a token whose price is
 	// unread there cannot be silently held flat.
-	f.use("ERC20.decimals(token)@pinHash(P_op)") // the 10^dec denominator every conversion below divides by
+	// WAVE H9: the case's decimals view is the pin-time map PLUS whatever the
+	// parent frame had to read historically (frame tokens delisted before the
+	// run pin). Decimals are immutable, so the two reads are the same fact at
+	// different pins; the merge only ever ADDS tokens the pin-time enumeration
+	// could not see, and everything downstream — the exec frame's price
+	// packing, the replay, the seizure reconstruction — consumes the merged
+	// view so a historically valued leg stays valued end to end.
+	decimals = mergeFrameDecimals(decimals, parent.st.histDecimals)
+	f.use(srcBTDecimals) // the 10^dec denominator every conversion below divides by
 	execWant := make([]common.Address, 0, len(parent.st.collateral))
 	for _, leg := range parent.st.collateral {
 		execWant = append(execWant, leg.token)
@@ -720,7 +737,16 @@ func obligation2Eligibility(key string, v *backtestView, parent parentFrame, exe
 		parentBasketNote = "parent basket valuation incomplete: at least one collateralOf leg lacks an engine-exact price, a collateralTokenConfig, or pinned decimals at N-1 — a dropped leg understates maxBorrowLT, so no parent claim can rest on this basket"
 	}
 
-	priceMoved, moveNote := priceFrameDelta(parent, exec)
+	// The delta's domain: the valued basket (parent legs) plus the seized
+	// tokens — both frames' shared pricing obligation (see priceFrameDelta).
+	priceDomain := map[common.Address]bool{}
+	for _, leg := range parent.st.collateral {
+		priceDomain[leg.token] = true
+	}
+	for _, s := range v.seizures() {
+		priceDomain[common.HexToAddress(s.AssetHex)] = true
+	}
+	priceMoved, moveNote := priceFrameDelta(parent, exec, priceDomain)
 	out.priceNote = moveNote
 	witnesses := v.sameBlockEarlier()
 	// THE CAUSATION REPLAY'S STARTING STATE (Codex round 4, M): the PARENT
@@ -978,10 +1004,16 @@ type frameState struct {
 	// core's own getDebtManagerAdmin accessor (round-11 H1, admin_epoch.go).
 	// Both frames carry it; runBacktestCase refuses the case unless both
 	// equal the audited constant.
-	adminImpl  common.Address
-	chainDebt  *big.Int
-	unread     string
-	pricesOnly bool
+	adminImpl common.Address
+	chainDebt *big.Int
+	// histDecimals holds ERC20.decimals read at THIS frame's own hash for
+	// frame tokens ABSENT from the pin-time decimals map (wave H9
+	// decimals-gap closure: a token delisted before the run pin would
+	// otherwise be unvaluable at N-1). Nil when no token needed it; the case
+	// merges it over the pin-time map via mergeFrameDecimals.
+	histDecimals map[common.Address]uint8
+	unread       string
+	pricesOnly   bool
 }
 
 // readParentFrame reads the PRE-LIQUIDATION frame: the collateral basket,
@@ -1019,7 +1051,7 @@ func newBacktestFrameState(block uint64, hash common.Hash, full bool) *frameStat
 // SUBCALL and a refusal must NAME the degraded call (Codex round 7, H1), so
 // the tag carries enough to print it.
 type backtestFrameTag struct {
-	kind string // "collateralOf" | "collateralTokens" | "adminImpl" | "borrowingOf" | "price" | "config" | "balanceOf"
+	kind string // "collateralOf" | "collateralTokens" | "adminImpl" | "borrowingOf" | "price" | "config" | "balanceOf" | "decimals"
 	tok  common.Address
 }
 
@@ -1041,6 +1073,8 @@ func (tg backtestFrameTag) name() string {
 		return "DebtManager.collateralTokenConfig(" + tg.tok.Hex() + ")"
 	case "balanceOf":
 		return "ERC20.balanceOf(user) on " + tg.tok.Hex()
+	case "decimals":
+		return "ERC20.decimals() on " + tg.tok.Hex()
 	}
 	return tg.kind
 }
@@ -1097,6 +1131,20 @@ func buildBacktestFrameCalls(dmProxy, account, debtToken common.Address, full bo
 		return nil, nil, err
 	}
 	calls, tags = append(calls, multicallCall{Target: dmProxy, CallData: gda}), append(tags, backtestFrameTag{kind: "adminImpl"})
+	return appendBacktestTokenCalls(calls, tags, dmProxy, account, full, tokens, decimals)
+}
+
+// appendBacktestTokenCalls appends the per-token subcall group — price, and
+// (full frames only) config and Safe balance — in address order. It is the
+// ONE builder for both the primary frame plan and the wave-H9
+// parent-universe supplement, so the per-token inventory cannot fork between
+// the two. A token with no pinned decimals still gets NO subcalls here; in
+// the full frame the wave-H9 decimals-gap closure reads ERC20.decimals at
+// the frame's own hash BEFORE the supplement runs, and the trailing
+// frame-token completeness check refuses anything that slipped through —
+// never a silent drop.
+func appendBacktestTokenCalls(calls []multicallCall, tags []backtestFrameTag, dmProxy, account common.Address,
+	full bool, tokens map[common.Address]bool, decimals map[common.Address]uint8) ([]multicallCall, []backtestFrameTag, error) {
 	for _, tok := range sortedAddrs(tokens) {
 		dec, ok := decimals[tok]
 		if !ok {
@@ -1219,6 +1267,21 @@ func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFram
 			}
 			st.balances[tg.tok] = v
 			f.use("ERC20.balanceOf(user, token)@parentHash(N-1)")
+		case "decimals":
+			// The wave-H9 decimals-gap closure: ERC20.decimals at THIS
+			// frame's own hash for a token the pin-time universe no longer
+			// lists. Same per-subcall law as every other read — fail, empty
+			// or undecodable marks the frame UNREAD with the subcall named.
+			v, err := unpackUint8Strict(erc20DecimalsABI, "decimals", res[i].ReturnData)
+			if err != nil {
+				st.unread = fmt.Sprintf("frame subcall %s undecodable at the frame pin: %v — the frame is UNREAD", tg.name(), err)
+				return
+			}
+			if st.histDecimals == nil {
+				st.histDecimals = map[common.Address]uint8{}
+			}
+			st.histDecimals[tg.tok] = v
+			f.use(srcBTDecimals)
 		}
 	}
 }
@@ -1226,7 +1289,11 @@ func applyBacktestFrameResults(st *frameState, f *gateFrame, tags []backtestFram
 // readBacktestFrameState reads one frame's state at a hash-bound pin. When
 // `full` is false only the prices (and, at the execution frame, the residue
 // read) are fetched — the execution frame exists for the marginality detector
-// and obligation 4, not for a second eligibility evaluation.
+// and obligation 4, not for a second eligibility evaluation. A FULL frame
+// (the parent) values the WHOLE collateral universe at its pin — seized ∪
+// collateralOf legs ∪ getCollateralTokens — via the hash-pinned follow-up
+// reads below, so the seizure fan-out can never truncate the valued basket
+// (wave H9; the r9 partial-liquidation defect).
 func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account, debtToken common.Address,
 	db snapshotdb.T6BacktestRow, decimals map[common.Address]uint8, block uint64, hash common.Hash, full bool,
 	alsoPrice ...common.Address) (*frameState, error) {
@@ -1256,11 +1323,95 @@ func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account
 		return st, nil
 	}
 	if full {
-		// The parent frame needs collateral AND the per-token price/config for
-		// each seized token; a missing price is what makes the frame unread.
-		for _, tok := range sortedAddrs(seized) {
+		// WAVE H9 — the parent frame values the WHOLE collateral universe at
+		// N-1, never just the seizure fan-out: every collateralOf leg plus
+		// the DM's own supported enumeration at THIS pin. A PARTIAL
+		// liquidation (fan-out < basket) previously left every unseized leg
+		// unvalued, so parent completeness failed structurally and the case
+		// gated intra-block-recompute-unpriced — a fail that should have
+		// been a pass (all 5 r9 gated cases; D-013's dual). Every token
+		// added below is chain-asserted at this frame's own hash (a decoded
+		// leg, or the N-1 enumeration the frame itself read), so the wave-8
+		// per-subcall law applies to the follow-up reads UNSOFTENED: the fix
+		// widens what is REQUESTED, never what an unanswered read means.
+		frameTokens := map[common.Address]bool{}
+		for tok := range seized {
+			frameTokens[tok] = true
+		}
+		for _, leg := range st.collateral {
+			frameTokens[leg.token] = true
+		}
+		for _, tok := range st.supported {
+			frameTokens[tok] = true
+		}
+
+		// THE DECIMALS-GAP CLOSURE: a frame token absent from the pin-time
+		// decimals map (delisted before the run pin) reads ERC20.decimals at
+		// THIS frame's own hash — the same immutable fact the run pin serves
+		// for listed tokens, read where the delisted token still answers.
+		// Same decode law, same refusal posture (srcBTDecimals).
+		var missing []common.Address
+		for _, tok := range sortedAddrs(frameTokens) {
+			if _, ok := decimals[tok]; !ok {
+				missing = append(missing, tok)
+			}
+		}
+		dec := decimals
+		if len(missing) > 0 {
+			decData, derr := erc20DecimalsABI.Pack("decimals")
+			if derr != nil {
+				return nil, derr
+			}
+			var dCalls []multicallCall
+			var dTags []backtestFrameTag
+			for _, tok := range missing {
+				dCalls, dTags = append(dCalls, multicallCall{Target: tok, CallData: decData}), append(dTags, backtestFrameTag{"decimals", tok})
+			}
+			dRes, _, derr := c.opR.multicall(ctx, fmt.Sprintf("p3:backtest:frame-decimals@%d", block), block, hash, dCalls)
+			if derr != nil {
+				st.unread = fmt.Sprintf("frame decimals read at %d (%s) failed: %v", block, replayFailureClass(derr), derr)
+				return st, nil
+			}
+			applyBacktestFrameResults(st, f, dTags, dRes)
+			if st.unread != "" {
+				return st, nil
+			}
+			dec = mergeFrameDecimals(decimals, st.histDecimals)
+		}
+
+		// The valuation supplement: price+config+balance for every frame
+		// token the primary plan did not already value — the SAME per-token
+		// builder, the SAME decode loop, at the SAME hash-bound pin.
+		need := map[common.Address]bool{}
+		for tok := range frameTokens {
 			if st.prices[tok] == nil {
-				st.unread = "the engine-exact price for seized token " + tok.Hex() + " did not read at the parent frame"
+				need[tok] = true
+			}
+		}
+		if len(need) > 0 {
+			uCalls, uTags, uerr := appendBacktestTokenCalls(nil, nil, c.dmProxy, account, true, need, dec)
+			if uerr != nil {
+				return nil, uerr
+			}
+			if len(uCalls) > 0 {
+				uRes, _, uerr := c.opR.multicall(ctx, fmt.Sprintf("p3:backtest:frame-universe@%d", block), block, hash, uCalls)
+				if uerr != nil {
+					st.unread = fmt.Sprintf("frame universe read at %d (%s) failed: %v", block, replayFailureClass(uerr), uerr)
+					return st, nil
+				}
+				applyBacktestFrameResults(st, f, uTags, uRes)
+				if st.unread != "" {
+					return st, nil
+				}
+			}
+		}
+
+		// The parent frame needs collateral AND the per-token price/config
+		// for EVERY frame token — seized, leg or supported; a missing price
+		// is what makes the frame unread (read-presence is first-class).
+		for _, tok := range sortedAddrs(frameTokens) {
+			if st.prices[tok] == nil {
+				st.unread = "the engine-exact price for frame token " + tok.Hex() + " did not read at the parent frame"
 				return st, nil
 			}
 		}
@@ -1268,12 +1419,38 @@ func readBacktestFrameState(ctx context.Context, c *p3Ctx, f *gateFrame, account
 	return st, nil
 }
 
-// priceFrameDelta reports whether any seized token's engine-exact price differs
-// between the parent and execution frames — risk-quant R2's detector (b).
-func priceFrameDelta(parent parentFrame, exec execFrame) (bool, string) {
+// mergeFrameDecimals merges the parent frame's historically read decimals
+// (frame tokens absent from the pin-time universe — the wave-H9 decimals-gap
+// closure) over a COPY of the pin-time map. Decimals are immutable, so the
+// two reads are the same fact at different pins; the historical read only
+// ever ADDS tokens the pin-time enumeration could not see. The pin map is
+// never mutated: it is shared across every case in the run.
+func mergeFrameDecimals(pin, hist map[common.Address]uint8) map[common.Address]uint8 {
+	if len(hist) == 0 {
+		return pin
+	}
+	out := make(map[common.Address]uint8, len(pin)+len(hist))
+	for tok, d := range pin {
+		out[tok] = d
+	}
+	for tok, d := range hist {
+		out[tok] = d
+	}
+	return out
+}
+
+// priceFrameDelta reports whether any VALUED token's engine-exact price
+// differs between the parent and execution frames — risk-quant R2's
+// detector (b). The domain is explicit: the parent-basket legs plus the
+// seized tokens — the tokens both frames are obligated to price. It is NOT
+// the parent frame's price keys: wave H9 prices the whole N-1 universe in
+// the parent frame, and a non-leg universe token has no exec-side
+// obligation, so ranging over parent keys would print "unread" noise for
+// tokens no claim rests on — wrong data on the operator's receipt.
+func priceFrameDelta(parent parentFrame, exec execFrame, domain map[common.Address]bool) (bool, string) {
 	moved := false
 	var notes []string
-	for _, tok := range sortedAddrs(addrSetFromPrices(parent.st.prices)) {
+	for _, tok := range sortedAddrs(domain) {
 		p, e := parent.st.prices[tok], exec.st.prices[tok]
 		if p == nil || e == nil {
 			notes = append(notes, tok.Hex()+": one frame's price is unread")
@@ -1285,17 +1462,9 @@ func priceFrameDelta(parent parentFrame, exec execFrame) (bool, string) {
 		}
 	}
 	if len(notes) == 0 {
-		return false, "every seized token's engine-exact price is IDENTICAL at N-1 and N"
+		return false, "every valued token's engine-exact price is IDENTICAL at N-1 and N"
 	}
 	return moved, strings.Join(notes, "; ")
-}
-
-func addrSetFromPrices(m map[common.Address]*big.Int) map[common.Address]bool {
-	out := map[common.Address]bool{}
-	for a := range m {
-		out[a] = true
-	}
-	return out
 }
 
 // preparedSeizure is one fan-out element with the pinned parent-frame inputs the

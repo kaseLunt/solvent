@@ -317,20 +317,32 @@ func TestObligation1IsTheP2Identity(t *testing.T) {
 // a price that differs between the parent and execution frames makes the case
 // marginal, and the note names the token and both values.
 func TestPriceFrameDeltaDetectsAnIntraBlockMove(t *testing.T) {
+	// The domain is explicit since wave H9 (the parent frame prices the
+	// whole N-1 universe, so parent price KEYS are no longer the valued
+	// set): here the valued token is tokA.
+	domain := map[common.Address]bool{tokA: true}
 	parent := parentFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}}
 	same := execFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(1_000_000)}}}
-	moved, note := priceFrameDelta(parent, same)
+	moved, note := priceFrameDelta(parent, same, domain)
 	require.False(t, moved)
 	require.Contains(t, note, "IDENTICAL")
 
 	execMoved := execFrame{st: &frameState{prices: map[common.Address]*big.Int{tokA: big.NewInt(999_000)}}}
-	moved, note = priceFrameDelta(parent, execMoved)
+	moved, note = priceFrameDelta(parent, execMoved, domain)
 	require.True(t, moved)
 	require.Contains(t, note, "1000000")
 	require.Contains(t, note, "999000")
 
 	// A frame whose price is unread is NOT silently "unchanged".
-	moved, note = priceFrameDelta(parent, execFrame{st: &frameState{prices: map[common.Address]*big.Int{}}})
+	moved, note = priceFrameDelta(parent, execFrame{st: &frameState{prices: map[common.Address]*big.Int{}}}, domain)
 	require.False(t, moved)
 	require.Contains(t, note, "one frame's price is unread")
+
+	// A non-leg universe token OUTSIDE the domain is not the operator's
+	// problem: no note, no fake "unread" (wave H9 — the parent frame now
+	// prices tokens the exec frame never owes an answer for).
+	parent.st.prices[tokB] = big.NewInt(5_000_000)
+	moved, note = priceFrameDelta(parent, same, domain)
+	require.False(t, moved)
+	require.Contains(t, note, "IDENTICAL")
 }
