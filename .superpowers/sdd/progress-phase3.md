@@ -3419,3 +3419,39 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   heldFlatDetailsSummary invariance carve-out. NEXT: r7 verdict →
   receipt commit + E1 paperwork; Codex review of the UX range
   (e794bb0..0b75eed) queued behind the receipt.
+- **r9 DIAGNOSED (5 = ONE HARNESS DEFECT); H8 + H9 LANDED; ROUND 8
+  DISPATCHED (18:15 Aug 1)**: the r9 FAIL's 5 gated failures were all
+  classification (c): readBacktestFrameState built its subcall set
+  from db.Seizures only, so PARTIAL liquidations (fan-out < basket)
+  left unseized collateralOf@N-1 legs unpriced -> incomplete basket ->
+  gated per the H1 doctrine working AS DESIGNED over an under-fetched
+  input (all 26 passers were full-sweep shapes; every dropped leg's
+  price+config provably served on-chain at N-1 via the harness's own
+  call shapes; seized-only sums reproduced the reported maxBorrowLT
+  bit-exactly). H9 landed a45b173: parent frame prices+configs the
+  whole getCollateralTokens@parentHash universe in the existing single
+  multicall; exec frame values the same complete basket; decimals gap
+  closed at the parent pin; read-presence doctrine untouched; negative
+  control proves a complete-basket genuine mismatch still fails
+  loudly; mutants 2/2. LIVE RE-ADJUDICATION at the r9 pins: 31/31
+  verdict=exact true-at-parent, complete baskets everywhere — the 5
+  land at the diagnosis-predicted margins (usd6 63348805/2669215/
+  308105121/553571/1447); the frame has ZERO gated residue. H8 landed
+  aa963eb (the study-pass finding the owner promoted): snapshot-first
+  batch resolution via store.NewestCompleteBatchQ + fail-closed
+  cardinality on /v1/book — SSE/meta/run-book inherit; prune-race +
+  cardinality regressions; mutants 2/2 with complementary-defense kill
+  modes; survey: handleAddressHistory three-instant read report-only
+  owed; riskd previousPrices noted (writer holds the prune lock). Live
+  API swapped to aa963eb. r9's FAIL artifacts preserved (scratchpad
+  accept-r9-fail/); committed receipt bytes restored to the tree (the
+  3 evidence-test failures were that drift, proven H8-independent).
+  AGENT-OPS LESSON (2nd occurrence): agents parked on background
+  processes stall silently — the H9 wave finished its work then died
+  waiting on its live test; integrator re-ran it directly. Session-
+  owned background processes only for anything verdict-bearing.
+  CODEX ROUND 8 DISPATCHED: the pre-receipt closing sweep over
+  e794bb0..a45b173 (H8 + H9 weighted highest; the UX/contract range's
+  first adversarial pass). On SHIP -> acceptance r10 (the receipt run:
+  direct go run, 127.0.0.1 substitution, -rps 1.0 -timeout 120m
+  -rpc-attempts 8, awake hours, session-owned background).
