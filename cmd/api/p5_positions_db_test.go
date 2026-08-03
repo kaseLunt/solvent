@@ -204,10 +204,29 @@ func TestPositionsPageHeadroomSortIsServedOnBothEngines(t *testing.T) {
 		require.Equal(t, accountsOf(t, out), accountsOf(t, explicit),
 			"%s: absent dir IS headroom's canonical direction (asc)", engine)
 
-		// …and the reverse is a DIFFERENT ranking, so `dir` is really wired.
+		// THE UNKNOWN-LAST LAW ON THE WIRE (Wave W-HR-C, Codex round-15 finding
+		// 2). `dir=desc` asks for the GREATEST headroom on the book, and this
+		// fixture's book is one computed row plus one REFUSED row per engine —
+		// a refusal has no headroom, so it must stay LAST in BOTH directions.
+		// The old fragment led the reversed page with it on both engines, which
+		// is the service asserting that an account it could not value has the
+		// most room left. The store owns the multi-row ranking proof
+		// (TestPositionsPageHeadroomIsTheRatioNotTheDollars); what this asserts
+		// is that the fix is what the HTTP surface actually serves.
 		reversed := f.getJSON(t, "/v1/positions?engine="+engine+"&sort=headroom&dir=desc", "/v1/positions")
-		require.NotEqual(t, accountsOf(t, out), accountsOf(t, reversed),
-			"%s: dir=desc must reverse headroom, not echo it", engine)
+		require.Equal(t, "computed", statusesOf(t, reversed)[0],
+			"%s: dir=desc must not lead with a row whose headroom is unknown", engine)
+		require.Equal(t, "refused", lastOf(statusesOf(t, reversed)),
+			"%s: a refused row has no headroom and ranks LAST under dir=desc too", engine)
+		require.Equal(t, "refused", lastOf(statusesOf(t, out)),
+			"%s: …and under the canonical direction, unchanged", engine)
+		// With exactly ONE valued row per engine here, asc and desc coincide by
+		// construction — only the ranked axis reverses, and a single row cannot
+		// reverse. `dir` being genuinely wired is proven where it can be: the
+		// store's three-known-ratio fixture, and the cursor binding below, which
+		// refuses an asc rank replayed into the desc ranking.
+		require.Equal(t, accountsOf(t, out), accountsOf(t, reversed),
+			"%s: one ranked row and one unranked row order the same either way", engine)
 	}
 
 	// THE ALIAS LAW ON THE WIRE: `liq_distance` is DEPRECATED, not withdrawn.
@@ -250,6 +269,23 @@ func accountsOf(t *testing.T, out map[string]any) []string {
 	}
 	return accounts
 }
+
+// statusesOf is the page's status order — what a ranking assertion needs when
+// the thing being ranked is WHERE THE UNKNOWNS GO rather than which account
+// leads (Wave W-HR-C).
+func statusesOf(t *testing.T, out map[string]any) []string {
+	t.Helper()
+	var statuses []string
+	for _, row := range asList(t, out["positions"]) {
+		status, ok := asMap(t, row)["status"].(string)
+		require.True(t, ok)
+		statuses = append(statuses, status)
+	}
+	require.NotEmpty(t, statuses, "an empty page cannot witness an ordering law")
+	return statuses
+}
+
+func lastOf(values []string) string { return values[len(values)-1] }
 
 // Contract 1.3.0 dir at the API: an explicit non-canonical direction reverses
 // the walk (the account tie-break stays ascending — proven at the store

@@ -320,6 +320,12 @@ func p5BookWithDustRefusal(retention int) RiskBatchWrite {
 // is the EXACT REVERSE of the canonical ranking — except the account
 // tie-break, which ALWAYS ranks ascending, so equal sort keys order
 // identically in both directions and the cursor stays deterministic.
+//
+// AND ITS ONE NAMED EXCEPTION (Wave W-HR-C): `headroom` reverses only its
+// KNOWN-VALUE axis. Rows with no headroom at all — refusals on both engines,
+// plus DM rows with no published capacity — stay LAST either way, because
+// "greatest headroom first" cannot honestly be answered with accounts whose
+// headroom this service could not compute.
 func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.T) {
 	s := testB1Store(t)
 	ctx := context.Background()
@@ -343,6 +349,15 @@ func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.
 		{"aave debt asc", riskAaveEngine, PositionSortDebt, PositionDirAsc, []string{"04", "03", "05", "01", "02"}},
 		// Aave status asc = refused-LAST (canonical is refused-first).
 		{"aave status asc", riskAaveEngine, PositionSortStatus, PositionDirAsc, []string{"03", "02", "01", "05", "04"}},
+		// HEADROOM IS THE ONE KEY THAT DOES NOT REVERSE WHOLESALE (W-HR-C):
+		// only the ranked values flip; refused rows stay LAST. Aave: 03 has zero
+		// debt — headroom 100%, the maximum and a KNOWN value — so it leads;
+		// then 02 (hf 2.0 → 50%); then the hf-1.05 pair, still account-ASC; then
+		// the refusal. Compare "aave hf desc" above, which still leads with 04.
+		{"aave headroom desc keeps the refusal last", riskAaveEngine, PositionSortHeadroom, PositionDirDesc, []string{"03", "02", "01", "05", "04"}},
+		// DM: +83.3% (16), +16.6% (12), −11.1% (11), refusal last — NOT the
+		// reverse of [11 12 16 13], which would have put 13 first.
+		{"dm headroom desc keeps the refusal last", riskDMEngine, PositionSortHeadroom, PositionDirDesc, []string{"16", "12", "11", "13"}},
 		// DM reversals — no ties, so exact reversals throughout.
 		{"dm liq_distance desc", riskDMEngine, PositionSortLiqDistance, PositionDirDesc, []string{"13", "16", "12", "11"}},
 		{"dm debt asc", riskDMEngine, PositionSortDebt, PositionDirAsc, []string{"13", "16", "12", "11"}},
@@ -403,6 +418,12 @@ func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.
 // By absolute room ascending: H4(0), H3, H2, H1 — the 1%-left account ranked
 // SAFER than the 5%-left one and the 20%-left one ranked riskiest.
 // By ratio ascending: H3(1%), H1(5%), H2(20%), then the two no-ratio rows.
+// By ratio DESCENDING (W-HR-C): H2(20%), H1(5%), H3(1%), then the two no-ratio
+// rows, then the refusal — the ratio axis reverses, the unknown block does not.
+//
+// The fixture carries BOTH flavours of unknown (H4 zero capacity, H5 NULL
+// capacity) and a refusal ON PURPOSE: they are the rows the old descending
+// fragment floated to the top of a page asking for the greatest headroom.
 func p5HeadroomBook(retention int) RiskBatchWrite {
 	dm := func(account byte, cap, debt *string) RiskPositionWrite {
 		p := RiskPositionWrite{
@@ -477,17 +498,59 @@ func TestPositionsPageHeadroomIsTheRatioNotTheDollars(t *testing.T) {
 	require.NotEqual(t, pageAccounts(res), pageAccounts(alias),
 		"the fixture must actually DISCRIMINATE the two keys, or neither assertion can fail")
 
-	// THE DIRECTION LAW on the new key: the exact reverse, NULLS placement
-	// flipped with it, account tie-break still ascending.
+	// THE DIRECTION LAW ON THIS KEY (Wave W-HR-C, Codex round-15 finding 2):
+	// desc reverses THE RATIO AND NOTHING ELSE. An operator who reverses the
+	// Headroom column is asking which accounts have the MOST room left, and the
+	// honest answer starts at 20% — not at the rows whose headroom this service
+	// could not compute at all. UNKNOWN IS NOT MAXIMAL. So: 20% → 5% → 1%, THEN
+	// the two no-ratio rows (account ASC), THEN the refusal: the same unknown
+	// block, in the same place, as the ascending page. Refused-FIRST triage
+	// stays the `status` sort's job, under its own name.
+	//
+	// THE OLD FRAGMENT — `(p.status='refused') DESC, <ratio> DESC NULLS FIRST` —
+	// served [26 24 25 22 21 23] on this exact fixture: every unknown ahead of
+	// every known ratio. This fixture DISCRIMINATES the two because it carries
+	// three distinct known ratios AND both flavours of unknown (zero capacity,
+	// NULL capacity) AND a refusal, so no reordering can satisfy both sequences.
 	desc, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirDesc, "", "", 50)
 	require.NoError(t, err)
-	require.Equal(t, []string{"26", "24", "25", "22", "21", "23"}, pageAccounts(desc))
+	require.Equal(t, []string{"22", "21", "23", "24", "25", "26"}, pageAccounts(desc),
+		"headroom desc ranks the KNOWN ratios first, greatest first — unknown is not maximal")
+	require.Equal(t, []string{"24", "25", "26"}, pageAccounts(desc)[3:],
+		"the unknown block (zero capacity, NULL capacity, refused) stays LAST under the reversal too")
 
-	// AAVE: `headroom` is the same total order as `hf` and `liq_distance` —
-	// one ranking under three names, asserted rather than assumed.
+	// …and the reversal really IS a reversal of the ranked rows: the three known
+	// ratios appear in the exact opposite order from the ascending page, so
+	// "nothing moved" cannot pass itself off as "the unknowns stayed put".
+	require.Equal(t, []string{"23", "21", "22"}, pageAccounts(res)[:3])
+	require.Equal(t, []string{"22", "21", "23"}, pageAccounts(desc)[:3])
+
+	// CURSOR CONTINUITY UNDER THE REVERSED RANKING: the cursor carries a
+	// ROW_NUMBER rank over THIS ordering, so a paged desc walk must reassemble
+	// the single-page desc ranking exactly — including the unknown tail, which
+	// is where a rank that disagreed with the fragment would surface.
+	var descWalk []string
+	cursor := ""
+	for {
+		page, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirDesc, "", cursor, 2)
+		require.NoError(t, err)
+		descWalk = append(descWalk, pageAccounts(page)...)
+		if page.NextCursor == "" {
+			break
+		}
+		require.Equal(t, batchID, mustCursorBatch(t, page.NextCursor))
+		cursor = page.NextCursor
+	}
+	require.Equal(t, pageAccounts(desc), descWalk,
+		"the paged desc walk must equal the single-page desc ranking, row for row")
+
+	// AAVE, ASCENDING: `headroom` is the same total order as `hf` and
+	// `liq_distance` — one ranking under three names, asserted rather than
+	// assumed. (Ascending hf already ranks refusals last, which is exactly what
+	// ascending headroom needs.)
 	aaveID, err := s.WriteRiskBatch(ctx, p5Book(10))
 	require.NoError(t, err)
-	for _, dir := range []PositionDir{PositionDirCanonical, PositionDirAsc, PositionDirDesc} {
+	for _, dir := range []PositionDir{PositionDirCanonical, PositionDirAsc} {
 		headroom, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHeadroom, dir, "", "", 50)
 		require.NoError(t, err)
 		hf, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHF, dir, "", "", 50)
@@ -495,6 +558,23 @@ func TestPositionsPageHeadroomIsTheRatioNotTheDollars(t *testing.T) {
 		require.Equal(t, pageAccounts(hf), pageAccounts(headroom),
 			"aave headroom/%s must be the hf ranking exactly — headroom is monotone in HF", dir)
 	}
+
+	// AAVE, DESCENDING: the two part company, and the fixture makes it visible.
+	// 03 has ZERO DEBT — headroom 100%, the MAXIMUM and a KNOWN value, so it
+	// leads; 02 (hf 2.0) is 50%; the hf-1.05 pair (≈4.8%) still breaks
+	// account-ASC; and the REFUSAL is last. `hf` desc is UNCHANGED and still
+	// leads with the refusal, because every link and in-flight cursor minted
+	// against it means that ranking.
+	aaveHead, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHeadroom, PositionDirDesc, "", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"03", "02", "01", "05", "04"}, pageAccounts(aaveHead),
+		"aave headroom desc: greatest headroom first, the refusal LAST")
+	aaveHF, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHF, PositionDirDesc, "", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"04", "03", "02", "01", "05"}, pageAccounts(aaveHF),
+		"hf desc is UNCHANGED by W-HR-C — the alias law binds it")
+	require.NotEqual(t, pageAccounts(aaveHF), pageAccounts(aaveHead),
+		"the two must actually DISAGREE on this fixture, or the unsharing proves nothing")
 }
 
 // THE CURSOR BINDS THE SORT TOKEN, so `headroom` and `liq_distance` cannot be

@@ -66,8 +66,9 @@ func TestPositionsOrderPerEngineVocabulary(t *testing.T) {
 // dishonesty the deprecation was designed to avoid — so the difference is
 // asserted rather than left to a comment.
 //
-// On AAVE they are the SAME fragment, because there headroom really is a
-// monotone function of the health factor: one ordering under three names.
+// On AAVE the ASCENDING fragment is shared, because there headroom really is a
+// monotone function of the health factor: one ordering under three names. The
+// DESCENDING fragment is NOT shared — see the unknown-last law below.
 func TestPositionsOrderHeadroomIsTheRatioAndTheAliasIsUntouched(t *testing.T) {
 	dm := positionsOrder[EngineDebtManager]
 	require.NotEqual(t, dm[PositionSortLiqDistance][PositionDirAsc], dm[PositionSortHeadroom][PositionDirAsc],
@@ -89,18 +90,94 @@ func TestPositionsOrderHeadroomIsTheRatioAndTheAliasIsUntouched(t *testing.T) {
 			"liq_distance keeps the ordering it shipped with — deprecated is not re-pointed")
 	}
 
-	// NULLS placement flips with the direction on the new key, exactly as the
-	// direction law requires of every other key.
+	// NULLS placement does NOT flip with the direction on this key (Wave
+	// W-HR-C): the ratio axis reverses, the no-ratio rows stay LAST either way.
+	// A row with no published capacity has no headroom, and "greatest headroom
+	// first" must not be answered with rows that have none.
 	require.Contains(t, dm[PositionSortHeadroom][PositionDirAsc], "ASC NULLS LAST")
-	require.Contains(t, dm[PositionSortHeadroom][PositionDirDesc], "DESC NULLS FIRST")
+	require.Contains(t, dm[PositionSortHeadroom][PositionDirDesc], "DESC NULLS LAST")
 
-	// AAVE: one ordering, three names — asserted as fragment identity so a
-	// future edit cannot fork them by touching only one entry.
+	// AAVE, ASCENDING: one ordering, three names — asserted as fragment
+	// identity so a future edit cannot fork them by touching only one entry,
+	// AND pinned to its exact bytes so the identity cannot go vacuous by all
+	// three drifting together.
 	aave := positionsOrder[EngineAave]
-	for _, dir := range []PositionDir{PositionDirAsc, PositionDirDesc} {
-		require.Equal(t, aave[PositionSortHF][dir], aave[PositionSortHeadroom][dir],
-			"aave headroom IS the hf ranking — headroom = 1 − 1/HF is strictly increasing in HF")
-		require.Equal(t, aave[PositionSortHF][dir], aave[PositionSortLiqDistance][dir])
+	require.Equal(t,
+		`(p.status = 'refused') ASC, p.hf_infinite ASC, p.hf_wad ASC NULLS LAST, p.account ASC`,
+		aave[PositionSortHF][PositionDirAsc])
+	require.Equal(t, aave[PositionSortHF][PositionDirAsc], aave[PositionSortHeadroom][PositionDirAsc],
+		"aave headroom ASC IS the hf ranking — headroom = 1 − 1/HF is strictly increasing in HF")
+	require.Equal(t, aave[PositionSortHF][PositionDirAsc], aave[PositionSortLiqDistance][PositionDirAsc])
+
+	// AAVE, DESCENDING: DELIBERATELY NOT SHARED (Wave W-HR-C, Codex round-15
+	// finding 2). Reversing hf leads with refused rows, which is a defensible
+	// answer to "highest health factor" — an unranked row has to go somewhere —
+	// but a LIE in answer to "greatest headroom first", where it states that
+	// accounts this service could not value have the most room left on the book.
+	// Both sides are pinned to exact bytes so the NON-identity cannot go
+	// vacuous: `hf`/`liq_distance` keep the ranking every pre-1.5.0 link and
+	// in-flight cursor was minted against, and `headroom` reverses the SAME
+	// known-value axis while pinning the unknown axes last.
+	require.Equal(t,
+		`(p.status = 'refused') DESC, p.hf_infinite DESC, p.hf_wad DESC NULLS FIRST, p.account ASC`,
+		aave[PositionSortHF][PositionDirDesc],
+		"hf desc is a pre-1.5.0 ranking and keeps its exact bytes — the alias law binds it")
+	require.Equal(t, aave[PositionSortHF][PositionDirDesc], aave[PositionSortLiqDistance][PositionDirDesc])
+	require.Equal(t,
+		`(p.status = 'refused') ASC, p.hf_infinite DESC, p.hf_wad DESC NULLS LAST, p.account ASC`,
+		aave[PositionSortHeadroom][PositionDirDesc],
+		"headroom desc: the hf axis reversed, the refused and NULL axes pinned LAST")
+	require.NotEqual(t, aave[PositionSortHF][PositionDirDesc], aave[PositionSortHeadroom][PositionDirDesc],
+		"aave headroom desc must NOT be the hf reversal — unknown is not maximal headroom")
+
+	// hf_infinite is NOT an unknown and must keep reversing with the direction:
+	// zero debt is headroom = 100%, the MAXIMUM, so those rows correctly LEAD
+	// the reversed page. Pinning them last with the refusals would be the same
+	// class of error in the opposite direction.
+	require.Contains(t, aave[PositionSortHeadroom][PositionDirAsc], "p.hf_infinite ASC")
+	require.Contains(t, aave[PositionSortHeadroom][PositionDirDesc], "p.hf_infinite DESC")
+}
+
+// THE HEADROOM UNKNOWN-LAST LAW (Wave W-HR-C), swept over the map itself so it
+// holds for every engine that defines the key, present and future.
+//
+// Codex round-15 finding 2 was this fragment reversed WHOLESALE:
+// `(p.status = 'refused') DESC, <ratio> DESC NULLS FIRST, p.account ASC` — so a
+// page asking for the greatest headroom on the book was answered with the
+// refusals and the zero-capacity rows, ahead of every account with a KNOWN
+// ratio. UNKNOWN IS NOT MAXIMAL. Refused-FIRST triage is the `status` sort's
+// job, under its own name, where the operator asked for it.
+func TestPositionsOrderHeadroomPinsUnknownsLastInBothDirections(t *testing.T) {
+	for engine, sorts := range positionsOrder {
+		fragments, ok := sorts[PositionSortHeadroom]
+		require.True(t, ok, "%s must define headroom", engine)
+		for _, dir := range []PositionDir{PositionDirAsc, PositionDirDesc} {
+			fragment := fragments[dir]
+			require.True(t, strings.HasPrefix(fragment, "(p.status = 'refused') ASC,"),
+				"%s/headroom/%s must rank refusals LAST in BOTH directions: %s", engine, dir, fragment)
+			require.NotContains(t, fragment, "NULLS FIRST",
+				"%s/headroom/%s must never float a no-value row above a ranked one: %s", engine, dir, fragment)
+			require.Contains(t, fragment, "NULLS LAST",
+				"%s/headroom/%s must state its NULLS placement explicitly: %s", engine, dir, fragment)
+		}
+	}
+
+	// AND THE CONVERSE, so the new law cannot quietly spread to the keys the
+	// ALIAS LAW binds: every OTHER key still obeys the plain reversal, its
+	// refused axis flipping with the direction, exactly as the links and
+	// in-flight cursors minted against it assume.
+	for engine, sorts := range positionsOrder {
+		for sort, dirs := range sorts {
+			if sort == PositionSortHeadroom {
+				continue
+			}
+			asc, desc := dirs[PositionDirAsc], dirs[PositionDirDesc]
+			require.NotEqual(t,
+				strings.HasPrefix(asc, "(p.status = 'refused') ASC,"),
+				strings.HasPrefix(desc, "(p.status = 'refused') ASC,"),
+				"%s/%s: the refused axis must still flip with the direction — %q keeps the ordering it shipped with:\n  asc:  %s\n  desc: %s",
+				engine, sort, sort, asc, desc)
+		}
 	}
 }
 

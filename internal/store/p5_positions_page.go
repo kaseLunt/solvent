@@ -92,10 +92,12 @@ var positionsCanonicalDir = map[PositionSort]PositionDir{
 //
 // On Aave the health factor IS the comparator the pool applies, and headroom
 // = 1 − 1/HF is STRICTLY INCREASING in HF — so "closest to the boundary",
-// "lowest health factor" and "least headroom" are the SAME total order, not
-// three orderings that happen to agree today. `headroom`, `liq_distance` and
-// `hf` therefore share these two fragments rather than each carrying its own
-// copy: one ordering, three names, and no way for a future edit to fork them.
+// "lowest health factor" and "least headroom" are the SAME total order OVER
+// THE ROWS THAT HAVE A VALUE, not orderings that happen to agree today.
+// `liq_distance` and `hf` therefore share these two fragments rather than each
+// carrying its own copy: one ordering, two names, and no way for a future edit
+// to fork them. `headroom` shares the ASCENDING one BY IDENTITY and parts
+// company on the reverse — see aaveHeadroomOrderDesc for why.
 //
 // Zero-debt (hf_infinite) rows are farthest by definition; refused rows sort
 // after computed rows under the canonical direction (a value sort cannot rank
@@ -103,6 +105,36 @@ var positionsCanonicalDir = map[PositionSort]PositionDir{
 const (
 	aaveBoundaryOrderAsc  = `(p.status = 'refused') ASC, p.hf_infinite ASC, p.hf_wad ASC NULLS LAST, p.account ASC`
 	aaveBoundaryOrderDesc = `(p.status = 'refused') DESC, p.hf_infinite DESC, p.hf_wad DESC NULLS FIRST, p.account ASC`
+)
+
+// THE HEADROOM UNKNOWN-LAST LAW (Wave W-HR-C), stated ONCE and obeyed by BOTH
+// engines: on the `headroom` key ONLY THE KNOWN-VALUE AXIS REVERSES. A row with
+// NO headroom value at all — a refused row on either engine, and on the Debt
+// Manager a row with no published borrowing capacity — ranks LAST IN BOTH
+// DIRECTIONS.
+//
+// WHY, and it is the whole point of the key: an operator who reverses the
+// Headroom column is asking for the GREATEST headroom first, and UNKNOWN IS NOT
+// MAXIMAL. Leading that page with refusals and no-capacity rows states "these
+// accounts have the most room left" about accounts this service could not value
+// at all — the false-safety direction. Refused-FIRST triage remains the job of
+// the explicit `status` sort, which still does exactly that, in its own name.
+//
+// `headroom` is therefore the ONE key whose reversed direction is NOT the exact
+// reverse of its canonical ranking: the unknown block stays pinned at the
+// bottom (account ASC within itself) either way, and only the ranked values
+// flip. Every OTHER key still obeys the plain reversal law — see positionsOrder.
+//
+// ON AAVE the ascending fragment IS aaveBoundaryOrderAsc, by identity rather
+// than by copy: ascending hf already ranks refusals last, so headroom-asc and
+// hf-asc really are one ordering. The descending fragment is headroom's own and
+// differs from aaveBoundaryOrderDesc in exactly two places — the refused axis
+// does NOT flip, and hf_wad's NULLS placement does not flip either. hf_infinite
+// (zero debt) is NOT an unknown: it is headroom = 100%, the maximum, so it
+// correctly LEADS the reversed page.
+const (
+	aaveHeadroomOrderAsc  = aaveBoundaryOrderAsc
+	aaveHeadroomOrderDesc = `(p.status = 'refused') ASC, p.hf_infinite DESC, p.hf_wad DESC NULLS LAST, p.account ASC`
 )
 
 // dmHeadroomRatio is the Debt Manager's HEADROOM RATIO, exact in `numeric`:
@@ -114,9 +146,9 @@ const (
 // capacity has no ratio at all. Dividing by zero would error, and treating the
 // numerator alone as the key would let a zero-capacity row fake either
 // infinite risk (0 − debt, hugely negative) or infinite safety. NULL is the
-// honest key, and NULLS LAST/FIRST under the direction law keeps it out of the
-// ranked positions on the canonical side. A NULL max_borrow_lt or borrowings
-// propagates to a NULL key for the same reason.
+// honest key, and NULLS LAST — in BOTH directions, per the headroom unknown-last
+// law above — keeps it out of the ranked positions at either end. A NULL
+// max_borrow_lt or borrowings propagates to a NULL key for the same reason.
 const dmHeadroomRatio = `((p.max_borrow_lt - p.borrowings)::numeric / NULLIF(p.max_borrow_lt, 0))`
 
 // positionsOrder maps (engine, sort, dir) to the deterministic ORDER BY
@@ -133,15 +165,25 @@ const dmHeadroomRatio = `((p.max_borrow_lt - p.borrowings)::numeric / NULLIF(p.m
 // canonical direction refused rows order AFTER computed rows (visible, never
 // dropped — they are still rows on late pages, and the `status` sort surfaces
 // them FIRST for triage); the reversed direction therefore leads with them.
+//
+// THE ONE EXCEPTION, and it is named rather than implied: `headroom` reverses
+// ONLY its known-value axis and pins the unknown block (refused rows, and DM
+// rows with no published capacity) LAST IN BOTH DIRECTIONS — because "greatest
+// headroom first" must not be answered with accounts whose headroom is
+// unknown. See THE HEADROOM UNKNOWN-LAST LAW above. `liq_distance`, `hf`,
+// `debt` and `status` keep the plain reversal, unchanged: links and in-flight
+// cursors minted against them mean exactly what they meant.
 var positionsOrder = map[string]map[PositionSort]map[PositionDir]string{
 	EngineAave: {
 		// Closest to liquidation first: the wad composite ascending; zero-debt
 		// (hf_infinite) rows are farthest by definition, refused rows last.
-		// headroom / liq_distance / hf are ONE ordering under three names —
-		// see aaveBoundaryOrder* above for why that is a fact, not a shortcut.
+		// headroom / liq_distance / hf are ONE ordering ASCENDING — see
+		// aaveBoundaryOrder* above for why that is a fact, not a shortcut —
+		// and headroom alone keeps refusals LAST when reversed, because
+		// "greatest headroom first" is not answered by "unknown".
 		PositionSortHeadroom: {
-			PositionDirAsc:  aaveBoundaryOrderAsc,
-			PositionDirDesc: aaveBoundaryOrderDesc,
+			PositionDirAsc:  aaveHeadroomOrderAsc,
+			PositionDirDesc: aaveHeadroomOrderDesc,
 		},
 		PositionSortLiqDistance: {
 			PositionDirAsc:  aaveBoundaryOrderAsc,
@@ -161,12 +203,14 @@ var positionsOrder = map[string]map[PositionSort]map[PositionDir]string{
 		},
 	},
 	EngineDebtManager: {
-		// headroom (1.5.0): the exact RATIO ascending — least capacity left
-		// first — so the ranking is the number the column prints. Rows with no
-		// published capacity carry a NULL key and never fake a position.
+		// headroom (1.5.0): the exact RATIO — so the ranking is the number the
+		// column prints. Ascending is least capacity left first. Descending
+		// reverses THE RATIO ONLY: refused rows and rows with no published
+		// capacity carry no ratio, so they stay LAST either way rather than
+		// heading a page that asked for the greatest headroom on the book.
 		PositionSortHeadroom: {
 			PositionDirAsc:  `(p.status = 'refused') ASC, ` + dmHeadroomRatio + ` ASC NULLS LAST, p.account ASC`,
-			PositionDirDesc: `(p.status = 'refused') DESC, ` + dmHeadroomRatio + ` DESC NULLS FIRST, p.account ASC`,
+			PositionDirDesc: `(p.status = 'refused') ASC, ` + dmHeadroomRatio + ` DESC NULLS LAST, p.account ASC`,
 		},
 		// The DM comparator is a strict boolean over borrowings vs
 		// max_borrow_lt; "distance" is the exact USD headroom
