@@ -74,9 +74,26 @@
 //     `eligible_debt_delta_usd` / `bad_debt_delta_usd` are recomputed from
 //     before/after rather than stated independently, and `checkResponse` refuses
 //     the write unless every cross-field law the web renders — AND every
-//     propagation law above — holds over the WHOLE body. The guard's own
-//     sensitivity is proven on two mutants at the write site: it must refuse the
-//     W-BS-B shape and it must refuse an undeclared shock.
+//     propagation law above — holds over the WHOLE body.
+//
+//     WAVE W-BS-D. Those propagation laws were all RATIOS, and a body can be
+//     falsified without disturbing a single one. Four mutations proved it, each
+//     passing the whole guard: a holding DELETED from one side (entries present
+//     on only one side were skipped outright), an amount and its value DOUBLED
+//     TOGETHER so the implied price never moves while the book gains collateral,
+//     a HELD DISCLOSURE DELETED (only the disclosures present were validated, so
+//     completeness was never proven), and a mover's rational SCALED ON BOTH
+//     HALVES so its quotient still matches the disclosed factor while its
+//     denominator contradicts the borrowings the same row publishes.
+//     `ApplyScenario` clones the balances and the debt and rewrites ONLY prices,
+//     so the guard now carries the CONSERVATION and COMPLETENESS laws (8-12)
+//     beside the movement laws (1-7): identical holdings across the sides,
+//     bit-identical amounts, disclosed prices that reproduce the itemization's
+//     absolute numbers, an exhaustive `held_flat` with nothing floating free in
+//     it, and a conserved denominator. The guard's own sensitivity is proven on
+//     NINE mutants at the write site, and each must be refused FOR ITS OWN NAMED
+//     REASON — the expected sentence is asserted, so a mutant that trips an
+//     unrelated law fails the generation rather than passing as evidence.
 //
 //  3. run-book.weeth.batch2.json and run-book.eth_minus_30.batch2.json — files
 //     2 and the run-book example with ONE field changed: the batch id, plus its
@@ -225,6 +242,20 @@
 //     The `.swap` file is the same body with different balances, so a rerun
 //     that reconciled the two rows by guessing shows a wrong number rather than
 //     a silent identity error. Full derivation at the write site.
+//
+//     A FINDING RECORDED HERE RATHER THAN FIXED (Wave W-BS-D). These two carry
+//     the contract's run-book 200 example verbatim, and that example serves
+//     `applied_shocks: []` AND `held_flat: []` while itemizing priced weETH on
+//     two chains. Its scenario, `weeth_market_depeg_oracles_held`, has
+//     `propagation: []` and no `projection` in the committed registry — so
+//     production runs `ApplyScenario`, holds every one of those price inputs
+//     flat, and NAMES them. The example's empty `held_flat` is a disclosure the
+//     server could not produce. It is a defect in `api/openapi.yaml`, not in
+//     this file, and item 2's discipline forbids rewriting the contract's bytes
+//     to satisfy a law — so the guard's completeness law (11) takes an
+//     ENUMERATED exemption for exactly those two keys, derived from the
+//     untouched example. It cannot grow silently, and the eth_minus_30 body —
+//     whose disclosures this generator composes itself — takes none.
 //
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
@@ -772,8 +803,78 @@ const checkSide = (name, side) => {
  *      wads and the Debt Manager's maxBorrowLT rationals both scale with the
  *      collateral that moved — and it must be a factor the body disclosed. A
  *      mover row is also placed in a bucket its side actually populated.
+ *
+ * WAVE W-BS-D. Laws 1-7 are all RATIOS. Every one of them asks whether a price
+ * MOVED and by how much, and a mutation that preserves every ratio is invisible
+ * to all seven — four such mutations were exercised against clones of the body
+ * below and all four passed. Movement is only half of what `ApplyScenario` does;
+ * the other half is what it REFUSES to do. It clones the balances and the debt
+ * and rewrites ONLY prices (scenario.go:677-745, 762-777), so the laws of
+ * CONSERVATION and COMPLETENESS join the laws of movement:
+ *
+ *   8. THE HOLDINGS ARE THE SAME HOLDINGS. The (asset, disclosure) key set of
+ *      `collateral_by_asset` is IDENTICAL across the two sides. A shock cannot
+ *      create a holding, destroy one, or RECLASSIFY one from counted to
+ *      unpriced. The old guard skipped any entry present on one side only, so
+ *      deleting a holding was a free move. If a real reclassification case is
+ *      ever found, it must be introduced DELIBERATELY, with its own law and its
+ *      own provenance — never allowed through this silence again.
+ *   9. THE AMOUNTS ARE CONSERVED. The same law read at the entry: `amount`,
+ *      `decimals` and `symbol` are BIT-IDENTICAL across the sides, and only
+ *      `value_usd` moves — by exactly the disclosed factor (law 4). Doubling an
+ *      amount AND its value together holds the implied price still, so laws 1-7
+ *      see nothing while the book gains balance out of nothing.
+ *  10. THE DISCLOSED PRICE IS THE ITEMIZATION'S OWN. A disclosure is not only a
+ *      ratio. `value_usd = floor(amount × price / 10^decimals)` is the engine's
+ *      own valuation, so an `applied_shocks` before/after pair and a `held_flat`
+ *      value have to reproduce the itemization's ABSOLUTE numbers on both sides,
+ *      not merely a matching quotient.
+ *  11. HELD FLAT IS EXHAUSTIVE, AND NOTHING FLOATS FREE. Law 6 bounds what
+ *      `held_flat` may CLAIM; this is its completeness half. `ApplyScenario`
+ *      records EVERY price input the matrix does not describe on `HeldFlat`
+ *      (scenario.go:679-686), so every PRICED holding this body itemizes whose
+ *      key the matrix does not name MUST appear in `held_flat` — deleting a held
+ *      disclosure is not a smaller truth, it is a different book. In the other
+ *      direction, a `held_flat` entry no itemization witnesses is a name with
+ *      nothing behind it.
+ *
+ *      TWO EXEMPTIONS, both ENUMERATED by the caller, neither a blanket:
+ *
+ *        `unitemizedInputs` — an Aave position's price inputs cover its BORROWED
+ *        reserves as well as its collateral, and `collateral_by_asset` itemizes
+ *        only collateral, so the debt leg's held price has no itemized witness
+ *        BY CONSTRUCTION. It is declared from the committed result this body
+ *        serves, and it still has to sit on a chain where some engine carries
+ *        debt on both sides. The Debt Manager needs no such exemption: its debt
+ *        leg is USD-NORMALIZED and copied verbatim (`cp.DebtUSD =
+ *        copyBig(in.DM.DebtUSD)`), carries no `PriceInput` at all, and is bound
+ *        instead by law 12.
+ *
+ *        `undisclosedInputs` — A RECORDED DEFECT, not a licence. The contract's
+ *        OWN run-book 200 example serves `applied_shocks: []` and
+ *        `held_flat: []` while itemizing priced weETH on two chains under
+ *        `weeth_market_depeg_oracles_held`, whose committed propagation matrix
+ *        is EMPTY and which carries no `projection` — so `ApplyScenario` runs,
+ *        holds every one of those inputs flat, and production's own body would
+ *        SAY SO. The example's disclosure is incomplete. This generator has no
+ *        standing to rewrite the contract, so the two bodies that carry it
+ *        verbatim (the collision pair, item 12) declare exactly those keys,
+ *        DERIVED from the untouched example rather than typed in. The
+ *        eth_minus_30 body composes its own disclosures, declares NOTHING, and
+ *        owes this law in full.
+ *  12. THE BORROWINGS ARE CONSERVED. A Debt Manager mover's rational is
+ *      maxBorrowLT / borrowings (`dm.go:164-176`), and `p5_runbook.go:799-814`
+ *      publishes the same after-side borrowings a second time as `debt_usd`. The
+ *      debt leg is USD-normalized and no scenario re-prices it, so the
+ *      DENOMINATOR is bit-identical across the sides AND equal to `debt_usd`,
+ *      and the whole move belongs to the numerator. Scaling both halves of the
+ *      rational keeps the quotient law 7 tests and falsifies the borrowings.
  */
-const checkPropagation = (name, response) => {
+const checkPropagation = (
+  name,
+  response,
+  { unitemizedInputs = new Set(), undisclosedInputs = new Set() } = {},
+) => {
   // THE MATRIX IS THE RESPONSE'S OWN. A body is measured against the scenario it
   // says it answers, read from the committed registry by that id — never against
   // whichever matrix this generator happens to have open.
@@ -836,6 +937,15 @@ const checkPropagation = (name, response) => {
 
   /** Every applied shock needs an aggregate that witnesses it (law 3). */
   const witnessed = new Set();
+  /** Every PRICED holding the body itemizes, keyed the evaluator's way (law 11). */
+  const itemized = new Set();
+
+  /** The server's own itemization key: one asset, one disclosure, one row. */
+  const disclosure = (entry) =>
+    entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
+
+  /** The engine's OWN valuation of a holding at a price — floor, never rounded. */
+  const valueAt = (amount, price, decimals) => (amount * price) / 10n ** BigInt(decimals);
 
   for (const engine of response.engines) {
     const label = `${name} ${engine.engine}`;
@@ -844,20 +954,62 @@ const checkPropagation = (name, response) => {
       fail(`${label} has no batch watermark, so its chain — and its propagation keys — are unknown`);
     }
 
-    const disclosure = (entry) =>
-      entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
     const afterByKey = new Map(
       engine.after.collateral_by_asset.map((entry) => [`${entry.asset}::${disclosure(entry)}`, entry]),
     );
 
+    // LAW 8. THE HOLDINGS ARE THE SAME HOLDINGS. Checked BEFORE anything reads a
+    // number off a pair, because a pair that does not exist is how the old guard
+    // was made to skip an entry entirely.
+    const beforeKeys = new Set(
+      engine.before.collateral_by_asset.map((entry) => `${entry.asset}::${disclosure(entry)}`),
+    );
+    for (const [side, own, other] of [
+      ["AFTER", afterByKey.keys(), beforeKeys],
+      ["BEFORE", beforeKeys, new Set(afterByKey.keys())],
+    ]) {
+      for (const key of own) {
+        if (!other.has(key)) {
+          fail(
+            `${label} carries ${key} on the ${side} side ONLY — ApplyScenario CLONES the balances ` +
+              `and rewrites only prices, so a shock can neither create a holding, destroy one, ` +
+              `nor reclassify one`,
+          );
+        }
+      }
+    }
+
     for (const before of engine.before.collateral_by_asset) {
       const after = afterByKey.get(`${before.asset}::${disclosure(before)}`);
-      // An entry present on one side only is a holding that appeared or left,
-      // not a price move; `checkSide` already bounds what each side may claim.
-      if (after === undefined || before.value_usd === null || after.value_usd === null) {
+      // LAW 9. THE AMOUNTS ARE CONSERVED. Only `value_usd` may differ between the
+      // sides; doubling an amount and its value together preserves every ratio
+      // laws 1-7 test while creating balance out of nothing.
+      for (const [field, b, a] of [
+        ["amount", before.amount, after.amount],
+        ["decimals", before.decimals, after.decimals],
+        ["symbol", before.symbol ?? null, after.symbol ?? null],
+      ]) {
+        if (b !== a) {
+          fail(
+            `${label} changes the ${field} of ${before.asset} from ${JSON.stringify(b)} to ` +
+              `${JSON.stringify(a)} across the two sides — a scenario moves PRICES and nothing ` +
+              `else, so the balances it clones must arrive unchanged`,
+          );
+        }
+      }
+      // An UNPRICED or NOT-COUNTED holding carries no `PriceInput`, so there is
+      // nothing for a scenario to move and nothing for it to hold flat.
+      if (before.value_usd === null) {
         continue;
       }
+      if (!Number.isInteger(before.decimals) || before.decimals < 0) {
+        fail(
+          `${label} counts ${before.asset} at ${JSON.stringify(before.decimals)} decimals, so its ` +
+            `price cannot be read off its value`,
+        );
+      }
       const key = responseKey(chain, before.asset);
+      itemized.add(key);
       const [Vb, Ab] = [BigInt(before.value_usd), BigInt(before.amount)];
       const [Va, Aa] = [BigInt(after.value_usd), BigInt(after.amount)];
       const moved = Vb * Aa !== Va * Ab;
@@ -882,6 +1034,36 @@ const checkPropagation = (name, response) => {
                 `${String(chain)} at ${String(num)}/${String(den)} — a declared asset cannot sit still`,
             );
           }
+          continue;
+        }
+        // LAW 11, first half: HELD FLAT IS EXHAUSTIVE. An undeclared PRICED
+        // input is one `ApplyScenario` recorded on `HeldFlat`. A body that holds
+        // it and does not say so has published an incomplete disclosure.
+        const held = heldFlat.get(key);
+        if (held === undefined) {
+          if (!undisclosedInputs.has(key)) {
+            fail(
+              `${label} counts a PRICED ${before.asset} that the committed matrix does not ` +
+                `describe, so ApplyScenario would have RECORDED IT ON HeldFlat — but ${name} ` +
+                `discloses no held_flat entry for ${key}`,
+            );
+          }
+          continue;
+        }
+        // LAW 10, for a held price: the disclosed value is this itemization's
+        // own price, on BOTH sides, absolutely and not merely in ratio.
+        for (const [sideName, value, amount] of [
+          ["before", Vb, Ab],
+          ["after", Va, Aa],
+        ]) {
+          const derived = valueAt(amount, BigInt(held.value), before.decimals);
+          if (derived !== value) {
+            fail(
+              `${label} holds ${before.asset} flat at ${held.value}, which values its ` +
+                `${amount.toString()} at ${derived.toString()} — but the ${sideName} side counts ` +
+                `${value.toString()}`,
+            );
+          }
         }
         continue;
       }
@@ -900,6 +1082,22 @@ const checkPropagation = (name, response) => {
             `${after.value_usd}/${after.amount}, which is not the disclosed ` +
             `${shock.factor_num}/${shock.factor_den}`,
         );
+      }
+      // LAW 10. The disclosed price pair is an ABSOLUTE claim about this
+      // holding, not just a quotient: each side's `value_usd` is the engine's
+      // own floor(amount × price / 10^decimals) at the price the body published.
+      for (const [sideName, price, amount, value] of [
+        ["before", BigInt(shock.before), Ab, Vb],
+        ["after", BigInt(shock.after), Aa, Va],
+      ]) {
+        const derived = valueAt(amount, price, before.decimals);
+        if (derived !== value) {
+          fail(
+            `${label} discloses a ${sideName} price of ${price.toString()} for ${before.asset}, ` +
+              `which values its ${amount.toString()} at ${derived.toString()} — but the ` +
+              `${sideName} side counts ${value.toString()}`,
+          );
+        }
       }
       witnessed.add(key);
     }
@@ -935,6 +1133,26 @@ const checkPropagation = (name, response) => {
         mover.hf_after_num !== null &&
         mover.hf_after_den !== null
       ) {
+        // LAW 12. THE BORROWINGS ARE CONSERVED. The denominator IS the
+        // borrowings (dm.go:164-176), the debt leg is USD-normalized and
+        // `ApplyScenario` copies it verbatim, and `p5_runbook.go:799-814`
+        // publishes that same after-side figure again as `debt_usd`. Scaling
+        // both halves of the rational leaves law 7's quotient intact and
+        // falsifies the borrowings, so the denominator is pinned twice.
+        if (mover.hf_before_den !== mover.hf_after_den) {
+          fail(
+            `${label} mover ${mover.account} moves its BORROWINGS ${mover.hf_before_den} -> ` +
+              `${mover.hf_after_den} across the two sides — the Debt Manager's debt leg is ` +
+              `USD-NORMALIZED and no scenario re-prices it, so the denominator cannot move`,
+          );
+        }
+        if (mover.debt_usd !== null && mover.debt_usd !== mover.hf_after_den) {
+          fail(
+            `${label} mover ${mover.account} publishes debt_usd ${mover.debt_usd} while its ` +
+              `after-side rational denominates in ${mover.hf_after_den} — both are the SAME ` +
+              `borrowings read twice, so they cannot disagree`,
+          );
+        }
         // maxBorrowLT / borrowings. The debt leg is USD-normalized and no
         // scenario re-prices it, so the whole move is the collateral's.
         const [nb, db] = [BigInt(mover.hf_before_num), BigInt(mover.hf_before_den)];
@@ -959,10 +1177,40 @@ const checkPropagation = (name, response) => {
       );
     }
   }
+
+  // LAW 11, second half: NOTHING FLOATS FREE. A held price the body cannot
+  // witness is a name with nothing behind it. The only price inputs this wire
+  // does not itemize are an engine's BORROWED reserves, and those are declared
+  // by the caller from the committed result they came from — never inferred.
+  for (const [key, entry] of heldFlat) {
+    if (itemized.has(key)) {
+      continue;
+    }
+    if (!unitemizedInputs.has(key)) {
+      fail(
+        `${name} holds ${key} flat, but NO engine in this response counts that asset and it is ` +
+          `not a declared un-itemized price input — a held disclosure with nothing behind it`,
+      );
+    }
+    // A declared exemption is a DEBT LEG's price, so an engine on that chain has
+    // to actually carry debt on both sides for the borrowing to exist at all.
+    const carriesDebt = response.engines.some(
+      (engine) =>
+        chains.get(engine.engine) === entry.chain_id &&
+        BigInt(engine.before.total_debt_usd) > 0n &&
+        BigInt(engine.after.total_debt_usd) > 0n,
+    );
+    if (!carriesDebt) {
+      fail(
+        `${name} holds ${key} flat as a DEBT-LEG price, but no engine on chain ` +
+          `${String(entry.chain_id)} carries debt on both sides, so nothing borrows it`,
+      );
+    }
+  }
 };
 
-const checkResponse = (name, response) => {
-  checkPropagation(name, response);
+const checkResponse = (name, response, declared) => {
+  checkPropagation(name, response, declared);
   for (const side of ["before", "after"]) {
     const accounts = response.engines.reduce((sum, engine) => sum + engine[side].accounts, 0);
     if (accounts !== response.coverage.in_book) {
@@ -1409,6 +1657,17 @@ const dmExample = runBookExample.engines.find((engine) => engine.engine === "deb
 const dmHeldEntries = dmExample.before.collateral_by_asset.filter(
   (entry) => entry.value_usd !== null && !propagation.has(responseKey(DM_CHAIN, entry.asset)),
 );
+// The held-flat DEBT MANAGER row is load-bearing twice over: it is the entry
+// guard law 11 proves completeness against, and mutants E and H are built by
+// deleting and corrupting it. If the example ever stops carrying a priced
+// holding the matrix does not describe, those two mutants would be testing
+// nothing and must be re-derived rather than quietly passing.
+if (dmHeldEntries.length === 0) {
+  fail(
+    "the run-book example's debt_manager side counts no priced holding the eth_minus_30 matrix " +
+      "leaves undeclared, so this body has no held-flat input and law 11 has nothing to prove",
+  );
+}
 
 const APPLIED_SHOCKS = [
   ...aaveResult.applied_shocks,
@@ -1443,6 +1702,36 @@ const HELD_FLAT = [
     `${b.asset}|${String(b.chain_id)}|${b.source}`,
   ),
 );
+
+/**
+ * THE PRICE INPUTS THIS WIRE DOES NOT ITEMIZE (guard law 11's first exemption).
+ *
+ * `ApplyScenario` walks a position's `PriceInput` list, and an Aave position
+ * carries prices for its BORROWED reserves as well as its collateral. The
+ * response itemizes only collateral, so the debt leg's held price — the aave
+ * USDC row this body copies from the committed result — has no itemized witness
+ * and never could. That is production's shape, not a defect.
+ *
+ * It is not a hole either. The set is DERIVED from the committed result whose
+ * disclosures this body serves, as exactly "the inputs that result priced which
+ * this body's own itemization does not carry", so it cannot quietly grow: a
+ * held_flat entry that is neither counted by an engine nor in here is refused.
+ * The Debt Manager contributes nothing — its debt leg is USD-normalized, carries
+ * no `PriceInput`, and is bound by law 12 instead.
+ */
+const UNITEMIZED_INPUTS = (() => {
+  const counted = new Set(
+    [aaveBefore, aaveAfter]
+      .flatMap((side) => side.collateral_by_asset)
+      .filter((entry) => entry.value_usd !== null)
+      .map((entry) => responseKey(AAVE_CHAIN, entry.asset)),
+  );
+  return new Set(
+    [...aaveResult.applied_shocks, ...aaveResult.held_flat]
+      .map((entry) => responseKey(entry.chain_id, entry.asset))
+      .filter((key) => !counted.has(key)),
+  );
+})();
 
 const ethRunBook = {
   ...runBookExample,
@@ -1564,20 +1853,47 @@ const ethRunBook = {
 // THE WHOLE BODY, checked — both engines, both sides, the response-level census
 // and every engine's deltas. Checking only the side that was edited is how the
 // impossible book got written in the first place.
-checkResponse("run-book.eth_minus_30", ethRunBook);
+checkResponse("run-book.eth_minus_30", ethRunBook, { unitemizedInputs: UNITEMIZED_INPUTS });
 
 // --- THE GUARD'S OWN SENSITIVITY: it has to fail on the bodies it exists for -
 //
-// A guard that cannot fail is not a guard. Both mutants below are built from the
-// body just written, so they cannot drift away from what the guard actually
-// sees, and BOTH must be refused:
+// A guard that cannot fail is not a guard, and a guard that refuses for the
+// WRONG reason is a guard that has not read the body. Every mutant below is
+// built from the body just written, so none can drift away from what the guard
+// actually sees, and each must be refused FOR ITS OWN NAMED REASON — the
+// expected sentence is asserted, never merely "something failed":
 //
 //   A  THE W-BS-B SHAPE. The invented account's holding put back on an address
 //      the propagation matrix does not name, with the old grafted disclosure.
-//      That is the finding, reproduced exactly.
+//      That is the W-BS-C finding, reproduced exactly.
 //   B  AN UNDECLARED SHOCK. The example's own held-flat weETH moved by the
 //      scenario's factor and disclosed as if the matrix covered it.
-const refuses = (what, mutate) => {
+//
+// C-F are the four W-BS-D mutations, each of which passed laws 1-7 intact:
+//
+//   C  A HOLDING DELETED FROM ONE SIDE. The aave UNPRICED row dropped from the
+//      after side — deliberately the unpriced one, because it carries no money
+//      and therefore NO other law in this file could ever see it go.
+//   D  BALANCE CREATED FROM NOTHING. The after-side WETH amount and value
+//      doubled together, so the implied price never moves and every ratio law
+//      is satisfied while the book gains 1,750,000,000 of collateral.
+//   E  A HELD DISCLOSURE DELETED. The chain-10 held_flat entry removed, leaving
+//      a priced input the matrix does not describe with nothing said about it.
+//   F  BORROWINGS FALSIFIED. The mover's rational scaled on both halves, so the
+//      quotient still matches the disclosed factor while the denominator claims
+//      borrowings that contradict the row's own `debt_usd`.
+//
+// G-I prove the laws this wave ADDED alongside those four. A law with no mutant
+// is a law nobody has watched fail:
+//
+//   G  A FREE-FLOATING HELD NAME. A held price for an address no engine counts,
+//      which is the completeness law read backwards.
+//   H  A HELD PRICE THAT CONTRADICTS ITS OWN ITEMIZATION. The held value doubled
+//      while the holding it prices is left alone.
+//   I  A DISCLOSED PRICE PAIR SCALED. Both halves of the applied shock's
+//      before/after doubled, so the RATIO every ratio-law tests is untouched
+//      while neither price values the holding the body serves.
+const refuses = (what, expected, mutate) => {
   const mutant = JSON.parse(JSON.stringify(ethRunBook));
   mutate(mutant);
   const realFail = console.error;
@@ -1590,7 +1906,7 @@ const refuses = (what, mutate) => {
     throw new Error("__guard_refused__");
   };
   try {
-    checkResponse("mutant", mutant);
+    checkResponse("mutant", mutant, { unitemizedInputs: UNITEMIZED_INPUTS });
   } catch (error) {
     if (error.message !== "__guard_refused__") {
       throw error;
@@ -1602,54 +1918,191 @@ const refuses = (what, mutate) => {
   if (refused === null) {
     fail(`THE GUARD IS BLIND: it accepted ${what}`);
   }
+  // THE REASON IS THE POINT. A mutant refused by an unrelated law proves the
+  // law it was built for nothing at all.
+  if (!refused.includes(expected)) {
+    fail(
+      `THE GUARD REFUSED ${what} FOR THE WRONG REASON: expected a refusal naming\n        ` +
+        `"${expected}"\n        but it said\n        ` +
+        `"${refused.replace(/^generate-lab-book\.mjs: /, "")}"`,
+    );
+  }
   console.log(`refused ${what}\n        ${refused.replace(/^generate-lab-book\.mjs: /, "")}`);
 };
 
-refuses("A: the W-BS-B shape — an undeclared asset shocked, the aave graft restored", (mutant) => {
-  const invented = "0x00000000000000000000000000000000000d0003";
-  for (const engine of mutant.engines) {
-    for (const side of ["before", "after"]) {
-      for (const entry of engine[side].collateral_by_asset) {
-        if (entry.asset === DM_FLIP_ASSET) {
-          entry.asset = invented;
-          delete entry.symbol;
+/** The address the W-BS-B body carried: one no propagation row describes. */
+const INVENTED_ASSET = "0x00000000000000000000000000000000000d0003";
+
+refuses(
+  "A: the W-BS-B shape — an undeclared asset shocked, the aave graft restored",
+  `with NO applied_shocks entry for ${responseKey(DM_CHAIN, INVENTED_ASSET)}`,
+  (mutant) => {
+    for (const engine of mutant.engines) {
+      for (const side of ["before", "after"]) {
+        for (const entry of engine[side].collateral_by_asset) {
+          if (entry.asset === DM_FLIP_ASSET) {
+            entry.asset = INVENTED_ASSET;
+            delete entry.symbol;
+          }
         }
       }
     }
-  }
-  mutant.applied_shocks = aaveResult.applied_shocks;
-  mutant.held_flat = [];
-});
+    mutant.applied_shocks = aaveResult.applied_shocks;
+    mutant.held_flat = [];
+  },
+);
 
-refuses("B: an undeclared shock — the example's held-flat weETH moved and disclosed", (mutant) => {
-  const held = mutant.held_flat.find((entry) => entry.chain_id === DM_CHAIN);
-  for (const engine of mutant.engines) {
-    if (engine.engine !== "debt_manager") {
-      continue;
-    }
-    for (const entry of engine.after.collateral_by_asset) {
-      if (entry.asset.toLowerCase() === held.asset.toLowerCase()) {
-        entry.value_usd = ((BigInt(entry.value_usd) * FACTOR_NUM) / FACTOR_DEN).toString();
+refuses(
+  "B: an undeclared shock — the example's held-flat weETH moved and disclosed",
+  "which the committed eth_minus_30 propagation matrix does not name",
+  (mutant) => {
+    const held = mutant.held_flat.find((entry) => entry.chain_id === DM_CHAIN);
+    for (const engine of mutant.engines) {
+      if (engine.engine !== "debt_manager") {
+        continue;
+      }
+      for (const entry of engine.after.collateral_by_asset) {
+        if (entry.asset.toLowerCase() === held.asset.toLowerCase()) {
+          entry.value_usd = ((BigInt(entry.value_usd) * FACTOR_NUM) / FACTOR_DEN).toString();
+        }
       }
     }
-  }
-  mutant.held_flat = mutant.held_flat.filter((entry) => entry !== held);
-  mutant.applied_shocks = [
-    ...mutant.applied_shocks,
-    {
-      asset: held.asset,
-      chain_id: held.chain_id,
-      source: held.source,
-      factor_num: FACTOR_NUM.toString(),
-      factor_den: FACTOR_DEN.toString(),
-      before: held.value,
-      after: ((BigInt(held.value) * FACTOR_NUM) / FACTOR_DEN).toString(),
-      snapped: false,
-      base_snapped: false,
-      cap_bound: false,
-    },
-  ];
-});
+    mutant.held_flat = mutant.held_flat.filter((entry) => entry !== held);
+    mutant.applied_shocks = [
+      ...mutant.applied_shocks,
+      {
+        asset: held.asset,
+        chain_id: held.chain_id,
+        source: held.source,
+        factor_num: FACTOR_NUM.toString(),
+        factor_den: FACTOR_DEN.toString(),
+        before: held.value,
+        after: ((BigInt(held.value) * FACTOR_NUM) / FACTOR_DEN).toString(),
+        snapped: false,
+        base_snapped: false,
+        cap_bound: false,
+      },
+    ];
+  },
+);
+
+// C. A HOLDING DELETED FROM ONE SIDE (law 8). The aave engine's UNPRICED row is
+// dropped from the after side and NOTHING else is touched: an unpriced holding
+// sits outside `total_collateral_usd` and outside the histogram census, so every
+// other law in this file — every sum, every delta, every ratio — still balances
+// to the digit. The old guard skipped an entry it could not pair, which is
+// exactly what made the deletion free.
+refuses(
+  "C: a holding deleted from one side — the aave unpriced row dropped from `after`",
+  "on the BEFORE side ONLY",
+  (mutant) => {
+    const aave = mutant.engines.find((engine) => engine.engine === AAVE_ENGINE);
+    const dropped = aave.after.collateral_by_asset.find((entry) => entry.value_usd === null);
+    if (dropped === undefined) {
+      fail("the aave after side carries no unpriced row for mutant C to delete");
+    }
+    aave.after.collateral_by_asset = aave.after.collateral_by_asset.filter(
+      (entry) => entry !== dropped,
+    );
+  },
+);
+
+// D. BALANCE CREATED FROM NOTHING (law 9). The after-side WETH amount AND value
+// are doubled together, so the implied price is UNCHANGED at 700000000 and law
+// 4's cross-multiplication is satisfied exactly — while the engine's collateral
+// and its itemization gain 1,750,000,000 that no shock could have produced. The
+// total is moved with it so the body stays internally consistent, which is what
+// made this mutation invisible: nothing is out of balance, the balance is wrong.
+refuses(
+  "D: balance created from nothing — the after-side WETH amount and value doubled together",
+  `changes the amount of ${DM_FLIP_ASSET}`,
+  (mutant) => {
+    const dm = mutant.engines.find((engine) => engine.engine === "debt_manager");
+    const entry = dm.after.collateral_by_asset.find((row) => row.asset === DM_FLIP_ASSET);
+    const gained = BigInt(entry.value_usd);
+    entry.amount = (BigInt(entry.amount) * 2n).toString();
+    entry.value_usd = (gained * 2n).toString();
+    dm.after.total_collateral_usd = (BigInt(dm.after.total_collateral_usd) + gained).toString();
+  },
+);
+
+// E. A HELD DISCLOSURE DELETED (law 11). The chain-10 held_flat entry removed
+// and nothing else: the Debt Manager still counts a priced weETH the committed
+// matrix does not describe, so production would have recorded it on `HeldFlat`
+// and said so. Completeness was never proven, so the deletion cost nothing.
+refuses(
+  "E: a held disclosure deleted — the chain-10 held_flat entry removed",
+  `discloses no held_flat entry for ${responseKey(DM_CHAIN, dmHeldEntries[0].asset)}`,
+  (mutant) => {
+    mutant.held_flat = mutant.held_flat.filter((entry) => entry.chain_id !== DM_CHAIN);
+  },
+);
+
+// F. BORROWINGS FALSIFIED (law 12). The mover's after-side rational is scaled on
+// BOTH halves, so its quotient is still the disclosed 70/100 and law 7 sees a
+// mover that agrees with the body — while the denominator now claims borrowings
+// twice the ones the same row publishes as `debt_usd`, and the histogram places
+// it in the same bucket because the bucket test is on the ratio too.
+refuses(
+  "F: borrowings falsified — the mover's rational scaled on both halves",
+  `moves its BORROWINGS ${String(DM_DELTA)} -> ${String(DM_DELTA * 2n)}`,
+  (mutant) => {
+    const dm = mutant.engines.find((engine) => engine.engine === "debt_manager");
+    const mover = dm.movers.find((row) => row.hf_after_num !== null);
+    mover.hf_after_num = (BigInt(mover.hf_after_num) * 2n).toString();
+    mover.hf_after_den = (BigInt(mover.hf_after_den) * 2n).toString();
+  },
+);
+
+// G. A FREE-FLOATING HELD NAME (law 11, the converse). A held price for an
+// address no engine in this response counts. `held_flat` is a claim about THIS
+// book's price inputs, so a name the book cannot witness is a disclosure about
+// somebody else's — the same defect as the grafted `applied_shocks` in mutant A,
+// on the other array.
+refuses(
+  "G: a free-floating held name — a price held for an asset no engine counts",
+  `holds ${responseKey(DM_CHAIN, INVENTED_ASSET)} flat, but NO engine in this response counts`,
+  (mutant) => {
+    mutant.held_flat = [
+      ...mutant.held_flat,
+      {
+        asset: INVENTED_ASSET,
+        chain_id: DM_CHAIN,
+        source: DM_PRICE_SOURCE,
+        value: DM_FLIP_PRICE_BEFORE.toString(),
+      },
+    ];
+  },
+);
+
+// H. A HELD PRICE THAT CONTRADICTS ITS OWN ITEMIZATION (law 10, held half). The
+// held value is doubled and the holding it prices is left alone, so the body now
+// publishes a price under which its own itemization would count twice what it
+// counts. Every law that only asks "did it move" is satisfied: it did not move,
+// on either side, by the wrong price both times.
+refuses(
+  "H: a held price that contradicts its own itemization — the held value doubled",
+  `flat at ${String(BigInt(HELD_FLAT.find((entry) => entry.chain_id === DM_CHAIN).value) * 2n)}`,
+  (mutant) => {
+    const held = mutant.held_flat.find((entry) => entry.chain_id === DM_CHAIN);
+    held.value = (BigInt(held.value) * 2n).toString();
+  },
+);
+
+// I. A DISCLOSED PRICE PAIR SCALED (law 10, applied half). Both halves of the
+// applied shock's before/after are doubled. The FACTOR they imply is unchanged,
+// so law 4's first half passes; the itemization is untouched, so law 4's second
+// half passes; and the disclosure now names two prices under which the holding
+// this body serves is worth double what the body says it is worth.
+refuses(
+  "I: a disclosed price pair scaled — the ratio kept, the valuation broken",
+  `discloses a before price of ${String(DM_FLIP_PRICE_BEFORE * 2n)} for ${DM_FLIP_ASSET}`,
+  (mutant) => {
+    const shock = mutant.applied_shocks.find((entry) => entry.asset === DM_FLIP_ASSET);
+    shock.before = (BigInt(shock.before) * 2n).toString();
+    shock.after = (BigInt(shock.after) * 2n).toString();
+  },
+);
 
 write("run-book.eth_minus_30.json", ethRunBook);
 write("run-book.eth_minus_30.batch2.json", {
@@ -1930,8 +2383,42 @@ const collisionSwap = withCollidingCollateral(
   "7000000000000000000",
 );
 
-checkResponse("run-book.collateral-collision", collision);
-checkResponse("run-book.collateral-collision.swap", collisionSwap);
+/**
+ * A RECORDED DEFECT IN THE CONTRACT'S OWN EXAMPLE (guard law 11's second
+ * exemption), declared here rather than silently tolerated.
+ *
+ * These two bodies are the run-book 200 example plus one NOT-COUNTED row, and
+ * that example serves `applied_shocks: []` AND `held_flat: []` while itemizing
+ * priced weETH on two chains. Its scenario is `weeth_market_depeg_oracles_held`,
+ * whose committed registry entry carries `propagation: []` and no `projection`
+ * — so `cmd/api/p5_runbook.go:462-486` runs `ApplyScenario` over every position,
+ * `scenario.go:679-686` records EVERY price input on `HeldFlat` because the
+ * matrix describes none of them, and the served body would name all of them.
+ * The example's `held_flat: []` is a disclosure production could not produce.
+ *
+ * The finding is real and it is NOT this generator's to fix: item 2's whole
+ * discipline is that the contract's example rides in verbatim and a law the
+ * example violates may not be used to rewrite bytes this file has no standing
+ * over. So the exemption is declared — DERIVED from the untouched example's own
+ * priced holdings, so it names exactly those two keys and cannot grow. A priced
+ * holding these fixtures ADD (the not-counted row is unpriced, so it adds none)
+ * would fall outside it and be refused. The eth_minus_30 body declares no
+ * exemption at all and owes law 11 in full.
+ */
+const EXAMPLE_UNDISCLOSED_INPUTS = new Set(
+  runBookExample.engines.flatMap((engine) =>
+    engine.before.collateral_by_asset
+      .filter((entry) => entry.value_usd !== null)
+      .map((entry) => responseKey(engineChain.get(engine.engine), entry.asset)),
+  ),
+);
+
+checkResponse("run-book.collateral-collision", collision, {
+  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+});
+checkResponse("run-book.collateral-collision.swap", collisionSwap, {
+  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+});
 
 write("run-book.collateral-collision.json", collision);
 write("run-book.collateral-collision.swap.json", collisionSwap);
