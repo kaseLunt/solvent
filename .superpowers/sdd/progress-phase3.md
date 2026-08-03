@@ -3690,3 +3690,50 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   wave; riskd past batch #460). ROUND 16 dispatched over
   06b2bcd..e909d33. Tallies at HEAD: web 577 passed/1 pre-existing
   skip; client 320/320; store+api Go suites ok.
+- **THE POLISH TAIL: ROUNDS 16–24 EACH NOT-SHIP → EACH CLOSED SAME
+  SESSION (R8 3c37daf, R9 a5a0f90, R10 f716504, R11 99dfbd5, R12
+  55668cd, R13 7a393e2 + R13b f342239, R14 d0ef33d, R15 12ce7ca, R16
+  b74f334); ROUND 25 IN FLIGHT (05:45 Aug 3)**: the finding class
+  narrowed every round — wrong DATA (rounds 12–15) → wrong SENTENCE
+  over right data (16–19) → two right sentences CONTRADICTING when
+  composed (20–24). R8: hf honored with its DIRECTION (the alias
+  dropped dir — a highest-HF bookmark served least-headroom-first);
+  monotonic cohort anchor (running is not an eraser); shape-C bad-debt
+  clause de-vacuoused. R9: the as-of claim separated from the
+  watermark floor; solvency ranges EVERY served engine — the lead-only
+  blind spot was LIVE on the committed fixture (dek named aave's
+  $2,190.48 while DM carried $2,219.80 unmentioned). R10: the matrix
+  header rebuilt as a five-clause truth table over NAMED displayed
+  sets (round 19 machine-enumerated 8,192 combos → 82 arm classes and
+  found ONE false arm left). R11: a served book that names nobody is
+  not a displayed result (all-hole rows: own set, no pin, no floor
+  movement; hole outranks supersession). R12: nothing is classified
+  before it is validated (bookRefusal: self-contradicting books
+  refused whole; definitionSkew: id+version+config identity join,
+  DERIVED against the current listing so a refresh heals it). R13:
+  the cohort speaks only for RENDERED rows (listedPhases filter,
+  never prune — a listing read must not destroy a measurement); one
+  banner derivation for both surfaces. R13b (integrator-direct): a
+  retained all-hole book is never called a measurement — and TWO
+  process lessons: a truncated reporter tail hid a failure section
+  (dot reporter + --list count now standard), and the R12 gate
+  correctly refused my mispaired test fixtures. R14: attempts carry
+  the identity they were ASKED under (stamped at dispatch; a v1
+  failure can never resurface as a re-listed v2 row's attempt); the
+  detail panel says what the banner promises (BookAllHoleView; the
+  completeness line's gate was wrong in GENERAL — partial holes
+  passed excluded_engines.length===0). R15: a request still out is
+  never told to re-run (running/settled split on one published flag).
+  R16: the settlement carries its own provenance (RerunFailure
+  {reason, attempt} — banner and skew structurally unable to
+  disagree; a presented retained body outranks a stale stamp, a
+  refused one has nothing to outrank with); the legend speaks all
+  three truths. Suite 480 → 715 tests across the tail; every wave
+  sensitivity-killed its own fixes; zero honesty assertions weakened
+  anywhere. AGENT-OPS: reviewer stall-nudges needed rounds 20/21/24
+  (running count: 7); reviewers self-hardened — detached pinned
+  worktrees from round 16 on (two empty locked leftover dirs,
+  C:\swt-r19 and C:\tmp\sv-r20, cleared on reboot); one wave killed
+  mid-response by an API server error and resumed in place with its
+  context intact (R9). Full stack serves b74f334; riskd past batch
+  #900; round 25 reviews 12ce7ca..b74f334.
