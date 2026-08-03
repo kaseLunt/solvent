@@ -23,11 +23,13 @@
 // The Lab owns this component; the Book's outpaced/refusal components are not
 // imported. Same register, separate ownership.
 
+import { useState } from "react";
 import type { ScenarioDefinition } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount } from "@/lib/book-format";
 import {
+  anchorBatchOfPhase,
   axisFamilyWords,
   cellState,
   resolveBatchCohort,
@@ -173,7 +175,32 @@ export function LabMatrix({
   selectedId,
   onSelect,
 }: LabMatrixProps) {
-  const cohort = resolveBatchCohort(phases);
+  // THE ANCHOR WATERMARK (Wave R8). The anchor batch id never DECREASES while
+  // this panel lives. `MatrixPhase.held` already keeps a running row's evidence
+  // on the table, which is what stops superseded rows repainting as current
+  // mid-re-run; this watermark is the LAW behind that behaviour rather than a
+  // second guess at it — whatever the phases say, the cohort's as-of only ever
+  // moves forward.
+  //
+  // Raised DURING RENDER, via React's own adjusting-state-on-change pattern
+  // (the same one `useFullBookWalk` uses): the guard is strictly narrowing, so
+  // it converges in one extra pass and cannot loop. An effect would land a
+  // frame late, and a frame is exactly the window in which a superseded cell
+  // would repaint as current.
+  //
+  // Passing the PRE-UPDATE value below is correct and deliberate: the anchor is
+  // max(floor, every held batch) and `resolveBatchCohort` folds the held
+  // batches in itself, so the current pass already answers with `observed`.
+  // The stored watermark only has to be right for LATER passes — the ones where
+  // `observed` has fallen.
+  const [watermark, setWatermark] = useState<number | null>(null);
+  let observed: number | null = null;
+  for (const phase of phases.values()) {
+    const batch = anchorBatchOfPhase(phase);
+    if (batch !== null && (observed === null || batch > observed)) observed = batch;
+  }
+  if (observed !== null && (watermark === null || observed > watermark)) setWatermark(observed);
+  const cohort = resolveBatchCohort(phases, watermark);
 
   return (
     <section data-testid="lab-matrix">
@@ -191,6 +218,12 @@ export function LabMatrix({
             (cohort.supersededScenarioIds.length === 0
               ? " Every held result is on that batch."
               : ` ${String(cohort.supersededScenarioIds.length)} row(s) still hold an older batch's result and are marked SUPERSEDED — they are shown, never blended into the sentence above.`)}
+        {/* WAVE R8: a run in flight is disclosed HERE because it is the only
+            thing that could make the sentence above look like it had moved.
+            It has not: the batch is a watermark and only ever goes forward. */}
+        {cohort.anchorBatchId !== null && cohort.inFlightScenarioIds.length > 0
+          ? ` ${String(cohort.inFlightScenarioIds.length)} row(s) have a run in flight; the batch above is a WATERMARK and never moves backwards while one is, so nothing older repaints as current.`
+          : ""}
         {frontierBatchId === null
           ? ""
           : ` The loss frontier above reads batch #${String(frontierBatchId)}${
@@ -261,6 +294,21 @@ export function LabMatrix({
                     >
                       {phase.kind === "running" ? "running…" : "run"}
                     </button>
+                    {/* WAVE R8: a re-run that ended without a book did NOT
+                        overwrite what this row already measured — that result
+                        is still in its cells, at its own batch pin. The failure
+                        is named here so the reader is never left wondering why
+                        clicking re-run changed nothing. */}
+                    {phase.kind === "outcome" && phase.rerunFailed !== undefined && (
+                      <span
+                        className={styles.cellSub}
+                        data-testid="matrix-rerun-failed"
+                        data-scenario-id={scenario.id}
+                      >
+                        re-run ended without a book — {phase.rerunFailed} The cells still show
+                        what this row already measured, at its own batch.
+                      </span>
+                    )}
                   </td>
                 </tr>
               );

@@ -159,25 +159,88 @@ export function matrixColumns(
 // The single-batch guard.
 // ---------------------------------------------------------------------------
 
-/** One row's run state, as the matrix holds it. */
+/**
+ * One row's run state, as the matrix holds it.
+ *
+ * WAVE R8 (Codex round-16 finding 2) — RUNNING IS A PRESENTATION STATE, NOT AN
+ * ERASER OF EVIDENCE.
+ *
+ * THE DEFECT: starting a re-run replaced the row's outcome with a bare
+ * `{kind:"running"}`, which deleted the batch that row was pinned to. When the
+ * re-run row happened to hold the NEWEST batch — the cohort ANCHOR — the anchor
+ * fell back to an older batch for the whole in-flight window, and every
+ * previously-SUPERSEDED row silently repainted as a current RESULT. A failed or
+ * unanswered re-run left them that way indefinitely, under a header sentence
+ * naming the older batch as the one every visible result was measured at.
+ *
+ * `held` keeps the row's evidence attached for exactly as long as the request
+ * is in flight. The row still RENDERS as running — that part was never the
+ * problem — but the batch it measured keeps vouching for the cohort, so the
+ * anchor cannot move backwards and the header stays true throughout.
+ */
 export type MatrixPhase =
   | { kind: "idle" }
-  | { kind: "running" }
-  | { kind: "outcome"; outcome: RunBookOutcome };
+  | {
+      kind: "running";
+      /**
+       * The outcome this row was DISPLAYING when the run started. Not rendered
+       * (the cell says "running…"), but it anchors the cohort while the request
+       * is in flight and it is what a failed run gives back.
+       */
+      held?: RunBookOutcome;
+    }
+  | {
+      kind: "outcome";
+      outcome: RunBookOutcome;
+      /**
+       * A LATER run that ended WITHOUT a book, named. `outcome` is still this
+       * row's own evidence at its ORIGINAL batch pin: a run that could not
+       * answer says nothing about the answer already held, so the failure is
+       * disclosed BESIDE the result rather than overwriting it.
+       */
+      rerunFailed?: string;
+    };
 
-/** The batch a phase's result is pinned to — null when it carries no result. */
+/** The batch a phase's DISPLAYED result is pinned to — null when it shows none. */
 export function batchOfPhase(phase: MatrixPhase): number | null {
   if (phase.kind !== "outcome") return null;
   return phase.outcome.kind === "ok" ? phase.outcome.response.batch.id : null;
 }
 
+/**
+ * The batch a phase's HELD evidence carries — this row's contribution to the
+ * cohort WATERMARK, in-flight rows included.
+ *
+ * It differs from `batchOfPhase` by exactly the re-run window, and that
+ * difference IS the fix: a running row displays nothing (so it is neither
+ * current nor superseded on screen) while still vouching for the batch it
+ * measured (so nothing older can claim to be current in its absence).
+ */
+export function anchorBatchOfPhase(phase: MatrixPhase): number | null {
+  const outcome =
+    phase.kind === "running"
+      ? phase.held
+      : phase.kind === "outcome"
+        ? phase.outcome
+        : undefined;
+  if (outcome === undefined) return null;
+  return outcome.kind === "ok" ? outcome.response.batch.id : null;
+}
+
 export interface BatchCohort {
-  /** The newest batch any held result carries — the matrix's own as-of. */
+  /** The newest batch any HELD result carries — the matrix's own as-of. */
   anchorBatchId: number | null;
-  /** Scenario ids whose result IS the anchor batch. */
+  /** Scenario ids whose DISPLAYED result IS the anchor batch. */
   currentScenarioIds: string[];
-  /** Scenario ids holding a result from an older batch — shown, never mixed. */
+  /** Scenario ids DISPLAYING a result from an older batch — shown, never mixed. */
   supersededScenarioIds: string[];
+  /**
+   * Scenario ids with a request IN FLIGHT: displaying nothing, still anchoring
+   * whatever they held. They are in neither list above — a running cell shows
+   * no result, so counting it as current or as superseded would describe a cell
+   * nobody can see.
+   */
+  inFlightScenarioIds: string[];
 }
 
 /**
@@ -192,22 +255,45 @@ export interface BatchCohort {
  * measurement of a real batch, and hiding it would trade one dishonesty for
  * another. It renders in its own named state, with its own batch id, and with
  * a re-run affordance.
+ *
+ * THE ANCHOR IS MONOTONIC (Wave R8), and it is made so twice over because the
+ * finding names two separate facts:
+ *
+ *   EVIDENCE — the anchor is taken over HELD evidence (`anchorBatchOfPhase`),
+ *   so a row that goes running does not take its batch off the table with it.
+ *   This is what stops previously-superseded rows repainting as current the
+ *   instant somebody re-runs the newest row.
+ *
+ *   LAW — `floorBatchId` is a WATERMARK the caller raises and never lowers. The
+ *   anchor is never below it, whatever the phases currently say. Retention
+ *   alone would still let the anchor fall if a re-run came back pinned to an
+ *   OLDER batch than the one it replaced; the watermark closes that too, so the
+ *   header's single-batch sentence can never walk backwards while the panel
+ *   lives.
  */
-export function resolveBatchCohort(phases: ReadonlyMap<string, MatrixPhase>): BatchCohort {
-  let anchorBatchId: number | null = null;
+export function resolveBatchCohort(
+  phases: ReadonlyMap<string, MatrixPhase>,
+  floorBatchId: number | null = null,
+): BatchCohort {
+  let anchorBatchId: number | null = floorBatchId;
   for (const phase of phases.values()) {
-    const batch = batchOfPhase(phase);
+    const batch = anchorBatchOfPhase(phase);
     if (batch !== null && (anchorBatchId === null || batch > anchorBatchId)) anchorBatchId = batch;
   }
   const currentScenarioIds: string[] = [];
   const supersededScenarioIds: string[] = [];
+  const inFlightScenarioIds: string[] = [];
   for (const [scenarioId, phase] of phases) {
+    if (phase.kind === "running") {
+      inFlightScenarioIds.push(scenarioId);
+      continue;
+    }
     const batch = batchOfPhase(phase);
     if (batch === null) continue;
     if (batch === anchorBatchId) currentScenarioIds.push(scenarioId);
     else supersededScenarioIds.push(scenarioId);
   }
-  return { anchorBatchId, currentScenarioIds, supersededScenarioIds };
+  return { anchorBatchId, currentScenarioIds, supersededScenarioIds, inFlightScenarioIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +379,12 @@ export interface CellStateInput {
  *      failure. (An outcome that named an engine outside the definition would
  *      be a contract violation; the coverage answer is still the honest one.)
  *   2. no phase / idle          → not run
- *   3. running                  → running (never blank, never a stale value)
+ *   3. running                  → running (never blank, never a stale value).
+ *      The phase's `held` evidence is NOT rendered here — showing a previous
+ *      batch's number under a live request is exactly the stale value this
+ *      state exists to avoid. It anchors the cohort and nothing else, which is
+ *      why every OLDER row keeps its SUPERSEDED state for the whole in-flight
+ *      window (Wave R8).
  *   4. an outcome without a book → unanswered, with the reason named
  *   5. an outcome from an OLDER batch than the cohort anchor → superseded,
  *      carrying whatever it held, and NEVER read alongside the anchor's cells

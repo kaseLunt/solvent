@@ -46,7 +46,7 @@ import { LabFrontier } from "./LabFrontier";
 import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
-import { matrixColumns, type MatrixPhase } from "./matrixCells";
+import { matrixColumns, unansweredReason, type MatrixPhase } from "./matrixCells";
 import {
   FactorText,
   LabAppliedShocks,
@@ -362,6 +362,16 @@ function CommittedDetail({
           flight
         </p>
       )}
+      {/* WAVE R8: a re-run that ended without a book did not overwrite the
+          result below it. The failure is stated in its own register; the result
+          keeps its own batch stamp, so the two can never be read as one. */}
+      {phase.kind === "outcome" && phase.rerunFailed !== undefined && (
+        <p className={styles.errorState} data-testid="rerun-failed">
+          the re-run ended without a book — {phase.rerunFailed} The result below is the one this
+          row already held, at the batch it was measured on; nothing was overwritten and nothing
+          was invented in its place.
+        </p>
+      )}
       {phase.kind === "outcome" && <OutcomeView id={scenario.id} outcome={phase.outcome} />}
       <LabOutOfModel items={scenario.out_of_model} />
     </section>
@@ -410,13 +420,51 @@ function LabBookPanelInner() {
   const runSeq = useRef(new Map<string, number>());
   const autoRan = useRef<string | null>(null);
 
+  // A RUN NEVER ERASES THE EVIDENCE IT IS RE-RUNNING (Wave R8, Codex round-16
+  // finding 2).
+  //
+  // Starting a run used to write a bare `{kind:"running"}` over the row's
+  // outcome. That deleted the batch the row was pinned to — and when the row
+  // held the NEWEST batch (the cohort anchor) the anchor fell back to an older
+  // one, repainting every previously-SUPERSEDED row as a current RESULT for the
+  // whole in-flight window. A failed run left them that way for good.
+  //
+  // Two rules close it, and both are about the same idea: running is a
+  // PRESENTATION state, not a deletion.
+  //   1. the outcome travels INTO the running state (`held`) — the cell renders
+  //      "running…" as before, but the batch it measured keeps anchoring the
+  //      cohort, so nothing older can claim to be current in its absence.
+  //   2. a run that ENDS WITHOUT A BOOK gives that outcome back, at its
+  //      ORIGINAL batch pin, with the failure NAMED beside it. Replacing a real
+  //      measurement with a 503 would lose evidence to an event that says
+  //      nothing about it — and drop the anchor in the same motion.
   const run = useCallback((scenarioId: string) => {
     const seq = (runSeq.current.get(scenarioId) ?? 0) + 1;
     runSeq.current.set(scenarioId, seq);
-    setPhases((previous) => new Map(previous).set(scenarioId, { kind: "running" }));
+    setPhases((previous) => {
+      const prior = previous.get(scenarioId);
+      const held =
+        prior?.kind === "outcome"
+          ? prior.outcome
+          : prior?.kind === "running"
+            ? prior.held
+            : undefined;
+      return new Map(previous).set(
+        scenarioId,
+        held === undefined ? { kind: "running" } : { kind: "running", held },
+      );
+    });
     void runBookScenario(solventBaseUrl(), scenarioId).then((outcome) => {
       if (runSeq.current.get(scenarioId) !== seq) return;
-      setPhases((previous) => new Map(previous).set(scenarioId, { kind: "outcome", outcome }));
+      setPhases((previous) => {
+        const prior = previous.get(scenarioId);
+        const held = prior?.kind === "running" ? prior.held : undefined;
+        const next: MatrixPhase =
+          outcome.kind !== "ok" && held !== undefined && held.kind === "ok"
+            ? { kind: "outcome", outcome: held, rerunFailed: unansweredReason(outcome) }
+            : { kind: "outcome", outcome };
+        return new Map(previous).set(scenarioId, next);
+      });
     });
   }, []);
 

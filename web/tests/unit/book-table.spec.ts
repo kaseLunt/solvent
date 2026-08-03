@@ -255,7 +255,13 @@ test.describe("normalizeBookQuery — the composed decision, orphaned dirs dropp
     });
   });
 
-  test("a dir under the ALIASED (debt_manager, hf) pair is ORPHANED — dropped, never reinterpreted", () => {
+  test("a dir under the REMAPPED (debt_manager, hf) pair is ORPHANED — dropped, never reinterpreted", () => {
+    // WAVE R8 renamed this case from "aliased" to "remapped", because that is
+    // now the only sort `normalizeBookQuery` moves at all — and it moves
+    // because the API refuses the pair, not because the UI prefers a token.
+    // On AAVE the same params are honored verbatim, direction included (see
+    // book-sort-vocabulary.spec.ts): the orphan rule is meant for a sort that
+    // genuinely HAD to change, and R7's alias made it fire on one that had not.
     expect(normalizeBookQuery("debt_manager", "hf", "desc")).toEqual({
       engine: "debt_manager",
       sort: "headroom",

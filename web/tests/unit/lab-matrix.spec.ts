@@ -16,6 +16,7 @@ import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
 import { RUN_BOOK_BATCH_2, RUN_BOOK_ETH, RUN_BOOK_WITHHELD, SCENARIOS } from "../fixtures/lab-book";
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
 import {
+  anchorBatchOfPhase,
   AXIS_FAMILY_WORDS,
   axisFamilies,
   axisFamilyWords,
@@ -43,6 +44,14 @@ const ETHFI = byId("ethfi_minus_50"); // debt_manager only, asset_usd
 /** A run outcome from a committed fixture body, verdicts already sealed. */
 function ok(body: typeof RUN_BOOK_ETH): MatrixPhase {
   return { kind: "outcome", outcome: { kind: "ok", response: body as unknown as LabRunBook } };
+}
+
+/**
+ * A row whose re-run is IN FLIGHT while it still holds what it measured — the
+ * state Wave R8 introduced. It renders "running…"; its batch keeps anchoring.
+ */
+function runningHolding(body: typeof RUN_BOOK_ETH): MatrixPhase {
+  return { kind: "running", held: { kind: "ok", response: body as unknown as LabRunBook } };
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +246,150 @@ test("phases carrying no book contribute NO batch to the cohort", () => {
   const cohort = resolveBatchCohort(phases);
   expect(cohort.anchorBatchId).toBeNull();
   expect(cohort.currentScenarioIds).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// WAVE R8 (Codex round-16 finding 2) — THE ANCHOR IS MONOTONIC.
+//
+// THE DEFECT: starting a re-run replaced the row's outcome with a bare
+// `{kind:"running"}`, deleting the batch that row was pinned to. If the row
+// held the NEWEST batch — the cohort anchor — the anchor fell back to an older
+// batch for the whole in-flight window and every previously-SUPERSEDED row
+// repainted as a current RESULT, under a header sentence naming the older
+// batch as the one every visible result was measured at. A failed or
+// unanswered re-run left them that way.
+// ---------------------------------------------------------------------------
+
+test("R8 — a re-running row still ANCHORS the cohort with what it holds", () => {
+  // ETH holds batch 1; DEPEG holds batch 2 and IS the anchor.
+  const settled = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, ok(RUN_BOOK_BATCH_2)],
+  ]);
+  expect(resolveBatchCohort(settled).anchorBatchId).toBe(2);
+
+  // The anchor row is re-run. It renders "running…" — but its evidence travels
+  // with it, so batch 2 is still the cohort's as-of.
+  const inFlight = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, runningHolding(RUN_BOOK_BATCH_2)],
+  ]);
+  const cohort = resolveBatchCohort(inFlight);
+  expect(cohort.anchorBatchId).toBe(2);
+
+  // The running row DISPLAYS nothing, so it is in neither the current nor the
+  // superseded list — counting a cell nobody can see would make the header's
+  // own sentence a claim about an invisible row.
+  expect(cohort.inFlightScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.supersededScenarioIds).toEqual([ETH.id]);
+
+  // AND THE OLDER ROW STAYS SUPERSEDED FOR THE WHOLE WINDOW. This is the
+  // assertion the finding is about: it used to read "result" here.
+  const stale = cellState({
+    scenario: ETH,
+    engine: "debt_manager",
+    phase: ok(RUN_BOOK_ETH),
+    cohort,
+  });
+  expect(stale.state).toBe("superseded");
+  if (stale.state !== "superseded") throw new Error("unreachable");
+  expect(stale.batchId).toBe(1);
+  expect(stale.anchorBatchId).toBe(2);
+
+  // The in-flight row renders RUNNING and never its held value: a previous
+  // batch's number under a live request is exactly the stale value the running
+  // state exists to avoid.
+  expect(
+    cellState({
+      scenario: DEPEG,
+      engine: "debt_manager",
+      phase: runningHolding(RUN_BOOK_BATCH_2),
+      cohort,
+    }).state,
+  ).toBe("running");
+});
+
+test("R8 — the WATERMARK keeps the anchor even with the newest row's evidence GONE", () => {
+  // The ruling's second mechanism, exercised with the newest row absent
+  // BECAUSE RUNNING — no `held` at all. Retention alone would let the anchor
+  // fall to 1 here; the caller's watermark says the cohort's as-of never moves
+  // backwards while the panel lives, and that is the law rather than a
+  // consequence of how the phase happens to be shaped.
+  const erased = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // batch 1
+    [DEPEG.id, { kind: "running" }], // the batch-2 row, evidence gone
+  ]);
+  expect(resolveBatchCohort(erased).anchorBatchId).toBe(1); // unfloored: the defect
+  const floored = resolveBatchCohort(erased, 2);
+  expect(floored.anchorBatchId).toBe(2);
+  expect(floored.currentScenarioIds).toEqual([]);
+  expect(floored.supersededScenarioIds).toEqual([ETH.id]);
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: ok(RUN_BOOK_ETH), cohort: floored })
+      .state,
+  ).toBe("superseded");
+
+  // The floor is a FLOOR, never a ceiling: a newer held batch still wins.
+  expect(resolveBatchCohort(settledAtTwo(), 1).anchorBatchId).toBe(2);
+});
+
+/** ETH @1 + DEPEG @2, both settled — the ordinary two-batch matrix. */
+function settledAtTwo(): Map<string, MatrixPhase> {
+  return new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, ok(RUN_BOOK_BATCH_2)],
+  ]);
+}
+
+test("R8 — held evidence anchors; DISPLAYED evidence classifies. The two are separate reads", () => {
+  const running = runningHolding(RUN_BOOK_BATCH_2);
+  // What the row SHOWS: nothing — so it pins no cell to a batch.
+  expect(batchOfPhase(running)).toBeNull();
+  // What the row HOLDS: batch 2 — so it vouches for the cohort's as-of.
+  expect(anchorBatchOfPhase(running)).toBe(2);
+  // A row that never had a result contributes to neither, exactly as before.
+  expect(anchorBatchOfPhase({ kind: "running" })).toBeNull();
+  expect(anchorBatchOfPhase({ kind: "idle" })).toBeNull();
+  // A non-ok held outcome carries no batch either — there is nothing to anchor.
+  expect(
+    anchorBatchOfPhase({ kind: "running", held: { kind: "not-served" } }),
+  ).toBeNull();
+});
+
+test("R8 — a FAILED re-run gives the prior outcome back, at its ORIGINAL batch pin", () => {
+  // What `LabBookPanel.run` writes when a re-run ends without a book: the
+  // outcome it was re-running, unchanged, plus the failure NAMED beside it.
+  // Replacing a real measurement with a 503 would lose evidence to an event
+  // that says nothing about it — and drop the anchor in the same motion.
+  const restored: MatrixPhase = {
+    kind: "outcome",
+    outcome: { kind: "ok", response: RUN_BOOK_BATCH_2 as unknown as LabRunBook },
+    rerunFailed: unansweredReason({
+      kind: "no-batch",
+      message: "no complete risk batch is available.",
+      retryAfterSeconds: 5,
+    }),
+  };
+  expect(batchOfPhase(restored)).toBe(2);
+  expect(anchorBatchOfPhase(restored)).toBe(2);
+  expect(restored.rerunFailed).toContain("no servable batch (503)");
+  expect(restored.rerunFailed).toContain("retry after 5s");
+
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, restored],
+  ]);
+  const cohort = resolveBatchCohort(phases);
+  // The anchor never fell, so the older row was never repainted as current.
+  expect(cohort.anchorBatchId).toBe(2);
+  expect(cohort.supersededScenarioIds).toEqual([ETH.id]);
+  expect(
+    cellState({ scenario: DEPEG, engine: "debt_manager", phase: restored, cohort }).state,
+  ).toBe("result");
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: ok(RUN_BOOK_ETH), cohort }).state,
+  ).toBe("superseded");
 });
 
 // ---------------------------------------------------------------------------

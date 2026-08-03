@@ -27,6 +27,15 @@
 // FIRST shocked step, or nowhere on the grid. Bad debt gets its own clause in
 // each, present or absent.
 //
+// THAT LAST SENTENCE WAS A CLAIM THIS FILE DID NOT KEEP (Wave R8, Codex
+// round-16 finding 3). Shape C — no cliff anywhere — returned BEFORE the
+// terminal clause, so terminal bad debt was never stated on the one shape where
+// nothing else on the surface would raise it: the committed
+// book-engine-refused fixture says "nothing new becomes liquidatable anywhere
+// on this grid" over a debt_manager book whose bad debt RISES to $2,219.801981
+// by −50%. A book can be quietly insolvent with zero NEW eligibility, and the
+// dek now says so in every shape.
+//
 // Relative imports (not the @/ alias): exercised by the unit specs under
 // Playwright's transpiler as well as by Next.
 
@@ -38,6 +47,7 @@ import {
   labUsd,
   leadEngineAtTerminal,
   type FrontierCell,
+  type FrontierStep,
   type FrontierView,
 } from "./frontierView";
 
@@ -91,6 +101,62 @@ function terminalClause(lead: FrontierCell, terminalMove: string): string {
       ? ` and its bad debt ${labUsd(lead.badDebt.toString(), lead.usdDecimals)}`
       : " with no bad debt on its book at that step";
   return `By ${terminalMove}, ${lead.engine}'s Σ eligible debt reaches ${sigma}${bad}.`;
+}
+
+/**
+ * "by −50%" / "at the unshocked mark" — the terminal point, in reader words.
+ *
+ * Shapes A and B always have a shocked terminal step (a cliff needs one), so
+ * `terminalClause` can say "By −50%" unconditionally. Shape C does not: a grid
+ * carrying ONLY the unshocked point is a legal no-cliff grid, and "by
+ * unshocked" is not a sentence.
+ */
+function terminalWhen(terminal: FrontierStep): string {
+  if (terminal.isBaseline) return "at the unshocked mark";
+  return terminal.prose === null ? "at the grid's last point" : `by ${terminal.move}`;
+}
+
+/**
+ * THE NO-CLIFF SHAPE'S TERMINAL CLAUSE (Wave R8, Codex round-16 finding 3).
+ *
+ * Shape C used to return before any terminal statement, so the one shape that
+ * says "nothing new becomes liquidatable" was also the one shape that never
+ * mentioned bad debt. Those are INDEPENDENT questions — a book already
+ * insolvent at the unshocked mark can add no new eligible account anywhere on
+ * the grid — and answering only the first reads as an all-clear.
+ *
+ * Engine-SCOPED and NAMED, like every other terminal statement here, because
+ * the wire forbids summing engine books. The positive-vs-computed-zero
+ * distinction is the same one `terminalClause` makes: a zero here is a
+ * computed zero over a book the engine was allowed to compute, and it reads as
+ * a finding rather than as a blank.
+ *
+ * THE ZERO ARM'S SCOPE IS EARNED, NOT ASSUMED. "no bad debt … anywhere on this
+ * grid" is a claim about EVERY served point, so every served point is checked.
+ * A lead engine that carried bad debt earlier and none at the terminal step
+ * gets the step-scoped wording instead: a computed zero at one point is not a
+ * clean grid, and the sentence must not upgrade it into one.
+ */
+function noCliffSolvencyClause(
+  view: FrontierView,
+  lead: FrontierCell,
+  terminal: FrontierStep,
+): string {
+  const when = terminalWhen(terminal);
+  if (lead.badDebt > 0n) {
+    const amount = labUsd(lead.badDebt.toString(), lead.usdDecimals);
+    return (
+      ` — and ${lead.engine}'s bad debt still reaches ${amount} ${when}: a book can be ` +
+      "insolvent with nothing new becoming liquidatable"
+    );
+  }
+  const cleanEverywhere = view.steps.every((step) => {
+    const cell = step.cells.find((candidate) => candidate.engine === lead.engine);
+    return cell === undefined || cell.badDebt === 0n;
+  });
+  return cleanEverywhere
+    ? `, with no bad debt on ${lead.engine}'s book anywhere on this grid`
+    : `, with no bad debt on ${lead.engine}'s book ${when}`;
 }
 
 /** The standing census at the unshocked mark — a census, never a projection. */
@@ -154,12 +220,18 @@ export function labDek(waterfall: Waterfall | null): string {
   const caveats = caveatClauses(waterfall, view);
 
   // SHAPE C — no cliff anywhere on the served grid.
+  //
+  // WAVE R8: the terminal clause is part of this shape now. It used to return
+  // one sentence early, which made "nothing new becomes liquidatable anywhere
+  // on this grid" the last word over books carrying rising bad debt.
   if (view.cliffIndex === null || terminal === undefined) {
     const reach =
       terminal === undefined || terminal.prose === null
         ? "anywhere the grid reaches"
         : `${axis} ${terminal.prose}`;
-    return `Nothing new becomes liquidatable anywhere on this grid — not even at ${reach}. ${censusClause(view)}${caveats}`;
+    const solvency =
+      terminal === undefined || lead === null ? "" : noCliffSolvencyClause(view, lead, terminal);
+    return `Nothing new becomes liquidatable anywhere on this grid — not even at ${reach}${solvency}. ${censusClause(view)}${caveats}`;
   }
 
   const cliff = view.steps[view.cliffIndex];

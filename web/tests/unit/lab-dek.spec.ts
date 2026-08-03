@@ -92,15 +92,86 @@ test("CLIFF AT STEP k — nothing new until the shock deepens", () => {
   expect(labDek(deeper)).not.toContain("down 20%");
 });
 
-test("NO CLIFF ANYWHERE — and the standing census is a census, not a cliff", () => {
-  // The withheld-engine fixture's grid has DM eligible at ×1.00 and nothing
-  // newly eligible below it. The baseline count must NOT be read as a cliff.
+test("NO CLIFF ANYWHERE — the terminal clause is STATED, and the census is a census", () => {
+  // WAVE R8 (round-16 finding 3) CHANGED THIS EXPECTATION, and the change IS
+  // the finding. Shape C returned before the terminal clause, so this exact
+  // fixture — whose debt_manager bad debt RISES from $239.603961 at ×1.00 to
+  // $2,219.801981 by −50% — said "nothing new becomes liquidatable anywhere on
+  // this grid" and stopped. A book can be quietly insolvent with ZERO new
+  // eligibility; the sentence that answers only the eligibility question reads
+  // as an all-clear over a book that is losing money.
+  //
+  // The baseline count must still NOT be read as a cliff — that law is
+  // unchanged and is why the census clause is still the next sentence.
   expect(labDek(waterfallOf(BOOK_ENGINE_REFUSED))).toBe(
-    `Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50%. ` +
+    `Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50% — and ` +
+      `debt_manager's bad debt still reaches $2,219.801981 by ${MINUS}50%: a book can be ` +
+      `insolvent with nothing new becoming liquidatable. ` +
       `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
       `census, not a projection. 1 engine's whole book is withheld from this grid ` +
       `(aave_v3_etherfi) — its side is unknown, not zero.`,
   );
+});
+
+test("NO CLIFF × COMPUTED-ZERO BAD DEBT — an absence, in words, scoped to the whole grid", () => {
+  // DERIVED NEGATIVE: the same no-cliff grid with every engine's bad debt
+  // zeroed at every point. The distinction the other shapes make — a positive
+  // amount versus a COMPUTED zero over a book the engine was allowed to
+  // compute — now exists here too, and the zero is said rather than printed.
+  //
+  // The scope word is EARNED: "anywhere on this grid" is a claim about every
+  // served point, and the clause checks every served point before making it.
+  const clean = withoutBadDebt(waterfallOf(BOOK_ENGINE_REFUSED));
+  expect(labDek(clean)).toBe(
+    `Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50%, with ` +
+      `no bad debt on debt_manager's book anywhere on this grid. ` +
+      `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
+      `census, not a projection. 1 engine's whole book is withheld from this grid ` +
+      `(aave_v3_etherfi) — its side is unknown, not zero.`,
+  );
+  expect(labDek(clean)).not.toContain("bad debt $0");
+  expect(labDek(clean)).not.toContain("$0");
+});
+
+test("NO CLIFF × ONE BASELINE POINT — the terminal clause still lands, in the right words", () => {
+  // DERIVED NEGATIVE: a grid carrying ONLY the unshocked point. There is no
+  // step after the baseline, so there can be no cliff — and there is no
+  // "by −50%" to say either, because the terminal point is not a move. The
+  // clause names the mark instead of inventing a percentage for it.
+  const baselineOnly: Waterfall = {
+    ...waterfallOf(BOOK_ENGINE_REFUSED),
+    points: waterfallOf(BOOK_ENGINE_REFUSED).points.slice(0, 1),
+  };
+  expect(labDek(baselineOnly)).toBe(
+    `Nothing new becomes liquidatable anywhere on this grid — not even at anywhere the grid ` +
+      `reaches — and debt_manager's bad debt still reaches $239.603961 at the unshocked mark: ` +
+      `a book can be insolvent with nothing new becoming liquidatable. ` +
+      `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
+      `census, not a projection. 1 engine's whole book is withheld from this grid ` +
+      `(aave_v3_etherfi) — its side is unknown, not zero.`,
+  );
+  // COMPUTED, not asserted: the amount is the BASELINE point's own bad debt,
+  // not the deeper grid's — a different served point produces a different number.
+  expect(labDek(baselineOnly)).not.toContain("2,219.801981");
+});
+
+test("BAD DEBT IS STATED IN EVERY SHAPE — and the claim is exercised on every shape", () => {
+  // THE VACUOUS GREEN THIS REPLACES (round-16 finding 3): the suite claimed
+  // "bad debt is stated whether present or absent" while only ever running the
+  // CLIFF shape past `terminalClause`. Shape C returned early and no test went
+  // there, so the claim was true of the code paths it visited and false of the
+  // file. Each shape is now named, and each is asserted.
+  const cliffShape = labDek(BASE); // shape B — the first step bites
+  const laterCliff = labDek(withNewly(BASE, { 1: { aave_v3_etherfi: 0 }, 2: { aave_v3_etherfi: 1 } })); // shape A
+  const noCliff = labDek(waterfallOf(BOOK_ENGINE_REFUSED)); // shape C
+  for (const sentence of [cliffShape, laterCliff, noCliff]) {
+    expect(sentence.toLowerCase()).toContain("bad debt");
+  }
+  // …and each names the ENGINE whose book it is, because engine books are
+  // never summed.
+  expect(cliffShape).toContain("aave_v3_etherfi's Σ eligible debt");
+  expect(laterCliff).toContain("aave_v3_etherfi's Σ eligible debt");
+  expect(noCliff).toContain("debt_manager's bad debt");
 });
 
 test("no cliff AND no standing census: the sentence still refuses to imply safety", () => {

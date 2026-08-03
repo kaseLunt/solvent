@@ -11,11 +11,14 @@
 //     asks for the number it prints.
 //   - POSITIONS_SORT_DIRECTIONS names each wire sort's canonical direction;
 //     BOOK_SORT_DIRECTIONS does the same for the columns.
-//   - normalizeBookQuery: unknown values fall to defaults; `hf` aliases onto
-//     the column that IS its ordering; `liq_distance` is HONORED verbatim
-//     (Wave R7 — on the DM it is a DIFFERENT ordering from the ratio, so
-//     re-ranking it would serve a bookmark's owner a different book); and the
-//     doomed pair (debt_manager, hf) is acknowledged — before any request
+//   - normalizeBookQuery: unknown values fall to defaults; the DEPRECATED wire
+//     keys the engine defines are HONORED VERBATIM, key AND direction —
+//     `liq_distance` on both engines (Wave R7: on the DM it is a DIFFERENT
+//     ordering from the ratio) and `hf` on Aave (Wave R8: hf-DESC and
+//     headroom-DESC are different orderings since W-HR-C, and the alias
+//     machinery dropped the `dir` as an orphan anyway, so a highest-HF-first
+//     bookmark was served least-headroom-first); and the doomed pair
+//     (debt_manager, hf) is REMAPPED and acknowledged — before any request
 //     could fire.
 //   - classifyPositionsFailure: a 4xx (except 429) is a REFUSAL — retrying
 //     the identical request cannot succeed; 429/503 refuse naming the
@@ -38,15 +41,20 @@ import {
   BOOK_SORTS,
   BOOK_SORTS_BY_ENGINE,
   BOOK_SORT_DIRECTIONS,
+  canonicalWireDir,
   classifyPositionsFailure,
   DEFAULT_BOOK_ENGINE,
   DEFAULT_BOOK_SORT,
   engineOffersBookSort,
+  HF_READER_WORDS,
+  HONORED_LEGACY_SORTS,
   isHonoredLegacySort,
+  legacySortRegister,
   LIQ_DISTANCE_READER_WORDS,
   normalizeBookQuery,
   POSITIONS_SORTS,
   POSITIONS_SORT_DIRECTIONS,
+  reversedWireDir,
   SORT_HF_REMAP_ACK,
   SORT_LIQ_DISTANCE_HONORED,
   SORTS_BY_ENGINE,
@@ -178,19 +186,106 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
     });
   });
 
-  test("`hf` ALIASES onto the Headroom column — the ranking survives, the token is rewritten", () => {
-    // A bookmarked ?sort=hf asked for "rank by how close to the boundary".
-    // That ranking IS the Headroom column, EXACTLY: headroom is 1 − 1/HF,
-    // strictly increasing in the health factor, so hf-asc and headroom-asc are
-    // one total order. Nothing about the sequence changes, so the param can be
-    // rewritten to the token the table is using without misleading anyone.
+  test("WAVE R8 — `hf` on AAVE is HONORED VERBATIM: the key survives, and so does its DIRECTION", () => {
+    // THIS EXPECTATION IS INVERTED FROM R7's, and the reason is the finding.
+    //
+    // R7's note read: "`hf` aliases EXACTLY: headroom is 1 − 1/HF, strictly
+    // increasing in the health factor, so hf-asc and headroom-asc are one total
+    // order." That is a statement about ASCENDING. W-HR-C then forked the
+    // DESCENDING fragments deliberately — hf-desc keeps the plain reversal
+    // (refused rows first, NULLS FIRST) while headroom-desc pins every unknown
+    // LAST — so the two are NOT one order in reverse.
+    //
+    // And the alias broke the ascending case too, by composition: a sort that
+    // does not survive VERBATIM orphans the `dir` beside it, so
+    // `?sort=hf&dir=desc` arrived, lost its direction, and was served CANONICAL
+    // HEADROOM ASC. A legacy highest-HF-first bookmark got least-headroom-first
+    // — the opposite end of the book — with the URL rewritten to agree.
     expect(normalizeBookQuery("aave_v3_etherfi", "hf", null)).toEqual({
       engine: "aave_v3_etherfi",
-      sort: "headroom",
+      sort: "hf",
+      reversed: false,
+      hfRemapped: false,
+      rewritten: false,
+    });
+    // THE FINDING'S OWN LINK: ?engine=aave_v3_etherfi&sort=hf&dir=desc.
+    expect(normalizeBookQuery("aave_v3_etherfi", "hf", "desc")).toEqual({
+      engine: "aave_v3_etherfi",
+      sort: "hf",
+      reversed: true,
+      hfRemapped: false,
+      rewritten: false,
+    });
+    // `dir=asc` IS hf's canonical direction, and defaults are omitted from the
+    // URL — so the redundant param is dropped (`rewritten`) while the ORDERING
+    // it named is exactly what is applied (`reversed: false`). Identical to the
+    // treatment R7 pinned for `liq_distance` asc, and the opposite of the
+    // defect: nothing about the ranking moves.
+    expect(normalizeBookQuery("aave_v3_etherfi", "hf", "asc")).toEqual({
+      engine: "aave_v3_etherfi",
+      sort: "hf",
       reversed: false,
       hfRemapped: false,
       rewritten: true,
     });
+  });
+
+  test("WAVE R8 — the honored hf link's key AND direction reach the WIRE", () => {
+    const desc = normalizeBookQuery("aave_v3_etherfi", "hf", "desc");
+    // The request the table composes from this deep link, and the same one
+    // every later page of the cursor walk composes.
+    expect(bookSortWireKey(desc.engine, desc.sort)).toBe("hf");
+    expect(desc.reversed).toBe(true);
+    expect(reversedWireDir(desc.sort)).toBe("desc");
+    // The service DEFINES the pair, so nothing here can compose a 400.
+    expect(SORTS_BY_ENGINE[desc.engine]).toContain(bookSortWireKey(desc.engine, desc.sort));
+    // The old composition, named so the regression is unmistakable: key
+    // rewritten to the column, direction dropped, request = headroom asc.
+    expect(desc.sort).not.toBe("headroom");
+    expect(canonicalWireDir("headroom")).toBe("asc");
+  });
+
+  test("WAVE R8 — the honored vocabulary is PER ENGINE: hf on Aave only", () => {
+    expect(HONORED_LEGACY_SORTS).toEqual(["liq_distance", "hf"]);
+    expect(isHonoredLegacySort("hf")).toBe(true);
+    // `hf` is honored where the SERVICE defines it and nowhere else. The Debt
+    // Manager publishes no health factor and the API refuses the pair with a
+    // 400, so there is no ordering there to honor — which is why an engine
+    // toggle onto the DM has to remap rather than carry it across.
+    expect(engineOffersBookSort("aave_v3_etherfi", "hf")).toBe(true);
+    expect(engineOffersBookSort("debt_manager", "hf")).toBe(false);
+    expect(SORTS_BY_ENGINE.aave_v3_etherfi).toContain("hf");
+    expect(SORTS_BY_ENGINE.debt_manager).not.toContain("hf");
+    // `liq_distance` is unchanged: 1.5.0 defines it on both books.
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      expect(engineOffersBookSort(engine, "liq_distance")).toBe(true);
+    }
+  });
+
+  test("WAVE R8 — the honored register NAMES the direction, both ways, for both keys", () => {
+    // The ruling's own words for the hf register.
+    expect(legacySortRegister("hf", true)).toContain("health factor, highest first");
+    expect(legacySortRegister("hf", false)).toContain("health factor, lowest first");
+    expect(HF_READER_WORDS).toBe("health factor");
+    // It is the DEPRECATED register, not a remap acknowledgment.
+    for (const reversed of [false, true]) {
+      const line = legacySortRegister("hf", reversed);
+      expect(line).toContain('sorted by "hf" (deprecated)');
+      expect(line).toContain("honored as sent");
+      // NO header claims the honored order — and the reason is stated, so a
+      // reader is never left wondering why the table shows no active column.
+      expect(line).toContain("no column header claims this order");
+      expect(line).toContain("Click any sortable header to rank by that column instead.");
+    }
+    // The footer names the applied ranking with its quantity, same rule.
+    expect(bookSortFooterLabel("hf")).toBe("hf (health factor)");
+    // ONE RULE, NO SPECIAL CASES: `liq_distance` is named the same way, and
+    // R7's constant is now simply its canonical-direction line.
+    expect(legacySortRegister("liq_distance", false)).toContain("nearest the boundary first");
+    expect(legacySortRegister("liq_distance", true)).toContain(
+      "farthest from the boundary first",
+    );
+    expect(SORT_LIQ_DISTANCE_HONORED).toBe(legacySortRegister("liq_distance", false));
   });
 
   test("the doomed pair is still acknowledged, and its request is never composed", () => {

@@ -39,12 +39,17 @@
 //     defaults omitted, history.replaceState) — the request the API would
 //     refuse is never composed, and when one IS refused (4xx) it renders in
 //     the refusal register with the server's sentence verbatim and NO retry.
-//   - AN ARRIVING ?sort=liq_distance KEEPS ITS ORDERING (Wave R7). The service
-//     serves the deprecated key unchanged so links keep meaning; on the DM it
-//     is a DIFFERENT sequence from the Headroom ratio, so re-ranking it here
-//     would hand a bookmark's owner a different book with no acknowledgment.
-//     The register names the applied ordering, no header claims it, and the
-//     first click of any sort control moves to that column and rewrites the URL.
+//   - AN ARRIVING DEPRECATED SORT KEEPS ITS ORDERING — key AND direction
+//     (?sort=liq_distance, Wave R7; ?sort=hf on Aave, Wave R8). The service
+//     serves both deprecated keys unchanged so links keep meaning; re-ranking
+//     one here hands a bookmark's owner a different book with no
+//     acknowledgment, and R7's own `hf` alias did worse than that — it dropped
+//     the link's `dir` as an orphan, turning "highest health factor first" into
+//     "least headroom first" with the URL rewritten to agree. The register
+//     names the applied ordering AND its direction, no header claims it, and
+//     the first click of any sort control moves to that column and rewrites the
+//     URL. `hf` at the debt_manager is the one exception and keeps its remap:
+//     the API refuses that pair, so the ordering does not exist to honor.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -72,11 +77,11 @@ import {
   engineOffersBookSort,
   fetchPositionsPage,
   isHonoredLegacySort,
+  legacySortRegister,
   normalizeBookQuery,
   POSITIONS_ENGINES,
   reversedWireDir,
   SORT_HF_REMAP_ACK,
-  SORT_LIQ_DISTANCE_HONORED,
   type AppliedBookSort,
   type BookSort,
   type PositionsEngine,
@@ -261,11 +266,16 @@ interface SortComposition {
  * glyph, and refused-first (sort=status) clears every indicator while the
  * headers stay clickable — clicking one exits it.
  *
- * WAVE R7: `active` is an identity test against the ranking ACTUALLY APPLIED,
- * so while the honored `liq_distance` ordering is in force NO header claims it
- * — the Headroom column cannot show an ascending glyph over rows the service
- * ranked by absolute room. Clicking the header still works and is what moves
- * the table onto the column's own ranking.
+ * WAVE R7, RE-AFFIRMED BY R8: `active` is an identity test against the ranking
+ * ACTUALLY APPLIED, so while ANY honored deprecated ordering is in force NO
+ * header claims it — the Headroom column cannot show an ascending glyph over
+ * rows the service ranked by absolute room, and it does not borrow one for
+ * `hf` either, in either direction. (Ascending on Aave the two orders do
+ * coincide server-side, but the coincidence is a fact this package cannot
+ * observe or test, and R7's "aliases exactly" is the cautionary tale. The
+ * ranking in force is the LINK's key, not a column's; no column speaks for
+ * it.) Clicking the header still works and is what moves the table onto the
+ * column's own ranking.
  */
 function headerSort(
   candidate: BookSort,
@@ -370,8 +380,9 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   // Deep-link normalization (W-UX-B part 10, extended by W-UX-C part 15):
   // URL state parses through ONE normalizer BEFORE the first fetch — unknown
   // enum values fall to the contract defaults, engine=debt_manager&sort=hf
-  // remaps to liq_distance, dir normalizes onto the two-state cycle, and
-  // dust onto its step vocabulary — so the request the API would honestly
+  // remaps to headroom (the ONE remap left, and only because the API refuses
+  // that pair), dir normalizes onto the two-state cycle, and dust onto its
+  // step vocabulary — so the request the API would honestly
   // refuse is NEVER composed. (useSearchParams requires the Suspense boundary
   // the caller provides; the initializer runs once, before any fetch can
   // fire.)
@@ -524,6 +535,11 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
     // too (contract 1.5.0), so switching engines KEEPS it rather than silently
     // re-ranking a reader who only asked to change books. An engine toggle is
     // not a sort control; only a sort control leaves the honored ordering.
+    //
+    // WAVE R8: an honored `hf` ranking is the ONE thing an engine toggle can
+    // strand, because the Debt Manager publishes no health factor and the API
+    // refuses the pair. That lands here, already handled — the same remap and
+    // the same acknowledgment a `?sort=hf` deep link at the DM receives.
     if (engineOffersBookSort(candidate, sort)) {
       setSortAck(null);
     } else {
@@ -824,13 +840,16 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
             {sortAck}
           </span>
         )}
-        {/* WAVE R7 — the honored deprecated ranking, NAMED for as long as it is
-            the one in force. Not an acknowledgment (nothing was remapped) and
-            so not a one-shot: it is the sort register, and it disappears the
-            moment a sort control moves the table onto a column. */}
+        {/* WAVE R7, EXTENDED BY R8 — the honored deprecated ranking, NAMED for
+            as long as it is the one in force. Not an acknowledgment (nothing
+            was remapped) and so not a one-shot: it is the sort register, and it
+            disappears the moment a sort control moves the table onto a column.
+            It carries the DIRECTION as well as the key, because the direction
+            is half of what the link asked for — and dropping that half is
+            exactly the defect R8 closed. */}
         {isHonoredLegacySort(sort) && (
           <span className={styles.sortAck} data-testid="legacy-sort-register">
-            {SORT_LIQ_DISTANCE_HONORED}
+            {legacySortRegister(sort, reversed)}
           </span>
         )}
       </div>
