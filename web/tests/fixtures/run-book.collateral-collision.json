@@ -6,7 +6,7 @@
     "age_seconds": 5,
     "producer": "riskd",
     "status": "complete",
-    "position_count": 5,
+    "position_count": 4,
     "refused_count": 2,
     "refused_engines": [],
     "flagged_count": 1,
@@ -43,40 +43,17 @@
     }
   },
   "scenario_config_version": "v1",
-  "scenario_id": "eth_minus_30",
+  "scenario_id": "weeth_market_depeg_oracles_held",
   "scenario_version": "v1",
-  "label": "ETH -30 percent",
-  "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
-  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
-  "shocks": [
-    {
-      "axis": "eth_usd",
-      "factor_num": 70,
-      "factor_den": 100
-    }
-  ],
+  "label": "weETH market depeg to 0.95 (oracles held)",
+  "description": "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable.",
+  "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+  "shocks": [],
   "out_of_model": [
-    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
-    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
     "liquidator liquidity, gas costs, execution latency and cascade dynamics",
-    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
-    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
-    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+    "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order, so this is neutral rather than conservative"
   ],
-  "applied_shocks": [
-    {
-      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-      "chain_id": 1,
-      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
-      "factor_num": "70",
-      "factor_den": "100",
-      "before": "400000000000",
-      "after": "280000000000",
-      "snapped": false,
-      "base_snapped": false,
-      "cap_bound": false
-    }
-  ],
+  "applied_shocks": [],
   "held_flat": [],
   "engines": [
     {
@@ -158,6 +135,15 @@
             "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
           },
           {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "5000000000000000000",
+            "value_usd": null,
+            "unpriced": false,
+            "note": "NOT COUNTED AS COLLATERAL: the engine counts none of this holding toward collateral (Aave `usedAsCollateral = false`), so the reviewed arithmetic assigned it no value and none is invented here. `amount` is exact; none of this holding is inside `total_collateral_usd`."
+          },
+          {
             "asset": "0x0000000000000000000000000000000000000BAD",
             "decimals": 18,
             "amount": "5000000000000000000",
@@ -243,6 +229,15 @@
             "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
           },
           {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "5000000000000000000",
+            "value_usd": null,
+            "unpriced": false,
+            "note": "NOT COUNTED AS COLLATERAL: the engine counts none of this holding toward collateral (Aave `usedAsCollateral = false`), so the reviewed arithmetic assigned it no value and none is invented here. `amount` is exact; none of this holding is inside `total_collateral_usd`."
+          },
+          {
             "asset": "0x0000000000000000000000000000000000000BAD",
             "decimals": 18,
             "amount": "5000000000000000000",
@@ -258,7 +253,14 @@
       "movers": [],
       "movers_total": 0,
       "movers_note": "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. This scenario moves no oracle mark, so NO account's health factor dropped and there is nothing to rank. `movers` carries all 0 of them.",
-      "market_realization": null,
+      "market_realization": {
+        "hfs_unchanged": true,
+        "execution_shortfall_usd": "40000000000",
+        "bad_debt_at_liquidation_usd": "0",
+        "usd_decimals": 8,
+        "seizure_model": "pro-rata-over-counted-collateral",
+        "note": "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it). The output is the gap the protocol is not seeing."
+      },
       "projection": null,
       "note": "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
     },
@@ -266,10 +268,10 @@
       "engine": "debt_manager",
       "usd_decimals": 6,
       "before": {
-        "accounts": 2,
+        "accounts": 1,
         "eligible_accounts": 1,
-        "total_collateral_usd": "6500000000",
-        "total_debt_usd": "6120000000",
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
         "eligible_debt_usd": "4200000000",
         "collateral_at_risk_usd": "4000000000",
         "bad_debt_usd": "239603961",
@@ -311,7 +313,7 @@
               "label": "1.25 – 1.50",
               "lower_wad": "1250000000000000000",
               "upper_wad": "1500000000000000000",
-              "count": 1
+              "count": 0
             },
             {
               "label": "1.50 – 2.00",
@@ -332,14 +334,6 @@
         },
         "collateral_by_asset": [
           {
-            "asset": "0x00000000000000000000000000000000000d0003",
-            "decimals": 18,
-            "amount": "2500000000000000000",
-            "value_usd": "2500000000",
-            "unpriced": false,
-            "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
-          },
-          {
             "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
             "symbol": "weETH",
             "decimals": 18,
@@ -351,12 +345,12 @@
         ]
       },
       "after": {
-        "accounts": 2,
-        "eligible_accounts": 2,
-        "total_collateral_usd": "5750000000",
-        "total_debt_usd": "6120000000",
-        "eligible_debt_usd": "5700000000",
-        "collateral_at_risk_usd": "5515000000",
+        "accounts": 1,
+        "eligible_accounts": 1,
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
+        "eligible_debt_usd": "4200000000",
+        "collateral_at_risk_usd": "4000000000",
         "bad_debt_usd": "239603961",
         "hf_histogram": {
           "comparator": "hf_num/hf_den",
@@ -372,7 +366,7 @@
               "label": "0.90 – 1.00",
               "lower_wad": "900000000000000000",
               "upper_wad": "1000000000000000000",
-              "count": 2
+              "count": 1
             },
             {
               "label": "1.00 – 1.05",
@@ -417,14 +411,6 @@
         },
         "collateral_by_asset": [
           {
-            "asset": "0x00000000000000000000000000000000000d0003",
-            "decimals": 18,
-            "amount": "2500000000000000000",
-            "value_usd": "1750000000",
-            "unpriced": false,
-            "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
-          },
-          {
             "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
             "symbol": "weETH",
             "decimals": 18,
@@ -435,35 +421,28 @@
           }
         ]
       },
-      "newly_eligible_accounts": 1,
-      "eligible_debt_delta_usd": "1500000000",
+      "newly_eligible_accounts": 0,
+      "eligible_debt_delta_usd": "0",
       "bad_debt_delta_usd": "0",
-      "movers": [
-        {
-          "account": "0x00000000000000000000000000000000000d0002",
-          "engine": "debt_manager",
-          "hf_before_wad": null,
-          "hf_after_wad": null,
-          "hf_drop_wad": null,
-          "hf_before_num": "2000000000",
-          "hf_before_den": "1500000000",
-          "hf_after_num": "1400000000",
-          "hf_after_den": "1500000000",
-          "became_eligible": true,
-          "debt_usd": "1500000000"
-        }
-      ],
-      "movers_total": 1,
-      "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked by their debt in this engine's 6-decimal USD, largest first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries all 1 of them.",
-      "market_realization": null,
+      "movers": [],
+      "movers_total": 0,
+      "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose eligibility FLIPPED false -> true are movers. This scenario moves no oracle mark, so nothing flipped. `movers` carries all 0 of them.",
+      "market_realization": {
+        "hfs_unchanged": true,
+        "execution_shortfall_usd": "200000000",
+        "bad_debt_at_liquidation_usd": "0",
+        "usd_decimals": 6,
+        "seizure_model": "pro-rata-over-counted-collateral",
+        "note": "same axis, this engine's own 6-decimal USD."
+      },
       "projection": null,
-      "note": "delta-only: after minus before over the positions in the run."
+      "note": "delta-only: zero deltas here are THE FINDING — HFs are bit-identical while realized proceeds fall."
     }
   ],
   "excluded_engines": [],
   "coverage": {
-    "batch_positions": 5,
-    "in_book": 3,
+    "batch_positions": 4,
+    "in_book": 2,
     "refused_in_batch": 2,
     "excluded_by_this_layer": 0,
     "excluded": [],

@@ -22,7 +22,9 @@ import { expect, test } from "@playwright/test";
 import type { LabRunBookEngine, RunBookAggregate } from "../../lib/runbook";
 import {
   belowOneCount,
+  collateralDisclosure,
   collateralReadingLine,
+  collateralRowKey,
   histogramShiftReadingLine,
   measuredCount,
   moversDisclosure,
@@ -101,7 +103,7 @@ test("measuredCount adds the no-debt accounts and NOT the refused ones", () => {
 // The histogram-shift reading line
 // ---------------------------------------------------------------------------
 
-test("the shift line names how many accounts CROSSED, computed from both sides", () => {
+test("the shift line names the NET population change, computed from both sides", () => {
   const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
   const engine: LabRunBookEngine = {
     ...dm,
@@ -117,13 +119,51 @@ test("the shift line names how many accounts CROSSED, computed from both sides",
     },
   };
   const line = histogramShiftReadingLine(engine);
-  expect(line).toContain("3 of 10 accounts crossed into that region");
-  expect(line).toContain("1 below 1.00, where this engine may liquidate before, 4 after");
+  // The arithmetic is on the page, derived from both sides.
+  expect(line).toContain("1 of 10 measured accounts sat below 1.00 before the shock, 4 after");
+  expect(line).toContain("the below-1.00 population grew by 3");
   // Nothing was refused, so no refused clause is invented.
   expect(line).not.toContain("counted refused");
 });
 
-test("a shift the other way is named LEFT, never a negative count", () => {
+test("THE NET CAVEAT: the sentence never claims accounts CROSSED, in either direction", () => {
+  // The wire serves two POPULATIONS. Their difference is a net figure, and an
+  // account that fell below 1.00 while another rose above it cancels in it —
+  // so a sentence calling the difference a count of accounts that crossed
+  // claims a measurement this response does not carry.
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const engine: LabRunBookEngine = {
+    ...dm,
+    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 1, ">= 2.00": 9 }) },
+    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 4, ">= 2.00": 6 }) },
+  };
+  const line = histogramShiftReadingLine(engine);
+  expect(line).toContain("That is a NET figure");
+  expect(line).toContain("serves the two populations, not the crossings between them");
+  expect(line).toContain("accounts may have moved in BOTH directions");
+  expect(line).toContain("no gross crossing count is claimed here");
+  // The words that made the OLD sentence a net figure dressed as a gross one.
+  expect(line).not.toContain("crossed into that region");
+  expect(line).not.toContain("left that region");
+  expect(line).not.toContain("accounts that moved");
+});
+
+test("an unchanged population says so, and still carries the net caveat", () => {
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const engine: LabRunBookEngine = {
+    ...dm,
+    before: { ...dm.before, hf_histogram: histogramWith(dm.before, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
+    after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
+  };
+  const line = histogramShiftReadingLine(engine);
+  expect(line).toContain("the below-1.00 population did not change");
+  // AND THAT IS THE CASE THE CAVEAT MATTERS MOST IN: two accounts could have
+  // swapped sides and the difference would still be zero.
+  expect(line).toContain("accounts may have moved in BOTH directions");
+  expect(line).not.toContain("Nothing crossed");
+});
+
+test("a shift the other way is named SHRANK, never a negative count", () => {
   const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
   const engine: LabRunBookEngine = {
     ...dm,
@@ -131,7 +171,8 @@ test("a shift the other way is named LEFT, never a negative count", () => {
     after: { ...dm.after, hf_histogram: histogramWith(dm.after, "hf_wad", { "< 0.90": 2, ">= 2.00": 8 }) },
   };
   const line = histogramShiftReadingLine(engine);
-  expect(line).toContain("4 of 10 accounts left that region");
+  expect(line).toContain("the below-1.00 population shrank by 4");
+  expect(line).toContain("6 of 10 measured accounts sat below 1.00 before the shock, 2 after");
   expect(line).not.toContain("-4");
   expect(line).not.toContain("−4");
 });
@@ -150,6 +191,7 @@ test("the Debt Manager's region is called a DISCLOSURE, never its trigger", () =
     },
   };
   const line = histogramShiftReadingLine(engine);
+  expect(line).toContain("Below 1.00 is the borrow-headroom ratio");
   expect(line).toContain("a DISCLOSURE, not this engine's trigger");
   // And the Aave sentence must NOT claim a disclosure — the comparator IS the
   // engine's own liquidation test there.
@@ -158,7 +200,7 @@ test("the Debt Manager's region is called a DISCLOSURE, never its trigger", () =
     before: { ...engine.before, hf_histogram: { ...engine.before.hf_histogram, comparator: "hf_wad" } },
     after: { ...engine.after, hf_histogram: { ...engine.after.hf_histogram, comparator: "hf_wad" } },
   });
-  expect(wadLine).toContain("where this engine may liquidate");
+  expect(wadLine).toContain("Below 1.00 is where this engine may liquidate");
   expect(wadLine).not.toContain("DISCLOSURE");
 });
 
@@ -214,24 +256,76 @@ function moversEngine(shown: number, total: number): LabRunBookEngine {
   };
 }
 
+/** The same engine re-comparatored to Aave — the wad ranking, not the flip. */
+function asWadEngine(engine: LabRunBookEngine): LabRunBookEngine {
+  return {
+    ...engine,
+    before: {
+      ...engine.before,
+      hf_histogram: { ...engine.before.hf_histogram, comparator: "hf_wad" },
+    },
+    after: { ...engine.after, hf_histogram: { ...engine.after.hf_histogram, comparator: "hf_wad" } },
+  };
+}
+
 test("TOP 20 OF N: the disclosure names both numbers and how many are missing", () => {
   expect(moversDisclosure(moversEngine(20, 31))).toBe(
-    "Showing the top 20 of 31 accounts that moved — 11 are not on this page.",
+    "Showing the top 20 of 31 accounts whose debt became eligible, ranked by that debt — " +
+      "11 are not on this page.",
   );
 });
 
+test("THE SUBJECT IS THE ENGINE'S OWN ONE-DIRECTION LIST, never 'accounts that moved'", () => {
+  // `movers` is not symmetric and the server's own note says so: Aave admits
+  // only STRICT DROPS and the Debt Manager only flips false -> true. A sentence
+  // calling either list "all accounts that moved" claims the other direction
+  // is in it, and the histogram line beside it has just disclosed that
+  // crossings the other way exist and are not served.
+  const dmLines = [
+    moversDisclosure(moversEngine(0, 0)),
+    moversDisclosure(moversEngine(3, 3)),
+    moversDisclosure(moversEngine(20, 31)),
+  ];
+  for (const line of dmLines) {
+    expect(line).toContain("became eligible");
+    expect(line).not.toContain("that moved");
+    expect(line).not.toContain("health factor");
+  }
+  expect(dmLines[1]).toContain("ranked by that debt");
+
+  const aaveLines = [
+    moversDisclosure(asWadEngine(moversEngine(0, 0))),
+    moversDisclosure(asWadEngine(moversEngine(3, 3))),
+    moversDisclosure(asWadEngine(moversEngine(20, 31))),
+  ];
+  for (const line of aaveLines) {
+    expect(line).toContain("health factor");
+    expect(line).not.toContain("that moved");
+    expect(line).not.toContain("eligible");
+  }
+  expect(aaveLines[1]).toContain("whose health factor strictly dropped");
+  expect(aaveLines[1]).toContain("ranked by the drop");
+});
+
 test("an untruncated list never claims a truncation that did not happen", () => {
-  expect(moversDisclosure(moversEngine(3, 3))).toBe("Showing all 3 accounts that moved.");
-  expect(moversDisclosure(moversEngine(1, 1))).toBe("Showing all 1 account that moved.");
+  expect(moversDisclosure(moversEngine(3, 3))).toBe(
+    "Showing all 3 accounts whose debt became eligible, ranked by that debt.",
+  );
+  expect(moversDisclosure(moversEngine(1, 1))).toBe(
+    "Showing all 1 account whose debt became eligible, ranked by that debt.",
+  );
   for (const line of [moversDisclosure(moversEngine(3, 3)), moversDisclosure(moversEngine(1, 1))]) {
     expect(line).not.toContain("top");
     expect(line).not.toContain("not on this page");
   }
 });
 
-test("zero movers is stated as zero MOVEMENT, not as an empty table", () => {
+test("zero movers is stated as zero MOVEMENT in the engine's own terms", () => {
   expect(moversDisclosure(moversEngine(0, 0))).toBe(
-    "No account moved under this scenario on this engine.",
+    "No account's debt became eligible under this scenario on this engine.",
+  );
+  expect(moversDisclosure(asWadEngine(moversEngine(0, 0)))).toBe(
+    "No account's health factor dropped under this scenario on this engine.",
   );
 });
 
@@ -326,4 +420,47 @@ test("the totals are the ENGINE's own decimals — the same bytes read at 6 diff
   // Read at 8 the SAME bytes are a different number, which is exactly why the
   // decimals ride the sentence.
   expect(collateralReadingLine(aggregate, 8, "before")).toContain("$40");
+});
+
+// ---------------------------------------------------------------------------
+// THE COLLATERAL ROW KEY — an identity claim, not a convenience
+// ---------------------------------------------------------------------------
+
+const NOT_COUNTED = {
+  ...COUNTED,
+  value_usd: null,
+  unpriced: false,
+  note: "NOT COUNTED AS COLLATERAL",
+} as const;
+
+test("the three disclosures are recovered from the two fields that carry them", () => {
+  expect(collateralDisclosure(COUNTED)).toBe("counted");
+  expect(collateralDisclosure(UNPRICED)).toBe("unpriced");
+  expect(collateralDisclosure(NOT_COUNTED)).toBe("not-counted");
+  // A value present outranks the flag: `unpriced` is only meaningful once the
+  // engine counted nothing, and a priced-and-counted row is COUNTED whatever
+  // else the flag says.
+  expect(collateralDisclosure({ ...COUNTED, unpriced: true })).toBe("counted");
+});
+
+test("ONE ASSET, THREE DISCLOSURES, THREE DISTINCT KEYS — the collision the live book serves", () => {
+  // The server itemizes by asset AND disclosure, so weETH legitimately appears
+  // COUNTED and NOT COUNTED on one side: counted for the accounts that enabled
+  // it as collateral, not counted for the accounts that did not. Both carry
+  // `unpriced: false`, so the old `asset + unpriced` key gave them ONE key —
+  // two rows claiming one identity, which React resolves across a rerun by
+  // guessing.
+  const keys = [COUNTED, UNPRICED, NOT_COUNTED].map((entry) =>
+    collateralRowKey({ ...entry, asset: COUNTED.asset }),
+  );
+  expect(new Set(keys).size).toBe(3);
+  // And the pair the OLD key collapsed is the one this test exists for.
+  expect(collateralRowKey({ ...COUNTED, asset: COUNTED.asset })).not.toBe(
+    collateralRowKey({ ...NOT_COUNTED, asset: COUNTED.asset }),
+  );
+  // The asset is still half the identity: the same disclosure on two assets
+  // must not share a key either.
+  expect(collateralRowKey(COUNTED)).not.toBe(
+    collateralRowKey({ ...COUNTED, asset: UNPRICED.asset }),
+  );
 });

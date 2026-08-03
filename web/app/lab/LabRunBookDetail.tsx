@@ -29,7 +29,9 @@ import type { LabRunBookEngine, RunBookAggregate } from "@/lib/runbook";
 import { EM_DASH, renderNullableDecimal } from "@/lib/format";
 import { labUsd } from "./frontierView";
 import {
+  collateralDisclosure,
   collateralReadingLine,
+  collateralRowKey,
   histogramShiftReadingLine,
   moversDisclosure,
 } from "./labRunBookLines";
@@ -194,8 +196,14 @@ function MoverRow({ engine, mover }: { engine: LabRunBookEngine; mover: LabRunBo
     <tr data-testid="runbook-mover">
       <td className={styles.mono}>
         {/* The Inspector reads an address; this is the same address the run
-            measured, so the row opens its own evidentiary chain. */}
-        <a href={`/inspector?address=${mover.account}`} data-testid="runbook-mover-account">
+            measured, so the row opens its own evidentiary chain.
+
+            THE ADDRESS IS THE PATH, not a query. `/inspector` is the entry
+            FORM and reads no search params; the surface that renders a
+            position lives at `/inspector/[addr]`. A link that claimed to open
+            the account's evidence and landed on an empty form was a promise
+            the href did not keep. */}
+        <a href={`/inspector/${mover.account}`} data-testid="runbook-mover-account">
           {mover.account}
         </a>
       </td>
@@ -316,9 +324,19 @@ function CollateralSide({
           <tbody>
             {aggregate.collateral_by_asset.map((entry) => (
               <tr
-                key={`${entry.asset}-${entry.unpriced ? "unpriced" : "counted"}`}
+                // A KEY IS AN IDENTITY CLAIM. The server itemizes by asset AND
+                // disclosure, so one asset legitimately appears more than once
+                // on one side — the live book already serves weETH COUNTED and
+                // NOT COUNTED together. `collateralRowKey` encodes that whole
+                // pair; keying on `asset + unpriced` made those two rows the
+                // same row to React, and a rerun then reconciled them by guess.
+                key={collateralRowKey(entry)}
                 data-testid="runbook-collateral-row"
                 data-unpriced={String(entry.unpriced)}
+                // The row states which of the three disclosures it carries, in
+                // the wire's own vocabulary — the identity the key is built on,
+                // readable rather than implied by two separate attributes.
+                data-disclosure={collateralDisclosure(entry)}
               >
                 <td className={styles.mono} title={entry.asset}>
                   {/* The symbol is decoration over an address that is already

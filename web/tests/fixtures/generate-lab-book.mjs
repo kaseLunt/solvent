@@ -33,10 +33,18 @@
 //     says it is "present when the scenario carries a market-realization axis"
 //     and eth_minus_30 does not carry one.
 //     ONE DOCUMENTED DERIVED DELTA, kept internally CONSISTENT so the delta is
-//     real in the data and not merely asserted: debt_manager's `after` gains
-//     one eligible account and DM_DELTA of eligible debt, and
-//     `newly_eligible_accounts` / `eligible_debt_delta_usd` are recomputed from
-//     before/after rather than stated independently.
+//     real in the data and not merely asserted: an INVENTED WHOLE ACCOUNT is
+//     added to the debt_manager book on BOTH sides, carrying its own debt and
+//     its own collateral, healthy before the shock and eligible after it. Every
+//     aggregate it touches moves with it — `accounts`, `total_debt_usd`,
+//     `total_collateral_usd` and its itemization, `eligible_accounts`,
+//     `eligible_debt_usd`, `collateral_at_risk_usd`, the histogram census — and
+//     `coverage.in_book` / `batch.position_count` count it as the batch row it
+//     is. `newly_eligible_accounts` / `eligible_debt_delta_usd` /
+//     `bad_debt_delta_usd` are recomputed from before/after rather than stated
+//     independently, and `checkResponse` refuses the write unless every
+//     cross-field law the web renders holds over the WHOLE body. The derivation
+//     and its arithmetic are written out at the derivation site below.
 //
 //  3. run-book.weeth.batch2.json and run-book.eth_minus_30.batch2.json — files
 //     2 and the run-book example with ONE field changed: the batch id, plus its
@@ -177,6 +185,15 @@
 //     detail panel used to render "excluded engines: none — every engine's book
 //     reached the run" on. One screen, two mutually exclusive statements.
 //
+// 12. run-book.collateral-collision.json + .swap.json — WAVE W-BS-B,
+//     FINDING 4: THE COLLIDING COLLATERAL ROWS. The run-book example with ONE
+//     entry added to the aave engine's `collateral_by_asset` on both sides —
+//     the same weETH it already counts, carried a second time under the
+//     NOT-COUNTED disclosure, which is the pair the LIVE book already serves.
+//     The `.swap` file is the same body with different balances, so a rerun
+//     that reconciled the two rows by guessing shows a wrong number rather than
+//     a silent identity error. Full derivation at the write site.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -252,34 +269,137 @@ const DM_DELTA = 1_500_000_000n;
 // `movers`/`movers_total`/`movers_note` (on each engine) ride the run-book
 // example VERBATIM into every file this generator spreads from, exactly as
 // every other field does. Only ONE file derives anything: the eth_minus_30
-// delta below, which invents a newly-eligible Debt Manager account — and an
-// invented account that appeared in `newly_eligible_accounts` while appearing
-// in NEITHER histogram nor `movers` would be a fixture contradicting itself,
-// which is precisely the shape this wave exists to make impossible.
+// delta below, which invents a newly-eligible Debt Manager account.
 //
-// So the delta is carried through all three, mechanically:
+// # THE ACCOUNT IS A WHOLE ACCOUNT, not a number added to one field
+//
+// An earlier revision of this block added DM_DELTA to `eligible_debt_usd` and
+// stopped there. The result was a body that could not exist: 5,700,000,000 of
+// eligible debt inside 4,620,000,000 of total debt, two accounts both eligible
+// against one account's worth of debt, and three accounts across the two
+// engines under a `coverage.in_book` of 2. Every one of those is a cross-field
+// law the web renders, and `checkSide` greened all of it because it checked
+// only three of them.
+//
+// So the invented account is constructed as an ACCOUNT and every aggregate it
+// touches moves with it, mechanically:
 //
 //   accounts        1 -> 2 on BOTH sides. A price shock does not create an
-//                   account; the second one must exist before it can flip. The
-//                   base example's `accounts: 1` under an after-side
-//                   `eligible_accounts: 2` was an INHERITED inconsistency (it
-//                   predates 1.6.0 and nothing rendered it); closing it here is
-//                   what lets the histogram census be checkable at all.
+//                   account; the second one must exist before it can flip.
+//   total_debt_usd  += its borrowings, on BOTH sides. The Debt Manager's debt
+//                   leg is USD-NORMALIZED and no scenario re-prices it (see
+//                   `stable_depeg_0995_in_band`'s own out_of_model note), so
+//                   the same figure rides both sides.
+//   total_collateral_usd / collateral_by_asset
+//                   += its holding, valued at its OWN price on each side. The
+//                   entries still sum to the total EXACTLY, which is the
+//                   contract's own law for that itemization.
+//   eligible_*      the account is healthy before and eligible after, so it
+//                   contributes to the AFTER side only — and `eligible_debt_usd`
+//                   moves by exactly DM_DELTA, which is what keeps
+//                   `eligible_debt_delta_usd` at its pinned "1500000000".
+//   collateral_at_risk_usd / bad_debt_usd
+//                   the waterfall's OWN formulas, applied to the after side:
+//                   at risk is Σ min(collateral, debt × (1+bonus)) and bad debt
+//                   is Σ max(0, debt − collateral/(1+bonus)) over the eligible
+//                   (internal/risk/waterfall.go:96-103). Those two formulas
+//                   reproduce the example's own 4,000,000,000 and 239,603,961
+//                   from its own inputs, which is why they are trustworthy here.
 //   hf_histogram    census == that side's `accounts`, and the count strictly
-//                   below the 1.00 edge == that side's `eligible_accounts`.
-//                   Before: the new account is healthy, in [1.10, 1.25).
-//                   After: it has dropped below 0.90 — which IS the flip.
-//   movers          exactly one row, the account that flipped, with the exact
-//                   rational on each side matching the bucket it sits in
-//                   (1.15 healthy -> 0.85 eligible) and `debt_usd` equal to
-//                   DM_DELTA, the debt that became eligible.
+//                   below the 1.00 edge == that side's `eligible_accounts`. The
+//                   BUCKET IS DERIVED from the same exact rational the mover row
+//                   publishes, so the two can never tell different stories.
+//   movers          exactly one row, the account that flipped, carrying that
+//                   rational on each side and `debt_usd` equal to DM_DELTA.
+//   coverage        `in_book` is the count of positions that reached the run —
+//                   Σ of each engine's `accounts` — so it moves too, and
+//                   `batch_positions` / `batch.position_count` with it.
 //
-// `collateral_by_asset` is untouched by this delta: the derivation moves
-// ELIGIBILITY, not collateral, and the example's counted entry already sums to
-// the `total_collateral_usd` neither side changes.
+// # What is NOT recomputed, and why
+//
+// The example's OWN rows are left byte-identical. This file's provenance (item
+// 2 above) is a RE-IDENTIFICATION of the contract's example, not a re-run of
+// the scenario against it: the example was measured under an oracles-held
+// scenario, so its two sides are identical by construction, and recomputing
+// them here would be this generator inventing a book rather than deriving one.
+// The invented account is therefore the only row that responds to the shock —
+// and it responds by the scenario's OWN committed factor, read from the
+// definition's `shocks[]` rather than typed in.
 
 /** A fixture account for the one derived Debt Manager flip. */
 const DM_FLIP_ACCOUNT = "0x00000000000000000000000000000000000d0002";
+
+/**
+ * The collateral that account holds. It is an invented identity in the SAME
+ * register as the account itself, and it is deliberately NOT the example's own
+ * weETH entry: two holdings of ONE asset at ONE price move by ONE factor, so
+ * folding the invented balance into that entry would make the entry claim a
+ * price move the example's own held-flat bytes contradict. A separate asset
+ * keeps every entry internally exact. No symbol is served for it, because the
+ * registry holds none and the contract says one is never invented.
+ */
+const DM_FLIP_ASSET = "0x00000000000000000000000000000000000d0003";
+const DM_FLIP_ASSET_DECIMALS = 18;
+const DM_FLIP_AMOUNT = 2_500_000_000_000_000_000n; // 2.5 tokens at 18 decimals
+const DM_FLIP_PRICE_BEFORE = 1_000_000_000n; // $1,000.000000 in the DM's 6-dec USD
+
+// The Debt Manager's committed weETH configuration, the same pair the seeded
+// API fixture welds against: threshold 80e18/100e18 and an ADDITIVE 1e18 bonus
+// over HUNDRED_PERCENT = 100e18, i.e. +1%.
+const DM_LT_NUM = 80n;
+const DM_LT_DEN = 100n;
+const DM_BONUS_NUM = 101n;
+const DM_BONUS_DEN = 100n;
+
+/** The scenario's OWN factor on its own axis — read, never typed in. */
+const ethShock = ethDefinition.shocks.find((shock) => shock.axis === "eth_usd");
+if (ethShock === undefined) {
+  console.error("generate-lab-book.mjs: the eth_minus_30 definition carries no eth_usd shock");
+  process.exit(1);
+}
+const FACTOR_NUM = BigInt(ethShock.factor_num);
+const FACTOR_DEN = BigInt(ethShock.factor_den);
+
+const TOKEN_UNIT = 10n ** BigInt(DM_FLIP_ASSET_DECIMALS);
+
+/** floor(amount × price / 10^decimals) — the Debt Manager's own valuation. */
+const dmValue = (amount, price) => (amount * price) / TOKEN_UNIT;
+
+const DM_FLIP_PRICE_AFTER = (DM_FLIP_PRICE_BEFORE * FACTOR_NUM) / FACTOR_DEN;
+const DM_FLIP_VALUE_BEFORE = dmValue(DM_FLIP_AMOUNT, DM_FLIP_PRICE_BEFORE);
+const DM_FLIP_VALUE_AFTER = dmValue(DM_FLIP_AMOUNT, DM_FLIP_PRICE_AFTER);
+
+// floor(value × LT / HUNDRED_PERCENT), per token then summed — one token here.
+const DM_FLIP_MAXBORROW_BEFORE = (DM_FLIP_VALUE_BEFORE * DM_LT_NUM) / DM_LT_DEN;
+const DM_FLIP_MAXBORROW_AFTER = (DM_FLIP_VALUE_AFTER * DM_LT_NUM) / DM_LT_DEN;
+
+// THE FLIP IS ASSERTED FROM THE ARITHMETIC, not assumed. The Debt Manager's
+// test is STRICT — borrowings > maxBorrowLT — and equality is healthy.
+if (DM_DELTA > DM_FLIP_MAXBORROW_BEFORE) {
+  console.error(
+    `generate-lab-book.mjs: the invented account is already eligible BEFORE the shock ` +
+      `(${String(DM_DELTA)} > ${String(DM_FLIP_MAXBORROW_BEFORE)}), so nothing flips`,
+  );
+  process.exit(1);
+}
+if (DM_DELTA <= DM_FLIP_MAXBORROW_AFTER) {
+  console.error(
+    `generate-lab-book.mjs: the invented account is still healthy AFTER the shock ` +
+      `(${String(DM_DELTA)} <= ${String(DM_FLIP_MAXBORROW_AFTER)}), so nothing flips`,
+  );
+  process.exit(1);
+}
+
+// The waterfall's own two measures, over the ONE eligible-after account.
+// internal/risk/waterfall.go:96-103.
+const DM_FLIP_AT_RISK_AFTER = (() => {
+  const seizable = (DM_DELTA * DM_BONUS_NUM) / DM_BONUS_DEN;
+  return seizable < DM_FLIP_VALUE_AFTER ? seizable : DM_FLIP_VALUE_AFTER;
+})();
+const DM_FLIP_BAD_DEBT_AFTER = (() => {
+  const recoverable = (DM_FLIP_VALUE_AFTER * DM_BONUS_DEN) / DM_BONUS_NUM;
+  return DM_DELTA > recoverable ? DM_DELTA - recoverable : 0n;
+})();
 
 /** Clone a histogram, adding `delta` to the count of one labelled bucket. */
 const withBucket = (histogram, label, delta) => {
@@ -291,6 +411,27 @@ const withBucket = (histogram, label, delta) => {
     process.exit(1);
   }
   return { ...histogram, buckets };
+};
+
+/**
+ * The bucket an EXACT RATIONAL num/den falls in, tested the way the server
+ * tests it: lower_wad × den <= num × wad_scale < upper_wad × den, with no
+ * division and therefore no rounding. Deriving the label rather than typing it
+ * is what makes the histogram and the mover row incapable of disagreeing.
+ */
+const bucketLabelForRational = (histogram, num, den) => {
+  const scale = BigInt(histogram.wad_scale);
+  for (const bucket of histogram.buckets) {
+    const aboveLower = bucket.lower_wad === null || BigInt(bucket.lower_wad) * den <= num * scale;
+    const belowUpper = bucket.upper_wad === null || num * scale < BigInt(bucket.upper_wad) * den;
+    if (aboveLower && belowUpper) {
+      return bucket.label;
+    }
+  }
+  console.error(
+    `generate-lab-book.mjs: no bucket holds the rational ${String(num)}/${String(den)}`,
+  );
+  return process.exit(1);
 };
 
 /** The count of accounts strictly below the 1.00 edge — the eligible region. */
@@ -307,33 +448,208 @@ const belowOne = (histogram) =>
 const census = (histogram) =>
   histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) + histogram.infinite_count;
 
-/** Fail the generation rather than write a self-contradicting side. */
+const fail = (message) => {
+  console.error(`generate-lab-book.mjs: ${message}`);
+  process.exit(1);
+};
+
+/**
+ * Fail the generation rather than write a self-contradicting side.
+ *
+ * Every law here is one the web RENDERS, and every one of them is checked
+ * against the untouched contract example first — a law the example itself
+ * violates would refuse honest bytes this generator has no standing to rewrite.
+ */
 const checkSide = (name, side) => {
   if (census(side.hf_histogram) !== side.accounts) {
-    console.error(
-      `generate-lab-book.mjs: ${name} histogram census ${String(census(side.hf_histogram))} ` +
+    fail(
+      `${name} histogram census ${String(census(side.hf_histogram))} ` +
         `!= accounts ${String(side.accounts)}`,
     );
-    process.exit(1);
   }
   if (belowOne(side.hf_histogram) !== side.eligible_accounts) {
-    console.error(
-      `generate-lab-book.mjs: ${name} sub-1.00 count ${String(belowOne(side.hf_histogram))} ` +
+    fail(
+      `${name} sub-1.00 count ${String(belowOne(side.hf_histogram))} ` +
         `!= eligible_accounts ${String(side.eligible_accounts)}`,
     );
-    process.exit(1);
+  }
+  // AN ELIGIBLE ACCOUNT IS AN ACCOUNT. The eligible set is a subset of the
+  // measured set, so its count can never exceed it.
+  if (side.eligible_accounts > side.accounts) {
+    fail(
+      `${name} eligible_accounts ${String(side.eligible_accounts)} ` +
+        `> accounts ${String(side.accounts)} — the eligible set is a SUBSET`,
+    );
+  }
+  // ELIGIBLE DEBT IS A SUBSET OF THE DEBT. `eligible_debt_usd` sums the
+  // borrowings of the eligible accounts; `total_debt_usd` sums every account's.
+  // A book claiming more eligible debt than debt is claiming money it does not
+  // carry — the exact shape this wave exists to make impossible.
+  if (BigInt(side.eligible_debt_usd) > BigInt(side.total_debt_usd)) {
+    fail(
+      `${name} eligible_debt_usd ${side.eligible_debt_usd} ` +
+        `> total_debt_usd ${side.total_debt_usd} — impossible money`,
+    );
+  }
+  // BAD DEBT IS THE UNRECOVERABLE PART OF THE ELIGIBLE DEBT, so it is bounded
+  // by it. (Verified against the example: 239,603,961 of 4,200,000,000.)
+  if (BigInt(side.bad_debt_usd) > BigInt(side.eligible_debt_usd)) {
+    fail(
+      `${name} bad_debt_usd ${side.bad_debt_usd} ` +
+        `> eligible_debt_usd ${side.eligible_debt_usd} — bad debt is a PART of the eligible debt`,
+    );
+  }
+  // COLLATERAL AT RISK IS COLLATERAL. It is Σ min(collateral, debt × (1+bonus))
+  // over the eligible accounts, so the min alone bounds it by the whole book's
+  // counted collateral.
+  if (BigInt(side.collateral_at_risk_usd) > BigInt(side.total_collateral_usd)) {
+    fail(
+      `${name} collateral_at_risk_usd ${side.collateral_at_risk_usd} ` +
+        `> total_collateral_usd ${side.total_collateral_usd}`,
+    );
   }
   const counted = side.collateral_by_asset
     .filter((entry) => entry.value_usd !== null)
     .reduce((sum, entry) => sum + BigInt(entry.value_usd), 0n);
   if (counted !== BigInt(side.total_collateral_usd)) {
-    console.error(
-      `generate-lab-book.mjs: ${name} collateral_by_asset sums ${String(counted)} ` +
+    fail(
+      `${name} collateral_by_asset sums ${String(counted)} ` +
         `!= total_collateral_usd ${side.total_collateral_usd}`,
     );
-    process.exit(1);
+  }
+  // ONE ASSET, ONE DISCLOSURE, ONE ENTRY. The server itemizes by asset AND
+  // disclosure, so a repeated (asset, disclosure) pair is two rows claiming one
+  // identity — the collision the detail view's React key now encodes.
+  const seen = new Set();
+  for (const entry of side.collateral_by_asset) {
+    const disclosure =
+      entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
+    const key = `${entry.asset}::${disclosure}`;
+    if (seen.has(key)) {
+      fail(`${name} carries TWO collateral entries for ${key}`);
+    }
+    seen.add(key);
   }
 };
+
+/**
+ * The laws that live ABOVE one side: the response's own account census against
+ * the coverage it publishes, and each engine's deltas against its two sides.
+ *
+ * `coverage.in_book` is the count of positions that reached the run
+ * (cmd/api/p5_runbook.go: `coverage(v.Positions, len(beforeInputs), refused)`),
+ * and every one of those positions is counted exactly once by its engine's
+ * `accounts`. So the two are the SAME number read two ways, and a book whose
+ * engines name more accounts than the run admits is describing a different book
+ * from the one its coverage describes.
+ */
+const checkResponse = (name, response) => {
+  for (const side of ["before", "after"]) {
+    const accounts = response.engines.reduce((sum, engine) => sum + engine[side].accounts, 0);
+    if (accounts !== response.coverage.in_book) {
+      fail(
+        `${name} ${side}-side accounts across engines ${String(accounts)} ` +
+          `!= coverage.in_book ${String(response.coverage.in_book)}`,
+      );
+    }
+  }
+  // Every position the batch carries is in the run, refused in the batch, or
+  // excluded by this layer. (This scenario covers BOTH engines, so no position
+  // is absent for want of coverage.)
+  const accountedFor =
+    response.coverage.in_book +
+    response.coverage.refused_in_batch +
+    response.coverage.excluded_by_this_layer;
+  if (accountedFor !== response.coverage.batch_positions) {
+    fail(
+      `${name} coverage accounts for ${String(accountedFor)} positions ` +
+        `but batch_positions is ${String(response.coverage.batch_positions)}`,
+    );
+  }
+  if (response.batch.position_count !== response.coverage.batch_positions) {
+    fail(
+      `${name} batch.position_count ${String(response.batch.position_count)} ` +
+        `!= coverage.batch_positions ${String(response.coverage.batch_positions)}`,
+    );
+  }
+  if (response.batch.refused_count !== response.coverage.refused_in_batch) {
+    fail(
+      `${name} batch.refused_count ${String(response.batch.refused_count)} ` +
+        `!= coverage.refused_in_batch ${String(response.coverage.refused_in_batch)}`,
+    );
+  }
+  for (const engine of response.engines) {
+    const label = `${name} ${engine.engine}`;
+    checkSide(`${label} before`, engine.before);
+    checkSide(`${label} after`, engine.after);
+    // THE DELTAS ARE AFTER MINUS BEFORE. The matrix cell renders
+    // `eligible_debt_delta_usd` as the run's own answer, so a delta that did
+    // not come from the two sides beside it is a number with no witness.
+    const deltas = [
+      ["newly_eligible_accounts", engine.newly_eligible_accounts,
+        engine.after.eligible_accounts - engine.before.eligible_accounts],
+      ["eligible_debt_delta_usd", BigInt(engine.eligible_debt_delta_usd),
+        BigInt(engine.after.eligible_debt_usd) - BigInt(engine.before.eligible_debt_usd)],
+      ["bad_debt_delta_usd", BigInt(engine.bad_debt_delta_usd),
+        BigInt(engine.after.bad_debt_usd) - BigInt(engine.before.bad_debt_usd)],
+    ];
+    for (const [field, stated, derived] of deltas) {
+      if (stated !== derived) {
+        fail(`${label} ${field} states ${String(stated)} but after-minus-before is ${String(derived)}`);
+      }
+    }
+    // The disclosure sentence derives "top S of T" from these two; a slice
+    // longer than the total it is a window onto is not a window.
+    if (engine.movers.length > engine.movers_total) {
+      fail(
+        `${label} serves ${String(engine.movers.length)} movers ` +
+          `under a movers_total of ${String(engine.movers_total)}`,
+      );
+    }
+    // A DEBT MANAGER MOVER AND THE HISTOGRAM MUST TELL ONE STORY: the rational
+    // the row publishes has to land where the flip says it landed.
+    for (const mover of engine.movers) {
+      if (mover.became_eligible !== true) {
+        continue;
+      }
+      const before = bucketLabelForRational(
+        engine.before.hf_histogram, BigInt(mover.hf_before_num), BigInt(mover.hf_before_den),
+      );
+      const after = bucketLabelForRational(
+        engine.after.hf_histogram, BigInt(mover.hf_after_num), BigInt(mover.hf_after_den),
+      );
+      if (engine.before.hf_histogram.buckets.find((b) => b.label === before).count === 0) {
+        fail(`${label} mover ${mover.account} sits in an EMPTY before-bucket ${before}`);
+      }
+      if (engine.after.hf_histogram.buckets.find((b) => b.label === after).count === 0) {
+        fail(`${label} mover ${mover.account} sits in an EMPTY after-bucket ${after}`);
+      }
+    }
+  }
+};
+
+/** The example's own COUNTED sentence, reused rather than paraphrased. */
+const countedNote = runBookExample.engines
+  .flatMap((engine) => engine.before.collateral_by_asset)
+  .find((entry) => entry.value_usd !== null)?.note;
+if (countedNote === undefined) {
+  console.error("generate-lab-book.mjs: the run-book example carries no counted collateral entry");
+  process.exit(1);
+}
+
+/** The invented account's holding, valued at its own price on one side. */
+const flipCollateralEntry = (valueUSD) => ({
+  asset: DM_FLIP_ASSET,
+  decimals: DM_FLIP_ASSET_DECIMALS,
+  amount: DM_FLIP_AMOUNT.toString(),
+  value_usd: valueUSD.toString(),
+  unpriced: false,
+  note: countedNote,
+});
+
+/** The server's own ordering: by asset, then by disclosure. */
+const byAsset = (entries) =>
+  [...entries].sort((a, b) => (a.asset < b.asset ? -1 : a.asset > b.asset ? 1 : 0));
 
 const ethRunBook = {
   ...runBookExample,
@@ -345,27 +661,64 @@ const ethRunBook = {
   shocks: ethDefinition.shocks,
   out_of_model: ethDefinition.out_of_model,
   applied_shocks: ethDefinition.results.flatMap((result) => result.applied_shocks),
+  // The invented account is a REAL ROW of the batch, so the batch counts it.
+  batch: {
+    ...runBookExample.batch,
+    position_count: runBookExample.batch.position_count + 1,
+  },
+  coverage: {
+    ...runBookExample.coverage,
+    batch_positions: runBookExample.coverage.batch_positions + 1,
+    in_book: runBookExample.coverage.in_book + 1,
+  },
   engines: runBookExample.engines.map((engine) => {
     if (engine.engine !== "debt_manager") {
       return { ...engine, market_realization: null };
     }
-    // The second account must EXIST on both sides before it can flip on one.
+    // The second account must EXIST on both sides before it can flip on one,
+    // and it brings its own debt and its own collateral with it.
     const before = {
       ...engine.before,
       accounts: engine.before.accounts + 1,
-      hf_histogram: withBucket(engine.before.hf_histogram, "1.10 – 1.25", 1),
+      total_debt_usd: (BigInt(engine.before.total_debt_usd) + DM_DELTA).toString(),
+      total_collateral_usd: (
+        BigInt(engine.before.total_collateral_usd) + DM_FLIP_VALUE_BEFORE
+      ).toString(),
+      collateral_by_asset: byAsset([
+        ...engine.before.collateral_by_asset,
+        flipCollateralEntry(DM_FLIP_VALUE_BEFORE),
+      ]),
+      hf_histogram: withBucket(
+        engine.before.hf_histogram,
+        bucketLabelForRational(engine.before.hf_histogram, DM_FLIP_MAXBORROW_BEFORE, DM_DELTA),
+        1,
+      ),
     };
     const after = {
       ...engine.after,
       accounts: engine.after.accounts + 1,
       eligible_accounts: engine.after.eligible_accounts + 1,
       eligible_debt_usd: (BigInt(engine.after.eligible_debt_usd) + DM_DELTA).toString(),
+      total_debt_usd: (BigInt(engine.after.total_debt_usd) + DM_DELTA).toString(),
+      total_collateral_usd: (
+        BigInt(engine.after.total_collateral_usd) + DM_FLIP_VALUE_AFTER
+      ).toString(),
+      collateral_at_risk_usd: (
+        BigInt(engine.after.collateral_at_risk_usd) + DM_FLIP_AT_RISK_AFTER
+      ).toString(),
+      bad_debt_usd: (BigInt(engine.after.bad_debt_usd) + DM_FLIP_BAD_DEBT_AFTER).toString(),
+      collateral_by_asset: byAsset([
+        ...engine.after.collateral_by_asset,
+        flipCollateralEntry(DM_FLIP_VALUE_AFTER),
+      ]),
       // The flip IS the account crossing the 1.00 edge — the same event
       // `newly_eligible_accounts` counts, drawn where a reader can see it.
-      hf_histogram: withBucket(engine.after.hf_histogram, "< 0.90", 1),
+      hf_histogram: withBucket(
+        engine.after.hf_histogram,
+        bucketLabelForRational(engine.after.hf_histogram, DM_FLIP_MAXBORROW_AFTER, DM_DELTA),
+        1,
+      ),
     };
-    checkSide("eth_minus_30 debt_manager before", before);
-    checkSide("eth_minus_30 debt_manager after", after);
     return {
       ...engine,
       before,
@@ -379,9 +732,9 @@ const ethRunBook = {
       bad_debt_delta_usd: (
         BigInt(after.bad_debt_usd) - BigInt(before.bad_debt_usd)
       ).toString(),
-      // The one account that flipped, with the exact rational on each side
-      // matching the bucket it sits in above, and the debt that became
-      // eligible equal to the delta that created it.
+      // The one account that flipped, with the EXACT rational on each side —
+      // the same two rationals the histogram placement above is derived from —
+      // and the debt that became eligible equal to the delta that created it.
       movers: [
         {
           account: DM_FLIP_ACCOUNT,
@@ -389,9 +742,9 @@ const ethRunBook = {
           hf_before_wad: null,
           hf_after_wad: null,
           hf_drop_wad: null,
-          hf_before_num: ((DM_DELTA * 115n) / 100n).toString(),
+          hf_before_num: DM_FLIP_MAXBORROW_BEFORE.toString(),
           hf_before_den: DM_DELTA.toString(),
-          hf_after_num: ((DM_DELTA * 85n) / 100n).toString(),
+          hf_after_num: DM_FLIP_MAXBORROW_AFTER.toString(),
           hf_after_den: DM_DELTA.toString(),
           became_eligible: true,
           debt_usd: DM_DELTA.toString(),
@@ -410,6 +763,11 @@ const ethRunBook = {
     };
   }),
 };
+
+// THE WHOLE BODY, checked — both engines, both sides, the response-level census
+// and every engine's deltas. Checking only the side that was edited is how the
+// impossible book got written in the first place.
+checkResponse("run-book.eth_minus_30", ethRunBook);
 
 write("run-book.eth_minus_30.json", ethRunBook);
 write("run-book.eth_minus_30.batch2.json", {
@@ -605,3 +963,93 @@ write("run-book.partial-hole.json", {
   ...runBookExample,
   engines: runBookExample.engines.filter((engine) => engine.engine !== refusal.engine),
 });
+
+// --- 12: THE COLLIDING COLLATERAL ROWS (Wave W-BS-B, finding 4) ------------
+//
+// The run-book example with ONE entry ADDED to the aave engine's
+// `collateral_by_asset`, on both sides: the SAME weETH asset it already counts,
+// carried a second time under the NOT-COUNTED disclosure. Nothing else moves —
+// a not-counted holding is outside `total_collateral_usd` by construction, so
+// the counted entries still sum to it exactly.
+//
+// This is not a hypothetical shape. `cmd/api/p5_runbook.go` keys the
+// itemization by asset AND disclosure (`runCollateralKey`), and the LIVE book
+// already serves weETH twice for an Aave aggregate: COUNTED for the accounts
+// that enabled it as collateral and NOT COUNTED for the accounts that did not.
+// The contract's own `unpriced` description says the same thing in the other
+// direction ("An entry may appear twice for one asset").
+//
+// It is the fixture the OLD React key could not tell apart. COUNTED and
+// NOT-COUNTED share `unpriced: false`, so `asset + unpriced` gave both rows one
+// key, and a rerun then reconciled two rows that claimed one identity. The
+// `.swap` file is the second serve of that rerun: the same two colliding rows
+// with DIFFERENT balances and a different counted value, so a row that survived
+// stale, doubled or dropped shows up as a wrong number on the page rather than
+// as a silent identity error.
+//
+// The NOT-COUNTED note is `runCollateralNotCounted`'s own sentence from
+// cmd/api/p5_runbook.go, verbatim — the wire's words, not a paraphrase.
+
+const NOT_COUNTED_NOTE =
+  "NOT COUNTED AS COLLATERAL: the engine counts none of this holding toward collateral " +
+  "(Aave `usedAsCollateral = false`), so the reviewed arithmetic assigned it no value and none " +
+  "is invented here. `amount` is exact; none of this holding is inside `total_collateral_usd`.";
+
+/**
+ * The example's aave engine with its counted weETH entry restated at
+ * `countedAmount`/`countedValue` and shadowed by a NOT-COUNTED row for the SAME
+ * asset at `notCountedAmount`. `total_collateral_usd` follows the counted value,
+ * because the counted entries sum to it EXACTLY and that law does not bend.
+ */
+const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) => {
+  const side = (aggregate) => {
+    const counted = aggregate.collateral_by_asset.find((entry) => entry.value_usd !== null);
+    if (counted === undefined) {
+      console.error("generate-lab-book.mjs: the aave side carries no counted collateral entry");
+      process.exit(1);
+    }
+    const rest = aggregate.collateral_by_asset.filter((entry) => entry !== counted);
+    return {
+      ...aggregate,
+      total_collateral_usd: countedValue,
+      collateral_by_asset: [
+        { ...counted, amount: countedAmount, value_usd: countedValue },
+        // Same asset, same `unpriced: false`, a DIFFERENT disclosure — the
+        // pair the row key must keep apart.
+        {
+          ...counted,
+          amount: notCountedAmount,
+          value_usd: null,
+          unpriced: false,
+          note: NOT_COUNTED_NOTE,
+        },
+        ...rest,
+      ],
+    };
+  };
+  return {
+    ...runBookExample,
+    engines: runBookExample.engines.map((engine) =>
+      engine.engine === "aave_v3_etherfi"
+        ? { ...engine, before: side(engine.before), after: side(engine.after) }
+        : engine,
+    ),
+  };
+};
+
+const collision = withCollidingCollateral(
+  "2000000000000000000",
+  "800000000000",
+  "5000000000000000000",
+);
+const collisionSwap = withCollidingCollateral(
+  "3000000000000000000",
+  "1200000000000",
+  "7000000000000000000",
+);
+
+checkResponse("run-book.collateral-collision", collision);
+checkResponse("run-book.collateral-collision.swap", collisionSwap);
+
+write("run-book.collateral-collision.json", collision);
+write("run-book.collateral-collision.swap.json", collisionSwap);

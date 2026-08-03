@@ -120,10 +120,17 @@ func TestRunBookServesTheDistributionShiftAndTheMovers(t *testing.T) {
 	// The DM account was ALREADY eligible at par, so nothing FLIPPED: zero
 	// movers, and `newly_eligible_accounts` is zero for the same reason. This
 	// pair is what proves movers_total is a flip count, not a headcount of the
-	// eligible.
+	// eligible — the two numbers COINCIDE here, so the pair that proves they are
+	// DIFFERENT MEASURES lives in
+	// TestRunBookMoversTotalIsNotTheNetEligibilityChange below.
 	require.Empty(t, asList(t, dm["movers"]), "an already-eligible account did not BECOME eligible")
 	require.Equal(t, float64(0), dm["movers_total"])
 	require.Equal(t, float64(0), dm["newly_eligible_accounts"])
+	// AND THE HEADCOUNT DISAGREES WITH BOTH: one account is eligible on this
+	// engine on both sides, so a movers_total that were a headcount of the
+	// eligible would read 1 here rather than 0.
+	require.Equal(t, float64(1), asMap(t, dm["after"])["eligible_accounts"],
+		"the DM account is eligible at par and stays eligible")
 	require.Contains(t, dm["movers_note"], "DEBT THAT BECAME ELIGIBLE")
 	require.Contains(t, dm["movers_note"], "not `newly_eligible_accounts`")
 
@@ -185,4 +192,144 @@ func TestRunBookOracleHeldScenarioMovesNobody(t *testing.T) {
 		require.JSONEq(t, string(before), string(after),
 			"%s: oracle marks held — the distribution is identical BY CONSTRUCTION", name)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Wave W-BS-B, finding 5 — THE MIXED-DIRECTION BOOK
+// ---------------------------------------------------------------------------
+
+// seedAaveUSDCParams writes the SECOND Aave param-ledger row the
+// mixed-direction book needs: USDC's own liquidation threshold and bonus. The
+// weETH row `seedSubstrate` writes says nothing about USDC, and
+// `weldLegParams` refuses a leg whose threshold no custodied row asserts — so
+// without this row the account that counts USDC as collateral would be an
+// honest reconstruction REFUSAL rather than a position in the run.
+//
+// It sits at the same effective block as the weETH row with a distinct
+// effective_log_index, so `riskfeed.FoldParams` still walks a totally ordered
+// ledger.
+func (f *apiFixture) seedAaveUSDCParams(t *testing.T) {
+	t.Helper()
+	_, err := f.admin.Exec(f.ctx,
+		`INSERT INTO param_history (engine, chain_id, asset, ltv, liq_threshold, liq_bonus,
+		                            emode_category, effective_block, effective_log_index, source_event, tx_hash)
+		 VALUES ($1,$2,$3,$4::numeric,$5::numeric,$6::numeric,0,$7,1,$8,$9)`,
+		risk.AaveParamEngine, int64(fxETHChain), fxUSDCEth.Bytes(),
+		fxMDUSDCLTV, fxMDUSDCLTBps, fxMDUSDCBonusBps,
+		int64(fxParamEffectiveBlock), "CollateralConfigurationChanged", hash32(0x55))
+	require.NoError(t, err)
+}
+
+// seedMixedDirectionBatch writes the mixed-direction book as a NEWER batch over
+// whatever the fixture already carries, through `store.WriteRiskBatch` — the
+// same production writer every other batch in this suite goes through, with the
+// same validation and the same completeness accounting. Every handler resolves
+// the newest complete batch inside its own request snapshot, so the run-book
+// route answers over this book from the next call onward.
+func (f *apiFixture) seedMixedDirectionBatch(t *testing.T, key string) {
+	t.Helper()
+	f.seedAaveUSDCParams(t)
+	id, err := f.store.WriteRiskBatch(f.ctx, fxMixedDirectionBatchWrite(key))
+	require.NoError(t, err)
+	require.Positive(t, id)
+	f.batchID = id
+}
+
+// TestRunBookMoversTotalIsNotTheNetEligibilityChange is the DISCRIMINATING pin
+// the 0/0 and 1/1 cases above cannot be: a served book in which `movers_total`
+// and `newly_eligible_accounts` are DIFFERENT NUMBERS.
+//
+// Two Aave accounts cross DOWN through 1.00 and one crosses UP (its debt is
+// denominated in the shocked asset, so a 30% ETH drawdown shrinks the debt
+// while its USDC collateral holds its mark). The mover count admits strict
+// drops only and reads 2; the eligibility change is a signed NET over the two
+// sides and reads 1, because the flip back to healthy is subtracted out of it.
+//
+// THE MUTATION THIS KILLS: serializing `ea.eligibleAccounts - eb.eligibleAccounts`
+// as `movers_total`. Against this book that reports 1 where the book has 2.
+// Against every earlier fixture — 0/0 on the Debt Manager, 1/1 on Aave — it
+// reports the right number for the wrong reason and passes.
+func TestRunBookMoversTotalIsNotTheNetEligibilityChange(t *testing.T) {
+	f := newP5Fixture(t)
+	f.seedMixedDirectionBatch(t, "wave-w-bs-b-mixed-direction-1")
+
+	out := f.postJSON(t, "/v1/scenarios/eth_minus_30/run-book", runBookContractPath, http.StatusOK)
+	engines := map[string]map[string]any{}
+	for _, e := range asList(t, out["engines"]) {
+		m := asMap(t, e)
+		engines[m["engine"].(string)] = m
+	}
+	aave := engines["aave_v3_etherfi"]
+	require.NotNil(t, aave, "eth_minus_30 covers the Aave engine")
+	before, after := asMap(t, aave["before"]), asMap(t, aave["after"])
+
+	// The whole book reached the run: four positions, none refused, none
+	// unrebuildable. A mixed-direction result over a partially-excluded book
+	// would prove nothing about either count.
+	cov := asMap(t, out["coverage"])
+	require.Equal(t, float64(4), cov["batch_positions"])
+	require.Equal(t, float64(4), cov["in_book"])
+	require.Equal(t, float64(0), cov["excluded_by_this_layer"])
+	require.Equal(t, float64(3), before["accounts"], "three Aave accounts in the run")
+	require.Equal(t, float64(3), after["accounts"])
+
+	// --- THE TWO NUMBERS, AND THEY DIFFER ------------------------------------
+	require.Equal(t, float64(2), aave["movers_total"],
+		"A and B crossed DOWN; both are movers")
+	require.Equal(t, float64(1), aave["newly_eligible_accounts"],
+		"after 2 minus before 1 — the NET count, with C's flip back to healthy subtracted out")
+	require.NotEqual(t, aave["movers_total"], aave["newly_eligible_accounts"],
+		"THE POINT: movers_total is a one-direction count and newly_eligible_accounts is a signed net")
+
+	// The eligibility census on each side, which is where the net comes from.
+	require.Equal(t, float64(1), before["eligible_accounts"], "only C is eligible at par")
+	require.Equal(t, float64(2), after["eligible_accounts"], "A and B after the shock; C is out")
+
+	// --- THE MOVERS ARE A AND B, RANKED BY THE DROP ---------------------------
+	movers := asList(t, aave["movers"])
+	require.Len(t, movers, 2)
+	m0, m1 := asMap(t, movers[0]), asMap(t, movers[1])
+	require.Equal(t, fxMDAcctDropsA.Hex(), m0["account"], "the larger drop ranks first")
+	require.Equal(t, fxMDAcctDropsB.Hex(), m1["account"])
+	require.Equal(t, fxMDAHFWad, m0["hf_before_wad"])
+	require.Equal(t, fxMDAHFWadAfter, m0["hf_after_wad"])
+	require.Equal(t, fxMDADropWad, m0["hf_drop_wad"])
+	require.Equal(t, fxMDBHFWad, m1["hf_before_wad"])
+	require.Equal(t, fxMDBHFWadAfter, m1["hf_after_wad"])
+	require.Equal(t, fxMDBDropWad, m1["hf_drop_wad"])
+
+	// AND THE ACCOUNT THAT CROSSED THE OTHER WAY IS IN NEITHER DIRECTION'S LIST.
+	// `movers` admits strict drops only, so a risen health factor is not a
+	// mover — and nothing on this wire reports it as one.
+	for _, mv := range movers {
+		require.NotEqual(t, fxMDAcctRises.Hex(), asMap(t, mv)["account"],
+			"an account whose health factor ROSE is not a mover")
+	}
+
+	// --- THE HISTOGRAMS AGREE, AND SHOW WHY THE NET IS NOT THE GROSS ----------
+	// Below 1.00: one account before (C), two after (A and B). The population
+	// moved by ONE while THREE accounts changed bucket and one of them left the
+	// region — which is exactly the limitation the run-book detail's histogram
+	// sentence now discloses instead of calling the difference a crossing count.
+	histBefore := asMap(t, before["hf_histogram"])
+	histAfter := asMap(t, after["hf_histogram"])
+	require.Equal(t, float64(1), runBookBucket(t, histBefore, "< 0.90"), "C at 0.74375")
+	require.Equal(t, float64(1), runBookBucket(t, histBefore, "1.05 – 1.10"), "B at 1.08")
+	require.Equal(t, float64(1), runBookBucket(t, histBefore, "1.10 – 1.25"), "A at 1.20")
+	require.Equal(t, float64(2), runBookBucket(t, histAfter, "< 0.90"), "A at 0.84, B at 0.756")
+	require.Equal(t, float64(1), runBookBucket(t, histAfter, "1.05 – 1.10"), "C at 1.0625")
+	require.Equal(t, float64(0), runBookBucket(t, histAfter, "1.10 – 1.25"))
+	// Both sides are a whole census of the engine's rows.
+	require.Equal(t, float64(3), runBookHistogramCensus(t, histBefore))
+	require.Equal(t, float64(3), runBookHistogramCensus(t, histAfter))
+
+	// --- THE DEBT MANAGER RIDES ALONG AS THE CONTROL --------------------------
+	// Nothing flips there under this scenario, so its two numbers COINCIDE at
+	// zero — the vacuous pair, kept in view beside the discriminating one so the
+	// difference between the two shapes is on the record.
+	dm := engines["debt_manager"]
+	require.Equal(t, float64(0), dm["movers_total"])
+	require.Equal(t, float64(0), dm["newly_eligible_accounts"])
+	require.Equal(t, float64(1), asMap(t, dm["after"])["eligible_accounts"],
+		"already eligible at par and still eligible: a headcount would read 1, both counts read 0")
 }

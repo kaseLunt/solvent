@@ -436,6 +436,312 @@ func fxDMRefused() *positionRow {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// THE MIXED-DIRECTION AAVE BOOK (Wave W-BS-B, finding 5).
+// ---------------------------------------------------------------------------
+//
+// `movers_total` and `newly_eligible_accounts` are DIFFERENT MEASURES, and the
+// serving layer's own `movers_note` says so. Until this fixture existed, the
+// distinction was only ever asserted on books where the two COINCIDE — 0/0 on
+// the Debt Manager and 1/1 on Aave — so a serving layer that simply serialized
+// the net count as the mover count passed every assertion. A guard that cannot
+// fail is not a guard.
+//
+// This book makes them differ, over three Aave accounts under eth_minus_30
+// (ETH -30%: weETH-on-mainnet 400000000000 -> 280000000000, USDC held flat
+// because the scenario's propagation matrix does not name it):
+//
+//	A  weETH collateral, USDC debt   HF 1.20    -> 0.840    CROSSES DOWN
+//	B  weETH collateral, USDC debt   HF 1.08    -> 0.756    CROSSES DOWN
+//	C  USDC collateral, weETH DEBT   HF 0.74375 -> 1.0625   CROSSES UP
+//
+// C is the row that separates the two numbers, and it is not a contrivance:
+// Aave lets an account BORROW weETH, and a 30% ETH drawdown shrinks a
+// weETH-denominated debt in USD terms while USDC collateral holds its mark. So
+// its health factor RISES and it flips eligible -> healthy.
+//
+//	movers_total            = 2   A and B. `runBookMovers` admits STRICT DROPS
+//	                              only, so C — whose health factor rose — is
+//	                              not a mover in either direction.
+//	newly_eligible_accounts = 1   after 2 (A, B) minus before 1 (C). A NET
+//	                              count, and the flip back to healthy is
+//	                              subtracted out of it.
+//
+// A serving layer that serialized the net count as `movers_total` reports 1
+// where this book has 2, and the DB test fails.
+//
+// # Why this is the AAVE analogue and not the Debt Manager's
+//
+// The Debt Manager's eligibility is MONOTONE under every committed scenario, so
+// the mixed-direction book is not constructible there from honest rows. Its
+// test is `borrowings > maxBorrowLT`; `borrowings` is the USD-NORMALIZED debt
+// leg, which no scenario re-prices (`stable_depeg_0995_in_band` says so in its
+// own out_of_model: "a stable depeg re-prices stable COLLATERAL but not
+// outstanding debt"), and every committed shock moves prices DOWN or holds
+// them — the stable snap only pulls a shocked price toward par, never above the
+// mark it started from. So maxBorrowLT can only fall and an eligible DM account
+// can never become healthy. Building one anyway would mean inventing a price
+// path the deployed provider cannot produce.
+//
+// # The arithmetic, hand-derived (aave.go's own rounding, not a paraphrase)
+//
+//	collateral_base = floor(amount x price / 10^dec)      per reserve
+//	debt_base       = ceil (amount x price / 10^dec)      per reserve
+//	weighted_lt     = collateral_base x lt_bps            counting reserves only
+//	avg_lt_bps      = floor(Σ weighted_lt / Σ collateral_base)   DISCLOSURE only
+//	hf_wad          = floor( floor((Σ weighted_lt x 1e18 + floor(D/2)) / D) / 1e4 )
+//	hf rational     = Σ weighted_lt / (1e4 x D)           NOT reduced
+//	liquidatable    = hf_wad < 1e18                       STRICT; 1e18 is healthy
+//
+//	A  weETH 2e18 @ 4e11    -> collateral_base 800000000000, weighted_lt 6480000000000000
+//	   USDC 5400e6 @ 1e8    -> debt_base       540000000000
+//	   avg_lt   = 6480000000000000 / 800000000000            = 8100
+//	   inner    = (6480000000000000 x 1e18 + 270000000000) / 540000000000
+//	            = 12000000000000000000000 + 0                = 1.2e22
+//	   hf_wad   = 1.2e22 / 1e4                               = 1200000000000000000  HEALTHY
+//	   AFTER: collateral_base floor(2e18 x 2.8e11/1e18)      =  560000000000
+//	          weighted_lt 8100 x 560000000000                = 4536000000000000
+//	          inner (4536000000000000 x 1e18 + 2.7e11)/5.4e11 = 8.4e21
+//	          hf_wad                                          =  840000000000000000  ELIGIBLE
+//	          drop = 1200000000000000000 - 840000000000000000 = 360000000000000000
+//
+//	B  weETH 1e18 @ 4e11    -> collateral_base 400000000000, weighted_lt 3240000000000000
+//	   USDC 3000e6 @ 1e8    -> debt_base       300000000000
+//	   avg_lt   = 3240000000000000 / 400000000000            = 8100
+//	   inner    = (3240000000000000 x 1e18 + 150000000000) / 300000000000 = 1.08e22
+//	   hf_wad                                                = 1080000000000000000  HEALTHY
+//	   AFTER: collateral_base                                =  280000000000
+//	          weighted_lt 8100 x 280000000000                = 2268000000000000
+//	          inner (2268000000000000 x 1e18 + 1.5e11)/3e11  = 7.56e21
+//	          hf_wad                                          =  756000000000000000  ELIGIBLE
+//	          drop = 1080000000000000000 - 756000000000000000 = 324000000000000000
+//
+//	C  USDC 7000e6 @ 1e8    -> collateral_base 700000000000, weighted_lt 5950000000000000
+//	                           (USDC's OWN threshold, 8500bps — a second ledger row)
+//	   weETH 2e18 @ 4e11    -> debt_base       800000000000   ceil, and exact here
+//	   avg_lt   = 5950000000000000 / 700000000000            = 8500
+//	   inner    = (5950000000000000 x 1e18 + 400000000000) / 800000000000 = 7.4375e21
+//	   hf_wad   = 7.4375e21 / 1e4                            =  743750000000000000  ELIGIBLE
+//	   AFTER: collateral_base UNCHANGED (USDC is held flat)  =  700000000000
+//	          debt_base ceil(2e18 x 2.8e11/1e18)             =  560000000000
+//	          inner (5950000000000000 x 1e18 + 2.8e11)/5.6e11 = 1.0625e22
+//	          hf_wad                                          = 1062500000000000000  HEALTHY
+//	          the drop is NEGATIVE, so C is not a mover at all
+//
+// A's drop (3.6e17) exceeds B's (3.24e17), so the ranking is total and the
+// order is not a tie the sort has to break.
+
+var (
+	fxMDAcctDropsA = common.HexToAddress("0xD0D0000000000000000000000000000000000001")
+	fxMDAcctDropsB = common.HexToAddress("0xD0D0000000000000000000000000000000000002")
+	fxMDAcctRises  = common.HexToAddress("0xD0D0000000000000000000000000000000000003")
+)
+
+// USDC's OWN Aave configuration for the mixed-direction book. It is a SECOND
+// param-ledger row (weETH's is the one `seedSubstrate` writes), because C
+// counts USDC as collateral and `weldLegParams` refuses a threshold no
+// custodied row asserts.
+const (
+	fxMDUSDCLTV      = "8000"
+	fxMDUSDCLTBps    = "8500"
+	fxMDUSDCBonusBps = "10450"
+)
+
+// Hand-derived, every one of them, from the block comment above.
+const (
+	fxMDAWeETHAmount  = "2000000000000000000"
+	fxMDACollBase     = "800000000000"
+	fxMDAWeightedLT   = "6480000000000000"
+	fxMDAUSDCDebt     = "5400000000"
+	fxMDADebtBase     = "540000000000"
+	fxMDAHFWad        = "1200000000000000000"
+	fxMDAHFDen        = "5400000000000000"
+	fxMDAHFWadAfter   = "840000000000000000"
+	fxMDADropWad      = "360000000000000000"
+
+	fxMDBWeETHAmount = "1000000000000000000"
+	fxMDBCollBase    = "400000000000"
+	fxMDBWeightedLT  = "3240000000000000"
+	fxMDBUSDCDebt    = "3000000000"
+	fxMDBDebtBase    = "300000000000"
+	fxMDBHFWad       = "1080000000000000000"
+	fxMDBHFDen       = "3000000000000000"
+	fxMDBHFWadAfter  = "756000000000000000"
+	fxMDBDropWad     = "324000000000000000"
+
+	fxMDCUSDCAmount   = "7000000000"
+	fxMDCCollBase     = "700000000000"
+	fxMDCWeightedLT   = "5950000000000000"
+	fxMDCWeETHDebt    = "2000000000000000000"
+	fxMDCDebtBase     = "800000000000"
+	fxMDCHFWad        = "743750000000000000"
+	fxMDCHFDen        = "8000000000000000"
+	fxMDCHFWadAfter   = "1062500000000000000"
+)
+
+// The Aave engine's persisted rollups over A + B + C:
+//
+//	collateral 800000000000 + 400000000000 + 700000000000 = 1900000000000
+//	debt       540000000000 + 300000000000 + 800000000000 = 1640000000000
+const (
+	fxMDAaveTotalCollateral = "1900000000000"
+	fxMDAaveTotalDebt       = "1640000000000"
+)
+
+// fxMDPrice is one 8-decimal Aave price witness, FRESH by the fixture's own
+// budget (age 30s against a 180s budget), so `fresh <=> age < budget` holds
+// rather than being asserted.
+func fxMDPrice(account, asset common.Address, value string) store.RiskBatchPriceInput {
+	return store.RiskBatchPriceInput{
+		Engine: risk.AaveEngine, Account: account.Bytes(), Asset: asset.Bytes(),
+		ChainID: int64(fxETHChain), Source: fxAaveSource, Provenance: risk.ProvenanceAdapterOutput,
+		Value: bi(value), Decimals: i16p(8), BlockNumber: i64p(fxAavePriceBlock),
+		SourceAsOf:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+		BudgetSeconds: fxPriceBudgetSecs, Verdict: riskfeed.VerdictFresh, AgeSeconds: i64p(fxDMWeETHAge),
+	}
+}
+
+// fxMDCollateralDown is one of the two accounts whose health factor CROSSES
+// DOWN under the shock: weETH collateral against USDC debt, the ordinary shape.
+// Every leg column riskd writes is written here, ZEROS INCLUDED, for the reason
+// fxAavePosition sets out — an absent number and a zero are different claims and
+// the per-leg verification treats them as such.
+func fxMDCollateralDown(
+	account common.Address,
+	weETHAmount, collBase, weightedLT, usdcDebt, debtBase, hfWad, hfDen string,
+) *positionRow {
+	return &positionRow{
+		Engine:              risk.AaveEngine,
+		Account:             account.Bytes(),
+		Status:              store.RiskPositionComputed,
+		Flags:               []string{},
+		ValueDecimals:       8,
+		HFNum:               bi(weightedLT),
+		HFDen:               bi(hfDen),
+		HFWad:               bi(hfWad),
+		Liquidatable:        boolp(false),
+		TotalCollateralBase: bi(collBase),
+		TotalDebtBase:       bi(debtBase),
+		WeightedLTSum:       bi(weightedLT),
+		AvgLTBps:            bi(fxAaveLTBps),
+		BalancesBlock:       fxAaveBlock,
+		ParamsBlock:         fxAaveParamBlock,
+		OldestPriceInput:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+		Legs: []legRow{
+			{
+				Engine: risk.AaveEngine, Account: account.Bytes(), Asset: fxUSDCEth.Bytes(), Decimals: 6,
+				LiveDebt: bi(usdcDebt), DebtBase: bi(debtBase),
+				LiveCollateral: bi("0"), CollateralBase: bi("0"), WeightedLT: bi("0"),
+				UsedAsCollateral: boolp(false), DebtIndexBlock: u64p(fxAaveBlock),
+			},
+			{
+				Engine: risk.AaveEngine, Account: account.Bytes(), Asset: fxWeETHEth.Bytes(), Decimals: 18,
+				LiveCollateral: bi(weETHAmount), CollateralBase: bi(collBase), WeightedLT: bi(weightedLT),
+				LiveDebt: bi("0"), DebtBase: bi("0"),
+				UsedAsCollateral: boolp(true), CollateralIndexBlock: u64p(fxAaveBlock),
+				LiqThreshold: bi(fxAaveLTBps), LiqBonus: bi(fxAaveBonusBps),
+			},
+		},
+		Prices: []store.RiskBatchPriceInput{
+			fxMDPrice(account, fxUSDCEth, fxAaveUSDCPrice),
+			fxMDPrice(account, fxWeETHEth, fxAaveWeETHPrice),
+		},
+	}
+}
+
+// fxMDDebtInShockedAsset is the account that CROSSES UP: its DEBT is weETH and
+// its collateral is USDC, so the same 30% ETH drawdown that sinks A and B
+// shrinks this account's debt while its collateral holds its mark. It is
+// eligible at par and healthy after the shock — the flip the NET count
+// subtracts and the mover count never sees.
+func fxMDDebtInShockedAsset() *positionRow {
+	return &positionRow{
+		Engine:              risk.AaveEngine,
+		Account:             fxMDAcctRises.Bytes(),
+		Status:              store.RiskPositionComputed,
+		Flags:               []string{},
+		ValueDecimals:       8,
+		HFNum:               bi(fxMDCWeightedLT),
+		HFDen:               bi(fxMDCHFDen),
+		HFWad:               bi(fxMDCHFWad),
+		Liquidatable:        boolp(true),
+		TotalCollateralBase: bi(fxMDCCollBase),
+		TotalDebtBase:       bi(fxMDCDebtBase),
+		WeightedLTSum:       bi(fxMDCWeightedLT),
+		AvgLTBps:            bi(fxMDUSDCLTBps),
+		BalancesBlock:       fxAaveBlock,
+		ParamsBlock:         fxAaveParamBlock,
+		OldestPriceInput:    timep(fxBase.Add(-time.Duration(fxDMWeETHAge) * time.Second)),
+		Legs: []legRow{
+			{
+				// USDC as COLLATERAL — the leg that needs its own ledger row.
+				Engine: risk.AaveEngine, Account: fxMDAcctRises.Bytes(), Asset: fxUSDCEth.Bytes(), Decimals: 6,
+				LiveCollateral: bi(fxMDCUSDCAmount), CollateralBase: bi(fxMDCCollBase),
+				WeightedLT: bi(fxMDCWeightedLT),
+				LiveDebt:   bi("0"), DebtBase: bi("0"),
+				UsedAsCollateral: boolp(true), CollateralIndexBlock: u64p(fxAaveBlock),
+				LiqThreshold: bi(fxMDUSDCLTBps), LiqBonus: bi(fxMDUSDCBonusBps),
+			},
+			{
+				// weETH as DEBT. It carries NO threshold: the account counts none
+				// of it as collateral, so no param row is required or consulted.
+				Engine: risk.AaveEngine, Account: fxMDAcctRises.Bytes(), Asset: fxWeETHEth.Bytes(), Decimals: 18,
+				LiveDebt: bi(fxMDCWeETHDebt), DebtBase: bi(fxMDCDebtBase),
+				LiveCollateral: bi("0"), CollateralBase: bi("0"), WeightedLT: bi("0"),
+				UsedAsCollateral: boolp(false), DebtIndexBlock: u64p(fxAaveBlock),
+			},
+		},
+		Prices: []store.RiskBatchPriceInput{
+			fxMDPrice(fxMDAcctRises, fxUSDCEth, fxAaveUSDCPrice),
+			fxMDPrice(fxMDAcctRises, fxWeETHEth, fxAaveWeETHPrice),
+		},
+	}
+}
+
+// fxMixedDirectionBatchWrite is the whole mixed-direction batch: the three Aave
+// rows above plus the standard Debt Manager position, so the book has both
+// engines and the DM's own honest pair (nothing flips there) rides along as the
+// control. The aggregates are summed from the rows, which `store.WriteRiskBatch`
+// requires and the serving completeness predicate re-checks.
+func fxMixedDirectionBatchWrite(key string) store.RiskBatchWrite {
+	positions := []*positionRow{
+		fxMDCollateralDown(fxMDAcctDropsA, fxMDAWeETHAmount, fxMDACollBase, fxMDAWeightedLT,
+			fxMDAUSDCDebt, fxMDADebtBase, fxMDAHFWad, fxMDAHFDen),
+		fxMDCollateralDown(fxMDAcctDropsB, fxMDBWeETHAmount, fxMDBCollBase, fxMDBWeightedLT,
+			fxMDBUSDCDebt, fxMDBDebtBase, fxMDBHFWad, fxMDBHFDen),
+		fxMDDebtInShockedAsset(),
+		fxDMPosition(),
+	}
+	w := store.RiskBatchWrite{
+		Producer:             fxBatchProduce,
+		Watermarks:           fxWatermarks(),
+		RequiredEngines:      fxRequiredEngines(),
+		RequiredSweepEngines: []string{risk.DMEngine},
+		Retention:            100,
+		MaterializationKey:   key,
+		Notify:               notifyChannel,
+		Aggregates: []store.RiskEngineAggregate{
+			{
+				Engine: risk.AaveEngine, ValueDecimals: 8,
+				Positions: 3, ComputedPositions: 3, RefusedPositions: 0, FlaggedPositions: 0,
+				// ONE eligible at par: C. A and B are healthy until the shock.
+				LiquidatablePositions: 1,
+				TotalCollateral:       bi(fxMDAaveTotalCollateral), TotalDebt: bi(fxMDAaveTotalDebt),
+			},
+			{
+				Engine: risk.DMEngine, ValueDecimals: 6,
+				Positions: 1, ComputedPositions: 1, RefusedPositions: 0, FlaggedPositions: 0,
+				LiquidatablePositions: 1,
+				TotalCollateral:       bi(fxDMCollateralUSD), TotalDebt: bi(fxDMBorrowings),
+			},
+		},
+	}
+	for _, p := range positions {
+		w.Positions = append(w.Positions, toWrite(p))
+	}
+	return w
+}
+
 func fxPositions() []*positionRow {
 	return []*positionRow{fxAavePosition(), fxAaveRefused(), fxDMPosition(), fxDMRefused()}
 }
