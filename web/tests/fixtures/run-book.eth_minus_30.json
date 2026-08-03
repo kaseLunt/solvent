@@ -65,6 +65,18 @@
   ],
   "applied_shocks": [
     {
+      "asset": "0x4200000000000000000000000000000000000006",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "factor_num": "70",
+      "factor_den": "100",
+      "before": "1000000000",
+      "after": "700000000",
+      "snapped": false,
+      "base_snapped": false,
+      "cap_bound": false
+    },
+    {
       "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
       "chain_id": 1,
       "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
@@ -77,7 +89,20 @@
       "cap_bound": false
     }
   ],
-  "held_flat": [],
+  "held_flat": [
+    {
+      "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "chain_id": 1,
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "value": "100000000"
+    },
+    {
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "chain_id": 10,
+      "source": "priceproviderv2",
+      "value": "4000000000"
+    }
+  ],
   "engines": [
     {
       "engine": "aave_v3_etherfi",
@@ -116,13 +141,13 @@
               "label": "1.05 – 1.10",
               "lower_wad": "1050000000000000000",
               "upper_wad": "1100000000000000000",
-              "count": 0
+              "count": 1
             },
             {
               "label": "1.10 – 1.25",
               "lower_wad": "1100000000000000000",
               "upper_wad": "1250000000000000000",
-              "count": 1
+              "count": 0
             },
             {
               "label": "1.25 – 1.50",
@@ -149,6 +174,14 @@
         },
         "collateral_by_asset": [
           {
+            "asset": "0x0000000000000000000000000000000000000BAD",
+            "decimals": 18,
+            "amount": "5000000000000000000",
+            "value_usd": null,
+            "unpriced": true,
+            "note": "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
+          },
+          {
             "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
             "symbol": "weETH",
             "decimals": 18,
@@ -156,25 +189,17 @@
             "value_usd": "800000000000",
             "unpriced": false,
             "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
-          },
-          {
-            "asset": "0x0000000000000000000000000000000000000BAD",
-            "decimals": 18,
-            "amount": "5000000000000000000",
-            "value_usd": null,
-            "unpriced": true,
-            "note": "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
           }
         ]
       },
       "after": {
         "accounts": 1,
-        "eligible_accounts": 0,
-        "total_collateral_usd": "800000000000",
+        "eligible_accounts": 1,
+        "total_collateral_usd": "560000000000",
         "total_debt_usd": "600000000000",
-        "eligible_debt_usd": "0",
-        "collateral_at_risk_usd": "0",
-        "bad_debt_usd": "0",
+        "eligible_debt_usd": "600000000000",
+        "collateral_at_risk_usd": "560000000000",
+        "bad_debt_usd": "66666666667",
         "hf_histogram": {
           "comparator": "hf_wad",
           "wad_scale": "1000000000000000000",
@@ -183,7 +208,7 @@
               "label": "< 0.90",
               "lower_wad": null,
               "upper_wad": "900000000000000000",
-              "count": 0
+              "count": 1
             },
             {
               "label": "0.90 – 1.00",
@@ -207,7 +232,7 @@
               "label": "1.10 – 1.25",
               "lower_wad": "1100000000000000000",
               "upper_wad": "1250000000000000000",
-              "count": 1
+              "count": 0
             },
             {
               "label": "1.25 – 1.50",
@@ -234,33 +259,47 @@
         },
         "collateral_by_asset": [
           {
-            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
-            "symbol": "weETH",
-            "decimals": 18,
-            "amount": "2000000000000000000",
-            "value_usd": "800000000000",
-            "unpriced": false,
-            "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
-          },
-          {
             "asset": "0x0000000000000000000000000000000000000BAD",
             "decimals": 18,
             "amount": "5000000000000000000",
             "value_usd": null,
             "unpriced": true,
             "note": "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
+          },
+          {
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "symbol": "weETH",
+            "decimals": 18,
+            "amount": "2000000000000000000",
+            "value_usd": "560000000000",
+            "unpriced": false,
+            "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
           }
         ]
       },
-      "newly_eligible_accounts": 0,
-      "eligible_debt_delta_usd": "0",
-      "bad_debt_delta_usd": "0",
-      "movers": [],
-      "movers_total": 0,
-      "movers_note": "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. This scenario moves no oracle mark, so NO account's health factor dropped and there is nothing to rank. `movers` carries all 0 of them.",
+      "newly_eligible_accounts": 1,
+      "eligible_debt_delta_usd": "600000000000",
+      "bad_debt_delta_usd": "66666666667",
+      "movers": [
+        {
+          "account": "0xAAaA000000000000000000000000000000000001",
+          "engine": "aave_v3_etherfi",
+          "hf_before_wad": "1080000000000000000",
+          "hf_after_wad": "756000000000000000",
+          "hf_drop_wad": "324000000000000000",
+          "hf_before_num": null,
+          "hf_before_den": null,
+          "hf_after_num": null,
+          "hf_after_den": null,
+          "became_eligible": null,
+          "debt_usd": null
+        }
+      ],
+      "movers_total": 1,
+      "movers_note": "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. Only accounts whose health factor STRICTLY DROPPED are movers. An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here — it is not a quiet zero. `movers` carries all 1 of them.",
       "market_realization": null,
       "projection": null,
-      "note": "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
+      "note": "delta-only: after minus before over the positions in the run, in this engine's own 8-decimal unit."
     },
     {
       "engine": "debt_manager",
@@ -332,7 +371,8 @@
         },
         "collateral_by_asset": [
           {
-            "asset": "0x00000000000000000000000000000000000d0003",
+            "asset": "0x4200000000000000000000000000000000000006",
+            "symbol": "WETH",
             "decimals": 18,
             "amount": "2500000000000000000",
             "value_usd": "2500000000",
@@ -417,7 +457,8 @@
         },
         "collateral_by_asset": [
           {
-            "asset": "0x00000000000000000000000000000000000d0003",
+            "asset": "0x4200000000000000000000000000000000000006",
+            "symbol": "WETH",
             "decimals": 18,
             "amount": "2500000000000000000",
             "value_usd": "1750000000",
@@ -457,7 +498,7 @@
       "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked by their debt in this engine's 6-decimal USD, largest first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries all 1 of them.",
       "market_realization": null,
       "projection": null,
-      "note": "delta-only: after minus before over the positions in the run."
+      "note": "delta-only: after minus before over the positions in the run, in this engine's own 6-decimal unit."
     }
   ],
   "excluded_engines": [],

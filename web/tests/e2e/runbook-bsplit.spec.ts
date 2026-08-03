@@ -174,15 +174,57 @@ test("the DEBT MANAGER's movers table shows the flip, the rational and the debt"
   await expect(note).toContainText("not `newly_eligible_accounts`");
 });
 
-test("AAVE's movers table speaks wads — and an unmoved engine says so", async ({ page }) => {
+test("AAVE's movers table speaks WADS — the drop that ranked the row", async ({ page }) => {
+  // Wave W-BS-C. This assertion used to read the Aave engine's movers as ZERO,
+  // because the eth_minus_30 fixture carried the oracles-held example's Aave
+  // rows unchanged — bit-identical sides under a scenario that shocks ETH by
+  // 30%. eth_minus_30's propagation matrix DECLARES weETH-on-mainnet against
+  // `eth_usd`, and a declared asset cannot hold still, so the generator now
+  // re-measures that engine from the contract's own committed eth_minus_30
+  // result and the account it moves is a real mover with real wads.
   await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
 
   const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
-  // The eth_minus_30 fixture derives no Aave delta, so nothing moved there.
-  // That is stated as zero MOVEMENT, never as a blank table — and in AAVE's own
-  // vocabulary, because Aave ranks strict health-factor drops and the Debt
-  // Manager ranks eligibility flips. One sentence for both would be wrong on
-  // at least one of them.
+  await expect(aave).toHaveAttribute("data-movers-total", "1");
+  // AAVE'S OWN VOCABULARY: it ranks STRICT health-factor drops, so the sentence
+  // says drops. The Debt Manager's sentence says eligibility flips, and one
+  // sentence for both would be wrong on at least one of them.
+  await expect(aave.getByTestId("runbook-movers-disclosure")).toHaveText(
+    "Showing all 1 account whose health factor strictly dropped, ranked by the drop.",
+  );
+
+  const rows = aave.getByTestId("runbook-mover");
+  await expect(rows).toHaveCount(1);
+  // THE WAD COLUMNS, and the drop that ranked the row: 1.08 → 0.756 is the
+  // committed result's own measurement, so the drop is 0.324 exactly.
+  await expect(aave).toContainText("hf drop");
+  await expect(aave.getByTestId("runbook-mover-drop")).toHaveText("0.324");
+  await expect(rows.first()).toContainText("1.08");
+  await expect(rows.first()).toContainText("0.756");
+  // No Debt Manager columns: Aave has no eligibility-flip verdict and no
+  // maxBorrowLT rational, so it is not asked for either.
+  await expect(aave).not.toContainText("maxBorrowLT / borrowings before");
+  await expect(aave.getByTestId("runbook-mover-flip")).toHaveCount(0);
+  // The ranking rule renders VERBATIM.
+  await expect(aave.getByTestId("runbook-movers-note")).toContainText("HEALTH-FACTOR DROP");
+});
+
+test("an engine that moved NOTHING says so — in its own vocabulary, never a blank table", async ({
+  page,
+}) => {
+  // The oracles-held scenario is the honest home for this assertion: its
+  // committed definition carries `shocks: []` and `propagation: []`, so NO
+  // price moves and NO health factor drops — by construction rather than by a
+  // fixture holding something still that the matrix says must move.
+  await runScenario(
+    page,
+    "weeth_market_depeg_oracles_held",
+    fixture("run-book.weeth_market_depeg_oracles_held.json"),
+  );
+
+  const aave = page.locator('[data-testid="runbook-movers"][data-engine="aave_v3_etherfi"]');
+  // Zero MOVEMENT is stated, never rendered as an empty table the reader has to
+  // interpret — and it is stated in Aave's own vocabulary.
   await expect(aave).toHaveAttribute("data-movers-total", "0");
   await expect(aave.getByTestId("runbook-movers-disclosure")).toHaveText(
     "No account's health factor dropped under this scenario on this engine.",
@@ -190,6 +232,14 @@ test("AAVE's movers table speaks wads — and an unmoved engine says so", async 
   await expect(aave.getByTestId("runbook-mover")).toHaveCount(0);
   // The ranking rule still renders — the reader learns what WOULD have ranked.
   await expect(aave.getByTestId("runbook-movers-note")).toContainText("HEALTH-FACTOR DROP");
+
+  // And the Debt Manager says the same thing in ITS vocabulary, which is a
+  // different sentence about a different one-direction list.
+  const dm = page.locator('[data-testid="runbook-movers"][data-engine="debt_manager"]');
+  await expect(dm).toHaveAttribute("data-movers-total", "0");
+  await expect(dm.getByTestId("runbook-movers-disclosure")).toHaveText(
+    "No account's debt became eligible under this scenario on this engine.",
+  );
 });
 
 test("THE UNPRICED HOLDING RENDERS IN THE REFUSAL REGISTER — never as a zero", async ({ page }) => {
