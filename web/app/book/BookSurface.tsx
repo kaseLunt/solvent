@@ -22,7 +22,13 @@ import { getSolventClient } from "@/lib/api";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { RefusedTag } from "@/components/RefusedTag";
 import { formatBlock, EM_DASH } from "@/lib/format";
-import { batchFreshnessLine, batchFreshnessStamp, receiptIdentity } from "@/lib/freshness";
+import {
+  batchFreshnessLine,
+  batchFreshnessLineUnknown,
+  batchFreshnessStamp,
+  batchFreshnessStampUnknown,
+  receiptIdentity,
+} from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { BOOK_DEK_LOADING, bookDek } from "./bookDek";
 import { BookStatRows } from "./BookStatRows";
@@ -71,33 +77,46 @@ export function BookSurface() {
   // whose network is not up yet must not trade a real book (rendered under an
   // age that is still climbing, and still true) for an error strip. A
   // FOREGROUND failure is still stated, in full.
-  const loadBook = useCallback((options?: { keepOnFailure?: boolean }) => {
+  //
+  // WAVE R6 (round-13 MEDIUM 2): AND IT REPORTS. `keepOnFailure` hides the
+  // failure from the SCREEN — deliberately, and correctly — but R5 also hid it
+  // from the age hook, which fired this off and forgot it. With both clocks
+  // blind, a failed repair therefore left an understated age standing as if the
+  // wire had confirmed it. So this resolves TRUE only when a receipt was
+  // applied, and FALSE on every failure, which is what drives the bounded retry.
+  const loadBook = useCallback((options?: { keepOnFailure?: boolean }): Promise<boolean> => {
     const keepOnFailure = options?.keepOnFailure ?? false;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
-    getSolventClient()
+    return getSolventClient()
       .book(controller.signal)
-      .then((book) => {
-        bookBatchRef.current = book.batch.id;
-        setState({ phase: "ok", book });
-      })
-      .catch((cause: unknown) => {
-        if (controller.signal.aborted) return;
-        const failure: BookState =
-          cause instanceof UnavailableError
-            ? {
-                phase: "no-batch",
-                message: cause.body.error.message,
-                retryAfterSeconds: cause.retryAfterSeconds,
-              }
-            : { phase: "error", message: cause instanceof Error ? cause.message : String(cause) };
-        setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
-      });
+      .then(
+        (book) => {
+          bookBatchRef.current = book.batch.id;
+          setState({ phase: "ok", book });
+          return true;
+        },
+        (cause: unknown) => {
+          // An ABORT is a supersession, not an answer: this request was replaced
+          // by a newer one, which will report for itself.
+          if (controller.signal.aborted) return false;
+          const failure: BookState =
+            cause instanceof UnavailableError
+              ? {
+                  phase: "no-batch",
+                  message: cause.body.error.message,
+                  retryAfterSeconds: cause.retryAfterSeconds,
+                }
+              : { phase: "error", message: cause instanceof Error ? cause.message : String(cause) };
+          setState((previous) => (keepOnFailure && previous.phase === "ok" ? previous : failure));
+          return false;
+        },
+      );
   }, []);
 
   useEffect(() => {
-    loadBook();
+    void loadBook();
     return () => { controllerRef.current?.abort(); };
   }, [loadBook]);
 
@@ -111,9 +130,10 @@ export function BookSurface() {
   // surface owns that fetch. The clamped estimate holds the line meanwhile:
   // no spinner over a stale number, and no "refreshing" claim, because the
   // estimate is not a placeholder — it is a true statement about the batch.
-  const reloadBookOnResume = useCallback(() => {
-    loadBook({ keepOnFailure: true });
-  }, [loadBook]);
+  const reloadBookOnResume = useCallback(
+    () => loadBook({ keepOnFailure: true }),
+    [loadBook],
+  );
   //
   // Wave R5 (round-12 MEDIUM): and the anchor is keyed to THIS RESPONSE's
   // identity — `served_at` with the batch id — not to its integer age. The
@@ -121,7 +141,15 @@ export function BookSurface() {
   // number; keyed on the value, a fresh batch that happened to land at the same
   // `age_seconds` as the stale one could not land at all, and the reader kept
   // the estimate's hours over a batch that was minutes old.
-  const liveAgeSeconds = useAnchoredAgeSeconds(
+  //
+  // Wave R6 (round-13 MEDIUM 2): and the reading now carries whether this page
+  // is still ENTITLED to state the age. On a blind resume — proven by the
+  // lifecycle, measured by neither clock — the re-fetch above is the only thing
+  // that can restore a measured age, so its failure is disclosed rather than
+  // absorbed: the age renders UNKNOWN, the retry is bounded, and the book
+  // itself stays on screen throughout. Freshness is never a reason to blank
+  // data.
+  const age = useAnchoredAgeSeconds(
     state.phase === "ok"
       ? {
           ageSeconds: state.book.batch.age_seconds,
@@ -140,7 +168,7 @@ export function BookSurface() {
     (batchId: number) => {
       if (reportedBatchRef.current === batchId) return;
       reportedBatchRef.current = batchId;
-      if (bookBatchRef.current !== null && bookBatchRef.current !== batchId) loadBook();
+      if (bookBatchRef.current !== null && bookBatchRef.current !== batchId) void loadBook();
     },
     [loadBook],
   );
@@ -165,7 +193,9 @@ export function BookSurface() {
             id, so "batch #5" can never be read as "now". */}
         {state.phase === "ok" && (
           <p className={styles.freshness} data-testid="book-freshness">
-            {batchFreshnessLine(state.book.batch, liveAgeSeconds ?? undefined)}
+            {age.unresolved
+              ? batchFreshnessLineUnknown(state.book.batch, age.refreshFailed)
+              : batchFreshnessLine(state.book.batch, age.seconds ?? undefined)}
           </p>
         )}
       </div>
@@ -261,7 +291,9 @@ export function BookSurface() {
             label="batch"
             value={
               <span data-testid="book-stamp-freshness">
-                {batchFreshnessStamp(state.book.batch, liveAgeSeconds ?? undefined)}
+                {age.unresolved
+                  ? batchFreshnessStampUnknown(state.book.batch, age.refreshFailed)
+                  : batchFreshnessStamp(state.book.batch, age.seconds ?? undefined)}
               </span>
             }
           />

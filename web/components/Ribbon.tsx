@@ -36,6 +36,22 @@ export type RibbonProps =
        * beyond what LIVE already says.
        */
       batchAgeSuffix?: string | null;
+      /**
+       * Wave R6 — the same slot, carrying a REFUSAL instead of a computed age:
+       * `· batch age UNKNOWN since resume · refreshing`.
+       *
+       * It exists because SILENCE in this slot reads as freshness. When a blind
+       * resume leaves the age unmeasurable, rendering nothing would be the
+       * round-13 defect exactly; rendering the understated `Xh old` would be a
+       * false claim; and rendering a stale verdict would be a different false
+       * claim, since the page does not know that either. So the slot says what
+       * is true: the age is not known right now.
+       *
+       * Mutually exclusive with `batchAgeSuffix` — the caller passes one or the
+       * other, never both, and this component renders the unknown first if it
+       * is somehow handed both.
+       */
+      batchAgeUnknown?: string | null;
     }
   | {
       mode: "proof";
@@ -60,10 +76,17 @@ export function Ribbon(props: RibbonProps) {
       <span className={`${styles.badge} ${styles.live}`}>
         <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />
         LIVE · WATERMARKED
-        {props.batchAgeSuffix !== undefined && props.batchAgeSuffix !== null && (
-          <span className={styles.batchAge} data-testid="ribbon-batch-age">
-            {props.batchAgeSuffix}
+        {props.batchAgeUnknown !== undefined && props.batchAgeUnknown !== null ? (
+          <span className={styles.batchAgeUnknown} data-testid="ribbon-batch-age-unknown">
+            {props.batchAgeUnknown}
           </span>
+        ) : (
+          props.batchAgeSuffix !== undefined &&
+          props.batchAgeSuffix !== null && (
+            <span className={styles.batchAge} data-testid="ribbon-batch-age">
+              {props.batchAgeSuffix}
+            </span>
+          )
         )}
       </span>
       {props.superseded === true && (

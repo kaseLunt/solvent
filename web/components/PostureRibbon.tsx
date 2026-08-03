@@ -1,8 +1,8 @@
 "use client";
 
-import { usePosture } from "@/lib/posture";
+import { usePosture, usePostureRefresh } from "@/lib/posture";
 import { formatBlock } from "@/lib/format";
-import { ribbonBatchAgeSuffix } from "@/lib/freshness";
+import { ribbonBatchAgeSuffix, ribbonBatchAgeUnknown } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { Ribbon, type RibbonAsOf } from "./Ribbon";
 import styles from "./ribbon.module.css";
@@ -27,10 +27,24 @@ export function PostureRibbon() {
   // old where #6 also arrived two minutes old is a NEW receipt and re-anchors;
   // under the old value test it inherited #6's anchor and rendered #7 as old as
   // the batch it replaced.
-  const liveAgeSeconds = useAnchoredAgeSeconds(
+  //
+  // Wave R6 (round-13 MEDIUM 1): AND IT HAS A REPAIR PATH NOW. The ribbon owns
+  // no fetch — its batch arrives on the stream — so when a blind resume left
+  // the age unmeasurable it could do nothing but wait for the publishing loop
+  // to speak. A stream that is healthy but QUIET never does, and the ribbon
+  // went on rendering `LIVE · WATERMARKED` with no stale suffix over data hours
+  // old, for as long as the understated age stayed inside the hour threshold.
+  //
+  // `refresh` is a stream TEARDOWN AND REOPEN (lib/posture.tsx), which obliges
+  // the server to re-deliver the base snapshot the contract promises on every
+  // connection — and that snapshot's `served_at` is a new receipt, which is the
+  // only thing that discharges an unknown age.
+  const refreshPosture = usePostureRefresh();
+  const age = useAnchoredAgeSeconds(
     posture.batch !== null && posture.batchReceiptId !== null
       ? { ageSeconds: posture.batch.age_seconds, receiptId: posture.batchReceiptId }
       : null,
+    refreshPosture,
   );
 
   if (posture.batch !== null && posture.unavailable === null) {
@@ -52,12 +66,23 @@ export function PostureRibbon() {
     // Wave R1 item 3: LIVE describes the STREAM; the suffix describes the
     // BATCH. A batch older than an hour says so, in the dim register, right
     // where the reader is being told the connection is live.
+    //
+    // Wave R6: and while the age is UNRESOLVED the suffix is not computed at
+    // all. `ribbonBatchAgeSuffix` is a function of a number the page has just
+    // admitted it does not have — feeding it the understated one would put the
+    // ribbon back in the state the finding describes (silent, because the
+    // number is still inside the hour), and there is no honest stale claim to
+    // substitute, because staleness is not what the page knows. It knows only
+    // that it cannot say.
     return (
       <Ribbon
         mode="live"
         asOfs={asOfs}
         superseded={posture.batch.supersession.superseded}
-        batchAgeSuffix={ribbonBatchAgeSuffix(liveAgeSeconds ?? posture.batch.age_seconds)}
+        batchAgeSuffix={
+          age.unresolved ? null : ribbonBatchAgeSuffix(age.seconds ?? posture.batch.age_seconds)
+        }
+        batchAgeUnknown={age.unresolved ? ribbonBatchAgeUnknown(age.refreshFailed) : null}
       />
     );
   }

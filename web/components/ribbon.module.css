@@ -40,6 +40,15 @@
   color: var(--ink-3);
 }
 
+/* THE UNKNOWN REGISTER (Wave R6): the same slot, in the WARN colour rather
+   than the dim one. It is louder than the age it replaces because a refusal to
+   state the age is a thing the reader must notice — and it is not the CRIT
+   colour, because "I cannot say" is not a verdict that anything is wrong with
+   the batch. */
+.badge.live .batchAgeUnknown {
+  color: var(--warn);
+}
+
 .badge.waiting {
   color: var(--ink-3);
   border-style: dashed;

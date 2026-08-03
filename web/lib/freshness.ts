@@ -368,10 +368,85 @@ export interface ResumeTracker {
   readonly lastReconcileProven: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// WAVE R6, Codex round-13 MEDIUM (1 and 2): A RESUME THE EVIDENCE PROVES AND
+// THE CLOCKS CANNOT MEASURE IS AN UNKNOWN AGE, NOT A SMALL ONE.
+//
+// R5 made definitive lifecycle evidence outrank both clocks, so the resume is
+// no longer DISMISSED. But being handled is not being measured. On the wake R5
+// exists for — `performance.now()` paused by a three-hour suspend, the wall
+// clock stepped backward on the same wake — the reconcile that now runs
+// recomputes `max(monotonic-derived, wall-derived, floor)` and adds NOTHING.
+// The evidence proves an interval passed; neither clock will say how long.
+//
+// R5 answered that with a re-fetch, and a re-fetch is the right repair. It is
+// not a guarantee:
+//
+//   · THE RIBBON (round-13 finding 1) had no repair path at all. Its batch
+//     arrives on the SSE stream, and a healthy-but-idle stream — heartbeats,
+//     no new snapshot or batch frame — delivers no new receipt for as long as
+//     the publishing loop is quiet. A batch received at 130s before a
+//     three-hour sleep therefore kept rendering under the one-hour threshold
+//     for another ~58 minutes: `LIVE · WATERMARKED`, no stale suffix, over
+//     data hours old.
+//   · THE SURFACES THAT DO OWN A FETCH (round-13 finding 2) consumed the
+//     departure evidence and re-marked both clocks BEFORE the fire-and-forget
+//     re-fetch. When that fetch failed — and `keepOnFailure` hides the failure,
+//     correctly, because a woken laptop with no network must not lose its data
+//     — "2m ago" stood, the proof of the missing interval was already spent,
+//     and every later tick added only post-wake time.
+//
+// Both are the same defect: an age the page cannot measure, rendered as a
+// number. So the law gains ONE new fact, and the callers gain ONE new state.
+//
+// A BLIND RESUME is a reconcile that (a) was forced by DEFINITIVE evidence and
+// (b) the delta test alone would have refused. The evidence proves a gap; the
+// clocks certify none of it; the recompute is therefore an UNDERSTATEMENT of
+// unknown size. A CLOCK-CERTIFIED resume — deltas at or past the coalescing
+// window — is NOT blind: the recompute measures it, and the number that comes
+// out is a true statement about the batch, exactly as R4 established.
+//
+// The caller learns this as `ResumeOutcome.blind`, and what it owes the reader
+// is in live-age.ts and the surfaces: while a blind resume stands unrepaired
+// the age renders UNKNOWN — never the understated number, and never a claim of
+// staleness either, because "I cannot say" is a refusal to state, not a
+// verdict. THE ONLY DISCHARGE IS A NEW RECEIPT. A later clock-certified
+// lifecycle reconcile does not clear it: measuring the time since the wake says
+// nothing about the interval the wake itself swallowed.
+// ---------------------------------------------------------------------------
+
 /** The decision, and the tracker to carry into the next signal. */
 export interface ResumeOutcome {
   readonly reconcile: boolean;
+  /**
+   * This reconcile was PROVEN by evidence and MEASURED by neither clock (Wave
+   * R6) — see `isBlindResume`. False on every non-reconcile, on every
+   * clock-certified resume, and on the first signal of a page that has no mark
+   * to measure against.
+   */
+  readonly blind: boolean;
   readonly tracker: ResumeTracker;
+}
+
+/**
+ * THE BLIND-RESUME PREDICATE, in one place so the surfaces and the tests read
+ * the same sentence:
+ *
+ *     blind = the evidence forced this reconcile
+ *             AND the clock deltas alone would have refused it
+ *
+ * `provenByEvidence` is `trackResumeSignal`'s own `proven` — definitive
+ * evidence that is not the echo of a resume already handled. `clockCertified`
+ * is `shouldReconcileOnResume` with NO evidence: the pure delta test.
+ *
+ * Both halves are required. Definitive evidence with certified deltas is a
+ * resume the recompute genuinely measures (a sleep the wall clock saw), and
+ * calling that unknown would raise a false alarm over an age the page can state
+ * exactly. Certified deltas without definitive evidence is R4's ordinary path,
+ * likewise measured.
+ */
+export function isBlindResume(provenByEvidence: boolean, clockCertified: boolean): boolean {
+  return provenByEvidence && !clockCertified;
 }
 
 /** The tracker a page starts with: nothing reconciled, nothing hidden. */
@@ -444,11 +519,17 @@ export function trackResumeSignal(
 ): ResumeOutcome {
   // A departure is never a resume — it is the evidence that the next return is.
   if (isHideSignal(signal)) {
-    return { reconcile: false, tracker: { ...tracker, hiddenSinceReconcile: true } };
+    return {
+      reconcile: false,
+      blind: false,
+      tracker: { ...tracker, hiddenSinceReconcile: true },
+    };
   }
-  // What the clocks alone would say. Consulted twice below: once to recognise
-  // an echo of a resume already proven, once as the fallback for a signal that
-  // proves nothing.
+  // What the clocks alone would say. Consulted three times below: once to
+  // recognise an echo of a resume already proven, once as the fallback for a
+  // signal that proves nothing, and once — as the second half of
+  // `isBlindResume` — to ask whether this reconcile was MEASURED as well as
+  // proven.
   const clocksAgree = shouldReconcileOnResume(tracker.lastResume, nowMs, wallMs);
   const evidence = resumeEvidenceOf(signal, tracker.hiddenSinceReconcile);
   // THE ECHO: definitive evidence arriving after a reconcile that was ITSELF
@@ -460,11 +541,16 @@ export function trackResumeSignal(
     !tracker.hiddenSinceReconcile &&
     !clocksAgree;
   const proven = evidence === "definitive" && !echo;
-  if (!proven && !clocksAgree) return { reconcile: false, tracker };
+  if (!proven && !clocksAgree) return { reconcile: false, blind: false, tracker };
   // The reconcile CONSUMES the away evidence and re-marks both clocks, so the
   // rest of this burst is measured against a reading taken after the resume.
   return {
     reconcile: true,
+    // WAVE R6: proven, and measured by neither clock. The recompute this
+    // reconcile is about to run cannot add the interval the evidence proves,
+    // so the age it produces is an understatement of unknown size and the
+    // caller must stop presenting it as the age.
+    blind: isBlindResume(proven, clocksAgree),
     tracker: {
       lastResume: { monotonicMs: nowMs, wallMs },
       hiddenSinceReconcile: false,
@@ -481,6 +567,32 @@ export function trackResumeSignal(
  * one tick of becoming true.
  */
 export const AGE_TICK_MS = 60_000;
+
+/**
+ * THE BOUNDED REPAIR SCHEDULE for a blind resume (Wave R6).
+ *
+ * The first attempt is IMMEDIATE and is not in this list — it is the reconcile
+ * itself. These are the delays before the retries that follow a FAILED attempt,
+ * in order. The list ENDS: a page that cannot be repaired says so and stops,
+ * because an unbounded retry over an endpoint that is not answering is a
+ * denial-of-service the reader never asked for, and because "still trying"
+ * forever is not more honest than "I could not".
+ *
+ * Two retries at 5s and 15s cover the failure this exists for — a woken laptop
+ * whose network interface is not up yet, which is a matter of seconds — without
+ * turning a genuinely-down service into a polling loop. Nothing is hidden by
+ * stopping: the surface keeps disclosing that the age is unknown.
+ */
+export const RESUME_RETRY_DELAYS_MS = [5_000, 15_000] as const;
+
+/**
+ * The delay before retry number `retriesMade` (0-based), or null when the
+ * schedule is spent. Null is the whole bound — there is no branch that can
+ * produce another delay.
+ */
+export function resumeRetryDelayMs(retriesMade: number): number | null {
+  return RESUME_RETRY_DELAYS_MS[retriesMade] ?? null;
+}
 
 /**
  * The one freshness line every surface renders:
@@ -503,6 +615,60 @@ export function batchFreshnessLine(batch: FreshnessBatch, ageSeconds?: number): 
 export function batchFreshnessStamp(batch: FreshnessBatch, ageSeconds?: number): string {
   const age = ageSeconds ?? batch.age_seconds;
   return `#${String(batch.id)} · computed ${batch.computed_at} · ${humanAge(age)} ago`;
+}
+
+// ---------------------------------------------------------------------------
+// THE UNKNOWN REGISTER (Wave R6). One vocabulary, three surfaces.
+//
+// What is unknown is the AGE, and only the age. The batch id and its
+// `computed_at` are facts the wire published and they keep rendering verbatim
+// — withholding them would be a second, invented refusal. The data itself is
+// never blanked: a table is not made more honest by being emptied.
+//
+// AND THIS IS NOT A STALENESS CLAIM. "I cannot say how old this is" is a
+// refusal to state, not a verdict that the batch is old. The ribbon therefore
+// does NOT render its `· batch Xh old` suffix while the age is unknown: that
+// suffix is a computed claim, and there is nothing left to compute it from.
+// ---------------------------------------------------------------------------
+
+/** The age line while a blind resume's repair is still being attempted. */
+export const AGE_UNKNOWN_REFRESHING = "age UNKNOWN since resume · refreshing";
+
+/**
+ * The age line once the bounded repair schedule is spent. The data stays; only
+ * the age is withheld, and the reader is told which of the two it is looking at.
+ */
+export const AGE_UNKNOWN_REFRESH_FAILED =
+  "age UNKNOWN since resume · refresh failed, data retained";
+
+/** The one phrase, chosen by whether anything is still being attempted. */
+export function unknownAgePhrase(refreshFailed: boolean): string {
+  return refreshFailed ? AGE_UNKNOWN_REFRESH_FAILED : AGE_UNKNOWN_REFRESHING;
+}
+
+/**
+ * `batchFreshnessStamp` with the age REFUSED rather than stated (Wave R6).
+ * Same shape, same separators, same verbatim `computed_at` — the reader's eye
+ * lands in the same place and finds a refusal instead of a number.
+ */
+export function batchFreshnessStampUnknown(batch: FreshnessBatch, refreshFailed: boolean): string {
+  return `#${String(batch.id)} · computed ${batch.computed_at} · ${unknownAgePhrase(refreshFailed)}`;
+}
+
+/** The head-line form of the same statement. */
+export function batchFreshnessLineUnknown(batch: FreshnessBatch, refreshFailed: boolean): string {
+  return `batch ${batchFreshnessStampUnknown(batch, refreshFailed)}`;
+}
+
+/**
+ * The RIBBON's suffix while the age is unknown — the slot `ribbonBatchAgeSuffix`
+ * would have filled, carrying a refusal instead of a computed `Xh old`.
+ *
+ * It is never null: the whole finding is that SILENCE in this slot reads as
+ * freshness, and a page that cannot state the age must not fall silent.
+ */
+export function ribbonBatchAgeUnknown(refreshFailed: boolean): string {
+  return `· batch ${unknownAgePhrase(refreshFailed)}`;
 }
 
 /**

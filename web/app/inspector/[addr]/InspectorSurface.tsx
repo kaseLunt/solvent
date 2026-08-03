@@ -24,7 +24,13 @@ import {
 } from "@solvent/client";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
-import { batchFreshnessLine, batchFreshnessStamp, receiptIdentity } from "@/lib/freshness";
+import {
+  batchFreshnessLine,
+  batchFreshnessLineUnknown,
+  batchFreshnessStamp,
+  batchFreshnessStampUnknown,
+  receiptIdentity,
+} from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import {
   fetchAddressHistory,
@@ -90,24 +96,32 @@ export function InspectorSurface({ addr }: { addr: string }) {
   // whose network is not up yet must not trade a real position (rendered under
   // an age that is still climbing, and still true) for "lookup unavailable".
   // A FOREGROUND failure is still stated, in full — an error is not an answer.
+  //
+  // WAVE R6 (round-13 MEDIUM 2): AND IT REPORTS. `keepOnFailure` keeps a failed
+  // background repair off the SCREEN; R5 also kept it from the age hook, so a
+  // repair that never landed was indistinguishable from one that did, and an
+  // age the clocks could not measure stood as if the wire had confirmed it.
+  // This resolves TRUE only when a lookup was applied.
   const addressControllerRef = useRef<AbortController | null>(null);
   const loadAddress = useCallback(
-    (options?: { keepOnFailure?: boolean }) => {
-      if (!valid) return;
+    (options?: { keepOnFailure?: boolean }): Promise<boolean> => {
+      if (!valid) return Promise.resolve(false);
       const keepOnFailure = options?.keepOnFailure ?? false;
       addressControllerRef.current?.abort();
       const controller = new AbortController();
       addressControllerRef.current = controller;
-      getSolventClient()
+      return getSolventClient()
         .address(addr, controller.signal)
         .then(
           (lookup) => {
-            if (!controller.signal.aborted) {
-              setAddressResult({ for: addr, state: { status: "ready", lookup } });
-            }
+            // An ABORT is a supersession, not an answer: the request that
+            // replaced this one reports for itself.
+            if (controller.signal.aborted) return false;
+            setAddressResult({ for: addr, state: { status: "ready", lookup } });
+            return true;
           },
           (cause: unknown) => {
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted) return false;
             const failure = {
               for: addr,
               state: { status: "error" as const, message: describeLookupError(cause) },
@@ -120,6 +134,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
                 ? previous
                 : failure,
             );
+            return false;
           },
         );
     },
@@ -127,7 +142,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
   );
 
   useEffect(() => {
-    loadAddress();
+    void loadAddress();
     return () => {
       addressControllerRef.current?.abort();
     };
@@ -141,15 +156,21 @@ export function InspectorSurface({ addr }: { addr: string }) {
   // as well as the monotonic one, with a background re-fetch of THIS lookup —
   // the envelope that carries the age this page renders. Never another
   // surface's, and never a spinner over the number already on screen.
-  const reloadAddressOnResume = useCallback(() => {
-    loadAddress({ keepOnFailure: true });
-  }, [loadAddress]);
+  const reloadAddressOnResume = useCallback(
+    () => loadAddress({ keepOnFailure: true }),
+    [loadAddress],
+  );
   //
   // Wave R5 (round-12 MEDIUM): keyed to THIS lookup's receipt — its own
   // `served_at` with its own batch id — so a re-fetch that returns a fresher
   // batch at the same integer age re-anchors instead of inheriting the age the
   // previous receipt had accumulated.
-  const liveAgeSeconds = useAnchoredAgeSeconds(
+  //
+  // Wave R6 (round-13 MEDIUM 2): and on a BLIND resume — proven by the
+  // lifecycle, measured by neither clock — this page stops stating an age it
+  // cannot support. The position, the history and the activity all stay on
+  // screen; only the age is withheld, and only until a receipt restores it.
+  const age = useAnchoredAgeSeconds(
     addressState.status === "ready"
       ? {
           ageSeconds: addressState.lookup.response.batch.age_seconds,
@@ -278,7 +299,9 @@ export function InspectorSurface({ addr }: { addr: string }) {
           THIS lookup's own envelope — never a borrowed or implied as-of. */}
       {addressState.status === "ready" && (
         <p className={styles.freshness} data-testid="inspector-freshness">
-          {batchFreshnessLine(addressState.lookup.response.batch, liveAgeSeconds ?? undefined)}
+          {age.unresolved
+            ? batchFreshnessLineUnknown(addressState.lookup.response.batch, age.refreshFailed)
+            : batchFreshnessLine(addressState.lookup.response.batch, age.seconds ?? undefined)}
         </p>
       )}
 
@@ -314,10 +337,17 @@ export function InspectorSurface({ addr }: { addr: string }) {
           <Stampline>
             <StampItem
               label="batch"
-              value={batchFreshnessStamp(
-                addressState.lookup.response.batch,
-                liveAgeSeconds ?? undefined,
-              )}
+              value={
+                age.unresolved
+                  ? batchFreshnessStampUnknown(
+                      addressState.lookup.response.batch,
+                      age.refreshFailed,
+                    )
+                  : batchFreshnessStamp(
+                      addressState.lookup.response.batch,
+                      age.seconds ?? undefined,
+                    )
+              }
             />
             <StampItem
               label="lookup"
