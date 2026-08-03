@@ -523,21 +523,42 @@ function stressFixture(name: string): Record<string, unknown> {
   ) as Record<string, unknown>;
 }
 
-test("(5) a NOT-FOUND stress still teaches the committed set — book mode is no dead end", async ({
+/** The two COLD bodies book mode reads on arrival (W-SD-A generated fixtures). */
+const LAB_SCENARIOS = stressFixture("scenarios.json");
+const LAB_BOOK = stressFixture("book.json");
+
+async function mockLabCold(page: Page): Promise<void> {
+  await page.route(`${API}/v1/scenarios`, (route) => fulfillJson(route, LAB_SCENARIOS));
+  await page.route(`${API}/v1/book`, (route) => fulfillJson(route, LAB_BOOK));
+}
+
+test("(5) a NOT-FOUND stress is still a complete answer — and book mode never needed it", async ({
   page,
 }) => {
+  // W-SD-A CHANGED THIS EXPECTATION. R1 fixed the dead end by teaching book
+  // mode from ANY completed lookup; W-SD-A removed the dependency entirely —
+  // the committed set comes from `GET /v1/scenarios`, cold. So the assertion
+  // moves from "the lookup taught the list" to the stronger fact: the list was
+  // never the lookup's to teach, and book mode is alive before any address is
+  // typed. The address side's own R1 content (a definitive negative is a
+  // complete answer) is still pinned.
+  //
   // DERIVED /v1/address/{addr}/stress: the contract-validated aave body with
   // `found` flipped to false (lookup_complete stays true and withheld_engines
-  // stays empty, which is exactly what a definitive negative requires). The
-  // `scenarios` block is UNTOUCHED — the committed set belongs to the
-  // deployment, not to the address, which is the whole point of the fix.
+  // stays empty, which is exactly what a definitive negative requires).
   const body = stressFixture("stress-aave.json");
   const addr = body.address as string;
   body.found = false;
-  await page.route("**/v1/stream**", (route) => route.abort());
+  await muteStream(page);
+  await mockLabCold(page);
   await page.route(`${API}/v1/address/${addr}/stress`, (route) => fulfillJson(route, body));
 
   await page.goto("/lab");
+  // Book mode is alive on arrival, with zero lookups behind it.
+  await expect(page.getByTestId("run-book-button")).toBeVisible();
+  await expect(page.getByTestId("lab-matrix")).toBeVisible();
+
+  await page.getByTestId("mode-address").click();
   const input = page.getByTestId("lab-address-input");
   const run = page.getByTestId("run-stress-button");
   await expect(async () => {
@@ -548,8 +569,8 @@ test("(5) a NOT-FOUND stress still teaches the committed set — book mode is no
 
   await expect(page.getByTestId("lab-not-found")).toBeVisible();
 
-  // The dead end: book mode used to render "run an address stress" here,
-  // after the reader had just done exactly that.
+  // Back in book mode: still alive, and it learned nothing from the lookup to
+  // be alive.
   await page.getByTestId("mode-book").click();
   await expect(page.getByTestId("book-mode-no-set")).toHaveCount(0);
   await expect(page.getByTestId("run-book-button")).toBeVisible();
@@ -562,16 +583,21 @@ test("(5) the mode toggle says what each mode DOES", async ({ page }) => {
   await expect(page.getByTestId("mode-book")).toHaveText("whole book");
 });
 
-test("(5) the pre-lookup book empty state names the escape hatch", async ({ page }) => {
+test("(5) there is no pre-lookup book empty state left to name an escape hatch", async ({
+  page,
+}) => {
+  // W-SD-A DELETED THIS EXPECTATION'S SUBJECT. The empty state existed only
+  // because book mode could not start without an address run; the
+  // escape-hatch copy was the best available answer to a dependency that
+  // should not have existed. `GET /v1/scenarios` serves the committed set
+  // cold, so the state is gone and the dashboard stands in its place.
   await muteStream(page);
+  await mockLabCold(page);
   await page.goto("/lab");
-  await page.getByTestId("mode-book").click();
-  await expect(page.getByTestId("book-mode-no-set")).toHaveText(
-    "Book-wide stress uses the same committed scenario list as address mode, and this page " +
-      "only learns that list from the wire — never from a hardcoded copy. Run one address " +
-      "stress (any address — even a not-found answer carries the list) and the scenarios " +
-      "appear here, ready to run book-wide.",
-  );
+  await expect(page.getByTestId("book-mode-no-set")).toHaveCount(0);
+  await expect(page.getByTestId("lab-dek")).toBeVisible();
+  await expect(page.getByTestId("lab-frontier")).toBeVisible();
+  await expect(page.getByTestId("lab-matrix")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------
@@ -631,10 +657,12 @@ test("(10) the adjudicated intros render, and the endpoint lines are demoted", a
     (await page.getByText("fed by", { exact: false }).first().boundingBox())?.y ?? 0;
   expect(fedByY).toBeGreaterThan(entryY);
 
+  // W-SD-A CHANGED THIS SENTENCE: whole book comes FIRST in the intro because
+  // whole book is the default register the surface now opens in.
   await page.goto("/lab");
   await expect(page.locator("main")).toContainText(
     "What would break this book: the committed stress scenarios — fixed, versioned shocks, no " +
-      "sliders — run against one address or the whole book.",
+      "sliders — run against the whole book, or against one address.",
   );
 
   await page.goto("/observatory");

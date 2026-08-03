@@ -1,0 +1,123 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 5,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract."
+    }
+  },
+  "scenario_config_version": "v1",
+  "scenario_id": "weeth_market_depeg_oracles_held",
+  "scenario_version": "v1",
+  "label": "weETH market depeg to 0.95 (oracles held)",
+  "description": "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable.",
+  "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+  "shocks": [],
+  "out_of_model": [
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order, so this is neutral rather than conservative"
+  ],
+  "applied_shocks": [],
+  "held_flat": [],
+  "engines": [
+    {
+      "engine": "debt_manager",
+      "usd_decimals": 6,
+      "before": {
+        "accounts": 1,
+        "eligible_accounts": 1,
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
+        "eligible_debt_usd": "4200000000",
+        "collateral_at_risk_usd": "4000000000",
+        "bad_debt_usd": "239603961"
+      },
+      "after": {
+        "accounts": 1,
+        "eligible_accounts": 1,
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
+        "eligible_debt_usd": "4200000000",
+        "collateral_at_risk_usd": "4000000000",
+        "bad_debt_usd": "239603961"
+      },
+      "newly_eligible_accounts": 0,
+      "eligible_debt_delta_usd": "0",
+      "bad_debt_delta_usd": "0",
+      "market_realization": {
+        "hfs_unchanged": true,
+        "execution_shortfall_usd": "200000000",
+        "bad_debt_at_liquidation_usd": "0",
+        "usd_decimals": 6,
+        "seizure_model": "pro-rata-over-counted-collateral",
+        "note": "same axis, this engine's own 6-decimal USD."
+      },
+      "projection": null,
+      "note": "delta-only: zero deltas here are THE FINDING — HFs are bit-identical while realized proceeds fall."
+    }
+  ],
+  "excluded_engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "code": "FLAG_CUSTODY_UNPROVEN",
+      "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+      "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+    }
+  ],
+  "coverage": {
+    "batch_positions": 4,
+    "in_book": 2,
+    "refused_in_batch": 2,
+    "excluded_by_this_layer": 0,
+    "excluded": [],
+    "withheld_engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "code": "FLAG_CUSTODY_UNPROVEN",
+        "detail": "the Aave engine's derived state cannot be shown to have been walked from its start block under a decode registry including the collateral-flag events",
+        "note": "FLAG_CUSTODY_UNPROVEN: reading flag ABSENCE as chain truth is not licensed. This refusal is WHOLE-ENGINE by design; the other engine serves normally."
+      }
+    ],
+    "stress_coverage_is_full": false,
+    "note": "every position the batch carries reached the run; the two refused rows are named in the batch's own counts and enter no arithmetic."
+  },
+  "notes": [
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines."
+  ]
+}

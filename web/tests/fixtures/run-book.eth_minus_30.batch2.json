@@ -1,0 +1,153 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "batch": {
+    "id": 2,
+    "computed_at": "2026-07-29T10:00:30Z",
+    "age_seconds": 5,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract."
+    }
+  },
+  "scenario_config_version": "v1",
+  "scenario_id": "eth_minus_30",
+  "scenario_version": "v1",
+  "label": "ETH -30 percent",
+  "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+  "shocks": [
+    {
+      "axis": "eth_usd",
+      "factor_num": 70,
+      "factor_den": 100
+    }
+  ],
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+  ],
+  "applied_shocks": [
+    {
+      "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+      "chain_id": 1,
+      "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f",
+      "factor_num": "70",
+      "factor_den": "100",
+      "before": "400000000000",
+      "after": "280000000000",
+      "snapped": false,
+      "base_snapped": false,
+      "cap_bound": false
+    }
+  ],
+  "held_flat": [],
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "usd_decimals": 8,
+      "before": {
+        "accounts": 1,
+        "eligible_accounts": 0,
+        "total_collateral_usd": "800000000000",
+        "total_debt_usd": "600000000000",
+        "eligible_debt_usd": "0",
+        "collateral_at_risk_usd": "0",
+        "bad_debt_usd": "0"
+      },
+      "after": {
+        "accounts": 1,
+        "eligible_accounts": 0,
+        "total_collateral_usd": "800000000000",
+        "total_debt_usd": "600000000000",
+        "eligible_debt_usd": "0",
+        "collateral_at_risk_usd": "0",
+        "bad_debt_usd": "0"
+      },
+      "newly_eligible_accounts": 0,
+      "eligible_debt_delta_usd": "0",
+      "bad_debt_delta_usd": "0",
+      "market_realization": null,
+      "projection": null,
+      "note": "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
+    },
+    {
+      "engine": "debt_manager",
+      "usd_decimals": 6,
+      "before": {
+        "accounts": 1,
+        "eligible_accounts": 1,
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
+        "eligible_debt_usd": "4200000000",
+        "collateral_at_risk_usd": "4000000000",
+        "bad_debt_usd": "239603961"
+      },
+      "after": {
+        "accounts": 1,
+        "eligible_accounts": 2,
+        "total_collateral_usd": "4000000000",
+        "total_debt_usd": "4620000000",
+        "eligible_debt_usd": "5700000000",
+        "collateral_at_risk_usd": "4000000000",
+        "bad_debt_usd": "239603961"
+      },
+      "newly_eligible_accounts": 1,
+      "eligible_debt_delta_usd": "1500000000",
+      "bad_debt_delta_usd": "0",
+      "market_realization": null,
+      "projection": null,
+      "note": "delta-only: after minus before over the positions in the run."
+    }
+  ],
+  "excluded_engines": [],
+  "coverage": {
+    "batch_positions": 4,
+    "in_book": 2,
+    "refused_in_batch": 2,
+    "excluded_by_this_layer": 0,
+    "excluded": [],
+    "withheld_engines": [],
+    "stress_coverage_is_full": true,
+    "note": "every position the batch carries reached the run; the two refused rows are named in the batch's own counts and enter no arithmetic."
+  },
+  "notes": [
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines."
+  ]
+}

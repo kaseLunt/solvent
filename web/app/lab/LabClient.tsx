@@ -1,6 +1,27 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+// The Scenarios surface's shell (Wave W-SD-A, ruling item 1).
+//
+// TWO THINGS DIED HERE, both for the same reason.
+//
+//   `pickDefaultScenario` — it chose the default chip by scanning an address
+//   run's RESULTS for a market-realization axis. That made the default a
+//   property of whichever address somebody had just typed. The committed set
+//   has its own wire order, served cold; the first member of that order is the
+//   default, and the reader picks from there.
+//
+//   THE HARVEST — the committed list used to be read out of an address stress
+//   response, so whole-book view stayed empty until an address run happened.
+//   `GET /v1/scenarios` serves the same definitions COLD, with no batch
+//   envelope at all. Book mode now reads them itself and no longer depends on
+//   the address tool for anything.
+//
+// BOOK MODE IS THE DEFAULT and arrives alive. Address mode still exists, is
+// still reachable in one click, and is explicitly the SECONDARY register: one
+// account is a narrower question than the whole book, and the surface now says
+// so in its ordering.
+
+import { useCallback, useRef, useState } from "react";
 import {
   BadRequestError,
   ContractInvariantError,
@@ -32,18 +53,6 @@ type StressPhase =
   | { status: "done"; addr: string; result: StressLookup }
   | { status: "error"; addr: string; message: string };
 
-/**
- * The default chip, picked from DATA: the first scenario whose results carry
- * a market-realization axis asserting `hfs_unchanged` (the flagship class),
- * else the first scenario the wire served. Never an id literal.
- */
-function pickDefaultScenario(scenarios: readonly RefinedScenario[]): string | null {
-  const flagship = scenarios.find((scenario) =>
-    scenario.results.some((result) => result.market_realization?.hfs_unchanged === true),
-  );
-  return flagship?.id ?? scenarios[0]?.id ?? null;
-}
-
 function describeError(error: unknown): string {
   if (error instanceof UnavailableError) {
     return "no complete risk batch is available (503) — a statement about the SERVICE, never an empty book";
@@ -73,7 +82,9 @@ function describeError(error: unknown): string {
 }
 
 export function LabClient() {
-  const [mode, setMode] = useState<Mode>("address");
+  // BOOK IS THE DEFAULT. Whole-book view is the primary question this surface
+  // answers, and it no longer depends on anything in address mode.
+  const [mode, setMode] = useState<Mode>("book");
   const [input, setInput] = useState("");
   const [phase, setPhase] = useState<StressPhase>({ status: "idle" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -82,24 +93,17 @@ export function LabClient() {
   const inputValid = isAddress(input);
 
   /**
-   * The committed set as the wire last served it.
-   *
-   * WAVE R1 ITEM 5 — THE DEAD END THIS FIXES: this used to require
-   * `outcome === "found"`. But the committed scenario set is a property of
-   * the DEPLOYMENT, not of the address: `/v1/address/{addr}/stress` carries
-   * `scenarios` on EVERY completed outcome — found, not-found and unknowable
-   * alike. Gating on `found` meant a reader who looked up an address with no
-   * position learned nothing AND left book mode permanently empty, with a
-   * message telling them to do the thing they had just done. Any completed
-   * lookup now teaches the list.
+   * The per-address scenarios AS THE WIRE SERVED THEM, for the address panel
+   * only. Book mode does NOT read this — it reads the committed listing from
+   * `GET /v1/scenarios` itself. This array is a property of the lookup, and
+   * nothing outside the lookup's own panel depends on it.
    */
-  const committed: readonly RefinedScenario[] = useMemo(() => {
-    if (phase.status !== "done") return [];
-    return phase.result.response.scenarios;
-  }, [phase]);
+  const committed: readonly RefinedScenario[] =
+    phase.status === "done" ? phase.result.response.scenarios : [];
 
-  const defaultId = useMemo(() => pickDefaultScenario(committed), [committed]);
-  const activeId = selectedId ?? defaultId;
+  // The default chip is the committed set's OWN first member, in wire order —
+  // never chosen by scanning results for a shape we happen to like.
+  const activeId = selectedId ?? committed[0]?.id ?? null;
   const activeScenario = committed.find((scenario) => scenario.id === activeId) ?? null;
 
   const submit = useCallback(async () => {
@@ -124,17 +128,6 @@ export function LabClient() {
         <button
           type="button"
           className={styles.modeButton}
-          aria-pressed={mode === "address"}
-          data-testid="mode-address"
-          onClick={() => {
-            setMode("address");
-          }}
-        >
-          one address
-        </button>
-        <button
-          type="button"
-          className={styles.modeButton}
           aria-pressed={mode === "book"}
           data-testid="mode-book"
           onClick={() => {
@@ -143,10 +136,34 @@ export function LabClient() {
         >
           whole book
         </button>
+        <button
+          type="button"
+          className={`${styles.modeButton} ${styles.modeButtonSecondary}`}
+          aria-pressed={mode === "address"}
+          data-testid="mode-address"
+          onClick={() => {
+            setMode("address");
+          }}
+        >
+          one address
+        </button>
+        <span className={styles.modeCaption} data-testid="mode-caption">
+          whole book is the default view; one address is the secondary register — a narrower
+          question, answered from the same committed set
+        </span>
       </div>
 
-      {mode === "address" ? (
-        <section aria-label="address stress">
+      {mode === "book" ? (
+        <section aria-label="book-wide stress">
+          <LabBookPanel />
+        </section>
+      ) : (
+        <section aria-label="address stress" data-testid="lab-address-section">
+          <p className={styles.secondaryNote} data-testid="address-secondary-note">
+            SECONDARY REGISTER — one account, not the book. The committed scenario set below is
+            the same one whole-book view renders; this panel evaluates it against a single
+            address.
+          </p>
           <form
             className={styles.addressForm}
             onSubmit={(event) => {
@@ -213,10 +230,6 @@ export function LabClient() {
               onSelect={setSelectedId}
             />
           )}
-        </section>
-      ) : (
-        <section aria-label="book-wide stress">
-          <LabBookPanel scenarios={committed} defaultScenarioId={defaultId} />
         </section>
       )}
     </>

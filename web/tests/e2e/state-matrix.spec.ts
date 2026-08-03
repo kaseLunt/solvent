@@ -146,8 +146,38 @@ async function mockStress(page: Page, addr: string, body: string, status = 200):
   );
 }
 
-/** Fill + submit the Lab address form, hydration-safe (the landed lab pattern). */
+/**
+ * The two COLD routes book mode reads on arrival (W-SD-A). Mocked wherever the
+ * Lab is visited so no state case depends on a live API.
+ */
+async function mockLabCold(page: Page): Promise<void> {
+  await page.route(`${API}/v1/scenarios`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: CORS,
+      body: labFixture("scenarios.json"),
+    }),
+  );
+  await page.route(`${API}/v1/book`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: CORS,
+      body: labFixture("book.json"),
+    }),
+  );
+}
+
+/**
+ * Fill + submit the Lab address form, hydration-safe (the landed lab pattern).
+ *
+ * W-SD-A CHANGED THIS HELPER: whole-book view is the default register, so
+ * address mode is reached the way a reader reaches it — one click on the
+ * secondary tab.
+ */
 async function runStress(page: Page, addr: string): Promise<void> {
+  await page.getByTestId("mode-address").click();
   const input = page.getByTestId("lab-address-input");
   const button = page.getByTestId("run-stress-button");
   await expect(async () => {
@@ -567,6 +597,7 @@ const MATRIX: Cell[] = [
     path: "/lab",
     mock: async (page) => {
       await muteStream(page);
+      await mockLabCold(page);
       await mockStress(page, STRESS_AAVE.address, labFixture("stress-aave.json"));
     },
     act: async (page) => {
@@ -584,6 +615,7 @@ const MATRIX: Cell[] = [
     path: "/lab",
     mock: async (page) => {
       await muteStream(page);
+      await mockLabCold(page);
       await mockStress(page, STRESS_UNKNOWABLE.address, labFixture("stress-unknowable.json"));
     },
     act: async (page) => {
@@ -602,6 +634,7 @@ const MATRIX: Cell[] = [
     path: "/lab",
     mock: async (page) => {
       await muteStream(page);
+      await mockLabCold(page);
       await mockStress(
         page,
         STRESS_AAVE.address,
@@ -622,7 +655,7 @@ const MATRIX: Cell[] = [
     path: "/lab",
     mock: async (page) => {
       await muteStream(page);
-      await mockStress(page, STRESS_AAVE.address, labFixture("stress-aave.json"));
+      await mockLabCold(page);
       await page.route(`${API}/v1/scenarios/*/run-book`, (route) =>
         route.fulfill({
           status: 404,
@@ -632,10 +665,10 @@ const MATRIX: Cell[] = [
         }),
       );
     },
+    // W-SD-A CHANGED THIS CASE: reaching the run control no longer requires an
+    // address lookup first. Book mode is the default and learns the committed
+    // set from `GET /v1/scenarios`, so the 404 state is one click from arrival.
     act: async (page) => {
-      await runStress(page, STRESS_AAVE.address);
-      await expect(page.getByTestId("lab-found")).toBeVisible();
-      await page.getByTestId("mode-book").click();
       await page.getByTestId("run-book-button").click();
     },
     verify: async (page) => {

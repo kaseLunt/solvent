@@ -7,12 +7,11 @@ export const metadata: Metadata = { title: "Scenario Lab" };
 /**
  * W3 — Scenario Lab (spec §3.3): stress, priced honestly.
  *
- * The committed scenario set rendered deliberately (from the wire, never a
- * hardcoded list), address-level runs today, book-wide runs the moment the
- * deployment serves them, and the flagship oracle-blind weETH depeg as a
- * two-panel contrast: HFs bit-identical on the left, execution shortfall on
- * the right. Projections are projections; refusals and held-flat lists render
- * as first-class UI.
+ * W-SD-A: the WHOLE BOOK is the default and arrives alive with zero runs — the
+ * committed listing served cold, the loss frontier drawn from `/v1/book`'s
+ * waterfall, and the scenario × engine matrix whose cells distinguish a
+ * scenario that never modelled an engine from an engine that refused. Address
+ * mode is the secondary register.
  */
 export default function LabPage() {
   return (
@@ -23,15 +22,16 @@ export default function LabPage() {
         <h1>Scenario Lab</h1>
         <p>
           What would break this book: the committed stress scenarios — fixed, versioned shocks,
-          no sliders — run against one address or the whole book. Every shocked number is labeled
-          a projection; the flagship weETH depeg shows a real loss the protocol&apos;s own oracles
-          never see.
+          no sliders — run against the whole book, or against one address. Every shocked number
+          is labeled a projection; the flagship weETH depeg shows a real loss the
+          protocol&apos;s own oracles never see.
         </p>
       </div>
       <LabClient />
       <p className={styles.fedByFoot}>
-        fed by <b>GET /v1/address/&#123;addr&#125;/stress</b> ·{" "}
-        <b>POST /v1/scenarios/&#123;id&#125;/run-book</b>
+        fed by <b>GET /v1/scenarios</b> · <b>GET /v1/book</b> ·{" "}
+        <b>POST /v1/scenarios/&#123;id&#125;/run-book</b> ·{" "}
+        <b>GET /v1/address/&#123;addr&#125;/stress</b>
       </p>
     </section>
   );

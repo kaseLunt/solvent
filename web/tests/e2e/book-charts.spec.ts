@@ -612,9 +612,35 @@ async function mockStress(page: Page, addr: string, body: string) {
   );
 }
 
+/** The two COLD routes book mode reads on arrival (W-SD-A). */
+async function mockLabCold(page: Page) {
+  await page.route(`${API}/v1/scenarios`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: CORS,
+      body: fixture("scenarios.json"),
+    }),
+  );
+  await page.route(`${API}/v1/book`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: CORS,
+      body: fixture("book.json"),
+    }),
+  );
+}
+
+/**
+ * W-SD-A CHANGED THIS HELPER: whole-book view is the default register, so the
+ * address form is reached with one click on the secondary tab.
+ */
 async function runStress(page: Page, addr: string) {
   await muteStream(page);
+  await mockLabCold(page);
   await page.goto("/lab");
+  await page.getByTestId("mode-address").click();
   const input = page.getByTestId("lab-address-input");
   const button = page.getByTestId("run-stress-button");
   await expect(async () => {
@@ -665,7 +691,13 @@ test("Lab realization: the eligible-vs-realized gloss rides the sub as title", a
 test("Lab run-book: wire notes become a counted verbatim details; collateral-at-risk carries the reader caption", async ({
   page,
 }) => {
-  await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
+  // W-SD-A CHANGED THIS SETUP: book mode learns the committed set from
+  // `GET /v1/scenarios`, so no address lookup is needed to reach the run
+  // control. The flagship is selected by clicking its committed chip —
+  // `pickDefaultScenario`, which used to hunt an address run's results for a
+  // realization axis, is deleted.
+  await muteStream(page);
+  await mockLabCold(page);
   await page.route(`${API}/v1/scenarios/*/run-book`, (route) =>
     route.fulfill({
       status: 200,
@@ -674,9 +706,10 @@ test("Lab run-book: wire notes become a counted verbatim details; collateral-at-
       body: fixture("run-book.weeth_market_depeg_oracles_held.json"),
     }),
   );
-  await runStress(page, STRESS_AAVE.address);
-  await expect(page.getByTestId("lab-found")).toBeVisible();
-  await page.getByTestId("mode-book").click();
+  await page.goto("/lab");
+  await page
+    .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
+    .click();
   await page.getByTestId("run-book-button").click();
   await expect(page.getByTestId("book-result")).toBeVisible();
 

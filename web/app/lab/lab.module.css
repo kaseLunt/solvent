@@ -444,3 +444,184 @@
   color: var(--warn);
   font-weight: 600;
 }
+
+/* ---- W-SD-A: the whole-book scenario dashboard ---- */
+
+/* The COMPUTED cliff sentence. Sized as the page's first real statement —
+   the reader's answer, not a caption under a heading. */
+.dek {
+  font-size: var(--fs-body);
+  color: var(--ink);
+  max-width: 78ch;
+  margin: var(--sp-4) 0 var(--sp-5);
+  line-height: 1.55;
+}
+
+.sectionTitle {
+  font-size: var(--fs-h2);
+  letter-spacing: var(--track-tight);
+  margin: 0;
+}
+
+.detailHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: var(--sp-6) 0 var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+/* Address mode is reachable in one click and reads as the secondary register
+   it is — the demotion is visual as well as ordinal. */
+.modeButtonSecondary {
+  opacity: 0.82;
+}
+
+.modeCaption {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  align-self: center;
+  max-width: 62ch;
+}
+
+.secondaryNote {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  color: var(--ink-3);
+  border-left: 2px solid var(--line);
+  padding-left: var(--sp-3);
+  margin: 0 0 var(--sp-4);
+}
+
+/* ---- matrix cells: five named states + supersession + unanswered ----
+   Every state differs by FORM as well as tone (the W0 severity ruling): a tag
+   word rides every cell, so nothing is distinguished by hue alone. */
+.cellIdle,
+.cellResult,
+.cellNotCovered,
+.cellWithheld,
+.cellSuperseded,
+.cellUnanswered {
+  vertical-align: top;
+  min-width: 168px;
+}
+
+.cellTag {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.cellValue {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.cellSub {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* NOT COVERED: hatched-quiet. The scenario's model never reached here, so the
+   cell must not compete with a measured one. */
+.cellNotCovered {
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 5px,
+    var(--panel-2) 5px,
+    var(--panel-2) 10px
+  );
+}
+
+.cellNotCovered .cellTag {
+  color: var(--ink-3);
+}
+
+.cellResult .cellTag {
+  color: var(--accent);
+}
+
+/* WITHHELD: the refusal register's own tone — a censored cell reads as
+   censored, never as an undefined one. */
+.cellWithheld {
+  background: var(--refused-bg);
+}
+
+/* SUPERSEDED: kept on screen, marked, never blended with the anchor batch. */
+.cellSuperseded {
+  background: var(--panel-2);
+  border-left: 2px dashed var(--warn);
+}
+
+.cellSuperseded .cellTag {
+  color: var(--warn);
+}
+
+.cellSuperseded .cellValue {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.cellUnanswered {
+  border-left: 2px solid var(--crit);
+}
+
+.cellUnanswered .cellTag {
+  color: var(--crit);
+}
+
+.rowLabelButton {
+  display: block;
+  font: inherit;
+  font-size: var(--fs-table);
+  font-weight: 600;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.rowLabelButton:hover {
+  color: var(--accent);
+}
+
+.runButtonSmall {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--ink-2);
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.runButtonSmall:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.runButtonSmall:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

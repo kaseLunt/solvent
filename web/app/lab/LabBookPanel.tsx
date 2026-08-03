@@ -1,9 +1,38 @@
-import { useCallback, useRef, useState } from "react";
-import type { RefinedScenario } from "@solvent/client";
+// BOOK MODE — the whole-book scenario dashboard (Wave W-SD-A, ruling items 1
+// and 5).
+//
+// WHAT CHANGED AND WHY. This panel used to be handed a scenario list HARVESTED
+// from an address-mode run's outcomes, and rendered an empty state until one
+// happened. Whole-book view — the more interesting angle by far — therefore
+// depended on the address tool, which is exactly backwards. The committed set
+// is a property of the DEPLOYMENT, `GET /v1/scenarios` serves it COLD (no
+// batch envelope, 200 before any batch exists), and `/v1/book` serves the
+// waterfall the frontier is drawn from. So this panel now fetches both itself
+// and arrives ALIVE with zero runs:
+//
+//   dek       a computed cliff sentence over `/v1/book`'s waterfall
+//   frontier  that waterfall, plotted per engine
+//   matrix    the committed listing × the engines it names
+//   detail    the selected committed scenario, and its run when one exists
+//
+// NO AUTO-RUN ON BARE ARRIVAL. Runs are computed over the whole book on
+// request; firing one because somebody opened a page would be a cost the
+// reader did not ask for. A `?scenario=<id>` deep link is a different
+// statement — the reader named the scenario — and DOES auto-run it, exactly
+// once, only when the id is a member of the served committed set.
+
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import {
+  UnavailableError,
+  type BookResponse,
+  type ScenarioDefinition,
+  type Waterfall,
+} from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { StatCard } from "@/components/StatCard";
-import { solventBaseUrl } from "@/lib/api";
+import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { AT_RISK_READER_CAPTION, wireNotesSummary } from "@/lib/book-copy";
 import { renderNullableDecimal } from "@/lib/format";
 import {
@@ -13,7 +42,11 @@ import {
   type RunBookOutcome,
 } from "@/lib/runbook";
 import { LabBatchStamp } from "./LabBatchStamp";
+import { LabFrontier } from "./LabFrontier";
+import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
+import { LAB_DEK_LOADING, labDek } from "./labDek";
+import { matrixColumns, type MatrixPhase } from "./matrixCells";
 import {
   FactorText,
   LabAppliedShocks,
@@ -23,11 +56,6 @@ import {
 import { HfsUnchangedBanner, LabRealization } from "./LabRealization";
 import { LabProjectionView } from "./LabProjectionView";
 import styles from "./lab.module.css";
-
-type BookPhase =
-  | { status: "idle" }
-  | { status: "running"; id: string }
-  | { status: "outcome"; id: string; outcome: RunBookOutcome };
 
 // ---------------------------------------------------------------------------
 // One engine's book, before/after, in its OWN unit and decimals.
@@ -265,92 +293,311 @@ function OutcomeView({ id, outcome }: { id: string; outcome: RunBookOutcome }) {
 }
 
 // ---------------------------------------------------------------------------
-// The panel.
+// The committed-scenario detail: the DEFINITION, then the run if one exists.
 // ---------------------------------------------------------------------------
 
-export interface LabBookPanelProps {
-  /** The committed set as learned FROM THE WIRE (empty until a run returns). */
-  scenarios: readonly RefinedScenario[];
-  /** Data-driven default selection shared with address mode. */
-  defaultScenarioId: string | null;
-}
-
-/**
- * BOOK MODE: one committed scenario against the whole book, via
- * `POST /v1/scenarios/{id}/run-book`. The scenario ids come from the wire's
- * committed set — the same set the chips render — and a deployment that does
- * not serve the route yet answers 404, which renders as a first-class state.
- */
-export function LabBookPanel({ scenarios, defaultScenarioId }: LabBookPanelProps) {
-  // The operator's explicit pick; the selection itself is DERIVED, so the
-  // data-driven default applies whenever no explicit pick (still) resolves.
-  const [pickedId, setPickedId] = useState<string | null>(null);
-  const [phase, setPhase] = useState<BookPhase>({ status: "idle" });
-  const requestSeq = useRef(0);
-
-  const selected =
-    scenarios.find((scenario) => scenario.id === (pickedId ?? defaultScenarioId)) ??
-    scenarios[0] ??
-    null;
-
-  const run = useCallback(async () => {
-    if (selected === null) return;
-    const seq = (requestSeq.current += 1);
-    setPhase({ status: "running", id: selected.id });
-    const outcome = await runBookScenario(solventBaseUrl(), selected.id);
-    if (requestSeq.current === seq) {
-      setPhase({ status: "outcome", id: selected.id, outcome });
-    }
-  }, [selected]);
-
-  if (scenarios.length === 0) {
-    return (
-      // Wave R1 item 5: the empty state is now reachable ONLY pre-lookup —
-      // every completed outcome (found / not-found / unknowable) teaches the
-      // list — so the copy says exactly that, including the escape hatch the
-      // old copy hid: a not-found answer works too.
-      <div className={styles.emptyState} data-testid="book-mode-no-set">
-        Book-wide stress uses the same committed scenario list as address mode, and this page
-        only learns that list from the wire — never from a hardcoded copy. Run one address
-        stress (any address — even a not-found answer carries the list) and the scenarios appear
-        here, ready to run book-wide.
-      </div>
-    );
-  }
-
+function CommittedDetail({
+  scenario,
+  phase,
+  onRun,
+}: {
+  scenario: ScenarioDefinition;
+  phase: MatrixPhase;
+  onRun: () => void;
+}) {
   return (
-    <div>
-      <LabScenarioChips
-        scenarios={scenarios}
-        selectedId={selected?.id ?? null}
-        onSelect={(id) => {
-          setPickedId(id);
-        }}
-      />
+    <section data-testid="committed-detail" data-scenario-id={scenario.id}>
+      <div className={styles.scenarioHead}>
+        <h2 className={styles.scenarioLabel}>{scenario.label}</h2>
+        <span className="mono dim">
+          {scenario.id} · {scenario.version}
+        </span>
+        {scenario.engines.map((engine) => (
+          <EngineChip key={engine} engine={engine} />
+        ))}
+      </div>
+      <p className={styles.description}>{scenario.description}</p>
+      <dl className={styles.kv}>
+        <dt>path assumption</dt>
+        <dd>{scenario.path_assumption}</dd>
+        <dt>defined for</dt>
+        <dd data-testid="committed-engines">
+          {scenario.engines.join(", ")} — an engine absent here is outside this scenario&apos;s
+          MODEL, which is not the same statement as a withheld engine
+        </dd>
+        <dt>shocks</dt>
+        <dd data-testid="committed-shocks">
+          {scenario.shocks.length === 0
+            ? "none — no oracle mark moves; this scenario's information lives on another axis"
+            : scenario.shocks.map((shock, index) => (
+                <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
+                  {index > 0 && " · "}
+                  {shock.axis}
+                  {shock.asset === undefined
+                    ? ""
+                    : ` ${shock.asset.slice(0, 6)}…${shock.asset.slice(-4)}`}{" "}
+                  <FactorText num={shock.factor_num} den={shock.factor_den} />
+                </span>
+              ))}
+        </dd>
+      </dl>
       <div className={styles.addressForm}>
         <button
           type="button"
           className={styles.runButton}
           data-testid="run-book-button"
-          disabled={phase.status === "running" || selected === null}
-          onClick={() => {
-            void run();
-          }}
+          disabled={phase.kind === "running"}
+          onClick={onRun}
         >
-          run book-wide
+          {phase.kind === "running" ? "running…" : "run book-wide"}
         </button>
         <span className={styles.hint}>
-          POST /v1/scenarios/{selected?.id ?? "…"}/run-book — computed on request over the
-          newest servable batch; writes nothing
+          POST /v1/scenarios/{scenario.id}/run-book — computed on request over the newest
+          servable batch; writes nothing
         </span>
       </div>
-      {phase.status === "running" && (
+      {phase.kind === "running" && (
         <p className={styles.pendingState} data-testid="book-running">
-          running <span className="mono">{phase.id}</span> over the whole book — request in
+          running <span className="mono">{scenario.id}</span> over the whole book — request in
           flight
         </p>
       )}
-      {phase.status === "outcome" && <OutcomeView id={phase.id} outcome={phase.outcome} />}
+      {phase.kind === "outcome" && <OutcomeView id={scenario.id} outcome={phase.outcome} />}
+      <LabOutOfModel items={scenario.out_of_model} />
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The panel.
+// ---------------------------------------------------------------------------
+
+/** A stable empty listing: a referential constant, never a fresh [] per render. */
+const NO_SCENARIOS: readonly ScenarioDefinition[] = [];
+
+type ListingState =
+  | { phase: "loading" }
+  | { phase: "ok"; scenarios: ScenarioDefinition[]; configVersion: string; notes: string[] }
+  | { phase: "error"; message: string };
+
+type BookState =
+  | { phase: "loading" }
+  | { phase: "ok"; book: BookResponse }
+  | { phase: "no-batch"; message: string }
+  | { phase: "error"; message: string };
+
+function bookDekFor(state: BookState): string {
+  switch (state.phase) {
+    case "loading":
+      return LAB_DEK_LOADING;
+    case "ok":
+      return labDek(state.book.waterfall);
+    case "no-batch":
+      return `No complete risk batch is available, so there is no frontier to read: ${state.message}. That is a statement about the SERVICE, never an empty book.`;
+    case "error":
+      return `The book could not be read (${state.message}), so no cliff can be stated. An unread book is not a safe book.`;
+  }
+}
+
+function LabBookPanelInner() {
+  const searchParams = useSearchParams();
+  const deepLinkId = searchParams.get("scenario");
+
+  const [listing, setListing] = useState<ListingState>({ phase: "loading" });
+  const [book, setBook] = useState<BookState>({ phase: "loading" });
+  const [phases, setPhases] = useState<ReadonlyMap<string, MatrixPhase>>(new Map());
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const runSeq = useRef(new Map<string, number>());
+  const autoRan = useRef<string | null>(null);
+
+  const run = useCallback((scenarioId: string) => {
+    const seq = (runSeq.current.get(scenarioId) ?? 0) + 1;
+    runSeq.current.set(scenarioId, seq);
+    setPhases((previous) => new Map(previous).set(scenarioId, { kind: "running" }));
+    void runBookScenario(solventBaseUrl(), scenarioId).then((outcome) => {
+      if (runSeq.current.get(scenarioId) !== seq) return;
+      setPhases((previous) => new Map(previous).set(scenarioId, { kind: "outcome", outcome }));
+    });
+  }, []);
+
+  // COLD arrival: both routes are servable without a run, and neither is a
+  // run. `/v1/scenarios` carries no batch envelope at all.
+  //
+  // THE DEEP LINK rides this callback rather than a separate effect, and that
+  // placement is the point: the auto-run is a consequence of the LISTING
+  // arriving — the only moment membership becomes knowable — so it can never
+  // POST an id the deployment does not publish, and it can never fire on bare
+  // arrival, where there is no `?scenario=` to honour.
+  useEffect(() => {
+    const controller = new AbortController();
+    const wanted = searchParams.get("scenario");
+    getSolventClient()
+      .scenarios(controller.signal)
+      .then(
+        (response) => {
+          setListing({
+            phase: "ok",
+            scenarios: response.scenarios,
+            configVersion: response.scenario_config_version,
+            notes: response.notes,
+          });
+          if (wanted === null || autoRan.current === wanted) return;
+          if (!response.scenarios.some((scenario) => scenario.id === wanted)) return;
+          autoRan.current = wanted;
+          run(wanted);
+        },
+        (cause: unknown) => {
+          if (controller.signal.aborted) return;
+          setListing({
+            phase: "error",
+            message: cause instanceof Error ? cause.message : String(cause),
+          });
+        },
+      );
+    return () => {
+      controller.abort();
+    };
+  }, [run, searchParams]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getSolventClient()
+      .book(controller.signal)
+      .then(
+        (response) => {
+          setBook({ phase: "ok", book: response });
+        },
+        (cause: unknown) => {
+          if (controller.signal.aborted) return;
+          setBook(
+            cause instanceof UnavailableError
+              ? { phase: "no-batch", message: cause.body.error.message }
+              : {
+                  phase: "error",
+                  message: cause instanceof Error ? cause.message : String(cause),
+                },
+          );
+        },
+      );
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  const scenarios: readonly ScenarioDefinition[] =
+    listing.phase === "ok" ? listing.scenarios : NO_SCENARIOS;
+  const columns = matrixColumns(scenarios);
+
+  // The selection is DERIVED, never stored on arrival: an explicit pick wins,
+  // then the deep link's id if the listing carries it, then the committed
+  // set's OWN first member in wire order. No default is chosen by scanning
+  // results for a shape somebody liked (that was `pickDefaultScenario`, and it
+  // is gone).
+  const deepLinkMember =
+    deepLinkId === null
+      ? null
+      : (scenarios.find((scenario) => scenario.id === deepLinkId) ?? null);
+  const selectedId = pickedId ?? deepLinkMember?.id ?? scenarios[0]?.id ?? null;
+  const selected = scenarios.find((scenario) => scenario.id === selectedId) ?? null;
+  const waterfall: Waterfall | null = book.phase === "ok" ? book.book.waterfall : null;
+  const frontierBatchId = book.phase === "ok" ? book.book.batch.id : null;
+
+  return (
+    <div data-testid="lab-book-panel">
+      <p className={styles.dek} data-testid="lab-dek">
+        {bookDekFor(book)}
+      </p>
+
+      {book.phase === "loading" ? (
+        <p className={styles.pendingState} data-testid="frontier-loading">
+          reading the book&apos;s loss frontier — <span className="mono">GET /v1/book</span> in
+          flight
+        </p>
+      ) : book.phase === "ok" ? (
+        <LabFrontier waterfall={waterfall} />
+      ) : (
+        <div className={styles.errorState} data-testid="frontier-refused">
+          {book.phase === "no-batch"
+            ? `no servable batch (503): ${book.message} — a statement about the SERVICE, never an empty book`
+            : `the book could not be read: ${book.message}`}
+        </div>
+      )}
+
+      {listing.phase === "loading" && (
+        <p className={styles.pendingState} data-testid="listing-loading">
+          reading the committed scenario set — <span className="mono">GET /v1/scenarios</span>{" "}
+          in flight. It is CONFIGURATION, not batch data, so it answers with no batch at all.
+        </p>
+      )}
+      {listing.phase === "error" && (
+        <div className={styles.errorState} data-testid="listing-error">
+          the committed scenario set could not be read: {listing.message}. No scenario list is
+          hardcoded here and none is invented — the matrix stays absent rather than partial.
+        </div>
+      )}
+      {listing.phase === "ok" && (
+        <>
+          <LabMatrix
+            scenarios={listing.scenarios}
+            columns={columns}
+            phases={phases}
+            frontierBatchId={frontierBatchId}
+            onRun={run}
+            selectedId={selectedId}
+            onSelect={setPickedId}
+          />
+
+          <div className={styles.detailHead}>
+            <h2 className={styles.sectionTitle}>Committed scenario</h2>
+            <span className="mono dim" data-testid="listing-config-version">
+              scenario_config_version {listing.configVersion}
+            </span>
+          </div>
+          <LabScenarioChips
+            scenarios={listing.scenarios}
+            selectedId={selectedId}
+            onSelect={setPickedId}
+          />
+          {selected !== null && (
+            <CommittedDetail
+              scenario={selected}
+              phase={phases.get(selected.id) ?? { kind: "idle" }}
+              onRun={() => {
+                run(selected.id);
+              }}
+            />
+          )}
+          {listing.notes.length > 0 && (
+            <details className={styles.disclosure} data-testid="listing-notes">
+              <summary>{wireNotesSummary(listing.notes.length)}</summary>
+              <ul>
+                {listing.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </>
+      )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams` needs a Suspense boundary to keep the route statically
+ * prerenderable (the same contract `BookPositions` honours). The fallback
+ * states what is loading; it invents no number.
+ */
+export function LabBookPanel() {
+  return (
+    <Suspense
+      fallback={
+        <p className={styles.pendingState} data-testid="lab-book-boot">
+          {LAB_DEK_LOADING}
+        </p>
+      }
+    >
+      <LabBookPanelInner />
+    </Suspense>
   );
 }
