@@ -197,8 +197,10 @@ test.describe("band assignment over a mixed book", () => {
       [24.99, "10–25%"],
       [25, "25–50%"],
       [49.99, "25–50%"],
-      [50, ">50%"],
-      [93.7, ">50%"],
+      // W-HR-B: exactly 50% is a MEMBER of the top band under the one
+      // left-closed rule, so the map's axis label must not say "more than".
+      [50, "≥50%"],
+      [93.7, "≥50%"],
     ];
     for (const [pct, label] of cases) {
       const result = buildRiskBins([makeRow({ headroom: headroomAt(pct) })]);

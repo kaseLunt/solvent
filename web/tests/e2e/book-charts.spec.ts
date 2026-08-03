@@ -413,7 +413,12 @@ test("OUTPACED: a book that re-materializes faster than one walk gives up OUT LO
 
   const outpaced = page.getByTestId("risk-map-outpaced");
   await expect(outpaced).toBeVisible();
-  await expect(outpaced).toContainText("the book re-materialized mid-walk 3 times");
+  // W-HR-B: the count is SUPERSESSIONS OBSERVED, not restarts spent. Four
+  // walk attempts each met a 409 — the fourth is the one that ended the walk,
+  // and it is an observation like the other three. Reporting the restart
+  // budget (3) under-counted the very event being reported.
+  await expect(outpaced).toContainText("the book re-materialized mid-walk 4 times");
+  await expect(outpaced).not.toContainText("mid-walk 3 times");
   await expect(outpaced).toContainText("a vector spliced across batches is not this book");
   await expect(outpaced).toContainText("newest batch #2");
   // The refusal is not a zero and not an empty map.
@@ -422,7 +427,8 @@ test("OUTPACED: a book that re-materializes faster than one walk gives up OUT LO
   await expect(page.getByTestId("risk-map-full-head")).toHaveCount(0);
 
   // The loop is BOUNDED: 1 initial walk + 3 restarts, and then it STOPS
-  // hammering the API.
+  // hammering the API. The reported count equals the 409s the walk actually
+  // met — one per page-one attempt.
   await expect.poll(() => walkPageOnes).toBe(4);
   await page.waitForTimeout(700);
   expect(walkPageOnes).toBe(4);
@@ -431,6 +437,130 @@ test("OUTPACED: a book that re-materializes faster than one walk gives up OUT LO
   // walk gave up — it is not a gate in front of the resting state.
   await page.getByTestId("risk-map-walk-again").click();
   await expect.poll(() => walkPageOnes).toBeGreaterThan(4);
+});
+
+test("409 mid-walk with a SLOW fresh page: the stale progress dies AT ONCE, not on arrival", async ({
+  page,
+}) => {
+  // Wave W-HR-B, round-14 MEDIUM. On a 409 the accumulator was dropped
+  // immediately but the rendered progress was not: "walked 1 of 2 · page 1 ·
+  // batch #1" kept standing — over zero held rows, naming a batch nobody was
+  // reading any more — until the replacement page RESOLVED. On a slow first
+  // page of the fresh batch that is seconds of a confident, false sentence.
+  const { page1 } = walkPages();
+  const freshPage = structuredClone(POSITIONS_AAVE_PAGE_1);
+  freshPage.limit = 200;
+  freshPage.next_cursor = null;
+  freshPage.total_positions = 1;
+  freshPage.batch.id = 2;
+  let walkPageOnes = 0;
+
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("sort") !== null) {
+      if (url.searchParams.get("cursor") === null)
+        return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+      return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
+    }
+    if (url.searchParams.get("cursor") === null) {
+      walkPageOnes += 1;
+      if (walkPageOnes === 1) return fulfillJson(route, page1);
+      // The RESTARTED page one is slow — the whole window this test exists for.
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      return fulfillJson(route, freshPage);
+    }
+    // Hold the supersession briefly so the PRE-409 progress is observable at
+    // all; mocked routes otherwise resolve inside one frame.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return fulfillJson(route, BATCH_SUPERSEDED, 409);
+  });
+  await openBook(page);
+
+  // The progress reached the pre-409 state at least once.
+  const progress = page.getByTestId("risk-map-progress");
+  await expect(progress).toHaveText("walking the full book — walked 1 of 2 · page 1 · batch #1");
+
+  // …and the instant the 409 lands it is ZEROED — before the fresh page can
+  // possibly have arrived (it is held for two seconds).
+  await expect(page.getByTestId("risk-map-superseded-notice")).toBeVisible();
+  await expect(progress).toHaveText("walking the full book — requesting page 1");
+  await expect(progress).not.toContainText("walked 1 of 2");
+  await expect(progress).not.toContainText("batch #1");
+  // No map is drawn from the abandoned vector either.
+  await expect(page.getByTestId("risk-map-full-head")).toHaveCount(0);
+  await expect(page.getByTestId("density-map")).toHaveCount(0);
+
+  // The restart then completes honestly, entirely on the fresh batch.
+  await expect(page.getByTestId("risk-map-full-head")).toContainText(
+    "full book · 1 positions · as-of batch #2",
+  );
+});
+
+test("the map's on-book count is BATCH-PAIRED — the table advancing past the map never blends two counts", async ({
+  page,
+}) => {
+  // Wave W-HR-B, round-14 MEDIUM. The map's head printed `aggregate.positions`
+  // guarded against the TABLE's batch. The two walk different endpoints at
+  // different speeds, so after the table 409s and heals onto batch N+1 —
+  // dragging /v1/book with it — the map's completed batch-N vector sat beside
+  // an N+1 count in one sentence, with no seam a reader could see.
+  const walkPage = structuredClone(POSITIONS_AAVE_PAGE_1);
+  walkPage.limit = 200;
+  walkPage.next_cursor = null;
+
+  const tablePageOne = structuredClone(POSITIONS_AAVE_PAGE_1);
+  tablePageOne.next_cursor = "table-2";
+  const tableFresh = structuredClone(POSITIONS_AAVE_PAGE_1);
+  tableFresh.next_cursor = null;
+  tableFresh.batch.id = 2;
+
+  // /v1/book heals to batch 2 with a DIFFERENT count once the table reports it.
+  const bookBatch2 = structuredClone(BOOK);
+  bookBatch2.batch.id = 2;
+  bookBatch2.engines = bookBatch2.engines.map((aggregate) =>
+    aggregate.engine === "aave_v3_etherfi" ? { ...aggregate, positions: 7 } : aggregate,
+  );
+  let bookCalls = 0;
+  await page.route("**/v1/book", (route) => {
+    bookCalls += 1;
+    return fulfillJson(route, bookCalls === 1 ? BOOK : bookBatch2);
+  });
+
+  let tablePageOnes = 0;
+  await page.route("**/v1/positions*", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("sort") === null) return fulfillJson(route, walkPage);
+    if (url.searchParams.get("cursor") === null) {
+      tablePageOnes += 1;
+      return fulfillJson(route, tablePageOnes === 1 ? tablePageOne : tableFresh);
+    }
+    // Hold the table's supersession long enough to assert the SAME-batch head.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return fulfillJson(route, BATCH_SUPERSEDED, 409);
+  });
+  await openBook(page);
+
+  // SAME batch: the two counts may be read together, and are. (The walk's one
+  // page holds 1 row; /v1/book's aave aggregate counts 2 — a legitimate gap
+  // the head states rather than hides, which is why the count is there at all.)
+  const head = page.getByTestId("risk-map-full-head");
+  await expect(head).toHaveText("full book · 1 positions · as-of batch #1 · 2 on book");
+
+  // The table is superseded and restarts onto batch 2; the surface re-fetches
+  // /v1/book, which now answers for batch 2 with 7 on book. The map still
+  // holds its completed batch-1 vector — and REFUSES to print the two counts
+  // side by side, naming the mismatch instead of quietly dropping the number.
+  await expect(page.getByTestId("batch-superseded-notice")).toBeVisible();
+  await expect.poll(() => bookCalls).toBeGreaterThan(1);
+  await expect(head).toContainText("full book · 1 positions · as-of batch #1");
+  await expect(head).toContainText(
+    "on-book count withheld (aggregate from batch #2, map from batch #1: " +
+      "counts from two batches are never blended)",
+  );
+  // The healed count is NEVER attached to the older vector.
+  await expect(head).not.toContainText("7 on book");
+  await expect(head).not.toContainText("2 on book");
 });
 
 test("an engine switch mid-walk restarts the walk — a vector never splices two books", async ({

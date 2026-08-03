@@ -29,6 +29,20 @@ import (
 type PositionSort string
 
 const (
+	// PositionSortHeadroom (contract 1.5.0) ranks by the SHARE of borrowing
+	// capacity still unused before liquidation — the RATIO the Book's Headroom
+	// column prints, on both engines. It exists because `liq_distance` on the
+	// Debt Manager ranks the ABSOLUTE USD room (max_borrow_lt − borrowings),
+	// which is a different quantity from the printed ratio and disagrees with
+	// it wherever capacity differs: a $1M account with $50k of room outranks a
+	// $10k account with $2k of room on the absolute key, while the ratios say
+	// the opposite (5% vs 20%). A live probe of the first 1000 rows found 130
+	// adjacent inversions against the printed percent.
+	PositionSortHeadroom PositionSort = "headroom"
+	// PositionSortLiqDistance is DEPRECATED by 1.5.0 and STILL SERVED, with its
+	// ordering UNCHANGED. An alias that quietly re-ranks is a lie: existing
+	// links, bookmarks and in-flight cursors were minted against this exact
+	// ranking and keep their meaning. Use `headroom` for the ratio.
 	PositionSortLiqDistance PositionSort = "liq_distance"
 	PositionSortDebt        PositionSort = "debt"
 	PositionSortHF          PositionSort = "hf"
@@ -62,15 +76,48 @@ var (
 )
 
 // positionsCanonicalDir names each sort's CANONICAL direction — the ranking
-// served when `dir` is absent, stated explicitly by contract 1.3.0:
-// liq_distance→asc (nearest to the boundary first), hf→asc, debt→desc
-// (largest debt first), status→refused-first (desc on the refused axis).
+// served when `dir` is absent, stated explicitly by contract 1.3.0 and
+// extended by 1.5.0: headroom→asc (least capacity left first), liq_distance→asc
+// (nearest to the boundary first), hf→asc, debt→desc (largest debt first),
+// status→refused-first (desc on the refused axis).
 var positionsCanonicalDir = map[PositionSort]PositionDir{
+	PositionSortHeadroom:    PositionDirAsc,
 	PositionSortLiqDistance: PositionDirAsc,
 	PositionSortHF:          PositionDirAsc,
 	PositionSortDebt:        PositionDirDesc,
 	PositionSortStatus:      PositionDirDesc,
 }
+
+// THE AAVE BOUNDARY RANKING, stated ONCE.
+//
+// On Aave the health factor IS the comparator the pool applies, and headroom
+// = 1 − 1/HF is STRICTLY INCREASING in HF — so "closest to the boundary",
+// "lowest health factor" and "least headroom" are the SAME total order, not
+// three orderings that happen to agree today. `headroom`, `liq_distance` and
+// `hf` therefore share these two fragments rather than each carrying its own
+// copy: one ordering, three names, and no way for a future edit to fork them.
+//
+// Zero-debt (hf_infinite) rows are farthest by definition; refused rows sort
+// after computed rows under the canonical direction (a value sort cannot rank
+// an unknown value) and lead under the reverse.
+const (
+	aaveBoundaryOrderAsc  = `(p.status = 'refused') ASC, p.hf_infinite ASC, p.hf_wad ASC NULLS LAST, p.account ASC`
+	aaveBoundaryOrderDesc = `(p.status = 'refused') DESC, p.hf_infinite DESC, p.hf_wad DESC NULLS FIRST, p.account ASC`
+)
+
+// dmHeadroomRatio is the Debt Manager's HEADROOM RATIO, exact in `numeric`:
+// the share of borrowing capacity still unused before liquidation. It is the
+// EXACT quantity the Book's Headroom column prints, so a column that says
+// "sorted by headroom" is sorted by the number in its own cells.
+//
+// NULLIF(max_borrow_lt, 0) is load-bearing: a row with NO published borrowing
+// capacity has no ratio at all. Dividing by zero would error, and treating the
+// numerator alone as the key would let a zero-capacity row fake either
+// infinite risk (0 − debt, hugely negative) or infinite safety. NULL is the
+// honest key, and NULLS LAST/FIRST under the direction law keeps it out of the
+// ranked positions on the canonical side. A NULL max_borrow_lt or borrowings
+// propagates to a NULL key for the same reason.
+const dmHeadroomRatio = `((p.max_borrow_lt - p.borrowings)::numeric / NULLIF(p.max_borrow_lt, 0))`
 
 // positionsOrder maps (engine, sort, dir) to the deterministic ORDER BY
 // fragment. The fragments are SERVER-OWNED CONSTANTS keyed by validated enums
@@ -90,13 +137,19 @@ var positionsOrder = map[string]map[PositionSort]map[PositionDir]string{
 	EngineAave: {
 		// Closest to liquidation first: the wad composite ascending; zero-debt
 		// (hf_infinite) rows are farthest by definition, refused rows last.
+		// headroom / liq_distance / hf are ONE ordering under three names —
+		// see aaveBoundaryOrder* above for why that is a fact, not a shortcut.
+		PositionSortHeadroom: {
+			PositionDirAsc:  aaveBoundaryOrderAsc,
+			PositionDirDesc: aaveBoundaryOrderDesc,
+		},
 		PositionSortLiqDistance: {
-			PositionDirAsc:  `(p.status = 'refused') ASC, p.hf_infinite ASC, p.hf_wad ASC NULLS LAST, p.account ASC`,
-			PositionDirDesc: `(p.status = 'refused') DESC, p.hf_infinite DESC, p.hf_wad DESC NULLS FIRST, p.account ASC`,
+			PositionDirAsc:  aaveBoundaryOrderAsc,
+			PositionDirDesc: aaveBoundaryOrderDesc,
 		},
 		PositionSortHF: {
-			PositionDirAsc:  `(p.status = 'refused') ASC, p.hf_infinite ASC, p.hf_wad ASC NULLS LAST, p.account ASC`,
-			PositionDirDesc: `(p.status = 'refused') DESC, p.hf_infinite DESC, p.hf_wad DESC NULLS FIRST, p.account ASC`,
+			PositionDirAsc:  aaveBoundaryOrderAsc,
+			PositionDirDesc: aaveBoundaryOrderDesc,
 		},
 		PositionSortDebt: {
 			PositionDirDesc: `(p.status = 'refused') ASC, p.total_debt_base DESC NULLS LAST, p.account ASC`,
@@ -108,10 +161,21 @@ var positionsOrder = map[string]map[PositionSort]map[PositionDir]string{
 		},
 	},
 	EngineDebtManager: {
+		// headroom (1.5.0): the exact RATIO ascending — least capacity left
+		// first — so the ranking is the number the column prints. Rows with no
+		// published capacity carry a NULL key and never fake a position.
+		PositionSortHeadroom: {
+			PositionDirAsc:  `(p.status = 'refused') ASC, ` + dmHeadroomRatio + ` ASC NULLS LAST, p.account ASC`,
+			PositionDirDesc: `(p.status = 'refused') DESC, ` + dmHeadroomRatio + ` DESC NULLS FIRST, p.account ASC`,
+		},
 		// The DM comparator is a strict boolean over borrowings vs
 		// max_borrow_lt; "distance" is the exact USD headroom
 		// (max_borrow_lt - borrowings) ascending — liquidatable rows have
 		// negative headroom and therefore lead. No wad, no normalization.
+		//
+		// DEPRECATED by 1.5.0 and UNCHANGED: this is the ABSOLUTE-dollar key,
+		// not the ratio. It keeps its exact ordering because every link and
+		// in-flight cursor minted against it means THIS ranking.
 		PositionSortLiqDistance: {
 			PositionDirAsc:  `(p.status = 'refused') ASC, (p.max_borrow_lt - p.borrowings) ASC NULLS LAST, p.account ASC`,
 			PositionDirDesc: `(p.status = 'refused') DESC, (p.max_borrow_lt - p.borrowings) DESC NULLS FIRST, p.account ASC`,
@@ -125,6 +189,10 @@ var positionsOrder = map[string]map[PositionSort]map[PositionDir]string{
 			PositionDirAsc:  `(p.status = 'refused') ASC, p.liquidatable ASC NULLS FIRST, (p.max_borrow_lt - p.borrowings) DESC NULLS FIRST, p.account ASC`,
 		},
 		// PositionSortHF deliberately absent: ErrPositionsSortUnsupported.
+		// `headroom` is NOT in that class — unlike a health factor, the share
+		// of unused borrowing capacity is defined by the Debt Manager's own
+		// published pair (max_borrow_lt, borrowings), so ranking by it invents
+		// nothing.
 	},
 }
 

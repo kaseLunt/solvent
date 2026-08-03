@@ -17,7 +17,11 @@
 //     change of the walk's identity (engine / min_value).
 //   - 409 BATCH_SUPERSEDED mid-walk RESTARTS VISIBLY from page one against the
 //     fresh batch, dropping the whole accumulated vector — a vector spliced
-//     across two materializations is not a book.
+//     across two materializations is not a book — AND the rendered progress
+//     goes with it in the same tick (W-HR-B): "walked N of M · batch #old" may
+//     not outlive the rows it counts.
+//   - the give-up reports SUPERSESSIONS OBSERVED, not restarts spent. Those
+//     differ by one, and the smaller number under-states the event.
 //   - the SAME filter the table walks under (min_value): the full book is the
 //     full FILTERED book, never a vector mixing two filters.
 //   - a withheld engine has no full book: the walk fails NAMED, and nothing
@@ -56,6 +60,12 @@ export const WALK_LIMIT = 1000;
  * Splicing the pages together would "fix" it by lying: a vector assembled from
  * four materializations is not a picture of any book that ever existed. So the
  * walk gives up out loud instead, and the panel states exactly why.
+ *
+ * THIS IS A BUDGET, NOT A CENSUS (Wave W-HR-B). It bounds how many times the
+ * walk RESTARTS; it is not how many times the book was OBSERVED to
+ * re-materialize. The two differ by exactly one — the supersession that
+ * exhausts the budget is observed and never restarted — and the panel reports
+ * the OBSERVED count, because that is the number that is true.
  */
 export const MAX_WALK_RESTARTS = 3;
 
@@ -76,7 +86,16 @@ export type FullBookWalkState =
        * the relationship between the walk and the batch cadence.
        */
       phase: "outpaced";
-      restarts: number;
+      /**
+       * SUPERSESSIONS OBSERVED — every 409 this walk met, including the one
+       * that exhausted the restart budget and was therefore never restarted.
+       *
+       * This used to carry the restart count, which is one LOWER: the walk
+       * reported "re-materialized 3 times" after seeing four 409s, so the
+       * sentence under-counted the very event it exists to report. The budget
+       * (MAX_WALK_RESTARTS) is a policy number; this is a measurement.
+       */
+      supersessions: number;
       latestBatchId: number | null;
     }
   | { phase: "failed"; message: string };
@@ -142,7 +161,11 @@ export function useFullBookWalk({ engine, minValue, enabled }: FullBookWalkParam
     const controller = new AbortController();
 
     const run = async () => {
+      // Two counters, because they are two different facts (W-HR-B):
+      //   restarts      — how much of the BUDGET has been spent.
+      //   supersessions — how many 409s were OBSERVED. Reported to the reader.
       let restarts = 0;
+      let supersessions = 0;
       // The outer loop exists ONLY for the 409 restart: a superseded batch
       // drops the whole accumulated vector and starts again from page one —
       // visibly — so no vector ever splices two materializations. It is
@@ -189,18 +212,31 @@ export function useFullBookWalk({ engine, minValue, enabled }: FullBookWalkParam
         } catch (cause) {
           if (controller.signal.aborted) return;
           if (cause instanceof BatchSupersededError) {
-            restarts += 1;
-            if (restarts > MAX_WALK_RESTARTS) {
+            supersessions += 1;
+            if (restarts >= MAX_WALK_RESTARTS) {
               // GIVE UP OUT LOUD. Splicing the accumulated pages together
               // would produce a vector no batch ever held; drawing a partial
               // walk would be a picture of page order. Neither is this book.
+              // The count reported is the OBSERVED one — this 409 included.
               setState({
                 phase: "outpaced",
-                restarts: restarts - 1,
+                supersessions,
                 latestBatchId: cause.currentBatchId,
               });
               return;
             }
+            restarts += 1;
+            // THE PROGRESS DIES WITH THE VECTOR (Wave W-HR-B, round-14
+            // MEDIUM). `acc` is dropped by the next iteration of the outer
+            // loop, but the last `setState` still on screen says "walked N of
+            // M · page P · batch #old" — a sentence describing rows this walk
+            // no longer holds, standing over a batch that is no longer being
+            // read, until the replacement page RESOLVES. On a slow first page
+            // of the fresh batch that is seconds of a confident lie. Zeroing
+            // here, in the same tick the vector is abandoned, means the panel
+            // can never claim progress it does not have; the notice below says
+            // what happened, and the walk starts counting again from nothing.
+            setState(WALK_START);
             setNotice(
               `batch ${String(cause.cursorBatchId)} was superseded${
                 cause.currentBatchId !== null ? ` by batch ${String(cause.currentBatchId)}` : ""

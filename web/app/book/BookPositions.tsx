@@ -609,6 +609,21 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
     [valueDecimals],
   );
 
+  // THE MAP's on-book count travels WITH ITS OWN BATCH (Wave W-HR-B). The
+  // footer's `aggServed` is guarded against the TABLE's envelope batch, which
+  // is the wrong guard for the map: the two walk different endpoints at
+  // different speeds, so after a 409 the table (and /v1/book with it) can heal
+  // onto a newer batch while the map still holds a completed vector from the
+  // older one. Handing the map a bare number guarded on the table's batch let
+  // exactly that pair render as one sentence. The aggregate is therefore
+  // handed over with the id of the batch it describes, and the map — the only
+  // component that knows its walk's batch — decides whether the two may be
+  // read together.
+  const mapOnBook =
+    bookFeed.batchId !== null && aggregate !== null && !aggregate.refused
+      ? { count: aggregate.positions, batchId: bookFeed.batchId }
+      : null;
+
   const hidden =
     dustActive && aggServed !== null && envelope !== null && envelope.totalPositions !== null
       ? aggServed.positions - envelope.totalPositions
@@ -826,7 +841,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
           engine={engine}
           walk={fullWalk}
           dustStep={dustActive ? (dust as ActiveDustStep) : null}
-          onBookCount={aggServed === null ? null : aggServed.positions}
+          onBook={mapOnBook}
         />
       </div>
 

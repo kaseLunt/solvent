@@ -52,6 +52,13 @@ export const WARN_HEADROOM_PCT = 10;
 /**
  * The band edges, in percent, ascending. The seven bands are: breached, then
  * [0,2), [2,5), [5,10), [10,25), [25,50), [50,∞).
+ *
+ * ONE RULE, EVERYWHERE: every band is LEFT-CLOSED — a headroom exactly AT an
+ * edge belongs to the band ABOVE it (`>= edge`, decided by cross-multiplication
+ * in bigint). That rule has always been what the code does; the TOP band's
+ * label used to contradict it by saying ">50%" while admitting exactly 50%,
+ * which made the label a false statement about its own members. The rule is
+ * kept and the LABEL is corrected (see HEADROOM_BANDS): "≥50%".
  */
 export const HEADROOM_BAND_EDGES = [2, 5, 10, 25, 50] as const;
 
@@ -83,7 +90,17 @@ export const HEADROOM_BANDS: readonly HeadroomBand[] = [
   { id: "5-10", label: "5–10%", meaning: "5–10% of borrowing capacity left before liquidation" },
   { id: "10-25", label: "10–25%", meaning: "10–25% of borrowing capacity left before liquidation" },
   { id: "25-50", label: "25–50%", meaning: "25–50% of borrowing capacity left before liquidation" },
-  { id: ">50", label: ">50%", meaning: "more than half the borrowing capacity is still unused" },
+  // THE TOP BAND IS LEFT-CLOSED LIKE EVERY OTHER ONE (Wave W-HR-B). An
+  // account at exactly 50% headroom lands here — `headroomBand` admits it with
+  // `scaled >= edge * num` — so ">50% / more than half" was a label that
+  // excluded a member it contained, and a reader checking the boundary case
+  // would have found the map disagreeing with its own axis. The band rule is
+  // unchanged; the LABEL and the MEANING now state it: at least half.
+  {
+    id: "50-plus",
+    label: "≥50%",
+    meaning: "at least half the borrowing capacity is still unused",
+  },
 ] as const;
 
 /** The breached band's index — named so no call-site writes a bare 0. */

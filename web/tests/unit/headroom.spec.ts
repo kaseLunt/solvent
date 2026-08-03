@@ -19,6 +19,7 @@ import { expect, test } from "@playwright/test";
 import {
   headroomBand,
   headroomBandLabel,
+  headroomBandMeaning,
   headroomBelowWarn,
   headroomBreached,
   headroomPercent,
@@ -125,10 +126,36 @@ test.describe("band edges — decided in exact bigint, never at a float boundary
       "5–10%",
       "10–25%",
       "25–50%",
-      ">50%",
+      // W-HR-B: NOT ">50%". Exactly 50% lands in this band under the one
+      // left-closed rule, so a label saying "more than" excluded a member it
+      // contained.
+      "≥50%",
     ]);
     // Every band carries a MEANING — a range is not an explanation.
     for (const band of HEADROOM_BANDS) expect(band.meaning.length).toBeGreaterThan(20);
+  });
+
+  test("EXACTLY 50% lands in the top band, and that band's label is TRUE of it", () => {
+    // The pair the round-14 MEDIUM was found on: headroom exactly 50%.
+    // (200 − 100) / 200 = 50%, and 100 × (num − den) === 50 × num exactly.
+    const num = 200n;
+    const den = 100n;
+    expect(100n * (num - den)).toBe(50n * num); // no float anywhere near it
+    expect(headroomPercent(num, den)).toBe("50%");
+
+    const band = headroomBand(num, den);
+    expect(band).toBe(HEADROOM_BANDS.length - 1); // the top band, as the rule says
+    expect(headroomBandLabel(band ?? -1)).toBe("≥50%");
+    expect(headroomBandMeaning(band ?? -1)).toBe(
+      "at least half the borrowing capacity is still unused",
+    );
+    // The label must not CLAIM strict inequality over a member that is equal.
+    expect(headroomBandLabel(band ?? -1)).not.toContain(">5");
+    expect(headroomBandMeaning(band ?? -1)).not.toContain("more than half");
+
+    // And the band below still owns everything strictly under the edge — the
+    // left-closed rule is unchanged, only the top label was false.
+    expect(headroomBand(10000n, 5001n)).toBe((HEADROOM_BANDS.length - 1) - 1); // 49.99%
   });
 
   test("the warn edge is 10 and the predicate is exact at it", () => {

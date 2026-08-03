@@ -139,7 +139,17 @@ function withQuery(path: string, params: URLSearchParams): string {
   return qs === "" ? path : `${path}?${qs}`;
 }
 
-/** The positions ranking vocabulary, verbatim from the contract. */
+/**
+ * The positions ranking vocabulary, verbatim from the contract.
+ *
+ * 1.5.0 added `headroom` — the RATIO of borrowing capacity still unused,
+ * defined on BOTH engines — and DEPRECATED `liq_distance`, which is still
+ * served with its ordering unchanged. On `debt_manager` those two are
+ * different quantities: `liq_distance` ranks the ABSOLUTE room in the engine's
+ * value unit, `headroom` ranks the percentage. A consumer that DISPLAYS a
+ * percentage must rank by `headroom`, or its column will disagree with its own
+ * order.
+ */
 export type PositionsSort = NonNullable<
   NonNullable<operations["getPositions"]["parameters"]["query"]>["sort"]
 >;
@@ -156,8 +166,9 @@ export interface PositionsQuery {
   sort?: PositionsSort;
   /**
    * Ranking direction (1.3.0), ABSOLUTE on the sort's own axis. Absent means
-   * the sort's canonical direction — liq_distance→asc, debt→desc, hf→asc,
-   * status→refused-first — and the account tie-break always ranks ascending.
+   * the sort's canonical direction — headroom→asc, liq_distance→asc,
+   * debt→desc, hf→asc, status→refused-first — and the account tie-break always
+   * ranks ascending.
    */
   dir?: PositionsDir;
   /**

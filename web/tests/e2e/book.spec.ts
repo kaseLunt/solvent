@@ -29,9 +29,13 @@ import {
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
 
-/** The ruling's acknowledgment copy, verbatim (W-UX-B part 9). */
+/**
+ * The acknowledgment copy, verbatim (W-UX-B part 9; destination amended by
+ * W-HR-B because contract 1.5.0 moved it — the Headroom column now asks for
+ * the wire's own `headroom` key, not `liq_distance`).
+ */
 const SORT_REMAP_ACK =
-  'sort "hf" is not defined for debt_manager — reset to liq_distance. The Debt Manager ' +
+  'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
   "publishes a strict liquidatable boolean, not a health factor.";
 
 const WARN_DISCLOSURE = "presentation band < 1.1 — not an engine threshold";
@@ -410,7 +414,7 @@ test("?engine=debt_manager&sort=hf normalizes BEFORE the first fetch — zero 40
   expect(doomed).toBe(0);
   const tableSorts = sortsRequested.filter((sort) => sort !== null);
   expect(tableSorts.length).toBeGreaterThan(0);
-  expect(tableSorts).toEqual(tableSorts.map(() => "liq_distance"));
+  expect(tableSorts).toEqual(tableSorts.map(() => "headroom"));
 
   // history.replaceState fixed the deep link. DEFAULTS ARE OMITTED (W-UX-C
   // part 15): headroom IS the default column and debt_manager IS the default

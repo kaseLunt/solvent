@@ -48,15 +48,40 @@ export interface BookRiskMapProps {
    * dust is excluded AT THE SOURCE: this map shows the filtered walk only.
    */
   dustStep?: ActiveDustStep | null;
-  /** aggregate.positions from /v1/book, same-batch-guarded upstream (null when unknown). */
-  onBookCount?: number | null;
+  /**
+   * /v1/book's engine aggregate count, TRAVELLING WITH THE BATCH IT DESCRIBES
+   * (null when unknown). The map compares that id to its OWN walk's batch and
+   * refuses to print the two side by side unless they are the same
+   * materialization — see `fullHead`.
+   */
+  onBook?: BookOnCount | null;
+}
+
+/**
+ * `aggregate.positions` and the batch it was served for, inseparably.
+ *
+ * WHY THE PAIR (Wave W-HR-B, round-14 MEDIUM). The map used to receive a bare
+ * number, guarded upstream against the TABLE's batch. The table and the map
+ * walk different endpoints at different speeds, so after a 409 the table can
+ * heal onto batch N+1 — dragging /v1/book with it — while the map is still
+ * displaying a completed vector from batch N. The head then read "full book ·
+ * 8,214 positions · as-of batch #N · 8,646 on book", one sentence with two
+ * materializations in it and no way for the reader to see the seam. A count
+ * that cannot state which batch it counted cannot be checked, so it now
+ * always travels with one.
+ */
+export interface BookOnCount {
+  /** `aggregate.positions` for this engine — refused rows included. */
+  count: number;
+  /** The /v1/book batch that aggregate came from. */
+  batchId: number;
 }
 
 export function BookRiskMap({
   engine,
   walk,
   dustStep = null,
-  onBookCount = null,
+  onBook = null,
 }: BookRiskMapProps) {
   const { state, notice } = walk;
   const binned = state.phase === "full" ? buildRiskBins(state.rows) : null;
@@ -76,13 +101,26 @@ export function BookRiskMap({
         ? "walking the full book — waiting for the book aggregate to settle"
         : null;
 
+  // THE ONE-BATCH RULE FOR THE HEAD (W-HR-B). The map's own count and the
+  // book aggregate's count may sit in one sentence ONLY when they describe the
+  // same materialization. When they do not, the number is not silently dropped
+  // — that would leave the reader wondering where it went — it is REPLACED by
+  // the reason, in the same grammar the table's footer uses for its own
+  // cross-batch guard (dust.ts `hiddenCountMismatch`).
+  const onBookSegment =
+    state.phase !== "full" || onBook === null
+      ? ""
+      : onBook.batchId === state.batch.id
+        ? ` · ${groupDecimalString(String(onBook.count))} on book`
+        : ` · on-book count withheld (aggregate from batch #${String(
+            onBook.batchId,
+          )}, map from batch #${String(state.batch.id)}: counts from two batches are never blended)`;
+
   const fullHead =
     state.phase === "full"
       ? `full book · ${groupDecimalString(String(state.rows.length))} positions · as-of batch #${String(
           state.batch.id,
-        )}${state.batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""}${
-          onBookCount === null ? "" : ` · ${groupDecimalString(String(onBookCount))} on book`
-        }`
+        )}${state.batch.supersession.superseded ? " · SUPERSEDED (still served)" : ""}${onBookSegment}`
       : null;
 
   return (
@@ -120,13 +158,16 @@ export function BookRiskMap({
       )}
 
       {/* OUTPACED: the indexer materialized a new batch faster than one walk
-          of the book completes, three restarts running. The honest reaction
-          is to stop and say so — a vector spliced across four
-          materializations is not a picture of any book that existed. */}
+          of the book completes, until the restart budget was spent. The honest
+          reaction is to stop and say so — a vector spliced across four
+          materializations is not a picture of any book that existed.
+          The count is SUPERSESSIONS OBSERVED (W-HR-B), which includes the one
+          that ended the walk; reporting restarts spent under-counted it by
+          exactly the event that made the walk stop. */}
       {state.phase === "outpaced" && (
         <div className={styles.walkNote} data-testid="risk-map-outpaced">
           <span>
-            the book re-materialized mid-walk {String(state.restarts)} times — no map is drawn,
+            the book re-materialized mid-walk {String(state.supersessions)} times — no map is drawn,
             because a vector spliced across batches is not this book
             {state.latestBatchId === null ? "" : ` (newest batch #${String(state.latestBatchId)})`}.
             Nothing here is a zero; the walk simply did not finish on one batch.

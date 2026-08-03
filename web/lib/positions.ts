@@ -43,8 +43,14 @@ export type PositionsEngine = (typeof POSITIONS_ENGINES)[number];
  */
 export const DEFAULT_BOOK_ENGINE: PositionsEngine = "debt_manager";
 
-/** The sort enum, verbatim from the contract. Default: `liq_distance`. */
-export const POSITIONS_SORTS = ["liq_distance", "debt", "hf", "status"] as const;
+/**
+ * The sort enum, verbatim from the contract (1.5.0). Default: `liq_distance`.
+ *
+ * `headroom` is the RATIO key added by 1.5.0 and defined on BOTH engines;
+ * `liq_distance` is DEPRECATED and still served with its ordering unchanged,
+ * so pre-1.5.0 links and cursors keep meaning exactly what they meant.
+ */
+export const POSITIONS_SORTS = ["headroom", "liq_distance", "debt", "hf", "status"] as const;
 export type PositionsSort = (typeof POSITIONS_SORTS)[number];
 
 /**
@@ -52,16 +58,19 @@ export type PositionsSort = (typeof POSITIONS_SORTS)[number];
  * publishes a strict liquidatable boolean, not a health factor, so its book
  * NEVER offers `hf` — the API refuses that pair with a 400 rather than invent
  * an ordering, and this map keeps the UI from ever composing the request.
+ * `headroom` is NOT in that class: the DM's own (max_borrow_lt, borrowings)
+ * pair defines the ratio, so 1.5.0 serves the key on both engines.
  * The flat `POSITIONS_SORTS` export above stays for compatibility.
  */
 export const SORTS_BY_ENGINE: Record<PositionsEngine, readonly PositionsSort[]> = {
-  aave_v3_etherfi: ["liq_distance", "debt", "hf", "status"],
-  debt_manager: ["liq_distance", "debt", "status"],
+  aave_v3_etherfi: ["headroom", "liq_distance", "debt", "hf", "status"],
+  debt_manager: ["headroom", "liq_distance", "debt", "status"],
 };
 
 /** Each sort's one canonical direction — vocabulary, not a per-view knob. */
 export type PositionsSortDirection = "asc" | "desc" | "refused-first";
 export const POSITIONS_SORT_DIRECTIONS: Record<PositionsSort, PositionsSortDirection> = {
+  headroom: "asc",
   liq_distance: "asc",
   debt: "desc",
   hf: "asc",
@@ -73,12 +82,10 @@ export const POSITIONS_SORT_DIRECTIONS: Record<PositionsSort, PositionsSortDirec
 // ---------------------------------------------------------------------------
 
 /**
- * The columns the Book table ranks by. `headroom` is a UI key with NO wire
- * twin: the service publishes no ratio ORDER BY, so each engine maps headroom
- * onto the existing wire key that ranks the same quantity.
- *
- * The wire vocabulary above is untouched (it is the contract's enum, verbatim
- * — this wave does not amend the contract).
+ * The columns the Book table ranks by. Since contract 1.5.0 `headroom` is a
+ * REAL WIRE KEY on both engines — the service orders by the exact ratio the
+ * column prints — so this vocabulary is a subset of the wire's, not a
+ * translation layer over it.
  */
 export const BOOK_SORTS = ["headroom", "debt", "status"] as const;
 export type BookSort = (typeof BOOK_SORTS)[number];
@@ -103,28 +110,26 @@ export const BOOK_SORT_DIRECTIONS: Record<BookSort, PositionsSortDirection> = {
 };
 
 /**
- * headroom → the engine's OWN existing wire key.
+ * The Book column → the wire key it ranks by. Since 1.5.0 that is the IDENTITY
+ * on every column, including Headroom, on BOTH engines.
  *
- *   aave_v3_etherfi → `hf`          (asc = lowest HF = least headroom first;
- *                                    headroom = 1 − 1/HF is strictly
- *                                    increasing in HF, so hf-asc IS
- *                                    headroom-asc, exactly)
- *   debt_manager    → `liq_distance` (the server's USD-headroom key)
+ * WHAT THIS FUNCTION USED TO PAPER OVER, AND NO LONGER DOES. W-HR-A had no
+ * ratio ORDER BY to ask for, so it mapped the Headroom column onto the nearest
+ * existing wire key per engine: `hf` on Aave (exact — headroom = 1 − 1/HF is
+ * strictly increasing in HF, so hf-asc IS headroom-asc) and `liq_distance` on
+ * the Debt Manager (NOT exact — that key ranks the ABSOLUTE dollar room while
+ * the column prints a ratio). A live probe of the first 1000 DM rows found 130
+ * adjacent pairs where the printed percentages ran backwards against the row
+ * order. Contract 1.5.0 serves `headroom` as a real ratio ORDER BY on both
+ * engines, so the column now asks for the number it displays and the
+ * limitation is gone — not disclosed, gone.
  *
- * KNOWN INTERIM LIMIT — DEBT MANAGER ORDERING IS NOT STRICTLY MONOTONIC IN
- * THE DISPLAYED COLUMN. The DM wire key ranks by ABSOLUTE USD headroom
- * (maxBorrowLT − borrowings, a dollar amount) while the column displays a
- * RATIO ((maxBorrowLT − borrowings) / maxBorrowLT). Those agree only at equal
- * capacity: a $1M account with $50k of room outranks a $10k account with $2k
- * of room on the wire, and the ratios say the opposite (5% vs 20%). So DM
- * rows are ordered by the right IDEA and can appear out of order against the
- * printed percent. The true ratio ORDER BY lands with contract 1.5.0 in Part
- * B; nothing in this wave touches the Go server, the openapi contract, or
- * packages/client-ts to fake it in the meantime.
+ * The mapping stays a function rather than collapsing to the identity at the
+ * call sites: it is the ONE place a future engine-specific column would
+ * resolve, and its per-engine shape is what the vocabulary tests pin.
  */
-export function bookSortWireKey(engine: PositionsEngine, sort: BookSort): PositionsSort {
-  if (sort !== "headroom") return sort;
-  return engine === "aave_v3_etherfi" ? "hf" : "liq_distance";
+export function bookSortWireKey(_engine: PositionsEngine, sort: BookSort): PositionsSort {
+  return sort;
 }
 
 /** Every sort key either vocabulary can name — the direction lookups accept both. */
@@ -179,14 +184,20 @@ export function normalizeDirParam(
 
 /**
  * The static acknowledgment rendered when a deep link's sort `hf` is remapped
- * for the DM — the ruling's copy VERBATIM (W-UX-B). It survives W-HR-A intact
- * and STAYS TRUE: `headroom` on the Debt Manager IS the wire's `liq_distance`
- * key, so a `?engine=debt_manager&sort=hf` link still lands exactly where this
- * sentence says it lands. A dim line in the controls region, NOT a toast and
- * NOT the loud notice slot (that register is reserved for supersession).
+ * for the DM. A dim line in the controls region, NOT a toast and NOT the loud
+ * notice slot (that register is reserved for supersession).
+ *
+ * W-HR-B AMENDS THE SECOND CLAUSE, because the old one stopped being true.
+ * W-UX-B's copy said "reset to liq_distance", and under W-HR-A that was
+ * literally where the link landed: the Headroom column requested the wire's
+ * `liq_distance` key. Contract 1.5.0 gives the column its own key, so the link
+ * now lands on `headroom` and the old sentence would name a ranking the table
+ * is not applying. The FIRST clause — the reason — is the ruling's, verbatim
+ * and unchanged; only the destination is corrected to the one the table
+ * actually uses.
  */
 export const SORT_HF_REMAP_ACK =
-  'sort "hf" is not defined for debt_manager — reset to liq_distance. The Debt Manager ' +
+  'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
   "publishes a strict liquidatable boolean, not a health factor.";
 
 /** What `normalizeBookQuery` decided, and whether it had to intervene. */
@@ -205,9 +216,19 @@ export interface NormalizedBookQuery {
  * The wire sort keys a PRE-W-HR-A deep link may still carry, and the Book
  * column they name today. These are ALIASES, not a second vocabulary: a
  * bookmarked `?sort=hf` described "rank by how close to the boundary", and
- * that ranking still exists — it is the Headroom column. The param is
- * rewritten to the current token rather than silently honored under an old
- * name, so the URL a reader copies always says what the table is doing.
+ * that ranking still exists — it is the Headroom column.
+ *
+ * THE PARAM IS REWRITTEN, which is what keeps this honest across the 1.5.0
+ * ordering change. On the WIRE, `liq_distance` is a deprecated alias that
+ * keeps its EXACT old ordering — API clients and in-flight cursors must not be
+ * re-ranked underneath them. In THIS surface there is no absolute-dollar-room
+ * column to land on, so a `?sort=liq_distance` link lands on the Headroom
+ * column, which since 1.5.0 requests the ratio key — a DIFFERENT DM order than
+ * the same link produced yesterday. That is disclosed structurally rather than
+ * silently: the URL is rewritten to the token the table is actually applying
+ * (or the param dropped when it is the default), so the link a reader copies
+ * always says what the table is doing, and nothing is honored under a name it
+ * no longer has.
  */
 const BOOK_SORT_ALIASES: Record<string, BookSort> = {
   hf: "headroom",

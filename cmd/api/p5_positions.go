@@ -17,6 +17,17 @@ package main
 //   - `hf` on the Debt Manager is a 400: there is no DM health factor, and
 //     inventing an ordering for it would blend the engines' comparators.
 //
+// Contract 1.5.0 added the `headroom` sort — the RATIO of borrowing capacity
+// still unused, defined on BOTH engines — because `liq_distance` on the Debt
+// Manager ranks the ABSOLUTE dollar room and therefore disagrees with the
+// ratio any consumer displays. `liq_distance` stays served, DEPRECATED, with
+// its ordering byte-for-byte unchanged: it is an alias in NAME only, and an
+// alias that re-ranks would silently rewrite every existing link and every
+// in-flight cursor. Cursor discipline is untouched — the 6-field cursor binds
+// the sort token it was minted under, so a `liq_distance` cursor round-trips
+// against the `liq_distance` ranking and a `headroom` cursor against
+// `headroom`, and presenting one under the other is the same 400 it always was.
+//
 // Rows are the LEAN PositionSummary (contract 1.2.0, AMENDMENT 1/E): the
 // ranked page's own fields — status, refusal, health factor, verdict, totals
 // in the engine's OWN unit, boundary distance, as-of marks — without the
@@ -227,7 +238,13 @@ func (s *server) writeBatchSuperseded(w http.ResponseWriter, r *http.Request, cu
 	}})
 }
 
+// positionsSorts is the contract's sort vocabulary (1.5.0). `headroom` is the
+// RATIO key — the share of borrowing capacity still unused — and is defined on
+// BOTH engines. `liq_distance` is DEPRECATED and still served, with its
+// ordering unchanged on both engines: an alias that silently re-ranks would
+// break every bookmark and every in-flight cursor minted against it.
 var positionsSorts = map[string]store.PositionSort{
+	"headroom":     store.PositionSortHeadroom,
 	"liq_distance": store.PositionSortLiqDistance,
 	"debt":         store.PositionSortDebt,
 	"hf":           store.PositionSortHF,
@@ -263,14 +280,14 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	sort, ok := positionsSorts[sortName]
 	if !ok {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"unknown sort "+strconv.Quote(sortName)+": the vocabulary is liq_distance | debt | hf | status", nil)
+			"unknown sort "+strconv.Quote(sortName)+": the vocabulary is headroom | liq_distance | debt | hf | status", nil)
 		return
 	}
 
 	// dir (1.3.0): an ABSOLUTE direction on the sort's own axis. Absent means
-	// the sort's canonical direction (liq_distance→asc, debt→desc, hf→asc,
-	// status→refused-first); the store resolves the default so the cursor
-	// binds the ranking actually walked.
+	// the sort's canonical direction (headroom→asc, liq_distance→asc,
+	// debt→desc, hf→asc, status→refused-first); the store resolves the default
+	// so the cursor binds the ranking actually walked.
 	dirName := q.Get("dir")
 	switch dirName {
 	case "", "asc", "desc":
@@ -341,7 +358,7 @@ func (s *server) handlePositions(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, store.ErrPositionsSortUnsupported):
 		writeError(w, http.StatusBadRequest, codeBadRequest,
 			"sort "+strconv.Quote(sortName)+" is not defined for engine "+strconv.Quote(engine)+
-				": the Debt Manager publishes a strict liquidatable boolean, not a health factor, and this service does not invent an ordering for it. Use liq_distance, debt or status.", nil)
+				": the Debt Manager publishes a strict liquidatable boolean, not a health factor, and this service does not invent an ordering for it. Use headroom, liq_distance, debt or status.", nil)
 		return
 	case errors.Is(err, store.ErrPositionsCursorMismatch):
 		writeError(w, http.StatusBadRequest, codeBadRequest,

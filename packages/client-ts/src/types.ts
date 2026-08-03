@@ -232,7 +232,7 @@ export type HeartbeatGrade = (typeof HEARTBEAT_GRADES)[number];
 export const SEIZURE_MODEL = "pro-rata-over-counted-collateral" as const;
 
 /** `info.version` of the contract this client was generated from. */
-export const CONTRACT_VERSION = "1.4.0" as const;
+export const CONTRACT_VERSION = "1.5.0" as const;
 
 /** WAD (1e18) — the scale health factors and grid factors are published at. */
 export const WAD = 10n ** 18n;

@@ -101,9 +101,18 @@ func TestPositionsPageSortSemantics(t *testing.T) {
 		{"aave debt", riskAaveEngine, PositionSortDebt, []string{"02", "01", "05", "03", "04"}},
 		// Aave status: refused FIRST for triage, then risk order.
 		{"aave status", riskAaveEngine, PositionSortStatus, []string{"04", "01", "05", "02", "03"}},
-		// DM liq_distance: headroom ASC — liquidatable (-100), near (+100),
+		// Aave headroom (1.5.0): the SAME total order as liq_distance and hf —
+		// headroom = 1 − 1/HF is strictly increasing in HF, so this is one
+		// ordering under three names, not three that happen to agree.
+		{"aave headroom", riskAaveEngine, PositionSortHeadroom, []string{"01", "05", "02", "03", "04"}},
+		// DM liq_distance: ABSOLUTE room ASC — liquidatable (-100), near (+100),
 		// safe (+1000), refused last.
 		{"dm liq_distance", riskDMEngine, PositionSortLiqDistance, []string{"11", "12", "16", "13"}},
+		// DM headroom (1.5.0): the RATIO ASC — −11.1% (−100/900), +16.6%
+		// (+100/600), +83.3% (+1000/1200), refused last. On THIS fixture the
+		// two DM keys agree; TestPositionsPageHeadroomIsTheRatioNotTheDollars
+		// is the fixture built to make them disagree.
+		{"dm headroom", riskDMEngine, PositionSortHeadroom, []string{"11", "12", "16", "13"}},
 		{"dm debt", riskDMEngine, PositionSortDebt, []string{"11", "12", "16", "13"}},
 		{"dm status", riskDMEngine, PositionSortStatus, []string{"13", "11", "12", "16"}},
 	}
@@ -355,6 +364,7 @@ func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.
 	// engines: the defaulted walk and the explicit-canonical walk are the
 	// same ranking, row for row.
 	canonical := map[PositionSort]PositionDir{
+		PositionSortHeadroom:    PositionDirAsc,
 		PositionSortLiqDistance: PositionDirAsc,
 		PositionSortHF:          PositionDirAsc,
 		PositionSortDebt:        PositionDirDesc,
@@ -377,6 +387,173 @@ func TestPositionsPageDirReversesEachSortWithAccountTiebreakStillAsc(t *testing.
 	// hf on the Debt Manager stays refused regardless of direction.
 	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHF, PositionDirDesc, "", "", 50)
 	require.ErrorIs(t, err, ErrPositionsSortUnsupported)
+}
+
+// p5HeadroomBook is the Debt Manager fixture built so the RATIO and the
+// ABSOLUTE dollar room DISAGREE — the shape the round-14 HIGH was found on,
+// where a page ranked by absolute room prints percentages that run backwards.
+//
+//	H1 (0x21) cap 1,000,000 debt 950,000 → room +50,000, ratio  5%
+//	H2 (0x22) cap    10,000 debt   8,000 → room  +2,000, ratio 20%
+//	H3 (0x23) cap   100,000 debt  99,000 → room  +1,000, ratio  1%
+//	H4 (0x24) cap         0 debt       0 → room       0, ratio NONE (0/0)
+//	H5 (0x25) cap    (NULL) debt  (NULL) → room    NULL, ratio NONE
+//	H6 (0x26) REFUSED
+//
+// By absolute room ascending: H4(0), H3, H2, H1 — the 1%-left account ranked
+// SAFER than the 5%-left one and the 20%-left one ranked riskiest.
+// By ratio ascending: H3(1%), H1(5%), H2(20%), then the two no-ratio rows.
+func p5HeadroomBook(retention int) RiskBatchWrite {
+	dm := func(account byte, cap, debt *string) RiskPositionWrite {
+		p := RiskPositionWrite{
+			Engine: riskDMEngine, Account: addr20(account), Status: RiskPositionComputed,
+			ValueDecimals: 6, CollateralValueUSD: bigStr("5000000"),
+			Liquidatable:  boolp(false),
+			BalancesBlock: 155_000_000, ParamsBlock: 155_000_000,
+		}
+		if cap != nil {
+			p.MaxBorrowLT = bigStr(*cap)
+		}
+		if debt != nil {
+			p.Borrowings = bigStr(*debt)
+		}
+		return p
+	}
+	str := func(v string) *string { return &v }
+	return RiskBatchWrite{
+		Producer: "p5-whrb-test", Retention: retention,
+		MaterializationKey: newTestKey(),
+		Watermarks: []RiskBatchWatermark{
+			{Engine: riskAaveEngine, ChainID: 1, LastBlock: 25_000_000, AckedEpoch: 1, MaxEpochAtCompute: 1},
+			{Engine: riskDMEngine, ChainID: 10, LastBlock: 155_000_000, AckedEpoch: 2, MaxEpochAtCompute: 2},
+		},
+		Positions: []RiskPositionWrite{
+			dm(0x21, str("1000000"), str("950000")),
+			dm(0x22, str("10000"), str("8000")),
+			dm(0x23, str("100000"), str("99000")),
+			dm(0x24, str("0"), str("0")),
+			dm(0x25, nil, nil),
+			{Engine: riskDMEngine, Account: addr20(0x26), Status: RiskPositionRefused,
+				RefusalCode: "SWEEP_NEVER", RefusalDetail: "collateral never read", ValueDecimals: 6,
+				BalancesBlock: 155_000_000, ParamsBlock: 155_000_000},
+		},
+		Aggregates: []RiskEngineAggregate{
+			{Engine: riskDMEngine, ValueDecimals: 6, Positions: 6, ComputedPositions: 5, RefusedPositions: 1,
+				TotalCollateral: bigStr("25000000"), TotalDebt: bigStr("1057000")},
+		},
+	}
+}
+
+// THE ROUND-14 HIGH, CLOSED IN THE STORE (contract 1.5.0).
+//
+// `headroom` must order by the exact RATIO — the number a consumer prints —
+// and `liq_distance` must keep ordering by the ABSOLUTE room, unchanged, so
+// every link and in-flight cursor minted against it still means what it meant.
+// Both statements are asserted on ONE fixture where the two disagree, because
+// a fixture where they agree cannot fail.
+func TestPositionsPageHeadroomIsTheRatioNotTheDollars(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+	batchID, err := s.WriteRiskBatch(ctx, p5HeadroomBook(10))
+	require.NoError(t, err)
+
+	// THE RATIO ORDER: 1% → 5% → 20%, then the rows with NO ratio, then
+	// refused. Zero capacity and NULL capacity are NOT a ratio of any kind:
+	// NULLS LAST keeps them from faking either infinite risk (a huge negative
+	// numerator) or infinite safety, and account ASC orders them among
+	// themselves.
+	res, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirCanonical, "", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"23", "21", "22", "24", "25", "26"}, pageAccounts(res),
+		"headroom ranks the RATIO: 1%% before 5%% before 20%%, whatever the dollar room says")
+
+	// THE DEPRECATED ALIAS, ORDERING UNCHANGED: absolute room ascending. This
+	// is a DIFFERENT sequence, which is the whole point — an alias that
+	// silently re-ranked would rewrite the meaning of every existing link.
+	alias, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"24", "23", "22", "21", "25", "26"}, pageAccounts(alias),
+		"liq_distance keeps ranking the ABSOLUTE room — deprecated is not re-pointed")
+	require.NotEqual(t, pageAccounts(res), pageAccounts(alias),
+		"the fixture must actually DISCRIMINATE the two keys, or neither assertion can fail")
+
+	// THE DIRECTION LAW on the new key: the exact reverse, NULLS placement
+	// flipped with it, account tie-break still ascending.
+	desc, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirDesc, "", "", 50)
+	require.NoError(t, err)
+	require.Equal(t, []string{"26", "24", "25", "22", "21", "23"}, pageAccounts(desc))
+
+	// AAVE: `headroom` is the same total order as `hf` and `liq_distance` —
+	// one ranking under three names, asserted rather than assumed.
+	aaveID, err := s.WriteRiskBatch(ctx, p5Book(10))
+	require.NoError(t, err)
+	for _, dir := range []PositionDir{PositionDirCanonical, PositionDirAsc, PositionDirDesc} {
+		headroom, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHeadroom, dir, "", "", 50)
+		require.NoError(t, err)
+		hf, err := s.PositionsPage(ctx, aaveID, riskAaveEngine, PositionSortHF, dir, "", "", 50)
+		require.NoError(t, err)
+		require.Equal(t, pageAccounts(hf), pageAccounts(headroom),
+			"aave headroom/%s must be the hf ranking exactly — headroom is monotone in HF", dir)
+	}
+}
+
+// THE CURSOR BINDS THE SORT TOKEN, so `headroom` and `liq_distance` cannot be
+// walked into each other — and a `liq_distance` cursor minted before 1.5.0
+// still ROUND-TRIPS against the ranking it was minted for.
+func TestPositionsPageHeadroomAndLiqDistanceCursorsAreNotInterchangeable(t *testing.T) {
+	s := testB1Store(t)
+	ctx := context.Background()
+	batchID, err := s.WriteRiskBatch(ctx, p5HeadroomBook(10))
+	require.NoError(t, err)
+
+	// An in-flight liq_distance walk keeps working, page for page, and its
+	// pages reassemble the UNCHANGED absolute-room ranking.
+	full, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 50)
+	require.NoError(t, err)
+	var walked []string
+	cursor := ""
+	for {
+		page, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", cursor, 2)
+		require.NoError(t, err)
+		walked = append(walked, pageAccounts(page)...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	require.Equal(t, pageAccounts(full), walked)
+
+	// Presenting that cursor under `headroom` is the SAME refusal any
+	// cross-ranking replay has always been: the rank means nothing in a
+	// different ordering, and serving it would be silent garbage.
+	liq, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", "", 2)
+	require.NoError(t, err)
+	require.NotEmpty(t, liq.NextCursor)
+	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirCanonical, "", liq.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+
+	// And the reverse.
+	head, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirCanonical, "", "", 2)
+	require.NoError(t, err)
+	require.NotEmpty(t, head.NextCursor)
+	_, err = s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortLiqDistance, PositionDirCanonical, "", head.NextCursor, 2)
+	require.ErrorIs(t, err, ErrPositionsCursorMismatch)
+
+	// The headroom walk itself paginates exactly, in the ratio order.
+	fullHead, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirCanonical, "", "", 50)
+	require.NoError(t, err)
+	var headWalk []string
+	cursor = ""
+	for {
+		page, err := s.PositionsPage(ctx, batchID, riskDMEngine, PositionSortHeadroom, PositionDirCanonical, "", cursor, 2)
+		require.NoError(t, err)
+		headWalk = append(headWalk, pageAccounts(page)...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	require.Equal(t, pageAccounts(fullHead), headWalk)
 }
 
 // THE EXCLUSION LAW (contract 1.3.0): a row is excluded iff status=computed

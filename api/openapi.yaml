@@ -20,7 +20,7 @@ openapi: 3.0.3
 
 info:
   title: Solvent Risk API
-  version: "1.4.0"
+  version: "1.5.0"
   description: |
     A read-only public view of ether.fi lending risk across two engines: the Aave
     v3 ether.fi market (Ethereum) and the ether.fi Debt Manager (Optimism).
@@ -164,25 +164,55 @@ paths:
           required: false
           description: |
             Ranking within the engine's own comparator. Defaults to
-            `liq_distance` — nearest to its OWN engine's liquidation boundary
-            first. Ties break on (account) so the order is total and the cursor
-            deterministic.
+            `liq_distance` (unchanged). Ties break on (account) so the order is
+            total and the cursor deterministic.
+
+            PER-ENGINE VOCABULARY. `headroom`, `debt` and `status` are defined
+            on BOTH engines. `hf` is `aave_v3_etherfi` ONLY — the Debt Manager
+            publishes a strict `liquidatable` boolean, not a health factor, and
+            this service refuses that pair with a 400 rather than invent an
+            ordering. `liq_distance` remains defined on both engines.
+
+            * `headroom` (ADDED 1.5.0) — the SHARE of the account's borrowing
+              capacity still unused before liquidation, i.e. the RATIO
+              `(threshold_value − debt) / threshold_value`, ascending: least
+              capacity left first. On `debt_manager` that is
+              `(max_borrow_lt − borrowings) / max_borrow_lt`, ordered as an
+              exact ratio; an account with no published borrowing capacity has
+              NO ratio and ranks last under the canonical direction rather than
+              faking either extreme. On `aave_v3_etherfi` headroom is
+              `1 − 1/HF`, which is strictly increasing in the health factor, so
+              `headroom`, `hf` and `liq_distance` are ONE total order there —
+              the same rows in the same sequence, under three names.
+            * `liq_distance` (DEPRECATED 1.5.0, STILL SERVED, ORDERING
+              UNCHANGED) — distance to the engine's own boundary. On
+              `debt_manager` this ranks the ABSOLUTE room in the engine's value
+              unit (`max_borrow_lt − borrowings`), which is a DIFFERENT
+              quantity from the ratio and disagrees with it wherever capacity
+              differs: a large account with a small percentage of room outranks
+              a small account with a large percentage. Consumers that DISPLAY a
+              percentage should rank by `headroom`. This key keeps its exact
+              ordering — existing links and in-flight cursors were minted
+              against it and continue to mean what they meant.
+            * `debt` — the engine's own debt total, descending.
+            * `hf` — health factor ascending (`aave_v3_etherfi` only).
+            * `status` — refused rows first, for triage.
           schema:
             type: string
-            enum: [liq_distance, debt, hf, status]
+            enum: [headroom, liq_distance, debt, hf, status]
         - name: dir
           in: query
           required: false
           description: |
             Ranking direction. ABSENT means the sort's own CANONICAL direction,
-            which this contract states explicitly: `liq_distance` → asc
-            (nearest to the boundary first), `debt` → desc (largest debt
-            first), `hf` → asc (lowest health factor first), `status` →
-            refused-first (desc on the refused axis). The non-canonical
-            direction serves the EXACT REVERSE of the canonical ranking —
-            except the account tie-break, which ALWAYS ranks ascending, so
-            equal sort keys order identically in both directions and the
-            cursor stays deterministic.
+            which this contract states explicitly: `headroom` → asc (least
+            capacity left first), `liq_distance` → asc (nearest to the boundary
+            first), `debt` → desc (largest debt first), `hf` → asc (lowest
+            health factor first), `status` → refused-first (desc on the refused
+            axis). The non-canonical direction serves the EXACT REVERSE of the
+            canonical ranking — except the account tie-break, which ALWAYS
+            ranks ascending, so equal sort keys order identically in both
+            directions and the cursor stays deterministic.
           schema:
             type: string
             enum: [asc, desc]
@@ -2975,8 +3005,12 @@ components:
         engine: { type: string }
         sort:
           type: string
-          enum: [liq_distance, debt, hf, status]
-          description: The ranking actually applied, echoed so a defaulted request still states its order.
+          enum: [headroom, liq_distance, debt, hf, status]
+          description: |
+            The ranking actually applied, echoed so a defaulted request still
+            states its order. `headroom` (1.5.0) ranks the RATIO of unused
+            borrowing capacity on both engines; `liq_distance` is deprecated
+            and still served with its ordering unchanged.
         limit:
           type: integer
           description: The page size actually applied, echoed so a defaulted request still states it.
@@ -3047,7 +3081,18 @@ components:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/Address" }]
           description: The axis's leading factor asset, when a distance is served.
-        factor_symbol: { type: string }
+        factor_symbol:
+          type: string
+          description: |
+            The `factor_asset`'s ticker, from the service's own valuation
+            registry — a LABEL for the axis a consumer renders ("weETH must
+            move −12.3% …"), never an identifier. Served on BOTH engines
+            (`aave_v3_etherfi` and `debt_manager`) on every `distance` row
+            whose factor asset the registry can name. ABSENT — never an empty
+            string — when there is no factor asset to label (`kind` is
+            `breached`, `never` or `none`, where `factor_asset` is null too) or
+            when the registry holds no symbol for it; a consumer must then name
+            the axis generically rather than print a blank.
         reason:
           type: string
           nullable: true

@@ -1,13 +1,14 @@
 // Per-engine sort vocabulary, the deep-link normalizer, and the page-fetch
 // failure taxonomy (design ruling, W-UX-B parts 9–11; sort vocabulary
-// extended by W-HR-A).
+// extended by W-HR-A and amended by W-HR-B / contract 1.5.0).
 //
 // Laws under test:
 //   - SORTS_BY_ENGINE (the WIRE vocabulary, contract-verbatim): the DM never
-//     OFFERS hf; aave keeps the full contract enum. Untouched by W-HR-A —
-//     this wave does not amend the contract.
-//   - BOOK_SORTS (the UI's column vocabulary): headroom / debt / status, and
-//     `headroom` resolves per engine onto an EXISTING wire key.
+//     OFFERS hf; aave keeps the full contract enum. 1.5.0 added `headroom` to
+//     BOTH engines and DEPRECATED `liq_distance` without removing it.
+//   - BOOK_SORTS (the UI's column vocabulary): headroom / debt / status, each
+//     resolving to the wire key of the SAME NAME on both engines — the column
+//     asks for the number it prints.
 //   - POSITIONS_SORT_DIRECTIONS names each wire sort's canonical direction;
 //     BOOK_SORT_DIRECTIONS does the same for the columns.
 //   - normalizeBookQuery: unknown values fall to defaults; the legacy wire
@@ -45,26 +46,40 @@ import {
 
 // The API's own 400 sentence for the doomed pair — the message the register
 // must carry VERBATIM (cmd/api/p5_positions.go).
+// W-HR-B: the hint clause gained `headroom`, which 1.5.0 defines for the DM.
 const DM_HF_400 =
   'sort "hf" is not defined for engine "debt_manager": the Debt Manager publishes a strict ' +
   "liquidatable boolean, not a health factor, and this service does not invent an ordering " +
-  "for it. Use liq_distance, debt or status.";
+  "for it. Use headroom, liq_distance, debt or status.";
 
 const URL_UNDER_TEST = "http://api.test/v1/positions?engine=debt_manager&sort=hf";
 
 test.describe("SORTS_BY_ENGINE — the per-engine sort vocabulary", () => {
-  test("the DM never offers hf; aave keeps the full contract enum", () => {
-    expect(SORTS_BY_ENGINE.aave_v3_etherfi).toEqual(["liq_distance", "debt", "hf", "status"]);
-    expect(SORTS_BY_ENGINE.debt_manager).toEqual(["liq_distance", "debt", "status"]);
+  test("the DM never offers hf; aave keeps the full contract enum; BOTH gain headroom", () => {
+    expect(SORTS_BY_ENGINE.aave_v3_etherfi).toEqual([
+      "headroom",
+      "liq_distance",
+      "debt",
+      "hf",
+      "status",
+    ]);
+    expect(SORTS_BY_ENGINE.debt_manager).toEqual(["headroom", "liq_distance", "debt", "status"]);
     expect(SORTS_BY_ENGINE.debt_manager).not.toContain("hf");
+    // `headroom` is NOT in hf's class: the DM's own (max_borrow_lt,
+    // borrowings) pair defines the ratio, so nothing is invented by ranking it.
+    expect(SORTS_BY_ENGINE.debt_manager).toContain("headroom");
   });
 
   test("the flat export survives for compatibility, verbatim from the contract", () => {
-    expect(POSITIONS_SORTS).toEqual(["liq_distance", "debt", "hf", "status"]);
+    expect(POSITIONS_SORTS).toEqual(["headroom", "liq_distance", "debt", "hf", "status"]);
+    // THE ALIAS LAW: 1.5.0 deprecated `liq_distance`; it did NOT remove it.
+    // A vocabulary that dropped it would break every pre-1.5.0 link.
+    expect(POSITIONS_SORTS).toContain("liq_distance");
   });
 
   test("every sort names its one canonical direction", () => {
     expect(POSITIONS_SORT_DIRECTIONS).toEqual({
+      headroom: "asc",
       liq_distance: "asc",
       debt: "desc",
       hf: "asc",
@@ -88,23 +103,39 @@ test.describe("BOOK_SORTS — the UI column vocabulary (W-HR-A)", () => {
     });
   });
 
-  test("headroom resolves onto each engine's OWN existing wire key", () => {
-    // Aave: hf. headroom = 1 − 1/HF is strictly increasing in HF, so hf-asc
-    // IS headroom-asc, exactly.
-    expect(bookSortWireKey("aave_v3_etherfi", "headroom")).toBe("hf");
-    // DM: the server's USD-headroom key. KNOWN INTERIM LIMIT — that key ranks
-    // by absolute USD headroom while the column prints a ratio, so DM order
-    // is not strictly monotonic in the displayed percent until 1.5.0.
-    expect(bookSortWireKey("debt_manager", "headroom")).toBe("liq_distance");
-    // Every other column is its own wire key on both engines.
-    expect(bookSortWireKey("aave_v3_etherfi", "debt")).toBe("debt");
-    expect(bookSortWireKey("debt_manager", "debt")).toBe("debt");
-    expect(bookSortWireKey("debt_manager", "status")).toBe("status");
+  test("EVERY column asks for the wire key of its own name, on BOTH engines", () => {
+    // W-HR-B / contract 1.5.0. The Headroom column no longer borrows another
+    // key: the service orders by the exact ratio the column prints. The DM's
+    // old borrow (`liq_distance`) ranked ABSOLUTE dollar room and produced 130
+    // adjacent inversions against the printed percent in the first 1000 live
+    // rows — the defect this identity closes.
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      for (const sort of BOOK_SORTS) {
+        expect(bookSortWireKey(engine, sort), `${engine}/${sort}`).toBe(sort);
+      }
+    }
+    expect(bookSortWireKey("debt_manager", "headroom")).toBe("headroom");
+    expect(bookSortWireKey("aave_v3_etherfi", "headroom")).toBe("headroom");
+    // The old borrows are NOT what the column asks for any more.
+    expect(bookSortWireKey("debt_manager", "headroom")).not.toBe("liq_distance");
+    expect(bookSortWireKey("aave_v3_etherfi", "headroom")).not.toBe("hf");
   });
 
   test("the doomed (debt_manager, hf) request can no longer be COMPOSED at all", () => {
     for (const sort of BOOK_SORTS) {
       expect(bookSortWireKey("debt_manager", sort)).not.toBe("hf");
+    }
+  });
+
+  test("every Book column resolves to a key its engine actually DEFINES", () => {
+    // The composition guard: a column may only ask for a key the per-engine
+    // wire vocabulary lists, or the UI is building a request the API refuses.
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      for (const sort of BOOK_SORTS_BY_ENGINE[engine]) {
+        expect(SORTS_BY_ENGINE[engine], `${engine}/${sort}`).toContain(
+          bookSortWireKey(engine, sort),
+        );
+      }
     }
   });
 });
@@ -168,9 +199,35 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
       hfRemapped: true,
       rewritten: true,
     });
-    // The acknowledgment's sentence remains literally true: headroom on the
-    // DM IS the wire's liq_distance key.
-    expect(bookSortWireKey(normalized.engine, normalized.sort)).toBe("liq_distance");
+    // W-HR-B: the acknowledgment must name the ranking the table ACTUALLY
+    // applies. Since 1.5.0 that is the wire's own `headroom` key, not
+    // `liq_distance` — so the copy below moved with it.
+    expect(bookSortWireKey(normalized.engine, normalized.sort)).toBe("headroom");
+  });
+
+  test("a `headroom` deep link is a FIRST-CLASS param — accepted verbatim, nothing rewritten", () => {
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      expect(normalizeBookQuery(engine, "headroom", null)).toEqual({
+        engine,
+        sort: "headroom",
+        reversed: false,
+        hfRemapped: false,
+        rewritten: false,
+      });
+    }
+  });
+
+  test("a pre-1.5.0 `liq_distance` link still LANDS — the alias law, with the URL corrected", () => {
+    // The wire keeps serving `liq_distance` with its old ordering for API
+    // clients and in-flight cursors. This surface has no absolute-room column,
+    // so the link lands on Headroom — and `rewritten` is true, so the URL is
+    // corrected to the token the table is applying rather than the request
+    // being honored under a name it no longer has.
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      const normalized = normalizeBookQuery(engine, "liq_distance", null);
+      expect(normalized.sort).toBe("headroom");
+      expect(normalized.rewritten).toBe(true);
+    }
   });
 
   test("unknown values fall to defaults and are rewritten", () => {
@@ -183,10 +240,16 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
     });
   });
 
-  test("the acknowledgment copy is the ruling's, verbatim", () => {
+  test("the acknowledgment copy names the ranking the table ACTUALLY applies", () => {
+    // W-UX-B's reason clause, verbatim; the destination corrected by W-HR-B
+    // because 1.5.0 moved it. A remap acknowledgment that names a key the
+    // table is not using is worse than none.
     expect(SORT_HF_REMAP_ACK).toBe(
-      'sort "hf" is not defined for debt_manager — reset to liq_distance. The Debt Manager ' +
+      'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
         "publishes a strict liquidatable boolean, not a health factor.",
+    );
+    expect(SORT_HF_REMAP_ACK).toContain(
+      bookSortWireKey("debt_manager", normalizeBookQuery("debt_manager", "hf", null).sort),
     );
   });
 });

@@ -14,8 +14,10 @@
 //   x — log10-USD HALF-DECADES: bin k spans [k/2, (k+1)/2) in log10 dollars,
 //       so exact powers land on the LOWER edge of their half-decade.
 //   y — the SEVEN headroom bands (lib/headroom): breached / 0–2 / 2–5 / 5–10 /
-//       10–25 / 25–50 / >50 %, assigned in exact bigint by lib/headroom's
-//       cross-multiplication — a float never decides a band edge.
+//       10–25 / 25–50 / ≥50 %, assigned in exact bigint by lib/headroom's
+//       cross-multiplication — a float never decides a band edge. EVERY band
+//       is LEFT-CLOSED: a headroom exactly at an edge belongs to the band
+//       above, the top band included (W-HR-B).
 //
 // Honesty laws carried here (pinned by tests/unit/risk-bins.spec.ts):
 //   - CRIT NEVER BINNED: verdict === "liquidatable" rows pass through as

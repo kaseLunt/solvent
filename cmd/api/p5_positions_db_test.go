@@ -180,6 +180,77 @@ func TestPositionsPageMinValueNeverExcludesRefusedRows(t *testing.T) {
 	require.Equal(t, float64(2), out["total_positions"])
 }
 
+// CONTRACT 1.5.0 AT THE API: `headroom` is accepted, validated and ECHOED on
+// BOTH engines; `liq_distance` is still accepted (the deprecated alias); the
+// two mint DIFFERENT cursors and cannot be walked into each other; and the DM
+// `hf` refusal now names `headroom` among the keys that DO work there.
+//
+// The ORDERING difference between the two DM keys is proven at the store layer
+// (TestPositionsPageHeadroomIsTheRatioNotTheDollars) on a fixture built to make
+// them disagree; what this test owns is the serving contract around it.
+func TestPositionsPageHeadroomSortIsServedOnBothEngines(t *testing.T) {
+	f := newP5Fixture(t)
+
+	for _, engine := range []string{risk.AaveEngine, risk.DMEngine} {
+		out := f.getJSON(t, "/v1/positions?engine="+engine+"&sort=headroom", "/v1/positions")
+		require.Equal(t, "headroom", out["sort"],
+			"%s: the applied ranking is echoed, so a client never has to assume it", engine)
+		require.Equal(t, engine, out["engine"])
+		require.Len(t, asList(t, out["positions"]), 2, "%s: the whole fixture book, refused row included", engine)
+
+		// The direction is applied without being sent: headroom's canonical
+		// direction is asc, and the explicit spelling is the same ranking.
+		explicit := f.getJSON(t, "/v1/positions?engine="+engine+"&sort=headroom&dir=asc", "/v1/positions")
+		require.Equal(t, accountsOf(t, out), accountsOf(t, explicit),
+			"%s: absent dir IS headroom's canonical direction (asc)", engine)
+
+		// …and the reverse is a DIFFERENT ranking, so `dir` is really wired.
+		reversed := f.getJSON(t, "/v1/positions?engine="+engine+"&sort=headroom&dir=desc", "/v1/positions")
+		require.NotEqual(t, accountsOf(t, out), accountsOf(t, reversed),
+			"%s: dir=desc must reverse headroom, not echo it", engine)
+	}
+
+	// THE ALIAS LAW ON THE WIRE: `liq_distance` is DEPRECATED, not withdrawn.
+	// A pre-1.5.0 client that names it is served, and served the ranking it
+	// asked for — the cursor it holds still round-trips.
+	alias := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=liq_distance&limit=1", "/v1/positions")
+	require.Equal(t, "liq_distance", alias["sort"], "the deprecated key is echoed under its own name")
+	aliasCursor, ok := alias["next_cursor"].(string)
+	require.True(t, ok)
+	aliasPage2 := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=liq_distance&limit=1&cursor="+url.QueryEscape(aliasCursor), "/v1/positions")
+	require.Len(t, asList(t, aliasPage2["positions"]), 1, "an in-flight liq_distance cursor still walks")
+
+	// The two keys are DIFFERENT RANKINGS and their cursors are not
+	// interchangeable — a rank replayed into another ordering is garbage.
+	head := f.getJSON(t, "/v1/positions?engine=debt_manager&sort=headroom&limit=1", "/v1/positions")
+	headCursor, ok := head["next_cursor"].(string)
+	require.True(t, ok)
+	bad := f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=headroom&limit=1&cursor="+url.QueryEscape(aliasCursor), "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, bad["error"])["message"], "cursor does not match this request")
+	bad = f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=liq_distance&limit=1&cursor="+url.QueryEscape(headCursor), "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, bad["error"])["message"], "cursor does not match this request")
+
+	// The two refusal sentences name the 1.5.0 vocabulary rather than a stale
+	// one — a hint that omits a working key sends the reader the wrong way.
+	unknown := f.getStatusJSON(t, "/v1/positions?engine=aave_v3_etherfi&sort=apy", "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, unknown["error"])["message"], "headroom | liq_distance | debt | hf | status")
+	dmHF := f.getStatusJSON(t, "/v1/positions?engine=debt_manager&sort=hf", "/v1/positions", http.StatusBadRequest)
+	require.Contains(t, asMap(t, dmHF["error"])["message"], "Use headroom, liq_distance, debt or status.")
+}
+
+// accountsOf is the page's account order — the only thing a ranking assertion
+// actually needs.
+func accountsOf(t *testing.T, out map[string]any) []string {
+	t.Helper()
+	var accounts []string
+	for _, row := range asList(t, out["positions"]) {
+		account, ok := asMap(t, row)["account"].(string)
+		require.True(t, ok)
+		accounts = append(accounts, account)
+	}
+	return accounts
+}
+
 // Contract 1.3.0 dir at the API: an explicit non-canonical direction reverses
 // the walk (the account tie-break stays ascending — proven at the store
 // layer), absent dir serves the canonical direction, and the cursor binds the

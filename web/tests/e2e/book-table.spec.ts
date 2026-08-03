@@ -337,25 +337,26 @@ test("header sort cycle: canonical → exact reverse → canonical; column switc
   await expect.poll(() => page.url()).not.toContain("dir=");
 
   // The wire saw exactly the cycle, each change restarting from page one.
-  // W-HR-A: on Aave the Headroom column ranks by the EXISTING `hf` wire key —
-  // headroom = 1 − 1/HF is strictly increasing in HF, so hf-asc IS
-  // headroom-asc. The contract's enum is untouched by this wave.
+  // W-HR-B / contract 1.5.0: the Headroom column asks for the wire's OWN
+  // `headroom` key — the ratio ORDER BY — on both engines. It used to borrow
+  // `hf` here (exact on Aave) and `liq_distance` on the DM (not exact); the
+  // borrow is gone on both, so the column and its order are one thing.
   await expect
     .poll(() => ranked.filter((request) => request.cursor === null).length)
     .toBe(5);
   const pageOnes = ranked.filter((request) => request.cursor === null);
   expect(pageOnes.map((request) => `${request.sort ?? ""}/${request.dir ?? "-"}`)).toEqual([
-    "hf/-",
+    "headroom/-",
     "debt/-",
     "debt/asc",
     "debt/-",
-    "hf/-",
+    "headroom/-",
   ]);
   // Footer names the COLUMN with its direction glyph.
   await expect(page.getByTestId(ACCOUNTING)).toContainText("sort headroom ▲");
 });
 
-test("the Headroom column ranks by each engine's OWN wire key — hf on Aave, liq_distance on the DM", async ({
+test("the Headroom column ranks by the wire's OWN `headroom` key on BOTH engines (1.5.0)", async ({
   page,
 }) => {
   const tableSorts: Array<{ engine: string | null; sort: string }> = [];
@@ -372,17 +373,21 @@ test("the Headroom column ranks by each engine's OWN wire key — hf on Aave, li
   await openBook(page);
 
   await expect(page.getByRole("table", { name: "positions for aave_v3_etherfi" })).toBeVisible();
-  await expect.poll(() => tableSorts.at(-1)?.sort).toBe("hf");
+  await expect.poll(() => tableSorts.at(-1)?.sort).toBe("headroom");
 
   await page.getByRole("button", { name: "debt_manager" }).click();
   await expect(page.getByRole("table", { name: "positions for debt_manager" })).toContainText(
     "0xccCc…0003",
   );
-  // The DM's headroom key is the server's USD-headroom key. KNOWN INTERIM
-  // LIMIT (documented in lib/positions): that ranks by ABSOLUTE USD headroom
-  // while the column prints a ratio, so DM order is not strictly monotonic in
-  // the displayed percent until the ratio ORDER BY lands in 1.5.0.
-  await expect.poll(() => tableSorts.at(-1)?.sort).toBe("liq_distance");
+  // W-HR-B: the DM asks for `headroom` too — the server's RATIO ORDER BY, the
+  // exact quantity the column prints. The old borrow (`liq_distance`, absolute
+  // dollar room) is the ordering that produced 130 adjacent inversions against
+  // the printed percent in the first 1000 live rows, and the column must never
+  // compose it again.
+  await expect.poll(() => tableSorts.at(-1)?.sort).toBe("headroom");
+  expect(
+    tableSorts.filter((entry) => entry.engine === "debt_manager" && entry.sort === "liq_distance"),
+  ).toHaveLength(0);
   // The doomed (debt_manager, hf) pair was never composed.
   expect(
     tableSorts.filter((entry) => entry.engine === "debt_manager" && entry.sort === "hf"),
@@ -491,7 +496,9 @@ test("deep links round-trip: non-defaults kept, illegal combos normalized before
   await expect(dmTable).toContainText("0xccCc…0003");
   await expect(page.getByTestId("sort-remap-ack")).toBeVisible();
   expect(requests.length).toBeGreaterThan(0);
-  expect(requests.every((request) => request.sort === "liq_distance" && request.dir === null)).toBe(
+  // W-HR-B: the remap lands on the Headroom column, which since 1.5.0 asks
+  // for the wire's `headroom` key.
+  expect(requests.every((request) => request.sort === "headroom" && request.dir === null)).toBe(
     true,
   );
   await expect.poll(() => page.url()).not.toContain("sort=");
