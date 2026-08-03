@@ -1,14 +1,24 @@
+import type { RibbonStreamPosture } from "@/lib/stream-posture";
 import styles from "./ribbon.module.css";
 
 // The integrity Ribbon — spec §3.6. Two modes, rendered distinctly:
 //
-//   LIVE · WATERMARKED   the live posture. Its payload is a watermark VECTOR
-//                        of named as-ofs (per-engine stamps, sweep age, …).
-//                        There is deliberately NO single-block prop: a global
-//                        "live at block N" does not exist in this system and
-//                        cannot be rendered by this component.
+//   mode="stream"        the stream posture over a watermark VECTOR of named
+//                        as-ofs (per-engine stamps, sweep age, …). There is
+//                        deliberately NO single-block prop: a global "live at
+//                        block N" does not exist in this system and cannot be
+//                        rendered by this component.
 //
 //   PROOF · EXACT @ PIN  reconcile-welded numbers at an exact pin.
+//
+// WAVE R7 (Codex round-15 finding 4) — `LIVE · WATERMARKED` IS A CLAIM, AND
+// THIS COMPONENT NO LONGER MAKES IT ON ITS OWN. The mode used to be called
+// "live", and having a batch to render was the whole qualification for painting
+// the green chip; the ribbon therefore went on saying LIVE over a connection
+// that had been torn down and never came back. The mode is now "stream" and it
+// takes a `posture` the caller must have DERIVED from the current connection
+// (lib/stream-posture.ts). A ribbon with data and a dead socket renders the
+// data under the socket's own word.
 
 export interface RibbonAsOf {
   /** The input's name, e.g. "aave_v3", "debt_manager", "sweep". */
@@ -20,7 +30,15 @@ export interface RibbonAsOf {
 
 export type RibbonProps =
   | {
-      mode: "live";
+      mode: "stream";
+      /**
+       * Wave R7 — WHAT THE CURRENT CONNECTION IS DOING, derived by the caller
+       * from `streamState` + `hasBase`. `{ live: true }` is the only value that
+       * paints `LIVE · WATERMARKED`; every other value paints the stream's own
+       * word over the SAME retained data, because a reader losing their
+       * connection must not also lose their book.
+       */
+      posture: RibbonStreamPosture;
       /** The watermark vector. Every entry names its own as-of. */
       asOfs: readonly RibbonAsOf[];
       /** Current batch is superseded — render the warning inline. */
@@ -71,11 +89,20 @@ export function Ribbon(props: RibbonProps) {
     );
   }
 
+  // The badge's tone is the posture's, not the payload's: the ok/green chip is
+  // reachable ONLY through `live: true`, and the pulsing dot — which is the
+  // thing an eye reads as "data is arriving" — goes with it.
+  const { posture } = props;
+  const toneClass = posture.live
+    ? styles.live
+    : posture.tone === "down"
+      ? styles.down
+      : styles.waiting;
   return (
     <span className={styles.ribbon}>
-      <span className={`${styles.badge} ${styles.live}`}>
-        <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />
-        LIVE · WATERMARKED
+      <span className={`${styles.badge} ${toneClass}`}>
+        {posture.live && <i className={`${styles.dot} ${styles.pulse}`} aria-hidden />}
+        {posture.live ? "LIVE · WATERMARKED" : posture.label}
         {props.batchAgeUnknown !== undefined && props.batchAgeUnknown !== null ? (
           <span className={styles.batchAgeUnknown} data-testid="ribbon-batch-age-unknown">
             {props.batchAgeUnknown}

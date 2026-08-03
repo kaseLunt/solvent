@@ -33,10 +33,13 @@
   border-color: var(--accent);
 }
 
-/* The batch-age suffix inside the LIVE badge (Wave R1 item 3): DIM, so the
-   eye reads LIVE as the stream's state and the suffix as a separate fact
-   about the batch — never one green sentence implying fresh numbers. */
-.badge.live .batchAge {
+/* The batch-age suffix inside the stream badge (Wave R1 item 3): DIM, so the
+   eye reads the badge as the stream's state and the suffix as a separate fact
+   about the batch — never one green sentence implying fresh numbers.
+   WAVE R7: scoped to `.badge`, not `.badge.live`. The batch and its age are
+   RETAINED while the connection is down, so the age slot has to keep its
+   styling under the waiting and closed tones too. */
+.badge .batchAge {
   color: var(--ink-3);
 }
 
@@ -45,7 +48,7 @@
    state the age is a thing the reader must notice — and it is not the CRIT
    colour, because "I cannot say" is not a verdict that anything is wrong with
    the batch. */
-.badge.live .batchAgeUnknown {
+.badge .batchAgeUnknown {
   color: var(--warn);
 }
 

@@ -181,7 +181,17 @@ test("(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing", a
   await openBookWith(page, POSITIONS_AAVE_PAGE_1);
 
   const header = page.getByRole("banner");
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7 (round-15 finding 4) CHANGED WHAT THIS BADGE IS ALLOWED TO SAY, and
+  // this assertion moved with it. `route.fulfill` delivers the snapshot and then
+  // ENDS the response body — which is a server hanging up. The client raises
+  // "the server closed the stream" and parks on its reconnect backoff (the fake
+  // clock keeps that timer parked). The ribbon USED to paint `LIVE ·
+  // WATERMARKED` over exactly that, because holding a batch was the whole
+  // qualification for the green chip; painting LIVE over a closed connection is
+  // the defect R7 fixes. It now names the connection it actually has — and the
+  // BATCH AGE, which is this test's real subject, renders beside it unchanged.
+  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   // Inside the threshold: nothing rendered, and the absence is not a claim.
   await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
 
@@ -189,8 +199,11 @@ test("(2) THE RIBBON ENGAGES: the stale-batch suffix appears on the crossing", a
   // ribbon now says so — the defect was that it never could.
   await page.clock.fastForward(60_000);
   await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 1h old");
-  // LIVE still describes the STREAM: two subjects, two statements, both true.
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // TWO SUBJECTS, TWO STATEMENTS, both still true and both still rendered: the
+  // stream's own posture, and the age of the batch it last delivered. Losing
+  // the connection does not cost the reader the fact that their data is old —
+  // which is the disclosure this whole wave exists to keep on screen.
+  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
 });
 
 // ---------------------------------------------------------------------------

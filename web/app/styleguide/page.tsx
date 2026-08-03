@@ -9,6 +9,7 @@ import { RefusedTag } from "@/components/RefusedTag";
 import { ProjectionBadge } from "@/components/ProjectionBadge";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { Ribbon } from "@/components/Ribbon";
+import { STREAM_RECONNECTING } from "@/lib/stream-posture";
 import { DataTable, type Column } from "@/components/DataTable";
 import { Sparkline } from "@/components/charts/Sparkline";
 import { Scatter } from "@/components/charts/Scatter";
@@ -280,7 +281,8 @@ export default function StyleguidePage() {
         <h2>Ribbon — two modes, watermark VECTOR, never one fake block</h2>
         <div className={styles.row}>
           <Ribbon
-            mode="live"
+            mode="stream"
+            posture={{ live: true }}
             asOfs={[
               { label: "aave_v3", value: "@25,641,730" },
               { label: "debt_manager", value: "@25,641,712" },
@@ -290,9 +292,21 @@ export default function StyleguidePage() {
         </div>
         <div className={styles.row}>
           <Ribbon
-            mode="live"
+            mode="stream"
+            posture={{ live: true }}
             superseded
             asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
+          />
+        </div>
+        {/* Wave R7 — the SAME retained data under a dead connection. LIVE is a
+            claim about the socket, so it is not made here; the book is not
+            taken away for it either. */}
+        <div className={styles.row}>
+          <Ribbon
+            mode="stream"
+            posture={{ live: false, label: STREAM_RECONNECTING, tone: "waiting" }}
+            asOfs={[{ label: "aave_v3", value: "@25,641,730" }]}
+            batchAgeSuffix="· batch 3h old"
           />
         </div>
         <div className={styles.row}>

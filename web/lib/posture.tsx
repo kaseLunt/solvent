@@ -62,6 +62,22 @@ export interface Posture {
    * otherwise a fresher batch inherits the older one's accumulated age.
    */
   batchReceiptId: string | null;
+  /**
+   * The identity of the RECEIPT that delivered `unavailable` (Wave R7,
+   * round-15 finding 3).
+   *
+   * `stale_since_seconds` is an AGE, and the server emits it ONCE and latches —
+   * so without a receipt of its own the ribbon had nothing to anchor it to, no
+   * repair to reach for, and no way to enter the unknown register on a blind
+   * resume. The unavailable frame already carries `served_at`; folded with the
+   * batch it names (`batch.id` when it kept one, else `last_good_batch_id`,
+   * else nothing), that is the same identity every other receipt on this
+   * surface has: distinct per response, stable across a re-render.
+   *
+   * Null whenever `unavailable` is null — the two are set and cleared together,
+   * so a stale identity can never outlive the statement it identified.
+   */
+  unavailableReceiptId: string | null;
   /** Per-engine aggregates from the last snapshot/batch, when sent. */
   engines: Aggregate[] | null;
   /** Current degradation posture (refusals / flags / supersession / withheld engines). */
@@ -83,6 +99,7 @@ const INITIAL: Posture = {
   hasBase: false,
   batch: null,
   batchReceiptId: null,
+  unavailableReceiptId: null,
   engines: null,
   degradation: null,
   transitions: [],
@@ -181,6 +198,9 @@ export function PostureProvider({ children }: { children: ReactNode }) {
       degradation: payload.degradation ?? null,
       recovered: payload.recovered === true,
       unavailable: null,
+      // Cleared WITH the statement it identified (Wave R7). A servable batch
+      // means there is no staleness duration left to anchor.
+      unavailableReceiptId: null,
       lastError: null,
     });
 
@@ -218,6 +238,15 @@ export function PostureProvider({ children }: { children: ReactNode }) {
             staleSinceSeconds: payload.stale_since_seconds ?? null,
             lastGoodBatchId: payload.last_good_batch_id ?? null,
           },
+          // WAVE R7: this frame's OWN receipt, from its own `served_at`. It is
+          // what lets `stale_since_seconds` be anchored, ticked, clamped, and —
+          // on a blind resume — withheld, exactly like the batch age beside it.
+          // `served_at` never contributes to a duration here either: it is an
+          // identity, and the duration still originates in the wire's integer.
+          unavailableReceiptId: receiptIdentity(
+            payload.served_at,
+            payload.batch?.id ?? payload.last_good_batch_id ?? null,
+          ),
         });
         // The service's own "no servable batch" IS an answer, delivered on this
         // connection. The reconnect did its job; what it found is a separate

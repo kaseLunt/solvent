@@ -39,6 +39,12 @@
 //     defaults omitted, history.replaceState) — the request the API would
 //     refuse is never composed, and when one IS refused (4xx) it renders in
 //     the refusal register with the server's sentence verbatim and NO retry.
+//   - AN ARRIVING ?sort=liq_distance KEEPS ITS ORDERING (Wave R7). The service
+//     serves the deprecated key unchanged so links keep meaning; on the DM it
+//     is a DIFFERENT sequence from the Headroom ratio, so re-ranking it here
+//     would hand a bookmark's owner a different book with no acknowledgment.
+//     The register names the applied ordering, no header claims it, and the
+//     first click of any sort control moves to that column and rewrites the URL.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -56,17 +62,22 @@ import { MarksStamp } from "@/components/MarksStamp";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
 import {
   BatchSupersededError,
+  bookSortFooterLabel,
   bookSortWireKey,
   BOOK_SORTS_BY_ENGINE,
   canonicalWireDir,
   classifyPositionsFailure,
   DEFAULT_BOOK_ENGINE,
   DEFAULT_BOOK_SORT,
+  engineOffersBookSort,
   fetchPositionsPage,
+  isHonoredLegacySort,
   normalizeBookQuery,
   POSITIONS_ENGINES,
   reversedWireDir,
   SORT_HF_REMAP_ACK,
+  SORT_LIQ_DISTANCE_HONORED,
+  type AppliedBookSort,
   type BookSort,
   type PositionsEngine,
 } from "@/lib/positions";
@@ -238,7 +249,8 @@ function headroomCell(row: PositionRow) {
 
 interface SortComposition {
   engine: PositionsEngine;
-  sort: BookSort;
+  /** The ranking IN FORCE — a column, or the honored deprecated key (R7). */
+  sort: AppliedBookSort;
   reversed: boolean;
   onSort: (candidate: BookSort) => void;
 }
@@ -248,6 +260,12 @@ interface SortComposition {
  * engine DEFINES become buttons, the active column carries its aria-sort +
  * glyph, and refused-first (sort=status) clears every indicator while the
  * headers stay clickable — clicking one exits it.
+ *
+ * WAVE R7: `active` is an identity test against the ranking ACTUALLY APPLIED,
+ * so while the honored `liq_distance` ordering is in force NO header claims it
+ * — the Headroom column cannot show an ascending glyph over rows the service
+ * ranked by absolute room. Clicking the header still works and is what moves
+ * the table onto the column's own ranking.
  */
 function headerSort(
   candidate: BookSort,
@@ -369,7 +387,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   });
 
   const [engine, setEngine] = useState<PositionsEngine>(initialQuery.engine);
-  const [sort, setSort] = useState<BookSort>(initialQuery.sort);
+  const [sort, setSort] = useState<AppliedBookSort>(initialQuery.sort);
   const [reversed, setReversed] = useState<boolean>(initialQuery.reversed);
   const [dust, setDust] = useState<DustStep>(initialQuery.dust);
   const [envelope, setEnvelope] = useState<PageEnvelope | null>(null);
@@ -501,7 +519,12 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
     // native to each), so an engine switch can no longer strand a sort. The
     // fallback stays as the vocabulary's own guard rather than as dead code —
     // if a future column is engine-specific, it lands here already handled.
-    if (BOOK_SORTS_BY_ENGINE[candidate].includes(sort)) {
+    //
+    // WAVE R7: the honored `liq_distance` ranking is defined on both engines
+    // too (contract 1.5.0), so switching engines KEEPS it rather than silently
+    // re-ranking a reader who only asked to change books. An engine toggle is
+    // not a sort control; only a sort control leaves the honored ordering.
+    if (engineOffersBookSort(candidate, sort)) {
       setSortAck(null);
     } else {
       setSort(DEFAULT_BOOK_SORT);
@@ -643,9 +666,14 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
       ? EM_DASH
       : String(envelope.totalPositions);
   const onBookDisplay = aggServed === null ? EM_DASH : String(aggServed.positions);
+  // THE FOOTER NAMES WHAT IS APPLIED (Wave R7). A column names itself; the
+  // honored deprecated key names itself AND its quantity, because a reader
+  // scanning a Headroom column has to be able to see that the ROWS are not
+  // ordered by it.
+  const sortLabel = bookSortFooterLabel(sort);
   const wireDirDisplay = reversed ? reversedWireDir(sort) : canonicalWireDir(sort);
   const sortSuffix =
-    wireDirDisplay === null ? sort : `${sort} ${wireDirDisplay === "asc" ? "▲" : "▼"}`;
+    wireDirDisplay === null ? sortLabel : `${sortLabel} ${wireDirDisplay === "asc" ? "▲" : "▼"}`;
 
   const accounting = dustActive
     ? footerAccountingDust(
@@ -794,6 +822,15 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         {sortAck !== null && (
           <span className={styles.sortAck} data-testid="sort-remap-ack">
             {sortAck}
+          </span>
+        )}
+        {/* WAVE R7 — the honored deprecated ranking, NAMED for as long as it is
+            the one in force. Not an acknowledgment (nothing was remapped) and
+            so not a one-shot: it is the sort register, and it disappears the
+            moment a sort control moves the table onto a column. */}
+        {isHonoredLegacySort(sort) && (
+          <span className={styles.sortAck} data-testid="legacy-sort-register">
+            {SORT_LIQ_DISTANCE_HONORED}
           </span>
         )}
       </div>

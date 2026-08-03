@@ -170,7 +170,14 @@ test("(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still cro
   await page.goto("/book?engine=aave_v3_etherfi");
 
   const header = page.getByRole("banner");
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7 (round-15 finding 4): `route.fulfill` ends the response body, so the
+  // stream is CLOSED the instant the snapshot lands and the client parks on its
+  // backoff. LIVE is now a claim about the current connection — open, with its
+  // base delivered — and this mock satisfies neither, so the badge names the
+  // connection it has. The age assertions below are untouched: the batch and
+  // its disclosure are RETAINED across the dead connection.
+  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   await expect(page.getByTestId("ribbon-batch-age")).toHaveCount(0);
 
   // Five hours of suspend: the interval never ran, `performance.now()` never
@@ -180,8 +187,9 @@ test("(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still cro
 
   await dispatchResume(page);
   await expect(page.getByTestId("ribbon-batch-age")).toHaveText("· batch 5h old");
-  // LIVE still describes the STREAM: two subjects, two statements, both true.
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // Two subjects, two statements, both true: the stream's real posture, and the
+  // age of the batch it delivered before it hung up.
+  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
 });
 
 test("(1) NEVER DECREASES: a wall clock stepped BACKWARDS cannot rewind the rendered age", async ({

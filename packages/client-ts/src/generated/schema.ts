@@ -2572,6 +2572,17 @@ export interface operations {
                  *     canonical ranking — except the account tie-break, which ALWAYS
                  *     ranks ascending, so equal sort keys order identically in both
                  *     directions and the cursor stays deterministic.
+                 *
+                 *     `headroom` IS THE ONE CARVE-OUT FROM THAT REVERSAL LAW (1.5.0).
+                 *     Only the KNOWN-VALUE axis flips: rows carrying NO headroom value at
+                 *     all — refused rows on either engine, and `debt_manager` rows with no
+                 *     published borrowing capacity — rank LAST in BOTH directions.
+                 *     UNKNOWN IS NOT MAXIMAL: a page asking for the GREATEST headroom
+                 *     first must not be led by accounts whose headroom this service could
+                 *     not derive, so the unknowns stay where the canonical direction also
+                 *     puts them instead of being flipped to the front. Every other key —
+                 *     `liq_distance`, `debt`, `hf`, `status` — reverses whole, refused
+                 *     axis included.
                  */
                 dir?: "asc" | "desc";
                 /**

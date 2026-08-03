@@ -998,9 +998,24 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       const header = page.getByRole("banner");
-      await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
       // The ribbon's payload is the REAL watermark vector, never one number.
       await expect(header.getByText("@25,635,618")).toBeVisible();
+      // WAVE R7 (round-15 finding 4). `mockStreamBody` fulfils a COMPLETE
+      // response, which ends the stream the instant the snapshot lands — the
+      // client raises "the server closed the stream" and spends its life on the
+      // reconnect backoff. This cell used to assert `LIVE · WATERMARKED` over
+      // that, because holding a batch was the entire qualification for the
+      // green chip. It is not any more: LIVE is a claim about the CURRENT
+      // connection (open, base delivered), and this mock cannot give one. The
+      // SNAPSHOT'S DATA — what this cell is actually about — is untouched and
+      // asserted above; the badge states the connection honestly.
+      //
+      // LIVE over a genuinely held-open stream is pinned in r7-fixes.spec.ts,
+      // against a real SSE server that does not hang up.
+      await expect(
+        header.getByText(/STREAM · (CONNECTING|RECONNECTING|AWAITING BASE|CLOSED)/),
+      ).toBeVisible();
+      await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
     },
   },
   {
@@ -1029,11 +1044,17 @@ const MATRIX: Cell[] = [
       await mockBookOk(page);
     },
     verify: async (page) => {
-      // Recovery renders as live truth again: the real vector, no residue of
-      // the unavailable state.
+      // Recovery renders the batch again: the real vector, and NO RESIDUE of
+      // the unavailable state — which is what this cell is for.
+      //
+      // WAVE R7: the badge no longer says LIVE, for the same reason as the
+      // sse-snapshot cell above — `mockStreamBody` ends the body, so there is
+      // no open connection to be live on. The recovery itself is unaffected:
+      // the batch is back, the staleness statement is gone.
       const header = page.getByRole("banner");
-      await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+      await expect(header.getByText("@25,635,618")).toBeVisible();
       await expect(header.getByText("NO SERVABLE BATCH")).toHaveCount(0);
+      await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
     },
   },
 ];

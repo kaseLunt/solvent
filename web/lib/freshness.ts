@@ -631,19 +631,40 @@ export function batchFreshnessStamp(batch: FreshnessBatch, ageSeconds?: number):
 // suffix is a computed claim, and there is nothing left to compute it from.
 // ---------------------------------------------------------------------------
 
+/**
+ * THE REGISTER'S CORE, WITHOUT ITS SUBJECT (Wave R7).
+ *
+ * R6 wrote the phrase as one string beginning with the word `age`, because the
+ * age of a BATCH was the only duration any surface could not state. R7 adds a
+ * second one — how long the service has had no servable batch
+ * (`stale_since_seconds`, which is an AGE and latches exactly like the batch's)
+ * — and that slot already carries its own subject word. Splitting the constant
+ * lets the second surface reuse THIS register verbatim instead of inventing a
+ * parallel one; the two `AGE_UNKNOWN_*` constants below are unchanged, byte for
+ * byte, and are now composed from it.
+ */
+export const UNKNOWN_SINCE_RESUME_REFRESHING = "UNKNOWN since resume · refreshing";
+
+/** The same core once the bounded repair schedule is spent. */
+export const UNKNOWN_SINCE_RESUME_FAILED = "UNKNOWN since resume · refresh failed, data retained";
+
+/** The core phrase, chosen by whether anything is still being attempted. */
+export function unknownSincePhrase(refreshFailed: boolean): string {
+  return refreshFailed ? UNKNOWN_SINCE_RESUME_FAILED : UNKNOWN_SINCE_RESUME_REFRESHING;
+}
+
 /** The age line while a blind resume's repair is still being attempted. */
-export const AGE_UNKNOWN_REFRESHING = "age UNKNOWN since resume · refreshing";
+export const AGE_UNKNOWN_REFRESHING = `age ${UNKNOWN_SINCE_RESUME_REFRESHING}`;
 
 /**
  * The age line once the bounded repair schedule is spent. The data stays; only
  * the age is withheld, and the reader is told which of the two it is looking at.
  */
-export const AGE_UNKNOWN_REFRESH_FAILED =
-  "age UNKNOWN since resume · refresh failed, data retained";
+export const AGE_UNKNOWN_REFRESH_FAILED = `age ${UNKNOWN_SINCE_RESUME_FAILED}`;
 
 /** The one phrase, chosen by whether anything is still being attempted. */
 export function unknownAgePhrase(refreshFailed: boolean): string {
-  return refreshFailed ? AGE_UNKNOWN_REFRESH_FAILED : AGE_UNKNOWN_REFRESHING;
+  return `age ${unknownSincePhrase(refreshFailed)}`;
 }
 
 /**
@@ -691,4 +712,59 @@ export const RIBBON_STALE_BATCH_SECONDS = 3600;
 export function ribbonBatchAgeSuffix(ageSeconds: number): string | null {
   if (ageSeconds <= RIBBON_STALE_BATCH_SECONDS) return null;
   return `· batch ${String(ageHours(ageSeconds))}h old`;
+}
+
+// ---------------------------------------------------------------------------
+// THE UNAVAILABLE FRAME'S OWN AGE (Wave R7, Codex round-15 finding 3).
+//
+// `stale_since_seconds` is how long the service has had NO SERVABLE BATCH, as
+// of the frame that carried it. The server emits it ONCE and LATCHES: the
+// provider clears `batch` on that frame, no later frame restates the number,
+// and nothing on this surface owned a receipt for it. So the ribbon printed the
+// wire integer verbatim, forever — "stale 42s" could stand for hours over a
+// service that had been down all afternoon, and a blind resume across it never
+// entered the unknown register at all, because the number was not an age as far
+// as this page was concerned.
+//
+// IT IS AN AGE. It gets exactly what every other age on this surface gets: an
+// anchor at the frame's own `served_at`, the monotonic-and-wall clamp, the
+// unresolved state when a blind resume proves an interval neither clock will
+// measure, and `usePostureRefresh` as its repair — the same reconnect that
+// obliges the contract's snapshot-on-connect to restate the posture.
+// ---------------------------------------------------------------------------
+
+/**
+ * The label the staleness duration hangs off. `for` (not `since`) because what
+ * follows is a DURATION, and the unknown form has to read as a sentence too:
+ * "stale for UNKNOWN since resume · refreshing".
+ */
+export const STALE_SINCE_LABEL = "stale for";
+
+/** What the ribbon renders beside `NO SERVABLE BATCH`. */
+export interface StaleSinceReading {
+  readonly label: string;
+  readonly value: string;
+  /** The duration is REFUSED rather than stated — rendered in the warn register. */
+  readonly unknown: boolean;
+}
+
+/**
+ * The staleness duration, or a refusal to state it, or nothing at all.
+ *
+ * THE ORDER OF THESE THREE BRANCHES IS THE LAW. `unresolved` is tested BEFORE
+ * the number is looked at: while a blind resume stands over this frame the
+ * seconds still held are an understatement of unknown size, and the one thing
+ * this module may not do is present them as the duration. A NULL duration is
+ * the server having said nothing — rendered as nothing, never as a zero.
+ */
+export function staleSinceReading(
+  ageSeconds: number | null,
+  unresolved: boolean,
+  refreshFailed: boolean,
+): StaleSinceReading | null {
+  if (unresolved) {
+    return { label: STALE_SINCE_LABEL, value: unknownSincePhrase(refreshFailed), unknown: true };
+  }
+  if (ageSeconds === null) return null;
+  return { label: STALE_SINCE_LABEL, value: humanAge(ageSeconds), unknown: false };
 }

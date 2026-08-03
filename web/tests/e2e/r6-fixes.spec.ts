@@ -198,7 +198,14 @@ test("(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longe
   await page.goto("/book?engine=aave_v3_etherfi");
 
   const header = page.getByRole("banner");
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7 (round-15 finding 4): this mock hands over a snapshot and ENDS the
+  // body, so the connection is closed and the client is parked on its backoff.
+  // R6 asserted `LIVE · WATERMARKED` here because holding a batch was the whole
+  // qualification for the green chip — which is precisely the defect R7 closes.
+  // What the ribbon claims about the CONNECTION changed; what it claims about
+  // the BATCH (this test's subject, every assertion below) did not.
+  await expect(header.getByText("STREAM · RECONNECTING")).toBeVisible();
+  await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
   // 130s is inside the hour: correctly silent, and correctly ONE connection —
   // the clock is paused, so the stream's reconnect backoff never fires and this
   // is a genuinely idle stream rather than a re-snapshotting one.
@@ -224,8 +231,15 @@ test("(1) THE ROUND-13 RIBBON DEFECT: an idle stream + two blind clocks no longe
   // meant no receipt for as long as it stayed quiet.
   await expect.poll(() => connections).toBe(2);
 
-  // LIVE still describes the STREAM throughout: two subjects, two statements.
-  await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7: and while that repair is IN FLIGHT the ribbon says so. Connection
+  // 2 is held open by the mock with no response at all, so the client is
+  // `connecting` — R6 asserted LIVE here, over a torn-down stream and a
+  // reconnect that had not answered, which is finding 4 in one line. Two
+  // subjects, two statements, and now BOTH are true: the connection is being
+  // re-established, and the age of the batch it is holding is unknown.
+  await expect(header.getByText("STREAM · CONNECTING")).toBeVisible();
+  await expect(header.getByText("LIVE · WATERMARKED")).toHaveCount(0);
+  await expect(page.getByTestId("ribbon-batch-age-unknown")).toBeVisible();
 
   // THE REPAIR LANDS. A new receipt — and a new receipt is the only thing that
   // discharges an unknown age. The suffix the ribbon could not compute a moment
@@ -286,7 +300,10 @@ test("(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops 
   await routePositions(page);
   await page.goto("/book?engine=aave_v3_etherfi");
 
-  await expect(page.getByRole("banner").getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7: the body ended, so the stream is closed and parked on its backoff.
+  // See the note on the previous test — LIVE is now a claim about the CURRENT
+  // connection, and this mock never gives it one.
+  await expect(page.getByRole("banner").getByText("STREAM · RECONNECTING")).toBeVisible();
   expect(connections).toBe(1);
 
   await blindWake(page);
@@ -315,9 +332,18 @@ test("(1) THE RIBBON'S REPAIR IS BOUNDED: one reconnect per step, then it stops 
   // AND IT IS A BOUND: those ten seconds produced no fourth attempt. The stream
   // is not converted into a poll over a service that is not answering.
   expect(connections).toBe(4);
-  // LIVE still describes the STREAM, which really is connected and really has
-  // nothing to say. Two subjects, two statements, both true.
-  await expect(page.getByRole("banner").getByText("LIVE · WATERMARKED")).toBeVisible();
+  // WAVE R7 CORRECTS THE CLAIM THIS LINE USED TO MAKE. R6 said "LIVE still
+  // describes the STREAM, which really is connected" — but every reconnect in
+  // this test is HELD by the mock with no response, so the stream is not
+  // connected at all; the ribbon was painting LIVE from the retained batch
+  // alone. That is finding 4 exactly. The badge now states the truth, and the
+  // reader is told BOTH facts: the connection is still being attempted, and the
+  // age of the data they are holding could not be restored.
+  await expect(page.getByRole("banner").getByText("STREAM · CONNECTING")).toBeVisible();
+  await expect(page.getByRole("banner").getByText("LIVE · WATERMARKED")).toHaveCount(0);
+  await expect(page.getByTestId("ribbon-batch-age-unknown")).toHaveText(
+    `· batch ${REFRESH_FAILED}`,
+  );
 
   releaseAll();
 });

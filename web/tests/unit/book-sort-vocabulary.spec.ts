@@ -11,9 +11,12 @@
 //     asks for the number it prints.
 //   - POSITIONS_SORT_DIRECTIONS names each wire sort's canonical direction;
 //     BOOK_SORT_DIRECTIONS does the same for the columns.
-//   - normalizeBookQuery: unknown values fall to defaults; the legacy wire
-//     sorts alias onto their column; the doomed pair (debt_manager, hf) is
-//     acknowledged — before any request could fire.
+//   - normalizeBookQuery: unknown values fall to defaults; `hf` aliases onto
+//     the column that IS its ordering; `liq_distance` is HONORED verbatim
+//     (Wave R7 — on the DM it is a DIFFERENT ordering from the ratio, so
+//     re-ranking it would serve a bookmark's owner a different book); and the
+//     doomed pair (debt_manager, hf) is acknowledged — before any request
+//     could fire.
 //   - classifyPositionsFailure: a 4xx (except 429) is a REFUSAL — retrying
 //     the identical request cannot succeed; 429/503 refuse naming the
 //     server's own retry instruction; network/500/malformed keep the
@@ -30,6 +33,7 @@ import {
   UnavailableError,
 } from "@solvent/client";
 import {
+  bookSortFooterLabel,
   bookSortWireKey,
   BOOK_SORTS,
   BOOK_SORTS_BY_ENGINE,
@@ -37,10 +41,14 @@ import {
   classifyPositionsFailure,
   DEFAULT_BOOK_ENGINE,
   DEFAULT_BOOK_SORT,
+  engineOffersBookSort,
+  isHonoredLegacySort,
+  LIQ_DISTANCE_READER_WORDS,
   normalizeBookQuery,
   POSITIONS_SORTS,
   POSITIONS_SORT_DIRECTIONS,
   SORT_HF_REMAP_ACK,
+  SORT_LIQ_DISTANCE_HONORED,
   SORTS_BY_ENGINE,
 } from "../../lib/positions";
 
@@ -170,18 +178,13 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
     });
   });
 
-  test("the legacy wire sorts ALIAS onto the Headroom column — the ranking survives, the token is rewritten", () => {
+  test("`hf` ALIASES onto the Headroom column — the ranking survives, the token is rewritten", () => {
     // A bookmarked ?sort=hf asked for "rank by how close to the boundary".
-    // That ranking is the Headroom column; the param is rewritten, never
-    // silently honored under a name the table no longer uses.
+    // That ranking IS the Headroom column, EXACTLY: headroom is 1 − 1/HF,
+    // strictly increasing in the health factor, so hf-asc and headroom-asc are
+    // one total order. Nothing about the sequence changes, so the param can be
+    // rewritten to the token the table is using without misleading anyone.
     expect(normalizeBookQuery("aave_v3_etherfi", "hf", null)).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "headroom",
-      reversed: false,
-      hfRemapped: false,
-      rewritten: true,
-    });
-    expect(normalizeBookQuery("aave_v3_etherfi", "liq_distance", null)).toEqual({
       engine: "aave_v3_etherfi",
       sort: "headroom",
       reversed: false,
@@ -217,16 +220,76 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
     }
   });
 
-  test("a pre-1.5.0 `liq_distance` link still LANDS — the alias law, with the URL corrected", () => {
-    // The wire keeps serving `liq_distance` with its old ordering for API
-    // clients and in-flight cursors. This surface has no absolute-room column,
-    // so the link lands on Headroom — and `rewritten` is true, so the URL is
-    // corrected to the token the table is applying rather than the request
-    // being honored under a name it no longer has.
+  test("a `liq_distance` deep link is HONORED VERBATIM — both engines, nothing rewritten", () => {
+    // WAVE R7 (round-15 finding 1). This USED to alias onto the Headroom
+    // column, and on `debt_manager` that was a DIFFERENT ORDERING: the key
+    // ranks the ABSOLUTE room (max_borrow_lt − borrowings) while headroom ranks
+    // the RATIO, so an honest reader's bookmark was served a different account
+    // sequence with no acknowledgment anywhere on the page. The service serves
+    // the deprecated key with its ordering unchanged precisely so links keep
+    // their meaning; the web must not defeat that.
     for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
-      const normalized = normalizeBookQuery(engine, "liq_distance", null);
-      expect(normalized.sort).toBe("headroom");
-      expect(normalized.rewritten).toBe(true);
+      expect(normalizeBookQuery(engine, "liq_distance", null), engine).toEqual({
+        engine,
+        sort: "liq_distance",
+        reversed: false,
+        hfRemapped: false,
+        // NOT rewritten: the URL keeps saying what the table is doing, which is
+        // only true while the table is doing what the URL says.
+        rewritten: false,
+      });
+    }
+  });
+
+  test("BOTH DIRECTIONS of an honored `liq_distance` link survive", () => {
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      // Canonical (asc, nearest the boundary first) is the DEFAULT direction,
+      // and defaults are omitted from the URL — so a present `dir=asc` is
+      // dropped while the ORDERING it named is exactly what is applied.
+      expect(normalizeBookQuery(engine, "liq_distance", "asc"), `${engine} asc`).toEqual({
+        engine,
+        sort: "liq_distance",
+        reversed: false,
+        hfRemapped: false,
+        rewritten: true,
+      });
+      // The reverse is the two-state cycle's other half and rides through
+      // untouched: the sort SURVIVED verbatim, so the dir beside it is not
+      // orphaned.
+      expect(normalizeBookQuery(engine, "liq_distance", "desc"), `${engine} desc`).toEqual({
+        engine,
+        sort: "liq_distance",
+        reversed: true,
+        hfRemapped: false,
+        rewritten: false,
+      });
+    }
+  });
+
+  test("the honored key is NAMED in reader words, and the vocabulary can resolve it", () => {
+    // The register must not be a bare wire token: `liq_distance` printed beside
+    // a Headroom column is exactly the confusion this wave removes.
+    expect(isHonoredLegacySort("liq_distance")).toBe(true);
+    expect(isHonoredLegacySort("headroom")).toBe(false);
+    expect(LIQ_DISTANCE_READER_WORDS).toBe("absolute room to the boundary");
+    expect(SORT_LIQ_DISTANCE_HONORED).toContain(LIQ_DISTANCE_READER_WORDS);
+    expect(SORT_LIQ_DISTANCE_HONORED).toContain("deprecated");
+    // It says the order is NOT the printed ratio — which is why no header
+    // carries an indicator while it is in force.
+    expect(SORT_LIQ_DISTANCE_HONORED).toContain("NOT the Headroom");
+    // The footer names the applied ranking, quantity included.
+    expect(bookSortFooterLabel("liq_distance")).toBe(
+      "liq_distance (absolute room to the boundary)",
+    );
+    expect(bookSortFooterLabel("headroom")).toBe("headroom");
+    // It resolves to itself on the wire — the request asks for the ordering the
+    // link asked for, on either engine.
+    for (const engine of ["aave_v3_etherfi", "debt_manager"] as const) {
+      expect(bookSortWireKey(engine, "liq_distance")).toBe("liq_distance");
+      expect(SORTS_BY_ENGINE[engine]).toContain("liq_distance");
+      // An ENGINE toggle never strands it: 1.5.0 defines the key on both books,
+      // so switching engines cannot silently re-rank the reader.
+      expect(engineOffersBookSort(engine, "liq_distance")).toBe(true);
     }
   });
 
