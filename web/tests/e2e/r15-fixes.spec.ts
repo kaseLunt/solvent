@@ -179,6 +179,34 @@ test("R15 — A RUN DISPATCHED UNDER v1 AND STILL OUT WHEN THE LISTING MOVES TO 
   await expect(page.getByTestId("book-running")).toHaveCount(0);
   await expect(page.getByTestId("runbook-not-served")).toHaveCount(0);
 
+  // ---- THE LEGEND (Wave R16, finding 2) ------------------------------------
+  //
+  // R15 corrected the header, the cells, the row note and the detail view over
+  // a request that is still out — and never looked at the caption under the
+  // table, which this file never inspected either. It carried R14's
+  // SETTLED-ONLY text, on every page and in every state: "never came back with
+  // a book of its own … re-run the row". Printed at this exact moment it
+  // contradicted all four corrected surfaces at once and pointed the reader at
+  // the control the row has disabled — the same dead end, one element lower.
+  //
+  // The register now enumerates its three cases, and the RUNNING one is on
+  // screen in its own words while the request is out.
+  const legendRunning = page.getByTestId("matrix-legend-dc-running");
+  await expect(legendRunning).toContainText("its request is STILL OUT");
+  await expect(legendRunning).toContainText("nothing to do here until it settles");
+  await expect(legendRunning).not.toContainText("never came back");
+  await expect(legendRunning).not.toContainText("re-run");
+  // The other two arms are present and keep their OWN remedies — the legend
+  // describes a register, so all three cases are named whatever this row is
+  // doing. What may never happen again is one case's text standing for three.
+  await expect(page.getByTestId("matrix-legend-dc-response")).toContainText(
+    "refresh the listing to run against the current one",
+  );
+  const legendSettled = page.getByTestId("matrix-legend-dc-settled");
+  await expect(legendSettled).toContainText("never came back with a book of its own");
+  await expect(legendSettled).toContainText("re-run the row");
+  await expect(legendSettled).toContainText("a refresh resolves nothing");
+
   // ---- 5. THE REQUEST SETTLES, BODYLESS. Every surface flips at once. -------
   releaseWeeth();
 

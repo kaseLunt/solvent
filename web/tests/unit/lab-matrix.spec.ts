@@ -395,19 +395,28 @@ test("R8 — a FAILED re-run gives the prior outcome back, at its ORIGINAL batch
   // outcome it was re-running, unchanged, plus the failure NAMED beside it.
   // Replacing a real measurement with a 503 would lose evidence to an event
   // that says nothing about it — and drop the anchor in the same motion.
+  //
+  // WAVE R16 widened `rerunFailed` from a bare sentence into a record so the
+  // FAILED request can carry the identity it was asked under (the phase's own
+  // `outcome` is a different request's body, and could not speak for it). R8's
+  // string is unmoved and unedited — it is `reason`, and the two assertions
+  // below still pin it character for character.
   const restored: MatrixPhase = {
     kind: "outcome",
     outcome: { kind: "ok", response: RUN_BOOK_BATCH_2 as unknown as LabRunBook },
-    rerunFailed: unansweredReason({
-      kind: "no-batch",
-      message: "no complete risk batch is available.",
-      retryAfterSeconds: 5,
-    }),
+    rerunFailed: {
+      reason: unansweredReason({
+        kind: "no-batch",
+        message: "no complete risk batch is available.",
+        retryAfterSeconds: 5,
+      }),
+    },
   };
   expect(batchOfPhase(restored)).toBe(2);
   expect(anchorBatchOfPhase(restored)).toBe(2);
-  expect(restored.rerunFailed).toContain("no servable batch (503)");
-  expect(restored.rerunFailed).toContain("retry after 5s");
+  if (restored.kind !== "outcome") throw new Error("unreachable");
+  expect(restored.rerunFailed?.reason).toContain("no servable batch (503)");
+  expect(restored.rerunFailed?.reason).toContain("retry after 5s");
 
   const phases = new Map<string, MatrixPhase>([
     [ETH.id, ok(RUN_BOOK_ETH)],
@@ -2139,12 +2148,19 @@ const RERUN_503 = unansweredReason({
   retryAfterSeconds: 5,
 });
 
-/** R8's state: the held outcome came back, with the later failure beside it. */
+/**
+ * R8's state: the held outcome came back, with the later failure beside it.
+ *
+ * WAVE R16 — the failure is a RECORD now, and this helper leaves its `attempt`
+ * UNSTAMPED on purpose. Every R8/R13 pin below is about a re-run whose identity
+ * question was never raised, and an unstamped record infers nothing — so all of
+ * them keep their pre-R16 answers, byte for byte. R16's own fixtures stamp it.
+ */
 function rerunFailedOver(body: typeof RUN_BOOK_ETH): MatrixPhase {
   return {
     kind: "outcome",
     outcome: { kind: "ok", response: body as unknown as LabRunBook },
-    rerunFailed: RERUN_503,
+    rerunFailed: { reason: RERUN_503 },
   };
 }
 
@@ -2274,7 +2290,10 @@ test("R13/2 — no failed re-run, no banner: the disclosure is never invented", 
   // The unreachable arm is STATED rather than assumed: `rerunFailed` is only
   // ever written beside a held `kind: "ok"` outcome, but if it were not, the
   // banner must still refuse to promise a result.
-  const unserved: MatrixPhase = { ...FAILED_COLD, rerunFailed: RERUN_503 } as MatrixPhase;
+  const unserved: MatrixPhase = {
+    ...FAILED_COLD,
+    rerunFailed: { reason: RERUN_503 },
+  } as MatrixPhase;
   const banner = rerunFailedBanner(unserved, undefined, "detail");
   expect(banner?.retained).toBe("unserved");
   expect(banner?.line).toContain("This row holds no result and no served response at all");
@@ -3328,4 +3347,412 @@ test("R15 — THE CELL AND THE HEADER AGREE about a request that is still out", 
   // The cell says the request is out; the header says the request is out. The
   // pre-R15 header said it never came back.
   expect(line).not.toContain("came back");
+});
+
+// ===========================================================================
+// WAVE R16 (Codex round-24).
+//
+// FINDING 1 (MEDIUM). R8 rules that a re-run which ends without a book gives the
+// held outcome BACK — the retained body occupies `outcome`, and the failure is
+// named beside it in `rerunFailed`. R14 rules that a phase with no body of its
+// own is judged by the identity it was DISPATCHED under, and that `attemptSkew`
+// must answer null for a `kind: "ok"` outcome, because a served body is the
+// server's own word about what it computed.
+//
+// Put both rules on ONE phase and the second reads the first's evidence as its
+// own. After a BODYLESS settlement over a retained ok book the phase is
+// `{outcome: <an EARLIER request's body>, rerunFailed: <THIS request's failure>}`
+// — and `attemptSkew` saw `outcome.kind === "ok"`, concluded the settlement had
+// spoken for itself, and answered null over a body the settled request never
+// produced.
+//
+// THE SEQUENCE: a v1 re-run is in flight, the listing moves to v2, the re-run
+// settles bodyless. The row never entered `settledAttemptScenarioIds`; the
+// header took R12's ANSWER arm over it — "Nothing failed and nothing was
+// withheld", refresh the listing — while the banner one line below said the
+// re-run had ended without a book, and the cell sent the reader to refresh a
+// listing that was already current. R15's fixtures all start from a row holding
+// NO evidence, so this settle shape was never exercised.
+//
+// THE RULE: THE SETTLEMENT AND THE DISPLAYED BODY ARE TWO REQUESTS, AND THE
+// FAILURE CARRIES ITS OWN REQUEST'S IDENTITY. `rerunFailed` is a record with the
+// stamp bound to it, `attemptSkew` reads the SETTLEMENT rather than the display,
+// and R14's authority rule survives sharpened rather than weakened: a body this
+// surface PRESENTS still outranks a stamp (R8 — a failed run may not take a
+// displayed measurement off the table), and a body it REFUSES presents nothing,
+// so it has nothing to outrank anything with.
+// ===========================================================================
+
+/** The 404 a deployment that does not serve run-book answers with. */
+const R16_404 = unansweredReason({ kind: "not-served" });
+
+/**
+ * THE FINDING'S PHASE. A held ok book given back by R8, the bodyless settlement
+ * named beside it, and BOTH stamped with the identity the row was showing when
+ * the failed request was dispatched — v1, while the listing has moved to v2.
+ */
+function heldThenFailed(
+  body: typeof RUN_BOOK_ETH,
+  attempt: ScenarioIdentity | undefined,
+): MatrixPhase {
+  return {
+    kind: "outcome",
+    outcome: { kind: "ok", response: body as unknown as LabRunBook },
+    rerunFailed: { reason: R16_404, attempt },
+    attempt,
+  };
+}
+
+/** The finding's own row: a v1 book retained, a v1 request settled bodyless. */
+const R16_SETTLED_OVER_HELD: [string, MatrixPhase] = [
+  DEPEG.id,
+  heldThenFailed(RUN_BOOK_WEETH_BATCH_1, STAMP_V1),
+];
+
+// ---------------------------------------------------------------------------
+// THE MECHANISM — why the retained body was mistaken for the settlement's.
+// ---------------------------------------------------------------------------
+
+test("R16/1 — THE MECHANISM: the retained body belongs to an EARLIER request, and said so to nobody", () => {
+  const phase = R16_SETTLED_OVER_HELD[1];
+  if (phase.kind !== "outcome" || phase.outcome.kind !== "ok") throw new Error("bad fixture");
+
+  // Both sides of the join are real and really disagree: the RETAINED body
+  // publishes v1 for itself, the listing publishes v2, and the request that
+  // actually settled this phase was dispatched under v1 too.
+  expect(servedIdentity(phase.outcome.response)).toEqual(STAMP_V1);
+  expect(IDENT_V2?.version).toBe("v2");
+  expect(phase.rerunFailed?.attempt).toEqual(STAMP_V1);
+  // R8's sentence is unmoved and unedited by the widening — one field deeper.
+  expect(phase.rerunFailed?.reason).toBe(R16_404);
+  expect(phase.rerunFailed?.reason).toContain("this deployment answered 404");
+
+  // THE DEFECT, ISOLATED. Strip the stamp off the FAILURE and leave everything
+  // else — including R14's phase-level `attempt` — exactly as it is, and the
+  // settlement becomes unreadable again: nothing left on the phase can say the
+  // request that settled it came back with no body of its own.
+  const unstamped: MatrixPhase = { ...phase, rerunFailed: { reason: R16_404 } };
+  expect(attemptSkew(unstamped, IDENT_V2)).toBeNull();
+  // …and with the stamp, the settlement IS readable, as the attempt it was.
+  const skew = attemptSkew(phase, IDENT_V2);
+  expect(skew?.subject).toBe("attempt");
+  expect(skew?.pending).toBe(false);
+  expect(skew?.served).toEqual(STAMP_V1);
+  expect(skew?.fields).toEqual(["scenario_version"]);
+});
+
+test("R16/1 — AN UNSTAMPED FAILURE INFERS NOTHING: the pre-R16 reading stands, whole", () => {
+  // The same discipline R11 gave absent coverage, R12 absent identity and R14 an
+  // unstamped phase. A caller that recorded no identity for the failed request
+  // is not making a claim about one, so the row is read by its BODY alone —
+  // which is R12's answer half, remedy and all.
+  const unstamped = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [
+      DEPEG.id,
+      {
+        kind: "outcome",
+        outcome: { kind: "ok", response: RUN_BOOK_WEETH_BATCH_1 as unknown as LabRunBook },
+        rerunFailed: { reason: R16_404 },
+      },
+    ],
+  ]);
+  const cohort = resolveBatchCohort(
+    listedPhases(unstamped, RELISTED),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+  expect(cohort.definitionChangedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
+  expect(batchHeaderLine(cohort, null)).toContain("Nothing failed and nothing was withheld");
+});
+
+// ---------------------------------------------------------------------------
+// THE FINDING'S SEQUENCE — held ok book + bodyless settle + listing moved.
+// ---------------------------------------------------------------------------
+
+test("R16/1 — THE SEQUENCE: the settled attempt is counted as one, and the header says so", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R16_SETTLED_OVER_HELD);
+
+  // THE SET THE ROW NEVER REACHED. R15 built this half for exactly this truth —
+  // nothing will ever come back, so only a re-run resolves it — and the settle
+  // shape that produces it was the one shape that could not get into it.
+  expect(cohort.settledAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.runningAttemptScenarioIds).toEqual([]);
+  // The R14 family and R12's set keep their invariants: the subsets partition
+  // the family, and the family is a subset of the definition-changed set.
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([DEPEG.id]);
+  // The row is counted as this table's run in NONE of R14's three tenses, and
+  // it displays nothing: no pin, no cohort membership, no anchor of its own.
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+  expect(cohort.inFlightScenarioIds).toEqual([]);
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(cohort.anchorBatchId).toBe(1);
+
+  // THE HEADER, WHICH IS THE FINDING. It reads R15's SETTLED sentence — the
+  // established vocabulary, byte for byte, not a new one minted for this shape.
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(R15_ANCHORED_LEAD + R15_SETTLED_ANCHORED);
+  // …and not one word of the account it used to give: a valid answer about
+  // another definition, nothing failed, refresh the listing.
+  expect(line).not.toContain("Nothing failed and nothing was withheld");
+  expect(line).not.toContain("answered for a COMMITTED DEFINITION");
+  expect(line).not.toContain("Refresh the committed listing");
+  // Nor the RUNNING half's, which would be false in the other direction.
+  for (const phrase of RUNNING_ONLY) expect(line).not.toContain(phrase);
+});
+
+test("R16/1 — THE CELL AND THE HEADER NAME ONE REMEDY between them, not two", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R16_SETTLED_OVER_HELD);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase: R16_SETTLED_OVER_HELD[1],
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(cell.state).toBe("definition-changed");
+  if (cell.state !== "definition-changed") throw new Error("unreachable");
+
+  // The cell is about the ATTEMPT now, not about the retained response — and
+  // its remedy is the one the row's controls can actually serve.
+  expect(cell.skew.subject).toBe("attempt");
+  expect(cell.skew.pending).toBe(false);
+  expect(cell.skew.reason).toContain("Re-run this row to ask under the definition");
+  expect(cell.skew.reason).not.toContain("Re-open or refresh the listing");
+
+  // THE CONTRADICTION THE LAW FORBIDS, AS A PAIR. Pre-R16 the cell said
+  // "refresh the listing" (R12's response wording) while the header said a
+  // refresh resolves nothing — over one row, one request, one screen.
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("Re-run the row to ask under the current definition");
+  expect(line).toContain("a listing refresh resolves nothing here");
+  expect(line).not.toContain("refresh the listing to run against the current one");
+
+  // And the row note the matrix prints beside the run control agrees with both.
+  expect(attemptChangedNote(cell.skew, "matrix")).toContain(
+    "Run this row again to ask under the definition above.",
+  );
+  expect(attemptChangedNote(cell.skew, "detail")).toContain("No book came back from it");
+});
+
+// ---------------------------------------------------------------------------
+// THE RETAINED BOOK — disclosed exactly as R13's banner family discloses it,
+// and never mistaken for the settled request's answer.
+// ---------------------------------------------------------------------------
+
+test("R16/1 — THE RETAINED BOOK is still disclosed, still refused, still never called a result", () => {
+  const phase = R16_SETTLED_OVER_HELD[1];
+  const matrix = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  const detail = rerunFailedBanner(phase, IDENT_V2, "detail", DEPEG_V2.engines);
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  for (const banner of [matrix, detail]) {
+    // R13's derivation is untouched: what the row HOLDS is a response this
+    // surface refuses, named by its own register and never called a result.
+    expect(banner.retained).toBe("refused");
+    expect(banner.register).toBe("DEFINITION CHANGED");
+    expect(banner.failure).toBe(R16_404);
+    expect(banner.line).toContain(R16_404);
+    expect(banner.line).toContain("EARLIER response this surface REFUSES to present");
+    expect(banner.line).toContain("NOT a result");
+    expect(banner.line).not.toContain("The result below");
+    expect(banner.line).not.toContain("still show what this row already measured");
+    // R16's own half: the settlement is named as the attempt it was.
+    expect(banner.attemptChanged).toBe(true);
+    expect(banner.line).toContain(
+      "ASKED under a committed definition this page is no longer showing",
+    );
+  }
+  // The two surfaces still differ ONLY in where they point the reader.
+  expect(matrix.line).toContain("every covered cell reads DEFINITION CHANGED about it");
+  expect(detail.line).toContain("the panel below reads DEFINITION CHANGED about it");
+});
+
+test("R16/1 — THE BANNER NEVER NAMES A REGISTER THE CELLS DO NOT USE", () => {
+  // THE SHARPEST ARM. The retained response is the CONTRADICTORY one, so R13's
+  // sentence would name CONTRADICTORY BOOK and promise that "every covered cell
+  // of this row names that refusal in its own words" — over cells that read
+  // DEFINITION CHANGED, because the settled attempt is what decides them. One
+  // row, two registers, which is the defect class this file has closed four
+  // times over. The retained response keeps its own name; the claim about the
+  // CELLS is the thing that had to go.
+  const phase = heldThenFailed(RUN_BOOK_CONTRADICTORY, STAMP_V1);
+  const banner = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  expect(banner?.register).toBe("CONTRADICTORY BOOK");
+  expect(banner?.attemptChanged).toBe(true);
+  expect(banner?.line).not.toContain("names that refusal in its own words");
+
+  const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase,
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(CELL_STATE_LABEL[cell.state]).toBe("DEFINITION CHANGED");
+  // The row is the SETTLED attempt, not a contradicted book: R12's body gate
+  // never gets to speak for a response this row does not present.
+  expect(cohort.settledAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.contradictedScenarioIds).toEqual([]);
+});
+
+test("R16/1 — ONE PROVENANCE: the banner's account and the skew are the same read", () => {
+  // The law the ruled fix names: the banner and `attemptSkew` must derive from
+  // one source, so they can never disagree the way the finding shows. This
+  // ranges over every retained shape the banner distinguishes.
+  const shapes: [string, MatrixPhase, ScenarioIdentity | undefined][] = [
+    ["refused v1 book, stamped v1, listing v2", R16_SETTLED_OVER_HELD[1], IDENT_V2],
+    [
+      "contradictory book, stamped v1, listing v2",
+      heldThenFailed(RUN_BOOK_CONTRADICTORY, STAMP_V1),
+      IDENT_V2,
+    ],
+    [
+      "presentable v2 book, stamped v1, listing v2",
+      heldThenFailed(RUN_BOOK_WEETH_V2, STAMP_V1),
+      IDENT_V2,
+    ],
+    [
+      "all-hole book, stamped v1, listing v2",
+      heldThenFailed(RUN_BOOK_NAMES_NOBODY, STAMP_V1),
+      IDENT_V2,
+    ],
+    ["v1 book, stamped v1, listing UNMOVED at v1", R16_SETTLED_OVER_HELD[1], STAMP_V1],
+    ["v1 book, UNSTAMPED failure, listing v2", rerunFailedOver(RUN_BOOK_WEETH_BATCH_1), IDENT_V2],
+    ["no identity claimed at all", R16_SETTLED_OVER_HELD[1], undefined],
+  ];
+  for (const [what, phase, identity] of shapes) {
+    const banner = rerunFailedBanner(phase, identity, "matrix", DEPEG_V2.engines);
+    expect(banner, what).not.toBeNull();
+    expect(banner?.attemptChanged, what).toBe(attemptSkew(phase, identity) !== null);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE OTHER SIDE OF THE RULE — a body this surface PRESENTS is never taken off
+// the table by a later request that answered nothing (R8).
+// ---------------------------------------------------------------------------
+
+test("R16/1 — THE LISTING UNMOVED: the same phase classifies as ITSELF, in R8's words", () => {
+  const phase = R16_SETTLED_OVER_HELD[1];
+  // Same phase, same stamp — the listing simply never moved. The stamp agrees
+  // with the listing, so there is no attempt question to ask, and every R8
+  // answer stands exactly as it did before this wave.
+  expect(attemptSkew(phase, STAMP_V1)).toBeNull();
+
+  const cohort = resolveBatchCohort(
+    listedPhases(new Map<string, MatrixPhase>([R15_ANCHOR, [DEPEG.id, phase]]), definitions),
+    null,
+    COVERAGE,
+    IDENTITY,
+  );
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([]);
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id, DEPEG.id]);
+  // The retained book is DISPLAYED, at its own batch pin, in the cohort.
+  expect(cohort.displayedPins).toEqual([
+    { scenarioId: ETH.id, batchId: 1 },
+    { scenarioId: DEPEG.id, batchId: 1 },
+  ]);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id, DEPEG.id]);
+
+  const banner = rerunFailedBanner(phase, STAMP_V1, "matrix", DEPEG.engines);
+  expect(banner?.retained).toBe("result");
+  expect(banner?.attemptChanged).toBe(false);
+  expect(banner?.line).toBe(
+    `re-run ended without a book — ${R16_404} The cells still show what this row already ` +
+      `measured, at its own batch.`,
+  );
+  const cell = cellState({
+    scenario: DEPEG,
+    engine: "debt_manager",
+    phase,
+    cohort,
+    identity: STAMP_V1,
+  });
+  expect(cell.state).toBe("result");
+});
+
+test("R16/1 — A PRESENTED BODY OUTRANKS A STALE STAMP: R8's law, unbroken", () => {
+  // The other direction of the same rule, and the one that keeps R16 from
+  // becoming an eraser. Here the RETAINED book publishes v2 — the definition
+  // the page is showing — so the row displays a real measurement of a real
+  // batch under the current definition. The request that failed afterwards was
+  // asked under v1 and answered nothing, and a run that could not answer says
+  // nothing about the answer already held (R8). It may not take it off screen.
+  const phase = heldThenFailed(RUN_BOOK_WEETH_V2, STAMP_V1);
+  expect(attemptSkew(phase, IDENT_V2)).toBeNull();
+
+  const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([]);
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id, DEPEG.id]);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id, DEPEG.id]);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase,
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(cell.state).toBe("result");
+  // R8's banner, verbatim: the cells DO still show what this row measured.
+  const banner = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  expect(banner?.retained).toBe("result");
+  expect(banner?.attemptChanged).toBe(false);
+  expect(banner?.line).toContain("The cells still show what this row already measured");
+});
+
+test("R16/1 — THE OK PATH IS STILL NOT DOUBLE-GATED: a settled body answers for itself", () => {
+  // R14's rule, re-pinned against R16's read. A phase whose OWN outcome is the
+  // served body — no failed re-run beside it — is decided by `bookRefusal` and
+  // by nothing else, whether the body agrees with the listing or not.
+  for (const [what, body, expected] of [
+    [
+      "a v1 book against a v2 listing is R12's ANSWER half",
+      RUN_BOOK_WEETH_BATCH_1,
+      "definition-changed",
+    ],
+    ["a v2 book against a v2 listing is simply a result", RUN_BOOK_WEETH_V2, "result"],
+  ] as const) {
+    const phase = stamped(ok(body), STAMP_V1);
+    expect(attemptSkew(phase, IDENT_V2), what).toBeNull();
+    const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+    expect(cohort.settledAttemptScenarioIds, what).toEqual([]);
+    const cell = cellState({
+      scenario: DEPEG_V2,
+      engine: "debt_manager",
+      phase,
+      cohort,
+      identity: IDENT_V2,
+    });
+    expect(cell.state, what).toBe(expected);
+  }
+});
+
+test("R16/1 — THE IN-FLIGHT WINDOW the sequence passes through is R15's, held evidence and all", () => {
+  // The step before the settle: the same row, request still out, holding the
+  // same v1 book. R15's running arm must own it — no `held` outcome has ever
+  // been consulted for the identity question, and none is now.
+  const running: MatrixPhase = {
+    kind: "running",
+    held: { kind: "ok", response: RUN_BOOK_WEETH_BATCH_1 as unknown as LabRunBook },
+    attempt: STAMP_V1,
+  };
+  const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, running]);
+  expect(cohort.runningAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
+  // Its held evidence raises neither the anchor nor the watermark: the clause
+  // counting it says it "pins no batch", and R14 made that sentence true.
+  expect(anchorBatchOfPhase(running, DEPEG_V2.engines, IDENT_V2)).toBeNull();
+  expect(cohort.inFlightHeldPins).toEqual([]);
+  expect(batchHeaderLine(cohort, null)).toBe(R15_ANCHORED_LEAD + R15_RUNNING_ANCHORED);
+  // No banner: nothing has failed, because nothing has settled.
+  expect(rerunFailedBanner(running, IDENT_V2, "matrix", DEPEG_V2.engines)).toBeNull();
 });

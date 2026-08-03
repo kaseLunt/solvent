@@ -611,6 +611,11 @@ function CommittedDetail({
           className={styles.errorState}
           data-testid="rerun-failed"
           data-retained={rerunBanner.retained}
+          // WAVE R16: whether the SETTLEMENT this banner names was asked under a
+          // definition this page no longer shows — published from the same
+          // `attemptSkew` read that decides the panel below, so the two can
+          // never describe one settlement two ways.
+          data-attempt-changed={rerunBanner.attemptChanged ? "true" : "false"}
         >
           {rerunBanner.line}
         </p>
@@ -762,7 +767,23 @@ function LabBookPanelInner() {
         const held = prior?.kind === "running" ? prior.held : undefined;
         const next: MatrixPhase =
           outcome.kind !== "ok" && held !== undefined && held.kind === "ok"
-            ? { kind: "outcome", outcome: held, rerunFailed: unansweredReason(outcome), attempt }
+            ? // WAVE R16, FINDING 1 — THE FAILURE CARRIES ITS OWN REQUEST'S
+              // IDENTITY. This is the ONE branch where `outcome` ends up holding
+              // a body THIS request did not produce: the held one, given back at
+              // its original batch pin (R8). The phase-level `attempt` is
+              // written too, exactly as R14 wrote it, but nothing downstream
+              // could tell that the settlement itself was BODYLESS once a
+              // retained `kind: "ok"` body occupied `outcome` — so `attemptSkew`
+              // deferred to that body as if the settled request had published
+              // it, and a run asked under a definition this page no longer shows
+              // was counted as an ANSWER about one. Binding the stamp to the
+              // failure record is what makes the settlement readable as itself.
+              {
+                kind: "outcome",
+                outcome: held,
+                rerunFailed: { reason: unansweredReason(outcome), attempt },
+                attempt,
+              }
             : { kind: "outcome", outcome, attempt };
         return new Map(previous).set(scenarioId, next);
       });

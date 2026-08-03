@@ -502,6 +502,9 @@ export function LabMatrix({
                         data-testid="matrix-rerun-failed"
                         data-scenario-id={scenario.id}
                         data-retained={rerunBanner.retained}
+                        // WAVE R16: the settlement's own provenance, from the
+                        // same `attemptSkew` read that decides this row's cells.
+                        data-attempt-changed={rerunBanner.attemptChanged ? "true" : "false"}
                       >
                         {rerunBanner.line}
                       </span>
@@ -575,12 +578,44 @@ export function LabMatrix({
         the run ended without a book, or the book it served named that engine in neither list —
         not a zero · CONTRADICTORY BOOK = the served response answered this cell two ways (an
         engine named twice, or named as served and withheld at once) and is refused whole rather
-        than resolved by this surface · DEFINITION CHANGED = the definition moved, so this table
-        does not classify the phase — either the ANSWER is about a committed definition this page
-        is no longer showing (refresh the listing to run against the current one), or the run was
-        ASKED under one and never came back with a book of its own (re-run the row; a refresh
-        resolves nothing, the listing is already current) · no total column: engine books are
-        never summed.
+        than resolved by this surface ·{" "}
+        {/* WAVE R16, FINDING 2 — THE LEGEND IS ALWAYS ON SCREEN, SO IT MAY NOT
+            CARRY ONE CASE'S TEXT FOR THREE.
+
+            R14 wrote this entry when DEFINITION CHANGED had two cases, and gave
+            it the SETTLED one's words: "never came back with a book of its
+            own… re-run the row". R15 then split the attempt family in two and
+            corrected the header, the cells, the row note and the detail view —
+            and left the legend behind. So during a RUNNING skewed attempt this
+            caption told the reader the run "never came back" and to re-run it,
+            directly under a row whose own note said the request was still out
+            and whose run control was disabled for exactly as long as it was:
+            the contradiction R15 closed everywhere else, still printed once per
+            page, on every page.
+
+            Three arms, one line each, in the vocabulary the surfaces already
+            use — REFRESH for an answer about another definition, NO REMEDY AT
+            ALL for a request still out, RE-RUN for one that ended. Each is
+            pinned separately, so a collapse back to one sentence fails. */}
+        <span data-testid="matrix-legend-dc">
+          DEFINITION CHANGED = the definition moved, so this table does not classify the phase —
+          three cases, one register:
+        </span>{" "}
+        <span data-testid="matrix-legend-dc-response">
+          the ANSWER is about a committed definition this page is no longer showing — refresh the
+          listing to run against the current one
+        </span>{" "}
+        ·{" "}
+        <span data-testid="matrix-legend-dc-running">
+          the run was ASKED under one and its request is STILL OUT — nothing has come back and
+          nothing has failed to, so there is nothing to do here until it settles
+        </span>{" "}
+        ·{" "}
+        <span data-testid="matrix-legend-dc-settled">
+          the run was ASKED under one and never came back with a book of its own — re-run the row;
+          a refresh resolves nothing, the listing is already current
+        </span>{" "}
+        · no total column: engine books are never summed.
       </p>
     </section>
   );
