@@ -72,6 +72,54 @@
 //     naming-nobody 200 must leave an older DISPLAYED result current rather than
 //     repainting it SUPERSEDED under a cohort nothing belongs to.
 //
+//  6. run-book.contradictory.json — WAVE R12, FINDING 1. File (4) with ONE
+//     array changed back: `engines[]` restored to the run-book example's own
+//     full array, while `excluded_engines[]` KEEPS the FLAG_CUSTODY_UNPROVEN
+//     refusal (4) put there. `coverage` is left exactly as (4) left it. The
+//     result is the body a deployment produces when it records an engine's
+//     refusal but fails to drop the served row: aave_v3_etherfi is named in
+//     BOTH arrays, served and withheld at once, from one response.
+//     Nothing here is invented — every byte comes from (4) or from the example
+//     it derives from. The contract permits it: neither array carries
+//     `uniqueItems`, there is no cross-field rule between them, and
+//     `lib/runbook.ts` does no validation, so it parses and typechecks exactly
+//     like a healthy body. It is the fixture that proves the OLD precedence
+//     (engines[] before excluded_engines[]) rendered a numeric RESULT in the
+//     matrix while the detail view rendered WITHHELD, from the same response.
+//
+//  7. run-book.named-twice.json — WAVE R12, FINDING 1, the other arm. The
+//     run-book 200 example with its aave engine object APPENDED to `engines[]`
+//     a second time, byte-identical, and nothing else touched. Two results
+//     offered for one cell, with nothing in the body saying which is the
+//     answer — the failure `Array.prototype.find` resolves silently by taking
+//     whichever came first.
+//
+//  8. scenarios.v2.json + run-book.ethfi_minus_50.v2.json — WAVE R12,
+//     FINDING 2: THE VERSION-SKEW PAIR. Both derive mechanically from committed
+//     bytes, and BOTH ARE INDIVIDUALLY VALID — that is the whole point of the
+//     finding, which is about the unguarded JOIN between them and not about
+//     either response.
+//
+//     scenarios.v2.json is (1) with THREE fields moved, all on the same axis:
+//     the set's `scenario_config_version` becomes "v2", and the ethfi_minus_50
+//     definition's own `version` becomes "v2" with its `engines[]` narrowed to
+//     ["aave_v3_etherfi"]. That is a committed definition being re-cut across a
+//     deployment — the ordinary event the finding is about, not a malformed
+//     body.
+//
+//     run-book.ethfi_minus_50.v2.json is the run-book example RE-IDENTIFIED to
+//     that v2 definition exactly as (2) re-identifies to eth_minus_30 — id,
+//     version, label, description, path_assumption, shocks, out_of_model copied
+//     byte-identically from scenarios.v2.json's own entry — carrying
+//     `scenario_config_version: "v2"` and, matching the v2 definition's
+//     coverage, only the aave engine in `engines[]`.
+//
+//     THE DEFECT THIS PAIR REPRODUCES: joined by scenario id alone, this valid
+//     v2 response read against the RETAINED v1 listing (which covers
+//     debt_manager for this id) names none of v1's covered engines — so R11
+//     classifies the row ALL-HOLE and the header says "the book named nobody"
+//     while the detail view renders the real aave result the response carries.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -120,12 +168,14 @@ const fromExcerpt = stressAave.scenarios.map((scenario) => {
 const seen = new Set(fromExcerpt.map((definition) => definition.id));
 const extra = scenariosExample.scenarios.filter((definition) => !seen.has(definition.id));
 
-write("scenarios.json", {
+const committedListing = {
   served_at: scenariosExample.served_at,
   scenario_config_version: scenariosExample.scenario_config_version,
   scenarios: [...fromExcerpt, ...extra],
   notes: scenariosExample.notes,
-});
+};
+
+write("scenarios.json", committedListing);
 
 // --- 2 + 3: eth_minus_30 run-book, re-identified + one consistent delta ----
 
@@ -227,4 +277,80 @@ write("run-book.names-nobody.json", namesNobody);
 write("run-book.names-nobody.batch2.json", {
   ...namesNobody,
   batch: { ...namesNobody.batch, id: namesNobody.batch.id + 1, computed_at: "2026-07-29T10:00:30Z" },
+});
+
+// --- 6: the 200 that CONTRADICTS ITSELF (Wave R12, finding 1) --------------
+//
+// File (4) with `engines[]` restored to the example's full array while
+// `excluded_engines[]` keeps the refusal (4) put there. aave_v3_etherfi is
+// therefore named in BOTH — served and withheld at once, from one response.
+// The old cell precedence read `engines[]` first and rendered its number; the
+// detail view rendered the refusal. Same body, two answers, one cell.
+
+write("run-book.contradictory.json", {
+  ...runBookExample,
+  engines: runBookExample.engines,
+  excluded_engines: [refusal],
+  coverage: {
+    ...runBookExample.coverage,
+    withheld_engines: [refusal],
+    stress_coverage_is_full: false,
+  },
+});
+
+// --- 7: the 200 that names ONE engine TWICE (Wave R12, finding 1) ----------
+//
+// The example with its aave engine object appended a second time, byte
+// identical. Two results for one cell and nothing saying which; `find()`
+// silently answers with whichever the array happens to carry first.
+
+const aaveEngine = runBookExample.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+if (aaveEngine === undefined) {
+  console.error("generate-lab-book.mjs: the run-book example carries no aave engine");
+  process.exit(1);
+}
+
+write("run-book.named-twice.json", {
+  ...runBookExample,
+  engines: [...runBookExample.engines, aaveEngine],
+});
+
+// --- 8: THE VERSION-SKEW PAIR (Wave R12, finding 2) ------------------------
+//
+// Two INDIVIDUALLY VALID responses from two deployments of the same service.
+// The defect is neither of them; it is the join between them being bound to a
+// scenario id alone, so a v2 book gets read against a v1 listing's coverage.
+
+const SKEWED_ID = "ethfi_minus_50";
+const V2 = "v2";
+
+const v2Scenarios = committedListing.scenarios.map((definition) =>
+  definition.id === SKEWED_ID
+    ? { ...definition, version: V2, engines: ["aave_v3_etherfi"] }
+    : definition,
+);
+const v2Definition = v2Scenarios.find((definition) => definition.id === SKEWED_ID);
+if (v2Definition === undefined) {
+  console.error(`generate-lab-book.mjs: the committed listing carries no ${SKEWED_ID}`);
+  process.exit(1);
+}
+
+write("scenarios.v2.json", {
+  ...committedListing,
+  scenario_config_version: V2,
+  scenarios: v2Scenarios,
+});
+
+write("run-book.ethfi_minus_50.v2.json", {
+  ...runBookExample,
+  scenario_config_version: V2,
+  scenario_id: v2Definition.id,
+  scenario_version: v2Definition.version,
+  label: v2Definition.label,
+  description: v2Definition.description,
+  path_assumption: v2Definition.path_assumption,
+  shocks: v2Definition.shocks,
+  out_of_model: v2Definition.out_of_model,
+  // The v2 definition covers aave alone, so the v2 run answers for aave alone.
+  engines: runBookExample.engines.filter((engine) => engine.engine === "aave_v3_etherfi"),
 });

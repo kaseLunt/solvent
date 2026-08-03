@@ -15,11 +15,15 @@ import { expect, test } from "@playwright/test";
 import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
 import {
   RUN_BOOK_BATCH_2,
+  RUN_BOOK_CONTRADICTORY,
   RUN_BOOK_ETH,
+  RUN_BOOK_ETHFI_V2,
+  RUN_BOOK_NAMED_TWICE,
   RUN_BOOK_NAMES_NOBODY,
   RUN_BOOK_WEETH_BATCH_1,
   RUN_BOOK_WITHHELD,
   SCENARIOS,
+  SCENARIOS_V2,
 } from "../fixtures/lab-book";
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
 import {
@@ -29,14 +33,20 @@ import {
   axisFamilyWords,
   batchHeaderLine,
   batchOfPhase,
+  bookContradiction,
+  bookRefusal,
+  CELL_STATE_LABEL,
   cellState,
+  definitionSkew,
   isAllHoleBook,
   matrixColumns,
   MATRIX_NO_RUN_LINE,
   observedAnchorBatch,
   resolveBatchCohort,
   rowCoverage,
+  rowIdentity,
   scenarioCoverage,
+  servedIdentity,
   unansweredReason,
   type MatrixPhase,
 } from "../../app/lab/matrixCells";
@@ -1273,6 +1283,576 @@ test("R11 — SENSITIVITY: without the committed coverage, the SAME phases read 
   expect(seeing.displayedPins).toEqual([]);
   expect(seeing.currentScenarioIds).toEqual([]);
   expect(batchHeaderLine(seeing, null)).not.toContain("results shown together");
+});
+
+// ===========================================================================
+// WAVE R12 (Codex round-20) — NOTHING IS CLASSIFIED BEFORE IT IS VALIDATED.
+//
+// FINDING 1 (matrixCells.ts:913-924). `cellState` checked `engines[]` before
+// `excluded_engines[]`, so a COVERED engine appearing in BOTH arrays rendered
+// its numeric RESULT in the matrix while the SAME response rendered it WITHHELD
+// in the detail view. Neither the schema nor the client enforces the arrays to
+// be disjoint — no `uniqueItems`, no cross-field rule, no validation in
+// `runbook.ts` — and R11's tests exercised served membership and refused
+// membership SEPARATELY, never together, so the precedence was never asked the
+// one question it answers wrongly.
+//
+// FINDING 2 (LabMatrix.tsx:235-239). Coverage from the committed listing was
+// joined to stored run phases BY SCENARIO ID ALONE. Across an API deployment
+// mid-session that is two different definitions wearing one name: a v1 listing
+// covering `debt_manager` retained in the browser, and a valid v2 response for
+// the same id covering only `aave_v3_etherfi`. R11 then reads the v2 book
+// against v1 coverage, finds v1's engine named nowhere, and declares the row
+// ALL-HOLE — "the book named nobody" — while the detail view renders the real
+// aave result the response is carrying. Both responses are individually valid;
+// the unguarded cross-request join manufactures the wrong answer.
+//
+// THE RULE FOR BOTH: the body is validated and the join is bound to IDENTITY
+// before anything is classified or pinned. A response that fails either check
+// is refused WHOLE — no cell, no pin, no cohort, no anchor and no watermark
+// movement — and it is counted in its OWN header set, because "the book named
+// nobody" must never be claimed about a book that named somebody twice, and
+// nothing failed at all in the version-skew case.
+// ===========================================================================
+
+/** The committed listing's IDENTITY — what `LabMatrix` hands the model (v1). */
+const IDENTITY = rowIdentity(definitions, SCENARIOS.scenario_config_version);
+
+/** The same listing after a deployment re-cut `ethfi_minus_50` to v2. */
+const V2_DEFINITIONS = SCENARIOS_V2.scenarios;
+const ETHFI_V2 = ((): ScenarioDefinition => {
+  const found = V2_DEFINITIONS.find((scenario) => scenario.id === "ethfi_minus_50");
+  if (found === undefined) throw new Error("the v2 fixture carries no ethfi_minus_50");
+  return found;
+})();
+const COVERAGE_V2 = rowCoverage(V2_DEFINITIONS);
+const IDENTITY_V2 = rowIdentity(V2_DEFINITIONS, SCENARIOS_V2.scenario_config_version);
+
+// ---------------------------------------------------------------------------
+// FINDING 1 — the body that answers one cell two ways.
+// ---------------------------------------------------------------------------
+
+test("R12/1 — THE VALIDATION RULE: overlap, duplicate-within-array, and the clean case", () => {
+  // THE FIXTURE IS THE DEFECT. Both lookups succeed for ONE engine, which is
+  // exactly what the old precedence resolved silently by asking `engines[]`
+  // first: a number in the matrix, a refusal register in the detail view.
+  expect(RUN_BOOK_CONTRADICTORY.engines.map((engine) => engine.engine)).toContain(
+    "aave_v3_etherfi",
+  );
+  expect(RUN_BOOK_CONTRADICTORY.excluded_engines.map((refusal) => refusal.engine)).toContain(
+    "aave_v3_etherfi",
+  );
+
+  // OVERLAP.
+  const overlap = bookContradiction(RUN_BOOK_CONTRADICTORY as unknown as LabRunBook);
+  expect(overlap).not.toBeNull();
+  if (overlap === null) throw new Error("unreachable");
+  expect(overlap.kind).toBe("served-and-withheld");
+  expect(overlap.engines).toEqual(["aave_v3_etherfi"]);
+  expect(overlap.reason).toContain("THE SERVED BOOK CONTRADICTS ITSELF");
+  expect(overlap.reason).toContain("named in BOTH engines[] and excluded_engines[]");
+  expect(overlap.reason).toContain("No cell, no pin, no cohort.");
+
+  // DUPLICATE WITHIN `engines[]`.
+  const twiceServed = bookContradiction(RUN_BOOK_NAMED_TWICE as unknown as LabRunBook);
+  expect(twiceServed).not.toBeNull();
+  if (twiceServed === null) throw new Error("unreachable");
+  expect(twiceServed.kind).toBe("named-twice-served");
+  expect(twiceServed.engines).toEqual(["aave_v3_etherfi"]);
+  expect(twiceServed.reason).toContain("named TWICE in engines[]");
+  expect(twiceServed.reason).toContain("choosing a number the response never chose");
+
+  // DUPLICATE WITHIN `excluded_engines[]` — a refusal register offered twice is
+  // the same failure in the other array, and is refused the same way.
+  const twiceWithheld = bookContradiction({
+    ...RUN_BOOK_WITHHELD,
+    excluded_engines: [...RUN_BOOK_WITHHELD.excluded_engines, ...RUN_BOOK_WITHHELD.excluded_engines],
+  } as unknown as LabRunBook);
+  expect(twiceWithheld).not.toBeNull();
+  if (twiceWithheld === null) throw new Error("unreachable");
+  expect(twiceWithheld.kind).toBe("named-twice-withheld");
+  expect(twiceWithheld.reason).toContain("named TWICE in excluded_engines[]");
+
+  // THE CLEAN CASES ARE UNCHANGED — every committed fixture R8-R11 drives, and
+  // the disjoint served/withheld body the whole distinction rests on.
+  for (const body of [
+    RUN_BOOK_ETH,
+    RUN_BOOK_BATCH_2,
+    RUN_BOOK_WEETH_BATCH_1,
+    RUN_BOOK_WITHHELD,
+    RUN_BOOK_NAMES_NOBODY,
+    RUN_BOOK_ETHFI_V2,
+  ]) {
+    expect(bookContradiction(body as unknown as LabRunBook)).toBeNull();
+  }
+});
+
+test("R12/1 — THE CELL: neither the number nor the refusal — the whole body is refused", () => {
+  const phases = new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_CONTRADICTORY)]]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+
+  // THE ASSERTION THE FINDING IS ABOUT: this cell used to read "result", with
+  // aave's own USD in it, while `LabBookPanel` rendered aave WITHHELD from the
+  // same response in the same instant.
+  const aave = cellState({
+    scenario: DEPEG,
+    engine: "aave_v3_etherfi",
+    phase: ok(RUN_BOOK_CONTRADICTORY),
+    cohort,
+    identity: IDENTITY.get(DEPEG.id),
+  });
+  expect(aave.state).toBe("contradicted");
+  if (aave.state !== "contradicted") throw new Error("unreachable");
+  expect(aave.contradiction.kind).toBe("served-and-withheld");
+  expect(aave.contradiction.reason).toContain("served and withheld at once");
+  expect(aave.batchId).toBe(1);
+
+  // AND IT IS THE WHOLE RESPONSE, NOT THE ONE CELL. debt_manager is named once,
+  // cleanly, and is STILL not rendered: a body that answers one cell two ways
+  // has no authority over any of them, because nothing in it says which answer
+  // it meant. Salvaging the "clean" cells would be this surface deciding the
+  // contradiction was local when the response never said so.
+  const dm = cellState({
+    scenario: DEPEG,
+    engine: "debt_manager",
+    phase: ok(RUN_BOOK_CONTRADICTORY),
+    cohort,
+    identity: IDENTITY.get(DEPEG.id),
+  });
+  expect(dm.state).toBe("contradicted");
+
+  // NOT COVERED still outranks it — coverage is structural, from the listing,
+  // and a broken response can never repaint a cell outside the model.
+  expect(
+    cellState({
+      scenario: RATE,
+      engine: "aave_v3_etherfi",
+      phase: ok(RUN_BOOK_CONTRADICTORY),
+      cohort,
+      identity: IDENTITY.get(RATE.id),
+    }).state,
+  ).toBe("not-covered");
+
+  expect(CELL_STATE_LABEL.contradicted).toBe("CONTRADICTORY BOOK");
+});
+
+test("R12/1 — THE ROW: a contradictory book pins nothing and anchors nothing", () => {
+  const phases = new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_CONTRADICTORY)]]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+
+  expect(cohort.attemptedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.contradictedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.displayedPins).toEqual([]);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.supersededScenarioIds).toEqual([]);
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(observedAnchorBatch(phases, COVERAGE, IDENTITY)).toBeNull();
+
+  // IT IS NOT THE R11 SET, and the separation is the ruling's own words: this
+  // book named somebody TWICE, so "named nobody" would be a false account of it.
+  expect(cohort.allHoleScenarioIds).toEqual([]);
+  // …and not the ended-without-a-book set either: a 200 arrived.
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+
+  // AND UNLIKE R11's READS, THIS ONE NEEDS NO LISTING. An all-hole book is only
+  // all-hole RELATIVE to a row's covered engines, so `batchOfPhase` still
+  // answers with the envelope's batch when no coverage is supplied. A
+  // self-contradictory body is invalid on its own terms, so it pins nothing
+  // whether or not anybody supplied a definition to read it against — there is
+  // no state of the world in which this response may be displayed.
+  expect(RUN_BOOK_CONTRADICTORY.batch.id).toBe(1);
+  expect(batchOfPhase(ok(RUN_BOOK_CONTRADICTORY))).toBeNull();
+  expect(batchOfPhase(ok(RUN_BOOK_CONTRADICTORY), DEPEG.engines)).toBeNull();
+  expect(anchorBatchOfPhase(runningHolding(RUN_BOOK_CONTRADICTORY))).toBeNull();
+  expect(anchorBatchOfPhase(runningHolding(RUN_BOOK_CONTRADICTORY), DEPEG.engines)).toBeNull();
+  // The contrast R11 pinned, unchanged: a naming-nobody body DOES pin when no
+  // coverage is supplied, because nothing can be inferred without a definition.
+  expect(batchOfPhase(ok(RUN_BOOK_NAMES_NOBODY))).toBe(1);
+});
+
+test("R12/1 — THE HEADER: named as a contradiction, and never as “named nobody”", () => {
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_CONTRADICTORY)]]),
+    null,
+    COVERAGE,
+    IDENTITY,
+  );
+  const line = batchHeaderLine(cohort, null);
+
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) were served a book that CONTRADICTS " +
+      "ITSELF — an engine named twice, or named as served and withheld at once, which is a body " +
+      "that names somebody twice rather than one that names nobody. There is no batch for this " +
+      "table to be as of — and this is NOT “not run”: every row counted here was asked, and each " +
+      "says in its own cell what became of the asking.",
+  );
+
+  // THE DEFECT, NAMED: a cohort claimed over a row displaying nothing.
+  expect(line).not.toContain("results shown together");
+  expect(line).not.toContain("Every DISPLAYED result was measured at that batch");
+  expect(line).not.toContain("batch #1");
+  // AND THE R11 SENTENCE IS NOT BORROWED. This is the ruling's explicit
+  // constraint: "named nobody" must not be claimed about a book that named
+  // somebody twice.
+  expect(line).not.toContain("named none of the row's covered engines");
+  expect(line).not.toContain("ended without a served result");
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R12/1 — the contradiction clause rides BESIDE a real cohort, never inside it", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [DEPEG.id, ok(RUN_BOOK_CONTRADICTORY)], // served @1, contradicts itself
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(cohort.contradictedScenarioIds).toEqual([DEPEG.id]);
+
+  expect(batchHeaderLine(cohort, null)).toBe(
+    "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+      "that batch. 1 row(s) were served a book that CONTRADICTS ITSELF — an engine named twice " +
+      "within an array, or named as served and withheld at once. A body that answers a cell two " +
+      "ways answers it no way, so the whole response is refused for presentation: no cell, no " +
+      "pin, and no part of the sentence above. That is not a book that named nobody — this one " +
+      "named somebody twice.",
+  );
+
+  // The row that really did display something is untouched.
+  expect(
+    cellState({
+      scenario: ETH,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETH),
+      cohort,
+      identity: IDENTITY.get(ETH.id),
+    }).state,
+  ).toBe("result");
+});
+
+test("R12/1 — a contradictory book at a NEWER batch supersedes nothing", () => {
+  // The anchor half, exactly as R11 pinned it for the naming-nobody body: a
+  // response this table refuses to read may not drag the as-of forward and
+  // repaint a real displayed result as SUPERSEDED under a cohort no cell holds.
+  const atSeven = {
+    ...RUN_BOOK_CONTRADICTORY,
+    batch: { ...RUN_BOOK_CONTRADICTORY.batch, id: 7 },
+  } as typeof RUN_BOOK_ETH;
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [DEPEG.id, ok(atSeven)], // refused @7
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(observedAnchorBatch(phases, COVERAGE, IDENTITY)).toBe(1);
+  expect(
+    cellState({
+      scenario: ETH,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETH),
+      cohort,
+      identity: IDENTITY.get(ETH.id),
+    }).state,
+  ).toBe("result");
+  expect(batchHeaderLine(cohort, null)).not.toContain("batch #7");
+});
+
+// ---------------------------------------------------------------------------
+// FINDING 2 — the join bound to identity, not to an id.
+// ---------------------------------------------------------------------------
+
+test("R12/2 — THE IDENTITY: id + version + config version, from the wire's own fields", () => {
+  // Verified against the generated schema, not assumed: the listing publishes
+  // `scenario_config_version` for the set and `version` per scenario; the
+  // run-book response publishes `scenario_id`, `scenario_version` and
+  // `scenario_config_version` for itself.
+  expect(servedIdentity(RUN_BOOK_ETHFI_V2 as unknown as LabRunBook)).toEqual({
+    scenarioId: "ethfi_minus_50",
+    version: "v2",
+    configVersion: "v2",
+  });
+  expect(IDENTITY.get(ETHFI.id)).toEqual({
+    scenarioId: "ethfi_minus_50",
+    version: "v1",
+    configVersion: "v1",
+  });
+
+  // A MATCHING JOIN IS NO SKEW — the ordinary case, unchanged.
+  expect(
+    definitionSkew(RUN_BOOK_ETH as unknown as LabRunBook, IDENTITY.get(ETH.id)),
+  ).toBeNull();
+  expect(
+    definitionSkew(RUN_BOOK_ETHFI_V2 as unknown as LabRunBook, IDENTITY_V2.get(ETHFI.id)),
+  ).toBeNull();
+
+  // NO IDENTITY SUPPLIED = NOTHING INFERRED, the same rule R11 gave absent
+  // coverage: a response cannot testify to which listing the page is holding.
+  expect(definitionSkew(RUN_BOOK_ETHFI_V2 as unknown as LabRunBook, undefined)).toBeNull();
+
+  // ONE DISAGREEING FIELD IS ENOUGH — "mostly the same scenario" is not a thing
+  // a risk surface may believe. Each field is checked, and each is named.
+  const skew = definitionSkew(
+    RUN_BOOK_ETHFI_V2 as unknown as LabRunBook,
+    IDENTITY.get(ETHFI.id),
+  );
+  expect(skew).not.toBeNull();
+  if (skew === null) throw new Error("unreachable");
+  expect(skew.fields).toEqual(["scenario_version", "scenario_config_version"]);
+  expect(
+    definitionSkew(RUN_BOOK_ETH as unknown as LabRunBook, IDENTITY.get(DEPEG.id))?.fields,
+  ).toEqual(["scenario_id"]);
+  expect(
+    definitionSkew(RUN_BOOK_ETH as unknown as LabRunBook, {
+      scenarioId: "eth_minus_30",
+      version: "v1",
+      configVersion: "v9",
+    })?.fields,
+  ).toEqual(["scenario_config_version"]);
+});
+
+test("R12/2 — THE DEFECT SEQUENCE: a valid v2 book against a retained v1 listing", () => {
+  // THE EXACT ROUND-20 SEQUENCE. The tab holds the v1 listing, which covers
+  // `debt_manager` for this id. The API is deployed. The reader runs the row and
+  // gets a VALID v2 response covering `aave_v3_etherfi` only.
+  expect(ETHFI.engines).toEqual(["debt_manager"]);
+  expect(RUN_BOOK_ETHFI_V2.engines.map((engine) => engine.engine)).toEqual(["aave_v3_etherfi"]);
+
+  const phases = new Map<string, MatrixPhase>([[ETHFI.id, ok(RUN_BOOK_ETHFI_V2)]]);
+
+  // WITHOUT THE IDENTITY BINDING — THE DEFECT, REPRODUCED ON DEMAND. v1's
+  // covered engine is named nowhere in the v2 book, so R11 reads the row as
+  // ALL-HOLE and the header says the book named nobody…
+  const idOnly = resolveBatchCohort(phases, null, COVERAGE);
+  expect(idOnly.allHoleScenarioIds).toEqual([ETHFI.id]);
+  expect(batchHeaderLine(idOnly, null)).toContain("named none of the row's covered engines");
+  // …while the response is carrying a real aave result the whole time.
+  expect(RUN_BOOK_ETHFI_V2.engines[0]?.eligible_debt_delta_usd.length).toBeGreaterThan(0);
+
+  // WITH IT: the join is refused, and nothing is classified against a definition
+  // the answer was not computed for.
+  const bound = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+  expect(bound.definitionChangedScenarioIds).toEqual([ETHFI.id]);
+  expect(bound.allHoleScenarioIds).toEqual([]);
+  expect(bound.unansweredScenarioIds).toEqual([]);
+  expect(bound.displayedPins).toEqual([]);
+  expect(bound.currentScenarioIds).toEqual([]);
+  expect(bound.anchorBatchId).toBeNull();
+  expect(observedAnchorBatch(phases, COVERAGE, IDENTITY)).toBeNull();
+});
+
+test("R12/2 — THE CELL and THE HEADER agree: DEFINITION CHANGED, never ALL-HOLE", () => {
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[ETHFI.id, ok(RUN_BOOK_ETHFI_V2)]]),
+    null,
+    COVERAGE,
+    IDENTITY,
+  );
+
+  const cell = cellState({
+    scenario: ETHFI,
+    engine: "debt_manager",
+    phase: ok(RUN_BOOK_ETHFI_V2),
+    cohort,
+    identity: IDENTITY.get(ETHFI.id),
+  });
+  expect(cell.state).toBe("definition-changed");
+  if (cell.state !== "definition-changed") throw new Error("unreachable");
+  expect(cell.skew.listing).toEqual({
+    scenarioId: "ethfi_minus_50",
+    version: "v1",
+    configVersion: "v1",
+  });
+  expect(cell.skew.served).toEqual({
+    scenarioId: "ethfi_minus_50",
+    version: "v2",
+    configVersion: "v2",
+  });
+  expect(cell.skew.reason).toContain(
+    "this scenario's committed definition changed after this page loaded",
+  );
+  expect(cell.skew.reason).toContain(
+    "refresh the listing to run against the current definition",
+  );
+  // THE ASSERTION THE FINDING IS ABOUT: this cell used to read UNANSWERED with
+  // the hole's own sentence, under a header saying the book named nobody.
+  expect(cell.state).not.toBe("unanswered");
+  expect(CELL_STATE_LABEL["definition-changed"]).toBe("DEFINITION CHANGED");
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) answered for a committed definition " +
+      "this page is no longer showing — refresh the listing to run against the current one. " +
+      "There is no batch for this table to be as of — and this is NOT “not run”: every row " +
+      "counted here was asked, and each says in its own cell what became of the asking.",
+  );
+  expect(line).not.toContain("named none of the row's covered engines");
+  expect(line).not.toContain("named nobody");
+  expect(line).not.toContain("results shown together");
+  expect(line).not.toContain("ended without a served result");
+});
+
+test("R12/2 — the definition-changed clause rides BESIDE a real cohort", () => {
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([
+      [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+      [ETHFI.id, ok(RUN_BOOK_ETHFI_V2)], // answered for another definition
+    ]),
+    null,
+    COVERAGE,
+    IDENTITY,
+  );
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([ETHFI.id]);
+
+  expect(batchHeaderLine(cohort, null)).toBe(
+    "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+      "that batch. 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing " +
+      "— the committed set moved after this page loaded. Nothing failed and nothing was " +
+      "withheld: a result computed for one definition is simply never read against the coverage " +
+      "of another, so the row is not classified, pins no batch, and is no part of the sentence " +
+      "above. Refresh the committed listing to run against the current definition.",
+  );
+});
+
+test("R12/2 — THE REFRESH PATH: with the v2 listing the SAME stored answer classifies", () => {
+  // The affordance's whole contract, and the reason the state is DERIVED rather
+  // than stored: re-read `GET /v1/scenarios`, and the answer that was
+  // unclassifiable a moment ago is read against the definition it was actually
+  // computed for. Nothing is re-run to make this happen.
+  const phases = new Map<string, MatrixPhase>([[ETHFI.id, ok(RUN_BOOK_ETHFI_V2)]]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE_V2, IDENTITY_V2);
+
+  expect(cohort.definitionChangedScenarioIds).toEqual([]);
+  expect(cohort.allHoleScenarioIds).toEqual([]);
+  expect(cohort.currentScenarioIds).toEqual([ETHFI.id]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETHFI.id, batchId: 1 }]);
+  expect(cohort.anchorBatchId).toBe(1);
+
+  // The v2 definition covers aave alone, so aave carries the result and
+  // debt_manager is NOT COVERED — a property of the DEFINITION, exactly as it
+  // has always been, now read against the right one.
+  const served = cellState({
+    scenario: ETHFI_V2,
+    engine: "aave_v3_etherfi",
+    phase: ok(RUN_BOOK_ETHFI_V2),
+    cohort,
+    identity: IDENTITY_V2.get(ETHFI.id),
+  });
+  expect(served.state).toBe("result");
+  expect(
+    cellState({
+      scenario: ETHFI_V2,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETHFI_V2),
+      cohort,
+      identity: IDENTITY_V2.get(ETHFI.id),
+    }).state,
+  ).toBe("not-covered");
+
+  expect(batchHeaderLine(cohort, null)).toBe(
+    "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+      "that batch.",
+  );
+});
+
+test("R12/2 — SENSITIVITY: without the identity source, the SAME phases read the old way", () => {
+  // The R11 sensitivity test's shape, for the new guard. The ONLY difference
+  // between the two calls is whether the listing's identity was supplied; with
+  // it absent nothing is inferred, and the v2 book is read against v1 coverage
+  // exactly as the defect did.
+  const phases = new Map<string, MatrixPhase>([[ETHFI.id, ok(RUN_BOOK_ETHFI_V2)]]);
+
+  const blind = resolveBatchCohort(phases, null, COVERAGE);
+  expect(blind.allHoleScenarioIds).toEqual([ETHFI.id]);
+  expect(blind.definitionChangedScenarioIds).toEqual([]);
+  expect(
+    cellState({ scenario: ETHFI, engine: "debt_manager", phase: ok(RUN_BOOK_ETHFI_V2), cohort: blind })
+      .state,
+  ).toBe("unanswered");
+
+  const seeing = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+  expect(seeing.allHoleScenarioIds).toEqual([]);
+  expect(seeing.definitionChangedScenarioIds).toEqual([ETHFI.id]);
+  expect(
+    cellState({
+      scenario: ETHFI,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETHFI_V2),
+      cohort: seeing,
+      identity: IDENTITY.get(ETHFI.id),
+    }).state,
+  ).toBe("definition-changed");
+});
+
+// ---------------------------------------------------------------------------
+// The two guards together.
+// ---------------------------------------------------------------------------
+
+test("R12 — VALIDITY IS DECIDED BEFORE IDENTITY, and the reason says so", () => {
+  // A body that contradicts itself is invalid whichever definition it belongs
+  // to, and telling the reader "your listing moved" about it would send them to
+  // refresh a listing that was never the problem.
+  const bothWrong = {
+    ...RUN_BOOK_CONTRADICTORY,
+    scenario_config_version: "v9",
+  } as typeof RUN_BOOK_ETH;
+  const refusal = bookRefusal(bothWrong as unknown as LabRunBook, IDENTITY.get(DEPEG.id));
+  expect(refusal).not.toBeNull();
+  if (refusal === null) throw new Error("unreachable");
+  expect(refusal.kind).toBe("contradicted");
+  expect(refusal.reason).toContain("THE SERVED BOOK CONTRADICTS ITSELF");
+  expect(refusal.reason).not.toContain("DEFINITION CHANGED");
+
+  // A clean body with a moved identity gets the other answer, and only it.
+  const skewed = bookRefusal(
+    RUN_BOOK_ETHFI_V2 as unknown as LabRunBook,
+    IDENTITY.get(ETHFI.id),
+  );
+  expect(skewed?.kind).toBe("definition-changed");
+  // A clean body against its own definition passes both, as it always has.
+  expect(bookRefusal(RUN_BOOK_ETH as unknown as LabRunBook, IDENTITY.get(ETH.id))).toBeNull();
+});
+
+test("R12 — the five ways a run can leave a row empty are counted SEPARATELY", () => {
+  // R11's three, plus R12's two. Each has its own set and its own sentence,
+  // because each is a different thing to have happened and a reader who is told
+  // the wrong one has been told something false.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, RUNNING_COLD], // in flight
+    [DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)], // served a book naming nobody
+    [RATE.id, FAILED_COLD], // ended without a book
+    [ETHFI.id, ok(RUN_BOOK_ETHFI_V2)], // answered for another definition
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE, IDENTITY);
+  expect(cohort.inFlightScenarioIds).toEqual([ETH.id]);
+  expect(cohort.allHoleScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([RATE.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([ETHFI.id]);
+
+  const withContradiction = resolveBatchCohort(
+    new Map<string, MatrixPhase>([...phases, [DEPEG.id, ok(RUN_BOOK_CONTRADICTORY)]]),
+    null,
+    COVERAGE,
+    IDENTITY,
+  );
+  expect(withContradiction.contradictedScenarioIds).toEqual([DEPEG.id]);
+  expect(withContradiction.allHoleScenarioIds).toEqual([]);
+
+  const line = batchHeaderLine(withContradiction, null);
+  expect(line).toContain("1 run(s) are in flight");
+  expect(line).toContain("1 run(s) ended without a served result");
+  expect(line).toContain("1 run(s) were served a book that CONTRADICTS ITSELF");
+  expect(line).toContain("1 run(s) answered for a committed definition this page is no longer showing");
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R12 — every cell state still has exactly one label, and no two share one", () => {
+  const labels = Object.values(CELL_STATE_LABEL);
+  expect(new Set(labels).size).toBe(labels.length);
+  expect(CELL_STATE_LABEL.unanswered).toBe("UNANSWERED");
+  expect(CELL_STATE_LABEL.contradicted).toBe("CONTRADICTORY BOOK");
+  expect(CELL_STATE_LABEL["definition-changed"]).toBe("DEFINITION CHANGED");
 });
 
 // ---------------------------------------------------------------------------

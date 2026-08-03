@@ -29,6 +29,24 @@
 // floor disclosure reads the watermark. This component supplies the watermark
 // and the frontier's batch and renders the result; it composes no sentence.
 //
+// AND NOTHING IS CLASSIFIED BEFORE IT IS VALIDATED (Wave R12). Two responses
+// this table refuses to read at all, each for its own stated reason:
+//
+//   CONTRADICTORY BOOK  the body answers one cell two ways — an engine named
+//                       twice within an array, or named as served and withheld
+//                       at once. Precedence used to pick the numeric arm here
+//                       while the detail view rendered the refusal.
+//   DEFINITION CHANGED  the response answered for a committed definition this
+//                       page is no longer showing. Coverage used to be joined
+//                       to stored runs by scenario ID alone, so a valid v2 book
+//                       read against a retained v1 listing was declared to have
+//                       "named nobody".
+//
+// Both refuse the WHOLE response: no cell, no pin, no cohort, no anchor and no
+// watermark movement, and the same sentence in the header, the cells and the
+// detail. The second one's affordance is a LISTING REFRESH — this component
+// asks for it, and re-runs nothing on its own.
+//
 // AND A ROW'S PRESENTATION DERIVES FROM ITS OWN CELLS (Wave R11). A 200 whose
 // `engines[]` and `excluded_engines[]` name none of the row's covered engines
 // leaves every cell of that row UNANSWERED; it therefore pins no batch, joins no
@@ -51,6 +69,7 @@ import {
   observedAnchorBatch,
   resolveBatchCohort,
   rowCoverage,
+  rowIdentity,
   scenarioCoverage,
   type LabCellState,
   type MatrixPhase,
@@ -169,12 +188,53 @@ function Cell({ state }: { state: LabCellState }) {
           <span className={styles.cellSub}>{state.reason}</span>
         </td>
       );
+    // WAVE R12, FINDING 1. The response answers this cell two ways, so the cell
+    // renders NEITHER of them. There is no number here and no refusal code
+    // here — both would be this surface picking one arm of a contradiction the
+    // body never resolved. The batch its envelope carried is disclosed and
+    // disclaimed in the same sentence, exactly as R11's hole does.
+    case "contradicted":
+      return (
+        <td
+          className={styles.cellContradicted}
+          data-testid="matrix-cell"
+          data-cell-state="contradicted"
+          title={state.contradiction.reason}
+        >
+          <span className={styles.cellTag}>CONTRADICTORY BOOK</span>
+          <span className={styles.cellSub}>
+            {state.contradiction.reason} The book it served was measured at batch #
+            {state.batchId}; nothing on this table is read from it.
+          </span>
+        </td>
+      );
+    // WAVE R12, FINDING 2. A real answer about a definition this page is no
+    // longer showing. Not a failure, not a refusal, and above all not a hole:
+    // the affordance is a listing refresh, and it sits on the row.
+    case "definition-changed":
+      return (
+        <td
+          className={styles.cellDefinitionChanged}
+          data-testid="matrix-cell"
+          data-cell-state="definition-changed"
+          title={state.skew.reason}
+        >
+          <span className={styles.cellTag}>DEFINITION CHANGED</span>
+          <span className={styles.cellSub}>{state.skew.reason}</span>
+        </td>
+      );
   }
 }
 
 export interface LabMatrixProps {
   /** The COMMITTED listing from `GET /v1/scenarios` — the rows, cold. */
   scenarios: readonly ScenarioDefinition[];
+  /**
+   * The listing's own `scenario_config_version` (Wave R12). It is HALF of the
+   * identity a stored run must match before it may be classified against these
+   * rows — the set's token; each row's `version` is the other half.
+   */
+  configVersion: string;
   /** Columns: the engines the definitions name, in wire order. */
   columns: readonly string[];
   /** Per-scenario run state, keyed by scenario id. */
@@ -182,6 +242,15 @@ export interface LabMatrixProps {
   /** The batch `/v1/book` served the frontier at — disclosed, never assumed equal. */
   frontierBatchId: number | null;
   onRun: (scenarioId: string) => void;
+  /**
+   * WAVE R12 — re-fetch `GET /v1/scenarios`. The ONLY affordance offered to a
+   * definition-changed row: it re-reads the committed set and re-renders. It
+   * re-runs nothing, because a re-run against a listing this page knows to be
+   * stale would just produce a second unclassifiable answer.
+   */
+  onRefreshListing: () => void;
+  /** True while that re-fetch is in flight — the button says so and disables. */
+  listingRefreshing: boolean;
   /** Highlighted row (the committed-scenario detail's selection). */
   selectedId: string | null;
   onSelect: (scenarioId: string) => void;
@@ -189,10 +258,13 @@ export interface LabMatrixProps {
 
 export function LabMatrix({
   scenarios,
+  configVersion,
   columns,
   phases,
   frontierBatchId,
   onRun,
+  onRefreshListing,
+  listingRefreshing,
   selectedId,
   onSelect,
 }: LabMatrixProps) {
@@ -232,11 +304,18 @@ export function LabMatrix({
   // none of a row's covered engines displays nothing, so it raises neither the
   // watermark nor the anchor — and the only way to keep those two answers in
   // agreement is for one function to give both.
+  //
+  // WAVE R12 hands the COMMITTED IDENTITY alongside the coverage, and to the
+  // same three reads, for the same reason: a response that answered for another
+  // definition must not raise the watermark either. The watermark is a floor
+  // under a sentence about DISPLAYED results, and a row this table declines to
+  // classify displays nothing.
   const coverage = rowCoverage(scenarios);
+  const identity = rowIdentity(scenarios, configVersion);
   const [watermark, setWatermark] = useState<number | null>(null);
-  const observed = observedAnchorBatch(phases, coverage);
+  const observed = observedAnchorBatch(phases, coverage, identity);
   if (observed !== null && (watermark === null || observed > watermark)) setWatermark(observed);
-  const cohort = resolveBatchCohort(phases, watermark, coverage);
+  const cohort = resolveBatchCohort(phases, watermark, coverage, identity);
 
   return (
     <section data-testid="lab-matrix">
@@ -303,7 +382,13 @@ export function LabMatrix({
                   {columns.map((engine) => (
                     <Cell
                       key={`${scenario.id}-${engine}`}
-                      state={cellState({ scenario, engine, phase, cohort })}
+                      state={cellState({
+                        scenario,
+                        engine,
+                        phase,
+                        cohort,
+                        identity: identity.get(scenario.id),
+                      })}
                     />
                   ))}
                   <td>
@@ -334,6 +419,34 @@ export function LabMatrix({
                         what this row already measured, at its own batch.
                       </span>
                     )}
+                    {/* WAVE R12, FINDING 2: the row's affordance is a LISTING
+                        REFRESH, not a re-run. Re-running against a listing this
+                        page already knows is stale would only produce a second
+                        answer it cannot classify; re-reading the committed set
+                        is what makes the stored answer readable — or proves it
+                        is about a definition that has moved on again. Nothing
+                        is auto-run either way. */}
+                    {cohort.definitionChangedScenarioIds.includes(scenario.id) && (
+                      <span
+                        className={styles.cellSub}
+                        data-testid="matrix-definition-changed"
+                        data-scenario-id={scenario.id}
+                      >
+                        <button
+                          type="button"
+                          className={styles.runButtonSmall}
+                          data-testid="matrix-refresh-listing"
+                          data-scenario-id={scenario.id}
+                          disabled={listingRefreshing}
+                          onClick={onRefreshListing}
+                        >
+                          {listingRefreshing ? "refreshing…" : "refresh listing"}
+                        </button>{" "}
+                        this row&apos;s run answered for a committed definition this page is no
+                        longer showing. Re-read <span className="mono">GET /v1/scenarios</span> to
+                        run against the current one — nothing is re-run for you.
+                      </span>
+                    )}
                   </td>
                 </tr>
               );
@@ -348,7 +461,11 @@ export function LabMatrix({
         rendered · SUPERSEDED = the result was measured at an older batch and is never blended
         with the current one · UNANSWERED = neither a result nor a refusal reached that cell —
         the run ended without a book, or the book it served named that engine in neither list —
-        not a zero · no total column: engine books are never summed.
+        not a zero · CONTRADICTORY BOOK = the served response answered this cell two ways (an
+        engine named twice, or named as served and withheld at once) and is refused whole rather
+        than resolved by this surface · DEFINITION CHANGED = the answer is about a committed
+        definition this page is no longer showing; refresh the listing to run against the current
+        one · no total column: engine books are never summed.
       </p>
     </section>
   );

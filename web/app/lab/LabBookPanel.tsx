@@ -46,7 +46,15 @@ import { LabFrontier } from "./LabFrontier";
 import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
-import { matrixColumns, unansweredReason, type MatrixPhase } from "./matrixCells";
+import {
+  bookRefusal,
+  matrixColumns,
+  rowIdentity,
+  unansweredReason,
+  type BookRefusal,
+  type MatrixPhase,
+  type ScenarioIdentity,
+} from "./matrixCells";
 import {
   FactorText,
   LabAppliedShocks,
@@ -245,10 +253,51 @@ function BookResult({ response }: { response: LabRunBook }) {
 // Outcome states — each honest, none a spinner, none fake data.
 // ---------------------------------------------------------------------------
 
-function OutcomeView({ id, outcome }: { id: string; outcome: RunBookOutcome }) {
+/**
+ * THE DETAIL VIEW REFUSES EXACTLY WHAT THE MATRIX REFUSES (Wave R12).
+ *
+ * This is the finding's other half. The matrix and this panel read the SAME
+ * response, and before R12 they could disagree about it: an engine named in
+ * both `engines[]` and `excluded_engines[]` rendered a numeric cell up there and
+ * a WITHHELD refusal down here, from one body, at the same moment. Both now ask
+ * `bookRefusal` first and render the SAME composed sentence, so header, cells
+ * and detail cannot drift — there is no second opinion to have.
+ */
+function BookRefusedView({ id, refusal }: { id: string; refusal: BookRefusal }) {
+  return refusal.kind === "contradicted" ? (
+    <div className={styles.errorState} data-testid="runbook-contradicted">
+      <b>refusing to render: the served book contradicts itself.</b> {refusal.reason} This panel
+      shows no aggregate, no delta and no refusal register from it — picking either arm would be
+      this surface answering a question the response left answered two ways. Re-run{" "}
+      <span className="mono">{id}</span> to ask for a body that answers it once.
+    </div>
+  ) : (
+    <div className={styles.notServed} data-testid="runbook-definition-changed">
+      <b>refusing to render: this answer is about another committed definition.</b>{" "}
+      {refusal.reason} The result is not discarded and nothing was re-run for you; it simply is
+      not read against a definition it was not computed for.
+    </div>
+  );
+}
+
+function OutcomeView({
+  id,
+  outcome,
+  identity,
+}: {
+  id: string;
+  outcome: RunBookOutcome;
+  identity: ScenarioIdentity | undefined;
+}) {
   switch (outcome.kind) {
-    case "ok":
-      return <BookResult response={outcome.response} />;
+    case "ok": {
+      const refusal = bookRefusal(outcome.response, identity);
+      return refusal === null ? (
+        <BookResult response={outcome.response} />
+      ) : (
+        <BookRefusedView id={id} refusal={refusal} />
+      );
+    }
     case "not-served":
       return (
         <div className={styles.notServed} data-testid="runbook-not-served">
@@ -299,10 +348,13 @@ function OutcomeView({ id, outcome }: { id: string; outcome: RunBookOutcome }) {
 function CommittedDetail({
   scenario,
   phase,
+  identity,
   onRun,
 }: {
   scenario: ScenarioDefinition;
   phase: MatrixPhase;
+  /** WAVE R12 — the identity this panel's listing publishes for this row. */
+  identity: ScenarioIdentity | undefined;
   onRun: () => void;
 }) {
   return (
@@ -372,7 +424,9 @@ function CommittedDetail({
           was invented in its place.
         </p>
       )}
-      {phase.kind === "outcome" && <OutcomeView id={scenario.id} outcome={phase.outcome} />}
+      {phase.kind === "outcome" && (
+        <OutcomeView id={scenario.id} outcome={phase.outcome} identity={identity} />
+      )}
       <LabOutOfModel items={scenario.out_of_model} />
     </section>
   );
@@ -414,6 +468,12 @@ function LabBookPanelInner() {
   const deepLinkId = searchParams.get("scenario");
 
   const [listing, setListing] = useState<ListingState>({ phase: "loading" });
+  // WAVE R12 — the listing-refresh affordance's own state. It is deliberately
+  // NOT folded into `listing`: a failed re-read must not delete the rows this
+  // page is already showing, because those rows are the only honest account of
+  // what the reader is looking at. The failure is disclosed beside them.
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [book, setBook] = useState<BookState>({ phase: "loading" });
   const [phases, setPhases] = useState<ReadonlyMap<string, MatrixPhase>>(new Map());
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -466,6 +526,42 @@ function LabBookPanelInner() {
         return new Map(previous).set(scenarioId, next);
       });
     });
+  }, []);
+
+  // WAVE R12 (Codex round-20 finding 2) — THE LISTING REFRESH.
+  //
+  // Coverage and identity both come from the committed listing held in this
+  // browser. Across an API deployment mid-session that listing goes stale, and
+  // a stored run answered by the NEW deployment is a valid response about a
+  // definition this page is no longer showing. The model refuses to classify it
+  // (see `definitionSkew`); this is the one affordance that resolves the
+  // refusal, and it does exactly one thing — RE-READ THE COMMITTED SET.
+  //
+  // IT RE-RUNS NOTHING, on purpose. A re-run against a listing already known to
+  // be stale would just produce a second answer nobody can classify, and firing
+  // a book-wide computation to fix a display state would be a cost the reader
+  // never asked for. Once the listing matches what the stored answer was
+  // computed for, that answer classifies honestly on its own.
+  const refreshListing = useCallback(() => {
+    setRefreshing(true);
+    setRefreshError(null);
+    getSolventClient()
+      .scenarios()
+      .then(
+        (response) => {
+          setListing({
+            phase: "ok",
+            scenarios: response.scenarios,
+            configVersion: response.scenario_config_version,
+            notes: response.notes,
+          });
+          setRefreshing(false);
+        },
+        (cause: unknown) => {
+          setRefreshError(cause instanceof Error ? cause.message : String(cause));
+          setRefreshing(false);
+        },
+      );
   }, []);
 
   // COLD arrival: both routes are servable without a run, and neither is a
@@ -585,12 +681,25 @@ function LabBookPanelInner() {
       )}
       {listing.phase === "ok" && (
         <>
+          {/* WAVE R12: a failed listing re-read leaves the rows this page is
+              already showing exactly where they are, and says so. Deleting them
+              would trade a stale-but-named definition for no definition at
+              all. */}
+          {refreshError !== null && (
+            <div className={styles.errorState} data-testid="listing-refresh-error">
+              the committed scenario set could not be re-read: {refreshError}. The rows below are
+              still the ones this page loaded — nothing was replaced and nothing was invented.
+            </div>
+          )}
           <LabMatrix
             scenarios={listing.scenarios}
+            configVersion={listing.configVersion}
             columns={columns}
             phases={phases}
             frontierBatchId={frontierBatchId}
             onRun={run}
+            onRefreshListing={refreshListing}
+            listingRefreshing={refreshing}
             selectedId={selectedId}
             onSelect={setPickedId}
           />
@@ -610,6 +719,7 @@ function LabBookPanelInner() {
             <CommittedDetail
               scenario={selected}
               phase={phases.get(selected.id) ?? { kind: "idle" }}
+              identity={rowIdentity(listing.scenarios, listing.configVersion).get(selected.id)}
               onRun={() => {
                 run(selected.id);
               }}

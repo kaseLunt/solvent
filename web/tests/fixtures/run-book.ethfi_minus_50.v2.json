@@ -1,0 +1,122 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "batch": {
+    "id": 1,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "age_seconds": 5,
+    "producer": "riskd",
+    "status": "complete",
+    "position_count": 4,
+    "refused_count": 2,
+    "refused_engines": [],
+    "flagged_count": 1,
+    "watermarks": [
+      {
+        "engine": "aave_v3_etherfi",
+        "chain_id": 1,
+        "last_block": 25635618,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "engine": "debt_manager",
+        "chain_id": 10,
+        "last_block": 154796552,
+        "acked_epoch": 0,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "rows": 3,
+          "failed": 1,
+          "success_sum": "309593004",
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "age_seconds": 1200,
+          "generation": 4,
+          "generation_open": false
+        }
+      }
+    ],
+    "supersession": {
+      "superseded": false,
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract."
+    }
+  },
+  "scenario_config_version": "v2",
+  "scenario_id": "ethfi_minus_50",
+  "scenario_version": "v2",
+  "label": "ETHFI -50 percent",
+  "description": "Idiosyncratic own-ecosystem-token shock. ETHFI collateral is correlated with exactly the stress states in which liquidations happen, and sETHFI is composed from ETHFI, so both move on one axis.",
+  "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+  "shocks": [
+    {
+      "axis": "asset_usd",
+      "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+      "factor_num": 50,
+      "factor_den": 100
+    }
+  ],
+  "out_of_model": [
+    "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+    "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+    "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+    "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+    "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+    "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
+    "the sETHFI/ETHFI accountant rate is held flat; a 50 percent ETHFI drawdown is assumed not to change the staking rate",
+    "reflexivity between the token price and the protocol's own risk parameters"
+  ],
+  "applied_shocks": [],
+  "held_flat": [],
+  "engines": [
+    {
+      "engine": "aave_v3_etherfi",
+      "usd_decimals": 8,
+      "before": {
+        "accounts": 1,
+        "eligible_accounts": 0,
+        "total_collateral_usd": "800000000000",
+        "total_debt_usd": "600000000000",
+        "eligible_debt_usd": "0",
+        "collateral_at_risk_usd": "0",
+        "bad_debt_usd": "0"
+      },
+      "after": {
+        "accounts": 1,
+        "eligible_accounts": 0,
+        "total_collateral_usd": "800000000000",
+        "total_debt_usd": "600000000000",
+        "eligible_debt_usd": "0",
+        "collateral_at_risk_usd": "0",
+        "bad_debt_usd": "0"
+      },
+      "newly_eligible_accounts": 0,
+      "eligible_debt_delta_usd": "0",
+      "bad_debt_delta_usd": "0",
+      "market_realization": {
+        "hfs_unchanged": true,
+        "execution_shortfall_usd": "40000000000",
+        "bad_debt_at_liquidation_usd": "0",
+        "usd_decimals": 8,
+        "seizure_model": "pro-rata-over-counted-collateral",
+        "note": "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it). The output is the gap the protocol is not seeing."
+      },
+      "projection": null,
+      "note": "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
+    }
+  ],
+  "excluded_engines": [],
+  "coverage": {
+    "batch_positions": 4,
+    "in_book": 2,
+    "refused_in_batch": 2,
+    "excluded_by_this_layer": 0,
+    "excluded": [],
+    "withheld_engines": [],
+    "stress_coverage_is_full": true,
+    "note": "every position the batch carries reached the run; the two refused rows are named in the batch's own counts and enter no arithmetic."
+  },
+  "notes": [
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines."
+  ]
+}

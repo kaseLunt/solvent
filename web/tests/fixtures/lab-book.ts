@@ -56,3 +56,39 @@ export const RUN_BOOK_WITHHELD: Schemas["RunBookResponse"] = load("run-book.weet
  */
 export const RUN_BOOK_NAMES_NOBODY: Schemas["RunBookResponse"] =
   load("run-book.names-nobody.json");
+
+/**
+ * THE 200 THAT CONTRADICTS ITSELF (Wave R12) — the withheld variant with
+ * `engines[]` restored, so `aave_v3_etherfi` is named in BOTH arrays.
+ *
+ * It typechecks and parses as a healthy response for the same reason the
+ * naming-nobody body does: neither array carries `uniqueItems`, no cross-field
+ * rule ties the two together, and `lib/runbook.ts` validates nothing. Under the
+ * pre-R12 cell precedence it rendered aave's numeric RESULT in the matrix while
+ * the detail view rendered aave WITHHELD — one response, two answers, one cell.
+ */
+export const RUN_BOOK_CONTRADICTORY: Schemas["RunBookResponse"] =
+  load("run-book.contradictory.json");
+
+/** The same finding's other arm: `aave_v3_etherfi` appended to `engines[]` twice. */
+export const RUN_BOOK_NAMED_TWICE: Schemas["RunBookResponse"] = load("run-book.named-twice.json");
+
+/**
+ * THE VERSION-SKEW PAIR (Wave R12, finding 2). Both are VALID responses; the
+ * defect lives in the join between them.
+ *
+ * `SCENARIOS_V2` is the committed listing after a deployment re-cut
+ * `ethfi_minus_50` — the set's `scenario_config_version` and the scenario's own
+ * `version` both move to v2, and its `engines[]` narrows to aave alone.
+ * `RUN_BOOK_ETHFI_V2` is what that deployment answers for the same id.
+ *
+ * Joined by scenario id ALONE against the RETAINED v1 listing (which covers
+ * `debt_manager` for this id), the v2 book names none of v1's covered engines —
+ * so R11 reads the row as ALL-HOLE and the header says the book named nobody,
+ * while the response's real aave result sits in the detail view.
+ */
+export const SCENARIOS_V2: Schemas["ScenariosResponse"] = load("scenarios.v2.json");
+
+export const RUN_BOOK_ETHFI_V2: Schemas["RunBookResponse"] = load(
+  "run-book.ethfi_minus_50.v2.json",
+);

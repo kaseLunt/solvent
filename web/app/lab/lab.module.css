@@ -505,7 +505,9 @@
 .cellNotCovered,
 .cellWithheld,
 .cellSuperseded,
-.cellUnanswered {
+.cellUnanswered,
+.cellContradicted,
+.cellDefinitionChanged {
   vertical-align: top;
   min-width: 168px;
 }
@@ -583,6 +585,31 @@
 
 .cellUnanswered .cellTag {
   color: var(--crit);
+}
+
+/* WAVE R12 — CONTRADICTORY BOOK: the response answered this cell two ways, so
+   the cell shows neither answer. It reads as the hardest refusal on the table
+   (a double crit rule) because it is the only one where the SERVICE contradicted
+   itself rather than declining, and it must never be mistaken for a hole. */
+.cellContradicted {
+  border-left: 4px double var(--crit);
+  background: var(--panel-2);
+}
+
+.cellContradicted .cellTag {
+  color: var(--crit);
+}
+
+/* WAVE R12 — DEFINITION CHANGED: nothing failed and nothing was withheld. The
+   answer is real and about another definition, so the tone is the warn register
+   (something to reconcile), never the crit register (something refused). */
+.cellDefinitionChanged {
+  border-left: 2px solid var(--warn);
+  background: var(--panel-2);
+}
+
+.cellDefinitionChanged .cellTag {
+  color: var(--warn);
 }
 
 .rowLabelButton {

@@ -222,6 +222,264 @@ export function isAllHoleBook(
 }
 
 // ---------------------------------------------------------------------------
+// WAVE R12, FINDING 1 — A BOOK THAT CONTRADICTS ITSELF IS NOT A BOOK TO READ.
+//
+// THE DEFECT. `cellState` asked `engines[]` first and `excluded_engines[]`
+// second, so an engine named in BOTH arrays rendered its numeric RESULT here
+// while the SAME response rendered it WITHHELD, refusal code and all, in the
+// detail view. Nothing forbids that body: the contract puts no `uniqueItems` on
+// either array and no cross-field rule between them, and `runBookScenario` does
+// no validation of its own. R11's tests exercised served membership and refused
+// membership SEPARATELY and never together, so the precedence was never asked
+// the one question it answers wrongly.
+//
+// THE RULE: THE BODY IS VALIDATED BEFORE ANYTHING IS CLASSIFIED. A duplicate
+// engine name WITHIN either array, or ANY overlap between the two, makes the
+// response INVALID FOR PRESENTATION — not partially invalid. A body that
+// answers one cell two ways has no authority over any of its cells, because
+// nothing in it says which answer it meant, and picking the first would be this
+// surface choosing a number the response never chose. So: no cell, no pin, no
+// cohort, no anchor and no watermark movement, and the SAME refusal-to-classify
+// in the header, in the cells and in the detail view.
+//
+// IT IS NOT THE ALL-HOLE STATE (R11) AND MAY NEVER BORROW ITS SENTENCE. "The
+// book named nobody" would be a false account of a body that named somebody
+// TWICE. Different failure, different set, different words.
+// ---------------------------------------------------------------------------
+
+/** "debt_manager" / "aave_v3_etherfi and debt_manager". */
+function engineWords(engines: readonly string[]): string {
+  if (engines.length <= 1) return engines[0] ?? "no engine";
+  return `${engines.slice(0, -1).join(", ")} and ${engines[engines.length - 1] ?? ""}`;
+}
+
+/** The names appearing more than once, deduped, in first-repeat order. */
+function repeatedNames(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const repeated = new Set<string>();
+  for (const name of names) {
+    if (seen.has(name)) repeated.add(name);
+    seen.add(name);
+  }
+  return [...repeated];
+}
+
+/**
+ * The way a served body contradicts itself, named — or null when it does not.
+ *
+ * `reason` is the ONE sentence the header, the cells and the detail view all
+ * render. One vocabulary, composed once, so the three can never drift into
+ * disagreeing about a response none of them may read.
+ */
+export interface BookContradiction {
+  kind: "served-and-withheld" | "named-twice-served" | "named-twice-withheld";
+  /** The engine names at fault, deduped, in the body's own order. */
+  engines: string[];
+  reason: string;
+}
+
+/**
+ * Validate a served run-book body against itself, BEFORE any classification.
+ *
+ * Overlap is checked first because it is the finding's own case and the one
+ * that produced two different renderings of one cell; the within-array
+ * duplicates follow. Every arm names the engines it caught, so the sentence is
+ * a statement about a set the reader can point at in the response.
+ */
+export function bookContradiction(response: LabRunBook): BookContradiction | null {
+  const served = response.engines.map((engine) => engine.engine);
+  const withheld = response.excluded_engines.map((refusal) => refusal.engine);
+
+  const both = [...new Set(served.filter((engine) => withheld.includes(engine)))];
+  if (both.length > 0) {
+    return {
+      kind: "served-and-withheld",
+      engines: both,
+      reason:
+        `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(both)} is named in BOTH engines[] ` +
+        `and excluded_engines[] — served and withheld at once, in one response. A body that ` +
+        `answers a cell two ways answers it no way, and nothing in it says which answer it ` +
+        `meant. No cell, no pin, no cohort.`,
+    };
+  }
+
+  const twiceServed = repeatedNames(served);
+  if (twiceServed.length > 0) {
+    return {
+      kind: "named-twice-served",
+      engines: twiceServed,
+      reason:
+        `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(twiceServed)} is named TWICE in ` +
+        `engines[] — two results offered for one cell, and nothing in the body says which is ` +
+        `the answer. Rendering the first would be this surface choosing a number the response ` +
+        `never chose. No cell, no pin, no cohort.`,
+    };
+  }
+
+  const twiceWithheld = repeatedNames(withheld);
+  if (twiceWithheld.length > 0) {
+    return {
+      kind: "named-twice-withheld",
+      engines: twiceWithheld,
+      reason:
+        `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(twiceWithheld)} is named TWICE in ` +
+        `excluded_engines[] — two refusals offered for one cell, and nothing in the body says ` +
+        `which register it meant. No cell, no pin, no cohort.`,
+    };
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// WAVE R12, FINDING 2 — THE JOIN IS BOUND TO IDENTITY, NOT TO AN ID.
+//
+// THE DEFECT. Coverage came from the committed listing held in the browser;
+// every stored run phase was joined to it by SCENARIO ID ALONE. Across an API
+// deployment mid-session those are two different definitions wearing one name:
+// a v1 listing covering `debt_manager` stays in the tab while a valid v2
+// response for the same id covers only `aave_v3_etherfi`. Both responses are
+// individually correct. The unguarded cross-request join is what manufactures
+// the wrong answer — R11 then reads the v2 book against v1 coverage, finds the
+// v1 engine named nowhere, and declares the row ALL-HOLE ("the book named
+// nobody") while the detail view renders the real aave result sitting right
+// there in the same response.
+//
+// THE RULE: A RESPONSE IS CLASSIFIED ONLY AGAINST THE DEFINITION IT WAS
+// COMPUTED FOR. The listing publishes `scenario_config_version` for the set and
+// `version` per scenario; the run-book response publishes `scenario_id`,
+// `scenario_version` and `scenario_config_version` for itself (verified against
+// the generated schema, not assumed). All three must agree with the coverage
+// source before an outcome is classified or pinned. On disagreement the row
+// gets its own named state — DEFINITION CHANGED — and no cell, no pin, no
+// cohort, no anchor movement.
+//
+// THE STATE IS DERIVED, NOT STORED, and that is strictly the stronger reading:
+// a flag written at store time goes stale the instant the listing is refreshed,
+// whereas this re-evaluates against whatever listing the page is currently
+// showing. Refresh to v2 and the v2 response classifies honestly, against the
+// coverage it was actually computed for. Nothing is re-run to make that happen.
+//
+// AN ABSENT IDENTITY ENTRY INFERS NOTHING, exactly as R11's absent coverage
+// does: a caller that supplied no identity source is not making a claim about
+// identity, and a response cannot testify to which definition the page holds.
+// ---------------------------------------------------------------------------
+
+/** What names one committed definition: the id, its version, and the set's. */
+export interface ScenarioIdentity {
+  scenarioId: string;
+  version: string;
+  configVersion: string;
+}
+
+/** The committed listing's identity, keyed by scenario id. */
+export type RowIdentity = ReadonlyMap<string, ScenarioIdentity>;
+
+/** No identity supplied at all — nothing is inferred; see `definitionSkew`. */
+export const NO_ROW_IDENTITY: RowIdentity = new Map();
+
+/**
+ * `GET /v1/scenarios` folded into the identity source the join reads.
+ *
+ * `configVersion` is the response's own `scenario_config_version` — the set's
+ * token, published once for the whole listing — and each row carries its own
+ * `version` beside it. Both are needed: the set can be re-versioned without a
+ * given scenario changing, and a scenario can change inside a set whose token
+ * a deployment forgot to move.
+ */
+export function rowIdentity(
+  scenarios: readonly Pick<ScenarioDefinition, "id" | "version">[],
+  configVersion: string,
+): RowIdentity {
+  return new Map(
+    scenarios.map((scenario) => [
+      scenario.id,
+      { scenarioId: scenario.id, version: scenario.version, configVersion },
+    ]),
+  );
+}
+
+/** The identity a run-book response publishes about ITSELF, from the wire. */
+export function servedIdentity(response: LabRunBook): ScenarioIdentity {
+  return {
+    scenarioId: response.scenario_id,
+    version: response.scenario_version,
+    configVersion: response.scenario_config_version,
+  };
+}
+
+/** A response and the listing disagreeing about which definition this is. */
+export interface DefinitionSkew {
+  /** The identity the page is currently SHOWING for this row. */
+  listing: ScenarioIdentity;
+  /** The identity the response published for itself. */
+  served: ScenarioIdentity;
+  /** Which wire fields disagree, in the order they are checked. */
+  fields: ("scenario_id" | "scenario_version" | "scenario_config_version")[];
+  reason: string;
+}
+
+/**
+ * Whether this response may be classified against this row's definition.
+ *
+ * Never a partial answer: one disagreeing field is enough, because a definition
+ * is the whole of its identity and "mostly the same scenario" is not a thing a
+ * risk surface may believe.
+ */
+export function definitionSkew(
+  response: LabRunBook,
+  identity: ScenarioIdentity | undefined,
+): DefinitionSkew | null {
+  if (identity === undefined) return null;
+  const served = servedIdentity(response);
+  const fields: DefinitionSkew["fields"] = [];
+  if (served.scenarioId !== identity.scenarioId) fields.push("scenario_id");
+  if (served.version !== identity.version) fields.push("scenario_version");
+  if (served.configVersion !== identity.configVersion) fields.push("scenario_config_version");
+  if (fields.length === 0) return null;
+  return {
+    listing: identity,
+    served,
+    fields,
+    reason:
+      `DEFINITION CHANGED — this scenario's committed definition changed after this page ` +
+      `loaded (${fields.join(", ")} disagree). The listing this page is showing reads ` +
+      `${identity.scenarioId} ${identity.version} at scenario_config_version ` +
+      `${identity.configVersion}; the run answered for ${served.scenarioId} ${served.version} ` +
+      `at scenario_config_version ${served.configVersion}. Two definitions are not one ` +
+      `definition, so a result computed for one is never read against the coverage of the ` +
+      `other: no cell, no pin, no cohort. Re-open or refresh the listing to run against the ` +
+      `current definition.`,
+  };
+}
+
+/**
+ * THE ONE GATE every read passes through before a served book is classified.
+ *
+ * ORDER IS DELIBERATE: the body's own validity is decided first, because a body
+ * that contradicts itself is invalid whichever definition it belongs to, and
+ * saying "your listing moved" about it would send the reader to refresh a
+ * listing that was never the problem. Identity is the second question and only
+ * gets asked of a body worth asking it of.
+ */
+export type BookRefusal =
+  | { kind: "contradicted"; contradiction: BookContradiction; reason: string }
+  | { kind: "definition-changed"; skew: DefinitionSkew; reason: string };
+
+export function bookRefusal(
+  response: LabRunBook,
+  identity: ScenarioIdentity | undefined,
+): BookRefusal | null {
+  const contradiction = bookContradiction(response);
+  if (contradiction !== null) {
+    return { kind: "contradicted", contradiction, reason: contradiction.reason };
+  }
+  const skew = definitionSkew(response, identity);
+  if (skew !== null) return { kind: "definition-changed", skew, reason: skew.reason };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // The single-batch guard.
 // ---------------------------------------------------------------------------
 
@@ -275,10 +533,19 @@ export type MatrixPhase =
  * cell displays is not a pin — it is a number the header would have to claim on
  * an empty row's behalf.
  */
-export function batchOfPhase(phase: MatrixPhase, covered?: readonly string[]): number | null {
+export function batchOfPhase(
+  phase: MatrixPhase,
+  covered?: readonly string[],
+  identity?: ScenarioIdentity,
+): number | null {
   if (phase.kind !== "outcome") return null;
   const outcome = phase.outcome;
   if (outcome.kind !== "ok") return null;
+  // WAVE R12: a body refused for presentation pins nothing, whatever batch its
+  // envelope carried. It is refused BEFORE the all-hole read because a
+  // contradictory book usually DOES name somebody — twice — so `isAllHoleBook`
+  // would happily answer false and let the phantom pin straight back in.
+  if (bookRefusal(outcome.response, identity) !== null) return null;
   return isAllHoleBook(outcome.response, covered) ? null : outcome.response.batch.id;
 }
 
@@ -302,6 +569,7 @@ export function batchOfPhase(phase: MatrixPhase, covered?: readonly string[]): n
 export function anchorBatchOfPhase(
   phase: MatrixPhase,
   covered?: readonly string[],
+  identity?: ScenarioIdentity,
 ): number | null {
   const outcome =
     phase.kind === "running"
@@ -311,6 +579,10 @@ export function anchorBatchOfPhase(
         : undefined;
   if (outcome === undefined) return null;
   if (outcome.kind !== "ok") return null;
+  // WAVE R12 — SAME READ AS `batchOfPhase`, and it must stay the same read. A
+  // book this table refuses to display may not put a floor under a sentence
+  // about displayed results, and held evidence is where that floor comes from.
+  if (bookRefusal(outcome.response, identity) !== null) return null;
   return isAllHoleBook(outcome.response, covered) ? null : outcome.response.batch.id;
 }
 
@@ -325,10 +597,11 @@ export function anchorBatchOfPhase(
 export function observedAnchorBatch(
   phases: ReadonlyMap<string, MatrixPhase>,
   coverage: RowCoverage = NO_ROW_COVERAGE,
+  identity: RowIdentity = NO_ROW_IDENTITY,
 ): number | null {
   let observed: number | null = null;
   for (const [scenarioId, phase] of phases) {
-    const batch = anchorBatchOfPhase(phase, coverage.get(scenarioId));
+    const batch = anchorBatchOfPhase(phase, coverage.get(scenarioId), identity.get(scenarioId));
     if (batch !== null && (observed === null || batch > observed)) observed = batch;
   }
   return observed;
@@ -386,6 +659,29 @@ export interface BatchCohort {
    */
   allHoleScenarioIds: string[];
   /**
+   * WAVE R12 — Scenario ids whose run was served a book that CONTRADICTS
+   * ITSELF: an engine named twice within an array, or named as served and
+   * withheld at once. The body is refused for presentation whole, so the row
+   * displays nothing, pins nothing and anchors nothing.
+   *
+   * Kept OUT of `allHoleScenarioIds` deliberately, and the distinction is the
+   * finding: that set's clause says the book "named none of the engines their
+   * committed definition covers", which is precisely the wrong account of a
+   * book that named one of them TWICE.
+   */
+  contradictedScenarioIds: string[];
+  /**
+   * WAVE R12 — Scenario ids whose response answered for a DIFFERENT committed
+   * definition than the listing this page is showing (`definitionSkew`). The
+   * response may be perfectly valid; it is simply not about the definition the
+   * reader is looking at, so it is not classified against it.
+   *
+   * Also its own set, for its own reason: nothing here failed and nothing was
+   * withheld. The row is waiting on a listing refresh, and the header says so
+   * rather than folding it into a sentence about books, holes or refusals.
+   */
+  definitionChangedScenarioIds: string[];
+  /**
    * WAVE R10 — the batch pins IN-FLIGHT rows are still holding. Held evidence
    * anchors the cohort (R8) but is displayed nowhere, so when it is OLDER than
    * the anchor the header must disclose it by count and batch rather than let a
@@ -434,9 +730,10 @@ export function resolveBatchCohort(
   phases: ReadonlyMap<string, MatrixPhase>,
   floorBatchId: number | null = null,
   coverage: RowCoverage = NO_ROW_COVERAGE,
+  identity: RowIdentity = NO_ROW_IDENTITY,
 ): BatchCohort {
   let anchorBatchId: number | null = floorBatchId;
-  const observed = observedAnchorBatch(phases, coverage);
+  const observed = observedAnchorBatch(phases, coverage, identity);
   if (observed !== null && (anchorBatchId === null || observed > anchorBatchId)) {
     anchorBatchId = observed;
   }
@@ -446,6 +743,8 @@ export function resolveBatchCohort(
   const attemptedScenarioIds: string[] = [];
   const unansweredScenarioIds: string[] = [];
   const allHoleScenarioIds: string[] = [];
+  const contradictedScenarioIds: string[] = [];
+  const definitionChangedScenarioIds: string[] = [];
   const inFlightHeldPins: BatchPin[] = [];
   const displayedPins: BatchPin[] = [];
   for (const [scenarioId, phase] of phases) {
@@ -455,15 +754,27 @@ export function resolveBatchCohort(
     if (phase.kind === "idle") continue;
     attemptedScenarioIds.push(scenarioId);
     const covered = coverage.get(scenarioId);
+    const rowIdentity = identity.get(scenarioId);
     if (phase.kind === "running") {
       inFlightScenarioIds.push(scenarioId);
-      const heldBatch = anchorBatchOfPhase(phase, covered);
+      const heldBatch = anchorBatchOfPhase(phase, covered, rowIdentity);
       if (heldBatch !== null) inFlightHeldPins.push({ scenarioId, batchId: heldBatch });
       continue;
     }
     const outcome = phase.outcome;
     if (outcome.kind !== "ok") {
       unansweredScenarioIds.push(scenarioId);
+      continue;
+    }
+    // WAVE R12 — VALIDATE BEFORE CLASSIFYING, and validate ahead of the R11
+    // hole read. A contradictory book usually names somebody (twice), and a
+    // version-skewed book is a real book about another definition, so both
+    // would sail past `isAllHoleBook` and mint exactly the phantom pin R11
+    // closed — by a door R11 could not see.
+    const refusal = bookRefusal(outcome.response, rowIdentity);
+    if (refusal !== null) {
+      if (refusal.kind === "contradicted") contradictedScenarioIds.push(scenarioId);
+      else definitionChangedScenarioIds.push(scenarioId);
       continue;
     }
     // WAVE R11 — THE ENVELOPE DOES NOT DECIDE THIS. A book that named none of
@@ -489,6 +800,8 @@ export function resolveBatchCohort(
     attemptedScenarioIds,
     unansweredScenarioIds,
     allHoleScenarioIds,
+    contradictedScenarioIds,
+    definitionChangedScenarioIds,
     inFlightHeldPins,
     displayedPins,
   };
@@ -553,11 +866,33 @@ export function resolveBatchCohort(
 //      COVERAGE (`isAllHoleBook`), and such a row is counted in its own set,
 //      with its own sentence, pinning no batch anywhere.
 //
+// R12 (Codex round-20) ADDS TWO MORE NAMED SETS, both for responses this table
+// refuses to classify AT ALL rather than classify wrongly:
+//
+//   5. A BODY THAT ANSWERS ONE CELL TWO WAYS WAS READ AS AN ANSWER. `cellState`
+//      checked `engines[]` before `excluded_engines[]`, so an engine in BOTH
+//      rendered its numeric RESULT in the matrix while the SAME response
+//      rendered it WITHHELD in the detail view. The body is now validated
+//      before anything is classified, and an invalid one is refused whole —
+//      counted in `contradictedScenarioIds`, with its own wording, because
+//      "the book named nobody" is a false account of a book that named
+//      somebody twice.
+//
+//   6. THE COVERAGE JOIN WAS BOUND TO A SCENARIO ID ALONE. Across an API
+//      deployment mid-session, a retained v1 listing and a valid v2 response
+//      for the same id are two different definitions wearing one name, and
+//      R11 read the v2 book against v1 coverage and called it ALL-HOLE. The
+//      join now requires scenario id + scenario version + scenario_config_
+//      version to agree, and a mismatch is counted in
+//      `definitionChangedScenarioIds` with a refresh-the-listing sentence.
+//
 // THE ONE PRINCIPLE, from which every clause below follows: EVERY CLAUSE IS A
 // STATEMENT ABOUT A NAMED SET the reader can point at — displayed rows, rows
-// asked, rows in flight, held pins, rows served a book that named nobody. The
-// WATERMARK appears in exactly one clause, the floor disclosure, where it is
-// named as what it is and nothing is inferred from it.
+// asked, rows in flight, held pins, rows served a book that named nobody, rows
+// served a book that contradicts itself, rows answered against a definition
+// this page no longer shows. The WATERMARK appears in exactly one clause, the
+// floor disclosure, where it is named as what it is and nothing is inferred
+// from it.
 // ---------------------------------------------------------------------------
 
 /** No run at all: a statement about this session, never about the book. */
@@ -590,6 +925,8 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   const inFlight = cohort.inFlightScenarioIds.length;
   const unanswered = cohort.unansweredScenarioIds.length;
   const allHole = cohort.allHoleScenarioIds.length;
+  const contradicted = cohort.contradictedScenarioIds.length;
+  const changed = cohort.definitionChangedScenarioIds.length;
   const facts: string[] = [];
   if (inFlight > 0) facts.push(`${String(inFlight)} run(s) are in flight`);
   if (unanswered > 0) facts.push(`${String(unanswered)} run(s) ended without a served result`);
@@ -599,6 +936,23 @@ function firstResultPendingClause(cohort: BatchCohort): string {
     facts.push(
       `${String(allHole)} run(s) were served a book that named none of the row's covered ` +
         `engines — a served book, but not a served result`,
+    );
+  }
+  // R12: NOT "named nobody". This book named somebody TWICE, or named them
+  // served and withheld at once — a body refused for presentation whole.
+  if (contradicted > 0) {
+    facts.push(
+      `${String(contradicted)} run(s) were served a book that CONTRADICTS ITSELF — an engine ` +
+        `named twice, or named as served and withheld at once, which is a body that names ` +
+        `somebody twice rather than one that names nobody`,
+    );
+  }
+  // R12: nothing failed here. The answer is real and is about another
+  // definition, so it is not read against the one on screen.
+  if (changed > 0) {
+    facts.push(
+      `${String(changed)} run(s) answered for a committed definition this page is no longer ` +
+        `showing — refresh the listing to run against the current one`,
     );
   }
   // Unreachable while a phase can only be idle / running / outcome — an ok
@@ -733,6 +1087,49 @@ function allHoleClause(cohort: BatchCohort): string {
 }
 
 /**
+ * ROWS SERVED A BOOK THAT CONTRADICTS ITSELF, counted and named (Wave R12).
+ *
+ * Its whole reason for existing separately from `allHoleClause` is the last
+ * sentence. R11's clause says the book "named none of the engines their
+ * committed definition covers"; borrowing it here would be a false account of a
+ * body that named one of those engines TWICE — once as a result, once as a
+ * refusal. The ruling is explicit that "named nobody" must not be claimed about
+ * a book that named somebody twice, so the two sentences never touch.
+ */
+function contradictedClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null || cohort.contradictedScenarioIds.length === 0) return "";
+  return (
+    ` ${String(cohort.contradictedScenarioIds.length)} row(s) were served a book that ` +
+    `CONTRADICTS ITSELF — an engine named twice within an array, or named as served and ` +
+    `withheld at once. A body that answers a cell two ways answers it no way, so the whole ` +
+    `response is refused for presentation: no cell, no pin, and no part of the sentence above. ` +
+    `That is not a book that named nobody — this one named somebody twice.`
+  );
+}
+
+/**
+ * ROWS ANSWERED AGAINST A DEFINITION THIS PAGE NO LONGER SHOWS (Wave R12).
+ *
+ * Nothing failed and nothing was withheld: the response is valid, and it is
+ * about a committed definition that is not the one on screen. Joining the two
+ * by scenario id alone is what produced the round-20 defect — a v2 book read
+ * against v1 coverage and declared to have "named nobody" while its real result
+ * sat in the detail view — so the clause states the mismatch and points at the
+ * only thing that resolves it, which is a fresh listing rather than a re-run.
+ */
+function definitionChangedClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null || cohort.definitionChangedScenarioIds.length === 0) return "";
+  return (
+    ` ${String(cohort.definitionChangedScenarioIds.length)} row(s) answered for a COMMITTED ` +
+    `DEFINITION this page is no longer showing — the committed set moved after this page ` +
+    `loaded. Nothing failed and nothing was withheld: a result computed for one definition is ` +
+    `simply never read against the coverage of another, so the row is not classified, pins no ` +
+    `batch, and is no part of the sentence above. Refresh the committed listing to run against ` +
+    `the current definition.`
+  );
+}
+
+/**
  * THE FRONTIER READS ITS OWN BATCH (Wave R10, round-18 finding 3).
  *
  * The comparison used to be made against the WATERMARK, which is not displayed
@@ -775,7 +1172,8 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
  *
  * The clause order is the reader's order: what this table claims, then what is
  * held but not shown, then what is still out, then what came back empty, then
- * what came back naming nobody, then the frontier's separate read.
+ * what came back naming nobody, then what came back naming somebody twice, then
+ * what came back about another definition, then the frontier's separate read.
  */
 export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
   return (
@@ -784,6 +1182,8 @@ export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | n
     inFlightClause(cohort) +
     unansweredClause(cohort) +
     allHoleClause(cohort) +
+    contradictedClause(cohort) +
+    definitionChangedClause(cohort) +
     frontierClause(cohort, frontierBatchId)
   );
 }
@@ -808,8 +1208,9 @@ export type SupersededPayload =
 
 /**
  * Every state one cell can be in. The five the ruling names — not run,
- * running, result, NOT COVERED, WITHHELD — plus the two the honesty register
- * forces:
+ * running, result, NOT COVERED, WITHHELD — plus the four the honesty register
+ * forces (two from the batch guard and the hole, two from Wave R12's
+ * refuse-before-you-classify rule):
  *
  *   superseded  the single-batch guard's own named state (ruling item 4: a
  *               result from a superseded batch is never silently mixed).
@@ -818,6 +1219,10 @@ export type SupersededPayload =
  *               `engines` nor `excluded_engines`. "A scenario the batch cannot
  *               answer is not a zero" (ruling item 6), so it is not a result,
  *               and it is not a refusal either — nobody refused anything.
+ *   contradicted     the served body answers this row's cells two ways at once
+ *                    (R12 finding 1). Refused whole, before classification.
+ *   definition-changed  the response is about a committed definition this page
+ *                    is no longer showing (R12 finding 2). Not classified.
  */
 export type LabCellState =
   | { state: "not-covered"; coverage: CellCoverage }
@@ -831,7 +1236,29 @@ export type LabCellState =
       batchId: number;
       anchorBatchId: number;
     }
-  | { state: "unanswered"; reason: string };
+  | { state: "unanswered"; reason: string }
+  | {
+      /**
+       * WAVE R12 — the served body contradicts itself, so this surface refuses
+       * to classify ANY of its cells. `reason` is composed once, in
+       * `bookContradiction`, and rendered identically by the header, the cell
+       * and the detail view.
+       */
+      state: "contradicted";
+      contradiction: BookContradiction;
+      batchId: number;
+    }
+  | {
+      /**
+       * WAVE R12 — the response answered for a committed definition this page
+       * is no longer showing. Not a failure and not a refusal: a real answer
+       * about a different definition, which is why it gets neither a cell nor
+       * a pin here and why the affordance is a listing refresh, not a re-run.
+       */
+      state: "definition-changed";
+      skew: DefinitionSkew;
+      batchId: number;
+    };
 
 /** The honest sentence for each way a run can end without a book. */
 export function unansweredReason(outcome: Exclude<RunBookOutcome, { kind: "ok" }>): string {
@@ -860,6 +1287,13 @@ export interface CellStateInput {
   engine: string;
   phase: MatrixPhase;
   cohort: BatchCohort;
+  /**
+   * WAVE R12 — the identity the LISTING publishes for this row, when the caller
+   * has one. Absent means the caller is making no identity claim, and nothing
+   * is inferred (the same rule R11 gave absent coverage). `LabMatrix` supplies
+   * it for every row it renders.
+   */
+  identity?: ScenarioIdentity;
 }
 
 /**
@@ -878,6 +1312,18 @@ export interface CellStateInput {
  *      why every OLDER row keeps its SUPERSEDED state for the whole in-flight
  *      window (Wave R8).
  *   4. an outcome without a book → unanswered, with the reason named
+ *   4a. WAVE R12 — a served body that CONTRADICTS ITSELF (an engine named twice
+ *      within an array, or named as served and withheld at once) → contradicted.
+ *      It outranks every read below because it is a statement about the WHOLE
+ *      response: there is no honest per-cell answer inside a body that answers
+ *      one cell two ways, and the old order's `engines[]`-then-
+ *      `excluded_engines[]` precedence silently picked the numeric one while
+ *      the detail view rendered the refusal.
+ *   4b. WAVE R12 — a response answering for a committed definition this page is
+ *      no longer showing → definition-changed. Same reason and same rank: a
+ *      book computed for one definition has no per-cell authority over the
+ *      coverage of another, and joining the two by scenario id alone is what
+ *      made a valid v2 book read as ALL-HOLE against a retained v1 listing.
  *   5. an outcome naming this engine in NEITHER array → unanswered: a hole the
  *      surface refuses to fill with a zero. WAVE R11 MOVED THIS AHEAD OF
  *      SUPERSESSION, and the move is load-bearing twice over. SUPERSEDED means
@@ -907,6 +1353,22 @@ export function cellState(input: CellStateInput): LabCellState {
 
   const response = phase.outcome.response;
   const batchId = response.batch.id;
+
+  // WAVE R12 — VALIDATE THE BODY, THEN THE JOIN, BEFORE ANY CLASSIFICATION.
+  // This sits ahead of the hole read (5) and therefore ahead of everything
+  // below it, because both refusals are statements about the RESPONSE AS A
+  // WHOLE: there is no honest per-cell answer to be had from a body that
+  // contradicts itself, and none to be had by reading a book for one definition
+  // against the coverage of another. The batch its envelope carried is
+  // disclosed in the sentence and disclaimed in the same breath — R11's
+  // pattern — because the row is in no cohort either way.
+  const refusal = bookRefusal(response, input.identity);
+  if (refusal !== null) {
+    return refusal.kind === "contradicted"
+      ? { state: "contradicted", contradiction: refusal.contradiction, batchId }
+      : { state: "definition-changed", skew: refusal.skew, batchId };
+  }
+
   const anchorBatchId = cohort.anchorBatchId;
   const stale = anchorBatchId !== null && batchId !== anchorBatchId;
 
@@ -917,11 +1379,11 @@ export function cellState(input: CellStateInput): LabCellState {
       : { state: "result", engine: served, batchId };
   }
 
-  const refusal = response.excluded_engines.find((candidate) => candidate.engine === engine);
-  if (refusal !== undefined) {
+  const refused = response.excluded_engines.find((candidate) => candidate.engine === engine);
+  if (refused !== undefined) {
     return stale
-      ? { state: "superseded", payload: { kind: "withheld", refusal }, batchId, anchorBatchId }
-      : { state: "withheld", refusal, batchId };
+      ? { state: "superseded", payload: { kind: "withheld", refusal: refused }, batchId, anchorBatchId }
+      : { state: "withheld", refusal: refused, batchId };
   }
 
   return {
@@ -943,4 +1405,6 @@ export const CELL_STATE_LABEL: Record<LabCellState["state"], string> = {
   withheld: "WITHHELD",
   superseded: "SUPERSEDED",
   unanswered: "UNANSWERED",
+  contradicted: "CONTRADICTORY BOOK",
+  "definition-changed": "DEFINITION CHANGED",
 };
