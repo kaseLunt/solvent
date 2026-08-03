@@ -3630,3 +3630,63 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   .next, one :3111 — R5's e2e needing a fresh build explains the 17:01
   server death (the wave stopped it deliberately; subsequent waves get
   that permission explicitly with disclose-and-leave-running terms).
+- **W-HR-B LANDED (06b2bcd); ROUND 15 NOT-SHIP (2H+2M) → W-HR-C
+  (69993d6) + R7 (e909d33) CLOSED IT; W-SD-A LANDED (8046c95) — BOTH
+  OWNER RULINGS ARE LIVE; ROUND 16 DISPATCHED (22:00 Aug 2)**: W-HR-B,
+  the atomic 1.5.0 train — store PositionSortHeadroom (DM exact-ratio
+  ORDER BY; aave shares the hf fragment by identity, test-pinned),
+  liq_distance DEPRECATED-BUT-SERVED with byte-unchanged ordering,
+  additive contract 1.4.0→1.5.0, client regen 320/320, ≥-relabel,
+  batch-paired map count, 409-zeroed progress. Live proof: the old
+  key's 130 adjacent ratio inversions → 0 under headroom across all
+  9,804 rows. The brief's factor_symbol clause was FALSIFIED live by
+  the wave (1,484/1,484 DM distance rows already carry it — a sampling
+  artifact) and PINNED with a test instead of a fabricated fix. ROUND
+  15 NOT-SHIP: (1H) the WEB normalizer silently rewrote liq_distance
+  links to headroom — the server kept the alias law and the web
+  defeated it; (2H) headroom desc ranked refused/NULL-capacity rows
+  FIRST (unknown-as-maximal) and the W-HR-B fixture LOCKED the wrong
+  sequence; (3M) the unavailable ribbon's stale_since_seconds froze
+  forever (no receipt, no anchor, no repair); (4M) LIVE·WATERMARKED
+  painted over dead connections (streamState/hasBase ignored). W-HR-C
+  69993d6 (Go, parallel with W-SD-A): unknowns-LAST both directions on
+  both engines — aave desc UNSHARED from the hf fragment (hf desc has
+  the same unknown-on-top shape but keeps its exact bytes; the alias
+  law binds pre-1.5.0 keys), hf_infinite ruled a KNOWN 100% maximum
+  that leads desc, every fixed pin proven failing against the old
+  fragments, desc cursor continuity added, and the identity test made
+  non-vacuous in both directions. R7 e909d33: liq_distance links are
+  HONORED as sent under a standing named register (no header claims
+  the honored order; one click moves to headroom; the URL mirror keeps
+  the token — deleting it would be the lie in reverse); the
+  unavailable frame's staleness is an anchored AGE on its own
+  served_at receipt (ticks, clamps, blind-resume unknown,
+  posture.refresh() repair; the two receipts mutually exclusive so the
+  bounded repair spend never doubles); the Ribbon's live mode is a
+  DISCRIMINATED UNION — LIVE unrepresentable without an open
+  connection whose base arrived, reconnect states render over retained
+  data, and 8 prior specs that asserted LIVE over hung streams were
+  corrected without weakening one age/data assertion (the new r7 e2e
+  runs a real Node SSE server so LIVE-only-after-base is observable);
+  the openapi dir description gained the headroom exact-reverse
+  carve-out W-HR-C flagged (documents landed behavior, no bump).
+  W-SD-A 8046c95 (25 files): the Scenarios page arrives ALIVE with
+  zero runs — computed cliff dek from /v1/book's waterfall (live:
+  "Nothing new becomes liquidatable until ETH is down 20% — then 28
+  accounts on debt_manager cross. By −50%, debt_manager's Σ eligible
+  debt reaches $1,877,357.29 and its bad debt $28,878.79"; baseline
+  census never a cliff; engine sums compared never added), LabFrontier
+  per-engine panels with per-SERIES cliff lines (the book's cliff
+  painted everywhere told the reader aave breaks at −20% when it
+  breaks at −40%), LabMatrix committed×engines with SEVEN honest cell
+  states (superseded + unanswered added beyond the ruled five, both
+  honesty-forced and integrator-accepted), newest-batch cohort anchor
+  (~2/min daemon supersession is the DESIGN CASE now, not the edge),
+  pickDefaultScenario and the outcome-harvest deleted, ?scenario=
+  deep-link auto-runs, address mode demoted to the secondary register.
+  B-splits confirmed to need API waves: run-book serves no post-shock
+  histogram, no movers[], no collateral_by_asset. OPS: the full stack
+  serves e909d33 (api swapped thrice through the leg; web rebuilt per
+  wave; riskd past batch #460). ROUND 16 dispatched over
+  06b2bcd..e909d33. Tallies at HEAD: web 577 passed/1 pre-existing
+  skip; client 320/320; store+api Go suites ok.
