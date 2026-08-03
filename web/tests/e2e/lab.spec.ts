@@ -109,11 +109,24 @@ test("COLD ARRIVAL: dek + frontier + matrix + committed list, with ZERO run requ
   await expect(page.getByTestId("lab-book-panel")).toBeVisible();
 
   // The dek is the COMPUTED cliff sentence over the served waterfall.
+  //
+  // WAVE R9 (round-17 finding 2) CHANGED THIS EXPECTATION, and the change IS
+  // the finding, RENDERED. The terminal bad-debt clause read only the LEAD
+  // engine (the one holding the most terminal eligible debt), so this sentence
+  // stated aave's $2,190.47619048 and stopped — over a book whose OTHER served
+  // engine, debt_manager, reaches $2,219.801981 at that very same step. The
+  // committed fixture has been carrying a second insolvent engine all along and
+  // the page never said its name. Both are named now, each at its own decimals,
+  // and they are never added together.
   await expect(page.getByTestId("lab-dek")).toHaveText(
     `The first step already bites: ETH down 10% makes 1 account on aave_v3_etherfi newly ` +
       `liquidatable. By ${MINUS}50%, aave_v3_etherfi's Σ eligible debt reaches $6,000 and its ` +
-      `bad debt $2,190.47619048.`,
+      `bad debt $2,190.47619048 — and debt_manager's bad debt reaches $2,219.801981 at that ` +
+      `same step.`,
   );
+  // NEVER SUMMED: the two books total $4,410.278171, a number that appears
+  // nowhere on the page.
+  await expect(page.getByTestId("lab-dek")).not.toContainText("4,410");
 
   // The frontier: one panel per engine, drawn from /v1/book's waterfall.
   await expect(page.getByTestId("lab-frontier")).toBeVisible();

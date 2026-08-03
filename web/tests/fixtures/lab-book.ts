@@ -31,5 +31,14 @@ export const RUN_BOOK_ETH: Schemas["RunBookResponse"] = load("run-book.eth_minus
 /** The run-book example @ batch 2 — the supersession driver. */
 export const RUN_BOOK_BATCH_2: Schemas["RunBookResponse"] = load("run-book.weeth.batch2.json");
 
+/**
+ * The SAME scenario's run-book @ batch 1 — what a re-run returns when the
+ * daemon has pruned or receded (Wave R9). The row succeeds and comes back
+ * pinned OLDER than the batch it was displaying.
+ */
+export const RUN_BOOK_WEETH_BATCH_1: Schemas["RunBookResponse"] = load(
+  "run-book.weeth_market_depeg_oracles_held.json",
+);
+
 /** The run-book example @ batch 1 with aave WITHHELD, refusal attached. */
 export const RUN_BOOK_WITHHELD: Schemas["RunBookResponse"] = load("run-book.weeth-withheld.json");

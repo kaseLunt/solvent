@@ -19,6 +19,8 @@
 // every current cell was measured at, and a cell holding an older batch's
 // result renders as SUPERSEDED with its own batch id and a re-run affordance.
 // There is no total column and no cross-batch sentence anywhere on this table.
+// And when NO cell is current at the watermark (Wave R9), the header states
+// that too rather than naming a cohort nothing belongs to.
 //
 // The Lab owns this component; the Book's outpaced/refusal components are not
 // imported. Same register, separate ownership.
@@ -31,6 +33,7 @@ import { renderEngineAmount } from "@/lib/book-format";
 import {
   anchorBatchOfPhase,
   axisFamilyWords,
+  batchHeaderLine,
   cellState,
   resolveBatchCohort,
   scenarioCoverage,
@@ -193,6 +196,12 @@ export function LabMatrix({
   // batches in itself, so the current pass already answers with `observed`.
   // The stored watermark only has to be right for LATER passes — the ones where
   // `observed` has fallen.
+  //
+  // WAVE R9: the watermark is a FLOOR and nothing else. It is NOT the header's
+  // as-of claim — see `batchHeaderLine`, which builds that claim from the rows
+  // actually DISPLAYING the anchor batch and declines to name a cohort with no
+  // members. A watermark that also spoke as an as-of claimed batch #2 over a
+  // table where every row had receded to batch 1.
   const [watermark, setWatermark] = useState<number | null>(null);
   let observed: number | null = null;
   for (const phase of phases.values()) {
@@ -211,26 +220,15 @@ export function LabMatrix({
         </span>
       </div>
 
+      {/* WAVE R9: the sentence is COMPOSED IN `matrixCells`, not here. The
+          watermark (a floor on the anchor) and the as-of claim (a statement
+          about what is DISPLAYED) are two different truths, and keeping the
+          claim in a pure function is what lets the unit spec drive it through
+          the sequence a browser reaches only through a timing window: an anchor
+          row whose re-run SUCCEEDS but returns an OLDER batch, leaving the
+          watermark at #N with not one row holding it. */}
       <p className={styles.caption} data-testid="matrix-batch-line">
-        {cohort.anchorBatchId === null
-          ? "no run has been issued yet — every covered cell reads “not run”, which is a statement about this session, not about the book."
-          : `results shown together were measured at batch #${String(cohort.anchorBatchId)}.` +
-            (cohort.supersededScenarioIds.length === 0
-              ? " Every held result is on that batch."
-              : ` ${String(cohort.supersededScenarioIds.length)} row(s) still hold an older batch's result and are marked SUPERSEDED — they are shown, never blended into the sentence above.`)}
-        {/* WAVE R8: a run in flight is disclosed HERE because it is the only
-            thing that could make the sentence above look like it had moved.
-            It has not: the batch is a watermark and only ever goes forward. */}
-        {cohort.anchorBatchId !== null && cohort.inFlightScenarioIds.length > 0
-          ? ` ${String(cohort.inFlightScenarioIds.length)} row(s) have a run in flight; the batch above is a WATERMARK and never moves backwards while one is, so nothing older repaints as current.`
-          : ""}
-        {frontierBatchId === null
-          ? ""
-          : ` The loss frontier above reads batch #${String(frontierBatchId)}${
-              cohort.anchorBatchId !== null && cohort.anchorBatchId !== frontierBatchId
-                ? " — a different batch from this table, which is why the two are never read as one number."
-                : "."
-            }`}
+        {batchHeaderLine(cohort, frontierBatchId)}
       </p>
 
       <div className={styles.tableWrap}>

@@ -297,6 +297,105 @@ export function resolveBatchCohort(
 }
 
 // ---------------------------------------------------------------------------
+// THE HEADER'S AS-OF CLAIM (Wave R9, Codex round-17 finding 1).
+//
+// THE DEFECT: the monotonic WATERMARK was doing two jobs it cannot both do.
+//
+//   THE WATERMARK is a FLOOR on the anchor — the law that stops a superseded
+//   row repainting as current when the newest row's evidence leaves the table.
+//   It is a statement about what this panel HAS SEEN.
+//
+//   THE AS-OF CLAIM is a statement about what is DISPLAYED: "results shown
+//   together were measured at batch #N".
+//
+// They agree right up until a re-run SUCCEEDS and comes back pinned to an OLDER
+// batch — exactly the pruned/receded daemon case the watermark exists for. The
+// watermark correctly holds at #2 and every displayed result is correctly marked
+// SUPERSEDED; but with the batch-2 result gone there is no batch-2 cohort left,
+// and the header went on naming #2 as the batch every visible result was
+// measured at while ZERO rows held it.
+//
+// So the two truths are separated here. The floor still never falls. The
+// sentence is now built from `currentScenarioIds` — the rows that ACTUALLY
+// display the anchor batch — and when that list is empty the header says so
+// instead of naming a cohort with no members. Every displayed row already
+// carries its own batch pin in its own cell, so nothing is hidden by declining
+// to claim a shared one.
+// ---------------------------------------------------------------------------
+
+/** No run at all: a statement about this session, never about the book. */
+export const MATRIX_NO_RUN_LINE =
+  "no run has been issued yet — every covered cell reads “not run”, which is a " +
+  "statement about this session, not about the book.";
+
+/**
+ * The cohort's own sentence — the as-of claim, or the refusal to make one.
+ *
+ * The empty-`currentScenarioIds` arm covers two real states with one honest
+ * sentence, because they are the same statement: the re-run that came back
+ * OLDER (nothing left at the watermark), and the in-flight window where the
+ * only row holding the watermark is displaying "running…" rather than a result.
+ * In both, no displayed result was measured at the watermark, and the header
+ * must not say one was.
+ */
+function cohortClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null) return MATRIX_NO_RUN_LINE;
+  const batch = `#${String(cohort.anchorBatchId)}`;
+  const older = cohort.supersededScenarioIds.length;
+  if (cohort.currentScenarioIds.length === 0) {
+    return (
+      `batch ${batch} is the newest batch this table has seen and the floor its as-of never ` +
+      `falls below — but NO result now displayed was measured at it. ` +
+      (older === 0
+        ? "No row is displaying a result at all right now, so there is no cohort to read together."
+        : `${String(older)} row(s) are displayed and every one of them is OLDER, marked ` +
+          `SUPERSEDED at its own batch pin — there is no batch ${batch} cohort here to read ` +
+          `them as one.`)
+    );
+  }
+  return (
+    `results shown together were measured at batch ${batch}.` +
+    (older === 0
+      ? " Every held result is on that batch."
+      : ` ${String(older)} row(s) still hold an older batch's result and are marked SUPERSEDED — they are shown, never blended into the sentence above.`)
+  );
+}
+
+/**
+ * A run in flight is disclosed because it is the only thing that could make the
+ * sentence above look like it had moved. It has not: the batch is a watermark
+ * and only ever goes forward.
+ */
+function inFlightClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null || cohort.inFlightScenarioIds.length === 0) return "";
+  return (
+    ` ${String(cohort.inFlightScenarioIds.length)} row(s) have a run in flight; the batch above ` +
+    `is a WATERMARK and never moves backwards while one is, so nothing older repaints as current.`
+  );
+}
+
+/** The frontier reads its OWN batch, and the two are never read as one number. */
+function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): string {
+  if (frontierBatchId === null) return "";
+  return ` The loss frontier above reads batch #${String(frontierBatchId)}${
+    cohort.anchorBatchId !== null && cohort.anchorBatchId !== frontierBatchId
+      ? " — a different batch from this table, which is why the two are never read as one number."
+      : "."
+  }`;
+}
+
+/**
+ * The whole batch line, as one pure string.
+ *
+ * It lives here rather than in the component so the claim can be pinned by the
+ * unit spec against a cohort built by hand, sequence by sequence — including
+ * the sequences a browser can only reach through a timing window.
+ */
+export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
+  return `${cohortClause(cohort)}${inFlightClause(cohort)}${frontierClause(cohort, frontierBatchId)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Cell states.
 // ---------------------------------------------------------------------------
 

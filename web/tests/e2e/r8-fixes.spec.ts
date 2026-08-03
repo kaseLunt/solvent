@@ -355,9 +355,24 @@ test("(2) A DELAYED RE-RUN OF THE ANCHOR ROW: superseded rows stay superseded fo
   await expect(ethCell).toContainText("at batch #1");
   await expect(ethCell).toContainText("matrix reads #2");
 
-  // THE HEADER'S SINGLE-BATCH SENTENCE STAYS TRUE, and it discloses the run in
-  // flight rather than letting the reader wonder whether the batch moved.
-  await expect(batchLine).toContainText("measured at batch #2");
+  // THE HEADER'S SENTENCE STAYS TRUE, and it discloses the run in flight rather
+  // than letting the reader wonder whether the batch moved.
+  //
+  // WAVE R9 (round-17 finding 1) CHANGED THIS EXPECTATION, and the change is a
+  // STRENGTHENING of exactly what this test is for. It used to assert
+  // `toContainText("measured at batch #2")` — i.e. that the header still named
+  // batch 2 as the batch every visible result was measured at. But during this
+  // window the batch-2 row is DISPLAYING NOTHING (it renders "running…"), so no
+  // displayed result was measured at batch 2 and the header must not say one
+  // was. R8's law is untouched and still asserted below: the watermark holds at
+  // 2, the older row keeps its SUPERSEDED state, and nothing repaints as
+  // current. What changed is that the header no longer claims a cohort with
+  // zero members while proving it.
+  await expect(batchLine).toContainText(
+    "batch #2 is the newest batch this table has seen and the floor its as-of never falls below",
+  );
+  await expect(batchLine).toContainText("NO result now displayed was measured at it");
+  await expect(batchLine).not.toContainText("results shown together");
   await expect(batchLine).not.toContainText("measured at batch #1");
   await expect(batchLine).toContainText("1 row(s) have a run in flight");
   await expect(batchLine).toContainText("never moves backwards");

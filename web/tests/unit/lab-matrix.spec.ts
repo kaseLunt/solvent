@@ -13,16 +13,24 @@
 
 import { expect, test } from "@playwright/test";
 import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
-import { RUN_BOOK_BATCH_2, RUN_BOOK_ETH, RUN_BOOK_WITHHELD, SCENARIOS } from "../fixtures/lab-book";
+import {
+  RUN_BOOK_BATCH_2,
+  RUN_BOOK_ETH,
+  RUN_BOOK_WEETH_BATCH_1,
+  RUN_BOOK_WITHHELD,
+  SCENARIOS,
+} from "../fixtures/lab-book";
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
 import {
   anchorBatchOfPhase,
   AXIS_FAMILY_WORDS,
   axisFamilies,
   axisFamilyWords,
+  batchHeaderLine,
   batchOfPhase,
   cellState,
   matrixColumns,
+  MATRIX_NO_RUN_LINE,
   resolveBatchCohort,
   scenarioCoverage,
   unansweredReason,
@@ -390,6 +398,179 @@ test("R8 — a FAILED re-run gives the prior outcome back, at its ORIGINAL batch
   expect(
     cellState({ scenario: ETH, engine: "debt_manager", phase: ok(RUN_BOOK_ETH), cohort }).state,
   ).toBe("superseded");
+});
+
+// ===========================================================================
+// WAVE R9 (Codex round-17 finding 1) — THE WATERMARK IS A FLOOR, NOT AN AS-OF.
+//
+// THE DEFECT: R8's monotonic watermark was also being read as the header's
+// as-of claim, and the two are different truths.
+//
+//   THE WATERMARK answers "what is the newest batch this panel has seen?" It is
+//   a FLOOR on the anchor, and its whole job is to stop a superseded row
+//   repainting as current when the newest row's evidence leaves the table.
+//
+//   THE AS-OF CLAIM answers "what batch was everything I can see measured at?"
+//   That is a statement about what is DISPLAYED.
+//
+// They agree until a re-run SUCCEEDS and comes back pinned to an OLDER batch —
+// the pruned/receded daemon case the watermark exists for. R8's machinery
+// behaves perfectly: the watermark holds at #2 and every displayed result is
+// correctly marked SUPERSEDED. But with the batch-2 result gone, NO row holds
+// batch 2 — and the header went on saying "results shown together were measured
+// at batch #2" over a cohort with zero members.
+// ===========================================================================
+
+/** ETH @1 + DEPEG @1 — what the table displays after the receded re-run. */
+function recededToOne(): Map<string, MatrixPhase> {
+  return new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, ok(RUN_BOOK_WEETH_BATCH_1)],
+  ]);
+}
+
+test("R9 — THE SEQUENCE: an anchor re-run that SUCCEEDS at an OLDER batch empties the cohort", () => {
+  // (1) ETH runs. Batch 1 is the only held result, so it IS the cohort.
+  const one = new Map<string, MatrixPhase>([[ETH.id, ok(RUN_BOOK_ETH)]]);
+  const atOne = resolveBatchCohort(one, null);
+  expect(atOne.anchorBatchId).toBe(1);
+  expect(atOne.currentScenarioIds).toEqual([ETH.id]);
+
+  // (2) DEPEG runs and lands on batch 2. It becomes the anchor; ETH supersedes.
+  const atTwo = resolveBatchCohort(settledAtTwo(), 1);
+  expect(atTwo.anchorBatchId).toBe(2);
+  expect(atTwo.currentScenarioIds).toEqual([DEPEG.id]);
+  expect(atTwo.supersededScenarioIds).toEqual([ETH.id]);
+
+  // (3) THE ANCHOR ROW IS RE-RUN AND SUCCEEDS — pinned to batch 1. Not a
+  // failure, not a refusal: a 200 carrying an OLDER batch, which is exactly
+  // what a daemon that pruned or receded returns.
+  const cohort = resolveBatchCohort(recededToOne(), 2);
+
+  // R8'S LAW HOLDS, UNTOUCHED: the watermark did not fall to 1.
+  expect(cohort.anchorBatchId).toBe(2);
+  // AND THE COHORT AT THAT WATERMARK IS EMPTY. This is the fact the header was
+  // not consulting — it read the watermark and claimed a batch-2 cohort.
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.supersededScenarioIds).toEqual([ETH.id, DEPEG.id]);
+
+  // EVERY DISPLAYED CELL IS SUPERSEDED, each carrying its OWN batch pin — which
+  // is why the header can decline to name a shared one without hiding anything.
+  for (const scenario of [ETH, DEPEG]) {
+    const cell = cellState({
+      scenario,
+      engine: "debt_manager",
+      phase: recededToOne().get(scenario.id) as MatrixPhase,
+      cohort,
+    });
+    expect(cell.state).toBe("superseded");
+    if (cell.state !== "superseded") throw new Error("unreachable");
+    expect(cell.batchId).toBe(1);
+    expect(cell.anchorBatchId).toBe(2);
+  }
+});
+
+test("R9 — THE HEADER: with no current result, it NAMES NO COHORT at the watermark", () => {
+  const line = batchHeaderLine(resolveBatchCohort(recededToOne(), 2), null);
+
+  // THE FIX, in full. The watermark is stated as what it IS — a floor on the
+  // as-of — and the claim about what is displayed is made separately and
+  // truthfully.
+  expect(line).toBe(
+    "batch #2 is the newest batch this table has seen and the floor its as-of never falls " +
+      "below — but NO result now displayed was measured at it. 2 row(s) are displayed and " +
+      "every one of them is OLDER, marked SUPERSEDED at its own batch pin — there is no " +
+      "batch #2 cohort here to read them as one.",
+  );
+
+  // THE OLD SENTENCE IS GONE. This is the assertion the finding is about: it
+  // used to claim a batch-2 cohort over a table where zero rows held batch 2.
+  expect(line).not.toContain("results shown together were measured at batch #2");
+  expect(line).not.toContain("results shown together");
+  // And it does not silently walk BACKWARDS to batch 1 either — the receded
+  // batch is never promoted into the header's place. Each row states its own.
+  expect(line).not.toContain("batch #1");
+});
+
+test("R9 — WHEN CURRENT RESULTS EXIST THE SENTENCE IS UNCHANGED, watermark or not", () => {
+  // The arm the ruling leaves alone. A floored cohort with a live current row
+  // reads exactly as it did before R9 — the fix narrows a false claim, it does
+  // not rewrite the true one.
+  expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), null)).toBe(
+    "results shown together were measured at batch #2. 1 row(s) still hold an older batch's " +
+      "result and are marked SUPERSEDED — they are shown, never blended into the sentence above.",
+  );
+  // …and with every held result on the anchor, the same as before.
+  const allCurrent = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_BATCH_2)],
+    [DEPEG.id, ok(RUN_BOOK_BATCH_2)],
+  ]);
+  expect(batchHeaderLine(resolveBatchCohort(allCurrent, 2), null)).toBe(
+    "results shown together were measured at batch #2. Every held result is on that batch.",
+  );
+});
+
+test("R9 — THE IN-FLIGHT WINDOW is the same statement: nothing displayed is at the watermark", () => {
+  // A row running while HOLDING the anchor displays nothing (R8), so during
+  // that window no displayed result is at batch 2 either. The honest sentence
+  // is the same one, and the in-flight disclosure still rides beside it.
+  const inFlight = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, runningHolding(RUN_BOOK_BATCH_2)],
+  ]);
+  const cohort = resolveBatchCohort(inFlight, 2);
+  expect(cohort.anchorBatchId).toBe(2);
+  expect(cohort.currentScenarioIds).toEqual([]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("NO result now displayed was measured at it");
+  expect(line).toContain(
+    "1 row(s) are displayed and every one of them is OLDER, marked SUPERSEDED at its own batch pin",
+  );
+  // R8'S OWN DISCLOSURE IS UNTOUCHED — the watermark still says why it cannot
+  // move backwards, which is what stops the reader inferring a moved batch.
+  expect(line).toContain("1 row(s) have a run in flight");
+  expect(line).toContain("never moves backwards");
+  expect(line).not.toContain("results shown together");
+});
+
+test("R9 — A WATERMARK WITH NOTHING DISPLAYED AT ALL says exactly that", () => {
+  // Every row in flight, none of them holding: the anchor stands only on the
+  // caller's floor, and there is not one result on screen. The sentence refuses
+  // to describe a cohort AND refuses to pretend the watermark is not there.
+  const nothing = new Map<string, MatrixPhase>([[ETH.id, { kind: "running" }]]);
+  const cohort = resolveBatchCohort(nothing, 2);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.supersededScenarioIds).toEqual([]);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain(
+    "No row is displaying a result at all right now, so there is no cohort to read together.",
+  );
+  expect(line).not.toContain("results shown together were measured");
+});
+
+test("R9 — the no-run and frontier clauses are carried through the header model verbatim", () => {
+  // The model owns the WHOLE line now, so the clauses the component used to
+  // append are pinned here rather than only in the browser.
+  const cold = resolveBatchCohort(new Map());
+  expect(batchHeaderLine(cold, null)).toBe(MATRIX_NO_RUN_LINE);
+  expect(MATRIX_NO_RUN_LINE).toContain("a statement about this session, not about the book");
+
+  // A frontier batch is DISCLOSED, and named as a different batch when it is.
+  expect(batchHeaderLine(cold, 1)).toBe(`${MATRIX_NO_RUN_LINE} The loss frontier above reads batch #1.`);
+  expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 1)).toContain(
+    "The loss frontier above reads batch #1 — a different batch from this table, which is why " +
+      "the two are never read as one number.",
+  );
+  // Same batch on both: disclosed, with no difference claimed.
+  expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 2)).toContain(
+    "The loss frontier above reads batch #2.",
+  );
+  // AND THE NO-COHORT ARM STILL DISCLOSES IT — the frontier's own batch is not
+  // dropped just because this table has no cohort to name.
+  expect(batchHeaderLine(resolveBatchCohort(recededToOne(), 2), 1)).toContain(
+    "The loss frontier above reads batch #1 — a different batch from this table",
+  );
 });
 
 // ---------------------------------------------------------------------------
