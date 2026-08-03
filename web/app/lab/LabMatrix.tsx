@@ -503,8 +503,15 @@ export function LabMatrix({
                         data-scenario-id={scenario.id}
                         data-retained={rerunBanner.retained}
                         // WAVE R16: the settlement's own provenance, from the
-                        // same `attemptSkew` read that decides this row's cells.
+                        // same read that decides this row's cells.
                         data-attempt-changed={rerunBanner.attemptChanged ? "true" : "false"}
+                        // WAVE R17: and which of the THREE dispositions composed
+                        // it. `data-attempt-changed` alone could not tell a
+                        // settlement this surface has nothing to say about from
+                        // one that was this row's own attempt and served no
+                        // book — the two shared one `false`, which is the shape
+                        // of the finding itself, one level up.
+                        data-settlement={rerunBanner.disposition}
                       >
                         {rerunBanner.line}
                       </span>
@@ -539,7 +546,17 @@ export function LabMatrix({
                         answer it cannot classify; re-reading the committed set
                         is what makes the stored answer readable — or proves it
                         is about a definition that has moved on again. Nothing
-                        is auto-run either way. */}
+                        is auto-run either way.
+
+                        WAVE R17: this affordance is gated on cohort MEMBERSHIP,
+                        so it needed no edit and got none — a row whose CURRENT
+                        attempt settled bodyless over a refused retained body is
+                        no longer in `definitionChangedScenarioIds` at all, and
+                        the button disappears with the membership. That is the
+                        point of fixing the classification rather than teaching
+                        each surface a second exception: the remedy that resolved
+                        nothing stops being offered because the row stopped
+                        claiming to be the thing that remedy is for. */}
                     {staleAttempt === null &&
                       cohort.definitionChangedScenarioIds.includes(scenario.id) && (
                       <span

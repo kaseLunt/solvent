@@ -48,7 +48,6 @@ import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
 import {
   attemptChangedNote,
-  attemptSkew,
   bookHoleEngines,
   bookRefusal,
   bookReachedEveryCoveredEngine,
@@ -56,6 +55,7 @@ import {
   matrixColumns,
   rerunFailedBanner,
   rowIdentity,
+  settlementOf,
   unansweredReason,
   NO_ROW_IDENTITY,
   type BookRefusal,
@@ -449,6 +449,35 @@ function BookAttemptChangedView({ skew }: { skew: DefinitionSkew }) {
   );
 }
 
+/**
+ * THIS ROW'S CURRENT ATTEMPT SERVED NO BOOK (Wave R17, Codex round 25).
+ *
+ * THE PANEL HALF of the matrix's UNANSWERED cells, and it exists for the reason
+ * every view in this file exists: without it the panel would render the RETAINED
+ * body's own refusal view — R12's "refusing to render: this answer is about
+ * another committed definition", ending in a listing-refresh remedy — directly
+ * under a row whose cells read UNANSWERED and whose header counts it among the
+ * runs that ended without a served book. Two registers for one row, and a remedy
+ * that resolves nothing, which are the two defects this file has spent R10-R16
+ * closing.
+ *
+ * IT SPEAKS THE SETTLEMENT, and the retained response is DISCLOSED inside the
+ * same sentence by its own register — composed once, in `matrixCells`, and
+ * rendered identically here and in the cell. The banner above adds where the
+ * reader should look; it never adds a fact this view does not already carry.
+ */
+function BookCurrentBodylessView({ reason }: { reason: string }) {
+  return (
+    <div className={styles.errorState} data-testid="runbook-current-bodyless">
+      <b>
+        refusing to read the retained response as this run&apos;s: this row&apos;s current attempt
+        served no book.
+      </b>{" "}
+      {reason}
+    </div>
+  );
+}
+
 function OutcomeView({
   id,
   outcome,
@@ -538,7 +567,13 @@ function CommittedDetail({
   // WAVE R14, FINDING 1 — the same read the matrix cell makes, from the same
   // function, so this panel can never render an outcome the row above has
   // already declined to read as its own.
-  const staleAttempt = attemptSkew(phase, identity);
+  //
+  // WAVE R17 — AND IT IS THE THREE-WAY READ NOW. `attemptSkew` answers null for
+  // a settlement that WAS this row's attempt and came back bodyless, which used
+  // to drop this panel straight through to the RETAINED body's refusal view —
+  // R12's register and R12's refresh remedy, under cells reading UNANSWERED.
+  const settlement = settlementOf(phase, identity);
+  const staleAttempt = settlement.disposition === "attempt-skew" ? settlement.skew : null;
   return (
     <section data-testid="committed-detail" data-scenario-id={scenario.id}>
       <div className={styles.scenarioHead}>
@@ -613,9 +648,11 @@ function CommittedDetail({
           data-retained={rerunBanner.retained}
           // WAVE R16: whether the SETTLEMENT this banner names was asked under a
           // definition this page no longer shows — published from the same
-          // `attemptSkew` read that decides the panel below, so the two can
-          // never describe one settlement two ways.
+          // settlement read that decides the panel below, so the two can never
+          // describe one settlement two ways.
           data-attempt-changed={rerunBanner.attemptChanged ? "true" : "false"}
+          // WAVE R17: and which of the three dispositions composed it.
+          data-settlement={rerunBanner.disposition}
         >
           {rerunBanner.line}
         </p>
@@ -627,7 +664,15 @@ function CommittedDetail({
           arriving in the panel. `attemptSkew` is null for every served body, so
           this never gates a response — R12's gate keeps that job alone. */}
       {staleAttempt !== null && <BookAttemptChangedView skew={staleAttempt} />}
-      {phase.kind === "outcome" && staleAttempt === null && (
+      {/* WAVE R17: the inverse settlement gets the inverse view. The panel says
+          what the CELLS say — this row's current attempt served no book — and
+          discloses the retained response inside that same sentence by its own
+          register, instead of handing the panel over to a body the settled
+          request never produced. */}
+      {settlement.disposition === "current-bodyless" && (
+        <BookCurrentBodylessView reason={settlement.reason} />
+      )}
+      {phase.kind === "outcome" && settlement.disposition === "defer" && (
         <OutcomeView
           id={scenario.id}
           outcome={phase.outcome}

@@ -801,62 +801,173 @@ export type MatrixPhase =
 // one of them with the other's evidence.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// WAVE R17, CODEX ROUND 25 — `attemptSkew`'s NULL WAS ANSWERING TWO QUESTIONS,
+// AND ONE OF THE TWO ANSWERS WAS THE INVERSE OF R16's FINDING.
+//
+// THE DEFECT, AS A SEQUENCE. A clean v1 book is held. The listing refreshes to
+// v2. The row is re-run — DISPATCHED UNDER v2, the definition on screen — and
+// that request settles BODYLESS, so R8 gives the v1 body back beside the
+// failure. `settledUnder` read the settlement correctly: the attempt is v2. It
+// MATCHES the current listing, `skewFields` is empty, and `attemptSkew` answered
+// null.
+//
+// AND NULL MEANT "DEFER TO THE RETAINED BODY". That body is the v1 one, which
+// `bookRefusal` refuses under a v2 listing — so every surface classified the ROW
+// as R12's ANSWER half. The cells read DEFINITION CHANGED about the RESPONSE;
+// the header said "Nothing failed and nothing was withheld … refresh the
+// listing" over a listing that is ALREADY v2, so the remedy resolves nothing;
+// and the banner one line below said the re-run had failed. Header and banner
+// gave two accounts of one row and neither was the true one:
+//
+//   THE CURRENT-DEFINITION ATTEMPT FAILED, AND IT SERVED NO BOOK.
+//
+// R16 closed the case where the settlement's stamp DISAGREES with the listing.
+// This is the case where it AGREES — and R16's null could not tell that apart
+// from "there is nothing attempt-shaped to say about this row at all".
+//
+// THE RULE: SETTLEMENT DISPOSITION IS NOT SKEW, AND IT GETS ITS OWN ANSWER.
+// `settlementOf` answers with one of THREE dispositions, so no surface has to
+// infer a second meaning out of an absent first one:
+//
+//   defer             nothing attempt-shaped to say. Either nothing was asked
+//                     (`idle`), or nothing was recorded (an unstamped phase or
+//                     failure record, or a caller claiming no listing identity),
+//                     or the settlement came back with a body THIS SURFACE
+//                     PRESENTS — in which case the body's own published identity
+//                     decides the row and `bookRefusal` is the only gate it
+//                     passes through. R8's law lives in that last arm: a request
+//                     that answered nothing may not take a displayed measurement
+//                     off the table, so a PRESENTED retained body still outranks
+//                     a stamp, exactly as R16 ruled it.
+//
+//   attempt-skew      the settlement's attempt disagrees with the current
+//                     listing. R14's finding, R15's partition and R16's
+//                     settlement read, all unchanged: the row is DEFINITION
+//                     CHANGED about the ATTEMPT, counted in the R14 family, and
+//                     counted in none of `attempted` / `inFlight` / `unanswered`.
+//
+//   current-bodyless  the settlement's attempt MATCHES the current listing, the
+//                     settlement was BODYLESS, and the body it retained is one
+//                     this surface REFUSES (`bookRefusal` non-null — response-
+//                     skewed, or contradictory). There is no skew to report and
+//                     there is no body to present, so the row's whole truth is
+//                     that THIS row's CURRENT attempt served no book. That is
+//                     UNANSWERED — the register that already exists for exactly
+//                     that truth — and R14's family is deliberately NOT used,
+//                     because nothing about this row's definition changed for
+//                     this attempt.
+//
+// THE RETAINED BODY IS STILL DISCLOSED, never displayed and never impersonating
+// the settlement: `rerunFailedBanner` names it by its own refusal register in
+// its own arm ("what this row still holds…"), and the row's UNANSWERED sentence
+// names it too. What it no longer does is DECIDE the row.
+//
+// THE BOUNDARIES, STATED SO THEY ARE NOT MISTAKEN FOR OVERSIGHTS:
+//
+//   A PRESENTED RETAINED BODY KEEPS R16 VERBATIM. `bookRefusal` null over a
+//   presentable book defers, the row displays its result at its own batch pin,
+//   and R8's banner wording is untouched. A presented body still outranks.
+//
+//   AN ALL-HOLE RETAINED BODY IS NOT IN SCOPE, and does not need to be.
+//   `bookRefusal` answers null for it, so it defers — and it already tells the
+//   truth on every surface: the cells read UNANSWERED (R11), the header counts
+//   it in `allHoleScenarioIds` with its own sentence, and the banner's
+//   `all-hole` arm refuses to call it a measurement (R13b). Nothing there says
+//   "nothing failed", and nothing there names a refresh.
+//
+//   AN UNSTAMPED FAILURE, OR NO LISTING IDENTITY, INFERS NOTHING. "The attempt
+//   MATCHES the current listing" is a claim that needs both sides in hand; with
+//   either missing the phase keeps its pre-R17 reading. That is the discipline
+//   R11 gave absent coverage, R12 absent identity, R14 an unstamped phase and
+//   R16 an unstamped failure record, applied once more rather than bent once.
+// ---------------------------------------------------------------------------
+
 /**
- * WHICH REQUEST SETTLED THIS PHASE, and whether it produced a presented body.
+ * WHICH REQUEST SETTLED THIS PHASE, and what that leaves the row to be judged by.
  *
- * Null means the phase has nothing for a stamp to be judged on: nothing was
- * asked (`idle`), or the settlement came back with a body this surface presents
- * — in which case the body's own published identity decides the row and
- * `bookRefusal` is the only gate it passes through.
+ * Three arms because there are three truths. See the block above for why the two
+ * that used to share one `null` are not one truth.
  */
-function settledUnder(
-  phase: MatrixPhase,
-  identity: ScenarioIdentity | undefined,
-): { attempt: ScenarioIdentity | undefined; pending: boolean } | null {
-  if (phase.kind === "idle") return null;
-  if (phase.kind === "running") return { attempt: phase.attempt, pending: true };
-  const failure = phase.rerunFailed;
-  if (failure !== undefined) {
-    // WAVE R16 — THE SETTLEMENT IS THE FAILED RE-RUN, and `outcome` beside it is
-    // an earlier request's body. A body this surface PRESENTS keeps the row
-    // (R8); one it refuses presents nothing, so the settled request's own stamp
-    // is all the row has.
-    if (phase.outcome.kind === "ok" && bookRefusal(phase.outcome.response, identity) === null) {
-      return null;
+export type Settlement =
+  | {
+      /**
+       * NOTHING ATTEMPT-SHAPED TO SAY. The row is judged by its BODY — by
+       * `bookRefusal` and the reads below it — or, when it has none, by the
+       * pre-R14 reading of the phase it is.
+       */
+      disposition: "defer";
     }
-    return { attempt: failure.attempt, pending: false };
-  }
-  // R14, VERBATIM: this phase's own outcome IS its settlement, and a served body
-  // publishes the identity it was computed for.
-  if (phase.outcome.kind === "ok") return null;
-  return { attempt: phase.attempt, pending: false };
+  | {
+      /**
+       * THE SETTLEMENT WAS ASKED UNDER A DEFINITION THIS PAGE NO LONGER SHOWS.
+       * R14's state, R15's `pending` partition, R16's settlement read.
+       */
+      disposition: "attempt-skew";
+      skew: DefinitionSkew;
+    }
+  | {
+      /**
+       * THE SETTLEMENT IS THIS ROW'S OWN ATTEMPT, IT CAME BACK WITH NO BOOK, AND
+       * THE BODY IT RETAINED IS ONE THIS SURFACE REFUSES TO PRESENT.
+       *
+       * The row is UNANSWERED under the current definition. It is NOT in R14's
+       * family: nothing about this row's definition changed for this attempt,
+       * and saying it did would send the reader to a remedy for a problem the
+       * row does not have.
+       */
+      disposition: "current-bodyless";
+      /** The identity BOTH the settlement and the listing carry — they agree. */
+      attempt: ScenarioIdentity;
+      /** The failure record the settlement wrote — R8's sentence, and its stamp. */
+      failure: RerunFailure;
+      /** Why the RETAINED body presents nothing. Disclosed, never displayed. */
+      retained: BookRefusal;
+      /** The row's whole sentence, composed once and rendered by every surface. */
+      reason: string;
+    };
+
+/** The common answer, allocated once rather than per read. */
+const DEFER: Settlement = { disposition: "defer" };
+
+/**
+ * The row's sentence for a CURRENT-DEFINITION BODYLESS FAILURE (Wave R17).
+ *
+ * TWO FACTS, NEITHER BORROWED FROM THE OTHER — this file's habit since R13. The
+ * settled request is this row's own and it served no book; and what the row
+ * still holds is an earlier response this surface refuses, named by the SAME
+ * register the banner uses for it, so a reader meets one vocabulary for one
+ * response wherever they look.
+ *
+ * NO REMEDY IS NAMED. The run control beside the row is live (the row is not
+ * running) and that is the affordance; a re-run may or may not resolve a 404
+ * from a deployment that does not serve run-book, and this surface does not
+ * promise remedies it cannot keep. A LISTING REFRESH IS NAMED NOWHERE, because
+ * the listing this attempt was asked under is the one on screen.
+ */
+function currentBodylessReason(failure: RerunFailure, retained: BookRefusal): string {
+  return (
+    `this row's CURRENT attempt served no book — ${failure.reason} That request was ASKED ` +
+    `under the definition this page IS showing, so it IS this row's attempt and there is no ` +
+    `skew to report: it simply came back with nothing, which is neither a zero nor a “not ` +
+    `run”. What this row still holds is an EARLIER response this surface REFUSES to present ` +
+    `(${CELL_STATE_LABEL[retained.kind]}) — retained at its own batch pin, disclosed in its ` +
+    `own banner, displayed nowhere, and never this attempt's answer.`
+  );
 }
 
 /**
- * Whether this phase's ATTEMPT belongs to the definition the row is showing.
+ * R14's DEFINITION-CHANGED sentence for an ATTEMPT, composed from one read.
  *
- * It answers null — nothing to say — for every phase that can speak for itself:
- * an `idle` phase (nothing was asked), an unstamped phase or failure record
- * (nothing was recorded), a caller with no listing identity (nothing was
- * claimed), and any settlement that came back with a body this surface presents,
- * whose response publishes its own identity and is judged on it by
- * `bookRefusal`.
+ * Lifted out of `attemptSkew` by R17 unchanged, so the wording every R14/R15/R16
+ * pin asserts is asserted from the same one place it always was.
  */
-export function attemptSkew(
-  phase: MatrixPhase,
-  identity: ScenarioIdentity | undefined,
-): DefinitionSkew | null {
-  if (identity === undefined) return null;
-  // WAVE R16 — ONE READ OF THE SETTLEMENT, for every surface. A body of its own
-  // outranks a stamp (see the note above); a body a DIFFERENT request left
-  // behind does not, and a body this surface refuses is not presented at all.
-  const settlement = settledUnder(phase, identity);
-  if (settlement === null) return null;
-  const attempt = settlement.attempt;
-  if (attempt === undefined) return null;
-  const fields = skewFields(attempt, identity);
-  if (fields.length === 0) return null;
-  const inFlight = settlement.pending;
+function attemptSkewOf(
+  attempt: ScenarioIdentity,
+  identity: ScenarioIdentity,
+  fields: DefinitionSkew["fields"],
+  inFlight: boolean,
+): DefinitionSkew {
   return {
     subject: "attempt",
     // WAVE R15 — THE SAME `inFlight` THE REASON BELOW BRANCHES ON, PUBLISHED.
@@ -886,6 +997,102 @@ export function attemptSkew(
           `response publishes for ITSELF.`
         : `Re-run this row to ask under the definition this page is showing.`),
   };
+}
+
+/**
+ * The disposition of a settlement that has NO body of its own to be judged by.
+ *
+ * `bodyless` is non-null only for the one shape R17 names: a BODYLESS settlement
+ * sitting beside a RETAINED body this surface refuses. It is what separates
+ * "this row's attempt matched and there is simply nothing to report" (defer)
+ * from "this row's attempt matched, and it failed with nothing to show for it".
+ */
+function judgeAttempt(
+  attempt: ScenarioIdentity | undefined,
+  identity: ScenarioIdentity | undefined,
+  inFlight: boolean,
+  bodyless: { failure: RerunFailure; retained: BookRefusal } | null,
+): Settlement {
+  // NOTHING WAS CLAIMED, OR NOTHING WAS RECORDED — infer nothing, in either
+  // direction. R11's absent coverage, R12's absent identity, R14's unstamped
+  // phase, R16's unstamped failure record: the same rule, once more.
+  if (identity === undefined || attempt === undefined) return DEFER;
+  const fields = skewFields(attempt, identity);
+  if (fields.length > 0) {
+    return { disposition: "attempt-skew", skew: attemptSkewOf(attempt, identity, fields, inFlight) };
+  }
+  // THE ATTEMPT IS THIS ROW'S. Whether that is worth saying anything about
+  // depends on what the settlement came back with — which is the question R16's
+  // null could not ask.
+  if (bodyless === null) return DEFER;
+  return {
+    disposition: "current-bodyless",
+    attempt,
+    failure: bodyless.failure,
+    retained: bodyless.retained,
+    reason: currentBodylessReason(bodyless.failure, bodyless.retained),
+  };
+}
+
+/**
+ * THE ONE SETTLEMENT READ every surface makes — cells, cohort, banner, detail.
+ *
+ * R16 established that the question is about the SETTLEMENT and not about the
+ * display; R17 establishes that it has three answers rather than two. Every
+ * surface branches on `disposition` and none of them re-derives it.
+ */
+export function settlementOf(
+  phase: MatrixPhase,
+  identity: ScenarioIdentity | undefined,
+): Settlement {
+  if (phase.kind === "idle") return DEFER;
+  if (phase.kind === "running") return judgeAttempt(phase.attempt, identity, true, null);
+  const failure = phase.rerunFailed;
+  if (failure !== undefined) {
+    // WAVE R16 — THE SETTLEMENT IS THE FAILED RE-RUN, and `outcome` beside it is
+    // an EARLIER request's body.
+    const retained =
+      phase.outcome.kind === "ok" ? bookRefusal(phase.outcome.response, identity) : null;
+    // A body this surface PRESENTS keeps the row (R8): a run that could not
+    // answer says nothing about the answer already held, so the settlement's
+    // stamp is not allowed to blank a displayed result.
+    if (phase.outcome.kind === "ok" && retained === null) return DEFER;
+    // WAVE R17 — a body it REFUSES presents nothing, so the settled request's
+    // own stamp is all the row has. Skewed, that is R16's DEFINITION CHANGED;
+    // MATCHING, it is this row's own attempt and it served no book.
+    return judgeAttempt(
+      failure.attempt,
+      identity,
+      false,
+      retained === null ? null : { failure, retained },
+    );
+  }
+  // R14, VERBATIM: this phase's own outcome IS its settlement, and a served body
+  // publishes the identity it was computed for.
+  if (phase.outcome.kind === "ok") return DEFER;
+  return judgeAttempt(phase.attempt, identity, false, null);
+}
+
+/**
+ * Whether this phase's ATTEMPT belongs to the definition the row is showing.
+ *
+ * It is `settlementOf`'s `attempt-skew` arm and NOTHING ELSE, which is exactly
+ * the contract R14, R15 and R16 pinned: a `DefinitionSkew` when the settlement
+ * was asked under a definition this page no longer shows, and null otherwise.
+ *
+ * WAVE R17 — NULL HERE NO LONGER MEANS "DEFER". It means only "there is no skew",
+ * which is true of a `defer` phase AND of a `current-bodyless` one — two states
+ * this function is deliberately not the reporter of. A surface that needs to
+ * know which of them it is asks `settlementOf`; a surface that only needs the
+ * skew (the row note, the detail's attempt view, the `attemptChanged` flag) asks
+ * this, and reads the same answer it always did.
+ */
+export function attemptSkew(
+  phase: MatrixPhase,
+  identity: ScenarioIdentity | undefined,
+): DefinitionSkew | null {
+  const settlement = settlementOf(phase, identity);
+  return settlement.disposition === "attempt-skew" ? settlement.skew : null;
 }
 
 /**
@@ -1015,7 +1222,13 @@ export function anchorBatchOfPhase(
   // sentence false in the same breath it is composed. The floor the panel has
   // already learned is NOT lowered by this — R13's rule, for the same reason:
   // what changes is only that this phase can no longer PUT a batch into it.
-  if (attemptSkew(phase, identity) !== null) return null;
+  //
+  // WAVE R17 — AND NEITHER DOES A CURRENT-DEFINITION BODYLESS FAILURE, for the
+  // same sentence's sake: that row displays UNANSWERED and pins no batch. It is
+  // the SAME answer the refusal read below already gives (the disposition exists
+  // only over a retained body `bookRefusal` refuses), stated once here so the
+  // two can never come apart if either read is ever widened.
+  if (settlementOf(phase, identity).disposition !== "defer") return null;
   const outcome =
     phase.kind === "running"
       ? phase.held
@@ -1261,19 +1474,29 @@ export function resolveBatchCohort(
     // `unansweredScenarioIds`, which are the same claim in two other tenses.
     // The check answers null for every `kind: "ok"` outcome, so a served body
     // keeps sole authority over its own identity in the reads below.
-    const staleAttempt = attemptSkew(phase, rowIdentity);
-    if (staleAttempt !== null) {
+    const settlement = settlementOf(phase, rowIdentity);
+    if (settlement.disposition === "attempt-skew") {
       definitionChangedScenarioIds.push(scenarioId);
       definitionChangedAttemptScenarioIds.push(scenarioId);
       // WAVE R15 — AND WHICH HALF, from the flag the skew itself publishes
       // rather than from a second read of `phase.kind`. The clause, the row note
       // and the detail view all branch on this one derivation, so the three can
       // never disagree about whether the request is still out.
-      if (staleAttempt.pending) runningAttemptScenarioIds.push(scenarioId);
+      if (settlement.skew.pending) runningAttemptScenarioIds.push(scenarioId);
       else settledAttemptScenarioIds.push(scenarioId);
       continue;
     }
     attemptedScenarioIds.push(scenarioId);
+    // WAVE R17 — THE SETTLEMENT WAS THIS ROW'S OWN, AND IT SERVED NO BOOK. The
+    // row IS this table's attempt (so it is counted above, unlike the skewed
+    // family) and it is UNANSWERED — the register that has always meant "the run
+    // ended without a served book". It must NOT fall through to the reads below,
+    // which would classify it by the RETAINED body and put a row whose current
+    // attempt failed into R12's "nothing failed, refresh the listing" set.
+    if (settlement.disposition === "current-bodyless") {
+      unansweredScenarioIds.push(scenarioId);
+      continue;
+    }
     if (phase.kind === "running") {
       inFlightScenarioIds.push(scenarioId);
       const heldBatch = anchorBatchOfPhase(phase, covered, rowIdentity);
@@ -1970,6 +2193,14 @@ export interface CellStateInput {
  *      state exists to avoid. It anchors the cohort and nothing else, which is
  *      why every OLDER row keeps its SUPERSEDED state for the whole in-flight
  *      window (Wave R8).
+ *   2b. WAVE R17 — a phase whose SETTLEMENT was this row's own attempt, came
+ *      back BODYLESS, and left behind a retained body this surface REFUSES
+ *      → unanswered, naming both facts. Same rank as 2a and for the same reason:
+ *      it is a statement about the WHOLE phase, and the retained body's own gate
+ *      at 4b would otherwise answer for a request that never produced it. It is
+ *      NOT the DEFINITION CHANGED register — nothing about this row's definition
+ *      changed for this attempt, and R14's family carries a remedy this row does
+ *      not need.
  *   4. an outcome without a book → unanswered, with the reason named
  *   4a. WAVE R12 — a served body that CONTRADICTS ITSELF (an engine named twice
  *      within an array, or named as served and withheld at once) → contradicted.
@@ -2014,9 +2245,19 @@ export function cellState(input: CellStateInput): LabCellState {
   // R12's two refusals are statements about the whole response — and it answers
   // null for every `kind: "ok"` outcome, so a served body keeps sole authority
   // over its own identity in step 4b below.
-  const staleAttempt = attemptSkew(phase, input.identity);
-  if (staleAttempt !== null) {
-    return { state: "definition-changed", skew: staleAttempt, batchId: null };
+  const settlement = settlementOf(phase, input.identity);
+  if (settlement.disposition === "attempt-skew") {
+    return { state: "definition-changed", skew: settlement.skew, batchId: null };
+  }
+  // 2b. WAVE R17 — THE SETTLEMENT WAS THIS ROW'S OWN AND IT SERVED NO BOOK. It
+  // sits at the same rank and for the same reason: it is a statement about the
+  // WHOLE phase, and it must outrank the retained body's own gate at 4b — which
+  // would otherwise paint this cell DEFINITION CHANGED about a response that is
+  // not the settled request's, under a header saying nothing failed. There is no
+  // skew here to report and no body to present, so the honest cell is the one
+  // that has always meant "the run ended without a book for this cell".
+  if (settlement.disposition === "current-bodyless") {
+    return { state: "unanswered", reason: settlement.reason };
   }
 
   if (phase.kind === "running") return { state: "running" };
@@ -2152,6 +2393,25 @@ export interface RerunFailedBanner {
   /** For `refused`: the register the retained response is named by. Else null. */
   register: string | null;
   /**
+   * WAVE R17 — WHICH SETTLEMENT DISPOSITION composed this line, published so a
+   * surface (and a spec) can branch on the three truths without re-deriving them
+   * from a pair of booleans.
+   *
+   *   defer             the row is judged by its retained BODY — a presented
+   *                     result (R8), an all-hole book (R13b), a refused response
+   *                     whose settlement this surface has nothing to say about,
+   *                     or a settlement nothing was recorded for.
+   *   attempt-skew      R16: the settlement was asked under a definition this
+   *                     page no longer shows, so the cells read DEFINITION
+   *                     CHANGED about IT.
+   *   current-bodyless  R17: the settlement was this row's own attempt and it
+   *                     served no book, so the cells read UNANSWERED about it.
+   *
+   * `attemptChanged` keeps its exact R16 meaning and is `disposition ===
+   * "attempt-skew"` by construction — the two are one derivation, never two.
+   */
+  disposition: Settlement["disposition"];
+  /**
    * WAVE R16 — whether the FAILED settlement this banner names was asked under a
    * committed definition this page is no longer showing.
    *
@@ -2189,21 +2449,25 @@ export function rerunFailedBanner(
   // WAVE R16 — R8's sentence, one field deeper and otherwise untouched.
   const failure = phase.rerunFailed.reason;
   const outcome = phase.outcome;
-  // WAVE R16 — WHOSE SETTLEMENT WAS THIS? From `attemptSkew`, which is the same
+  // WAVE R16 — WHOSE SETTLEMENT WAS THIS? From `settlementOf`, which is the same
   // function the cells, the cohort, the row note and the detail view ask — so
-  // this banner cannot describe cells that read something else. It is non-null
-  // only when the row has NO body this surface presents, which is exactly when
-  // the cells belong to the ATTEMPT rather than to anything retained.
-  const settled = attemptSkew(phase, identity);
+  // this banner cannot describe cells that read something else.
+  //
+  // WAVE R17 — AND WITH THREE ANSWERS RATHER THAN TWO. `attemptChanged` keeps
+  // its exact R16 meaning (it is `attempt-skew` and nothing else); the third
+  // disposition gets its own arm below, because over it the cells read UNANSWERED
+  // and every sentence that promises otherwise is false.
+  const settlement = settlementOf(phase, identity);
+  const settled = settlement.disposition === "attempt-skew";
 
   if (outcome.kind !== "ok") {
     return {
       failure,
       retained: "unserved",
       register: null,
-      attemptChanged: settled !== null,
-      line:
-        settled === null
+      disposition: settlement.disposition,
+      attemptChanged: settled,
+      line: !settled
           ? `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book — ` +
             `${failure} This row holds no result and no served response at all: the earlier run ` +
             `ended without a book either, and ${
@@ -2223,10 +2487,12 @@ export function rerunFailedBanner(
 
   const refusal = bookRefusal(outcome.response, identity);
   if (refusal === null) {
-    // WAVE R16 — `settled` IS NULL HERE BY CONSTRUCTION, and the invariant is
-    // the point rather than an accident: a retained body this surface PRESENTS
-    // keeps the row (R8), so `settledUnder` declines to judge the stamp and both
-    // arms below keep their pre-R16 wording with nothing to qualify.
+    // WAVE R16 — THE DISPOSITION IS `defer` HERE BY CONSTRUCTION, and the
+    // invariant is the point rather than an accident: a retained body this
+    // surface PRESENTS keeps the row (R8), so `settlementOf` declines to judge
+    // the stamp and both arms below keep their pre-R16 wording with nothing to
+    // qualify. R17 changes nothing here — its third disposition exists only over
+    // a retained body `bookRefusal` REFUSES, which this arm is the absence of.
     //
     // THE R13 ADJACENCY (integrator-ruled): a retained ALL-HOLE book (R11 — a
     // 200 naming none of the row's covered engines) is presented only as
@@ -2239,6 +2505,7 @@ export function rerunFailedBanner(
         failure,
         retained: "all-hole",
         register: null,
+        disposition: "defer",
         attemptChanged: false,
         line:
           surface === "matrix"
@@ -2259,6 +2526,7 @@ export function rerunFailedBanner(
       failure,
       retained: "result",
       register: null,
+      disposition: "defer",
       attemptChanged: false,
       line:
         surface === "matrix"
@@ -2286,11 +2554,12 @@ export function rerunFailedBanner(
   // cells reading DEFINITION CHANGED is the two-registers-for-one-row defect
   // this file has closed four times.) The retained response is still disclosed,
   // still named by its own register, and still never called a result.
-  if (settled !== null) {
+  if (settled) {
     return {
       failure,
       retained: "refused",
       register,
+      disposition: "attempt-skew",
       attemptChanged: true,
       line:
         surface === "matrix"
@@ -2309,10 +2578,46 @@ export function rerunFailedBanner(
     };
   }
 
+  // WAVE R17 — THE INVERSE ARM. The settlement was asked under the definition
+  // this page IS showing, so it is this row's own attempt — and it served no
+  // book, which makes every covered cell UNANSWERED rather than the retained
+  // response's register. R13's sentence below promises the reader that the cells
+  // "name that refusal in its own words"; over this row they name the ATTEMPT's
+  // failure instead, so that promise had to go the same way R16's did.
+  //
+  // WHAT DOES NOT CHANGE: the retained response is still disclosed, still named
+  // by its own register, and still never called a result. It is the settled
+  // request's account that is corrected, not the retained body's.
+  if (settlement.disposition === "current-bodyless") {
+    return {
+      failure,
+      retained: "refused",
+      register,
+      disposition: "current-bodyless",
+      // R16's flag, with R16's exact meaning: this settlement's definition did
+      // NOT change. Saying it had would earn the row a remedy it does not need.
+      attemptChanged: false,
+      line:
+        surface === "matrix"
+          ? `re-run ended without a served book — ${failure} That request was ASKED under the ` +
+            `definition this page IS showing, so it IS this row's CURRENT attempt and every ` +
+            `covered cell reads UNANSWERED. What this row still holds is NOT a result either: ` +
+            `it is an EARLIER response this surface REFUSES to present (${register}), retained ` +
+            `at its own batch pin. Nothing was overwritten, and nothing was measured in its ` +
+            `place.`
+          : `the re-run ended without a served book — ${failure} That request was ASKED under ` +
+            `the definition this page IS showing, so it IS this row's CURRENT attempt and the ` +
+            `panel below reads UNANSWERED. What this row still holds is NOT a result either: it ` +
+            `is an EARLIER response this surface REFUSES to present (${register}). Nothing was ` +
+            `overwritten and nothing was invented in its place.`,
+    };
+  }
+
   return {
     failure,
     retained: "refused",
     register,
+    disposition: "defer",
     attemptChanged: false,
     line:
       surface === "matrix"

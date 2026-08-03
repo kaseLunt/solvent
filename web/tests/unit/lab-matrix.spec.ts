@@ -57,6 +57,7 @@ import {
   rowIdentity,
   scenarioCoverage,
   servedIdentity,
+  settlementOf,
   unansweredReason,
   type MatrixPhase,
   type ScenarioIdentity,
@@ -3755,4 +3756,513 @@ test("R16/1 — THE IN-FLIGHT WINDOW the sequence passes through is R15's, held 
   expect(batchHeaderLine(cohort, null)).toBe(R15_ANCHORED_LEAD + R15_RUNNING_ANCHORED);
   // No banner: nothing has failed, because nothing has settled.
   expect(rerunFailedBanner(running, IDENT_V2, "matrix", DEPEG_V2.engines)).toBeNull();
+});
+
+// ===========================================================================
+// WAVE R17 (Codex round-25) — THE INVERSE OF R16, AND THE NULL THAT COULD NOT
+// TELL THE TWO APART.
+//
+// FINDING 1 (MEDIUM). R16 made `attemptSkew` read the SETTLEMENT rather than the
+// display, which closed the case where the settled request's stamp DISAGREES
+// with the listing. Round 25 walks the sequence the other way round:
+//
+//   a clean v1 book is HELD → the listing refreshes to v2 → the row is re-run,
+//   DISPATCHED UNDER v2 → that request settles BODYLESS, so R8 gives the v1 body
+//   back beside the failure.
+//
+// `settledUnder` returned the v2 attempt, correctly. It MATCHES the current
+// listing, so `skewFields` was empty and `attemptSkew` answered null — AND NULL
+// MEANT "DEFER TO THE RETAINED BODY". That body is the v1 one, which
+// `bookRefusal` refuses under a v2 listing, so the ROW classified as R12's
+// ANSWER half: cells DEFINITION CHANGED about the RESPONSE, header "Nothing
+// failed and nothing was withheld … refresh the listing" over a listing that was
+// ALREADY v2, and the banner one line below saying the re-run had failed. Two
+// accounts of one row, and the true one was neither:
+//
+//   THE CURRENT-DEFINITION ATTEMPT FAILED, AND IT SERVED NO BOOK.
+//
+// THE RULE: SETTLEMENT DISPOSITION IS NOT SKEW. `settlementOf` answers with one
+// of three dispositions — `defer`, `attempt-skew`, `current-bodyless` — so no
+// surface has to infer a second meaning out of an absent first one. The third
+// classifies in the register that already exists for exactly that truth: the row
+// is UNANSWERED under the current definition, counted in `unansweredScenarioIds`
+// and in NO part of R14's definition-changed family, with the retained refused
+// body still disclosed by its own banner arm.
+//
+// THE MUTATION THIS SECTION EXISTS TO CATCH: restore "null means both" — make a
+// MATCHING attempt always defer, whatever the settlement came back with — and
+// the header below reverts, word for word, to the one the finding quotes.
+// ===========================================================================
+
+/**
+ * THE FINDING'S PHASE. The same `heldThenFailed` shape R16 built, stamped with
+ * the identity the listing is showing NOW: the re-run was dispatched AFTER the
+ * refresh to v2, so the settlement is this row's own attempt — and the body it
+ * gave back belongs to the v1 request that ran before the refresh.
+ */
+const R17_INVERSE: [string, MatrixPhase] = [
+  DEPEG.id,
+  heldThenFailed(RUN_BOOK_WEETH_BATCH_1, IDENT_V2),
+];
+
+/**
+ * A book that names NOBODY and publishes the CURRENT definition's identity.
+ *
+ * The committed all-hole fixture is a v1 body, so under a v2 listing it is
+ * REFUSED before the hole read ever runs — which makes it useless for pinning
+ * the all-hole BOUNDARY. This one passes `bookRefusal` and still displays
+ * nothing, which is exactly the shape the ruling puts outside R17's scope.
+ */
+const R17_ALL_HOLE_V2 = { ...RUN_BOOK_WEETH_V2, engines: [], excluded_engines: [] };
+
+/** The UNANSWERED clause, anchored — R10's sentence, unmoved and unedited. */
+const R17_UNANSWERED_ANCHORED =
+  " 1 row(s) display UNANSWERED — their run ended without a served book, which is neither a " +
+  "zero nor a “not run”, and joins no batch sentence here.";
+
+/** R12's ANSWER arm, anchored — the account the finding says the row used to get. */
+const R12_ANSWER_ANCHORED =
+  " 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing — the committed " +
+  "set moved after this page loaded. Nothing failed and nothing was withheld: a result computed " +
+  "for one definition is simply never read against the coverage of another, so the row is not " +
+  "classified, pins no batch, and is no part of the sentence above. Refresh the committed " +
+  "listing to run against the current definition.";
+
+/** Every phrase that belongs to R12's ANSWER truth and to nothing else. */
+const ANSWER_ONLY = [
+  "Nothing failed and nothing was withheld",
+  "answered for a COMMITTED DEFINITION",
+  "Refresh the committed listing",
+  "refresh the listing to run against the current one",
+];
+
+// ---------------------------------------------------------------------------
+// THE MECHANISM — two facts the one null was collapsing.
+// ---------------------------------------------------------------------------
+
+test("R17/1 — THE MECHANISM: a MATCHING stamp over a REFUSED retained body is its own disposition", () => {
+  const phase = R17_INVERSE[1];
+  if (phase.kind !== "outcome" || phase.outcome.kind !== "ok") throw new Error("bad fixture");
+
+  // BOTH SIDES OF THE SEQUENCE ARE REAL. The retained body publishes v1 and the
+  // listing publishes v2, so `bookRefusal` refuses it — while the request that
+  // actually settled this phase was dispatched under v2 and MATCHES the listing.
+  expect(servedIdentity(phase.outcome.response)).toEqual(STAMP_V1);
+  expect(phase.rerunFailed?.attempt).toEqual(IDENT_V2);
+  expect(bookRefusal(phase.outcome.response, IDENT_V2)?.kind).toBe("definition-changed");
+
+  // THE DEFECT, ISOLATED. There is no skew — and `attemptSkew` is RIGHT to say
+  // so. What it cannot say, and never could, is that the settlement it just read
+  // came back with nothing. That is the second fact the one null was carrying.
+  expect(attemptSkew(phase, IDENT_V2)).toBeNull();
+  const settlement = settlementOf(phase, IDENT_V2);
+  expect(settlement.disposition).toBe("current-bodyless");
+  if (settlement.disposition !== "current-bodyless") throw new Error("unreachable");
+  expect(settlement.attempt).toEqual(IDENT_V2);
+  expect(settlement.failure.reason).toBe(R16_404);
+  expect(settlement.retained.kind).toBe("definition-changed");
+});
+
+test("R17/1 — THE THREE DISPOSITIONS ARE EXHAUSTIVE, DISJOINT, AND BOUNDED WHERE THE RULING BOUNDS THEM", () => {
+  const shapes: [string, MatrixPhase, ScenarioIdentity | undefined, string][] = [
+    ["idle — nothing was asked", { kind: "idle" }, IDENT_V2, "defer"],
+    [
+      "running, stamped v2 — this row's own request, still out",
+      stamped({ kind: "running" }, IDENT_V2),
+      IDENT_V2,
+      "defer",
+    ],
+    [
+      "running, stamped v1 — R15's skewed in-flight attempt",
+      stamped({ kind: "running" }, STAMP_V1),
+      IDENT_V2,
+      "attempt-skew",
+    ],
+    [
+      "bodyless outcome, stamped v1 — R14's settled attempt",
+      stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1),
+      IDENT_V2,
+      "attempt-skew",
+    ],
+    [
+      "bodyless outcome, stamped v2 — this row's own unanswered run",
+      stamped({ kind: "outcome", outcome: { kind: "not-served" } }, IDENT_V2),
+      IDENT_V2,
+      "defer",
+    ],
+    [
+      "plain ok body — the ok path is never double-gated",
+      stamped(ok(RUN_BOOK_WEETH_BATCH_1), STAMP_V1),
+      IDENT_V2,
+      "defer",
+    ],
+    [
+      "R16: bodyless settle, stamped v1, refused retained body",
+      R16_SETTLED_OVER_HELD[1],
+      IDENT_V2,
+      "attempt-skew",
+    ],
+    [
+      "R17: bodyless settle, stamped v2, refused retained body",
+      R17_INVERSE[1],
+      IDENT_V2,
+      "current-bodyless",
+    ],
+    [
+      "R17: bodyless settle, stamped v2, CONTRADICTORY retained body",
+      heldThenFailed(RUN_BOOK_CONTRADICTORY, IDENT_V2),
+      IDENT_V2,
+      "current-bodyless",
+    ],
+    // THE BOUNDARIES, each stated so it is not mistaken for an oversight.
+    [
+      "a PRESENTED retained body still outranks (R8/R16), stamp matching or not",
+      heldThenFailed(RUN_BOOK_WEETH_V2, IDENT_V2),
+      IDENT_V2,
+      "defer",
+    ],
+    [
+      "an ALL-HOLE retained body is out of scope — bookRefusal answers null for it",
+      heldThenFailed(R17_ALL_HOLE_V2, IDENT_V2),
+      IDENT_V2,
+      "defer",
+    ],
+    [
+      "…and an all-hole body the listing has moved PAST is refused first, so it is R16's",
+      heldThenFailed(RUN_BOOK_NAMES_NOBODY, STAMP_V1),
+      IDENT_V2,
+      "attempt-skew",
+    ],
+    [
+      "an UNSTAMPED failure record infers nothing",
+      rerunFailedOver(RUN_BOOK_WEETH_BATCH_1),
+      IDENT_V2,
+      "defer",
+    ],
+    ["NO LISTING IDENTITY claims nothing", R17_INVERSE[1], undefined, "defer"],
+    [
+      "the retained body is bodyless too — the row was already UNANSWERED",
+      {
+        kind: "outcome",
+        outcome: { kind: "not-served" },
+        rerunFailed: { reason: R16_404, attempt: IDENT_V2 },
+        attempt: IDENT_V2,
+      },
+      IDENT_V2,
+      "defer",
+    ],
+  ];
+  for (const [what, phase, identity, expected] of shapes) {
+    expect(settlementOf(phase, identity).disposition, what).toBe(expected);
+    // AND `attemptSkew` IS EXACTLY THE MIDDLE ARM — the contract R14, R15 and
+    // R16 pinned, unchanged by the third answer existing.
+    expect(attemptSkew(phase, identity) !== null, what).toBe(expected === "attempt-skew");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE FINDING'S SEQUENCE — the row is UNANSWERED under the current definition.
+// ---------------------------------------------------------------------------
+
+test("R17/1 — THE SEQUENCE: the row lands in unansweredScenarioIds, and in no part of R14's family", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R17_INVERSE);
+
+  // THE REGISTER THAT ALREADY EXISTS FOR THIS TRUTH. The run ended without a
+  // served book; that is what this set has always meant.
+  expect(cohort.unansweredScenarioIds).toEqual([DEPEG.id]);
+  // AND THIS IS THIS ROW'S OWN RUN, so it is counted as one — the half of R14's
+  // rule that never applied here, because the definition did not move.
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id, DEPEG.id]);
+  // NOT R12's ANSWER half, and not R14's ATTEMPT family in either of R15's
+  // halves. Every one of those would carry a remedy for a problem this row does
+  // not have.
+  expect(cohort.definitionChangedScenarioIds).toEqual([]);
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([]);
+  expect(cohort.runningAttemptScenarioIds).toEqual([]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
+  // Nor any of the other named sets: the retained body is refused, so it is not
+  // an all-hole book and it is not a contradicted one THIS ROW is counted by.
+  expect(cohort.allHoleScenarioIds).toEqual([]);
+  expect(cohort.contradictedScenarioIds).toEqual([]);
+  // It displays nothing and pins nothing — the retained body was refused before
+  // R17 and is refused after it.
+  expect(cohort.inFlightScenarioIds).toEqual([]);
+  expect(cohort.inFlightHeldPins).toEqual([]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(anchorBatchOfPhase(R17_INVERSE[1], DEPEG_V2.engines, IDENT_V2)).toBeNull();
+  expect(batchOfPhase(R17_INVERSE[1], DEPEG_V2.engines, IDENT_V2)).toBeNull();
+});
+
+test("R17/1 — THE HEADER names the failure truth, and not one word of the account it used to give", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R17_INVERSE);
+  const line = batchHeaderLine(cohort, null);
+
+  // R10's sentence, byte for byte — not a new one minted for this shape.
+  expect(line).toBe(R15_ANCHORED_LEAD + R17_UNANSWERED_ANCHORED);
+  expect(line).toContain("their run ended without a served book");
+
+  // THE FINDING'S HEADER, ABSENT. This is the assertion the mutation named at
+  // the top of this section must fail: restore "null means both" and the line
+  // becomes `R15_ANCHORED_LEAD + R12_ANSWER_ANCHORED` exactly.
+  expect(line).not.toContain(R12_ANSWER_ANCHORED);
+  for (const phrase of ANSWER_ONLY) expect(line).not.toContain(phrase);
+  // Nor R14's/R15's attempt sentences, which would be false in the other
+  // direction: this attempt WAS asked under the definition on screen.
+  for (const phrase of [...SETTLED_ONLY, ...RUNNING_ONLY]) expect(line).not.toContain(phrase);
+  expect(line).not.toContain("ASKED under a COMMITTED DEFINITION");
+  // The clean row is untouched by the whole sequence.
+  expect(line).toContain("results shown together were measured at batch #1.");
+});
+
+test("R17/1 — THE NO-ANCHOR ARM says the same thing in its own frame", () => {
+  // The same row with nothing displayed beside it. R10's first-result-pending
+  // clause owns it, through the fact it has always composed for this set.
+  const cohort = r15Cohort(R17_INVERSE);
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(cohort.unansweredScenarioIds).toEqual([DEPEG.id]);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(r15Pending("1 run(s) ended without a served result"));
+  expect(line).not.toBe(MATRIX_NO_RUN_LINE);
+  for (const phrase of ANSWER_ONLY) expect(line).not.toContain(phrase);
+});
+
+test("R17/1 — THE CELLS read UNANSWERED, and their sentence names both facts", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R17_INVERSE);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase: R17_INVERSE[1],
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(cell.state).toBe("unanswered");
+  if (cell.state !== "unanswered") throw new Error("unreachable");
+  expect(CELL_STATE_LABEL[cell.state]).toBe("UNANSWERED");
+
+  // FACT ONE: this row's own attempt served no book, in R8's words for it.
+  expect(cell.reason).toContain("this row's CURRENT attempt served no book");
+  expect(cell.reason).toContain(R16_404);
+  expect(cell.reason).toContain("ASKED under the definition this page IS showing");
+  // FACT TWO: what the row still holds, named by the register the banner uses
+  // for it — one vocabulary for one response, wherever the reader meets it.
+  expect(cell.reason).toContain("EARLIER response this surface REFUSES to present");
+  expect(cell.reason).toContain("(DEFINITION CHANGED)");
+  expect(cell.reason).toContain("displayed nowhere");
+
+  // AND NO REMEDY THAT RESOLVES NOTHING. R12's refresh is named nowhere: the
+  // listing this attempt was asked under is the one on screen.
+  expect(cell.reason.toLowerCase()).not.toContain("refresh");
+  // Nor R14's, which belongs to an attempt under a definition that HAS moved.
+  expect(cell.reason).not.toContain("Re-run this row to ask under the definition");
+  expect(cell.reason).not.toContain("no longer showing");
+});
+
+test("R17/1 — THE BANNER keeps naming both facts, and promises nothing about the cells it cannot keep", () => {
+  const phase = R17_INVERSE[1];
+  const matrix = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  const detail = rerunFailedBanner(phase, IDENT_V2, "detail", DEPEG_V2.engines);
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  for (const banner of [matrix, detail]) {
+    expect(banner.disposition).toBe("current-bodyless");
+    // R16's flag keeps R16's exact meaning: THIS settlement's definition did not
+    // change, so the row earns none of R14's family's remedies.
+    expect(banner.attemptChanged).toBe(false);
+    // R13's derivation is untouched: what the row HOLDS is a response this
+    // surface refuses, named by its own register and never called a result.
+    expect(banner.retained).toBe("refused");
+    expect(banner.register).toBe("DEFINITION CHANGED");
+    expect(banner.failure).toBe(R16_404);
+    expect(banner.line).toContain(R16_404);
+    expect(banner.line).toContain("EARLIER response this surface REFUSES to present");
+    expect(banner.line).toContain("NOT a result");
+    expect(banner.line).toContain("ASKED under the definition this page IS showing");
+    expect(banner.line).toContain("this row's CURRENT attempt");
+    // THE TWO FALSE PROMISES, GONE. R13's — that the cells name the retained
+    // refusal — is false because they read UNANSWERED; R16's — that the request
+    // was asked under a definition this page no longer shows — is false because
+    // it was asked under the one it IS showing.
+    expect(banner.line).not.toContain("names that refusal in its own words");
+    expect(banner.line).not.toContain("no longer showing");
+    expect(banner.line).not.toContain("The cells still show what this row already measured");
+    expect(banner.line).not.toContain("The result below");
+    expect(banner.line.toLowerCase()).not.toContain("refresh");
+  }
+  // The two surfaces still differ ONLY in where they point the reader.
+  expect(matrix.line).toContain("every covered cell reads UNANSWERED");
+  expect(detail.line).toContain("the panel below reads UNANSWERED");
+});
+
+test("R17/1 — THE SHARPEST ARM: a CONTRADICTORY retained body keeps its own name over UNANSWERED cells", () => {
+  // The register the banner names and the register the cells use are different
+  // words about different things, and that is exactly why the banner may not
+  // claim the cells speak for the retained body. It never does — and the row is
+  // counted as UNANSWERED rather than as a contradicted book, because the book
+  // is not what this settlement came back with.
+  const phase = heldThenFailed(RUN_BOOK_CONTRADICTORY, IDENT_V2);
+  const banner = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  expect(banner?.disposition).toBe("current-bodyless");
+  expect(banner?.register).toBe("CONTRADICTORY BOOK");
+  expect(banner?.attemptChanged).toBe(false);
+  expect(banner?.line).not.toContain("names that refusal in its own words");
+  expect(banner?.line).toContain("every covered cell reads UNANSWERED");
+
+  const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+  expect(cohort.unansweredScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.contradictedScenarioIds).toEqual([]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([]);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase,
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(CELL_STATE_LABEL[cell.state]).toBe("UNANSWERED");
+  if (cell.state !== "unanswered") throw new Error("unreachable");
+  expect(cell.reason).toContain("(CONTRADICTORY BOOK)");
+});
+
+test("R17/1 — ONE ROW, ONE ACCOUNT: header, cells, banner and detail agree, phrase for phrase", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R17_INVERSE);
+  const header = batchHeaderLine(cohort, null);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase: R17_INVERSE[1],
+    cohort,
+    identity: IDENT_V2,
+  });
+  const matrix = rerunFailedBanner(R17_INVERSE[1], IDENT_V2, "matrix", DEPEG_V2.engines);
+  const detail = rerunFailedBanner(R17_INVERSE[1], IDENT_V2, "detail", DEPEG_V2.engines);
+  if (cell.state !== "unanswered" || matrix === null || detail === null) {
+    throw new Error("unreachable");
+  }
+  const surfaces = [header, cell.reason, matrix.line, detail.line];
+
+  // NOBODY NAMES A REMEDY THAT RESOLVES NOTHING. The listing is already the one
+  // this attempt was asked under, so no surface sends the reader to re-read it.
+  for (const text of surfaces) expect(text.toLowerCase()).not.toContain("refresh");
+  // NOBODY CALLS THIS A DEFINITION CHANGE ABOUT THE ATTEMPT.
+  for (const text of surfaces) expect(text).not.toContain("no longer showing");
+  // AND THE FAILURE ITSELF IS NAMED WHEREVER IT IS RELEVANT — the header by
+  // count and register, the other three by R8's own sentence.
+  expect(header).toContain("ended without a served book");
+  for (const text of [cell.reason, matrix.line, detail.line]) expect(text).toContain(R16_404);
+  // ONE VOCABULARY FOR THE RETAINED RESPONSE, in the two places that name it.
+  expect(cell.reason).toContain(`(${String(matrix.register)})`);
+});
+
+// ---------------------------------------------------------------------------
+// THE OTHER TWO DISPOSITIONS, RE-ASSERTED — R17 is a third answer, not a
+// re-basing of the two that were already right.
+// ---------------------------------------------------------------------------
+
+test("R17/1 — THE ROUND-24 FORWARD SEQUENCE DOES NOT REGRESS: R16's row is still the settled attempt", () => {
+  // The same fixture R16 landed, re-asserted through the new read. A settlement
+  // whose stamp DISAGREES with the listing is `attempt-skew`, and every set,
+  // sentence and remedy R16 pinned is the one it still gets.
+  const phase = R16_SETTLED_OVER_HELD[1];
+  expect(settlementOf(phase, IDENT_V2).disposition).toBe("attempt-skew");
+  const cohort = r15Cohort(R15_ANCHOR, R16_SETTLED_OVER_HELD);
+  expect(cohort.settledAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+  expect(batchHeaderLine(cohort, null)).toBe(R15_ANCHORED_LEAD + R15_SETTLED_ANCHORED);
+
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase,
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(CELL_STATE_LABEL[cell.state]).toBe("DEFINITION CHANGED");
+  const banner = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+  expect(banner?.disposition).toBe("attempt-skew");
+  expect(banner?.attemptChanged).toBe(true);
+  expect(banner?.line).toContain("every covered cell reads DEFINITION CHANGED about it");
+});
+
+test("R17/1 — A PRESENTED RETAINED BODY STILL OUTRANKS: R16's arm, verbatim", () => {
+  // R8's law, which R17 must not become an eraser of. The retained book is
+  // presentable under the CURRENT listing, so the row displays a real
+  // measurement of a real batch — and a later request that answered nothing may
+  // not take it off the table, whatever it was stamped with.
+  for (const [what, attempt] of [
+    ["stamped v1 — R16's own fixture", STAMP_V1],
+    ["stamped v2 — R17's sequence over a presentable body", IDENT_V2],
+  ] as const) {
+    const phase = heldThenFailed(RUN_BOOK_WEETH_V2, attempt);
+    expect(settlementOf(phase, IDENT_V2).disposition, what).toBe("defer");
+    const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+    expect(cohort.currentScenarioIds, what).toEqual([ETH.id, DEPEG.id]);
+    expect(cohort.unansweredScenarioIds, what).toEqual([]);
+    expect(cohort.definitionChangedScenarioIds, what).toEqual([]);
+    const cell = cellState({
+      scenario: DEPEG_V2,
+      engine: "debt_manager",
+      phase,
+      cohort,
+      identity: IDENT_V2,
+    });
+    expect(cell.state, what).toBe("result");
+    // R8's ORIGINAL BANNER, unedited: the cells DO still show what this row
+    // measured, so the sentence that says so is the honest one.
+    const banner = rerunFailedBanner(phase, IDENT_V2, "matrix", DEPEG_V2.engines);
+    expect(banner?.disposition, what).toBe("defer");
+    expect(banner?.retained, what).toBe("result");
+    expect(banner?.attemptChanged, what).toBe(false);
+    expect(banner?.line, what).toBe(
+      `re-run ended without a book — ${R16_404} The cells still show what this row already ` +
+        `measured, at its own batch.`,
+    );
+  }
+});
+
+test("R17/1 — ONE PROVENANCE, STILL: every surface's account is the same settlement read", () => {
+  // R16's law, extended to the third answer. `attemptChanged` is the middle arm
+  // and nothing else; `disposition` is the whole answer; and the banner, the
+  // cell and the cohort can never disagree because there is one derivation.
+  const shapes: [string, MatrixPhase, ScenarioIdentity | undefined][] = [
+    ["R17 inverse — matching stamp, refused retained body", R17_INVERSE[1], IDENT_V2],
+    [
+      "R17 inverse — contradictory retained body",
+      heldThenFailed(RUN_BOOK_CONTRADICTORY, IDENT_V2),
+      IDENT_V2,
+    ],
+    ["R16 forward — skewed stamp, refused retained body", R16_SETTLED_OVER_HELD[1], IDENT_V2],
+    ["presentable retained body, stamped v2", heldThenFailed(RUN_BOOK_WEETH_V2, IDENT_V2), IDENT_V2],
+    ["all-hole retained body, stamped v2", heldThenFailed(R17_ALL_HOLE_V2, IDENT_V2), IDENT_V2],
+    ["unstamped failure record", rerunFailedOver(RUN_BOOK_WEETH_BATCH_1), IDENT_V2],
+    ["no identity claimed at all", R17_INVERSE[1], undefined],
+  ];
+  for (const [what, phase, identity] of shapes) {
+    const banner = rerunFailedBanner(phase, identity, "matrix", DEPEG_V2.engines);
+    expect(banner, what).not.toBeNull();
+    const settlement = settlementOf(phase, identity);
+    expect(banner?.disposition, what).toBe(settlement.disposition);
+    expect(banner?.attemptChanged, what).toBe(attemptSkew(phase, identity) !== null);
+    // The CELL agrees with the disposition the banner published, in the register
+    // that disposition names — which is the whole shape of this finding.
+    const cohort = r15Cohort(R15_ANCHOR, [DEPEG.id, phase]);
+    const cell = cellState({
+      scenario: DEPEG_V2,
+      engine: "debt_manager",
+      phase,
+      cohort,
+      identity,
+    });
+    if (settlement.disposition === "current-bodyless") {
+      expect(CELL_STATE_LABEL[cell.state], what).toBe("UNANSWERED");
+      expect(cohort.unansweredScenarioIds, what).toEqual([DEPEG.id]);
+    }
+    if (settlement.disposition === "attempt-skew") {
+      expect(CELL_STATE_LABEL[cell.state], what).toBe("DEFINITION CHANGED");
+      expect(cohort.definitionChangedAttemptScenarioIds, what).toEqual([DEPEG.id]);
+    }
+  }
 });

@@ -325,20 +325,45 @@ test("(C) A FAILED RE-RUN OVER A REFUSED RESPONSE never calls it a result, on ei
     await expect(banner).not.toContainText("at the batch it was measured on");
   }
 
-  // THE GATED REFUSAL IS STILL RENDERED, and still refuses. A banner claiming a
-  // measured result above this panel was the contradiction.
-  await expect(page.getByTestId("runbook-contradicted")).toBeVisible();
+  // WAVE R17 SUPERSEDES THE THREE EXPECTATIONS BELOW, AND ONLY THOSE THREE.
+  //
+  // R13's finding was about the BANNER's wording, and every assertion in the
+  // loop above still holds byte for byte: the failure is named, what is retained
+  // is named by its own register, it is never called a result, and both false
+  // compositions stay gone. What round-25 changed is the row's CLASSIFICATION.
+  //
+  // This phase is the shape round-25 ruled on — a BODYLESS settlement whose
+  // attempt MATCHES the listing on screen, sitting beside a retained body
+  // `bookRefusal` REFUSES. The model cannot distinguish it from the finding's own
+  // sequence (a clean book, a listing move, a re-run under the current
+  // definition), and nothing in the phase could: both are "this row's current
+  // attempt came back with nothing, over a body that presents nothing". So both
+  // get the one answer — the row is UNANSWERED under the current definition —
+  // rather than a fourth condition invented to keep two shapes apart that the
+  // reader would experience identically.
+  //
+  // THE RETAINED CONTRADICTORY BOOK LOSES NOTHING BY THIS. It is disclosed in
+  // the banner (asserted above) and named again inside the cell's own sentence,
+  // by the same register it always had.
+  await expect(page.getByTestId("runbook-contradicted")).toHaveCount(0);
+  await expect(page.getByTestId("runbook-current-bodyless")).toBeVisible();
+  await expect(page.getByTestId("runbook-current-bodyless")).toContainText("(CONTRADICTORY BOOK)");
   await expect(page.getByTestId("book-result")).toHaveCount(0);
   await expect(page.getByTestId("book-engine")).toHaveCount(0);
-  await expect(aaveCell).toHaveAttribute("data-cell-state", "contradicted");
+  await expect(aaveCell).toHaveAttribute("data-cell-state", "unanswered");
+  await expect(aaveCell).toContainText("(CONTRADICTORY BOOK)");
   await expect(page.locator('[data-testid="matrix-cell"][data-cell-state="result"]')).toHaveCount(
     0,
   );
 
-  // THE HEADER DID NOT MOVE. The re-run failed, so nothing was learned: the row
-  // is still the one row served a self-contradicting book, and still no cohort.
-  await expect(batchLine).toHaveText(headerBefore);
-  await expect(batchLine).toContainText("1 run(s) were served a book that CONTRADICTS ITSELF");
+  // THE HEADER MOVED, and moved to the truth about the LATEST request: this
+  // row's own run ended without a served book. It no longer offers the retained
+  // body's account as the row's current word — while never claiming the R12 sin
+  // either, since "ended without a served result" is a statement about the 503
+  // and not about what the earlier book named.
+  await expect(batchLine).not.toHaveText(headerBefore);
+  await expect(batchLine).toContainText("1 run(s) ended without a served result");
+  await expect(batchLine).not.toContainText("1 run(s) were served a book that CONTRADICTS ITSELF");
   await expect(batchLine).not.toContainText("results shown together");
 
   // ---- THE CONTROL: over a response this surface DOES present, R8's wording
@@ -388,13 +413,26 @@ test("(C) THE DEFINITION-CHANGED VARIANT: the same banner, in the other register
     await expect(banner).not.toContainText("The cells still show what this row already measured");
   }
 
-  // The refusal below is untouched, and so is the affordance it offers: the row
-  // is waiting on a fresh listing, not on another run.
-  await expect(page.getByTestId("runbook-definition-changed")).toBeVisible();
+  // WAVE R17 SUPERSEDES THE ROW'S CLASSIFICATION HERE TOO, for the same reason
+  // and with the same scope: every banner assertion above is untouched, and what
+  // changes is which register the row is counted and rendered in.
+  //
+  // THE AFFORDANCE GOES WITH THE CLASSIFICATION, and that is the ruled behaviour
+  // rather than a side effect. R12's refresh is the remedy for a row whose
+  // CURRENT WORD is an answer about another definition. Once this row's current
+  // word is "my own attempt came back with nothing", offering it would be
+  // offering a remedy for the row's PREVIOUS word — which is the exact shape of
+  // the round-25 finding, where the refresh sat under a listing that was already
+  // the right one. The retained body is still disclosed, still named DEFINITION
+  // CHANGED, and becomes readable again the moment the row displays it again.
+  await expect(page.getByTestId("runbook-definition-changed")).toHaveCount(0);
+  await expect(page.getByTestId("runbook-current-bodyless")).toBeVisible();
+  await expect(page.getByTestId("runbook-current-bodyless")).toContainText("(DEFINITION CHANGED)");
   await expect(page.getByTestId("book-result")).toHaveCount(0);
-  await expect(dmCell).toHaveAttribute("data-cell-state", "definition-changed");
-  await expect(
-    page.locator(`${ETHFI_ROW} [data-testid="matrix-refresh-listing"]`),
-  ).toBeVisible();
-  await expect(batchLine).toHaveText(headerBefore);
+  await expect(dmCell).toHaveAttribute("data-cell-state", "unanswered");
+  await expect(dmCell).toContainText("(DEFINITION CHANGED)");
+  await expect(page.locator(`${ETHFI_ROW} [data-testid="matrix-refresh-listing"]`)).toHaveCount(0);
+  await expect(batchLine).not.toHaveText(headerBefore);
+  await expect(batchLine).toContainText("1 run(s) ended without a served result");
+  await expect(batchLine).not.toContainText("answered for a committed definition");
 });
