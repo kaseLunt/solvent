@@ -89,6 +89,20 @@ export const RUN_BOOK_NAMED_TWICE: Schemas["RunBookResponse"] = load("run-book.n
  */
 export const SCENARIOS_V2: Schemas["ScenariosResponse"] = load("scenarios.v2.json");
 
+/**
+ * THE DELISTED ROW (Wave R13, finding 1) — the committed listing after a
+ * deployment stopped publishing `weeth_market_depeg_oracles_held`.
+ *
+ * Every surviving definition is byte-identical to `SCENARIOS`, in wire order,
+ * and `scenario_config_version` has NOT moved. That combination is what isolates
+ * the finding: R12's identity guard and R11's coverage guard are both keyed per
+ * row, so neither can say anything about a row the listing no longer carries —
+ * `identity.get(id)` and `coverage.get(id)` are undefined, both checks correctly
+ * decline to infer, and the run phase stored under that id sails past both into
+ * the cohort as a DISPLAYED PIN with no rendered row anywhere on the table.
+ */
+export const SCENARIOS_REMOVED: Schemas["ScenariosResponse"] = load("scenarios.removed.json");
+
 export const RUN_BOOK_ETHFI_V2: Schemas["RunBookResponse"] = load(
   "run-book.ethfi_minus_50.v2.json",
 );

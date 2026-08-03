@@ -120,6 +120,24 @@
 //     classifies the row ALL-HOLE and the header says "the book named nobody"
 //     while the detail view renders the real aave result the response carries.
 //
+//  9. scenarios.removed.json — WAVE R13, FINDING 1: THE DELISTED ROW. File (1)
+//     with ONE definition FILTERED OUT — `weeth_market_depeg_oracles_held`, in
+//     place, every surviving byte identical and in wire order. That is a
+//     deployment dropping a committed scenario, which the contract's own note
+//     already anticipates ("an id absent from this listing is a 404 there").
+//
+//     `scenario_config_version` IS DELIBERATELY LEFT AT v1, and that is the
+//     fixture's whole point rather than an oversight. Wave R12's identity guard
+//     is derived PER ROW, so moving the set token would refuse every SURVIVING
+//     row as DEFINITION CHANGED and leave the table with nothing displayed —
+//     hiding the defect behind a guard that never sees it. A guard keyed per row
+//     cannot say anything about a row that is not there: `identity.get(id)` and
+//     `coverage.get(id)` are both undefined for the dropped scenario, so
+//     `definitionSkew` and `isAllHoleBook` each correctly decline to infer, and
+//     the orphaned phase reaches the cohort as a DISPLAYED PIN with no rendered
+//     row anywhere. Holding the token still isolates that orphan as the only
+//     anomaly on the table.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -354,3 +372,24 @@ write("run-book.ethfi_minus_50.v2.json", {
   // The v2 definition covers aave alone, so the v2 run answers for aave alone.
   engines: runBookExample.engines.filter((engine) => engine.engine === "aave_v3_etherfi"),
 });
+
+// --- 9: THE DELISTED ROW (Wave R13, finding 1) -----------------------------
+//
+// The committed listing with ONE definition dropped, in place, and the set's
+// own token LEFT WHERE IT WAS. Not a malformed listing: a deployment that
+// stopped publishing a scenario. Everything that survives is byte-identical to
+// (1), so the only difference between the two files is the row that is gone —
+// which is exactly the difference the finding is about.
+
+const DELISTED_ID = "weeth_market_depeg_oracles_held";
+
+const delistedListing = {
+  ...committedListing,
+  scenarios: committedListing.scenarios.filter((definition) => definition.id !== DELISTED_ID),
+};
+if (delistedListing.scenarios.length !== committedListing.scenarios.length - 1) {
+  console.error(`generate-lab-book.mjs: the committed listing carries no ${DELISTED_ID}`);
+  process.exit(1);
+}
+
+write("scenarios.removed.json", delistedListing);

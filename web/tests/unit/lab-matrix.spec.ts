@@ -23,6 +23,7 @@ import {
   RUN_BOOK_WEETH_BATCH_1,
   RUN_BOOK_WITHHELD,
   SCENARIOS,
+  SCENARIOS_REMOVED,
   SCENARIOS_V2,
 } from "../fixtures/lab-book";
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
@@ -39,9 +40,11 @@ import {
   cellState,
   definitionSkew,
   isAllHoleBook,
+  listedPhases,
   matrixColumns,
   MATRIX_NO_RUN_LINE,
   observedAnchorBatch,
+  rerunFailedBanner,
   resolveBatchCohort,
   rowCoverage,
   rowIdentity,
@@ -1853,6 +1856,421 @@ test("R12 — every cell state still has exactly one label, and no two share one
   expect(CELL_STATE_LABEL.unanswered).toBe("UNANSWERED");
   expect(CELL_STATE_LABEL.contradicted).toBe("CONTRADICTORY BOOK");
   expect(CELL_STATE_LABEL["definition-changed"]).toBe("DEFINITION CHANGED");
+});
+
+// ===========================================================================
+// WAVE R13 (Codex round-21) — THE TABLE SPEAKS ONLY FOR THE ROWS IT DRAWS.
+//
+// FINDING 1 (LabMatrix.tsx:313-318). `phases` is component state keyed by
+// scenario id, and it OUTLIVES the listing it was built against. A deployment
+// stops publishing a committed scenario; the reader takes R12's listing-refresh
+// affordance; the row leaves the table — and the phase stored under its id stays
+// behind. R11's coverage guard and R12's identity guard are BOTH keyed per row,
+// so neither can say anything about a row that is not there: `coverage.get(id)`
+// and `identity.get(id)` are undefined, `isAllHoleBook` and `definitionSkew`
+// each correctly decline to infer, and the orphan reached `resolveBatchCohort`
+// as a DISPLAYED PIN. Carrying the newest batch it took the anchor, marked every
+// VISIBLE result SUPERSEDED, and left the header naming a cohort with no
+// rendered current row in it.
+//
+// FINDING 2 (LabBookPanel.tsx:420-428). The failed-re-run banners on both
+// surfaces composed from `rerunFailed !== undefined` alone, never asking what
+// the retained outcome actually was. Over a response R12 REFUSES to present, the
+// detail strip claimed "The result below is the one this row already held, at
+// the batch it was measured on" directly above a gated view whose entire text is
+// "refusing to render", and the matrix's banner claimed the cells still showed a
+// measurement over cells reading CONTRADICTORY BOOK. A surface may not call a
+// response a result one line above refusing to present it.
+//
+// THE RULE FOR BOTH: a claim is composed only from what the surface actually
+// RENDERS. Finding 1 restricts the cohort's inputs to the rendered row set, in
+// one place, before the reads; finding 2 gates the banner's wording through the
+// same `bookRefusal` every other sentence here already passes.
+// ===========================================================================
+
+/** The listing after a deployment stopped publishing `weeth_market_...`. */
+const LISTED = SCENARIOS_REMOVED.scenarios;
+const COVERAGE_LISTED = rowCoverage(LISTED);
+const IDENTITY_LISTED = rowIdentity(LISTED, SCENARIOS_REMOVED.scenario_config_version);
+
+/** The row the refreshed listing dropped — every ghost phase below is keyed here. */
+const GHOST = DEPEG.id;
+
+/** The rendered rows' own state: one visible result, at batch 1. */
+function visibleAtOne(): Map<string, MatrixPhase> {
+  return new Map<string, MatrixPhase>([[ETH.id, ok(RUN_BOOK_ETH)]]);
+}
+
+/** The same map with a ghost phase of the given shape appended. */
+function withGhost(shape: MatrixPhase): Map<string, MatrixPhase> {
+  return new Map<string, MatrixPhase>([...visibleAtOne(), [GHOST, shape]]);
+}
+
+/** The cohort as the component builds it: filtered, then read. */
+function renderedCohort(phases: ReadonlyMap<string, MatrixPhase>) {
+  return resolveBatchCohort(
+    listedPhases(phases, LISTED),
+    null,
+    COVERAGE_LISTED,
+    IDENTITY_LISTED,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FINDING 1 — a phase whose scenario the listing no longer names.
+// ---------------------------------------------------------------------------
+
+test("R13/1 — THE MECHANISM: for an unlisted row BOTH optional guards are inert", () => {
+  // This is why absence is not a guard, and it is the whole reason the orphan
+  // needs its own rule rather than a third classifier. Neither existing check is
+  // wrong here — each is declining to infer something it genuinely cannot know —
+  // and between them nothing is left to refuse the response.
+  expect(COVERAGE_LISTED.get(GHOST)).toBeUndefined();
+  expect(IDENTITY_LISTED.get(GHOST)).toBeUndefined();
+
+  // R11: a book cannot testify to which engines a scenario is defined for.
+  expect(isAllHoleBook(RUN_BOOK_NAMES_NOBODY as unknown as LabRunBook, undefined)).toBe(false);
+  // R12: a response cannot testify to which definition the page is showing.
+  expect(definitionSkew(RUN_BOOK_ETHFI_V2 as unknown as LabRunBook, undefined)).toBeNull();
+  expect(bookRefusal(RUN_BOOK_ETH as unknown as LabRunBook, undefined)).toBeNull();
+
+  // So UNFILTERED, the ghost is a first-class member of the cohort.
+  const unfiltered = resolveBatchCohort(
+    withGhost(ok(RUN_BOOK_ETH)),
+    null,
+    COVERAGE_LISTED,
+    IDENTITY_LISTED,
+  );
+  expect(unfiltered.displayedPins).toContainEqual({ scenarioId: GHOST, batchId: 1 });
+});
+
+test("R13/1 — THE INVARIANT: an unlisted phase changes NOTHING, whatever shape it is in", () => {
+  // The ruling's own list, one shape per entry: a result at the cohort's own
+  // batch, a result at a NEWER batch (the shape that took the anchor), held
+  // evidence behind an in-flight request, a book that named nobody, a book that
+  // contradicts itself, and a run that ended without a book. Every one of them
+  // is a state the cohort has a NAMED SET and a header clause for — so if the
+  // filter missed any, one of the eleven fields below would move.
+  const shapes: [string, MatrixPhase][] = [
+    ["current — a result at the displayed cohort's own batch", ok(RUN_BOOK_WEETH_BATCH_1)],
+    ["superseded — a result at a NEWER batch, the shape that took the anchor", ok(RUN_BOOK_BATCH_2)],
+    ["held — an in-flight request still carrying batch 2", runningHolding(RUN_BOOK_BATCH_2)],
+    ["all-hole — a 200 that named nobody", ok(RUN_BOOK_NAMES_NOBODY)],
+    ["contradicted — a body that answers one cell two ways", ok(RUN_BOOK_CONTRADICTORY)],
+    ["unanswered — a run that ended without a book", FAILED_COLD],
+    ["idle — asked about, then reset", { kind: "idle" }],
+  ];
+
+  const rendered = renderedCohort(visibleAtOne());
+  const anchorOnly = observedAnchorBatch(
+    listedPhases(visibleAtOne(), LISTED),
+    COVERAGE_LISTED,
+    IDENTITY_LISTED,
+  );
+  const line = batchHeaderLine(rendered, 1);
+
+  for (const [what, shape] of shapes) {
+    const haunted = withGhost(shape);
+    // THE COHORT — every set, every pin, and the anchor, field for field.
+    expect(renderedCohort(haunted), what).toEqual(rendered);
+    // THE WATERMARK's own input, read exactly as the component reads it.
+    expect(
+      observedAnchorBatch(listedPhases(haunted, LISTED), COVERAGE_LISTED, IDENTITY_LISTED),
+      what,
+    ).toEqual(anchorOnly);
+    // AND THE SENTENCE — no clause counts it, in either direction.
+    expect(batchHeaderLine(renderedCohort(haunted), 1), what).toBe(line);
+  }
+
+  // Stated positively, so the test cannot pass by everything being empty: the
+  // rendered row IS the cohort, at its own batch, and says so.
+  expect(rendered.currentScenarioIds).toEqual([ETH.id]);
+  expect(rendered.anchorBatchId).toBe(1);
+  expect(line).toContain("results shown together were measured at batch #1.");
+  expect(line).toContain("Every DISPLAYED result was measured at that batch.");
+});
+
+test("R13/1 — THE DEFECT SEQUENCE: a NEWER ghost marked a VISIBLE result SUPERSEDED", () => {
+  // The reported reproduction. `eth_minus_30` is on the table displaying batch
+  // 1; the delisted row's stored phase carries batch 2. Read unfiltered, the
+  // ghost is the only member of `currentScenarioIds` — a cohort with no rendered
+  // row in it — and the one row a reader can actually see is repainted
+  // SUPERSEDED against an anchor nothing on screen holds.
+  const haunted = withGhost(ok(RUN_BOOK_BATCH_2));
+
+  const ghosted = resolveBatchCohort(haunted, null, COVERAGE_LISTED, IDENTITY_LISTED);
+  expect(ghosted.anchorBatchId).toBe(2);
+  expect(ghosted.currentScenarioIds).toEqual([GHOST]);
+  expect(ghosted.supersededScenarioIds).toEqual([ETH.id]);
+  expect(batchHeaderLine(ghosted, null)).toContain(
+    "results shown together were measured at batch #2.",
+  );
+  expect(batchHeaderLine(ghosted, null)).toContain(
+    "1 row(s) still hold an older batch's result and are marked SUPERSEDED",
+  );
+  // …and the cell agrees with the header while contradicting the reader's eyes.
+  expect(
+    cellState({
+      scenario: ETH,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETH),
+      cohort: ghosted,
+      identity: IDENTITY_LISTED.get(ETH.id),
+    }).state,
+  ).toBe("superseded");
+
+  // FILTERED: the ghost is NOT THERE. Not refused, not a hole — there is no row
+  // for it to be a statement about, so the visible row is simply the cohort.
+  const rendered = renderedCohort(haunted);
+  expect(rendered.anchorBatchId).toBe(1);
+  expect(rendered.currentScenarioIds).toEqual([ETH.id]);
+  expect(rendered.supersededScenarioIds).toEqual([]);
+  expect(
+    cellState({
+      scenario: ETH,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETH),
+      cohort: rendered,
+      identity: IDENTITY_LISTED.get(ETH.id),
+    }).state,
+  ).toBe("result");
+
+  // AND IT IS IN NO CLAUSE — not as a cohort member, not as a superseded row,
+  // and not as any of the refusal sets either. It is absent, not accounted for.
+  const line = batchHeaderLine(rendered, null);
+  expect(line).toContain("results shown together were measured at batch #1.");
+  expect(line).toContain("Every DISPLAYED result was measured at that batch.");
+  expect(line).not.toContain("SUPERSEDED");
+  expect(line).not.toContain("row(s) were served a book");
+  expect(line).not.toContain("no longer showing");
+});
+
+test("R13/1 — A GHOST NEVER MAKES A ROW SUPERSEDED that no listed row could", () => {
+  // The other order, and the harder one: the delisted row's answer lands while
+  // its row is already gone (a request in flight across the refresh), so the
+  // watermark was never raised by it. Read unfiltered, a FIRST run on a listed
+  // row comes back and is instantly stamped SUPERSEDED by a row the table does
+  // not draw. Filtered, it is what it is — current, alone, at its own batch.
+  const phases = new Map<string, MatrixPhase>([
+    [GHOST, ok(RUN_BOOK_BATCH_2)],
+    [ETH.id, ok(RUN_BOOK_ETH)],
+  ]);
+
+  const ghosted = resolveBatchCohort(phases, null, COVERAGE_LISTED, IDENTITY_LISTED);
+  expect(ghosted.supersededScenarioIds).toEqual([ETH.id]);
+
+  const rendered = renderedCohort(phases);
+  expect(rendered.currentScenarioIds).toEqual([ETH.id]);
+  expect(rendered.supersededScenarioIds).toEqual([]);
+  expect(rendered.anchorBatchId).toBe(1);
+});
+
+test("R13/1 — THE FLOOR is not lowered by a delisting, and the header stays honest", () => {
+  // The watermark is a floor on what THIS PANEL HAS SEEN, and R8 made it
+  // monotonic to stop an older row repainting as CURRENT. A delisting does not
+  // unsee a batch, so the floor stays — what changes is that the ghost can no
+  // longer PUT a batch into the anchor. The header then does exactly what R9
+  // built it to do: it declines to name a cohort nothing belongs to, and counts
+  // only the rows that are displayed.
+  const rendered = resolveBatchCohort(
+    listedPhases(withGhost(ok(RUN_BOOK_BATCH_2)), LISTED),
+    2, // the floor learned while the delisted row was still on the table
+    COVERAGE_LISTED,
+    IDENTITY_LISTED,
+  );
+  expect(rendered.anchorBatchId).toBe(2);
+  expect(rendered.currentScenarioIds).toEqual([]);
+  expect(rendered.supersededScenarioIds).toEqual([ETH.id]);
+
+  const line = batchHeaderLine(rendered, null);
+  expect(line).toContain("NO result now displayed was measured at it");
+  expect(line).toContain("1 row(s) are displayed and every one of them is OLDER");
+  expect(line).not.toContain("results shown together");
+});
+
+test("R13/1 — `listedPhases` keeps the listing's rows, in the map's OWN order", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [RATE.id, FAILED_COLD],
+    [GHOST, ok(RUN_BOOK_BATCH_2)],
+    [ETH.id, ok(RUN_BOOK_ETH)],
+  ]);
+  // Order is load-bearing: the cohort's set order IS the map's iteration order,
+  // and this spec pins those sets with `toEqual` on arrays.
+  expect([...listedPhases(phases, LISTED).keys()]).toEqual([RATE.id, ETH.id]);
+  expect([...listedPhases(phases, definitions).keys()]).toEqual([RATE.id, GHOST, ETH.id]);
+  expect([...listedPhases(phases, []).keys()]).toEqual([]);
+  // The phases themselves are carried through untouched — this filters, it does
+  // not reclassify.
+  expect(listedPhases(phases, LISTED).get(ETH.id)).toBe(phases.get(ETH.id));
+});
+
+test("R13/1 — SENSITIVITY: without the filter, the SAME phases read the old way", () => {
+  // The R11 and R12 sensitivity shape, for the new guard. The ONLY difference
+  // between the two calls is whether the phases were restricted to the rendered
+  // rows first; with them unrestricted the orphan pins, anchors and is counted.
+  const phases = withGhost(ok(RUN_BOOK_NAMES_NOBODY));
+
+  const blind = resolveBatchCohort(phases, null, COVERAGE_LISTED, IDENTITY_LISTED);
+  expect(blind.displayedPins).toContainEqual({ scenarioId: GHOST, batchId: 1 });
+  expect(blind.currentScenarioIds).toEqual([ETH.id, GHOST]);
+
+  const seeing = renderedCohort(phases);
+  expect(seeing.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(seeing.currentScenarioIds).toEqual([ETH.id]);
+  expect(seeing.allHoleScenarioIds).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// FINDING 2 — what a failed re-run left behind, named for what it is.
+// ---------------------------------------------------------------------------
+
+/** The failure sentence the real path composes, from a real 503 outcome. */
+const RERUN_503 = unansweredReason({
+  kind: "no-batch",
+  message: "no complete risk batch is available",
+  retryAfterSeconds: 5,
+});
+
+/** R8's state: the held outcome came back, with the later failure beside it. */
+function rerunFailedOver(body: typeof RUN_BOOK_ETH): MatrixPhase {
+  return {
+    kind: "outcome",
+    outcome: { kind: "ok", response: body as unknown as LabRunBook },
+    rerunFailed: RERUN_503,
+  };
+}
+
+test("R13/2 — A CLEAN HELD RESULT keeps R8's wording, verbatim, on both surfaces", () => {
+  const phase = rerunFailedOver(RUN_BOOK_ETH);
+  const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "matrix");
+  const detail = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "detail");
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  expect(matrix.retained).toBe("result");
+  expect(detail.retained).toBe("result");
+  expect(matrix.register).toBeNull();
+
+  // The R8 assertions, unchanged — this response IS presented, so calling it a
+  // result is the honest thing and nothing about it moves.
+  expect(matrix.line).toBe(
+    `re-run ended without a book — ${RERUN_503} The cells still show what this row already ` +
+      `measured, at its own batch.`,
+  );
+  expect(detail.line).toBe(
+    `the re-run ended without a book — ${RERUN_503} The result below is the one this row already ` +
+      `held, at the batch it was measured on; nothing was overwritten and nothing was invented ` +
+      `in its place.`,
+  );
+  expect(matrix.line).toContain("no servable batch (503)");
+  expect(detail.line).toContain("retry after 5s");
+});
+
+test("R13/2 — A CONTRADICTORY HELD RESPONSE is never called a result, on either surface", () => {
+  const phase = rerunFailedOver(RUN_BOOK_CONTRADICTORY);
+  const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "matrix");
+  const detail = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "detail");
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  // THE DERIVATION, single-sourced: both surfaces agree on WHAT is retained and
+  // on the register naming it, so they cannot compose different accounts of it.
+  expect(matrix.retained).toBe("refused");
+  expect(detail.retained).toBe("refused");
+  expect(matrix.register).toBe("CONTRADICTORY BOOK");
+  expect(detail.register).toBe("CONTRADICTORY BOOK");
+
+  for (const banner of [matrix, detail]) {
+    // THE FAILURE IS STILL NAMED — the fix must not swallow the event R8 exposed.
+    expect(banner.line).toContain("no servable batch (503)");
+    expect(banner.line).toContain("retry after 5s");
+    // THE RETAINED RESPONSE IS NOT A RESULT, and is not called one.
+    expect(banner.line).toContain("What this row still holds is NOT a result");
+    expect(banner.line).toContain("this surface REFUSES to present");
+    expect(banner.line).toContain("CONTRADICTORY BOOK");
+    // THE FALSE COMPOSITIONS, gone. Both are direct quotes of the defect.
+    expect(banner.line).not.toContain("The result below");
+    expect(banner.line).not.toContain("The cells still show what this row already measured");
+    expect(banner.line).not.toContain("at the batch it was measured on");
+    // AND R8's ASSURANCE SURVIVES: the evidence was retained, not overwritten.
+    expect(banner.line).toContain("Nothing was overwritten");
+  }
+
+  // They point the reader at DIFFERENT places, because that is the one thing
+  // that genuinely differs: the row's own cells, or the panel below.
+  expect(matrix.line).toContain("every covered cell of this row names that refusal");
+  expect(detail.line).toContain("named below in its own words");
+});
+
+test("R13/2 — A DEFINITION-SKEWED HELD RESPONSE gets its own register, not a result", () => {
+  const phase = rerunFailedOver(RUN_BOOK_ETHFI_V2);
+  const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETHFI.id), "matrix");
+  const detail = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETHFI.id), "detail");
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  expect(matrix.retained).toBe("refused");
+  expect(detail.retained).toBe("refused");
+  expect(matrix.register).toBe("DEFINITION CHANGED");
+  expect(detail.register).toBe("DEFINITION CHANGED");
+  for (const banner of [matrix, detail]) {
+    expect(banner.line).toContain("What this row still holds is NOT a result");
+    expect(banner.line).toContain("DEFINITION CHANGED");
+    expect(banner.line).not.toContain("The result below");
+    expect(banner.line).not.toContain("CONTRADICTORY BOOK");
+  }
+});
+
+test("R13/2 — the banner's register is the SAME vocabulary the cells refuse in", () => {
+  // One response, one register, wherever the reader looks. If a new refusal kind
+  // ever lands, this fails until the banner learns its word too.
+  for (const [body, state] of [
+    [RUN_BOOK_CONTRADICTORY, "contradicted"],
+    [RUN_BOOK_ETHFI_V2, "definition-changed"],
+  ] as const) {
+    const identity = IDENTITY_LISTED.get(ETHFI.id);
+    const phase = rerunFailedOver(body);
+    const banner = rerunFailedBanner(phase, identity, "detail");
+    const cell = cellState({
+      scenario: ETHFI,
+      engine: "debt_manager",
+      phase,
+      cohort: renderedCohort(new Map([[ETHFI.id, phase]])),
+      identity,
+    });
+    expect(cell.state).toBe(state);
+    expect(banner?.register).toBe(CELL_STATE_LABEL[state]);
+    expect(banner?.line).toContain(CELL_STATE_LABEL[state]);
+  }
+});
+
+test("R13/2 — SENSITIVITY: without the identity source, the SAME phase reads the old way", () => {
+  // The skew guard is what makes the wording change, and this proves it: the
+  // identical retained response, judged with no identity claim, is a response
+  // this surface DOES present — so it is a result and is called one.
+  const phase = rerunFailedOver(RUN_BOOK_ETHFI_V2);
+  const blind = rerunFailedBanner(phase, undefined, "detail");
+  expect(blind?.retained).toBe("result");
+  expect(blind?.line).toContain("The result below");
+
+  const seeing = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETHFI.id), "detail");
+  expect(seeing?.retained).toBe("refused");
+  expect(seeing?.line).not.toContain("The result below");
+});
+
+test("R13/2 — no failed re-run, no banner: the disclosure is never invented", () => {
+  expect(rerunFailedBanner({ kind: "idle" }, undefined, "matrix")).toBeNull();
+  expect(rerunFailedBanner({ kind: "running" }, undefined, "matrix")).toBeNull();
+  expect(rerunFailedBanner(runningHolding(RUN_BOOK_ETH), undefined, "detail")).toBeNull();
+  // An outcome with no LATER failure beside it says nothing about a re-run.
+  expect(rerunFailedBanner(ok(RUN_BOOK_ETH), undefined, "detail")).toBeNull();
+  expect(rerunFailedBanner(FAILED_COLD, undefined, "detail")).toBeNull();
+
+  // The unreachable arm is STATED rather than assumed: `rerunFailed` is only
+  // ever written beside a held `kind: "ok"` outcome, but if it were not, the
+  // banner must still refuse to promise a result.
+  const unserved: MatrixPhase = { ...FAILED_COLD, rerunFailed: RERUN_503 } as MatrixPhase;
+  const banner = rerunFailedBanner(unserved, undefined, "detail");
+  expect(banner?.retained).toBe("unserved");
+  expect(banner?.line).toContain("This row holds no result and no served response at all");
+  expect(banner?.line).not.toContain("The result below");
 });
 
 // ---------------------------------------------------------------------------

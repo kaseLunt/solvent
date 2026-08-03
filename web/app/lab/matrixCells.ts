@@ -533,6 +533,71 @@ export type MatrixPhase =
  * cell displays is not a pin — it is a number the header would have to claim on
  * an empty row's behalf.
  */
+// ---------------------------------------------------------------------------
+// WAVE R13, FINDING 1 — THE COHORT SPEAKS ONLY FOR ROWS THE TABLE RENDERS.
+//
+// THE DEFECT. `phases` is component state keyed by scenario id, and it OUTLIVES
+// the listing it was built against. A deployment stops publishing a committed
+// scenario; the reader takes the listing-refresh affordance R12 shipped; the row
+// leaves the table — and the run phase stored under its id stays behind.
+//
+// Every guard R11 and R12 added is keyed to that same map by that same id, so
+// the orphan slips past BOTH of them BY ABSENCE rather than by merit, and each
+// is behaving correctly on its own terms when it lets it through:
+//
+//   `coverage.get(id)` is undefined, so `isAllHoleBook` declines to infer which
+//   engines the row was defined for — a book cannot testify to that — and
+//   answers false.
+//
+//   `identity.get(id)` is undefined, so `definitionSkew` declines to infer which
+//   definition the page is showing for the row, and answers null.
+//
+// Two optional checks, both correctly silent about a row nobody supplied a
+// definition for, and between them a response with NO RENDERED ROW AT ALL
+// reached `resolveBatchCohort` as a DISPLAYED PIN. When it carried the newest
+// batch it took the anchor, marked every VISIBLE result SUPERSEDED, and left the
+// header announcing a cohort whose only current member is a row the table does
+// not draw. Header and cells contradicted — over a row that does not exist.
+//
+// THE RULE: A PHASE WHOSE SCENARIO IS NOT IN THE CURRENT LISTING IS NOT THERE.
+// It is not refused, and it is not a hole. Those are both statements ABOUT A
+// ROW, and there is no row: the thing it described is not on this table. So it
+// contributes nothing anywhere — no pin, no anchor, no held pin, no set
+// membership, and no clause counting it.
+//
+// IT IS ENFORCED IN ONE PLACE, ON THE WAY IN, rather than by teaching every
+// classifier what absence means. `observedAnchorBatch` and `resolveBatchCohort`
+// are the only two functions that range over the WHOLE map — every other read
+// is already per-row, from a row the caller is rendering. Filter what those two
+// are handed and everything below them is restricted by construction: the
+// anchor, the watermark floor the caller derives from the same read, the pins,
+// the sets, and every clause composed from the sets.
+//
+// THE ORPHAN IS FILTERED, NOT PRUNED FROM STATE. See `LabMatrix` for the
+// decision and its reasoning; the short form is that a listing read must not
+// destroy a measurement, and R12 already established that a stored answer
+// becomes readable again the moment the listing it belongs to is on screen.
+// ---------------------------------------------------------------------------
+
+/**
+ * The phases whose scenario the CURRENT listing still names.
+ *
+ * Order is preserved deliberately: the cohort's set order and pin order are the
+ * map's iteration order, which the unit spec pins with `toEqual` on arrays, so a
+ * filter that reshuffled would change answers it has no business changing.
+ */
+export function listedPhases(
+  phases: ReadonlyMap<string, MatrixPhase>,
+  scenarios: readonly Pick<ScenarioDefinition, "id">[],
+): ReadonlyMap<string, MatrixPhase> {
+  const listed = new Set(scenarios.map((scenario) => scenario.id));
+  const kept = new Map<string, MatrixPhase>();
+  for (const [scenarioId, phase] of phases) {
+    if (listed.has(scenarioId)) kept.set(scenarioId, phase);
+  }
+  return kept;
+}
+
 export function batchOfPhase(
   phase: MatrixPhase,
   covered?: readonly string[],
@@ -1408,3 +1473,135 @@ export const CELL_STATE_LABEL: Record<LabCellState["state"], string> = {
   contradicted: "CONTRADICTORY BOOK",
   "definition-changed": "DEFINITION CHANGED",
 };
+
+// ---------------------------------------------------------------------------
+// WAVE R13, FINDING 2 — A FAILED RE-RUN MAY NOT CALL A REFUSED RESPONSE A
+// RESULT.
+//
+// THE DEFECT. Wave R8 established that a re-run which ends without a book does
+// NOT overwrite what the row already held: the held outcome comes back at its
+// own batch pin and the failure is DISCLOSED BESIDE IT. Both surfaces render
+// that disclosure, and both composed it from `rerunFailed !== undefined` alone —
+// the retained outcome's `kind: "ok"` was never asked what it actually was.
+//
+// So over a response R12 refuses to present, the two banners said:
+//
+//   detail  "The result below is the one this row already held, at the batch it
+//            was measured on"  — directly above a gated view whose entire text
+//            is "refusing to render", where no result is rendered at all.
+//   matrix  "The cells still show what this row already measured, at its own
+//            batch" — over a row whose every covered cell reads CONTRADICTORY
+//            BOOK or DEFINITION CHANGED, which are the states that exist
+//            PRECISELY because nothing there was measured into a cell.
+//
+// A surface that refuses to present a response may not turn around and call it a
+// result one line higher. That is the same law R12 landed, arriving through the
+// one sentence R12 did not compose.
+//
+// THE RULE: THE WORDING IS GATED THROUGH `bookRefusal`, LIKE EVERYTHING ELSE.
+// What the row RETAINS is derived here, once, and the sentence follows from it:
+// a presentable result keeps R8's wording VERBATIM, and a retained-but-refused
+// response gets its own neutral banner that names it by its own refusal
+// register and never uses the word "result" for it.
+//
+// BOTH SURFACES COMPOSE FROM THIS ONE DERIVATION so they cannot diverge — which
+// is the shape of the finding itself: two banners, one state, two accounts of it.
+// They differ only in where they point the reader (the row's own cells, or the
+// panel below), because that is the one thing that genuinely differs between
+// them.
+// ---------------------------------------------------------------------------
+
+/** Which banner is being composed — the two differ only in where they point. */
+export type RerunSurface = "matrix" | "detail";
+
+export interface RerunFailedBanner {
+  /** The run-outcome sentence for the FAILURE itself (`MatrixPhase.rerunFailed`). */
+  failure: string;
+  /**
+   * What the row STILL HOLDS, which is the only thing the banner may call it.
+   *
+   *   result    a served book this surface presents — R8's original case.
+   *   refused   a served book this surface REFUSES to present (R12). Retained,
+   *             disclosed, and never named a result anywhere.
+   *   unserved  the retained outcome carried no book either. Unreachable while
+   *             `rerunFailed` is only written beside a held `kind: "ok"`
+   *             outcome; stated rather than assumed.
+   */
+  retained: "result" | "refused" | "unserved";
+  /** For `refused`: the register the retained response is named by. Else null. */
+  register: string | null;
+  /** The whole sentence for the surface asked for. */
+  line: string;
+}
+
+/**
+ * The failed-re-run disclosure for one row, or null when there is none.
+ *
+ * `identity` is the listing's identity for the row, exactly as every other R12
+ * read takes it: absent means the caller makes no identity claim and nothing is
+ * inferred, so a retained response is judged on its BODY alone — which is the
+ * same reading `cellState` and `resolveBatchCohort` give it.
+ */
+export function rerunFailedBanner(
+  phase: MatrixPhase,
+  identity: ScenarioIdentity | undefined,
+  surface: RerunSurface,
+): RerunFailedBanner | null {
+  if (phase.kind !== "outcome" || phase.rerunFailed === undefined) return null;
+  const failure = phase.rerunFailed;
+  const outcome = phase.outcome;
+
+  if (outcome.kind !== "ok") {
+    return {
+      failure,
+      retained: "unserved",
+      register: null,
+      line:
+        `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book — ` +
+        `${failure} This row holds no result and no served response at all: the earlier run ` +
+        `ended without a book either, and ${
+          surface === "matrix" ? "every covered cell" : "the outcome below"
+        } says so.`,
+    };
+  }
+
+  const refusal = bookRefusal(outcome.response, identity);
+  if (refusal === null) {
+    // R8's ORIGINAL WORDING, VERBATIM. The clean case was never the defect and
+    // its assertions stand unchanged; a response this surface DOES present is a
+    // result, and calling it one is the honest thing.
+    return {
+      failure,
+      retained: "result",
+      register: null,
+      line:
+        surface === "matrix"
+          ? `re-run ended without a book — ${failure} The cells still show what this row ` +
+            `already measured, at its own batch.`
+          : `the re-run ended without a book — ${failure} The result below is the one this row ` +
+            `already held, at the batch it was measured on; nothing was overwritten and nothing ` +
+            `was invented in its place.`,
+    };
+  }
+
+  // THE FINDING'S OWN SENTENCE. Two facts, neither borrowed from the other: the
+  // re-run failed, AND what is retained is not a result. It is named by the same
+  // register the cells and the detail view use for it, so the reader meets one
+  // vocabulary for one response wherever they look.
+  const register = CELL_STATE_LABEL[refusal.kind];
+  return {
+    failure,
+    retained: "refused",
+    register,
+    line:
+      surface === "matrix"
+        ? `re-run ended without a served book — ${failure} What this row still holds is NOT a ` +
+          `result: it is the earlier response this surface REFUSES to present, and every covered ` +
+          `cell of this row names that refusal in its own words (${register}). Nothing was ` +
+          `overwritten, and nothing was measured in its place.`
+        : `the re-run ended without a served book — ${failure} What this row still holds is NOT ` +
+          `a result: it is the earlier response this surface REFUSES to present, named below in ` +
+          `its own words (${register}). Nothing was overwritten and nothing was invented in its ` +
+          `place.`,
+  };
+}

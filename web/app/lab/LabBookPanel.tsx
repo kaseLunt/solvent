@@ -49,6 +49,7 @@ import { LAB_DEK_LOADING, labDek } from "./labDek";
 import {
   bookRefusal,
   matrixColumns,
+  rerunFailedBanner,
   rowIdentity,
   unansweredReason,
   type BookRefusal,
@@ -357,6 +358,10 @@ function CommittedDetail({
   identity: ScenarioIdentity | undefined;
   onRun: () => void;
 }) {
+  // WAVE R13, FINDING 2 — the failed-re-run disclosure is DERIVED, from the same
+  // function the matrix's row banner calls, so the two surfaces cannot give
+  // different accounts of one retained response. See `rerunFailedBanner`.
+  const rerunBanner = rerunFailedBanner(phase, identity, "detail");
   return (
     <section data-testid="committed-detail" data-scenario-id={scenario.id}>
       <div className={styles.scenarioHead}>
@@ -416,12 +421,21 @@ function CommittedDetail({
       )}
       {/* WAVE R8: a re-run that ended without a book did not overwrite the
           result below it. The failure is stated in its own register; the result
-          keeps its own batch stamp, so the two can never be read as one. */}
-      {phase.kind === "outcome" && phase.rerunFailed !== undefined && (
-        <p className={styles.errorState} data-testid="rerun-failed">
-          the re-run ended without a book — {phase.rerunFailed} The result below is the one this
-          row already held, at the batch it was measured on; nothing was overwritten and nothing
-          was invented in its place.
+          keeps its own batch stamp, so the two can never be read as one.
+
+          WAVE R13, FINDING 2: "the result below" was a lie whenever the retained
+          response is one `bookRefusal` refuses — this banner sat directly above
+          a gated view whose whole text is "refusing to render", claiming a
+          measured result one line above a panel stating there is none. The
+          wording is now derived, and a retained-but-refused response is named by
+          its own refusal register instead. */}
+      {rerunBanner !== null && (
+        <p
+          className={styles.errorState}
+          data-testid="rerun-failed"
+          data-retained={rerunBanner.retained}
+        >
+          {rerunBanner.line}
         </p>
       )}
       {phase.kind === "outcome" && (
@@ -475,6 +489,25 @@ function LabBookPanelInner() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [book, setBook] = useState<BookState>({ phase: "loading" });
+  // WAVE R13, FINDING 1 — THIS MAP IS NEVER PRUNED ON A LISTING REFRESH, and
+  // the decision is recorded here because this is where the pruning would have
+  // to happen.
+  //
+  // A refresh can drop a committed scenario, leaving a run phase whose row no
+  // longer exists. That orphan must contribute NOTHING to the matrix — no pin,
+  // no anchor, no set membership, no clause — and it does not: `LabMatrix`
+  // filters the map down to the rendered rows in one place, before the two reads
+  // that range over it (`listedPhases`). Nothing else reads an orphan: the
+  // per-row `get` below takes its id from `scenarios.find(...)`, and `run()` is
+  // only ever called with an id the listing published.
+  //
+  // So pruning was AVAILABLE, and is still refused: it would destroy a real
+  // served response because a DIFFERENT route stopped mentioning its id. R8
+  // already ruled that a failed re-run may not erase the result it was re-running
+  // — an event that says nothing about a measurement must not delete it — and a
+  // listing read says even less. R12 ruled the return trip: a stored answer
+  // becomes readable again "the moment the listing it was computed against is the
+  // one on screen", which is a promise a pruned phase could never keep.
   const [phases, setPhases] = useState<ReadonlyMap<string, MatrixPhase>>(new Map());
   const [pickedId, setPickedId] = useState<string | null>(null);
   const runSeq = useRef(new Map<string, number>());

@@ -66,7 +66,9 @@ import {
   axisFamilyWords,
   batchHeaderLine,
   cellState,
+  listedPhases,
   observedAnchorBatch,
+  rerunFailedBanner,
   resolveBatchCohort,
   rowCoverage,
   rowIdentity,
@@ -310,12 +312,63 @@ export function LabMatrix({
   // definition must not raise the watermark either. The watermark is a floor
   // under a sentence about DISPLAYED results, and a row this table declines to
   // classify displays nothing.
+  //
+  // WAVE R13 restricts all three of those reads to the rows this table RENDERS,
+  // in one place, on the way in — see below.
   const coverage = rowCoverage(scenarios);
   const identity = rowIdentity(scenarios, configVersion);
+
+  // WAVE R13, FINDING 1 — THE COHORT SPEAKS ONLY FOR ROWS THE TABLE RENDERS.
+  //
+  // `phases` outlives the listing it was built against. A deployment stops
+  // publishing a committed scenario, the reader takes R12's listing-refresh
+  // affordance, the row leaves the table — and its stored phase stays behind.
+  // R11's coverage check and R12's identity check are both keyed per row, so
+  // NEITHER can speak about a row that is not there: both lookups answer
+  // undefined, both correctly decline to infer, and the orphan used to reach the
+  // cohort as a displayed pin. Carrying the newest batch it took the anchor,
+  // marked every VISIBLE result SUPERSEDED, and left the header naming a cohort
+  // with no rendered current row in it.
+  //
+  // ONE FILTER, BEFORE THE READS. `observedAnchorBatch` (which is the
+  // WATERMARK's own input) and `resolveBatchCohort` are the only two functions
+  // that range over the whole map; every other read here is already per-row,
+  // from a row being rendered. Restricting what those two are handed restricts
+  // the anchor, the watermark, the pins, the sets and every clause by
+  // construction — with no classifier taught what absence means.
+  //
+  // FILTERED, NOT PRUNED FROM STATE, and the choice is deliberate:
+  //
+  //   NOTHING ELSE READS AN ORPHAN. The only other reads of `phases` are this
+  //   component's per-row `get` (rows come from `scenarios`) and the panel's
+  //   `phases.get(selected.id)` (the selection is `scenarios.find(...)`), so
+  //   pruning would be available. It is still the wrong move.
+  //
+  //   A LISTING READ MUST NOT DESTROY A MEASUREMENT. Pruning would delete a real
+  //   response because a DIFFERENT route stopped mentioning its id — the same
+  //   trade R8 refused when it stopped a failed re-run from erasing the result it
+  //   was re-running. A `GET /v1/scenarios` says nothing about a book that was
+  //   already served.
+  //
+  //   AND R12 ALREADY RULED ON THE RETURN TRIP. Its refresh path turns on a
+  //   stored answer becoming readable "the moment the listing it was computed
+  //   against is the one on screen". Listings move in both directions —
+  //   rollbacks, staged deploys, a row republished — and a pruned phase could
+  //   never come back, while a filtered one classifies honestly the instant its
+  //   row does (as itself, or as DEFINITION CHANGED if the definition moved).
+  //
+  // The watermark is NOT lowered when a row is delisted, and that too is
+  // deliberate: R8's floor is a statement about what THIS PANEL HAS SEEN, and
+  // lowering it would let an older row repaint as CURRENT — the exact defect the
+  // floor exists to prevent. A delisted row can no longer PUT a batch into the
+  // anchor; a floor already learned while it was on the table stays a floor, and
+  // the header goes on saying honestly that no displayed result was measured at
+  // it.
+  const listed = listedPhases(phases, scenarios);
   const [watermark, setWatermark] = useState<number | null>(null);
-  const observed = observedAnchorBatch(phases, coverage, identity);
+  const observed = observedAnchorBatch(listed, coverage, identity);
   if (observed !== null && (watermark === null || observed > watermark)) setWatermark(observed);
-  const cohort = resolveBatchCohort(phases, watermark, coverage, identity);
+  const cohort = resolveBatchCohort(listed, watermark, coverage, identity);
 
   return (
     <section data-testid="lab-matrix">
@@ -352,7 +405,12 @@ export function LabMatrix({
           </thead>
           <tbody>
             {scenarios.map((scenario) => {
-              const phase = phases.get(scenario.id) ?? { kind: "idle" as const };
+              // Read from the FILTERED map, not from `phases`. It is the same
+              // answer for a rendered row — that is the point — and it leaves
+              // exactly one map this component reads anything out of.
+              const phase = listed.get(scenario.id) ?? { kind: "idle" as const };
+              const rowIdent = identity.get(scenario.id);
+              const rerunBanner = rerunFailedBanner(phase, rowIdent, "matrix");
               const families = scenarioCoverage(scenario, scenario.engines[0] ?? "").families;
               return (
                 <tr
@@ -387,7 +445,7 @@ export function LabMatrix({
                         engine,
                         phase,
                         cohort,
-                        identity: identity.get(scenario.id),
+                        identity: rowIdent,
                       })}
                     />
                   ))}
@@ -408,15 +466,26 @@ export function LabMatrix({
                         overwrite what this row already measured — that result
                         is still in its cells, at its own batch pin. The failure
                         is named here so the reader is never left wondering why
-                        clicking re-run changed nothing. */}
-                    {phase.kind === "outcome" && phase.rerunFailed !== undefined && (
+                        clicking re-run changed nothing.
+
+                        WAVE R13, FINDING 2: the sentence is now GATED THROUGH
+                        `bookRefusal` like everything else on this surface. Over
+                        a retained response R12 refuses to present, "the cells
+                        still show what this row already measured" was a claim
+                        about cells reading CONTRADICTORY BOOK or DEFINITION
+                        CHANGED — states that exist precisely because nothing was
+                        measured into them. `rerunFailedBanner` composes both
+                        wordings, and the detail strip composes from the same
+                        call, so the two can never give different accounts of one
+                        retained response. */}
+                    {rerunBanner !== null && (
                       <span
                         className={styles.cellSub}
                         data-testid="matrix-rerun-failed"
                         data-scenario-id={scenario.id}
+                        data-retained={rerunBanner.retained}
                       >
-                        re-run ended without a book — {phase.rerunFailed} The cells still show
-                        what this row already measured, at its own batch.
+                        {rerunBanner.line}
                       </span>
                     )}
                     {/* WAVE R12, FINDING 2: the row's affordance is a LISTING
