@@ -1523,11 +1523,17 @@ export interface RerunFailedBanner {
    *   result    a served book this surface presents — R8's original case.
    *   refused   a served book this surface REFUSES to present (R12). Retained,
    *             disclosed, and never named a result anywhere.
+   *   all-hole  a served book that named none of the engines the row's
+   *             committed definition covers (R11) — presented only as
+   *             UNANSWERED cells, so "the cells still show what this row
+   *             already measured" would be false. The R13 adjacency, ruled by
+   *             the integrator: a book that measured nothing is never called
+   *             a measurement.
    *   unserved  the retained outcome carried no book either. Unreachable while
    *             `rerunFailed` is only written beside a held `kind: "ok"`
    *             outcome; stated rather than assumed.
    */
-  retained: "result" | "refused" | "unserved";
+  retained: "result" | "refused" | "all-hole" | "unserved";
   /** For `refused`: the register the retained response is named by. Else null. */
   register: string | null;
   /** The whole sentence for the surface asked for. */
@@ -1546,6 +1552,7 @@ export function rerunFailedBanner(
   phase: MatrixPhase,
   identity: ScenarioIdentity | undefined,
   surface: RerunSurface,
+  covered?: readonly string[],
 ): RerunFailedBanner | null {
   if (phase.kind !== "outcome" || phase.rerunFailed === undefined) return null;
   const failure = phase.rerunFailed;
@@ -1567,6 +1574,29 @@ export function rerunFailedBanner(
 
   const refusal = bookRefusal(outcome.response, identity);
   if (refusal === null) {
+    // THE R13 ADJACENCY (integrator-ruled): a retained ALL-HOLE book (R11 — a
+    // 200 naming none of the row's covered engines) is presented only as
+    // UNANSWERED cells, so the clean-retention sentence "the cells still show
+    // what this row already measured" would be false above it. A book that
+    // measured nothing is never called a measurement. `covered === undefined`
+    // infers nothing — the same discipline as `isAllHoleBook` itself.
+    if (isAllHoleBook(outcome.response, covered)) {
+      return {
+        failure,
+        retained: "all-hole",
+        register: null,
+        line:
+          surface === "matrix"
+            ? `re-run ended without a served book — ${failure} What this row still holds is ` +
+              `NOT a result: it is a served book that named none of the engines this row's ` +
+              `committed definition covers, and every covered cell reads UNANSWERED. Nothing ` +
+              `was overwritten, and nothing was measured in its place.`
+            : `the re-run ended without a served book — ${failure} What this row still holds ` +
+              `is NOT a result: it is a served book that named none of the engines this row's ` +
+              `committed definition covers — the outcome below says so in its own words. ` +
+              `Nothing was overwritten and nothing was invented in its place.`,
+      };
+    }
     // R8's ORIGINAL WORDING, VERBATIM. The clean case was never the defect and
     // its assertions stand unchanged; a response this surface DOES present is a
     // result, and calling it one is the honest thing.

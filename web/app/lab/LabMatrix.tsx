@@ -410,7 +410,7 @@ export function LabMatrix({
               // exactly one map this component reads anything out of.
               const phase = listed.get(scenario.id) ?? { kind: "idle" as const };
               const rowIdent = identity.get(scenario.id);
-              const rerunBanner = rerunFailedBanner(phase, rowIdent, "matrix");
+              const rerunBanner = rerunFailedBanner(phase, rowIdent, "matrix", scenario.engines);
               const families = scenarioCoverage(scenario, scenario.engines[0] ?? "").families;
               return (
                 <tr

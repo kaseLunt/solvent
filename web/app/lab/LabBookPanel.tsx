@@ -361,7 +361,7 @@ function CommittedDetail({
   // WAVE R13, FINDING 2 — the failed-re-run disclosure is DERIVED, from the same
   // function the matrix's row banner calls, so the two surfaces cannot give
   // different accounts of one retained response. See `rerunFailedBanner`.
-  const rerunBanner = rerunFailedBanner(phase, identity, "detail");
+  const rerunBanner = rerunFailedBanner(phase, identity, "detail", scenario.engines);
   return (
     <section data-testid="committed-detail" data-scenario-id={scenario.id}>
       <div className={styles.scenarioHead}>

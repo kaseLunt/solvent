@@ -2274,6 +2274,62 @@ test("R13/2 — no failed re-run, no banner: the disclosure is never invented", 
 });
 
 // ---------------------------------------------------------------------------
+// R13b — the flagged adjacency, integrator-ruled: a retained ALL-HOLE book
+// under a failed re-run. The R13 wave flagged it and declined to act without a
+// ruling; the ruling is that a book that measured nothing is never called a
+// measurement, however cleanly its envelope arrived.
+// ---------------------------------------------------------------------------
+
+test("R13b — A RETAINED ALL-HOLE BOOK is never called a measurement, on either surface", () => {
+  // RUN_BOOK_NAMES_NOBODY derives from the DEPEG run-book — its identity must
+  // match, or the gate (correctly) refuses it as skewed before the hole read.
+  const phase = rerunFailedOver(RUN_BOOK_NAMES_NOBODY);
+  const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(DEPEG.id), "matrix", DEPEG.engines);
+  const detail = rerunFailedBanner(phase, IDENTITY_LISTED.get(DEPEG.id), "detail", DEPEG.engines);
+  if (matrix === null || detail === null) throw new Error("a failed re-run must be disclosed");
+
+  expect(matrix.retained).toBe("all-hole");
+  expect(detail.retained).toBe("all-hole");
+  expect(matrix.register).toBeNull();
+
+  for (const banner of [matrix, detail]) {
+    // THE FAILURE IS STILL NAMED — the ruling must not swallow the event.
+    expect(banner.line).toContain("no servable batch (503)");
+    // THE RETAINED BOOK IS NOT A RESULT, and is not called one.
+    expect(banner.line).toContain("What this row still holds is NOT a result");
+    expect(banner.line).toContain("named none of the engines this row's committed definition covers");
+    // THE FALSE COMPOSITION, gone — the exact sentence the adjacency flagged.
+    expect(banner.line).not.toContain("The cells still show what this row already measured");
+    expect(banner.line).not.toContain("The result below");
+    expect(banner.line).not.toContain("at the batch it was measured on");
+    // AND the retention assurance survives: nothing was overwritten.
+    expect(banner.line).toContain("Nothing was overwritten");
+  }
+  // Each surface points where its reader should look.
+  expect(matrix.line).toContain("every covered cell reads UNANSWERED");
+  expect(detail.line).toContain("the outcome below says so in its own words");
+});
+
+test("R13b — WITHOUT the covered list, nothing is inferred: the pre-ruling reading stands", () => {
+  // The same discipline as isAllHoleBook and definitionSkew: an absent source
+  // infers nothing. A caller that cannot say what the row covers cannot accuse
+  // the book of naming none of it.
+  const phase = rerunFailedOver(RUN_BOOK_NAMES_NOBODY);
+  const banner = rerunFailedBanner(phase, IDENTITY_LISTED.get(DEPEG.id), "matrix");
+  expect(banner?.retained).toBe("result");
+});
+
+test("R13b — the clean case is untouched by the new parameter", () => {
+  const phase = rerunFailedOver(RUN_BOOK_ETH);
+  const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "matrix", ETH.engines);
+  expect(matrix?.retained).toBe("result");
+  expect(matrix?.line).toBe(
+    `re-run ended without a book — ${RERUN_503} The cells still show what this row already ` +
+      `measured, at its own batch.`,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // The remaining states.
 // ---------------------------------------------------------------------------
 
