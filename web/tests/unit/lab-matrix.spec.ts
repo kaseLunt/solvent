@@ -16,6 +16,7 @@ import type { EngineRefusal, ScenarioDefinition, Shock } from "@solvent/client";
 import {
   RUN_BOOK_BATCH_2,
   RUN_BOOK_ETH,
+  RUN_BOOK_NAMES_NOBODY,
   RUN_BOOK_WEETH_BATCH_1,
   RUN_BOOK_WITHHELD,
   SCENARIOS,
@@ -29,9 +30,12 @@ import {
   batchHeaderLine,
   batchOfPhase,
   cellState,
+  isAllHoleBook,
   matrixColumns,
   MATRIX_NO_RUN_LINE,
+  observedAnchorBatch,
   resolveBatchCohort,
+  rowCoverage,
   scenarioCoverage,
   unansweredReason,
   type MatrixPhase,
@@ -869,6 +873,406 @@ test("R10 — THE SWEEP: once ANY row was asked, the header never says “no run
       expect(line.length).toBeGreaterThan(0);
     }
   }
+});
+
+// ===========================================================================
+// WAVE R11 (Codex round-19) — ROW PRESENTATION DERIVES FROM ACTUAL CELL
+// COVERAGE, NEVER FROM ENVELOPE PRESENCE.
+//
+// THE DEFECT: the cohort builder treated every `kind: "ok"` outcome as a
+// DISPLAYED result, because the envelope carried a batch. `cellState` already
+// (correctly) renders a covered engine named in NEITHER `engines[]` nor
+// `excluded_engines[]` as UNANSWERED — "this surface will not fill a hole with
+// a zero" — and the contract permits exactly such a body: neither array carries
+// `minItems`, and `runBookScenario` does no cross-field validation. So a 200
+// whose two arrays are both empty painted EVERY cell of the row UNANSWERED
+// while the builder minted a displayed pin and a current cohort. The header then
+// read "results shown together were measured at batch #N. Every DISPLAYED result
+// was measured at that batch." above ZERO displayed results, and the frontier
+// clause compared itself against that nonexistent cohort.
+//
+// THE FIX, in three parts, each pinned below:
+//   ROW      a row whose covered cells ALL fall in the hole is an ALL-HOLE row.
+//            It contributes NO pin to current/superseded/displayedPins, and it
+//            is counted in its own set with its own clause — never in
+//            `unansweredScenarioIds`, whose sentence ("ended without a served
+//            result") would be a false account of a run that ended with a 200.
+//   ANCHOR   an all-hole envelope's batch raises neither the ANCHOR nor the
+//            WATERMARK. No displayable evidence, no floor movement.
+//   CELL     the HOLE outranks SUPERSESSION, so an all-hole row reads UNANSWERED
+//            at every batch — including a batch NEWER than the anchor, which the
+//            old order would have stamped "measured at #7; the matrix reads #1".
+//
+// A row with SOME covered cells served keeps its pin: those cells are real
+// measurements, and the hole beside them stays the CELL's own sentence (R10's
+// resolution, unchanged).
+// ===========================================================================
+
+/** The committed listing's own coverage — what `LabMatrix` hands the model. */
+const COVERAGE = rowCoverage(definitions);
+
+/** The both-arrays-empty 200, re-pinned to a NEWER batch than any real result. */
+const NAMES_NOBODY_AT_7 = {
+  ...RUN_BOOK_NAMES_NOBODY,
+  batch: { ...RUN_BOOK_NAMES_NOBODY.batch, id: 7 },
+} as typeof RUN_BOOK_ETH;
+
+test("R11 — THE CLASSIFICATION: covered engines against engines[] ∪ excluded_engines[]", () => {
+  // Both arrays empty: nothing the row covers is named, so the row is all-hole.
+  expect(RUN_BOOK_NAMES_NOBODY.engines).toEqual([]);
+  expect(RUN_BOOK_NAMES_NOBODY.excluded_engines).toEqual([]);
+  expect(isAllHoleBook(RUN_BOOK_NAMES_NOBODY as unknown as LabRunBook, DEPEG.engines)).toBe(true);
+
+  // A book that SERVES a covered engine is not all-hole…
+  expect(isAllHoleBook(RUN_BOOK_ETH as unknown as LabRunBook, ETH.engines)).toBe(false);
+  // …and NEITHER IS ONE THAT REFUSES ONE. A refusal is a named answer about a
+  // covered cell, so the row displays something and pins its batch.
+  expect(RUN_BOOK_WITHHELD.excluded_engines.map((refusal) => refusal.engine)).toEqual([
+    "aave_v3_etherfi",
+  ]);
+  expect(isAllHoleBook(RUN_BOOK_WITHHELD as unknown as LabRunBook, ["aave_v3_etherfi"])).toBe(
+    false,
+  );
+
+  // The rule is the SCENARIO'S OWN covered set, not "did the book name anybody":
+  // a book naming only engines this row is not defined for still fills no cell
+  // of this row.
+  expect(isAllHoleBook(RUN_BOOK_ETH as unknown as LabRunBook, ["an_engine_nobody_serves"])).toBe(
+    true,
+  );
+
+  // NO DEFINITION SUPPLIED = NOTHING INFERRED. A book cannot testify to which
+  // engines a scenario is defined for, so an absent coverage entry keeps the
+  // pre-R11 reading rather than guessing in either direction.
+  expect(isAllHoleBook(RUN_BOOK_NAMES_NOBODY as unknown as LabRunBook, undefined)).toBe(false);
+});
+
+test("R11 — THE ROW: a both-arrays-empty 200 displays NOTHING, so it pins nothing", () => {
+  const phases = new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)]]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE);
+
+  // The row was ASKED and it ANSWERED — but with nothing this table can display.
+  expect(cohort.attemptedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.allHoleScenarioIds).toEqual([DEPEG.id]);
+  // THE PHANTOM PIN AND THE PHANTOM COHORT, both gone.
+  expect(cohort.displayedPins).toEqual([]);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.supersededScenarioIds).toEqual([]);
+  // NOT folded into the run-ended-without-a-book set: the book arrived.
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+  // ANCHOR AND WATERMARK UNMOVED — no displayable evidence, no floor movement.
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(observedAnchorBatch(phases, COVERAGE)).toBeNull();
+
+  // EVERY COVERED CELL READS UNANSWERED, which is what the header must agree
+  // with. (Both engines: DEPEG's committed definition names both.)
+  for (const engine of DEPEG.engines) {
+    const cell = cellState({
+      scenario: DEPEG,
+      engine,
+      phase: ok(RUN_BOOK_NAMES_NOBODY),
+      cohort,
+    });
+    expect(cell.state).toBe("unanswered");
+    if (cell.state !== "unanswered") throw new Error("unreachable");
+    expect(cell.reason).toContain("neither a result nor a refusal");
+    expect(cell.reason).toContain("will not fill a hole with a zero");
+    // The batch the naming-nobody book DID carry is disclosed in the only place
+    // left that can carry it — the cell's own sentence — and disclaimed in the
+    // same breath, because the row is in no cohort.
+    expect(cell.reason).toContain("The book it served was measured at batch #1");
+    expect(cell.reason).toContain("no part of that batch's cohort");
+  }
+});
+
+test("R11 — THE HEADER: no cohort claim, and the state is NAMED as a served book", () => {
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)]]),
+    null,
+    COVERAGE,
+  );
+  const line = batchHeaderLine(cohort, null);
+
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) were served a book that named none " +
+      "of the row's covered engines — a served book, but not a served result. There is no batch " +
+      "for this table to be as of — and this is NOT “not run”: every row counted here was asked, " +
+      "and each says in its own cell what became of the asking.",
+  );
+
+  // THE DEFECT, NAMED: the old line claimed a cohort over zero displayed results.
+  expect(line).not.toContain("results shown together");
+  expect(line).not.toContain("Every DISPLAYED result was measured at that batch");
+  expect(line).not.toContain("batch #1");
+  // And it does not misreport what happened either way: this run did NOT end
+  // without a served result, and it is emphatically not "not run".
+  expect(line).not.toContain("ended without a served result");
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R11 — the ALL-HOLE clause rides BESIDE a real cohort, and never inside it", () => {
+  // ETH displays batch 1. DEPEG's run returns a 200 at batch 7 that names
+  // nobody: NEWER than the anchor, and still displaying nothing.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [DEPEG.id, ok(NAMES_NOBODY_AT_7)], // served @7, names nobody
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE);
+
+  // THE ANCHOR DID NOT FOLLOW THE ENVELOPE TO BATCH 7.
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(observedAnchorBatch(phases, COVERAGE)).toBe(1);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(cohort.allHoleScenarioIds).toEqual([DEPEG.id]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+      "that batch. 1 row(s) were SERVED A BOOK that named none of the engines their committed " +
+      "definition covers — every covered cell there reads UNANSWERED, so the row displays no " +
+      "result, pins no batch, and is no part of the sentence above. That is not a run that " +
+      "ended without a book: the book arrived and named nobody.",
+  );
+
+  // AND THE CELLS SAY EXACTLY THAT. The hole outranks supersession, so the
+  // batch-7 row does NOT render "measured at batch #7; the matrix reads #1" —
+  // which would call a NEWER batch older, on a cell that holds nothing at all.
+  for (const engine of DEPEG.engines) {
+    const cell = cellState({ scenario: DEPEG, engine, phase: ok(NAMES_NOBODY_AT_7), cohort });
+    expect(cell.state).toBe("unanswered");
+  }
+  // The row that really did display something is untouched.
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: ok(RUN_BOOK_ETH), cohort }).state,
+  ).toBe("result");
+});
+
+test("R11 — THE PARTIAL HOLE KEEPS ITS PIN: served cells are real measurements", () => {
+  // R10'S RESOLUTION, UNCHANGED. One covered engine is served, one is in neither
+  // array: the row displays a real result at a real batch, and the hole stays
+  // the CELL's own sentence rather than emptying the row.
+  const partial = {
+    ...RUN_BOOK_ETH,
+    engines: RUN_BOOK_ETH.engines.filter((engine) => engine.engine !== "aave_v3_etherfi"),
+  } as typeof RUN_BOOK_ETH;
+  expect(isAllHoleBook(partial as unknown as LabRunBook, ETH.engines)).toBe(false);
+
+  const phases = new Map<string, MatrixPhase>([[ETH.id, ok(partial)]]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE);
+  expect(cohort.allHoleScenarioIds).toEqual([]);
+  expect(cohort.displayedPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.anchorBatchId).toBe(1);
+
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: ok(partial), cohort }).state,
+  ).toBe("result");
+  expect(
+    cellState({ scenario: ETH, engine: "aave_v3_etherfi", phase: ok(partial), cohort }).state,
+  ).toBe("unanswered");
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("results shown together were measured at batch #1.");
+  expect(line).not.toContain("named none of the engines");
+
+  // AND THE TWO STATES COEXIST AT AN OLDER BATCH. With another row displaying
+  // batch 2, this row's SERVED cell is SUPERSEDED — a real measurement, at its
+  // own pin — while the HOLE beside it stays UNANSWERED. A hole is not a
+  // superseded measurement: there was never anything in that cell to supersede,
+  // and "SUPERSEDED · no cell served" claimed one that did not exist.
+  const withNewer = resolveBatchCohort(
+    new Map<string, MatrixPhase>([
+      [ETH.id, ok(partial)], // served debt_manager @1, aave a hole
+      [DEPEG.id, ok(RUN_BOOK_BATCH_2)], // displayed @2
+    ]),
+    null,
+    COVERAGE,
+  );
+  expect(withNewer.anchorBatchId).toBe(2);
+  expect(withNewer.supersededScenarioIds).toEqual([ETH.id]);
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: ok(partial), cohort: withNewer })
+      .state,
+  ).toBe("superseded");
+  expect(
+    cellState({ scenario: ETH, engine: "aave_v3_etherfi", phase: ok(partial), cohort: withNewer })
+      .state,
+  ).toBe("unanswered");
+});
+
+test("R11 — THE ANCHOR: an all-hole envelope raises neither the anchor nor the watermark", () => {
+  const displayed: MatrixPhase = ok(NAMES_NOBODY_AT_7);
+  const held: MatrixPhase = runningHolding(NAMES_NOBODY_AT_7);
+
+  // Envelope-level, with no definition supplied: the batch is right there.
+  expect(batchOfPhase(displayed)).toBe(7);
+  expect(anchorBatchOfPhase(held)).toBe(7);
+  // Row-level, with the committed definition supplied: it displays nothing, so
+  // it pins nothing and vouches for nothing.
+  expect(batchOfPhase(displayed, DEPEG.engines)).toBeNull();
+  expect(anchorBatchOfPhase(held, DEPEG.engines)).toBeNull();
+
+  // A RE-RUNNING ROW HOLDING an all-hole book holds no displayable evidence, so
+  // it discloses no held pin either — there is nothing to disclose.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [DEPEG.id, held], // running, holding a book that names nobody
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE);
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(cohort.inFlightScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.inFlightHeldPins).toEqual([]);
+  expect(cohort.allHoleScenarioIds).toEqual([]); // in flight, not displayed
+
+  // THE WATERMARK IS THE SAME READ. The caller raises its floor from
+  // `observedAnchorBatch`, so a book the cohort refuses to display can never put
+  // a floor under a sentence about displayed results.
+  expect(observedAnchorBatch(phases, COVERAGE)).toBe(1);
+  expect(observedAnchorBatch(phases)).toBe(7); // the pre-R11 read, for contrast
+});
+
+test("R11 — A RE-RUN THAT COMES BACK NAMING NOBODY: the watermark holds, the cohort empties", () => {
+  // The sequence a live panel reaches: the row displayed batch 2, the reader
+  // re-ran it, and the daemon answered 200 at batch 3 with both arrays empty.
+  // `LabBookPanel` writes that outcome over the prior one — correctly, because
+  // a 200 IS an answer, and R8's keep-the-held-result rule is for runs that
+  // ended WITHOUT a book. So the row now displays UNANSWERED everywhere, and
+  // the header has to survive that without inventing a cohort at EITHER batch.
+  const rerun = {
+    ...RUN_BOOK_NAMES_NOBODY,
+    batch: { ...RUN_BOOK_NAMES_NOBODY.batch, id: 3 },
+  } as typeof RUN_BOOK_ETH;
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[DEPEG.id, ok(rerun)]]),
+    2, // the watermark this panel raised when batch 2 was displayed
+    COVERAGE,
+  );
+
+  // The floor stands where displayable evidence last put it — batch 3 arrived in
+  // an envelope, not in a cell, so it did not raise it.
+  expect(cohort.anchorBatchId).toBe(2);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.displayedPins).toEqual([]);
+  expect(cohort.allHoleScenarioIds).toEqual([DEPEG.id]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "batch #2 is the newest batch this table has seen and the floor its as-of never falls below " +
+      "— but NO result now displayed was measured at it. No row is displaying a result at all " +
+      "right now, so there is no cohort to read together. 1 row(s) were SERVED A BOOK that named " +
+      "none of the engines their committed definition covers — every covered cell there reads " +
+      "UNANSWERED, so the row displays no result, pins no batch, and is no part of the sentence " +
+      "above. That is not a run that ended without a book: the book arrived and named nobody.",
+  );
+  // No cohort is claimed at EITHER batch: not at the watermark, and not at the
+  // batch the naming-nobody envelope carried.
+  expect(line).not.toContain("results shown together");
+  expect(line).not.toContain("batch #3");
+
+  // The cells agree, and the batch-3 envelope is disclosed where it belongs —
+  // in the cell's own sentence, disclaimed as no part of any cohort.
+  for (const engine of DEPEG.engines) {
+    const cell = cellState({ scenario: DEPEG, engine, phase: ok(rerun), cohort });
+    expect(cell.state).toBe("unanswered");
+    if (cell.state !== "unanswered") throw new Error("unreachable");
+    expect(cell.reason).toContain("The book it served was measured at batch #3");
+  }
+});
+
+test("R11 — THE FRONTIER makes no table-wide comparison against a phantom cohort", () => {
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)]]),
+    null,
+    COVERAGE,
+  );
+  // The frontier's OWN batch is the all-hole book's batch — the case that would
+  // have produced "the same batch 1 of the 1 displayed row(s) are pinned to"
+  // over a row displaying nothing.
+  const line = batchHeaderLine(cohort, 1);
+  expect(line).toContain("The loss frontier above reads batch #1.");
+  expect(line).not.toContain("a different batch");
+  expect(line).not.toContain("displayed row(s) are pinned to");
+  expect(line).not.toContain("results shown together");
+
+  // A frontier at some other batch is disclosed the same way: no comparison is
+  // available, so none is invented.
+  const other = batchHeaderLine(cohort, 4);
+  expect(other).toContain("The loss frontier above reads batch #4.");
+  expect(other).not.toContain("a different batch");
+});
+
+test("R11 — the three ways a run can leave a row empty are counted SEPARATELY", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, RUNNING_COLD], // in flight
+    [DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)], // served a book naming nobody
+    [RATE.id, FAILED_COLD], // ended without a book
+  ]);
+  const cohort = resolveBatchCohort(phases, null, COVERAGE);
+  expect(cohort.inFlightScenarioIds).toEqual([ETH.id]);
+  expect(cohort.allHoleScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([RATE.id]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("1 run(s) are in flight");
+  expect(line).toContain("1 run(s) ended without a served result");
+  expect(line).toContain(
+    "1 run(s) were served a book that named none of the row's covered engines — a served book, " +
+      "but not a served result",
+  );
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R11 — a row covered for NO engine draws no cell, so its book pins nothing either", () => {
+  // The degenerate committed definition. Every column of its row is NOT COVERED,
+  // so a batch it carried would be a cohort claim on behalf of a row displaying
+  // nothing — the same phantom pin by a different route.
+  const uncovered: ScenarioDefinition = { ...RATE, engines: [] };
+  expect(isAllHoleBook(RUN_BOOK_ETH as unknown as LabRunBook, uncovered.engines)).toBe(true);
+
+  const cohort = resolveBatchCohort(
+    new Map<string, MatrixPhase>([[uncovered.id, ok(RUN_BOOK_ETH)]]),
+    null,
+    rowCoverage([uncovered]),
+  );
+  expect(cohort.allHoleScenarioIds).toEqual([uncovered.id]);
+  expect(cohort.displayedPins).toEqual([]);
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(
+    cellState({
+      scenario: uncovered,
+      engine: "debt_manager",
+      phase: ok(RUN_BOOK_ETH),
+      cohort,
+    }).state,
+  ).toBe("not-covered");
+});
+
+test("R11 — SENSITIVITY: without the committed coverage, the SAME phases read the old way", () => {
+  // This is the defect, reproduced on demand. The only difference between the
+  // two calls is whether the row's committed definition was supplied; with it
+  // absent nothing can be inferred, so the envelope's batch is taken at face
+  // value — a displayed pin, a current cohort, and a header claiming both.
+  const phases = new Map<string, MatrixPhase>([[DEPEG.id, ok(RUN_BOOK_NAMES_NOBODY)]]);
+
+  const blind = resolveBatchCohort(phases, null);
+  expect(blind.displayedPins).toEqual([{ scenarioId: DEPEG.id, batchId: 1 }]);
+  expect(blind.currentScenarioIds).toEqual([DEPEG.id]);
+  expect(batchHeaderLine(blind, null)).toContain(
+    "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+      "that batch.",
+  );
+  // …while every cell of that row reads UNANSWERED in the very same state.
+  for (const engine of DEPEG.engines) {
+    expect(
+      cellState({ scenario: DEPEG, engine, phase: ok(RUN_BOOK_NAMES_NOBODY), cohort: blind }).state,
+    ).toBe("unanswered");
+  }
+
+  const seeing = resolveBatchCohort(phases, null, COVERAGE);
+  expect(seeing.displayedPins).toEqual([]);
+  expect(seeing.currentScenarioIds).toEqual([]);
+  expect(batchHeaderLine(seeing, null)).not.toContain("results shown together");
 });
 
 // ---------------------------------------------------------------------------

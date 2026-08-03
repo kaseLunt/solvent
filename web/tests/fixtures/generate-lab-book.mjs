@@ -55,6 +55,23 @@
 //     rebuilt OR any engine is withheld"). The withheld engine is absent from
 //     `engines[]` entirely — exactly as the schema says it must be.
 //
+//  5. run-book.names-nobody.json — the run-book 200 example with BOTH engine
+//     arrays EMPTIED (`engines: []`, `excluded_engines: []`) and NOTHING ELSE
+//     touched. This is the degraded 200 the contract's own schemas permit:
+//     neither array carries `minItems`, and `lib/runbook.ts` does no cross-field
+//     validation, so a body that names no engine at all parses and typechecks
+//     exactly like a healthy one. `coverage` is deliberately left claiming
+//     `stress_coverage_is_full: true` with an empty `withheld_engines` — the
+//     whole point of the fixture is that the ENVELOPE still looks healthy while
+//     the arrays name nobody, which is why row presentation must derive from the
+//     arrays (Wave R11) and never from envelope presence.
+//     run-book.names-nobody.batch2.json is that file with ONE field changed —
+//     the batch id, `computed_at` advanced to stay ordered, exactly as in (3).
+//     It is the ANCHOR half of the same finding: a book that displays nothing
+//     must not raise the anchor or the watermark, so a NEWER batch carried by a
+//     naming-nobody 200 must leave an older DISPLAYED result current rather than
+//     repainting it SUPERSEDED under a cohort nothing belongs to.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -191,4 +208,23 @@ write("run-book.weeth-withheld.json", {
     withheld_engines: [refusal],
     stress_coverage_is_full: false,
   },
+});
+
+// --- 5: the 200 that names NOBODY (Wave R11) -------------------------------
+//
+// Both arrays emptied, everything else byte-identical to the example. A book
+// that names none of a row's covered engines leaves every one of that row's
+// cells UNANSWERED, so the row displays no result — while the envelope it
+// arrived in still carries a batch and a full-coverage claim.
+
+const namesNobody = {
+  ...runBookExample,
+  engines: [],
+  excluded_engines: [],
+};
+
+write("run-book.names-nobody.json", namesNobody);
+write("run-book.names-nobody.batch2.json", {
+  ...namesNobody,
+  batch: { ...namesNobody.batch, id: namesNobody.batch.id + 1, computed_at: "2026-07-29T10:00:30Z" },
 });

@@ -29,6 +29,13 @@
 // floor disclosure reads the watermark. This component supplies the watermark
 // and the frontier's batch and renders the result; it composes no sentence.
 //
+// AND A ROW'S PRESENTATION DERIVES FROM ITS OWN CELLS (Wave R11). A 200 whose
+// `engines[]` and `excluded_engines[]` name none of the row's covered engines
+// leaves every cell of that row UNANSWERED; it therefore pins no batch, joins no
+// cohort, and raises neither the anchor nor the watermark. This component's only
+// job in that is to hand the COMMITTED COVERAGE — which it already has, as the
+// rows themselves — to the model that decides it.
+//
 // The Lab owns this component; the Book's outpaced/refusal components are not
 // imported. Same register, separate ownership.
 
@@ -38,11 +45,12 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount } from "@/lib/book-format";
 import {
-  anchorBatchOfPhase,
   axisFamilyWords,
   batchHeaderLine,
   cellState,
+  observedAnchorBatch,
   resolveBatchCohort,
+  rowCoverage,
   scenarioCoverage,
   type LabCellState,
   type MatrixPhase,
@@ -131,15 +139,18 @@ function Cell({ state }: { state: LabCellState }) {
           title={`this result was measured at batch #${String(state.batchId)}; the matrix now reads batch #${String(state.anchorBatchId)}. It is shown as its own state rather than mixed with the current batch's cells.`}
         >
           <span className={styles.cellTag}>SUPERSEDED</span>
+          {/* WAVE R11: there is no third branch any more. A cell the run named
+              in NEITHER array is a HOLE, not a superseded measurement, and it
+              renders as UNANSWERED at whatever batch its book carried — so
+              "SUPERSEDED · no cell served", which claimed a measurement that
+              never existed, is gone with the payload member behind it. */}
           <span className={styles.cellValue}>
             {state.payload.kind === "result"
               ? usd(
                   state.payload.engine.eligible_debt_delta_usd,
                   state.payload.engine.usd_decimals,
                 )
-              : state.payload.kind === "withheld"
-                ? state.payload.refusal.code
-                : "no cell served"}
+              : state.payload.refusal.code}
           </span>
           <span className={styles.cellSub}>
             at batch #{state.batchId} · matrix reads #{state.anchorBatchId} — re-run this row
@@ -215,14 +226,17 @@ export function LabMatrix({
   // disclosure). "No run has been issued yet" is decided by rows ASKED, the
   // held-batch assurance by rows DISPLAYED, and the frontier comparison by the
   // displayed cohort's batch — never by this number.
+  //
+  // WAVE R11 hands the COMMITTED COVERAGE to both reads, and hands the observed
+  // batch itself to `matrixCells` rather than folding it here. A book that named
+  // none of a row's covered engines displays nothing, so it raises neither the
+  // watermark nor the anchor — and the only way to keep those two answers in
+  // agreement is for one function to give both.
+  const coverage = rowCoverage(scenarios);
   const [watermark, setWatermark] = useState<number | null>(null);
-  let observed: number | null = null;
-  for (const phase of phases.values()) {
-    const batch = anchorBatchOfPhase(phase);
-    if (batch !== null && (observed === null || batch > observed)) observed = batch;
-  }
+  const observed = observedAnchorBatch(phases, coverage);
   if (observed !== null && (watermark === null || observed > watermark)) setWatermark(observed);
-  const cohort = resolveBatchCohort(phases, watermark);
+  const cohort = resolveBatchCohort(phases, watermark, coverage);
 
   return (
     <section data-testid="lab-matrix">
@@ -332,8 +346,9 @@ export function LabMatrix({
         NOT COVERED = the committed definition does not name that engine — a property of the
         DEFINITION, knowable before any run · WITHHELD = the engine refused, code and detail
         rendered · SUPERSEDED = the result was measured at an older batch and is never blended
-        with the current one · UNANSWERED = the run ended without a book for that cell — not a
-        zero · no total column: engine books are never summed.
+        with the current one · UNANSWERED = neither a result nor a refusal reached that cell —
+        the run ended without a book, or the book it served named that engine in neither list —
+        not a zero · no total column: engine books are never summed.
       </p>
     </section>
   );

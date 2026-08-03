@@ -156,6 +156,72 @@ export function matrixColumns(
 }
 
 // ---------------------------------------------------------------------------
+// ROW COVERAGE — the cells a row actually draws (Wave R11, Codex round-19).
+// ---------------------------------------------------------------------------
+
+/**
+ * The engines each committed row is DEFINED for, keyed by scenario id.
+ *
+ * It is the same `engines[]` `scenarioCoverage()` answers `covered: true` for,
+ * gathered once so the batch cohort can ask at ROW level the question the cells
+ * already answer cell by cell: is there anything here to display?
+ */
+export type RowCoverage = ReadonlyMap<string, readonly string[]>;
+
+/** The committed listing, folded into the lookup the cohort builder reads. */
+export function rowCoverage(
+  scenarios: readonly Pick<ScenarioDefinition, "id" | "engines">[],
+): RowCoverage {
+  return new Map(scenarios.map((scenario) => [scenario.id, scenario.engines]));
+}
+
+/** No committed definitions supplied at all — see `isAllHoleBook`. */
+export const NO_ROW_COVERAGE: RowCoverage = new Map();
+
+/**
+ * AN ALL-HOLE BOOK: a 200 that names NOT ONE of the row's covered engines —
+ * neither in `engines[]` nor in `excluded_engines[]` (Wave R11, Codex round-19).
+ *
+ * THE DEFECT THIS CLOSES. The cohort builder treated every `kind: "ok"` outcome
+ * as a DISPLAYED result, because the envelope carried a batch. But `cellState`
+ * already renders a covered engine that appears in NEITHER array as UNANSWERED
+ * — "this surface will not fill a hole with a zero" — and the contract permits
+ * such a body: neither array carries `minItems`, and `runBookScenario` does no
+ * cross-field validation. So a 200 with both arrays empty painted EVERY cell of
+ * the row UNANSWERED while the builder minted a displayed pin and a current
+ * cohort, and the header announced "results shown together were measured at
+ * batch #N. Every DISPLAYED result was measured at that batch." above ZERO
+ * displayed results. Header and cells contradicted — the exact degraded-response
+ * class this surface otherwise fails closed on.
+ *
+ * THE RULE: ROW PRESENTATION DERIVES FROM ACTUAL CELL COVERAGE, never from
+ * envelope presence. A row whose covered cells ALL fall in the hole displays
+ * nothing, so it pins no batch, joins no cohort, and — see `anchorBatchOfPhase`
+ * — raises neither the anchor nor the watermark.
+ *
+ * A row covered for NO engine folds in here by the same arithmetic and for the
+ * same reason: it draws no covered cell anywhere on this table, so its book
+ * displays nothing either and must not speak for a cohort.
+ *
+ * `covered === undefined` means THE CALLER SUPPLIED NO DEFINITION for this row.
+ * Nothing is inferred from the response alone — a book cannot testify to which
+ * engines a scenario is defined for — so the row keeps the pre-R11 reading
+ * rather than being guessed at in either direction. `LabMatrix` supplies every
+ * row it renders; the specs that omit it are pinning other behaviour.
+ */
+export function isAllHoleBook(
+  response: LabRunBook,
+  covered: readonly string[] | undefined,
+): boolean {
+  if (covered === undefined) return false;
+  return !covered.some(
+    (engine) =>
+      response.engines.some((served) => served.engine === engine) ||
+      response.excluded_engines.some((refusal) => refusal.engine === engine),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The single-batch guard.
 // ---------------------------------------------------------------------------
 
@@ -201,10 +267,19 @@ export type MatrixPhase =
       rerunFailed?: string;
     };
 
-/** The batch a phase's DISPLAYED result is pinned to — null when it shows none. */
-export function batchOfPhase(phase: MatrixPhase): number | null {
+/**
+ * The batch a phase's DISPLAYED result is pinned to — null when it shows none.
+ *
+ * WAVE R11: pass the row's COVERED ENGINES and an all-hole book answers null
+ * too. A book that named none of them displays no cell here, and a batch no
+ * cell displays is not a pin — it is a number the header would have to claim on
+ * an empty row's behalf.
+ */
+export function batchOfPhase(phase: MatrixPhase, covered?: readonly string[]): number | null {
   if (phase.kind !== "outcome") return null;
-  return phase.outcome.kind === "ok" ? phase.outcome.response.batch.id : null;
+  const outcome = phase.outcome;
+  if (outcome.kind !== "ok") return null;
+  return isAllHoleBook(outcome.response, covered) ? null : outcome.response.batch.id;
 }
 
 /**
@@ -215,8 +290,19 @@ export function batchOfPhase(phase: MatrixPhase): number | null {
  * difference IS the fix: a running row displays nothing (so it is neither
  * current nor superseded on screen) while still vouching for the batch it
  * measured (so nothing older can claim to be current in its absence).
+ *
+ * WAVE R11 — NO DISPLAYABLE EVIDENCE, NO FLOOR MOVEMENT. With the row's covered
+ * engines supplied, an ALL-HOLE book carries no anchor batch and therefore
+ * cannot raise the anchor OR the watermark the caller derives from this same
+ * function. The watermark is a floor under a sentence about DISPLAYED results;
+ * letting a book that displays nothing raise it would put that floor under a
+ * batch no cell on this table has ever shown, which is the R9/R10 defect class
+ * arriving by a new door.
  */
-export function anchorBatchOfPhase(phase: MatrixPhase): number | null {
+export function anchorBatchOfPhase(
+  phase: MatrixPhase,
+  covered?: readonly string[],
+): number | null {
   const outcome =
     phase.kind === "running"
       ? phase.held
@@ -224,7 +310,28 @@ export function anchorBatchOfPhase(phase: MatrixPhase): number | null {
         ? phase.outcome
         : undefined;
   if (outcome === undefined) return null;
-  return outcome.kind === "ok" ? outcome.response.batch.id : null;
+  if (outcome.kind !== "ok") return null;
+  return isAllHoleBook(outcome.response, covered) ? null : outcome.response.batch.id;
+}
+
+/**
+ * The newest batch any row's HELD evidence carries — the number the caller
+ * raises its WATERMARK to.
+ *
+ * It lives here, next to `resolveBatchCohort`, because the two must read the
+ * same evidence through the same rule. A watermark computed in the component
+ * from a different reading is a floor under a sentence the model never made.
+ */
+export function observedAnchorBatch(
+  phases: ReadonlyMap<string, MatrixPhase>,
+  coverage: RowCoverage = NO_ROW_COVERAGE,
+): number | null {
+  let observed: number | null = null;
+  for (const [scenarioId, phase] of phases) {
+    const batch = anchorBatchOfPhase(phase, coverage.get(scenarioId));
+    if (batch !== null && (observed === null || batch > observed)) observed = batch;
+  }
+  return observed;
 }
 
 /** One row's tie to one batch: which scenario, which batch id. */
@@ -266,6 +373,18 @@ export interface BatchCohort {
    * result and still pins its batch. That hole is the CELL's sentence to tell.
    */
   unansweredScenarioIds: string[];
+  /**
+   * WAVE R11 — Scenario ids whose run WAS SERVED A BOOK that named none of the
+   * row's covered engines (`isAllHoleBook`). Every covered cell there renders
+   * UNANSWERED, so the row displays no result: it pins no batch, joins neither
+   * displayed list, and contributes no anchor evidence.
+   *
+   * They are kept OUT of `unansweredScenarioIds` deliberately. That set's clause
+   * says the run "ended without a served result", which would be a false account
+   * of a run that ended with a 200 and a batch — the book arrived, and named
+   * nobody. Two different failures, two different sentences.
+   */
+  allHoleScenarioIds: string[];
   /**
    * WAVE R10 — the batch pins IN-FLIGHT rows are still holding. Held evidence
    * anchors the cohort (R8) but is displayed nowhere, so when it is OLDER than
@@ -314,17 +433,19 @@ export interface BatchCohort {
 export function resolveBatchCohort(
   phases: ReadonlyMap<string, MatrixPhase>,
   floorBatchId: number | null = null,
+  coverage: RowCoverage = NO_ROW_COVERAGE,
 ): BatchCohort {
   let anchorBatchId: number | null = floorBatchId;
-  for (const phase of phases.values()) {
-    const batch = anchorBatchOfPhase(phase);
-    if (batch !== null && (anchorBatchId === null || batch > anchorBatchId)) anchorBatchId = batch;
+  const observed = observedAnchorBatch(phases, coverage);
+  if (observed !== null && (anchorBatchId === null || observed > anchorBatchId)) {
+    anchorBatchId = observed;
   }
   const currentScenarioIds: string[] = [];
   const supersededScenarioIds: string[] = [];
   const inFlightScenarioIds: string[] = [];
   const attemptedScenarioIds: string[] = [];
   const unansweredScenarioIds: string[] = [];
+  const allHoleScenarioIds: string[] = [];
   const inFlightHeldPins: BatchPin[] = [];
   const displayedPins: BatchPin[] = [];
   for (const [scenarioId, phase] of phases) {
@@ -333,17 +454,29 @@ export function resolveBatchCohort(
     // check rather than an inference from "no batch came back".
     if (phase.kind === "idle") continue;
     attemptedScenarioIds.push(scenarioId);
+    const covered = coverage.get(scenarioId);
     if (phase.kind === "running") {
       inFlightScenarioIds.push(scenarioId);
-      const heldBatch = anchorBatchOfPhase(phase);
+      const heldBatch = anchorBatchOfPhase(phase, covered);
       if (heldBatch !== null) inFlightHeldPins.push({ scenarioId, batchId: heldBatch });
       continue;
     }
-    const batch = batchOfPhase(phase);
-    if (batch === null) {
+    const outcome = phase.outcome;
+    if (outcome.kind !== "ok") {
       unansweredScenarioIds.push(scenarioId);
       continue;
     }
+    // WAVE R11 — THE ENVELOPE DOES NOT DECIDE THIS. A book that named none of
+    // this row's covered engines leaves every one of its cells UNANSWERED, so
+    // the row displays nothing and pins nothing: no `displayedPins` entry, no
+    // membership in current/superseded, and (via `observedAnchorBatch` above)
+    // no anchor. The batch it carries is real and is disclosed in the cells'
+    // own sentences; what it is not is a cohort this table can be as of.
+    if (isAllHoleBook(outcome.response, covered)) {
+      allHoleScenarioIds.push(scenarioId);
+      continue;
+    }
+    const batch = outcome.response.batch.id;
     displayedPins.push({ scenarioId, batchId: batch });
     if (batch === anchorBatchId) currentScenarioIds.push(scenarioId);
     else supersededScenarioIds.push(scenarioId);
@@ -355,6 +488,7 @@ export function resolveBatchCohort(
     inFlightScenarioIds,
     attemptedScenarioIds,
     unansweredScenarioIds,
+    allHoleScenarioIds,
     inFlightHeldPins,
     displayedPins,
   };
@@ -407,11 +541,23 @@ export function resolveBatchCohort(
 //      same/different claim is made at all — the frontier's own batch is
 //      disclosed, and the displayed rows that carry it are counted.
 //
+// R11 (Codex round-19) ADDS THE LAST NAMED SET, because one clause was still
+// deriving from the ENVELOPE rather than from anything on screen:
+//
+//   4. A SERVED BOOK WAS READ AS A DISPLAYED RESULT. Every `kind: "ok"` outcome
+//      minted a displayed pin because the envelope carried a batch — even when
+//      the book named none of the row's covered engines and `cellState` had
+//      already painted every one of those cells UNANSWERED. The header claimed
+//      a cohort over zero displayed results, and the frontier clause compared
+//      itself against it. Row presentation now derives from ACTUAL CELL
+//      COVERAGE (`isAllHoleBook`), and such a row is counted in its own set,
+//      with its own sentence, pinning no batch anywhere.
+//
 // THE ONE PRINCIPLE, from which every clause below follows: EVERY CLAUSE IS A
 // STATEMENT ABOUT A NAMED SET the reader can point at — displayed rows, rows
-// asked, rows in flight, held pins. The WATERMARK appears in exactly one clause,
-// the floor disclosure, where it is named as what it is and nothing is inferred
-// from it.
+// asked, rows in flight, held pins, rows served a book that named nobody. The
+// WATERMARK appears in exactly one clause, the floor disclosure, where it is
+// named as what it is and nothing is inferred from it.
 // ---------------------------------------------------------------------------
 
 /** No run at all: a statement about this session, never about the book. */
@@ -433,17 +579,28 @@ function batchWords(ids: readonly number[]): string {
  * round-18 finding 1).
  *
  * This is the arm the old code collapsed into "no run has been issued yet". It
- * covers the two states a first run can be in when it has produced no batch:
- * still IN FLIGHT, and ENDED WITHOUT A BOOK. Both leave real, non-idle cells on
- * screen — "running…" and "UNANSWERED" — and the header's job is to agree with
- * them, name what happened, and decline to name a batch it does not have.
+ * covers the states a first run can be in when it has produced no DISPLAYABLE
+ * batch: still IN FLIGHT, ENDED WITHOUT A BOOK, and — Wave R11 — SERVED A BOOK
+ * THAT NAMED NOBODY. All three leave real, non-idle cells on screen ("running…"
+ * and "UNANSWERED"), and the header's job is to agree with them, name what
+ * happened in each case SEPARATELY, and decline to name a batch it does not
+ * have.
  */
 function firstResultPendingClause(cohort: BatchCohort): string {
   const inFlight = cohort.inFlightScenarioIds.length;
   const unanswered = cohort.unansweredScenarioIds.length;
+  const allHole = cohort.allHoleScenarioIds.length;
   const facts: string[] = [];
   if (inFlight > 0) facts.push(`${String(inFlight)} run(s) are in flight`);
   if (unanswered > 0) facts.push(`${String(unanswered)} run(s) ended without a served result`);
+  // R11: NOT "ended without a served result". This run ended WITH a 200 and a
+  // batch; what it did not carry was any cell for this row.
+  if (allHole > 0) {
+    facts.push(
+      `${String(allHole)} run(s) were served a book that named none of the row's covered ` +
+        `engines — a served book, but not a served result`,
+    );
+  }
   // Unreachable while a phase can only be idle / running / outcome — an ok
   // outcome would have given an anchor. Stated rather than assumed.
   if (facts.length === 0) {
@@ -551,6 +708,31 @@ function unansweredClause(cohort: BatchCohort): string {
 }
 
 /**
+ * ROWS SERVED A BOOK THAT NAMED NOBODY, counted and named (Wave R11).
+ *
+ * The distinction this clause carries is the whole finding: `unansweredClause`
+ * above speaks for runs that ENDED WITHOUT A BOOK, and saying that about a run
+ * which returned a 200 with a batch would be a false account of what happened.
+ * The book arrived; it simply named none of the engines this row is defined
+ * for, so there is nothing of it to display and nothing of it to be as of.
+ *
+ * The claim about the cells is exact and holds at EVERY batch: `cellState`
+ * decides the hole before it decides supersession, so an all-hole row's covered
+ * cells read UNANSWERED whatever batch the book carried. (A row covered for no
+ * engine is folded into this set too — it draws no covered cell at all, so the
+ * claim is vacuously true there and the "displays no result" half is the point.)
+ */
+function allHoleClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null || cohort.allHoleScenarioIds.length === 0) return "";
+  return (
+    ` ${String(cohort.allHoleScenarioIds.length)} row(s) were SERVED A BOOK that named none of ` +
+    `the engines their committed definition covers — every covered cell there reads UNANSWERED, ` +
+    `so the row displays no result, pins no batch, and is no part of the sentence above. That is ` +
+    `not a run that ended without a book: the book arrived and named nobody.`
+  );
+}
+
+/**
  * THE FRONTIER READS ITS OWN BATCH (Wave R10, round-18 finding 3).
  *
  * The comparison used to be made against the WATERMARK, which is not displayed
@@ -593,7 +775,7 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
  *
  * The clause order is the reader's order: what this table claims, then what is
  * held but not shown, then what is still out, then what came back empty, then
- * the frontier's separate read.
+ * what came back naming nobody, then the frontier's separate read.
  */
 export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
   return (
@@ -601,6 +783,7 @@ export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | n
     heldPinClause(cohort) +
     inFlightClause(cohort) +
     unansweredClause(cohort) +
+    allHoleClause(cohort) +
     frontierClause(cohort, frontierBatchId)
   );
 }
@@ -609,11 +792,19 @@ export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | n
 // Cell states.
 // ---------------------------------------------------------------------------
 
-/** What a superseded cell was HOLDING when the batch moved out from under it. */
+/**
+ * What a superseded cell was HOLDING when the batch moved out from under it.
+ *
+ * WAVE R11 removed a third member, `{ kind: "absent" }`. SUPERSEDED means "this
+ * cell holds a measurement taken at an older batch"; a cell the run named in
+ * NEITHER array holds nothing, so there was never anything there to supersede —
+ * it is a HOLE, at every batch, and `cellState` decides it as one before it
+ * decides supersession. The rendered cell used to read "SUPERSEDED · no cell
+ * served", which claimed a superseded measurement that did not exist.
+ */
 export type SupersededPayload =
   | { kind: "result"; engine: LabRunBookEngine }
-  | { kind: "withheld"; refusal: EngineRefusal }
-  | { kind: "absent" };
+  | { kind: "withheld"; refusal: EngineRefusal };
 
 /**
  * Every state one cell can be in. The five the ruling names — not run,
@@ -664,14 +855,6 @@ export function unansweredReason(outcome: Exclude<RunBookOutcome, { kind: "ok" }
   }
 }
 
-function payloadFor(response: LabRunBook, engine: string): SupersededPayload {
-  const served = response.engines.find((candidate) => candidate.engine === engine);
-  if (served !== undefined) return { kind: "result", engine: served };
-  const refusal = response.excluded_engines.find((candidate) => candidate.engine === engine);
-  if (refusal !== undefined) return { kind: "withheld", refusal };
-  return { kind: "absent" };
-}
-
 export interface CellStateInput {
   scenario: Pick<ScenarioDefinition, "id" | "engines" | "shocks">;
   engine: string;
@@ -695,13 +878,20 @@ export interface CellStateInput {
  *      why every OLDER row keeps its SUPERSEDED state for the whole in-flight
  *      window (Wave R8).
  *   4. an outcome without a book → unanswered, with the reason named
- *   5. an outcome from an OLDER batch than the cohort anchor → superseded,
- *      carrying whatever it held, and NEVER read alongside the anchor's cells
- *      as one sentence
- *   6. a served engine          → result
- *   7. a refused engine         → withheld, refusal register attached
- *   8. neither                  → unanswered: a hole the surface refuses to
- *      fill with a zero
+ *   5. an outcome naming this engine in NEITHER array → unanswered: a hole the
+ *      surface refuses to fill with a zero. WAVE R11 MOVED THIS AHEAD OF
+ *      SUPERSESSION, and the move is load-bearing twice over. SUPERSEDED means
+ *      "this cell HOLDS a measurement from an older batch"; a cell that was
+ *      never served holds nothing, so there is nothing to supersede and the
+ *      hole is the honest state at EVERY batch. And because an all-hole book no
+ *      longer raises the anchor, such a row can now sit at a batch NEWER than
+ *      the anchor — where the old order would have stamped it "measured at
+ *      batch #5; the matrix now reads #3", calling a newer batch older.
+ *   6. an outcome from a DIFFERENT batch than the cohort anchor → superseded,
+ *      carrying what it actually held, and NEVER read alongside the anchor's
+ *      cells as one sentence
+ *   7. a served engine          → result
+ *   8. a refused engine         → withheld, refusal register attached
  */
 export function cellState(input: CellStateInput): LabCellState {
   const coverage = scenarioCoverage(input.scenario, input.engine);
@@ -717,27 +907,30 @@ export function cellState(input: CellStateInput): LabCellState {
 
   const response = phase.outcome.response;
   const batchId = response.batch.id;
-  if (cohort.anchorBatchId !== null && batchId !== cohort.anchorBatchId) {
-    return {
-      state: "superseded",
-      payload: payloadFor(response, engine),
-      batchId,
-      anchorBatchId: cohort.anchorBatchId,
-    };
-  }
+  const anchorBatchId = cohort.anchorBatchId;
+  const stale = anchorBatchId !== null && batchId !== anchorBatchId;
 
   const served = response.engines.find((candidate) => candidate.engine === engine);
-  if (served !== undefined) return { state: "result", engine: served, batchId };
+  if (served !== undefined) {
+    return stale
+      ? { state: "superseded", payload: { kind: "result", engine: served }, batchId, anchorBatchId }
+      : { state: "result", engine: served, batchId };
+  }
 
   const refusal = response.excluded_engines.find((candidate) => candidate.engine === engine);
-  if (refusal !== undefined) return { state: "withheld", refusal, batchId };
+  if (refusal !== undefined) {
+    return stale
+      ? { state: "superseded", payload: { kind: "withheld", refusal }, batchId, anchorBatchId }
+      : { state: "withheld", refusal, batchId };
+  }
 
   return {
     state: "unanswered",
     reason:
       `the run returned neither a result nor a refusal for ${engine} — the committed ` +
       "definition claims this engine, so its absence is a hole, and this surface will not " +
-      "fill a hole with a zero.",
+      `fill a hole with a zero. The book it served was measured at batch #${String(batchId)}; ` +
+      "this cell is no part of that batch's cohort.",
   };
 }
 

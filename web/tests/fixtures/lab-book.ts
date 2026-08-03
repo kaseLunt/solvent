@@ -42,3 +42,17 @@ export const RUN_BOOK_WEETH_BATCH_1: Schemas["RunBookResponse"] = load(
 
 /** The run-book example @ batch 1 with aave WITHHELD, refusal attached. */
 export const RUN_BOOK_WITHHELD: Schemas["RunBookResponse"] = load("run-book.weeth-withheld.json");
+
+/**
+ * THE 200 THAT NAMES NOBODY (Wave R11) — the run-book example with BOTH engine
+ * arrays empty and the envelope otherwise untouched, batch and full-coverage
+ * claim included.
+ *
+ * It typechecks as a healthy response because it IS one, by the contract's own
+ * schemas: neither `engines` nor `excluded_engines` carries `minItems`, and no
+ * cross-field rule ties either to the scenario's committed `engines[]`. Every
+ * covered cell of the row it answers therefore reads UNANSWERED — which is why
+ * nothing about the row's presentation may be inferred from the envelope.
+ */
+export const RUN_BOOK_NAMES_NOBODY: Schemas["RunBookResponse"] =
+  load("run-book.names-nobody.json");
