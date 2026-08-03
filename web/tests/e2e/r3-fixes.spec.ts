@@ -52,7 +52,7 @@ async function openBookWith(page: Page, positions: unknown, book: unknown = BOOK
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : positions);
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 }
 
 async function mockInspector(page: Page, address: unknown, history: unknown = HISTORY) {
@@ -246,15 +246,18 @@ test("(3) the legend states REACHABILITY, and stops contradicting the covers hov
     "moves this account's collateral",
   );
 
-  // The hover is reason-specific and UNCHANGED — the legend now agrees with it.
+  // The hover is reason-specific and UNCHANGED — the legend now agrees with
+  // it. W-HR-A moved the hover onto the Headroom cell (the price-path column
+  // is struck); the sentence it carries is byte-identical, after the band's
+  // own meaning.
   const cell = page
     .getByRole("table", { name: "positions for aave_v3_etherfi" })
-    .getByText("no price path", { exact: true });
+    .getByTestId("headroom-value");
   await expect(cell).toHaveAttribute(
     "title",
-    "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold — no fall of the shocked asset alone reaches the boundary; interest or " +
-      "parameter changes still can. Wire: 'collateral outside the factor already covers the " +
-      "debt at threshold'.",
+    "5–10% of borrowing capacity left before liquidation Collateral outside the shocked asset already covers the debt at the " +
+      "liquidation threshold — no fall of the shocked asset alone reaches the boundary; " +
+      "interest or parameter changes still can. Wire: 'collateral outside the factor already " +
+      "covers the debt at threshold'.",
   );
 });

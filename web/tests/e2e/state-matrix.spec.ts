@@ -158,13 +158,21 @@ async function runStress(page: Page, addr: string): Promise<void> {
 }
 
 /**
- * DERIVED FIXTURE (provenance): a documented SINGLE-FIELD delta of the landed
+ * DERIVED FIXTURE (provenance): a documented TWO-FIELD delta of the landed
  * `positions-aave-page-1.json` — the same envelope with
- * `batch.supersession.superseded = true`. The wire's own supersession note
- * states a superseded batch is STILL SERVED; no other byte changes.
+ * `batch.supersession.superseded = true`, and `next_cursor = null`. The wire's
+ * own supersession note states a superseded batch is STILL SERVED; no other
+ * byte changes.
+ *
+ * W-HR-A added the `next_cursor` delta: the map's full-book walk now runs on
+ * mount and follows cursors to exhaustion, and this mock answers EVERY request
+ * with the same body. A non-null cursor over a constant response is an endless
+ * walk in the fixture, not in the product — terminating the page is what makes
+ * the mock a book rather than a loop.
  */
 const POSITIONS_AAVE_SUPERSEDED = {
   ...POSITIONS_AAVE_PAGE_1,
+  next_cursor: null,
   batch: {
     ...POSITIONS_AAVE_PAGE_1.batch,
     supersession: { ...POSITIONS_AAVE_PAGE_1.batch.supersession, superseded: true },
@@ -242,7 +250,9 @@ const MATRIX: Cell[] = [
       // Engines never blend: no cross-engine sum in any unit.
       await expect(page.locator("body")).not.toContainText("12,200");
       // Every chart states its as-of: the risk map declares its own batch.
-      await expect(page.getByTestId("risk-map-as-of")).toContainText("as-of batch #1");
+      // W-HR-A: the map walks the whole book by itself, so its as-of rides the
+      // completed-walk head rather than a partial-view label.
+      await expect(page.getByTestId("risk-map-full-head")).toContainText("as-of batch #1");
       // Severity is color AND form: the wad panel's eligible buckets carry
       // the filled-square form cue (2 sub-1.00 buckets in the fixture).
       await expect(page.getByTestId("hist-eligible-mark")).toHaveCount(2);
@@ -329,15 +339,21 @@ const MATRIX: Cell[] = [
   {
     surface: "book",
     state: "degraded:batch-superseded-409",
-    path: "/book",
+    // W-HR-A moved the default engine to debt_manager; this case is written
+    // against the aave pages, so it names its engine.
+    path: "/book?engine=aave_v3_etherfi",
     mock: async (page) => {
       await muteStream(page);
       await page.route("**/v1/book", (route) => fulfillJson(route, BOOK));
       let cursorRequests = 0;
       await page.route("**/v1/positions*", (route) => {
         const url = new URL(route.request().url());
+        // The map's hoisted full-book walk shares this endpoint and sends no
+        // `sort`; only the TABLE's continuation carries the 409 under test.
+        const isTable = url.searchParams.get("sort") !== null;
         if (url.searchParams.get("cursor") === null)
           return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+        if (!isTable) return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
         // First cursor presentation answers 409; the restarted walk's cursor
         // is honored (the W-UX-C sentinel drives both without a click).
         cursorRequests += 1;
@@ -380,7 +396,7 @@ const MATRIX: Cell[] = [
       // under the dust step (refused rows are never dust) and stays in every
       // denominator.
       await expect(page.getByTestId("positions-accounting")).toHaveText(
-        "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort liq_distance ▲",
+        "2 loaded of 2 qualifying (dust <1) · 0 hidden below step · 2 on book · sort headroom ▲",
       );
     },
   },
@@ -399,7 +415,7 @@ const MATRIX: Cell[] = [
       // The supersession flag is the CONTRACT: still served, visibly so —
       // in the table foot AND on the chart's own as-of.
       await expect(page.getByText("SUPERSEDED (still served)").first()).toBeVisible();
-      await expect(page.getByTestId("risk-map-as-of")).toContainText(
+      await expect(page.getByTestId("risk-map-full-head")).toContainText(
         "SUPERSEDED (still served)",
       );
     },

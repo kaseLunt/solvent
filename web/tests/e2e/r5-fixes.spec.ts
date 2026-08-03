@@ -156,7 +156,7 @@ test("(1) THE ROUND-12 DEFECT: a NEW receipt at the SAME age_seconds re-anchors"
     await fulfillJson(route, second);
   });
   await routePositions(page);
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 2m ago");
@@ -203,7 +203,7 @@ test("(1) the SAME receipt re-delivered does NOT re-anchor — the age never sna
     return fulfillJson(route, only);
   });
   await routePositions(page);
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 2m ago");
@@ -245,7 +245,7 @@ test("(2) THE ROUND-12 DEFECT: a paused monotonic clock AND a backward wall step
     return fulfillJson(route, bookCalls === 1 ? first : truth);
   });
   await routePositions(page);
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 2m ago");
@@ -285,7 +285,7 @@ test("(2) hidden→visible reconciles on sub-threshold deltas; a BARE focus does
     return fulfillJson(route, bookCalls === 1 ? bookTwoMinutesOld() : nextBatchAlsoTwoMinutesOld());
   });
   await routePositions(page);
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 2m ago");
@@ -332,7 +332,7 @@ test("(2) the full lifecycle burst under TWO blind clocks is still ONE re-fetch"
     return fulfillJson(route, bookCalls === 1 ? bookTwoMinutesOld() : nextBatchAlsoTwoMinutesOld());
   });
   await routePositions(page);
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 2m ago");

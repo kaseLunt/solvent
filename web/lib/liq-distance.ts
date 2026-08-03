@@ -111,11 +111,62 @@ export function noPricePathTitle(reason: string | null | undefined): string {
  * claiming anything about any of them, and it points the reader at the hover
  * rather than pre-empting it. The HF column stays the verdict.
  */
-export const NO_PRICE_PATH_LEGEND =
+/**
+ * WAVE W-HR-A. The price-path statement is no longer a COLUMN — Headroom took
+ * that slot — so this legend now explains a hover rather than a cell. Its
+ * words are unchanged up to the final clause, which names WHICH surviving
+ * element carries the verdict, and that differs per engine now that the Debt
+ * Manager's HF disclosure column is struck. The body is stated once so the two
+ * arms can never drift.
+ */
+const NO_PRICE_PATH_LEGEND_BODY =
   "no price path = no downward move along the committed price axis reaches liquidation for " +
   "this account — non-price paths are not evaluated here; each cell's hover names its " +
-  "reason. The HF column stays the verdict.";
+  "reason. ";
 
-/** The Liq. distance column header's own title attribute. */
+export const NO_PRICE_PATH_LEGEND = `${NO_PRICE_PATH_LEGEND_BODY}The HF column stays the verdict.`;
+
+/** The arm for an engine with no HF column (the Debt Manager, W-HR-A). */
+export const NO_PRICE_PATH_LEGEND_NO_HF_COLUMN = `${NO_PRICE_PATH_LEGEND_BODY}The engine's own liquidatable verdict stays the verdict.`;
+
+/**
+ * The legend for one engine. Aave still renders a Health factor column, so
+ * its legend still points at it; the Debt Manager's disclosure column is gone
+ * and pointing at it would be a reference to something not on screen.
+ */
+export function noPricePathLegendFor(engine: string): string {
+  return engine === "debt_manager" ? NO_PRICE_PATH_LEGEND_NO_HF_COLUMN : NO_PRICE_PATH_LEGEND;
+}
+
+/** The Liq. distance column header's own title attribute (the struck column). */
 export const LIQ_DISTANCE_HEADER_TITLE =
   "how far the named asset's price must fall to cross this engine's boundary — price axis only.";
+
+/**
+ * The DEMOTED price-path statement, as one hover sentence (W-HR-A). The
+ * tagged union that used to be the Liq. distance column now rides the
+ * Headroom cell's title: the reason still renders, verbatim, and a refusal is
+ * still named — it simply stops being the headline.
+ *
+ * Returns null when the row carries no price-path statement worth demoting
+ * (a live distance under a healthy solve says nothing the Headroom column
+ * does not already say better).
+ */
+export function pricePathDetail(
+  kind: "distance" | "breached" | "never" | "none",
+  reason: string | null,
+  assetLabel: string | null,
+  display: string | null,
+): string | null {
+  if (kind === "never") return noPricePathTitle(reason);
+  if (kind === "none") {
+    return reason === null
+      ? "Price path: no factor-level solve was published for this account."
+      : `Price path: no factor-level solve was published for this account. Wire: '${reason}'.`;
+  }
+  if (kind === "distance" && display !== null) {
+    const asset = assetLabel === null ? "the committed price axis" : assetLabel;
+    return `Price path: ${asset} must move ${display} to reach this engine's boundary.`;
+  }
+  return null;
+}

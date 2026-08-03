@@ -3,6 +3,18 @@
 // never fork. Tests pin every string independently — a reword here fails the
 // suite, which is the point.
 
+/**
+ * W-HR-A — the risk map's dek. It names the two axes in reader words and the
+ * marginal that makes the grid readable; it does NOT name a scatter, because
+ * there is no longer a scatter and a dek that describes a dead register is a
+ * lie with good intentions.
+ */
+export const RISK_MAP_DEK =
+  "Where the book's debt sits by headroom — the share of borrowing capacity each account has " +
+  "left before liquidation. Rows are headroom bands, columns are debt size, and the right " +
+  "margin carries each band's exact Σ debt: a band of twelve accounts can outweigh a band of " +
+  "twelve thousand.";
+
 /** §18 — the waterfall section note, verbatim. */
 export const WATERFALL_SECTION_NOTE =
   "If the shocked asset fell step by step, how much debt could the engine liquidate — and " +

@@ -1,13 +1,18 @@
 // Per-engine sort vocabulary, the deep-link normalizer, and the page-fetch
-// failure taxonomy (design ruling, W-UX-B parts 9–11).
+// failure taxonomy (design ruling, W-UX-B parts 9–11; sort vocabulary
+// extended by W-HR-A).
 //
 // Laws under test:
-//   - SORTS_BY_ENGINE: the DM never OFFERS hf; aave keeps the full contract
-//     enum; the flat POSITIONS_SORTS export survives for compatibility.
-//   - POSITIONS_SORT_DIRECTIONS names each sort's one canonical direction.
-//   - normalizePositionsQuery: unknown enum values fall to defaults; the
-//     doomed pair (debt_manager, hf) remaps to the contract default
-//     liq_distance and SAYS SO — before any request could fire.
+//   - SORTS_BY_ENGINE (the WIRE vocabulary, contract-verbatim): the DM never
+//     OFFERS hf; aave keeps the full contract enum. Untouched by W-HR-A —
+//     this wave does not amend the contract.
+//   - BOOK_SORTS (the UI's column vocabulary): headroom / debt / status, and
+//     `headroom` resolves per engine onto an EXISTING wire key.
+//   - POSITIONS_SORT_DIRECTIONS names each wire sort's canonical direction;
+//     BOOK_SORT_DIRECTIONS does the same for the columns.
+//   - normalizeBookQuery: unknown values fall to defaults; the legacy wire
+//     sorts alias onto their column; the doomed pair (debt_manager, hf) is
+//     acknowledged — before any request could fire.
 //   - classifyPositionsFailure: a 4xx (except 429) is a REFUSAL — retrying
 //     the identical request cannot succeed; 429/503 refuse naming the
 //     server's own retry instruction; network/500/malformed keep the
@@ -24,8 +29,14 @@ import {
   UnavailableError,
 } from "@solvent/client";
 import {
+  bookSortWireKey,
+  BOOK_SORTS,
+  BOOK_SORTS_BY_ENGINE,
+  BOOK_SORT_DIRECTIONS,
   classifyPositionsFailure,
-  normalizePositionsQuery,
+  DEFAULT_BOOK_ENGINE,
+  DEFAULT_BOOK_SORT,
+  normalizeBookQuery,
   POSITIONS_SORTS,
   POSITIONS_SORT_DIRECTIONS,
   SORT_HF_REMAP_ACK,
@@ -62,51 +73,111 @@ test.describe("SORTS_BY_ENGINE — the per-engine sort vocabulary", () => {
   });
 });
 
-test.describe("normalizePositionsQuery — ONE normalizer before the first fetch", () => {
-  test("absent params are the defaults — nothing rewritten", () => {
-    expect(normalizePositionsQuery(null, null)).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "liq_distance",
+test.describe("BOOK_SORTS — the UI column vocabulary (W-HR-A)", () => {
+  test("the columns are headroom / debt / status, and BOTH engines rank by all three", () => {
+    expect(BOOK_SORTS).toEqual(["headroom", "debt", "status"]);
+    expect(BOOK_SORTS_BY_ENGINE.aave_v3_etherfi).toEqual(["headroom", "debt", "status"]);
+    expect(BOOK_SORTS_BY_ENGINE.debt_manager).toEqual(["headroom", "debt", "status"]);
+  });
+
+  test("headroom is asc (least headroom first); the other directions are unchanged", () => {
+    expect(BOOK_SORT_DIRECTIONS).toEqual({
+      headroom: "asc",
+      debt: "desc",
+      status: "refused-first",
+    });
+  });
+
+  test("headroom resolves onto each engine's OWN existing wire key", () => {
+    // Aave: hf. headroom = 1 − 1/HF is strictly increasing in HF, so hf-asc
+    // IS headroom-asc, exactly.
+    expect(bookSortWireKey("aave_v3_etherfi", "headroom")).toBe("hf");
+    // DM: the server's USD-headroom key. KNOWN INTERIM LIMIT — that key ranks
+    // by absolute USD headroom while the column prints a ratio, so DM order
+    // is not strictly monotonic in the displayed percent until 1.5.0.
+    expect(bookSortWireKey("debt_manager", "headroom")).toBe("liq_distance");
+    // Every other column is its own wire key on both engines.
+    expect(bookSortWireKey("aave_v3_etherfi", "debt")).toBe("debt");
+    expect(bookSortWireKey("debt_manager", "debt")).toBe("debt");
+    expect(bookSortWireKey("debt_manager", "status")).toBe("status");
+  });
+
+  test("the doomed (debt_manager, hf) request can no longer be COMPOSED at all", () => {
+    for (const sort of BOOK_SORTS) {
+      expect(bookSortWireKey("debt_manager", sort)).not.toBe("hf");
+    }
+  });
+});
+
+test.describe("normalizeBookQuery — ONE normalizer before the first fetch", () => {
+  test("absent params are the defaults — debt_manager + headroom, nothing rewritten", () => {
+    expect(DEFAULT_BOOK_ENGINE).toBe("debt_manager");
+    expect(DEFAULT_BOOK_SORT).toBe("headroom");
+    expect(normalizeBookQuery(null, null, null)).toEqual({
+      engine: "debt_manager",
+      sort: "headroom",
+      reversed: false,
       hfRemapped: false,
       rewritten: false,
     });
   });
 
   test("valid pairs pass through untouched", () => {
-    expect(normalizePositionsQuery("debt_manager", "debt")).toEqual({
+    expect(normalizeBookQuery("debt_manager", "debt", null)).toEqual({
       engine: "debt_manager",
       sort: "debt",
+      reversed: false,
       hfRemapped: false,
       rewritten: false,
     });
-    expect(normalizePositionsQuery("aave_v3_etherfi", "hf")).toEqual({
+    expect(normalizeBookQuery("aave_v3_etherfi", "headroom", null)).toEqual({
       engine: "aave_v3_etherfi",
-      sort: "hf",
+      sort: "headroom",
+      reversed: false,
       hfRemapped: false,
       rewritten: false,
     });
   });
 
-  test("the doomed pair remaps to the contract default and says so", () => {
-    expect(normalizePositionsQuery("debt_manager", "hf")).toEqual({
+  test("the legacy wire sorts ALIAS onto the Headroom column — the ranking survives, the token is rewritten", () => {
+    // A bookmarked ?sort=hf asked for "rank by how close to the boundary".
+    // That ranking is the Headroom column; the param is rewritten, never
+    // silently honored under a name the table no longer uses.
+    expect(normalizeBookQuery("aave_v3_etherfi", "hf", null)).toEqual({
+      engine: "aave_v3_etherfi",
+      sort: "headroom",
+      reversed: false,
+      hfRemapped: false,
+      rewritten: true,
+    });
+    expect(normalizeBookQuery("aave_v3_etherfi", "liq_distance", null)).toEqual({
+      engine: "aave_v3_etherfi",
+      sort: "headroom",
+      reversed: false,
+      hfRemapped: false,
+      rewritten: true,
+    });
+  });
+
+  test("the doomed pair is still acknowledged, and its request is never composed", () => {
+    const normalized = normalizeBookQuery("debt_manager", "hf", null);
+    expect(normalized).toEqual({
       engine: "debt_manager",
-      sort: "liq_distance",
+      sort: "headroom",
+      reversed: false,
       hfRemapped: true,
       rewritten: true,
     });
+    // The acknowledgment's sentence remains literally true: headroom on the
+    // DM IS the wire's liq_distance key.
+    expect(bookSortWireKey(normalized.engine, normalized.sort)).toBe("liq_distance");
   });
 
-  test("unknown enum values fall to defaults and are rewritten", () => {
-    expect(normalizePositionsQuery("bogus_engine", "bogus_sort")).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "liq_distance",
-      hfRemapped: false,
-      rewritten: true,
-    });
-    // An unknown engine defaults to aave, for which hf IS defined — kept.
-    expect(normalizePositionsQuery("bogus_engine", "hf")).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "hf",
+  test("unknown values fall to defaults and are rewritten", () => {
+    expect(normalizeBookQuery("bogus_engine", "bogus_sort", null)).toEqual({
+      engine: "debt_manager",
+      sort: "headroom",
+      reversed: false,
       hfRemapped: false,
       rewritten: true,
     });

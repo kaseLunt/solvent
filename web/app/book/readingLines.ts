@@ -18,9 +18,11 @@ import {
   type BadDebt,
   type EngineHistogram,
 } from "@solvent/client";
-import { groupDecimalString } from "../../lib/book-format";
+import { groupDecimalString, renderEngineAmount } from "../../lib/book-format";
 import { EM_DASH } from "../../lib/format";
+import { WARN_HEADROOM_PCT } from "../../lib/headroom";
 import { ALL_DUST_SUFFIX, sumProvablyDust } from "./dust";
+import type { RiskBinsResult } from "./riskBins";
 
 function usd(value: string, decimals: number): string {
   return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
@@ -81,6 +83,43 @@ export function histogramReadingLine(
     "What this shows: how many accounts sit at each borrow-headroom ratio — a disclosure, " +
     `not the engine's trigger. The engine's own verdict counts ${m} of ${computed} ` +
     `liquidatable — ${eligibleDebtFragment(badDebt)}.`
+  );
+}
+
+/**
+ * The RISK MAP's reading line (W-HR-A) — COMPUTED from the same bin result
+ * the grid renders, never asserted.
+ *
+ * It answers the one question the grid's shape cannot: how much DEBT sits
+ * inside the warn edge. Counts and areas are the map's own language; the Σ is
+ * the reason anyone looks. The aside is stated in the same sentence so the
+ * denominator can never be read as the whole book when it is not.
+ */
+export function riskMapReadingLine(result: RiskBinsResult): string {
+  let count = 0;
+  let debt = 0n;
+  for (const marginal of result.bandTotals) {
+    // Bands 0…3 are breached / 0–2 / 2–5 / 5–10 — everything strictly inside
+    // the warn edge. The edge itself lives in lib/headroom; this loop derives
+    // its membership from the band vocabulary rather than restating it.
+    if (marginal.band <= 3) {
+      count += marginal.count;
+      debt += marginal.debt;
+    }
+  }
+  const plotted = result.total - result.aside.total;
+  const asideClause =
+    result.aside.total === 0
+      ? "every walked row is plotted"
+      : `${String(result.aside.total)} of ${String(result.total)} walked rows are counted aside, ` +
+        "not plotted";
+  return (
+    `What this shows: where the book's debt sits by headroom. ${String(count)} of ` +
+    `${String(plotted)} plotted accounts have less than ${String(WARN_HEADROOM_PCT)}% of their ` +
+    `borrowing capacity left — Σ debt ${renderEngineAmount(
+      debt.toString(),
+      result.decimals,
+    )} in the engine's own unit. ${asideClause}.`
   );
 }
 

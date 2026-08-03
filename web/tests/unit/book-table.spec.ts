@@ -42,7 +42,7 @@ import {
 } from "../../app/book/dust";
 import {
   canonicalWireDir,
-  normalizeBookTableQuery,
+  normalizeBookQuery,
   normalizeDirParam,
   reversedWireDir,
 } from "../../lib/positions";
@@ -135,14 +135,14 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
       "120 loaded of 300 qualifying (dust <1) · 45 hidden below step · 345 on book · sort debt ▼",
     );
     // A degraded hidden count renders NOTHING in its slot — never a zero.
-    expect(footerAccountingDust(0, "—", "1", "", "—", "liq_distance ▲")).toBe(
-      "0 loaded of — qualifying (dust <1) · — on book · sort liq_distance ▲",
+    expect(footerAccountingDust(0, "—", "1", "", "—", "headroom ▲")).toBe(
+      "0 loaded of — qualifying (dust <1) · — on book · sort headroom ▲",
     );
   });
 
   test("footer accounting, dust off", () => {
-    expect(footerAccountingOff(2, "2", "2", "liq_distance ▲")).toBe(
-      "2 of 2 rows · 2 on book · sort liq_distance ▲",
+    expect(footerAccountingOff(2, "2", "2", "headroom ▲")).toBe(
+      "2 of 2 rows · 2 on book · sort headroom ▲",
     );
   });
 
@@ -234,9 +234,9 @@ test.describe("normalizeDirParam — the two-state direction, never a doomed req
   });
 });
 
-test.describe("normalizeBookTableQuery — the composed decision, orphaned dirs dropped", () => {
+test.describe("normalizeBookQuery — the composed decision, orphaned dirs dropped", () => {
   test("a legal reversal under a surviving sort is kept", () => {
-    expect(normalizeBookTableQuery("debt_manager", "debt", "asc")).toEqual({
+    expect(normalizeBookQuery("debt_manager", "debt", "asc")).toEqual({
       engine: "debt_manager",
       sort: "debt",
       hfRemapped: false,
@@ -246,19 +246,19 @@ test.describe("normalizeBookTableQuery — the composed decision, orphaned dirs 
   });
 
   test("a dir with NO sort param reverses the DEFAULT sort — it says what it means", () => {
-    expect(normalizeBookTableQuery(null, null, "desc")).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "liq_distance",
+    expect(normalizeBookQuery(null, null, "desc")).toEqual({
+      engine: "debt_manager",
+      sort: "headroom",
       hfRemapped: false,
       rewritten: false,
       reversed: true,
     });
   });
 
-  test("a dir under the REMAPPED (debt_manager, hf) pair is ORPHANED — dropped, never reinterpreted", () => {
-    expect(normalizeBookTableQuery("debt_manager", "hf", "desc")).toEqual({
+  test("a dir under the ALIASED (debt_manager, hf) pair is ORPHANED — dropped, never reinterpreted", () => {
+    expect(normalizeBookQuery("debt_manager", "hf", "desc")).toEqual({
       engine: "debt_manager",
-      sort: "liq_distance",
+      sort: "headroom",
       hfRemapped: true,
       rewritten: true,
       reversed: false,
@@ -266,9 +266,9 @@ test.describe("normalizeBookTableQuery — the composed decision, orphaned dirs 
   });
 
   test("a dir under an unknown sort is orphaned too", () => {
-    expect(normalizeBookTableQuery(null, "bogus_sort", "desc")).toEqual({
-      engine: "aave_v3_etherfi",
-      sort: "liq_distance",
+    expect(normalizeBookQuery(null, "bogus_sort", "desc")).toEqual({
+      engine: "debt_manager",
+      sort: "headroom",
       hfRemapped: false,
       rewritten: true,
       reversed: false,
@@ -277,9 +277,10 @@ test.describe("normalizeBookTableQuery — the composed decision, orphaned dirs 
 });
 
 test.describe("wire directions — canonical and reversed, from the sort vocabulary", () => {
-  test("canonical: liq_distance/hf asc, debt desc, status none", () => {
+  test("canonical: liq_distance/hf/headroom asc, debt desc, status none", () => {
     expect(canonicalWireDir("liq_distance")).toBe("asc");
     expect(canonicalWireDir("hf")).toBe("asc");
+    expect(canonicalWireDir("headroom")).toBe("asc");
     expect(canonicalWireDir("debt")).toBe("desc");
     expect(canonicalWireDir("status")).toBeNull();
   });
@@ -287,6 +288,7 @@ test.describe("wire directions — canonical and reversed, from the sort vocabul
   test("reversed is the exact flip; status stays direction-free", () => {
     expect(reversedWireDir("liq_distance")).toBe("desc");
     expect(reversedWireDir("hf")).toBe("desc");
+    expect(reversedWireDir("headroom")).toBe("desc");
     expect(reversedWireDir("debt")).toBe("asc");
     expect(reversedWireDir("status")).toBeNull();
   });

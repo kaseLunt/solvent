@@ -28,6 +28,13 @@ import {
 // specs under Playwright's transpiler as well as by Next.
 import type { Mark } from "../../components/MarksStamp";
 import { factorDistancePercent, hfDisplayFromRatio, hfDisplayFromWad } from "../../lib/book-format";
+import {
+  headroomBand,
+  headroomBelowWarn,
+  headroomBreached,
+  headroomPercent,
+  HEADROOM_BREACHED_BAND,
+} from "../../lib/headroom";
 
 export interface RowHF {
   /** Exact-derived display string ("1.043"), or null when none is published. */
@@ -46,6 +53,33 @@ export type RowLiqDistance =
   | { kind: "never"; reason: string | null }
   | { kind: "none"; reason: string | null };
 
+/**
+ * The row's HEADROOM (Wave W-HR-A) — the share of borrowing capacity still
+ * unused before liquidation, derived in EXACT bigint from the engine's own
+ * health-factor num/den (see lib/headroom).
+ *
+ * Three arms, and the two non-numeric ones exist precisely so an unknowable
+ * can never arrive at a cell as a zero:
+ *   - `headroom` — a derived ratio, with its floored display, its band, and
+ *     the two presentation predicates;
+ *   - `no-debt`  — the HF is infinite: there IS no boundary, so there is no
+ *     headroom FROM one. Not 100%, not "safest";
+ *   - `unknown`  — refused, or no usable threshold/debt pair was published.
+ */
+export type RowHeadroom =
+  | {
+      kind: "headroom";
+      /** Floored percent, one fraction digit ("7.4%"). Null only when the ratio is undefined but the breach predicate holds. */
+      display: string | null;
+      /** Index into lib/headroom's HEADROOM_BANDS. */
+      band: number;
+      breached: boolean;
+      /** Presentation band only (< WARN_HEADROOM_PCT) — never a verdict. */
+      belowWarn: boolean;
+    }
+  | { kind: "no-debt" }
+  | { kind: "unknown"; reason: string | null };
+
 export interface PositionRow {
   engine: string;
   account: string;
@@ -63,6 +97,8 @@ export interface PositionRow {
     decimals: number;
   };
   liqDistance: RowLiqDistance;
+  /** The Book table's headline distance (W-HR-A). See RowHeadroom. */
+  headroom: RowHeadroom;
   /** B/P(/S) blocks in the mockup's marks grammar. */
   marks: Mark[];
   flags: string[];
@@ -124,6 +160,49 @@ function rowLiqDistance(
   return { kind: "distance", display, assetLabel: ld.factor_symbol ?? null };
 }
 
+/**
+ * The row's headroom, from the engine's OWN health-factor pair.
+ *
+ * ONE arithmetic for both books (lib/headroom carries the derivation): the
+ * Debt Manager's `num/den` IS maxBorrowLT/borrowings, and Aave's wad against
+ * 1e18 is the same ratio at the chain's own scale. The wad is preferred where
+ * present because the wad is what the pool compares.
+ *
+ * The engine's sealed verdict stays authoritative for the breached band — the
+ * same cross-check `rowLiqDistance` applies: a liquidatable verdict folds the
+ * row onto the breached band whatever the published ratio rounds to.
+ */
+function rowHeadroom(
+  position: RefinedPositionSummary,
+  verdict: LiquidationVerdict,
+): RowHeadroom {
+  if (position.status === "refused") {
+    return { kind: "unknown", reason: position.refusal?.code ?? null };
+  }
+  const hf = position.health_factor;
+  if (hf === null) return { kind: "unknown", reason: null };
+  if (hf.infinite) return { kind: "no-debt" };
+
+  let pair: { num: bigint; den: bigint } | null = null;
+  if (hf.wad !== null) {
+    pair = { num: parseDecimal(hf.wad), den: 10n ** 18n };
+  } else {
+    pair = healthFactorRatio(hf);
+  }
+  if (pair === null) return { kind: "unknown", reason: null };
+
+  const band = headroomBand(pair.num, pair.den);
+  if (band === null) return { kind: "unknown", reason: null };
+  const breached = band === HEADROOM_BREACHED_BAND || headroomBreached(pair.num, pair.den) || verdict === "liquidatable";
+  return {
+    kind: "headroom",
+    display: headroomPercent(pair.num, pair.den),
+    band: breached ? HEADROOM_BREACHED_BAND : band,
+    breached,
+    belowWarn: headroomBelowWarn(pair.num, pair.den),
+  };
+}
+
 function rowMarks(position: RefinedPositionSummary): Mark[] {
   const marks: Mark[] = [
     { letter: "B", block: position.balances_block },
@@ -155,6 +234,7 @@ export function toPositionRow(position: RefinedPositionSummary): PositionRow {
       decimals: position.value_decimals,
     },
     liqDistance: rowLiqDistance(position, verdict),
+    headroom: rowHeadroom(position, verdict),
     marks: rowMarks(position),
     flags: position.flags,
   };

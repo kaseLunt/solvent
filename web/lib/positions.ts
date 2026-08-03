@@ -35,6 +35,14 @@ export { BatchSupersededError };
 export const POSITIONS_ENGINES = ["aave_v3_etherfi", "debt_manager"] as const;
 export type PositionsEngine = (typeof POSITIONS_ENGINES)[number];
 
+/**
+ * The Book surfaces' default engine (owner directive, W-HR-A):
+ * `debt_manager`. The contract has no default engine — `engine` is REQUIRED —
+ * so this is a UI choice and lives here, named, rather than as a literal
+ * sprinkled through the components.
+ */
+export const DEFAULT_BOOK_ENGINE: PositionsEngine = "debt_manager";
+
 /** The sort enum, verbatim from the contract. Default: `liq_distance`. */
 export const POSITIONS_SORTS = ["liq_distance", "debt", "hf", "status"] as const;
 export type PositionsSort = (typeof POSITIONS_SORTS)[number];
@@ -60,6 +68,73 @@ export const POSITIONS_SORT_DIRECTIONS: Record<PositionsSort, PositionsSortDirec
   status: "refused-first",
 };
 
+// ---------------------------------------------------------------------------
+// THE BOOK TABLE's OWN SORT VOCABULARY (Wave W-HR-A).
+// ---------------------------------------------------------------------------
+
+/**
+ * The columns the Book table ranks by. `headroom` is a UI key with NO wire
+ * twin: the service publishes no ratio ORDER BY, so each engine maps headroom
+ * onto the existing wire key that ranks the same quantity.
+ *
+ * The wire vocabulary above is untouched (it is the contract's enum, verbatim
+ * — this wave does not amend the contract).
+ */
+export const BOOK_SORTS = ["headroom", "debt", "status"] as const;
+export type BookSort = (typeof BOOK_SORTS)[number];
+
+/** The Book table's default ranking: least headroom first. */
+export const DEFAULT_BOOK_SORT: BookSort = "headroom";
+
+/**
+ * Both engines rank by all three: unlike `hf`, `headroom` is DEFINED for the
+ * Debt Manager (its num/den IS maxBorrowLT/borrowings), so the Book table no
+ * longer has a per-engine hole in its column vocabulary.
+ */
+export const BOOK_SORTS_BY_ENGINE: Record<PositionsEngine, readonly BookSort[]> = {
+  aave_v3_etherfi: ["headroom", "debt", "status"],
+  debt_manager: ["headroom", "debt", "status"],
+};
+
+export const BOOK_SORT_DIRECTIONS: Record<BookSort, PositionsSortDirection> = {
+  headroom: "asc",
+  debt: "desc",
+  status: "refused-first",
+};
+
+/**
+ * headroom → the engine's OWN existing wire key.
+ *
+ *   aave_v3_etherfi → `hf`          (asc = lowest HF = least headroom first;
+ *                                    headroom = 1 − 1/HF is strictly
+ *                                    increasing in HF, so hf-asc IS
+ *                                    headroom-asc, exactly)
+ *   debt_manager    → `liq_distance` (the server's USD-headroom key)
+ *
+ * KNOWN INTERIM LIMIT — DEBT MANAGER ORDERING IS NOT STRICTLY MONOTONIC IN
+ * THE DISPLAYED COLUMN. The DM wire key ranks by ABSOLUTE USD headroom
+ * (maxBorrowLT − borrowings, a dollar amount) while the column displays a
+ * RATIO ((maxBorrowLT − borrowings) / maxBorrowLT). Those agree only at equal
+ * capacity: a $1M account with $50k of room outranks a $10k account with $2k
+ * of room on the wire, and the ratios say the opposite (5% vs 20%). So DM
+ * rows are ordered by the right IDEA and can appear out of order against the
+ * printed percent. The true ratio ORDER BY lands with contract 1.5.0 in Part
+ * B; nothing in this wave touches the Go server, the openapi contract, or
+ * packages/client-ts to fake it in the meantime.
+ */
+export function bookSortWireKey(engine: PositionsEngine, sort: BookSort): PositionsSort {
+  if (sort !== "headroom") return sort;
+  return engine === "aave_v3_etherfi" ? "hf" : "liq_distance";
+}
+
+/** Every sort key either vocabulary can name — the direction lookups accept both. */
+export type AnySort = PositionsSort | BookSort;
+
+const SORT_DIRECTIONS: Record<AnySort, PositionsSortDirection> = {
+  ...POSITIONS_SORT_DIRECTIONS,
+  ...BOOK_SORT_DIRECTIONS,
+};
+
 /** The contract's `dir` enum re-exported beside the sort vocabulary. */
 export type { PositionsDir };
 
@@ -69,13 +144,13 @@ export type { PositionsDir };
  * asc/desc form — refused-first IS its canonical ranking — so it maps to
  * null.
  */
-export function canonicalWireDir(sort: PositionsSort): PositionsDir | null {
-  const direction = POSITIONS_SORT_DIRECTIONS[sort];
+export function canonicalWireDir(sort: AnySort): PositionsDir | null {
+  const direction = SORT_DIRECTIONS[sort];
   return direction === "refused-first" ? null : direction;
 }
 
 /** The exact flip of the canonical direction — the ONLY dir the UI ever sends. */
-export function reversedWireDir(sort: PositionsSort): PositionsDir | null {
+export function reversedWireDir(sort: AnySort): PositionsDir | null {
   const canonical = canonicalWireDir(sort);
   if (canonical === null) return null;
   return canonical === "asc" ? "desc" : "asc";
@@ -92,7 +167,7 @@ export function reversedWireDir(sort: PositionsSort): PositionsDir | null {
  */
 export function normalizeDirParam(
   rawDir: string | null,
-  sort: PositionsSort,
+  sort: AnySort,
 ): { reversed: boolean; rewritten: boolean } {
   if (rawDir === null) return { reversed: false, rewritten: false };
   if (rawDir !== "asc" && rawDir !== "desc") return { reversed: false, rewritten: true };
@@ -102,48 +177,24 @@ export function normalizeDirParam(
   return { reversed: true, rewritten: false };
 }
 
-/** `normalizePositionsQuery` + the dir extension, composed as ONE decision. */
-export interface NormalizedBookTableQuery extends NormalizedPositionsQuery {
-  /** True when the deep link legally reverses the FINAL sort's canonical direction. */
-  reversed: boolean;
-}
-
 /**
- * The engine/sort/dir normalization the Book table runs before its first
- * fetch. One composition rule beyond the parts: a `dir` that arrived UNDER A
- * SORT THAT HAD TO CHANGE (the doomed DM/hf remap, or an unknown sort
- * falling to the default) is ORPHANED — it described a different ranking
- * axis, and dropping it is honest where reinterpreting it against the
- * fallback sort would invent an ordering nobody asked for. A dir with NO
- * sort param stays live: it reverses the default sort, which is exactly
- * what it says.
- */
-export function normalizeBookTableQuery(
-  rawEngine: string | null,
-  rawSort: string | null,
-  rawDir: string | null,
-): NormalizedBookTableQuery {
-  const base = normalizePositionsQuery(rawEngine, rawSort);
-  const sortSurvived = rawSort === null || rawSort === base.sort;
-  const dir = sortSurvived
-    ? normalizeDirParam(rawDir, base.sort)
-    : { reversed: false, rewritten: rawDir !== null };
-  return { ...base, reversed: dir.reversed, rewritten: base.rewritten || dir.rewritten };
-}
-
-/**
- * The static acknowledgment rendered when sort `hf` is remapped for the DM —
- * the ruling's copy VERBATIM. A dim line in the controls region, NOT a toast
- * and NOT the loud notice slot (that register is reserved for supersession).
+ * The static acknowledgment rendered when a deep link's sort `hf` is remapped
+ * for the DM — the ruling's copy VERBATIM (W-UX-B). It survives W-HR-A intact
+ * and STAYS TRUE: `headroom` on the Debt Manager IS the wire's `liq_distance`
+ * key, so a `?engine=debt_manager&sort=hf` link still lands exactly where this
+ * sentence says it lands. A dim line in the controls region, NOT a toast and
+ * NOT the loud notice slot (that register is reserved for supersession).
  */
 export const SORT_HF_REMAP_ACK =
   'sort "hf" is not defined for debt_manager — reset to liq_distance. The Debt Manager ' +
   "publishes a strict liquidatable boolean, not a health factor.";
 
-/** What `normalizePositionsQuery` decided, and whether it had to intervene. */
-export interface NormalizedPositionsQuery {
+/** What `normalizeBookQuery` decided, and whether it had to intervene. */
+export interface NormalizedBookQuery {
   engine: PositionsEngine;
-  sort: PositionsSort;
+  sort: BookSort;
+  /** True when the deep link legally reverses the FINAL sort's canonical direction. */
+  reversed: boolean;
   /** True when the doomed (debt_manager, hf) pair was remapped — render the acknowledgment. */
   hfRemapped: boolean;
   /** True when any PRESENT param had to change — mirror the fix into the URL (history.replaceState). */
@@ -151,28 +202,59 @@ export interface NormalizedPositionsQuery {
 }
 
 /**
- * THE one normalizer deep-link state passes through before the first fetch
- * (design ruling, W-UX-B part 10): unknown enum values fall to the contract
- * defaults, and `engine=debt_manager&sort=hf` remaps to `liq_distance` so the
- * request the API would honestly refuse is NEVER composed.
+ * The wire sort keys a PRE-W-HR-A deep link may still carry, and the Book
+ * column they name today. These are ALIASES, not a second vocabulary: a
+ * bookmarked `?sort=hf` described "rank by how close to the boundary", and
+ * that ranking still exists — it is the Headroom column. The param is
+ * rewritten to the current token rather than silently honored under an old
+ * name, so the URL a reader copies always says what the table is doing.
  */
-export function normalizePositionsQuery(
+const BOOK_SORT_ALIASES: Record<string, BookSort> = {
+  hf: "headroom",
+  liq_distance: "headroom",
+};
+
+/**
+ * THE one normalizer Book deep-link state passes through before the first
+ * fetch. Unknown values fall to the defaults; the legacy wire sorts alias onto
+ * their column; and `engine=debt_manager&sort=hf` — the pair the API refuses
+ * with a 400 — is acknowledged, so the doomed request is NEVER composed.
+ *
+ * One composition rule beyond the parts: a `dir` that arrived UNDER A SORT
+ * THAT HAD TO CHANGE is ORPHANED — it described a different ranking axis, and
+ * dropping it is honest where reinterpreting it against the fallback sort
+ * would invent an ordering nobody asked for. A dir with NO sort param stays
+ * live: it reverses the default sort, which is exactly what it says.
+ */
+export function normalizeBookQuery(
   rawEngine: string | null,
   rawSort: string | null,
-): NormalizedPositionsQuery {
+  rawDir: string | null,
+): NormalizedBookQuery {
   const engineKnown =
     rawEngine !== null && (POSITIONS_ENGINES as readonly string[]).includes(rawEngine);
-  const sortKnown = rawSort !== null && (POSITIONS_SORTS as readonly string[]).includes(rawSort);
-  const engine: PositionsEngine = engineKnown ? (rawEngine as PositionsEngine) : "aave_v3_etherfi";
-  let sort: PositionsSort = sortKnown ? (rawSort as PositionsSort) : "liq_distance";
-  let rewritten = (rawEngine !== null && !engineKnown) || (rawSort !== null && !sortKnown);
-  let hfRemapped = false;
-  if (!SORTS_BY_ENGINE[engine].includes(sort)) {
-    sort = "liq_distance"; // the contract default
-    hfRemapped = true;
-    rewritten = true;
-  }
-  return { engine, sort, hfRemapped, rewritten };
+  const engine: PositionsEngine = engineKnown
+    ? (rawEngine as PositionsEngine)
+    : DEFAULT_BOOK_ENGINE;
+
+  const named = rawSort !== null && (BOOK_SORTS as readonly string[]).includes(rawSort);
+  const aliased = rawSort !== null && !named ? BOOK_SORT_ALIASES[rawSort] : undefined;
+  const sort: BookSort = named
+    ? (rawSort as BookSort)
+    : (aliased ?? DEFAULT_BOOK_SORT);
+
+  // The historical doomed pair, acknowledged in its own words.
+  const hfRemapped = rawSort === "hf" && engine === "debt_manager";
+  // A sort param that did not survive VERBATIM orphans any dir beside it.
+  const sortSurvived = rawSort === null || rawSort === sort;
+  const dir = sortSurvived
+    ? normalizeDirParam(rawDir, sort)
+    : { reversed: false, rewritten: rawDir !== null };
+
+  const rewritten =
+    (rawEngine !== null && !engineKnown) || (rawSort !== null && !named) || dir.rewritten;
+
+  return { engine, sort, reversed: dir.reversed, hfRemapped, rewritten };
 }
 
 /** How the Book renders a page-fetch failure (design ruling, W-UX-B part 11). */

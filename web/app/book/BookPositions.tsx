@@ -50,24 +50,36 @@ import {
   type ColumnSortState,
 } from "@/components/DataTable";
 import { AddressMono } from "@/components/AddressMono";
-import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { SeverityHF } from "@/components/SeverityHF";
 import { MarksStamp } from "@/components/MarksStamp";
 import { useCursorPages, type CursorPage } from "@/lib/pagination";
 import {
   BatchSupersededError,
+  bookSortWireKey,
+  BOOK_SORTS_BY_ENGINE,
   canonicalWireDir,
   classifyPositionsFailure,
+  DEFAULT_BOOK_ENGINE,
+  DEFAULT_BOOK_SORT,
   fetchPositionsPage,
-  normalizeBookTableQuery,
+  normalizeBookQuery,
   POSITIONS_ENGINES,
   reversedWireDir,
   SORT_HF_REMAP_ACK,
-  SORTS_BY_ENGINE,
+  type BookSort,
   type PositionsEngine,
-  type PositionsSort,
 } from "@/lib/positions";
+import {
+  headroomBandLabel,
+  headroomBandMeaning,
+  HEADROOM_HEADER_TITLE,
+  HEADROOM_LEGEND,
+  HEADROOM_NO_DEBT_LABEL,
+  HEADROOM_NO_DEBT_TITLE,
+  HEADROOM_UNKNOWN_TITLE,
+  WARN_HEADROOM_DISCLOSURE,
+} from "@/lib/headroom";
 import { groupDecimalString, renderEngineAmount } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
 import {
@@ -94,12 +106,8 @@ import {
 } from "./dust";
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { BookRiskMap } from "./BookRiskMap";
-import {
-  LIQ_DISTANCE_HEADER_TITLE,
-  NO_PRICE_PATH_LABEL,
-  NO_PRICE_PATH_LEGEND,
-  noPricePathTitle,
-} from "@/lib/liq-distance";
+import { useFullBookWalk } from "./useFullBookWalk";
+import { noPricePathLegendFor, pricePathDetail } from "@/lib/liq-distance";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
 
@@ -132,45 +140,107 @@ export interface BookAggregateFeed {
   aggregates: readonly Aggregate[] | null;
 }
 
-function liqDistanceCell(row: PositionRow) {
-  switch (row.liqDistance.kind) {
-    case "breached":
-      return <span className="crit-t">liquidatable</span>;
+/**
+ * The row's DEMOTED price-path statement (Wave W-HR-A), composed for a hover.
+ *
+ * The tagged union that used to BE the Liq. distance column keeps every one of
+ * its arms and every one of its wire reasons — it just rides the Headroom
+ * cell's title now. Nothing is swallowed: an unrecognized reason still travels
+ * verbatim, and a row with nothing to say gets nothing appended rather than a
+ * filler sentence.
+ */
+function pricePathFor(row: PositionRow): string | null {
+  const ld = row.liqDistance;
+  switch (ld.kind) {
     case "distance":
-      return (
-        <>
-          {row.liqDistance.display}
-          {row.liqDistance.assetLabel !== null && (
-            <span className="dim"> {row.liqDistance.assetLabel}</span>
-          )}
-        </>
-      );
+      return pricePathDetail("distance", null, ld.assetLabel, ld.display);
+    case "breached":
+      return pricePathDetail("breached", null, null, null);
     case "never":
-      // Wave R1 item 1: `never` was an unconditional safety claim the wire
-      // never made. The label is axis-scoped now, and the hover carries the
-      // wire's OWN reason inside a sentence naming what it does not exclude.
-      return (
-        <span className="dim" title={noPricePathTitle(row.liqDistance.reason)}>
-          {NO_PRICE_PATH_LABEL}
-        </span>
-      );
+      return pricePathDetail("never", ld.reason, null, null);
     case "none":
-      return (
-        <span className="dim" title={row.liqDistance.reason ?? "no factor-level solve was published"}>
-          {EM_DASH}
-        </span>
-      );
+      return pricePathDetail("none", ld.reason, null, null);
   }
 }
 
-const HF_DISCLOSURE_TITLE =
-  "maxBorrowLT/borrowings — a disclosure only; the verdict is the engine's strict boolean";
+/**
+ * THE Headroom cell (Wave W-HR-A) — the column that replaced Liq. distance.
+ *
+ * Every arm is a different FACT and renders as one:
+ *   - refused    → the named refusal, inline. The DM lost its HF column, so
+ *                  this cell is where a withheld row states itself; a refusal
+ *                  never becomes an em dash and never becomes a number.
+ *   - breached   → the crit word plus the (negative) percent — how far past
+ *                  the boundary, not merely that it is past.
+ *   - no debt    → said in words. NOT 100%: an account with nothing borrowed
+ *                  has no boundary to have headroom from, and printing the
+ *                  maximum would rank it as the safest thing on the book.
+ *   - unknown    → an em dash with its reason in the hover. Never a zero.
+ *   - a ratio    → the FLOORED percent, its band beside it, and the band's
+ *                  meaning plus the demoted price-path statement in the title.
+ */
+function headroomCell(row: PositionRow) {
+  const pricePath = pricePathFor(row);
+  const withPricePath = (sentence: string) =>
+    pricePath === null ? sentence : `${sentence} ${pricePath}`;
+
+  if (row.status === "refused") {
+    return (
+      <span title={row.refusalDetail ?? undefined}>
+        <RefusedTag reason={row.refusalCode ?? "refused"} />
+      </span>
+    );
+  }
+  switch (row.headroom.kind) {
+    case "no-debt":
+      return (
+        <span className="dim" title={withPricePath(HEADROOM_NO_DEBT_TITLE)}>
+          {HEADROOM_NO_DEBT_LABEL}
+        </span>
+      );
+    case "unknown":
+      return (
+        <span
+          className="dim"
+          title={withPricePath(
+            row.headroom.reason === null
+              ? HEADROOM_UNKNOWN_TITLE
+              : `${HEADROOM_UNKNOWN_TITLE} Wire: '${row.headroom.reason}'.`,
+          )}
+        >
+          {EM_DASH}
+        </span>
+      );
+    case "headroom": {
+      const band = row.headroom.band;
+      const title = withPricePath(headroomBandMeaning(band));
+      if (row.headroom.breached) {
+        // The engine's SEALED verdict and a ratio past the line are different
+        // facts and get different words: `liquidatable` is the engine's own
+        // comparator speaking, `breached` is only what the published ratio
+        // says. The UI never promotes the second into the first.
+        return (
+          <span className="crit-t" title={title} data-testid="headroom-breached">
+            {row.verdict === "liquidatable" ? "liquidatable" : "breached"}
+            {row.headroom.display !== null && <span className="dim"> {row.headroom.display}</span>}
+          </span>
+        );
+      }
+      return (
+        <span title={title} data-testid="headroom-value">
+          {row.headroom.display}
+          <span className="dim"> {headroomBandLabel(band)}</span>
+        </span>
+      );
+    }
+  }
+}
 
 interface SortComposition {
   engine: PositionsEngine;
-  sort: PositionsSort;
+  sort: BookSort;
   reversed: boolean;
-  onSort: (candidate: PositionsSort) => void;
+  onSort: (candidate: BookSort) => void;
 }
 
 /**
@@ -180,10 +250,10 @@ interface SortComposition {
  * headers stay clickable — clicking one exits it.
  */
 function headerSort(
-  candidate: PositionsSort,
+  candidate: BookSort,
   { engine, sort, reversed, onSort }: SortComposition,
 ): ColumnSortState | undefined {
-  if (!SORTS_BY_ENGINE[engine].includes(candidate)) return undefined;
+  if (!BOOK_SORTS_BY_ENGINE[engine].includes(candidate)) return undefined;
   const active = sort === candidate;
   const wire = reversed ? reversedWireDir(candidate) : canonicalWireDir(candidate);
   return {
@@ -195,16 +265,29 @@ function headerSort(
 }
 
 /**
- * The table is single-engine, so the HF column header is the engine's own
- * (design ruling, W-UX-B part 12): the DM's reads "HF — disclosure" with the
- * disclosure title — plain text, never clickable/sortable-looking — while the
- * Aave view keeps "Health factor" (a sortable header, W-UX-C). No per-cell
- * dagger.
+ * The column set (Wave W-HR-A). THREE STRIKES and one replacement:
+ *
+ *   - ENGINE is struck. The table is single-engine by construction — the
+ *     toggle above it switches whole walks and the table's own accessible
+ *     name states the engine. A column that repeats one constant on every row
+ *     is a column of noise.
+ *   - The DM's "HF — disclosure" column is struck. It printed
+ *     maxBorrowLT/borrowings as a pseudo-health-factor that the reader had to
+ *     be told, in a hover, was not the verdict. The same two numbers now
+ *     produce Headroom, which IS a reading rather than a disclaimer, so the
+ *     disclosure has nothing left to disclose. Aave keeps "Health factor":
+ *     there the wad is the chain's own comparator, not a stand-in.
+ *   - LIQ. DISTANCE is replaced by HEADROOM. The price-path statement is not
+ *     deleted — it rides the Headroom cell's hover with every reason intact.
+ *
+ * The Aave HF column loses its SORT affordance: headroom is a strictly
+ * increasing function of HF, so "sort by HF" and "sort by Headroom" are the
+ * same ranking, and two headers claiming independent control of one order is
+ * a lie about the table. One ranking, one control.
  */
 function positionColumns(composition: SortComposition): ReadonlyArray<Column<PositionRow>> {
   const { engine } = composition;
   return [
-    { id: "engine", header: "Engine", cell: (row) => <EngineChip engine={row.engine} /> },
     {
       id: "account",
       header: "Account",
@@ -223,41 +306,37 @@ function positionColumns(composition: SortComposition): ReadonlyArray<Column<Pos
       sort: headerSort("debt", composition),
       cell: (row) => renderEngineAmount(row.totals.debt, row.totals.decimals),
     },
+    ...(engine === "debt_manager"
+      ? []
+      : [
+          {
+            id: "hf",
+            header: "Health factor",
+            align: "right" as const,
+            cell: (row: PositionRow) =>
+              row.status === "refused" ? (
+                <span title={row.refusalDetail ?? undefined}>
+                  <RefusedTag reason={row.refusalCode ?? "refused"} />
+                </span>
+              ) : (
+                <SeverityHF
+                  verdict={row.verdict}
+                  display={row.hf.display}
+                  ratio={row.hf.ratio}
+                  infinite={row.hf.infinite}
+                />
+              ),
+          },
+        ]),
     {
-      id: "hf",
-      header:
-        engine === "debt_manager" ? (
-          <span title={HF_DISCLOSURE_TITLE}>HF — disclosure</span>
-        ) : (
-          "Health factor"
-        ),
-      align: "right",
-      ...(engine === "debt_manager" ? {} : { sort: headerSort("hf", composition) }),
-      cell: (row) =>
-        row.status === "refused" ? (
-          <span title={row.refusalDetail ?? undefined}>
-            <RefusedTag reason={row.refusalCode ?? "refused"} />
-          </span>
-        ) : (
-          <span title={row.hf.disclosureOnly ? HF_DISCLOSURE_TITLE : undefined}>
-            <SeverityHF
-              verdict={row.verdict}
-              display={row.hf.display}
-              ratio={row.hf.ratio}
-              infinite={row.hf.infinite}
-            />
-          </span>
-        ),
-    },
-    {
-      id: "liq-distance",
+      id: "headroom",
       // The title rides a <span> INSIDE the header so the accessible name
-      // stays the visible text ("Liq. distance") whether or not the header
-      // is a sort button — content wins over title in the accname algorithm.
-      header: <span title={LIQ_DISTANCE_HEADER_TITLE}>Liq. distance</span>,
+      // stays the visible text ("Headroom") whether or not the header is a
+      // sort button — content wins over title in the accname algorithm.
+      header: <span title={HEADROOM_HEADER_TITLE}>Headroom</span>,
       align: "right",
-      sort: headerSort("liq_distance", composition),
-      cell: liqDistanceCell,
+      sort: headerSort("headroom", composition),
+      cell: headroomCell,
     },
     { id: "marks", header: "Marks", cell: (row) => <MarksStamp marks={row.marks} /> },
   ];
@@ -280,7 +359,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   // fire.)
   const searchParams = useSearchParams();
   const [initialQuery] = useState(() => {
-    const base = normalizeBookTableQuery(
+    const base = normalizeBookQuery(
       searchParams.get("engine"),
       searchParams.get("sort"),
       searchParams.get("dir"),
@@ -290,7 +369,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   });
 
   const [engine, setEngine] = useState<PositionsEngine>(initialQuery.engine);
-  const [sort, setSort] = useState<PositionsSort>(initialQuery.sort);
+  const [sort, setSort] = useState<BookSort>(initialQuery.sort);
   const [reversed, setReversed] = useState<boolean>(initialQuery.reversed);
   const [dust, setDust] = useState<DustStep>(initialQuery.dust);
   const [envelope, setEnvelope] = useState<PageEnvelope | null>(null);
@@ -314,6 +393,18 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   /** Dust is ACTIVE only when a min_value actually rides the requests. */
   const dustActive = dust !== "off" && minValue !== undefined;
   const wireDir = reversed ? reversedWireDir(sort) : null;
+  /** The UI column's ranking, resolved to THIS engine's own wire key. */
+  const wireSort = bookSortWireKey(engine, sort);
+
+  // THE full-book walk, hoisted (W-HR-A): one owner, one vector, auto-started
+  // once /v1/book settles so the composed min_value is the table's own. The
+  // map reads this; any future full-book consumer reads the SAME walk rather
+  // than opening a second one over the same book.
+  const fullWalk = useFullBookWalk({
+    engine,
+    ...(minValue === undefined ? {} : { minValue }),
+    enabled: bookFeed.settled,
+  });
 
   // `resetRef` lets fetchPage restart the walk on 409 without a stale-closure
   // dependency on the hook it feeds.
@@ -324,7 +415,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
       try {
         const response = await fetchPositionsPage({
           engine,
-          sort,
+          sort: wireSort,
           ...(wireDir === null ? {} : { dir: wireDir }),
           ...(minValue === undefined ? {} : { minValue }),
           cursor,
@@ -358,7 +449,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         throw cause;
       }
     },
-    [engine, sort, wireDir, minValue],
+    [engine, wireSort, wireDir, minValue],
   );
 
   const { rows, hasMore, loading, error, loadMore, reset } = useCursorPages<PositionRow, string>(
@@ -386,8 +477,8 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
       if (value === null) url.searchParams.delete(key);
       else url.searchParams.set(key, value);
     };
-    apply("engine", engine === "aave_v3_etherfi" ? null : engine);
-    apply("sort", sort === "liq_distance" ? null : sort);
+    apply("engine", engine === DEFAULT_BOOK_ENGINE ? null : engine);
+    apply("sort", sort === DEFAULT_BOOK_SORT ? null : sort);
     apply("dir", reversed ? reversedWireDir(sort) : null);
     apply("dust", dust === DUST_DEFAULT_STEP ? null : dust);
     if (url.href !== window.location.href) {
@@ -406,12 +497,14 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   const switchEngine = (candidate: PositionsEngine) => {
     if (candidate === engine) return;
     setEngine(candidate);
-    // Engine-switch remap (W-UX-B part 9): a sort the candidate engine does
-    // not define falls back to the contract default, acknowledged in place.
-    if (SORTS_BY_ENGINE[candidate].includes(sort)) {
+    // W-HR-A: every Book column is defined for BOTH engines now (headroom is
+    // native to each), so an engine switch can no longer strand a sort. The
+    // fallback stays as the vocabulary's own guard rather than as dead code —
+    // if a future column is engine-specific, it lands here already handled.
+    if (BOOK_SORTS_BY_ENGINE[candidate].includes(sort)) {
       setSortAck(null);
     } else {
-      setSort("liq_distance");
+      setSort(DEFAULT_BOOK_SORT);
       setReversed(false);
       setSortAck(SORT_HF_REMAP_ACK);
     }
@@ -423,7 +516,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   // canonical — TWO-STATE, no third unsorted click. Clicking any header
   // exits refused-first.
   const applyHeaderSort = useCallback(
-    (candidate: PositionsSort) => {
+    (candidate: BookSort) => {
       setSortAck(null);
       if (sort === candidate) {
         setReversed((value) => !value);
@@ -627,12 +720,20 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
       <div className={styles.sectionHead}>
         <h2>Positions — batch-stable pages, one engine at a time</h2>
         <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
-          <i aria-hidden /> warn = {WARN_BAND_DISCLOSURE}
+          <i aria-hidden /> warn = {engine === "debt_manager" ? WARN_HEADROOM_DISCLOSURE : WARN_BAND_DISCLOSURE}
         </span>
-        {/* Wave R1 item 1: the label's meaning is RENDERED, not hover-only —
-            a reader without a mouse gets the same disclosure. */}
+        {/* W-HR-A: the Headroom column's one-sentence legend. RENDERED, not
+            hover-only — a reader without a mouse gets the metric's definition,
+            in reader words, before they read a single number under it. */}
+        <span className={styles.sectionNote} data-testid="headroom-legend">
+          {HEADROOM_LEGEND}
+        </span>
+        {/* Wave R1 item 1, DEMOTED by W-HR-A: the price-path statement is no
+            longer a column, so this line explains the hover that now carries
+            it. The words are unchanged; only the clause naming the surviving
+            verdict element differs per engine. */}
         <span className={styles.sectionNote} data-testid="no-price-path-legend">
-          {NO_PRICE_PATH_LEGEND}
+          {noPricePathLegendFor(engine)}
         </span>
       </div>
 
@@ -713,23 +814,18 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         </div>
       )}
 
-      {/* ORDER (Wave R1 item 8, ruling §II.1): controls → MAP → table →
-          footer. The map is the shape of the book; the table is the lookup.
-          A reader who must scroll 70vh of rows before seeing the shape reads
-          the rows without knowing what they are looking at.
-          Keyed by engine AND dust step (W-UX-D §16 + the W-UX-C handoff): a
-          switch of either remounts the map, so the full-book walk state can
-          never leak across engines OR across dust filters — the map only ever
-          shows ONE filtered walk. */}
+      {/* ORDER (Wave R1 item 8, ruling §II.1; re-affirmed W-HR-A): controls →
+          MAP → table → footer. The map is the shape of the book; the table is
+          the lookup. A reader who must scroll 70vh of rows before seeing the
+          shape reads the rows without knowing what they are looking at.
+          The walk itself is hoisted (useFullBookWalk) and its identity is
+          (engine, min_value), so a switch of either restarts it — the map can
+          never show a vector spliced across two engines or two filters. */}
       <div style={{ marginBottom: "var(--sp-3)" }}>
         <BookRiskMap
-          key={`${engine}:${dust}`}
           engine={engine}
-          rows={rows}
-          totalPositions={envelope === null ? null : envelope.totalPositions}
-          batch={envelope === null ? null : envelope.batch}
+          walk={fullWalk}
           dustStep={dustActive ? (dust as ActiveDustStep) : null}
-          minValue={minValue}
           onBookCount={aggServed === null ? null : aggServed.positions}
         />
       </div>

@@ -5,12 +5,12 @@
 // law can be proven by watching the rendered line change.
 //
 // Asserted rulings:
-//   §16 — the risk map NEVER auto-walks; ONE explicit "load full book"
-//         action runs a sequential abortable walk (limit=200) with live mono
-//         progress; 409 mid-walk restarts VISIBLY from page one (the
-//         BookPositions notice grammar verbatim); completion swaps
-//         Scatter→DensityMap with the "full book · n positions · as-of
-//         batch #id" header; abort returns the labeled partial state.
+//   §16 (as AMENDED by W-HR-A) — the risk map's full-book walk AUTO-STARTS on
+//         mount with no button, disclosing "walked N of M"; 409 mid-walk
+//         restarts VISIBLY from page one (the BookPositions notice grammar
+//         verbatim); completion renders the "full book · n positions · as-of
+//         batch #id" header over the DensityMap. The partial page-scatter and
+//         its abort control are GONE — see the auto-walk test for why.
 //   §17 — reading lines render per histogram panel, COMPUTED from the same
 //         /v1/book response (mutate the fixture → the line changes); the
 //         wire note stays visible; the Liquidatable card sub carries the Σ.
@@ -65,9 +65,13 @@ async function mockPositions(page: Page): Promise<void> {
   });
 }
 
-async function openBook(page: Page): Promise<void> {
+/**
+ * W-HR-A made debt_manager the default engine; these fixtures are the aave
+ * book, so the engine is named explicitly rather than assumed.
+ */
+async function openBook(page: Page, path = "/book?engine=aave_v3_etherfi"): Promise<void> {
   await muteStream(page);
-  await page.goto("/book");
+  await page.goto(path);
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +243,7 @@ function walkPages() {
   return { page1, page2 };
 }
 
-test("NO auto-walk on page load — the full book moves only on the ONE explicit action", async ({
+test("the full-book walk AUTO-STARTS on mount — no button, and the partial page-scatter is gone", async ({
   page,
 }) => {
   let walkRequests = 0;
@@ -255,19 +259,19 @@ test("NO auto-walk on page load — the full book moves only on the ONE explicit
   });
   await openBook(page);
 
-  // The table walked its own pages (the sentinel fills short walks); the map
-  // stayed partial and labeled with the three-part coverage grammar.
-  await expect(page.getByTestId("book-risk-map")).toContainText(
-    "2 loaded / 2 qualifying / 2 on book",
-  );
-  await expect(page.getByTestId("risk-map-partial-label")).toHaveText(
-    "partial — plots the table's loaded pages",
-  );
-  await expect(page.getByTestId("load-full-book")).toBeVisible();
-  expect(walkRequests).toBe(0);
+  // W-HR-A REVERSES W-UX-D §16's "no auto-walk" on purpose. The partial
+  // scatter it protected was a picture of the TABLE'S SORT ORDER, not of the
+  // book, and it was the resting default — so the honest reading was behind a
+  // button and the misleading one was free. With the partial register gone
+  // there is nothing to hold the reader while they decide to press, so the
+  // walk starts itself and discloses how far it has got.
+  await expect(page.getByTestId("risk-map-full-head")).toContainText("full book · 2 positions");
+  await expect(page.getByTestId("load-full-book")).toHaveCount(0);
+  await expect(page.getByTestId("risk-map-partial-label")).toHaveCount(0);
+  expect(walkRequests).toBeGreaterThan(0);
 });
 
-test("load full book: live progress, completed header, Scatter→DensityMap swap", async ({
+test("the auto walk: live progress, completed header, and ONE drawing (the DensityMap)", async ({
   page,
 }) => {
   const { page1, page2 } = walkPages();
@@ -282,46 +286,53 @@ test("load full book: live progress, completed header, Scatter→DensityMap swap
     }
     if (url.searchParams.get("cursor") === null) return fulfillJson(route, page1);
     // Hold page two long enough for the live progress to be asserted.
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
     return fulfillJson(route, page2);
   });
   await openBook(page);
 
-  // Partial mode first: the Scatter renders the loaded pages.
-  await expect(
-    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
-  ).toBeVisible();
-
-  await page.getByTestId("load-full-book").click();
-
-  // Live progress — mono, in the panel head, the ruling's grammar.
+  // Live progress — mono, in the panel head, disclosing "walked N of M".
   await expect(page.getByTestId("risk-map-progress")).toHaveText(
-    "loading full book — page 1 · 1 of 2 · batch #1",
+    "walking the full book — walked 1 of 2 · page 1 · batch #1",
   );
-  await expect(page.getByTestId("abort-full-book")).toBeVisible();
 
-  // Completion: the full-book header replaces the partial labeling.
+  // Completion: the full-book header, with the map's own as-of.
   await expect(page.getByTestId("risk-map-full-head")).toHaveText(
-    "full book · 2 positions · as-of batch #1",
+    "full book · 2 positions · as-of batch #1 · 2 on book",
   );
-  await expect(page.getByTestId("risk-map-partial-label")).toHaveCount(0);
 
-  // The DensityMap replaced the Scatter.
   const density = page.getByTestId("density-map");
   await expect(density).toBeVisible();
-  await expect(
-    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
-  ).toHaveCount(0);
+  // There is no second drawing to swap with — the Scatter call-site is dead.
+  await expect(page.getByRole("img", { name: /vs liquidation distance/ })).toHaveCount(0);
 
-  // One computed row → one bin, with the exact per-bin title grammar.
+  // One computed row → one bin. The title carries count + debt range + band +
+  // Σ debt + what the band MEANS (W-HR-A: a range is not an explanation).
   const bin = page.getByTestId("risk-bin");
   await expect(bin).toHaveCount(1);
-  await expect(bin.locator("title")).toHaveText("1 account · debt $3,162–$10k · −5…−10%");
+  await expect(bin.locator("title")).toHaveText(
+    "1 account · debt $3,162–$10k · headroom 5–10% · Σ debt 6,000 · " +
+      "5–10% of borrowing capacity left before liquidation",
+  );
+
+  // The band axis reads in reader words, and the right-margin marginal states
+  // each band's count and exact Σ debt.
+  await expect(density).toContainText("5–10% left");
+  await expect(density).toContainText("breached");
+  await expect(page.getByTestId("density-marginal-head")).toHaveText("accts · Σ debt");
+  await expect(page.getByTestId("density-band-marginal").nth(3)).toContainText("1 · 6,000");
 
   // USD axis with true-decade ticks; the quantized legend, never a gradient.
   await expect(density).toContainText("debt (usd, log)");
   await expect(density).toContainText("$10k");
   await expect(page.getByTestId("density-legend")).toContainText("1 · 10 · 100 · 1,000 accounts");
+
+  // The reading line is COMPUTED from the same bins the grid draws.
+  await expect(page.getByTestId("risk-map-reading")).toHaveText(
+    "What this shows: where the book's debt sits by headroom. 1 of 1 plotted accounts have " +
+      "less than 10% of their borrowing capacity left — Σ debt 6,000 in the engine's own unit. " +
+      "1 of 2 walked rows are counted aside, not plotted.",
+  );
 
   // The refused row is COUNTED aside, never dropped, never plotted.
   await expect(page.getByTestId("risk-map-aside")).toContainText("1 counted aside, not plotted");
@@ -357,7 +368,6 @@ test("409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page
     return fulfillJson(route, BATCH_SUPERSEDED, 409);
   });
   await openBook(page);
-  await page.getByTestId("load-full-book").click();
 
   // The notice: visible, the BookPositions grammar verbatim.
   const notice = page.getByTestId("risk-map-superseded-notice");
@@ -369,48 +379,91 @@ test("409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page
 
   // The restart is REAL: page one was fetched twice, and the completed
   // vector is entirely the fresh batch — never a spliced vector.
-  await expect(page.getByTestId("risk-map-full-head")).toHaveText(
+  await expect(page.getByTestId("risk-map-full-head")).toContainText(
     "full book · 1 positions · as-of batch #2",
   );
   expect(walkPageOneRequests).toBe(2);
 });
 
-test("abort mid-walk: the labeled partial state returns", async ({ page }) => {
+test("OUTPACED: a book that re-materializes faster than one walk gives up OUT LOUD — never a spliced vector", async ({
+  page,
+}) => {
+  // THE FIELD CONDITION: a live indexer can publish a new batch every couple
+  // of seconds, so every full walk is superseded mid-pagination and restarts
+  // — forever. Auto-started (W-HR-A), that is an unbounded request loop that
+  // never draws anything. Here EVERY cursor page 409s, so the restart bound
+  // is reached immediately.
   const { page1 } = walkPages();
+  let walkPageOnes = 0;
   await mockBook(page, BOOK);
-  await page.route("**/v1/positions*", async (route) => {
+  await page.route("**/v1/positions*", (route) => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("sort") !== null) {
       if (url.searchParams.get("cursor") === null)
         return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
       return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
     }
-    if (url.searchParams.get("cursor") === null) return fulfillJson(route, page1);
-    // Page two never arrives inside this test's lifetime.
-    await new Promise((resolve) => setTimeout(resolve, 30_000));
-    try {
-      await route.abort();
-    } catch {
-      // The page (and its request) are long gone by then.
+    if (url.searchParams.get("cursor") === null) {
+      walkPageOnes += 1;
+      return fulfillJson(route, page1);
     }
-    return undefined;
+    return fulfillJson(route, BATCH_SUPERSEDED, 409);
   });
   await openBook(page);
-  await page.getByTestId("load-full-book").click();
 
-  await expect(page.getByTestId("risk-map-progress")).toBeVisible();
-  await page.getByTestId("abort-full-book").click();
-
-  // Partial returns, labeled; the action is offered again; the Scatter is back.
-  await expect(page.getByTestId("risk-map-walk-note")).toHaveText(
-    "full-book load aborted — partial view (loaded pages) retained",
-  );
-  await expect(page.getByTestId("risk-map-partial-label")).toBeVisible();
-  await expect(page.getByTestId("load-full-book")).toBeVisible();
-  await expect(
-    page.getByRole("img", { name: /^risk map for aave_v3_etherfi: debt \(usd, log\)/ }),
-  ).toBeVisible();
+  const outpaced = page.getByTestId("risk-map-outpaced");
+  await expect(outpaced).toBeVisible();
+  await expect(outpaced).toContainText("the book re-materialized mid-walk 3 times");
+  await expect(outpaced).toContainText("a vector spliced across batches is not this book");
+  await expect(outpaced).toContainText("newest batch #2");
+  // The refusal is not a zero and not an empty map.
+  await expect(outpaced).toContainText("Nothing here is a zero");
   await expect(page.getByTestId("density-map")).toHaveCount(0);
+  await expect(page.getByTestId("risk-map-full-head")).toHaveCount(0);
+
+  // The loop is BOUNDED: 1 initial walk + 3 restarts, and then it STOPS
+  // hammering the API.
+  await expect.poll(() => walkPageOnes).toBe(4);
+  await page.waitForTimeout(700);
+  expect(walkPageOnes).toBe(4);
+
+  // "walk again" is the ONE manual affordance, and it exists only after the
+  // walk gave up — it is not a gate in front of the resting state.
+  await page.getByTestId("risk-map-walk-again").click();
+  await expect.poll(() => walkPageOnes).toBeGreaterThan(4);
+});
+
+test("an engine switch mid-walk restarts the walk — a vector never splices two books", async ({
+  page,
+}) => {
+  const walkEngines: string[] = [];
+  const dmWalkPage = structuredClone(POSITIONS_DM_PAGE_1);
+  dmWalkPage.limit = 200;
+  dmWalkPage.next_cursor = null;
+
+  await mockBook(page, BOOK);
+  await page.route("**/v1/positions*", (route) => {
+    const url = new URL(route.request().url());
+    const engine = url.searchParams.get("engine") ?? "";
+    if (url.searchParams.get("sort") === null) walkEngines.push(engine);
+    if (engine === "debt_manager") return fulfillJson(route, dmWalkPage);
+    if (url.searchParams.get("cursor") === null) return fulfillJson(route, POSITIONS_AAVE_PAGE_1);
+    return fulfillJson(route, POSITIONS_AAVE_PAGE_2);
+  });
+  await openBook(page);
+  await expect(page.getByTestId("risk-map-full-head")).toContainText("full book · 2 positions");
+
+  await page.getByRole("button", { name: "debt_manager" }).click();
+
+  // The map is the DM's book now — its own head, its own bands, and its walk
+  // fired against the DM engine. The walk's IDENTITY is (engine, min_value),
+  // so the aave vector was dropped whole rather than appended to.
+  await expect(page.getByTestId("book-risk-map")).toContainText("risk map · debt_manager");
+  await expect(page.getByTestId("risk-map-full-head")).toContainText("full book · 2 positions");
+  expect(walkEngines).toContain("debt_manager");
+  // The DM fixture's one computed row is BREACHED (HF 3,200/4,200), so it
+  // lands on the breached band — the row a reader looks for first.
+  await expect(page.getByTestId("risk-crit")).toHaveCount(1);
 });
 
 // ---------------------------------------------------------------------------

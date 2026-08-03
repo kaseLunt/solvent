@@ -106,7 +106,7 @@ test("(1) THE ROUND-11 DEFECT: a sleep that freezes performance.now no longer fr
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : POSITIONS_AAVE_PAGE_1);
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 59m ago");
@@ -167,7 +167,7 @@ test("(1) THE RIBBON ENGAGES POST-RESUME: a slept-through threshold is still cro
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : POSITIONS_AAVE_PAGE_1);
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const header = page.getByRole("banner");
   await expect(header.getByText("LIVE · WATERMARKED")).toBeVisible();
@@ -197,7 +197,7 @@ test("(1) NEVER DECREASES: a wall clock stepped BACKWARDS cannot rewind the rend
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : POSITIONS_AAVE_PAGE_1);
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const line = page.getByTestId("book-freshness");
   await expect(line).toHaveText("batch #1 · computed 2026-07-29T10:00:00Z · 59m ago");
@@ -301,12 +301,13 @@ test("(2) THE ROUND-11 DEFECT: the legend and the NO-DEBT hover no longer contra
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : aavePageWithNoDebt());
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   const legend = page.getByTestId("no-price-path-legend");
+  // W-HR-A: the price-path statement rides the Headroom cell's hover now.
   const cell = page
     .getByRole("table", { name: "positions for aave_v3_etherfi" })
-    .getByText("no price path", { exact: true });
+    .getByTestId("headroom-value");
 
   // BOTH ARE ON SCREEN AT ONCE — that is the whole test. The legend is
   // reason-NEUTRAL, and the hover carries this row's own reason.
@@ -320,8 +321,9 @@ test("(2) THE ROUND-11 DEFECT: the legend and the NO-DEBT hover no longer contra
   );
   await expect(cell).toHaveAttribute(
     "title",
-    "No debt to liquidate: with zero borrowings there is no boundary to cross. If the account " +
-      "borrows, a distance will appear. Wire: 'position carries no debt'.",
+    "5–10% of borrowing capacity left before liquidation No debt to liquidate: with zero borrowings there is no boundary to " +
+      "cross. If the account borrows, a distance will appear. Wire: 'position carries no " +
+      "debt'.",
   );
 
   // THE CONTRADICTION, named: the hover says there is NO boundary. A legend
@@ -355,7 +357,7 @@ test("(2) the reason-neutral legend still sits honestly over the COVERS arm", as
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : page1);
   });
-  await page.goto("/book");
+  await page.goto("/book?engine=aave_v3_etherfi");
 
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
@@ -367,12 +369,12 @@ test("(2) the reason-neutral legend still sits honestly over the COVERS arm", as
   await expect(
     page
       .getByRole("table", { name: "positions for aave_v3_etherfi" })
-      .getByText("no price path", { exact: true }),
+      .getByTestId("headroom-value"),
   ).toHaveAttribute(
     "title",
-    "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold — no fall of the shocked asset alone reaches the boundary; interest or " +
-      "parameter changes still can. Wire: 'collateral outside the factor already covers the " +
-      "debt at threshold'.",
+    "5–10% of borrowing capacity left before liquidation Collateral outside the shocked asset already covers the debt at the " +
+      "liquidation threshold — no fall of the shocked asset alone reaches the boundary; " +
+      "interest or parameter changes still can. Wire: 'collateral outside the factor already " +
+      "covers the debt at threshold'.",
   );
 });

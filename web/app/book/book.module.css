@@ -440,10 +440,21 @@
 
 /* Abort/failure disposition: dim, labeled, above the retained partial view. */
 .walkNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   font-family: var(--mono);
   font-size: var(--fs-caption);
   color: var(--ink-3);
   padding: 8px 14px 0;
+}
+
+/* The outpaced note carries a re-walk affordance, so its prose wraps against
+   the button rather than pushing it off the panel. */
+.walkNote > span {
+  flex: 1 1 40ch;
+  min-width: 0;
 }
 
 /* ---- histogram reading lines (W-UX-D §17) ---- */

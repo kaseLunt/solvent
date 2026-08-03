@@ -71,6 +71,17 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
     expect(row.totals.collateral).toBe("800000000000");
     expect(row.totals.debt).toBe("600000000000");
     expect(row.liqDistance).toEqual({ kind: "distance", display: "−7.5%", assetLabel: "weETH" });
+    // W-HR-A: headroom from the WAD — (1.08e18 − 1e18)/1.08e18 = 7.407…%,
+    // floored to 7.4%, in the 5–10% band and INSIDE the 10% warn edge. The
+    // old Liq. distance column read "−7.5% weETH" over this same row and said
+    // nothing about how little capacity is left.
+    expect(row.headroom).toEqual({
+      kind: "headroom",
+      display: "7.4%",
+      band: 3,
+      breached: false,
+      belowWarn: true,
+    });
     // No sweeper on this engine: B and P only, no S mark at all.
     expect(row.marks).toEqual([
       { letter: "B", block: 25635618 },
@@ -88,6 +99,9 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
     expect(row.totals.collateral).toBeNull(); // null stays null — em dash downstream, not 0
     expect(row.totals.debt).toBeNull();
     expect(row.liqDistance.kind).toBe("none");
+    // A withheld row's headroom is UNKNOWN with its refusal code named —
+    // never a percent, never a zero, never "safe".
+    expect(row.headroom).toEqual({ kind: "unknown", reason: "G1" });
   });
 
   test("dm liquidatable: crit from the engine's strict boolean, hf is a labeled disclosure", () => {
@@ -97,6 +111,15 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
     expect(row.hf.disclosureOnly).toBe(true);
     expect(row.hf.display).toBe("0.761"); // maxBorrowLT/borrowings, truncated
     expect(row.liqDistance.kind).toBe("breached");
+    // W-HR-A: the DM's headroom is the SAME two numbers the disclosure used —
+    // (3,200 − 4,200)/3,200 = −31.25%, floored to −31.3% (never −31.2%).
+    expect(row.headroom).toEqual({
+      kind: "headroom",
+      display: "−31.3%",
+      band: 0,
+      breached: true,
+      belowWarn: true,
+    });
     // DM totals come from the engine's own fields (usd 6-dec).
     expect(row.totals.collateral).toBe("4000000000");
     expect(row.totals.debt).toBe("4200000000");
@@ -114,6 +137,7 @@ test.describe("toPositionRow — the PositionSummary mapping", () => {
     const row = toPositionRow(refinePositionSummary(dmRefused));
     expect(row.refusalCode).toBe("SWEEP_NEVER");
     expect(row.verdict).toBe("unknowable");
+    expect(row.headroom).toEqual({ kind: "unknown", reason: "SWEEP_NEVER" });
     expect(row.marks).toEqual([
       { letter: "B", block: 154796552 },
       { letter: "P", block: 154796552 },

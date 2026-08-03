@@ -79,28 +79,39 @@ async function openBookWith(page: Page, positions: unknown, book: unknown = BOOK
     const engine = new URL(route.request().url()).searchParams.get("engine");
     return fulfillJson(route, engine === "debt_manager" ? POSITIONS_DM_PAGE_1 : positions);
   });
-  await page.goto("/book");
+  // W-HR-A made debt_manager the default engine; these fixtures are the aave
+  // book, so the engine is named rather than assumed.
+  await page.goto("/book?engine=aave_v3_etherfi");
 }
 
-test("(1) the cell reads `no price path`, never `never`, and hovers the wire's own reason", async ({
+test("(1) the wire's own reason survives the DEMOTION to the Headroom cell's hover, verbatim", async ({
   page,
 }) => {
+  // W-HR-A DEMOTED the price-path statement out of its own column: Headroom
+  // took the slot because "no price path" was the honest answer to the WRONG
+  // question, and it read as SAFE over accounts carrying real debt near the
+  // line. The statement itself was never the defect — it is intact, on the
+  // row's hover, with the wire's reason verbatim, and this pin follows it.
   await openBookWith(
     page,
     aavePageWithNoPricePath("position holds no counted collateral in the factor"),
   );
 
   const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
-  const cell = table.getByText("no price path", { exact: true });
-  await expect(cell).toBeVisible();
+  // The word `never` is still nowhere near this row — the R1 law holds.
   await expect(table).not.toContainText(/\bnever\b/);
+  // And the cell now leads with the metric that answers the reader's question:
+  // 7.4% of borrowing capacity left, inside the warn edge.
+  const cell = table.getByTestId("headroom-value");
+  await expect(cell).toContainText("7.4%");
 
   await expect(cell).toHaveAttribute(
     "title",
-    "No price move alone can liquidate this account: its counted collateral is not on any " +
-      "committed price axis (stable collateral holds its value in this solve). Debt growth — " +
-      "interest — or a parameter change can still cross the boundary. Wire: 'position holds no " +
-      "counted collateral in the factor'.",
+    "5–10% of borrowing capacity left before liquidation No price move alone can liquidate " +
+      "this account: its counted collateral is not on any committed price axis (stable " +
+      "collateral holds its value in this solve). Debt growth — interest — or a parameter " +
+      "change can still cross the boundary. Wire: 'position holds no counted collateral in " +
+      "the factor'.",
   );
 });
 
@@ -108,11 +119,12 @@ test("(1) an ABSENT reason still refuses to rule out interest and parameters", a
   await openBookWith(page, aavePageWithNoPricePath(null));
   const cell = page
     .getByRole("table", { name: "positions for aave_v3_etherfi" })
-    .getByText("no price path", { exact: true });
+    .getByTestId("headroom-value");
   await expect(cell).toHaveAttribute(
     "title",
-    "No downward price move can liquidate this account under this solve. Other paths " +
-      "(interest, parameters) are not ruled out.",
+    "5–10% of borrowing capacity left before liquidation No downward price move can " +
+      "liquidate this account under this solve. Other paths (interest, parameters) are not " +
+      "ruled out.",
   );
 });
 
@@ -139,12 +151,22 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
       "reason. The HF column stays the verdict.",
   );
 
+  // W-HR-A: the column is Headroom, and its header carries its OWN scope —
+  // including the truncation promise, because a rounded-up headroom would be
+  // a claim of safety the arithmetic did not make.
   const header = page
     .getByRole("table", { name: "positions for aave_v3_etherfi" })
-    .getByRole("columnheader", { name: "Liq. distance" });
+    .getByRole("columnheader", { name: "Headroom" });
   await expect(header.locator("span[title]").first()).toHaveAttribute(
     "title",
-    "how far the named asset's price must fall to cross this engine's boundary — price axis only.",
+    "how much of this account's borrowing capacity is still unused before liquidation — " +
+      "truncated, never rounded up.",
+  );
+  // And the metric's definition is RENDERED beside it, never hover-only.
+  await expect(page.getByTestId("headroom-legend")).toHaveText(
+    "Headroom = the share of this account's borrowing capacity still unused before " +
+      "liquidation — (liquidation threshold − debt) ÷ liquidation threshold, in the engine's " +
+      "own comparator; 0% is the boundary and `breached` is already past it.",
   );
 });
 
@@ -155,12 +177,13 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
 test("(7) every numeric column header is right-aligned, matching its cells", async ({ page }) => {
   await openBookWith(page, POSITIONS_AAVE_PAGE_1);
   const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
-  for (const name of ["Collateral", "Debt", "Health factor", "Liq. distance"]) {
+  for (const name of ["Collateral", "Debt", "Health factor", "Headroom"]) {
     const header = table.getByRole("columnheader", { name });
     await expect(header).toHaveCSS("text-align", "right");
   }
-  // The non-numeric ones stay left — the fix is scoped, not blanket.
-  await expect(table.getByRole("columnheader", { name: "Engine" })).toHaveCSS(
+  // The non-numeric ones stay left — the fix is scoped, not blanket. (W-HR-A
+  // struck the Engine column, so Account carries this half of the pin.)
+  await expect(table.getByRole("columnheader", { name: "Account" })).toHaveCSS(
     "text-align",
     "left",
   );
