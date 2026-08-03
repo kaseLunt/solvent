@@ -72,6 +72,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount } from "@/lib/book-format";
 import {
+  attemptChangedNote,
   attemptSkew,
   axisFamilyWords,
   batchHeaderLine,
@@ -517,17 +518,16 @@ export function LabMatrix({
                         className={styles.cellSub}
                         data-testid="matrix-attempt-changed"
                         data-scenario-id={scenario.id}
-                        data-in-flight={phase.kind === "running" ? "true" : "false"}
+                        // WAVE R15: the row note was already the only surface
+                        // telling the truth about a request that is still out,
+                        // but it re-derived that fact from `phase.kind` on its
+                        // own. It now reads the flag `attemptSkew` publishes —
+                        // the same one the cohort partitions on and the detail
+                        // view branches on — so one request gets one account
+                        // wherever a reader meets it.
+                        data-in-flight={staleAttempt.pending ? "true" : "false"}
                       >
-                        {phase.kind === "running"
-                          ? "this row's request is still out, and was ASKED under a committed " +
-                            "definition this page is no longer showing. Whatever it answers will " +
-                            "be judged by the identity the response publishes for ITSELF — a " +
-                            "listing refresh resolves nothing here."
-                          : "this row's run was ASKED under a committed definition this page is " +
-                            "no longer showing, and never came back with a book of its own. A " +
-                            "listing refresh resolves nothing — the listing is already the " +
-                            "current one. Run this row again to ask under the definition above."}
+                        {attemptChangedNote(staleAttempt, "matrix")}
                       </span>
                     )}
                     {/* WAVE R12, FINDING 2: the row's affordance is a LISTING

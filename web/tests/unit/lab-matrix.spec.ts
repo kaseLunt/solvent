@@ -32,6 +32,7 @@ import {
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
 import {
   anchorBatchOfPhase,
+  attemptChangedNote,
   attemptSkew,
   AXIS_FAMILY_WORDS,
   axisFamilies,
@@ -2758,10 +2759,20 @@ test("R14/1 — the attempt clause rides BESIDE a real cohort, and beside R12's 
   // Both halves of the definition-changed set at once, over a live cohort. They
   // are counted separately and worded separately because the REMEDIES differ:
   // an answer needs a fresh listing, an attempt needs a fresh run.
+  //
+  // WAVE R15 CORRECTED THIS TEST'S EXPECTATION. The fixture below is a RUNNING
+  // skewed attempt, and R14 asserted the settled sentence over it — "never came
+  // back with a book of their own", "Re-run the row" — which is the round-23
+  // finding stated as a pin. It also contradicted the law two tests down
+  // ("the in-flight attempt's own wording names the request, not a re-run"),
+  // which this file asserted at the same time. The fixture is kept, because a
+  // request that is still out is the adversarial case and the in-flight
+  // negatives below are load-bearing; the SENTENCE is now the one that is true
+  // of it. R15's own tests pin the settled anchored wording verbatim.
   const phases = new Map<string, MatrixPhase>([
     [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
     [ETHFI.id, stamped(ok(RUN_BOOK_ETHFI_V2), IDENTITY.get(ETHFI.id))], // an ANSWER, skewed
-    [DEPEG.id, stamped({ kind: "running" }, STAMP_V1)], // an ATTEMPT, skewed
+    [DEPEG.id, stamped({ kind: "running" }, STAMP_V1)], // an ATTEMPT, skewed, STILL OUT
   ]);
   const cohort = resolveBatchCohort(
     listedPhases(phases, RELISTED),
@@ -2782,13 +2793,25 @@ test("R14/1 — the attempt clause rides BESIDE a real cohort, and beside R12's 
       "committed set moved after this page loaded.",
   );
   expect(line).toContain("Refresh the committed listing to run against the current definition.");
-  // R14's, with its own count and the OTHER remedy.
+  // R15's, with its own count and NO remedy — the request is still out, so
+  // there is no action to name and none is invented.
+  expect(cohort.runningAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([]);
   expect(line).toContain(
-    "1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and never " +
-      "came back with a book of their own",
+    "1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and their " +
+      "request is STILL OUT",
   );
-  expect(line).toContain("Re-run the row to ask under the current definition");
-  expect(line).toContain("a listing refresh resolves nothing here");
+  expect(line).toContain(
+    "whatever the request answers will be judged by the identity the RESPONSE publishes for " +
+      "itself",
+  );
+  expect(line).toContain("There is nothing to do here until it settles.");
+  // THE CORRECTED EXPECTATION. Neither half of R14's settled sentence may be
+  // said about a request that has not come back yet — and the re-run it points
+  // at is the control this row disables while the request is out.
+  expect(line).not.toContain("never came back with a book of their own");
+  expect(line).not.toContain("Re-run the row to ask under the current definition");
+  expect(line).not.toContain("a listing refresh resolves nothing here");
   // The cohort above is untouched, and the in-flight assurance is NOT claimed
   // for a request that is out under another definition.
   expect(line).toContain("results shown together were measured at batch #1.");
@@ -2951,4 +2974,358 @@ test("R14/2 — WITHOUT the covered list, nothing is inferred: the pre-R14 readi
   expect(bookReachedEveryCoveredEngine(RUN_BOOK_WITHHELD as unknown as LabRunBook, undefined)).toBe(
     false,
   );
+});
+
+// ===========================================================================
+// WAVE R15 (Codex round-23).
+//
+// THE FINDING (MEDIUM). R14 bound every bodyless phase to the identity it was
+// DISPATCHED under and gave the resulting set ONE remedy: this run never
+// answered, so a listing refresh cannot help it — RE-RUN THE ROW. That is right
+// for a run that ENDED and false for one STILL IN FLIGHT, and `attemptSkew` knew
+// the difference from the day it was written: its CELL wording already reads
+// "The request is still out; whatever it answers will be judged by the identity
+// the response publishes for ITSELF". The COHORT threw that away. Running and
+// settled skewed attempts landed in ONE count, so the header said over a live
+// request that it "never came back with a book of its own" and sent the reader
+// to re-run — while `matrix-run` and `run-book-button` are BOTH disabled for
+// exactly as long as that request is out. A dead end, printed above a sentence
+// that contradicts it, and this file asserted BOTH sides of the contradiction at
+// once (see the corrected expectation in "the attempt clause rides BESIDE a real
+// cohort").
+//
+// THE RULE: TWO STATES, TWO TRUTHS, NEITHER SENTENCE BORROWING THE OTHER'S.
+// A running skewed attempt is told the request is out and offered NO remedy,
+// because waiting is not an action. A settled one keeps R14's finding verbatim.
+// One derivation — `DefinitionSkew.pending` — feeds the cohort's two subsets,
+// the header clause, the matrix row note and the detail tail, so the surfaces
+// cannot drift into three accounts of one request.
+// ===========================================================================
+
+/**
+ * A SECOND row whose stamp disagrees with the listing, so both halves of the
+ * attempt family can be on one table at once. `dm_rate_horizon_plus_200bps` is
+ * v1 in every committed listing; a phase stamped v0 was dispatched under a cut
+ * this page never showed, which is the same join R14 makes for DEPEG.
+ */
+const RATE_STAMP_OLD: ScenarioIdentity = {
+  scenarioId: RATE.id,
+  version: "v0",
+  configVersion: "v1",
+};
+
+/** The request that is STILL OUT, asked under a definition that has moved. */
+const R15_RUNNING: [string, MatrixPhase] = [DEPEG.id, stamped({ kind: "running" }, STAMP_V1)];
+
+/** The one that ENDED without a book — R14's case, unchanged. */
+const R15_SETTLED: [string, MatrixPhase] = [
+  RATE.id,
+  stamped({ kind: "outcome", outcome: { kind: "not-served" } }, RATE_STAMP_OLD),
+];
+
+/** A displayed result at batch 1, so the ANCHORED arm of the header is taken. */
+const R15_ANCHOR: [string, MatrixPhase] = [ETH.id, ok(RUN_BOOK_ETH)];
+
+function r15Cohort(...entries: [string, MatrixPhase][]) {
+  return resolveBatchCohort(
+    listedPhases(new Map<string, MatrixPhase>(entries), RELISTED),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+}
+
+/** The anchored arm's opening, whenever ETH is the only displayed row. */
+const R15_ANCHORED_LEAD =
+  "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
+  "that batch.";
+
+/** The RUNNING arm, anchored. It names no remedy — that is the whole finding. */
+const R15_RUNNING_ANCHORED =
+  " 1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and their " +
+  "request is STILL OUT — an attempt carries only the identity it was DISPATCHED under, and " +
+  "that identity is not this row's. Nothing has settled: whatever the request answers will be " +
+  "judged by the identity the RESPONSE publishes for itself, so the row pins no batch and is " +
+  "no part of the sentence above. There is nothing to do here until it settles.";
+
+/** The SETTLED arm, anchored — R14's wording, byte for byte. */
+const R15_SETTLED_ANCHORED =
+  " 1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and never " +
+  "came back with a book of their own — an attempt carries only the identity it was DISPATCHED " +
+  "under, and that identity is not this row's. Nothing answered and nothing was refused, so the " +
+  "attempt is counted as neither in flight nor unanswered, pins no batch, and is no part of the " +
+  "sentence above. Re-run the row to ask under the current definition — a listing refresh " +
+  "resolves nothing here, because the listing is already the current one.";
+
+/** The no-anchor arm's facts, each as `firstResultPendingClause` builds it. */
+const R15_RUNNING_FACT =
+  "1 run(s) were ASKED under a committed definition this page is no longer showing and the " +
+  "request is STILL OUT — whatever it answers will be judged by the identity the response " +
+  "publishes for itself, so there is nothing to do here until it settles";
+
+const R15_SETTLED_FACT =
+  "1 run(s) were ASKED under a committed definition this page is no longer showing and never " +
+  "came back with a book of their own — re-run to ask under the current one";
+
+/** The no-anchor arm's frame, around whatever facts it was given. */
+function r15Pending(facts: string): string {
+  return (
+    `no result has been served to this table yet: ${facts}. There is no batch for this table ` +
+    `to be as of — and this is NOT “not run”: every row counted here was asked, and each says ` +
+    `in its own cell what became of the asking.`
+  );
+}
+
+/** Every phrase that belongs to the SETTLED truth and to nothing else. */
+const SETTLED_ONLY = [
+  "never came back with a book of their own",
+  "Re-run the row to ask under the current definition",
+  "re-run to ask under the current one",
+];
+
+/** Every phrase that belongs to the RUNNING truth and to nothing else. */
+const RUNNING_ONLY = [
+  "their request is STILL OUT",
+  "the request is STILL OUT",
+  "There is nothing to do here until it settles",
+];
+
+test("R15 — THE PARTITION: the R14 family keeps its exact meaning, split by whether it settled", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R15_RUNNING, R15_SETTLED);
+  // R14's set is untouched: it still answers, alone, "is this row's phase an
+  // attempt under a definition this page no longer shows".
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([DEPEG.id, RATE.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([DEPEG.id, RATE.id]);
+  // …and the two subsets partition it, disjointly and exhaustively.
+  expect(cohort.runningAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.settledAttemptScenarioIds).toEqual([RATE.id]);
+  expect([...cohort.runningAttemptScenarioIds, ...cohort.settledAttemptScenarioIds].sort()).toEqual(
+    [...cohort.definitionChangedAttemptScenarioIds].sort(),
+  );
+  // Neither half is counted as this row's run in ANY of R14's three tenses.
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+  expect(cohort.inFlightScenarioIds).toEqual([]);
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+  expect(cohort.inFlightHeldPins).toEqual([]);
+});
+
+test("R15 — THE DERIVATION IS ONE: `pending` is published by the skew, not re-read per surface", () => {
+  const running = attemptSkew(stamped({ kind: "running" }, STAMP_V1), IDENT_V2);
+  const settled = attemptSkew(
+    stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1),
+    IDENT_V2,
+  );
+  expect(running?.pending).toBe(true);
+  expect(settled?.pending).toBe(false);
+  // It agrees with the reason `attemptSkew` already composed from the same read
+  // — which is the distinction R14 knew and then discarded downstream.
+  expect(running?.reason).toContain("The request is still out");
+  expect(settled?.reason).toContain("Re-run this row to ask under the definition");
+  // A SERVED BODY is settled by construction: there is a response to read.
+  const answered = definitionSkew(RUN_BOOK_WEETH_BATCH_1 as unknown as LabRunBook, IDENT_V2);
+  expect(answered?.subject).toBe("response");
+  expect(answered?.pending).toBe(false);
+  // And the cohort's split is that flag and nothing else.
+  for (const [id, phase, expected] of [
+    [DEPEG.id, R15_RUNNING[1], "running"],
+    [RATE.id, R15_SETTLED[1], "settled"],
+  ] as const) {
+    const cohort = r15Cohort([id, phase]);
+    expect(cohort.runningAttemptScenarioIds).toEqual(expected === "running" ? [id] : []);
+    expect(cohort.settledAttemptScenarioIds).toEqual(expected === "settled" ? [id] : []);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE COMPOSED HEADER, ANCHORED — (a) running only, (b) settled only, (c) both.
+// ---------------------------------------------------------------------------
+
+test("R15 — ANCHORED (a): a request STILL OUT is never told it came back, and is offered no re-run", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R15_RUNNING);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(R15_ANCHORED_LEAD + R15_RUNNING_ANCHORED);
+  // THE FINDING, AS A NEGATIVE. Not one word of the settled truth may appear
+  // over a request that has not come back — and the re-run it points at is the
+  // control BOTH surfaces disable while the request is out.
+  for (const phrase of SETTLED_ONLY) expect(line).not.toContain(phrase);
+  expect(line).not.toContain("came back");
+  expect(line.toLowerCase()).not.toContain("re-run");
+  // Nor any of the accounts belonging to other events.
+  expect(line).not.toContain("row(s) have a run in flight");
+  expect(line).not.toContain("ended without a served result");
+  expect(line).not.toContain("answered for a COMMITTED DEFINITION");
+});
+
+test("R15 — ANCHORED (b): a SETTLED skewed attempt keeps R14's sentence, byte for byte", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R15_SETTLED);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(R15_ANCHORED_LEAD + R15_SETTLED_ANCHORED);
+  // R14's remedy is honest here: nothing will ever come back, and the run
+  // control is live because this row is not running.
+  expect(line).toContain("Re-run the row to ask under the current definition");
+  for (const phrase of RUNNING_ONLY) expect(line).not.toContain(phrase);
+});
+
+test("R15 — ANCHORED (c): both at once — two truths, one sentence each, never merged", () => {
+  const cohort = r15Cohort(R15_ANCHOR, R15_RUNNING, R15_SETTLED);
+  const line = batchHeaderLine(cohort, null);
+  // THE WHOLE COMPOSED OUTPUT. Two arms, each counting ONE row, in the reader's
+  // order: what is still out, then what has ended.
+  expect(line).toBe(R15_ANCHORED_LEAD + R15_RUNNING_ANCHORED + R15_SETTLED_ANCHORED);
+  // THE MERGE THIS TEST EXISTS TO CATCH. Two rows are in the family, and the
+  // pre-R15 clause would have said so in ONE sentence with a count of 2.
+  expect(cohort.definitionChangedAttemptScenarioIds).toHaveLength(2);
+  expect(line).not.toContain("2 row(s) were ASKED");
+  expect(line).not.toContain("2 run(s) were ASKED");
+  // Each truth is said EXACTLY ONCE, in this arm's own words, and neither
+  // borrows the other's. A merge would print one of them twice or not at all.
+  for (const phrase of [
+    "their request is STILL OUT",
+    "There is nothing to do here until it settles.",
+    "never came back with a book of their own",
+    "Re-run the row to ask under the current definition",
+  ]) {
+    expect(line.split(phrase)).toHaveLength(2);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE COMPOSED HEADER, NO ANCHOR — the same three, through the other arm.
+// ---------------------------------------------------------------------------
+
+test("R15 — NO ANCHOR (a): the first-result-pending arm names the request, not a remedy", () => {
+  const cohort = r15Cohort(R15_RUNNING);
+  expect(cohort.anchorBatchId).toBeNull();
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(r15Pending(R15_RUNNING_FACT));
+  for (const phrase of SETTLED_ONLY) expect(line).not.toContain(phrase);
+  expect(line).not.toContain("came back");
+  expect(line.toLowerCase()).not.toContain("re-run");
+  // R10's law still holds through the new arm: this is NOT "not run". The row
+  // was asked — just not under the definition on screen — and its cells say so.
+  expect(cohort.attemptedScenarioIds).toEqual([]);
+  expect(line).not.toBe(MATRIX_NO_RUN_LINE);
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R15 — NO ANCHOR (b): a SETTLED skewed attempt keeps R14's fact, byte for byte", () => {
+  const cohort = r15Cohort(R15_SETTLED);
+  expect(cohort.anchorBatchId).toBeNull();
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(r15Pending(R15_SETTLED_FACT));
+  for (const phrase of RUNNING_ONLY) expect(line).not.toContain(phrase);
+});
+
+test("R15 — NO ANCHOR (c): both at once — two facts, joined, each counting its own row", () => {
+  const cohort = r15Cohort(R15_RUNNING, R15_SETTLED);
+  expect(cohort.anchorBatchId).toBeNull();
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(r15Pending(`${R15_RUNNING_FACT}, and ${R15_SETTLED_FACT}`));
+  expect(cohort.definitionChangedAttemptScenarioIds).toHaveLength(2);
+  expect(line).not.toContain("2 run(s) were ASKED");
+  // Each fact exactly once, in the no-anchor arm's own lower-cased register.
+  for (const phrase of [
+    "the request is STILL OUT",
+    "so there is nothing to do here until it settles",
+    "never came back with a book of their own",
+    "re-run to ask under the current one",
+  ]) {
+    expect(line.split(phrase)).toHaveLength(2);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// THE DETAIL VIEW'S TAIL, both ways — from the same derivation the clause uses.
+// ---------------------------------------------------------------------------
+
+test("R15 — THE DETAIL TAIL never contradicts the reason it is appended to", () => {
+  const running = attemptSkew(stamped({ kind: "running" }, STAMP_V1), IDENT_V2);
+  const settled = attemptSkew(
+    stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1),
+    IDENT_V2,
+  );
+  if (running === null || settled === null) throw new Error("the fixture is not skewed");
+
+  // THE DEFECT, AS A PAIR OF SENTENCES. R14 appended one fixed tail — "No book
+  // came back from it" — to a reason whose last words are "The request is still
+  // out". One paragraph, two mutually exclusive claims about one request.
+  const runningTail = attemptChangedNote(running, "detail");
+  expect(runningTail).toBe(
+    "This panel therefore shows no aggregate, no delta and no outcome register from it — and " +
+      "there is nothing to do here until the request settles.",
+  );
+  expect(runningTail).not.toContain("came back");
+  expect(runningTail.toLowerCase()).not.toContain("re-run");
+  // The whole paragraph the panel renders, read as one thing.
+  const paragraph = `${running.reason} ${runningTail}`;
+  expect(paragraph).toContain("The request is still out");
+  expect(paragraph).not.toContain("No book came back");
+
+  // …and the SETTLED tail is R14's, unchanged, because R14 was right about it.
+  expect(attemptChangedNote(settled, "detail")).toBe(
+    "No book came back from it, so there is nothing here for a listing refresh to make " +
+      "readable — this panel shows no aggregate, no delta and no outcome register from it.",
+  );
+});
+
+test("R15 — THE MATRIX ROW NOTE and the detail tail read the same flag", () => {
+  const running = attemptSkew(stamped({ kind: "running" }, STAMP_V1), IDENT_V2);
+  const settled = attemptSkew(
+    stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1),
+    IDENT_V2,
+  );
+  if (running === null || settled === null) throw new Error("the fixture is not skewed");
+
+  // The row note beside a DISABLED run control names no action at all.
+  const runningNote = attemptChangedNote(running, "matrix");
+  expect(runningNote).toContain("this row's request is still out");
+  expect(runningNote).toContain("a listing refresh resolves nothing here");
+  expect(runningNote).not.toContain("Run this row again");
+  expect(runningNote).not.toContain("came back");
+
+  // The settled note keeps R14's wording, and its re-run direction is honest:
+  // the row is not running, so the control it points at is live.
+  const settledNote = attemptChangedNote(settled, "matrix");
+  expect(settledNote).toContain("never came back with a book of its own");
+  expect(settledNote).toContain("Run this row again to ask under the definition above.");
+  expect(settledNote).not.toContain("still out");
+
+  // ONE SOURCE: every surface's branch is this flag, so a cohort that counts a
+  // row in `runningAttemptScenarioIds` cannot be rendered beside a note or a
+  // tail written for the settled half.
+  const cohort = r15Cohort(R15_RUNNING, R15_SETTLED);
+  for (const [id, skew] of [
+    [DEPEG.id, running],
+    [RATE.id, settled],
+  ] as const) {
+    expect(cohort.runningAttemptScenarioIds.includes(id)).toBe(skew.pending);
+    expect(cohort.settledAttemptScenarioIds.includes(id)).toBe(!skew.pending);
+  }
+});
+
+test("R15 — THE CELL AND THE HEADER AGREE about a request that is still out", () => {
+  // The law this wave extends: header, cells, banners and detail never
+  // contradict. The cell was already right (that is how the finding was found);
+  // this pins the header beside it, over one cohort, in one assertion.
+  const cohort = r15Cohort(R15_ANCHOR, R15_RUNNING);
+  const cell = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase: R15_RUNNING[1],
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(cell.state).toBe("definition-changed");
+  if (cell.state !== "definition-changed") throw new Error("unreachable");
+  expect(cell.skew.pending).toBe(true);
+  expect(cell.skew.reason).toContain("The request is still out");
+  expect(cell.skew.reason).not.toContain("Re-run this row");
+  expect(CELL_STATE_LABEL[cell.state]).toBe("DEFINITION CHANGED");
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("their request is STILL OUT");
+  expect(line.toLowerCase()).not.toContain("re-run");
+  // The cell says the request is out; the header says the request is out. The
+  // pre-R15 header said it never came back.
+  expect(line).not.toContain("came back");
 });

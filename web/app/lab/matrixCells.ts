@@ -481,6 +481,33 @@ export interface DefinitionSkew {
    *             will ever become readable: the affordance is a RE-RUN.
    */
   subject: "response" | "attempt";
+  /**
+   * WAVE R15 — WHETHER THE REQUEST IS STILL OUT. THE SINGLE SOURCE, and the
+   * whole point of it living on the skew object rather than being re-derived per
+   * surface: the header clause, the matrix row note and the detail view all
+   * branch on THIS field, so they cannot give a reader three accounts of one
+   * request.
+   *
+   * R14 split the definition-changed set by SUBJECT (an answer about another
+   * definition versus an attempt under one) and stopped there, which merged two
+   * further states under one remedy. A skewed attempt that is STILL IN FLIGHT
+   * has not failed at anything: no book has come back because none could have
+   * yet. Telling that reader the run "never came back" and to "re-run" is false
+   * twice over — and the re-run control is disabled for exactly as long as the
+   * sentence is on screen, so it is a dead end besides.
+   *
+   *   true   the run is still out. Nothing has settled, so nothing is claimed
+   *          about what it did or did not do, and NO remedy is offered: the
+   *          affordance is to WAIT.
+   *   false  the phase has settled — a served body (`response`), or an attempt
+   *          that ended without one. R14's remedies stand exactly as written.
+   *
+   * IT IS NOT THE `inFlightScenarioIds` CLAIM. That set says "this ROW has a run
+   * in flight", and a skewed attempt is deliberately absent from it because the
+   * run in flight is not this row's. This field says only that the request whose
+   * identity does not match has not come back yet.
+   */
+  pending: boolean;
   /** The identity the page is currently SHOWING for this row. */
   listing: ScenarioIdentity;
   /**
@@ -530,6 +557,9 @@ export function definitionSkew(
   if (fields.length === 0) return null;
   return {
     subject: "response",
+    // A body in hand is a settled phase by construction — there is a response to
+    // read the identity off. Stated rather than left to the reader to infer.
+    pending: false,
     listing: identity,
     served,
     fields,
@@ -705,6 +735,15 @@ export function attemptSkew(
   const inFlight = phase.kind === "running";
   return {
     subject: "attempt",
+    // WAVE R15 — THE SAME `inFlight` THE REASON BELOW BRANCHES ON, PUBLISHED.
+    // R14 computed this distinction, said the true thing about it in the CELL,
+    // and then let every other surface re-derive it or ignore it: the cohort
+    // merged both states into one count, so the header told a reader whose
+    // request was still out that it "never came back" and to re-run — while the
+    // run controls were disabled waiting for that very request. Publishing the
+    // flag is what makes the header, the row note and the detail view read from
+    // one source.
+    pending: inFlight,
     listing: identity,
     served: attempt,
     fields,
@@ -976,8 +1015,45 @@ export interface BatchCohort {
    * about another definition becomes readable the moment the listing catches up,
    * so its affordance is a REFRESH; an ATTEMPT under another definition never
    * becomes anything at all, so its affordance is a RE-RUN.
+   *
+   * WAVE R15 — "never becomes anything at all" is true of a SETTLED attempt and
+   * false of one still in flight, so the family is partitioned by the two sets
+   * below and the clause reads from those. This set keeps its exact meaning and
+   * its exact count: it still answers, alone, "is this row's phase an attempt
+   * under a definition this page no longer shows".
    */
   definitionChangedAttemptScenarioIds: string[];
+  /**
+   * WAVE R15 — the RUNNING half of the attempt family: a skewed run whose
+   * request IS STILL OUT.
+   *
+   * THE SHAPE, AND WHY IT IS THIS ONE. The family above stays the UNION and
+   * keeps its meaning byte for byte — it answers "is this row's phase an attempt
+   * under a definition this page no longer shows", and that is still one
+   * question with one answer. What R14 got wrong was reading a second question
+   * off the same count: "so what should the reader DO". Two SUBSETS partition
+   * the family without redefining it, so every set-membership pin R14 wrote
+   * still holds exactly as written, and the clause gains an arm rather than
+   * having its arithmetic re-based.
+   *
+   * NOTHING HAS FAILED HERE. The request has not come back because it cannot
+   * have come back yet — and the two run controls are disabled for precisely as
+   * long as it is out, so a sentence sending this reader to re-run points at a
+   * button that cannot be clicked. The only true thing to say is that the
+   * request is out and that whatever it answers will be judged by the identity
+   * the RESPONSE publishes for itself.
+   */
+  runningAttemptScenarioIds: string[];
+  /**
+   * WAVE R15 — the SETTLED half: a skewed attempt that ended WITHOUT a book of
+   * its own (404, 503, 429, 5xx, or no HTTP response at all).
+   *
+   * This half is R14's finding intact, wording and remedy unchanged. Nothing
+   * will ever come back for it, so nothing a fresh listing can do makes it
+   * readable and only a re-run resolves it — and the run controls are live,
+   * because the row is not running.
+   */
+  settledAttemptScenarioIds: string[];
   /**
    * WAVE R10 — the batch pins IN-FLIGHT rows are still holding. Held evidence
    * anchors the cohort (R8) but is displayed nowhere, so when it is OLDER than
@@ -1043,6 +1119,8 @@ export function resolveBatchCohort(
   const contradictedScenarioIds: string[] = [];
   const definitionChangedScenarioIds: string[] = [];
   const definitionChangedAttemptScenarioIds: string[] = [];
+  const runningAttemptScenarioIds: string[] = [];
+  const settledAttemptScenarioIds: string[] = [];
   const inFlightHeldPins: BatchPin[] = [];
   const displayedPins: BatchPin[] = [];
   for (const [scenarioId, phase] of phases) {
@@ -1063,6 +1141,12 @@ export function resolveBatchCohort(
     if (staleAttempt !== null) {
       definitionChangedScenarioIds.push(scenarioId);
       definitionChangedAttemptScenarioIds.push(scenarioId);
+      // WAVE R15 — AND WHICH HALF, from the flag the skew itself publishes
+      // rather than from a second read of `phase.kind`. The clause, the row note
+      // and the detail view all branch on this one derivation, so the three can
+      // never disagree about whether the request is still out.
+      if (staleAttempt.pending) runningAttemptScenarioIds.push(scenarioId);
+      else settledAttemptScenarioIds.push(scenarioId);
       continue;
     }
     attemptedScenarioIds.push(scenarioId);
@@ -1114,6 +1198,8 @@ export function resolveBatchCohort(
     contradictedScenarioIds,
     definitionChangedScenarioIds,
     definitionChangedAttemptScenarioIds,
+    runningAttemptScenarioIds,
+    settledAttemptScenarioIds,
     inFlightHeldPins,
     displayedPins,
   };
@@ -1214,6 +1300,24 @@ export function resolveBatchCohort(
 //      can say "re-run" where R12's says "refresh", because a run that never
 //      answered has nothing for a fresh listing to make readable.
 //
+// R15 (Codex round-23) SPLITS THAT SUBSET AGAIN, because ONE of the two events
+// R14 named is itself two events with two truths:
+//
+//   8. A RUN STILL IN FLIGHT WAS TOLD IT NEVER CAME BACK. `attemptSkew` already
+//      knew the difference — its CELL wording says "the request is still out" —
+//      but the cohort merged running and settled skewed attempts into one count,
+//      so the header spoke R14's single sentence over both: the request "never
+//      came back with a book of their own", re-run the row. Over a request that
+//      is still out that is false about the past and useless about the present,
+//      and it directs the reader at a control BOTH surfaces disable for exactly
+//      as long as the request is in flight. `runningAttemptScenarioIds` and
+//      `settledAttemptScenarioIds` partition the R14 family (which keeps its
+//      meaning and its count), and the running arm names NO remedy at all,
+//      because waiting is the only true one. The single derivation is
+//      `DefinitionSkew.pending`, published by `attemptSkew` from the same read
+//      its reason branches on, so the header clause, the matrix row note and the
+//      detail view cannot give three accounts of one request.
+//
 // THE ONE PRINCIPLE, from which every clause below follows: EVERY CLAUSE IS A
 // STATEMENT ABOUT A NAMED SET the reader can point at — displayed rows, rows
 // asked, rows in flight, held pins, rows served a book that named nobody, rows
@@ -1260,6 +1364,11 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   // sentence — byte-identical whenever no attempt is involved.
   const changedAttempts = cohort.definitionChangedAttemptScenarioIds.length;
   const changed = cohort.definitionChangedScenarioIds.length - changedAttempts;
+  // R15: and the attempt half splits again, by whether the request has SETTLED.
+  // Same arithmetic discipline: the settled count is the family minus the
+  // running one, so R14's fact renders byte-identically whenever nothing is out.
+  const runningAttempts = cohort.runningAttemptScenarioIds.length;
+  const settledAttempts = changedAttempts - runningAttempts;
   const facts: string[] = [];
   if (inFlight > 0) facts.push(`${String(inFlight)} run(s) are in flight`);
   if (unanswered > 0) facts.push(`${String(unanswered)} run(s) ended without a served result`);
@@ -1288,13 +1397,25 @@ function firstResultPendingClause(cohort: BatchCohort): string {
         `showing — refresh the listing to run against the current one`,
     );
   }
+  // R15: THE REQUEST IS STILL OUT, so no account of what it did may be given and
+  // no remedy may be named. "Never came back" is a claim about a finished thing;
+  // this thing is not finished. And the re-run it would send the reader to is
+  // the control this row disables while the request is out.
+  if (runningAttempts > 0) {
+    facts.push(
+      `${String(runningAttempts)} run(s) were ASKED under a committed definition this page is ` +
+        `no longer showing and the request is STILL OUT — whatever it answers will be judged by ` +
+        `the identity the response publishes for itself, so there is nothing to do here until ` +
+        `it settles`,
+    );
+  }
   // R14: NOTHING ANSWERED HERE AT ALL, so the remedy above is the wrong one. A
   // refresh makes a stored ANSWER readable; there is no answer here to make
   // readable, only a run that was asked under a definition this page has moved
   // past. Only a re-run resolves it.
-  if (changedAttempts > 0) {
+  if (settledAttempts > 0) {
     facts.push(
-      `${String(changedAttempts)} run(s) were ASKED under a committed definition this page is ` +
+      `${String(settledAttempts)} run(s) were ASKED under a committed definition this page is ` +
         `no longer showing and never came back with a book of their own — re-run to ask under ` +
         `the current one`,
     );
@@ -1477,8 +1598,21 @@ function definitionChangedClause(cohort: BatchCohort): string {
   // involved); the attempt half gets its own, because "answered for" is a false
   // account of a run that never answered, and "refresh the listing" is a false
   // remedy for a row whose listing is already current.
+  //
+  // WAVE R15 — AND THE ATTEMPT HALF IS ITSELF TWO STATES. R14 wrote ONE sentence
+  // for every skewed attempt, and that sentence said the run "never came back"
+  // and told the reader to re-run. Over a request that is STILL OUT both halves
+  // of it are false: nothing has come back because nothing could have yet, and
+  // the re-run it points at is disabled for exactly as long as the request is in
+  // flight — the header directing a reader to a control the row has disabled is
+  // the contradiction R10 through R14 closed everywhere else, arriving through
+  // the newest door. Three arms now, each a statement about a set the reader can
+  // point at, and the counts subtract so that every arm not in play renders R14's
+  // and R12's text unchanged.
   const attempts = cohort.definitionChangedAttemptScenarioIds.length;
   const answers = cohort.definitionChangedScenarioIds.length - attempts;
+  const running = cohort.runningAttemptScenarioIds.length;
+  const settled = attempts - running;
   let line = "";
   if (answers > 0) {
     line +=
@@ -1489,9 +1623,21 @@ function definitionChangedClause(cohort: BatchCohort): string {
       `batch, and is no part of the sentence above. Refresh the committed listing to run against ` +
       `the current definition.`;
   }
-  if (attempts > 0) {
+  // R15's arm. It names no remedy AT ALL, and that is the point: there is no
+  // action a reader can take on a request that is still out, so offering one
+  // would be inventing work. It also makes no claim about what came back.
+  if (running > 0) {
     line +=
-      ` ${String(attempts)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
+      ` ${String(running)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
+      `longer showing and their request is STILL OUT — an attempt carries only the identity it ` +
+      `was DISPATCHED under, and that identity is not this row's. Nothing has settled: whatever ` +
+      `the request answers will be judged by the identity the RESPONSE publishes for itself, ` +
+      `so the row pins no batch and is no part of the sentence above. There is nothing to do ` +
+      `here until it settles.`;
+  }
+  if (settled > 0) {
+    line +=
+      ` ${String(settled)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
       `longer showing and never came back with a book of their own — an attempt carries only ` +
       `the identity it was DISPATCHED under, and that identity is not this row's. Nothing ` +
       `answered and nothing was refused, so the attempt is counted as neither in flight nor ` +
@@ -1546,7 +1692,9 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
  * The clause order is the reader's order: what this table claims, then what is
  * held but not shown, then what is still out, then what came back empty, then
  * what came back naming nobody, then what came back naming somebody twice, then
- * what came back about another definition, then the frontier's separate read.
+ * what came back about another definition, then what is still out under another
+ * definition, then what ended under another definition, then the frontier's
+ * separate read.
  */
 export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
   return (
@@ -1971,4 +2119,72 @@ export function rerunFailedBanner(
           `its own words (${register}). Nothing was overwritten and nothing was invented in its ` +
           `place.`,
   };
+}
+
+// ---------------------------------------------------------------------------
+// WAVE R15, CODEX ROUND 23 — A REQUEST THAT IS STILL OUT HAS NOT FAILED AT
+// ANYTHING, AND MAY NOT BE TOLD IT DID.
+//
+// THE DEFECT. R14 bound every bodyless phase to the identity it was DISPATCHED
+// under and gave the resulting set its own remedy: this run never answered, so
+// a listing refresh cannot help it — RE-RUN THE ROW. That is exactly right for a
+// run that ENDED. It is false for one still in flight, and `attemptSkew` knew as
+// much all along: its CELL wording already reads "The request is still out;
+// whatever it answers will be judged by the identity the response publishes for
+// ITSELF". The COHORT threw that distinction away, merging both into one count,
+// so the header said over a live request that it "never came back with a book of
+// its own" and directed the reader to re-run — while `matrix-run` and
+// `run-book-button` are BOTH disabled for precisely as long as the request is
+// out. A dead end, printed above a sentence that contradicts it.
+//
+// THE RULE: TWO STATES, TWO TRUTHS, AND NEITHER SENTENCE MAY BORROW THE OTHER'S.
+//
+//   running  the request is still out. No account of what came back is given,
+//            because nothing came back and nothing failed to; NO remedy is named
+//            anywhere, because waiting is the only one and it is not an action.
+//   settled  R14's finding, intact: nothing will ever come back, a fresh listing
+//            makes nothing readable, and only a re-run resolves it.
+//
+// ONE DERIVATION FOR ALL THREE SURFACES. `DefinitionSkew.pending` is published by
+// `attemptSkew` from the same read its own reason branches on;
+// `resolveBatchCohort` partitions its two subsets on it, the header clause counts
+// those subsets, and the composer below — which BOTH the matrix row note and the
+// detail view render — branches on it. There is no fourth place for the question
+// to be answered differently.
+// ---------------------------------------------------------------------------
+
+/**
+ * The row-level sentence for an attempt asked under another definition.
+ *
+ * Shared by both surfaces for R13's reason, which is now this file's habit: two
+ * hand-written copies of one claim are two claims, and they drift. `surface`
+ * selects the register, never the FACTS — the matrix note stands alone beside a
+ * row, the detail tail lands after `skew.reason` and speaks about the panel.
+ *
+ * Only ever called with `subject: "attempt"`. A `response` skew has a body to
+ * read and R12's own gate names it; passing one here would be asking the wrong
+ * question of the wrong thing, and its `pending` is false by construction.
+ */
+export function attemptChangedNote(skew: DefinitionSkew, surface: RerunSurface): string {
+  if (surface === "matrix") {
+    // WAVE R15: no remedy is named, and the word "again" does not appear. The
+    // run control beside this very sentence is disabled while the request is
+    // out, so naming one would point at a button that cannot be clicked.
+    return skew.pending
+      ? "this row's request is still out, and was ASKED under a committed definition this page " +
+          "is no longer showing. Whatever it answers will be judged by the identity the response " +
+          "publishes for ITSELF — a listing refresh resolves nothing here."
+      : "this row's run was ASKED under a committed definition this page is no longer showing, " +
+          "and never came back with a book of its own. A listing refresh resolves nothing — the " +
+          "listing is already the current one. Run this row again to ask under the definition " +
+          "above.";
+  }
+  // The detail tail. R14's settled sentence is kept verbatim; the pending one
+  // says only what this PANEL can establish, and never contradicts the reason it
+  // is appended to — whose last words are that the request is still out.
+  return skew.pending
+    ? "This panel therefore shows no aggregate, no delta and no outcome register from it — and " +
+        "there is nothing to do here until the request settles."
+    : "No book came back from it, so there is nothing here for a listing refresh to make " +
+        "readable — this panel shows no aggregate, no delta and no outcome register from it.";
 }

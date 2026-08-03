@@ -47,6 +47,7 @@ import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
 import {
+  attemptChangedNote,
   attemptSkew,
   bookHoleEngines,
   bookRefusal,
@@ -423,14 +424,27 @@ function BookAllHoleView({
  * in-flight pending line — directly under a row whose every cell reads
  * DEFINITION CHANGED, which is the same header-versus-cells contradiction R10
  * through R13 closed everywhere else.
+ *
+ * WAVE R15 — THE TAIL BRANCHES ON THE SAME DERIVATION THE HEADER CLAUSE DOES.
+ * R14 appended one fixed sentence to `skew.reason`: "No book came back from it,
+ * so there is nothing here for a listing refresh to make readable". Over a
+ * RUNNING attempt that landed directly after a reason whose last words are "The
+ * request is still out" — the panel contradicting itself inside one paragraph,
+ * and contradicting it in the direction that invents a finished failure out of
+ * an open request. The branch reads `skew.pending`, which is the field
+ * `resolveBatchCohort` splits its two attempt subsets on and the matrix row note
+ * reads too, so the three surfaces cannot drift.
  */
 function BookAttemptChangedView({ skew }: { skew: DefinitionSkew }) {
   return (
-    <div className={styles.notServed} data-testid="runbook-attempt-changed">
+    <div
+      className={styles.notServed}
+      data-testid="runbook-attempt-changed"
+      data-in-flight={skew.pending ? "true" : "false"}
+    >
       <b>refusing to read this run as this row&apos;s: it was asked under another committed
       definition.</b>{" "}
-      {skew.reason} No book came back from it, so there is nothing here for a listing refresh to
-      make readable — this panel shows no aggregate, no delta and no outcome register from it.
+      {skew.reason} {attemptChangedNote(skew, "detail")}
     </div>
   );
 }
