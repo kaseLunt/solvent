@@ -3570,3 +3570,63 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   dashboard split A next); then riskd-as-a-service (the HF-History
   sparseness root cause: batches only exist from manual -once runs);
   W3 deploy checklist behind the owner's VPS + domain.
+- **riskd IS A SERVICE; R5 + W-HR-A + R6 LANDED (22ab9e9, 58db6d6,
+  a8a5937); ROUNDS 12–14 EACH NOT-SHIP → EACH CLOSED (19:15 Aug 2)**:
+  riskd's daemon loop already existed (runLoop, 2s vector poll, 5000
+  retention) — the HF-History sparseness was purely operational, batches
+  only ever came from manual -once probes. riskd-aad8a36.exe now RUNS
+  (first daemon batch #7: 9,848 positions, 0 refused; ~2/min cadence off
+  the indexer's 60s price polls; ~42h of history at retention). ROUND 12
+  NOT-SHIP (2 MED, both R4 freshness): equal-integer wire ages could not
+  re-anchor a NEWER receipt (fresh batch rendered with the old
+  accumulated age), and a sleep + backward wall-step killed both deltas
+  so the resume reconcile never fired → R5 22ab9e9: re-anchoring keyed
+  on the RECEIPT (served_at + batch id, threaded through posture and
+  all three call sites); persisted-pageshow and hidden→visible are
+  DEFINITIVE evidence that outranks both clocks, burst-coalesced via
+  consumable away-evidence + an echo guard. W-HR-A 58db6d6 (25 files):
+  the owner's "never on real debt" and "useless map" findings die
+  together — HEADROOM is the book's native distance on both engines,
+  one formula over the HF's own rational pair ((num−den)/num; DM:
+  maxBorrowLT/borrowings, Aave: wad/1e18), floor display + exact-bigint
+  7-band scale, liq-distance column replaced, Engine and DM
+  HF-disclosure columns struck (price-path demoted to the cell hover,
+  legends per engine), the risk map bins the FULL book by band above
+  the table, page-scatter deleted, ONE hoisted auto-started walk at the
+  contract-max page size, debt_manager the default engine. The
+  auto-walk surfaced a FIELD DEFECT: at 200/page every walk was
+  outpaced by the daemon's cadence and looped forever (550 requests/55s,
+  zero maps) — WALK_LIMIT=1000 beats the cadence (~4s), and after 3
+  supersessions the walk refuses OUT LOUD (outpaced state; splicing or
+  drawing the partial would both lie), with a walk-again affordance
+  only in that state (integrator-accepted). ROUND 13 NOT-SHIP (2 MED):
+  blind wakes (definitive evidence, neither clock certifies) left the
+  ribbon fresh over hours-old data (no repair path; idle heartbeat SSE
+  never re-receipts) and a failed resume fetch CONSUMED the only proof
+  of missing time → R6 a8a5937: the UNRESOLVED-RESUME state — the hook
+  returns {seconds, unresolved, refreshFailed}; while unresolved the
+  AGE is withheld (never the book), repairs are OBSERVABLE
+  (Promise<boolean>) on a bounded 0/+5s/+15s schedule then disclosed as
+  failed, posture.refresh() reopens the stream so the ribbon can repair
+  at all, and the ONLY discharge is a new receipt. ROUND 14 NOT-SHIP on
+  W-HR-A (1 HIGH + 3 MED): DM's "Headroom ↑" actually ordered by
+  absolute USD room (130 live adjacent ratio inversions in the first
+  1000 rows — comment-only disclosure fails the bar), exactly-50%
+  banded as ">50%", the map header could pair batch N's map with an
+  N+1 count, and 409 restarts kept stale walked-N progress → W-HR-B IN
+  FLIGHT, the atomic 1.5.0 train: store ratio ORDER BY behind a real
+  `headroom` sort key both engines (liq_distance a deprecated alias
+  that keeps its OLD ordering — an alias that reorders is a lie),
+  additive contract 1.4.0→1.5.0, DM factor_symbol populated
+  server-side, client regen byte-identical, web adopts the true key and
+  drops the interim disclosure, ≥50%/at-least-half relabel under the
+  one left-closed band rule, batch-guarded map count, zeroed restarting
+  state + true supersession count. Round 15 reviews 58db6d6..W-HR-B.
+  AGENT-OPS (3rd/4th occurrences): codex-reviewer agents park on
+  background monitors instead of polling — the synchronous-poll nudge
+  is now standard; round-14's findings had to be recovered from the
+  plugin's job-state JSON when the agent's final message carried only
+  metadata. Web waves are SERIALIZED by law now: one working tree, one
+  .next, one :3111 — R5's e2e needing a fresh build explains the 17:01
+  server death (the wave stopped it deliberately; subsequent waves get
+  that permission explicitly with disclose-and-leave-running terms).
