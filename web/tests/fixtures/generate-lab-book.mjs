@@ -246,6 +246,95 @@ if (ethDefinition === undefined) {
 /** The derived delta, in the Debt Manager's own 6-decimal USD. */
 const DM_DELTA = 1_500_000_000n;
 
+// --- CONTRACT 1.6.0: the three additive fields, DERIVED not stated ---------
+//
+// `hf_histogram`, `collateral_by_asset` (on each aggregate) and
+// `movers`/`movers_total`/`movers_note` (on each engine) ride the run-book
+// example VERBATIM into every file this generator spreads from, exactly as
+// every other field does. Only ONE file derives anything: the eth_minus_30
+// delta below, which invents a newly-eligible Debt Manager account — and an
+// invented account that appeared in `newly_eligible_accounts` while appearing
+// in NEITHER histogram nor `movers` would be a fixture contradicting itself,
+// which is precisely the shape this wave exists to make impossible.
+//
+// So the delta is carried through all three, mechanically:
+//
+//   accounts        1 -> 2 on BOTH sides. A price shock does not create an
+//                   account; the second one must exist before it can flip. The
+//                   base example's `accounts: 1` under an after-side
+//                   `eligible_accounts: 2` was an INHERITED inconsistency (it
+//                   predates 1.6.0 and nothing rendered it); closing it here is
+//                   what lets the histogram census be checkable at all.
+//   hf_histogram    census == that side's `accounts`, and the count strictly
+//                   below the 1.00 edge == that side's `eligible_accounts`.
+//                   Before: the new account is healthy, in [1.10, 1.25).
+//                   After: it has dropped below 0.90 — which IS the flip.
+//   movers          exactly one row, the account that flipped, with the exact
+//                   rational on each side matching the bucket it sits in
+//                   (1.15 healthy -> 0.85 eligible) and `debt_usd` equal to
+//                   DM_DELTA, the debt that became eligible.
+//
+// `collateral_by_asset` is untouched by this delta: the derivation moves
+// ELIGIBILITY, not collateral, and the example's counted entry already sums to
+// the `total_collateral_usd` neither side changes.
+
+/** A fixture account for the one derived Debt Manager flip. */
+const DM_FLIP_ACCOUNT = "0x00000000000000000000000000000000000d0002";
+
+/** Clone a histogram, adding `delta` to the count of one labelled bucket. */
+const withBucket = (histogram, label, delta) => {
+  const buckets = histogram.buckets.map((bucket) =>
+    bucket.label === label ? { ...bucket, count: bucket.count + delta } : bucket,
+  );
+  if (buckets.every((bucket, index) => bucket.count === histogram.buckets[index].count)) {
+    console.error(`generate-lab-book.mjs: no bucket labelled ${label} in the run-book example`);
+    process.exit(1);
+  }
+  return { ...histogram, buckets };
+};
+
+/** The count of accounts strictly below the 1.00 edge — the eligible region. */
+const belowOne = (histogram) =>
+  histogram.buckets.reduce(
+    (sum, bucket) =>
+      bucket.upper_wad !== null && BigInt(bucket.upper_wad) <= BigInt(histogram.wad_scale)
+        ? sum + bucket.count
+        : sum,
+    0,
+  );
+
+/** buckets + infinite — every account this side measured. */
+const census = (histogram) =>
+  histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) + histogram.infinite_count;
+
+/** Fail the generation rather than write a self-contradicting side. */
+const checkSide = (name, side) => {
+  if (census(side.hf_histogram) !== side.accounts) {
+    console.error(
+      `generate-lab-book.mjs: ${name} histogram census ${String(census(side.hf_histogram))} ` +
+        `!= accounts ${String(side.accounts)}`,
+    );
+    process.exit(1);
+  }
+  if (belowOne(side.hf_histogram) !== side.eligible_accounts) {
+    console.error(
+      `generate-lab-book.mjs: ${name} sub-1.00 count ${String(belowOne(side.hf_histogram))} ` +
+        `!= eligible_accounts ${String(side.eligible_accounts)}`,
+    );
+    process.exit(1);
+  }
+  const counted = side.collateral_by_asset
+    .filter((entry) => entry.value_usd !== null)
+    .reduce((sum, entry) => sum + BigInt(entry.value_usd), 0n);
+  if (counted !== BigInt(side.total_collateral_usd)) {
+    console.error(
+      `generate-lab-book.mjs: ${name} collateral_by_asset sums ${String(counted)} ` +
+        `!= total_collateral_usd ${side.total_collateral_usd}`,
+    );
+    process.exit(1);
+  }
+};
+
 const ethRunBook = {
   ...runBookExample,
   scenario_id: ethDefinition.id,
@@ -260,23 +349,63 @@ const ethRunBook = {
     if (engine.engine !== "debt_manager") {
       return { ...engine, market_realization: null };
     }
+    // The second account must EXIST on both sides before it can flip on one.
+    const before = {
+      ...engine.before,
+      accounts: engine.before.accounts + 1,
+      hf_histogram: withBucket(engine.before.hf_histogram, "1.10 – 1.25", 1),
+    };
     const after = {
       ...engine.after,
+      accounts: engine.after.accounts + 1,
       eligible_accounts: engine.after.eligible_accounts + 1,
       eligible_debt_usd: (BigInt(engine.after.eligible_debt_usd) + DM_DELTA).toString(),
+      // The flip IS the account crossing the 1.00 edge — the same event
+      // `newly_eligible_accounts` counts, drawn where a reader can see it.
+      hf_histogram: withBucket(engine.after.hf_histogram, "< 0.90", 1),
     };
+    checkSide("eth_minus_30 debt_manager before", before);
+    checkSide("eth_minus_30 debt_manager after", after);
     return {
       ...engine,
+      before,
       after,
       market_realization: null,
       // Recomputed FROM before/after, never stated independently.
-      newly_eligible_accounts: after.eligible_accounts - engine.before.eligible_accounts,
+      newly_eligible_accounts: after.eligible_accounts - before.eligible_accounts,
       eligible_debt_delta_usd: (
-        BigInt(after.eligible_debt_usd) - BigInt(engine.before.eligible_debt_usd)
+        BigInt(after.eligible_debt_usd) - BigInt(before.eligible_debt_usd)
       ).toString(),
       bad_debt_delta_usd: (
-        BigInt(after.bad_debt_usd) - BigInt(engine.before.bad_debt_usd)
+        BigInt(after.bad_debt_usd) - BigInt(before.bad_debt_usd)
       ).toString(),
+      // The one account that flipped, with the exact rational on each side
+      // matching the bucket it sits in above, and the debt that became
+      // eligible equal to the delta that created it.
+      movers: [
+        {
+          account: DM_FLIP_ACCOUNT,
+          engine: engine.engine,
+          hf_before_wad: null,
+          hf_after_wad: null,
+          hf_drop_wad: null,
+          hf_before_num: ((DM_DELTA * 115n) / 100n).toString(),
+          hf_before_den: DM_DELTA.toString(),
+          hf_after_num: ((DM_DELTA * 85n) / 100n).toString(),
+          hf_after_den: DM_DELTA.toString(),
+          became_eligible: true,
+          debt_usd: DM_DELTA.toString(),
+        },
+      ],
+      movers_total: 1,
+      movers_note:
+        "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility " +
+        "FLIPPED false -> true under this scenario are movers, ranked by their debt in this " +
+        "engine's 6-decimal USD, largest first. The Debt Manager has no health-factor wad, so " +
+        "`hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, " +
+        "a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not " +
+        "`newly_eligible_accounts`, which is a NET count and also subtracts any flip back to " +
+        "healthy. `movers` carries all 1 of them.",
       note: "delta-only: after minus before over the positions in the run.",
     };
   }),

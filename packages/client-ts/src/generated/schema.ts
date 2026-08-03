@@ -398,6 +398,16 @@ export interface paths {
          *     is withheld are named in `excluded_engines` and appear nowhere else —
          *     an absence with no name is exactly the silent hole this surface must
          *     not have.
+         *
+         *     ADDED 1.6.0, all additive: each aggregate carries `hf_histogram` (the
+         *     distribution at that side of the shock, in the SAME buckets `/v1/book`
+         *     serves — so BEFORE and AFTER can be read against each other) and
+         *     `collateral_by_asset` (that side's collateral decomposed per asset, with
+         *     holdings the engine does not count listed at a null `value_usd` rather
+         *     than a zero). Each engine carries `movers` / `movers_total` /
+         *     `movers_note` — the accounts the scenario moved, ranked by that engine's
+         *     own definition of movement, bounded to the top 20 with the truncation
+         *     stated rather than silent.
          */
         post: operations["runBookScenario"];
         delete?: never;
@@ -2077,6 +2087,107 @@ export interface components {
             series: components["schemas"]["PriceSeries"][];
             notes: string[];
         };
+        /**
+         * @description ONE SIDE of the shock's health-factor distribution for one engine (ADDED
+         *     1.6.0). The buckets are the SAME edges `/v1/book`'s `hf_histogram` serves
+         *     and are computed by the same law, so the two surfaces cannot drift; the
+         *     AFTER side is bucketed on the SHOCKED states.
+         *
+         *     There are no `refused`/`refusal` engine fields here, unlike
+         *     EngineHistogram: an ENGINE whose book is withheld contributes no run-book
+         *     row at all — it is in `excluded_engines` and appears nowhere else — so a
+         *     pair that could only ever read false/null would be a promise this surface
+         *     does not make.
+         */
+        RunBookHistogram: {
+            /**
+             * @description Which quantity the buckets are computed on — the SAME per-engine
+             *     vocabulary EngineHistogram uses. Aave uses the pool's own
+             *     health-factor WAD, because that is the chain's comparator. The Debt
+             *     Manager has no wad at all — its buckets are the exact rational
+             *     maxBorrowLT/borrowings, a disclosure only.
+             * @enum {string}
+             */
+            comparator: "hf_wad" | "hf_num/hf_den";
+            /** @description Repeated on each histogram rather than assumed, because these buckets are read without `/v1/book`'s envelope in scope. */
+            wad_scale: components["schemas"]["Decimal"];
+            buckets: components["schemas"]["HistogramBucket"][];
+            /** @description Accounts with NO DEBT on this side — the health factor is undefined-because-unbounded, never a large number and never a bucket. */
+            infinite_count: number;
+            /**
+             * @description Positions on this engine carrying no comparator on this side,
+             *     including the rows this layer could not rebuild (which are also in
+             *     `coverage.excluded`). They are COUNTED here rather than dropped: an
+             *     aggregate histogram that silently omitted them would read as a
+             *     complete census of a book it does not cover.
+             */
+            refused_count: number;
+            note: string;
+        };
+        /**
+         * @description One asset's contribution to ONE side's collateral (ADDED 1.6.0), in the
+         *     same register as the address surface's `Leg`: `amount` is the balance in
+         *     base units and `value_usd` is the value the ENGINE COUNTED, and those are
+         *     not the same claim.
+         */
+        RunBookCollateralAsset: {
+            asset: components["schemas"]["Address"];
+            /** @description Served only when the custodied registry holds one for this asset — never invented, exactly as on every other symbol-bearing surface here. */
+            symbol?: string;
+            /** @description The token's own decimals, without which `amount` cannot be read. */
+            decimals: number;
+            /** @description The balance in the token's BASE UNITS, exact, summed over the accounts in the run. */
+            amount: components["schemas"]["Decimal"];
+            /**
+             * @description The value this engine COUNTED for the asset on this side, at the
+             *     engine's `usd_decimals`. NULL — never "0" — when the engine counted
+             *     none of it: a balance whose worth is unknowable and a balance worth
+             *     nothing are different facts. The entries whose `value_usd` is
+             *     non-null sum EXACTLY to this aggregate's `total_collateral_usd`.
+             */
+            value_usd: components["schemas"]["NullableDecimal"];
+            /**
+             * @description True when NO price witness describes this asset on this side, so
+             *     `amount` is a balance whose USD value is UNKNOWABLE and is therefore
+             *     outside `total_collateral_usd`. An entry may appear twice for one
+             *     asset — once counted, once unpriced — rather than mixing a known
+             *     value and an unknowable one under a single number.
+             */
+            unpriced: boolean;
+            note: string;
+        };
+        /**
+         * @description One account this scenario MOVED (ADDED 1.6.0), with its evidence in the
+         *     engine's OWN vocabulary. Every per-engine field is present on every
+         *     mover and NULL on the engine that does not speak it — an absent number
+         *     is never served as a zero.
+         */
+        RunBookMover: {
+            account: components["schemas"]["Address"];
+            engine: string;
+            /** @description Aave only — the pool's own health-factor WAD before the shock. Null on the Debt Manager, which has no wad. */
+            hf_before_wad: components["schemas"]["NullableDecimal"];
+            /** @description Aave only — the same WAD after the shock. */
+            hf_after_wad: components["schemas"]["NullableDecimal"];
+            /** @description Aave only — `hf_before_wad` minus `hf_after_wad`, the quantity this row is RANKED by. Always positive on a mover. */
+            hf_drop_wad: components["schemas"]["NullableDecimal"];
+            /** @description Debt Manager only — the numerator of the exact rational maxBorrowLT/borrowings before the shock, the same disclosure its histogram buckets on. Null when that side has no debt. */
+            hf_before_num: components["schemas"]["NullableDecimal"];
+            /** @description Debt Manager only — the denominator of the same rational before the shock. */
+            hf_before_den: components["schemas"]["NullableDecimal"];
+            /** @description Debt Manager only — the numerator after the shock. */
+            hf_after_num: components["schemas"]["NullableDecimal"];
+            /** @description Debt Manager only — the denominator after the shock. */
+            hf_after_den: components["schemas"]["NullableDecimal"];
+            /**
+             * @description Debt Manager only — the eligibility FLIP (false to true) that makes
+             *     this row a mover. Null on Aave, whose movers are ranked by a
+             *     continuous drop rather than by a boolean flip.
+             */
+            became_eligible: boolean | null;
+            /** @description Debt Manager only — the debt that BECAME eligible, at the engine's `usd_decimals`. It is the quantity this row is RANKED by. */
+            debt_usd: components["schemas"]["NullableDecimal"];
+        };
         /** @description One engine's book reduced at one side of the shock, in the engine's OWN unit and decimals. Never summed across engines. */
         RunBookAggregate: {
             accounts: number;
@@ -2087,6 +2198,20 @@ export interface components {
             eligible_debt_usd: components["schemas"]["Decimal"];
             collateral_at_risk_usd: components["schemas"]["Decimal"];
             bad_debt_usd: components["schemas"]["Decimal"];
+            /**
+             * @description ADDED 1.6.0. This side's health-factor distribution, so BEFORE and
+             *     AFTER each carry one and the shift between them is readable without
+             *     a second request. The after side is bucketed on the SHOCKED states.
+             */
+            hf_histogram: components["schemas"]["RunBookHistogram"];
+            /**
+             * @description ADDED 1.6.0. The per-asset decomposition of THIS side's collateral.
+             *     It is per aggregate, never summed across engines by this server, and
+             *     it differs between the two sides under an asset shock. Holdings the
+             *     engine does not count are still listed, with a null `value_usd` and
+             *     a note naming why — an unknowable is never rendered as a zero.
+             */
+            collateral_by_asset: components["schemas"]["RunBookCollateralAsset"][];
         };
         RunBookEngine: {
             engine: string;
@@ -2098,6 +2223,27 @@ export interface components {
             eligible_debt_delta_usd: components["schemas"]["Decimal"];
             /** @description DELTA-ONLY, same basis. */
             bad_debt_delta_usd: components["schemas"]["Decimal"];
+            /**
+             * @description ADDED 1.6.0. The accounts this scenario MOVED, ranked by this
+             *     ENGINE'S OWN definition of movement and BOUNDED to the top 20. It is
+             *     a window onto `movers_total`, never the whole of it, and
+             *     `movers_note` names both the ranking rule and the truncation.
+             */
+            movers: components["schemas"]["RunBookMover"][];
+            /**
+             * @description ADDED 1.6.0. The FULL count of accounts that moved under this
+             *     scenario on this engine — not the length of `movers`. On the Debt
+             *     Manager it counts flips to eligible ONLY, so it is NOT
+             *     `newly_eligible_accounts`, which is a NET count that also subtracts
+             *     any flip back to healthy.
+             */
+            movers_total: number;
+            /**
+             * @description ADDED 1.6.0. Names the ranking rule in the engine's own vocabulary
+             *     AND states the truncation explicitly, including how many rows are not
+             *     on the page. A cap the consumer cannot see is a silent cap.
+             */
+            movers_note: string;
             /** @description Present when the scenario carries a market-realization axis; its `hfs_unchanged` asserts that no oracle mark moved. */
             market_realization: components["schemas"]["Shortfall"] | null;
             /** @description Present on rate scenarios — a PROJECTION over time on the delta-only basis, never a spot shock. */
@@ -3515,7 +3661,83 @@ export interface operations {
                      *             "total_debt_usd": "600000000000",
                      *             "eligible_debt_usd": "0",
                      *             "collateral_at_risk_usd": "0",
-                     *             "bad_debt_usd": "0"
+                     *             "bad_debt_usd": "0",
+                     *             "hf_histogram": {
+                     *               "comparator": "hf_wad",
+                     *               "wad_scale": "1000000000000000000",
+                     *               "buckets": [
+                     *                 {
+                     *                   "label": "< 0.90",
+                     *                   "lower_wad": null,
+                     *                   "upper_wad": "900000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "0.90 – 1.00",
+                     *                   "lower_wad": "900000000000000000",
+                     *                   "upper_wad": "1000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.00 – 1.05",
+                     *                   "lower_wad": "1000000000000000000",
+                     *                   "upper_wad": "1050000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.05 – 1.10",
+                     *                   "lower_wad": "1050000000000000000",
+                     *                   "upper_wad": "1100000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.10 – 1.25",
+                     *                   "lower_wad": "1100000000000000000",
+                     *                   "upper_wad": "1250000000000000000",
+                     *                   "count": 1
+                     *                 },
+                     *                 {
+                     *                   "label": "1.25 – 1.50",
+                     *                   "lower_wad": "1250000000000000000",
+                     *                   "upper_wad": "1500000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.50 – 2.00",
+                     *                   "lower_wad": "1500000000000000000",
+                     *                   "upper_wad": "2000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": ">= 2.00",
+                     *                   "lower_wad": "2000000000000000000",
+                     *                   "upper_wad": null,
+                     *                   "count": 0
+                     *                 }
+                     *               ],
+                     *               "infinite_count": 0,
+                     *               "refused_count": 0,
+                     *               "note": "buckets are the pool's own health-factor WAD. This is ONE SIDE of the shock, in the SAME buckets /v1/book's histogram serves."
+                     *             },
+                     *             "collateral_by_asset": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "symbol": "weETH",
+                     *                 "decimals": 18,
+                     *                 "amount": "2000000000000000000",
+                     *                 "value_usd": "800000000000",
+                     *                 "unpriced": false,
+                     *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
+                     *               },
+                     *               {
+                     *                 "asset": "0x0000000000000000000000000000000000000BAD",
+                     *                 "decimals": 18,
+                     *                 "amount": "5000000000000000000",
+                     *                 "value_usd": null,
+                     *                 "unpriced": true,
+                     *                 "note": "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
+                     *               }
+                     *             ]
                      *           },
                      *           "after": {
                      *             "accounts": 1,
@@ -3524,11 +3746,90 @@ export interface operations {
                      *             "total_debt_usd": "600000000000",
                      *             "eligible_debt_usd": "0",
                      *             "collateral_at_risk_usd": "0",
-                     *             "bad_debt_usd": "0"
+                     *             "bad_debt_usd": "0",
+                     *             "hf_histogram": {
+                     *               "comparator": "hf_wad",
+                     *               "wad_scale": "1000000000000000000",
+                     *               "buckets": [
+                     *                 {
+                     *                   "label": "< 0.90",
+                     *                   "lower_wad": null,
+                     *                   "upper_wad": "900000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "0.90 – 1.00",
+                     *                   "lower_wad": "900000000000000000",
+                     *                   "upper_wad": "1000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.00 – 1.05",
+                     *                   "lower_wad": "1000000000000000000",
+                     *                   "upper_wad": "1050000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.05 – 1.10",
+                     *                   "lower_wad": "1050000000000000000",
+                     *                   "upper_wad": "1100000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.10 – 1.25",
+                     *                   "lower_wad": "1100000000000000000",
+                     *                   "upper_wad": "1250000000000000000",
+                     *                   "count": 1
+                     *                 },
+                     *                 {
+                     *                   "label": "1.25 – 1.50",
+                     *                   "lower_wad": "1250000000000000000",
+                     *                   "upper_wad": "1500000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.50 – 2.00",
+                     *                   "lower_wad": "1500000000000000000",
+                     *                   "upper_wad": "2000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": ">= 2.00",
+                     *                   "lower_wad": "2000000000000000000",
+                     *                   "upper_wad": null,
+                     *                   "count": 0
+                     *                 }
+                     *               ],
+                     *               "infinite_count": 0,
+                     *               "refused_count": 0,
+                     *               "note": "buckets are the pool's own health-factor WAD. This is ONE SIDE of the shock, in the SAME buckets /v1/book's histogram serves."
+                     *             },
+                     *             "collateral_by_asset": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "symbol": "weETH",
+                     *                 "decimals": 18,
+                     *                 "amount": "2000000000000000000",
+                     *                 "value_usd": "800000000000",
+                     *                 "unpriced": false,
+                     *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
+                     *               },
+                     *               {
+                     *                 "asset": "0x0000000000000000000000000000000000000BAD",
+                     *                 "decimals": 18,
+                     *                 "amount": "5000000000000000000",
+                     *                 "value_usd": null,
+                     *                 "unpriced": true,
+                     *                 "note": "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
+                     *               }
+                     *             ]
                      *           },
                      *           "newly_eligible_accounts": 0,
                      *           "eligible_debt_delta_usd": "0",
                      *           "bad_debt_delta_usd": "0",
+                     *           "movers": [],
+                     *           "movers_total": 0,
+                     *           "movers_note": "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. This scenario moves no oracle mark, so NO account's health factor dropped and there is nothing to rank. `movers` carries all 0 of them.",
                      *           "market_realization": {
                      *             "hfs_unchanged": true,
                      *             "execution_shortfall_usd": "40000000000",
@@ -3550,7 +3851,75 @@ export interface operations {
                      *             "total_debt_usd": "4620000000",
                      *             "eligible_debt_usd": "4200000000",
                      *             "collateral_at_risk_usd": "4000000000",
-                     *             "bad_debt_usd": "239603961"
+                     *             "bad_debt_usd": "239603961",
+                     *             "hf_histogram": {
+                     *               "comparator": "hf_num/hf_den",
+                     *               "wad_scale": "1000000000000000000",
+                     *               "buckets": [
+                     *                 {
+                     *                   "label": "< 0.90",
+                     *                   "lower_wad": null,
+                     *                   "upper_wad": "900000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "0.90 – 1.00",
+                     *                   "lower_wad": "900000000000000000",
+                     *                   "upper_wad": "1000000000000000000",
+                     *                   "count": 1
+                     *                 },
+                     *                 {
+                     *                   "label": "1.00 – 1.05",
+                     *                   "lower_wad": "1000000000000000000",
+                     *                   "upper_wad": "1050000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.05 – 1.10",
+                     *                   "lower_wad": "1050000000000000000",
+                     *                   "upper_wad": "1100000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.10 – 1.25",
+                     *                   "lower_wad": "1100000000000000000",
+                     *                   "upper_wad": "1250000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.25 – 1.50",
+                     *                   "lower_wad": "1250000000000000000",
+                     *                   "upper_wad": "1500000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.50 – 2.00",
+                     *                   "lower_wad": "1500000000000000000",
+                     *                   "upper_wad": "2000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": ">= 2.00",
+                     *                   "lower_wad": "2000000000000000000",
+                     *                   "upper_wad": null,
+                     *                   "count": 0
+                     *                 }
+                     *               ],
+                     *               "infinite_count": 0,
+                     *               "refused_count": 0,
+                     *               "note": "the Debt Manager has no health-factor wad: these buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable`."
+                     *             },
+                     *             "collateral_by_asset": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "symbol": "weETH",
+                     *                 "decimals": 18,
+                     *                 "amount": "1000000000000000000",
+                     *                 "value_usd": "4000000000",
+                     *                 "unpriced": false,
+                     *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
+                     *               }
+                     *             ]
                      *           },
                      *           "after": {
                      *             "accounts": 1,
@@ -3559,11 +3928,82 @@ export interface operations {
                      *             "total_debt_usd": "4620000000",
                      *             "eligible_debt_usd": "4200000000",
                      *             "collateral_at_risk_usd": "4000000000",
-                     *             "bad_debt_usd": "239603961"
+                     *             "bad_debt_usd": "239603961",
+                     *             "hf_histogram": {
+                     *               "comparator": "hf_num/hf_den",
+                     *               "wad_scale": "1000000000000000000",
+                     *               "buckets": [
+                     *                 {
+                     *                   "label": "< 0.90",
+                     *                   "lower_wad": null,
+                     *                   "upper_wad": "900000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "0.90 – 1.00",
+                     *                   "lower_wad": "900000000000000000",
+                     *                   "upper_wad": "1000000000000000000",
+                     *                   "count": 1
+                     *                 },
+                     *                 {
+                     *                   "label": "1.00 – 1.05",
+                     *                   "lower_wad": "1000000000000000000",
+                     *                   "upper_wad": "1050000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.05 – 1.10",
+                     *                   "lower_wad": "1050000000000000000",
+                     *                   "upper_wad": "1100000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.10 – 1.25",
+                     *                   "lower_wad": "1100000000000000000",
+                     *                   "upper_wad": "1250000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.25 – 1.50",
+                     *                   "lower_wad": "1250000000000000000",
+                     *                   "upper_wad": "1500000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": "1.50 – 2.00",
+                     *                   "lower_wad": "1500000000000000000",
+                     *                   "upper_wad": "2000000000000000000",
+                     *                   "count": 0
+                     *                 },
+                     *                 {
+                     *                   "label": ">= 2.00",
+                     *                   "lower_wad": "2000000000000000000",
+                     *                   "upper_wad": null,
+                     *                   "count": 0
+                     *                 }
+                     *               ],
+                     *               "infinite_count": 0,
+                     *               "refused_count": 0,
+                     *               "note": "the Debt Manager has no health-factor wad: these buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable`."
+                     *             },
+                     *             "collateral_by_asset": [
+                     *               {
+                     *                 "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                     *                 "symbol": "weETH",
+                     *                 "decimals": 18,
+                     *                 "amount": "1000000000000000000",
+                     *                 "value_usd": "4000000000",
+                     *                 "unpriced": false,
+                     *                 "note": "COUNTED: this value is inside `total_collateral_usd` on this side."
+                     *               }
+                     *             ]
                      *           },
                      *           "newly_eligible_accounts": 0,
                      *           "eligible_debt_delta_usd": "0",
                      *           "bad_debt_delta_usd": "0",
+                     *           "movers": [],
+                     *           "movers_total": 0,
+                     *           "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose eligibility FLIPPED false -> true are movers. This scenario moves no oracle mark, so nothing flipped. `movers` carries all 0 of them.",
                      *           "market_realization": {
                      *             "hfs_unchanged": true,
                      *             "execution_shortfall_usd": "200000000",

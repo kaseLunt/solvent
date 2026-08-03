@@ -38,6 +38,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/kaselunt/solvent/internal/risk"
 )
 
@@ -56,6 +57,85 @@ type wireRunBookAggregate struct {
 	EligibleDebtUSD     string `json:"eligible_debt_usd"`
 	CollateralAtRiskUSD string `json:"collateral_at_risk_usd"`
 	BadDebtUSD          string `json:"bad_debt_usd"`
+	// HFHistogram is THIS side of the shock's health-factor distribution, on
+	// this engine's own comparator and in the SAME buckets /v1/book serves
+	// (bucketIndexOf is the single law). The after-side's is over the SHOCKED
+	// states — that is the whole point of carrying one per side.
+	HFHistogram wireRunBookHistogram `json:"hf_histogram"`
+	// CollateralByAsset itemizes the collateral behind TotalCollateralUSD. It is
+	// per aggregate, never summed across engines, and it differs between the two
+	// sides under an asset shock.
+	CollateralByAsset []wireRunBookCollateralAsset `json:"collateral_by_asset"`
+}
+
+// wireRunBookHistogram is one engine's one-side distribution. It is the
+// EngineHistogram shape minus the engine-withholding fields: a withheld engine
+// contributes no run-book row at all (it is in `excluded_engines`), so a
+// refused/refusal pair here could only ever be false/null and would read as a
+// promise this surface does not make.
+type wireRunBookHistogram struct {
+	Comparator string `json:"comparator"`
+	// WadScale is repeated here rather than assumed: these buckets are read
+	// without /v1/book's envelope in scope.
+	WadScale string                `json:"wad_scale"`
+	Buckets  []wireHistogramBucket `json:"buckets"`
+	// InfiniteCount is accounts with NO DEBT: the health factor is
+	// undefined-because-unbounded, never a large number and never a bucket.
+	InfiniteCount int `json:"infinite_count"`
+	// RefusedCount is positions on this engine that carry no comparator on this
+	// side — counted here so an aggregate histogram can never be read as a
+	// complete census while rows are silently missing from it.
+	RefusedCount int    `json:"refused_count"`
+	Note         string `json:"note"`
+}
+
+// wireRunBookCollateralAsset is one asset's contribution to ONE side's counted
+// collateral, in the same register as the address surface's `Leg`: `amount` is
+// the balance in base units, `value_usd` is the value the ENGINE COUNTED, and
+// the two are not the same claim.
+type wireRunBookCollateralAsset struct {
+	Asset string `json:"asset"`
+	// Symbol is served only when the custodied registry holds one — never
+	// invented, exactly as every other symbol-bearing surface here.
+	Symbol   string `json:"symbol,omitempty"`
+	Decimals uint8  `json:"decimals"`
+	Amount   string `json:"amount"`
+	// ValueUSD is the summed value this engine COUNTED for the asset, at the
+	// engine's usd_decimals. NULL — never "0" — when the engine counted no
+	// value for it on this side: a balance whose worth is unknowable and a
+	// balance worth nothing are different facts.
+	ValueUSD *string `json:"value_usd"`
+	// Unpriced is true when at least one holding of this asset carried NO price
+	// witness, so `amount` includes tokens whose USD value is UNKNOWABLE and is
+	// therefore NOT inside total_collateral_usd.
+	Unpriced bool   `json:"unpriced"`
+	Note     string `json:"note"`
+}
+
+// wireRunBookMover is one account this scenario MOVED, with the evidence in the
+// engine's OWN vocabulary. Every per-engine field is present on every mover and
+// NULL on the engine that does not speak it — an absent number is never a zero.
+type wireRunBookMover struct {
+	Account string `json:"account"`
+	Engine  string `json:"engine"`
+
+	// Aave: the pool's own health-factor WADs, and the DROP that ranks this row.
+	HFBeforeWad *string `json:"hf_before_wad"`
+	HFAfterWad  *string `json:"hf_after_wad"`
+	HFDropWad   *string `json:"hf_drop_wad"`
+
+	// Debt Manager: the exact rational maxBorrowLT/borrowings on each side —
+	// the same disclosure its histogram buckets on. There is no wad to report.
+	HFBeforeNum *string `json:"hf_before_num"`
+	HFBeforeDen *string `json:"hf_before_den"`
+	HFAfterNum  *string `json:"hf_after_num"`
+	HFAfterDen  *string `json:"hf_after_den"`
+
+	// BecameEligible is the Debt Manager's eligibility FLIP (false -> true) that
+	// makes this row a mover; DebtUSD is the debt that became eligible, at the
+	// engine's usd_decimals.
+	BecameEligible *bool   `json:"became_eligible"`
+	DebtUSD        *string `json:"debt_usd"`
 }
 
 type wireRunBookEngine struct {
@@ -66,9 +146,16 @@ type wireRunBookEngine struct {
 	NewlyEligibleAccounts int                  `json:"newly_eligible_accounts"`
 	EligibleDebtDeltaUSD  string               `json:"eligible_debt_delta_usd"`
 	BadDebtDeltaUSD       string               `json:"bad_debt_delta_usd"`
-	Shortfall             *wireShortfall       `json:"market_realization"`
-	Projection            *wireProjection      `json:"projection"`
-	Note                  string               `json:"note"`
+	// Movers is at most runBookMoversCap rows of the accounts this scenario
+	// moved, ranked by the engine's own rule. MoversTotal is the FULL count —
+	// the slice is a window onto it, never the whole of it, and MoversNote names
+	// both the rule and the truncation.
+	Movers      []wireRunBookMover `json:"movers"`
+	MoversTotal int                `json:"movers_total"`
+	MoversNote  string             `json:"movers_note"`
+	Shortfall   *wireShortfall     `json:"market_realization"`
+	Projection  *wireProjection    `json:"projection"`
+	Note        string             `json:"note"`
 }
 
 type runBookResponse struct {
@@ -102,16 +189,187 @@ type runMeasure struct {
 	eligibleDebt     *big.Int
 	collateralAtRisk *big.Int
 	badDebt          *big.Int
+
+	// Everything below is DERIVED IN THE SAME WALK that sums the totals above.
+	// measureRunBook already computes each position's health to sum collateral
+	// and debt; the histogram bucket, the per-asset collateral and the
+	// per-account state fall out of that one computation. Nothing here re-walks
+	// the book and nothing here re-reads the database.
+	buckets    []int
+	infinite   int
+	refused    int
+	collateral map[runCollateralKey]*runCollateral
+	states     map[common.Address]*runAccountState
+}
+
+// runBookMoversCap bounds the `movers` array. It is a CONSTANT and it is named
+// in every movers_note this surface serves: a cap the consumer cannot see is a
+// silent cap, and `movers_total` is what says how much was left out.
+const runBookMoversCap = 20
+
+// The collateral disclosure vocabulary. A holding is either COUNTED (its value
+// is inside total_collateral_usd) or it is not — and when it is not, this says
+// which of the two very different reasons applies.
+const (
+	// runCollateralCounted: the engine counted this value. value_usd is exact.
+	runCollateralCounted = "counted"
+	// runCollateralUnpriced: the account holds the token and NO price witness
+	// describes it, so its USD value is UNKNOWABLE. value_usd is null, never 0.
+	runCollateralUnpriced = "unpriced"
+	// runCollateralNotCounted: priced, but the engine counts none of it toward
+	// collateral (Aave `usedAsCollateral = false`). value_usd is null because
+	// the reviewed arithmetic assigned it none — inventing one here would put a
+	// number on the wire that no engine computed.
+	runCollateralNotCounted = "not_counted_as_collateral"
+)
+
+// runCollateralKey groups by asset AND disclosure, so one entry never mixes a
+// counted balance with an unknowable one under a single value.
+type runCollateralKey struct {
+	asset      common.Address
+	disclosure string
+}
+
+type runCollateral struct {
+	asset      common.Address
+	decimals   uint8
+	disclosure string
+	amount     *big.Int
+	valueUSD   *big.Int
+}
+
+// runAccountState is ONE account's comparator state on ONE side of the shock.
+// The movers join is over these: no position is measured twice to build it.
+type runAccountState struct {
+	hfWad        *big.Int // Aave; nil when infinite
+	hfNum, hfDen *big.Int // Debt Manager; the exact rational
+	infinite     bool
+	eligible     bool
+	debtUSD      *big.Int
 }
 
 func newRunMeasure() *runMeasure {
 	return &runMeasure{
 		totalCollateral: new(big.Int), totalDebt: new(big.Int),
 		eligibleDebt: new(big.Int), collateralAtRisk: new(big.Int), badDebt: new(big.Int),
+		buckets:    make([]int, len(histogramEdges)),
+		collateral: map[runCollateralKey]*runCollateral{},
+		states:     map[common.Address]*runAccountState{},
 	}
 }
 
-func (m *runMeasure) wire() wireRunBookAggregate {
+// bucket places one account's comparator state into THIS side's histogram,
+// through bucketIndexOf — the same law, not a second copy of it. An account
+// with no comparator is counted REFUSED here rather than dropped, exactly as
+// /v1/book's histogram does with a computed row carrying no health factor.
+func (m *runMeasure) bucket(engine string, st *runAccountState) {
+	if st.infinite {
+		m.infinite++
+		return
+	}
+	idx := bucketIndexOf(engine, st.hfWad, st.hfNum, st.hfDen)
+	if idx < 0 {
+		m.refused++
+		return
+	}
+	m.buckets[idx]++
+}
+
+// addCollateral folds one holding into this side's per-asset breakdown, keyed by
+// asset AND disclosure so a counted balance and an unknowable one never share an
+// entry.
+func (m *runMeasure) addCollateral(asset common.Address, decimals uint8, disclosure string, amount, valueUSD *big.Int) {
+	if amount == nil || amount.Sign() <= 0 {
+		return
+	}
+	k := runCollateralKey{asset: asset, disclosure: disclosure}
+	c, ok := m.collateral[k]
+	if !ok {
+		c = &runCollateral{asset: asset, decimals: decimals, disclosure: disclosure,
+			amount: new(big.Int), valueUSD: new(big.Int)}
+		m.collateral[k] = c
+	}
+	c.amount.Add(c.amount, amount)
+	if disclosure == runCollateralCounted {
+		c.valueUSD.Add(c.valueUSD, orZeroBigInt(valueUSD))
+	}
+}
+
+func (m *runMeasure) wire(engine string, s *server) wireRunBookAggregate {
+	comparator, histNote := histogramComparator(engine)
+	hist := wireRunBookHistogram{
+		Comparator:    comparator,
+		WadScale:      risk.WadUnit().String(),
+		Buckets:       make([]wireHistogramBucket, 0, len(histogramEdges)),
+		InfiniteCount: m.infinite,
+		RefusedCount:  m.refused,
+		Note: histNote + " This is ONE SIDE of the shock over the positions in the run, " +
+			"in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. " +
+			"`infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — " +
+			"both are counted here rather than dropped, so the buckets plus these two account for the whole run.",
+	}
+	// The edges are walked in the SAME order and built by the SAME edgeWad as
+	// /v1/book's, so an edge that moves moves in both places at once.
+	var lower *string
+	for i, e := range histogramEdges {
+		b := wireHistogramBucket{Label: e.label, Count: m.buckets[i], LowerWad: lower}
+		if e.upper != 0 {
+			u := edgeWad(e.upper).String()
+			b.UpperWad = &u
+			lower = &u
+		} else {
+			b.UpperWad = nil
+		}
+		hist.Buckets = append(hist.Buckets, b)
+	}
+
+	keys := make([]runCollateralKey, 0, len(m.collateral))
+	for k := range m.collateral {
+		keys = append(keys, k)
+	}
+	// Deterministic: by asset, then by disclosure. Two runs over the same batch
+	// serve byte-identical arrays.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].asset != keys[j].asset {
+			return keys[i].asset.Hex() < keys[j].asset.Hex()
+		}
+		return keys[i].disclosure < keys[j].disclosure
+	})
+	byAsset := make([]wireRunBookCollateralAsset, 0, len(keys))
+	for _, k := range keys {
+		c := m.collateral[k]
+		w := wireRunBookCollateralAsset{
+			Asset:    c.asset.Hex(),
+			Decimals: c.decimals,
+			Amount:   c.amount.String(),
+			Unpriced: c.disclosure == runCollateralUnpriced,
+		}
+		// The symbol is decoration over an address that is already exact. A
+		// registry that holds no entry — or is absent entirely — leaves it off
+		// rather than inventing one.
+		if s.registry != nil {
+			if spec, ok := s.registry.Spec(engine, c.asset); ok {
+				w.Symbol = spec.Symbol
+			}
+		}
+		switch c.disclosure {
+		case runCollateralCounted:
+			v := c.valueUSD.String()
+			w.ValueUSD = &v
+			w.Note = "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
+		case runCollateralUnpriced:
+			// value_usd stays nil. A balance whose price nothing describes is
+			// not a balance worth zero, and that is the whole reason this field
+			// is nullable.
+			w.Note = "UNPRICED: the account holds this token and NO price witness describes it on this side, so its USD value is UNKNOWABLE — not zero. " +
+				"`amount` is exact; none of this holding is inside `total_collateral_usd`."
+		default:
+			w.Note = "NOT COUNTED AS COLLATERAL: the engine counts none of this holding toward collateral (Aave `usedAsCollateral = false`), so the reviewed arithmetic assigned it no value and none is invented here. " +
+				"`amount` is exact; none of this holding is inside `total_collateral_usd`."
+		}
+		byAsset = append(byAsset, w)
+	}
+
 	return wireRunBookAggregate{
 		Accounts:            m.accounts,
 		EligibleAccounts:    m.eligibleAccounts,
@@ -120,6 +378,8 @@ func (m *runMeasure) wire() wireRunBookAggregate {
 		EligibleDebtUSD:     m.eligibleDebt.String(),
 		CollateralAtRiskUSD: m.collateralAtRisk.String(),
 		BadDebtUSD:          m.badDebt.String(),
+		HFHistogram:         hist,
+		CollateralByAsset:   byAsset,
 	}
 }
 
@@ -155,8 +415,18 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 	var run []runPos
 	var notCovered []string
 	seenEngine := map[string]bool{}
+	// refusedByEngine counts positions on a COVERED engine that this layer could
+	// not rebuild. They carry no numbers to shock and so reach no arithmetic —
+	// but they are real rows of the book, and the per-side histograms must count
+	// them as refused rather than let a distribution read as a complete census
+	// while they are silently missing from it. They are also, unchanged, in
+	// `coverage.excluded`.
+	refusedByEngine := map[string]int{}
 	for _, p := range v.Positions {
 		if p.input == nil {
+			if covers(sc.Engines, p.Engine) {
+				refusedByEngine[p.Engine]++
+			}
 			continue
 		}
 		if !covers(sc.Engines, p.Engine) {
@@ -304,14 +574,26 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 		if ea == nil {
 			ea = newRunMeasure()
 		}
+		// The unrebuildable rows are refused on BOTH sides: the shock does not
+		// make a position rebuildable, and a histogram that counted them on one
+		// side only would move rows between the two distributions for a reason
+		// that has nothing to do with the scenario.
+		if n := refusedByEngine[engine]; n > 0 {
+			eb.refused += n
+			ea.refused += n
+		}
+		movers, moversTotal := runBookMovers(engine, eb, ea)
 		we := wireRunBookEngine{
 			Engine:                engine,
 			UsdDecimals:           dec,
-			Before:                eb.wire(),
-			After:                 ea.wire(),
+			Before:                eb.wire(engine, s),
+			After:                 ea.wire(engine, s),
 			NewlyEligibleAccounts: ea.eligibleAccounts - eb.eligibleAccounts,
 			EligibleDebtDeltaUSD:  new(big.Int).Sub(ea.eligibleDebt, eb.eligibleDebt).String(),
 			BadDebtDeltaUSD:       new(big.Int).Sub(ea.badDebt, eb.badDebt).String(),
+			Movers:                movers,
+			MoversTotal:           moversTotal,
+			MoversNote:            runBookMoversNote(engine, len(movers), moversTotal, dec),
 			Note: "delta-only: after minus before over the positions in the run, in this engine's own " +
 				strconv.Itoa(int(dec)) + "-decimal unit.",
 		}
@@ -362,6 +644,12 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 	// Totals and account counts, summed from each position's own recompute —
 	// the same pure functions the reconstruction verification welds against
 	// the persisted rows.
+	//
+	// THE HISTOGRAM, THE PER-ASSET COLLATERAL AND THE PER-ACCOUNT MOVER STATE
+	// ARE DERIVED HERE, off the health this loop already computes. They cost one
+	// map write each and no second evaluation of anything: a second walk would
+	// be a second chance for the two to disagree about what this side of the
+	// shock contains.
 	for _, pos := range book {
 		switch pos.Engine {
 		case risk.AaveEngine:
@@ -373,6 +661,34 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 			m.accounts++
 			m.totalCollateral.Add(m.totalCollateral, orZeroBigInt(h.TotalCollateralBase))
 			m.totalDebt.Add(m.totalDebt, orZeroBigInt(h.TotalDebtBase))
+
+			st := &runAccountState{
+				hfWad:    h.HealthFactorWad,
+				infinite: h.IsInfinite,
+				eligible: h.Liquidatable(),
+				debtUSD:  orZeroBigInt(h.TotalDebtBase),
+			}
+			m.states[h.Account] = st
+			m.bucket(risk.AaveEngine, st)
+
+			for _, rv := range h.Reserves {
+				if rv.LiveCollateral == nil || rv.LiveCollateral.Sign() <= 0 {
+					continue
+				}
+				switch {
+				// LiquidationThresholdBps is set by ComputeAaveHealth exactly
+				// when the reserve COUNTS as collateral, so it is the engine's
+				// own discriminator rather than a re-derivation of one.
+				case rv.LiquidationThresholdBps != nil:
+					m.addCollateral(rv.Asset, rv.Decimals, runCollateralCounted, rv.LiveCollateral, rv.CollateralBase)
+				case rv.Price.Value == nil:
+					// Held, collateral disabled, and NOTHING prices it. The
+					// balance is exact and its worth is unknowable.
+					m.addCollateral(rv.Asset, rv.Decimals, runCollateralUnpriced, rv.LiveCollateral, nil)
+				default:
+					m.addCollateral(rv.Asset, rv.Decimals, runCollateralNotCounted, rv.LiveCollateral, nil)
+				}
+			}
 		case risk.DMEngine:
 			h, err := risk.ComputeDMHealth(*pos.DM)
 			if err != nil {
@@ -382,6 +698,23 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 			m.accounts++
 			m.totalCollateral.Add(m.totalCollateral, orZeroBigInt(h.CollateralValueUSD))
 			m.totalDebt.Add(m.totalDebt, orZeroBigInt(h.Borrowings))
+
+			st := &runAccountState{
+				infinite: h.IsInfinite,
+				eligible: h.Liquidatable,
+				debtUSD:  orZeroBigInt(h.Borrowings),
+			}
+			if !h.IsInfinite {
+				st.hfNum, st.hfDen = h.HealthFactor.Num, h.HealthFactor.Den
+			}
+			m.states[h.Account] = st
+			m.bucket(risk.DMEngine, st)
+
+			for _, cv := range h.Collateral {
+				// ComputeDMHealth REFUSES a nonzero leg it cannot price, so a
+				// leg that reached here with a balance is priced and counted.
+				m.addCollateral(cv.Asset, cv.Decimals, runCollateralCounted, cv.Amount, cv.ValueUSD)
+			}
 		}
 	}
 	if len(book) == 0 {
@@ -402,6 +735,125 @@ func (s *server) measureRunBook(book []risk.PositionInput) (map[string]*runMeasu
 		m.badDebt = orZeroBigInt(e.CumulativeBadDebtUSD)
 	}
 	return out, nil
+}
+
+// runBookMovers joins the two sides' per-account states into the accounts this
+// scenario MOVED, ranked by the engine's own definition of movement.
+//
+// # The ranking rule is the engine's, not a shared one
+//
+// Aave has a continuous comparator, so the movement that matters is the HEALTH
+// FACTOR DROP: before minus after, in the pool's own wad space, largest first.
+// The Debt Manager has no health-factor wad and no continuous comparator — its
+// liquidation test is the strict boolean `debt > maxBorrowLT` — so the movement
+// that matters is the ELIGIBILITY FLIP, and the accounts that flipped are ranked
+// by the DEBT that became eligible, largest first. Ranking DM rows by a ratio
+// delta would rank on the disclosure rather than on the verdict.
+//
+// Returns the capped slice and the FULL count. The two are different numbers and
+// the caller publishes both.
+func runBookMovers(engine string, before, after *runMeasure) ([]wireRunBookMover, int) {
+	type ranked struct {
+		mover wireRunBookMover
+		key   *big.Int
+	}
+	var all []ranked
+
+	// Deterministic iteration: the join walks the BEFORE side's accounts in
+	// sorted order, so equal ranking keys resolve the same way on every run.
+	accounts := make([]common.Address, 0, len(before.states))
+	for a := range before.states {
+		accounts = append(accounts, a)
+	}
+	sort.Slice(accounts, func(i, j int) bool { return accounts[i].Hex() < accounts[j].Hex() })
+
+	for _, acct := range accounts {
+		b := before.states[acct]
+		a, ok := after.states[acct]
+		if !ok {
+			continue
+		}
+		switch engine {
+		case risk.AaveEngine:
+			// A drop needs a health factor on BOTH sides. A zero-debt account
+			// has none — it is unbounded, not large — so it cannot have dropped
+			// and is not a mover. That exclusion is named in the movers_note.
+			if b.infinite || a.infinite || b.hfWad == nil || a.hfWad == nil {
+				continue
+			}
+			drop := new(big.Int).Sub(b.hfWad, a.hfWad)
+			if drop.Sign() <= 0 {
+				continue
+			}
+			bw, aw, dw := b.hfWad.String(), a.hfWad.String(), drop.String()
+			all = append(all, ranked{key: drop, mover: wireRunBookMover{
+				Account: acct.Hex(), Engine: engine,
+				HFBeforeWad: &bw, HFAfterWad: &aw, HFDropWad: &dw,
+			}})
+		case risk.DMEngine:
+			// The flip, strictly false -> true. An account already eligible
+			// before the shock did not become eligible under it.
+			if b.eligible || !a.eligible {
+				continue
+			}
+			debt := orZeroBigInt(a.debtUSD)
+			flipped := true
+			ds := debt.String()
+			mv := wireRunBookMover{
+				Account: acct.Hex(), Engine: engine,
+				BecameEligible: &flipped, DebtUSD: &ds,
+			}
+			// The exact rational on each side, when the side has one. An
+			// infinite side carries nulls rather than a stand-in.
+			if b.hfNum != nil && b.hfDen != nil {
+				bn, bd := b.hfNum.String(), b.hfDen.String()
+				mv.HFBeforeNum, mv.HFBeforeDen = &bn, &bd
+			}
+			if a.hfNum != nil && a.hfDen != nil {
+				an, ad := a.hfNum.String(), a.hfDen.String()
+				mv.HFAfterNum, mv.HFAfterDen = &an, &ad
+			}
+			all = append(all, ranked{key: debt, mover: mv})
+		}
+	}
+
+	// Largest key first; ties keep the account order established above, so the
+	// ranking is total and stable.
+	sort.SliceStable(all, func(i, j int) bool { return all[i].key.Cmp(all[j].key) > 0 })
+
+	total := len(all)
+	if len(all) > runBookMoversCap {
+		all = all[:runBookMoversCap]
+	}
+	out := make([]wireRunBookMover, 0, len(all))
+	for _, r := range all {
+		out = append(out, r.mover)
+	}
+	return out, total
+}
+
+// runBookMoversNote names the ranking rule AND the truncation, in the engine's
+// own vocabulary. `shown` and `total` are both in the sentence because a capped
+// list whose cap is invisible is a silent cap.
+func runBookMoversNote(engine string, shown, total int, dec uint8) string {
+	var rule string
+	switch engine {
+	case risk.AaveEngine:
+		rule = "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. " +
+			"Only accounts whose health factor STRICTLY DROPPED are movers. An account with no debt has an unbounded health factor on either side, " +
+			"so it has no drop to rank and is not counted here — it is not a quiet zero."
+	default:
+		rule = "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, " +
+			"ranked by their debt in this engine's " + strconv.Itoa(int(dec)) + "-decimal USD, largest first. " +
+			"The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. " +
+			"`movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy."
+	}
+	trunc := "`movers` carries all " + strconv.Itoa(total) + " of them."
+	if total > shown {
+		trunc = "`movers` is TRUNCATED to the top " + strconv.Itoa(runBookMoversCap) + " of " + strconv.Itoa(total) +
+			"; `movers_total` is the full count and the other " + strconv.Itoa(total-shown) + " are not on this page."
+	}
+	return rule + " " + trunc
 }
 
 // runBookProjection aggregates the DM rate projection book-wide: each

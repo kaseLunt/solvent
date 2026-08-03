@@ -140,6 +140,12 @@ export const SEALED_FIELD_NAMES = [
   // APPLICABLE, so `!detail.deficit_paired` would read a withheld statement
   // as "not paired" — the same falsiness class.
   "deficit_paired",
+  // RunBookMover.became_eligible (contract 1.6.0): the Debt Manager's
+  // eligibility FLIP. Null on Aave rows means NOT APPLICABLE — Aave movers are
+  // ranked by a continuous health-factor drop, not by a boolean flip — so
+  // `!mover.became_eligible` would read a withheld statement as "did not become
+  // eligible" on every Aave mover. The same falsiness class as deficit_paired.
+  "became_eligible",
   // Refined string-union verdicts (the sealed vocabularies in src/refine.ts):
   // hazardous under `!` for the OPPOSITE reason — never null, every non-empty
   // token truthy, so `!p.liquidation_verdict` is dead code that reads as a

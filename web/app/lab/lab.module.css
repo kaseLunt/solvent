@@ -652,3 +652,123 @@
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---- run-book detail: the 1.6.0 surfaces (Wave W-BS-A) --------------------
+   The Book surface's chart law, re-expressed over the run-book's own shape.
+   Same bars, same mono labels, same hairline baseline, same crit tint — see
+   LabRunBookDetail.tsx for why these are lab-local rather than imported. */
+
+.subPanel {
+  border-top: 1px solid var(--line);
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+}
+
+.comparatorTag {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.readingLine {
+  font-size: var(--fs-caption);
+  color: var(--ink);
+  max-width: 64ch;
+  margin: 0 0 10px;
+}
+
+/* The two distributions sit side by side and share ONE count scale, so their
+   bar lengths are comparable. They wrap rather than shrink on narrow views. */
+.histPair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+}
+
+.histSide {
+  flex: 1 1 280px;
+  min-width: 0;
+}
+
+.collateralSide {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.histSideTitle {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+  margin: 0 0 6px;
+}
+
+.histLabel {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-3);
+}
+
+.histCount {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  fill: var(--ink-2);
+}
+
+.histBar {
+  fill: var(--accent);
+  opacity: 0.85;
+}
+
+.histBarEligible {
+  fill: var(--crit);
+}
+
+.histEligibleMark {
+  fill: var(--crit);
+}
+
+.histBaseline {
+  stroke: var(--line);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.histAside {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
+.histBadge {
+  border: 1px dashed var(--ink-3);
+  border-radius: var(--r-xs);
+  padding: 1px 7px;
+  color: var(--ink-2);
+}
+
+/* THE REFUSAL REGISTER on this surface: a dashed tag, the same form the
+   RefusedTag primitive uses, so a value nobody could compute can never be
+   mistaken for a number somebody did. */
+.unpricedTag {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  border: 1px dashed var(--warn);
+  border-radius: var(--r-xs);
+  padding: 1px 7px;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  overflow-wrap: anywhere;
+}

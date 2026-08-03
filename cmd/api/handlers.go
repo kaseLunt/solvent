@@ -408,6 +408,20 @@ func edgeWad(hundredths int64) *big.Int {
 	return w.Div(w, big.NewInt(100))
 }
 
+// histogramComparator names WHICH quantity an engine's buckets are computed on,
+// and says why in the engine's own terms. It lives here, once, because the
+// run-book's per-side aggregate histograms publish the same comparator vocabulary
+// over the same buckets: two copies of this sentence would be two contracts.
+func histogramComparator(engine string) (comparator, note string) {
+	switch engine {
+	case risk.AaveEngine:
+		return "hf_wad", "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy."
+	default:
+		return "hf_num/hf_den", "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. " +
+			"These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`."
+	}
+}
+
 // histogram buckets each engine's positions by health factor.
 //
 // # The comparator differs per engine, and that is not sloppiness
@@ -433,15 +447,7 @@ func (s *server) histogram(v *batchView) wireHistogram {
 		a, ok := byEngine[engine]
 		if !ok {
 			a = &acc{buckets: make([]int, len(histogramEdges))}
-			switch engine {
-			case risk.AaveEngine:
-				a.comparator = "hf_wad"
-				a.note = "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy."
-			default:
-				a.comparator = "hf_num/hf_den"
-				a.note = "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. " +
-					"These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`."
-			}
+			a.comparator, a.note = histogramComparator(engine)
 			byEngine[engine] = a
 		}
 		return a
@@ -521,26 +527,45 @@ func (s *server) histogram(v *batchView) wireHistogram {
 // bucketIndex places one computed position, or −1 when it carries no health
 // factor at all.
 func bucketIndex(p *positionRow) int {
+	return bucketIndexOf(p.Engine, p.HFWad, p.HFNum, p.HFDen)
+}
+
+// bucketIndexOf is THE bucketing law, in one place, for every surface that
+// buckets health factors.
+//
+// It takes the comparator quantities rather than a row so that a surface
+// bucketing a COMPUTED health (the run-book's shocked after-side, which has no
+// persisted row at all) lands in exactly the same buckets, on exactly the same
+// comparator, as /v1/book's histogram over the persisted rows. A second
+// implementation would be a second law: the run-book's after-histogram would
+// drift from the book's the first time an edge moved, and nothing would say so.
+//
+// Aave buckets on `hfWad` — the pool's own WAD, never a re-derived float. The
+// Debt Manager has no wad: it buckets on the EXACT rational hfNum/hfDen
+// (maxBorrowLT/borrowings) compared scale-free. Returns −1 when the engine's
+// comparator quantity is absent, which every caller must count as refused
+// rather than drop.
+func bucketIndexOf(engine string, hfWad, hfNum, hfDen *big.Int) int {
 	wad := risk.WadUnit()
-	switch p.Engine {
+	switch engine {
 	case risk.AaveEngine:
-		if p.HFWad == nil {
+		if hfWad == nil {
 			return -1
 		}
 		for i, e := range histogramEdges {
 			if e.upper == 0 {
 				return i
 			}
-			if p.HFWad.Cmp(edgeWad(e.upper)) < 0 {
+			if hfWad.Cmp(edgeWad(e.upper)) < 0 {
 				return i
 			}
 		}
 		return len(histogramEdges) - 1
 	default:
-		if p.HFNum == nil || p.HFDen == nil || p.HFDen.Sign() <= 0 {
+		if hfNum == nil || hfDen == nil || hfDen.Sign() <= 0 {
 			return -1
 		}
-		ratio := risk.Rational{Num: p.HFNum, Den: p.HFDen}
+		ratio := risk.Rational{Num: hfNum, Den: hfDen}
 		for i, e := range histogramEdges {
 			if e.upper == 0 {
 				return i

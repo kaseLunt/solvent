@@ -71,6 +71,11 @@ import {
 } from "./LabScenarioDetail";
 import { HfsUnchangedBanner, LabRealization } from "./LabRealization";
 import { LabProjectionView } from "./LabProjectionView";
+import {
+  LabRunBookCollateral,
+  LabRunBookHistogramPair,
+  LabRunBookMovers,
+} from "./LabRunBookDetail";
 import styles from "./lab.module.css";
 
 // ---------------------------------------------------------------------------
@@ -144,6 +149,12 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
           sub="same delta-only basis"
         />
       </div>
+      {/* Contract 1.6.0. These render ONLY from a SERVED result: they sit
+          inside EngineResult, downstream of every refusal/hole gate, so a row
+          that holds no book still shows nothing. */}
+      <LabRunBookHistogramPair engine={engine} />
+      <LabRunBookMovers engine={engine} />
+      <LabRunBookCollateral engine={engine} />
       {engine.market_realization !== null && (
         <>
           <HfsUnchangedBanner realization={engine.market_realization} />
