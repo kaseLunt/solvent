@@ -3737,3 +3737,32 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   mid-response by an API server error and resumed in place with its
   context intact (R9). Full stack serves b74f334; riskd past batch
   #900; round 25 reviews 12ce7ca..b74f334.
+- **ROUND 26: SHIP — THE REVIEW TRAIN IS CLOSED (07:06 Aug 3)**: round
+  25 found the INVERSE of round 24's sequence (a v2 rerun failing
+  bodyless over a retained now-skewed v1 body read as "Nothing failed
+  — refresh a listing that was already current"; the root: attemptSkew
+  returning null for two different truths) → R17 a7dced9 made the
+  settlement disposition EXPLICIT (settlementOf: defer | attempt-skew
+  | current-bodyless; a current-definition bodyless failure classifies
+  through R10's own UNANSWERED register with the retained refused body
+  disclosed at its own pin; every boundary an explicit arm; the
+  collapse mutation reproduces the finding's header verbatim in unit
+  AND browser). ROUND 26 over 4172061..a7dced9: **approve, zero
+  findings** — "no substantive honest-user wrong-answer,
+  silent-corruption, false-pass, or vacuous-green finding is
+  supported." ROUNDS 12–26: FIFTEEN adversarial rounds, every finding
+  fixed-and-verified same session, the last range clean. FINAL STATE:
+  HEAD a7dced9; web 727 passed / 1 pre-existing conditional skip (728
+  listed); client 320/320; store+api Go suites ok; contract 1.5.0;
+  full stack live at HEAD (:8080 api-e909d33 binary — Go unchanged
+  since — :3111 the R17 build; riskd daemon past batch #900,
+  0 refused-engine batches, HF History dense). Both owner rulings
+  SHIPPED AND REVIEW-CLEAN: headroom as the book's native distance,
+  and the whole-book scenario dashboard alive on cold arrival.
+  REMAINING QUEUE (new work object territory, not this train): the
+  B-split API waves (post-shock histogram, movers[],
+  collateral_by_asset — confirmed absent from the wire), contract
+  1.6.0 for them when designed; the W3 deploy checklist behind the
+  owner's VPS + domain (spec §12); npm publish @solvent/client;
+  README/demo path; the deferred report-only surveys
+  (handleAddressHistory three-instant read; riskd previousPrices).
