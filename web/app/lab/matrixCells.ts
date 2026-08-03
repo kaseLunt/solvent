@@ -227,6 +227,12 @@ export function anchorBatchOfPhase(phase: MatrixPhase): number | null {
   return outcome.kind === "ok" ? outcome.response.batch.id : null;
 }
 
+/** One row's tie to one batch: which scenario, which batch id. */
+export interface BatchPin {
+  scenarioId: string;
+  batchId: number;
+}
+
 export interface BatchCohort {
   /** The newest batch any HELD result carries — the matrix's own as-of. */
   anchorBatchId: number | null;
@@ -241,6 +247,40 @@ export interface BatchCohort {
    * nobody can see.
    */
   inFlightScenarioIds: string[];
+  /**
+   * WAVE R10 — Scenario ids this session has ASKED ABOUT: every phase past
+   * `idle`, whatever it became. It is the ONLY set that may decide whether "no
+   * run has been issued yet" is true, because that sentence is a claim about
+   * what was ASKED, not about what came back. A first run that is still in
+   * flight, and a first run that failed, are both attempts — and the header
+   * used to call both of them "not run".
+   */
+  attemptedScenarioIds: string[];
+  /**
+   * WAVE R10 — Scenario ids whose RUN ENDED WITHOUT A BOOK: the rows displaying
+   * UNANSWERED. They display no result and pin no batch, so they belong to none
+   * of the three sets above; they are counted here so the header can say what
+   * happened instead of leaving the reader with a sentence about "not run".
+   *
+   * Row-level, not cell-level: a 200 that dropped ONE engine still displays a
+   * result and still pins its batch. That hole is the CELL's sentence to tell.
+   */
+  unansweredScenarioIds: string[];
+  /**
+   * WAVE R10 — the batch pins IN-FLIGHT rows are still holding. Held evidence
+   * anchors the cohort (R8) but is displayed nowhere, so when it is OLDER than
+   * the anchor the header must disclose it by count and batch rather than let a
+   * sentence about "every held result" quietly range over a set that excludes
+   * it.
+   */
+  inFlightHeldPins: BatchPin[];
+  /**
+   * WAVE R10 — every row DISPLAYING a result, with the batch it displays. The
+   * union of `currentScenarioIds` and `supersededScenarioIds`, carrying the pin
+   * each one shows in its own cell, so a clause can name which displayed rows a
+   * batch matches instead of making a claim about "this table" as a whole.
+   */
+  displayedPins: BatchPin[];
 }
 
 /**
@@ -283,23 +323,48 @@ export function resolveBatchCohort(
   const currentScenarioIds: string[] = [];
   const supersededScenarioIds: string[] = [];
   const inFlightScenarioIds: string[] = [];
+  const attemptedScenarioIds: string[] = [];
+  const unansweredScenarioIds: string[] = [];
+  const inFlightHeldPins: BatchPin[] = [];
+  const displayedPins: BatchPin[] = [];
   for (const [scenarioId, phase] of phases) {
+    // IDLE IS NOT AN ATTEMPT. Everything else is, and stays one: that is what
+    // makes "no run has been issued yet" a claim this session can actually
+    // check rather than an inference from "no batch came back".
+    if (phase.kind === "idle") continue;
+    attemptedScenarioIds.push(scenarioId);
     if (phase.kind === "running") {
       inFlightScenarioIds.push(scenarioId);
+      const heldBatch = anchorBatchOfPhase(phase);
+      if (heldBatch !== null) inFlightHeldPins.push({ scenarioId, batchId: heldBatch });
       continue;
     }
     const batch = batchOfPhase(phase);
-    if (batch === null) continue;
+    if (batch === null) {
+      unansweredScenarioIds.push(scenarioId);
+      continue;
+    }
+    displayedPins.push({ scenarioId, batchId: batch });
     if (batch === anchorBatchId) currentScenarioIds.push(scenarioId);
     else supersededScenarioIds.push(scenarioId);
   }
-  return { anchorBatchId, currentScenarioIds, supersededScenarioIds, inFlightScenarioIds };
+  return {
+    anchorBatchId,
+    currentScenarioIds,
+    supersededScenarioIds,
+    inFlightScenarioIds,
+    attemptedScenarioIds,
+    unansweredScenarioIds,
+    inFlightHeldPins,
+    displayedPins,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// THE HEADER'S AS-OF CLAIM (Wave R9, Codex round-17 finding 1).
+// THE HEADER'S TRUTH TABLE (Wave R9, then rebuilt whole by Wave R10).
 //
-// THE DEFECT: the monotonic WATERMARK was doing two jobs it cannot both do.
+// R9 SEPARATED TWO TRUTHS that the monotonic WATERMARK was trying to serve at
+// once:
 //
 //   THE WATERMARK is a FLOOR on the anchor — the law that stops a superseded
 //   row repainting as current when the newest row's evidence leaves the table.
@@ -315,18 +380,81 @@ export function resolveBatchCohort(
 // and the header went on naming #2 as the batch every visible result was
 // measured at while ZERO rows held it.
 //
-// So the two truths are separated here. The floor still never falls. The
-// sentence is now built from `currentScenarioIds` — the rows that ACTUALLY
-// display the anchor batch — and when that list is empty the header says so
-// instead of naming a cohort with no members. Every displayed row already
-// carries its own batch pin in its own cell, so nothing is hidden by declining
-// to claim a shared one.
+// R10 (Codex round-18 findings 1-3) FINISHES THE JOB, because three clauses
+// were still deriving from something other than what a reader can see:
+//
+//   1. NO ANCHOR WAS READ AS NO RUN. `anchorBatchId === null` returned "no run
+//      has been issued yet — every covered cell reads not run". That is FALSE
+//      the moment a FIRST run is in flight (the cells say running…) and it is
+//      false INDEFINITELY after a first run fails (the cells say UNANSWERED).
+//      The header contradicted the cells directly underneath it. "No run has
+//      been issued yet" is a claim about what was ASKED, so it is now decided
+//      by `attemptedScenarioIds` and by nothing else.
+//
+//   2. "EVERY HELD RESULT IS ON THAT BATCH" RANGED OVER A SET THAT EXCLUDED A
+//      HELD PIN. An in-flight row's held outcome ANCHORS the cohort (R8) but the
+//      row is deliberately in neither displayed list — so with row A re-running
+//      while holding batch 1 and row B current at batch 2, `superseded` was
+//      empty and the header claimed every held result was on batch 2 while A
+//      held batch 1 that very moment. The assurance now speaks about DISPLAYED
+//      results, and older held pins are DISCLOSED by count and batch.
+//
+//   3. THE FRONTIER WAS COMPARED AGAINST THE WATERMARK. In the receded sequence
+//      (watermark 2, every displayed row AND the frontier at batch 1) the line
+//      said the frontier was "a different batch from this table" while every
+//      displayed result matched it exactly. The comparison is now against the
+//      DISPLAYED cohort's batch when one exists; when none exists, no table-wide
+//      same/different claim is made at all — the frontier's own batch is
+//      disclosed, and the displayed rows that carry it are counted.
+//
+// THE ONE PRINCIPLE, from which every clause below follows: EVERY CLAUSE IS A
+// STATEMENT ABOUT A NAMED SET the reader can point at — displayed rows, rows
+// asked, rows in flight, held pins. The WATERMARK appears in exactly one clause,
+// the floor disclosure, where it is named as what it is and nothing is inferred
+// from it.
 // ---------------------------------------------------------------------------
 
 /** No run at all: a statement about this session, never about the book. */
 export const MATRIX_NO_RUN_LINE =
   "no run has been issued yet — every covered cell reads “not run”, which is a " +
   "statement about this session, not about the book.";
+
+/** "batch #1" / "batches #1 and #3" / "batches #1, #3 and #4". */
+function batchWords(ids: readonly number[]): string {
+  const unique = [...new Set(ids)]
+    .sort((left, right) => left - right)
+    .map((id) => `#${String(id)}`);
+  if (unique.length <= 1) return `batch ${unique[0] ?? "—"}`;
+  return `batches ${unique.slice(0, -1).join(", ")} and ${unique[unique.length - 1] ?? ""}`;
+}
+
+/**
+ * NO BATCH HAS EVER BEEN SERVED HERE, BUT SOMETHING WAS ASKED (Wave R10,
+ * round-18 finding 1).
+ *
+ * This is the arm the old code collapsed into "no run has been issued yet". It
+ * covers the two states a first run can be in when it has produced no batch:
+ * still IN FLIGHT, and ENDED WITHOUT A BOOK. Both leave real, non-idle cells on
+ * screen — "running…" and "UNANSWERED" — and the header's job is to agree with
+ * them, name what happened, and decline to name a batch it does not have.
+ */
+function firstResultPendingClause(cohort: BatchCohort): string {
+  const inFlight = cohort.inFlightScenarioIds.length;
+  const unanswered = cohort.unansweredScenarioIds.length;
+  const facts: string[] = [];
+  if (inFlight > 0) facts.push(`${String(inFlight)} run(s) are in flight`);
+  if (unanswered > 0) facts.push(`${String(unanswered)} run(s) ended without a served result`);
+  // Unreachable while a phase can only be idle / running / outcome — an ok
+  // outcome would have given an anchor. Stated rather than assumed.
+  if (facts.length === 0) {
+    return "no result is displayed on this table, and no batch can be named for one.";
+  }
+  return (
+    `no result has been served to this table yet: ${facts.join(", and ")}. There is no batch ` +
+    `for this table to be as of — and this is NOT “not run”: every row counted here was asked, ` +
+    `and each says in its own cell what became of the asking.`
+  );
+}
 
 /**
  * The cohort's own sentence — the as-of claim, or the refusal to make one.
@@ -339,7 +467,14 @@ export const MATRIX_NO_RUN_LINE =
  * must not say one was.
  */
 function cohortClause(cohort: BatchCohort): string {
-  if (cohort.anchorBatchId === null) return MATRIX_NO_RUN_LINE;
+  // R10 finding 1: "no run" is decided by what was ASKED, never by the absence
+  // of a batch. The anchor check rides along so a caller-supplied floor with no
+  // attempts still falls through to the floor disclosure rather than claiming
+  // a session that never ran.
+  if (cohort.attemptedScenarioIds.length === 0 && cohort.anchorBatchId === null) {
+    return MATRIX_NO_RUN_LINE;
+  }
+  if (cohort.anchorBatchId === null) return firstResultPendingClause(cohort);
   const batch = `#${String(cohort.anchorBatchId)}`;
   const older = cohort.supersededScenarioIds.length;
   if (cohort.currentScenarioIds.length === 0) {
@@ -355,9 +490,33 @@ function cohortClause(cohort: BatchCohort): string {
   }
   return (
     `results shown together were measured at batch ${batch}.` +
+    // R10 finding 2: the assurance is about what is DISPLAYED. It used to read
+    // "Every held result is on that batch", which ranged over held evidence —
+    // including an in-flight row's OLDER pin that this list deliberately omits.
     (older === 0
-      ? " Every held result is on that batch."
+      ? " Every DISPLAYED result was measured at that batch."
       : ` ${String(older)} row(s) still hold an older batch's result and are marked SUPERSEDED — they are shown, never blended into the sentence above.`)
+  );
+}
+
+/**
+ * OLDER HELD EVIDENCE, DISCLOSED (Wave R10, round-18 finding 2).
+ *
+ * A re-running row displays nothing and is in neither displayed list, yet its
+ * held result is still real evidence pinned to a real batch. When that pin is
+ * OLDER than the anchor, the row is holding a measurement the sentence above
+ * does not cover — so it is counted and its batch is named, rather than being
+ * quietly folded under an assurance about "every held result".
+ */
+function heldPinClause(cohort: BatchCohort): string {
+  const anchor = cohort.anchorBatchId;
+  if (anchor === null) return "";
+  const older = cohort.inFlightHeldPins.filter((pin) => pin.batchId < anchor);
+  if (older.length === 0) return "";
+  return (
+    ` ${String(older.length)} re-running row(s) still hold a result at ` +
+    `${batchWords(older.map((pin) => pin.batchId))} while the request is out — held evidence, ` +
+    `displayed nowhere, and never part of the cohort above.`
   );
 }
 
@@ -374,14 +533,55 @@ function inFlightClause(cohort: BatchCohort): string {
   );
 }
 
-/** The frontier reads its OWN batch, and the two are never read as one number. */
+/**
+ * Rows whose run ENDED WITHOUT A BOOK, counted beside the batch sentence.
+ *
+ * They display no result, so they neither join the cohort nor contradict it —
+ * but leaving them out entirely once left a reader to assume every row not
+ * named was current. In the no-anchor arm this is already said inline, so the
+ * clause holds its tongue there.
+ */
+function unansweredClause(cohort: BatchCohort): string {
+  if (cohort.anchorBatchId === null || cohort.unansweredScenarioIds.length === 0) return "";
+  return (
+    ` ${String(cohort.unansweredScenarioIds.length)} row(s) display UNANSWERED — their run ` +
+    `ended without a served book, which is neither a zero nor a “not run”, and joins no batch ` +
+    `sentence here.`
+  );
+}
+
+/**
+ * THE FRONTIER READS ITS OWN BATCH (Wave R10, round-18 finding 3).
+ *
+ * The comparison used to be made against the WATERMARK, which is not displayed
+ * anywhere and can be a batch no row holds. In the receded sequence — watermark
+ * 2, every displayed row at batch 1, frontier at batch 1 — that produced "a
+ * different batch from this table" while every visible result matched it.
+ *
+ * So the comparison is now made against the one batch this table actually
+ * CLAIMS: the batch its DISPLAYED cohort was measured at. When there is no such
+ * cohort there is nothing to compare table-wide, and none is claimed; instead
+ * the frontier's own batch is disclosed and the DISPLAYED rows carrying it are
+ * counted, which is a statement about a set the reader can point at.
+ */
 function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): string {
   if (frontierBatchId === null) return "";
-  return ` The loss frontier above reads batch #${String(frontierBatchId)}${
-    cohort.anchorBatchId !== null && cohort.anchorBatchId !== frontierBatchId
-      ? " — a different batch from this table, which is why the two are never read as one number."
-      : "."
-  }`;
+  const lead = ` The loss frontier above reads batch #${String(frontierBatchId)}`;
+  if (cohort.anchorBatchId !== null && cohort.currentScenarioIds.length > 0) {
+    return cohort.anchorBatchId === frontierBatchId
+      ? `${lead}.`
+      : `${lead} — a different batch from this table's displayed cohort, which is why the two ` +
+          `are never read as one number.`;
+  }
+  if (cohort.displayedPins.length === 0) return `${lead}.`;
+  const matching = cohort.displayedPins.filter((pin) => pin.batchId === frontierBatchId).length;
+  const displayed = cohort.displayedPins.length;
+  return matching === 0
+    ? `${lead} — no result displayed here was measured at it, and this table names no cohort ` +
+        `of its own, so no same-or-different claim is made for the table as a whole.`
+    : `${lead} — the same batch ${String(matching)} of the ${String(displayed)} displayed ` +
+        `row(s) are pinned to. This table names no cohort of its own, so the two are still ` +
+        `never read as one number.`;
 }
 
 /**
@@ -390,9 +590,19 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
  * It lives here rather than in the component so the claim can be pinned by the
  * unit spec against a cohort built by hand, sequence by sequence — including
  * the sequences a browser can only reach through a timing window.
+ *
+ * The clause order is the reader's order: what this table claims, then what is
+ * held but not shown, then what is still out, then what came back empty, then
+ * the frontier's separate read.
  */
 export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
-  return `${cohortClause(cohort)}${inFlightClause(cohort)}${frontierClause(cohort, frontierBatchId)}`;
+  return (
+    cohortClause(cohort) +
+    heldPinClause(cohort) +
+    inFlightClause(cohort) +
+    unansweredClause(cohort) +
+    frontierClause(cohort, frontierBatchId)
+  );
 }
 
 // ---------------------------------------------------------------------------

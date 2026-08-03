@@ -22,6 +22,13 @@
 // And when NO cell is current at the watermark (Wave R9), the header states
 // that too rather than naming a cohort nothing belongs to.
 //
+// THE HEADER MAY NEVER CONTRADICT THE CELLS (Wave R10). Every clause of that
+// sentence is composed in `matrixCells.batchHeaderLine` from a NAMED set — rows
+// asked, rows displaying, rows in flight, held pins — so the line can only ever
+// describe states the reader can point at in the grid below it. Nothing but the
+// floor disclosure reads the watermark. This component supplies the watermark
+// and the frontier's batch and renders the result; it composes no sentence.
+//
 // The Lab owns this component; the Book's outpaced/refusal components are not
 // imported. Same register, separate ownership.
 
@@ -202,6 +209,12 @@ export function LabMatrix({
   // actually DISPLAYING the anchor batch and declines to name a cohort with no
   // members. A watermark that also spoke as an as-of claimed batch #2 over a
   // table where every row had receded to batch 1.
+  //
+  // WAVE R10 narrows it further and the narrowing is entirely inside
+  // `matrixCells`: the watermark is now read by exactly ONE clause (the floor
+  // disclosure). "No run has been issued yet" is decided by rows ASKED, the
+  // held-batch assurance by rows DISPLAYED, and the frontier comparison by the
+  // displayed cohort's batch — never by this number.
   const [watermark, setWatermark] = useState<number | null>(null);
   let observed: number | null = null;
   for (const phase of phases.values()) {

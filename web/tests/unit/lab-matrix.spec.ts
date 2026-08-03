@@ -500,13 +500,21 @@ test("R9 — WHEN CURRENT RESULTS EXIST THE SENTENCE IS UNCHANGED, watermark or 
     "results shown together were measured at batch #2. 1 row(s) still hold an older batch's " +
       "result and are marked SUPERSEDED — they are shown, never blended into the sentence above.",
   );
-  // …and with every held result on the anchor, the same as before.
+  // …and with every displayed result on the anchor, the same as before.
+  //
+  // WAVE R10 CHANGED THIS EXPECTATION (round-18 finding 2). The assurance used
+  // to read "Every held result is on that batch." — a claim over HELD evidence,
+  // which includes the pin an IN-FLIGHT row is still carrying and which the
+  // displayed lists deliberately omit. In THIS cohort the two sets coincide, so
+  // the old sentence was not false here; it was false in the cohort pinned by
+  // the R10 held-pin test below, and a sentence that is only sometimes true is
+  // not the sentence to ship. It now speaks about what is DISPLAYED, always.
   const allCurrent = new Map<string, MatrixPhase>([
     [ETH.id, ok(RUN_BOOK_BATCH_2)],
     [DEPEG.id, ok(RUN_BOOK_BATCH_2)],
   ]);
   expect(batchHeaderLine(resolveBatchCohort(allCurrent, 2), null)).toBe(
-    "results shown together were measured at batch #2. Every held result is on that batch.",
+    "results shown together were measured at batch #2. Every DISPLAYED result was measured at that batch.",
   );
 });
 
@@ -558,19 +566,309 @@ test("R9 — the no-run and frontier clauses are carried through the header mode
 
   // A frontier batch is DISCLOSED, and named as a different batch when it is.
   expect(batchHeaderLine(cold, 1)).toBe(`${MATRIX_NO_RUN_LINE} The loss frontier above reads batch #1.`);
+
+  // WAVE R10 CHANGED THIS EXPECTATION (round-18 finding 3), by NARROWING what
+  // the difference is claimed against. "A different batch from this table" is a
+  // claim over every row on the table — and a SUPERSEDED row displayed right
+  // here IS pinned to batch 1, the frontier's own batch. The only number this
+  // table actually claims is the batch its DISPLAYED COHORT was measured at, so
+  // that is what the comparison now names.
   expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 1)).toContain(
-    "The loss frontier above reads batch #1 — a different batch from this table, which is why " +
-      "the two are never read as one number.",
+    "The loss frontier above reads batch #1 — a different batch from this table's displayed " +
+      "cohort, which is why the two are never read as one number.",
   );
   // Same batch on both: disclosed, with no difference claimed.
   expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 2)).toContain(
     "The loss frontier above reads batch #2.",
   );
-  // AND THE NO-COHORT ARM STILL DISCLOSES IT — the frontier's own batch is not
-  // dropped just because this table has no cohort to name.
-  expect(batchHeaderLine(resolveBatchCohort(recededToOne(), 2), 1)).toContain(
-    "The loss frontier above reads batch #1 — a different batch from this table",
+
+  // WAVE R10 FIXED THIS EXPECTATION (round-18 finding 3) — IT LOCKED IN THE
+  // DEFECT. `recededToOne()` displays batch 1 in EVERY row; the watermark is 2
+  // only because the panel once saw batch 2. Asserting that a frontier at batch
+  // 1 is "a different batch from this table" pinned a sentence that contradicts
+  // every visible cell, because the comparison was made against the WATERMARK —
+  // a number displayed nowhere — instead of against anything on screen. The
+  // frontier's own batch is still disclosed (that part of the old expectation
+  // was right and is kept); what is gone is the false difference.
+  const receded = batchHeaderLine(resolveBatchCohort(recededToOne(), 2), 1);
+  expect(receded).toContain("The loss frontier above reads batch #1");
+  expect(receded).not.toContain("a different batch");
+});
+
+// ===========================================================================
+// WAVE R10 (Codex round-18 findings 1-3) — THE HEADER'S TRUTH TABLE, REBUILT.
+//
+// ONE PRINCIPLE: every clause of the batch line is a statement about a NAMED
+// set the reader can point at — rows ASKED, rows DISPLAYING, rows IN FLIGHT,
+// HELD pins. The watermark is read by exactly one clause (the floor disclosure)
+// and inferred from by none. The header may never contradict the cells.
+//
+// THE THREE DEFECTS THIS SECTION PINS SHUT:
+//
+//   1. NO ANCHOR WAS READ AS NO RUN. `anchorBatchId === null` returned "no run
+//      has been issued yet — every covered cell reads not run", which is FALSE
+//      while a FIRST run is in flight (cells read "running…") and false
+//      INDEFINITELY after a first run fails (cells read UNANSWERED).
+//   2. "EVERY HELD RESULT IS ON THAT BATCH" RANGED OVER A SET THAT EXCLUDED A
+//      HELD PIN. An in-flight row's held outcome anchors the cohort but the row
+//      is in neither displayed list, so a row re-running while holding batch 1
+//      beside a current row at batch 2 produced that sentence with the batch-1
+//      pin live and uncounted.
+//   3. THE FRONTIER WAS COMPARED AGAINST THE WATERMARK — a number displayed
+//      nowhere. In the receded sequence every displayed row AND the frontier sat
+//      at batch 1 while the line called them different batches.
+// ===========================================================================
+
+/** A FIRST run still out: asked, nothing held, nothing displayed. */
+const RUNNING_COLD: MatrixPhase = { kind: "running" };
+
+/** A FIRST run that ENDED WITHOUT A BOOK: asked, answered, no result. */
+const FAILED_COLD: MatrixPhase = {
+  kind: "outcome",
+  outcome: {
+    kind: "no-batch",
+    message: "no complete risk batch is available.",
+    retryAfterSeconds: 5,
+  },
+};
+
+test("R10 — NEVER ATTEMPTED is the ONLY state that says “no run has been issued yet”", () => {
+  const cold = resolveBatchCohort(new Map(), null);
+  expect(cold.attemptedScenarioIds).toEqual([]);
+  expect(batchHeaderLine(cold, null)).toBe(MATRIX_NO_RUN_LINE);
+
+  // An explicitly-idle row is not an attempt either: the map may carry one, and
+  // "idle" is precisely the state the sentence is about.
+  const idle = resolveBatchCohort(new Map<string, MatrixPhase>([[ETH.id, { kind: "idle" }]]), null);
+  expect(idle.attemptedScenarioIds).toEqual([]);
+  expect(batchHeaderLine(idle, null)).toBe(MATRIX_NO_RUN_LINE);
+  // …and the cells agree with it.
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: { kind: "idle" }, cohort: idle })
+      .state,
+  ).toBe("not-run");
+});
+
+test("R10 — A FIRST RUN IN FLIGHT: the header says the run is out, never that none was issued", () => {
+  const phases = new Map<string, MatrixPhase>([[ETH.id, RUNNING_COLD]]);
+  const cohort = resolveBatchCohort(phases, null);
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+  expect(cohort.inFlightScenarioIds).toEqual([ETH.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) are in flight. There is no batch " +
+      "for this table to be as of — and this is NOT “not run”: every row counted here was " +
+      "asked, and each says in its own cell what became of the asking.",
   );
+
+  // THE DEFECT, NAMED: the old line claimed nothing had been issued while the
+  // cell directly beneath it read "running…".
+  expect(line).not.toContain("no run has been issued yet");
+  expect(line).not.toContain("every covered cell reads");
+  expect(line).not.toBe(MATRIX_NO_RUN_LINE);
+
+  // HEADER AND CELLS AGREE — the whole point of the arm.
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: RUNNING_COLD, cohort }).state,
+  ).toBe("running");
+});
+
+test("R10 — A FIRST RUN THAT FAILED: N run(s) ended without a served result, indefinitely", () => {
+  const phases = new Map<string, MatrixPhase>([[ETH.id, FAILED_COLD]]);
+  const cohort = resolveBatchCohort(phases, null);
+  expect(cohort.anchorBatchId).toBeNull();
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([ETH.id]);
+  expect(cohort.inFlightScenarioIds).toEqual([]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) ended without a served result. " +
+      "There is no batch for this table to be as of — and this is NOT “not run”: every row " +
+      "counted here was asked, and each says in its own cell what became of the asking.",
+  );
+
+  // THE DEFECT, NAMED: this state is TERMINAL until somebody clicks again, so
+  // the old header said "not run" about a failed run for as long as the panel
+  // lived — while the cell beneath it read UNANSWERED with the 503 in its title.
+  expect(line).not.toContain("no run has been issued yet");
+  expect(line).not.toBe(MATRIX_NO_RUN_LINE);
+
+  expect(
+    cellState({ scenario: ETH, engine: "debt_manager", phase: FAILED_COLD, cohort }).state,
+  ).toBe("unanswered");
+});
+
+test("R10 — in flight AND ended-without-a-result are counted SEPARATELY in the same sentence", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, RUNNING_COLD],
+    [DEPEG.id, FAILED_COLD],
+  ]);
+  const cohort = resolveBatchCohort(phases, null);
+  expect(cohort.attemptedScenarioIds).toEqual([ETH.id, DEPEG.id]);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("1 run(s) are in flight, and 1 run(s) ended without a served result");
+  expect(line).not.toContain("no run has been issued yet");
+});
+
+test("R10 — THE HELD PIN: a re-running row holding an OLDER batch is disclosed by count and batch", () => {
+  // THE FINDING'S OWN SEQUENCE. Row A re-runs while holding batch 1; row B
+  // displays batch 2 and IS the cohort. A is IN FLIGHT, so it is deliberately
+  // absent from BOTH displayed lists — which is exactly why the old assurance
+  // over "every held result" was free to be wrong.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, runningHolding(RUN_BOOK_ETH)], // held @1, displaying nothing
+    [DEPEG.id, ok(RUN_BOOK_BATCH_2)], // displayed @2
+  ]);
+  const cohort = resolveBatchCohort(phases, 2);
+  expect(cohort.anchorBatchId).toBe(2);
+  expect(cohort.currentScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.supersededScenarioIds).toEqual([]); // ← the empty list that lied
+  expect(cohort.inFlightHeldPins).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+
+  const line = batchHeaderLine(cohort, null);
+
+  // THE DEFECT, NAMED: `supersededScenarioIds` is empty, so the old code said
+  // "Every held result is on that batch." while row A held batch 1 that moment.
+  expect(line).not.toContain("Every held result is on that batch");
+
+  expect(line).toBe(
+    "results shown together were measured at batch #2. Every DISPLAYED result was measured at " +
+      "that batch. 1 re-running row(s) still hold a result at batch #1 while the request is " +
+      "out — held evidence, displayed nowhere, and never part of the cohort above. 1 row(s) " +
+      "have a run in flight; the batch above is a WATERMARK and never moves backwards while " +
+      "one is, so nothing older repaints as current.",
+  );
+
+  // The in-flight row still renders RUNNING and never its held value (R8).
+  expect(
+    cellState({
+      scenario: ETH,
+      engine: "debt_manager",
+      phase: runningHolding(RUN_BOOK_ETH),
+      cohort,
+    }).state,
+  ).toBe("running");
+});
+
+test("R10 — an in-flight row holding the ANCHOR's OWN batch adds no held-pin disclosure", () => {
+  // The R8 harness state: the disclosure is about OLDER held evidence, so a pin
+  // equal to the anchor produces no clause and no noise.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, runningHolding(RUN_BOOK_BATCH_2)],
+  ]);
+  const cohort = resolveBatchCohort(phases, 2);
+  expect(cohort.inFlightHeldPins).toEqual([{ scenarioId: DEPEG.id, batchId: 2 }]);
+  const line = batchHeaderLine(cohort, null);
+  expect(line).not.toContain("re-running row(s) still hold");
+  expect(line).toContain("1 row(s) have a run in flight");
+});
+
+test("R10 — TWO re-running rows on TWO older batches are named as both", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, runningHolding(RUN_BOOK_ETH)], // held @1
+    [RATE.id, runningHolding(RUN_BOOK_WEETH_BATCH_1)], // held @1
+    [DEPEG.id, ok(RUN_BOOK_BATCH_2)], // displayed @2
+  ]);
+  const line = batchHeaderLine(resolveBatchCohort(phases, 2), null);
+  expect(line).toContain("2 re-running row(s) still hold a result at batch #1");
+  expect(line).toContain("2 row(s) have a run in flight");
+});
+
+test("R10 — THE RECEDED SEQUENCE with a MATCHING frontier makes NO “different batch” claim", () => {
+  // Watermark 2; every displayed row at batch 1; the frontier at batch 1 too.
+  const cohort = resolveBatchCohort(recededToOne(), 2);
+  expect(cohort.currentScenarioIds).toEqual([]);
+  expect(cohort.displayedPins).toEqual([
+    { scenarioId: ETH.id, batchId: 1 },
+    { scenarioId: DEPEG.id, batchId: 1 },
+  ]);
+
+  const line = batchHeaderLine(cohort, 1);
+
+  // THE DEFECT, NAMED: the comparison was made against the WATERMARK (2), so
+  // the line called batch 1 "a different batch from this table" while EVERY
+  // displayed result on that table was measured at batch 1.
+  expect(line).not.toContain("a different batch");
+  expect(line).toContain(
+    "The loss frontier above reads batch #1 — the same batch 2 of the 2 displayed row(s) are " +
+      "pinned to.",
+  );
+  // No table-wide same-claim either: there is no cohort, so none is invented.
+  expect(line).toContain("This table names no cohort of its own");
+
+  // R9's floor disclosure still composes ahead of it, unweakened.
+  expect(line).toContain("NO result now displayed was measured at it");
+  expect(line).not.toContain("results shown together");
+});
+
+test("R10 — no cohort and NO displayed row at the frontier's batch: still no table-wide claim", () => {
+  const line = batchHeaderLine(resolveBatchCohort(recededToOne(), 2), 3);
+  expect(line).toContain("The loss frontier above reads batch #3");
+  expect(line).toContain("no result displayed here was measured at it");
+  expect(line).toContain("no same-or-different claim is made for the table as a whole");
+  expect(line).not.toContain("a different batch");
+});
+
+test("R10 — WITH a displayed cohort the frontier is compared against the COHORT's batch, both ways", () => {
+  const withCohort = resolveBatchCohort(settledAtTwo(), 1); // current = [DEPEG] @2
+  expect(withCohort.currentScenarioIds).toEqual([DEPEG.id]);
+
+  // SAME: disclosed, no difference claimed.
+  const same = batchHeaderLine(withCohort, 2);
+  expect(same).toContain("The loss frontier above reads batch #2.");
+  expect(same).not.toContain("different batch");
+
+  // DIFFERENT: claimed against the DISPLAYED COHORT by name. It is not claimed
+  // against "this table", because a SUPERSEDED row displayed on this very table
+  // is pinned to batch 1 — the frontier's own batch.
+  const different = batchHeaderLine(withCohort, 1);
+  expect(different).toContain(
+    "The loss frontier above reads batch #1 — a different batch from this table's displayed cohort",
+  );
+  expect(different).not.toContain("a different batch from this table,");
+});
+
+test("R10 — an UNANSWERED row is COUNTED beside the batch sentence, never folded into it", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [DEPEG.id, FAILED_COLD], // asked, no book
+  ]);
+  const cohort = resolveBatchCohort(phases, 1);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.unansweredScenarioIds).toEqual([DEPEG.id]);
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toContain("results shown together were measured at batch #1.");
+  expect(line).toContain("Every DISPLAYED result was measured at that batch.");
+  expect(line).toContain("1 row(s) display UNANSWERED");
+  expect(line).toContain("neither a zero nor a “not run”");
+});
+
+test("R10 — THE SWEEP: once ANY row was asked, the header never says “no run has been issued yet”", () => {
+  const asked: MatrixPhase[] = [
+    RUNNING_COLD,
+    FAILED_COLD,
+    runningHolding(RUN_BOOK_ETH),
+    ok(RUN_BOOK_ETH),
+    { kind: "outcome", outcome: { kind: "not-served" } },
+    { kind: "outcome", outcome: { kind: "unreachable", message: "network down" } },
+    { kind: "outcome", outcome: { kind: "rate-limited", retryAfterSeconds: null } },
+  ];
+  const floors: (number | null)[] = [null, 1, 2];
+  for (const phase of asked) {
+    for (const floor of floors) {
+      const cohort = resolveBatchCohort(new Map<string, MatrixPhase>([[ETH.id, phase]]), floor);
+      expect(cohort.attemptedScenarioIds).toEqual([ETH.id]);
+      const line = batchHeaderLine(cohort, null);
+      expect(line).not.toContain("no run has been issued yet");
+      expect(line.length).toBeGreaterThan(0);
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

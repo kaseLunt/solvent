@@ -335,8 +335,16 @@ test("SUPERSESSION: the stale result is NAMED, kept on screen, and never mixed",
   // against a book that has moved on returns.)
   await page.locator('[data-testid="matrix-run"][data-scenario-id="eth_minus_30"]').click();
   await expect(ethCell).toHaveAttribute("data-cell-state", "result");
+  // WAVE R10 CHANGED THIS EXPECTATION (round-18 finding 2). The assurance used
+  // to read "Every held result is on that batch." — a claim over HELD evidence,
+  // which includes the pin an IN-FLIGHT row is still carrying and which the
+  // displayed lists deliberately omit. Both rows are settled here, so the two
+  // sets coincide and the old sentence was not false in THIS state; it was
+  // false with a row re-running while holding an older batch, which is pinned
+  // by tests/e2e/r10-fixes.spec.ts (2). The claim now speaks about what is
+  // DISPLAYED in every state, and older held pins are disclosed separately.
   await expect(page.getByTestId("matrix-batch-line")).toContainText(
-    "Every held result is on that batch.",
+    "Every DISPLAYED result was measured at that batch.",
   );
 });
 
