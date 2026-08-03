@@ -91,9 +91,31 @@
 //     bit-identical amounts, disclosed prices that reproduce the itemization's
 //     absolute numbers, an exhaustive `held_flat` with nothing floating free in
 //     it, and a conserved denominator. The guard's own sensitivity is proven on
-//     NINE mutants at the write site, and each must be refused FOR ITS OWN NAMED
+//     mutants at the write site, and each must be refused FOR ITS OWN NAMED
 //     REASON — the expected sentence is asserted, so a mutant that trips an
 //     unrelated law fails the generation rather than passing as evidence.
+//
+//     WAVE W-BS-E. Codex round 30 broke the conservation half four more times,
+//     and the four are one lesson: THE GUARD WAS VALIDATING DERIVED PROPERTIES
+//     OF ITS OWN OUTPUT. Each law asked whether the body was consistent —
+//     side against side, ratio against ratio, non-null against non-null — and
+//     each round produced a body with the right properties and the wrong
+//     content. A two-sided amount swap between two rows that share an asset
+//     satisfies every side-to-side comparison. A nulled `debt_usd` satisfies a
+//     law that only reads `debt_usd` when it is there. An exemption DERIVED
+//     from "absent from the counted itemization" admits an unpriced collateral
+//     row. An exemption RECOMPUTED from a mutable example grows with it.
+//
+//     The remedy is ANCHORING, applied to all four. Every immutable fact of a
+//     generated body is pinned to its SOURCE — the contract example's untouched
+//     bytes plus the rows this generator explicitly injects — and both sides
+//     must match THE ANCHOR rather than each other (law 9); each mover must
+//     match the SHAPE its engine's serializer produces rather than merely
+//     agreeing where it is non-null (law 12); and both of law 11's exemptions
+//     are frozen literals, asserted equal to their derivation and refused at
+//     the point of use if the body itemizes or discloses what they forgive.
+//     EIGHTEEN mutants hold it, and a register at the end of the file proves
+//     each one's expected sentence belongs to its law ALONE.
 //
 //  3. run-book.weeth.batch2.json and run-book.eth_minus_30.batch2.json — files
 //     2 and the run-book example with ONE field changed: the batch id, plus its
@@ -253,9 +275,13 @@
 //     server could not produce. It is a defect in `api/openapi.yaml`, not in
 //     this file, and item 2's discipline forbids rewriting the contract's bytes
 //     to satisfy a law — so the guard's completeness law (11) takes an
-//     ENUMERATED exemption for exactly those two keys, derived from the
-//     untouched example. It cannot grow silently, and the eth_minus_30 body —
-//     whose disclosures this generator composes itself — takes none.
+//     ENUMERATED exemption for exactly those two keys. Wave W-BS-E FROZE them
+//     as literals: the example's priced holdings are fingerprinted and asserted
+//     equal to what round 30 reviewed, so the exemption cannot widen when the
+//     example moves, and it is refused outright once the example DISCLOSES what
+//     it forgives — which is what makes the banked contract repair
+//     self-enforcing. The eth_minus_30 body, whose disclosures this generator
+//     composes itself, takes none.
 //
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
@@ -671,6 +697,87 @@ const belowOne = (histogram) =>
 const census = (histogram) =>
   histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) + histogram.infinite_count;
 
+// --- THE HOLDING ANCHOR (Wave W-BS-E) --------------------------------------
+//
+// Codex round 30 landed one lesson four times: a guard that validates DERIVED
+// PROPERTIES of a body is satisfied by a body with the right properties and the
+// wrong content. Laws 8 and 9 compared the two SIDES TO EACH OTHER, so a
+// TWO-SIDED edit — swapping the amounts of the collision fixture's two rows, on
+// both sides — kept every correspondence intact while the book served balances
+// nobody put there. And the fields no law read at all (`unpriced`, `note`)
+// could be edited on ONE side with nothing anywhere to say so.
+//
+// The remedy is ANCHORING. Every immutable fact of a generated body is pinned
+// to its SOURCE — the contract example's untouched bytes plus the rows this
+// generator explicitly injects — and BOTH sides must equal THE ANCHOR. Not each
+// other, not a ratio, not merely non-null: the anchor.
+//
+// `value_usd` is the one field an anchor does not pin, because it is the one
+// field `ApplyScenario` WRITES (scenario.go:677-745). It moves, and laws 1-4
+// and 10 bind exactly how far.
+
+/** The server's own itemization identity: one asset, one disclosure, one row. */
+const disclosureOf = (entry) =>
+  entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
+
+/** An anchor row's key: whose book, which asset, which disclosure. */
+const anchorKey = (engineName, entry) => `${engineName}|${entry.asset}::${disclosureOf(entry)}`;
+
+/**
+ * THE PER-ENGINE MOVER VOCABULARY, as `wireRunBookMover` declares it
+ * (p5_runbook.go:117-139): every mover carries every field, and the engine that
+ * does not SPEAK a field publishes it as NULL rather than omitting it. Which
+ * makes the shape an anchor — see law 12.
+ */
+const MOVER_VOCABULARY = {
+  aave_v3_etherfi: ["hf_before_wad", "hf_after_wad", "hf_drop_wad"],
+  debt_manager: [
+    "hf_before_num",
+    "hf_before_den",
+    "hf_after_num",
+    "hf_after_den",
+    "became_eligible",
+    "debt_usd",
+  ],
+};
+
+/** How a field reads in a refusal: absent and null are different failures. */
+const shown = (value) => (value === undefined ? "ABSENT" : JSON.stringify(value));
+
+/**
+ * THE IMMUTABLE HALF OF A HOLDING — everything `ApplyScenario` CLONES rather
+ * than writes (scenario.go:677-745, 762-777). `symbol` and `note` normalize to
+ * null when absent, so an anchor pins their ABSENCE as firmly as their value.
+ */
+const anchorOf = (entry) => ({
+  amount: entry.amount,
+  decimals: entry.decimals,
+  symbol: entry.symbol ?? null,
+  unpriced: entry.unpriced,
+  note: entry.note ?? null,
+});
+
+/**
+ * Build one response's anchor from `[engine, entries]` declarations.
+ *
+ * The caller passes SOURCE rows — the contract example's own arrays and the
+ * entries this generator constructs — and never rows read back off the body
+ * being checked, which would only ever prove that the body equals itself.
+ */
+const holdingAnchor = (declarations) => {
+  const anchor = new Map();
+  for (const [engineName, entries] of declarations) {
+    for (const entry of entries) {
+      const key = anchorKey(engineName, entry);
+      if (anchor.has(key)) {
+        fail(`the declared holding anchor names ${key} TWICE, so it pins nothing`);
+      }
+      anchor.set(key, anchorOf(entry));
+    }
+  }
+  return anchor;
+};
+
 /**
  * Fail the generation rather than write a self-contradicting side.
  *
@@ -740,9 +847,7 @@ const checkSide = (name, side) => {
   // identity — the collision the detail view's React key now encodes.
   const seen = new Set();
   for (const entry of side.collateral_by_asset) {
-    const disclosure =
-      entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
-    const key = `${entry.asset}::${disclosure}`;
+    const key = `${entry.asset}::${disclosureOf(entry)}`;
     if (seen.has(key)) {
       fail(`${name} carries TWO collateral entries for ${key}`);
     }
@@ -819,11 +924,20 @@ const checkSide = (name, side) => {
  *      deleting a holding was a free move. If a real reclassification case is
  *      ever found, it must be introduced DELIBERATELY, with its own law and its
  *      own provenance — never allowed through this silence again.
- *   9. THE AMOUNTS ARE CONSERVED. The same law read at the entry: `amount`,
- *      `decimals` and `symbol` are BIT-IDENTICAL across the sides, and only
- *      `value_usd` moves — by exactly the disclosed factor (law 4). Doubling an
- *      amount AND its value together holds the implied price still, so laws 1-7
- *      see nothing while the book gains balance out of nothing.
+ *   9. THE HOLDINGS ARE ANCHORED (rebuilt in Wave W-BS-E). `amount`,
+ *      `decimals`, `symbol`, `unpriced` and `note` are pinned to the caller's
+ *      declared ANCHOR — the contract example's untouched bytes plus the rows
+ *      this generator explicitly injects — and BOTH sides must equal it. Only
+ *      `value_usd` moves, by exactly the disclosed factor (laws 4 and 10).
+ *
+ *      The first cut of this law compared the two SIDES TO EACH OTHER, and
+ *      Codex round 30 showed what that misses. Swapping the amounts of the
+ *      collision fixture's two rows ON BOTH SIDES leaves every corresponding
+ *      pair identical: the counted row and the not-counted row simply trade
+ *      balances, the sums still balance, and the book serves holdings nobody
+ *      put there. `unpriced` and `note` were read by no law at all, so a
+ *      ONE-SIDED edit to either was free. An anchor answers all three, because
+ *      it is not derived from the body it judges.
  *  10. THE DISCLOSED PRICE IS THE ITEMIZATION'S OWN. A disclosure is not only a
  *      ratio. `value_usd = floor(amount × price / 10^decimals)` is the engine's
  *      own valuation, so an `applied_shocks` before/after pair and a `held_flat`
@@ -843,12 +957,21 @@ const checkSide = (name, side) => {
  *        `unitemizedInputs` — an Aave position's price inputs cover its BORROWED
  *        reserves as well as its collateral, and `collateral_by_asset` itemizes
  *        only collateral, so the debt leg's held price has no itemized witness
- *        BY CONSTRUCTION. It is declared from the committed result this body
- *        serves, and it still has to sit on a chain where some engine carries
- *        debt on both sides. The Debt Manager needs no such exemption: its debt
+ *        BY CONSTRUCTION. The Debt Manager needs no such exemption: its debt
  *        leg is USD-NORMALIZED and copied verbatim (`cp.DebtUSD =
  *        copyBig(in.DM.DebtUSD)`), carries no `PriceInput` at all, and is bound
  *        instead by law 12.
+ *
+ *        WAVE W-BS-E. That exemption used to be DERIVED — "the committed
+ *        result's inputs this body's counted itemization does not carry" — and
+ *        Codex round 30 walked straight through the derivation: hold the
+ *        fixture's UNPRICED collateral flat and it qualifies, because an
+ *        unpriced row is not counted and the chain does carry some debt. A
+ *        COLLATERAL row was thereby licensed as a DEBT LEG. So the exemption is
+ *        now ANCHORED at both ends: the declared keys are frozen literals
+ *        asserted equal to the derivation (at the write site), and this guard
+ *        refuses any declared key the response ITEMIZES — at any disclosure,
+ *        priced or not. A holding is not a borrowing.
  *
  *        `undisclosedInputs` — A RECORDED DEFECT, not a licence. The contract's
  *        OWN run-book 200 example serves `applied_shocks: []` and
@@ -858,23 +981,57 @@ const checkSide = (name, side) => {
  *        holds every one of those inputs flat, and production's own body would
  *        SAY SO. The example's disclosure is incomplete. This generator has no
  *        standing to rewrite the contract, so the two bodies that carry it
- *        verbatim (the collision pair, item 12) declare exactly those keys,
- *        DERIVED from the untouched example rather than typed in. The
- *        eth_minus_30 body composes its own disclosures, declares NOTHING, and
- *        owes this law in full.
- *  12. THE BORROWINGS ARE CONSERVED. A Debt Manager mover's rational is
- *      maxBorrowLT / borrowings (`dm.go:164-176`), and `p5_runbook.go:799-814`
- *      publishes the same after-side borrowings a second time as `debt_usd`. The
- *      debt leg is USD-normalized and no scenario re-prices it, so the
- *      DENOMINATOR is bit-identical across the sides AND equal to `debt_usd`,
- *      and the whole move belongs to the numerator. Scaling both halves of the
- *      rational keeps the quotient law 7 tests and falsifies the borrowings.
+ *        verbatim (the collision pair, item 12) declare exactly those keys — as
+ *        FROZEN LITERALS asserted equal to the example's own derivation, for
+ *        the reason the write site sets out. The eth_minus_30 body composes its
+ *        own disclosures, declares NOTHING, and owes this law in full.
+ *  12. THE MOVER IS THE SHAPE ITS ENGINE SPEAKS, AND ITS BORROWINGS ARE
+ *      CONSERVED.
+ *
+ *      `wireRunBookMover` (p5_runbook.go:117-139) carries EVERY per-engine
+ *      field on EVERY mover and NULLS the ones the engine does not speak —
+ *      "an absent number is never a zero". The first cut of this law read
+ *      `debt_usd` only when it was non-null, and Codex round 30 deleted it:
+ *      null the DM mover's debt evidence (then every DM-specific field) and the
+ *      guard stayed green over a mover that discloses nothing. Non-null
+ *      equality is a DERIVED property; the SHAPE is the anchor. So each mover
+ *      is checked whole, against the engine whose vocabulary it is in:
+ *
+ *        aave_v3_etherfi (p5_runbook.go:783-799) — three wads, present, with
+ *        `hf_drop_wad` the STRICT drop that ranked the row; every Debt Manager
+ *        field NULL.
+ *
+ *        debt_manager (p5_runbook.go:800-818) — both rationals present,
+ *        `became_eligible` STRICTLY true (the serializer writes no other
+ *        value), `debt_usd` present and EQUAL to `hf_after_den`; every aave wad
+ *        NULL.
+ *
+ *      The DM rationals are not optional here even though the serializer writes
+ *      them "when the side has one": a DM mover is an account whose after side
+ *      is ELIGIBLE, eligibility is `borrowings > maxBorrowLT` STRICTLY
+ *      (dm.go:165-166), so borrowings > 0 and the after side is finite
+ *      (dm.go:171-178) — and `ApplyScenario` copies the debt leg verbatim, so
+ *      the before side carries the same positive borrowings and is finite too.
+ *
+ *      THE BORROWINGS THEMSELVES: the rational is maxBorrowLT / borrowings
+ *      (dm.go:164-176) and `p5_runbook.go:799-814` publishes that same
+ *      after-side figure a second time as `debt_usd`. No scenario re-prices a
+ *      USD-normalized debt leg, so the DENOMINATOR is bit-identical across the
+ *      sides AND equal to `debt_usd`, and the whole move belongs to the
+ *      numerator. Scaling both halves keeps the quotient law 7 tests and
+ *      falsifies the borrowings.
  */
 const checkPropagation = (
   name,
   response,
-  { unitemizedInputs = new Set(), undisclosedInputs = new Set() } = {},
+  { unitemizedInputs = new Set(), undisclosedInputs = new Set(), holdings } = {},
 ) => {
+  // THE ANCHOR IS REQUIRED. A body checked without one is a body whose
+  // immutable fields are pinned to nothing, which is the state this wave
+  // exists to end — so the absence is a refusal, never a silent skip.
+  if (!(holdings instanceof Map) || holdings.size === 0) {
+    fail(`${name} is checked with NO declared holding anchor, so its balances are pinned to nothing`);
+  }
   // THE MATRIX IS THE RESPONSE'S OWN. A body is measured against the scenario it
   // says it answers, read from the committed registry by that id — never against
   // whichever matrix this generator happens to have open.
@@ -940,12 +1097,57 @@ const checkPropagation = (
   /** Every PRICED holding the body itemizes, keyed the evaluator's way (law 11). */
   const itemized = new Set();
 
-  /** The server's own itemization key: one asset, one disclosure, one row. */
-  const disclosure = (entry) =>
-    entry.value_usd !== null ? "counted" : entry.unpriced ? "unpriced" : "not-counted";
-
   /** The engine's OWN valuation of a holding at a price — floor, never rounded. */
   const valueAt = (amount, price, decimals) => (amount * price) / 10n ** BigInt(decimals);
+
+  // LAW 11's FIRST EXEMPTION, ANCHORED (Wave W-BS-E). A declared un-itemized
+  // input is a BORROWED reserve's price — a leg this wire has no column for. A
+  // key the response ITEMIZES is a holding, at whatever disclosure, and a
+  // holding is not a borrowing: exempting one would let the completeness law be
+  // satisfied by the very row it exists to make the body witness. Built here,
+  // over EVERY entry rather than the priced ones, because the round-30 probe
+  // was precisely an UNPRICED collateral row wearing the debt leg's exemption.
+  const carried = new Map();
+  for (const engine of response.engines) {
+    const engineChainId = chains.get(engine.engine);
+    if (engineChainId === undefined) {
+      continue; // reported with its own sentence in the engine loop below
+    }
+    for (const side of ["before", "after"]) {
+      for (const entry of engine[side].collateral_by_asset) {
+        carried.set(
+          responseKey(engineChainId, entry.asset),
+          `${engine.engine} itemizes it as ${disclosureOf(entry)} collateral`,
+        );
+      }
+    }
+  }
+  for (const key of unitemizedInputs) {
+    const where = carried.get(key);
+    if (where !== undefined) {
+      fail(
+        `${name} declares ${key} an UN-ITEMIZED debt-leg price input, but ${where} — the debt leg ` +
+          `is the set of reserves a position BORROWS, and a holding is not a borrowing`,
+      );
+    }
+  }
+  // LAW 11's SECOND EXEMPTION, at the point of use. `undisclosedInputs` forgives
+  // a disclosure the body DOES NOT MAKE. A key the body discloses is one the
+  // exemption no longer covers, and a licence outliving the defect it records is
+  // how the next hole gets forgiven without anybody reading it.
+  const disclosedHere = new Set(
+    [...response.applied_shocks, ...response.held_flat].map((entry) =>
+      responseKey(entry.chain_id, entry.asset),
+    ),
+  );
+  for (const key of undisclosedInputs) {
+    if (disclosedHere.has(key)) {
+      fail(
+        `${name} declares ${key} an UNDISCLOSED price input while DISCLOSING it — the exemption ` +
+          `records a defect this body no longer has, so it forgives nothing and hides the next one`,
+      );
+    }
+  }
 
   for (const engine of response.engines) {
     const label = `${name} ${engine.engine}`;
@@ -955,14 +1157,17 @@ const checkPropagation = (
     }
 
     const afterByKey = new Map(
-      engine.after.collateral_by_asset.map((entry) => [`${entry.asset}::${disclosure(entry)}`, entry]),
+      engine.after.collateral_by_asset.map((entry) => [
+        `${entry.asset}::${disclosureOf(entry)}`,
+        entry,
+      ]),
     );
 
     // LAW 8. THE HOLDINGS ARE THE SAME HOLDINGS. Checked BEFORE anything reads a
     // number off a pair, because a pair that does not exist is how the old guard
     // was made to skip an entry entirely.
     const beforeKeys = new Set(
-      engine.before.collateral_by_asset.map((entry) => `${entry.asset}::${disclosure(entry)}`),
+      engine.before.collateral_by_asset.map((entry) => `${entry.asset}::${disclosureOf(entry)}`),
     );
     for (const [side, own, other] of [
       ["AFTER", afterByKey.keys(), beforeKeys],
@@ -979,24 +1184,49 @@ const checkPropagation = (
       }
     }
 
-    for (const before of engine.before.collateral_by_asset) {
-      const after = afterByKey.get(`${before.asset}::${disclosure(before)}`);
-      // LAW 9. THE AMOUNTS ARE CONSERVED. Only `value_usd` may differ between the
-      // sides; doubling an amount and its value together preserves every ratio
-      // laws 1-7 test while creating balance out of nothing.
-      for (const [field, b, a] of [
-        ["amount", before.amount, after.amount],
-        ["decimals", before.decimals, after.decimals],
-        ["symbol", before.symbol ?? null, after.symbol ?? null],
-      ]) {
-        if (b !== a) {
+    // LAW 9. THE HOLDINGS ARE ANCHORED. Each side is measured against the
+    // caller's declared anchor — source bytes plus injected rows — rather than
+    // against the other side, because a TWO-SIDED edit satisfies any
+    // side-to-side comparison while serving balances nobody put there, and
+    // `unpriced`/`note` were pinned by nothing at all.
+    const served = new Set();
+    for (const side of ["before", "after"]) {
+      for (const entry of engine[side].collateral_by_asset) {
+        const key = anchorKey(engine.engine, entry);
+        served.add(key);
+        const anchored = holdings.get(key);
+        if (anchored === undefined) {
           fail(
-            `${label} changes the ${field} of ${before.asset} from ${JSON.stringify(b)} to ` +
-              `${JSON.stringify(a)} across the two sides — a scenario moves PRICES and nothing ` +
-              `else, so the balances it clones must arrive unchanged`,
+            `${label} ${side} carries ${key}, which the declared holding ANCHOR does not name — ` +
+              `every row of a generated body comes from the contract example's own bytes or from ` +
+              `a row this generator injects, and this one comes from neither`,
           );
         }
+        for (const [field, want] of Object.entries(anchored)) {
+          const got = entry[field] ?? null;
+          if (got !== want) {
+            fail(
+              `${label} ${side} serves ${field} ${JSON.stringify(got)} for ${key}, but the ` +
+                `declared ANCHOR pins ${JSON.stringify(want)} — a scenario moves PRICES and ` +
+                `nothing else, so every other byte of a holding must arrive as its source has it`,
+            );
+          }
+        }
       }
+    }
+    // The anchor is EXHAUSTIVE for this engine. A row it names that the body
+    // does not serve is a holding the generator injected and the body lost.
+    for (const key of holdings.keys()) {
+      if (key.startsWith(`${engine.engine}|`) && !served.has(key)) {
+        fail(
+          `${label} serves NO entry for ${key}, which the declared holding ANCHOR names — a body ` +
+            `may not drop a row its own source carries`,
+        );
+      }
+    }
+
+    for (const before of engine.before.collateral_by_asset) {
+      const after = afterByKey.get(`${before.asset}::${disclosureOf(before)}`);
       // An UNPRICED or NOT-COUNTED holding carries no `PriceInput`, so there is
       // nothing for a scenario to move and nothing for it to hold flat.
       if (before.value_usd === null) {
@@ -1110,31 +1340,54 @@ const checkPropagation = (
     const disclosesFactor = (num, den) =>
       factorsHere.some(([fn, fd]) => num * fd === den * fn);
 
+    // LAW 12, first half: THE MOVER IS THE SHAPE ITS ENGINE SPEAKS. Asserted
+    // WHOLE and BEFORE any number is read off the row, because the round-30
+    // defect was a guard that only ever looked at fields that were still there.
+    const speaks = MOVER_VOCABULARY[engine.engine];
+    if (speaks === undefined) {
+      fail(`${label} publishes movers in a vocabulary this guard does not know`);
+    }
+    const silent = Object.entries(MOVER_VOCABULARY)
+      .filter(([engineName]) => engineName !== engine.engine)
+      .flatMap(([, fields]) => fields);
+
     for (const mover of engine.movers) {
-      if (mover.hf_before_wad !== null && mover.hf_after_wad !== null) {
-        const [wb, wa] = [BigInt(mover.hf_before_wad), BigInt(mover.hf_after_wad)];
-        if (wb !== wa && !disclosesFactor(wa, wb)) {
+      if (mover.engine !== engine.engine) {
+        fail(
+          `${label} mover ${mover.account} says its engine is ${shown(mover.engine)} — a mover is ` +
+            `serialized inside the engine that ranked it and can belong to no other`,
+        );
+      }
+      for (const field of speaks) {
+        if (mover[field] === null || mover[field] === undefined) {
           fail(
-            `${label} mover ${mover.account} moves ${String(wb)} -> ${String(wa)} in wad, a factor ` +
-              `no applied_shocks entry on chain ${String(chain)} discloses`,
+            `${label} mover ${mover.account} publishes ${field} ${shown(mover[field])}, but ` +
+              `${engine.engine} SPEAKS that field on every mover it ranks — a nulled field is not ` +
+              `a smaller disclosure, it is the evidence deleted`,
           );
         }
-        for (const [side, wad] of [["before", wb], ["after", wa]]) {
-          const histogram = engine[side].hf_histogram;
-          const bucket = bucketLabelForRational(histogram, wad, BigInt(histogram.wad_scale));
-          if (histogram.buckets.find((entry) => entry.label === bucket).count === 0) {
-            fail(`${label} mover ${mover.account} sits in an EMPTY ${side}-bucket ${bucket}`);
-          }
+      }
+      for (const field of silent) {
+        if (!(field in mover) || mover[field] !== null) {
+          fail(
+            `${label} mover ${mover.account} publishes ${field} ${shown(mover[field])}, but ` +
+              `${engine.engine} does not SPEAK that field — the serializer carries it NULL, and a ` +
+              `number in another engine's vocabulary is a number this engine never measured`,
+          );
         }
       }
-      if (
-        mover.hf_before_num !== null &&
-        mover.hf_before_den !== null &&
-        mover.hf_after_num !== null &&
-        mover.hf_after_den !== null
-      ) {
-        // LAW 12. THE BORROWINGS ARE CONSERVED. The denominator IS the
-        // borrowings (dm.go:164-176), the debt leg is USD-normalized and
+
+      if (engine.engine === "debt_manager") {
+        // The serializer writes this flag ONLY on the strict false -> true flip
+        // that made the account a mover (p5_runbook.go:794-806).
+        if (mover.became_eligible !== true) {
+          fail(
+            `${label} mover ${mover.account} publishes became_eligible ${shown(mover.became_eligible)} — ` +
+              `a Debt Manager mover IS the strict false -> true flip, so no other value can rank one`,
+          );
+        }
+        // LAW 12, second half: THE BORROWINGS ARE CONSERVED. The denominator IS
+        // the borrowings (dm.go:164-176), the debt leg is USD-normalized and
         // `ApplyScenario` copies it verbatim, and `p5_runbook.go:799-814`
         // publishes that same after-side figure again as `debt_usd`. Scaling
         // both halves of the rational leaves law 7's quotient intact and
@@ -1146,7 +1399,7 @@ const checkPropagation = (
               `USD-NORMALIZED and no scenario re-prices it, so the denominator cannot move`,
           );
         }
-        if (mover.debt_usd !== null && mover.debt_usd !== mover.hf_after_den) {
+        if (mover.debt_usd !== mover.hf_after_den) {
           fail(
             `${label} mover ${mover.account} publishes debt_usd ${mover.debt_usd} while its ` +
               `after-side rational denominates in ${mover.hf_after_den} — both are the SAME ` +
@@ -1163,6 +1416,39 @@ const checkPropagation = (
               `${String(na)}/${String(da)}, a factor no applied_shocks entry on chain ` +
               `${String(chain)} discloses`,
           );
+        }
+        continue;
+      }
+
+      const [wb, wa] = [BigInt(mover.hf_before_wad), BigInt(mover.hf_after_wad)];
+      // The drop is what RANKED the row, and Aave ranks a STRICT drop only
+      // (p5_runbook.go:783-799) — so it is recomputed, never taken on trust.
+      if (BigInt(mover.hf_drop_wad) !== wb - wa) {
+        fail(
+          `${label} mover ${mover.account} publishes hf_drop_wad ${mover.hf_drop_wad}, but its own ` +
+            `wads fall ${String(wb)} -> ${String(wa)}, a drop of ${String(wb - wa)}`,
+        );
+      }
+      if (wb <= wa) {
+        fail(
+          `${label} mover ${mover.account} does not STRICTLY drop (${String(wb)} -> ${String(wa)}), ` +
+            `so the engine's own rule ranks no mover for it`,
+        );
+      }
+      if (!disclosesFactor(wa, wb)) {
+        fail(
+          `${label} mover ${mover.account} moves ${String(wb)} -> ${String(wa)} in wad, a factor ` +
+            `no applied_shocks entry on chain ${String(chain)} discloses`,
+        );
+      }
+      for (const [side, wad] of [
+        ["before", wb],
+        ["after", wa],
+      ]) {
+        const histogram = engine[side].hf_histogram;
+        const bucket = bucketLabelForRational(histogram, wad, BigInt(histogram.wad_scale));
+        if (histogram.buckets.find((entry) => entry.label === bucket).count === 0) {
+          fail(`${label} mover ${mover.account} sits in an EMPTY ${side}-bucket ${bucket}`);
         }
       }
     }
@@ -1704,33 +1990,76 @@ const HELD_FLAT = [
 );
 
 /**
- * THE PRICE INPUTS THIS WIRE DOES NOT ITEMIZE (guard law 11's first exemption).
+ * THE BORROWED RESERVES, NAMED AND FROZEN (Codex round 30, HIGH).
  *
  * `ApplyScenario` walks a position's `PriceInput` list, and an Aave position
  * carries prices for its BORROWED reserves as well as its collateral. The
- * response itemizes only collateral, so the debt leg's held price — the aave
- * USDC row this body copies from the committed result — has no itemized witness
- * and never could. That is production's shape, not a defect.
+ * response itemizes only collateral, so the debt leg's held price has no
+ * itemized witness and never could. That is production's shape, not a defect —
+ * and guard law 11's first exemption is exactly that hole, no wider.
  *
- * It is not a hole either. The set is DERIVED from the committed result whose
- * disclosures this body serves, as exactly "the inputs that result priced which
- * this body's own itemization does not carry", so it cannot quietly grow: a
- * held_flat entry that is neither counted by an engine nor in here is refused.
- * The Debt Manager contributes nothing — its debt leg is USD-normalized, carries
- * no `PriceInput`, and is bound by law 12 instead.
+ * IT USED TO BE DERIVED, AND THE DERIVATION WAS THE DEFECT. The rule was "the
+ * committed result's price inputs that this body's COUNTED itemization does not
+ * carry", and a probe walked straight through it: hold the aave book's UNPRICED
+ * 0x…0BAD collateral flat and it qualifies — an unpriced row is not counted, and
+ * the chain does carry debt, which was the only other test. A COLLATERAL row
+ * wore the debt leg's exemption and the guard said nothing.
+ *
+ * So the key is FROZEN as a literal and the derivation is asserted EQUAL to it.
+ * The derivation itself is tightened to "not itemized AT ALL", so the two
+ * disagree the moment a collateral key tries to enter; and `checkPropagation`
+ * refuses any declared key the response itemizes, at any disclosure, which
+ * catches the same shape a third time at the point of use.
+ *
+ * THE DERIVATION, shown rather than trusted: `stress-aave.json`'s eth_minus_30
+ * aave result is ONE position holding weETH (0xCd5f…, mainnet) against $6,000 of
+ * debt. Its own disclosures name two price inputs — weETH APPLIED at 70/100, and
+ * USDC HELD FLAT at $1.00 — and the itemization carries weETH (counted) and
+ * 0x…0BAD (unpriced) and nothing else. USDC is therefore the borrowed reserve,
+ * and it is the only key this exemption may ever hold for this body.
+ *
+ * The Debt Manager contributes nothing: its debt leg is USD-normalized, carries
+ * no `PriceInput` at all, and is bound by law 12 instead.
  */
+const AAVE_BORROWED_RESERVE_KEYS = new Set([
+  // responseKey(1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") — USDC on
+  // mainnet, the reserve the committed result's one position BORROWS.
+  "1|0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+]);
+
 const UNITEMIZED_INPUTS = (() => {
-  const counted = new Set(
+  // EVERY itemized key, at EVERY disclosure — not just the counted ones.
+  const itemizedHere = new Set(
     [aaveBefore, aaveAfter]
       .flatMap((side) => side.collateral_by_asset)
-      .filter((entry) => entry.value_usd !== null)
       .map((entry) => responseKey(AAVE_CHAIN, entry.asset)),
   );
-  return new Set(
+  const derived = new Set(
     [...aaveResult.applied_shocks, ...aaveResult.held_flat]
       .map((entry) => responseKey(entry.chain_id, entry.asset))
-      .filter((key) => !counted.has(key)),
+      .filter((key) => !itemizedHere.has(key)),
   );
+  // EQUALITY, both directions. A key the committed result grows into this hole
+  // is not admitted by arriving; it is admitted by a person deciding it is a
+  // borrowed reserve and writing it above.
+  for (const key of derived) {
+    if (!AAVE_BORROWED_RESERVE_KEYS.has(key)) {
+      fail(
+        `the committed aave result now carries an un-itemized price input for ${key}, which is ` +
+          `NOT one of the frozen borrowed reserves — an exemption may not grow by derivation: ` +
+          `name it above with its provenance, or explain why the body should itemize it`,
+      );
+    }
+  }
+  for (const key of AAVE_BORROWED_RESERVE_KEYS) {
+    if (!derived.has(key)) {
+      fail(
+        `the frozen borrowed reserve ${key} is no longer an un-itemized price input of the ` +
+          `committed aave result — the exemption now covers a hole that is not there`,
+      );
+    }
+  }
+  return new Set(AAVE_BORROWED_RESERVE_KEYS);
 })();
 
 const ethRunBook = {
@@ -1850,10 +2179,38 @@ const ethRunBook = {
   }),
 };
 
+/**
+ * THIS BODY'S HOLDING ANCHOR (guard law 9), declared from its SOURCES.
+ *
+ * Two sources and no third: the contract example's own arrays, untouched, and
+ * the ONE row this generator injects. Both engines' `before` and `after` are
+ * measured against it, so no edit to the produced body can define what the
+ * produced body is allowed to say.
+ *
+ *   aave          the example's own rows, verbatim. The re-measurement above
+ *                 rewrites `value_usd` and touches nothing else, and the
+ *                 example's two sides are identical by construction — which
+ *                 this anchor now ASSERTS rather than assumes, since the after
+ *                 side is measured against the before side's bytes.
+ *   debt_manager  the example's own rows PLUS `flipCollateralEntry`, at the
+ *                 amount, decimals, symbol and note the invented account is
+ *                 constructed with. Its `value_usd` differs per side, which is
+ *                 the one thing an anchor does not pin.
+ */
+const ETH_HOLDINGS = holdingAnchor([
+  [AAVE_ENGINE, aaveExample.before.collateral_by_asset],
+  [
+    "debt_manager",
+    [...dmExample.before.collateral_by_asset, flipCollateralEntry(DM_FLIP_VALUE_BEFORE)],
+  ],
+]);
+
+const ETH_DECLARED = { unitemizedInputs: UNITEMIZED_INPUTS, holdings: ETH_HOLDINGS };
+
 // THE WHOLE BODY, checked — both engines, both sides, the response-level census
 // and every engine's deltas. Checking only the side that was edited is how the
 // impossible book got written in the first place.
-checkResponse("run-book.eth_minus_30", ethRunBook, { unitemizedInputs: UNITEMIZED_INPUTS });
+checkResponse("run-book.eth_minus_30", ethRunBook, ETH_DECLARED);
 
 // --- THE GUARD'S OWN SENSITIVITY: it has to fail on the bodies it exists for -
 //
@@ -1893,9 +2250,35 @@ checkResponse("run-book.eth_minus_30", ethRunBook, { unitemizedInputs: UNITEMIZE
 //   I  A DISCLOSED PRICE PAIR SCALED. Both halves of the applied shock's
 //      before/after doubled, so the RATIO every ratio-law tests is untouched
 //      while neither price values the holding the body serves.
-const refuses = (what, expected, mutate) => {
-  const mutant = JSON.parse(JSON.stringify(ethRunBook));
-  mutate(mutant);
+//
+// J-R are Codex round 30, and they are ONE finding told five ways: the guard was
+// validating DERIVED PROPERTIES of a body, and each round produced a body with
+// the right properties and the wrong content. Rebuilt on ANCHORS, each has a
+// refusal of its own:
+//
+//   J  THE MOVER'S DEBT EVIDENCE NULLED. Law 12 compared `debt_usd` to the
+//      rational's denominator only when `debt_usd` was NON-NULL, so deleting it
+//      was free. K is the same move made total.
+//   L  THE SAME DELETION IN THE OTHER VOCABULARY — the aave mover's wads — and
+//      M its mirror, a Debt Manager field on an engine that does not speak one.
+//   N  A COLLATERAL KEY WEARING THE DEBT LEG'S EXEMPTION. The probe that walked
+//      through the old derived `unitemizedInputs`.
+//
+// O-R are built from the COLLISION fixtures rather than this body, because the
+// rows they falsify are the colliding pair, and they live beside those files at
+// the end of this generator:
+//
+//   O  A TWO-SIDED AMOUNT SWAP between the two rows that share an asset.
+//   P  A ONE-SIDED UNPRICED FLAG FLIP, and Q a ONE-SIDED NOTE EDIT — two fields
+//      that no law read at all before the anchor.
+//   R  THE EXAMPLE GROWN A PRICED HOLDING, which used to widen the recorded
+//      contract-example exemption silently.
+
+/** Every mutant this run exercised, for the uniqueness cross-check at the end. */
+const MUTANTS = [];
+
+/** Run `attempt` with the guard's own exit trapped; return its refusal, or null. */
+const refusalFrom = (attempt) => {
   const realFail = console.error;
   let refused = null;
   console.error = (message) => {
@@ -1906,7 +2289,7 @@ const refuses = (what, expected, mutate) => {
     throw new Error("__guard_refused__");
   };
   try {
-    checkResponse("mutant", mutant, { unitemizedInputs: UNITEMIZED_INPUTS });
+    attempt();
   } catch (error) {
     if (error.message !== "__guard_refused__") {
       throw error;
@@ -1915,6 +2298,10 @@ const refuses = (what, expected, mutate) => {
     console.error = realFail;
     process.exit = realExit;
   }
+  return refused;
+};
+
+const recordRefusal = (what, expected, refused) => {
   if (refused === null) {
     fail(`THE GUARD IS BLIND: it accepted ${what}`);
   }
@@ -1927,7 +2314,34 @@ const refuses = (what, expected, mutate) => {
         `"${refused.replace(/^generate-lab-book\.mjs: /, "")}"`,
     );
   }
+  MUTANTS.push({ what, expected, refused });
   console.log(`refused ${what}\n        ${refused.replace(/^generate-lab-book\.mjs: /, "")}`);
+};
+
+/**
+ * A BODY MUTANT: a clone of a written body, edited, and pushed back through the
+ * whole guard under the declaration its honest original was checked with.
+ *
+ * `mutate` MAY RETURN declaration overrides. A mutant that reproduces a body an
+ * earlier revision of this generator actually produced must be judged against
+ * the ANCHOR that revision declared — otherwise it is refused for having the
+ * wrong provenance rather than for the law it was built to break, and it proves
+ * that law nothing. Mutant A is the one such case.
+ */
+const refuses = (what, expected, mutate, subject = { response: ethRunBook, declared: ETH_DECLARED }) => {
+  const mutant = JSON.parse(JSON.stringify(subject.response));
+  const overrides = mutate(mutant) ?? {};
+  const declared = { ...subject.declared, ...overrides };
+  recordRefusal(what, expected, refusalFrom(() => checkResponse("mutant", mutant, declared)));
+};
+
+/**
+ * A GENERATION MUTANT: a DERIVATION refused before any body exists. The frozen
+ * exemptions are asserted at generation time, so the only way to watch them
+ * fail is to run the derivation over a mutated source.
+ */
+const refusesGeneration = (what, expected, attempt) => {
+  recordRefusal(what, expected, refusalFrom(attempt));
 };
 
 /** The address the W-BS-B body carried: one no propagation row describes. */
@@ -1949,6 +2363,17 @@ refuses(
     }
     mutant.applied_shocks = aaveResult.applied_shocks;
     mutant.held_flat = [];
+    // The W-BS-B revision declared THIS anchor — its own invented row is what it
+    // injected — so the mutant is judged against it and refused for law 1, the
+    // law it exists to reproduce, rather than for having the wrong provenance.
+    const inventedRow = { ...flipCollateralEntry(DM_FLIP_VALUE_BEFORE), asset: INVENTED_ASSET };
+    delete inventedRow.symbol;
+    return {
+      holdings: holdingAnchor([
+        [AAVE_ENGINE, aaveExample.before.collateral_by_asset],
+        ["debt_manager", [...dmExample.before.collateral_by_asset, inventedRow]],
+      ]),
+    };
   },
 );
 
@@ -2015,7 +2440,7 @@ refuses(
 // made this mutation invisible: nothing is out of balance, the balance is wrong.
 refuses(
   "D: balance created from nothing — the after-side WETH amount and value doubled together",
-  `changes the amount of ${DM_FLIP_ASSET}`,
+  `serves amount "${String(DM_FLIP_AMOUNT * 2n)}" for debt_manager|${DM_FLIP_ASSET}::counted`,
   (mutant) => {
     const dm = mutant.engines.find((engine) => engine.engine === "debt_manager");
     const entry = dm.after.collateral_by_asset.find((row) => row.asset === DM_FLIP_ASSET);
@@ -2101,6 +2526,101 @@ refuses(
     const shock = mutant.applied_shocks.find((entry) => entry.asset === DM_FLIP_ASSET);
     shock.before = (BigInt(shock.before) * 2n).toString();
     shock.after = (BigInt(shock.after) * 2n).toString();
+  },
+);
+
+// --- THE ROUND-30 FOUR, on this body (law 12's shape and law 11's exemption) -
+//
+// J-M are one finding read four ways: law 12 checked `debt_usd` only when it was
+// NON-NULL, so the evidence could simply be deleted. The shape is now the
+// anchor, and each engine's vocabulary is asserted in BOTH directions — the
+// fields it speaks are present, the fields it does not are null — so each of
+// these four names a different byte of the same law.
+
+refuses(
+  "J: the mover's debt evidence nulled — the DM mover's `debt_usd` deleted",
+  "publishes debt_usd null, but debt_manager SPEAKS that field",
+  (mutant) => {
+    const dm = mutant.engines.find((engine) => engine.engine === "debt_manager");
+    dm.movers.find((row) => row.became_eligible === true).debt_usd = null;
+  },
+);
+
+// K. THE WHOLE DISCLOSURE DELETED. Nulling `debt_usd` alone leaves a rational
+// behind; nulling EVERY Debt Manager field leaves a mover row that says an
+// account moved and publishes not one number about it. Under a guard that reads
+// a field only when it is there, that is the safest mutation in the file.
+refuses(
+  "K: every DM-specific field nulled — a mover that discloses nothing at all",
+  "publishes hf_before_num null, but debt_manager SPEAKS that field",
+  (mutant) => {
+    const dm = mutant.engines.find((engine) => engine.engine === "debt_manager");
+    const mover = dm.movers.find((row) => row.became_eligible === true);
+    for (const field of MOVER_VOCABULARY.debt_manager) {
+      mover[field] = null;
+    }
+  },
+);
+
+// L. THE MIRROR, on the engine that speaks wads. Aave's evidence is its three
+// health-factor wads and nothing else, so nulling them is the same deletion in
+// the other vocabulary.
+refuses(
+  "L: the aave mover's wads nulled — the drop that ranked the row deleted",
+  "publishes hf_before_wad null, but aave_v3_etherfi SPEAKS that field",
+  (mutant) => {
+    const aave = mutant.engines.find((engine) => engine.engine === AAVE_ENGINE);
+    for (const field of MOVER_VOCABULARY.aave_v3_etherfi) {
+      aave.movers[0][field] = null;
+    }
+  },
+);
+
+// M. THE OTHER DIRECTION. A field the engine does not speak is not a bonus
+// disclosure — it is a number this engine never measured, in a vocabulary it
+// does not have. Aave has no eligibility flip and no `debt_usd` (p5_runbook.go
+// :783-799 sets neither), so a value there describes somebody else's book.
+refuses(
+  "M: an aave mover in the Debt Manager's vocabulary — `debt_usd` on a wad engine",
+  `publishes debt_usd "${String(DM_DELTA)}", but aave_v3_etherfi does not SPEAK that field`,
+  (mutant) => {
+    const aave = mutant.engines.find((engine) => engine.engine === AAVE_ENGINE);
+    aave.movers[0].debt_usd = DM_DELTA.toString();
+  },
+);
+
+/** The aave book's UNPRICED collateral — the row the round-30 probe exempted. */
+const AAVE_UNPRICED = aaveExample.before.collateral_by_asset.find(
+  (entry) => entry.value_usd === null,
+);
+if (AAVE_UNPRICED === undefined) {
+  fail("the example's aave side carries no unpriced row, so mutant N has nothing to mis-exempt");
+}
+
+// N. A COLLATERAL KEY WEARING THE DEBT LEG'S EXEMPTION (law 11, first
+// exemption). This is the round-30 probe itself: hold the aave book's UNPRICED
+// 0x…0BAD collateral flat and declare it an un-itemized price input. Under the
+// old derived exemption it qualified — an unpriced row is not COUNTED, and the
+// only other test was whether the chain carried any debt at all, which it does.
+refuses(
+  "N: a collateral key exempted as a debt leg — the aave unpriced row held flat and declared",
+  `declares ${responseKey(AAVE_CHAIN, AAVE_UNPRICED.asset)} an UN-ITEMIZED debt-leg price input`,
+  (mutant) => {
+    mutant.held_flat = [
+      ...mutant.held_flat,
+      {
+        asset: AAVE_UNPRICED.asset,
+        chain_id: AAVE_CHAIN,
+        source: aaveResult.held_flat[0].source,
+        value: "1",
+      },
+    ];
+    return {
+      unitemizedInputs: new Set([
+        ...UNITEMIZED_INPUTS,
+        responseKey(AAVE_CHAIN, AAVE_UNPRICED.asset),
+      ]),
+    };
   },
 );
 
@@ -2335,13 +2855,25 @@ const NOT_COUNTED_NOTE =
  * `countedAmount`/`countedValue` and shadowed by a NOT-COUNTED row for the SAME
  * asset at `notCountedAmount`. `total_collateral_usd` follows the counted value,
  * because the counted entries sum to it EXACTLY and that law does not bend.
+ *
+ * IT RETURNS ITS OWN ANCHOR (Wave W-BS-E). The two injected rows are written
+ * ONCE and used twice — to build the body, and to pin it — and they are built
+ * from the example's untouched counted entry plus the literal balances this call
+ * declares. An anchor read back off the produced body would only ever prove that
+ * the body equals itself, which is the whole class of defect round 30 found.
  */
 const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) => {
+  const exampleAave = runBookExample.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+  const exampleCounted = exampleAave.before.collateral_by_asset.find(
+    (entry) => entry.value_usd !== null,
+  );
+  if (exampleCounted === undefined) {
+    fail("the example's aave side carries no counted collateral entry");
+  }
   const side = (aggregate) => {
     const counted = aggregate.collateral_by_asset.find((entry) => entry.value_usd !== null);
     if (counted === undefined) {
-      console.error("generate-lab-book.mjs: the aave side carries no counted collateral entry");
-      process.exit(1);
+      fail("the aave side carries no counted collateral entry");
     }
     const rest = aggregate.collateral_by_asset.filter((entry) => entry !== counted);
     return {
@@ -2363,19 +2895,45 @@ const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) 
     };
   };
   return {
-    ...runBookExample,
-    engines: runBookExample.engines.map((engine) =>
-      engine.engine === "aave_v3_etherfi"
-        ? { ...engine, before: side(engine.before), after: side(engine.after) }
-        : engine,
-    ),
+    response: {
+      ...runBookExample,
+      engines: runBookExample.engines.map((engine) =>
+        engine.engine === "aave_v3_etherfi"
+          ? { ...engine, before: side(engine.before), after: side(engine.after) }
+          : engine,
+      ),
+    },
+    holdings: holdingAnchor([
+      [
+        "aave_v3_etherfi",
+        [
+          { ...exampleCounted, amount: countedAmount, value_usd: countedValue },
+          {
+            ...exampleCounted,
+            amount: notCountedAmount,
+            value_usd: null,
+            unpriced: false,
+            note: NOT_COUNTED_NOTE,
+          },
+          ...exampleAave.before.collateral_by_asset.filter((entry) => entry !== exampleCounted),
+        ],
+      ],
+      [
+        "debt_manager",
+        runBookExample.engines.find((engine) => engine.engine === "debt_manager").before
+          .collateral_by_asset,
+      ],
+    ]),
   };
 };
 
+const COLLISION_COUNTED_AMOUNT = "2000000000000000000";
+const COLLISION_NOT_COUNTED_AMOUNT = "5000000000000000000";
+
 const collision = withCollidingCollateral(
-  "2000000000000000000",
+  COLLISION_COUNTED_AMOUNT,
   "800000000000",
-  "5000000000000000000",
+  COLLISION_NOT_COUNTED_AMOUNT,
 );
 const collisionSwap = withCollidingCollateral(
   "3000000000000000000",
@@ -2385,7 +2943,7 @@ const collisionSwap = withCollidingCollateral(
 
 /**
  * A RECORDED DEFECT IN THE CONTRACT'S OWN EXAMPLE (guard law 11's second
- * exemption), declared here rather than silently tolerated.
+ * exemption), FROZEN here rather than derived (Codex round 30, HIGH).
  *
  * These two bodies are the run-book 200 example plus one NOT-COUNTED row, and
  * that example serves `applied_shocks: []` AND `held_flat: []` while itemizing
@@ -2399,26 +2957,254 @@ const collisionSwap = withCollidingCollateral(
  * The finding is real and it is NOT this generator's to fix: item 2's whole
  * discipline is that the contract's example rides in verbatim and a law the
  * example violates may not be used to rewrite bytes this file has no standing
- * over. So the exemption is declared — DERIVED from the untouched example's own
- * priced holdings, so it names exactly those two keys and cannot grow. A priced
- * holding these fixtures ADD (the not-counted row is unpriced, so it adds none)
- * would fall outside it and be refused. The eth_minus_30 body declares no
- * exemption at all and owes law 11 in full.
+ * over.
+ *
+ * WHY IT IS FROZEN AND NOT DERIVED. The first cut RECOMPUTED this set from the
+ * example every run, and an exemption recomputed from a mutable source grows
+ * with it: add a priced holding to `api/openapi.yaml`'s example and it is
+ * exempted before anybody notices there is something new to exempt. So the two
+ * defective keys are written below as LITERALS, and the example's own priced
+ * holdings are FINGERPRINTED — key, amount, value, decimals, symbol, on BOTH
+ * sides of BOTH engines — and asserted equal to what round 30 reviewed. Any
+ * added, removed or changed priced holding fails generation until a person has
+ * looked at it.
+ *
+ * THIS MAKES THE BANKED CONTRACT REPAIR SELF-ENFORCING. When `api/openapi.yaml`
+ * is fixed — the example given the `held_flat` its own scenario would produce —
+ * generation FAILS HERE, because the fingerprint moves and the exemption is no
+ * longer owed. That failure is the signal to DELETE this whole block and the
+ * `undisclosedInputs` parameter with it, not to re-freeze it.
  */
-const EXAMPLE_UNDISCLOSED_INPUTS = new Set(
-  runBookExample.engines.flatMap((engine) =>
-    engine.before.collateral_by_asset
-      .filter((entry) => entry.value_usd !== null)
-      .map((entry) => responseKey(engineChain.get(engine.engine), entry.asset)),
-  ),
+const EXAMPLE_UNDISCLOSED_KEYS = [
+  // The two priced weETH inputs the example itemizes and never discloses:
+  // responseKey(1, "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") on the aave
+  // engine and responseKey(10, ...) on the Debt Manager's.
+  "1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+  "10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
+];
+
+/** Exactly the priced holdings round 30 reviewed this exemption against. */
+const EXAMPLE_PRICED_HOLDINGS = [
+  "aave_v3_etherfi|before|1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|2000000000000000000|800000000000|18|weETH",
+  "aave_v3_etherfi|after|1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|2000000000000000000|800000000000|18|weETH",
+  "debt_manager|before|10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|1000000000000000000|4000000000|18|weETH",
+  "debt_manager|after|10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|1000000000000000000|4000000000|18|weETH",
+];
+
+/**
+ * The frozen exemption, re-proved against the example it was reviewed over.
+ * Written as a function of the example so its own failure can be WATCHED
+ * (mutant R) rather than only asserted.
+ */
+const exampleUndisclosedInputs = (example) => {
+  const chains = new Map(
+    example.batch.watermarks.map((watermark) => [watermark.engine, watermark.chain_id]),
+  );
+  const fingerprint = [];
+  const keys = new Set();
+  for (const engine of example.engines) {
+    for (const side of ["before", "after"]) {
+      for (const entry of engine[side].collateral_by_asset) {
+        if (entry.value_usd === null) {
+          continue;
+        }
+        const key = responseKey(chains.get(engine.engine), entry.asset);
+        keys.add(key);
+        fingerprint.push(
+          [
+            engine.engine,
+            side,
+            key,
+            entry.amount,
+            entry.value_usd,
+            String(entry.decimals),
+            entry.symbol ?? "—",
+          ].join("|"),
+        );
+      }
+    }
+  }
+  for (const row of fingerprint) {
+    if (!EXAMPLE_PRICED_HOLDINGS.includes(row)) {
+      fail(
+        `the contract's run-book 200 example carries a PRICED holding this recorded exemption was ` +
+          `never reviewed against:\n        ${row}\n        The exemption covers a defect somebody ` +
+          `read; it may not widen because the example moved. Re-review it, or delete it if the ` +
+          `example now discloses its own held prices.`,
+      );
+    }
+  }
+  for (const row of EXAMPLE_PRICED_HOLDINGS) {
+    if (!fingerprint.includes(row)) {
+      fail(
+        `the contract's run-book 200 example NO LONGER carries the priced holding this recorded ` +
+          `exemption was frozen against:\n        ${row}\n        If the example was repaired, ` +
+          `DELETE this exemption rather than re-freezing it.`,
+      );
+    }
+  }
+  if (fingerprint.length !== EXAMPLE_PRICED_HOLDINGS.length) {
+    fail(
+      `the contract's run-book 200 example itemizes ${String(fingerprint.length)} priced holdings ` +
+        `but this exemption was frozen over ${String(EXAMPLE_PRICED_HOLDINGS.length)}`,
+    );
+  }
+  // The KEY set is asserted in its own right, so the two disclosures this
+  // exemption forgives stay exactly two.
+  for (const key of keys) {
+    if (!EXAMPLE_UNDISCLOSED_KEYS.includes(key)) {
+      fail(`the example's undisclosed price inputs now include ${key}, which is not frozen above`);
+    }
+  }
+  for (const key of EXAMPLE_UNDISCLOSED_KEYS) {
+    if (!keys.has(key)) {
+      fail(`the frozen undisclosed input ${key} is no longer a priced holding of the example`);
+    }
+  }
+  // THE EXEMPTION MUST STILL BE OWED. It forgives a disclosure the example does
+  // not make; the moment the example MAKES it, the exemption is dead licence
+  // that would quietly forgive the next hole instead. THIS is the assertion
+  // that makes the banked contract repair self-enforcing — when
+  // `api/openapi.yaml`'s example is given the `held_flat` its own scenario
+  // would produce, generation stops here until this block is DELETED.
+  const disclosedByExample = new Set(
+    [...example.applied_shocks, ...example.held_flat].map((entry) =>
+      responseKey(entry.chain_id, entry.asset),
+    ),
+  );
+  for (const key of EXAMPLE_UNDISCLOSED_KEYS) {
+    if (disclosedByExample.has(key)) {
+      fail(
+        `the contract's run-book 200 example now DISCLOSES ${key}, so the recorded defect this ` +
+          `exemption forgives is REPAIRED — delete EXAMPLE_UNDISCLOSED_KEYS, ` +
+          `EXAMPLE_PRICED_HOLDINGS and the \`undisclosedInputs\` parameter with it, rather than ` +
+          `keeping a licence nothing owes`,
+      );
+    }
+  }
+  return new Set(EXAMPLE_UNDISCLOSED_KEYS);
+};
+
+const EXAMPLE_UNDISCLOSED_INPUTS = exampleUndisclosedInputs(runBookExample);
+
+const COLLISION_DECLARED = {
+  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+  holdings: collision.holdings,
+};
+
+checkResponse("run-book.collateral-collision", collision.response, COLLISION_DECLARED);
+checkResponse("run-book.collateral-collision.swap", collisionSwap.response, {
+  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+  holdings: collisionSwap.holdings,
+});
+
+// --- THE ROUND-30 MUTANTS THAT NEED THE COLLIDING PAIR ---------------------
+//
+// O-Q are the anchor's own sensitivity, and they can only be built here: the
+// two-sided swap needs TWO rows that share an asset, and the eth_minus_30 body
+// has none. R watches the frozen contract-example exemption refuse to grow.
+
+const COLLISION_SUBJECT = { response: collision.response, declared: COLLISION_DECLARED };
+
+/** The asset both colliding rows claim — the example's own counted weETH. */
+const COLLIDING_ASSET = runBookExample.engines
+  .find((engine) => engine.engine === "aave_v3_etherfi")
+  .before.collateral_by_asset.find((entry) => entry.value_usd !== null).asset;
+
+// O. A TWO-SIDED AMOUNT SWAP. The counted row and the not-counted row trade
+// balances, on BOTH sides. Every side-to-side comparison is satisfied — the
+// counted row still equals the counted row — the counted VALUE never moves, so
+// `total_collateral_usd` still sums exactly, and the book now says the account
+// counts 5 weETH toward collateral and leaves 2 out. The anchor is the only
+// thing in the file that knows which balance belongs to which disclosure.
+refuses(
+  "O: a two-sided amount swap — the colliding rows trade balances on BOTH sides",
+  `serves amount "${COLLISION_NOT_COUNTED_AMOUNT}" for aave_v3_etherfi|${COLLIDING_ASSET}::counted`,
+  (mutant) => {
+    for (const side of ["before", "after"]) {
+      const rows = mutant.engines.find((engine) => engine.engine === "aave_v3_etherfi")[side]
+        .collateral_by_asset;
+      const counted = rows.find((entry) => entry.value_usd !== null);
+      const notCounted = rows.find((entry) => entry.value_usd === null && entry.unpriced === false);
+      [counted.amount, notCounted.amount] = [notCounted.amount, counted.amount];
+    }
+  },
+  COLLISION_SUBJECT,
 );
 
-checkResponse("run-book.collateral-collision", collision, {
-  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
-});
-checkResponse("run-book.collateral-collision.swap", collisionSwap, {
-  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
-});
+// P. A ONE-SIDED UNPRICED FLAG FLIP. `unpriced` does not enter the disclosure
+// key while `value_usd` is non-null, so flipping it on the counted row changes
+// no key, no sum and no ratio — it only changes what the row SAYS about whether
+// its balance has a price witness. Before the anchor, no law read the field.
+refuses(
+  "P: a one-sided unpriced flag flip — the after-side counted row claims no price witness",
+  `serves unpriced true for aave_v3_etherfi|${COLLIDING_ASSET}::counted`,
+  (mutant) => {
+    const aave = mutant.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+    aave.after.collateral_by_asset.find((entry) => entry.value_usd !== null).unpriced = true;
+  },
+  COLLISION_SUBJECT,
+);
 
-write("run-book.collateral-collision.json", collision);
-write("run-book.collateral-collision.swap.json", collisionSwap);
+// Q. A ONE-SIDED NOTE EDIT. The note is the sentence the page RENDERS beside the
+// number — `runCollateralCounted`'s own words — and it was pinned by nothing.
+refuses(
+  "Q: a one-sided note edit — the after-side counted row's disclosure sentence rewritten",
+  `serves note "COUNTED: trust me." for aave_v3_etherfi|${COLLIDING_ASSET}::counted`,
+  (mutant) => {
+    const aave = mutant.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+    aave.after.collateral_by_asset.find((entry) => entry.value_usd !== null).note =
+      "COUNTED: trust me.";
+  },
+  COLLISION_SUBJECT,
+);
+
+// R. THE EXAMPLE GROWN A PRICED HOLDING. The recorded exemption used to be
+// RECOMPUTED from the example, so a new priced holding in `api/openapi.yaml`
+// arrived pre-forgiven: law 11 would never ask the collision bodies to disclose
+// it, and nothing anywhere would say the exemption had widened.
+const GROWN_HOLDING_ROW = `debt_manager|before|${responseKey(DM_CHAIN, INVENTED_ASSET)}|1|1|18|GROWN`;
+
+refusesGeneration(
+  "R: the contract example grown a priced holding — the recorded exemption widened silently",
+  GROWN_HOLDING_ROW,
+  () => {
+    const grown = JSON.parse(JSON.stringify(runBookExample));
+    grown.engines
+      .find((engine) => engine.engine === "debt_manager")
+      .before.collateral_by_asset.push({
+        asset: INVENTED_ASSET,
+        symbol: "GROWN",
+        decimals: 18,
+        amount: "1",
+        value_usd: "1",
+        unpriced: false,
+        note: countedNote,
+      });
+    exampleUndisclosedInputs(grown);
+  },
+);
+
+write("run-book.collateral-collision.json", collision.response);
+write("run-book.collateral-collision.swap.json", collisionSwap.response);
+
+// --- THE MUTANT REGISTER: every expected sentence belongs to ONE law --------
+//
+// Codex round 30 found no substring collision among the nine mutants that
+// existed then, and this is what keeps it true as the set grows. A mutant's
+// expected sentence proves its law only if no OTHER mutant's refusal contains
+// it: two mutants trading refusals would both still read green.
+for (const mutant of MUTANTS) {
+  const alsoIn = MUTANTS.filter(
+    (other) => other !== mutant && other.refused.includes(mutant.expected),
+  );
+  if (alsoIn.length > 0) {
+    fail(
+      `the expected sentence for ${mutant.what} is NOT unique to its law — it also appears in the ` +
+        `refusal of ${alsoIn.map((other) => other.what).join("; ")}`,
+    );
+  }
+}
+console.log(
+  `checked ${String(MUTANTS.length)} mutants — each refused, each for a reason unique to its law`,
+);
