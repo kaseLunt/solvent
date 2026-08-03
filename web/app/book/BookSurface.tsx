@@ -22,7 +22,7 @@ import { getSolventClient } from "@/lib/api";
 import { Stampline, StampItem } from "@/components/Stampline";
 import { RefusedTag } from "@/components/RefusedTag";
 import { formatBlock, EM_DASH } from "@/lib/format";
-import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
+import { batchFreshnessLine, batchFreshnessStamp, receiptIdentity } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import { BOOK_DEK_LOADING, bookDek } from "./bookDek";
 import { BookStatRows } from "./BookStatRows";
@@ -114,8 +114,20 @@ export function BookSurface() {
   const reloadBookOnResume = useCallback(() => {
     loadBook({ keepOnFailure: true });
   }, [loadBook]);
+  //
+  // Wave R5 (round-12 MEDIUM): and the anchor is keyed to THIS RESPONSE's
+  // identity — `served_at` with the batch id — not to its integer age. The
+  // resume re-fetch above exists to replace an estimate with the wire's own
+  // number; keyed on the value, a fresh batch that happened to land at the same
+  // `age_seconds` as the stale one could not land at all, and the reader kept
+  // the estimate's hours over a batch that was minutes old.
   const liveAgeSeconds = useAnchoredAgeSeconds(
-    state.phase === "ok" ? state.book.batch.age_seconds : null,
+    state.phase === "ok"
+      ? {
+          ageSeconds: state.book.batch.age_seconds,
+          receiptId: receiptIdentity(state.book.served_at, state.book.batch.id),
+        }
+      : null,
     reloadBookOnResume,
   );
 

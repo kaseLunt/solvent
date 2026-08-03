@@ -21,7 +21,17 @@ export function PostureRibbon() {
   // on a minute tick, so the stale-batch suffix ENGAGES while the tab is open
   // instead of testing a number frozen just short of the threshold. Called
   // unconditionally, above every early return — hooks are not conditional.
-  const liveAgeSeconds = useAnchoredAgeSeconds(posture.batch?.age_seconds ?? null);
+  //
+  // Wave R5 (round-12 MEDIUM): the anchor is keyed to the STREAM RECEIPT that
+  // delivered this batch, not to its integer age. Batch #7 arriving two minutes
+  // old where #6 also arrived two minutes old is a NEW receipt and re-anchors;
+  // under the old value test it inherited #6's anchor and rendered #7 as old as
+  // the batch it replaced.
+  const liveAgeSeconds = useAnchoredAgeSeconds(
+    posture.batch !== null && posture.batchReceiptId !== null
+      ? { ageSeconds: posture.batch.age_seconds, receiptId: posture.batchReceiptId }
+      : null,
+  );
 
   if (posture.batch !== null && posture.unavailable === null) {
     const asOfs: RibbonAsOf[] = posture.batch.watermarks.map((stamp) => ({

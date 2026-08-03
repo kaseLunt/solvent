@@ -36,6 +36,7 @@ import {
   type Transition,
 } from "@solvent/client";
 import { solventStreamUrl } from "./api";
+import { receiptIdentity } from "./freshness";
 
 /** The server's own unavailability statement, kept verbatim. */
 export interface UnavailableInfo {
@@ -51,6 +52,14 @@ export interface Posture {
   hasBase: boolean;
   /** The newest servable batch (watermark vector inside), or null. */
   batch: Batch | null;
+  /**
+   * The identity of the RECEIPT that delivered `batch` (Wave R5, round-12
+   * MEDIUM): the payload's own `served_at` folded with the batch id. Every
+   * snapshot/batch frame is a new receipt even when it repeats the previous
+   * frame's integer `age_seconds`, and the age anchor must re-anchor on it —
+   * otherwise a fresher batch inherits the older one's accumulated age.
+   */
+  batchReceiptId: string | null;
   /** Per-engine aggregates from the last snapshot/batch, when sent. */
   engines: Aggregate[] | null;
   /** Current degradation posture (refusals / flags / supersession / withheld engines). */
@@ -71,6 +80,7 @@ const INITIAL: Posture = {
   streamState: "idle",
   hasBase: false,
   batch: null,
+  batchReceiptId: null,
   engines: null,
   degradation: null,
   transitions: [],
@@ -97,6 +107,8 @@ export function PostureProvider({ children }: { children: ReactNode }) {
     const fromPayload = (payload: StreamPayload): Partial<Posture> => ({
       hasBase: true,
       batch: payload.batch,
+      batchReceiptId:
+        payload.batch === null ? null : receiptIdentity(payload.served_at, payload.batch.id),
       engines: payload.engines ?? null,
       degradation: payload.degradation ?? null,
       recovered: payload.recovered === true,
@@ -121,6 +133,8 @@ export function PostureProvider({ children }: { children: ReactNode }) {
         apply({
           hasBase: true,
           batch: payload.batch,
+          batchReceiptId:
+            payload.batch === null ? null : receiptIdentity(payload.served_at, payload.batch.id),
           unavailable: {
             reason: payload.reason ?? null,
             staleSinceSeconds: payload.stale_since_seconds ?? null,

@@ -177,6 +177,63 @@ export function anchoredAgeSeconds(
 }
 
 // ---------------------------------------------------------------------------
+// WAVE R5, Codex round-12 MEDIUM (1): WHAT MAKES A RECEIPT *NEW*.
+//
+// R3/R4 keyed re-anchoring on the wire VALUE: a response whose `age_seconds`
+// differed from the one on screen was a new receipt; a response repeating the
+// same integer kept the older anchor, so the rendered age kept climbing rather
+// than snapping back.
+//
+// That was right about which error to prefer and wrong about the test.
+// `age_seconds` is an INTEGER of seconds, and a page that re-fetches on resume
+// asks for a fresh batch at whatever cadence the reader's lifecycle produces.
+// When the request cadence and the batch cadence line up — and they do, because
+// both hang off the same publishing loop — batch #7 fetched two minutes after
+// it was computed carries EXACTLY the `age_seconds` batch #6 carried two
+// minutes after IT was computed. Under the value test that new, genuinely
+// fresher receipt inherited the old anchor AND the old accumulated interval,
+// and a batch two minutes old rendered as an hour and two minutes old: fresh
+// data presented as stale, with no path back short of a reload.
+//
+// Over-stating is the error R4 licensed the floor to make — but only until the
+// next receipt corrected it. The correction has to be able to LAND.
+//
+// So identity moves off the value and onto the RECEIPT: `served_at` — the
+// instant the SERVICE built the response, which every /v1 envelope carries and
+// which is distinct per response — plus the batch id where the caller has one.
+// Any new successful receipt re-anchors, at equal `age_seconds` or not. A
+// FAILED re-fetch produces no receipt at all and therefore still cannot
+// re-anchor anything (live-age.ts's `keepOnFailure` path is untouched).
+// ---------------------------------------------------------------------------
+
+/** A wire age together with the identity of the receipt that carried it. */
+export interface AgeReceipt {
+  /** The wire's own `age_seconds`, from THIS response. */
+  readonly ageSeconds: number;
+  /**
+   * The identity of that successful receipt — see `receiptIdentity`. Two
+   * different responses never share one; one response re-rendered always does.
+   */
+  readonly receiptId: string;
+}
+
+/**
+ * The identity of ONE successful receipt.
+ *
+ * `servedAt` is the envelope's `served_at` (the database clock at the instant
+ * the service built the response). It is used here ONLY as an identity: it is
+ * never differenced against a browser clock and never contributes to an age.
+ * LAW 1 IS UNTOUCHED — the age still originates in the wire's `age_seconds`,
+ * and the browser still contributes only a duration.
+ *
+ * `batchId` is folded in where the caller has one, so two responses a coarse
+ * `served_at` could not separate are still separated by the batch they describe.
+ */
+export function receiptIdentity(servedAt: string, batchId: number | null = null): string {
+  return batchId === null ? servedAt : `${servedAt}#${String(batchId)}`;
+}
+
+// ---------------------------------------------------------------------------
 // RECONCILIATION ON RESUME (Wave R4, part b).
 //
 // The minute tick cannot fire while the tab is suspended, so a resumed page
@@ -216,24 +273,204 @@ export interface ResumeMark {
   readonly wallMs: number;
 }
 
+// ---------------------------------------------------------------------------
+// WAVE R5, Codex round-12 MEDIUM (2): TWO BLIND CLOCKS ARE NOT AN ABSENCE OF
+// EVIDENCE.
+//
+// R4 decided whether a lifecycle event was a real resume by asking the two
+// clocks how much time had passed. Both can be blind AT ONCE: a multi-hour
+// suspend PAUSES `performance.now()` (delta ~ 0) and, on that same wake, the OS
+// corrects a skewed wall clock BACKWARD by a comparable interval (delta <= 0).
+// Both readings fall inside the coalescing window, the lifecycle burst is
+// dismissed as the second and third events of a resume nobody ever handled, and
+// the page reconciles NOTHING — no recompute, no repair re-fetch. The age, and
+// the stale-batch ribbon that is nothing but a function of it, stay hours
+// fresher than the truth. That is stale data presented as fresh, which is the
+// exact direction this module exists to prevent.
+//
+// The clocks were never the only evidence available. Two lifecycle facts PROVE
+// a resume with no arithmetic at all:
+//
+//   · `pageshow` with `persisted === true` — the document was restored FROM the
+//     bfcache. It was not running; now it is.
+//   · a signal arriving VISIBLE when this page has been observed HIDDEN since
+//     its last reconcile — it went away, and it is back. (`visibilitychange`
+//     hidden->visible is exactly this pair of facts.)
+//
+// Neither is an inference from a duration, so neither can be defeated by a
+// clock. Both force the reconcile path outright.
+//
+// COALESCING SURVIVES, and not by measuring: the away evidence is CONSUMED by
+// the reconcile it triggers. A restore fires pageshow, then visibilitychange,
+// then focus; the first forces a reconcile, clears the away flag and re-marks
+// both clocks, and the remaining two — no longer carrying definitive evidence —
+// fall back to the delta test against a mark taken AFTER the resume, where the
+// clocks are honest again. One resume, one reconcile, one re-fetch. A LATER
+// suspend re-arms the flag on its own way out (visibilitychange to hidden,
+// pagehide), so the second restore is proven exactly as the first was rather
+// than being trusted to a clock that has already been shown to lie.
+//
+// A `pageshow` is the exception that needs its own guard: it states its own
+// case and does not consult the flag, so a restore delivering its events in
+// any other order would prove itself twice. A definitive signal arriving after
+// a reconcile that was ITSELF proven, with no departure recorded since, is the
+// same restore speaking again — see `ResumeTracker.lastReconcileProven`.
+//
+// A BARE `focus` — no persisted pageshow, no recorded hide — stays delta-gated.
+// A window merely raised is not evidence that anything was suspended, and
+// re-fetching an aggregate every time a reader alt-tabs would be a cost paid
+// for no truth.
+// ---------------------------------------------------------------------------
+
+/** What a lifecycle signal PROVES about a resume, before any clock is read. */
+export type ResumeEvidence = "definitive" | "ambiguous";
+
+/**
+ * The events that mean "this page is going AWAY" — the evidence that the next
+ * return is a resume. `visibilitychange` also carries a departure, but it earns
+ * that by its own `visible: false` reading rather than by name, so it stays
+ * listed once, in RESUME_EVENTS.
+ */
+export const HIDE_EVENTS = ["pagehide"] as const;
+
+/** One lifecycle event, reduced to the facts that decide a reconcile. */
+export interface ResumeSignal {
+  /** The event's `type`. */
+  readonly type: string;
+  /** `PageTransitionEvent.persisted` — true ONLY for a bfcache restore. */
+  readonly persisted?: boolean;
+  /** `document.visibilityState === "visible"`, READ AT THE EVENT. */
+  readonly visible?: boolean;
+}
+
+/** Everything the resume path remembers between signals. */
+export interface ResumeTracker {
+  /** Both clock readings taken at the last reconcile — null before the first. */
+  readonly lastResume: ResumeMark | null;
+  /**
+   * This page has been observed HIDDEN (or stowed in the bfcache) since that
+   * reconcile. It is the definitive half of the evidence, and it is CONSUMED —
+   * not merely tested — by the reconcile it triggers.
+   */
+  readonly hiddenSinceReconcile: boolean;
+  /**
+   * That last reconcile was itself forced by definitive evidence, rather than
+   * taken at a receipt or earned on the clocks.
+   *
+   * It is what makes the burst coalesce in ANY order. A `pageshow` states its
+   * own case and does not need the away flag — so a restore that delivers
+   * `visibilitychange` first would otherwise reconcile twice, once on each. A
+   * definitive signal arriving after a PROVEN reconcile, with no departure
+   * recorded since, is the same restore speaking again; it is delta-gated like
+   * any echo. A genuinely later suspend always records its departure first, so
+   * this can never suppress a second real resume.
+   */
+  readonly lastReconcileProven: boolean;
+}
+
+/** The decision, and the tracker to carry into the next signal. */
+export interface ResumeOutcome {
+  readonly reconcile: boolean;
+  readonly tracker: ResumeTracker;
+}
+
+/** The tracker a page starts with: nothing reconciled, nothing hidden. */
+export const INITIAL_RESUME_TRACKER: ResumeTracker = {
+  lastResume: null,
+  hiddenSinceReconcile: false,
+  lastReconcileProven: false,
+};
+
+/** Whether this signal says the page LEFT, rather than that it came back. */
+export function isHideSignal(signal: ResumeSignal): boolean {
+  if (signal.type === "pagehide") return true;
+  return signal.type === "visibilitychange" && signal.visible === false;
+}
+
+/**
+ * Whether this signal PROVES a resume, independent of every clock.
+ *
+ * `hiddenSinceReconcile` is the caller's record of a departure it has not yet
+ * reconciled against — see `trackResumeSignal`, which consumes it.
+ */
+export function resumeEvidenceOf(
+  signal: ResumeSignal,
+  hiddenSinceReconcile: boolean,
+): ResumeEvidence {
+  // A bfcache restore states its own case, and states it first: the flag is not
+  // consulted, because a restore is proof whether or not this tab saw the stow.
+  if (signal.type === "pageshow" && signal.persisted === true) return "definitive";
+  if (hiddenSinceReconcile && signal.visible === true) return "definitive";
+  return "ambiguous";
+}
+
 /**
  * Whether a resume signal is a NEW resume rather than the second or third
  * event of one the caller already handled.
  *
- * The elapsed test takes the LARGER of the two clocks' deltas, because the
- * whole finding is that either clock alone can be blind: after a sleep the
- * monotonic delta is ~0 and only the wall shows the gap, and after a backwards
- * wall step the wall delta is negative and only the monotonic clock shows it.
- * Requiring both to agree would coalesce away exactly the resumes that matter.
+ * DEFINITIVE EVIDENCE OUTRANKS BOTH CLOCKS (Wave R5). Without it, the elapsed
+ * test takes the LARGER of the two clocks' deltas, because either clock alone
+ * can be blind: after a sleep the monotonic delta is ~0 and only the wall shows
+ * the gap, and after a backwards wall step the wall delta is negative and only
+ * the monotonic clock shows it. Requiring both to agree would coalesce away
+ * exactly the resumes that matter — and R5's finding is that requiring EITHER
+ * still coalesces away the resume where both are blind at once.
  */
 export function shouldReconcileOnResume(
   last: ResumeMark | null,
   nowMs: number,
   wallMs: number,
+  evidence: ResumeEvidence = "ambiguous",
 ): boolean {
   if (last === null) return true;
+  if (evidence === "definitive") return true;
   const elapsedMs = Math.max(nowMs - last.monotonicMs, wallMs - last.wallMs);
   return elapsedMs >= RESUME_COALESCE_MS;
+}
+
+/**
+ * ONE lifecycle signal folded into the resume state: whether to reconcile now,
+ * and what to remember for the next signal.
+ *
+ * This is the whole decision, kept pure so it can be driven event by event with
+ * both clocks under a test's control — the resume defects of R4 and R5 both
+ * live in the gap between what a clock says and what actually happened.
+ */
+export function trackResumeSignal(
+  tracker: ResumeTracker,
+  signal: ResumeSignal,
+  nowMs: number,
+  wallMs: number,
+): ResumeOutcome {
+  // A departure is never a resume — it is the evidence that the next return is.
+  if (isHideSignal(signal)) {
+    return { reconcile: false, tracker: { ...tracker, hiddenSinceReconcile: true } };
+  }
+  // What the clocks alone would say. Consulted twice below: once to recognise
+  // an echo of a resume already proven, once as the fallback for a signal that
+  // proves nothing.
+  const clocksAgree = shouldReconcileOnResume(tracker.lastResume, nowMs, wallMs);
+  const evidence = resumeEvidenceOf(signal, tracker.hiddenSinceReconcile);
+  // THE ECHO: definitive evidence arriving after a reconcile that was ITSELF
+  // proven, with no departure recorded since and both clocks showing a burst's
+  // worth of time. That is one restore speaking twice, not two restores.
+  const echo =
+    evidence === "definitive" &&
+    tracker.lastReconcileProven &&
+    !tracker.hiddenSinceReconcile &&
+    !clocksAgree;
+  const proven = evidence === "definitive" && !echo;
+  if (!proven && !clocksAgree) return { reconcile: false, tracker };
+  // The reconcile CONSUMES the away evidence and re-marks both clocks, so the
+  // rest of this burst is measured against a reading taken after the resume.
+  return {
+    reconcile: true,
+    tracker: {
+      lastResume: { monotonicMs: nowMs, wallMs },
+      hiddenSinceReconcile: false,
+      lastReconcileProven: proven,
+    },
+  };
 }
 
 /**

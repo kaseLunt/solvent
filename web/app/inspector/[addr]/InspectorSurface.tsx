@@ -24,7 +24,7 @@ import {
 } from "@solvent/client";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { formatBlock, isAddress, renderLookupOutcome } from "@/lib/format";
-import { batchFreshnessLine, batchFreshnessStamp } from "@/lib/freshness";
+import { batchFreshnessLine, batchFreshnessStamp, receiptIdentity } from "@/lib/freshness";
 import { useAnchoredAgeSeconds } from "@/lib/live-age";
 import {
   fetchAddressHistory,
@@ -144,8 +144,21 @@ export function InspectorSurface({ addr }: { addr: string }) {
   const reloadAddressOnResume = useCallback(() => {
     loadAddress({ keepOnFailure: true });
   }, [loadAddress]);
+  //
+  // Wave R5 (round-12 MEDIUM): keyed to THIS lookup's receipt — its own
+  // `served_at` with its own batch id — so a re-fetch that returns a fresher
+  // batch at the same integer age re-anchors instead of inheriting the age the
+  // previous receipt had accumulated.
   const liveAgeSeconds = useAnchoredAgeSeconds(
-    addressState.status === "ready" ? addressState.lookup.response.batch.age_seconds : null,
+    addressState.status === "ready"
+      ? {
+          ageSeconds: addressState.lookup.response.batch.age_seconds,
+          receiptId: receiptIdentity(
+            addressState.lookup.response.served_at,
+            addressState.lookup.response.batch.id,
+          ),
+        }
+      : null,
     reloadAddressOnResume,
   );
 
