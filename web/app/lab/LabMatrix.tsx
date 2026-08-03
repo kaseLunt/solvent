@@ -47,6 +47,15 @@
 // detail. The second one's affordance is a LISTING REFRESH — this component
 // asks for it, and re-runs nothing on its own.
 //
+// AND NEITHER GUARD CAN SEE A PHASE WITH NO BODY (Wave R14). Both read the
+// RESPONSE, so a run still in flight and a run that ended without a book slipped
+// past them and re-attached to a re-listed row by scenario id alone — rendering
+// as RUNNING or UNANSWERED on a definition that was never asked anything. Every
+// phase now carries the identity it was DISPATCHED under; when that disagrees
+// with the row's, the phase reads DEFINITION CHANGED too, and the row's
+// affordance is a RE-RUN rather than a refresh, because nothing answered and a
+// fresh listing has nothing here to make readable.
+//
 // AND A ROW'S PRESENTATION DERIVES FROM ITS OWN CELLS (Wave R11). A 200 whose
 // `engines[]` and `excluded_engines[]` name none of the row's covered engines
 // leaves every cell of that row UNANSWERED; it therefore pins no batch, joins no
@@ -63,6 +72,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { renderEngineAmount } from "@/lib/book-format";
 import {
+  attemptSkew,
   axisFamilyWords,
   batchHeaderLine,
   cellState,
@@ -410,6 +420,13 @@ export function LabMatrix({
               // exactly one map this component reads anything out of.
               const phase = listed.get(scenario.id) ?? { kind: "idle" as const };
               const rowIdent = identity.get(scenario.id);
+              // WAVE R14 — this row's phase carries no body of its own AND was
+              // dispatched under a definition this page no longer shows. It is
+              // in `definitionChangedScenarioIds` with R12's answers, so the
+              // header counts it there; the AFFORDANCE, though, is the opposite
+              // one, and offering R12's refresh here would send the reader to
+              // re-read a listing that is already current.
+              const staleAttempt = attemptSkew(phase, rowIdent);
               const rerunBanner = rerunFailedBanner(phase, rowIdent, "matrix", scenario.engines);
               const families = scenarioCoverage(scenario, scenario.engines[0] ?? "").families;
               return (
@@ -488,6 +505,31 @@ export function LabMatrix({
                         {rerunBanner.line}
                       </span>
                     )}
+                    {/* WAVE R14: the ATTEMPT half of the definition-changed
+                        set gets the OTHER remedy. A stored ANSWER about another
+                        definition becomes readable when the listing catches up,
+                        which is what R12's refresh is for; a run that was ASKED
+                        under another definition never answered anything, so
+                        there is nothing for a fresh listing to make readable and
+                        the only thing that resolves it is asking again. */}
+                    {staleAttempt !== null && (
+                      <span
+                        className={styles.cellSub}
+                        data-testid="matrix-attempt-changed"
+                        data-scenario-id={scenario.id}
+                        data-in-flight={phase.kind === "running" ? "true" : "false"}
+                      >
+                        {phase.kind === "running"
+                          ? "this row's request is still out, and was ASKED under a committed " +
+                            "definition this page is no longer showing. Whatever it answers will " +
+                            "be judged by the identity the response publishes for ITSELF — a " +
+                            "listing refresh resolves nothing here."
+                          : "this row's run was ASKED under a committed definition this page is " +
+                            "no longer showing, and never came back with a book of its own. A " +
+                            "listing refresh resolves nothing — the listing is already the " +
+                            "current one. Run this row again to ask under the definition above."}
+                      </span>
+                    )}
                     {/* WAVE R12, FINDING 2: the row's affordance is a LISTING
                         REFRESH, not a re-run. Re-running against a listing this
                         page already knows is stale would only produce a second
@@ -495,7 +537,8 @@ export function LabMatrix({
                         is what makes the stored answer readable — or proves it
                         is about a definition that has moved on again. Nothing
                         is auto-run either way. */}
-                    {cohort.definitionChangedScenarioIds.includes(scenario.id) && (
+                    {staleAttempt === null &&
+                      cohort.definitionChangedScenarioIds.includes(scenario.id) && (
                       <span
                         className={styles.cellSub}
                         data-testid="matrix-definition-changed"
@@ -532,9 +575,12 @@ export function LabMatrix({
         the run ended without a book, or the book it served named that engine in neither list —
         not a zero · CONTRADICTORY BOOK = the served response answered this cell two ways (an
         engine named twice, or named as served and withheld at once) and is refused whole rather
-        than resolved by this surface · DEFINITION CHANGED = the answer is about a committed
-        definition this page is no longer showing; refresh the listing to run against the current
-        one · no total column: engine books are never summed.
+        than resolved by this surface · DEFINITION CHANGED = the definition moved, so this table
+        does not classify the phase — either the ANSWER is about a committed definition this page
+        is no longer showing (refresh the listing to run against the current one), or the run was
+        ASKED under one and never came back with a book of its own (re-run the row; a refresh
+        resolves nothing, the listing is already current) · no total column: engine books are
+        never summed.
       </p>
     </section>
   );

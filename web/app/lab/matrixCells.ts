@@ -222,6 +222,63 @@ export function isAllHoleBook(
 }
 
 // ---------------------------------------------------------------------------
+// WAVE R14, FINDING 2 — THE HOLE, AT CELL GRANULARITY, FOR THE DETAIL VIEW.
+//
+// `isAllHoleBook` answers the ROW's question (does this book display anything at
+// all?). The detail panel needs the same predicate one cell at a time, because
+// the sentence it was rendering is a claim about EVERY covered engine:
+//
+//   "excluded engines: none — every engine's book reached the run"
+//
+// It was gated on `excluded_engines.length === 0` alone, which is not that
+// claim and does not imply it. A book that serves ONE of two covered engines
+// and refuses neither satisfies the gate exactly — and the engine it never
+// mentioned reads UNANSWERED in the matrix directly above, its cell saying "the
+// run returned neither a result nor a refusal". Two mutually exclusive
+// statements, one screen. (The ALL-HOLE case is the same defect at its limit,
+// and R13b's banner had already promised "the outcome below says so in its own
+// words" over a panel that said the opposite.)
+//
+// `covered === undefined` INFERS NOTHING, exactly as `isAllHoleBook` does: a
+// caller that cannot say which engines the definition covers cannot accuse the
+// book of missing any, so the pre-R14 reading stands. `LabBookPanel` supplies it
+// for the only response it renders.
+// ---------------------------------------------------------------------------
+
+/**
+ * The row's covered engines this book named in NEITHER array — the HOLE.
+ *
+ * Same membership test as `isAllHoleBook`, per engine instead of per row, so
+ * the cell's sentence and the panel's sentence can never disagree about which
+ * engines fell in it.
+ */
+export function bookHoleEngines(
+  response: LabRunBook,
+  covered: readonly string[] | undefined,
+): string[] {
+  if (covered === undefined) return [];
+  return covered.filter(
+    (engine) =>
+      !response.engines.some((served) => served.engine === engine) &&
+      !response.excluded_engines.some((refusal) => refusal.engine === engine),
+  );
+}
+
+/**
+ * Whether "every engine's book reached the run" is a TRUE thing to say here.
+ *
+ * Both halves of the sentence, because the sentence asserts both: nothing was
+ * refused, AND no covered engine was left unmentioned. One predicate for one
+ * claim, so the claim cannot be rendered from half its condition.
+ */
+export function bookReachedEveryCoveredEngine(
+  response: LabRunBook,
+  covered: readonly string[] | undefined,
+): boolean {
+  return response.excluded_engines.length === 0 && bookHoleEngines(response, covered).length === 0;
+}
+
+// ---------------------------------------------------------------------------
 // WAVE R12, FINDING 1 — A BOOK THAT CONTRADICTS ITSELF IS NOT A BOOK TO READ.
 //
 // THE DEFECT. `cellState` asked `engines[]` first and `excluded_engines[]`
@@ -408,15 +465,52 @@ export function servedIdentity(response: LabRunBook): ScenarioIdentity {
   };
 }
 
-/** A response and the listing disagreeing about which definition this is. */
+/** A response — or (Wave R14) an ATTEMPT — disagreeing with the listing. */
 export interface DefinitionSkew {
+  /**
+   * WAVE R14 — WHICH SIDE carries the other identity. The state is one state
+   * (this table does not classify the phase, because the definition moved) but
+   * the two are not one claim, and above all they do not share a REMEDY:
+   *
+   *   response  a served book published its own `scenario_*` fields and they
+   *             disagree with the listing (R12). The answer is real and is
+   *             about another definition, so it becomes readable the moment the
+   *             listing catches up: the affordance is a LISTING REFRESH.
+   *   attempt   a run that produced no book of its own, judged by the identity
+   *             it was DISPATCHED under (R14). Nothing answered, so nothing
+   *             will ever become readable: the affordance is a RE-RUN.
+   */
+  subject: "response" | "attempt";
   /** The identity the page is currently SHOWING for this row. */
   listing: ScenarioIdentity;
-  /** The identity the response published for itself. */
+  /**
+   * The identity on the OTHER side of the join, as the deployment served it:
+   * for a `response`, the identity the run-book body published for itself; for
+   * an `attempt`, the identity `GET /v1/scenarios` was serving for this row at
+   * the moment the run was dispatched, stamped onto the phase there and then.
+   */
   served: ScenarioIdentity;
   /** Which wire fields disagree, in the order they are checked. */
   fields: ("scenario_id" | "scenario_version" | "scenario_config_version")[];
   reason: string;
+}
+
+/**
+ * The wire fields on which two identities disagree, in the order checked.
+ *
+ * One comparison, shared by the response join (R12) and the attempt join (R14),
+ * so the two can never drift into disagreeing about what "the same definition"
+ * means.
+ */
+function skewFields(
+  left: ScenarioIdentity,
+  right: ScenarioIdentity,
+): DefinitionSkew["fields"] {
+  const fields: DefinitionSkew["fields"] = [];
+  if (left.scenarioId !== right.scenarioId) fields.push("scenario_id");
+  if (left.version !== right.version) fields.push("scenario_version");
+  if (left.configVersion !== right.configVersion) fields.push("scenario_config_version");
+  return fields;
 }
 
 /**
@@ -432,12 +526,10 @@ export function definitionSkew(
 ): DefinitionSkew | null {
   if (identity === undefined) return null;
   const served = servedIdentity(response);
-  const fields: DefinitionSkew["fields"] = [];
-  if (served.scenarioId !== identity.scenarioId) fields.push("scenario_id");
-  if (served.version !== identity.version) fields.push("scenario_version");
-  if (served.configVersion !== identity.configVersion) fields.push("scenario_config_version");
+  const fields = skewFields(served, identity);
   if (fields.length === 0) return null;
   return {
+    subject: "response",
     listing: identity,
     served,
     fields,
@@ -512,6 +604,13 @@ export type MatrixPhase =
        * is in flight and it is what a failed run gives back.
        */
       held?: RunBookOutcome;
+      /**
+       * WAVE R14 — the identity the row was SHOWING when this request was
+       * dispatched. See the block below `attemptSkew`; optional because the
+       * type must admit an unstamped phase transitionally, and an unstamped
+       * phase infers nothing.
+       */
+      attempt?: ScenarioIdentity;
     }
   | {
       kind: "outcome";
@@ -523,7 +622,108 @@ export type MatrixPhase =
        * disclosed BESIDE the result rather than overwriting it.
        */
       rerunFailed?: string;
+      /** WAVE R14 — the identity this attempt was dispatched under. */
+      attempt?: ScenarioIdentity;
     };
+
+// ---------------------------------------------------------------------------
+// WAVE R14, FINDING 1 — EVERY PHASE IS BOUND TO THE IDENTITY IT WAS ASKED UNDER.
+//
+// THE DEFECT. R13 restricted the cohort to the rows the table RENDERS by
+// filtering `phases` through the current listing (`listedPhases`), and that
+// filter is keyed — as the map itself is — BY SCENARIO ID ALONE. A row that
+// leaves the listing is correctly dropped; a row that COMES BACK is re-admitted
+// on the strength of its id, whatever the definition behind that id has become.
+//
+// For a `kind: "ok"` outcome that is harmless, because the RESPONSE carries its
+// own identity: R12's `bookRefusal` reads `scenario_id` + `scenario_version` +
+// `scenario_config_version` off the wire and refuses the join itself. But a
+// RUNNING phase and a NON-OK outcome carry NO identity at all. There is no body
+// to read one off, and nothing else in the phase remembers which definition the
+// row was showing when the run was dispatched.
+//
+// So: v1 is listed and run; the run fails (404, 503, or no HTTP response at
+// all); the deployment stops publishing the scenario, the reader refreshes, and
+// R13 correctly drops the orphan; the deployment republishes the scenario RE-CUT
+// as v2, the reader refreshes again — and the v1 failure walks back onto the v2
+// row. It renders there as RUNNING or as UNANSWERED, and the header counts the
+// v2 row among the rows this session ASKED ABOUT, though v2 was never asked
+// anything. That breaks R13's own promise in the sentence it made it in: a
+// returning row classifies "as itself, or as DEFINITION CHANGED".
+//
+// THE RULE: A PHASE IS STAMPED, AT DISPATCH, WITH THE IDENTITY THE ROW WAS
+// SHOWING. `LabBookPanel.run()` holds the listing when it fires the request, so
+// the stamp is the same triple R12 joins on, from the same source, taken at the
+// only moment it is unambiguous. A phase with no body of its own is then judged
+// by that stamp: if it disagrees with the identity the listing is showing NOW,
+// the attempt is not this row's attempt. It is counted in the definition-changed
+// set, rendered in the DEFINITION CHANGED register, and counted in NEITHER
+// `attemptedScenarioIds`, `inFlightScenarioIds` NOR `unansweredScenarioIds` —
+// because every one of those is a claim about a run issued for the row the
+// reader is looking at.
+//
+// THE OK PATH IS NOT DOUBLE-GATED, and the reason is a rule about authority. A
+// served body publishes its own identity, and that is the SERVER'S WORD about
+// what it computed. The two CAN disagree — the reader runs under v1 against a
+// deployment that has already moved to v2, then refreshes to v2 — and where they
+// do, the body wins: `attemptSkew` answers null for every `kind: "ok"` outcome,
+// `bookRefusal` alone decides, and the row classifies exactly as R12's refresh
+// path promises ("the moment the listing it was computed against is the one on
+// screen"). One response, one register, from one gate — never two.
+//
+// AN UNSTAMPED PHASE INFERS NOTHING. `attempt` is optional on the type: nothing
+// this wave ships writes a phase without it, but the type admits one
+// transitionally, and such a phase keeps its PRE-R14 reading rather than being
+// guessed at in either direction. That is the same discipline R11 gave absent
+// coverage and R12 gave absent identity — a caller that supplied no identity is
+// not making a claim about identity.
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether this phase's ATTEMPT belongs to the definition the row is showing.
+ *
+ * It answers null — nothing to say — for every phase that can speak for itself:
+ * an `idle` phase (nothing was asked), an unstamped phase (nothing was
+ * recorded), a caller with no listing identity (nothing was claimed), and any
+ * `kind: "ok"` outcome, whose response publishes its own identity and is judged
+ * on it by `bookRefusal`.
+ */
+export function attemptSkew(
+  phase: MatrixPhase,
+  identity: ScenarioIdentity | undefined,
+): DefinitionSkew | null {
+  if (identity === undefined) return null;
+  if (phase.kind === "idle") return null;
+  // A BODY OF ITS OWN OUTRANKS A STAMP. See the note above: the response's
+  // identity is the server's word about what it computed, and this table never
+  // holds two registers over one response.
+  if (phase.kind === "outcome" && phase.outcome.kind === "ok") return null;
+  const attempt = phase.attempt;
+  if (attempt === undefined) return null;
+  const fields = skewFields(attempt, identity);
+  if (fields.length === 0) return null;
+  const inFlight = phase.kind === "running";
+  return {
+    subject: "attempt",
+    listing: identity,
+    served: attempt,
+    fields,
+    reason:
+      `DEFINITION CHANGED — this attempt belongs to a definition this page is no longer ` +
+      `showing (${fields.join(", ")} disagree). The run was DISPATCHED against ` +
+      `${attempt.scenarioId} ${attempt.version} at scenario_config_version ` +
+      `${attempt.configVersion}; the listing this page is showing reads ${identity.scenarioId} ` +
+      `${identity.version} at scenario_config_version ${identity.configVersion}. ` +
+      `${inFlight ? "No book has come back from it" : "No book came back from it"}, so the ` +
+      `identity it was ASKED under is the only identity it has — and that is not this row's. ` +
+      `It is therefore not this row's attempt: no cell, no pin, no cohort, and it is counted ` +
+      `as neither in flight nor unanswered here. ` +
+      (inFlight
+        ? `The request is still out; whatever it answers will be judged by the identity the ` +
+          `response publishes for ITSELF.`
+        : `Re-run this row to ask under the definition this page is showing.`),
+  };
+}
 
 /**
  * The batch a phase's DISPLAYED result is pinned to — null when it shows none.
@@ -585,6 +785,16 @@ export type MatrixPhase =
  * Order is preserved deliberately: the cohort's set order and pin order are the
  * map's iteration order, which the unit spec pins with `toEqual` on arrays, so a
  * filter that reshuffled would change answers it has no business changing.
+ *
+ * WAVE R14 — THIS FILTER IS A MEMBERSHIP TEST AND NOTHING MORE, and that is
+ * deliberate rather than an omission. It answers "is there a row for this id",
+ * which is the only question `phases` can be asked by id alone; it does NOT
+ * answer "is this the same definition", because a delisted-then-RE-LISTED id is
+ * a member again whatever the definition behind it has become. Widening the
+ * filter to drop a returning phase would erase the fact that something WAS
+ * asked, and this table never turns an event into a "not run". The identity
+ * question is asked one step later, per row, where both sides are in hand — see
+ * `attemptSkew` for a phase with no body and `bookRefusal` for one with a body.
  */
 export function listedPhases(
   phases: ReadonlyMap<string, MatrixPhase>,
@@ -636,6 +846,13 @@ export function anchorBatchOfPhase(
   covered?: readonly string[],
   identity?: ScenarioIdentity,
 ): number | null {
+  // WAVE R14 — AN ATTEMPT ASKED UNDER ANOTHER DEFINITION HOLDS NOTHING FOR THIS
+  // ROW. The clause that counts such a row says it "pins no batch"; letting the
+  // evidence behind its in-flight request raise the anchor would make that
+  // sentence false in the same breath it is composed. The floor the panel has
+  // already learned is NOT lowered by this — R13's rule, for the same reason:
+  // what changes is only that this phase can no longer PUT a batch into it.
+  if (attemptSkew(phase, identity) !== null) return null;
   const outcome =
     phase.kind === "running"
       ? phase.held
@@ -747,6 +964,21 @@ export interface BatchCohort {
    */
   definitionChangedScenarioIds: string[];
   /**
+   * WAVE R14 — the SUBSET of `definitionChangedScenarioIds` whose phase is an
+   * ATTEMPT rather than an answer: a run DISPATCHED under a committed definition
+   * this page is no longer showing, which came back with no book of its own (or
+   * has not come back at all).
+   *
+   * A subset and not a fourth sibling set, because the state IS the same state —
+   * the definition moved, so this table does not classify the phase — and R12's
+   * clause counts it there. It is named separately because the REMEDY differs
+   * and a reader told the wrong one has been told something false: an ANSWER
+   * about another definition becomes readable the moment the listing catches up,
+   * so its affordance is a REFRESH; an ATTEMPT under another definition never
+   * becomes anything at all, so its affordance is a RE-RUN.
+   */
+  definitionChangedAttemptScenarioIds: string[];
+  /**
    * WAVE R10 — the batch pins IN-FLIGHT rows are still holding. Held evidence
    * anchors the cohort (R8) but is displayed nowhere, so when it is OLDER than
    * the anchor the header must disclose it by count and batch rather than let a
@@ -810,6 +1042,7 @@ export function resolveBatchCohort(
   const allHoleScenarioIds: string[] = [];
   const contradictedScenarioIds: string[] = [];
   const definitionChangedScenarioIds: string[] = [];
+  const definitionChangedAttemptScenarioIds: string[] = [];
   const inFlightHeldPins: BatchPin[] = [];
   const displayedPins: BatchPin[] = [];
   for (const [scenarioId, phase] of phases) {
@@ -817,9 +1050,22 @@ export function resolveBatchCohort(
     // makes "no run has been issued yet" a claim this session can actually
     // check rather than an inference from "no batch came back".
     if (phase.kind === "idle") continue;
-    attemptedScenarioIds.push(scenarioId);
     const covered = coverage.get(scenarioId);
     const rowIdentity = identity.get(scenarioId);
+    // WAVE R14 — WHOSE ATTEMPT IS THIS, DECIDED BEFORE IT IS COUNTED AS ONE.
+    // `attemptedScenarioIds` is the ONLY set that may answer "has this row been
+    // asked about", so a run issued for a definition this page no longer shows
+    // must never reach it — nor `inFlightScenarioIds` or
+    // `unansweredScenarioIds`, which are the same claim in two other tenses.
+    // The check answers null for every `kind: "ok"` outcome, so a served body
+    // keeps sole authority over its own identity in the reads below.
+    const staleAttempt = attemptSkew(phase, rowIdentity);
+    if (staleAttempt !== null) {
+      definitionChangedScenarioIds.push(scenarioId);
+      definitionChangedAttemptScenarioIds.push(scenarioId);
+      continue;
+    }
+    attemptedScenarioIds.push(scenarioId);
     if (phase.kind === "running") {
       inFlightScenarioIds.push(scenarioId);
       const heldBatch = anchorBatchOfPhase(phase, covered, rowIdentity);
@@ -867,6 +1113,7 @@ export function resolveBatchCohort(
     allHoleScenarioIds,
     contradictedScenarioIds,
     definitionChangedScenarioIds,
+    definitionChangedAttemptScenarioIds,
     inFlightHeldPins,
     displayedPins,
   };
@@ -951,13 +1198,29 @@ export function resolveBatchCohort(
 //      version to agree, and a mismatch is counted in
 //      `definitionChangedScenarioIds` with a refresh-the-listing sentence.
 //
+// R14 (Codex round-22) SPLITS THE LAST SET IN TWO, because one clause was
+// speaking for two different events with one remedy:
+//
+//   7. A RUN ASKED UNDER A DEFINITION THIS PAGE NO LONGER SHOWS WAS COUNTED AS
+//      THIS ROW'S ATTEMPT. R12's identity guard reads the RESPONSE's own
+//      `scenario_*` fields, so it says nothing about a phase with no response —
+//      a run still in flight, or one that ended in a 404/503/no-HTTP-response.
+//      Those re-attached to a re-listed row by id alone, rendering as RUNNING or
+//      UNANSWERED on a definition that was never asked anything, and the header
+//      counted the row attempted. Every phase is now STAMPED at dispatch with
+//      the identity the row was showing; a stamp that disagrees with the current
+//      listing puts the row in `definitionChangedScenarioIds` — and in the
+//      `definitionChangedAttemptScenarioIds` subset, which exists so the clause
+//      can say "re-run" where R12's says "refresh", because a run that never
+//      answered has nothing for a fresh listing to make readable.
+//
 // THE ONE PRINCIPLE, from which every clause below follows: EVERY CLAUSE IS A
 // STATEMENT ABOUT A NAMED SET the reader can point at — displayed rows, rows
 // asked, rows in flight, held pins, rows served a book that named nobody, rows
 // served a book that contradicts itself, rows answered against a definition
-// this page no longer shows. The WATERMARK appears in exactly one clause, the
-// floor disclosure, where it is named as what it is and nothing is inferred
-// from it.
+// this page no longer shows, rows asked under one. The WATERMARK appears in
+// exactly one clause, the floor disclosure, where it is named as what it is and
+// nothing is inferred from it.
 // ---------------------------------------------------------------------------
 
 /** No run at all: a statement about this session, never about the book. */
@@ -991,7 +1254,12 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   const unanswered = cohort.unansweredScenarioIds.length;
   const allHole = cohort.allHoleScenarioIds.length;
   const contradicted = cohort.contradictedScenarioIds.length;
-  const changed = cohort.definitionChangedScenarioIds.length;
+  // R14: the attempts are a SUBSET of the definition-changed set, and the two
+  // halves get separate facts because they are separate events with separate
+  // remedies. Subtracting keeps the response half's count — and therefore R12's
+  // sentence — byte-identical whenever no attempt is involved.
+  const changedAttempts = cohort.definitionChangedAttemptScenarioIds.length;
+  const changed = cohort.definitionChangedScenarioIds.length - changedAttempts;
   const facts: string[] = [];
   if (inFlight > 0) facts.push(`${String(inFlight)} run(s) are in flight`);
   if (unanswered > 0) facts.push(`${String(unanswered)} run(s) ended without a served result`);
@@ -1018,6 +1286,17 @@ function firstResultPendingClause(cohort: BatchCohort): string {
     facts.push(
       `${String(changed)} run(s) answered for a committed definition this page is no longer ` +
         `showing — refresh the listing to run against the current one`,
+    );
+  }
+  // R14: NOTHING ANSWERED HERE AT ALL, so the remedy above is the wrong one. A
+  // refresh makes a stored ANSWER readable; there is no answer here to make
+  // readable, only a run that was asked under a definition this page has moved
+  // past. Only a re-run resolves it.
+  if (changedAttempts > 0) {
+    facts.push(
+      `${String(changedAttempts)} run(s) were ASKED under a committed definition this page is ` +
+        `no longer showing and never came back with a book of their own — re-run to ask under ` +
+        `the current one`,
     );
   }
   // Unreachable while a phase can only be idle / running / outcome — an ok
@@ -1047,7 +1326,16 @@ function cohortClause(cohort: BatchCohort): string {
   // of a batch. The anchor check rides along so a caller-supplied floor with no
   // attempts still falls through to the floor disclosure rather than claiming
   // a session that never ran.
-  if (cohort.attemptedScenarioIds.length === 0 && cohort.anchorBatchId === null) {
+  // R14 rides on the same principle and had to join this guard: an attempt
+  // asked under a definition this page no longer shows is deliberately NOT in
+  // `attemptedScenarioIds`, but its cells read DEFINITION CHANGED — so a header
+  // saying "every covered cell reads not run" above them would be the round-18
+  // contradiction arriving through the new door.
+  if (
+    cohort.attemptedScenarioIds.length === 0 &&
+    cohort.definitionChangedAttemptScenarioIds.length === 0 &&
+    cohort.anchorBatchId === null
+  ) {
     return MATRIX_NO_RUN_LINE;
   }
   if (cohort.anchorBatchId === null) return firstResultPendingClause(cohort);
@@ -1183,15 +1471,35 @@ function contradictedClause(cohort: BatchCohort): string {
  * only thing that resolves it, which is a fresh listing rather than a re-run.
  */
 function definitionChangedClause(cohort: BatchCohort): string {
-  if (cohort.anchorBatchId === null || cohort.definitionChangedScenarioIds.length === 0) return "";
-  return (
-    ` ${String(cohort.definitionChangedScenarioIds.length)} row(s) answered for a COMMITTED ` +
-    `DEFINITION this page is no longer showing — the committed set moved after this page ` +
-    `loaded. Nothing failed and nothing was withheld: a result computed for one definition is ` +
-    `simply never read against the coverage of another, so the row is not classified, pins no ` +
-    `batch, and is no part of the sentence above. Refresh the committed listing to run against ` +
-    `the current definition.`
-  );
+  if (cohort.anchorBatchId === null) return "";
+  // WAVE R14 — TWO HALVES, TWO SENTENCES, ONE SET. The response half keeps R12's
+  // words exactly (and therefore renders byte-identically whenever no attempt is
+  // involved); the attempt half gets its own, because "answered for" is a false
+  // account of a run that never answered, and "refresh the listing" is a false
+  // remedy for a row whose listing is already current.
+  const attempts = cohort.definitionChangedAttemptScenarioIds.length;
+  const answers = cohort.definitionChangedScenarioIds.length - attempts;
+  let line = "";
+  if (answers > 0) {
+    line +=
+      ` ${String(answers)} row(s) answered for a COMMITTED ` +
+      `DEFINITION this page is no longer showing — the committed set moved after this page ` +
+      `loaded. Nothing failed and nothing was withheld: a result computed for one definition is ` +
+      `simply never read against the coverage of another, so the row is not classified, pins no ` +
+      `batch, and is no part of the sentence above. Refresh the committed listing to run against ` +
+      `the current definition.`;
+  }
+  if (attempts > 0) {
+    line +=
+      ` ${String(attempts)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
+      `longer showing and never came back with a book of their own — an attempt carries only ` +
+      `the identity it was DISPATCHED under, and that identity is not this row's. Nothing ` +
+      `answered and nothing was refused, so the attempt is counted as neither in flight nor ` +
+      `unanswered, pins no batch, and is no part of the sentence above. Re-run the row to ask ` +
+      `under the current definition — a listing refresh resolves nothing here, because the ` +
+      `listing is already the current one.`;
+  }
+  return line;
 }
 
 /**
@@ -1319,10 +1627,17 @@ export type LabCellState =
        * is no longer showing. Not a failure and not a refusal: a real answer
        * about a different definition, which is why it gets neither a cell nor
        * a pin here and why the affordance is a listing refresh, not a re-run.
+       *
+       * WAVE R14 — the same register, and deliberately the SAME state, for a
+       * phase with no body of its own: a run DISPATCHED under a definition this
+       * page no longer shows. `skew.subject` says which of the two it is, and
+       * `batchId` is null for an attempt because there is no book and therefore
+       * no batch to disclose — the one thing an answer has that an attempt
+       * never does.
        */
       state: "definition-changed";
       skew: DefinitionSkew;
-      batchId: number;
+      batchId: number | null;
     };
 
 /** The honest sentence for each way a run can end without a book. */
@@ -1370,6 +1685,13 @@ export interface CellStateInput {
  *      failure. (An outcome that named an engine outside the definition would
  *      be a contract violation; the coverage answer is still the honest one.)
  *   2. no phase / idle          → not run
+ *   2a. WAVE R14 — a phase whose ATTEMPT was dispatched under a definition this
+ *      page no longer shows → definition-changed. A running phase and a run
+ *      that ended without a book carry no identity of their own; the stamp is
+ *      the only one they have, and if it is not this row's then neither
+ *      "running…" nor UNANSWERED is a true statement about this row. It answers
+ *      null for every `kind: "ok"` outcome, so a served body is never gated
+ *      twice — its own published identity decides it at 4b.
  *   3. running                  → running (never blank, never a stale value).
  *      The phase's `held` evidence is NOT rendered here — showing a previous
  *      batch's number under a live request is exactly the stale value this
@@ -1410,6 +1732,21 @@ export function cellState(input: CellStateInput): LabCellState {
 
   const { phase, cohort, engine } = input;
   if (phase.kind === "idle") return { state: "not-run" };
+
+  // 2a. WAVE R14 — WHOSE ATTEMPT IS THIS? A running phase and a run that ended
+  // without a book carry no identity of their own, so they are judged by the one
+  // stamped on them at dispatch. When it is not this row's, "running…" and
+  // UNANSWERED are both claims about a run THIS definition never had, and the
+  // header would count the row as attempted on the strength of them. It sits
+  // ahead of both because it is a statement about the WHOLE phase — exactly as
+  // R12's two refusals are statements about the whole response — and it answers
+  // null for every `kind: "ok"` outcome, so a served body keeps sole authority
+  // over its own identity in step 4b below.
+  const staleAttempt = attemptSkew(phase, input.identity);
+  if (staleAttempt !== null) {
+    return { state: "definition-changed", skew: staleAttempt, batchId: null };
+  }
+
   if (phase.kind === "running") return { state: "running" };
 
   if (phase.outcome.kind !== "ok") {

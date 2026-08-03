@@ -20,21 +20,27 @@ import {
   RUN_BOOK_ETHFI_V2,
   RUN_BOOK_NAMED_TWICE,
   RUN_BOOK_NAMES_NOBODY,
+  RUN_BOOK_PARTIAL_HOLE,
   RUN_BOOK_WEETH_BATCH_1,
+  RUN_BOOK_WEETH_V2,
   RUN_BOOK_WITHHELD,
   SCENARIOS,
+  SCENARIOS_RELISTED,
   SCENARIOS_REMOVED,
   SCENARIOS_V2,
 } from "../fixtures/lab-book";
 import type { LabRunBook, RunBookOutcome } from "../../lib/runbook";
 import {
   anchorBatchOfPhase,
+  attemptSkew,
   AXIS_FAMILY_WORDS,
   axisFamilies,
   axisFamilyWords,
   batchHeaderLine,
   batchOfPhase,
   bookContradiction,
+  bookHoleEngines,
+  bookReachedEveryCoveredEngine,
   bookRefusal,
   CELL_STATE_LABEL,
   cellState,
@@ -52,6 +58,7 @@ import {
   servedIdentity,
   unansweredReason,
   type MatrixPhase,
+  type ScenarioIdentity,
 } from "../../app/lab/matrixCells";
 
 const definitions = SCENARIOS.scenarios;
@@ -2405,4 +2412,543 @@ test("the result cell carries the run's OWN delta, in the engine's OWN decimals"
   expect(cell.engine.eligible_debt_delta_usd).toBe("1500000000");
   expect(cell.engine.usd_decimals).toBe(6);
   expect(cell.batchId).toBe(1);
+});
+
+// ===========================================================================
+// WAVE R14 (Codex round-22).
+//
+// FINDING 1 (matrixCells.ts, `listedPhases`). The filter R13 added is a
+// MEMBERSHIP test keyed by scenario id, which is the only question a map keyed
+// by id can be asked. A row that leaves the listing is dropped; a row that comes
+// BACK is re-admitted on the strength of its id, whatever the definition behind
+// it has become. `kind: "ok"` outcomes defend themselves — the body publishes
+// `scenario_id` + `scenario_version` + `scenario_config_version` and R12's
+// `bookRefusal` reads them — but a RUNNING phase and a NON-OK outcome publish
+// NOTHING. So a v1 run that failed reappeared on a re-listed v2 row as RUNNING
+// or UNANSWERED, and the header counted the v2 row among the rows this session
+// asked about, though v2 was never asked anything. That is R13's own promise
+// broken in the sentence it made it in: a returning row classifies "as itself,
+// or as DEFINITION CHANGED".
+//
+// FINDING 2 (LabBookPanel's `BookResult`). "excluded engines: none — every
+// engine's book reached the run" was gated on `excluded_engines.length === 0`
+// alone, which is not that claim. A book that serves ONE of two covered engines
+// and refuses neither satisfies the gate exactly, while the engine it never
+// mentioned reads UNANSWERED in the matrix above. At the limit — a book naming
+// NOBODY — R13b's detail banner had already promised "the outcome below says so
+// in its own words" over a panel saying the opposite.
+//
+// THE RULE FOR BOTH: a claim is composed only from what the surface can actually
+// establish. Finding 1 binds every phase to the identity it was ASKED under, at
+// dispatch, because that is the only identity a run without a body ever has;
+// finding 2 gates the completeness sentence on the whole of the claim it makes.
+// ===========================================================================
+
+/** The listing after the dropped row is REPUBLISHED, re-cut: DEPEG at v2. */
+const RELISTED = SCENARIOS_RELISTED.scenarios;
+const COVERAGE_RELISTED = rowCoverage(RELISTED);
+const IDENTITY_RELISTED = rowIdentity(RELISTED, SCENARIOS_RELISTED.scenario_config_version);
+
+const DEPEG_V2 = ((): ScenarioDefinition => {
+  const found = RELISTED.find((scenario) => scenario.id === DEPEG.id);
+  if (found === undefined) throw new Error("the re-listed fixture carries no depeg definition");
+  return found;
+})();
+
+/** The stamp a run dispatched while the v1 listing was on screen carries. */
+const STAMP_V1 = IDENTITY.get(DEPEG.id);
+
+/** …and the identity the SAME row publishes once the re-cut listing lands. */
+const IDENT_V2 = IDENTITY_RELISTED.get(DEPEG.id);
+
+/** A phase with the identity the row was showing at dispatch stamped on it. */
+function stamped(shape: MatrixPhase, attempt: ScenarioIdentity | undefined): MatrixPhase {
+  return { ...shape, attempt } as MatrixPhase;
+}
+
+/**
+ * EVERY WAY A RUN CAN CARRY NO BODY OF ITS OWN. `running` is the in-flight
+ * window; the five below are `RunBookOutcome`'s whole non-ok arm, and each is a
+ * state whose cell would otherwise read UNANSWERED on a definition that was
+ * never asked anything.
+ */
+const BODYLESS_SHAPES: [string, MatrixPhase][] = [
+  ["running — the request is still out", { kind: "running" }],
+  [
+    "unanswered-404 — this deployment does not serve run-book",
+    { kind: "outcome", outcome: { kind: "not-served" } },
+  ],
+  [
+    "unanswered-503 — no servable batch",
+    {
+      kind: "outcome",
+      outcome: {
+        kind: "no-batch",
+        message: "no complete risk batch is available.",
+        retryAfterSeconds: 5,
+      },
+    },
+  ],
+  [
+    "unanswered-network — no HTTP response at all",
+    { kind: "outcome", outcome: { kind: "unreachable", message: "fetch failed" } },
+  ],
+  [
+    "unanswered-429 — rate limited",
+    { kind: "outcome", outcome: { kind: "rate-limited", retryAfterSeconds: 3 } },
+  ],
+  [
+    "unanswered-5xx — the service answered without a book",
+    { kind: "outcome", outcome: { kind: "failed", status: 500, message: "internal error" } },
+  ],
+];
+
+// ---------------------------------------------------------------------------
+// FINDING 1 — the attempt, bound to the identity it was asked under.
+// ---------------------------------------------------------------------------
+
+test("R14/1 — THE MECHANISM: a phase with no body has no identity for R12 to read", () => {
+  // This is why the id re-admits it and why neither existing guard can object.
+  // R12 reads the RESPONSE; there is no response here to read, and R11's
+  // coverage read is about a book that was never served either.
+  for (const [what, shape] of BODYLESS_SHAPES) {
+    expect(batchOfPhase(shape, DEPEG_V2.engines, IDENT_V2), what).toBeNull();
+    // The row IS in the re-listed set, so R13's filter admits it — correctly:
+    // there is a row for this id, and something WAS asked under it.
+    expect([...listedPhases(new Map([[DEPEG.id, shape]]), RELISTED).keys()], what).toEqual([
+      DEPEG.id,
+    ]);
+  }
+  // And the two identities the join is between really do differ by exactly the
+  // scenario's own version — the set's token did not move.
+  expect(STAMP_V1).toEqual({ scenarioId: DEPEG.id, version: "v1", configVersion: "v1" });
+  expect(IDENT_V2).toEqual({ scenarioId: DEPEG.id, version: "v2", configVersion: "v1" });
+});
+
+test("R14/1 — THE ROUND TRIP: delist, re-list at v2, and EVERY bodyless shape is DEFINITION CHANGED", () => {
+  for (const [what, shape] of BODYLESS_SHAPES) {
+    const phases = new Map<string, MatrixPhase>([
+      [ETH.id, ok(RUN_BOOK_ETH)], // a real, listed, displayed result at batch 1
+      [DEPEG.id, stamped(shape, STAMP_V1)], // asked under v1
+    ]);
+
+    // ---- STEP 1: still listed at v1. The phase is exactly what it is. -------
+    const atV1 = resolveBatchCohort(listedPhases(phases, definitions), null, COVERAGE, IDENTITY);
+    expect(atV1.attemptedScenarioIds, what).toContain(DEPEG.id);
+    expect(atV1.definitionChangedScenarioIds, what).toEqual([]);
+
+    // ---- STEP 2: DELISTED. R13's filter: it is not there, at all. ----------
+    const removed = resolveBatchCohort(
+      listedPhases(phases, LISTED),
+      null,
+      COVERAGE_LISTED,
+      IDENTITY_LISTED,
+    );
+    expect(removed.attemptedScenarioIds, what).toEqual([ETH.id]);
+    expect(removed.definitionChangedScenarioIds, what).toEqual([]);
+
+    // ---- STEP 3: RE-LISTED AT v2 — the finding. ---------------------------
+    const relisted = resolveBatchCohort(
+      listedPhases(phases, RELISTED),
+      null,
+      COVERAGE_RELISTED,
+      IDENTITY_RELISTED,
+    );
+    expect(relisted.definitionChangedScenarioIds, what).toEqual([DEPEG.id]);
+    expect(relisted.definitionChangedAttemptScenarioIds, what).toEqual([DEPEG.id]);
+    // NEVER THE NEW ROW'S ATTEMPT, in any of the three tenses that claim would
+    // be made in. Pre-R14 the row was in `attempted` and in one of the other two.
+    expect(relisted.attemptedScenarioIds, what).toEqual([ETH.id]);
+    expect(relisted.inFlightScenarioIds, what).toEqual([]);
+    expect(relisted.unansweredScenarioIds, what).toEqual([]);
+    // And it contributes nothing anywhere else either.
+    expect(relisted.displayedPins, what).toEqual([{ scenarioId: ETH.id, batchId: 1 }]);
+    expect(relisted.inFlightHeldPins, what).toEqual([]);
+    expect(relisted.allHoleScenarioIds, what).toEqual([]);
+    expect(relisted.contradictedScenarioIds, what).toEqual([]);
+
+    // THE CELL AGREES WITH THE HEADER, in the register R12 already owns.
+    const cell = cellState({
+      scenario: DEPEG_V2,
+      engine: "debt_manager",
+      phase: stamped(shape, STAMP_V1),
+      cohort: relisted,
+      identity: IDENT_V2,
+    });
+    expect(cell.state, what).toBe("definition-changed");
+    if (cell.state !== "definition-changed") throw new Error("unreachable");
+    expect(cell.skew.subject, what).toBe("attempt");
+    // No book came back, so there is no batch to disclose — the one thing an
+    // answer has that an attempt never does.
+    expect(cell.batchId, what).toBeNull();
+    expect(cell.skew.reason, what).toContain(
+      "this attempt belongs to a definition this page is no longer showing",
+    );
+    expect(cell.skew.reason, what).toContain("scenario_version disagree");
+    // NEVER the pre-R14 readings, and never R12's response wording either.
+    expect(cell.state, what).not.toBe("running");
+    expect(cell.state, what).not.toBe("unanswered");
+    expect(cell.skew.reason, what).not.toContain("the run answered for");
+    expect(CELL_STATE_LABEL[cell.state], what).toBe("DEFINITION CHANGED");
+  }
+});
+
+test("R14/1 — SAME-VERSION re-listing keeps the phase as ITSELF: the stamp agrees", () => {
+  // The other half of the promise. A row that leaves the listing and comes back
+  // UNCHANGED is the same definition it always was, so nothing is refused and
+  // nothing is renamed — the phase reads exactly as it read before.
+  for (const [what, shape] of BODYLESS_SHAPES) {
+    const phases = new Map<string, MatrixPhase>([[DEPEG.id, stamped(shape, STAMP_V1)]]);
+    const cohort = resolveBatchCohort(listedPhases(phases, definitions), null, COVERAGE, IDENTITY);
+    expect(cohort.definitionChangedScenarioIds, what).toEqual([]);
+    expect(cohort.attemptedScenarioIds, what).toEqual([DEPEG.id]);
+    const expected = shape.kind === "running" ? "running" : "unanswered";
+    expect(
+      cellState({
+        scenario: DEPEG,
+        engine: "debt_manager",
+        phase: stamped(shape, STAMP_V1),
+        cohort,
+        identity: STAMP_V1,
+      }).state,
+      what,
+    ).toBe(expected);
+    expect(attemptSkew(stamped(shape, STAMP_V1), STAMP_V1), what).toBeNull();
+  }
+});
+
+test("R14/1 — AN UNSTAMPED PHASE infers nothing: the pre-R14 reading stands", () => {
+  // The discipline R11 gave absent coverage and R12 gave absent identity. The
+  // type admits an unstamped phase transitionally; nothing this wave writes
+  // produces one, and one that exists is not guessed at in either direction.
+  for (const [what, shape] of BODYLESS_SHAPES) {
+    expect(attemptSkew(shape, IDENT_V2), what).toBeNull();
+    const phases = new Map<string, MatrixPhase>([[DEPEG.id, shape]]);
+    const cohort = resolveBatchCohort(
+      listedPhases(phases, RELISTED),
+      null,
+      COVERAGE_RELISTED,
+      IDENTITY_RELISTED,
+    );
+    expect(cohort.attemptedScenarioIds, what).toEqual([DEPEG.id]);
+    expect(cohort.definitionChangedScenarioIds, what).toEqual([]);
+  }
+  // An idle phase is not an attempt whatever is stamped on it.
+  expect(attemptSkew({ kind: "idle" }, IDENT_V2)).toBeNull();
+});
+
+test("R14/1 — SENSITIVITY: without the listing identity, the SAME stamped phases read the old way", () => {
+  // The R11/R12/R13 sensitivity shape. The ONLY difference between the two calls
+  // is whether the current listing's identity was supplied; with it absent the
+  // v1 attempt is read as the v2 row's own, exactly as the defect did.
+  const phases = new Map<string, MatrixPhase>([
+    [DEPEG.id, stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1)],
+  ]);
+
+  const blind = resolveBatchCohort(listedPhases(phases, RELISTED), null, COVERAGE_RELISTED);
+  expect(blind.attemptedScenarioIds).toEqual([DEPEG.id]);
+  expect(blind.unansweredScenarioIds).toEqual([DEPEG.id]);
+  expect(blind.definitionChangedScenarioIds).toEqual([]);
+  expect(batchHeaderLine(blind, null)).toContain("1 run(s) ended without a served result");
+
+  const seeing = resolveBatchCohort(
+    listedPhases(phases, RELISTED),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+  expect(seeing.attemptedScenarioIds).toEqual([]);
+  expect(seeing.unansweredScenarioIds).toEqual([]);
+  expect(seeing.definitionChangedAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(batchHeaderLine(seeing, null)).not.toContain("ended without a served result");
+});
+
+test("R14/1 — THE OK PATH IS NOT DOUBLE-GATED: the response's own identity wins, both ways", () => {
+  // THE ADJACENCY THE RULING NAMES. The stamp and a served body CAN disagree —
+  // the reader runs while the listing says v1 against a deployment that has
+  // already moved — and where they do, exactly ONE register may result. The
+  // body's is the one that counts: it is the server's word about what it
+  // computed, and R12's refresh path turns on it.
+
+  // (i) STAMPED v1, ANSWERED v2, LISTING v2 → the answer is about the definition
+  //     on screen, so the row classifies CLEANLY. Gating on the stamp here would
+  //     break R12's promise that a stored answer becomes readable "the moment the
+  //     listing it was computed against is the one on screen".
+  const answeredV2 = stamped(ok(RUN_BOOK_WEETH_V2), STAMP_V1);
+  expect(attemptSkew(answeredV2, IDENT_V2)).toBeNull();
+  const clean = resolveBatchCohort(
+    new Map([[DEPEG.id, answeredV2]]),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+  expect(clean.definitionChangedScenarioIds).toEqual([]);
+  expect(clean.currentScenarioIds).toEqual([DEPEG.id]);
+  expect(
+    cellState({
+      scenario: DEPEG_V2,
+      engine: "debt_manager",
+      phase: answeredV2,
+      cohort: clean,
+      identity: IDENT_V2,
+    }).state,
+  ).toBe("result");
+
+  // (ii) STAMPED v2, ANSWERED v1, LISTING v2 → ONE register again, and it is the
+  //      RESPONSE's: R12's `subject: "response"` skew, with R12's own wording.
+  const answeredV1 = stamped(ok(RUN_BOOK_WEETH_BATCH_1), IDENT_V2);
+  expect(attemptSkew(answeredV1, IDENT_V2)).toBeNull();
+  const cohort = resolveBatchCohort(
+    new Map([[DEPEG.id, answeredV1]]),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+  const skewed = cellState({
+    scenario: DEPEG_V2,
+    engine: "debt_manager",
+    phase: answeredV1,
+    cohort,
+    identity: IDENT_V2,
+  });
+  expect(skewed.state).toBe("definition-changed");
+  if (skewed.state !== "definition-changed") throw new Error("unreachable");
+  expect(skewed.skew.subject).toBe("response");
+  expect(skewed.skew.reason).toContain("this scenario's committed definition changed");
+  expect(skewed.skew.reason).not.toContain("this attempt belongs to");
+  // …and it is counted with R12's ANSWERS, not with R14's attempts.
+  expect(cohort.definitionChangedScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([]);
+});
+
+test("R14/1 — THE HEADER: an attempt is never called an answer, and never called “not run”", () => {
+  const phases = new Map<string, MatrixPhase>([
+    [DEPEG.id, stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1)],
+  ]);
+  const cohort = resolveBatchCohort(
+    listedPhases(phases, RELISTED),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+
+  const line = batchHeaderLine(cohort, null);
+  expect(line).toBe(
+    "no result has been served to this table yet: 1 run(s) were ASKED under a committed " +
+      "definition this page is no longer showing and never came back with a book of their own — " +
+      "re-run to ask under the current one. There is no batch for this table to be as of — and " +
+      "this is NOT “not run”: every row counted here was asked, and each says in its own cell " +
+      "what became of the asking.",
+  );
+  // THE CONTRADICTION THIS ARM EXISTS TO PREVENT: `attemptedScenarioIds` is
+  // deliberately empty here, and the no-run arm keys off exactly that. Left
+  // alone it would have announced "every covered cell reads not run" above two
+  // cells reading DEFINITION CHANGED.
+  expect(cohort.attemptedScenarioIds).toEqual([]);
+  expect(line).not.toBe(MATRIX_NO_RUN_LINE);
+  expect(line).not.toContain("no run has been issued yet");
+  // …nor any of the accounts that belong to other events.
+  expect(line).not.toContain("ended without a served result");
+  expect(line).not.toContain("are in flight");
+  expect(line).not.toContain("answered for a committed definition");
+  expect(line).not.toContain("named none of the row's covered engines");
+});
+
+test("R14/1 — the attempt clause rides BESIDE a real cohort, and beside R12's own", () => {
+  // Both halves of the definition-changed set at once, over a live cohort. They
+  // are counted separately and worded separately because the REMEDIES differ:
+  // an answer needs a fresh listing, an attempt needs a fresh run.
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)], // displayed @1
+    [ETHFI.id, stamped(ok(RUN_BOOK_ETHFI_V2), IDENTITY.get(ETHFI.id))], // an ANSWER, skewed
+    [DEPEG.id, stamped({ kind: "running" }, STAMP_V1)], // an ATTEMPT, skewed
+  ]);
+  const cohort = resolveBatchCohort(
+    listedPhases(phases, RELISTED),
+    null,
+    COVERAGE_RELISTED,
+    IDENTITY_RELISTED,
+  );
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.definitionChangedScenarioIds).toEqual([ETHFI.id, DEPEG.id]);
+  expect(cohort.definitionChangedAttemptScenarioIds).toEqual([DEPEG.id]);
+  expect(cohort.inFlightScenarioIds).toEqual([]);
+
+  const line = batchHeaderLine(cohort, null);
+  // R12's sentence, byte for byte, with its own count of ONE — the attempt is
+  // not folded into it.
+  expect(line).toContain(
+    "1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing — the " +
+      "committed set moved after this page loaded.",
+  );
+  expect(line).toContain("Refresh the committed listing to run against the current definition.");
+  // R14's, with its own count and the OTHER remedy.
+  expect(line).toContain(
+    "1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and never " +
+      "came back with a book of their own",
+  );
+  expect(line).toContain("Re-run the row to ask under the current definition");
+  expect(line).toContain("a listing refresh resolves nothing here");
+  // The cohort above is untouched, and the in-flight assurance is NOT claimed
+  // for a request that is out under another definition.
+  expect(line).toContain("results shown together were measured at batch #1.");
+  expect(line).not.toContain("row(s) have a run in flight");
+});
+
+test("R14/1 — a skewed attempt's HELD evidence raises neither the anchor nor the watermark", () => {
+  // The clause says such a row "pins no batch". A running phase carries held
+  // evidence that ordinarily anchors the cohort (R8), so letting it anchor here
+  // would falsify that sentence in the breath it is composed — and would hand
+  // the anchor to a request nobody on this table made.
+  // The v2 answer at a NEWER batch, so the two readings cannot coincide by
+  // accident: the fixture with ONE field moved, exactly as the generator's own
+  // supersession variants move it.
+  const V2_AT_TWO = {
+    ...RUN_BOOK_WEETH_V2,
+    batch: { ...RUN_BOOK_WEETH_V2.batch, id: 2 },
+  } as typeof RUN_BOOK_ETH;
+
+  const held = stamped(runningHolding(V2_AT_TWO), STAMP_V1); // held @2, asked under v1
+  expect(anchorBatchOfPhase(held, DEPEG_V2.engines, IDENT_V2)).toBeNull();
+  // With the stamp AGREEING it anchors exactly as R8 built it to — so the null
+  // above is the stamp's doing and nothing else's.
+  expect(
+    anchorBatchOfPhase(stamped(runningHolding(V2_AT_TWO), IDENT_V2), DEPEG_V2.engines, IDENT_V2),
+  ).toBe(2);
+
+  const phases = new Map<string, MatrixPhase>([
+    [ETH.id, ok(RUN_BOOK_ETH)],
+    [DEPEG.id, held],
+  ]);
+  const listedNow = listedPhases(phases, RELISTED);
+  expect(observedAnchorBatch(listedNow, COVERAGE_RELISTED, IDENTITY_RELISTED)).toBe(1);
+  const cohort = resolveBatchCohort(listedNow, null, COVERAGE_RELISTED, IDENTITY_RELISTED);
+  expect(cohort.anchorBatchId).toBe(1);
+  expect(cohort.currentScenarioIds).toEqual([ETH.id]);
+  expect(cohort.supersededScenarioIds).toEqual([]);
+  expect(cohort.inFlightHeldPins).toEqual([]);
+
+  // AND THE FLOOR IS NOT LOWERED — R13's rule, for R13's reason. A watermark
+  // learned while the row was its old self is a statement about what this panel
+  // HAS SEEN; what changes is only that this phase can no longer PUT a batch in.
+  const withFloor = resolveBatchCohort(listedNow, 2, COVERAGE_RELISTED, IDENTITY_RELISTED);
+  expect(withFloor.anchorBatchId).toBe(2);
+  expect(withFloor.currentScenarioIds).toEqual([]);
+  expect(batchHeaderLine(withFloor, null)).toContain("NO result now displayed was measured at it");
+});
+
+test("R14/1 — the in-flight attempt's own wording names the request, not a re-run", () => {
+  // The two remedies differ by whether the request is still out, and the
+  // sentence must not send a reader to click a button the row has disabled.
+  const running = attemptSkew(stamped({ kind: "running" }, STAMP_V1), IDENT_V2);
+  const ended = attemptSkew(
+    stamped({ kind: "outcome", outcome: { kind: "not-served" } }, STAMP_V1),
+    IDENT_V2,
+  );
+  expect(running?.reason).toContain("The request is still out");
+  expect(running?.reason).toContain("judged by the identity the response publishes for ITSELF");
+  expect(running?.reason).not.toContain("Re-run this row");
+  expect(ended?.reason).toContain(
+    "Re-run this row to ask under the definition this page is showing",
+  );
+  expect(ended?.reason).not.toContain("The request is still out");
+  // Both name the two identities in full, so the reader can point at each.
+  for (const skew of [running, ended]) {
+    expect(skew?.subject).toBe("attempt");
+    expect(skew?.served).toEqual(STAMP_V1);
+    expect(skew?.listing).toEqual(IDENT_V2);
+    expect(skew?.fields).toEqual(["scenario_version"]);
+    expect(skew?.reason).toContain(
+      "weeth_market_depeg_oracles_held v1 at scenario_config_version v1",
+    );
+    expect(skew?.reason).toContain(
+      "weeth_market_depeg_oracles_held v2 at scenario_config_version v1",
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// FINDING 2 — the completeness claim, gated on the whole of what it claims.
+// ---------------------------------------------------------------------------
+
+test("R14/2 — THE COMPLETENESS CONDITION: both halves, or the sentence is not said", () => {
+  const covered = DEPEG.engines; // aave_v3_etherfi + debt_manager
+  expect(covered).toEqual(["aave_v3_etherfi", "debt_manager"]);
+
+  // THE CLEAN BOOK: nothing refused AND every covered engine served. Only here
+  // is "every engine's book reached the run" a true thing to say.
+  expect(
+    bookReachedEveryCoveredEngine(RUN_BOOK_WEETH_BATCH_1 as unknown as LabRunBook, covered),
+  ).toBe(true);
+  expect(bookHoleEngines(RUN_BOOK_WEETH_BATCH_1 as unknown as LabRunBook, covered)).toEqual([]);
+
+  // THE FINDING: a PARTIAL HOLE satisfies the OLD gate exactly —
+  // `excluded_engines` is empty — while one covered engine reached nothing.
+  expect(RUN_BOOK_PARTIAL_HOLE.excluded_engines).toEqual([]);
+  expect(bookHoleEngines(RUN_BOOK_PARTIAL_HOLE as unknown as LabRunBook, covered)).toEqual([
+    "aave_v3_etherfi",
+  ]);
+  expect(
+    bookReachedEveryCoveredEngine(RUN_BOOK_PARTIAL_HOLE as unknown as LabRunBook, covered),
+  ).toBe(false);
+  // …and the matrix says so in the cell, which is the statement the panel used
+  // to contradict.
+  expect(
+    cellState({
+      scenario: DEPEG,
+      engine: "aave_v3_etherfi",
+      phase: ok(RUN_BOOK_PARTIAL_HOLE),
+      cohort: resolveBatchCohort(
+        new Map([[DEPEG.id, ok(RUN_BOOK_PARTIAL_HOLE)]]),
+        null,
+        COVERAGE,
+        IDENTITY,
+      ),
+      identity: IDENTITY.get(DEPEG.id),
+    }).state,
+  ).toBe("unanswered");
+
+  // A WITHHELD ENGINE IS NOT A HOLE — it reached the run and was refused, which
+  // is a different sentence and a different cell state.
+  expect(bookHoleEngines(RUN_BOOK_WITHHELD as unknown as LabRunBook, covered)).toEqual([]);
+  expect(bookReachedEveryCoveredEngine(RUN_BOOK_WITHHELD as unknown as LabRunBook, covered)).toBe(
+    false,
+  );
+
+  // THE ALL-HOLE BOOK: the limit case, where there is no engine the claim could
+  // even be about.
+  expect(bookHoleEngines(RUN_BOOK_NAMES_NOBODY as unknown as LabRunBook, covered)).toEqual(covered);
+  expect(
+    bookReachedEveryCoveredEngine(RUN_BOOK_NAMES_NOBODY as unknown as LabRunBook, covered),
+  ).toBe(false);
+});
+
+test("R14/2 — the hole read agrees with `isAllHoleBook` at the row level, by construction", () => {
+  // One predicate, two granularities. If they could disagree, the panel and the
+  // header would be describing two different books.
+  const covered = DEPEG.engines;
+  for (const body of [
+    RUN_BOOK_WEETH_BATCH_1,
+    RUN_BOOK_WITHHELD,
+    RUN_BOOK_PARTIAL_HOLE,
+    RUN_BOOK_NAMES_NOBODY,
+  ]) {
+    const response = body as unknown as LabRunBook;
+    expect(isAllHoleBook(response, covered)).toBe(
+      bookHoleEngines(response, covered).length === covered.length,
+    );
+  }
+});
+
+test("R14/2 — WITHOUT the covered list, nothing is inferred: the pre-R14 reading stands", () => {
+  // The discipline `isAllHoleBook` and `definitionSkew` keep. A caller that
+  // cannot say what the row covers cannot accuse the book of missing any of it —
+  // so the sentence falls back to exactly its old condition, and only that.
+  expect(bookHoleEngines(RUN_BOOK_PARTIAL_HOLE as unknown as LabRunBook, undefined)).toEqual([]);
+  expect(
+    bookReachedEveryCoveredEngine(RUN_BOOK_PARTIAL_HOLE as unknown as LabRunBook, undefined),
+  ).toBe(true);
+  expect(bookReachedEveryCoveredEngine(RUN_BOOK_WITHHELD as unknown as LabRunBook, undefined)).toBe(
+    false,
+  );
 });

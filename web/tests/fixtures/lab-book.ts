@@ -106,3 +106,38 @@ export const SCENARIOS_REMOVED: Schemas["ScenariosResponse"] = load("scenarios.r
 export const RUN_BOOK_ETHFI_V2: Schemas["RunBookResponse"] = load(
   "run-book.ethfi_minus_50.v2.json",
 );
+
+/**
+ * THE RE-LISTED ROW (Wave R14, finding 1) — the committed listing after a
+ * deployment republished `weeth_market_depeg_oracles_held` RE-CUT.
+ *
+ * It is `SCENARIOS` with exactly one field moved: that scenario's own `version`
+ * is now v2. The set's `scenario_config_version` is held at v1 for the same
+ * reason `SCENARIOS_REMOVED` holds it — moving it would refuse every surviving
+ * row and hide the finding behind a guard that never sees it.
+ *
+ * The sequence it completes: v1 lists the row, `SCENARIOS_REMOVED` drops it (and
+ * R13 correctly filters the orphaned phase out), and this listing brings the id
+ * back attached to a DIFFERENT definition. `listedPhases` re-admits the stored
+ * phase on the strength of the id alone; a `kind: "ok"` outcome defends itself
+ * because the body publishes its own identity, but a RUNNING phase and a NON-OK
+ * outcome publish nothing at all.
+ */
+export const SCENARIOS_RELISTED: Schemas["ScenariosResponse"] = load("scenarios.relisted.json");
+
+/** What the republishing deployment answers for that id: the example at v2. */
+export const RUN_BOOK_WEETH_V2: Schemas["RunBookResponse"] = load("run-book.weeth.v2.json");
+
+/**
+ * THE PARTIAL HOLE (Wave R14, finding 2) — `RUN_BOOK_WITHHELD` without the
+ * refusal: aave dropped from `engines[]` and named in `excluded_engines[]`
+ * NOWHERE.
+ *
+ * One of the row's two committed engines reached the run and the other is in
+ * neither array, so aave's cell reads UNANSWERED while `excluded_engines` is
+ * empty — which was the whole condition the detail panel rendered "excluded
+ * engines: none — every engine's book reached the run" on.
+ */
+export const RUN_BOOK_PARTIAL_HOLE: Schemas["RunBookResponse"] = load(
+  "run-book.partial-hole.json",
+);

@@ -138,6 +138,45 @@
 //     row anywhere. Holding the token still isolates that orphan as the only
 //     anomaly on the table.
 //
+// 10. scenarios.relisted.json + run-book.weeth.v2.json — WAVE R14, FINDING 1:
+//     THE RE-LISTED ROW. (9) with the dropped definition PUT BACK, in its
+//     original wire position, with ONE field moved: its own `version` becomes
+//     "v2". The set's `scenario_config_version` is again LEFT at v1, for exactly
+//     the reason (9) leaves it: moving it would refuse every surviving row and
+//     hide the finding behind a guard that never sees it.
+//
+//     That is the sequence the finding is about, told in three listings the
+//     deployment actually serves: v1 lists the scenario, the next deployment
+//     drops it, the next republishes it RE-CUT. R13 filters the orphan out of
+//     the middle listing correctly; the defect is the third step, where
+//     `listedPhases` re-admits the stored phase on the strength of its id alone.
+//     For a `kind: "ok"` outcome R12 catches it — the body publishes its own
+//     identity — but a RUNNING phase and a NON-OK outcome publish nothing, so
+//     the v1 failure renders on the v2 row as RUNNING or UNANSWERED and the
+//     header counts v2 as attempted.
+//
+//     run-book.weeth.v2.json is what the third deployment answers for that id:
+//     the run-book example with `scenario_version` moved to "v2" to match the
+//     re-listed definition and NOTHING else touched — `scenario_config_version`
+//     stays v1 because the set's token did not move. It is the clean re-run that
+//     proves the row works normally once it is asked under the definition on
+//     screen.
+//
+// 11. run-book.partial-hole.json — WAVE R14, FINDING 2: THE PARTIAL HOLE. File
+//     (4) with its ONE edit undone: the aave engine is dropped from `engines[]`
+//     exactly as (4) drops it, but `excluded_engines[]` is left EMPTY — no
+//     refusal is recorded for it. `coverage` is left untouched, still claiming
+//     `stress_coverage_is_full: true`, for the same reason (5) leaves it: the
+//     envelope looks healthy while the arrays name only half the row.
+//
+//     It is the body a deployment produces when an engine's row is dropped
+//     without its refusal being recorded, and the contract permits it for the
+//     reasons (5) sets out. `weeth_market_depeg_oracles_held` is committed for
+//     BOTH engines, so aave is named in neither array: its cell reads UNANSWERED
+//     while `excluded_engines.length === 0` — which is the whole condition the
+//     detail panel used to render "excluded engines: none — every engine's book
+//     reached the run" on. One screen, two mutually exclusive statements.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -393,3 +432,47 @@ if (delistedListing.scenarios.length !== committedListing.scenarios.length - 1) 
 }
 
 write("scenarios.removed.json", delistedListing);
+
+// --- 10: THE RE-LISTED ROW (Wave R14, finding 1) ---------------------------
+//
+// The dropped definition, republished RE-CUT: back in its original wire
+// position with its own `version` moved to v2, and the set's token held at v1 so
+// every other row is untouched. A phase stored while the row read v1 is
+// re-admitted here by scenario id alone — and a phase with no served body has
+// nothing but the identity it was DISPATCHED under to say otherwise.
+
+const relistedDefinition = committedListing.scenarios.find(
+  (definition) => definition.id === DELISTED_ID,
+);
+if (relistedDefinition === undefined) {
+  console.error(`generate-lab-book.mjs: the committed listing carries no ${DELISTED_ID}`);
+  process.exit(1);
+}
+
+write("scenarios.relisted.json", {
+  ...committedListing,
+  scenarios: committedListing.scenarios.map((definition) =>
+    definition.id === DELISTED_ID ? { ...definition, version: V2 } : definition,
+  ),
+});
+
+// What the republishing deployment answers for that id: the example with its
+// `scenario_version` moved to match, and nothing else. The set token did not
+// move, so `scenario_config_version` does not either.
+write("run-book.weeth.v2.json", {
+  ...runBookExample,
+  scenario_version: V2,
+});
+
+// --- 11: THE PARTIAL HOLE (Wave R14, finding 2) ----------------------------
+//
+// (4) without its refusal: aave dropped from `engines[]` and NOT named in
+// `excluded_engines[]`. One of the row's two covered engines reached the run;
+// the other is in neither array, so its cell reads UNANSWERED while
+// `excluded_engines.length === 0` — the exact condition the detail panel's
+// "every engine's book reached the run" line used to be gated on.
+
+write("run-book.partial-hole.json", {
+  ...runBookExample,
+  engines: runBookExample.engines.filter((engine) => engine.engine !== refusal.engine),
+});

@@ -47,12 +47,18 @@ import { LabMatrix } from "./LabMatrix";
 import { LabScenarioChips } from "./LabScenarioChips";
 import { LAB_DEK_LOADING, labDek } from "./labDek";
 import {
+  attemptSkew,
+  bookHoleEngines,
   bookRefusal,
+  bookReachedEveryCoveredEngine,
+  isAllHoleBook,
   matrixColumns,
   rerunFailedBanner,
   rowIdentity,
   unansweredReason,
+  NO_ROW_IDENTITY,
   type BookRefusal,
+  type DefinitionSkew,
   type MatrixPhase,
   type ScenarioIdentity,
 } from "./matrixCells";
@@ -149,7 +155,79 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
   );
 }
 
-function BookResult({ response }: { response: LabRunBook }) {
+/** "debt_manager" / "aave_v3_etherfi and debt_manager" — the cells' vocabulary. */
+function engineList(engines: readonly string[]): string {
+  if (engines.length <= 1) return engines[0] ?? "no engine";
+  return `${engines.slice(0, -1).join(", ")} and ${engines[engines.length - 1] ?? ""}`;
+}
+
+/**
+ * THE HOLE, IN THE CELLS' OWN WORDS (Wave R14, finding 2).
+ *
+ * Composed as ONE string rather than as JSX prose, deliberately: JSX collapses
+ * whitespace across expression boundaries, so a sentence interleaved with
+ * `{...}` is not reliably the sentence a reader gets. Every wording this wave
+ * lands is load-bearing and is pinned by a test, and a pin must be able to quote
+ * what is rendered.
+ *
+ * It also does NOT quote the completeness claim in order to negate it. A surface
+ * whose whole job is that the two statements never appear together must not
+ * print one of them as the first half of the other — and a test asserting the
+ * claim's ABSENCE could not tell the two apart.
+ */
+function holeDisclosure(hole: readonly string[], coveredCount: number): string {
+  const one = hole.length === 1;
+  return (
+    `AN INCOMPLETE BOOK: this run returned neither a result nor a refusal for ` +
+    `${engineList(hole)} — ${one ? "an engine" : "engines"} this scenario's committed ` +
+    `definition covers. That absence is a HOLE, not a refusal and not a zero: nobody withheld ` +
+    `${one ? "it" : "them"}, and this surface will not fill a hole with a zero. ` +
+    `${String(coveredCount - hole.length)} of the ${String(coveredCount)} covered engine(s) ` +
+    `reached this run, so no completeness claim is made here — those cells read UNANSWERED in ` +
+    `the matrix above.`
+  );
+}
+
+/**
+ * A SERVED BOOK THAT NAMED NOBODY, in the same vocabulary (Wave R14, finding 2).
+ *
+ * One string, for the reason above, and one vocabulary with the cells, the
+ * header's R11 clause and R13b's banner: "a served book, but not a served
+ * result", "every covered cell … reads UNANSWERED", "the book arrived and named
+ * nobody". The batch its envelope carried is disclosed and disclaimed in the
+ * same breath — R11's pattern — because this panel is in no cohort either way.
+ */
+function allHoleDisclosure(covered: readonly string[], batchId: number): string {
+  return (
+    `${engineList(covered)} ${covered.length === 1 ? "is" : "are"} named in neither engines[] ` +
+    `nor excluded_engines[], so every covered cell of this row reads UNANSWERED. Nothing here ` +
+    `was refused and no absence is a zero — the book arrived and named nobody. It was measured ` +
+    `at batch #${String(batchId)}, and no cell on this page is part of that batch's cohort. ` +
+    `This panel therefore shows no aggregate, no delta and no completeness claim from it.`
+  );
+}
+
+function BookResult({
+  response,
+  covered,
+}: {
+  response: LabRunBook;
+  /**
+   * WAVE R14, FINDING 2 — the engines this scenario's COMMITTED DEFINITION
+   * covers. Absent means the caller makes no coverage claim and nothing is
+   * inferred, the same discipline `isAllHoleBook` and `definitionSkew` keep.
+   */
+  covered: readonly string[] | undefined;
+}) {
+  // WAVE R14, FINDING 2 — THE COMPLETENESS SENTENCE IS GATED ON THE CLAIM IT
+  // MAKES, not on half of it. "excluded engines: none — every engine's book
+  // reached the run" asserts BOTH that nothing was refused AND that every
+  // covered engine was answered; it used to render on the first half alone, so
+  // a book serving ONE of two covered engines and refusing neither printed it
+  // directly under a matrix cell reading UNANSWERED for the other. The hole is
+  // named here instead, in the cells' own words.
+  const hole = bookHoleEngines(response, covered);
+  const complete = bookReachedEveryCoveredEngine(response, covered);
   return (
     <div data-testid="book-result">
       <div className={styles.scenarioHead}>
@@ -181,9 +259,11 @@ function BookResult({ response }: { response: LabRunBook }) {
 
       <div data-testid="book-excluded">
         {response.excluded_engines.length === 0 ? (
-          <p className={styles.caption}>
-            excluded engines: none — every engine&apos;s book reached the run
-          </p>
+          complete ? (
+            <p className={styles.caption}>
+              excluded engines: none — every engine&apos;s book reached the run
+            </p>
+          ) : null
         ) : (
           <div className={styles.withheldList}>
             {response.excluded_engines.map((refusal) => (
@@ -194,6 +274,14 @@ function BookResult({ response }: { response: LabRunBook }) {
               </div>
             ))}
           </div>
+        )}
+        {/* WAVE R14, FINDING 2: the hole, NAMED. It rides beside the refusal
+            list too, because a book can both refuse one engine and never
+            mention another, and those are two different absences. */}
+        {hole.length > 0 && (
+          <p className={styles.caption} data-testid="book-hole">
+            {holeDisclosure(hole, covered?.length ?? 0)}
+          </p>
         )}
       </div>
 
@@ -281,23 +369,94 @@ function BookRefusedView({ id, refusal }: { id: string; refusal: BookRefusal }) 
   );
 }
 
+/**
+ * A SERVED BOOK THAT MEASURED NOTHING (Wave R14, finding 2).
+ *
+ * THE DEFECT THIS CLOSES. R13b ruled that a retained ALL-HOLE book is never
+ * called a measurement, and its detail banner says so — ending "the outcome
+ * below says so in its own words". The outcome below was `BookResult`, which
+ * over a body with both arrays empty printed
+ *
+ *   "excluded engines: none — every engine's book reached the run"
+ *
+ * beneath a header counting the row as SERVED A BOOK THAT NAMED NOBODY and
+ * beside cells reading UNANSWERED. The banner's promise was false, and the two
+ * sentences were mutually exclusive on one screen.
+ *
+ * So the panel now has the state the cells and the header already had, in the
+ * same vocabulary: the book arrived, it named nobody, and this is a served book
+ * rather than a served result. It renders no aggregate, no delta, no refusal
+ * register and — above all — NO COMPLETENESS LINE, because there is no engine it
+ * could be a claim about.
+ *
+ * It is decided AFTER `bookRefusal` and before anything is rendered, which is
+ * the same order `resolveBatchCohort` and `cellState` decide it in: a body that
+ * contradicts itself or answers for another definition is refused whole first,
+ * and the hole read only gets a body worth asking it of.
+ */
+function BookAllHoleView({
+  id,
+  response,
+  covered,
+}: {
+  id: string;
+  response: LabRunBook;
+  covered: readonly string[];
+}) {
+  return (
+    <div className={styles.notServed} data-testid="runbook-all-hole">
+      <b>
+        a served book, but not a served result: this book named none of the engines this
+        scenario&apos;s committed definition covers.
+      </b>{" "}
+      {allHoleDisclosure(covered, response.batch.id)} Re-run{" "}
+      <span className="mono">{id}</span> to ask for a book that names them.
+    </div>
+  );
+}
+
+/**
+ * A RUN ASKED UNDER A DEFINITION THIS PAGE NO LONGER SHOWS (Wave R14, finding 1).
+ *
+ * The detail half of the matrix cell. Without it this panel would render the
+ * raw outcome — "book-wide stress not yet served by this deployment", or the
+ * in-flight pending line — directly under a row whose every cell reads
+ * DEFINITION CHANGED, which is the same header-versus-cells contradiction R10
+ * through R13 closed everywhere else.
+ */
+function BookAttemptChangedView({ skew }: { skew: DefinitionSkew }) {
+  return (
+    <div className={styles.notServed} data-testid="runbook-attempt-changed">
+      <b>refusing to read this run as this row&apos;s: it was asked under another committed
+      definition.</b>{" "}
+      {skew.reason} No book came back from it, so there is nothing here for a listing refresh to
+      make readable — this panel shows no aggregate, no delta and no outcome register from it.
+    </div>
+  );
+}
+
 function OutcomeView({
   id,
   outcome,
   identity,
+  covered,
 }: {
   id: string;
   outcome: RunBookOutcome;
   identity: ScenarioIdentity | undefined;
+  /** WAVE R14 — the engines this row's committed definition covers. */
+  covered: readonly string[];
 }) {
   switch (outcome.kind) {
     case "ok": {
       const refusal = bookRefusal(outcome.response, identity);
-      return refusal === null ? (
-        <BookResult response={outcome.response} />
-      ) : (
-        <BookRefusedView id={id} refusal={refusal} />
-      );
+      if (refusal !== null) return <BookRefusedView id={id} refusal={refusal} />;
+      // WAVE R14, FINDING 2 — the R11 read, in the order the model already uses
+      // it: refuse the body first, then ask whether it displays anything.
+      if (isAllHoleBook(outcome.response, covered)) {
+        return <BookAllHoleView id={id} response={outcome.response} covered={covered} />;
+      }
+      return <BookResult response={outcome.response} covered={covered} />;
     }
     case "not-served":
       return (
@@ -362,6 +521,10 @@ function CommittedDetail({
   // function the matrix's row banner calls, so the two surfaces cannot give
   // different accounts of one retained response. See `rerunFailedBanner`.
   const rerunBanner = rerunFailedBanner(phase, identity, "detail", scenario.engines);
+  // WAVE R14, FINDING 1 — the same read the matrix cell makes, from the same
+  // function, so this panel can never render an outcome the row above has
+  // already declined to read as its own.
+  const staleAttempt = attemptSkew(phase, identity);
   return (
     <section data-testid="committed-detail" data-scenario-id={scenario.id}>
       <div className={styles.scenarioHead}>
@@ -413,7 +576,7 @@ function CommittedDetail({
           servable batch; writes nothing
         </span>
       </div>
-      {phase.kind === "running" && (
+      {phase.kind === "running" && staleAttempt === null && (
         <p className={styles.pendingState} data-testid="book-running">
           running <span className="mono">{scenario.id}</span> over the whole book — request in
           flight
@@ -438,8 +601,20 @@ function CommittedDetail({
           {rerunBanner.line}
         </p>
       )}
-      {phase.kind === "outcome" && (
-        <OutcomeView id={scenario.id} outcome={phase.outcome} identity={identity} />
+      {/* WAVE R14, FINDING 1: a run this row's definition never made gets the
+          register the cells give it, not the raw outcome. Rendering "book-wide
+          stress not yet served by this deployment" under a row reading
+          DEFINITION CHANGED would be the header-versus-cells contradiction
+          arriving in the panel. `attemptSkew` is null for every served body, so
+          this never gates a response — R12's gate keeps that job alone. */}
+      {staleAttempt !== null && <BookAttemptChangedView skew={staleAttempt} />}
+      {phase.kind === "outcome" && staleAttempt === null && (
+        <OutcomeView
+          id={scenario.id}
+          outcome={phase.outcome}
+          identity={identity}
+          covered={scenario.engines}
+        />
       )}
       <LabOutOfModel items={scenario.out_of_model} />
     </section>
@@ -531,7 +706,26 @@ function LabBookPanelInner() {
   //      ORIGINAL batch pin, with the failure NAMED beside it. Replacing a real
   //      measurement with a 503 would lose evidence to an event that says
   //      nothing about it — and drop the anchor in the same motion.
-  const run = useCallback((scenarioId: string) => {
+  //
+  // WAVE R14, FINDING 1 — AND THE ATTEMPT IS STAMPED WITH THE IDENTITY THE ROW
+  // WAS SHOWING, here, because here is the only place that knows it.
+  //
+  // A run still in flight and a run that ended without a book carry NO identity
+  // of their own — there is no body to read one off — so a listing that dropped
+  // and then re-published a scenario RE-CUT re-admitted the old phase onto the
+  // new row by id alone (`listedPhases`), where it rendered as RUNNING or
+  // UNANSWERED for a definition nobody had asked anything. The stamp is the same
+  // triple R12 joins on, taken from the listing this panel is CURRENTLY showing
+  // at the instant of dispatch, and it is passed in by the caller rather than
+  // read from state so this callback stays dependency-free — `run` is a
+  // dependency of the arrival effect, and re-creating it on every listing change
+  // would re-fetch the listing that changed it.
+  //
+  // It travels into BOTH phases the request writes: the `running` one and the
+  // settled one. A response that carries its own identity outranks it (see
+  // `attemptSkew`), so stamping a phase that will end up holding a served book
+  // costs nothing and keeps one shape for all four cases.
+  const run = useCallback((scenarioId: string, attempt: ScenarioIdentity | undefined) => {
     const seq = (runSeq.current.get(scenarioId) ?? 0) + 1;
     runSeq.current.set(scenarioId, seq);
     setPhases((previous) => {
@@ -544,7 +738,7 @@ function LabBookPanelInner() {
             : undefined;
       return new Map(previous).set(
         scenarioId,
-        held === undefined ? { kind: "running" } : { kind: "running", held },
+        held === undefined ? { kind: "running", attempt } : { kind: "running", held, attempt },
       );
     });
     void runBookScenario(solventBaseUrl(), scenarioId).then((outcome) => {
@@ -554,8 +748,8 @@ function LabBookPanelInner() {
         const held = prior?.kind === "running" ? prior.held : undefined;
         const next: MatrixPhase =
           outcome.kind !== "ok" && held !== undefined && held.kind === "ok"
-            ? { kind: "outcome", outcome: held, rerunFailed: unansweredReason(outcome) }
-            : { kind: "outcome", outcome };
+            ? { kind: "outcome", outcome: held, rerunFailed: unansweredReason(outcome), attempt }
+            : { kind: "outcome", outcome, attempt };
         return new Map(previous).set(scenarioId, next);
       });
     });
@@ -621,7 +815,13 @@ function LabBookPanelInner() {
           if (wanted === null || autoRan.current === wanted) return;
           if (!response.scenarios.some((scenario) => scenario.id === wanted)) return;
           autoRan.current = wanted;
-          run(wanted);
+          // WAVE R14: stamped from the response that just made membership
+          // knowable — the same listing the auto-run's own membership test is
+          // decided by, so the two can never be about different definitions.
+          run(
+            wanted,
+            rowIdentity(response.scenarios, response.scenario_config_version).get(wanted),
+          );
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -664,6 +864,15 @@ function LabBookPanelInner() {
   const scenarios: readonly ScenarioDefinition[] =
     listing.phase === "ok" ? listing.scenarios : NO_SCENARIOS;
   const columns = matrixColumns(scenarios);
+  // WAVE R14 — the identity this page is CURRENTLY showing, per row, derived
+  // once. It is both halves of the same fact: what a STORED phase is judged
+  // against, and what a NEW run is stamped with at dispatch. Deriving it in one
+  // place is what makes those two the same identity by construction rather than
+  // by two callers agreeing to look it up the same way.
+  const identities =
+    listing.phase === "ok"
+      ? rowIdentity(listing.scenarios, listing.configVersion)
+      : NO_ROW_IDENTITY;
 
   // The selection is DERIVED, never stored on arrival: an explicit pick wins,
   // then the deep link's id if the listing carries it, then the committed
@@ -730,7 +939,9 @@ function LabBookPanelInner() {
             columns={columns}
             phases={phases}
             frontierBatchId={frontierBatchId}
-            onRun={run}
+            onRun={(scenarioId) => {
+              run(scenarioId, identities.get(scenarioId));
+            }}
             onRefreshListing={refreshListing}
             listingRefreshing={refreshing}
             selectedId={selectedId}
@@ -752,9 +963,9 @@ function LabBookPanelInner() {
             <CommittedDetail
               scenario={selected}
               phase={phases.get(selected.id) ?? { kind: "idle" }}
-              identity={rowIdentity(listing.scenarios, listing.configVersion).get(selected.id)}
+              identity={identities.get(selected.id)}
               onRun={() => {
-                run(selected.id);
+                run(selected.id, identities.get(selected.id));
               }}
             />
           )}
