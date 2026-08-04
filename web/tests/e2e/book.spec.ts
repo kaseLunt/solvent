@@ -202,10 +202,13 @@ test("HF histograms are per engine, each on its OWN comparator, counts beside bu
   await expect(dm).toBeVisible();
   await expect(aave).toContainText("comparator: hf_wad");
   await expect(dm).toContainText("comparator: hf_num/hf_den");
-  // refused / infinite counts are rendered BESIDE the buckets, per engine.
-  await expect(aave).toContainText("refused 1");
-  await expect(aave).toContainText("∞ no-debt 0");
-  await expect(dm).toContainText("refused 1");
+  // CX-6: refused / infinite counts are their own ACCOUNTING ROWS beneath the
+  // bars, in the reader's words. They were never folded into the denominator
+  // and now they say so: an account with no debt has no comparator to bucket,
+  // and a refused account is an unknowable — neither is a small bucket.
+  await expect(aave).toContainText("refused: 1");
+  await expect(aave).toContainText("no debt (no comparator): 0");
+  await expect(dm).toContainText("refused: 1");
   // The DM's disclosure-only note stays visible.
   await expect(dm).toContainText("a disclosure only");
 });

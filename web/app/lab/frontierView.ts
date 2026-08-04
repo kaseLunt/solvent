@@ -18,12 +18,19 @@
 // Relative imports (not the @/ alias): exercised by the unit specs under
 // Playwright's transpiler as well as by Next.
 
-import { formatUnits, parseDecimal, type Waterfall, type WaterfallEngine } from "@solvent/client";
-import { factorDistancePercent, groupDecimalString } from "../../lib/book-format";
+import { parseDecimal, type Waterfall, type WaterfallEngine } from "@solvent/client";
+import { factorDistancePercent, renderUsdAmount } from "../../lib/book-format";
 
-/** `$1,871,766.083918` — exact string surgery at the engine's own decimals. */
+/**
+ * `$1,871,766.083918` — exact string surgery at the engine's own decimals.
+ *
+ * CX-4: the implementation moved to `lib/book-format`'s `renderUsdAmount` so
+ * the Lab's three money call sites (this, `LabBookPanel`, `LabRealization`)
+ * share ONE renderer instead of two that disagreed about grouping. The name
+ * stays because the Lab's callers read `labUsd` as "this engine's own USD".
+ */
 export function labUsd(value: string, decimals: number): string {
-  return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
+  return renderUsdAmount(value, decimals);
 }
 
 /**
@@ -158,11 +165,32 @@ export function frontierView(waterfall: Waterfall): FrontierView {
   };
 }
 
+/**
+ * ONE GRID SAMPLE, FROM THIS ENGINE'S POINT OF VIEW (LF-8).
+ *
+ * There is exactly one of these per point the WATERFALL served, in wire order,
+ * whether or not this engine appeared at it. A `null` cell is a HOLE — the
+ * engine served no point here and the values are unknown, which is a different
+ * statement from zero and renders as one.
+ *
+ * The grid length is the wire's, never a constant: the served grid is free to
+ * grow, and a hardcoded column count would silently drop the new sample.
+ */
+export interface FrontierGridPoint {
+  index: number;
+  move: string;
+  prose: string | null;
+  isBaseline: boolean;
+  cell: FrontierCell | null;
+}
+
 /** One engine's series across the grid — the unit a frontier panel plots. */
 export interface FrontierSeries {
   engine: string;
   usdDecimals: number;
   points: { move: string; prose: string | null; isBaseline: boolean; cell: FrontierCell }[];
+  /** ONE ENTRY PER GRID SAMPLE, holes included, in chart order (LF-8). */
+  grid: FrontierGridPoint[];
   /** Largest eligible debt on the series — the panel's own y ceiling. */
   peakEligibleDebt: bigint;
   /** Largest bad debt on the series. */
@@ -175,6 +203,12 @@ export interface FrontierSeries {
    * the reader this engine breaks where it does not. Each panel marks its own.
    */
   cliffMove: string | null;
+  /** The GRID index of this engine's own cliff — the cliff line's column. */
+  cliffIndex: number | null;
+  /** This engine's own newly-eligible count AT its cliff (LF-5's label). */
+  cliffNewlyEligible: number | null;
+  /** The grid label of the sample BEFORE the cliff — the bracket's lower end. */
+  cliffPreviousMove: string | null;
 }
 
 /**
@@ -190,12 +224,29 @@ export interface FrontierSeries {
  */
 export function frontierSeries(view: FrontierView): FrontierSeries[] {
   return view.engines.map((engine) => {
-    const points = view.steps.flatMap((step) => {
-      const cell = step.cells.find((candidate) => candidate.engine === engine);
-      return cell === undefined
+    // THE GRID, WHOLE (LF-8): one entry per served waterfall point, in wire
+    // order, with a null cell where this engine served nothing. The chart, the
+    // ledger and the axis ticks all count columns from HERE, so the grid can
+    // grow on the wire and every one of them follows it.
+    const grid: FrontierGridPoint[] = view.steps.map((step) => ({
+      index: step.index,
+      move: step.move,
+      prose: step.prose,
+      isBaseline: step.isBaseline,
+      cell: step.cells.find((candidate) => candidate.engine === engine) ?? null,
+    }));
+    const points = grid.flatMap((entry) =>
+      entry.cell === null
         ? []
-        : [{ move: step.move, prose: step.prose, isBaseline: step.isBaseline, cell }];
-    });
+        : [
+            {
+              move: entry.move,
+              prose: entry.prose,
+              isBaseline: entry.isBaseline,
+              cell: entry.cell,
+            },
+          ],
+    );
     let peakEligibleDebt = 0n;
     let peakBadDebt = 0n;
     for (const point of points) {
@@ -205,18 +256,36 @@ export function frontierSeries(view: FrontierView): FrontierSeries[] {
     // The engine's OWN cliff, by the same rule the book-wide one uses: the
     // first point AFTER this series' baseline with a nonzero `newly`. The
     // baseline's own count is a census and is skipped.
-    const baselineAt = points.findIndex((point) => point.isBaseline);
-    const cliffMove =
-      points
-        .slice(baselineAt === -1 ? 0 : baselineAt + 1)
-        .find((point) => point.cell.newlyEligible > 0)?.move ?? null;
+    //
+    // It is resolved on the GRID rather than on the served points, because the
+    // cliff line is drawn at a COLUMN and the columns are grid samples.
+    const gridBaselineAt = grid.findIndex((entry) => entry.isBaseline);
+    const searchFrom = gridBaselineAt === -1 ? 0 : gridBaselineAt + 1;
+    let cliffIndex: number | null = null;
+    for (let i = searchFrom; i < grid.length; i += 1) {
+      const cell = grid[i]?.cell;
+      if (cell !== null && cell !== undefined && cell.newlyEligible > 0) {
+        cliffIndex = i;
+        break;
+      }
+    }
+    // The PREVIOUS GRID SAMPLE brackets the true threshold: the grid samples
+    // discrete shocks, so all anyone knows is that the crossing happened
+    // somewhere between these two. Naming only the later one would present a
+    // sampling artefact as a measured threshold.
+    const previous = cliffIndex === null ? undefined : grid[cliffIndex - 1];
     return {
       engine,
       usdDecimals: points[0]?.cell.usdDecimals ?? 0,
       points,
+      grid,
       peakEligibleDebt,
       peakBadDebt,
-      cliffMove,
+      cliffMove: cliffIndex === null ? null : (grid[cliffIndex]?.move ?? null),
+      cliffIndex,
+      cliffNewlyEligible:
+        cliffIndex === null ? null : (grid[cliffIndex]?.cell?.newlyEligible ?? null),
+      cliffPreviousMove: previous === undefined ? null : previous.move,
     };
   });
 }

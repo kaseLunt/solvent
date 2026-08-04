@@ -475,9 +475,12 @@ test("book mode: renders the served run-book response — the UI ships ready", a
   const engines = page.getByTestId("book-engine");
   await expect(engines).toHaveCount(2);
   await expect(engines.nth(0)).toContainText("aave_v3_etherfi");
-  await expect(engines.nth(0)).toContainText("$8000"); // 800000000000 @ 8dp
+  // CX-4: ONE grouped-USD renderer across the Lab. These used to print
+  // `$8000` here and `$8,000` in the frontier panel above, from the same wire
+  // field, because two money helpers disagreed about thousands separators.
+  await expect(engines.nth(0)).toContainText("$8,000"); // 800000000000 @ 8dp
   await expect(engines.nth(1)).toContainText("debt_manager");
-  await expect(engines.nth(1)).toContainText("$4620"); // 4620000000 @ 6dp
+  await expect(engines.nth(1)).toContainText("$4,620"); // 4620000000 @ 6dp
 
   // The book-wide flagship claim: HFs unchanged while shortfall is realized.
   await expect(page.getByTestId("hfs-unchanged-banner")).toHaveCount(2);

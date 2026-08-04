@@ -27,6 +27,14 @@
 
 import type { LabRunBookEngine, RunBookAggregate } from "@/lib/runbook";
 import { EM_DASH, renderNullableDecimal } from "@/lib/format";
+import { sharePercent, shareFraction } from "@/lib/book-format";
+import {
+  RISK_BAND_METHOD,
+  riskBandDenominatorLine,
+  riskBandNoDebtRow,
+  riskBandPairAria,
+  riskBandRefusedRow,
+} from "@/lib/book-copy";
 import { labUsd } from "./frontierView";
 import {
   collateralDisclosure,
@@ -40,7 +48,10 @@ import styles from "./lab.module.css";
 const BAR_MAX = 168;
 const ROW_H = 18;
 const LABEL_W = 84;
-const COUNT_W = 34;
+const COUNT_W = 64;
+/** CX-6: the common percent axis and the gutter its labels need. */
+const PERCENT_TICKS = [0, 50, 100] as const;
+const AXIS_H = 20;
 
 // ---------------------------------------------------------------------------
 // B1 — the BEFORE/AFTER histogram pair
@@ -49,12 +60,10 @@ const COUNT_W = 34;
 function Distribution({
   aggregate,
   side,
-  maxCount,
   engine,
 }: {
   aggregate: RunBookAggregate;
   side: "before" | "after";
-  maxCount: number;
   engine: string;
 }) {
   const histogram = aggregate.hf_histogram;
@@ -64,18 +73,27 @@ function Distribution({
   // asymmetry is the design; it is not an oversight.
   const eligibleTint = histogram.comparator === "hf_wad";
   const scale = BigInt(histogram.wad_scale);
-  const width = LABEL_W + BAR_MAX + COUNT_W + 12;
-  const height = histogram.buckets.length * ROW_H + 6;
+  // CX-6: the denominator is this side's debt-bearing accounts with a finite
+  // comparator — exactly the population the buckets partition. The two sides
+  // still share ONE scale, and that scale is now the COMMON 0 to 100 percent
+  // axis: percentages are dimensionless (LAW-2), so shape stays comparable
+  // between the sides while each names its own denominator.
+  const denominator = histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const width = LABEL_W + BAR_MAX + COUNT_W + 24;
+  const height = histogram.buckets.length * ROW_H + AXIS_H;
 
   return (
     <div className={styles.histSide} data-testid={`runbook-hist-${side}`} data-engine={engine}>
       <p className={styles.histSideTitle}>{side} the shock</p>
+      <p className={styles.denominatorLine} data-testid={`runbook-hist-denominator-${side}`}>
+        {riskBandDenominatorLine(denominator)}
+      </p>
       <svg
         width={width}
         height={height}
         viewBox={`0 0 ${String(width)} ${String(height)}`}
         role="img"
-        aria-label={`health-factor distribution ${side} the shock for ${engine} on comparator ${histogram.comparator}`}
+        aria-label={`risk-band distribution ${side} the shock for ${engine} on comparator ${histogram.comparator}`}
         style={{ display: "block", maxWidth: "100%", height: "auto" }}
       >
         <line
@@ -83,13 +101,33 @@ function Distribution({
           x1={LABEL_W + 4}
           x2={LABEL_W + 4}
           y1={2}
-          y2={height - 2}
+          y2={height - AXIS_H + 2}
         />
+        {PERCENT_TICKS.map((tick) => (
+          <g key={`tick-${String(tick)}`} data-testid="runbook-percent-tick">
+            <line
+              className={styles.histBaseline}
+              x1={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+              x2={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+              y1={2}
+              y2={height - AXIS_H + 2}
+              opacity={tick === 0 ? 1 : 0.35}
+            />
+            <text
+              className={styles.histAxisLabel}
+              x={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+              y={height - 6}
+              textAnchor="middle"
+            >
+              {String(tick)}%
+            </text>
+          </g>
+        ))}
         {histogram.buckets.map((bucket, index) => {
           const y = index * ROW_H + 4;
-          // ONE scale across both sides: bar length is comparable between the
-          // two charts, which is the entire reason they sit side by side.
-          const barWidth = bucket.count === 0 ? 0 : Math.max((bucket.count / maxCount) * BAR_MAX, 1.5);
+          const barWidth =
+            bucket.count === 0 ? 0 : Math.max(shareFraction(bucket.count, denominator) * BAR_MAX, 1.5);
+          const percent = sharePercent(bucket.count, denominator);
           const belowOne =
             eligibleTint && bucket.upper_wad !== null && BigInt(bucket.upper_wad) <= scale;
           return (
@@ -121,39 +159,42 @@ function Distribution({
                   height={ROW_H - 8}
                 />
               )}
-              <text className={styles.histCount} x={LABEL_W + 12 + barWidth} y={y + 10}>
+              <text
+                className={styles.histCount}
+                x={LABEL_W + 12 + BAR_MAX}
+                y={y + 10}
+                data-testid="runbook-hist-row-label"
+              >
                 {String(bucket.count)}
+                {percent === null ? "" : ` · ${percent}%`}
               </text>
             </g>
           );
         })}
       </svg>
+      {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
       <div className={styles.histAside}>
-        <span className={styles.histBadge} data-testid={`runbook-hist-refused-${side}`}>
-          refused {String(histogram.refused_count)} · rows counted here, never dropped
+        <span data-testid={`runbook-hist-no-debt-${side}`}>
+          {riskBandNoDebtRow(histogram.infinite_count)}
         </span>
-        <span>∞ no-debt {String(histogram.infinite_count)}</span>
+        <span className={styles.histBadge} data-testid={`runbook-hist-refused-${side}`}>
+          {riskBandRefusedRow(histogram.refused_count)} · rows counted here, never dropped
+        </span>
       </div>
     </div>
   );
 }
 
 export function LabRunBookHistogramPair({ engine }: { engine: LabRunBookEngine }) {
-  // ONE maximum across BOTH sides — see Distribution.
-  const maxCount = Math.max(
-    ...engine.before.hf_histogram.buckets.map((bucket) => bucket.count),
-    ...engine.after.hf_histogram.buckets.map((bucket) => bucket.count),
-    1,
-  );
   return (
     <section
       className={styles.subPanel}
       data-testid="runbook-histogram-pair"
       data-engine={engine.engine}
-      aria-label={`health-factor distribution before and after for ${engine.engine}`}
+      aria-label={riskBandPairAria(engine.engine)}
     >
       <p className={styles.panelTitle}>
-        HF distribution · before → after{" "}
+        Risk-band distribution · before → after{" "}
         <span className={styles.comparatorTag}>
           comparator: {engine.before.hf_histogram.comparator}
         </span>
@@ -162,19 +203,12 @@ export function LabRunBookHistogramPair({ engine }: { engine: LabRunBookEngine }
         {histogramShiftReadingLine(engine)}
       </p>
       <div className={styles.histPair}>
-        <Distribution
-          aggregate={engine.before}
-          side="before"
-          maxCount={maxCount}
-          engine={engine.engine}
-        />
-        <Distribution
-          aggregate={engine.after}
-          side="after"
-          maxCount={maxCount}
-          engine={engine.engine}
-        />
+        <Distribution aggregate={engine.before} side="before" engine={engine.engine} />
+        <Distribution aggregate={engine.after} side="after" engine={engine.engine} />
       </div>
+      <p className={styles.methodLine} data-testid="runbook-hist-method">
+        {RISK_BAND_METHOD}
+      </p>
       <p className={styles.noteText}>{engine.after.hf_histogram.note}</p>
     </section>
   );

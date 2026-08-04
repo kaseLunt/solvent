@@ -6,7 +6,7 @@
 // dash (never 0), and the exact value always survives into `title`-level
 // affordances upstream. Pinned by tests/unit/book-format.spec.ts.
 
-import { parseDecimal } from "@solvent/client";
+import { formatUnits, parseDecimal } from "@solvent/client";
 import { EM_DASH, renderNullableDecimal } from "./format";
 
 /**
@@ -31,6 +31,86 @@ export function groupDecimalString(value: string): string {
 export function renderEngineAmount(value: string | null, decimals: number): string {
   if (value === null) return EM_DASH;
   return groupDecimalString(renderNullableDecimal(value, { decimals }));
+}
+
+/**
+ * THE ONE GROUPED-USD RENDERER (CX-4).
+ *
+ * `$1,234.56789` — exact string surgery at the given decimals, thousands
+ * separated, trailing fractional zeros trimmed. Null is an em dash, never `$0`.
+ *
+ * This was `frontierView.labUsd`, a Lab-local helper, while two other Lab
+ * surfaces rendered money through `renderNullableDecimal(value, {prefix:"$"})`
+ * — which does NOT group. So one panel printed `$1,877,357.544497` and the
+ * panel beside it printed `$1877357.544497` from the same wire field. Money is
+ * grouped on this product; there is now one function that says so, and every
+ * Lab money call site routes through it.
+ *
+ * `renderNullableDecimal` is deliberately NOT touched: it has many non-money
+ * callers (health factors, balances, block counts) that must not gain a `$`
+ * or a thousands separator.
+ */
+export function renderUsdAmount(value: string | null, decimals: number): string {
+  if (value === null) return EM_DASH;
+  return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
+}
+
+/** The typographic minus (U+2212) — a hyphen is not a sign. */
+export const MINUS_SIGN = "−";
+
+/**
+ * CX-8 — AN EXPLICIT SIGN ON EVERY DELTA.
+ *
+ * `+164` · `−3` (U+2212) · bare `0`. A signed net delta rendered as a bare
+ * `164` reads as a gross count of arrivals; the sign is the only thing on
+ * screen that says the number can go the other way.
+ */
+export function renderSignedCount(value: number): string {
+  if (value > 0) return `+${value.toLocaleString("en-US")}`;
+  if (value < 0) return `${MINUS_SIGN}${Math.abs(value).toLocaleString("en-US")}`;
+  return "0";
+}
+
+/**
+ * The same law for a monetary delta: `+$4,200`, `−$4,200`, `$0`.
+ *
+ * The sign leads the currency mark rather than sitting inside it, so a
+ * negative delta can never be misread as a negative price.
+ */
+export function renderSignedUsdAmount(value: string | null, decimals: number): string {
+  if (value === null) return EM_DASH;
+  const units = parseDecimal(value);
+  if (units === 0n) return renderUsdAmount("0", decimals);
+  const magnitude = renderUsdAmount((units < 0n ? -units : units).toString(), decimals);
+  return `${units > 0n ? "+" : MINUS_SIGN}${magnitude}`;
+}
+
+/**
+ * CX-6 / CX-8 — a share of a NAMED denominator, by exact integer arithmetic.
+ *
+ * `count × 1000 / denominator`, truncated, rendered as tenths of a percent
+ * with the trailing `.0` dropped. Null when the denominator is zero: a
+ * percentage against nothing is not a small percentage, it is not a
+ * percentage. Above 9,999% the string is `from near-zero` — a five-digit
+ * percentage is a statement about the denominator, not about the numerator.
+ */
+export function sharePercent(count: number, denominator: number): string | null {
+  if (denominator <= 0) return null;
+  const permille = (BigInt(count) * 1000n) / BigInt(denominator);
+  if (permille > 99_990n) return "from near-zero";
+  const whole = permille / 10n;
+  const tenth = permille % 10n;
+  return tenth === 0n ? whole.toString() : `${whole.toString()}.${tenth.toString()}`;
+}
+
+/**
+ * The share as a 0–1 BAR FRACTION, exact-integer derived and clamped.
+ * Geometry only — the printed percent is `sharePercent`.
+ */
+export function shareFraction(count: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  const permille = Number((BigInt(count) * 1000n) / BigInt(denominator));
+  return Math.min(permille / 1000, 1);
 }
 
 /**

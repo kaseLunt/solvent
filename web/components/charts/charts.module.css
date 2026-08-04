@@ -21,10 +21,19 @@
   shape-rendering: crispEdges;
 }
 
+/* CX-7 TYPOGRAPHY FLOOR: 12 RENDERED CSS px, and 4.5:1 against --panel.
+ *
+ * Measured (WCAG 2.x relative luminance, against --panel):
+ *   --ink-3  #8a979c on #ffffff = 3.005:1   |  #5f7178 on #131c20 = 3.392:1
+ *   --ink-2  #56676e on #ffffff = 5.897:1   |  #93a5ab on #131c20 = 6.760:1
+ *
+ * --ink-3 misses 4.5:1 in BOTH themes, so every axis label moves to --ink-2,
+ * which clears it in both with margin. The token itself therefore does not
+ * move (CX-7's conditional), and --ink-3 keeps its non-text duties. */
 .axisLabel {
   font-family: var(--mono);
-  font-size: 10px;
-  fill: var(--ink-3);
+  font-size: 12px;
+  fill: var(--ink-2);
   letter-spacing: 0.06em;
 }
 
@@ -56,11 +65,13 @@
   opacity: 0.55;
 }
 
+/* --crit measures 5.027:1 (light) / 5.080:1 (dark) against --panel, so the
+ * label clears 4.5:1 at FULL opacity only. The 0.75 wash is gone: a token that
+ * passes and is then faded does not pass. */
 .refLabel {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 12px;
   fill: var(--crit);
-  opacity: 0.75;
 }
 
 /* Invisible full-height hover target carrying a point's <title> (design
@@ -110,35 +121,115 @@
   stroke-dasharray: 2 3;
 }
 
-/* ---- risk-map density bins (W-UX-D §16) ---- */
+/* ---- risk-map density bins (chart spec v4 RM-5 / RM-6) ---- */
 /* The QUANTIZED 4-step count ramp (thresholds 1 / 10 / 100 / 1,000):
    opacity on CLASS fills over the theme accent — stepped, never a gradient,
-   no hardcoded hex, so both themes keep their own ink. */
+   no hardcoded hex, so both themes keep their own ink.
+
+   RM-6 raises the ramp to 0.30 / 0.48 / 0.66 / 0.85.
+
+   NON-TEXT CONTRAST, MEASURED. RM-6's stated aim is that the lightest nonempty
+   cell clears 3:1 against --panel. A 30% wash CANNOT reach that on a white
+   panel by fill alone — the arithmetic ceiling for ANY colour at 30% over
+   #ffffff is 2.16:1 (pure black), and --accent at 0.30 measures 1.488:1 light
+   / 1.788:1 dark. So the 3:1 boundary is carried where WCAG 1.4.11 actually
+   asks for it: a 1px hairline on every nonempty cell in --ink-3, measured
+   3.005:1 (light) / 3.392:1 (dark) against --panel. The SELECTED cell replaces
+   that hairline with --ink-2 (5.897 / 6.760), which is why selection still
+   reads as an additional, stronger statement. */
+.binCell {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+
 .binStep1 {
   fill: var(--accent);
-  opacity: 0.16;
+  fill-opacity: 0.3;
 }
 
 .binStep2 {
   fill: var(--accent);
-  opacity: 0.34;
+  fill-opacity: 0.48;
 }
 
 .binStep3 {
   fill: var(--accent);
-  opacity: 0.58;
+  fill-opacity: 0.66;
 }
 
 .binStep4 {
   fill: var(--accent);
-  opacity: 0.85;
+  fill-opacity: 0.85;
 }
 
-/* Direct mono labels for the top-12 debt outliers. */
+/* RM-6 / AC-32: the selected cell's outline. */
+.binSelected {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+}
+
+/* RM-2 THE BREAK GLYPH. Never .refLine, which is reserved crit vocabulary —
+   a compressed axis is not a threshold. --ink-2 rather than --line because
+   --line measures 1.349:1 (light) / 1.268:1 (dark) against --panel and WCAG
+   1.4.11 wants 3:1 for a mark that carries meaning. */
+.axisBreak {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* RM-9 numbered callouts: 12px mono beside the mark. */
+.callout {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+/* RM-9 leader line: drawn UNDER all data ink, so a hairline never crosses a
+   mark it is pointing at. */
+.leader {
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  fill: none;
+}
+
+/* Direct mono labels for named exposures. */
 .outlierLabel {
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 12px;
   fill: var(--ink-2);
+}
+
+/* LAW-3: the map renders 1:1 from a measured width, with a minimum and a
+   horizontal scroll below it. It never scales, because a viewBox scale turns
+   a 12px label into a 7px one and the spec's pixels stop being pixels. */
+.measuredFrame {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  padding: var(--sp-3);
+  overflow-x: auto;
+}
+
+.measuredFrame svg {
+  display: block;
+  max-width: none;
+}
+
+.measuredFrame svg:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The hidden mono probe (LF-8): ten `0` glyphs, measured once, never
+   estimated. Off-screen rather than display:none so it still lays out. */
+.chProbe {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font-family: var(--mono);
+  font-size: 12px;
 }
 
 .densityLegend {
@@ -166,15 +257,15 @@
 }
 
 .binSwatchS1 {
-  opacity: 0.16;
+  opacity: 0.3;
 }
 
 .binSwatchS2 {
-  opacity: 0.34;
+  opacity: 0.48;
 }
 
 .binSwatchS3 {
-  opacity: 0.58;
+  opacity: 0.66;
 }
 
 .binSwatchS4 {
@@ -187,21 +278,123 @@
   shape-rendering: crispEdges;
 }
 
+/* CX-7 floor: 12px, --ink-2 (4.5:1 in both themes). */
 .valueLabel {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   fill: var(--ink-2);
 }
 
 .stepLabel {
   font-family: var(--mono);
-  font-size: 10.5px;
-  fill: var(--ink-3);
+  font-size: 12px;
+  fill: var(--ink-2);
 }
 
 .stepSub {
   font-family: var(--mono);
-  font-size: 9px;
-  fill: var(--ink-3);
-  opacity: 0.8;
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+/* ---- LF-8 the frontier's transposed ledger ---- */
+/* The grid template is generated by `frontierScale` — the SAME module the SVG
+   places its bars with — so a column and the bar above it are aligned by
+   construction (R2). */
+.ledger {
+  display: grid;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 4px;
+}
+
+.ledgerRow {
+  display: contents;
+}
+
+/* The row label WRAPS rather than ellipsing. The gutter is 88px by LF-3 (it
+   is the y-tick column's width, shared with the SVG), and `collateral at
+   risk` at the 12px floor does not fit on one line there. A truncated measure
+   name is a small lie about which number the reader is looking at, and the
+   geometry that matters here is HORIZONTAL — a two-line label costs a few
+   pixels of row height and no alignment at all. */
+.ledgerRowLabel {
+  padding: 3px 8px 3px 0;
+  text-align: right;
+  color: var(--ink-2);
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.ledgerCell {
+  padding: 3px 4px;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- RM-12 the risk map's ledger ---- */
+.mapLedger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-5);
+  margin-top: var(--sp-3);
+}
+
+.mapLedgerBlock {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.mapLedgerHead {
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.mapLedgerTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.mapLedgerTable th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+  padding: 2px 6px 4px 0;
+  white-space: nowrap;
+}
+
+.mapLedgerTable td {
+  padding: 2px 6px 2px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.mapLedgerTable tr[data-selected="true"] td {
+  background: var(--panel-2);
+}
+
+.mapLedgerNum {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.mapLedgerLine {
+  margin: 6px 0 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
 }

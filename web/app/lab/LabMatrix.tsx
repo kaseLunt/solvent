@@ -70,7 +70,7 @@ import { useState } from "react";
 import type { ScenarioDefinition } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
-import { renderEngineAmount } from "@/lib/book-format";
+import { renderEngineAmount, renderSignedCount } from "@/lib/book-format";
 import {
   attemptChangedNote,
   attemptSkew,
@@ -146,7 +146,12 @@ function Cell({ state }: { state: LabCellState }) {
             {usd(state.engine.eligible_debt_delta_usd, state.engine.usd_decimals)}
           </span>
           <span className={styles.cellSub}>
-            Δ eligible debt · DELTA-ONLY · {state.engine.newly_eligible_accounts} newly eligible
+            {/* CX-2: `newly_eligible_accounts` is a signed NET delta, so the
+                cell states it as one. The card in the panel below carries the
+                full label and the arithmetic; here the sign is the disclosure
+                that makes the number readable at a glance. */}
+            Δ eligible debt · DELTA-ONLY · net eligible accounts{" "}
+            {renderSignedCount(state.engine.newly_eligible_accounts)}
           </span>
         </td>
       );

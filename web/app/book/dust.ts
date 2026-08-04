@@ -216,11 +216,24 @@ export function emptyFilteredWalk(
   );
 }
 
-/** The risk map's legend line while a dust step is active (W-UX-D handoff). */
+/**
+ * THE SOURCE-FILTER SEMANTICS, STATED (chart spec v4, STATE slot).
+ *
+ * The old line said "dust below 1 is excluded at the source, so this map shows
+ * the filtered walk only". True, and it left the reader to guess WHICH rows
+ * that removes — and the natural guess is wrong. The contract's exclusion is a
+ * conjunction: a row hides only when BOTH its collateral and its debt sit
+ * below the step. So a position with sub-dollar debt and $40,000 of collateral
+ * is still on this map, which is exactly the population the compressed sub-$1
+ * lane is drawing. A reader who thinks the lane is a leftover of an incomplete
+ * filter will discount the one part of the axis this wave built.
+ */
 export function dustMapLegend(step: ActiveDustStep): string {
+  const amount = dustStepAmount(step);
   return (
-    `dust below ${dustStepAmount(step)} is excluded at the source, so this map shows the ` +
-    `filtered walk only`
+    `Source filter: a position is excluded only when both its collateral and its debt are ` +
+    `below ${amount}. A position with sub-dollar debt stays on this map when its collateral ` +
+    `is at or above ${amount}.`
   );
 }
 

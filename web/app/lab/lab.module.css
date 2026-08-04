@@ -708,14 +708,30 @@
 
 .histLabel {
   font-family: var(--mono);
-  font-size: 10.5px;
-  fill: var(--ink-3);
+  font-size: 12px;
+  fill: var(--ink-2);
 }
 
 .histCount {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   fill: var(--ink-2);
+}
+
+/* CX-6: the common 0 to 100 percent axis' own tick labels. */
+.histAxisLabel {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+/* CX-6: the named denominator. A share without its denominator is not a
+   disclosure. */
+.denominatorLine {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: 0 0 6px;
 }
 
 .histBar {
@@ -771,4 +787,65 @@
   font-family: var(--mono);
   font-size: var(--fs-caption);
   overflow-wrap: anywhere;
+}
+
+/* ---- chart spec v4 section template (slots 2, 3, 6) ----
+ *
+ * STATE renders ABOVE the visual and never inside a <details> (R6, R7): every
+ * qualification of a chart renders before the chart it qualifies. */
+.stateSlot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 96ch;
+}
+
+/* ANSWER: one computed sentence, 14px, --ink (template slot 3). */
+.answerLine {
+  font-size: 14px;
+  color: var(--ink);
+  max-width: 82ch;
+  margin: 0 0 10px;
+}
+
+/* METHOD: one 12px line — encoding, unit, as-of (template slot 6). */
+.methodLine {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 96ch;
+  margin: 10px 0 8px;
+}
+
+/* LF-2: the full-width separator rule between the rows, carrying row 2's
+ * scale statement. Unequal heights, separate tick sets, per-row direct labels
+ * and this sentence are four independent cues that the rows are on different
+ * rulers. */
+.frontierSeparator {
+  border-top: 1px solid var(--line);
+  margin: 6px 0 0;
+  padding: 6px 0 2px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* LF-10 / RM-14: the visible control that moves focus to the ledger. */
+.exactDataButton {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--chip-bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.exactDataButton:hover {
+  color: var(--ink);
 }

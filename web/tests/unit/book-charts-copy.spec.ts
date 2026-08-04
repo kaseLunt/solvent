@@ -12,6 +12,9 @@
 //     the line changes) — never asserted, never hardcoded.
 //   - the ruling's copy is pinned verbatim so no rewording can drift in.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import type { EngineHistogram, Waterfall } from "@solvent/client";
 import {
@@ -23,6 +26,15 @@ import {
   belowOneCount,
   histogramReadingLine,
   liquidatableCardSub,
+  riskMapCalloutOverflowNote,
+  riskMapCellDetailLine,
+  riskMapCoverageLine,
+  riskMapCritStripNote,
+  riskMapLaneDisclosure,
+  riskMapMethodLine,
+  RISK_MAP_ANSWER_LEAD,
+  RISK_MAP_EXACT_DATA,
+  RISK_MAP_FORENSICS_SUMMARY,
 } from "../../app/book/readingLines";
 import {
   AT_RISK_READER_CAPTION,
@@ -31,9 +43,17 @@ import {
   HELD_FLAT_VALUE_HEADER,
   heldFlatDetailsSummary,
   heldFlatSummary,
+  RISK_BAND_HEADING,
+  RISK_BAND_METHOD,
+  riskBandDenominatorLine,
+  riskBandNoDebtRow,
+  riskBandPairAria,
+  riskBandPanelAria,
+  riskBandRefusedRow,
   WATERFALL_SECTION_NOTE,
   wireNotesSummary,
 } from "../../lib/book-copy";
+import { sharePercent, shareFraction } from "../../lib/book-format";
 import { BOOK } from "../fixtures/book";
 
 const WAD = 10n ** 18n;
@@ -287,4 +307,193 @@ test.describe("the ruling's copy, pinned verbatim", () => {
     );
     expect(wireNotesSummary(2)).toBe("wire notes: 2, verbatim");
   });
+});
+
+// ---------------------------------------------------------------------------
+// CHART SPEC v4 — the risk map's FINAL COPY, and CX-5 / CX-6 / CX-8.
+// ---------------------------------------------------------------------------
+
+test.describe("the risk map's FINAL COPY block, verbatim", () => {
+  test("the panel claim and ANSWER lead", () => {
+    expect(RISK_MAP_ANSWER_LEAD).toBe(
+      "Where accounts cluster by debt size and headroom. Row bars show each band's exact " +
+        "total debt.",
+    );
+  });
+
+  // AC-27 — the lane disclosure computes its own lower bound.
+  test("the lane disclosure names the COMPUTED bound and the incomparability", () => {
+    expect(riskMapLaneDisclosure(-6)).toBe(
+      "Sub-$1 debts occupy an order-preserving compressed log lane spanning $1e-6 to <$1 in " +
+        "this snapshot. Horizontal distances in this lane are not comparable with the main axis.",
+    );
+    // Computed, not asserted: a different domain gives a different bound.
+    expect(riskMapLaneDisclosure(-3)).toContain("spanning $1e-3 to <$1");
+  });
+
+  // AC-26 — the coverage line's exact grammar.
+  test("the coverage line reads `{plotted} plotted of {book} · {aside} counted aside`", () => {
+    expect(riskMapCoverageLine(8214, 8646, 432)).toBe("8,214 plotted of 8,646 · 432 counted aside");
+    // RM-15 / R7: it renders with ZERO refusals too, and says so honestly.
+    expect(riskMapCoverageLine(2, 2, 0)).toBe("2 plotted of 2 · 0 counted aside");
+  });
+
+  test("the conditional notes name the count and where the rest is listed", () => {
+    expect(riskMapCritStripNote(20)).toBe(
+      "20 liquidatable marks share a debt neighbourhood and are stacked so each stays " +
+        "individually reachable. Every one is listed with its exact debt below.",
+    );
+    expect(riskMapCalloutOverflowNote(3)).toBe(
+      "3 of the 12 numbered exposures could not be placed clear at this width. All 12 are " +
+        "listed with full addresses below.",
+    );
+  });
+
+  test("the activated cell's sentence carries count, Σ, range and band", () => {
+    expect(riskMapCellDetailLine(37, "1,204,556", "$1k", "$3,162", "0–2%", 24)).toBe(
+      "37 accounts, Σ debt 1,204,556, debt $1k to $3,162, headroom 0–2%. " +
+        "Showing the top 24 by debt of 37, all counted.",
+    );
+  });
+
+  test("METHOD names the encoding, the unit and the as-of", () => {
+    expect(riskMapMethodLine(1)).toBe(
+      "Cell shading counts accounts on a four-step ramp. Rows are headroom bands, the " +
+        "horizontal axis is debt size, and the right-margin bars carry each band's exact total " +
+        "debt on one common scale. Exact counts and totals are in the ledger below, as of " +
+        "batch #1.",
+    );
+  });
+
+  test("FORENSICS names what it holds, and the control names itself", () => {
+    expect(RISK_MAP_FORENSICS_SUMMARY).toBe(
+      "Exact data: band totals, every bin, top exposures with full addresses, and " +
+        "liquidatable accounts",
+    );
+    expect(RISK_MAP_EXACT_DATA).toBe("Exact data");
+  });
+});
+
+// AC-52 / CX-5
+test.describe("CX-5 — the risk-band distribution rename (display only)", () => {
+  test("the heading and the two aria strings are the spec's, verbatim", () => {
+    expect(RISK_BAND_HEADING).toBe("Risk-band distribution: each engine on its own comparator");
+    expect(riskBandPanelAria("debt_manager", "hf_num/hf_den")).toBe(
+      "risk-band distribution for debt_manager on comparator hf_num/hf_den",
+    );
+    expect(riskBandPairAria("aave_v3_etherfi")).toBe(
+      "risk-band distribution before and after for aave_v3_etherfi",
+    );
+  });
+
+  test("no copy constant says `HF histogram` or `health-factor histogram`", () => {
+    const strings = [
+      RISK_BAND_HEADING,
+      RISK_BAND_METHOD,
+      riskBandPanelAria("e", "c"),
+      riskBandPairAria("e"),
+      riskBandDenominatorLine(0),
+      riskBandNoDebtRow(0),
+      riskBandRefusedRow(0),
+    ];
+    for (const value of strings) {
+      expect(value).not.toContain("HF histogram");
+      expect(value).not.toContain("health-factor histogram");
+      expect(value).not.toContain("HF distribution");
+    }
+  });
+
+  test("the METHOD line names the denominator the bars are a share OF", () => {
+    expect(RISK_BAND_METHOD).toBe(
+      "Buckets are policy bands of unequal width. Bar length is each bucket's share of this " +
+        "engine's debt-bearing accounts with a finite comparator, on a common 0 to 100 percent " +
+        "axis. Exact counts sit beside each bar.",
+    );
+    expect(riskBandDenominatorLine(1204)).toBe(
+      "denominator: 1,204 debt-bearing accounts with a finite comparator",
+    );
+  });
+
+  test("the accounting rows are their own rows, in the reader's words", () => {
+    expect(riskBandNoDebtRow(46)).toBe("no debt (no comparator): 46");
+    expect(riskBandRefusedRow(2)).toBe("refused: 2");
+  });
+});
+
+// AC-53 arithmetic / CX-6 / CX-8
+test.describe("CX-6 — percent share by exact integer arithmetic", () => {
+  test("count × 1000 / denominator, TRUNCATED, rendered in tenths", () => {
+    expect(sharePercent(1, 1)).toBe("100");
+    expect(sharePercent(1, 2)).toBe("50");
+    expect(sharePercent(1, 3)).toBe("33.3"); // 333/10 — truncated, never 33.4
+    expect(sharePercent(2, 3)).toBe("66.6"); // 666/10 — truncated, never 66.7
+    expect(sharePercent(0, 5)).toBe("0");
+    expect(sharePercent(1, 8)).toBe("12.5");
+  });
+
+  test("a bucket at 100% spans the full axis, and a zero bucket draws none", () => {
+    expect(shareFraction(1, 1)).toBe(1);
+    expect(shareFraction(0, 4)).toBe(0);
+    expect(shareFraction(1, 4)).toBeCloseTo(0.25, 9);
+  });
+
+  // CX-8
+  test("NO percentage renders against a zero denominator", () => {
+    expect(sharePercent(0, 0)).toBeNull();
+    expect(sharePercent(5, 0)).toBeNull();
+    expect(shareFraction(5, 0)).toBe(0);
+  });
+
+  // CX-8
+  test("a percentage above 9,999% reads `from near-zero`", () => {
+    // The boundary is INCLUSIVE of 9,999%: above it, the number is a statement
+    // about the denominator rather than about the numerator.
+    expect(sharePercent(9_999, 100)).toBe("9999");
+    expect(sharePercent(10_000, 100)).toBe("from near-zero");
+    expect(sharePercent(10_000, 1)).toBe("from near-zero");
+    expect(sharePercent(1, 0)).toBeNull();
+  });
+
+  test("the share TRUNCATES at book scale — no double ever holds the ratio", () => {
+    // 8,214 of 8,646 is 95.00…%; a float path drifts here, integer work does
+    // not. Truncation always understates, which is the conservative direction.
+    expect(sharePercent(8_214, 8_646)).toBe("95");
+    expect(sharePercent(8_215, 8_646)).toBe("95");
+    expect(sharePercent(8_300, 8_646)).toBe("95.9"); // 959 permille, never 96
+  });
+});
+
+// AC-55 — no changed file references a token that does not exist.
+test("R8 / AC-55: no `--ink-1` reference survives in any file this wave touched", () => {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const root = path.join(here, "../..");
+  const touched = [
+    "app/book/riskBins.ts",
+    "app/book/BookRiskMap.tsx",
+    "app/book/BookHistogram.tsx",
+    "app/book/readingLines.ts",
+    "app/book/dust.ts",
+    "app/book/book.module.css",
+    "app/lab/LabFrontier.tsx",
+    "app/lab/frontierScale.ts",
+    "app/lab/frontierView.ts",
+    "app/lab/labReadingLines.ts",
+    "app/lab/LabBookPanel.tsx",
+    "app/lab/LabRealization.tsx",
+    "app/lab/LabRunBookDetail.tsx",
+    "app/lab/lab.module.css",
+    "components/charts/DensityMap.tsx",
+    "components/charts/RiskMapLedger.tsx",
+    "components/charts/FrontierLedger.tsx",
+    "components/charts/charts.module.css",
+    "lib/book-format.ts",
+    "lib/book-copy.ts",
+    "lib/useMeasuredWidth.ts",
+    "app/globals.css",
+    "app/tokens.css",
+  ];
+  for (const file of touched) {
+    const source = readFileSync(path.join(root, file), "utf8");
+    expect(source, file).not.toContain("--ink-1");
+  }
 });

@@ -1,7 +1,7 @@
 import type { Shortfall } from "@solvent/client";
 import { StatCard } from "@/components/StatCard";
 import { ELIGIBLE_REALIZED_GLOSS } from "@/lib/book-copy";
-import { renderNullableDecimal } from "@/lib/format";
+import { renderUsdAmount } from "@/lib/book-format";
 import styles from "./lab.module.css";
 
 /**
@@ -25,8 +25,9 @@ export function HfsUnchangedBanner({ realization }: { realization: Shortfall }) 
  * the seizure-model assumption is captioned verbatim.
  */
 export function LabRealization({ realization }: { realization: Shortfall }) {
-  const money = (value: string) =>
-    renderNullableDecimal(value, { decimals: realization.usd_decimals, prefix: "$" });
+  // CX-4: ONE grouped-USD renderer across the Lab. This used to print
+  // `$1877357.544497` beside a frontier panel printing `$1,877,357.544497`.
+  const money = (value: string) => renderUsdAmount(value, realization.usd_decimals);
   return (
     <div data-testid="market-realization">
       <div className={styles.statRow}>

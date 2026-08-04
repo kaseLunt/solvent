@@ -178,12 +178,24 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
     );
   });
 
-  test("the risk-map dust legend (W-UX-D handoff)", () => {
+  // CHART SPEC v4 — the STATE slot's source-filter semantics. The old line
+  // said dust was "excluded at the source" and left the reader to guess WHICH
+  // rows that removes; the natural guess (any sub-dollar debt) is wrong,
+  // because the contract's exclusion is a CONJUNCTION over both totals.
+  test("the risk-map source-filter disclosure states the conjunction", () => {
     expect(dustMapLegend("1")).toBe(
-      "dust below 1 is excluded at the source, so this map shows the filtered walk only",
+      "Source filter: a position is excluded only when both its collateral and its debt are " +
+        "below 1. A position with sub-dollar debt stays on this map when its collateral is at " +
+        "or above 1.",
     );
     expect(dustMapLegend("1k")).toBe(
-      "dust below 1k is excluded at the source, so this map shows the filtered walk only",
+      "Source filter: a position is excluded only when both its collateral and its debt are " +
+        "below 1k. A position with sub-dollar debt stays on this map when its collateral is at " +
+        "or above 1k.",
+    );
+    // AC-33: the clause that makes the conjunction unmistakable.
+    expect(dustMapLegend("100")).toContain(
+      "only when both its collateral and its debt are below",
     );
   });
 });

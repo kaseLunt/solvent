@@ -22,7 +22,7 @@ import { groupDecimalString, renderEngineAmount } from "../../lib/book-format";
 import { EM_DASH } from "../../lib/format";
 import { WARN_HEADROOM_PCT } from "../../lib/headroom";
 import { ALL_DUST_SUFFIX, sumProvablyDust } from "./dust";
-import type { RiskBinsResult } from "./riskBins";
+import { usdExponentLabel, type RiskBinsResult } from "./riskBins";
 
 function usd(value: string, decimals: number): string {
   return `$${groupDecimalString(formatUnits(value, decimals, { trim: true }))}`;
@@ -127,3 +127,93 @@ export function riskMapReadingLine(result: RiskBinsResult): string {
 export function liquidatableCardSub(badDebt: BadDebt | undefined): string {
   return `of computed positions, engine's own comparator · ${eligibleDebtFragment(badDebt)}`;
 }
+
+// ---------------------------------------------------------------------------
+// The chart spec v4 FINAL COPY block for the risk map, verbatim.
+//
+// Constants and builders rather than inline JSX: JSX collapses whitespace
+// across expression boundaries, so a sentence interleaved with `{...}` is not
+// reliably the sentence a reader gets — and every string here is pinned.
+// ---------------------------------------------------------------------------
+
+/** The panel's claim, and the ANSWER slot's lead sentence (template slot 3). */
+export const RISK_MAP_ANSWER_LEAD =
+  "Where accounts cluster by debt size and headroom. Row bars show each band's exact total debt.";
+
+/**
+ * RM-1's LANE DISCLOSURE (STATE).
+ *
+ * A compressed axis whose compression is not stated is a lie about distance:
+ * two marks an inch apart in the lane may be four decades apart while two
+ * marks an inch apart on the main axis are one. The lower bound is COMPUTED
+ * from the data's own minimum exponent, never asserted.
+ */
+export function riskMapLaneDisclosure(xMinExp: number): string {
+  return (
+    `Sub-$1 debts occupy an order-preserving compressed log lane spanning ` +
+    `${usdExponentLabel(xMinExp)} to <$1 in this snapshot. Horizontal distances in this lane ` +
+    `are not comparable with the main axis.`
+  );
+}
+
+/**
+ * RM-15 / R7 — THE COVERAGE LINE, ON EVERY RENDER.
+ *
+ * Including the render with zero refusals: a coverage line that only appears
+ * when coverage is imperfect teaches the reader that its absence means
+ * nothing was checked. Material missingness is always visible.
+ */
+export function riskMapCoverageLine(plotted: number, book: number, aside: number): string {
+  const n = (value: number) => value.toLocaleString("en-US");
+  return `${n(plotted)} plotted of ${n(book)} · ${n(aside)} counted aside`;
+}
+
+/** RM-8's conditional note: why some crit marks sit below the first lane. */
+export function riskMapCritStripNote(stacked: number): string {
+  return (
+    `${String(stacked)} liquidatable marks share a debt neighbourhood and are stacked so each ` +
+    `stays individually reachable. Every one is listed with its exact debt below.`
+  );
+}
+
+/** RM-9's conditional note: callouts the width could not place clear. */
+export function riskMapCalloutOverflowNote(hidden: number): string {
+  return (
+    `${String(hidden)} of the 12 numbered exposures could not be placed clear at this width. ` +
+    `All 12 are listed with full addresses below.`
+  );
+}
+
+/** RM-13's activated-cell sentence, over the already-held full-book vector. */
+export function riskMapCellDetailLine(
+  count: number,
+  sumDisplay: string,
+  rangeLower: string,
+  rangeUpper: string,
+  bandLabel: string,
+  shown: number,
+): string {
+  return (
+    `${String(count)} accounts, Σ debt ${sumDisplay}, debt ${rangeLower} to ${rangeUpper}, ` +
+    `headroom ${bandLabel}. Showing the top ${String(shown)} by debt of ${String(count)}, ` +
+    `all counted.`
+  );
+}
+
+/** Template slot 6 — encoding, unit, as-of, in one 12px line. */
+export function riskMapMethodLine(batchId: number | null): string {
+  return (
+    `Cell shading counts accounts on a four-step ramp. Rows are headroom bands, the horizontal ` +
+    `axis is debt size, and the right-margin bars carry each band's exact total debt on one ` +
+    `common scale. Exact counts and totals are in the ledger below, as of batch ` +
+    `#${batchId === null ? "unknown" : String(batchId)}.`
+  );
+}
+
+/** Template slot 7's summary. */
+export const RISK_MAP_FORENSICS_SUMMARY =
+  "Exact data: band totals, every bin, top exposures with full addresses, and liquidatable " +
+  "accounts";
+
+/** RM-14's visible control, which moves focus into FORENSICS. */
+export const RISK_MAP_EXACT_DATA = "Exact data";

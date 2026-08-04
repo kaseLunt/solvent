@@ -197,7 +197,9 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
 
   // The risk map discloses the source-side filter and the three-part label.
   await expect(page.getByTestId("risk-map-dust-legend")).toHaveText(
-    "dust below 1 is excluded at the source, so this map shows the filtered walk only",
+    "Source filter: a position is excluded only when both its collateral and its debt are " +
+      "below 1. A position with sub-dollar debt stays on this map when its collateral is at " +
+      "or above 1.",
   );
   // W-HR-A: the map walks the WHOLE filtered book and states it, with the
   // unfiltered on-book count beside it — there is no loaded/qualifying

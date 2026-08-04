@@ -218,8 +218,69 @@
 
 .warnDisclosure {
   font-family: var(--mono);
-  font-size: var(--fs-caption);
-  color: var(--ink-3);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ---- the chart spec v4 section template (slots 2, 3, 6, 7) ----
+ *
+ * STATE sits ABOVE the visual and NEVER inside a <details> (R6, R7): every
+ * qualification of a chart renders before the chart it qualifies, and material
+ * missingness is always visible. Only DECOMPOSITIONS collapse. */
+.stateSlot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 96ch;
+}
+
+/* ANSWER: one computed sentence, 14px, --ink (template slot 3). */
+.answerLine {
+  font-size: 14px;
+  color: var(--ink);
+  max-width: 78ch;
+  margin: 0 0 10px;
+}
+
+/* METHOD: one 12px line — encoding, unit, as-of (template slot 6). */
+.methodLine {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 96ch;
+  margin: 10px 0 8px;
+}
+
+.forensicsHead {
+  margin: 12px 0 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.forensicsList {
+  margin: 0;
+  padding-left: 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.forensicsLine {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
 }
 
 .warnDisclosure i {
@@ -296,14 +357,30 @@
 
 .histLabel {
   font-family: var(--mono);
-  font-size: 10.5px;
-  fill: var(--ink-3);
+  font-size: 12px;
+  fill: var(--ink-2);
 }
 
 .histCount {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 12px;
   fill: var(--ink-2);
+}
+
+/* CX-6: the common 0 to 100 percent axis' own tick labels. */
+.histAxisLabel {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+/* CX-6: the named denominator. A share without its denominator is not a
+   disclosure. */
+.denominatorLine {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  margin: 0 0 6px;
 }
 
 .histBar {

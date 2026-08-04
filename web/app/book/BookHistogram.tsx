@@ -28,13 +28,25 @@ import {
 } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
+import {
+  RISK_BAND_HEADING,
+  RISK_BAND_METHOD,
+  riskBandDenominatorLine,
+  riskBandNoDebtRow,
+  riskBandPanelAria,
+  riskBandRefusedRow,
+} from "@/lib/book-copy";
+import { sharePercent, shareFraction } from "@/lib/book-format";
 import { histogramReadingLine } from "./readingLines";
 import styles from "./book.module.css";
 
 const BAR_MAX = 240;
 const ROW_H = 18;
 const LABEL_W = 84;
-const COUNT_W = 40;
+const COUNT_W = 64;
+/** CX-6: the common percent axis and the gutter its labels need. */
+const PERCENT_TICKS = [0, 50, 100] as const;
+const AXIS_H = 20;
 
 function EnginePanel({
   histogram,
@@ -63,9 +75,13 @@ function EnginePanel({
     );
   }
 
-  const maxCount = Math.max(...histogram.buckets.map((bucket) => bucket.count), 1);
-  const width = LABEL_W + BAR_MAX + COUNT_W + 12;
-  const height = histogram.buckets.length * ROW_H + 6;
+  // CX-6 THE DENOMINATOR: debt-bearing accounts with a finite comparator —
+  // exactly the population the buckets partition. `infinite_count` (no debt,
+  // so no comparator) and `refused_count` (an unknowable) are NOT folded in:
+  // they render as their own accounting rows beneath the bars.
+  const denominator = histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const width = LABEL_W + BAR_MAX + COUNT_W + 24;
+  const height = histogram.buckets.length * ROW_H + AXIS_H;
   const eligibleTint = histogram.comparator === "hf_wad";
 
   return (
@@ -80,12 +96,15 @@ function EnginePanel({
         <p className={styles.readingLine} data-testid={`hist-reading-${histogram.engine}`}>
           {histogramReadingLine(histogram, aggregate, badDebt, wadScale)}
         </p>
+        <p className={styles.denominatorLine} data-testid={`hist-denominator-${histogram.engine}`}>
+          {riskBandDenominatorLine(denominator)}
+        </p>
         <svg
           width={width}
           height={height}
           viewBox={`0 0 ${String(width)} ${String(height)}`}
           role="img"
-          aria-label={`health-factor histogram for ${histogram.engine} on comparator ${histogram.comparator}`}
+          aria-label={riskBandPanelAria(histogram.engine, histogram.comparator)}
           style={{ display: "block", maxWidth: "100%", height: "auto" }}
         >
           <line
@@ -93,12 +112,36 @@ function EnginePanel({
             x1={LABEL_W + 4}
             x2={LABEL_W + 4}
             y1={2}
-            y2={height - 2}
+            y2={height - AXIS_H + 2}
           />
+          {/* CX-6: a COMMON 0 to 100 percent axis with ticks at 0, 50, 100.
+              The old axis was `count / largestBucket`, so the tallest bucket
+              was always full width and the axis meant nothing. */}
+          {PERCENT_TICKS.map((tick) => (
+            <g key={`tick-${String(tick)}`} data-testid="hist-percent-tick">
+              <line
+                className={styles.histBaseline}
+                x1={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+                x2={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+                y1={2}
+                y2={height - AXIS_H + 2}
+                opacity={tick === 0 ? 1 : 0.35}
+              />
+              <text
+                className={styles.histAxisLabel}
+                x={LABEL_W + 6 + (tick / 100) * BAR_MAX}
+                y={height - 6}
+                textAnchor="middle"
+              >
+                {String(tick)}%
+              </text>
+            </g>
+          ))}
           {histogram.buckets.map((bucket, index) => {
             const y = index * ROW_H + 4;
-            const barWidth =
-              bucket.count === 0 ? 0 : Math.max((bucket.count / maxCount) * BAR_MAX, 1.5);
+            const share = shareFraction(bucket.count, denominator);
+            const barWidth = bucket.count === 0 ? 0 : Math.max(share * BAR_MAX, 1.5);
+            const percent = sharePercent(bucket.count, denominator);
             // Crit tint only where the comparator itself defines eligibility:
             // the whole bucket sits strictly below 1.00 on the wad.
             const belowOne =
@@ -137,19 +180,34 @@ function EnginePanel({
                     height={ROW_H - 8}
                   />
                 )}
-                <text className={styles.histCount} x={LABEL_W + 12 + barWidth} y={y + 10}>
+                {/* CX-6 / CX-8: `{count} · {pct}%`, the percent from exact
+                    integer arithmetic. A zero denominator yields NO percentage
+                    — a share of nothing is not a small share. */}
+                <text
+                  className={styles.histCount}
+                  x={LABEL_W + 12 + BAR_MAX}
+                  y={y + 10}
+                  data-testid="hist-row-label"
+                >
                   {String(bucket.count)}
+                  {percent === null ? "" : ` · ${percent}%`}
                 </text>
               </g>
             );
           })}
         </svg>
+        {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
         <div className={styles.histAside}>
-          <span className={styles.badge}>
-            refused {String(histogram.refused_count)} · rows withheld and counted here
+          <span data-testid={`hist-no-debt-${histogram.engine}`}>
+            {riskBandNoDebtRow(histogram.infinite_count)}
           </span>
-          <span>∞ no-debt {String(histogram.infinite_count)}</span>
+          <span className={styles.badge} data-testid={`hist-refused-${histogram.engine}`}>
+            {riskBandRefusedRow(histogram.refused_count)} · rows withheld and counted here
+          </span>
         </div>
+        <p className={styles.methodLine} data-testid={`hist-method-${histogram.engine}`}>
+          {RISK_BAND_METHOD}
+        </p>
         <p className={styles.panelNote}>{histogram.note}</p>
       </div>
     </div>
@@ -167,9 +225,9 @@ export function BookHistogram({
 }) {
   const wadScale = parseDecimal(histogram.wad_scale);
   return (
-    <section className={styles.section} aria-label="health-factor histogram per engine">
+    <section className={styles.section} aria-label="risk-band distribution per engine">
       <div className={styles.sectionHead}>
-        <h2>HF histogram: each engine on its own comparator</h2>
+        <h2>{RISK_BAND_HEADING}</h2>
         <span className={styles.sectionNote}>engines are never merged into one distribution</span>
       </div>
       <div className={styles.panelGrid}>

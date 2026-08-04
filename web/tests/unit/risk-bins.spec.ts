@@ -23,13 +23,18 @@
 //     debt (bigint, never a float).
 //   - sub-dollar decades are mono-scientific ("$1e-3"), never cent notation.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import {
   buildRiskBins,
   HEADROOM_BANDS,
+  LANE_AXIS_LABEL,
   OPACITY_LEGEND,
   opacityStep,
   usdExponentLabel,
+  xIndexOf,
 } from "../../app/book/riskBins";
 import {
   headroomBand,
@@ -316,8 +321,10 @@ test.describe("the 4-step count-opacity ramp", () => {
     expect(result.bins[0]?.step).toBe(2);
   });
 
-  test("the legend copy is the ruling's, verbatim", () => {
-    expect(OPACITY_LEGEND).toBe("1 · 10 · 100 · 1,000 accounts");
+  // AC-17. "1 · 10 · 100 · 1,000" reads as four exact counts; the ramp is four
+  // half-open RANGES, and the legend now names them.
+  test("the legend copy is the chart spec's, verbatim", () => {
+    expect(OPACITY_LEGEND).toBe("1–9 · 10–99 · 100–999 · 1,000+ accounts");
   });
 });
 
@@ -403,4 +410,201 @@ test.describe("the USD half-decade axis", () => {
     expect(buildRiskBins([makeRow({ decimals: 6 })]).decimals).toBe(6);
     expect(buildRiskBins([]).decimals).toBe(0);
   });
+});
+
+// ---------------------------------------------------------------------------
+// CHART SPEC v4 — RM-10 / LAW-4: the semantic bin index is EXACT INTEGER work.
+//
+// `Math.floor(Math.log10(v) * 2)` decided a BIN IDENTITY with a double. Two
+// accounts either side of a half-decade edge could land in different bins
+// because of the last bit of a `log10`, and this module's own header has
+// always forbidden floats outside geometry.
+// ---------------------------------------------------------------------------
+
+test.describe("xIndexOf — exact integer half-decade arithmetic (RM-10)", () => {
+  // AC-1
+  test("the spec's own verification table, exactly", () => {
+    expect(xIndexOf("3162", 0)).toBe(6);
+    expect(xIndexOf("3163", 0)).toBe(7);
+    expect(xIndexOf("46", 6)).toBe(-9);
+    expect(xIndexOf("1", 0)).toBe(0);
+    expect(xIndexOf("5", 0)).toBe(1);
+    expect(xIndexOf("100000000000000000000000", 0)).toBe(46);
+  });
+
+  // AC-2
+  test("PROPERTY: every power of ten at decimals 0, 6 and 8 lands on 2*(digits-1-d)", () => {
+    for (const decimals of [0, 6, 8]) {
+      for (let k = 0; k <= 40; k += 1) {
+        const units = (10n ** BigInt(k)).toString();
+        expect(xIndexOf(units, decimals), "power of ten " + String(k)).toBe(
+          2 * (units.length - 1 - decimals),
+        );
+      }
+    }
+  });
+
+  test("the half-decade edge is decided by u squared, never by a square root", () => {
+    // 10^3.5 is 3162.27…; 3162 sits below it and 3163 above.
+    expect(xIndexOf("31622", 1)).toBe(6);
+    expect(xIndexOf("31623", 1)).toBe(7);
+    // The same edge 15 decades up, where a float log10 is least exact.
+    expect(xIndexOf("3162277660168379331", 0)).toBe(36);
+    expect(xIndexOf("3162277660168379332", 0)).toBe(37);
+  });
+
+  test("a non-positive debt is a caller error, not a bin — a log axis has no zero", () => {
+    expect(() => xIndexOf("0", 6)).toThrow(RangeError);
+    expect(() => xIndexOf("-5", 6)).toThrow(RangeError);
+  });
+
+  // AC-3 — the unit half: the exported function's own body carries no float.
+  test("the bin-assignment path holds no Math.log10, no Number() and no float compare", () => {
+    const body = String(xIndexOf);
+    expect(body).not.toContain("log10");
+    expect(body).not.toContain("Number(");
+    expect(body).not.toMatch(/\d+\.\d+/);
+
+    // …and the SOURCE half, so a future refactor cannot reintroduce one
+    // through a helper the runtime body would not show.
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const source = readFileSync(path.join(here, "../../app/book/riskBins.ts"), "utf8");
+    const start = source.indexOf("export function xIndexOf(");
+    expect(start, "xIndexOf must exist in the source").toBeGreaterThan(-1);
+    const declaration = source.slice(start, source.indexOf("\n}", start));
+    expect(declaration).not.toContain("Math.");
+    expect(declaration).not.toContain("Number(");
+    expect(declaration).not.toContain("parseFloat");
+  });
+});
+
+test.describe("the partition and the sub-$1 population (AC-4, AC-5)", () => {
+  /** A row at sub-dollar debt — the population the compressed lane holds. */
+  function dust(account: string, units: string): PositionRow {
+    return makeRow({ account, debt: units, decimals: 6, headroom: headroomAt(7.5) });
+  }
+
+  // AC-4
+  test("bins + crit + aside === rows over sub-$1, crit, refused, no-debt and zero-debt", () => {
+    const rows = [
+      dust("0x1000000000000000000000000000000000000001", "1"), // $0.000001
+      dust("0x1000000000000000000000000000000000000002", "46"), // $0.000046
+      makeRow({ debt: "15000000000" }), // $150 at 8dp
+      makeRow({ verdict: "liquidatable", headroom: breached(), debt: "220000000000000" }),
+      makeRow({
+        status: "refused",
+        verdict: "unknowable",
+        debt: null,
+        headroom: { kind: "unknown", reason: "G1" },
+      }),
+      makeRow({ headroom: { kind: "no-debt" } }),
+      makeRow({ debt: "0" }), // computed, banded, ZERO debt: unplottable
+    ];
+    const result = buildRiskBins(rows);
+    expect(binTotal(result) + result.crit.length + result.aside.total).toBe(rows.length);
+    expect(result.total).toBe(rows.length);
+    // The invariant restated field by field, so a regression names itself.
+    expect(binTotal(result)).toBe(3);
+    expect(result.crit).toHaveLength(1);
+    expect(result.aside).toEqual({ noDebt: 1, unknown: 0, refused: 1, unplottable: 1, total: 3 });
+  });
+
+  // AC-5
+  test("belowOne counts and sums EXACTLY the marks under $1, and adds no field", () => {
+    const rows = [
+      dust("0x1000000000000000000000000000000000000001", "1"), // $0.000001
+      dust("0x1000000000000000000000000000000000000002", "46"), // $0.000046
+      dust("0x1000000000000000000000000000000000000003", "999999"), // $0.999999
+      makeRow({ debt: "100000000", decimals: 6 }), // $100 — at or above $1
+    ];
+    const result = buildRiskBins(rows);
+    expect(result.belowOne.count).toBe(3);
+    expect(result.belowOne.debt).toBe(1n + 46n + 999999n);
+    // The half-decade index is the membership test, and it is an integer one.
+    expect(xIndexOf("999999", 6)).toBeLessThan(0);
+    expect(xIndexOf("1000000", 6)).toBe(0);
+    // ADDITIVE: the partition is untouched by the new field.
+    expect(binTotal(result) + result.crit.length + result.aside.total).toBe(rows.length);
+    expect(result.bandTotals.reduce((sum, band) => sum + band.count, 0)).toBe(4);
+  });
+
+  test("an all-sub-$1 book has every mark below one and a wholly negative domain (RM-3)", () => {
+    const result = buildRiskBins([
+      dust("0x1000000000000000000000000000000000000001", "1"),
+      dust("0x1000000000000000000000000000000000000002", "5000"),
+    ]);
+    expect(result.belowOne.count).toBe(2);
+    expect(result.xMaxExp).toBeLessThanOrEqual(0);
+    expect(result.xMinExp).toBe(-6);
+    // AC-27's computed lower bound for the reference fixture.
+    expect(usdExponentLabel(result.xMinExp)).toBe("$1e-6");
+  });
+});
+
+// AC-19 — RM-8's crit ordering.
+test.describe("crit ordering (RM-8)", () => {
+  function critRow(account: string, debt: string): PositionRow {
+    return makeRow({ account, verdict: "liquidatable", headroom: breached(), debt });
+  }
+
+  test("descending by EXACT debt with an account tiebreak, stable across permutation", () => {
+    const rows = [
+      critRow("0xccc0000000000000000000000000000000000003", "300000000000"),
+      critRow("0xaaa0000000000000000000000000000000000001", "900000000000"),
+      critRow("0xbbb0000000000000000000000000000000000002", "300000000000"),
+      critRow("0xddd0000000000000000000000000000000000004", "900000000001"),
+    ];
+    const expected = [
+      "0xddd0000000000000000000000000000000000004", // $9,000.00000001
+      "0xaaa0000000000000000000000000000000000001", // $9,000
+      "0xbbb0000000000000000000000000000000000002", // $3,000, lower account
+      "0xccc0000000000000000000000000000000000003", // $3,000, higher account
+    ];
+    expect(buildRiskBins(rows).crit.map((point) => point.account)).toEqual(expected);
+    const shuffled = [rows[2], rows[0], rows[3], rows[1]].filter(
+      (row): row is PositionRow => row !== undefined,
+    );
+    expect(buildRiskBins(shuffled).crit.map((point) => point.account)).toEqual(expected);
+  });
+
+  test("every crit point carries its exact debt and its exact half-decade index", () => {
+    const result = buildRiskBins([
+      critRow("0xaaa0000000000000000000000000000000000001", "220000000000000"),
+    ]);
+    expect(result.crit[0]?.debt).toBe(220000000000000n);
+    expect(result.crit[0]?.debtDisplay).toBe("2,200,000");
+    expect(result.crit[0]?.xIndex).toBe(xIndexOf("220000000000000", 8));
+  });
+});
+
+test("the lane's ONE axis label is the spec's, verbatim (RM-4)", () => {
+  expect(LANE_AXIS_LABEL).toBe("<$1");
+});
+
+test("every bin carries the exact range and the exact Σ the LEDGER prints (RM-12)", () => {
+  const result = buildRiskBins([
+    makeRow({ headroom: headroomAt(7.5), debt: "15000000000" }),
+    makeRow({ headroom: headroomAt(6), debt: "20000000000" }),
+  ]);
+  const bin = result.bins[0];
+  expect(bin?.rangeLabel).toBe("$100–$316");
+  expect(bin?.debtDisplay).toBe("350");
+  // LAW-5: every number in the title exists outside it.
+  expect(bin?.title).toContain(bin?.rangeLabel ?? "");
+  expect(bin?.title).toContain("Σ debt " + (bin?.debtDisplay ?? ""));
+});
+
+test("the top exposures are RANKED, and each carries its full identity (RM-9)", () => {
+  const rows = Array.from({ length: 14 }, (_, index) =>
+    makeRow({
+      account: "0xaaa" + String(index).padStart(37, "0"),
+      debt: String(index + 1) + "00000000000",
+    }),
+  );
+  const result = buildRiskBins(rows);
+  expect(result.outliers.map((outlier) => outlier.rank)).toEqual([
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+  ]);
+  expect(result.outliers[0]?.debt).toBe(1400000000000n);
+  expect(result.outliers[0]?.debtDisplay).toBe("14,000");
 });

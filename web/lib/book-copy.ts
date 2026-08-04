@@ -67,3 +67,67 @@ export const AT_RISK_READER_CAPTION =
 export function wireNotesSummary(n: number): string {
   return `wire notes: ${String(n)}, verbatim`;
 }
+
+// ---------------------------------------------------------------------------
+// CX-5 / CX-6 — the risk-band distribution.
+//
+// THE RENAME. "HF histogram" named the wire field, not the thing. Only one of
+// the two engines publishes a health factor as its comparator at all: the Debt
+// Manager's buckets are the exact rational maxBorrowLT/borrowings, a
+// DISCLOSURE rather than a trigger. A reader who takes "HF histogram" at face
+// value reads one engine's disclosure as the other engine's verdict. The wire
+// field `hf_histogram` and every testid are UNCHANGED — this is display only.
+//
+// THE PERCENT AXIS. Bar length used to be `count / largestBucket`, so the
+// tallest bucket was always full width and the axis had no meaning. Within one
+// engine that differs from `count / engineTotal` by a constant factor, so the
+// within-engine SHAPE survives the change — and a named denominator on a
+// common 0–100% axis is a reading rather than a ranking. Percentages are
+// dimensionless (LAW-2), so the two engine panels may sit side by side without
+// creating a forbidden cross-engine aggregate; each still names its own
+// denominator.
+// ---------------------------------------------------------------------------
+
+/** The section heading (CX-5). */
+export const RISK_BAND_HEADING = "Risk-band distribution: each engine on its own comparator";
+
+/** The per-panel accessible name (CX-5). */
+export function riskBandPanelAria(engine: string, comparator: string): string {
+  return `risk-band distribution for ${engine} on comparator ${comparator}`;
+}
+
+/** The run-book before/after pair's accessible name (CX-5). */
+export function riskBandPairAria(engine: string): string {
+  return `risk-band distribution before and after for ${engine}`;
+}
+
+/** The section's METHOD line (CX-6). */
+export const RISK_BAND_METHOD =
+  "Buckets are policy bands of unequal width. Bar length is each bucket's share of this " +
+  "engine's debt-bearing accounts with a finite comparator, on a common 0 to 100 percent axis. " +
+  "Exact counts sit beside each bar.";
+
+/**
+ * The denominator, NAMED on the panel (CX-6). A share without its denominator
+ * is not a disclosure.
+ */
+export function riskBandDenominatorLine(denominator: number): string {
+  return (
+    `denominator: ${denominator.toLocaleString("en-US")} debt-bearing accounts with a finite ` +
+    `comparator`
+  );
+}
+
+/**
+ * The accounting rows (CX-6): `infinite_count` and `refused_count` render
+ * BENEATH the bars as their own rows, never folded into the denominator
+ * silently. An account with no debt has no comparator to bucket, and a refused
+ * account is an unknowable — neither is a small bucket.
+ */
+export function riskBandNoDebtRow(count: number): string {
+  return `no debt (no comparator): ${count.toLocaleString("en-US")}`;
+}
+
+export function riskBandRefusedRow(count: number): string {
+  return `refused: ${count.toLocaleString("en-US")}`;
+}

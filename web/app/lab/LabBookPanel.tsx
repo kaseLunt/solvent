@@ -34,7 +34,11 @@ import { RefusedTag } from "@/components/RefusedTag";
 import { StatCard } from "@/components/StatCard";
 import { getSolventClient, solventBaseUrl } from "@/lib/api";
 import { AT_RISK_READER_CAPTION, wireNotesSummary } from "@/lib/book-copy";
-import { renderNullableDecimal } from "@/lib/format";
+import {
+  renderSignedCount,
+  renderSignedUsdAmount,
+  renderUsdAmount,
+} from "@/lib/book-format";
 import {
   runBookScenario,
   type LabRunBook,
@@ -99,9 +103,25 @@ const AGGREGATE_ROWS = [
   { key: "bad_debt_usd", label: "bad debt", money: true },
 ] as const;
 
+/**
+ * CX-2 — THE RUN-BOOK CARD'S LABEL AND SUB, VERBATIM.
+ *
+ * `newly_eligible_accounts` is computed server-side as
+ * `after.eligibleAccounts − before.eligibleAccounts`: a SIGNED NET delta, and
+ * the contract's own note says it "subtracts any flip back to healthy". The
+ * card called it "Newly eligible accounts", which names a gross arrival count
+ * — a strictly larger number whenever anything healed. The label now states
+ * the arithmetic, the value always carries its sign, and a favourable movement
+ * is never toned as a favourable scenario.
+ */
+const NET_ELIGIBLE_LABEL = "Net change in eligible accounts";
+const NET_ELIGIBLE_SUB =
+  "After eligible count minus before for this engine's run. " +
+  "Healthy→eligible adds; eligible→healthy subtracts.";
+
 function EngineResult({ engine }: { engine: LabRunBookEngine }) {
-  const money = (value: string) =>
-    renderNullableDecimal(value, { decimals: engine.usd_decimals, prefix: "$" });
+  // CX-4: the Lab's ONE grouped-USD renderer.
+  const money = (value: string) => renderUsdAmount(value, engine.usd_decimals);
   const cell = (row: (typeof AGGREGATE_ROWS)[number], side: "before" | "after") => {
     const value = engine[side][row.key];
     return row.money ? money(value as string) : String(value);
@@ -134,18 +154,25 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
       </div>
       <div className={styles.statRow}>
         <StatCard
-          label="Newly eligible accounts"
-          value={String(engine.newly_eligible_accounts)}
+          label={NET_ELIGIBLE_LABEL}
+          value={renderSignedCount(engine.newly_eligible_accounts)}
+          // Accounts are dimensionless, so the sub carries no unit clause.
+          sub={NET_ELIGIBLE_SUB}
+          // Tone is crit ABOVE zero only. At or below zero the movement is
+          // favourable for this metric, and a favourable metric movement is
+          // not a favourable scenario — so it takes the default register
+          // rather than an "all clear" one.
           tone={engine.newly_eligible_accounts > 0 ? "crit" : "default"}
+          testId="net-eligible-card"
         />
         <StatCard
           label="Δ eligible debt · DELTA-ONLY"
-          value={money(engine.eligible_debt_delta_usd)}
+          value={renderSignedUsdAmount(engine.eligible_debt_delta_usd, engine.usd_decimals)}
           sub="after minus before, the scenario's own contribution"
         />
         <StatCard
           label="Δ bad debt · DELTA-ONLY"
-          value={money(engine.bad_debt_delta_usd)}
+          value={renderSignedUsdAmount(engine.bad_debt_delta_usd, engine.usd_decimals)}
           sub="same delta-only basis"
         />
       </div>
@@ -991,7 +1018,7 @@ function LabBookPanelInner() {
           flight
         </p>
       ) : book.phase === "ok" ? (
-        <LabFrontier waterfall={waterfall} />
+        <LabFrontier waterfall={waterfall} batchId={frontierBatchId} />
       ) : (
         <div className={styles.errorState} data-testid="frontier-refused">
           {book.phase === "no-batch"

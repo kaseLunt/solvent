@@ -316,17 +316,24 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
       "5–10% of borrowing capacity left before liquidation",
   );
 
-  // The band axis reads in reader words, and the right-margin marginal states
-  // each band's count and exact Σ debt.
+  // The band axis reads in reader words. RM-7: the right margin carries BARS
+  // now, not money text — exact money never floats inside a VISUAL (R1), and
+  // every exact Σ moved to the LEDGER directly beneath.
   await expect(density).toContainText("5–10% left");
   await expect(density).toContainText("breached");
-  await expect(page.getByTestId("density-marginal-head")).toHaveText("accts · Σ debt");
-  await expect(page.getByTestId("density-band-marginal").nth(3)).toContainText("1 · 6,000");
+  await expect(page.getByTestId("density-marginal-head")).toHaveCount(0);
+  await expect(page.getByTestId("density-band-marginal")).toHaveCount(0);
+  await expect(page.getByTestId("density-band-bar")).toHaveCount(1);
+  await expect(page.getByTestId("density-band-bar")).toHaveAttribute("data-band", "3");
+  // RM-12: the exact Σ is in the LEDGER, unrounded and never collapsed.
+  await expect(page.getByTestId("risk-map-ledger")).toContainText("6,000");
 
   // USD axis with true-decade ticks; the quantized legend, never a gradient.
   await expect(density).toContainText("debt (usd, log)");
   await expect(density).toContainText("$10k");
-  await expect(page.getByTestId("density-legend")).toContainText("1 · 10 · 100 · 1,000 accounts");
+  await expect(page.getByTestId("density-legend")).toContainText(
+    "1–9 · 10–99 · 100–999 · 1,000+ accounts",
+  );
 
   // The reading line is COMPUTED from the same bins the grid draws.
   await expect(page.getByTestId("risk-map-reading")).toHaveText(
@@ -335,12 +342,22 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
       "1 of 2 walked rows are counted aside and stay out of the plot.",
   );
 
-  // The refused row is COUNTED aside, never dropped, never plotted.
-  await expect(page.getByTestId("risk-map-aside")).toContainText("1 counted aside, out of the plot");
-  await expect(page.getByTestId("risk-map-aside")).toContainText("1 refused");
+  // RM-15 / AC-26: the coverage line renders on EVERY render, outside every
+  // <details>, in the spec's own grammar.
+  await expect(page.getByTestId("risk-map-coverage")).toHaveText("1 plotted of 2 · 1 counted aside");
+  // AC-28 / R3: the refusal is NOT inside FORENSICS. It is in STATE, where a
+  // withheld count belongs, and it is stated as an unknowable.
+  await expect(page.getByTestId("risk-map-refused")).toContainText("1 refused");
+  await expect(
+    page.getByTestId("risk-map-forensics").getByTestId("risk-map-refused"),
+  ).toHaveCount(0);
 
-  // The top-debt outlier is named with its truncated address.
-  await expect(page.getByTestId("risk-map-outlier")).toHaveText("0xAAaA…0001");
+  // RM-9: the top exposure takes a NUMBERED callout; its FULL address lives in
+  // FORENSICS, where a truncation would make the panel useless.
+  await expect(page.getByTestId("risk-map-callout")).toHaveText("1");
+  await expect(page.getByTestId("risk-map-exposure-address")).toHaveText(
+    "0xAAaA000000000000000000000000000000000001",
+  );
 });
 
 test("409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page one", async ({
