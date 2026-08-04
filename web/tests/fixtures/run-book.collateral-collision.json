@@ -255,7 +255,7 @@
       "movers_note": "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. This scenario moves no oracle mark, so NO account's health factor dropped and there is nothing to rank. `movers` carries all 0 of them.",
       "market_realization": {
         "hfs_unchanged": true,
-        "execution_shortfall_usd": "40000000000",
+        "execution_shortfall_usd": "0",
         "bad_debt_at_liquidation_usd": "0",
         "usd_decimals": 8,
         "seizure_model": "pro-rata-over-counted-collateral",
@@ -429,8 +429,8 @@
       "movers_note": "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose eligibility FLIPPED false -> true are movers. This scenario moves no oracle mark, so nothing flipped. `movers` carries all 0 of them.",
       "market_realization": {
         "hfs_unchanged": true,
-        "execution_shortfall_usd": "200000000",
-        "bad_debt_at_liquidation_usd": "0",
+        "execution_shortfall_usd": "0",
+        "bad_debt_at_liquidation_usd": "620000000",
         "usd_decimals": 6,
         "seizure_model": "pro-rata-over-counted-collateral",
         "note": "same axis, this engine's own 6-decimal USD."

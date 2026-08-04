@@ -549,11 +549,39 @@
 //   because the output's whole purpose is to be a body the product should refuse
 //   to render honestly.
 //
-// AND THAT IS THE WHOLE LIST. After this wave, the ways to change what an honest
-// user sees without failing generation are exactly (i) and (ii). There is no
-// third: the completeness law leaves no leaf unclaimed on a guarded body, and
-// every register entry resolves to arithmetic over frozen inputs, to a frozen
-// pin over a committed source, or to a written-down reason.
+// LIMIT (iii) — THE REGISTER ASSIGNMENT ITSELF (WAVE W-BS-I, and the amendment
+// wave W-BS-H's own claim needed). W-BS-H closed with "the ways to change what an
+// honest user sees without failing generation are exactly (i) and (ii). There is
+// no third." That was FALSE, and Codex round 33 found the third by walking into
+// it: `market_realization.execution_shortfall_usd` sat in the ANCHORED register,
+// with a real committed provenance, re-proved against the contract example every
+// run — and served $400 of CRITICAL execution shortfall on a body whose own
+// `eligible_accounts` is 0. Neither (i) nor (ii) was involved. Nothing was edited
+// in two places and no fixture was deliberately malformed. The number was simply
+// FILED IN THE WRONG REGISTER, and an anchor's whole promise — "this value
+// answers to a source" — is worth nothing when the value is arithmetic over a
+// book the source does not describe. The pin kept agreeing; the book had moved.
+//
+//   THE TEST, now stated so the judgement can be reviewed rather than assumed:
+//   a leaf may be ANCHORED only if its value is INDEPENDENT OF THE BODY'S OWN
+//   BOOK. If any transform this file performs — restating a balance, injecting a
+//   row, re-identifying a scenario — could change what production would serve for
+//   it, then it is DERIVED, and filing it as ANCHORED buys a pin on the wrong
+//   number. Money and counts are almost never envelope. Sentences, identity
+//   stamps, provider tokens and the batch's own provenance almost always are.
+//
+// This limit cannot be closed by a law in this file, because it is a limit on the
+// HUMAN JUDGEMENT the registers encode: no walk over a body can tell that a leaf's
+// register is the wrong one, only that it has one. What Wave W-BS-I does instead
+// is state the test above, apply it to every entry in the ANCHORED register, and
+// leave the reasons in the register beside each survivor.
+//
+// AND THAT IS THE WHOLE LIST. The ways to change what an honest user sees without
+// failing generation are (i), (ii) and (iii). The completeness law leaves no leaf
+// unclaimed on a guarded body, and every register entry resolves to arithmetic
+// over frozen inputs, to a frozen pin over a committed source, or to a
+// written-down reason — but WHICH of those three a leaf gets is a decision, and
+// (iii) is the honest name for the decision being wrong.
 //
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
@@ -1734,20 +1762,17 @@ const FROZEN_EXAMPLE_ENVELOPE = new Map([
   ["notes[0]", text("a11aaae34adb7eeb", "aggregates are per engine in each engine's O")],
   ["engines[0].note", text("0440e01766848af7", "oracle marks held: before and after aggregat")],
   ["engines[0].movers_note", text("e6f51a236a09295d", "RANKED BY HEALTH-FACTOR DROP: before minus a")],
-  ["engines[0].projection", null],
-  ["engines[0].market_realization.hfs_unchanged", true],
-  ["engines[0].market_realization.execution_shortfall_usd", "40000000000"],
-  ["engines[0].market_realization.bad_debt_at_liquidation_usd", "0"],
-  ["engines[0].market_realization.usd_decimals", 8],
+  // `projection` and the realization block's four computed leaves are NOT frozen
+  // here any more — Wave W-BS-I moved them to DERIVED, and a frozen pin on a
+  // derived leaf would be two registers claiming one field. The one this list
+  // used to carry is worth naming: `engines[0].market_realization
+  // .execution_shortfall_usd` was pinned to "40000000000", which is $400 of
+  // CRITICAL execution shortfall — a figure the example computes over ITS book
+  // and the collision pair republished over a book with `eligible_accounts: 0`.
   ["engines[0].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
   ["engines[0].market_realization.note", text("5483193594ac1b43", "market value is NOT an oracle mark: this sce")],
   ["engines[1].note", text("20511f4ce03c0789", "delta-only: zero deltas here are THE FINDING")],
   ["engines[1].movers_note", text("7c127dc90477c0f0", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
-  ["engines[1].projection", null],
-  ["engines[1].market_realization.hfs_unchanged", true],
-  ["engines[1].market_realization.execution_shortfall_usd", "200000000"],
-  ["engines[1].market_realization.bad_debt_at_liquidation_usd", "0"],
-  ["engines[1].market_realization.usd_decimals", 6],
   ["engines[1].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
   ["engines[1].market_realization.note", "same axis, this engine's own 6-decimal USD."],
 ]);
@@ -1825,6 +1850,164 @@ const derivedAtRisk = (collateral, debt, bonusNum, bonusDen) => {
 const derivedBadDebt = (collateral, debt, bonusNum, bonusDen) => {
   const recoverable = (collateral * bonusDen) / bonusNum;
   return debt > recoverable ? debt - recoverable : 0n;
+};
+
+// --- THE REALIZATION AXIS'S MONEY, DERIVED (WAVE W-BS-I) --------------------
+//
+// `market_realization.execution_shortfall_usd` was in the ANCHORED register as
+// "the contract example's own shortfall" — an envelope byte carried in from the
+// example. It is nothing of the kind. It is an AGGREGATE OVER THE BOOK, and
+// `internal/risk/shortfall.go:97-104` sums it over LIQUIDATABLE POSITIONS ONLY.
+// Both collision bodies served the example's `40000000000` on an aave engine
+// whose own `eligible_accounts` is 0: $400 of CRITICAL execution shortfall over a
+// book with no liquidatable account, on a body the completeness law walks and
+// every law read green (Codex round 33, HIGH). The register named the leaf and
+// filed it wrong, and a frozen pin kept agreeing with a source that describes a
+// DIFFERENT BOOK.
+//
+// THE ARITHMETIC, in the derivation's own hand (`internal/risk/shortfall.go`
+// :49-127 and :166-267, assembled by `cmd/api/p5_runbook.go:500-613`):
+//
+//   ratios      keyed responseKey(chain, asset) from the COMMITTED scenario's
+//               `market_realizations`. A key the axis does NOT name realizes at
+//               PAR — the fallback shortfall.go:240-243 spells, not an omission.
+//   legs        the position's COUNTED collateral, each at its oracle value.
+//   realizable  Sum floor(value x r / WAD), floored PER LEG.
+//   seizable    the debt the liquidation bonus lets a liquidator seize.
+//   shortfall   max(0, seizable - floor(seizable x Sum(value x r) / (WAD x Sum value)))
+//   bad debt    max(0, borrowings - realizable)
+//
+// and BOTH aggregates are summed over the LIQUIDATABLE positions of the BEFORE
+// side alone: production runs the whole computation on `beforeInputs`.
+//
+// WHAT THIS DERIVATION CAN AND CANNOT COMPOSE, stated rather than papered over.
+// `seizable` needs each engine's liquidation bonus, and no frozen source in this
+// file carries the Debt Manager's. So the shortfall term is composed through the
+// two CLOSED FORMS that are exact identities of the arithmetic above, and the
+// derivation REFUSES rather than guesses outside them:
+//
+//   no liquidatable position    the sum is EMPTY. Zero eligible accounts, zero
+//                               aggregate realization shortfall — the invariant
+//                               round 33's finding violated, and it holds
+//                               whatever the ratios are.
+//   every counted leg at PAR    Sum(value x r) is exactly WAD x Sum value, so the
+//                               fused floor returns `seizable` unchanged and the
+//                               gap is zero FOR ANY seizable. No bonus needed.
+//
+// The bad-debt term needs no bonus at all — only the borrowings and the realized
+// collateral — so it is composed whenever the engine carries ONE account, which
+// is the condition under which an engine aggregate IS the single position's
+// figure. An aggregate over more than one cannot be decomposed into the
+// per-position sum production performs, and the derivation says so and stops.
+
+/** The realization wad's unit — `risk.WadUnit()`, the ratio 1.00 exactly. */
+const DERIVED_REALIZATION_PAR = 1_000_000_000_000_000_000n;
+
+/** The committed axis keyed the way production keys it (shortfall.go:50-62). */
+const derivedRealizationRatios = (what, axis) => {
+  const ratios = new Map();
+  for (const row of axis) {
+    const key = responseKey(row.chain_id, row.asset);
+    const wad = BigInt(row.market_over_oracle_wad);
+    if (wad <= 0n) {
+      fail(
+        `${what}: the committed realization axis gives ${key} a market_over_oracle_wad of ` +
+          `${String(wad)}, which shortfall.go:52-55 refuses as non-positive`,
+      );
+    }
+    if (ratios.has(key)) {
+      fail(
+        `${what}: the committed realization axis names ${key} TWICE, which shortfall.go:57-60 ` +
+          `refuses as a duplicate market realization`,
+      );
+    }
+    ratios.set(key, wad);
+  }
+  return ratios;
+};
+
+/**
+ * One engine's `market_realization`, composed from the frozen sources — the
+ * VALUES and the sentence each one answers to, so a refusal names the reason and
+ * not only the number.
+ */
+const derivedMarketRealization = (
+  what,
+  { axis, chainId, legs, borrowings, accounts, eligibleAccounts, usdDecimals },
+) => {
+  const ratios = derivedRealizationRatios(what, axis);
+  let realizable = 0n;
+  let marked = 0n;
+  let atPar = true;
+  for (const leg of legs) {
+    const ratio = ratios.get(responseKey(chainId, leg.asset)) ?? DERIVED_REALIZATION_PAR;
+    if (ratio !== DERIVED_REALIZATION_PAR) {
+      atPar = false;
+    }
+    marked += leg.value;
+    realizable += (leg.value * ratio) / DERIVED_REALIZATION_PAR;
+  }
+
+  const shared = { hfs_unchanged: true, usd_decimals: usdDecimals };
+  const sharedWhy = {
+    hfs_unchanged:
+      "the market-realization pass COPIES the position and writes no price input " +
+      "(internal/risk/shortfall.go:145-158), so both health computations read identical inputs and " +
+      "production's own bit-for-bit comparison comes out true; a body serving false claims that " +
+      "guard FIRED",
+    usd_decimals:
+      "the shortfall is READ at this engine's own frozen serializer constant, the same one " +
+      "engines[].usd_decimals carries (cmd/api/p5_runbook.go:602-610)",
+  };
+
+  if (eligibleAccounts === 0) {
+    return {
+      values: { ...shared, execution_shortfall_usd: "0", bad_debt_at_liquidation_usd: "0" },
+      why: {
+        ...sharedWhy,
+        execution_shortfall_usd:
+          "the aggregate is summed over LIQUIDATABLE positions ONLY " +
+          "(internal/risk/shortfall.go:97-104) and this engine's BEFORE side carries 0 eligible " +
+          "accounts, so the sum is EMPTY: zero eligible accounts, zero aggregate realization shortfall",
+        bad_debt_at_liquidation_usd:
+          "the same empty sum: no position on this engine's BEFORE side is liquidatable, so none " +
+          "contributes bad debt at liquidation",
+      },
+    };
+  }
+  if (accounts !== 1 || eligibleAccounts !== 1) {
+    fail(
+      `${what}: the derivation cannot compose a realization aggregate over ${String(accounts)} ` +
+        `accounts of which ${String(eligibleAccounts)} are eligible — production sums it PER ` +
+        `POSITION over the liquidatable ones (internal/risk/shortfall.go:97-104), and an engine ` +
+        `aggregate over more than one account does not decompose into that sum`,
+    );
+  }
+  if (!atPar) {
+    fail(
+      `${what}: this engine has a liquidatable position AND a counted leg the committed axis ` +
+        `DISCOUNTS, so the shortfall needs the SEIZABLE term — which needs a liquidation bonus no ` +
+        `frozen source in this file carries. Freeze the bonus and compose seizableValue, or state ` +
+        `why the body may publish a figure nothing derives; do not let one ride in from the example`,
+    );
+  }
+  return {
+    values: {
+      ...shared,
+      execution_shortfall_usd: "0",
+      bad_debt_at_liquidation_usd: (borrowings > realizable ? borrowings - realizable : 0n).toString(),
+    },
+    why: {
+      ...sharedWhy,
+      execution_shortfall_usd:
+        `every counted leg realizes at PAR — the committed axis names no key this engine itemizes — ` +
+        `so Sum(value x r) is exactly WAD x ${String(marked)} and the fused floor returns seizable ` +
+        `unchanged: the gap is zero for ANY seizable`,
+      bad_debt_at_liquidation_usd:
+        `the ONE liquidatable account's frozen borrowings ${String(borrowings)} less what its ` +
+        `counted collateral realizes at the committed ratios, ${String(realizable)}`,
+    },
+  };
 };
 
 /**
@@ -2056,6 +2239,37 @@ const checkDerivation = (name, response, derivation) => {
           `derivation composes ${want.usd_decimals} from the serializer's own frozen constant — ` +
           `an engine's USD scale is what every number it serves is READ at, not a label`,
       );
+    }
+
+    // THE REALIZATION AXIS'S MONEY (Wave W-BS-I, Codex round 33 HIGH). Composed
+    // from the frozen holdings, the frozen borrowings and the COMMITTED
+    // realization ratios — never carried from the example, which is how a
+    // CRITICAL execution shortfall came to ride on a book with no liquidatable
+    // account. WHETHER the block is present belongs to law 16 and the committed
+    // scenario's own axis; what is inside it belongs here.
+    if (!("market_realization" in want)) {
+      fail(
+        `${label}'s derivation composes no market_realization at all — the axis's money is DERIVED, ` +
+          `and a body whose shortfall nothing composes is a body publishing somebody else's book`,
+      );
+    }
+    if (want.market_realization !== null) {
+      const realization = engine.market_realization;
+      if (realization === null || realization === undefined) {
+        fail(
+          `${label} serves market_realization ${shown(realization)}, but the derivation composes ` +
+            `this engine's own realization figures from the committed axis — the shortfall is not a ` +
+            `field a body may drop`,
+        );
+      }
+      for (const [field, value] of Object.entries(want.market_realization.values)) {
+        if (String(realization[field]) !== String(value)) {
+          fail(
+            `${label} publishes market_realization.${field} ${shown(realization[field])}, but the ` +
+              `derivation composes ${shown(value)} — ${want.market_realization.why[field]}`,
+          );
+        }
+      }
     }
 
     for (const side of ["before", "after"]) {
@@ -3175,6 +3389,18 @@ const RESPONSE_DERIVED_LEAVES = new Map([
   ["engines[].engine", "checkDerivation: the engine set is the derivation's, in order"],
   ["engines[].usd_decimals", "checkDerivation: the serializer's own frozen constant"],
   ["engines[].market_realization", "law 16: NULL exactly when the committed scenario carries no market-realization axis"],
+  ["engines[].projection", "law 18: NULL unless the committed scenario carries a projection axis AND this is the Debt Manager"],
+
+  // THE REALIZATION AXIS'S MONEY (Wave W-BS-I). These four were ANCHORED to the
+  // contract example's own bytes until Codex round 33 found what that means on a
+  // TRANSFORMED body: the example's shortfall is arithmetic over the EXAMPLE's
+  // book, and a body that restates the book and keeps the figure publishes a
+  // critical shortfall over a book with nothing liquidatable. `seizure_model` and
+  // `note` stay ANCHORED: they are the disclosure sentences, not the money.
+  ["engines[].market_realization.hfs_unchanged", "checkDerivation: the realization pass writes no price input, so production's own comparison is true"],
+  ["engines[].market_realization.execution_shortfall_usd", "checkDerivation: the aggregate over LIQUIDATABLE positions ONLY, from the frozen book and the committed ratios"],
+  ["engines[].market_realization.bad_debt_at_liquidation_usd", "checkDerivation: the same aggregate — the frozen borrowings less what the counted collateral realizes"],
+  ["engines[].market_realization.usd_decimals", "checkDerivation: the unit the shortfall is READ at — this engine's own serializer constant"],
   ["engines[].movers_total", "checkDerivation: the count of accounts the derivation's arithmetic moves"],
   ["engines[].newly_eligible_accounts", "checkResponse: after minus before, over derived sides"],
   ["engines[].eligible_debt_delta_usd", "checkResponse: after minus before, over derived sides"],
@@ -3260,13 +3486,27 @@ const RESPONSE_ANCHORED_LEAVES = new Map([
 
   ["engines[].note", { by: "response", why: "the sentence the page renders beside the deltas" }],
   ["engines[].movers_note", { by: "response", why: "the sentence that says whether the ranking is COMPLETE" }],
-  ["engines[].projection", { by: "response", why: "the contract example's own NULL — this file composes no projection" }],
-  ["engines[].market_realization.hfs_unchanged", { by: "response", why: "the contract example's own realization axis" }],
-  ["engines[].market_realization.execution_shortfall_usd", { by: "response", why: "the contract example's own shortfall" }],
-  ["engines[].market_realization.bad_debt_at_liquidation_usd", { by: "response", why: "the contract example's own figure" }],
-  ["engines[].market_realization.usd_decimals", { by: "response", why: "the unit that shortfall is READ at" }],
-  ["engines[].market_realization.seizure_model", { by: "response", why: "the contract example's own seizure model" }],
-  ["engines[].market_realization.note", { by: "response", why: "the contract example's own realization sentence" }],
+  // WHAT IS LEFT OF THE REALIZATION BLOCK AFTER WAVE W-BS-I, and why each is
+  // genuinely envelope rather than arithmetic somebody has not got to yet:
+  //
+  //   seizure_model  the disclosed MODELLING ASSUMPTION, not a measurement — it
+  //                  names which of several defensible seizure models the number
+  //                  beside it was computed under. Its provenance is the Go
+  //                  constant `risk.SeizureModelProRata` (internal/risk
+  //                  /shortfall.go:45), which the example's byte reproduces
+  //                  verbatim; a generator cannot compose a Go constant, so the
+  //                  strongest available statement is a frozen pin on the string.
+  //   note           the disclosure SENTENCE a reader is told the numbers mean.
+  //                  RECORDED, NOT FIXED (the ledger this file already keeps for
+  //                  `held_flat: []`, the aave census and the histogram note):
+  //                  `p5_runbook.go:612` writes ONE sentence for EVERY engine,
+  //                  and the example carries two different ones — a longer aave
+  //                  sentence and a short debt_manager sentence production would
+  //                  never emit. Two committed artifacts disagree; item 2's
+  //                  discipline is that the example rides in verbatim, so the
+  //                  EXAMPLE's sentences are what is frozen.
+  ["engines[].market_realization.seizure_model", { by: "response", why: "the disclosed seizure model — `risk.SeizureModelProRata`, a Go constant no generator composes" }],
+  ["engines[].market_realization.note", { by: "response", why: "the example's own realization sentence; production's differs on BOTH engines and the divergence is recorded, not fixed" }],
 
   ["applied_shocks[].source", { by: "response", why: "WHICH oracle moved — a frozen literal of this body's own inputs" }],
   ["applied_shocks[].snapped", { by: "response", why: "a stable-band snap this generator does not model, frozen false" }],
@@ -3616,6 +3856,31 @@ const checkResponse = (name, response, declared) => {
           `${response.scenario_id} registry entry carries ${String(realizations.length)} ` +
           `market-realization rows — the axis belongs to the SCENARIO, so a body may neither ` +
           `invent a realization the scenario has no axis for nor withhold one it does`,
+      );
+    }
+  }
+  // LAW 18: THE PROJECTION AXIS IS THE SCENARIO'S TOO — AND THE DEBT MANAGER'S
+  // ALONE (Wave W-BS-I, the round-33 audit). `cmd/api/p5_runbook.go:616-624`
+  // composes `projection` when — and only when — the committed scenario carries a
+  // `projection` axis AND the engine is the Debt Manager; every other engine
+  // publishes NULL. This leaf was ANCHORED as "the contract example's own NULL",
+  // which is round 33's misclassification in its other form: a value the
+  // COMMITTED SCENARIO decides, pinned to a carried literal instead. The pin held
+  // the field on the bodies whose example happened to carry null and said nothing
+  // about WHOSE null it was, so an aave engine could grow a rate horizon.
+  const projectionAxis = committedScenario(response.scenario_id).projection;
+  const projects = projectionAxis !== null && projectionAxis !== undefined;
+  for (const engine of response.engines) {
+    const owed = projects && engine.engine === "debt_manager";
+    const carries = engine.projection !== null && engine.projection !== undefined;
+    if (carries !== owed) {
+      fail(
+        `${name} ${engine.engine} serves projection ` +
+          `${carries ? "an object" : shown(engine.projection)}, but the committed ` +
+          `${response.scenario_id} registry entry carries ${projects ? "a" : "no"} projection axis ` +
+          `and this engine is ${engine.engine === "debt_manager" ? "" : "NOT "}the Debt Manager — a ` +
+          `rate projection is composed for the SCENARIO's own rate axis and for the one engine that ` +
+          `HAS a rate, never carried because the example's null looked right`,
       );
     }
   }
@@ -4718,6 +4983,10 @@ const ETH_DERIVATION = (() => {
       {
         engine: AAVE_ENGINE,
         usd_decimals: String(FROZEN_ENGINE_SERIALIZATION[AAVE_ENGINE].usd_decimals),
+        // eth_minus_30 carries NO market-realization axis, so there is no money
+        // for this block to hold and the derivation composes its absence. Law 16
+        // proves the NULLity against the committed registry independently.
+        market_realization: null,
         before: aaveBeforeDerived,
         after: aaveAfterDerived,
         movers: new Set(aaveMovers),
@@ -4740,6 +5009,7 @@ const ETH_DERIVATION = (() => {
       {
         engine: "debt_manager",
         usd_decimals: String(FROZEN_ENGINE_SERIALIZATION.debt_manager.usd_decimals),
+        market_realization: null,
         before: dmBeforeDerived,
         after: dmAfterDerived,
         movers: new Set(dmMovers),
@@ -4822,8 +5092,10 @@ const FROZEN_ETH_ENVELOPE = new Map([
   ["engines[1].movers_note", text("b6cf9a08427c2b70", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
   // `market_realization` itself is NOT pinned here: law 16 derives its NULLity
   // from the committed registry's own market-realization axis, so an anchor row
-  // would be a second register claiming one leaf. Only its CHILDREN are
-  // anchored, and this body drops them — see FROZEN_ETH_ENVELOPE_DROPPED.
+  // would be a second register claiming one leaf. The same now holds for
+  // `projection`, which law 18 derives the same way. Of the realization block's
+  // CHILDREN only the two disclosure sentences are still anchored, and this body
+  // drops those — see FROZEN_ETH_ENVELOPE_DROPPED.
   // Sorted by `${asset}|${chain_id}|${source}`, the server's own disclosure order.
   ["applied_shocks[0].source", "priceproviderv2"],
   ["applied_shocks[0].snapped", false],
@@ -4840,24 +5112,21 @@ const FROZEN_ETH_ENVELOPE = new Map([
 /**
  * The example's envelope leaves this body does NOT carry.
  *
- * `market_realization` goes from an OBJECT to NULL, so its six leaves stop
- * existing and their pins would otherwise sit on fields that are gone — which
- * the completeness law refuses in its own right ("a body may not drop an
- * envelope field its own source carries"). Dropping them here is the statement
- * that their absence is INTENDED, and law 16 is what proves the intention is
- * the committed scenario's rather than this file's.
+ * `market_realization` goes from an OBJECT to NULL, so its leaves stop existing
+ * and their pins would otherwise sit on fields that are gone — which the
+ * completeness law refuses in its own right ("a body may not drop an envelope
+ * field its own source carries"). Dropping them here is the statement that their
+ * absence is INTENDED, and law 16 is what proves the intention is the committed
+ * scenario's rather than this file's.
+ *
+ * The list is TWO PER ENGINE after Wave W-BS-I, not six: the block's four
+ * computed leaves are DERIVED now and were never anchored to begin with, so
+ * dropping them would be dropping nothing — which `responseAnchor` refuses.
+ * Only the two disclosure sentences are still anchored, and only they are here.
  */
 const FROZEN_ETH_ENVELOPE_DROPPED = [
-  "engines[0].market_realization.hfs_unchanged",
-  "engines[0].market_realization.execution_shortfall_usd",
-  "engines[0].market_realization.bad_debt_at_liquidation_usd",
-  "engines[0].market_realization.usd_decimals",
   "engines[0].market_realization.seizure_model",
   "engines[0].market_realization.note",
-  "engines[1].market_realization.hfs_unchanged",
-  "engines[1].market_realization.execution_shortfall_usd",
-  "engines[1].market_realization.bad_debt_at_liquidation_usd",
-  "engines[1].market_realization.usd_decimals",
   "engines[1].market_realization.seizure_model",
   "engines[1].market_realization.note",
 ];
@@ -6031,6 +6300,80 @@ const collidingHistogram = (aggregate, countedValue) => {
   );
 };
 
+/**
+ * THE REALIZATION AXIS THE SERVING LAYER WOULD WRITE FOR THIS BODY.
+ *
+ * `withCollidingCollateral` carried the contract example's `market_realization`
+ * through by object spread, so both collision fixtures served
+ * `execution_shortfall_usd: "40000000000"` — $400 of CRITICAL execution
+ * shortfall, rendered `crit` by `LabRealization` — on an aave engine whose own
+ * `eligible_accounts` is 0 (Codex round 33, HIGH). The shortfall is not an
+ * envelope byte. `cmd/api/p5_runbook.go:500-613` computes it from the BEFORE
+ * side's book through `risk.ExecutionShortfall`, which aggregates LIQUIDATABLE
+ * positions only, and a body that restates the book owes a restated figure.
+ *
+ * So it is composed here, in the GENERATING pen, from this body's own before
+ * side and the committed scenario's own axis. `collisionDerivation` reaches the
+ * same figures from the frozen literals by its own arithmetic, and
+ * `checkDerivation` is what makes the two agree.
+ *
+ * `seizure_model` and `note` are carried, not composed: they are the disclosure
+ * sentences, they stay ANCHORED, and the register says why.
+ */
+const runMarketRealization = (engine, chainId, axis) => {
+  const carried = engine.market_realization;
+  if (carried === null || carried === undefined) {
+    return carried ?? null;
+  }
+  const par = 10n ** 18n;
+  const discounts = new Map(
+    axis.map((row) => [responseKey(row.chain_id, row.asset), BigInt(row.market_over_oracle_wad)]),
+  );
+  // The BEFORE side is the book production measures this axis over.
+  const side = engine.before;
+  let realized = 0n;
+  let discounted = false;
+  for (const row of side.collateral_by_asset) {
+    // A row with no `value_usd` is outside the aggregate entirely: the engine
+    // counted no collateral for it, so a liquidator realizes nothing from it.
+    if (row.value_usd === null) {
+      continue;
+    }
+    const ratio = discounts.get(responseKey(chainId, row.asset)) ?? par;
+    discounted = discounted || ratio !== par;
+    realized += (BigInt(row.value_usd) * ratio) / par;
+  }
+  // Wire order, unchanged: the contract's own field order for the block.
+  const compose = (shortfall, badDebt) => ({
+    hfs_unchanged: true,
+    execution_shortfall_usd: shortfall,
+    bad_debt_at_liquidation_usd: badDebt,
+    usd_decimals: engine.usd_decimals,
+    seizure_model: carried.seizure_model,
+    note: carried.note,
+  });
+  if (side.eligible_accounts === 0) {
+    // Nothing here is liquidatable, so the per-position sum production performs
+    // is EMPTY and both aggregates are zero. This is the whole finding.
+    return compose("0", "0");
+  }
+  if (discounted || side.accounts !== 1) {
+    fail(
+      "the collision transform cannot state a realization aggregate for a liquidatable engine " +
+        "whose counted collateral is DISCOUNTED, or whose side carries more than one account: the " +
+        "shortfall would need the seizable term, and that needs a liquidation bonus this transform " +
+        "does not hold",
+    );
+  }
+  const owed = BigInt(side.total_debt_usd);
+  return compose(
+    // Every counted leg realizes at par, so seizure at market value equals
+    // seizure at the oracle mark exactly and the gap closes to nothing.
+    "0",
+    (owed > realized ? owed - realized : 0n).toString(),
+  );
+};
+
 const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) => {
   const exampleAave = runBookExample.engines.find((engine) => engine.engine === "aave_v3_etherfi");
   const exampleCounted = exampleAave.before.collateral_by_asset.find(
@@ -6067,14 +6410,28 @@ const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) 
       ],
     };
   };
+  // The axis and each engine's chain come from THIS body's own sources — the
+  // scenario it answers and the batch watermarks it publishes — so the
+  // generating pen never reaches for the derivation's frozen constants.
+  const axis = committedScenario(runBookExample.scenario_id).market_realizations ?? [];
+  const chainOf = new Map(
+    runBookExample.batch.watermarks.map((watermark) => [watermark.engine, watermark.chain_id]),
+  );
   return {
     response: {
       ...runBookExample,
-      engines: runBookExample.engines.map((engine) =>
-        engine.engine === "aave_v3_etherfi"
-          ? { ...engine, before: side(engine.before), after: side(engine.after) }
-          : engine,
-      ),
+      engines: runBookExample.engines.map((engine) => {
+        const rebuilt =
+          engine.engine === "aave_v3_etherfi"
+            ? { ...engine, before: side(engine.before), after: side(engine.after) }
+            : engine;
+        // The realization block is composed AFTER the book is restated, over the
+        // book this body actually serves.
+        return {
+          ...rebuilt,
+          market_realization: runMarketRealization(rebuilt, chainOf.get(rebuilt.engine), axis),
+        };
+      }),
     },
     holdings: holdingAnchor([
       [
@@ -6342,7 +6699,7 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
     BigInt(rowOf(exampleDM, FROZEN_WEETH_ASSET).amount),
   );
 
-  const aaveItems = derivedItemization(matrix, chains.get("aave_v3_etherfi"), [
+  const aaveRows = [
     {
       asset: FROZEN_WEETH_ASSET,
       decimals: 18,
@@ -6366,8 +6723,8 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
       price: null,
       disclosure: "unpriced",
     },
-  ]);
-  const dmItems = derivedItemization(matrix, chains.get("debt_manager"), [
+  ];
+  const dmRows = [
     {
       asset: FROZEN_WEETH_ASSET,
       decimals: 18,
@@ -6375,7 +6732,33 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
       price: FROZEN_DM_WEETH_PRICE,
       disclosure: "counted",
     },
-  ]);
+  ];
+  const aaveItems = derivedItemization(matrix, chains.get("aave_v3_etherfi"), aaveRows);
+  const dmItems = derivedItemization(matrix, chains.get("debt_manager"), dmRows);
+
+  // THE REALIZATION AXIS, DERIVED (Wave W-BS-I). `ExecutionShortfall` runs on
+  // the BEFORE side's book (p5_runbook.go:502), so its legs are that side's
+  // COUNTED collateral at the values this derivation just composed — never the
+  // body's own itemization read back.
+  const realizationAxis =
+    committedScenario(FROZEN_EXAMPLE_SCENARIO_ID).market_realizations ?? [];
+  const countedLegs = (rows, items) =>
+    rows
+      .filter((row) => row.disclosure === "counted")
+      .map((row) => ({ asset: row.asset, value: items.before.values.get(`${row.asset}::counted`) }))
+      .filter((leg) => leg.value !== null && leg.value > 0n);
+  const realizationFor = (engineName, rows, items) => {
+    const baseline = FROZEN_EXAMPLE_BASELINE[engineName].before;
+    return derivedMarketRealization(`${what} ${engineName} market_realization`, {
+      axis: realizationAxis,
+      chainId: chains.get(engineName),
+      legs: countedLegs(rows, items),
+      borrowings: BigInt(baseline.total_debt_usd),
+      accounts: baseline.accounts,
+      eligibleAccounts: baseline.eligible_accounts,
+      usdDecimals: FROZEN_ENGINE_SERIALIZATION[engineName].usd_decimals,
+    });
+  };
 
   /**
    * The example's own aggregate for this engine, with the derived collateral.
@@ -6495,6 +6878,7 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
       {
         engine: "aave_v3_etherfi",
         usd_decimals: String(FROZEN_ENGINE_SERIALIZATION.aave_v3_etherfi.usd_decimals),
+        market_realization: realizationFor("aave_v3_etherfi", aaveRows, aaveItems),
         before: aaveSideFrom("before"),
         after: aaveSideFrom("after"),
         // NOTHING MOVES under this scenario, so nothing is ranked. That is the
@@ -6506,6 +6890,7 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
       {
         engine: "debt_manager",
         usd_decimals: String(FROZEN_ENGINE_SERIALIZATION.debt_manager.usd_decimals),
+        market_realization: realizationFor("debt_manager", dmRows, dmItems),
         before: dmSideFrom("before"),
         after: dmSideFrom("after"),
         movers: new Set(),
@@ -6956,6 +7341,89 @@ refuses(
     }
   },
   { response: collisionSwap.response, declared: COLLISION_SWAP_DECLARED },
+);
+
+// --- WAVE W-BS-I: THE REALIZATION AXIS'S MONEY, WATCHED ---------------------
+//
+// One helper so the same engine is reached the same way in every probe below.
+const engineOfMutant = (mutant, engineName) =>
+  mutant.engines.find((engine) => engine.engine === engineName);
+
+// AU. THE STALE CARRIED FIGURE — Codex round 33's exact shape, restored. The
+// aave engine's before side counts ONE account and finds NONE of it liquidatable,
+// and the body publishes $400 of execution shortfall over it, which
+// `LabRealization` renders in the `crit` tone. Every law in this file read green
+// for seven waves, because the number was ANCHORED to the contract example's own
+// bytes and the example's book is not this body's book.
+refuses(
+  "AU: the stale carried shortfall — a critical shortfall over a book with nothing liquidatable",
+  "zero eligible accounts, zero aggregate realization shortfall",
+  (mutant) => {
+    engineOfMutant(mutant, "aave_v3_etherfi").market_realization.execution_shortfall_usd =
+      "40000000000";
+  },
+  COLLISION_SUBJECT,
+);
+
+// AV. A DERIVED FIELD FALSIFIED. The Debt Manager's ONE account IS liquidatable
+// and its counted collateral realizes at par, so the bad debt at liquidation is
+// its borrowings less that collateral — 4620000000 - 4000000000 = 620000000, a
+// real $620 the protocol is not seeing. The contract example published 0 for it;
+// this puts the 0 back, and the refusal has to name BOTH numbers.
+refuses(
+  "AV: a derived realization field falsified — the liquidatable account's bad debt zeroed",
+  'publishes market_realization.bad_debt_at_liquidation_usd "0", but the derivation composes "620000000"',
+  (mutant) => {
+    engineOfMutant(mutant, "debt_manager").market_realization.bad_debt_at_liquidation_usd = "0";
+  },
+  COLLISION_SUBJECT,
+);
+
+// AW. THE COMPUTED ASSERTION DEMOTED TO A CARRIED BYTE. `hfs_unchanged` is
+// production's own bit-for-bit health comparison — computed, not promised
+// (internal/risk/shortfall.go:21-28). A body serving `false` claims that guard
+// FIRED: that a market realization moved an oracle. That is a statement about the
+// library, and no frozen envelope byte can be the thing that decides it.
+refuses(
+  "AW: hfs_unchanged flipped — the body claims a market realization moved an oracle",
+  "publishes market_realization.hfs_unchanged false, but the derivation composes true",
+  (mutant) => {
+    engineOfMutant(mutant, "aave_v3_etherfi").market_realization.hfs_unchanged = false;
+  },
+  COLLISION_SUBJECT,
+);
+
+// AX. THE SHORTFALL READ AT ANOTHER ENGINE'S SCALE. Debt Manager money is
+// 6-decimal and aave money is 8; a realization block claiming 8 on the Debt
+// Manager's row renders $620.00 of bad debt as $6.20. The engine's OWN
+// `usd_decimals` is untouched, so nothing else in the body disagrees with itself
+// and law 17 never sees it — the block used to be pinned only positionally, to
+// whatever the example's second engine happened to carry.
+refuses(
+  "AX: the realization read at the other engine's scale — the Debt Manager's shortfall at 8 decimals",
+  "publishes market_realization.usd_decimals 8, but the derivation composes 6",
+  (mutant) => {
+    engineOfMutant(mutant, "debt_manager").market_realization.usd_decimals = 8;
+  },
+  COLLISION_SUBJECT,
+);
+
+// AY. A PROJECTION INVENTED (law 18). `projection` was ANCHORED to "the contract
+// example's own NULL", which pins the field on bodies whose example carried null
+// and says nothing about WHOSE null it is. eth_minus_30 carries no projection
+// axis, and the aave engine could not carry one even if it did — a rate horizon
+// belongs to the Debt Manager alone. This is round 33's misclassification in its
+// other form, and it is refused by the committed registry rather than by a pin.
+refuses(
+  "AY: a projection invented — a rate horizon on an engine with no rate, under a scenario with no rate axis",
+  "serves projection an object, but the committed eth_minus_30 registry entry carries no projection axis",
+  (mutant) => {
+    mutant.engines[0].projection = {
+      horizon_seconds: 2592000,
+      debt_usd: "6000000000",
+      projected_usd: "6100000000",
+    };
+  },
 );
 
 write("run-book.collateral-collision.json", collision.response);
