@@ -222,7 +222,7 @@ export function BookSurface() {
       {state.phase === "error" && (
         <div className={styles.warnStrip} role="alert">
           <b>BOOK FETCH FAILED</b>
-          <span>{state.message}. The aggregates are unavailable, and none of them is zero.</span>
+          <span>{state.message}. The aggregates are unavailable, and nothing here is rendered as zero.</span>
         </div>
       )}
 

@@ -347,7 +347,7 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("rate limit");
-      await expect(strip).toContainText("unavailable, and none of them is zero");
+      await expect(strip).toContainText("unavailable, and nothing here is rendered as zero");
       await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
     },
   },
@@ -363,7 +363,7 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("failed to build the response");
-      await expect(strip).toContainText("unavailable, and none of them is zero");
+      await expect(strip).toContainText("unavailable, and nothing here is rendered as zero");
     },
   },
   {

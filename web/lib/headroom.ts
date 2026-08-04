@@ -123,9 +123,9 @@ export const HEADROOM_HEADER_TITLE =
 /** What a row with no debt gets instead of a percent — never a 100% claim. */
 export const HEADROOM_NO_DEBT_LABEL = "no debt";
 export const HEADROOM_NO_DEBT_TITLE =
-  "No debt, so there is no liquidation boundary to have headroom from. An account with " +
-  "nothing borrowed sits outside this metric, which is why it carries no percent and no " +
-  "place in the ranking.";
+  "No debt, so there is no liquidation boundary to measure distance from and the cell " +
+  "carries no percent. The engine treats nothing borrowed as full headroom, so under " +
+  "greatest-headroom-first these rows lead the ranking.";
 
 /** What a row whose headroom cannot be derived gets — an unknowable, not a zero. */
 export const HEADROOM_UNKNOWN_TITLE =
