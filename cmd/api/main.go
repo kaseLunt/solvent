@@ -110,7 +110,10 @@ const (
 	// the factor essentially the whole book is exposed to (weETH = rate × ETH by
 	// construction), so it is the one grid whose monotonicity invariant is
 	// meaningful for a headline surface.
-	defaultWaterfallScenario = "eth_minus_30"
+	//
+	// It names the DEEPEST committed ETH rung, because the frontier's own
+	// disclosures are that scenario's out_of_model — see defaultWaterfallGrid.
+	defaultWaterfallScenario = "eth_minus_60"
 )
 
 // Published cadence constants (design spec §10: "≥5-block confirmation trail +
@@ -406,16 +409,23 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 	}, nil
 }
 
-// defaultWaterfallGrid is 1.0 → 0.5 in ten-percent steps, WAD-scaled.
+// defaultWaterfallGrid is 1.0 → 0.4 in ten-percent steps, WAD-scaled.
 //
 // The first point is 1.0 ON PURPOSE. Every column at that point describes the
 // book AS IT STANDS — including the bad-debt census, which design spec §6 wants
 // standing on the surface rather than buried under a shock ("the HF 0.73 golden-
 // vector dust position makes this a feature, not an embarrassment").
+//
+// THE LAW OF THE LAST POINT: the deepest grid point equals the deepest
+// COMMITTED ETH rung (defaultWaterfallScenario = eth_minus_60, factor 40/100),
+// never deeper. The frontier carries no out_of_model of its own — it borrows
+// the named scenario's — so a grid point past that rung would be a public
+// number whose disclosures describe a shallower shock than the one it priced.
+// Extending the grid therefore means committing the matching rung FIRST.
 func defaultWaterfallGrid() []*big.Int {
 	wad := risk.WaterfallGridScale()
 	var out []*big.Int
-	for _, pct := range []int64{100, 90, 80, 70, 60, 50} {
+	for _, pct := range []int64{100, 90, 80, 70, 60, 50, 40} {
 		g := new(big.Int).Mul(wad, big.NewInt(pct))
 		out = append(out, g.Div(g, big.NewInt(100)))
 	}

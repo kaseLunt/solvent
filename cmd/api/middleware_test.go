@@ -339,7 +339,10 @@ func TestDefaultWaterfallGridOpensAtOne(t *testing.T) {
 	for i := 1; i < len(grid); i++ {
 		require.Negative(t, grid[i].Cmp(grid[i-1]))
 	}
-	require.Equal(t, "500000000000000000", grid[len(grid)-1].String())
+	// The last point is the deepest COMMITTED ETH rung (eth_minus_60 = 40/100)
+	// and never deeper: the frontier borrows that scenario's out_of_model, so a
+	// grid point past it would price a shock its own disclosures do not describe.
+	require.Equal(t, "400000000000000000", grid[len(grid)-1].String())
 }
 
 // TestStandingDisclosuresNameTheHardLimits keeps the honest small print from

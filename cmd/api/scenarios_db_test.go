@@ -40,7 +40,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// committedScenarioIDs is the committed set as the suite knows it — twelve
+// committedScenarioIDs is the committed set as the suite knows it — fifteen
 // files under internal/risk/scenarios, the same count TestStressServesExact
 // RecomputableValues pins on the stress side. It is written out rather than
 // derived from `s.scenarios` on purpose: a listing test whose expectation is
@@ -53,6 +53,9 @@ var committedScenarioIDs = []string{
 	"eth_minus_10",
 	"eth_minus_20",
 	"eth_minus_30",
+	"eth_minus_40",
+	"eth_minus_50",
+	"eth_minus_60",
 	"ethfi_minus_50",
 	"stable_depeg_098_unsnapped",
 	"stable_depeg_0995_in_band",

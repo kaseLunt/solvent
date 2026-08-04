@@ -189,8 +189,11 @@ rows; never shock derived USD feeds independently.
 **Scenario set v1** (committed JSON config in-repo; each ships as shocked-axes + path assumption
 + census query + recomputable expected-loss arithmetic + propagation matrix + out-of-model
 list):
-- **ETH −10/−20/−30%** — factor shock; all ETH-linked collateral moves jointly (weETH =
-  rate × ETH by construction).
+- **ETH −10/−20/−30/−40/−50/−60%** — factor shock; all ETH-linked collateral moves jointly
+  (weETH = rate × ETH by construction). The deep rungs (−40/−50/−60) disclose that a move
+  that size is not single-axis: non-ETH-linked collateral is held at its current sample, so
+  their eligible and bad-debt figures are a FLOOR. −60% is the deepest committed rung and the
+  frontier grid stops at the same depth, never deeper.
 - **weETH redemption-rate −5%** — the slashing/exploit counterfactual; the scenario that
   actually moves both engines' oracles (replaces the incoherent "market depeg 0.95" HF shock).
 - **weETH market depeg (oracles held)** — explicitly NOT an HF event by oracle construction;

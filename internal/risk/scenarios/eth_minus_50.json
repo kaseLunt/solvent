@@ -1,8 +1,8 @@
 {
-  "id": "eth_minus_10",
+  "id": "eth_minus_50",
   "version": "v1",
-  "label": "ETH -10 percent",
-  "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+  "label": "ETH -50 percent",
+  "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here. At this depth the single-axis assumption dominates the answer. Collateral that is not ETH-linked is held at its current sample, so the eligible and bad-debt figures are a floor on what a correlated move of this size would produce.",
   "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
   "engines": [
     "aave_v3_etherfi",
@@ -11,7 +11,7 @@
   "shocks": [
     {
       "axis": "eth_usd",
-      "factor_num": 90,
+      "factor_num": 50,
       "factor_den": 100
     }
   ],
@@ -88,6 +88,11 @@
     "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
     "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
     "the weETH redemption rate is held at its current sample; a real ETH drawdown large enough to cause slashing would also move it",
-    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+    "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input",
+    "REGIME: this rung moves one axis. Collateral that is not ETH-linked is held at its current sample, and the probe census puts the ETH-linked share near 47 percent of Debt Manager collateral (recon/p3-probes.md). The held-flat remainder includes the BTC leg, ETHFI and sETHFI, and liquidRWA. In a market where ETH falls this far those assets move too, so the eligible and bad-debt figures here are a floor on a correlated move of this size.",
+    "ORACLE PATH: a move of this size arrives as a sequence of feed updates, each fired by a deviation trigger, and each one opens its own liquidation window. This rung prices the endpoint. How much debt is closable on the way down is outside it.",
+    "PARAMETERS HELD: LTVs, liquidation thresholds, borrow caps and bonuses stay at their current values for the whole shock. A drawdown this deep is the regime in which governance changes them, and that response is outside the model.",
+    "PROCEEDS AT ORACLE MARKS: seizure value is computed from oracle prices with no slippage curve and no liquidator capital limit. The gap between an oracle mark and realizable proceeds lives on the market-realization axis (weeth_market_depeg_oracles_held) and is absent here.",
+    "weETH REDEMPTION RATE VERSUS MARKET: both engines mark weETH at the redemption rate, held flat here. A drawdown this deep is where the secondary market trades below redemption while the rate itself is unchanged. That gap reaches liquidator proceeds and never reaches a health factor, by oracle construction."
   ]
 }

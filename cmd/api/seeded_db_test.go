@@ -212,7 +212,11 @@ func assertBookExactValues(t jt, body map[string]any) {
 	require.Equal(t, risk.WadUnit().String(), str(t, body, "waterfall", "grid_scale"))
 	require.True(t, boolAt(t, body, "waterfall", "monotonicity", "ok"))
 	points := arr(t, body, "waterfall", "points")
-	require.Len(t, points, 6)
+	// Seven points: 1.0 → 0.4 in ten-percent steps (Wave W-SC-A). The last one
+	// is the deepest COMMITTED ETH rung and never deeper — the frontier borrows
+	// eth_minus_60's out_of_model, so a grid point past it would be a number
+	// with no disclosure of its own.
+	require.Len(t, points, 7)
 
 	// Point 0 — the UNSHOCKED book. Aave is healthy at 1.08; the Debt Manager is
 	// already liquidatable AND insolvent, which is the standing bad debt.
@@ -243,6 +247,20 @@ func assertBookExactValues(t jt, body map[string]any) {
 	require.EqualValues(t, 0, num(t, p1dm, "newly_eligible_accounts"), "the Debt Manager crossed at point 0 and must not be counted again")
 	require.Equal(t, fxDMAtRiskAt90, str(t, p1dm, "cumulative_collateral_at_risk_usd"))
 	require.Equal(t, fxDMBadDebtAt90, str(t, p1dm, "cumulative_bad_debt_usd"))
+
+	// The TAIL POINT — ETH −60%, the deepest committed rung (Wave W-SC-A). The
+	// Debt Manager's weETH collateral marks straight through the factor:
+	// 4000000000 × 40/100 = 1600000000. Bad debt is strictly deeper than at
+	// −50%, which is the monotonicity the frontier PUBLISHES rather than assumes.
+	require.Equal(t, "400000000000000000", str(t, points[6], "factor"))
+	p6dm := byKey(t, arr(t, points[6], "engines"), "engine", risk.DMEngine)
+	require.Equal(t, "1600000000", str(t, p6dm, "cumulative_collateral_at_risk_usd"))
+	p5dm := byKey(t, arr(t, points[5], "engines"), "engine", risk.DMEngine)
+	deepBad, ok := new(big.Int).SetString(str(t, p6dm, "cumulative_bad_debt_usd"), 10)
+	require.True(t, ok)
+	prevBad, ok := new(big.Int).SetString(str(t, p5dm, "cumulative_bad_debt_usd"), 10)
+	require.True(t, ok)
+	require.Positive(t, deepBad.Cmp(prevBad), "bad debt must deepen from −50% to −60%")
 
 	// The USDC leg is not in the eth_usd propagation matrix, so it is HELD FLAT —
 	// and named, rather than silently unmoved.
@@ -646,9 +664,10 @@ func TestStressServesExactRecomputableValues(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &body))
 	require.Equal(t, "v1", str(t, body, "scenario_config_version"))
 	scenarios := arr(t, body, "scenarios")
-	// 12 = the 11 stress scenarios + dm_composition_census (Wave S: the
+	// 15 = the 14 stress scenarios + dm_composition_census (Wave S: the
 	// explicit-claim-or-explicit-decision record whose axes shock ×1/1).
-	require.Len(t, scenarios, 12, "the whole committed scenario set must be evaluated, not a subset")
+	// Wave W-SC-A added the deep ETH rungs −40/−50/−60.
+	require.Len(t, scenarios, 15, "the whole committed scenario set must be evaluated, not a subset")
 
 	// ETH −30%: weETH 4000.00000000 × 70/100 = 2800.00000000, so
 	// collateral = 2 × 2800 = 5600.00000000, weighted = 5600×0.81 = 4536,

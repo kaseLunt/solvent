@@ -38,6 +38,9 @@ func TestLoadScenariosCoversTheV1Set(t *testing.T) {
 		"eth_minus_10",
 		"eth_minus_20",
 		"eth_minus_30",
+		"eth_minus_40",
+		"eth_minus_50",
+		"eth_minus_60",
 		"ethfi_minus_50",
 		"stable_depeg_098_unsnapped",
 		"stable_depeg_0995_in_band",
@@ -146,7 +149,12 @@ func TestScenarioSetSpecificShapes(t *testing.T) {
 	require.Equal(t, AxisWeETHRate, weeth.Shocks[0].Axis)
 	require.Len(t, weeth.Propagation, 2, "only the two weETH marks respond to the rate axis")
 
-	for _, id := range []string{"eth_minus_10", "eth_minus_20", "eth_minus_30"} {
+	// Wave W-SC-A: the deep rungs are the same graph at a deeper factor, so the
+	// shape law covers all six or it covers none of them.
+	for _, id := range []string{
+		"eth_minus_10", "eth_minus_20", "eth_minus_30",
+		"eth_minus_40", "eth_minus_50", "eth_minus_60",
+	} {
 		sc, err := LoadScenario(id)
 		require.NoError(t, err)
 		require.Len(t, sc.Shocks, 1)

@@ -29,7 +29,7 @@
         }
       ],
       "base_asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md:283); base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(weETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
+      "note": "Debt Manager marks weETH as the weETH/ETH exchange-rate feed x ETH/USD (recon/derivation-notes.md, section 'Debt Manager side (OP) -- poll-only, canonical'); base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(weETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     },
     {
       "asset": "0x4200000000000000000000000000000000000006",
@@ -52,7 +52,7 @@
         }
       ],
       "base_asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
-      "note": "accountant lens getRate() over an ETH base (recon/derivation-notes.md:284); the probe census counts liquidETH inside the 47 percent ETH-linked share; base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(liquidETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
+      "note": "accountant lens getRate() over an ETH base (recon/derivation-notes.md, section 'Debt Manager side (OP) -- poll-only, canonical'); the probe census counts liquidETH inside the 47 percent ETH-linked share; base_asset is the DEPLOYED composition read from PriceProviderV2.tokenConfig(liquidETH).baseAsset = the native-ETH sentinel at the accept-r4 OP pin (see the pinned-read out_of_model entry)"
     },
     {
       "asset": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
