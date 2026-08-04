@@ -150,7 +150,9 @@ func TestScenarioSetSpecificShapes(t *testing.T) {
 	require.Len(t, weeth.Propagation, 2, "only the two weETH marks respond to the rate axis")
 
 	// Wave W-SC-A: the deep rungs are the same graph at a deeper factor, so the
-	// shape law covers all six or it covers none of them.
+	// shape law covers all six or it covers none of them. SHAPE ONLY — the
+	// factors themselves are pinned by TestETHRungFactorsArePinned, because a
+	// shape assertion cannot tell -40 from -60.
 	for _, id := range []string{
 		"eth_minus_10", "eth_minus_20", "eth_minus_30",
 		"eth_minus_40", "eth_minus_50", "eth_minus_60",
@@ -176,6 +178,104 @@ func TestScenarioSetSpecificShapes(t *testing.T) {
 				require.Empty(t, p.BaseAsset, "%s: %s is USD-terminal at the pin", id, p.Symbol)
 			}
 		}
+	}
+}
+
+// TestETHRungFactorsArePinned is the factor law for the whole ETH ladder.
+//
+// Wave W-SC-B, finding 2: the shape loop above checks the shock COUNT, the axis
+// and the propagation graph, and every one of those stays green if a numerator
+// is reversed. A file labelled eth_minus_40 carrying 40/100 would then compute a
+// 60% drawdown under a 40% label — on the frontier, in address stress and in the
+// run-book — with nothing in the suite objecting.
+//
+// The rung's NAME is the drawdown; the factor is what REMAINS. So eth_minus_40
+// keeps 60/100, and this table says so for all six rungs.
+func TestETHRungFactorsArePinned(t *testing.T) {
+	for _, tc := range []struct {
+		id       string
+		num, den int64
+	}{
+		{"eth_minus_10", 90, 100},
+		{"eth_minus_20", 80, 100},
+		{"eth_minus_30", 70, 100},
+		{"eth_minus_40", 60, 100},
+		{"eth_minus_50", 50, 100},
+		{"eth_minus_60", 40, 100},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			sc, err := LoadScenario(tc.id)
+			require.NoError(t, err)
+			require.Len(t, sc.Shocks, 1, "one axis instance, so the ladder is a single factor walk")
+			require.Equal(t, AxisETHUSD, sc.Shocks[0].Axis)
+			require.Equal(t, tc.num, sc.Shocks[0].FactorNum,
+				"%s must KEEP %d/%d of price — the rung's name is the drawdown, the factor is the remainder",
+				tc.id, tc.num, tc.den)
+			require.Equal(t, tc.den, sc.Shocks[0].FactorDen, "%s denominator", tc.id)
+		})
+	}
+}
+
+// TestApplyScenarioDeepETHRungsApplyTheirCommittedFactor is the other half of the
+// factor law: the number in the JSON must actually REACH a price. A pin on the
+// file alone would still pass if application dropped or mangled the factor.
+//
+// One assertion per NEW rung (Wave W-SC-A added -40/-50/-60), over the same
+// known fixture prices the -20 test uses, with exact integer expectations:
+//
+//	weETH   2099380000 ($2,099.38)
+//	WETH    1950000000 ($1,950.00)
+//	liqETH  2200000000 ($2,200.00)
+//
+// Every product below is exact — no rounding is being hidden in the expectation.
+func TestApplyScenarioDeepETHRungsApplyTheirCommittedFactor(t *testing.T) {
+	for _, tc := range []struct {
+		id                  string
+		num, den            string
+		weETH, wETH, liqETH string
+	}{
+		{"eth_minus_40", "60", "100", "1259628000", "1170000000", "1320000000"},
+		{"eth_minus_50", "50", "100", "1049690000", "975000000", "1100000000"},
+		{"eth_minus_60", "40", "100", "839752000", "780000000", "880000000"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			sc, err := LoadScenario(tc.id)
+			require.NoError(t, err)
+			out, err := ApplyScenario(dmStressPosition(t), sc)
+			require.NoError(t, err)
+			require.Equal(t, tc.id, out.Scenario.ScenarioID)
+
+			byAsset := map[common.Address]*big.Int{}
+			for _, p := range out.DM.Prices {
+				byAsset[p.Asset] = p.Value
+			}
+			requireBig(t, tc.weETH, byAsset[dWeETH], "2099380000 × %s/%s", tc.num, tc.den)
+			requireBig(t, tc.wETH, byAsset[dWETH], "1950000000 × %s/%s", tc.num, tc.den)
+			requireBig(t, tc.liqETH, byAsset[dLiqETH], "2200000000 × %s/%s", tc.num, tc.den)
+			requireBig(t, "1000000", byAsset[dUSDC], "a stable is not ETH-linked")
+			requireBig(t, "95000000000", byAsset[dLiqBTC], "BTC is not ETH-linked")
+
+			// The disclosed factor is the committed one, not a re-derivation.
+			require.Len(t, out.Scenario.Applied, 3)
+			for _, a := range out.Scenario.Applied {
+				requireBig(t, tc.num, a.FactorNum, "%s: applied numerator", tc.id)
+				requireBig(t, tc.den, a.FactorDen, "%s: applied denominator", tc.id)
+				require.False(t, a.Snapped)
+				require.False(t, a.CapBound, "a down-shock never binds an upward cap")
+			}
+
+			// A deeper rung must actually bite harder than a shallower one.
+			shallower, err := LoadScenario("eth_minus_10")
+			require.NoError(t, err)
+			shallowOut, err := ApplyScenario(dmStressPosition(t), shallower)
+			require.NoError(t, err)
+			deep, err := ComputeDMHealth(*out.DM)
+			require.NoError(t, err)
+			shallow, err := ComputeDMHealth(*shallowOut.DM)
+			require.NoError(t, err)
+			require.Equal(t, 1, shallow.MaxBorrowLT.Cmp(deep.MaxBorrowLT),
+				"%s must leave STRICTLY less borrowing power than eth_minus_10", tc.id)
+		})
 	}
 }
 

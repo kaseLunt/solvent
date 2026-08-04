@@ -383,9 +383,9 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 		sc.StepBps = n
 	}
 
-	grid, ok := byID[sc.WaterfallScenario]
-	if !ok {
-		return nil, fmt.Errorf("api: waterfall scenario %q is not in the committed scenario set", sc.WaterfallScenario)
+	grid, err := resolveWaterfall(byID, sc)
+	if err != nil {
+		return nil, err
 	}
 
 	// The evidence statics are read from the deployed tree ONCE, here. An
@@ -455,6 +455,90 @@ func parseGrid(v string) ([]*big.Int, error) {
 		}
 	}
 	return out, nil
+}
+
+// resolveWaterfall binds the book's frontier to ONE committed scenario and
+// enforces THE LAW OF THE LAST POINT on the pair.
+//
+// The scenario and the grid arrive as two independent env knobs
+// (SOLVENT_API_WATERFALL_SCENARIO, SOLVENT_API_WATERFALL_GRID), but they are not
+// independent facts. The frontier publishes NO disclosures of its own — it
+// borrows the named scenario's out_of_model and path_assumption wholesale — so
+// the grid's deepest point must BE that scenario's own committed shock. A tail
+// deeper than the named rung prices a shock the small print does not describe
+// (the failure c780b2c exists to eliminate); a tail shallower than it labels the
+// frontier with a rung the grid never reaches. Both are refused HERE, at
+// startup, rather than served and disclaimed.
+//
+// The comparison is EXACT and rational — no floats anywhere. For grid tail wad
+// t, grid scale w and the scenario's committed factor num/den:
+//
+//	t/w == num/den   <=>   t*den == w*num
+//
+// evaluated in big.Int. Because the scenario must already be in the COMMITTED
+// set, equality also bounds the tail to a rung someone committed on purpose:
+// extending the grid means committing the matching scenario first.
+func resolveWaterfall(byID map[string]risk.Scenario, cfg serverConfig) (risk.Scenario, error) {
+	sc, ok := byID[cfg.WaterfallScenario]
+	if !ok {
+		return risk.Scenario{}, fmt.Errorf(
+			"api: SOLVENT_API_WATERFALL_SCENARIO %q is not in the committed scenario set",
+			cfg.WaterfallScenario)
+	}
+	// The grid walks ONE axis by construction (risk.Waterfall re-factors a single
+	// shock per point), so a multi-shock scenario has no single committed factor
+	// for the tail to equal.
+	if len(sc.Shocks) != 1 {
+		return risk.Scenario{}, fmt.Errorf(
+			"api: SOLVENT_API_WATERFALL_SCENARIO %q declares %d shocks, want exactly 1: the waterfall grid walks a SINGLE axis",
+			sc.ID, len(sc.Shocks))
+	}
+	num := big.NewInt(sc.Shocks[0].FactorNum)
+	den := big.NewInt(sc.Shocks[0].FactorDen)
+	if num.Sign() <= 0 || den.Sign() <= 0 {
+		return risk.Scenario{}, fmt.Errorf(
+			"api: committed scenario %q carries a non-positive shock factor %s/%s",
+			sc.ID, num, den)
+	}
+
+	if len(cfg.WaterfallGrid) == 0 {
+		return risk.Scenario{}, errors.New("api: SOLVENT_API_WATERFALL_GRID resolved to an empty grid")
+	}
+	scale := risk.WaterfallGridScale()
+	// The FIRST point is the unshocked book — it is where the standing bad-debt
+	// census comes from, so a shocked point sitting there would relabel a shocked
+	// number as "current".
+	if cfg.WaterfallGrid[0].Cmp(scale) != 0 {
+		return risk.Scenario{}, fmt.Errorf(
+			"api: SOLVENT_API_WATERFALL_GRID must OPEN at the UNSHOCKED book: first point is %s, want the grid scale %s",
+			cfg.WaterfallGrid[0], scale)
+	}
+	for i := 1; i < len(cfg.WaterfallGrid); i++ {
+		if cfg.WaterfallGrid[i].Sign() <= 0 || cfg.WaterfallGrid[i].Cmp(cfg.WaterfallGrid[i-1]) >= 0 {
+			return risk.Scenario{}, fmt.Errorf(
+				"api: SOLVENT_API_WATERFALL_GRID must be STRICTLY DESCENDING (point %d = %s is not below point %d = %s)",
+				i, cfg.WaterfallGrid[i], i-1, cfg.WaterfallGrid[i-1])
+		}
+	}
+
+	tail := cfg.WaterfallGrid[len(cfg.WaterfallGrid)-1]
+	lhs := new(big.Int).Mul(tail, den)  // t*den
+	rhs := new(big.Int).Mul(scale, num) // w*num
+	if lhs.Cmp(rhs) == 0 {
+		return sc, nil
+	}
+
+	// Name BOTH sides and both env vars: an operator who retained a stale pair
+	// must be able to see which line to change without reading this file.
+	wantTail, rem := new(big.Int).QuoRem(rhs, den, new(big.Int))
+	wanted := wantTail.String()
+	if rem.Sign() != 0 {
+		wanted = fmt.Sprintf("(not representable at scale %s)", scale)
+	}
+	return risk.Scenario{}, fmt.Errorf(
+		"api: WATERFALL TAIL-RUNG INVARIANT violated: SOLVENT_API_WATERFALL_GRID ends at %s, but SOLVENT_API_WATERFALL_SCENARIO %q commits the shock %s/%s, whose exact wad tail is %s. "+
+			"The frontier borrows the named scenario's disclosures, so its DEEPEST point must be that scenario's own shock — set the tail to %s, or name the scenario whose committed rung the tail already is (committing it first if it does not exist)",
+		tail, sc.ID, num, den, wanted, wanted)
 }
 
 // buildVersion reports the VCS revision this binary was built from, or "devel"
