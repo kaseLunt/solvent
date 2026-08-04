@@ -96,8 +96,15 @@ test("the computed reading line names the SHIFT, derived from the two sides", as
   await expect(reading).toContainText("What this shows: how the book's health factors moved");
   // The fixture's derived delta moves exactly one Debt Manager account across
   // the 1.00 edge, and the sentence must be that arithmetic — not a label.
+  //
+  // THREE measured accounts since Wave W-EX-A, not two. The repaired contract
+  // example carries the Debt Manager's REAL weETH (0x5A7f… on chain 10), which
+  // eth_minus_30's matrix DECLARES — so the example's own account moves under
+  // this scenario, and the generator's law-11 witness had to become an account
+  // of its own rather than a second holding on the flipping one. The book is the
+  // example's account plus two injected ones.
   await expect(reading).toContainText(
-    "1 of 2 measured accounts sat below 1.00 before the shock, 2 after",
+    "1 of 3 measured accounts sat below 1.00 before the shock, 2 after",
   );
   await expect(reading).toContainText("the below-1.00 population grew by 1");
   // AND IT SAYS WHAT KIND OF NUMBER THAT IS. Two populations subtracted is a
@@ -120,20 +127,23 @@ test("the served book RECONCILES with itself: coverage, accounts, and the money"
   await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
 
   const dm = page.locator('[data-testid="runbook-histogram-pair"][data-engine="debt_manager"]');
-  // Two accounts measured on this engine, which is what the census says and
-  // what the invented account's existence requires.
-  await expect(dm.getByTestId("runbook-hist-reading")).toContainText("of 2 measured accounts");
+  // THREE accounts measured on this engine since Wave W-EX-A — the contract
+  // example's own plus the two this generator injects (the one that flips, and
+  // the one carrying the held-flat holding law 11 is proved against).
+  await expect(dm.getByTestId("runbook-hist-reading")).toContainText("of 3 measured accounts");
 
   // The itemization the reading line sums is the WHOLE collateral of the side,
-  // the invented account's holding included.
+  // every injected holding included. $6,600 = the example's $4,000 of weETH plus
+  // $2,500 of WETH plus $100 of USDC.
   const dmCollateral = page.locator('[data-testid="runbook-collateral"][data-engine="debt_manager"]');
   await expect(dmCollateral.getByTestId("runbook-collateral-reading-before")).toContainText(
-    "2 assets sum to $6,500",
+    "3 assets sum to $6,600",
   );
-  // And it FALLS on the after side, because the account that flipped is the one
-  // whose collateral moved.
+  // And it FALLS on the after side, because BOTH ETH-linked holdings moved: the
+  // example's weETH to $2,800 and the injected WETH to $1,750, while the USDC
+  // the matrix does not name is held flat at $100.
   await expect(dmCollateral.getByTestId("runbook-collateral-reading-after")).toContainText(
-    "2 assets sum to $5,750",
+    "3 assets sum to $4,650",
   );
 });
 

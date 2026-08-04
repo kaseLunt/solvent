@@ -714,8 +714,15 @@ test("Lab run-book: wire notes become a counted verbatim details; collateral-at-
   await expect(page.getByTestId("book-result")).toBeVisible();
 
   // Caption (c): the counted, verbatim wire-notes disclosure.
+  //
+  // THREE, not one, since Wave W-EX-A. `cmd/api/p5_runbook.go:512-518` composes
+  // three response-level notes on every run-book body; the contract's example
+  // used to carry one, and the example is now CAPTURED from the running handler
+  // rather than composed by hand. The count is the point of this assertion — a
+  // counted disclosure whose count is the fixture's own is what makes a dropped
+  // note visible — so it moves with the fixture.
   const notes = page.getByTestId("book-wire-notes");
-  await expect(notes.locator("summary")).toHaveText("wire notes — 1, verbatim");
+  await expect(notes.locator("summary")).toHaveText("wire notes — 3, verbatim");
   await notes.locator("summary").click();
   await expect(notes).toContainText(
     "aggregates are per engine in each engine's OWN unit and decimals",

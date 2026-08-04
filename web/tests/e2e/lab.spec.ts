@@ -481,7 +481,15 @@ test("book mode: renders the served run-book response — the UI ships ready", a
 
   // The book-wide flagship claim: HFs unchanged while shortfall is realized.
   await expect(page.getByTestId("hfs-unchanged-banner")).toHaveCount(2);
-  await expect(engines.nth(0).getByTestId("market-realization")).toContainText("$400");
+  // WAVE W-EX-A MOVED THIS MONEY, and the move is the repair. The contract's
+  // run-book 200 example used to publish $400 of execution shortfall on the
+  // AAVE engine — an engine whose own `eligible_accounts` is 0. An execution
+  // shortfall is summed over LIQUIDATABLE positions only
+  // (internal/risk/shortfall.go:97-104), so an empty sum is "0", and the
+  // example is now CAPTURED from the running handler rather than composed. The
+  // shortfall lives where the eligible account is: the Debt Manager.
+  await expect(engines.nth(0).getByTestId("market-realization")).toContainText("$0");
+  await expect(engines.nth(1).getByTestId("market-realization")).toContainText("$200");
 
   // Delta-only labeling on the wire-published deltas.
   await expect(engines.nth(0)).toContainText("DELTA-ONLY");

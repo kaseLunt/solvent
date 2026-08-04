@@ -1136,6 +1136,12 @@ paths:
                   refused_engines: []
                   flagged_count: 1
                   watermarks:
+                    - engine: "aave_param"
+                      chain_id: 1
+                      last_block: 25635600
+                      acked_epoch: 0
+                      max_epoch_at_compute: 0
+                      sweep: null
                     - engine: "aave_v3_etherfi"
                       chain_id: 1
                       last_block: 25635618
@@ -1155,22 +1161,52 @@ paths:
                         age_seconds: 1200
                         generation: 4
                         generation_open: false
+                    - engine: "prices:poll:1"
+                      chain_id: 1
+                      last_block: 25635610
+                      acked_epoch: 0
+                      max_epoch_at_compute: 0
+                      sweep: null
+                    - engine: "prices:poll:10"
+                      chain_id: 10
+                      last_block: 154796540
+                      acked_epoch: 0
+                      max_epoch_at_compute: 0
+                      sweep: null
                   supersession:
                     superseded: false
                     legs: []
-                    note: "a superseded batch is still served: the flag is the contract."
+                    note: "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock."
                 scenario_config_version: "v1"
                 scenario_id: "weeth_market_depeg_oracles_held"
                 scenario_version: "v1"
                 label: "weETH market depeg to 0.95 (oracles held)"
-                description: "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable."
+                description: "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable. Its output is liquidator-side - execution shortfall on seized collateral and bad debt at liquidation. Implemented on the market-realization axis, never as a price shock."
                 path_assumption: "oracle marks held exactly; market value is a separate axis applied only to realized proceeds"
                 shocks: []
                 out_of_model:
+                  - "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat"
+                  - "deviation-trigger discreteness (a feed moves in rounds, not continuously)"
                   - "liquidator liquidity, gas costs, execution latency and cascade dynamics"
-                  - "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order, so this is neutral rather than conservative"
+                  - "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md"
+                  - "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)"
+                  - "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order and would take the least-impaired asset first, so this is neutral rather than conservative"
+                  - "market depth: the 0.95 ratio is a flat haircut, not a slippage curve"
+                  - "the possibility that a sustained market depeg eventually becomes a rate event"
                 applied_shocks: []
-                held_flat: []
+                held_flat:
+                  - asset: "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
+                    chain_id: 10
+                    source: "priceproviderv2"
+                    value: "4000000000"
+                  - asset: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+                    chain_id: 1
+                    source: "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
+                    value: "100000000"
+                  - asset: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+                    chain_id: 1
+                    source: "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
+                    value: "400000000000"
                 engines:
                   - engine: "aave_v3_etherfi"
                     usd_decimals: 8
@@ -1189,44 +1225,44 @@ paths:
                           - { label: "< 0.90", lower_wad: null, upper_wad: "900000000000000000", count: 0 }
                           - { label: "0.90 – 1.00", lower_wad: "900000000000000000", upper_wad: "1000000000000000000", count: 0 }
                           - { label: "1.00 – 1.05", lower_wad: "1000000000000000000", upper_wad: "1050000000000000000", count: 0 }
-                          - { label: "1.05 – 1.10", lower_wad: "1050000000000000000", upper_wad: "1100000000000000000", count: 0 }
-                          - { label: "1.10 – 1.25", lower_wad: "1100000000000000000", upper_wad: "1250000000000000000", count: 1 }
+                          - { label: "1.05 – 1.10", lower_wad: "1050000000000000000", upper_wad: "1100000000000000000", count: 1 }
+                          - { label: "1.10 – 1.25", lower_wad: "1100000000000000000", upper_wad: "1250000000000000000", count: 0 }
                           - { label: "1.25 – 1.50", lower_wad: "1250000000000000000", upper_wad: "1500000000000000000", count: 0 }
                           - { label: "1.50 – 2.00", lower_wad: "1500000000000000000", upper_wad: "2000000000000000000", count: 0 }
                           - { label: ">= 2.00", lower_wad: "2000000000000000000", upper_wad: null, count: 0 }
                         infinite_count: 0
-                        refused_count: 0
-                        note: "buckets are the pool's own health-factor WAD. This is ONE SIDE of the shock, in the SAME buckets /v1/book's histogram serves."
+                        refused_count: 1
+                        note: "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so `< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
                       collateral_by_asset:
+                        - asset: "0x0000000000000000000000000000000000000Bad"
+                          decimals: 18
+                          amount: "5000000000000000000"
+                          value_usd: null
+                          unpriced: true
+                          note: "UNPRICED: the account holds this token and NO price witness describes it on this side, so its USD value is UNKNOWABLE — not zero. `amount` is exact; none of this holding is inside `total_collateral_usd`."
                         - asset: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
                           symbol: "weETH"
                           decimals: 18
                           amount: "2000000000000000000"
                           value_usd: "800000000000"
                           unpriced: false
-                          note: "COUNTED: this value is inside `total_collateral_usd` on this side."
-                        - asset: "0x0000000000000000000000000000000000000BAD"
-                          decimals: 18
-                          amount: "5000000000000000000"
-                          value_usd: null
-                          unpriced: true
-                          note: "UNPRICED: the account holds this token and NO price witness describes it, so its USD value is UNKNOWABLE — not zero. The registry holds no symbol for it and none is invented."
+                          note: "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
                     after: *runbook_example_aave_side
                     newly_eligible_accounts: 0
                     eligible_debt_delta_usd: "0"
                     bad_debt_delta_usd: "0"
                     movers: []
                     movers_total: 0
-                    movers_note: "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. This scenario moves no oracle mark, so NO account's health factor dropped and there is nothing to rank. `movers` carries all 0 of them."
+                    movers_note: "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. Only accounts whose health factor STRICTLY DROPPED are movers. An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here — it is not a quiet zero. `movers` carries all 0 of them."
                     market_realization:
                       hfs_unchanged: true
-                      execution_shortfall_usd: "40000000000"
+                      execution_shortfall_usd: "0"
                       bad_debt_at_liquidation_usd: "0"
                       usd_decimals: 8
                       seizure_model: "pro-rata-over-counted-collateral"
-                      note: "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it). The output is the gap the protocol is not seeing."
+                      note: "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it, computed not promised). The output is the gap the protocol is not seeing, under the disclosed seizure model."
                     projection: null
-                    note: "oracle marks held: before and after aggregates are bit-identical by construction; the shortfall axis is where this scenario's information lives."
+                    note: "oracle marks held: before and after aggregates are identical by construction; the shortfall axis is where this scenario's information lives."
                   - engine: "debt_manager"
                     usd_decimals: 6
                     before: &runbook_example_dm_side
@@ -1234,15 +1270,15 @@ paths:
                       eligible_accounts: 1
                       total_collateral_usd: "4000000000"
                       total_debt_usd: "4620000000"
-                      eligible_debt_usd: "4200000000"
+                      eligible_debt_usd: "4620000000"
                       collateral_at_risk_usd: "4000000000"
-                      bad_debt_usd: "239603961"
+                      bad_debt_usd: "659603961"
                       hf_histogram:
                         comparator: "hf_num/hf_den"
                         wad_scale: "1000000000000000000"
                         buckets:
-                          - { label: "< 0.90", lower_wad: null, upper_wad: "900000000000000000", count: 0 }
-                          - { label: "0.90 – 1.00", lower_wad: "900000000000000000", upper_wad: "1000000000000000000", count: 1 }
+                          - { label: "< 0.90", lower_wad: null, upper_wad: "900000000000000000", count: 1 }
+                          - { label: "0.90 – 1.00", lower_wad: "900000000000000000", upper_wad: "1000000000000000000", count: 0 }
                           - { label: "1.00 – 1.05", lower_wad: "1000000000000000000", upper_wad: "1050000000000000000", count: 0 }
                           - { label: "1.05 – 1.10", lower_wad: "1050000000000000000", upper_wad: "1100000000000000000", count: 0 }
                           - { label: "1.10 – 1.25", lower_wad: "1100000000000000000", upper_wad: "1250000000000000000", count: 0 }
@@ -1250,32 +1286,32 @@ paths:
                           - { label: "1.50 – 2.00", lower_wad: "1500000000000000000", upper_wad: "2000000000000000000", count: 0 }
                           - { label: ">= 2.00", lower_wad: "2000000000000000000", upper_wad: null, count: 0 }
                         infinite_count: 0
-                        refused_count: 0
-                        note: "the Debt Manager has no health-factor wad: these buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable`."
+                        refused_count: 1
+                        note: "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean `debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of the shock over the positions in the run, in the SAME buckets /v1/book's histogram serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator — both are counted here rather than dropped, so the buckets plus these two account for the whole run."
                       collateral_by_asset:
-                        - asset: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee"
+                        - asset: "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF"
                           symbol: "weETH"
                           decimals: 18
                           amount: "1000000000000000000"
                           value_usd: "4000000000"
                           unpriced: false
-                          note: "COUNTED: this value is inside `total_collateral_usd` on this side."
+                          note: "COUNTED: this value is inside `total_collateral_usd` on this side. The counted entries sum to it EXACTLY."
                     after: *runbook_example_dm_side
                     newly_eligible_accounts: 0
                     eligible_debt_delta_usd: "0"
                     bad_debt_delta_usd: "0"
                     movers: []
                     movers_total: 0
-                    movers_note: "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose eligibility FLIPPED false -> true are movers. This scenario moves no oracle mark, so nothing flipped. `movers` carries all 0 of them."
+                    movers_note: "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, ranked by their debt in this engine's 6-decimal USD, largest first. The Debt Manager has no health-factor wad, so `hf_before_num/den` and `hf_after_num/den` are the EXACT rational maxBorrowLT/borrowings, a disclosure only. `movers_total` counts flips to eligible ONLY, so it is not `newly_eligible_accounts`, which is a NET count and also subtracts any flip back to healthy. `movers` carries all 0 of them."
                     market_realization:
                       hfs_unchanged: true
                       execution_shortfall_usd: "200000000"
-                      bad_debt_at_liquidation_usd: "0"
+                      bad_debt_at_liquidation_usd: "820000000"
                       usd_decimals: 6
                       seizure_model: "pro-rata-over-counted-collateral"
-                      note: "same axis, this engine's own 6-decimal USD."
+                      note: "market value is NOT an oracle mark: this scenario moves NO health factor (`hfs_unchanged` asserts it, computed not promised). The output is the gap the protocol is not seeing, under the disclosed seizure model."
                     projection: null
-                    note: "delta-only: zero deltas here are THE FINDING — HFs are bit-identical while realized proceeds fall."
+                    note: "oracle marks held: before and after aggregates are identical by construction; the shortfall axis is where this scenario's information lives."
                 excluded_engines: []
                 coverage:
                   batch_positions: 4
@@ -1285,9 +1321,11 @@ paths:
                   excluded: []
                   withheld_engines: []
                   stress_coverage_is_full: true
-                  note: "every position the batch carries reached the run; the two refused rows are named in the batch's own counts and enter no arithmetic."
+                  note: "every position the batch carries is on the wire. `excluded` lists positions this layer could not rebuild into the pure library's input form; `withheld_engines` lists ENGINES whose whole book is refused and therefore absent from the stress and waterfall arithmetic entirely. `stress_coverage_is_full` accounts for both — it is a book-wide claim, not a per-position one."
                 notes:
                   - "aggregates are per engine in each engine's OWN unit and decimals; they are never summed across engines."
+                  - "deltas are DELTA-ONLY: after minus before, the scenario's own contribution over the positions in the run."
+                  - "eligibility, collateral-at-risk and bad-debt measures are the SAME arithmetic as /v1/book's unshocked waterfall point, evaluated on each side of the shock."
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }

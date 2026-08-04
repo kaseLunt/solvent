@@ -444,39 +444,34 @@
 //     that reconciled the two rows by guessing shows a wrong number rather than
 //     a silent identity error. Full derivation at the write site.
 //
-//     A FINDING RECORDED HERE RATHER THAN FIXED (Wave W-BS-D). These two carry
-//     the contract's run-book 200 example verbatim, and that example serves
-//     `applied_shocks: []` AND `held_flat: []` while itemizing priced weETH on
-//     two chains. Its scenario, `weeth_market_depeg_oracles_held`, has
-//     `propagation: []` and no `projection` in the committed registry — so
-//     production runs `ApplyScenario`, holds every one of those price inputs
-//     flat, and NAMES them. The example's empty `held_flat` is a disclosure the
-//     server could not produce. It is a defect in `api/openapi.yaml`, not in
-//     this file, and item 2's discipline forbids rewriting the contract's bytes
-//     to satisfy a law — so the guard's completeness law (11) takes an
-//     ENUMERATED exemption for exactly those two keys. Wave W-BS-E FROZE them
-//     as literals: the example's priced holdings are fingerprinted and asserted
-//     equal to what round 30 reviewed, so the exemption cannot widen when the
-//     example moves, and it is refused outright once the example DISCLOSES what
-//     it forgives — which is what makes the banked contract repair
-//     self-enforcing. The eth_minus_30 body, whose disclosures this generator
-//     composes itself, takes none.
+//     THE FINDINGS THIS PAIR RECORDED ARE ALL DISCHARGED (Wave W-EX-A). These
+//     two carry the contract's run-book 200 example verbatim, and that example
+//     used to be PROSE ABOUT a body: it served `applied_shocks: []` AND
+//     `held_flat: []` while itemizing priced weETH on two chains, under a
+//     scenario whose committed `propagation: []` means production holds every
+//     price input flat and NAMES it; it drew its aave account in `1.10 – 1.25`
+//     where the contract's own /v1/params threshold puts it at 1.08; it drew its
+//     Debt Manager account in `0.90 – 1.00` where its own collateral and
+//     threshold put it at 0.6926; it carried notes matching no sentence the
+//     server composes; and it published $400 of execution shortfall on an engine
+//     with zero eligible accounts. Every one was a defect in `api/openapi.yaml`
+//     rather than in this file, so each was RECORDED — an enumerated law-11
+//     exemption, two histogram carries, two frozen note divergences — with teeth
+//     that would fire the moment the contract was repaired.
+//
+//     `cmd/api/p5_runbook_example_db_test.go` repaired it, and not one instance
+//     at a time: the example is now CAPTURED from the real handler over a seeded
+//     book, and `TestRunBookExampleIsAServedBody` asserts forever that the yaml's
+//     example IS a served body modulo four clock-produced fields. Every tooth
+//     fired on the first run afterwards and every licence was deleted rather than
+//     re-frozen. What is left in this file is derivation, not carry.
 //
 //     ONE DEFECT IN THIS PAIR WAS THIS FILE'S OWN, AND WAVE W-BS-H REPAIRED IT.
 //     The `.swap` body restates the counted balance at 3 weETH — 1200000000000
 //     against the same 600000000000 of debt — and carried the example's
 //     `1.10 – 1.25` census unchanged. At the committed 8100 bps that account sits
-//     at 1200/600 x 0.81 = 1.62, the `1.50 – 2.00` bucket; even the example's OWN
-//     implied 8250-9375 bps would put 3 weETH at 1.65 or above. No threshold
-//     reconciles them, so the census was falsifiable with NO reference to the
-//     recorded example defect — which is what tells the two apart. The COLLISION
-//     body carries the example's own money (2 weETH, 800000000000) and its census
-//     is the example's book, still carried, still recorded. The `.swap` body
-//     carries money THIS GENERATOR restated, and a census describing a book it
-//     does not serve. The carry is conditional now — a carry records a defect in
-//     the EXAMPLE'S OWN BOOK, and a body that restates the book is not that book
-//     — so the swap side takes the derived placement and its four histogram bytes
-//     were regenerated to match. Mutant AT moves them back.
+//     at 1200/600 x 0.81 = 1.62, the `1.50 – 2.00` bucket. Both sides of the pair
+//     take the derived placement now; mutant AT moves the swap side back.
 //
 // ===========================================================================
 // THE GUARD'S CLAIMED COVERAGE, AND ITS KNOWN LIMITS (WAVE W-BS-H)
@@ -753,6 +748,13 @@ const engineChain = new Map(
 /** The derived delta, in the Debt Manager's own 6-decimal USD. */
 const DM_DELTA = 1_500_000_000n;
 
+/**
+ * How many accounts this generator injects into the Debt Manager's book: the
+ * one that FLIPS, and the one that carries the held-flat holding law 11 is
+ * proved against (see `DM_HELD_ACCOUNT` for why they cannot be one account).
+ */
+const DM_INJECTED_ACCOUNTS = 2;
+
 // --- CONTRACT 1.6.0: the three additive fields, DERIVED not stated ---------
 //
 // `hf_histogram`, `collateral_by_asset` (on each aggregate) and
@@ -840,20 +842,63 @@ const DM_FLIP_ACCOUNT = "0x00000000000000000000000000000000000d0002";
  *   1. It responds to EXACTLY the scenario's one declared axis, so its factor is
  *      the scenario's own 70/100 with no composition and nothing to reconcile.
  *   2. It carries neither snap flag, so it moves by that plain rational.
- *   3. IT COLLIDES WITH NOTHING. The example's Debt Manager side already carries
- *      0xCd5f… (the mainnet weETH address) and the matrix does not describe that
- *      address ON CHAIN 10 — the DM's weETH is 0x5A7f… there — so the example's
- *      own entry is HELD FLAT by the matrix, exactly as its own bytes hold it.
- *      No entry has to claim two price paths and no (asset, disclosure) key
- *      repeats.
+ *   3. IT COLLIDES WITH NOTHING. The example's Debt Manager side carries weETH
+ *      on chain 10 (0x5A7f…) and nothing else, so no entry has to claim two
+ *      price paths and no (asset, disclosure) key repeats.
  *
  * The symbol is READ from the propagation row, not invented: the registry names
  * this one, so serving it is disclosure rather than fabrication.
+ *
+ * # WAVE W-EX-A: WHY THE ACCOUNT GREW A SECOND HOLDING
+ *
+ * Until the contract example was repaired, its Debt Manager side carried the
+ * MAINNET weETH address (0xCd5f…) on chain 10 — an address the eth_minus_30
+ * matrix does not describe there. That accident was load-bearing: it was the one
+ * priced, itemized, undeclared holding in this whole body, so it was what proved
+ * guard law 11 (held flat is exhaustive) and what mutants B, E and H mutate. The
+ * repaired example carries the DM's REAL weETH, 0x5A7f…, which the matrix DOES
+ * declare — so it moves, and the body lost its held-flat witness entirely.
+ *
+ * The guard below refuses that state rather than letting three mutants pass
+ * against nothing, and the re-derivation is a SECOND holding on the same
+ * injected account: USDC on Optimism, the Debt Manager's own borrow token, which
+ * the live book genuinely holds as collateral (the merged-leg shape
+ * `cmd/api/fixture_test.go:fxDMMergedPosition` reproduces) and which
+ * eth_minus_30's matrix does not name, because a dollar stable is not ETH-linked.
+ * Production therefore holds it flat and records it on `HeldFlat`, and the body
+ * says so with an itemized row behind it.
  */
 const DM_FLIP_ASSET = "0x4200000000000000000000000000000000000006";
 const DM_FLIP_ASSET_DECIMALS = 18;
 const DM_FLIP_AMOUNT = 2_500_000_000_000_000_000n; // 2.5 tokens at 18 decimals
 const DM_FLIP_PRICE_BEFORE = 1_000_000_000n; // $1,000.000000 in the DM's 6-dec USD
+
+/**
+ * THE SECOND INJECTED ACCOUNT, and why it is a second account rather than a
+ * second holding on the first.
+ *
+ * Its holding is USDC on Optimism — the Debt Manager's own borrow token, which
+ * the live book genuinely holds as collateral and which no eth_minus_30
+ * propagation row names, so both sides value it identically and production
+ * records it on `HeldFlat`. That is the law-11 witness this body needs.
+ *
+ * It could not ride on the FLIPPING account. Guard law 7 requires a mover's own
+ * rationals to imply a factor the body DISCLOSES for that engine, and an account
+ * holding one shocked asset beside one held asset moves by a BLEND of 70/100 and
+ * 1/1 that no `applied_shocks` entry states. Rather than weaken a law to fit a
+ * fixture, the held balance gets its own account — healthy on BOTH sides, so it
+ * is no mover and law 7 never speaks about it.
+ *
+ * Its debt is small enough that it stays healthy under the engine's own STRICT
+ * test on both sides, which is asserted below rather than assumed.
+ */
+const DM_HELD_ACCOUNT = "0x00000000000000000000000000000000000d0004";
+const DM_HELD_ASSET = "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85";
+const DM_HELD_SYMBOL = "USDC";
+const DM_HELD_DECIMALS = 6;
+const DM_HELD_AMOUNT = 100_000_000n; // 100 USDC at 6 decimals
+const DM_HELD_PRICE = 1_000_000n; // $1.000000 in the DM's 6-dec USD
+const DM_HELD_DEBT = 50_000_000n; // $50.000000 borrowed against $100 of USDC
 
 const DM_CHAIN = engineChain.get("debt_manager");
 if (DM_CHAIN === undefined) {
@@ -893,19 +938,35 @@ if (FACTOR_NUM === 1n && FACTOR_DEN === 1n) {
   fail(`${DM_FLIP_SYMBOL} responds to no axis this scenario shocks, so nothing would move`);
 }
 
-// THE COLLISION CHECK. The invented balance may not land on an asset the
-// example's Debt Manager side already carries: one asset at one price moves by
-// one factor, so a second entry for it would be two rows claiming one identity —
-// and folding the balance in would make the merged entry claim a price path the
-// example's own bytes contradict.
+// THE HELD HOLDING REALLY IS UNDECLARED, asserted against the committed matrix
+// rather than assumed. If eth_minus_30 ever grows a row for it, production would
+// SHOCK it and this body's held-flat disclosure would be the thing law 11 exists
+// to catch.
+if (propagation.has(responseKey(DM_CHAIN, DM_HELD_ASSET))) {
+  fail(
+    `the eth_minus_30 propagation matrix now DECLARES ${DM_HELD_ASSET} on chain ` +
+      `${String(DM_CHAIN)}, so production would shock it and this body's held-flat witness is gone`,
+  );
+}
+
+// THE COLLISION CHECK. Neither injected balance may land on an asset the
+// example's Debt Manager side already carries, or on the other one: one asset at
+// one price moves by one factor, so a second entry for it would be two rows
+// claiming one identity — and folding the balance in would make the merged entry
+// claim a price path the example's own bytes contradict.
+if (DM_FLIP_ASSET.toLowerCase() === DM_HELD_ASSET.toLowerCase()) {
+  fail("the injected account's two holdings are the same asset");
+}
 for (const side of ["before", "after"]) {
   for (const entry of runBookExample.engines.find((e) => e.engine === "debt_manager")[side]
     .collateral_by_asset) {
-    if (entry.asset.toLowerCase() === DM_FLIP_ASSET.toLowerCase()) {
-      fail(
-        `the example's debt_manager ${side} side already carries ${DM_FLIP_ASSET}; ` +
-          `the invented balance would collide with it`,
-      );
+    for (const injected of [DM_FLIP_ASSET, DM_HELD_ASSET]) {
+      if (entry.asset.toLowerCase() === injected.toLowerCase()) {
+        fail(
+          `the example's debt_manager ${side} side already carries ${injected}; ` +
+            `the invented balance would collide with it`,
+        );
+      }
     }
   }
 }
@@ -913,15 +974,32 @@ for (const side of ["before", "after"]) {
 const TOKEN_UNIT = 10n ** BigInt(DM_FLIP_ASSET_DECIMALS);
 
 /** floor(amount × price / 10^decimals) — the Debt Manager's own valuation. */
+const dmValueAt = (amount, price, decimals) => (amount * price) / 10n ** BigInt(decimals);
 const dmValue = (amount, price) => (amount * price) / TOKEN_UNIT;
 
 const DM_FLIP_PRICE_AFTER = (DM_FLIP_PRICE_BEFORE * FACTOR_NUM) / FACTOR_DEN;
 const DM_FLIP_VALUE_BEFORE = dmValue(DM_FLIP_AMOUNT, DM_FLIP_PRICE_BEFORE);
 const DM_FLIP_VALUE_AFTER = dmValue(DM_FLIP_AMOUNT, DM_FLIP_PRICE_AFTER);
 
-// floor(value × LT / HUNDRED_PERCENT), per token then summed — one token here.
-const DM_FLIP_MAXBORROW_BEFORE = (DM_FLIP_VALUE_BEFORE * DM_LT_NUM) / DM_LT_DEN;
-const DM_FLIP_MAXBORROW_AFTER = (DM_FLIP_VALUE_AFTER * DM_LT_NUM) / DM_LT_DEN;
+/** The held holding's value — the SAME on both sides, because nothing moves it. */
+const DM_HELD_VALUE = dmValueAt(DM_HELD_AMOUNT, DM_HELD_PRICE, DM_HELD_DECIMALS);
+
+// floor(value × LT / HUNDRED_PERCENT), PER TOKEN and then summed — which is
+// production's own shape (`max_borrow_contribution` is a per-leg column), and
+// not the same number as flooring the account's total.
+const dmMaxBorrow = (...values) =>
+  values.reduce((sum, value) => sum + (value * DM_LT_NUM) / DM_LT_DEN, 0n);
+const DM_FLIP_MAXBORROW_BEFORE = dmMaxBorrow(DM_FLIP_VALUE_BEFORE);
+const DM_FLIP_MAXBORROW_AFTER = dmMaxBorrow(DM_FLIP_VALUE_AFTER);
+
+/** The held account's own ceiling — identical on both sides, like its collateral. */
+const DM_HELD_MAXBORROW = dmMaxBorrow(DM_HELD_VALUE);
+if (DM_HELD_DEBT > DM_HELD_MAXBORROW) {
+  fail(
+    `the held-flat account is eligible (${String(DM_HELD_DEBT)} > ${String(DM_HELD_MAXBORROW)}), ` +
+      `so it would be a mover on a body whose only disclosed factor is the shocked one`,
+  );
+}
 
 // THE FLIP IS ASSERTED FROM THE ARITHMETIC, not assumed. The Debt Manager's
 // test is STRICT — borrowings > maxBorrowLT — and equality is healthy.
@@ -940,27 +1018,15 @@ if (DM_DELTA <= DM_FLIP_MAXBORROW_AFTER) {
   process.exit(1);
 }
 
-// The waterfall's own two measures, over the ONE eligible-after account.
-// internal/risk/waterfall.go:96-103.
-const DM_FLIP_AT_RISK_AFTER = (() => {
-  const seizable = (DM_DELTA * DM_BONUS_NUM) / DM_BONUS_DEN;
-  return seizable < DM_FLIP_VALUE_AFTER ? seizable : DM_FLIP_VALUE_AFTER;
-})();
-const DM_FLIP_BAD_DEBT_AFTER = (() => {
-  const recoverable = (DM_FLIP_VALUE_AFTER * DM_BONUS_DEN) / DM_BONUS_NUM;
-  return DM_DELTA > recoverable ? DM_DELTA - recoverable : 0n;
-})();
-
-/** Clone a histogram, adding `delta` to the count of one labelled bucket. */
-const withBucket = (histogram, label, delta) => {
-  const buckets = histogram.buckets.map((bucket) =>
-    bucket.label === label ? { ...bucket, count: bucket.count + delta } : bucket,
-  );
-  if (buckets.every((bucket, index) => bucket.count === histogram.buckets[index].count)) {
-    console.error(`generate-lab-book.mjs: no bucket labelled ${label} in the run-book example`);
-    process.exit(1);
-  }
-  return { ...histogram, buckets };
+// The waterfall's own two measures, over ONE eligible account's whole
+// collateral. internal/risk/waterfall.go:96-103.
+const dmAtRisk = (collateral, debt) => {
+  const seizable = (debt * DM_BONUS_NUM) / DM_BONUS_DEN;
+  return seizable < collateral ? seizable : collateral;
+};
+const dmBadDebt = (collateral, debt) => {
+  const recoverable = (collateral * DM_BONUS_DEN) / DM_BONUS_NUM;
+  return debt > recoverable ? debt - recoverable : 0n;
 };
 
 /**
@@ -995,23 +1061,38 @@ const belowOne = (histogram) =>
   );
 
 /**
- * buckets + infinite + refused — the SERVER'S OWN account invariant (Wave
- * W-BS-H, residual class E).
+ * THE TWO CENSUSES, AND WHY THEY ARE TWO (Wave W-EX-A corrects Wave W-BS-H).
  *
- * `p5_runbook.go:418-430, 578-583` adds a covered engine's unrebuildable
- * positions to `refused_count` on BOTH sides, and `handlers.go:700-714` counts
- * them in `accounts` all the same: a position this layer could not rebuild is
- * still a position the run measured over. The old reading was `buckets +
- * infinite`, which is correct only while `refused_count` is zero — and it is
- * zero on every body this file writes, which is exactly why the arithmetic was
- * never questioned. A law that happens to be true is not a law; the moment a
- * fixture carries a refusal, `buckets + infinite` would have quietly demanded
- * that `accounts` UNDERCOUNT the run by the refused rows.
+ * `measured` is buckets + infinite: the accounts this side actually MEASURED,
+ * and it is what `accounts` counts. The WIDER census — that plus
+ * `refused_count` — is every row of the engine the batch carries, measured or
+ * not; the two differ by exactly the rows that reached the run without numbers.
+ * Only the first has an independent witness on the wire, so only the first is a
+ * law here; the wider one is named in the failure message so a reader can see
+ * which set is which.
+ *
+ * W-BS-H moved `census` to `buckets + infinite + refused` and kept comparing it
+ * against `accounts`, on the reading that "a position this layer could not
+ * rebuild is still a position the run measured over". Production says otherwise
+ * and always did: `measureRunBook` (p5_runbook.go:657-661, 694-698) increments
+ * `accounts` ONLY inside the loop over the RUN — the rebuildable positions — and
+ * `p5_runbook.go:581-583` adds `refusedByEngine[engine]` to `refused` AFTERWARDS,
+ * on a measure that has already finished counting accounts. So a refused row is
+ * in `refused_count` and NOT in `accounts`, and the contract's own histogram
+ * sentence says the same thing in words: the buckets plus these two "account for
+ * the whole run", which is a larger set than the one `accounts` counts.
+ *
+ * Neither reading could be falsified while every body here served
+ * `refused_count: 0`. The repaired contract example serves 1 on both engines —
+ * its book carries one batch-refused row per engine — and the disagreement
+ * surfaced immediately. This is a DERIVATION ERROR corrected against production,
+ * not a defect in the example: `TestRunBookServesTheDistributionShiftAndTheMovers`
+ * (cmd/api) has pinned `buckets + infinite + refused == every Aave position in
+ * the batch` over a 1-computed-1-refused book since Wave W-BS-A, and `accounts`
+ * reads 1 there.
  */
-const census = (histogram) =>
-  histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) +
-  histogram.infinite_count +
-  histogram.refused_count;
+const measured = (histogram) =>
+  histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) + histogram.infinite_count;
 
 // --- THE HOLDING ANCHOR (Wave W-BS-E) --------------------------------------
 //
@@ -1102,14 +1183,15 @@ const holdingAnchor = (declarations) => {
  * violates would refuse honest bytes this generator has no standing to rewrite.
  */
 const checkSide = (name, side) => {
-  if (census(side.hf_histogram) !== side.accounts) {
+  if (measured(side.hf_histogram) !== side.accounts) {
     const histogram = side.hf_histogram;
     const placed = histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0);
     fail(
-      `${name} histogram census ${String(census(histogram))} ` +
+      `${name} histogram measures ${String(measured(histogram))} ` +
         `!= accounts ${String(side.accounts)} — ${String(placed)} placed in buckets + ` +
-        `${String(histogram.infinite_count)} unbounded + ${String(histogram.refused_count)} ` +
-        `refused IS the set of accounts this side measured`,
+        `${String(histogram.infinite_count)} unbounded IS the set of accounts this side ` +
+        `measured; the ${String(histogram.refused_count)} refused are rows the run could not ` +
+        `measure and are counted OUTSIDE accounts`,
     );
   }
   if (belowOne(side.hf_histogram) !== side.eligible_accounts) {
@@ -1335,30 +1417,39 @@ const EMPTY_ARRAY = Symbol("an empty array");
 //                 publishes the same pair, and the freeze asserts that too.
 //   note          THE CONTRACT EXAMPLE'S OWN SENTENCE, frozen from its bytes.
 //
-//                 RECORDED, NOT FIXED: `runMeasure.wire` (p5_runbook.go:298-311)
+//                 THE DIVERGENCE IS DISCHARGED (Wave W-EX-A). It used to be a
+//                 ledger entry: `runMeasure.wire` (p5_runbook.go:298-311)
 //                 composes `histogramComparator`'s note PLUS an eligible-edge
-//                 clause and an `infinite_count`/`refused_count` paragraph, so
-//                 the LIVE server's sentence is strictly longer than the one
-//                 `api/openapi.yaml`'s example carries. Two committed artifacts
-//                 disagree and the example's bytes are what every body here
-//                 rides on; item 2's discipline forbids rewriting them to
-//                 satisfy a law. So the EXAMPLE's sentence is what is frozen,
-//                 and the divergence joins the `held_flat: []` defect and the
-//                 aave histogram defect in this file's contract-defect ledger.
+//                 clause and an `infinite_count`/`refused_count` paragraph, and
+//                 the example carried a shorter sentence nobody's server writes,
+//                 so two committed artifacts disagreed and this file had no
+//                 standing to rewrite either. The example is now CAPTURED from
+//                 the running handler (`TestRunBookExampleIsAServedBody`), so
+//                 the sentence frozen below IS the sentence the server composes
+//                 — one artifact, read twice, agreeing.
 const FROZEN_ENGINE_SERIALIZATION = {
   aave_v3_etherfi: {
     usd_decimals: 8,
     comparator: "hf_wad",
     note:
-      "buckets are the pool's own health-factor WAD. This is ONE SIDE of the shock, in the SAME " +
-      "buckets /v1/book's histogram serves.",
+      "buckets are the pool's own health-factor WAD. Aave liquidates STRICTLY BELOW 1e18, so " +
+      "`< 1.00` is the eligible set and exactly 1.00 is healthy. This is ONE SIDE of the shock " +
+      "over the positions in the run, in the SAME buckets /v1/book's histogram serves; the " +
+      "after-side is bucketed on the SHOCKED states. `infinite_count` is accounts with no debt " +
+      "and `refused_count` is positions carrying no comparator — both are counted here rather " +
+      "than dropped, so the buckets plus these two account for the whole run.",
   },
   debt_manager: {
     usd_decimals: 6,
     comparator: "hf_num/hf_den",
     note:
-      "the Debt Manager has no health-factor wad: these buckets are the EXACT rational " +
-      "maxBorrowLT/borrowings, a disclosure only — take eligibility from `liquidatable`.",
+      "the Debt Manager has no health-factor wad: its liquidation test is the strict boolean " +
+      "`debt > maxBorrowLT`. These buckets are the EXACT rational maxBorrowLT/borrowings, a " +
+      "disclosure only — take eligibility from `liquidatable_positions`. This is ONE SIDE of " +
+      "the shock over the positions in the run, in the SAME buckets /v1/book's histogram " +
+      "serves; the after-side is bucketed on the SHOCKED states. `infinite_count` is accounts " +
+      "with no debt and `refused_count` is positions carrying no comparator — both are counted " +
+      "here rather than dropped, so the buckets plus these two account for the whole run.",
   },
 };
 
@@ -1422,8 +1513,8 @@ const FROZEN_EXAMPLE_BASELINE = {
       collateral_at_risk_usd: "0",
       bad_debt_usd: "0",
       infinite_count: 0,
-      refused_count: 0,
-      counts: [0, 0, 0, 0, 1, 0, 0, 0],
+      refused_count: 1,
+      counts: [0, 0, 0, 1, 0, 0, 0, 0],
     },
     after: {
       accounts: 1,
@@ -1434,8 +1525,8 @@ const FROZEN_EXAMPLE_BASELINE = {
       collateral_at_risk_usd: "0",
       bad_debt_usd: "0",
       infinite_count: 0,
-      refused_count: 0,
-      counts: [0, 0, 0, 0, 1, 0, 0, 0],
+      refused_count: 1,
+      counts: [0, 0, 0, 1, 0, 0, 0, 0],
     },
   },
   debt_manager: {
@@ -1444,24 +1535,24 @@ const FROZEN_EXAMPLE_BASELINE = {
       eligible_accounts: 1,
       total_collateral_usd: "4000000000",
       total_debt_usd: "4620000000",
-      eligible_debt_usd: "4200000000",
+      eligible_debt_usd: "4620000000",
       collateral_at_risk_usd: "4000000000",
-      bad_debt_usd: "239603961",
+      bad_debt_usd: "659603961",
       infinite_count: 0,
-      refused_count: 0,
-      counts: [0, 1, 0, 0, 0, 0, 0, 0],
+      refused_count: 1,
+      counts: [1, 0, 0, 0, 0, 0, 0, 0],
     },
     after: {
       accounts: 1,
       eligible_accounts: 1,
       total_collateral_usd: "4000000000",
       total_debt_usd: "4620000000",
-      eligible_debt_usd: "4200000000",
+      eligible_debt_usd: "4620000000",
       collateral_at_risk_usd: "4000000000",
-      bad_debt_usd: "239603961",
+      bad_debt_usd: "659603961",
       infinite_count: 0,
-      refused_count: 0,
-      counts: [0, 1, 0, 0, 0, 0, 0, 0],
+      refused_count: 1,
+      counts: [1, 0, 0, 0, 0, 0, 0, 0],
     },
   },
 };
@@ -1484,23 +1575,43 @@ const FROZEN_EXAMPLE_CHAINS = { aave_v3_etherfi: 1, debt_manager: 10 };
 /**
  * THE ENGINES NAMED BY `coverage.excluded` — frozen as the empty list it is.
  *
- * A side's `refused_count` is NOT `refused_in_batch`. `refused_in_batch` counts
- * rows the BATCH refused, which carry no numbers and never reach the run at all
- * (handlers.go:700-703). `refused_count` counts positions on a COVERED engine
- * that THIS LAYER could not rebuild (p5_runbook.go:418-430) — the same rows
- * `coverage.excluded` names one by one and `excluded_by_this_layer` totals — and
- * `p5_runbook.go:578-583` adds them to BOTH sides. So the histogram's refusal
- * count and the coverage census are one census read twice, and the derivation
- * composes the first FROM the second rather than restating it.
+ * A side's `refused_count` is EVERY row of the engine that reached the run
+ * WITHOUT numbers, and there are TWO ways to be one. `p5_runbook.go:426-431`
+ * counts `p.input == nil` on a covered engine, which is the union of:
+ *
+ *   * rows the BATCH refused (`handlers.go:701-703` totals them as
+ *     `refused_in_batch`), and
+ *   * rows THIS LAYER could not rebuild (`handlers.go:704-712` names them one by
+ *     one in `coverage.excluded` and totals them as `excluded_by_this_layer`).
+ *
+ * `p5_runbook.go:584-588` then adds that union to BOTH sides. Wave W-EX-A
+ * corrected this derivation, which had modelled only the second: the example's
+ * book carries one batch-refused row per engine and no layer refusals at all, so
+ * a `refused_count` composed from `coverage.excluded` alone read 0 where the
+ * server serves 1. The census below is the batch-refusal split, and it is
+ * re-proved against `coverage.refused_in_batch` — the example publishes the
+ * TOTAL, so the split is a frozen literal that has to sum to it.
  */
 const FROZEN_EXAMPLE_EXCLUDED_ENGINES = [];
 
 /** The engines the example WITHHOLDS — frozen as the empty list it is. */
 const FROZEN_EXAMPLE_WITHHELD_ENGINES = [];
 
-/** One engine's `refused_count`: the layer's own refusals for it, plus injected. */
+/**
+ * The BATCH's own refusals, split per engine. Its sum is welded to the example's
+ * `coverage.refused_in_batch` by `freezeExampleBaseline`, so a split that stops
+ * describing the published total stops generation.
+ */
+const FROZEN_EXAMPLE_REFUSED_IN_BATCH = { aave_v3_etherfi: 1, debt_manager: 1 };
+
+/**
+ * One engine's `refused_count`: the batch's refusals for it, plus the layer's,
+ * plus whatever this generator injects on top.
+ */
 const derivedRefusedCount = (engineName, injected) =>
-  FROZEN_EXAMPLE_EXCLUDED_ENGINES.filter((name) => name === engineName).length + injected;
+  (FROZEN_EXAMPLE_REFUSED_IN_BATCH[engineName] ?? 0) +
+  FROZEN_EXAMPLE_EXCLUDED_ENGINES.filter((name) => name === engineName).length +
+  injected;
 
 /** The frozen bucket SHAPE, in the form `derivedHistogram` reads. */
 const FROZEN_HISTOGRAM_SHAPE = {
@@ -1510,15 +1621,6 @@ const FROZEN_HISTOGRAM_SHAPE = {
     lower_wad,
     upper_wad,
   })),
-};
-
-/** One engine/side's frozen CARRIED census, in the form `derivedHistogram` reads. */
-const frozenCarried = (engineName, side) => {
-  const frozen = FROZEN_EXAMPLE_BASELINE[engineName][side];
-  return {
-    infinite_count: frozen.infinite_count,
-    buckets: FROZEN_HISTOGRAM_EDGES.map(([label], index) => ({ label, count: frozen.counts[index] })),
-  };
 };
 
 /** The histogram metadata the SERIALIZER owns, composed for one engine. */
@@ -1565,6 +1667,15 @@ const freezeExampleBaseline = (example) => {
     "example coverage.withheld_engines",
     FROZEN_EXAMPLE_WITHHELD_ENGINES.join(" ") || "(none)",
     example.coverage.withheld_engines.map((entry) => entry.engine).join(" ") || "(none)",
+  );
+  // THE BATCH-REFUSAL SPLIT IS WELDED TO THE PUBLISHED TOTAL. The example states
+  // `refused_in_batch` and no per-engine breakdown, so the split above is a
+  // literal — and a literal that stopped summing to the total would silently
+  // move a refusal from one engine's histogram to the other's.
+  frozenLiteral(
+    "the frozen per-engine batch-refusal split, summed against coverage.refused_in_batch",
+    Object.values(FROZEN_EXAMPLE_REFUSED_IN_BATCH).reduce((sum, n) => sum + n, 0),
+    example.coverage.refused_in_batch,
   );
   for (const [engineName, frozen] of Object.entries(FROZEN_EXAMPLE_BASELINE)) {
     const engine = example.engines.find((entry) => entry.engine === engineName);
@@ -1728,53 +1839,88 @@ const FROZEN_EXAMPLE_ENVELOPE = new Map([
   ["batch.refused_count", 2],
   ["batch.refused_engines[]", EMPTY_ARRAY],
   ["batch.flagged_count", 1],
-  ["batch.watermarks[0].engine", "aave_v3_etherfi"],
+  ["batch.watermarks[0].engine", "aave_param"],
   ["batch.watermarks[0].chain_id", 1],
-  ["batch.watermarks[0].last_block", 25635618],
+  ["batch.watermarks[0].last_block", 25635600],
   ["batch.watermarks[0].acked_epoch", 0],
   ["batch.watermarks[0].max_epoch_at_compute", 0],
-  // The aave engine runs no sweep, and NULL is the disclosure that says so.
+  // The engines that run no sweep, and NULL is the disclosure that says so.
   ["batch.watermarks[0].sweep", null],
-  ["batch.watermarks[1].engine", "debt_manager"],
-  ["batch.watermarks[1].chain_id", 10],
-  ["batch.watermarks[1].last_block", 154796552],
+  ["batch.watermarks[1].engine", "aave_v3_etherfi"],
+  ["batch.watermarks[1].chain_id", 1],
+  ["batch.watermarks[1].last_block", 25635618],
   ["batch.watermarks[1].acked_epoch", 0],
   ["batch.watermarks[1].max_epoch_at_compute", 0],
-  ["batch.watermarks[1].sweep.rows", 3],
-  ["batch.watermarks[1].sweep.failed", 1],
-  ["batch.watermarks[1].sweep.success_sum", "309593004"],
-  ["batch.watermarks[1].sweep.max_updated_at", "2026-07-29T09:40:00Z"],
-  ["batch.watermarks[1].sweep.generation", 4],
-  ["batch.watermarks[1].sweep.generation_open", false],
+  ["batch.watermarks[1].sweep", null],
+  ["batch.watermarks[2].engine", "debt_manager"],
+  ["batch.watermarks[2].chain_id", 10],
+  ["batch.watermarks[2].last_block", 154796552],
+  ["batch.watermarks[2].acked_epoch", 0],
+  ["batch.watermarks[2].max_epoch_at_compute", 0],
+  ["batch.watermarks[2].sweep.rows", 3],
+  ["batch.watermarks[2].sweep.failed", 1],
+  ["batch.watermarks[2].sweep.success_sum", "309593004"],
+  ["batch.watermarks[2].sweep.max_updated_at", "2026-07-29T09:40:00Z"],
+  ["batch.watermarks[2].sweep.generation", 4],
+  ["batch.watermarks[2].sweep.generation_open", false],
+  ["batch.watermarks[3].engine", "prices:poll:1"],
+  ["batch.watermarks[3].chain_id", 1],
+  ["batch.watermarks[3].last_block", 25635610],
+  ["batch.watermarks[3].acked_epoch", 0],
+  ["batch.watermarks[3].max_epoch_at_compute", 0],
+  ["batch.watermarks[3].sweep", null],
+  ["batch.watermarks[4].engine", "prices:poll:10"],
+  ["batch.watermarks[4].chain_id", 10],
+  ["batch.watermarks[4].last_block", 154796540],
+  ["batch.watermarks[4].acked_epoch", 0],
+  ["batch.watermarks[4].max_epoch_at_compute", 0],
+  ["batch.watermarks[4].sweep", null],
   ["batch.supersession.superseded", false],
   ["batch.supersession.legs[]", EMPTY_ARRAY],
-  ["batch.supersession.note", text("1e2f0c3377fe6271", "a superseded batch is still served: the flag")],
+  ["batch.supersession.note", text("b53a04a36de24e4a", "a superseded batch is still served: the flag")],
   ["scenario_config_version", "v1"],
   ["label", "weETH market depeg to 0.95 (oracles held)"],
-  ["description", text("48897232abf08d4b", "weETH trades 5 percent below its redemption ")],
+  ["description", text("aff652caebc34e63", "weETH trades 5 percent below its redemption ")],
   ["path_assumption", text("a33afc9e81f1fd0d", "oracle marks held exactly; market value is a")],
-  ["out_of_model[0]", text("4b9449973c74d69c", "liquidator liquidity, gas costs, execution l")],
-  ["out_of_model[1]", text("79a5a7ac35d4e29f", "seizure is modeled PRO-RATA over a position'")],
+  ["out_of_model[0]", text("9ca6adc0cc1b008e", "oracle lag and heartbeat behaviour during th")],
+  ["out_of_model[1]", text("093d256536e771f7", "deviation-trigger discreteness (a feed moves")],
+  ["out_of_model[2]", text("4b9449973c74d69c", "liquidator liquidity, gas costs, execution l")],
+  ["out_of_model[3]", text("39e2edaa4bb9fb8f", "market correlations not mechanically implied")],
+  ["out_of_model[4]", text("db68886bf0d25c81", "intra-sample price wicks: prices are 60-seco")],
+  ["out_of_model[5]", text("2c595ee809a728f7", "seizure is modeled PRO-RATA over a position'")],
+  ["out_of_model[6]", text("e0669cd5b4647ecc", "market depth: the 0.95 ratio is a flat hairc")],
+  ["out_of_model[7]", text("ec0f2aac7bce4f39", "the possibility that a sustained market depe")],
+  // WHICH ORACLE HELD EACH MARK. `held_flat` used to be the empty array the
+  // ledger recorded as impossible; the repaired example names all three price
+  // inputs the book consulted, so there are three sources to pin.
+  ["held_flat[0].source", "priceproviderv2"],
+  ["held_flat[1].source", text("1ee82a7f1a70f58f", "aaveoracle:0x43b64f28a678944e0655404b0b98e44")],
+  ["held_flat[2].source", text("1ee82a7f1a70f58f", "aaveoracle:0x43b64f28a678944e0655404b0b98e44")],
+  ["engines[0].movers_note", text("6d8893181d06269d", "RANKED BY HEALTH-FACTOR DROP: before minus a")],
+  ["engines[0].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
+  ["engines[0].market_realization.note", text("0aebc29e3b500eea", "market value is NOT an oracle mark: this sce")],
+  ["engines[0].note", text("f9095d07cfdf6602", "oracle marks held: before and after aggregat")],
+  ["engines[1].movers_note", text("df38e79ac9c51cfc", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
+  ["engines[1].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
+  // THE TWO ENGINES CARRY THE SAME SENTENCE, because `p5_runbook.go:612` writes
+  // ONE for every engine. The example used to carry two different ones and
+  // neither was production's; the divergence is discharged, not recorded.
+  ["engines[1].market_realization.note", text("0aebc29e3b500eea", "market value is NOT an oracle mark: this sce")],
+  ["engines[1].note", text("f9095d07cfdf6602", "oracle marks held: before and after aggregat")],
   // `excluded_engines[]` is NOT frozen here: law 15 derives it from the withheld
   // roster the derivation composes, so freezing it too would be two registers
   // claiming one leaf — which the completeness law refuses in its own right.
-  ["coverage.note", text("90fd6b96c7c44a86", "every position the batch carries reached the")],
+  //
+  // `projection` and the realization block's four computed leaves are not here
+  // either — Wave W-BS-I moved them to DERIVED. The one this list used to carry
+  // is worth naming: `engines[0].market_realization.execution_shortfall_usd` was
+  // pinned to "40000000000", $400 of CRITICAL execution shortfall on an engine
+  // whose own `eligible_accounts` is 0. The repaired example serves "0" there,
+  // because an empty sum IS zero.
+  ["coverage.note", text("694dd7a5f727678d", "every position the batch carries is on the w")],
   ["notes[0]", text("a11aaae34adb7eeb", "aggregates are per engine in each engine's O")],
-  ["engines[0].note", text("0440e01766848af7", "oracle marks held: before and after aggregat")],
-  ["engines[0].movers_note", text("e6f51a236a09295d", "RANKED BY HEALTH-FACTOR DROP: before minus a")],
-  // `projection` and the realization block's four computed leaves are NOT frozen
-  // here any more — Wave W-BS-I moved them to DERIVED, and a frozen pin on a
-  // derived leaf would be two registers claiming one field. The one this list
-  // used to carry is worth naming: `engines[0].market_realization
-  // .execution_shortfall_usd` was pinned to "40000000000", which is $400 of
-  // CRITICAL execution shortfall — a figure the example computes over ITS book
-  // and the collision pair republished over a book with `eligible_accounts: 0`.
-  ["engines[0].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
-  ["engines[0].market_realization.note", text("5483193594ac1b43", "market value is NOT an oracle mark: this sce")],
-  ["engines[1].note", text("20511f4ce03c0789", "delta-only: zero deltas here are THE FINDING")],
-  ["engines[1].movers_note", text("7c127dc90477c0f0", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
-  ["engines[1].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
-  ["engines[1].market_realization.note", "same axis, this engine's own 6-decimal USD."],
+  ["notes[1]", text("fcf5d2e83d46ee83", "deltas are DELTA-ONLY: after minus before, t")],
+  ["notes[2]", text("b5f66ac34f04064e", "eligibility, collateral-at-risk and bad-debt")],
 ]);
 
 /** Assert one frozen envelope entry — literal, sentence or empty array. */
@@ -1933,7 +2079,7 @@ const derivedRealizationRatios = (what, axis) => {
  */
 const derivedMarketRealization = (
   what,
-  { axis, chainId, legs, borrowings, accounts, eligibleAccounts, usdDecimals },
+  { axis, chainId, legs, borrowings, accounts, eligibleAccounts, usdDecimals, bonus },
 ) => {
   const ratios = derivedRealizationRatios(what, axis);
   let realizable = 0n;
@@ -1983,26 +2129,80 @@ const derivedMarketRealization = (
         `aggregate over more than one account does not decompose into that sum`,
     );
   }
-  if (!atPar) {
+  if (atPar) {
+    // THE PAR CLOSED FORM, kept because it needs NO bonus at all: Sum(value x r)
+    // is exactly WAD x Sum value, so the fused floor returns `seizable`
+    // unchanged whatever `seizable` is, and the gap closes for any bonus.
+    return {
+      values: {
+        ...shared,
+        execution_shortfall_usd: "0",
+        bad_debt_at_liquidation_usd: (
+          borrowings > realizable ? borrowings - realizable : 0n
+        ).toString(),
+      },
+      why: {
+        ...sharedWhy,
+        execution_shortfall_usd:
+          `every counted leg realizes at PAR — the committed axis names no key this engine ` +
+          `itemizes — so Sum(value x r) is exactly WAD x ${String(marked)} and the fused floor ` +
+          `returns seizable unchanged: the gap is zero for ANY seizable`,
+        bad_debt_at_liquidation_usd:
+          `the ONE liquidatable account's frozen borrowings ${String(borrowings)} less what its ` +
+          `counted collateral realizes at the committed ratios, ${String(realizable)}`,
+      },
+    };
+  }
+  // THE DISCOUNTED FORM (Wave W-EX-A). It needs the SEIZABLE term, and therefore
+  // the engine's liquidation bonus — which this derivation refused to guess
+  // until the repaired contract example made the case reachable: its Debt
+  // Manager holds the DM's real weETH on chain 10, and the committed
+  // market-realization axis DISCOUNTS exactly that key to 0.95.
+  //
+  // The bonus is not typed in here. `ENGINE_SEIZURE_BONUS` reads each engine's
+  // from the same committed sources this file already derives thresholds with,
+  // and the caller passes the pair, so a bonus that moved would move in one place.
+  if (bonus === undefined) {
     fail(
       `${what}: this engine has a liquidatable position AND a counted leg the committed axis ` +
-        `DISCOUNTS, so the shortfall needs the SEIZABLE term — which needs a liquidation bonus no ` +
-        `frozen source in this file carries. Freeze the bonus and compose seizableValue, or state ` +
-        `why the body may publish a figure nothing derives; do not let one ride in from the example`,
+        `DISCOUNTS, so the shortfall needs the SEIZABLE term — and the caller declared no ` +
+        `liquidation bonus for it. Declare the bonus with its provenance; do not let a figure ` +
+        `ride in from a body`,
     );
   }
+  const [bonusNum, bonusDen] = bonus;
+  // `seizableValue` (internal/risk/dm.go:385-401): per leg, the debt's share of
+  // that leg times the bonus, capped at the leg's own value, then summed.
+  let seizable = 0n;
+  if (marked > 0n) {
+    for (const leg of legs) {
+      const share = (borrowings * leg.value * bonusNum) / (marked * bonusDen);
+      seizable += share < leg.value ? share : leg.value;
+    }
+  }
+  // ONE fused floor: seizable x Sum(value·r) / (WAD x Sum value).
+  let weighted = 0n;
+  for (const leg of legs) {
+    weighted += leg.value * (ratios.get(responseKey(chainId, leg.asset)) ?? DERIVED_REALIZATION_PAR);
+  }
+  const seizableMarket = marked > 0n ? (seizable * weighted) / (DERIVED_REALIZATION_PAR * marked) : 0n;
   return {
     values: {
       ...shared,
-      execution_shortfall_usd: "0",
-      bad_debt_at_liquidation_usd: (borrowings > realizable ? borrowings - realizable : 0n).toString(),
+      execution_shortfall_usd: (
+        seizable > seizableMarket ? seizable - seizableMarket : 0n
+      ).toString(),
+      bad_debt_at_liquidation_usd: (
+        borrowings > realizable ? borrowings - realizable : 0n
+      ).toString(),
     },
     why: {
       ...sharedWhy,
       execution_shortfall_usd:
-        `every counted leg realizes at PAR — the committed axis names no key this engine itemizes — ` +
-        `so Sum(value x r) is exactly WAD x ${String(marked)} and the fused floor returns seizable ` +
-        `unchanged: the gap is zero for ANY seizable`,
+        `the ONE liquidatable account's seizable value at the oracle mark, ${String(seizable)} — ` +
+        `its borrowings ${String(borrowings)} at the committed ${String(bonusNum)}/` +
+        `${String(bonusDen)} bonus, capped per leg at that leg's own value — less what the same ` +
+        `seizure realizes at the committed market ratios, ${String(seizableMarket)}`,
       bad_debt_at_liquidation_usd:
         `the ONE liquidatable account's frozen borrowings ${String(borrowings)} less what its ` +
         `counted collateral realizes at the committed ratios, ${String(realizable)}`,
@@ -2081,59 +2281,28 @@ const derivedHistogram = (shape, carried, placements, meta) => {
 };
 
 /**
- * A CARRIED CENSUS IS A RECORDED DEFECT, NEVER A DEFAULT (Wave W-BS-G).
+ * THE CARRY IS GONE (Wave W-EX-A), and this note is its receipt.
  *
- * The collision pair used to hand `derivedHistogram` the example's census as
- * BOTH the shape and the starting counts, for BOTH engines, with no placements
- * at all — a blanket carry. That is a second pen writing down whatever the first
- * one wrote: the only census it can refuse is one that disagrees with the
- * example, and the example is exactly what the body copied.
+ * `carriedCensus` used to live here. It let a derivation START from the contract
+ * example's own histogram census instead of composing one, for a recorded
+ * reason: the example drew its aave account in `1.10 - 1.25` where the
+ * contract's own /v1/params threshold (8100 bps on 800000000000 against
+ * 600000000000 = 1.08) puts it in `1.05 - 1.10`, and drew its Debt Manager
+ * account in `0.90 - 1.00` where 3200000000/4620000000 = 0.6926 puts it in
+ * `< 0.90`. Two committed artifacts disagreed and this file had no standing to
+ * rewrite either.
  *
- * The carry is now narrowed to a LEDGER, one entry per engine, and every entry
- * has to prove it is still owed:
+ * The carry was built with teeth: it re-proved every run that the derivation and
+ * the carried census still DISAGREED, and stopped generation demanding its own
+ * deletion the moment they agreed. Wave W-EX-A repaired the example by CAPTURING
+ * it from the running handler, both placements came out where this derivation
+ * puts them, and both entries fired on the first run afterwards. Mutants AE and
+ * AF went with them: each existed to watch one carry discharge, and a probe of a
+ * licence nobody holds proves nothing.
  *
- *   `baselinePlacements`  the rationals this derivation composes for the
- *                         accounts the carried census is supposed to describe,
- *                         from the frozen collateral, threshold and debt.
- *   `addedPlacements`     accounts this generator INJECTS on top of the carried
- *                         baseline, placed by the server's own test as always.
- *
- * If the derivation's own placement AGREES with the carried census, the carry
- * forgives nothing — it is dead licence that would quietly swallow the next
- * discrepancy — so generation STOPS and demands its deletion. That is what makes
- * the recorded contract repair self-enforcing: repair the example's histogram
- * and this file refuses to keep carrying it, exactly as `exampleUndisclosedInputs`
- * refuses to keep forgiving a disclosure the example finally makes.
+ * Every histogram this file derives is now placed entirely by the exact
+ * rationals the accounts' own arithmetic produces.
  */
-const carriedCensus = (what, shape, carried, baselinePlacements, addedPlacements, meta) => {
-  const alone = derivedHistogram(shape, null, baselinePlacements, meta);
-  const agrees =
-    alone.infinite_count === carried.infinite_count &&
-    alone.buckets.every((bucket) => {
-      const entry = carried.buckets.find((other) => other.label === bucket.label);
-      return entry !== undefined && entry.count === bucket.count;
-    });
-  if (agrees) {
-    fail(
-      `${what}: THE RECORDED HISTOGRAM DEFECT IS REPAIRED — this derivation now places the ` +
-        `carried book EXACTLY where the carried census draws it, so the carry forgives nothing ` +
-        `and is a licence nothing owes: DELETE the carry and let the derived placement stand`,
-    );
-  }
-  const derivedLabels = alone.buckets
-    .filter((bucket) => bucket.count > 0)
-    .map((bucket) => `${bucket.label}×${String(bucket.count)}`)
-    .join(", ");
-  const carriedLabels = carried.buckets
-    .filter((bucket) => bucket.count > 0)
-    .map((bucket) => `${bucket.label}×${String(bucket.count)}`)
-    .join(", ");
-  console.log(
-    `carried ${what}\n        this derivation places [${derivedLabels || "nothing"}]; the ` +
-      `committed census draws [${carriedLabels || "nothing"}] — recorded defect, still owed`,
-  );
-  return derivedHistogram(shape, carried, addedPlacements, meta);
-};
 
 /**
  * ONE FROZEN PRICED INPUT, valued on BOTH SIDES through the committed matrix.
@@ -2341,16 +2510,17 @@ const checkDerivation = (name, response, derivation) => {
         );
       }
       // THE REFUSALS THIS SIDE COUNTS. `refused_count` is positions on a covered
-      // engine THIS LAYER could not rebuild, added to both sides — the same rows
-      // `coverage.excluded` names — so it is composed from the refusal census
-      // rather than restated. A count with no excluded row behind it invents
-      // positions the run never saw.
+      // engine that reached the run WITHOUT numbers — the rows the BATCH refused
+      // plus the rows THIS LAYER could not rebuild — added to both sides. It is
+      // composed from that two-part census rather than restated. A count with no
+      // refused row behind it invents positions the run never saw.
       if (gotHistogram.refused_count !== wantHistogram.refused_count) {
         fail(
           `${label} ${side} publishes an hf_histogram refused_count of ` +
             `${JSON.stringify(gotHistogram.refused_count)}, but the derivation composes ` +
             `${String(wantHistogram.refused_count)} from the run's own refusal census — a refused ` +
-            `position is a row of coverage.excluded, and this side counts rows nobody excluded`,
+            `position is a row the batch refused or a row coverage.excluded names, and this side ` +
+            `counts rows from neither`,
         );
       }
       // THE SENTENCE THE PAGE RENDERS. It is the disclosure a reader is given
@@ -2652,7 +2822,8 @@ const checkDerivation = (name, response, derivation) => {
  *      direction, a `held_flat` entry no itemization witnesses is a name with
  *      nothing behind it.
  *
- *      TWO EXEMPTIONS, both ENUMERATED by the caller, neither a blanket:
+ *      ONE EXEMPTION, ENUMERATED by the caller and never a blanket. There used
+ *      to be two; Wave W-EX-A discharged the second and deleted it.
  *
  *        `unitemizedInputs` — an Aave position's price inputs cover its BORROWED
  *        reserves as well as its collateral, and `collateral_by_asset` itemizes
@@ -2673,18 +2844,15 @@ const checkDerivation = (name, response, derivation) => {
  *        refuses any declared key the response ITEMIZES — at any disclosure,
  *        priced or not. A holding is not a borrowing.
  *
- *        `undisclosedInputs` — A RECORDED DEFECT, not a licence. The contract's
- *        OWN run-book 200 example serves `applied_shocks: []` and
- *        `held_flat: []` while itemizing priced weETH on two chains under
+ *        `undisclosedInputs` IS GONE (Wave W-EX-A). It forgave a disclosure the
+ *        contract's OWN run-book 200 example did not make: `applied_shocks: []`
+ *        and `held_flat: []` while itemizing priced weETH on two chains under
  *        `weeth_market_depeg_oracles_held`, whose committed propagation matrix
- *        is EMPTY and which carries no `projection` — so `ApplyScenario` runs,
- *        holds every one of those inputs flat, and production's own body would
- *        SAY SO. The example's disclosure is incomplete. This generator has no
- *        standing to rewrite the contract, so the two bodies that carry it
- *        verbatim (the collision pair, item 12) declare exactly those keys — as
- *        FROZEN LITERALS asserted equal to the example's own derivation, for
- *        the reason the write site sets out. The eth_minus_30 body composes its
- *        own disclosures, declares NOTHING, and owes this law in full.
+ *        is EMPTY — so `ApplyScenario` held every one of those inputs flat and
+ *        production's own body named them all. The example is CAPTURED from the
+ *        running handler now and discloses all three prices its book consulted,
+ *        so the licence was owed by nothing and was deleted rather than
+ *        re-frozen. EVERY body this file writes owes law 11 in full.
  *  12. THE MOVER IS THE SHAPE ITS ENGINE SPEAKS, AND ITS BORROWINGS ARE
  *      CONSERVED.
  *
@@ -2724,7 +2892,7 @@ const checkDerivation = (name, response, derivation) => {
 const checkPropagation = (
   name,
   response,
-  { unitemizedInputs = new Set(), undisclosedInputs = new Set(), holdings } = {},
+  { unitemizedInputs = new Set(), holdings } = {},
 ) => {
   // THE ANCHOR IS REQUIRED. A body checked without one is a body whose
   // immutable fields are pinned to nothing, which is the state this wave
@@ -2880,24 +3048,6 @@ const checkPropagation = (
       );
     }
   }
-  // LAW 11's SECOND EXEMPTION, at the point of use. `undisclosedInputs` forgives
-  // a disclosure the body DOES NOT MAKE. A key the body discloses is one the
-  // exemption no longer covers, and a licence outliving the defect it records is
-  // how the next hole gets forgiven without anybody reading it.
-  const disclosedHere = new Set(
-    [...response.applied_shocks, ...response.held_flat].map((entry) =>
-      responseKey(entry.chain_id, entry.asset),
-    ),
-  );
-  for (const key of undisclosedInputs) {
-    if (disclosedHere.has(key)) {
-      fail(
-        `${name} declares ${key} an UNDISCLOSED price input while DISCLOSING it — the exemption ` +
-          `records a defect this body no longer has, so it forgives nothing and hides the next one`,
-      );
-    }
-  }
-
   /**
    * How many ENGINE ITERATIONS served each anchored row (law 9's exhaustiveness
    * half, hoisted OUT of the loop in Wave W-BS-F).
@@ -3042,14 +3192,11 @@ const checkPropagation = (
         // it and does not say so has published an incomplete disclosure.
         const held = heldFlat.get(key);
         if (held === undefined) {
-          if (!undisclosedInputs.has(key)) {
-            fail(
-              `${label} counts a PRICED ${before.asset} that the committed matrix does not ` +
-                `describe, so ApplyScenario would have RECORDED IT ON HeldFlat — but ${name} ` +
-                `discloses no held_flat entry for ${key}`,
-            );
-          }
-          continue;
+          fail(
+            `${label} counts a PRICED ${before.asset} that the committed matrix does not ` +
+              `describe, so ApplyScenario would have RECORDED IT ON HeldFlat — but ${name} ` +
+              `discloses no held_flat entry for ${key}`,
+          );
         }
         // LAW 10, for a held price: the disclosed value is this itemization's
         // own price, on BOTH sides, absolutely and not merely in ratio.
@@ -3497,16 +3644,15 @@ const RESPONSE_ANCHORED_LEAVES = new Map([
   //                  verbatim; a generator cannot compose a Go constant, so the
   //                  strongest available statement is a frozen pin on the string.
   //   note           the disclosure SENTENCE a reader is told the numbers mean.
-  //                  RECORDED, NOT FIXED (the ledger this file already keeps for
-  //                  `held_flat: []`, the aave census and the histogram note):
-  //                  `p5_runbook.go:612` writes ONE sentence for EVERY engine,
-  //                  and the example carries two different ones — a longer aave
-  //                  sentence and a short debt_manager sentence production would
-  //                  never emit. Two committed artifacts disagree; item 2's
-  //                  discipline is that the example rides in verbatim, so the
-  //                  EXAMPLE's sentences are what is frozen.
+  //                  DISCHARGED IN WAVE W-EX-A: `p5_runbook.go:612` writes ONE
+  //                  sentence for EVERY engine, and the example used to carry
+  //                  two different ones — a longer aave sentence and a short
+  //                  debt_manager sentence production would never emit. The
+  //                  example is CAPTURED from the running handler now, so both
+  //                  engines carry the sentence the server composes and the two
+  //                  committed artifacts agree.
   ["engines[].market_realization.seizure_model", { by: "response", why: "the disclosed seizure model — `risk.SeizureModelProRata`, a Go constant no generator composes" }],
-  ["engines[].market_realization.note", { by: "response", why: "the example's own realization sentence; production's differs on BOTH engines and the divergence is recorded, not fixed" }],
+  ["engines[].market_realization.note", { by: "response", why: "the realization sentence the serving layer composes, one for every engine, frozen from the example's captured bytes" }],
 
   ["applied_shocks[].source", { by: "response", why: "WHICH oracle moved — a frozen literal of this body's own inputs" }],
   ["applied_shocks[].snapped", { by: "response", why: "a stable-band snap this generator does not model, frozen false" }],
@@ -3933,6 +4079,28 @@ const flipCollateralEntry = (valueUSD) => ({
 });
 
 /**
+ * The injected account's OTHER holding — the one no propagation row describes,
+ * so it is worth the same on both sides and production records it on `HeldFlat`.
+ * Its symbol is the token's own, not a propagation row's: the matrix says
+ * nothing about it, which is the whole point.
+ */
+const heldCollateralEntry = () => ({
+  asset: DM_HELD_ASSET,
+  symbol: DM_HELD_SYMBOL,
+  decimals: DM_HELD_DECIMALS,
+  amount: DM_HELD_AMOUNT.toString(),
+  value_usd: DM_HELD_VALUE.toString(),
+  unpriced: false,
+  note: countedNote,
+});
+
+/** Both injected holdings on one side, in the order the caller will sort them. */
+const injectedCollateralEntries = (flipValueUSD) => [
+  flipCollateralEntry(flipValueUSD),
+  heldCollateralEntry(),
+];
+
+/**
  * The server's own ordering: by `asset.Hex()`, then by disclosure — the exact
  * comparator at `cmd/api/p5_runbook.go:332-337`, whose stated purpose is that
  * "two runs over the same batch serve byte-identical arrays".
@@ -4110,19 +4278,33 @@ const shockedCollateral = (entries, chainId) =>
     return { ...entry, value_usd: ((BigInt(entry.value_usd) * num) / den).toString() };
   });
 
-/** A ONE-ACCOUNT histogram, rebuilt so the census sits where the rational lands. */
-const histogramForOneRational = (histogram, num, den) => {
-  if (census(histogram) !== 1 || histogram.infinite_count !== 0) {
-    fail("the example's aave histogram does not census exactly one finite account");
+/**
+ * A histogram rebuilt from scratch: the example's SHAPE and metadata, and a
+ * census placed entirely by the exact rationals the caller derived. Nothing is
+ * carried — a bucket count is where an account's own arithmetic puts it.
+ */
+const histogramForRationals = (histogram, rationals) => {
+  const counts = new Map(histogram.buckets.map((bucket) => [bucket.label, 0]));
+  for (const [num, den] of rationals) {
+    const label = bucketLabelForRational(histogram, num, den);
+    counts.set(label, counts.get(label) + 1);
   }
-  const label = bucketLabelForRational(histogram, num, den);
   return {
     ...histogram,
+    infinite_count: 0,
     buckets: histogram.buckets.map((bucket) => ({
       ...bucket,
-      count: bucket.label === label ? 1 : 0,
+      count: counts.get(bucket.label),
     })),
   };
+};
+
+/** A ONE-ACCOUNT histogram, rebuilt so the census sits where the rational lands. */
+const histogramForOneRational = (histogram, num, den) => {
+  if (measured(histogram) !== 1 || histogram.infinite_count !== 0) {
+    fail("the example's aave histogram does not measure exactly one finite account");
+  }
+  return histogramForRationals(histogram, [[num, den]]);
 };
 
 /** One measured side of the aave engine, entirely derived from the committed result. */
@@ -4267,36 +4449,58 @@ const dmPriceOf = (entry) =>
   (BigInt(entry.value_usd) * 10n ** BigInt(entry.decimals)) / BigInt(entry.amount);
 
 const dmExample = runBookExample.engines.find((engine) => engine.engine === "debt_manager");
-const dmHeldEntries = dmExample.before.collateral_by_asset.filter(
+
+/**
+ * The Debt Manager's HELD-FLAT itemized inputs on this body: every priced
+ * holding — the example's own and this file's injected ones — that the
+ * eth_minus_30 matrix leaves undeclared.
+ *
+ * It is load-bearing twice over: it is the entry guard law 11 proves
+ * completeness against, and mutants B, E and H are built by moving, deleting and
+ * corrupting it. If the body ever stops carrying a priced holding the matrix does
+ * not describe, those three mutants would be testing nothing — so generation
+ * stops and demands they be re-derived rather than quietly passing.
+ */
+const dmHeldEntries = [...dmExample.before.collateral_by_asset, ...injectedCollateralEntries(DM_FLIP_VALUE_BEFORE)].filter(
   (entry) => entry.value_usd !== null && !propagation.has(responseKey(DM_CHAIN, entry.asset)),
 );
-// The held-flat DEBT MANAGER row is load-bearing twice over: it is the entry
-// guard law 11 proves completeness against, and mutants E and H are built by
-// deleting and corrupting it. If the example ever stops carrying a priced
-// holding the matrix does not describe, those two mutants would be testing
-// nothing and must be re-derived rather than quietly passing.
 if (dmHeldEntries.length === 0) {
   fail(
-    "the run-book example's debt_manager side counts no priced holding the eth_minus_30 matrix " +
-      "leaves undeclared, so this body has no held-flat input and law 11 has nothing to prove",
+    "this body's debt_manager side counts no priced holding the eth_minus_30 matrix " +
+      "leaves undeclared, so it has no held-flat input and law 11 has nothing to prove",
   );
 }
 
-const APPLIED_SHOCKS = [
-  ...aaveResult.applied_shocks,
-  {
-    asset: DM_FLIP_ASSET,
-    chain_id: DM_CHAIN,
-    source: DM_PRICE_SOURCE,
-    factor_num: FACTOR_NUM.toString(),
-    factor_den: FACTOR_DEN.toString(),
-    before: DM_FLIP_PRICE_BEFORE.toString(),
-    after: DM_FLIP_PRICE_AFTER.toString(),
-    snapped: false,
-    base_snapped: false,
-    cap_bound: false,
-  },
-].sort((a, b) =>
+/**
+ * Every DECLARED Debt Manager holding on this body, disclosed as the shock the
+ * matrix composes for it. Derived per holding rather than written once, because
+ * Wave W-EX-A's repair added a second one: the example's own weETH is 0x5A7f…
+ * now, the address eth_minus_30 DECLARES on chain 10, so it moves and the body
+ * has to say so — the accident that used to hold it flat is gone.
+ */
+const dmAppliedEntries = [
+  ...dmExample.before.collateral_by_asset,
+  ...injectedCollateralEntries(DM_FLIP_VALUE_BEFORE),
+]
+  .filter((entry) => entry.value_usd !== null && propagation.has(responseKey(DM_CHAIN, entry.asset)))
+  .map((entry) => {
+    const [num, den] = composedFactor(propagation.get(responseKey(DM_CHAIN, entry.asset)));
+    const before = dmPriceOf(entry);
+    return {
+      asset: entry.asset,
+      chain_id: DM_CHAIN,
+      source: DM_PRICE_SOURCE,
+      factor_num: num.toString(),
+      factor_den: den.toString(),
+      before: before.toString(),
+      after: ((before * num) / den).toString(),
+      snapped: false,
+      base_snapped: false,
+      cap_bound: false,
+    };
+  });
+
+const APPLIED_SHOCKS = [...aaveResult.applied_shocks, ...dmAppliedEntries].sort((a, b) =>
   `${a.asset}|${String(a.chain_id)}|${a.source}`.localeCompare(
     `${b.asset}|${String(b.chain_id)}|${b.source}`,
   ),
@@ -4400,15 +4604,15 @@ const ethRunBook = {
   out_of_model: ethDefinition.out_of_model,
   applied_shocks: APPLIED_SHOCKS,
   held_flat: HELD_FLAT,
-  // The invented account is a REAL ROW of the batch, so the batch counts it.
+  // The invented accounts are REAL ROWS of the batch, so the batch counts them.
   batch: {
     ...runBookExample.batch,
-    position_count: runBookExample.batch.position_count + 1,
+    position_count: runBookExample.batch.position_count + DM_INJECTED_ACCOUNTS,
   },
   coverage: {
     ...runBookExample.coverage,
-    batch_positions: runBookExample.coverage.batch_positions + 1,
-    in_book: runBookExample.coverage.in_book + 1,
+    batch_positions: runBookExample.coverage.batch_positions + DM_INJECTED_ACCOUNTS,
+    in_book: runBookExample.coverage.in_book + DM_INJECTED_ACCOUNTS,
   },
   engines: runBookExample.engines.map((engine) => {
     if (engine.engine === AAVE_ENGINE) {
@@ -4417,50 +4621,106 @@ const ethRunBook = {
     if (engine.engine !== "debt_manager") {
       fail(`the run-book example carries an engine this generator does not derive: ${engine.engine}`);
     }
-    // The second account must EXIST on both sides before it can flip on one,
-    // and it brings its own debt and its own collateral with it.
-    const before = {
-      ...engine.before,
-      accounts: engine.before.accounts + 1,
-      total_debt_usd: (BigInt(engine.before.total_debt_usd) + DM_DELTA).toString(),
-      total_collateral_usd: (
-        BigInt(engine.before.total_collateral_usd) + DM_FLIP_VALUE_BEFORE
-      ).toString(),
-      collateral_by_asset: byAsset([
-        ...engine.before.collateral_by_asset,
-        flipCollateralEntry(DM_FLIP_VALUE_BEFORE),
-      ]),
-      hf_histogram: withBucket(
-        engine.before.hf_histogram,
-        bucketLabelForRational(engine.before.hf_histogram, DM_FLIP_MAXBORROW_BEFORE, DM_DELTA),
-        1,
-      ),
+    // THE BASELINE ACCOUNT MOVES NOW (Wave W-EX-A). The repaired contract
+    // example carries the Debt Manager's REAL weETH — 0x5A7f… on chain 10 —
+    // which eth_minus_30's matrix DECLARES, so a body that re-identified the
+    // example's rows and left them alone would hold a declared asset still.
+    // Law 5 refuses that, and production could not serve it. So the baseline
+    // account is re-valued through the matrix exactly as the aave side is, and
+    // every aggregate it feeds is recomputed from that value.
+    //
+    // The BEFORE side must come out at the example's own published figures —
+    // the matrix leaves a before side alone — and that is asserted below rather
+    // than assumed, which is what makes the re-measurement a derivation of the
+    // example rather than a replacement for it.
+    const baselineDebt = BigInt(engine.before.total_debt_usd);
+    const baselineEntries = {
+      before: engine.before.collateral_by_asset,
+      after: shockedCollateral(engine.before.collateral_by_asset, DM_CHAIN),
     };
-    const after = {
-      ...engine.after,
-      accounts: engine.after.accounts + 1,
-      eligible_accounts: engine.after.eligible_accounts + 1,
-      eligible_debt_usd: (BigInt(engine.after.eligible_debt_usd) + DM_DELTA).toString(),
-      total_debt_usd: (BigInt(engine.after.total_debt_usd) + DM_DELTA).toString(),
-      total_collateral_usd: (
-        BigInt(engine.after.total_collateral_usd) + DM_FLIP_VALUE_AFTER
-      ).toString(),
-      collateral_at_risk_usd: (
-        BigInt(engine.after.collateral_at_risk_usd) + DM_FLIP_AT_RISK_AFTER
-      ).toString(),
-      bad_debt_usd: (BigInt(engine.after.bad_debt_usd) + DM_FLIP_BAD_DEBT_AFTER).toString(),
-      collateral_by_asset: byAsset([
-        ...engine.after.collateral_by_asset,
-        flipCollateralEntry(DM_FLIP_VALUE_AFTER),
-      ]),
-      // The flip IS the account crossing the 1.00 edge — the same event
-      // `newly_eligible_accounts` counts, drawn where a reader can see it.
-      hf_histogram: withBucket(
-        engine.after.hf_histogram,
-        bucketLabelForRational(engine.after.hf_histogram, DM_FLIP_MAXBORROW_AFTER, DM_DELTA),
-        1,
-      ),
+    const dmSide = (sideName) => {
+      const baselineRows = baselineEntries[sideName];
+      const baselineValues = baselineRows
+        .filter((entry) => entry.value_usd !== null)
+        .map((entry) => BigInt(entry.value_usd));
+      const baselineCollateral = baselineValues.reduce((sum, value) => sum + value, 0n);
+      const baselineMaxBorrow = dmMaxBorrow(...baselineValues);
+      const baselineEligible = baselineDebt > baselineMaxBorrow;
+
+      const flipValue = sideName === "before" ? DM_FLIP_VALUE_BEFORE : DM_FLIP_VALUE_AFTER;
+      const flipMaxBorrow =
+        sideName === "before" ? DM_FLIP_MAXBORROW_BEFORE : DM_FLIP_MAXBORROW_AFTER;
+      const flipEligible = DM_DELTA > flipMaxBorrow;
+      // The held account is healthy on both sides, asserted at its declaration.
+      const heldEligible = DM_HELD_DEBT > DM_HELD_MAXBORROW;
+
+      const eligibleDebt =
+        (baselineEligible ? baselineDebt : 0n) + (flipEligible ? DM_DELTA : 0n);
+      const atRisk =
+        (baselineEligible ? dmAtRisk(baselineCollateral, baselineDebt) : 0n) +
+        (flipEligible ? dmAtRisk(flipValue, DM_DELTA) : 0n);
+      const badDebt =
+        (baselineEligible ? dmBadDebt(baselineCollateral, baselineDebt) : 0n) +
+        (flipEligible ? dmBadDebt(flipValue, DM_DELTA) : 0n);
+
+      return {
+        baselineOnly: {
+          total_collateral_usd: baselineCollateral.toString(),
+          eligible_accounts: baselineEligible ? 1 : 0,
+          eligible_debt_usd: (baselineEligible ? baselineDebt : 0n).toString(),
+          collateral_at_risk_usd: (
+            baselineEligible ? dmAtRisk(baselineCollateral, baselineDebt) : 0n
+          ).toString(),
+          bad_debt_usd: (
+            baselineEligible ? dmBadDebt(baselineCollateral, baselineDebt) : 0n
+          ).toString(),
+        },
+        side: {
+          ...engine[sideName],
+          accounts: engine[sideName].accounts + DM_INJECTED_ACCOUNTS,
+          eligible_accounts:
+            (baselineEligible ? 1 : 0) + (flipEligible ? 1 : 0) + (heldEligible ? 1 : 0),
+          total_debt_usd: (baselineDebt + DM_DELTA + DM_HELD_DEBT).toString(),
+          total_collateral_usd: (baselineCollateral + flipValue + DM_HELD_VALUE).toString(),
+          eligible_debt_usd: eligibleDebt.toString(),
+          collateral_at_risk_usd: atRisk.toString(),
+          bad_debt_usd: badDebt.toString(),
+          collateral_by_asset: byAsset([
+            ...baselineRows,
+            ...injectedCollateralEntries(flipValue),
+          ]),
+          // ALL THREE accounts are placed from their own EXACT rationals, so
+          // nothing is carried: the flip IS the injected account crossing the
+          // 1.00 edge — the same event `newly_eligible_accounts` counts — and
+          // the other two are wherever their own collateral puts them.
+          hf_histogram: histogramForRationals(engine[sideName].hf_histogram, [
+            [baselineMaxBorrow, baselineDebt],
+            [flipMaxBorrow, DM_DELTA],
+            [DM_HELD_MAXBORROW, DM_HELD_DEBT],
+          ]),
+        },
+      };
     };
+    const beforeSide = dmSide("before");
+    const afterSide = dmSide("after");
+    // THE BEFORE SIDE IS THE EXAMPLE'S OWN, RE-DERIVED. A matrix moves the after
+    // side only, so re-measuring the baseline account on the before side has to
+    // reproduce exactly what the contract example publishes for it — which is
+    // what makes this a derivation OF the example rather than a replacement for
+    // it. Any disagreement means the matrix, the threshold or the bonus this
+    // file derives with is not the one the example was measured under.
+    for (const [field, want] of Object.entries(beforeSide.baselineOnly)) {
+      const published = engine.before[field];
+      if (String(want) !== String(published)) {
+        fail(
+          `re-measuring the example's debt_manager account on the BEFORE side gives ` +
+            `${field} = ${String(want)}, but the contract example publishes ${String(published)} ` +
+            `— a matrix moves the after side only, so the two must agree to the digit`,
+        );
+      }
+    }
+    const before = beforeSide.side;
+    const after = afterSide.side;
     return {
       ...engine,
       before,
@@ -4519,16 +4779,16 @@ const ethRunBook = {
  *                 example's two sides are identical by construction — which
  *                 this anchor now ASSERTS rather than assumes, since the after
  *                 side is measured against the before side's bytes.
- *   debt_manager  the example's own rows PLUS `flipCollateralEntry`, at the
- *                 amount, decimals, symbol and note the invented account is
- *                 constructed with. Its `value_usd` differs per side, which is
+ *   debt_manager  the example's own rows PLUS the injected account's TWO
+ *                 holdings, at the amount, decimals, symbol and note they are
+ *                 constructed with. Their `value_usd` differs per side, which is
  *                 the one thing an anchor does not pin.
  */
 const ETH_HOLDINGS = holdingAnchor([
   [AAVE_ENGINE, aaveExample.before.collateral_by_asset],
   [
     "debt_manager",
-    [...dmExample.before.collateral_by_asset, flipCollateralEntry(DM_FLIP_VALUE_BEFORE)],
+    [...dmExample.before.collateral_by_asset, ...injectedCollateralEntries(DM_FLIP_VALUE_BEFORE)],
   ],
 ]);
 
@@ -4697,7 +4957,7 @@ const ETH_DERIVATION = (() => {
   const FROZEN_AAVE_WEETH_PRICE = 400_000_000_000n;
   // PROVENANCE: the example's second aave row. NO price witness describes it, so
   // it is UNKNOWABLE on both sides and enters no sum.
-  const FROZEN_AAVE_UNPRICED_ASSET = "0x0000000000000000000000000000000000000BAD";
+  const FROZEN_AAVE_UNPRICED_ASSET = "0x0000000000000000000000000000000000000Bad";
   const FROZEN_AAVE_UNPRICED_AMOUNT = 5_000_000_000_000_000_000n;
   const FROZEN_AAVE_UNPRICED_DECIMALS = 18;
   // PROVENANCE: the committed result's own `before.debt_usd`. The debt leg is
@@ -4839,14 +5099,26 @@ const ETH_DERIVATION = (() => {
   // The borrowings the injected account carries, on BOTH sides — the DM's debt
   // leg is USD-normalized and no scenario re-prices it.
   const FROZEN_DM_FLIP_DEBT = 1_500_000_000n;
+  // PROVENANCE: the injected account's HELD-FLAT holding, USDC on Optimism.
+  const FROZEN_DM_HELD_ASSET = "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85";
+  const FROZEN_DM_HELD_AMOUNT = 100_000_000n; // 100 USDC at 6 decimals
+  const FROZEN_DM_HELD_DECIMALS = 6;
+  const FROZEN_DM_HELD_PRICE = 1_000_000n; // $1.000000, the DM's 6-dec USD
+  const FROZEN_DM_HELD_DEBT = 50_000_000n; // $50.000000, healthy on both sides
+  const FROZEN_DM_HELD_ACCOUNT = "0x00000000000000000000000000000000000d0004";
+  /** Two accounts injected: the one that flips, and the held-flat one. */
+  const FROZEN_INJECTED_ACCOUNTS = 2;
   // The Debt Manager's committed weETH configuration: threshold 80/100 and an
   // ADDITIVE 1e18 bonus over HUNDRED_PERCENT = 100e18, i.e. 101/100.
   const FROZEN_DM_LT_NUM = 80n;
   const FROZEN_DM_LT_DEN = 100n;
   const FROZEN_DM_BONUS_NUM = 101n;
   const FROZEN_DM_BONUS_DEN = 100n;
-  // PROVENANCE: the example's own debt_manager row and batch watermark.
-  const FROZEN_DM_WEETH_ASSET = "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee";
+  // PROVENANCE: the example's own debt_manager row and batch watermark. The
+  // address is the DEBT MANAGER's weETH on Optimism — Wave W-EX-A's repair; the
+  // example used to carry the MAINNET weETH address on chain 10, an identity no
+  // served body could have.
+  const FROZEN_DM_WEETH_ASSET = "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF";
   const FROZEN_DM_WEETH_AMOUNT = 1_000_000_000_000_000_000n;
   const FROZEN_DM_WEETH_DECIMALS = 18;
   const FROZEN_DM_WEETH_PRICE = 4_000_000_000n;
@@ -4868,8 +5140,22 @@ const ETH_DERIVATION = (() => {
   frozenLiteral("injected decimals", FROZEN_DM_FLIP_DECIMALS, DM_FLIP_ASSET_DECIMALS);
   frozenLiteral("injected SOURCE-SIDE price", FROZEN_DM_FLIP_PRICE, DM_FLIP_PRICE_BEFORE);
   frozenLiteral("injected borrowings", FROZEN_DM_FLIP_DEBT, DM_DELTA);
+  frozenLiteral("injected held asset", FROZEN_DM_HELD_ASSET, DM_HELD_ASSET);
+  frozenLiteral("injected held amount", FROZEN_DM_HELD_AMOUNT, DM_HELD_AMOUNT);
+  frozenLiteral("injected held decimals", FROZEN_DM_HELD_DECIMALS, DM_HELD_DECIMALS);
+  frozenLiteral("injected held SOURCE-SIDE price", FROZEN_DM_HELD_PRICE, DM_HELD_PRICE);
+  frozenLiteral("injected held borrowings", FROZEN_DM_HELD_DEBT, DM_HELD_DEBT);
+  frozenLiteral("injected held account", FROZEN_DM_HELD_ACCOUNT, DM_HELD_ACCOUNT);
+  frozenLiteral("injected account count", FROZEN_INJECTED_ACCOUNTS, DM_INJECTED_ACCOUNTS);
 
   const dmItems = derivedItemization(matrix, FROZEN_DM_CHAIN, [
+    {
+      asset: FROZEN_DM_HELD_ASSET,
+      decimals: FROZEN_DM_HELD_DECIMALS,
+      amount: FROZEN_DM_HELD_AMOUNT,
+      price: FROZEN_DM_HELD_PRICE,
+      disclosure: "counted",
+    },
     {
       asset: FROZEN_DM_FLIP_ASSET,
       decimals: FROZEN_DM_FLIP_DECIMALS,
@@ -4886,65 +5172,107 @@ const ETH_DERIVATION = (() => {
     },
   ]);
   const dmFlipKey = `${FROZEN_DM_FLIP_ASSET}::counted`;
+  const dmHeldKey = `${FROZEN_DM_HELD_ASSET}::counted`;
+  const dmBaselineKey = `${FROZEN_DM_WEETH_ASSET}::counted`;
+
+  /** floor(value × LT / HUNDRED_PERCENT) PER TOKEN, then summed — dm.go's shape. */
+  const derivedMaxBorrow = (...values) =>
+    values.reduce((sum, value) => sum + (value * FROZEN_DM_LT_NUM) / FROZEN_DM_LT_DEN, 0n);
 
   /**
-   * One side of the Debt Manager book: the FROZEN BASELINE plus the injected
-   * account, whose eligibility is the engine's own STRICT test —
-   * `borrowings > maxBorrowLT`, with equality healthy (dm.go:165-166).
+   * One side of the Debt Manager book: the example's OWN account plus the
+   * injected one, each measured through the matrix, and each judged by the
+   * engine's own STRICT test — `borrowings > maxBorrowLT`, equality healthy
+   * (dm.go:165-166).
+   *
+   * WAVE W-EX-A: the baseline account is no longer taken from the frozen
+   * aggregate totals. Its weETH is 0x5A7f…, which eth_minus_30's matrix
+   * DECLARES, so its collateral MOVES — and a derivation that read the example's
+   * held-flat total would be measuring the wrong scenario. The frozen baseline
+   * still supplies the account's BORROWINGS (a figure no scenario re-prices) and
+   * still re-proves the BEFORE side, where the matrix changes nothing.
    */
   const dmSideDerived = (side) => {
     const baseline = FROZEN_EXAMPLE_BASELINE.debt_manager[side];
-    // The baseline's own collateral has to be what the frozen weETH price values
-    // its frozen amount at, or the baseline and the price disagree about the
-    // same book.
-    const baselineCollateral = dmItems[side].values.get(`${FROZEN_DM_WEETH_ASSET}::counted`);
-    frozenLiteral(
-      `debt_manager BASELINE collateral on the ${side} side`,
-      baselineCollateral,
-      BigInt(baseline.total_collateral_usd),
-    );
+    const baselineDebt = BigInt(baseline.total_debt_usd);
+    const baselineCollateral = dmItems[side].values.get(dmBaselineKey);
+    if (side === "before") {
+      // The before side is the example's own measurement, so the two must agree.
+      frozenLiteral(
+        "debt_manager BASELINE collateral on the before side",
+        baselineCollateral,
+        BigInt(baseline.total_collateral_usd),
+      );
+    }
+    const baselineMaxBorrow = derivedMaxBorrow(baselineCollateral);
+    const baselineEligible = baselineDebt > baselineMaxBorrow;
+
     const injected = dmItems[side].values.get(dmFlipKey);
-    const maxBorrowLT = (injected * FROZEN_DM_LT_NUM) / FROZEN_DM_LT_DEN;
+    const maxBorrowLT = derivedMaxBorrow(injected);
     const eligible = FROZEN_DM_FLIP_DEBT > maxBorrowLT;
+    // The held-flat account: its collateral never moves, so neither does its
+    // ceiling, and it is healthy on both sides by construction.
+    const heldCollateral = dmItems[side].values.get(dmHeldKey);
+    const heldMaxBorrow = derivedMaxBorrow(heldCollateral);
+    const heldEligible = FROZEN_DM_HELD_DEBT > heldMaxBorrow;
     return {
       values: dmItems[side].values,
       eligible,
       maxBorrowLT,
-      // The FROZEN BASELINE's own census, plus the injected account placed by
-      // the exact rational maxBorrowLT/borrowings the engine measures it by —
-      // the same rational its mover row publishes, so the two cannot disagree
-      // about where the account sits and neither can invent a bucket.
-      //
-      // THE BASELINE HALF IS A RECORDED CARRY, and `carriedCensus` re-proves
-      // every run that it is still owed: this derivation places the example's
-      // own Debt Manager account by its own frozen collateral, threshold and
-      // borrowings, and the census the example draws has to DISAGREE with that
-      // placement or the carry is deleted. Full derivation at
-      // `RECORDED_DM_BASELINE_RATIONAL` below.
-      histogram: carriedCensus(
-        `the contract example's debt_manager census (${side} side)`,
+      baselineEligible,
+      baselineMaxBorrow,
+      baselineDebt,
+      baselineCollateral,
+      // BOTH ACCOUNTS PLACED FROM THEIR OWN EXACT RATIONALS, and nothing
+      // carried. The carry that used to sit here was a recorded contract defect:
+      // the example drew its Debt Manager account in `0.90 – 1.00` while its own
+      // collateral, the committed 80/100 threshold and its own borrowings put it
+      // at 3200000000/4620000000 = 0.6926, which is `< 0.90`. Wave W-EX-A
+      // repaired the example by CAPTURING it from the running handler, the two
+      // agree, and `carriedCensus` demanded the carry's deletion on the first
+      // run afterwards — exactly the self-enforcement it was built for.
+      histogram: derivedHistogram(
         FROZEN_HISTOGRAM_SHAPE,
-        frozenCarried("debt_manager", side),
-        [recordedDMBaselineRational(side)],
-        [[maxBorrowLT, FROZEN_DM_FLIP_DEBT]],
+        null,
+        [
+          [baselineMaxBorrow, baselineDebt],
+          [maxBorrowLT, FROZEN_DM_FLIP_DEBT],
+          [heldMaxBorrow, FROZEN_DM_HELD_DEBT],
+        ],
         frozenHistogramMeta("debt_manager", INJECTED_REFUSALS),
       ),
       aggregate: {
-        accounts: String(baseline.accounts + 1),
-        eligible_accounts: String(baseline.eligible_accounts + (eligible ? 1 : 0)),
+        accounts: String(baseline.accounts + FROZEN_INJECTED_ACCOUNTS),
+        eligible_accounts: String(
+          (baselineEligible ? 1 : 0) + (eligible ? 1 : 0) + (heldEligible ? 1 : 0),
+        ),
         total_collateral_usd: dmItems[side].counted.toString(),
-        total_debt_usd: (BigInt(baseline.total_debt_usd) + FROZEN_DM_FLIP_DEBT).toString(),
+        total_debt_usd: (baselineDebt + FROZEN_DM_FLIP_DEBT + FROZEN_DM_HELD_DEBT).toString(),
         eligible_debt_usd: (
-          BigInt(baseline.eligible_debt_usd) + (eligible ? FROZEN_DM_FLIP_DEBT : 0n)
+          (baselineEligible ? baselineDebt : 0n) + (eligible ? FROZEN_DM_FLIP_DEBT : 0n)
         ).toString(),
         collateral_at_risk_usd: (
-          BigInt(baseline.collateral_at_risk_usd) +
+          (baselineEligible
+            ? derivedAtRisk(
+                baselineCollateral,
+                baselineDebt,
+                FROZEN_DM_BONUS_NUM,
+                FROZEN_DM_BONUS_DEN,
+              )
+            : 0n) +
           (eligible
             ? derivedAtRisk(injected, FROZEN_DM_FLIP_DEBT, FROZEN_DM_BONUS_NUM, FROZEN_DM_BONUS_DEN)
             : 0n)
         ).toString(),
         bad_debt_usd: (
-          BigInt(baseline.bad_debt_usd) +
+          (baselineEligible
+            ? derivedBadDebt(
+                baselineCollateral,
+                baselineDebt,
+                FROZEN_DM_BONUS_NUM,
+                FROZEN_DM_BONUS_DEN,
+              )
+            : 0n) +
           (eligible
             ? derivedBadDebt(injected, FROZEN_DM_FLIP_DEBT, FROZEN_DM_BONUS_NUM, FROZEN_DM_BONUS_DEN)
             : 0n)
@@ -4962,8 +5290,8 @@ const ETH_DERIVATION = (() => {
 
   // ===== THE RESPONSE =======================================================
   //
-  // ONE injected account, so the run's census moves by exactly one row.
-  const INJECTED_ACCOUNTS = 1;
+  // TWO injected accounts, so the run's census moves by exactly two rows.
+  const INJECTED_ACCOUNTS = FROZEN_INJECTED_ACCOUNTS;
   const exampleCoverage = FROZEN_EXAMPLE_COVERAGE;
 
   return {
@@ -5096,17 +5424,26 @@ const FROZEN_ETH_ENVELOPE = new Map([
   // `projection`, which law 18 derives the same way. Of the realization block's
   // CHILDREN only the two disclosure sentences are still anchored, and this body
   // drops those — see FROZEN_ETH_ENVELOPE_DROPPED.
-  // Sorted by `${asset}|${chain_id}|${source}`, the server's own disclosure order.
+  // Sorted by `${asset}|${chain_id}|${source}`, the server's own disclosure
+  // order. THREE applied shocks after Wave W-EX-A, not two: the repaired
+  // contract example carries the Debt Manager's REAL weETH (0x5A7f… on chain
+  // 10), which eth_minus_30's matrix declares — so the example's own holding
+  // moves here and the body discloses it. The two held prices are the two USDCs,
+  // one per chain, neither of which the matrix names.
   ["applied_shocks[0].source", "priceproviderv2"],
   ["applied_shocks[0].snapped", false],
   ["applied_shocks[0].base_snapped", false],
   ["applied_shocks[0].cap_bound", false],
-  ["applied_shocks[1].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
+  ["applied_shocks[1].source", "priceproviderv2"],
   ["applied_shocks[1].snapped", false],
   ["applied_shocks[1].base_snapped", false],
   ["applied_shocks[1].cap_bound", false],
-  ["held_flat[0].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
-  ["held_flat[1].source", "priceproviderv2"],
+  ["applied_shocks[2].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
+  ["applied_shocks[2].snapped", false],
+  ["applied_shocks[2].base_snapped", false],
+  ["applied_shocks[2].cap_bound", false],
+  ["held_flat[0].source", "priceproviderv2"],
+  ["held_flat[1].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
 ]);
 
 /**
@@ -5129,6 +5466,18 @@ const FROZEN_ETH_ENVELOPE_DROPPED = [
   "engines[0].market_realization.note",
   "engines[1].market_realization.seizure_model",
   "engines[1].market_realization.note",
+  // The two caveats eth_minus_30 does NOT carry. `GET /v1/scenarios` publishes
+  // each definition's own `out_of_model`, and the committed listing's
+  // eth_minus_30 entry has six where the repaired run-book example's
+  // weeth_market_depeg entry has eight. A pin on a caveat this body's own
+  // definition never states would be a pin nobody reads.
+  "out_of_model[6]",
+  "out_of_model[7]",
+  // The repaired example holds THREE prices flat (its scenario's propagation
+  // matrix names nothing at all); this body holds TWO, because eth_minus_30
+  // declares — and therefore moves — both weETHs. The third pin has no leaf
+  // here, and a pin on an absent field forgives the field's absence.
+  "held_flat[2].source",
 ];
 
 /**
@@ -5430,7 +5779,14 @@ refuses(
       }
     }
     mutant.applied_shocks = aaveResult.applied_shocks;
-    mutant.held_flat = [];
+    // The W-BS-B shape dropped every held disclosure. This mutant keeps the ONE
+    // that is not its point — the injected held-flat holding Wave W-EX-A added —
+    // so the refusal it earns is law 1's, for an asset it moved and did not
+    // disclose, rather than law 11's for a disclosure it also happened to
+    // delete. A mutant refused for the wrong reason proves nothing.
+    mutant.held_flat = mutant.held_flat.filter(
+      (entry) => responseKey(entry.chain_id, entry.asset) === responseKey(DM_CHAIN, DM_HELD_ASSET),
+    );
     // The W-BS-B revision declared THIS anchor — its own invented row is what it
     // injected — so the mutant is judged against it and refused for law 1, the
     // law it exists to reproduce, rather than for having the wrong provenance.
@@ -5439,7 +5795,10 @@ refuses(
     return {
       holdings: holdingAnchor([
         [AAVE_ENGINE, aaveExample.before.collateral_by_asset],
-        ["debt_manager", [...dmExample.before.collateral_by_asset, inventedRow]],
+        [
+          "debt_manager",
+          [...dmExample.before.collateral_by_asset, inventedRow, heldCollateralEntry()],
+        ],
       ]),
     };
   },
@@ -5867,14 +6226,15 @@ refuses(
   },
 );
 
-// AA. REFUSALS INVENTED. `refused_count` is positions on a covered engine THIS
-// LAYER could not rebuild — the same rows `coverage.excluded` names one by one.
-// Raising it to 7 tells a reader that seven positions carried no comparator and
-// were held out of the distribution, on a run whose coverage census excludes
-// nobody. The claim is a refusal disclosure with no refusal behind it.
+// AA. REFUSALS INVENTED. `refused_count` is every position on a covered engine
+// that reached the run without numbers — the rows the batch refused plus the
+// rows this layer could not rebuild. Raising it to 7 tells a reader that seven
+// positions carried no comparator and were held out of the distribution, on a
+// run whose census refuses two and excludes nobody. The claim is a refusal
+// disclosure with no refusal behind it.
 refuses(
   "AA: refusals invented — seven positions counted out of a distribution nothing excluded",
-  "histogram census 8 != accounts 1 — 1 placed in buckets + 0 unbounded + 7 refused",
+  "publishes an hf_histogram refused_count of 7, but the derivation composes 1",
   (mutant) => {
     for (const engine of mutant.engines) {
       for (const side of ["before", "after"]) {
@@ -5884,21 +6244,22 @@ refuses(
   },
 );
 
-// AA MOVED LAWS IN WAVE W-BS-H, and the move is the class-E finding. Until this
-// wave `checkSide` read a side's census as `buckets + infinite`, which is right
-// only while `refused_count` is zero — and it is zero on every body this file
-// writes, so the arithmetic was never questioned. `refused_count` counts
-// positions on a COVERED engine this layer could not rebuild, and
-// `handlers.go:700-714` counts those in `accounts` all the same: a position the
-// run could not rebuild is still a position the run measured over. So the
-// invariant is `buckets + infinite + refused === accounts`, and AA — which
-// invents seven refusals and moves nothing else — is now refused by the
-// ARITHMETIC rather than by the derivation. The old law would have passed it and
-// then quietly demanded that `accounts` undercount the run by seven.
+// AA MOVED LAWS TWICE, and the second move is Wave W-EX-A's correction.
 //
-// The derivation's own `refused_count` law keeps its witness at AQ, below: with
-// the census tightened, no BODY edit can reach that law without breaking the
-// arithmetic first, so it is probed against a doctored DERIVATION instead.
+// W-BS-H read a side's census as `buckets + infinite + refused` and compared it
+// against `accounts`, on the reading that a position this layer could not
+// rebuild is still a position the run measured over — which put AA under the
+// ARITHMETIC rather than under the derivation. Production disagrees:
+// `measureRunBook` counts `accounts` only over the RUN, and
+// `p5_runbook.go:581-583` adds the refusals afterwards. Neither reading was
+// falsifiable while every body here served `refused_count: 0`; the repaired
+// contract example serves 1, and the disagreement surfaced on the first run.
+//
+// So the arithmetic law is `buckets + infinite === accounts` (`measured`), the
+// wider census is `+ refused` and equals the whole run, and AA is back under the
+// derivation's own `refused_count` law where it began. AZ, below, is the witness
+// for the corrected arithmetic: it moves a BUCKET, which is what `accounts`
+// actually counts.
 
 // AB. THE NOTE FALSIFIED. The note is the sentence the page RENDERS beside the
 // distribution — it is what a reader is TOLD the buckets mean. The rewrite below
@@ -6259,46 +6620,33 @@ const NOT_COUNTED_NOTE =
  * the body equals itself, which is the whole class of defect round 30 found.
  */
 /**
- * THE CENSUS FOLLOWS THE MONEY (Wave W-BS-H, the sanctioned class-C repair).
+ * THE CENSUS FOLLOWS THE MONEY (Wave W-BS-H, unconditional since Wave W-EX-A).
  *
- * The `.swap` body exists to restate the counted balance, and until this wave it
- * restated the balance and carried the example's DISTRIBUTION unchanged: 3 weETH
- * — 1200000000000 against the same 600000000000 of debt — drawn in `1.10 – 1.25`.
- * That is falsifiable with NO reference to the recorded example defect, and the
- * arithmetic is one line: at the committed 8100 bps the account sits at
- * 1200/600 x 0.81 = 1.62, which is the `1.50 – 2.00` bucket. Even under the
- * example's OWN implied threshold — the 8250-9375 bps its `1.10 – 1.25` on 2
- * weETH would require — 3 weETH lands at 1.65 or above. No threshold anywhere
- * reconciles 3 weETH of that collateral with that bucket.
+ * The `.swap` body exists to restate the counted balance, and it used to restate
+ * the balance and carry the example's DISTRIBUTION unchanged: 3 weETH —
+ * 1200000000000 against the same 600000000000 of debt — drawn in `1.10 – 1.25`.
+ * At the committed 8100 bps that account sits at 1200/600 x 0.81 = 1.62, which
+ * is the `1.50 – 2.00` bucket, and no threshold anywhere reconciles 3 weETH of
+ * that collateral with the bucket the example drew.
  *
- * THE DEFECT WAS THIS TRANSFORM'S, NOT THE EXAMPLE'S, and the difference is what
- * licenses the repair. The example itemizes 2 weETH at 800000000000 and draws
- * `1.10 – 1.25`; the collision body carries that money untouched, so its census
- * is the example's own book and its disagreement with /v1/params is the recorded
- * contract defect this file has no standing to fix. The `.swap` body carries
- * money THIS GENERATOR restated and a census it did not — a census describing a
- * book the body does not serve. So the rule is the money's:
- *
- *   a carry records a defect in the EXAMPLE'S OWN BOOK. A body that restates the
- *   book is not that book, and takes the derivation's placement instead.
- *
- * `collisionDerivation` reaches the same rule from its own frozen inputs, in its
- * own arithmetic, and the two must agree.
+ * W-BS-H made the placement CONDITIONAL: a body that restates the book takes the
+ * derived placement, and a body serving the example's own money kept carrying
+ * the example's census, because that census disagreed with /v1/params and the
+ * disagreement was a contract defect this file had no standing to fix. Wave
+ * W-EX-A fixed it at the source — the example is CAPTURED from the running
+ * handler now and draws its one aave account at 1.08, in `1.05 – 1.10`, where
+ * this arithmetic puts it — so the condition became dead weight: both branches
+ * produce the same bytes. The placement is unconditional now, and there is one
+ * rule instead of two.
  */
-const collidingHistogram = (aggregate, countedValue) => {
-  const carried = BigInt(aggregate.total_collateral_usd);
-  const restated = BigInt(countedValue);
-  if (restated === carried) {
-    return aggregate.hf_histogram;
-  }
+const collidingHistogram = (aggregate, countedValue) =>
   // Aave's own health-factor rational, never divided out:
   // sum(collateral x liq_threshold) / (debt x 10000).
-  return histogramForOneRational(
+  histogramForOneRational(
     aggregate.hf_histogram,
-    restated * AAVE_LT_BPS,
+    BigInt(countedValue) * AAVE_LT_BPS,
     BigInt(aggregate.total_debt_usd) * BPS,
   );
-};
 
 /**
  * THE REALIZATION AXIS THE SERVING LAYER WOULD WRITE FOR THIS BODY.
@@ -6320,6 +6668,20 @@ const collidingHistogram = (aggregate, countedValue) => {
  * `seizure_model` and `note` are carried, not composed: they are the disclosure
  * sentences, they stay ANCHORED, and the register says why.
  */
+/**
+ * Each engine's LIQUIDATION BONUS, as the exact rational `seizableValue`
+ * multiplies the debt by (internal/risk/dm.go:385-401).
+ *
+ * Aave's is the committed param ledger's own `liq_bonus` over basis points; the
+ * Debt Manager's is its committed ADDITIVE 1e18 over HUNDRED_PERCENT = 100e18,
+ * i.e. 101/100. Both are read from the constants this file already derives with,
+ * never typed in a second time.
+ */
+const ENGINE_SEIZURE_BONUS = {
+  aave_v3_etherfi: () => [AAVE_BONUS_BPS, BPS],
+  debt_manager: () => [DM_BONUS_NUM, DM_BONUS_DEN],
+};
+
 const runMarketRealization = (engine, chainId, axis) => {
   const carried = engine.market_realization;
   if (carried === null || carried === undefined) {
@@ -6329,20 +6691,6 @@ const runMarketRealization = (engine, chainId, axis) => {
   const discounts = new Map(
     axis.map((row) => [responseKey(row.chain_id, row.asset), BigInt(row.market_over_oracle_wad)]),
   );
-  // The BEFORE side is the book production measures this axis over.
-  const side = engine.before;
-  let realized = 0n;
-  let discounted = false;
-  for (const row of side.collateral_by_asset) {
-    // A row with no `value_usd` is outside the aggregate entirely: the engine
-    // counted no collateral for it, so a liquidator realizes nothing from it.
-    if (row.value_usd === null) {
-      continue;
-    }
-    const ratio = discounts.get(responseKey(chainId, row.asset)) ?? par;
-    discounted = discounted || ratio !== par;
-    realized += (BigInt(row.value_usd) * ratio) / par;
-  }
   // Wire order, unchanged: the contract's own field order for the block.
   const compose = (shortfall, badDebt) => ({
     hfs_unchanged: true,
@@ -6352,24 +6700,53 @@ const runMarketRealization = (engine, chainId, axis) => {
     seizure_model: carried.seizure_model,
     note: carried.note,
   });
+  // The BEFORE side is the book production measures this axis over.
+  const side = engine.before;
   if (side.eligible_accounts === 0) {
     // Nothing here is liquidatable, so the per-position sum production performs
     // is EMPTY and both aggregates are zero. This is the whole finding.
     return compose("0", "0");
   }
-  if (discounted || side.accounts !== 1) {
+  if (side.accounts !== 1) {
     fail(
       "the collision transform cannot state a realization aggregate for a liquidatable engine " +
-        "whose counted collateral is DISCOUNTED, or whose side carries more than one account: the " +
-        "shortfall would need the seizable term, and that needs a liquidation bonus this transform " +
-        "does not hold",
+        "whose side carries more than one account: production sums the axis PER POSITION, and an " +
+        "aggregate over several cannot be decomposed into the positions it came from",
     );
   }
+  const bonusOf = ENGINE_SEIZURE_BONUS[engine.engine];
+  if (bonusOf === undefined) {
+    fail(`no liquidation bonus is derivable for ${engine.engine}, so its seizable term is unknown`);
+  }
+  const [bonusNum, bonusDen] = bonusOf();
+  // A row with no `value_usd` is outside the aggregate entirely: the engine
+  // counted no collateral for it, so a liquidator realizes nothing from it.
+  const legs = side.collateral_by_asset
+    .filter((row) => row.value_usd !== null)
+    .map((row) => ({
+      value: BigInt(row.value_usd),
+      ratio: discounts.get(responseKey(chainId, row.asset)) ?? par,
+    }));
+  const total = legs.reduce((sum, leg) => sum + leg.value, 0n);
   const owed = BigInt(side.total_debt_usd);
+
+  // `seizableValue` — PER LEG, each capped at the leg's own value, summed.
+  let seizable = 0n;
+  if (total > 0n) {
+    for (const leg of legs) {
+      const share = (owed * leg.value * bonusNum) / (total * bonusDen);
+      seizable += share < leg.value ? share : leg.value;
+    }
+  }
+  // Σ(valueᵢ × rᵢ), exact, and the ONE fused floor production performs:
+  // seizable × Σ(value·r) / (WAD × Σ value).
+  const weighted = legs.reduce((sum, leg) => sum + leg.value * leg.ratio, 0n);
+  const seizableMarket = total > 0n ? (seizable * weighted) / (par * total) : 0n;
+  // `realizable` floors PER LEG, which is not the same as flooring the sum.
+  const realized = legs.reduce((sum, leg) => sum + (leg.value * leg.ratio) / par, 0n);
+
   return compose(
-    // Every counted leg realizes at par, so seizure at market value equals
-    // seizure at the oracle mark exactly and the gap closes to nothing.
-    "0",
+    (seizable > seizableMarket ? seizable - seizableMarket : 0n).toString(),
     (owed > realized ? owed - realized : 0n).toString(),
   );
 };
@@ -6478,150 +6855,33 @@ const collisionSwap = withCollidingCollateral(
 );
 
 /**
- * A RECORDED DEFECT IN THE CONTRACT'S OWN EXAMPLE (guard law 11's second
- * exemption), FROZEN here rather than derived (Codex round 30, HIGH).
+ * LAW 11's SECOND EXEMPTION IS GONE (Wave W-EX-A), and this note is what is left
+ * of it.
  *
- * These two bodies are the run-book 200 example plus one NOT-COUNTED row, and
- * that example serves `applied_shocks: []` AND `held_flat: []` while itemizing
- * priced weETH on two chains. Its scenario is `weeth_market_depeg_oracles_held`,
- * whose committed registry entry carries `propagation: []` and no `projection`
- * — so `cmd/api/p5_runbook.go:462-486` runs `ApplyScenario` over every position,
- * `scenario.go:679-686` records EVERY price input on `HeldFlat` because the
- * matrix describes none of them, and the served body would name all of them.
- * The example's `held_flat: []` is a disclosure production could not produce.
+ * `EXAMPLE_UNDISCLOSED_KEYS`, `EXAMPLE_PRICED_HOLDINGS`, `exampleUndisclosedInputs`
+ * and the `undisclosedInputs` parameter used to live here. They forgave a
+ * DISCLOSURE THE CONTRACT'S OWN EXAMPLE DID NOT MAKE: it served
+ * `applied_shocks: []` AND `held_flat: []` while itemizing priced weETH on two
+ * chains under `weeth_market_depeg_oracles_held`, whose committed registry entry
+ * carries `propagation: []` - so `scenario.go:679-686` records EVERY price input
+ * on `HeldFlat` and the served body names all of them. The example's empty
+ * `held_flat` was a body production could not serve, and this generator had no
+ * standing to rewrite the contract, so the two bodies that carried the example
+ * verbatim declared exactly those keys as frozen literals.
  *
- * The finding is real and it is NOT this generator's to fix: item 2's whole
- * discipline is that the contract's example rides in verbatim and a law the
- * example violates may not be used to rewrite bytes this file has no standing
- * over.
+ * The exemption was built to be SELF-ENFORCING: it re-proved every run that it
+ * was still owed, and fingerprinted the example's priced holdings so the licence
+ * could not widen. Wave W-EX-A repaired the example - CAPTURED it from the
+ * running handler instead of composing it - and on the first run afterwards both
+ * teeth bit: the fingerprint moved (the Debt Manager's weETH is 0x5A7f... on
+ * chain 10 now, not the mainnet address) and the example DISCLOSED both keys. A
+ * licence nothing owes forgives the next hole instead of the one it recorded, so
+ * the whole block was deleted rather than re-frozen, exactly as its own failure
+ * message demanded. Mutant R went with it: it probed a widening that can no
+ * longer happen, because there is no exemption left to widen.
  *
- * WHY IT IS FROZEN AND NOT DERIVED. The first cut RECOMPUTED this set from the
- * example every run, and an exemption recomputed from a mutable source grows
- * with it: add a priced holding to `api/openapi.yaml`'s example and it is
- * exempted before anybody notices there is something new to exempt. So the two
- * defective keys are written below as LITERALS, and the example's own priced
- * holdings are FINGERPRINTED — key, amount, value, decimals, symbol, on BOTH
- * sides of BOTH engines — and asserted equal to what round 30 reviewed. Any
- * added, removed or changed priced holding fails generation until a person has
- * looked at it.
- *
- * THIS MAKES THE BANKED CONTRACT REPAIR SELF-ENFORCING. When `api/openapi.yaml`
- * is fixed — the example given the `held_flat` its own scenario would produce —
- * generation FAILS HERE, because the fingerprint moves and the exemption is no
- * longer owed. That failure is the signal to DELETE this whole block and the
- * `undisclosedInputs` parameter with it, not to re-freeze it.
+ * Law 11 is now owed IN FULL by every body this file writes.
  */
-const EXAMPLE_UNDISCLOSED_KEYS = [
-  // The two priced weETH inputs the example itemizes and never discloses:
-  // responseKey(1, "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee") on the aave
-  // engine and responseKey(10, ...) on the Debt Manager's.
-  "1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
-  "10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee",
-];
-
-/** Exactly the priced holdings round 30 reviewed this exemption against. */
-const EXAMPLE_PRICED_HOLDINGS = [
-  "aave_v3_etherfi|before|1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|2000000000000000000|800000000000|18|weETH",
-  "aave_v3_etherfi|after|1|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|2000000000000000000|800000000000|18|weETH",
-  "debt_manager|before|10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|1000000000000000000|4000000000|18|weETH",
-  "debt_manager|after|10|0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee|1000000000000000000|4000000000|18|weETH",
-];
-
-/**
- * The frozen exemption, re-proved against the example it was reviewed over.
- * Written as a function of the example so its own failure can be WATCHED
- * (mutant R) rather than only asserted.
- */
-const exampleUndisclosedInputs = (example) => {
-  const chains = new Map(
-    example.batch.watermarks.map((watermark) => [watermark.engine, watermark.chain_id]),
-  );
-  const fingerprint = [];
-  const keys = new Set();
-  for (const engine of example.engines) {
-    for (const side of ["before", "after"]) {
-      for (const entry of engine[side].collateral_by_asset) {
-        if (entry.value_usd === null) {
-          continue;
-        }
-        const key = responseKey(chains.get(engine.engine), entry.asset);
-        keys.add(key);
-        fingerprint.push(
-          [
-            engine.engine,
-            side,
-            key,
-            entry.amount,
-            entry.value_usd,
-            String(entry.decimals),
-            entry.symbol ?? "—",
-          ].join("|"),
-        );
-      }
-    }
-  }
-  for (const row of fingerprint) {
-    if (!EXAMPLE_PRICED_HOLDINGS.includes(row)) {
-      fail(
-        `the contract's run-book 200 example carries a PRICED holding this recorded exemption was ` +
-          `never reviewed against:\n        ${row}\n        The exemption covers a defect somebody ` +
-          `read; it may not widen because the example moved. Re-review it, or delete it if the ` +
-          `example now discloses its own held prices.`,
-      );
-    }
-  }
-  for (const row of EXAMPLE_PRICED_HOLDINGS) {
-    if (!fingerprint.includes(row)) {
-      fail(
-        `the contract's run-book 200 example NO LONGER carries the priced holding this recorded ` +
-          `exemption was frozen against:\n        ${row}\n        If the example was repaired, ` +
-          `DELETE this exemption rather than re-freezing it.`,
-      );
-    }
-  }
-  if (fingerprint.length !== EXAMPLE_PRICED_HOLDINGS.length) {
-    fail(
-      `the contract's run-book 200 example itemizes ${String(fingerprint.length)} priced holdings ` +
-        `but this exemption was frozen over ${String(EXAMPLE_PRICED_HOLDINGS.length)}`,
-    );
-  }
-  // The KEY set is asserted in its own right, so the two disclosures this
-  // exemption forgives stay exactly two.
-  for (const key of keys) {
-    if (!EXAMPLE_UNDISCLOSED_KEYS.includes(key)) {
-      fail(`the example's undisclosed price inputs now include ${key}, which is not frozen above`);
-    }
-  }
-  for (const key of EXAMPLE_UNDISCLOSED_KEYS) {
-    if (!keys.has(key)) {
-      fail(`the frozen undisclosed input ${key} is no longer a priced holding of the example`);
-    }
-  }
-  // THE EXEMPTION MUST STILL BE OWED. It forgives a disclosure the example does
-  // not make; the moment the example MAKES it, the exemption is dead licence
-  // that would quietly forgive the next hole instead. THIS is the assertion
-  // that makes the banked contract repair self-enforcing — when
-  // `api/openapi.yaml`'s example is given the `held_flat` its own scenario
-  // would produce, generation stops here until this block is DELETED.
-  const disclosedByExample = new Set(
-    [...example.applied_shocks, ...example.held_flat].map((entry) =>
-      responseKey(entry.chain_id, entry.asset),
-    ),
-  );
-  for (const key of EXAMPLE_UNDISCLOSED_KEYS) {
-    if (disclosedByExample.has(key)) {
-      fail(
-        `the contract's run-book 200 example now DISCLOSES ${key}, so the recorded defect this ` +
-          `exemption forgives is REPAIRED — delete EXAMPLE_UNDISCLOSED_KEYS, ` +
-          `EXAMPLE_PRICED_HOLDINGS and the \`undisclosedInputs\` parameter with it, rather than ` +
-          `keeping a licence nothing owes`,
-      );
-    }
-  }
-  return new Set(EXAMPLE_UNDISCLOSED_KEYS);
-};
-
-const EXAMPLE_UNDISCLOSED_INPUTS = exampleUndisclosedInputs(runBookExample);
 
 /**
  * THE COLLISION PAIR'S DERIVATION (Wave W-BS-F), composed from the frozen
@@ -6659,10 +6919,16 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
   const INJECTED_REFUSALS = 0;
   // The same frozen source-side prices the eth_minus_30 derivation names, for
   // the same two rows of the same contract example.
-  const FROZEN_WEETH_ASSET = "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee";
+  // ONE SYMBOL, TWO ADDRESSES. weETH is 0xCd5f... on mainnet (Aave's) and
+  // 0x5A7f... on Optimism (the Debt Manager's). The two used to share ONE
+  // literal here, because the contract example carried the mainnet address on
+  // chain 10 as well - an identity no served body could have, and the accident
+  // Wave W-EX-A's repair removed.
+  const FROZEN_AAVE_WEETH_ASSET = "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee";
+  const FROZEN_DM_WEETH_ASSET = "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF";
   const FROZEN_AAVE_WEETH_PRICE = 400_000_000_000n;
   const FROZEN_DM_WEETH_PRICE = 4_000_000_000n;
-  const FROZEN_UNPRICED_ASSET = "0x0000000000000000000000000000000000000BAD";
+  const FROZEN_UNPRICED_ASSET = "0x0000000000000000000000000000000000000Bad";
   const FROZEN_UNPRICED_AMOUNT = 5_000_000_000_000_000_000n;
   const FROZEN_DM_WEETH_AMOUNT = 1_000_000_000_000_000_000n;
 
@@ -6679,14 +6945,14 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
   frozenLiteral(
     "the collision pair's aave weETH SOURCE-SIDE price",
     FROZEN_AAVE_WEETH_PRICE,
-    (BigInt(rowOf(exampleAave, FROZEN_WEETH_ASSET).value_usd) * 10n ** 18n) /
-      BigInt(rowOf(exampleAave, FROZEN_WEETH_ASSET).amount),
+    (BigInt(rowOf(exampleAave, FROZEN_AAVE_WEETH_ASSET).value_usd) * 10n ** 18n) /
+      BigInt(rowOf(exampleAave, FROZEN_AAVE_WEETH_ASSET).amount),
   );
   frozenLiteral(
     "the collision pair's debt_manager weETH SOURCE-SIDE price",
     FROZEN_DM_WEETH_PRICE,
-    (BigInt(rowOf(exampleDM, FROZEN_WEETH_ASSET).value_usd) * 10n ** 18n) /
-      BigInt(rowOf(exampleDM, FROZEN_WEETH_ASSET).amount),
+    (BigInt(rowOf(exampleDM, FROZEN_DM_WEETH_ASSET).value_usd) * 10n ** 18n) /
+      BigInt(rowOf(exampleDM, FROZEN_DM_WEETH_ASSET).amount),
   );
   frozenLiteral(
     "the collision pair's unpriced amount",
@@ -6696,12 +6962,12 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
   frozenLiteral(
     "the collision pair's debt_manager weETH amount",
     FROZEN_DM_WEETH_AMOUNT,
-    BigInt(rowOf(exampleDM, FROZEN_WEETH_ASSET).amount),
+    BigInt(rowOf(exampleDM, FROZEN_DM_WEETH_ASSET).amount),
   );
 
   const aaveRows = [
     {
-      asset: FROZEN_WEETH_ASSET,
+      asset: FROZEN_AAVE_WEETH_ASSET,
       decimals: 18,
       amount: BigInt(countedAmount),
       price: FROZEN_AAVE_WEETH_PRICE,
@@ -6710,7 +6976,7 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
     // The colliding row: the SAME asset, NOT COUNTED. No price witness enters
     // the aggregate for it, by the engine's own rule, so it values at null.
     {
-      asset: FROZEN_WEETH_ASSET,
+      asset: FROZEN_AAVE_WEETH_ASSET,
       decimals: 18,
       amount: BigInt(notCountedAmount),
       price: null,
@@ -6726,7 +6992,7 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
   ];
   const dmRows = [
     {
-      asset: FROZEN_WEETH_ASSET,
+      asset: FROZEN_DM_WEETH_ASSET,
       decimals: 18,
       amount: FROZEN_DM_WEETH_AMOUNT,
       price: FROZEN_DM_WEETH_PRICE,
@@ -6757,82 +7023,43 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
       accounts: baseline.accounts,
       eligibleAccounts: baseline.eligible_accounts,
       usdDecimals: FROZEN_ENGINE_SERIALIZATION[engineName].usd_decimals,
+      bonus: ENGINE_SEIZURE_BONUS[engineName]?.(),
     });
   };
 
   /**
-   * The example's own aggregate for this engine, with the derived collateral.
+   * The example's own aggregate for this engine, with the derived collateral and
+   * a histogram PLACED BY THIS DERIVATION.
    *
-   * THE HISTOGRAM IS THE FROZEN EXAMPLE'S OWN CENSUS, PLACED BY NOBODY — and
-   * that is a RECORDED LIMIT, not an oversight. Wave W-BS-F's second pass set
-   * out to place these accounts by their derived health factor the way the
-   * eth_minus_30 body's are placed, and the derivation DISAGREED WITH THE
-   * COMMITTED BYTES:
+   * IT USED TO BE CARRIED, AND THE CARRY WAS A RECORDED CONTRACT DEFECT. The
+   * example's aave side carries ONE account at 800000000000 of collateral
+   * against 600000000000 of debt and drew it in `1.10 - 1.25`, which needs a
+   * liquidation threshold between 8250 and 9375 bps - while the contract's OWN
+   * /v1/params example gives that (engine, chain, asset) 8100 bps, which puts
+   * the account at 1.08, in `1.05 - 1.10`, and `stress-aave.json` measures the
+   * same money at `health_factor_wad` 1080000000000000000 and agrees to the
+   * digit. Its Debt Manager side drew ONE account in `0.90 - 1.00` while its own
+   * collateral and the committed 80/100 threshold put 3200000000/4620000000 at
+   * 0.6926, which is `< 0.90`. Two committed artifacts disagreed on each engine
+   * and this file had no standing to rewrite either, so both censuses were
+   * carried under `carriedCensus`, which re-proved the disagreement every run.
    *
-   *   The example's aave side carries ONE account at 800000000000 of collateral
-   *   against 600000000000 of debt and draws it in the `1.10 – 1.25` bucket,
-   *   which needs a liquidation threshold between 8250 and 9375 bps. The
-   *   contract's OWN /v1/params example gives that same (engine, chain, asset)
-   *   a `liq_threshold` of 8100 bps, which puts the account at 1.08 — the
-   *   `1.05 – 1.10` bucket. And `stress-aave.json`, measuring THE SAME
-   *   collateral against THE SAME debt, publishes `health_factor_wad`
-   *   1080000000000000000 and the rational 6480000000000000/6000000000000000,
-   *   agreeing with /v1/params to the digit.
-   *
-   * Two committed contract artifacts disagree and the EXAMPLE'S HISTOGRAM is the
-   * one standing alone — the same family as the `held_flat: []` defect recorded
-   * at `EXAMPLE_UNDISCLOSED_KEYS`, and equally not this generator's to fix.
-   * (The eth_minus_30 body already reads `1.05 – 1.10` because it re-measures
-   * its aave engine from the stress excerpt rather than carrying the example's.)
-   *
-   * So the census here is CARRIED instead — but a carry is now a LEDGER ENTRY
-   * and not a default (Wave W-BS-G). `carriedCensus` states the placement THIS
-   * derivation composes for the account each carried census describes, refuses
-   * to keep carrying the moment the two agree, and prints the disagreement it is
-   * standing on. Two entries are owed, one per engine, and the second is the one
-   * the narrowing was NOT expected to need — the full derivation of both, and
-   * why the Debt Manager side cannot take a derived placement either, is under
-   * THE RECORDED HISTOGRAM CARRIES above.
-   *
-   * A THIRD THING THIS CARRY HID — REPAIRED IN WAVE W-BS-H, and the repair is
-   * the reason the carry is now conditional. The `.swap` body restates the
-   * counted balance at 3 weETH (1200000000000 against the same 600000000000 of
-   * debt) and used to carry the example's `1.10 – 1.25` census unchanged. That
-   * census was falsifiable WITHOUT reference to the recorded example defect: at
-   * the committed 8100 bps the account sits at 1.62, and even the example's own
-   * implied 8250-9375 bps would put 3 weETH at 1.65 or above. No threshold
-   * reconciles them.
-   *
-   * A CARRY RECORDS A DEFECT IN THE EXAMPLE'S OWN BOOK, so it is owed only where
-   * the body serves the example's own money. `restatesTheBook` is that test, in
-   * the derivation's own hand: a side whose derived counted collateral differs
-   * from the frozen baseline is not the book the carried census describes, and
-   * takes the DERIVED placement. The collision body (2 weETH, 800000000000 — the
-   * example's own) still carries, and its ledger entry still prints. The `.swap`
-   * body (3 weETH, 1200000000000 — this generator's) is placed at `1.50 – 2.00`,
-   * where the arithmetic puts it, and its fixture bytes were regenerated to
-   * match. `withCollidingCollateral` reaches the same rule from the other side.
+   * Wave W-EX-A repaired the example - it is CAPTURED from the running handler
+   * now, not composed - and both carries discharged themselves on the first run
+   * afterwards. Every side below takes the derived placement, on every body:
+   * `recordedAaveRational` for the aave account, `recordedDMBaselineRational`
+   * for the Debt Manager's, each from the same frozen collateral, threshold and
+   * debt the aggregates beside them are built from. A body that RESTATES the
+   * book (the `.swap` fixture's 3 weETH) is placed by the same arithmetic as one
+   * that serves the example's own, which is what the conditional carry was
+   * approximating and is now simply the rule.
    */
-  const restatesTheBook = (engineName, items, side) =>
-    items[side].counted !== BigInt(FROZEN_EXAMPLE_BASELINE[engineName][side].total_collateral_usd);
-
   const sideFrom = (engineName, items, side, baselinePlacement) => {
     const baseline = FROZEN_EXAMPLE_BASELINE[engineName][side];
     const meta = frozenHistogramMeta(engineName, INJECTED_REFUSALS);
     return {
       values: items[side].values,
-      histogram: restatesTheBook(engineName, items, side)
-        ? // THE DERIVATION IS THE AUTHORITY. This body does not serve the book
-          // the carried census describes, so the census has no standing over it.
-          derivedHistogram(FROZEN_HISTOGRAM_SHAPE, null, [baselinePlacement], meta)
-        : carriedCensus(
-            `${what} ${engineName} census (${side} side)`,
-            FROZEN_HISTOGRAM_SHAPE,
-            frozenCarried(engineName, side),
-            [baselinePlacement],
-            [],
-            meta,
-          ),
+      histogram: derivedHistogram(FROZEN_HISTOGRAM_SHAPE, null, [baselinePlacement], meta),
       aggregate: {
         accounts: String(baseline.accounts),
         eligible_accounts: String(baseline.eligible_accounts),
@@ -6913,8 +7140,67 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
  */
 const COLLISION_ANCHOR = responseAnchor("the collision pair", [], []);
 
+/**
+ * THE EXAMPLE'S OWN BORROWED RESERVE (law 11's FIRST exemption), frozen.
+ *
+ * The collision pair carries the contract example's `held_flat` untouched, and
+ * the repaired example holds THREE prices flat — one per price input its book
+ * consulted. Two are itemized holdings and answer to law 11 in full; the third
+ * is the Aave account's USDC DEBT LEG, and this wire has no column for a
+ * borrowing. That hole is production's shape, not a defect: `ApplyScenario`
+ * walks a position's whole `PriceInput` list while `collateral_by_asset`
+ * itemizes collateral only.
+ *
+ * It is FROZEN as a literal and the derivation is asserted equal to it, in both
+ * directions, exactly as `AAVE_BORROWED_RESERVE_KEYS` is for the eth_minus_30
+ * body — an exemption that grows by derivation is an exemption nobody reviewed.
+ * The key is the same USDC-on-mainnet reserve, because it is the same account.
+ */
+const EXAMPLE_BORROWED_RESERVE_KEYS = new Set([
+  // responseKey(1, "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48") — USDC on
+  // mainnet, the reserve the example's one Aave position BORROWS.
+  "1|0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+]);
+
+{
+  const chains = new Map(
+    runBookExample.batch.watermarks.map((watermark) => [watermark.engine, watermark.chain_id]),
+  );
+  const itemized = new Set(
+    runBookExample.engines.flatMap((engine) =>
+      ["before", "after"].flatMap((side) =>
+        engine[side].collateral_by_asset.map((entry) =>
+          responseKey(chains.get(engine.engine), entry.asset),
+        ),
+      ),
+    ),
+  );
+  const derived = new Set(
+    [...runBookExample.applied_shocks, ...runBookExample.held_flat]
+      .map((entry) => responseKey(entry.chain_id, entry.asset))
+      .filter((key) => !itemized.has(key)),
+  );
+  for (const key of derived) {
+    if (!EXAMPLE_BORROWED_RESERVE_KEYS.has(key)) {
+      fail(
+        `the contract's run-book 200 example now discloses an un-itemized price input for ${key}, ` +
+          `which is NOT one of the frozen borrowed reserves — an exemption may not grow by ` +
+          `derivation: name it above with its provenance, or explain why the body should itemize it`,
+      );
+    }
+  }
+  for (const key of EXAMPLE_BORROWED_RESERVE_KEYS) {
+    if (!derived.has(key)) {
+      fail(
+        `the frozen borrowed reserve ${key} is no longer an un-itemized price input of the ` +
+          `contract's run-book 200 example — the exemption now covers a hole that is not there`,
+      );
+    }
+  }
+}
+
 const COLLISION_DECLARED = {
-  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+  unitemizedInputs: EXAMPLE_BORROWED_RESERVE_KEYS,
   holdings: collision.holdings,
   anchor: COLLISION_ANCHOR,
   derivation: collisionDerivation(
@@ -6926,7 +7212,7 @@ const COLLISION_DECLARED = {
 
 checkResponse("run-book.collateral-collision", collision.response, COLLISION_DECLARED);
 const COLLISION_SWAP_DECLARED = {
-  undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
+  unitemizedInputs: EXAMPLE_BORROWED_RESERVE_KEYS,
   holdings: collisionSwap.holdings,
   anchor: COLLISION_ANCHOR,
   derivation: collisionDerivation(
@@ -7010,7 +7296,7 @@ refuses(
 // derived census is the only thing in the file that knows where it really sits.
 refuses(
   "W: the histogram's free bucket — the collision aave account redrawn above 2.00",
-  `counts 0 accounts in hf_histogram bucket "1.10 – 1.25", but the derivation places 1 there`,
+  `counts 0 accounts in hf_histogram bucket "1.05 – 1.10", but the derivation places 1 there`,
   (mutant) => {
     for (const side of ["before", "after"]) {
       const histogram = mutant.engines.find((engine) => engine.engine === "aave_v3_etherfi")[side]
@@ -7024,31 +7310,15 @@ refuses(
   COLLISION_SUBJECT,
 );
 
-// R. THE EXAMPLE GROWN A PRICED HOLDING. The recorded exemption used to be
-// RECOMPUTED from the example, so a new priced holding in `api/openapi.yaml`
-// arrived pre-forgiven: law 11 would never ask the collision bodies to disclose
-// it, and nothing anywhere would say the exemption had widened.
-const GROWN_HOLDING_ROW = `debt_manager|before|${responseKey(DM_CHAIN, INVENTED_ASSET)}|1|1|18|GROWN`;
-
-refusesGeneration(
-  "R: the contract example grown a priced holding — the recorded exemption widened silently",
-  GROWN_HOLDING_ROW,
-  () => {
-    const grown = JSON.parse(JSON.stringify(runBookExample));
-    grown.engines
-      .find((engine) => engine.engine === "debt_manager")
-      .before.collateral_by_asset.push({
-        asset: INVENTED_ASSET,
-        symbol: "GROWN",
-        decimals: 18,
-        amount: "1",
-        value_usd: "1",
-        unpriced: false,
-        note: countedNote,
-      });
-    exampleUndisclosedInputs(grown);
-  },
-);
+// R IS DELETED (Wave W-EX-A), WITH THE EXEMPTION IT WATCHED.
+//
+// It probed a recorded exemption WIDENING: the licence for the contract
+// example's undisclosed held prices used to be recomputed from the example, so a
+// new priced holding in `api/openapi.yaml` arrived pre-forgiven. The licence is
+// gone — the repaired example discloses every price it holds — and a mutant that
+// widens an exemption that does not exist proves nothing. It is named here
+// rather than silently removed, because a deleted probe is a law nobody is
+// watching any more and that is worth reading.
 
 // --- WAVE W-BS-G: THE AUTHORITY FILE, AND THE CARRY THAT OUTLIVES ITS DEFECT -
 
@@ -7097,67 +7367,17 @@ const authorityDigest = createHash("md5").update(authorityBytes).digest("hex");
   );
 }
 
-/** The frozen census of one engine/side with its ONE account moved between buckets. */
-const censusMoved = (engineName, side, fromLabel, toLabel) => {
-  const carried = frozenCarried(engineName, side);
-  return {
-    infinite_count: carried.infinite_count,
-    buckets: carried.buckets.map((bucket) =>
-      bucket.label === fromLabel
-        ? { ...bucket, count: bucket.count - 1 }
-        : bucket.label === toLabel
-          ? { ...bucket, count: bucket.count + 1 }
-          : bucket,
-    ),
-  };
-};
-
-// AE. THE RECORDED AAVE DEFECT REPAIRED. When `api/openapi.yaml`'s example draws
-// its one aave account where its OWN /v1/params threshold puts it — 8100 bps on
-// 800000000000 against 600000000000 is 1.08, in `1.05 – 1.10` — the carry stops
-// forgiving anything and becomes a licence that would swallow the next
-// discrepancy silently. Generation stops and demands its deletion. This is the
-// second of the two teeth: `freezeExampleBaseline` catches the bytes moving
-// (mutant AD), and this catches the carry outliving the defect it records.
-refusesGeneration(
-  "AE: the recorded aave histogram defect repaired — the carry becomes a licence nothing owes",
-  "probe: the example's aave census repaired to its own params: THE RECORDED HISTOGRAM DEFECT IS " +
-    "REPAIRED",
-  () =>
-    carriedCensus(
-      "probe: the example's aave census repaired to its own params",
-      FROZEN_HISTOGRAM_SHAPE,
-      censusMoved("aave_v3_etherfi", "before", "1.10 – 1.25", "1.05 – 1.10"),
-      [
-        recordedAaveRational(
-          BigInt(FROZEN_EXAMPLE_BASELINE.aave_v3_etherfi.before.total_collateral_usd),
-          BigInt(FROZEN_EXAMPLE_BASELINE.aave_v3_etherfi.before.total_debt_usd),
-        ),
-      ],
-      [],
-      frozenHistogramMeta("aave_v3_etherfi", 0),
-    ),
-);
-
-// AF. THE SECOND RECORDED DEFECT, THE SAME WAY. The Debt Manager's carried
-// census is owed for its own reason — 3200000000/4620000000 is 0.6926, which is
-// `< 0.90`, not the `0.90 – 1.00` the example draws — and it is held by the same
-// tooth. Two recorded defects, two probes: neither exemption can outlive the
-// thing it forgives.
-refusesGeneration(
-  "AF: the recorded Debt Manager histogram defect repaired — the second carry deleted too",
-  "probe: the example's debt_manager census repaired to its own threshold: THE RECORDED HISTOGRAM " +
-    "DEFECT IS REPAIRED",
-  () =>
-    carriedCensus(
-      "probe: the example's debt_manager census repaired to its own threshold",
-      FROZEN_HISTOGRAM_SHAPE,
-      censusMoved("debt_manager", "before", "0.90 – 1.00", "< 0.90"),
-      [recordedDMBaselineRational("before")],
-      [],
-      frozenHistogramMeta("debt_manager", 0),
-    ),
-);
+// AE AND AF ARE DELETED (Wave W-EX-A), WITH THE TWO CARRIES THEY WATCHED.
+//
+// Each probed one recorded histogram carry DISCHARGING: AE moved the example's
+// aave account from `1.10 - 1.25` to the `1.05 - 1.10` its own /v1/params
+// threshold puts it in, AF moved the Debt Manager's from `0.90 - 1.00` to the
+// `< 0.90` its own collateral and threshold put it in, and each asserted that
+// `carriedCensus` then demanded its carry's deletion. The repair made both moves
+// REAL: the captured example draws both accounts where the arithmetic does, both
+// carries fired for real, and both were deleted. There is no carry left for
+// either probe to discharge, and `censusMoved` - which existed only to build
+// them - goes with them.
 
 // --- WAVE W-BS-H: ONE MUTANT PER NEW LAW FAMILY ----------------------------
 //
@@ -7297,16 +7517,19 @@ refuses(
   },
 );
 
-// AS. THE DERIVATION'S OWN REFUSAL COUNT, WATCHED WHERE IT STILL CAN BE. With the
-// census tightened (AA), no BODY edit can reach `checkDerivation`'s
-// `refused_count` law without breaking the arithmetic first — the two laws now
-// pin one field and the cheaper one fires. So the law is probed against a
-// doctored DERIVATION instead: one that expects a refusal the honest body does
-// not carry. A law that can no longer be reached from the outside is still a law
-// that has to work.
+// AS. THE REFUSAL COUNT READ FROM THE OTHER END. AA edits a BODY to publish
+// refusals nothing refused; this doctors the DERIVATION to expect a refusal the
+// honest body does not carry. The two directions are different failures of the
+// same law — a body that under-reports its refused rows is as wrong as one that
+// invents them — and only one of them is reachable by editing a body.
+//
+// Its number moved in Wave W-EX-A. It used to expect 1 against a body that
+// served 0; every body this file writes now serves 1, because the repaired
+// contract example's book carries one batch-refused row per engine, so the probe
+// expects 2 to stay a probe at all.
 refusesGeneration(
   "AS: the derivation expects a refusal the body does not carry — the second reading, still watched",
-  "publishes an hf_histogram refused_count of 0, but the derivation composes 1",
+  "publishes an hf_histogram refused_count of 1, but the derivation composes 2",
   () =>
     checkDerivation("probe", ethRunBook, {
       ...ETH_DERIVATION,
@@ -7314,7 +7537,7 @@ refusesGeneration(
         ...engine,
         before: {
           ...engine.before,
-          histogram: { ...engine.before.histogram, refused_count: 1 },
+          histogram: { ...engine.before.histogram, refused_count: 2 },
         },
       })),
     }),
@@ -7365,14 +7588,21 @@ refuses(
   COLLISION_SUBJECT,
 );
 
-// AV. A DERIVED FIELD FALSIFIED. The Debt Manager's ONE account IS liquidatable
-// and its counted collateral realizes at par, so the bad debt at liquidation is
-// its borrowings less that collateral — 4620000000 - 4000000000 = 620000000, a
-// real $620 the protocol is not seeing. The contract example published 0 for it;
+// AV. A DERIVED FIELD FALSIFIED. The Debt Manager's ONE account IS liquidatable,
+// and the committed realization axis DISCOUNTS its weETH to 0.95 — so its
+// collateral realizes 3800000000 of the 4000000000 it is marked at, and the bad
+// debt at liquidation is 4620000000 - 3800000000 = 820000000: a real $820 the
+// protocol is not seeing. The defective contract example published 0 for it;
 // this puts the 0 back, and the refusal has to name BOTH numbers.
+//
+// The figure moved in Wave W-EX-A, and the move is the repair. The old example
+// carried the MAINNET weETH address on chain 10, which the realization axis does
+// not name there, so this account realized at PAR and the derivation composed
+// 620000000. The repaired example carries the Debt Manager's real weETH, the
+// axis discounts it, and the served body says 820000000.
 refuses(
   "AV: a derived realization field falsified — the liquidatable account's bad debt zeroed",
-  'publishes market_realization.bad_debt_at_liquidation_usd "0", but the derivation composes "620000000"',
+  'publishes market_realization.bad_debt_at_liquidation_usd "0", but the derivation composes "820000000"',
   (mutant) => {
     engineOfMutant(mutant, "debt_manager").market_realization.bad_debt_at_liquidation_usd = "0";
   },
@@ -7424,6 +7654,34 @@ refuses(
       projected_usd: "6100000000",
     };
   },
+);
+
+// AZ. THE CORRECTED CENSUS ARITHMETIC, WATCHED (Wave W-EX-A).
+//
+// `checkSide`'s account invariant is `buckets + infinite === accounts` — the
+// accounts a side actually MEASURED — with `refused_count` counted OUTSIDE it,
+// because production's `measureRunBook` increments `accounts` only over the run
+// and adds the refusals afterwards. W-BS-H had it as `buckets + infinite +
+// refused === accounts` and nothing could tell the two apart while every body
+// here served `refused_count: 0`.
+//
+// This is the probe that tells them apart: it adds ONE account to a bucket and
+// touches nothing else. Under the corrected law it is refused immediately —
+// two accounts placed where the side says it measured one. Under W-BS-H's
+// reading the same edit was refused too, so the probe alone does not separate
+// them; what separates them is that this file's bodies now carry a NONZERO
+// `refused_count`, and the old law would have failed on the honest body before
+// any mutant reached it.
+refuses(
+  "AZ: a bucket grown by one — a distribution that places more accounts than the side measured",
+  "histogram measures 2 != accounts 1 — 2 placed in buckets + 0 unbounded IS the set of accounts",
+  (mutant) => {
+    const aave = engineOfMutant(mutant, "aave_v3_etherfi");
+    for (const side of ["before", "after"]) {
+      aave[side].hf_histogram.buckets.find((bucket) => bucket.count > 0).count += 1;
+    }
+  },
+  COLLISION_SUBJECT,
 );
 
 write("run-book.collateral-collision.json", collision.response);
