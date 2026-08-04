@@ -281,7 +281,11 @@ paths:
                         failed: 1
                         success_sum: "309593004"
                         max_updated_at: "2026-07-29T09:40:00Z"
-                        age_seconds: 1200
+                        # SERVE-time minus the stamp: 10:00:05Z - 09:40:00Z. The
+                        # example published 1200 here — the age measured from
+                        # `computed_at` instead — which no response at this
+                        # example's own `served_at` can carry.
+                        age_seconds: 1205
                         generation: 4
                         generation_open: false
                   supersession:
@@ -1158,7 +1162,11 @@ paths:
                         failed: 1
                         success_sum: "309593004"
                         max_updated_at: "2026-07-29T09:40:00Z"
-                        age_seconds: 1200
+                        # SERVE-time minus the stamp: 10:00:05Z - 09:40:00Z. The
+                        # example published 1200 here — the age measured from
+                        # `computed_at` instead — which no response at this
+                        # example's own `served_at` can carry.
+                        age_seconds: 1205
                         generation: 4
                         generation_open: false
                     - engine: "prices:poll:1"

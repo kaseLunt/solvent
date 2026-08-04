@@ -271,9 +271,13 @@
 //       the committed one, AND each applied factor is re-composed from the body's
 //       OWN disclosed axes.
 //       LAW 14. `batch.age_seconds` — how stale a reader is TOLD the numbers are
-//       — is `served_at - computed_at`, and the sweep's own age is measured from
-//       the compute stamp. `served_at` is the one leaf this file leaves free, and
-//       a free clock beside a stated age is two disclosures that can drift.
+//       — is `served_at - computed_at`, and the sweep's own age is `served_at`
+//       minus the sweep's own stamp: ONE database instant read twice, because
+//       that is what production does. `served_at` is the one leaf this file
+//       leaves free, and a free clock beside a stated age is two disclosures
+//       that can drift. (Wave W-EX-B corrected the sweep half, which measured
+//       from `computed_at` and so derived the very 1200 the contract example
+//       wrongly published; mutant AO2 is the regression.)
 //       LAW 15. `excluded_engines[]` and `coverage.withheld_engines[]` are one
 //       roster read twice — the `run-book.contradictory` shape — and only the
 //       second was composed.
@@ -3531,7 +3535,7 @@ const RESPONSE_DERIVED_LEAVES = new Map([
 
   ["batch.position_count", "checkDerivation: welded to coverage.batch_positions"],
   ["batch.age_seconds", "law 14: served_at minus computed_at, the batch's own clock"],
-  ["batch.watermarks[].sweep.age_seconds", "law 14: computed_at minus the sweep's own max_updated_at"],
+  ["batch.watermarks[].sweep.age_seconds", "law 14: served_at minus the sweep's own max_updated_at — the SAME instant, because production measures both from one database clock"],
 
   ["engines[].engine", "checkDerivation: the engine set is the derivation's, in order"],
   ["engines[].usd_decimals", "checkDerivation: the serializer's own frozen constant"],
@@ -3683,7 +3687,8 @@ const RESPONSE_UNPINNED_LEAVES = new Map([
     "stamped by the SERVING layer at the instant the response leaves, not computed from the batch " +
       "— no law in a fixture generator can pin a clock, and pinning it to the example's would " +
       "assert a value that says nothing about the run. Its COHERENCE is still held: law 14 makes " +
-      "batch.age_seconds answer to it.",
+      "BOTH stated ages answer to it — batch.age_seconds and every sweep's age_seconds, which is " +
+      "the same database instant production measures them from.",
   ],
 ]);
 
@@ -3937,15 +3942,29 @@ const checkResponse = (name, response, declared) => {
   // It runs AFTER the derivation deliberately. A body whose SCALE is wrong is
   // the derivation's refusal, not this one's; this law owns only the case where
   // the scale is right and the sentence beside it disagrees.
-  // LAW 14: THE BATCH'S OWN CLOCK IS COHERENT (Wave W-BS-H). `served_at` is the
-  // one leaf this file leaves free, and a free clock beside a stated age is two
-  // disclosures that can drift: `batch.age_seconds` is how STALE a reader is
-  // told the numbers are, and it is `served_at - computed_at`. The sweep's own
-  // age is measured from the COMPUTE stamp instead, because a sweep's staleness
-  // is a property of the batch and not of when somebody asked for it. Both
-  // identities hold to the second in the contract's own example, which is the
-  // provenance for reading them as the server's arithmetic rather than as
-  // decoration.
+  // LAW 14: THE BATCH'S OWN CLOCK IS COHERENT (Wave W-BS-H; CORRECTED Wave
+  // W-EX-B). `served_at` is the one leaf this file leaves free, and a free clock
+  // beside a stated age is two disclosures that can drift: `batch.age_seconds`
+  // is how STALE a reader is told the numbers are, and it is
+  // `served_at - computed_at`.
+  //
+  // THE SWEEP'S AGE ANSWERS TO THE SAME CLOCK, and this law used to say
+  // otherwise. It measured the sweep from the COMPUTE stamp — "a sweep's
+  // staleness is a property of the batch and not of when somebody asked for
+  // it" — which is a defensible sentence about a quantity PRODUCTION DOES NOT
+  // SERVE. `cmd/api/meta.go:156-177` writes the sweep's age as DB-now minus the
+  // stamp, from the very same `v.Now` that stamps `served_at`, and the
+  // contract's own `SweepStamp` prose says so in words: "the database clock at
+  // SERVE time minus the stamp — the stamp itself is immutable capture-time
+  // evidence".
+  //
+  // The old reading's stated provenance was that "both identities hold to the
+  // second in the contract's own example" — and they did, because the example
+  // published a 1200-second sweep age over a stamp 1205 seconds before its own
+  // `served_at`. The wrong law and the wrong example each vouched for the
+  // other, which is exactly the shape a law is supposed to make impossible. The
+  // example now carries 1205 and this law is measured from `served_at`, so the
+  // two artifacts agree on the arithmetic the server actually performs.
   const seconds = (from, to) => (Date.parse(to) - Date.parse(from)) / 1000;
   const servedAge = seconds(response.batch.computed_at, response.served_at);
   if (response.batch.age_seconds !== servedAge) {
@@ -3960,13 +3979,14 @@ const checkResponse = (name, response, declared) => {
     if (watermark.sweep === null) {
       continue;
     }
-    const sweepAge = seconds(watermark.sweep.max_updated_at, response.batch.computed_at);
+    const sweepAge = seconds(watermark.sweep.max_updated_at, response.served_at);
     if (watermark.sweep.age_seconds !== sweepAge) {
       fail(
         `${name} publishes a ${watermark.engine} sweep age of ` +
           `${String(watermark.sweep.age_seconds)} seconds over rows last updated at ` +
-          `${watermark.sweep.max_updated_at} for a batch computed at ${response.batch.computed_at}, ` +
-          `which is ${String(sweepAge)} — a sweep's staleness is measured from the COMPUTE stamp`,
+          `${watermark.sweep.max_updated_at} for a body served at ${response.served_at}, ` +
+          `which is ${String(sweepAge)} — a sweep's age is the SERVE-time database clock minus its ` +
+          `own stamp (cmd/api/meta.go:156-177), the same instant batch.age_seconds answers to`,
       );
     }
   }
@@ -7448,6 +7468,29 @@ refuses(
   "publishes batch.age_seconds 900, but it was computed at",
   (mutant) => {
     mutant.batch.age_seconds = 900;
+  },
+);
+
+// AO2. THE SWEEP'S AGE MEASURED FROM THE WRONG STAMP (law 14, the half that had
+// no mutant — Wave W-EX-B). Law 14 held `batch.age_seconds` from the day it was
+// written; its sweep half was watched by nothing, and it was ALSO measuring from
+// the wrong instant. Codex round 35 found the pair: the contract example
+// published a 1200-second sweep age over rows stamped 1205 seconds before its
+// own `served_at`, and this file derived the same 1200 from `computed_at`, so
+// the wrong law and the wrong example each vouched for the other.
+//
+// 1200 is not an arbitrary wrong number — it is EXACTLY what the old reading
+// produced. A mutant that re-injects it is the regression for the whole finding:
+// the number this file used to compose must now be refused by name.
+refuses(
+  "AO2: the sweep's age measured from the compute stamp — the exact number the old law composed",
+  "sweep age of 1200 seconds over rows last updated at",
+  (mutant) => {
+    for (const watermark of mutant.batch.watermarks) {
+      if (watermark.sweep !== null) {
+        watermark.sweep.age_seconds = 1200;
+      }
+    }
   },
 );
 

@@ -155,12 +155,16 @@ const batchBody = {
       flagged_positions: 0,
       liquidatable_positions: 1,
       // 1.2.2: the sweep-cut behind the liquidatable count, named on the row.
+      // The age is SERVE-time minus the stamp (cmd/api/meta.go:156-177), so it
+      // answers to this body's own `served_at`: 10:00:05Z - 09:40:00Z = 1205.
+      // It read 1200 — the age measured from `computed_at` — which no response
+      // at this body's stated instant can carry.
       sweep: {
         rows: 3,
         failed: 1,
         success_sum: "309593004",
         max_updated_at: "2026-07-29T09:40:00Z",
-        age_seconds: 1200,
+        age_seconds: 1205,
         generation: 4,
         generation_open: false,
       },

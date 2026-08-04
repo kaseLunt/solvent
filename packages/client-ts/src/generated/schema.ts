@@ -2792,7 +2792,7 @@ export interface operations {
                      *               "failed": 1,
                      *               "success_sum": "309593004",
                      *               "max_updated_at": "2026-07-29T09:40:00Z",
-                     *               "age_seconds": 1200,
+                     *               "age_seconds": 1205,
                      *               "generation": 4,
                      *               "generation_open": false
                      *             }
@@ -3633,7 +3633,7 @@ export interface operations {
                      *               "failed": 1,
                      *               "success_sum": "309593004",
                      *               "max_updated_at": "2026-07-29T09:40:00Z",
-                     *               "age_seconds": 1200,
+                     *               "age_seconds": 1205,
                      *               "generation": 4,
                      *               "generation_open": false
                      *             }

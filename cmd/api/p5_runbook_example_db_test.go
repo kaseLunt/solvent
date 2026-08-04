@@ -52,15 +52,28 @@ package main
 // # The four normalized fields, and why each one
 //
 // A document cannot pin a number a clock produces. These four and no others are
-// overwritten with the example's stylistic values before the comparison:
+// overwritten before the comparison — but they are NOT four free choices, and
+// Wave W-EX-B is the wave that learned the difference:
 //
-//	served_at                             the request's own instant
-//	batch.computed_at                     the DATABASE clock at write time
-//	batch.age_seconds                     now minus computed_at
-//	batch.watermarks[].sweep.age_seconds  now minus the sweep stamp's max_updated_at
+//	served_at                             FREE ANCHOR — the request's own instant
+//	batch.computed_at                     FREE ANCHOR — the DATABASE clock at write time
+//	batch.age_seconds                     DERIVED — served_at minus computed_at
+//	batch.watermarks[].sweep.age_seconds  DERIVED — served_at minus the stamp's own max_updated_at
+//
+// Production stamps all four from ONE database instant (`v.Now`), so the two
+// AGES are arithmetic over the two anchors, not further stylistic values. The
+// normalizer therefore DERIVES them (`exampleAgeSeconds`) and never writes a
+// literal. It used to write a literal 1200 for the sweep, over a stamp 1205
+// seconds before the example's own `served_at` — so the root law blessed an
+// example that understated its own freshness by five seconds while printing the
+// two timestamps that disprove it. `requireTemporalCoherence` is the standing
+// law that makes that unconstructible, and it runs against the SERVED body too,
+// so a server whose own clock stopped cohering fails here rather than being
+// normalized into agreement.
 //
 // `max_updated_at` itself is NOT normalized: it is a persisted stamp, seeded to
-// a fixed instant, and the example carries it verbatim.
+// a fixed instant, and the example carries it verbatim. That is exactly why the
+// sweep's age can be derived from the example's own bytes.
 //
 // EVERY OTHER BYTE OF THE EXAMPLE IS ASSERTED EQUAL. Editing the example by
 // hand — adding a note the server does not compose, moving a bucket, inventing
@@ -208,6 +221,92 @@ var (
 // example's stylistic values and returns the field list it touched. It fails if
 // a field it expects to normalize is absent — a normalizer that silently
 // normalizes nothing would make the whole comparison vacuous.
+// exampleInstant reads one of a body's own RFC3339 stamps back as an instant.
+func exampleInstant(t *testing.T, v any) time.Time {
+	t.Helper()
+	s, ok := v.(string)
+	require.True(t, ok, "an instant an age is measured against must be a string, got %T", v)
+	at, err := time.Parse(time.RFC3339, s)
+	require.NoError(t, err, "unparseable instant %q", s)
+	return at.UTC()
+}
+
+// exampleAgeSeconds is production's `ageSeconds` (`cmd/api/meta.go:255-261`)
+// evaluated over a body's own bytes: floored whole seconds from `stamp` to
+// `now`, never negative. It is the ONLY way this file produces an age — the
+// wave that hard-coded one is the wave that made an incoherent example
+// unfalsifiable.
+func exampleAgeSeconds(t *testing.T, now time.Time, stamp any) float64 {
+	t.Helper()
+	d := now.Sub(exampleInstant(t, stamp))
+	if d < 0 {
+		return 0
+	}
+	return float64(d / time.Second)
+}
+
+// requireTemporalCoherence is the law that makes a body's stated ages answer to
+// its own clock.
+//
+// # Why it exists (Wave W-EX-B)
+//
+// The four serve-time fields are not four free choices. `served_at` and
+// `batch.computed_at` are FREE ANCHORS — a document may stamp them however it
+// reads best — but the two AGES beside them are arithmetic over those anchors,
+// because production measures all three from ONE database instant:
+//
+//	served_at                            = v.Now                       (p5_runbook.go:511)
+//	batch.age_seconds                    = v.Now - batch.computed_at   (meta.go:125)
+//	batch.watermarks[].sweep.age_seconds = v.Now - sweep.max_updated_at (meta.go:174)
+//
+// The run-book example stated a sweep age of 1200 over a stamp 1205 seconds
+// before its own `served_at`. No response this server can emit at the example's
+// stated instant carries that number, so the example understated its own
+// freshness by five seconds while publishing the two timestamps that disprove
+// it — and the root law blessed it, because the normalizer overwrote the served
+// age with the same hard-coded 1200 before comparing.
+//
+// This runs against BOTH bodies, and each reading has its own teeth:
+//
+//   - against the SERVED body, before normalization, it proves PRODUCTION's
+//     clock is coherent — which is what makes the document's coherence a
+//     statement about the server rather than about the document.
+//   - against the CONTRACT EXAMPLE it proves the document's is, and it fails
+//     naming the arithmetic rather than as an anonymous byte diff.
+func requireTemporalCoherence(t *testing.T, what string, body map[string]any) {
+	t.Helper()
+	require.Contains(t, body, "served_at")
+	served := exampleInstant(t, body["served_at"])
+
+	batch := asMap(t, body["batch"])
+	require.Contains(t, batch, "computed_at")
+	require.Contains(t, batch, "age_seconds")
+	require.Equal(t, exampleAgeSeconds(t, served, batch["computed_at"]), batch["age_seconds"],
+		"%s states a batch age its own two stamps contradict: `batch.age_seconds` IS `served_at` (%v) "+
+			"minus `batch.computed_at` (%v), floored at zero, because production measures both from the "+
+			"one database instant it serves at (cmd/api/meta.go:125). A stated age no response at the "+
+			"stated instant can carry is an understated staleness a reader has no way to catch.",
+		what, body["served_at"], batch["computed_at"])
+
+	for i, w := range asList(t, batch["watermarks"]) {
+		m := asMap(t, w)
+		sweep, ok := m["sweep"].(map[string]any)
+		if !ok {
+			continue
+		}
+		require.Contains(t, sweep, "max_updated_at")
+		require.Contains(t, sweep, "age_seconds")
+		require.Equal(t, exampleAgeSeconds(t, served, sweep["max_updated_at"]), sweep["age_seconds"],
+			"%s states a %v sweep age its own stamps contradict: `batch.watermarks[%d].sweep.age_seconds` "+
+				"IS `served_at` (%v) minus that sweep's OWN `max_updated_at` (%v), floored at zero — the SAME "+
+				"database instant `batch.age_seconds` answers to (cmd/api/meta.go:156-177, and the contract's "+
+				"own SweepStamp prose: \"the database clock at SERVE time minus the stamp\"). The stamp is "+
+				"immutable capture-time evidence; only its age is measured, and it is measured from the serve "+
+				"instant, never from the compute stamp.",
+			what, m["engine"], i, body["served_at"], sweep["max_updated_at"])
+	}
+}
+
 func normalizeServeTime(t *testing.T, body map[string]any) {
 	t.Helper()
 	require.Contains(t, body, "served_at")
@@ -217,7 +316,12 @@ func normalizeServeTime(t *testing.T, body map[string]any) {
 	require.Contains(t, batch, "computed_at")
 	require.Contains(t, batch, "age_seconds")
 	batch["computed_at"] = exampleComputedAt.UTC().Format(time.RFC3339)
-	batch["age_seconds"] = float64(5)
+	// DERIVED, NEVER PINNED. Production writes this as ONE database instant
+	// minus the compute stamp (`cmd/api/meta.go:125`), so once the two stylistic
+	// instants are chosen the age is not a further choice — it is their
+	// difference. A literal here would let the example state an age its own two
+	// stamps contradict, and the comparison below would bless it.
+	batch["age_seconds"] = exampleAgeSeconds(t, exampleServedAt, batch["computed_at"])
 
 	sweeps := 0
 	for _, w := range asList(t, batch["watermarks"]) {
@@ -227,7 +331,14 @@ func normalizeServeTime(t *testing.T, body map[string]any) {
 			continue
 		}
 		require.Contains(t, sweep, "age_seconds")
-		sweep["age_seconds"] = float64(1200)
+		// The sweep stamp itself is PERSISTED evidence and is not normalized, so
+		// its age is derived from the body's OWN `max_updated_at` against the
+		// same stylistic serve instant — which is exactly how production
+		// measures it (`cmd/api/meta.go:156-177`: DB-now minus the stamp, from
+		// the same `v.Now` that stamped `served_at`).
+		require.Contains(t, sweep, "max_updated_at",
+			"the sweep's age is DERIVED from its own stamp, so a stamp-less sweep cannot be normalized")
+		sweep["age_seconds"] = exampleAgeSeconds(t, exampleServedAt, sweep["max_updated_at"])
 		sweeps++
 	}
 	require.Equal(t, 1, sweeps,
@@ -259,6 +370,11 @@ func runBookContractExample(t *testing.T) map[string]any {
 	// the schema violation it is.
 	require.NoError(t, mt.Schema.Value.VisitJSON(mt.Example, openapi3.MultiErrors()),
 		"the contract's run-book 200 example violates the contract's own schema")
+
+	// ...and its own CLOCK. A schema cannot see that a stated age contradicts
+	// the two stamps printed beside it; this can, and it says so in arithmetic
+	// rather than as a byte diff against a served body.
+	requireTemporalCoherence(t, "the contract's run-book 200 example", out)
 	return out
 }
 
@@ -272,6 +388,14 @@ func TestRunBookExampleIsAServedBody(t *testing.T) {
 	f := newRunBookExampleFixture(t)
 
 	served := f.postJSON(t, "/v1/scenarios/"+exScenarioID+"/run-book", runBookContractPath, http.StatusOK)
+
+	// PRODUCTION'S OWN CLOCK, BEFORE ANYTHING IS OVERWRITTEN. The four measured
+	// fields are one instant read four ways, so a real response is temporally
+	// coherent by construction. Asserting it HERE is what earns the right to
+	// demand the same of the document: if this ever failed, the defect would be
+	// the server's and normalizing the example to match would hide it.
+	requireTemporalCoherence(t, "the served run-book body", served)
+
 	normalizeServeTime(t, served)
 
 	// The seeded book really is the example's book, asserted here rather than
