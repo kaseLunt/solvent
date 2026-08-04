@@ -48,14 +48,25 @@
 //      unproven. It is proven here.
 //   2. THE HISTORICAL DEFECT, IN MEMORY. The pre-repair 1200 re-injected into
 //      the committed posture snapshot, and the law naming the trio.
-//   3. THE WALK. Every committed JSON fixture, enumerated FROM THE DIRECTORY,
-//      re-derived age by age.
+//   3. THE WALK. Every committed JSON fixture, enumerated FROM THE DIRECTORY
+//      TREE, re-derived age by age.
 //   4. THE CENSUS. What the law found, pinned per file and in total, and
 //      cross-checked against the two generators' OWN pins read out of their
 //      source — so this spec and the generators cannot disagree about coverage
 //      without one of them failing.
+//
+// AMENDMENT (Codex round 38). The first cut of this file enumerated with a FLAT
+// `readdirSync`, which reads immediate children only — while the sentence above
+// it promised every committed JSON fixture. A nested `fixtures/feed/snapshot.json`
+// would have bypassed the walk AND all four census laws, silently, and the
+// guarantee would have kept reading as though it were checked. The enumeration
+// is now a recursive descent keyed on NORMALIZED RELATIVE PATHS, and the
+// enumerator itself is proven against a synthetic nested tree ("the enumerator
+// descends", below) rather than trusted — a walk that stops walking is the same
+// failure as a law that stops matching, and it deserves the same treatment.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -120,22 +131,66 @@ const theLaw = (): Promise<ClockLaw> => {
   return loading;
 };
 
-// --- the corpus, enumerated from the directory ------------------------------
+// --- the corpus, enumerated from the directory TREE --------------------------
 //
 // DERIVED, NEVER HAND-LISTED. A fixture added tomorrow is walked tomorrow, with
 // nobody remembering to add a line here. The pinned census below is what turns
 // "walked" into a countable claim.
+//
+// RECURSIVE, and the identifier is the RELATIVE PATH with forward slashes on
+// every platform — `feed/snapshot.json`, never `feed\snapshot.json`. The
+// separator is normalized at construction rather than at comparison, so a census
+// key means one thing on Windows and Linux alike. Today the directory is FLAT, so
+// every relative path is a bare filename and the census keys read exactly as they
+// did before; the day someone nests a fixture, its key gains a directory and the
+// census discriminates on it rather than colliding with a same-named sibling.
 
-const fixtureFiles = readdirSync(fixturesDir)
-  .filter((name) => name.endsWith(".json"))
-  .sort();
+/** Directories that are never fixtures. Defensive: none exists today, and a test below pins that. */
+const SKIPPED_DIR_NAMES = new Set(["node_modules", ".git"]);
 
-const readFixture = (name: string): unknown => {
-  const text = readFileSync(path.join(fixturesDir, name), "utf8");
+interface Corpus {
+  /** Every `.json` beneath the root, relative + forward-slashed, sorted. */
+  files: string[];
+  /** Every directory descended into, same form. */
+  directories: string[];
+  /** Every directory NOT descended into, same form. */
+  skipped: string[];
+}
+
+const collectFixtures = (root: string): Corpus => {
+  const files: string[] = [];
+  const directories: string[] = [];
+  const skipped: string[] = [];
+  const descend = (dir: string, prefix: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (SKIPPED_DIR_NAMES.has(entry.name)) {
+          skipped.push(relative);
+          continue;
+        }
+        directories.push(relative);
+        descend(path.join(dir, entry.name), relative);
+        continue;
+      }
+      if (entry.name.endsWith(".json")) {
+        files.push(relative);
+      }
+    }
+  };
+  descend(root, "");
+  return { files: files.sort(), directories: directories.sort(), skipped: skipped.sort() };
+};
+
+const corpus = collectFixtures(fixturesDir);
+const fixtureFiles = corpus.files;
+
+const readFixture = (relative: string): unknown => {
+  const text = readFileSync(path.join(fixturesDir, relative), "utf8");
   try {
     return JSON.parse(text) as unknown;
   } catch (cause) {
-    throw new Error(`${name} is not parseable JSON: ${String(cause)}`);
+    throw new Error(`${relative} is not parseable JSON: ${String(cause)}`);
   }
 };
 
@@ -160,7 +215,9 @@ const isBatchBearing = (node: unknown): boolean => {
 // --- THE CENSUS -------------------------------------------------------------
 //
 // Every committed fixture the clock law resolves a stamp/age trio in, and how
-// many. PINNED, for the same reason both generators pin theirs: a law that
+// many. KEYED BY RELATIVE PATH beneath `tests/fixtures` — which for a flat
+// directory is just the filename, and which stays honest the moment it stops
+// being flat. PINNED, for the same reason both generators pin theirs: a law that
 // stopped matching would pass exactly as quietly as the stale byte it exists to
 // catch. A new batch-bearing fixture that skips the law is therefore a VISIBLE
 // DIFF — the walk finds trios the census does not name, and the census test
@@ -400,6 +457,58 @@ test.describe("every committed fixture states only ages its own stamps support",
     // A directory read that started returning nothing would make every test
     // below vacuous — the walk's own version of a law that stops matching.
     expect(fixtureFiles.length).toBeGreaterThanOrEqual(51);
+    // Every key is relative and forward-slashed, on every platform.
+    expect(fixtureFiles.filter((name) => name.includes("\\"))).toEqual([]);
+    expect(fixtureFiles.filter((name) => path.isAbsolute(name))).toEqual([]);
+  });
+
+  test("nothing in the fixtures tree was skipped as noise", () => {
+    // The skip list is defensive, and today it never fires: `tests/fixtures` is
+    // flat and holds fixtures and generators, nothing installed. If this ever
+    // fails, a directory appeared that nobody decided about — decide, rather
+    // than let the walk quietly stop covering it.
+    expect(corpus.skipped).toEqual([]);
+    expect(corpus.directories).toEqual([]);
+  });
+
+  test("the enumerator descends", async () => {
+    // PROVEN, NOT TRUSTED (Codex round 38). The flat `readdirSync` this replaced
+    // read as though it walked everything and did not, so the recursion gets its
+    // own mutant: a synthetic tree — built OUTSIDE the repo, in the OS temp dir,
+    // and torn down here — with a stale trio buried two levels down. A walker
+    // that stopped descending would return two files instead of four, and a
+    // walker that leaked the platform separator would fail the key assertions.
+    const law = await theLaw();
+    const root = mkdtempSync(path.join(tmpdir(), "clock-law-enum-"));
+    try {
+      mkdirSync(path.join(root, "feed", "deep"), { recursive: true });
+      const stale = {
+        served_at: "2026-07-29T10:00:05Z",
+        batch: { computed_at: "2026-07-29T09:40:00Z", age_seconds: 1200 },
+      };
+      writeFileSync(path.join(root, "top.json"), JSON.stringify(stale));
+      writeFileSync(path.join(root, "notes.txt"), "not a fixture");
+      writeFileSync(path.join(root, "feed", "snapshot.json"), JSON.stringify(stale));
+      writeFileSync(path.join(root, "feed", "deep", "buried.json"), JSON.stringify(stale));
+      mkdirSync(path.join(root, "node_modules", "pkg"), { recursive: true });
+      writeFileSync(path.join(root, "node_modules", "pkg", "package.json"), "{}");
+
+      const found = collectFixtures(root);
+      expect(found.files).toEqual(["feed/deep/buried.json", "feed/snapshot.json", "top.json"]);
+      expect(found.directories).toEqual(["feed", "feed/deep"]);
+      expect(found.skipped).toEqual(["node_modules"]);
+
+      // And a nested body IS readable and IS refused by the law — the two halves
+      // the round-38 gap left unjoined.
+      for (const name of found.files) {
+        const text = readFileSync(path.join(root, name), "utf8");
+        const report = law.checkClocks(JSON.parse(text) as unknown);
+        expect(report.checked).toBe(1);
+        expect(report.failures.join("\n")).toContain("IS 1205");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   for (const name of fixtureFiles) {
@@ -483,6 +592,12 @@ test.describe("this census and the generators' own pins cannot disagree", () => 
       labBookPin,
       feedPins: feedPins.size,
     }).toEqual(GENERATOR_PIN_SHAPE);
+    // Both generators write with `path.join(here, name)`, so every name they
+    // emit is a TOP-LEVEL file and its bare name is already a valid relative
+    // census key. Pinned, because a generator that started nesting would
+    // otherwise look up `feed/x.json` under the key `x.json` and quietly agree
+    // with nothing.
+    expect([...labBookWrites, ...feedPins.keys()].filter((name) => name.includes("/"))).toEqual([]);
   });
 
   test("generate-lab-book.mjs's 26 is this census's 26", () => {
