@@ -37,8 +37,8 @@ function EngineStats({
           <span>{aggregate.refusal?.detail ?? "engine withheld on this batch"}</span>
         </div>
         <div className={styles.statrow}>
-          <StatCard label="Collateral (counted)" value={EM_DASH} sub="withheld — not zero" />
-          <StatCard label="Debt" value={EM_DASH} sub="withheld — not zero" />
+          <StatCard label="Collateral (counted)" value={EM_DASH} sub="withheld, no number served" />
+          <StatCard label="Debt" value={EM_DASH} sub="withheld, no number served" />
           <StatCard label="Liquidatable" value={EM_DASH} sub="no verdicts were computed" />
           <StatCard
             label="Refused"
@@ -107,7 +107,7 @@ export function BookStatRows({
   return (
     <section className={styles.section} aria-label="per-engine aggregates">
       <div className={styles.sectionHead}>
-        <h2>Aggregates — per engine, never combined</h2>
+        <h2>Aggregates: per engine, never combined</h2>
       </div>
       {engines.map((aggregate) => (
         <EngineStats

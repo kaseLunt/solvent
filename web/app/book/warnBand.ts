@@ -5,4 +5,6 @@
 
 import { WARN_HF_RATIO } from "@/lib/severity";
 
-export const WARN_BAND_DISCLOSURE = `presentation band < ${String(WARN_HF_RATIO)} — not an engine threshold`;
+export const WARN_BAND_DISCLOSURE = `presentation band < ${String(
+  WARN_HF_RATIO,
+)}, set for display and not by the engine`;

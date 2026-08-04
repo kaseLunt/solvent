@@ -286,7 +286,7 @@ export function legacySortRegister(sort: HonoredLegacySort, reversed: boolean): 
     ? LEGACY_SORT_DIRECTION_WORDS[sort].reversed
     : LEGACY_SORT_DIRECTION_WORDS[sort].canonical;
   return (
-    `sorted by "${sort}" (deprecated) — this link's own ranking, honored as sent: ` +
+    `sorted by "${sort}" (deprecated), this link's own ranking, honored as sent: ` +
     `${LEGACY_SORT_READER_WORDS[sort]}${LEGACY_SORT_UNIT[sort]}, ${direction}. ` +
     `${LEGACY_SORT_NO_HEADER[sort]} Click any sortable header to rank by that column instead.`
   );
@@ -383,8 +383,8 @@ export function normalizeDirParam(
  * actually uses.
  */
 export const SORT_HF_REMAP_ACK =
-  'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
-  "publishes a strict liquidatable boolean, not a health factor.";
+  'sort "hf" is not defined for debt_manager, so it was reset to headroom. The Debt ' +
+  "Manager publishes a strict liquidatable boolean, not a health factor.";
 
 /** What `normalizeBookQuery` decided, and whether it had to intervene. */
 export interface NormalizedBookQuery {

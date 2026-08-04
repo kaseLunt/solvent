@@ -58,7 +58,7 @@ export function InspectorHistory({ state }: { state: HistoryState }) {
       {state.status === "loading" && <p className="mono dim">loading history…</p>}
       {state.status === "error" && (
         <div className={`${styles.stateCard} ${styles.stateRefused}`}>
-          <p className="mono">history unavailable — {state.message}</p>
+          <p className="mono">history unavailable: {state.message}</p>
         </div>
       )}
       {state.status === "ready" && <HistoryBody lookup={state.lookup} />}
@@ -71,7 +71,7 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
     return (
       <div className={`${styles.stateCard} ${styles.stateRefused}`}>
         <p className="mono">
-          {renderLookupOutcome("unknowable")} — an engine&apos;s book is withheld in the newest
+          {renderLookupOutcome("unknowable")} · an engine&apos;s book is withheld in the newest
           servable batch:
         </p>
         <ul className={styles.withheldList}>
@@ -89,7 +89,7 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
     return (
       <div className={styles.stateCard}>
         <p className="mono">
-          no persisted points in the covered window — a definitive answer over{" "}
+          no persisted points in the covered window, which is a definitive answer over{" "}
           {String(lookup.response.limit)} batches ({renderLookupOutcome("not-found")}).
         </p>
         <p className="mono dim">{lookup.note}</p>
@@ -101,7 +101,7 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
     <>
       {!lookup.complete && (
         <p className={styles.disclosure}>
-          FLOOR — {lookup.withheldEngines.map((r) => r.engine).join(", ")} withheld in the newest
+          FLOOR · {lookup.withheldEngines.map((r) => r.engine).join(", ")} withheld in the newest
           batch: more points may exist behind it.
         </p>
       )}
@@ -137,10 +137,10 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
         // not a borrowed caption.
         const referenceLegend =
           engine.engine === "aave_v3_etherfi"
-            ? "reference line: 1.0 — the engine's own boundary (wad strictly < 1e18)."
+            ? "reference line: 1.0, the engine's own boundary (wad strictly < 1e18)."
             : engine.engine === "debt_manager"
-              ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings — the verdict is the engine's strict boolean (equality healthy), not this chart."
-              : "reference line: 1.0 — a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
+              ? "reference line: 1.0 on the DISCLOSURE ratio maxBorrowLT/borrowings. The verdict is the engine's strict boolean (equality healthy) and not this chart."
+              : "reference line: 1.0, a plotting aid only; this engine's verdict semantics are not asserted by this chart.";
         return (
           <div key={engine.engine} className={styles.historyCard} data-testid={`history-${engine.engine}`}>
             <div className={styles.historyMeta}>
@@ -176,10 +176,10 @@ function HistoryBody({ lookup }: { lookup: HistoryLookup }) {
               <details className={styles.historyDoctrine}>
                 <summary>{HISTORY_DOCTRINE_SUMMARY}</summary>
                 <p>
-                  a gap is a REFUSED, WITHHELD or NO-ROW point — hover any tick for its named
+                  a gap is a REFUSED, WITHHELD or NO-ROW point. hover any tick for its named
                   reason, or any plotted point for its value and block; the line never
                   interpolates across a gap. gaps mark only batches this response itself
-                  witnesses — the wire does not enumerate the full retained set.{" "}
+                  witnesses, because the wire does not enumerate the full retained set.{" "}
                   {referenceLegend}
                 </p>
               </details>

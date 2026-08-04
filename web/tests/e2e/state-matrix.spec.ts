@@ -305,7 +305,7 @@ const MATRIX: Cell[] = [
       await expect(badDebt).toContainText("—");
       await expect(badDebt).not.toContainText("$0");
       await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toContainText(
-        "withheld — not zero",
+        "withheld, no number served",
       );
     },
   },
@@ -347,7 +347,7 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("rate limit");
-      await expect(strip).toContainText("unavailable, not zero");
+      await expect(strip).toContainText("unavailable, and none of them is zero");
       await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
     },
   },
@@ -363,7 +363,7 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("failed to build the response");
-      await expect(strip).toContainText("unavailable, not zero");
+      await expect(strip).toContainText("unavailable, and none of them is zero");
     },
   },
   {
@@ -745,7 +745,7 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       const degraded = page.getByTestId("observatory-degraded");
-      await expect(degraded).toContainText("a named state, not an empty chart");
+      await expect(degraded).toContainText("a named state rather than an empty chart");
       // Never an empty chart, never zeros.
       await expect(page.getByTestId("observatory-chart-debt_usd")).toHaveCount(0);
     },
@@ -762,7 +762,7 @@ const MATRIX: Cell[] = [
     },
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "SERIES FETCH FAILED" });
-      await expect(strip).toContainText("unavailable, not empty");
+      await expect(strip).toContainText("unavailable, and none of it is being shown as empty");
     },
   },
 

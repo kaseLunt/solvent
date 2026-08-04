@@ -179,8 +179,8 @@ export default function StyleguidePage() {
       <div className={styles.banner} data-testid="specimen-banner">
         <span className={styles.bannerTag}>SPECIMEN</span>
         <span>
-          Every value on this page is a static example (the mockup&apos;s own numbers) — nothing
-          here is live data. This route is dev-only.
+          Every value on this page is a static example (the mockup&apos;s own numbers), and
+          none of it is live data. This route is dev-only.
         </span>
       </div>
 
@@ -222,7 +222,7 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-severity">
-        <h2>SeverityHF — crit only from the engine&apos;s verdict</h2>
+        <h2>SeverityHF · crit only from the engine&apos;s verdict</h2>
         <div className={styles.row}>
           <SeverityHF verdict="not-liquidatable" display="1.539" ratio={1.539} />
           <SeverityHF verdict="not-liquidatable" display="1.043" ratio={1.043} />
@@ -232,7 +232,7 @@ export default function StyleguidePage() {
         </div>
         <p className={styles.note}>
           ok · warn (presentation band &lt; 1.1) · crit (engine comparator verdict) · ∞ (no debt)
-          · {EM_DASH} (unknowable — never a green light)
+          · {EM_DASH} (unknowable, and never a green light)
         </p>
       </section>
 
@@ -248,7 +248,7 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-marks">
-        <h2>MarksStamp — B·P·S @block grammar</h2>
+        <h2>MarksStamp · B·P·S @block grammar</h2>
         <div className={styles.row}>
           <MarksStamp
             marks={[
@@ -278,7 +278,7 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-ribbon">
-        <h2>Ribbon — two modes, watermark VECTOR, never one fake block</h2>
+        <h2>Ribbon · two modes, watermark VECTOR, never one fake block</h2>
         <div className={styles.row}>
           <Ribbon
             mode="stream"
@@ -315,7 +315,7 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-table">
-        <h2>DataTable — sticky mono header, severity rows, refusals visible</h2>
+        <h2>DataTable · sticky mono header, severity rows, refusals visible</h2>
         <DataTable
           columns={SPECIMEN_COLUMNS}
           rows={SPECIMEN_ROWS}
@@ -334,7 +334,7 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-charts">
-        <h2>SVG primitives — Sparkline · Scatter · WaterfallSteps</h2>
+        <h2>SVG primitives · Sparkline · Scatter · WaterfallSteps</h2>
         <div className={styles.row}>
           <div className={styles.chartFrame}>
             <Sparkline
@@ -358,8 +358,8 @@ export default function StyleguidePage() {
                 { id: "a", x: 6.3, y: -34.9, severity: "ok", title: "0x3c19…88af" },
                 { id: "b", x: 6.1, y: -4.1, severity: "warn", title: "0x71aa…04e2" },
                 { id: "c", x: 5.5, y: -29.9, severity: "ok", title: "0xb2f1…7d30" },
-                { id: "d", x: 1.2, y: 0, severity: "crit", title: "0x9a04…e6c2 — liquidatable" },
-                { id: "e", x: 0.9, y: -12.2, severity: "none", title: "0x2c64…0649 — no debt" },
+                { id: "d", x: 1.2, y: 0, severity: "crit", title: "0x9a04…e6c2 · liquidatable" },
+                { id: "e", x: 0.9, y: -12.2, severity: "none", title: "0x2c64…0649 · no debt" },
               ]}
             />
           </div>
@@ -382,12 +382,12 @@ export default function StyleguidePage() {
       </section>
 
       <section className={styles.section} data-testid="sg-drawer">
-        <h2>Drawer — explain this number</h2>
+        <h2>Drawer · explain this number</h2>
         <DrawerDemo />
       </section>
 
       <section className={styles.section} data-testid="sg-truth">
-        <h2>truth primitives — the honest-rendering laws</h2>
+        <h2>truth primitives · the honest-rendering laws</h2>
         <Stampline>
           <StampItem label="found:null →" value={renderLookupOutcome("unknowable")} tone="warn" />
           <StampItem label="found:false →" value={renderLookupOutcome("not-found")} />

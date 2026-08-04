@@ -75,7 +75,7 @@ test("params render with required flags; the SSE route invents no JSON sample", 
   await expect(positions).toContainText("never blended");
 
   const stream = page.getByTestId("endpoint-getStream");
-  await expect(stream).toContainText("text/event-stream — no JSON sample");
+  await expect(stream).toContainText("text/event-stream · no JSON sample");
   await expect(stream.locator('[data-testid="sample-getStream"]')).toHaveCount(0);
 });
 

@@ -21,8 +21,8 @@ export default function LabPage() {
       <div className={styles.head}>
         <h1>Scenario Lab</h1>
         <p>
-          What would break this book: the committed stress scenarios — fixed, versioned shocks,
-          no sliders — run against the whole book, or against one address. Every shocked number
+          What would break this book: the committed stress scenarios, fixed and versioned shocks
+          with no sliders, run against the whole book or against one address. Every shocked number
           is labeled a projection; the flagship weETH depeg shows a real loss the
           protocol&apos;s own oracles never see.
         </p>

@@ -26,8 +26,8 @@ test("(a) no counted collateral in the factor — the adjudicated sentence, wire
   const title = noPricePathTitle(LIQ_NEVER_REASON_NO_COUNTED_COLLATERAL);
   expect(title).toBe(
     "No price move alone can liquidate this account: its counted collateral is not on any " +
-      "committed price axis (stable collateral holds its value in this solve). Debt growth — " +
-      "interest — or a parameter change can still cross the boundary. Wire: 'position holds no " +
+      "committed price axis (stable collateral holds its value in this solve). Debt growth from " +
+      "interest, or a parameter change, can still cross the boundary. Wire: 'position holds no " +
       "counted collateral in the factor'.",
   );
 });
@@ -36,7 +36,7 @@ test("(b) collateral outside the factor covers the debt — interest/params stil
   const title = noPricePathTitle(LIQ_NEVER_REASON_OUTSIDE_COVERS);
   expect(title).toBe(
     "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold — no fall of the shocked asset alone reaches the boundary; interest or " +
+      "threshold, so no fall of the shocked asset alone reaches the boundary; interest or " +
       "parameter changes still can. Wire: 'collateral outside the factor already covers the " +
       "debt at threshold'.",
   );
@@ -92,11 +92,11 @@ test("the RENDERED legend and the column title carry the axis scope, verbatim", 
   // reason to the cell that owns one.
   expect(NO_PRICE_PATH_LEGEND).toBe(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
       "reason. The HF column stays the verdict.",
   );
   expect(LIQ_DISTANCE_HEADER_TITLE).toBe(
-    "how far the named asset's price must fall to cross this engine's boundary — price axis only.",
+    "how far the named asset's price must fall to cross this engine's boundary, on the price axis only.",
   );
 });
 
@@ -124,7 +124,7 @@ test("WAVE R4: the legend asserts NO non-price path — the no-debt row has none
   expect(NO_PRICE_PATH_LEGEND).not.toContain("interest");
   expect(NO_PRICE_PATH_LEGEND).not.toContain("parameter change");
   // It states the SCOPE of the solve and delegates the reason to the hover.
-  expect(NO_PRICE_PATH_LEGEND).toContain("non-price paths are not evaluated here");
+  expect(NO_PRICE_PATH_LEGEND).toContain("Non-price paths are not evaluated here");
   expect(NO_PRICE_PATH_LEGEND).toContain("each cell's hover names its reason");
   // And the no-debt hover — the arm that broke the old legend — is unchanged
   // and still says the boundary does not exist.

@@ -15,7 +15,7 @@
 // FINDING 2 (MEDIUM). R13b's detail banner promises, over a retained all-hole
 // book, that "the outcome below says so in its own words". The outcome below was
 // the generic `BookResult`, which for an empty `excluded_engines[]` printed
-// "excluded engines: none — every engine's book reached the run" — over a book
+// "excluded engines: none · every engine's book reached the run" — over a book
 // that reached NO engine. Two mutually exclusive statements on one screen. And
 // the same gate produced the same false sentence for a PARTIAL hole: the
 // condition was `excluded_engines.length === 0`, which is not the claim.
@@ -64,7 +64,7 @@ const WEETH_CHIP = '[data-testid="lab-chip"][data-scenario-id="weeth_market_depe
  * and the hole disclosure this wave adds must never print the claim as the first
  * half of its own negation — an absence assertion could not tell those apart.
  */
-const COMPLETENESS = "excluded engines: none — every engine's book reached the run";
+const COMPLETENESS = "excluded engines: none · every engine's book reached the run";
 
 // ===========================================================================
 // (A) The row that was delisted and then republished, re-cut.
@@ -190,12 +190,12 @@ test("(A) A FAILED v1 RUN ON A ROW RE-LISTED AT v2 reads DEFINITION CHANGED, and
   await expect(batchLine).not.toContainText("run(s) are in flight");
   await expect(batchLine).not.toContainText("no run has been issued yet");
   await expect(batchLine).toContainText(
-    "1 run(s) answered for a committed definition this page is no longer showing — refresh the " +
+    "1 run(s) answered for a committed definition this page is no longer showing. Refresh the " +
       "listing to run against the current one",
   );
   await expect(batchLine).toContainText(
     "1 run(s) were ASKED under a committed definition this page is no longer showing and never " +
-      "came back with a book of their own — re-run to ask under the current one",
+      "came back with a book of their own, so re-run to ask under the current one",
   );
 
   // THE ROW'S AFFORDANCE IS THE OTHER ONE. Sending the reader to re-read a
@@ -347,7 +347,7 @@ test("(B) A RETAINED ALL-HOLE BOOK: banner, cells and detail give ONE account, w
   // THE HEADER GIVES THE SAME ACCOUNT — a served book, not a served result, and
   // never a run that ended without one.
   await expect(batchLine).toContainText(
-    "1 run(s) were served a book that named none of the row's covered engines — a served book, " +
+    "1 run(s) were served a book that named none of the row's covered engines: a served book, " +
       "but not a served result",
   );
   await expect(batchLine).not.toContainText("results shown together");
@@ -402,7 +402,7 @@ test("(C) A PARTIAL HOLE makes no completeness claim, and names the engine that 
   await expect(hole).toBeVisible();
   await expect(hole).toContainText("AN INCOMPLETE BOOK");
   await expect(hole).toContainText(
-    "this run returned neither a result nor a refusal for aave_v3_etherfi — an engine this " +
+    "this run returned neither a result nor a refusal for aave_v3_etherfi, an engine this " +
       "scenario's committed definition covers",
   );
   await expect(hole).toContainText("will not fill a hole with a zero");

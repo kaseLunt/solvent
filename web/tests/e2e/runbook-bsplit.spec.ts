@@ -114,7 +114,7 @@ test("the computed reading line names the SHIFT, derived from the two sides", as
   await expect(reading).toContainText("accounts may have moved in BOTH directions");
   await expect(reading).not.toContainText("crossed into that region");
   // Its buckets are a DISCLOSURE, never dressed as the engine's trigger.
-  await expect(reading).toContainText("a DISCLOSURE, not this engine's trigger");
+  await expect(reading).toContainText("a DISCLOSURE rather than this engine's trigger");
 });
 
 test("the served book RECONCILES with itself: coverage, accounts, and the money", async ({
@@ -274,7 +274,7 @@ test("THE UNPRICED HOLDING RENDERS IN THE REFUSAL REGISTER — never as a zero",
   // And the reading line says UNKNOWABLE rather than reporting a total that
   // silently excludes it.
   const reading = aaveCollateral.getByTestId("runbook-collateral-reading-before");
-  await expect(reading).toContainText("UNKNOWABLE — not zero");
+  await expect(reading).toContainText("UNKNOWABLE rather than zero");
   await expect(reading).toContainText("outside that total");
 });
 
@@ -288,10 +288,10 @@ test("the collateral breakdown is PER SIDE and per engine — never summed acros
 
   // Each engine reads at its OWN decimals and says so in its own sentence.
   await expect(aave.getByTestId("runbook-collateral-reading-before")).toContainText(
-    "at 8 decimals — never added to another engine's",
+    "at 8 decimals, never added to another engine's",
   );
   await expect(dm.getByTestId("runbook-collateral-reading-before")).toContainText(
-    "at 6 decimals — never added to another engine's",
+    "at 6 decimals, never added to another engine's",
   );
   // Both sides render for both engines: under an asset shock they differ, and
   // a single shared table could not show that.

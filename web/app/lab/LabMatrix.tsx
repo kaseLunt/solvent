@@ -118,7 +118,7 @@ function Cell({ state }: { state: LabCellState }) {
           className={styles.cellIdle}
           data-testid="matrix-cell"
           data-cell-state="not-run"
-          title="no run has been issued for this scenario on this surface. Not a zero, not a refusal — nothing has been asked yet."
+          title="no run has been issued for this scenario on this surface. Nothing has been asked yet, so this cell is neither a zero nor a refusal."
         >
           <span className={styles.cellTag}>not run</span>
         </td>
@@ -185,7 +185,7 @@ function Cell({ state }: { state: LabCellState }) {
               : state.payload.refusal.code}
           </span>
           <span className={styles.cellSub}>
-            at batch #{state.batchId} · matrix reads #{state.anchorBatchId} — re-run this row
+            at batch #{state.batchId} · matrix reads #{state.anchorBatchId} · re-run this row
           </span>
         </td>
       );
@@ -576,7 +576,7 @@ export function LabMatrix({
                         </button>{" "}
                         this row&apos;s run answered for a committed definition this page is no
                         longer showing. Re-read <span className="mono">GET /v1/scenarios</span> to
-                        run against the current one — nothing is re-run for you.
+                        run against the current one. Nothing is re-run for you.
                       </span>
                     )}
                   </td>
@@ -588,12 +588,12 @@ export function LabMatrix({
       </div>
 
       <p className={styles.caption} data-testid="matrix-legend">
-        NOT COVERED = the committed definition does not name that engine — a property of the
+        NOT COVERED = the committed definition does not name that engine, a property of the
         DEFINITION, knowable before any run · WITHHELD = the engine refused, code and detail
         rendered · SUPERSEDED = the result was measured at an older batch and is never blended
-        with the current one · UNANSWERED = neither a result nor a refusal reached that cell —
-        the run ended without a book, or the book it served named that engine in neither list —
-        not a zero · CONTRADICTORY BOOK = the served response answered this cell two ways (an
+        with the current one · UNANSWERED = neither a result nor a refusal reached that cell:
+        the run ended without a book, or the book it served named that engine in neither list,
+        and neither case is a zero · CONTRADICTORY BOOK = the served response answered this cell two ways (an
         engine named twice, or named as served and withheld at once) and is refused whole rather
         than resolved by this surface ·{" "}
         {/* WAVE R16, FINDING 2 — THE LEGEND IS ALWAYS ON SCREEN, SO IT MAY NOT
@@ -615,22 +615,22 @@ export function LabMatrix({
             ALL for a request still out, RE-RUN for one that ended. Each is
             pinned separately, so a collapse back to one sentence fails. */}
         <span data-testid="matrix-legend-dc">
-          DEFINITION CHANGED = the definition moved, so this table does not classify the phase —
-          three cases, one register:
+          DEFINITION CHANGED = the definition moved, so this table does not classify the phase.
+          Three cases, one register:
         </span>{" "}
         <span data-testid="matrix-legend-dc-response">
-          the ANSWER is about a committed definition this page is no longer showing — refresh the
-          listing to run against the current one
+          the ANSWER is about a committed definition this page is no longer showing, so refresh
+          the listing to run against the current one
         </span>{" "}
         ·{" "}
         <span data-testid="matrix-legend-dc-running">
-          the run was ASKED under one and its request is STILL OUT — nothing has come back and
+          the run was ASKED under one and its request is STILL OUT. Nothing has come back and
           nothing has failed to, so there is nothing to do here until it settles
         </span>{" "}
         ·{" "}
         <span data-testid="matrix-legend-dc-settled">
-          the run was ASKED under one and never came back with a book of its own — re-run the row;
-          a refresh resolves nothing, the listing is already current
+          the run was ASKED under one and never came back with a book of its own, so re-run the
+          row; a refresh resolves nothing, the listing is already current
         </span>{" "}
         · no total column: engine books are never summed.
       </p>

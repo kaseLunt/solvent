@@ -260,7 +260,7 @@ test("(1) an ENGINE toggle to the DM REMAPS the honored hf ranking — the API r
   await page.getByRole("button", { name: "debt_manager", exact: true }).click();
   await expect(page.getByTestId("sort-remap-ack")).toBeVisible();
   await expect(page.getByTestId("sort-remap-ack")).toContainText(
-    'sort "hf" is not defined for debt_manager — reset to headroom',
+    'sort "hf" is not defined for debt_manager, so it was reset to headroom',
   );
   await expect(page.getByTestId("legacy-sort-register")).toHaveCount(0);
   await expect.poll(() => asked).toContain("debt_manager:headroom");

@@ -43,7 +43,7 @@ for (const surface of SURFACES) {
 
     // Shared chrome: brand + all six nav destinations.
     const header = page.getByRole("banner");
-    await expect(header.getByRole("link", { name: "Solvent — go to the Book" })).toBeVisible();
+    await expect(header.getByRole("link", { name: "Solvent · go to the Book" })).toBeVisible();
     const nav = page.getByRole("navigation", { name: "app surfaces" });
     for (const label of NAV_LABELS) {
       await expect(nav.getByRole("link", { name: label, exact: true })).toBeVisible();

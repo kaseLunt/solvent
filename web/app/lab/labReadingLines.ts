@@ -45,7 +45,7 @@ export function cliffClause(view: FrontierView): string {
     const cell = cellAt(view, view.cliffIndex ?? 0, engine);
     return cell === null ? [] : [`${String(cell.newlyEligible)} on ${engine}`];
   });
-  return `First new eligibility lands at ${step?.move ?? "an unnamed step"} — ${counts.join(", ")}.`;
+  return `First new eligibility lands at ${step?.move ?? "an unnamed step"}: ${counts.join(", ")}.`;
 }
 
 /**
@@ -60,7 +60,7 @@ export function frontierReadingLine(waterfall: Waterfall): string {
   const censusClause =
     baseline === undefined || baseline === null
       ? "This grid carries no unshocked point, so every step on it is a projection."
-      : `${baseline.move} is the standing census — every step below it is a projection.`;
+      : `${baseline.move} is the standing census; every step below it is a projection.`;
   return (
     `What this shows: how much debt each engine could liquidate if ` +
     `${axisWords(waterfall.axis, waterfall.axis_asset)} fell step by step. ` +
@@ -79,7 +79,7 @@ export function frontierSeriesReadingLine(series: FrontierSeries): string {
   const first = series.points[0];
   const last = series.points[series.points.length - 1];
   if (first === undefined || last === undefined) {
-    return `${series.engine} served no point on this grid — a hole, not a zero.`;
+    return `${series.engine} served no point on this grid, so the grid has a hole here rather than a zero.`;
   }
   const from = labUsd(first.cell.eligibleDebt.toString(), series.usdDecimals);
   const to = labUsd(last.cell.eligibleDebt.toString(), series.usdDecimals);
@@ -88,7 +88,7 @@ export function frontierSeriesReadingLine(series: FrontierSeries): string {
   return (
     `${series.engine}: Σ eligible debt ${from} at ${first.move} → ${to} at ${last.move}; ` +
     `bad debt ${badFrom} → ${badTo}. This engine's own USD at ${String(series.usdDecimals)} ` +
-    `decimals — never added to another engine's.`
+    `decimals, never added to another engine's.`
   );
 }
 

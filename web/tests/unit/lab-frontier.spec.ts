@@ -116,7 +116,7 @@ test("the reading lines are COMPUTED, and the axis titles are reader words", () 
   const seriesLine = frontierSeriesReadingLine(aave);
   expect(seriesLine).toContain("Σ eligible debt $0 at unshocked");
   expect(seriesLine).toContain(`$6,000 at ${MINUS}50%`);
-  expect(seriesLine).toContain("This engine's own USD at 8 decimals — never added to another");
+  expect(seriesLine).toContain("This engine's own USD at 8 decimals, never added to another");
 });
 
 test("a grid with NO new eligibility says so, rather than leaving the sentence open", () => {

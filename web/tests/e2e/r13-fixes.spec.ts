@@ -185,7 +185,7 @@ test("(A) A DELISTED ROW HOLDING THE NEWEST BATCH takes its cohort claim with it
 
   // THE FRONTIER COMPARES ITSELF AGAINST THE ROWS ON SCREEN, and counts them.
   await expect(batchLine).toContainText(
-    "The loss frontier above reads batch #1 — the same batch 1 of the 1 displayed row(s) are " +
+    "The loss frontier above reads batch #1: the same batch 1 of the 1 displayed row(s) are " +
       "pinned to.",
   );
   await expect(batchLine).not.toContainText("a different batch from this table's displayed cohort");

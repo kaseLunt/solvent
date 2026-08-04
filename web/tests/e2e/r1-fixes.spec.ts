@@ -109,8 +109,8 @@ test("(1) the wire's own reason survives the DEMOTION to the Headroom cell's hov
     "title",
     "5–10% of borrowing capacity left before liquidation No price move alone can liquidate " +
       "this account: its counted collateral is not on any committed price axis (stable " +
-      "collateral holds its value in this solve). Debt growth — interest — or a parameter " +
-      "change can still cross the boundary. Wire: 'position holds no counted collateral in " +
+      "collateral holds its value in this solve). Debt growth from interest, or a parameter " +
+      "change, can still cross the boundary. Wire: 'position holds no counted collateral in " +
       "the factor'.",
   );
 });
@@ -147,7 +147,7 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
   // delegates; tests/e2e/r4-fixes.spec.ts asserts it TOGETHER with that hover.
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
       "reason. The HF column stays the verdict.",
   );
 
@@ -159,14 +159,14 @@ test("(1) the legend is RENDERED (not hover-only) and the column header carries 
     .getByRole("columnheader", { name: "Headroom" });
   await expect(header.locator("span[title]").first()).toHaveAttribute(
     "title",
-    "how much of this account's borrowing capacity is still unused before liquidation — " +
-      "truncated, never rounded up.",
+    "how much of this account's borrowing capacity is still unused before liquidation, " +
+      "truncated and never rounded up.",
   );
   // And the metric's definition is RENDERED beside it, never hover-only.
   await expect(page.getByTestId("headroom-legend")).toHaveText(
     "Headroom = the share of this account's borrowing capacity still unused before " +
-      "liquidation — (liquidation threshold − debt) ÷ liquidation threshold, in the engine's " +
-      "own comparator; 0% is the boundary and `breached` is already past it.",
+      "liquidation: (liquidation threshold − debt) ÷ liquidation threshold, in the engine's " +
+      "own comparator. 0% is the boundary and `breached` is already past it.",
   );
 });
 
@@ -238,8 +238,8 @@ test("(9) a withheld engine's side is UNKNOWN in the dek — never a zero", asyn
   await openBookWith(page, POSITIONS_AAVE_PAGE_1, withheld);
   const dek = page.getByTestId("book-dek");
   await expect(dek).toContainText(
-    "aave_v3_etherfi's whole book is withheld (FLAG_CUSTODY_UNPROVEN) — its side is unknown, " +
-      "not zero.",
+    "aave_v3_etherfi's whole book is withheld (FLAG_CUSTODY_UNPROVEN), so that side is " +
+      "unknown rather than zero.",
   );
   await expect(dek).not.toContainText("aave_v3_etherfi has 0");
 });
@@ -364,7 +364,7 @@ test("(2) a HEALTHY never_liquidatable renders the axis-scoped badge with the wi
   await expect(badge).toHaveAttribute(
     "title",
     "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold — no fall of the shocked asset alone reaches the boundary; interest or " +
+      "threshold, so no fall of the shocked asset alone reaches the boundary; interest or " +
       "parameter changes still can. Wire: 'collateral outside the factor already covers the " +
       "debt at threshold'.",
   );
@@ -439,7 +439,7 @@ test("(11) the history head and meta line separate what PLOTS from what is witne
     "witnessed batches plot",
   );
   await expect(page.getByTestId("hf-history")).toContainText(
-    "gaps break the line — hover any tick for that batch's named reason.",
+    "gaps break the line. Hover any tick for that batch's named reason.",
   );
   // The full doctrine is one click away, not gone.
   await expect(
@@ -461,7 +461,7 @@ test("(11) an engine the account has NEVER touched renders one line, not an empt
   await page.goto(`/inspector/${FOUND_ADDR}`);
 
   await expect(page.getByTestId("history-absent-debt_manager")).toContainText(
-    "no debt_manager history — this address has never had a debt_manager position in the " +
+    "no debt_manager history: this address has never had a debt_manager position in the " +
       "retained window.",
   );
   // No frame at all for that engine.
@@ -649,7 +649,7 @@ test("(10) the adjudicated intros render, and the endpoint lines are demoted", a
   await expect(page.locator("main")).toContainText(
     "Look up one address: its current position, the price inputs behind it, its distance to " +
       "liquidation, and its history across batches. Anything the service cannot defend renders " +
-      "as a named refusal — never a guess.",
+      "as a named refusal, never a guess.",
   );
   // The provenance line survives — BELOW the entry form, not above it.
   const entryY = (await page.getByTestId("lab-address-input").or(page.locator("form")).first().boundingBox())?.y ?? 0;
@@ -661,33 +661,34 @@ test("(10) the adjudicated intros render, and the endpoint lines are demoted", a
   // whole book is the default register the surface now opens in.
   await page.goto("/lab");
   await expect(page.locator("main")).toContainText(
-    "What would break this book: the committed stress scenarios — fixed, versioned shocks, no " +
-      "sliders — run against the whole book, or against one address.",
+    "What would break this book: the committed stress scenarios, fixed and versioned shocks " +
+      "with no sliders, run against the whole book or against one address.",
   );
 
   await page.goto("/observatory");
   await expect(page.locator("main")).toContainText(
     "How each engine's book has moved, hour by hour, in a record that outlives batch " +
-      "retention. An hour with no complete batch renders as a hole — never smoothed, never zero.",
+      "retention. An hour with no complete batch renders as a hole, which is never smoothed " +
+      "over and never drawn as a zero.",
   );
 
   await page.goto("/feed");
   await expect(page.locator("main")).toContainText(
-    "Chain actions as recorded — borrows, repays, supplies, withdrawals, liquidations. The " +
+    "Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The " +
       "live strip shows the stream's posture now; the list below pages through durable " +
-      "history — the two never blend.",
+      "history. The two never blend.",
   );
 
   await page.goto("/proof");
   await expect(page.locator("main")).toContainText(
     "What this deployment is, exactly: the pinned proof of its last reconcile and the identity " +
-      "of the batch it serves now. Nothing here is measured on request — every field is carried " +
+      "of the batch it serves now. Nothing here is measured on request: every field is carried " +
       "by the build or persisted by a batch.",
   );
 
   await page.goto("/developers");
   await expect(page.locator("main")).toContainText(
-    "The committed API contract, rendered from its own examples — read-only JSON, no auth, " +
+    "The committed API contract, rendered from its own examples: read-only JSON, no auth, " +
       "every money value a decimal string. If a handler disagrees with this page, that is a " +
       "failure, not documentation lag.",
   );

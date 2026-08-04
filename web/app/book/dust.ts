@@ -105,15 +105,16 @@ export function normalizeDustParam(raw: string | null): { dust: DustStep; rewrit
 /** The dust chip group's title attribute (ruling part C, point 14). */
 export const DUST_GROUP_TITLE =
   "hide rows where max(collateral, debt) is below the step, in the engine's own value " +
-  "unit — hidden rows stay counted here and in every aggregate above; refused and " +
+  "unit. Hidden rows stay counted here and in every aggregate above; refused and " +
   "null-valued rows are never hidden";
 
 /** The standalone refused-first chip's title (ruling part C, point 8). */
 export const REFUSED_FIRST_CHIP_TITLE =
-  "sort=status — refused rows ranked first for triage, then risk order";
+  "sort=status: refused rows ranked first for triage, then risk order";
 
 /** The footer constant line, amended (ruling part C, point 5). */
-export const FOOTER_REFUSED_NEVER_DUST = "refused rows stay visible and counted — never dust";
+export const FOOTER_REFUSED_NEVER_DUST =
+  "refused rows stay visible and counted; the dust step never hides them";
 
 /**
  * Footer accounting, dust active: "{loaded} loaded of {total_positions}
@@ -175,7 +176,7 @@ export function dustDisclosureBound(
 ): string {
   return (
     `hidden: ${String(hidden)} rows below ${stepAmount} · Σ debt ≤ ${boundDisplay} ` +
-    `(bound — every hidden row is below the step) · `
+    `(bound: every hidden row is below the step) · `
   );
 }
 
@@ -197,7 +198,7 @@ export function dustDisclosureExact(
  */
 export function liquidatableDisclosureTail(loadedLiquidatable: number): string {
   return (
-    ` liquidatable on this book · ${String(loadedLiquidatable)} among loaded rows — the ` +
+    ` liquidatable on this book · ${String(loadedLiquidatable)} among loaded rows; the ` +
     `rest are below the dust step or on unloaded pages`
   );
 }
@@ -209,15 +210,16 @@ export function emptyFilteredWalk(
   boundDisplay: string,
 ): string {
   return (
-    `no rows at or above the dust step (${dustStepAmount(step)}) — ${String(hidden)} rows ` +
-    `below it are hidden, not absent · Σ debt ≤ ${boundDisplay} · set dust off to see them`
+    `no rows at or above the dust step (${dustStepAmount(step)}) · ${String(hidden)} rows ` +
+    `below it are hidden by the filter and still counted · Σ debt ≤ ${boundDisplay} · ` +
+    `set dust off to see them`
   );
 }
 
 /** The risk map's legend line while a dust step is active (W-UX-D handoff). */
 export function dustMapLegend(step: ActiveDustStep): string {
   return (
-    `dust below ${dustStepAmount(step)} is excluded at the source — this map shows the ` +
+    `dust below ${dustStepAmount(step)} is excluded at the source, so this map shows the ` +
     `filtered walk only`
   );
 }

@@ -50,8 +50,8 @@ test("one engine withheld: its side is UNKNOWN, and the sentence never prints a 
   });
   expect(sentence).toBe(
     "As of batch #1, debt_manager has 1 of 1 positions liquidatable (Σ eligible debt $4,200); " +
-      "aave_v3_etherfi's whole book is withheld (FLAG_CUSTODY_UNPROVEN) — its side is unknown, " +
-      "not zero.",
+      "aave_v3_etherfi's whole book is withheld (FLAG_CUSTODY_UNPROVEN), so that side is " +
+      "unknown rather than zero.",
   );
   expect(sentence).not.toContain("aave_v3_etherfi has 0");
 });
@@ -74,7 +74,7 @@ test("EVERY engine withheld (untemplated by the ruling) still refuses to imply z
 
 test("the loading fallback states what the surface IS — it never invents a number", () => {
   expect(BOOK_DEK_LOADING).toBe(
-    "Every account both engines cover — what each engine would liquidate, and what it refused " +
+    "Every account both engines cover: what each engine would liquidate, and what it refused " +
       "to price.",
   );
   expect(BOOK_DEK_LOADING).not.toMatch(/[0-9]/);

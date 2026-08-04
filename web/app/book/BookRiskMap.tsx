@@ -91,14 +91,14 @@ export function BookRiskMap({
   const walkProgress =
     state.phase === "walking"
       ? state.pageCount === 0
-        ? "walking the full book — requesting page 1"
-        : `walking the full book — walked ${groupDecimalString(String(state.loaded))} of ${
+        ? "walking the full book · requesting page 1"
+        : `walking the full book · walked ${groupDecimalString(String(state.loaded))} of ${
             state.total === null ? EM_DASH : groupDecimalString(String(state.total))
           } · page ${String(state.pageCount)} · batch ${
             state.batchId === null ? EM_DASH : `#${String(state.batchId)}`
           }`
       : state.phase === "idle"
-        ? "walking the full book — waiting for the book aggregate to settle"
+        ? "walking the full book · waiting for the book aggregate to settle"
         : null;
 
   // THE ONE-BATCH RULE FOR THE HEAD (W-HR-B). The map's own count and the
@@ -153,7 +153,8 @@ export function BookRiskMap({
 
       {state.phase === "failed" && (
         <div className={styles.walkNote} data-testid="risk-map-walk-note">
-          full-book walk failed — {state.message} — the map is unavailable, not empty
+          full-book walk failed: {state.message}. That leaves the map unavailable, and it says
+          nothing about how much is on the book.
         </div>
       )}
 
@@ -167,10 +168,11 @@ export function BookRiskMap({
       {state.phase === "outpaced" && (
         <div className={styles.walkNote} data-testid="risk-map-outpaced">
           <span>
-            the book re-materialized mid-walk {String(state.supersessions)} times — no map is drawn,
-            because a vector spliced across batches is not this book
+            the book re-materialized mid-walk {String(state.supersessions)} times, so the walk
+            never finished on one batch
             {state.latestBatchId === null ? "" : ` (newest batch #${String(state.latestBatchId)})`}.
-            Nothing here is a zero; the walk simply did not finish on one batch.
+            No map is drawn from rows that span materializations, and the blank space is a
+            missing measurement.
           </span>
           <button
             type="button"
@@ -187,14 +189,15 @@ export function BookRiskMap({
         {binned === null ? (
           <div className={styles.emptyReason} data-testid="risk-map-pending">
             {state.phase === "failed" || state.phase === "outpaced"
-              ? "no full-book vector — nothing is plotted, and nothing here is a zero."
-              : "walking the full book — the map draws once the whole vector is in hand, because " +
-                "a partial vector is a picture of the sort order, not of the book."}
+              ? "the walk produced no full-book vector, so nothing is plotted and the blank is a missing measurement."
+              : "walking the full book. The map draws once the whole vector is in hand, because " +
+                "pages arrive in sort order and a partial walk would show only the top of that ranking."}
           </div>
         ) : binned.bins.length === 0 && binned.crit.length === 0 ? (
           <div className={styles.emptyReason}>
-            nothing plottable — {String(binned.total)} row(s) walked, {String(binned.aside.total)}{" "}
-            without both a positive debt and a derivable headroom. Counted aside, not dropped.
+            nothing plottable: {String(binned.total)} row(s) walked, {String(binned.aside.total)}{" "}
+            without both a positive debt and a derivable headroom. Those rows are counted aside and
+            stay out of the plot.
           </div>
         ) : (
           <>
@@ -205,7 +208,7 @@ export function BookRiskMap({
             <div className={styles.legend}>
               <span data-testid="risk-map-reading">{riskMapReadingLine(binned)}</span>
               <span>
-                <i className={`${styles.legendSwatch} ${styles.crit}`} aria-hidden /> crit —
+                <i className={`${styles.legendSwatch} ${styles.crit}`} aria-hidden /> crit:
                 engine verdict only, never binned
               </span>
               <span className={styles.warnDisclosure} data-testid="risk-map-warn-disclosure">
@@ -213,7 +216,7 @@ export function BookRiskMap({
               </span>
               {binned.aside.total > 0 && (
                 <span data-testid="risk-map-aside">
-                  {String(binned.aside.total)} counted aside, not plotted —{" "}
+                  {String(binned.aside.total)} counted aside, out of the plot:{" "}
                   {String(binned.aside.noDebt)} no debt · {String(binned.aside.unknown)} headroom
                   unknown · {String(binned.aside.refused)} refused ·{" "}
                   {String(binned.aside.unplottable)} no positive debt

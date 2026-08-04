@@ -26,7 +26,7 @@ export function DegradationBanner() {
         <div className={styles.bannerInner}>
           <span className={styles.bannerTag}>UNAVAILABLE</span>
           <span className={styles.bannerBody}>
-            no servable batch{reason !== null && reason.length > 0 ? <> — {reason}</> : null}
+            no servable batch{reason !== null && reason.length > 0 ? <> · {reason}</> : null}
             {staleSinceSeconds !== null && (
               <>
                 {" "}
@@ -84,7 +84,7 @@ export function DegradationBanner() {
         <div className={styles.bannerInner}>
           <span className={`${styles.bannerTag} ${styles.warnTag}`}>RECONNECTING</span>
           <span className={styles.bannerBody}>
-            stream lost — showing the last delivered batch until the reconnect snapshot lands
+            stream lost. Showing the last delivered batch until the reconnect snapshot lands.
           </span>
         </div>
       </div>

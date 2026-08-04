@@ -98,7 +98,7 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       display: event.amount,
       unitChip: "no unit tag",
       unitTitle:
-        "the wire carried no amount_unit — required since contract 1.2.0. Rendered verbatim as wire drift, never formatted through an unlicensed scale",
+        "the wire carried no amount_unit, required since contract 1.2.0. Rendered verbatim as wire drift, never formatted through an unlicensed scale",
       symbol,
       rawUnits: true,
     };
@@ -112,7 +112,7 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
       display: event.amount,
       unitChip: unit,
       unitTitle:
-        "unit tag outside the known closed set (dm_normalized_debt / aave_scaled / none / opaque) — rendered verbatim, never interpreted",
+        "unit tag outside the known closed set (dm_normalized_debt / aave_scaled / none / opaque), rendered verbatim, never interpreted",
       symbol,
       rawUnits: true,
     };
@@ -127,7 +127,7 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
         display: event.amount,
         unitChip: "none",
         unitTitle:
-          "the wire tagged this row record-only (unit `none`) yet carried an amount — rendered raw, never interpreted",
+          "the wire tagged this row record-only (unit `none`) yet carried an amount, so it renders raw, never interpreted",
         symbol,
         rawUnits: true,
       };
@@ -137,7 +137,7 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
         display: event.amount,
         unitChip: "opaque units",
         unitTitle:
-          "the delta's unit could not be established from custody — the raw integer renders verbatim; even decimals would be an interpretation",
+          "the delta's unit could not be established from custody, so the raw integer renders verbatim; even decimals would be an interpretation",
         symbol,
         rawUnits: true,
       };
@@ -153,8 +153,8 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
         unitChip: "aave-scaled",
         unitTitle:
           decimals === null
-            ? "ray-scaled aToken/variableDebtToken units, and this row carries NO decimals for the leg — the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
-            : "ray-scaled aToken/variableDebtToken units — the nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
+            ? "ray-scaled aToken/variableDebtToken units, and this row carries NO decimals for the leg, so the raw integer renders verbatim rather than through the engine's base-currency scale, which is a different unit. The nominal token amount is rayMul(scaled, live index); never a USD figure"
+            : "ray-scaled aToken/variableDebtToken units. The nominal token amount is rayMul(scaled, live index); not converted here, never a USD figure",
         symbol,
         rawUnits: decimals === null,
       };
@@ -170,8 +170,8 @@ export function feedAmount(event: FeedChainEvent, scale: FeedAmountScale = {}): 
         unitChip: "normalized debt",
         unitTitle:
           decimals === null
-            ? "Debt Manager normalized debt units, and this deployment's value_decimals are not known to this page yet — the raw integer renders verbatim rather than through a guessed scale. The USD view is value × interest index ÷ 1e18 at the event's index; never a USD figure"
-            : "Debt Manager normalized debt units at the engine's own value_decimals — the USD view is value × interest index ÷ 1e18 at the event's index; not converted here, never a USD figure",
+            ? "Debt Manager normalized debt units, and this deployment's value_decimals are not known to this page yet, so the raw integer renders verbatim rather than through a guessed scale. The USD view is value × interest index ÷ 1e18 at the event's index; never a USD figure"
+            : "Debt Manager normalized debt units at the engine's own value_decimals. The USD view is value × interest index ÷ 1e18 at the event's index; not converted here, never a USD figure",
         symbol,
         rawUnits: decimals === null,
       };

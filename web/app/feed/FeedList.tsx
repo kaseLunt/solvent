@@ -150,7 +150,7 @@ function LiquidationDetail({ event }: { event: FeedChainEvent }) {
       <span
         className={styles.detailRow}
         data-testid="liquidation-bonus"
-        title="an unestablished bonus is an em dash — never estimated"
+        title="an unestablished bonus renders as an em dash, never as an estimate"
       >
         bonus realized <b>{renderBps(detail.realized_bonus_bps)}</b> / configured{" "}
         <b>{renderBps(detail.configured_bonus_bps)}</b>
@@ -252,14 +252,14 @@ export function FeedList({ events, mode, ledger, empty, valueDecimals = {} }: Fe
       {untimed.length > 0 && (
         <>
           <div className={styles.untimedDivider} data-testid="untimed-divider">
-            <b>UNTIMED TAIL</b> — {String(untimed.length)} row
+            <b>UNTIMED TAIL</b> · {String(untimed.length)} row
             {untimed.length === 1 ? "" : "s"} without custodied header time, served after every
-            timed row and ordered by the chain-aware tiebreak (chain, height, tx, log, seq) — not
-            by time. A timestamp is never invented; each row shows its block number.
+            timed row and ordered by the chain-aware tiebreak (chain, height, tx, log, seq)
+            instead of by time. A timestamp is never invented; each row shows its block number.
           </div>
           {orderViolated && (
             <div className={styles.untimedDivider} role="alert" data-testid="untimed-order-violation">
-              <b>ORDERING DRIFT</b> — the wire served a TIMED row inside the untimed tail, which
+              <b>ORDERING DRIFT</b> · the wire served a TIMED row inside the untimed tail, which
               the ordering law forbids. Rows stay in wire order (re-sorting would hide the
               service bug); treat this walk as suspect.
             </div>

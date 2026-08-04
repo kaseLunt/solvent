@@ -86,7 +86,7 @@ function LiquidationExtract({ event }: { event: ChainEvent }) {
 export function InspectorActivity({ events, loading, error, hasMore, onLoadMore }: InspectorActivityProps) {
   return (
     <section data-testid="address-activity">
-      <div className={styles.sectionHead}>Address activity — durable chain actions (this account)</div>
+      <div className={styles.sectionHead}>Address activity · durable chain actions (this account)</div>
 
       {events.length === 0 && !loading && error === null && (
         <p className="mono dim">no custodied chain actions for this account in the feed.</p>
@@ -125,7 +125,7 @@ export function InspectorActivity({ events, loading, error, hasMore, onLoadMore 
 
       {error !== null && (
         <p className={styles.refusal} role="alert">
-          activity unavailable — {error.message}
+          activity unavailable: {error.message}
         </p>
       )}
       {loading && <p className="mono dim">loading activity…</p>}
@@ -135,8 +135,8 @@ export function InspectorActivity({ events, loading, error, hasMore, onLoadMore 
         </button>
       )}
       <p className={styles.sectionNote}>
-        block_time is chain-asserted header custody — null until custodied, in which case the block
-        number renders instead; a timestamp is never invented.
+        block_time is chain-asserted header custody: null until custodied, in which case the block
+        number renders instead. A timestamp is never invented.
       </p>
     </section>
   );

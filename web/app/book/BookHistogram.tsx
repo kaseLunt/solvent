@@ -56,7 +56,8 @@ function EnginePanel({
         </div>
         <div className={styles.emptyReason}>
           {histogram.refusal !== null && <RefusedTag reason={histogram.refusal.code} />}{" "}
-          buckets are empty because the ENGINE is withheld — not because no position sits here.
+          buckets are empty because the ENGINE is withheld, and that says nothing about how many
+          positions sit here.
         </div>
       </div>
     );
@@ -120,7 +121,7 @@ function EnginePanel({
                     rx={1}
                   >
                     <title>
-                      eligible territory — the engine liquidates strictly below 1.00 on the wad
+                      eligible territory: the engine liquidates strictly below 1.00 on the wad
                     </title>
                   </rect>
                 )}
@@ -144,7 +145,9 @@ function EnginePanel({
           })}
         </svg>
         <div className={styles.histAside}>
-          <span className={styles.badge}>refused {String(histogram.refused_count)} — rows withheld, counted here</span>
+          <span className={styles.badge}>
+            refused {String(histogram.refused_count)} · rows withheld and counted here
+          </span>
           <span>∞ no-debt {String(histogram.infinite_count)}</span>
         </div>
         <p className={styles.panelNote}>{histogram.note}</p>
@@ -166,7 +169,7 @@ export function BookHistogram({
   return (
     <section className={styles.section} aria-label="health-factor histogram per engine">
       <div className={styles.sectionHead}>
-        <h2>HF histogram — each engine on its own comparator</h2>
+        <h2>HF histogram: each engine on its own comparator</h2>
         <span className={styles.sectionNote}>engines are never merged into one distribution</span>
       </div>
       <div className={styles.panelGrid}>

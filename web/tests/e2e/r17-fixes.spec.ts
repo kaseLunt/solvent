@@ -175,7 +175,7 @@ test("R17 — A BODYLESS SETTLEMENT UNDER THE CURRENT DEFINITION IS THIS ROW'S O
   // TWO, the remedy was "refresh the listing", and the UNANSWERED sentence was
   // never printed at all.
   await expect(batchLine).toContainText(
-    "1 row(s) display UNANSWERED — their run ended without a served book",
+    "1 row(s) display UNANSWERED: their run ended without a served book",
   );
   await expect(batchLine).not.toContainText("2 row(s) answered for a COMMITTED DEFINITION");
   // …while R12's ANSWER half keeps its own sentence, its own count and its own

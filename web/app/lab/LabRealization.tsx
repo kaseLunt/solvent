@@ -12,7 +12,7 @@ export function HfsUnchangedBanner({ realization }: { realization: Shortfall }) 
   if (!realization.hfs_unchanged) return null;
   return (
     <p className={styles.banner} data-testid="hfs-unchanged-banner">
-      hfs_unchanged — asserted by the scenario: no oracle mark moved, every health factor is
+      hfs_unchanged · asserted by the scenario: no oracle mark moved, every health factor is
       bit-identical
     </p>
   );
@@ -50,7 +50,7 @@ export function LabRealization({ realization }: { realization: Shortfall }) {
         />
       </div>
       <p className={styles.caption} data-testid="seizure-model">
-        seizure model: {realization.seizure_model} — the disclosed assumption behind the
+        seizure model: {realization.seizure_model} · the disclosed assumption behind the
         shortfall arithmetic
       </p>
       <p className={styles.noteText}>{realization.note}</p>

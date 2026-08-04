@@ -84,7 +84,7 @@ test("cross-engine walk: time-ordered head, DISCLOSED untimed tail across pages"
   const divider = page.getByTestId("untimed-divider");
   await expect(divider).toHaveCount(1);
   await expect(divider).toContainText("1 row without custodied header time");
-  await expect(divider).toContainText("not");
+  await expect(divider).toContainText("instead of");
   await expect(divider).toContainText("by time");
 
   // The untimed row renders its BLOCK NUMBER, never an invented time.
@@ -328,7 +328,7 @@ test("live posture: no base frame → nothing pretended; the law is printed", as
   await expect(page.getByTestId("feed-live-none")).toContainText("nothing is pretended");
   await expect(page.getByTestId("feed-live-batch")).toHaveCount(0);
   await expect(strip).toContainText("current connection only");
-  await expect(strip).toContainText("live posture is never history");
+  await expect(strip).toContainText("Live posture is never history");
 });
 
 test("live posture: a delivered snapshot renders the batch's real watermark vector", async ({

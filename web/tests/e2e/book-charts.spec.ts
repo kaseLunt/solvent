@@ -87,12 +87,12 @@ test("reading lines render per panel from the served /v1/book values", async ({ 
   // adjective needs members to describe; the $0 Σ still renders.
   await expect(page.getByTestId("hist-reading-aave_v3_etherfi")).toHaveText(
     "What this shows: how many accounts sit at each health factor. 0 of 1 are below 1.00, " +
-      "where the engine may liquidate — Σ eligible debt $0.",
+      "where the engine may liquidate. Σ eligible debt $0.",
   );
   await expect(page.getByTestId("hist-reading-debt_manager")).toHaveText(
-    "What this shows: how many accounts sit at each borrow-headroom ratio — a disclosure, " +
-      "not the engine's trigger. The engine's own verdict counts 1 of 1 liquidatable — " +
-      "Σ eligible debt $4,200.",
+    "What this shows: how many accounts sit at each borrow-headroom ratio, which is a " +
+      "disclosure rather than the engine's trigger. The engine's own verdict counts 1 of 1 " +
+      "liquidatable. Σ eligible debt $4,200.",
   );
 
   // The wire histogram.note stays VISIBLE in the dim register — no collapse,
@@ -165,7 +165,7 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
 
   // The section note, verbatim; the ProjectionBadge stays where it was.
   await expect(page.getByTestId("waterfall-section-note")).toHaveText(
-    "If the shocked asset fell step by step, how much debt could the engine liquidate — and " +
+    "If the shocked asset fell step by step, how much debt could the engine liquidate, and " +
       "how much would it lose? Bars: cumulative eligible debt at each price. ×1.00 is the " +
       "standing census; every lower point is a projection.",
   );
@@ -173,13 +173,13 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
 
   // The one dim legend line under the panel grid, verbatim.
   await expect(page.getByTestId("waterfall-bad-debt-legend")).toHaveText(
-    "bad debt = debt still owed after all collateral is seized — the protocol's loss at that price.",
+    "bad debt = debt still owed after all collateral is seized, the protocol's loss at that price.",
   );
 
   // Caption (b): the primary gloss; the wire eligibility_note stays dim + verbatim.
   await expect(page.getByTestId("eligible-gloss")).toHaveText(
     '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
-      "closes can be less — the Debt Manager liquidates in two passes: half the debt, then " +
+      "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
       "the remainder.",
   );
   await expect(page.getByTestId("waterfall-held-flat")).toContainText("closes in two passes");
@@ -210,16 +210,17 @@ test("held flat (Book): the counted-disclosure pattern, raw units by design", as
   const heldFlat = page.getByTestId("waterfall-held-flat");
   // The always-visible summary, verbatim.
   await expect(heldFlat.getByTestId("held-flat-summary")).toHaveText(
-    "1 price input held flat — the scenario did not move these prices; positions priced by " +
-      "them are stressed at stale marks. A blind spot, not a zero.",
+    "1 price input held flat. The scenario did not move these prices, so positions priced by " +
+      "them are stressed at stale marks. Each one keeps its standing value, and the scenario " +
+      "is blind to where it would have gone.",
   );
   // The counted details line; open it and check the table.
   const summary = heldFlat.locator("summary");
-  await expect(summary).toHaveText("held flat — 1 inputs named");
+  await expect(summary).toHaveText("held flat: 1 inputs named");
   await summary.click();
   await expect(
     heldFlat.getByRole("columnheader", {
-      name: "held value (source's raw units — unscaled by design)",
+      name: "held value (source's raw units, unscaled by design)",
     }),
   ).toBeVisible();
   // The value is the source's RAW units (string surgery grouping only —
@@ -293,7 +294,7 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
 
   // Live progress — mono, in the panel head, disclosing "walked N of M".
   await expect(page.getByTestId("risk-map-progress")).toHaveText(
-    "walking the full book — walked 1 of 2 · page 1 · batch #1",
+    "walking the full book · walked 1 of 2 · page 1 · batch #1",
   );
 
   // Completion: the full-book header, with the map's own as-of.
@@ -330,12 +331,12 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
   // The reading line is COMPUTED from the same bins the grid draws.
   await expect(page.getByTestId("risk-map-reading")).toHaveText(
     "What this shows: where the book's debt sits by headroom. 1 of 1 plotted accounts have " +
-      "less than 10% of their borrowing capacity left — Σ debt 6,000 in the engine's own unit. " +
-      "1 of 2 walked rows are counted aside, not plotted.",
+      "less than 10% of their borrowing capacity left. Σ debt 6,000 in the engine's own unit. " +
+      "1 of 2 walked rows are counted aside and stay out of the plot.",
   );
 
   // The refused row is COUNTED aside, never dropped, never plotted.
-  await expect(page.getByTestId("risk-map-aside")).toContainText("1 counted aside, not plotted");
+  await expect(page.getByTestId("risk-map-aside")).toContainText("1 counted aside, out of the plot");
   await expect(page.getByTestId("risk-map-aside")).toContainText("1 refused");
 
   // The top-debt outlier is named with its truncated address.
@@ -374,7 +375,7 @@ test("409 mid-walk: the BookPositions notice grammar VERBATIM, restart from page
   await expect(notice).toBeVisible();
   await expect(notice).toContainText("BATCH SUPERSEDED");
   await expect(notice).toContainText(
-    "batch 1 was superseded by batch 2 mid-pagination — restarted from page one against the fresh batch",
+    "batch 1 was superseded by batch 2 mid-pagination, so the walk restarted from page one against the fresh batch",
   );
 
   // The restart is REAL: page one was fetched twice, and the completed
@@ -419,10 +420,10 @@ test("OUTPACED: a book that re-materializes faster than one walk gives up OUT LO
   // budget (3) under-counted the very event being reported.
   await expect(outpaced).toContainText("the book re-materialized mid-walk 4 times");
   await expect(outpaced).not.toContainText("mid-walk 3 times");
-  await expect(outpaced).toContainText("a vector spliced across batches is not this book");
+  await expect(outpaced).toContainText("No map is drawn from rows that span materializations");
   await expect(outpaced).toContainText("newest batch #2");
   // The refusal is not a zero and not an empty map.
-  await expect(outpaced).toContainText("Nothing here is a zero");
+  await expect(outpaced).toContainText("the blank space is a missing measurement");
   await expect(page.getByTestId("density-map")).toHaveCount(0);
   await expect(page.getByTestId("risk-map-full-head")).toHaveCount(0);
 
@@ -479,12 +480,12 @@ test("409 mid-walk with a SLOW fresh page: the stale progress dies AT ONCE, not 
 
   // The progress reached the pre-409 state at least once.
   const progress = page.getByTestId("risk-map-progress");
-  await expect(progress).toHaveText("walking the full book — walked 1 of 2 · page 1 · batch #1");
+  await expect(progress).toHaveText("walking the full book · walked 1 of 2 · page 1 · batch #1");
 
   // …and the instant the 409 lands it is ZEROED — before the fresh page can
   // possibly have arrived (it is held for two seconds).
   await expect(page.getByTestId("risk-map-superseded-notice")).toBeVisible();
-  await expect(progress).toHaveText("walking the full book — requesting page 1");
+  await expect(progress).toHaveText("walking the full book · requesting page 1");
   await expect(progress).not.toContainText("walked 1 of 2");
   await expect(progress).not.toContainText("batch #1");
   // No map is drawn from the abandoned vector either.
@@ -657,15 +658,16 @@ test("Lab held flat (address mode): counted details, raw-units header", async ({
 
   const heldFlat = page.getByTestId("held-flat");
   await expect(heldFlat.getByTestId("held-flat-summary")).toHaveText(
-    "1 price input held flat — the scenario did not move these prices; positions priced by " +
-      "them are stressed at stale marks. A blind spot, not a zero.",
+    "1 price input held flat. The scenario did not move these prices, so positions priced by " +
+      "them are stressed at stale marks. Each one keeps its standing value, and the scenario " +
+      "is blind to where it would have gone.",
   );
   const summary = heldFlat.locator("summary");
-  await expect(summary).toHaveText("held flat — 1 inputs named");
+  await expect(summary).toHaveText("held flat: 1 inputs named");
   await summary.click();
   await expect(
     heldFlat.getByRole("columnheader", {
-      name: "held value (source's raw units — unscaled by design)",
+      name: "held value (source's raw units, unscaled by design)",
     }),
   ).toBeVisible();
   await expect(heldFlat).toContainText("100000000"); // the source's raw units, verbatim
@@ -683,7 +685,7 @@ test("Lab realization: the eligible-vs-realized gloss rides the sub as title", a
   await expect(page.getByTestId("realized-leq-eligible").first()).toHaveAttribute(
     "title",
     '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
-      "closes can be less — the Debt Manager liquidates in two passes: half the debt, then " +
+      "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
       "the remainder.",
   );
 });
@@ -722,7 +724,7 @@ test("Lab run-book: wire notes become a counted verbatim details; collateral-at-
   // counted disclosure whose count is the fixture's own is what makes a dropped
   // note visible — so it moves with the fixture.
   const notes = page.getByTestId("book-wire-notes");
-  await expect(notes.locator("summary")).toHaveText("wire notes — 3, verbatim");
+  await expect(notes.locator("summary")).toHaveText("wire notes: 3, verbatim");
   await notes.locator("summary").click();
   await expect(notes).toContainText(
     "aggregates are per engine in each engine's OWN unit and decimals",

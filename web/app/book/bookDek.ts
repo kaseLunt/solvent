@@ -23,7 +23,7 @@ import { eligibleDebtFragment } from "./readingLines";
 
 /** The dek before /v1/book has answered — what the surface IS, not a number. */
 export const BOOK_DEK_LOADING =
-  "Every account both engines cover — what each engine would liquidate, and what it refused " +
+  "Every account both engines cover: what each engine would liquidate, and what it refused " +
   "to price.";
 
 /**
@@ -87,7 +87,7 @@ export function bookDek({ batchId, engines, badDebt }: BookDekInput): string {
       .join(" and ");
     return (
       `As of batch #${String(batchId)}, every engine's whole book is withheld` +
-      `${names === "" ? "" : ` — ${names}`}: no side is known, and none is zero.`
+      `${names === "" ? "" : ` (${names})`}: no side is known, and none is zero.`
     );
   }
 
@@ -103,7 +103,7 @@ export function bookDek({ batchId, engines, badDebt }: BookDekInput): string {
       `As of batch #${String(batchId)}, ${lead.engine} has ${String(counts.liquidatable)} of ` +
       `${String(counts.denominator)} positions liquidatable (Σ eligible debt ` +
       `${usdOrDash(bad(lead.engine)?.eligible_debt_usd ?? null, bad(lead.engine)?.usd_decimals ?? 0)}); ` +
-      `${withheldNames} — its side is unknown, not zero.`
+      `${withheldNames}, so that side is unknown rather than zero.`
     );
   }
 

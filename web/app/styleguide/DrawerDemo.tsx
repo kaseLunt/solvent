@@ -15,7 +15,7 @@ export function DrawerDemo() {
       </button>
       <Drawer open={open} onClose={() => setOpen(false)} title="EXPLAIN · SPECIMEN NUMBER">
         <p style={{ marginTop: 0 }}>
-          SPECIMEN CONTENT — in a real surface this drawer carries the evidentiary chain: batch +
+          SPECIMEN CONTENT · in a real surface this drawer carries the evidentiary chain: batch +
           materialization identity, input as-ofs, price inputs with provenance class and budget
           verdicts, flags/refusals, the engine-exact formula and comparator.
         </p>

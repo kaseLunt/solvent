@@ -175,15 +175,15 @@ test.describe("histogram reading lines (§17) — computed, never asserted", () 
     // empty class — the $0 Σ still renders, honest over a computed book.
     expect(histogramReadingLine(aaveHist, aaveAgg, aaveBadDebt, WAD)).toBe(
       "What this shows: how many accounts sit at each health factor. 0 of 1 are below 1.00, " +
-        "where the engine may liquidate — Σ eligible debt $0.",
+        "where the engine may liquidate. Σ eligible debt $0.",
     );
   });
 
   test("the DM line: a disclosure, with the engine's own verdict count", () => {
     expect(histogramReadingLine(dmHist, dmAgg, dmBadDebt, WAD)).toBe(
-      "What this shows: how many accounts sit at each borrow-headroom ratio — a disclosure, " +
-        "not the engine's trigger. The engine's own verdict counts 1 of 1 liquidatable — " +
-        "Σ eligible debt $4,200.",
+      "What this shows: how many accounts sit at each borrow-headroom ratio, which is a " +
+        "disclosure rather than the engine's trigger. The engine's own verdict counts 1 of 1 " +
+        "liquidatable. Σ eligible debt $4,200.",
     );
   });
 
@@ -238,7 +238,7 @@ test.describe("histogram reading lines (§17) — computed, never asserted", () 
 test.describe("the ruling's copy, pinned verbatim", () => {
   test("waterfall section note", () => {
     expect(WATERFALL_SECTION_NOTE).toBe(
-      "If the shocked asset fell step by step, how much debt could the engine liquidate — and " +
+      "If the shocked asset fell step by step, how much debt could the engine liquidate, and " +
         "how much would it lose? Bars: cumulative eligible debt at each price. ×1.00 is the " +
         "standing census; every lower point is a projection.",
     );
@@ -246,42 +246,45 @@ test.describe("the ruling's copy, pinned verbatim", () => {
 
   test("bad-debt legend line", () => {
     expect(BAD_DEBT_LEGEND).toBe(
-      "bad debt = debt still owed after all collateral is seized — the protocol's loss at that price.",
+      "bad debt = debt still owed after all collateral is seized, the protocol's loss at that price.",
     );
   });
 
   test("eligible-vs-realized gloss", () => {
     expect(ELIGIBLE_REALIZED_GLOSS).toBe(
       '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
-        "closes can be less — the Debt Manager liquidates in two passes: half the debt, then " +
+        "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
         "the remainder.",
     );
   });
 
   test("held-flat copy builders", () => {
     expect(heldFlatSummary(3)).toBe(
-      "3 price inputs held flat — the scenario did not move these prices; positions priced by " +
-        "them are stressed at stale marks. A blind spot, not a zero.",
+      "3 price inputs held flat. The scenario did not move these prices, so positions priced by " +
+        "them are stressed at stale marks. Each one keeps its standing value, and the scenario " +
+        "is blind to where it would have gone.",
     );
-    expect(heldFlatDetailsSummary(3)).toBe("held flat — 3 inputs named");
-    expect(HELD_FLAT_VALUE_HEADER).toBe("held value (source's raw units — unscaled by design)");
+    expect(heldFlatDetailsSummary(3)).toBe("held flat: 3 inputs named");
+    expect(HELD_FLAT_VALUE_HEADER).toBe("held value (source's raw units, unscaled by design)");
   });
 
   test("held-flat summary pluralizes: singular prose at n = 1 (W-UX-C micro-ruling 3)", () => {
     expect(heldFlatSummary(1)).toBe(
-      "1 price input held flat — the scenario did not move these prices; positions priced by " +
-        "them are stressed at stale marks. A blind spot, not a zero.",
+      "1 price input held flat. The scenario did not move these prices, so positions priced by " +
+        "them are stressed at stale marks. Each one keeps its standing value, and the scenario " +
+        "is blind to where it would have gone.",
     );
     // The counted label-value line may stay invariant — pinned so the ruling's
     // scope is deliberate.
-    expect(heldFlatDetailsSummary(1)).toBe("held flat — 1 inputs named");
+    expect(heldFlatDetailsSummary(1)).toBe("held flat: 1 inputs named");
   });
 
   test("collateral-at-risk reader caption and wire-notes summary", () => {
     expect(AT_RISK_READER_CAPTION).toBe(
-      "collateral at risk is re-measured at each price step — it can fall as prices fall, " +
-        "because the same collateral is worth less. A dip is honest arithmetic, not missing data.",
+      "collateral at risk is re-measured at each price step, so it can fall as prices fall, " +
+        "because the same collateral is worth less. A dip in the line comes from that " +
+        "arithmetic, not from missing data.",
     );
-    expect(wireNotesSummary(2)).toBe("wire notes — 2, verbatim");
+    expect(wireNotesSummary(2)).toBe("wire notes: 2, verbatim");
   });
 });

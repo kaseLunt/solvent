@@ -192,7 +192,7 @@ test("the Debt Manager's region is called a DISCLOSURE, never its trigger", () =
   };
   const line = histogramShiftReadingLine(engine);
   expect(line).toContain("Below 1.00 is the borrow-headroom ratio");
-  expect(line).toContain("a DISCLOSURE, not this engine's trigger");
+  expect(line).toContain("a DISCLOSURE rather than this engine's trigger");
   // And the Aave sentence must NOT claim a disclosure — the comparator IS the
   // engine's own liquidation test there.
   const wadLine = histogramShiftReadingLine({
@@ -270,7 +270,7 @@ function asWadEngine(engine: LabRunBookEngine): LabRunBookEngine {
 
 test("TOP 20 OF N: the disclosure names both numbers and how many are missing", () => {
   expect(moversDisclosure(moversEngine(20, 31))).toBe(
-    "Showing the top 20 of 31 accounts whose debt became eligible, ranked by that debt — " +
+    "Showing the top 20 of 31 accounts whose debt became eligible, ranked by that debt; " +
       "11 are not on this page.",
   );
 });
@@ -372,7 +372,7 @@ const UNPRICED = {
 test("an all-priced side states the sum, the engine and its decimals — and adds nothing", () => {
   const line = collateralReadingLine(collateralOf([COUNTED], "800000000000"), 8, "before");
   expect(line).toContain("1 asset sums to $8,000");
-  expect(line).toContain("this engine's own USD at 8 decimals — never added to another engine's");
+  expect(line).toContain("this engine's own USD at 8 decimals, never added to another engine's");
   // No remainder exists, so no remainder sentence is invented.
   expect(line).not.toContain("listed with NO value");
   expect(line).not.toContain("UNKNOWABLE");
@@ -386,7 +386,7 @@ test("AN UNPRICED HOLDING IS UNKNOWABLE, never zero and never summed", () => {
   );
   expect(line).toContain("1 asset sums to $8,000");
   expect(line).toContain("1 further holding is listed with NO value, and it is outside that total");
-  expect(line).toContain("carries no price at all, so its worth is UNKNOWABLE — not zero");
+  expect(line).toContain("carries no price at all, so its worth is UNKNOWABLE rather than zero");
   // THE LAW: the unpriced balance never becomes a dollar figure. $0 must not
   // appear anywhere in the sentence.
   expect(line).not.toContain("$0");

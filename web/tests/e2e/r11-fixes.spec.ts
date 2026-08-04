@@ -105,7 +105,7 @@ test("(A) A 200 NAMING NOBODY: every covered cell UNANSWERED, and the header cla
   // not borrow the sentence for a run that ended without one, and may not call
   // it "not run" either.
   await expect(batchLine).toContainText(
-    "1 run(s) were served a book that named none of the row's covered engines — a served book, " +
+    "1 run(s) were served a book that named none of the row's covered engines: a served book, " +
       "but not a served result",
   );
   await expect(batchLine).toContainText("There is no batch for this table to be as of");

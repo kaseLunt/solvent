@@ -188,7 +188,7 @@ export function useFullBookWalk({ engine, minValue, enabled }: FullBookWalkParam
             if (response.refused) {
               setState({
                 phase: "failed",
-                message: `engine withheld — ${response.refusal?.code ?? "unnamed refusal"}: ${
+                message: `engine withheld · ${response.refusal?.code ?? "unnamed refusal"}: ${
                   response.refusal?.detail ?? "the whole book is withheld on this batch"
                 }`,
               });
@@ -240,7 +240,7 @@ export function useFullBookWalk({ engine, minValue, enabled }: FullBookWalkParam
             setNotice(
               `batch ${String(cause.cursorBatchId)} was superseded${
                 cause.currentBatchId !== null ? ` by batch ${String(cause.currentBatchId)}` : ""
-              } mid-pagination — restarted from page one against the fresh batch`,
+              } mid-pagination, so the walk restarted from page one against the fresh batch`,
             );
             continue; // restart from page one, visibly
           }

@@ -403,8 +403,8 @@ test.describe("normalizeBookQuery — ONE normalizer before the first fetch", ()
     // because 1.5.0 moved it. A remap acknowledgment that names a key the
     // table is not using is worse than none.
     expect(SORT_HF_REMAP_ACK).toBe(
-      'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
-        "publishes a strict liquidatable boolean, not a health factor.",
+      'sort "hf" is not defined for debt_manager, so it was reset to headroom. The Debt ' +
+        "Manager publishes a strict liquidatable boolean, not a health factor.",
     );
     expect(SORT_HF_REMAP_ACK).toContain(
       bookSortWireKey("debt_manager", normalizeBookQuery("debt_manager", "hf", null).sort),

@@ -133,7 +133,7 @@ export function scenarioCoverage(
     families,
     reason: covered
       ? `${scenario.id} is defined for ${engine}; it moves ${axisFamilyWords(families)}.`
-      : `NOT COVERED — ${scenario.id} moves ${axisFamilyWords(families)} and is defined for ` +
+      : `NOT COVERED · ${scenario.id} moves ${axisFamilyWords(families)} and is defined for ` +
         `${definedFor}. ${engine} is outside this scenario's model: a property of the committed ` +
         `DEFINITION, not a refusal and not a failed run.`,
   };
@@ -354,7 +354,7 @@ export function bookContradiction(response: LabRunBook): BookContradiction | nul
       engines: both,
       reason:
         `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(both)} is named in BOTH engines[] ` +
-        `and excluded_engines[] — served and withheld at once, in one response. A body that ` +
+        `and excluded_engines[]: served and withheld at once, in one response. A body that ` +
         `answers a cell two ways answers it no way, and nothing in it says which answer it ` +
         `meant. No cell, no pin, no cohort.`,
     };
@@ -367,7 +367,7 @@ export function bookContradiction(response: LabRunBook): BookContradiction | nul
       engines: twiceServed,
       reason:
         `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(twiceServed)} is named TWICE in ` +
-        `engines[] — two results offered for one cell, and nothing in the body says which is ` +
+        `engines[]: two results offered for one cell, and nothing in the body says which is ` +
         `the answer. Rendering the first would be this surface choosing a number the response ` +
         `never chose. No cell, no pin, no cohort.`,
     };
@@ -380,7 +380,7 @@ export function bookContradiction(response: LabRunBook): BookContradiction | nul
       engines: twiceWithheld,
       reason:
         `THE SERVED BOOK CONTRADICTS ITSELF: ${engineWords(twiceWithheld)} is named TWICE in ` +
-        `excluded_engines[] — two refusals offered for one cell, and nothing in the body says ` +
+        `excluded_engines[]: two refusals offered for one cell, and nothing in the body says ` +
         `which register it meant. No cell, no pin, no cohort.`,
     };
   }
@@ -564,7 +564,7 @@ export function definitionSkew(
     served,
     fields,
     reason:
-      `DEFINITION CHANGED — this scenario's committed definition changed after this page ` +
+      `DEFINITION CHANGED · this scenario's committed definition changed after this page ` +
       `loaded (${fields.join(", ")} disagree). The listing this page is showing reads ` +
       `${identity.scenarioId} ${identity.version} at scenario_config_version ` +
       `${identity.configVersion}; the run answered for ${served.scenarioId} ${served.version} ` +
@@ -947,11 +947,11 @@ const DEFER: Settlement = { disposition: "defer" };
  */
 function currentBodylessReason(failure: RerunFailure, retained: BookRefusal): string {
   return (
-    `this row's CURRENT attempt served no book — ${failure.reason} That request was ASKED ` +
+    `this row's CURRENT attempt served no book. ${failure.reason} That request was ASKED ` +
     `under the definition this page IS showing, so it IS this row's attempt and there is no ` +
     `skew to report: it simply came back with nothing, which is neither a zero nor a “not ` +
     `run”. What this row still holds is an EARLIER response this surface REFUSES to present ` +
-    `(${CELL_STATE_LABEL[retained.kind]}) — retained at its own batch pin, disclosed in its ` +
+    `(${CELL_STATE_LABEL[retained.kind]}), retained at its own batch pin, disclosed in its ` +
     `own banner, displayed nowhere, and never this attempt's answer.`
   );
 }
@@ -983,13 +983,13 @@ function attemptSkewOf(
     served: attempt,
     fields,
     reason:
-      `DEFINITION CHANGED — this attempt belongs to a definition this page is no longer ` +
+      `DEFINITION CHANGED · this attempt belongs to a definition this page is no longer ` +
       `showing (${fields.join(", ")} disagree). The run was DISPATCHED against ` +
       `${attempt.scenarioId} ${attempt.version} at scenario_config_version ` +
       `${attempt.configVersion}; the listing this page is showing reads ${identity.scenarioId} ` +
       `${identity.version} at scenario_config_version ${identity.configVersion}. ` +
       `${inFlight ? "No book has come back from it" : "No book came back from it"}, so the ` +
-      `identity it was ASKED under is the only identity it has — and that is not this row's. ` +
+      `identity it was ASKED under is the only identity it has, and that is not this row's. ` +
       `It is therefore not this row's attempt: no cell, no pin, no cohort, and it is counted ` +
       `as neither in flight nor unanswered here. ` +
       (inFlight
@@ -1676,7 +1676,7 @@ export function resolveBatchCohort(
 
 /** No run at all: a statement about this session, never about the book. */
 export const MATRIX_NO_RUN_LINE =
-  "no run has been issued yet — every covered cell reads “not run”, which is a " +
+  "no run has been issued yet, so every covered cell reads “not run”, which is a " +
   "statement about this session, not about the book.";
 
 /** "batch #1" / "batches #1 and #3" / "batches #1, #3 and #4". */
@@ -1724,14 +1724,14 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   if (allHole > 0) {
     facts.push(
       `${String(allHole)} run(s) were served a book that named none of the row's covered ` +
-        `engines — a served book, but not a served result`,
+        `engines: a served book, but not a served result`,
     );
   }
   // R12: NOT "named nobody". This book named somebody TWICE, or named them
   // served and withheld at once — a body refused for presentation whole.
   if (contradicted > 0) {
     facts.push(
-      `${String(contradicted)} run(s) were served a book that CONTRADICTS ITSELF — an engine ` +
+      `${String(contradicted)} run(s) were served a book that CONTRADICTS ITSELF: an engine ` +
         `named twice, or named as served and withheld at once, which is a body that names ` +
         `somebody twice rather than one that names nobody`,
     );
@@ -1741,7 +1741,7 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   if (changed > 0) {
     facts.push(
       `${String(changed)} run(s) answered for a committed definition this page is no longer ` +
-        `showing — refresh the listing to run against the current one`,
+        `showing. Refresh the listing to run against the current one`,
     );
   }
   // R15: THE REQUEST IS STILL OUT, so no account of what it did may be given and
@@ -1751,7 +1751,7 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   if (runningAttempts > 0) {
     facts.push(
       `${String(runningAttempts)} run(s) were ASKED under a committed definition this page is ` +
-        `no longer showing and the request is STILL OUT — whatever it answers will be judged by ` +
+        `no longer showing and the request is STILL OUT. Whatever it answers will be judged by ` +
         `the identity the response publishes for itself, so there is nothing to do here until ` +
         `it settles`,
     );
@@ -1763,7 +1763,7 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   if (settledAttempts > 0) {
     facts.push(
       `${String(settledAttempts)} run(s) were ASKED under a committed definition this page is ` +
-        `no longer showing and never came back with a book of their own — re-run to ask under ` +
+        `no longer showing and never came back with a book of their own, so re-run to ask under ` +
         `the current one`,
     );
   }
@@ -1774,7 +1774,7 @@ function firstResultPendingClause(cohort: BatchCohort): string {
   }
   return (
     `no result has been served to this table yet: ${facts.join(", and ")}. There is no batch ` +
-    `for this table to be as of — and this is NOT “not run”: every row counted here was asked, ` +
+    `for this table to be as of, and this is NOT “not run”: every row counted here was asked, ` +
     `and each says in its own cell what became of the asking.`
   );
 }
@@ -1812,11 +1812,11 @@ function cohortClause(cohort: BatchCohort): string {
   if (cohort.currentScenarioIds.length === 0) {
     return (
       `batch ${batch} is the newest batch this table has seen and the floor its as-of never ` +
-      `falls below — but NO result now displayed was measured at it. ` +
+      `falls below, but NO result now displayed was measured at it. ` +
       (older === 0
         ? "No row is displaying a result at all right now, so there is no cohort to read together."
         : `${String(older)} row(s) are displayed and every one of them is OLDER, marked ` +
-          `SUPERSEDED at its own batch pin — there is no batch ${batch} cohort here to read ` +
+          `SUPERSEDED at its own batch pin, so there is no batch ${batch} cohort here to read ` +
           `them as one.`)
     );
   }
@@ -1827,7 +1827,7 @@ function cohortClause(cohort: BatchCohort): string {
     // including an in-flight row's OLDER pin that this list deliberately omits.
     (older === 0
       ? " Every DISPLAYED result was measured at that batch."
-      : ` ${String(older)} row(s) still hold an older batch's result and are marked SUPERSEDED — they are shown, never blended into the sentence above.`)
+      : ` ${String(older)} row(s) still hold an older batch's result and are marked SUPERSEDED. They are shown, never blended into the sentence above.`)
   );
 }
 
@@ -1847,7 +1847,7 @@ function heldPinClause(cohort: BatchCohort): string {
   if (older.length === 0) return "";
   return (
     ` ${String(older.length)} re-running row(s) still hold a result at ` +
-    `${batchWords(older.map((pin) => pin.batchId))} while the request is out — held evidence, ` +
+    `${batchWords(older.map((pin) => pin.batchId))} while the request is out · held evidence, ` +
     `displayed nowhere, and never part of the cohort above.`
   );
 }
@@ -1876,7 +1876,7 @@ function inFlightClause(cohort: BatchCohort): string {
 function unansweredClause(cohort: BatchCohort): string {
   if (cohort.anchorBatchId === null || cohort.unansweredScenarioIds.length === 0) return "";
   return (
-    ` ${String(cohort.unansweredScenarioIds.length)} row(s) display UNANSWERED — their run ` +
+    ` ${String(cohort.unansweredScenarioIds.length)} row(s) display UNANSWERED: their run ` +
     `ended without a served book, which is neither a zero nor a “not run”, and joins no batch ` +
     `sentence here.`
   );
@@ -1901,7 +1901,7 @@ function allHoleClause(cohort: BatchCohort): string {
   if (cohort.anchorBatchId === null || cohort.allHoleScenarioIds.length === 0) return "";
   return (
     ` ${String(cohort.allHoleScenarioIds.length)} row(s) were SERVED A BOOK that named none of ` +
-    `the engines their committed definition covers — every covered cell there reads UNANSWERED, ` +
+    `the engines their committed definition covers, so every covered cell there reads UNANSWERED, ` +
     `so the row displays no result, pins no batch, and is no part of the sentence above. That is ` +
     `not a run that ended without a book: the book arrived and named nobody.`
   );
@@ -1921,10 +1921,10 @@ function contradictedClause(cohort: BatchCohort): string {
   if (cohort.anchorBatchId === null || cohort.contradictedScenarioIds.length === 0) return "";
   return (
     ` ${String(cohort.contradictedScenarioIds.length)} row(s) were served a book that ` +
-    `CONTRADICTS ITSELF — an engine named twice within an array, or named as served and ` +
+    `CONTRADICTS ITSELF: an engine named twice within an array, or named as served and ` +
     `withheld at once. A body that answers a cell two ways answers it no way, so the whole ` +
     `response is refused for presentation: no cell, no pin, and no part of the sentence above. ` +
-    `That is not a book that named nobody — this one named somebody twice.`
+    `That is not a book that named nobody; this one named somebody twice.`
   );
 }
 
@@ -1964,7 +1964,7 @@ function definitionChangedClause(cohort: BatchCohort): string {
   if (answers > 0) {
     line +=
       ` ${String(answers)} row(s) answered for a COMMITTED ` +
-      `DEFINITION this page is no longer showing — the committed set moved after this page ` +
+      `DEFINITION this page is no longer showing: the committed set moved after this page ` +
       `loaded. Nothing failed and nothing was withheld: a result computed for one definition is ` +
       `simply never read against the coverage of another, so the row is not classified, pins no ` +
       `batch, and is no part of the sentence above. Refresh the committed listing to run against ` +
@@ -1976,7 +1976,7 @@ function definitionChangedClause(cohort: BatchCohort): string {
   if (running > 0) {
     line +=
       ` ${String(running)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
-      `longer showing and their request is STILL OUT — an attempt carries only the identity it ` +
+      `longer showing and their request is STILL OUT. An attempt carries only the identity it ` +
       `was DISPATCHED under, and that identity is not this row's. Nothing has settled: whatever ` +
       `the request answers will be judged by the identity the RESPONSE publishes for itself, ` +
       `so the row pins no batch and is no part of the sentence above. There is nothing to do ` +
@@ -1985,11 +1985,11 @@ function definitionChangedClause(cohort: BatchCohort): string {
   if (settled > 0) {
     line +=
       ` ${String(settled)} row(s) were ASKED under a COMMITTED DEFINITION this page is no ` +
-      `longer showing and never came back with a book of their own — an attempt carries only ` +
+      `longer showing and never came back with a book of their own. An attempt carries only ` +
       `the identity it was DISPATCHED under, and that identity is not this row's. Nothing ` +
       `answered and nothing was refused, so the attempt is counted as neither in flight nor ` +
       `unanswered, pins no batch, and is no part of the sentence above. Re-run the row to ask ` +
-      `under the current definition — a listing refresh resolves nothing here, because the ` +
+      `under the current definition, and a listing refresh resolves nothing here, because the ` +
       `listing is already the current one.`;
   }
   return line;
@@ -2015,16 +2015,16 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
   if (cohort.anchorBatchId !== null && cohort.currentScenarioIds.length > 0) {
     return cohort.anchorBatchId === frontierBatchId
       ? `${lead}.`
-      : `${lead} — a different batch from this table's displayed cohort, which is why the two ` +
+      : `${lead}, a different batch from this table's displayed cohort, which is why the two ` +
           `are never read as one number.`;
   }
   if (cohort.displayedPins.length === 0) return `${lead}.`;
   const matching = cohort.displayedPins.filter((pin) => pin.batchId === frontierBatchId).length;
   const displayed = cohort.displayedPins.length;
   return matching === 0
-    ? `${lead} — no result displayed here was measured at it, and this table names no cohort ` +
+    ? `${lead}: no result displayed here was measured at it, and this table names no cohort ` +
         `of its own, so no same-or-different claim is made for the table as a whole.`
-    : `${lead} — the same batch ${String(matching)} of the ${String(displayed)} displayed ` +
+    : `${lead}: the same batch ${String(matching)} of the ${String(displayed)} displayed ` +
         `row(s) are pinned to. This table names no cohort of its own, so the two are still ` +
         `never read as one number.`;
 }
@@ -2139,7 +2139,7 @@ export type LabCellState =
 export function unansweredReason(outcome: Exclude<RunBookOutcome, { kind: "ok" }>): string {
   switch (outcome.kind) {
     case "not-served":
-      return "this deployment answered 404 — book-wide stress is not served here. A fact about the DEPLOYMENT, not about the scenario.";
+      return "this deployment answered 404, so book-wide stress is not served here. A fact about the DEPLOYMENT, not about the scenario.";
     case "no-batch":
       return `no servable batch (503): ${outcome.message}${
         outcome.retryAfterSeconds === null
@@ -2148,10 +2148,10 @@ export function unansweredReason(outcome: Exclude<RunBookOutcome, { kind: "ok" }
       }`;
     case "rate-limited":
       return outcome.retryAfterSeconds === null
-        ? "rate limited (429) — the service did not say when to retry."
-        : `rate limited (429) — the service says retry after ${String(outcome.retryAfterSeconds)}s.`;
+        ? "rate limited (429), and the service did not say when to retry."
+        : `rate limited (429), and the service says retry after ${String(outcome.retryAfterSeconds)}s.`;
     case "unreachable":
-      return `the API could not be reached (${outcome.message}) — this says nothing about the book.`;
+      return `the API could not be reached (${outcome.message}), which says nothing about the book.`;
     case "failed":
       return `the run failed (${String(outcome.status)}): ${outcome.message}`;
   }
@@ -2304,7 +2304,7 @@ export function cellState(input: CellStateInput): LabCellState {
   return {
     state: "unanswered",
     reason:
-      `the run returned neither a result nor a refusal for ${engine} — the committed ` +
+      `the run returned neither a result nor a refusal for ${engine}, an engine the committed ` +
       "definition claims this engine, so its absence is a hole, and this surface will not " +
       `fill a hole with a zero. The book it served was measured at batch #${String(batchId)}; ` +
       "this cell is no part of that batch's cohort.",
@@ -2468,7 +2468,7 @@ export function rerunFailedBanner(
       disposition: settlement.disposition,
       attemptChanged: settled,
       line: !settled
-          ? `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book — ` +
+          ? `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book. ` +
             `${failure} This row holds no result and no served response at all: the earlier run ` +
             `ended without a book either, and ${
               surface === "matrix" ? "every covered cell" : "the outcome below"
@@ -2476,7 +2476,7 @@ export function rerunFailedBanner(
           : // Unreachable while `rerunFailed` is only written beside a held
             // `kind: "ok"` outcome, and stated rather than assumed — as this
             // arm already was before R16 gave it a second half.
-            `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book — ` +
+            `${surface === "matrix" ? "re-run" : "the re-run"} ended without a served book. ` +
             `${failure} That request was ASKED under a committed definition this page is no ` +
             `longer showing, so it is not this row's attempt and ${
               surface === "matrix" ? "every covered cell" : "the panel below"
@@ -2509,13 +2509,13 @@ export function rerunFailedBanner(
         attemptChanged: false,
         line:
           surface === "matrix"
-            ? `re-run ended without a served book — ${failure} What this row still holds is ` +
+            ? `re-run ended without a served book. ${failure} What this row still holds is ` +
               `NOT a result: it is a served book that named none of the engines this row's ` +
               `committed definition covers, and every covered cell reads UNANSWERED. Nothing ` +
               `was overwritten, and nothing was measured in its place.`
-            : `the re-run ended without a served book — ${failure} What this row still holds ` +
+            : `the re-run ended without a served book. ${failure} What this row still holds ` +
               `is NOT a result: it is a served book that named none of the engines this row's ` +
-              `committed definition covers — the outcome below says so in its own words. ` +
+              `committed definition covers, and the outcome below says so in its own words. ` +
               `Nothing was overwritten and nothing was invented in its place.`,
       };
     }
@@ -2530,9 +2530,9 @@ export function rerunFailedBanner(
       attemptChanged: false,
       line:
         surface === "matrix"
-          ? `re-run ended without a book — ${failure} The cells still show what this row ` +
+          ? `re-run ended without a book. ${failure} The cells still show what this row ` +
             `already measured, at its own batch.`
-          : `the re-run ended without a book — ${failure} The result below is the one this row ` +
+          : `the re-run ended without a book. ${failure} The result below is the one this row ` +
             `already held, at the batch it was measured on; nothing was overwritten and nothing ` +
             `was invented in its place.`,
     };
@@ -2563,13 +2563,13 @@ export function rerunFailedBanner(
       attemptChanged: true,
       line:
         surface === "matrix"
-          ? `re-run ended without a served book — ${failure} That request was ASKED under a ` +
+          ? `re-run ended without a served book. ${failure} That request was ASKED under a ` +
             `committed definition this page is no longer showing, so it is not this row's ` +
             `attempt and every covered cell reads DEFINITION CHANGED about it. What this row ` +
             `still holds is NOT a result either: it is an EARLIER response this surface REFUSES ` +
             `to present (${register}), retained at its own batch pin. Nothing was overwritten, ` +
             `and nothing was measured in its place.`
-          : `the re-run ended without a served book — ${failure} That request was ASKED under a ` +
+          : `the re-run ended without a served book. ${failure} That request was ASKED under a ` +
             `committed definition this page is no longer showing, so it is not this row's ` +
             `attempt and the panel below reads DEFINITION CHANGED about it. What this row still ` +
             `holds is NOT a result either: it is an EARLIER response this surface REFUSES to ` +
@@ -2599,13 +2599,13 @@ export function rerunFailedBanner(
       attemptChanged: false,
       line:
         surface === "matrix"
-          ? `re-run ended without a served book — ${failure} That request was ASKED under the ` +
+          ? `re-run ended without a served book. ${failure} That request was ASKED under the ` +
             `definition this page IS showing, so it IS this row's CURRENT attempt and every ` +
             `covered cell reads UNANSWERED. What this row still holds is NOT a result either: ` +
             `it is an EARLIER response this surface REFUSES to present (${register}), retained ` +
             `at its own batch pin. Nothing was overwritten, and nothing was measured in its ` +
             `place.`
-          : `the re-run ended without a served book — ${failure} That request was ASKED under ` +
+          : `the re-run ended without a served book. ${failure} That request was ASKED under ` +
             `the definition this page IS showing, so it IS this row's CURRENT attempt and the ` +
             `panel below reads UNANSWERED. What this row still holds is NOT a result either: it ` +
             `is an EARLIER response this surface REFUSES to present (${register}). Nothing was ` +
@@ -2621,11 +2621,11 @@ export function rerunFailedBanner(
     attemptChanged: false,
     line:
       surface === "matrix"
-        ? `re-run ended without a served book — ${failure} What this row still holds is NOT a ` +
+        ? `re-run ended without a served book. ${failure} What this row still holds is NOT a ` +
           `result: it is the earlier response this surface REFUSES to present, and every covered ` +
           `cell of this row names that refusal in its own words (${register}). Nothing was ` +
           `overwritten, and nothing was measured in its place.`
-        : `the re-run ended without a served book — ${failure} What this row still holds is NOT ` +
+        : `the re-run ended without a served book. ${failure} What this row still holds is NOT ` +
           `a result: it is the earlier response this surface REFUSES to present, named below in ` +
           `its own words (${register}). Nothing was overwritten and nothing was invented in its ` +
           `place.`,
@@ -2684,9 +2684,9 @@ export function attemptChangedNote(skew: DefinitionSkew, surface: RerunSurface):
     return skew.pending
       ? "this row's request is still out, and was ASKED under a committed definition this page " +
           "is no longer showing. Whatever it answers will be judged by the identity the response " +
-          "publishes for ITSELF — a listing refresh resolves nothing here."
+          "publishes for ITSELF, and a listing refresh resolves nothing here."
       : "this row's run was ASKED under a committed definition this page is no longer showing, " +
-          "and never came back with a book of its own. A listing refresh resolves nothing — the " +
+          "and never came back with a book of its own. A listing refresh resolves nothing, because the " +
           "listing is already the current one. Run this row again to ask under the definition " +
           "above.";
   }
@@ -2694,8 +2694,8 @@ export function attemptChangedNote(skew: DefinitionSkew, surface: RerunSurface):
   // says only what this PANEL can establish, and never contradicts the reason it
   // is appended to — whose last words are that the request is still out.
   return skew.pending
-    ? "This panel therefore shows no aggregate, no delta and no outcome register from it — and " +
+    ? "This panel therefore shows no aggregate, no delta and no outcome register from it, and " +
         "there is nothing to do here until the request settles."
     : "No book came back from it, so there is nothing here for a listing refresh to make " +
-        "readable — this panel shows no aggregate, no delta and no outcome register from it.";
+        "readable, so this panel shows no aggregate, no delta and no outcome register from it.";
 }

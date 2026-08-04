@@ -58,15 +58,15 @@ export function noPricePathTitle(reason: string | null | undefined): string {
   if (reason === LIQ_NEVER_REASON_NO_COUNTED_COLLATERAL) {
     return (
       "No price move alone can liquidate this account: its counted collateral is not on any " +
-      "committed price axis (stable collateral holds its value in this solve). Debt growth — " +
-      "interest — or a parameter change can still cross the boundary. " +
+      "committed price axis (stable collateral holds its value in this solve). Debt growth from " +
+      "interest, or a parameter change, can still cross the boundary. " +
       `Wire: '${LIQ_NEVER_REASON_NO_COUNTED_COLLATERAL}'.`
     );
   }
   if (reason === LIQ_NEVER_REASON_OUTSIDE_COVERS) {
     return (
       "Collateral outside the shocked asset already covers the debt at the liquidation " +
-      "threshold — no fall of the shocked asset alone reaches the boundary; interest or " +
+      "threshold, so no fall of the shocked asset alone reaches the boundary; interest or " +
       `parameter changes still can. Wire: '${reason}'.`
     );
   }
@@ -121,7 +121,7 @@ export function noPricePathTitle(reason: string | null | undefined): string {
  */
 const NO_PRICE_PATH_LEGEND_BODY =
   "no price path = no downward move along the committed price axis reaches liquidation for " +
-  "this account — non-price paths are not evaluated here; each cell's hover names its " +
+  "this account. Non-price paths are not evaluated here; each cell's hover names its " +
   "reason. ";
 
 export const NO_PRICE_PATH_LEGEND = `${NO_PRICE_PATH_LEGEND_BODY}The HF column stays the verdict.`;
@@ -140,7 +140,7 @@ export function noPricePathLegendFor(engine: string): string {
 
 /** The Liq. distance column header's own title attribute (the struck column). */
 export const LIQ_DISTANCE_HEADER_TITLE =
-  "how far the named asset's price must fall to cross this engine's boundary — price axis only.";
+  "how far the named asset's price must fall to cross this engine's boundary, on the price axis only.";
 
 /**
  * The DEMOTED price-path statement, as one hover sentence (W-HR-A). The

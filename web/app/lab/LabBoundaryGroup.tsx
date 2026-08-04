@@ -48,7 +48,7 @@ function resultSummary(result: RefinedScenarioResult) {
   if (!result.applicable) {
     return (
       <span className="mono dim">
-        not applicable — {result.reason ?? "no reason served"}
+        not applicable · {result.reason ?? "no reason served"}
       </span>
     );
   }
@@ -66,9 +66,9 @@ function resultSummary(result: RefinedScenarioResult) {
   return (
     <span className="mono">
       {identical ? (
-        <span className={styles["tone-ok"]}>no-op — served states bit-identical</span>
+        <span className={styles["tone-ok"]}>no-op · served states bit-identical</span>
       ) : (
-        <span className={styles["tone-warn"]}>re-priced — served states moved</span>
+        <span className={styles["tone-warn"]}>re-priced · served states moved</span>
       )}
       {result.applied_shocks.length > 0 && (
         <span className="dim">
@@ -99,8 +99,8 @@ export function LabBoundaryGroup({ scenarios }: { scenarios: readonly RefinedSce
       </p>
       <p className={styles.caption}>
         grouped from the wire: every committed scenario whose shocks all ride the{" "}
-        <span className="mono">stable_usd</span> axis. Only served members render — a missing
-        boundary point is absent, never invented.
+        <span className="mono">stable_usd</span> axis. Only served members render, so a missing
+        boundary point is absent rather than invented.
       </p>
       <div className={styles.boundaryGrid}>
         {group.map((scenario) => (

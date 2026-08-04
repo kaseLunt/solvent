@@ -52,7 +52,7 @@ export function EndpointCard({ op, baseUrl }: { op: ContractOperation; baseUrl: 
 
       {op.sse ? (
         <p className={styles.sseNote}>
-          text/event-stream — no JSON sample exists (or is invented) for a stream. Event names:
+          text/event-stream · no JSON sample exists (or is invented) for a stream. Event names:
           snapshot · batch · degradation · unavailable; heartbeats are SSE comment frames.
         </p>
       ) : (

@@ -49,7 +49,7 @@ export default function DevelopersPage() {
       <div className={styles.head}>
         <h1>Developers</h1>
         <p>
-          The committed API contract, rendered from its own examples — read-only JSON, no auth,
+          The committed API contract, rendered from its own examples: read-only JSON, no auth,
           every money value a decimal string. If a handler disagrees with this page, that is a
           failure, not documentation lag.
         </p>
@@ -77,7 +77,7 @@ export default function DevelopersPage() {
         ))}
       </nav>
 
-      <h2 className={styles.sectionHead}>TypeScript — @solvent/client</h2>
+      <h2 className={styles.sectionHead}>TypeScript · @solvent/client</h2>
       <CodeBlock
         code={quickstart(baseUrl)}
         copyLabel="copy TypeScript quickstart"
@@ -85,7 +85,7 @@ export default function DevelopersPage() {
       />
 
       <h2 className={styles.sectionHead}>
-        Endpoints — {String(OPERATIONS.length)} operations, {CONTRACT_META.sourcePath} verbatim
+        Endpoints · {String(OPERATIONS.length)} operations, {CONTRACT_META.sourcePath} verbatim
       </h2>
       {OPERATIONS.map((op) => (
         <EndpointCard key={op.operationId} op={op} baseUrl={baseUrl} />

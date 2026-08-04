@@ -112,6 +112,6 @@ export function publishable(text: string): { ok: true; text: string } | { ok: fa
   if (leaks.length === 0) return { ok: true, text };
   return {
     ok: false,
-    refusal: `WITHHELD — ${String(leaks.length)} endpoint/DSN-shaped fragment(s) refused at render (this surface publishes env-var names only)`,
+    refusal: `WITHHELD · ${String(leaks.length)} endpoint/DSN-shaped fragment(s) refused at render (this surface publishes env-var names only)`,
   };
 }

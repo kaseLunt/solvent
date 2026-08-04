@@ -280,7 +280,7 @@ export function DensityMap({ result, label, width = 980 }: DensityMapProps) {
         {hiddenOutliers > 0 && (
           <span data-testid="density-outliers-hidden">
             · {String(hiddenOutliers)} of the top {String(result.outliers.length)} debt labels
-            overlap and are not drawn — their accounts are still binned and still counted
+            overlap, so those labels are left off. The accounts stay binned and counted.
           </span>
         )}
       </div>

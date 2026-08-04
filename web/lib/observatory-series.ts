@@ -197,7 +197,7 @@ export function buildMetricSeries(
     if (entry.point === null) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} — no complete batch in this bucket — nothing was captured; absence is stated, never interpolated`,
+        `${entry.bucketStart} · no complete batch in this bucket · nothing was captured; absence is stated, never interpolated`,
       );
       gapKinds.push("absent");
       continue;
@@ -206,7 +206,7 @@ export function buildMetricSeries(
     if (point.refused) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} — WITHHELD · ${point.refusal_code ?? "unnamed"} @ block ${formatBlock(point.last_block)} — totals are null for that reason, never 0`,
+        `${entry.bucketStart} · WITHHELD · ${point.refusal_code ?? "unnamed"} @ block ${formatBlock(point.last_block)} · totals are null for that reason, never 0`,
       );
       gapKinds.push("withheld");
       continue;
@@ -216,14 +216,14 @@ export function buildMetricSeries(
     if (raw === null || value === null) {
       values.push(null);
       titles.push(
-        `${entry.bucketStart} — ${METRIC_LABELS[metric]} is null in this bucket (null is not zero)`,
+        `${entry.bucketStart} · ${METRIC_LABELS[metric]} is null in this bucket (null is not zero)`,
       );
       gapKinds.push("null");
       continue;
     }
     values.push(value);
     titles.push(
-      `${entry.bucketStart} · ${METRIC_LABELS[metric]} ${displayMetric(point, metric, response.usd_decimals)} @ block ${formatBlock(point.last_block)} — captured from the newest complete batch in this bucket`,
+      `${entry.bucketStart} · ${METRIC_LABELS[metric]} ${displayMetric(point, metric, response.usd_decimals)} @ block ${formatBlock(point.last_block)} · captured from the newest complete batch in this bucket`,
     );
     gapKinds.push(null);
   }
@@ -234,9 +234,9 @@ export function buildMetricSeries(
 /** The stride, disclosed. A stride never averages — it serves every Nth bucket. */
 export function describeStride(stepSeconds: number | null): string {
   if (stepSeconds === null) {
-    return "native hourly buckets — every captured bucket served verbatim";
+    return "native hourly buckets · every captured bucket served verbatim";
   }
-  return `stride ${String(stepSeconds)}s — every Nth captured bucket VERBATIM, skipped buckets are never averaged`;
+  return `stride ${String(stepSeconds)}s · every Nth captured bucket VERBATIM, skipped buckets are never averaged`;
 }
 
 /** The served range, disclosed. Absent bounds are unbounded, and say so. */

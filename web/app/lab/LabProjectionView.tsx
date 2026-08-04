@@ -64,7 +64,7 @@ export function LabProjectionView({ projection }: { projection: RefinedProjectio
         </table>
       </div>
       <p className={styles.caption}>
-        integer quantities verbatim from the wire, in the engine&apos;s native scale — this
+        integer quantities verbatim from the wire, in the engine&apos;s native scale. This
         surface publishes no display decimals for them
       </p>
       <p className={styles.noteText}>{projection.note}</p>

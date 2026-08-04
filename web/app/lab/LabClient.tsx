@@ -55,21 +55,21 @@ type StressPhase =
 
 function describeError(error: unknown): string {
   if (error instanceof UnavailableError) {
-    return "no complete risk batch is available (503) — a statement about the SERVICE, never an empty book";
+    return "no complete risk batch is available (503). That is a statement about the SERVICE, never an empty book";
   }
   if (error instanceof RateLimitedError) {
     return error.retryAfterSeconds !== null
-      ? `rate limited (429) — the service says retry after ${String(error.retryAfterSeconds)}s`
-      : "rate limited (429) — the service did not say when to retry";
+      ? `rate limited (429), and the service says retry after ${String(error.retryAfterSeconds)}s`
+      : "rate limited (429), and the service did not say when to retry";
   }
   if (error instanceof BadRequestError) {
     return `the service refused the request (400): ${error.message}`;
   }
   if (error instanceof SolventNetworkError) {
-    return `the API could not be reached (${error.timedOut ? "client timeout" : "no HTTP response"}) — this says nothing about the address`;
+    return `the API could not be reached (${error.timedOut ? "client timeout" : "no HTTP response"}), which says nothing about the address`;
   }
   if (error instanceof ContractInvariantError) {
-    return `refusing to render: the response contradicts itself — ${error.message}`;
+    return `refusing to render: the response contradicts itself. ${error.message}`;
   }
   if (error instanceof SchemaVersionMismatchError) {
     return `refusing to render: ${error.message}`;
@@ -148,7 +148,7 @@ export function LabClient() {
           one address
         </button>
         <span className={styles.modeCaption} data-testid="mode-caption">
-          whole book is the default view; one address is the secondary register — a narrower
+          whole book is the default view; one address is the secondary register, a narrower
           question, answered from the same committed set
         </span>
       </div>
@@ -160,7 +160,7 @@ export function LabClient() {
       ) : (
         <section aria-label="address stress" data-testid="lab-address-section">
           <p className={styles.secondaryNote} data-testid="address-secondary-note">
-            SECONDARY REGISTER — one account, not the book. The committed scenario set below is
+            SECONDARY REGISTER · one account, not the book. The committed scenario set below is
             the same one whole-book view renders; this panel evaluates it against a single
             address.
           </p>
@@ -178,7 +178,7 @@ export function LabClient() {
               onChange={(event) => {
                 setInput(event.target.value.trim());
               }}
-              placeholder="0x + 40 hex — the account to stress"
+              placeholder="0x + 40 hex · the account to stress"
               aria-label="account address"
               spellCheck={false}
               autoComplete="off"
@@ -193,7 +193,7 @@ export function LabClient() {
             </button>
             {input.length > 0 && !inputValid && (
               <span className={`${styles.hint} ${styles.hintBad}`} data-testid="address-hint">
-                not an address: the contract requires 0x + exactly 40 hex digits — nothing is
+                not an address: the contract requires 0x + exactly 40 hex digits, so nothing is
                 sent until it matches
               </span>
             )}
@@ -201,7 +201,7 @@ export function LabClient() {
 
           {phase.status === "idle" && (
             <div className={styles.emptyState} data-testid="lab-idle">
-              enter an address to run the COMMITTED scenario set against it — every scenario
+              enter an address to run the COMMITTED scenario set against it · every scenario
               from <span className="mono">GET /v1/address/{"{addr}"}/stress</span>, evaluated
               from the newest servable batch&apos;s persisted rows. The scenario chips render
               from that response; no scenario list is hardcoded in this UI.
@@ -210,7 +210,7 @@ export function LabClient() {
 
           {phase.status === "loading" && (
             <p className={styles.pendingState}>
-              running the committed set against <span className="mono">{phase.addr}</span> —
+              running the committed set against <span className="mono">{phase.addr}</span> ·
               request in flight
             </p>
           )}
@@ -253,7 +253,7 @@ function StressResult({
     case "not-found":
       return (
         <div className={styles.emptyState} data-testid="lab-not-found">
-          {renderLookupOutcome(result.outcome)} — a definitive negative: every engine was
+          {renderLookupOutcome(result.outcome)} · a definitive negative: every engine was
           available to be consulted and none carries this account in the batch.
         </div>
       );
@@ -276,7 +276,7 @@ function StressResult({
         <div data-testid="lab-found">
           {!result.complete && (
             <div className={styles.notServed} data-testid="lab-floor-note">
-              <b>incomplete lookup — these results are a FLOOR, not a total.</b> {result.note}
+              <b>incomplete lookup: these results are a FLOOR, not a total.</b> {result.note}
               <div className={styles.withheldList}>
                 {result.withheldEngines.map((refusal) => (
                   <div key={refusal.engine}>

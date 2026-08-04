@@ -65,7 +65,7 @@ function FrontierPanel({ series, axis }: { series: FrontierSeries; axis: { x: st
     >
       <p className={styles.panelTitle}>
         <EngineChip engine={series.engine} /> · loss frontier · usd_decimals{" "}
-        {series.usdDecimals} — this engine&apos;s own unit, never summed with another&apos;s
+        {series.usdDecimals} · this engine&apos;s own unit, never summed with another&apos;s
       </p>
       <div className={chart.frame}>
         <svg
@@ -74,7 +74,7 @@ function FrontierPanel({ series, axis }: { series: FrontierSeries; axis: { x: st
           height={HEIGHT}
           viewBox={`0 0 ${String(WIDTH)} ${String(HEIGHT)}`}
           role="img"
-          aria-label={`${series.engine} loss frontier — ${axis.y} against ${axis.x}`}
+          aria-label={`${series.engine} loss frontier · ${axis.y} against ${axis.x}`}
         >
           {/* y ceiling + zero line, labeled in the engine's own exact USD. */}
           <line
@@ -270,7 +270,7 @@ export function LabFrontier({ waterfall }: LabFrontierProps) {
         {frontierReadingLine(waterfall)}
       </p>
       <p className={styles.caption} data-testid="frontier-legend">
-        bars: Σ eligible debt at each step · inner bar: bad debt — debt still owed after all
+        bars: Σ eligible debt at each step · inner bar: bad debt, the debt still owed after all
         collateral is seized · dashed line: THAT ENGINE&apos;S own first step with new
         eligibility (engines cross at different steps, so the line is per panel)
       </p>
@@ -278,7 +278,7 @@ export function LabFrontier({ waterfall }: LabFrontierProps) {
       {seriesList.length === 0 ? (
         <div className={styles.notServed} data-testid="frontier-no-engines">
           <b>the grid served no engine.</b> Every point carries an empty engine list, so there
-          is no series to plot — an absence of data, never a zero.
+          is no series to plot. That is an absence of data, and never a zero.
         </div>
       ) : (
         seriesList.map((series) => (
@@ -297,7 +297,7 @@ export function LabFrontier({ waterfall }: LabFrontierProps) {
 
       {waterfall.monotonicity.ok ? (
         <p className={styles.caption} data-testid="frontier-monotonicity">
-          monotonicity: <span className={styles["tone-ok"]}>holds</span> — the eligible-debt
+          monotonicity: <span className={styles["tone-ok"]}>holds</span> · the eligible-debt
           series never falls as the shock deepens
         </p>
       ) : (
@@ -314,7 +314,7 @@ export function LabFrontier({ waterfall }: LabFrontierProps) {
             : ` (factor ${waterfall.monotonicity.factor})`}
           {waterfall.monotonicity.detail === undefined
             ? ""
-            : ` — ${waterfall.monotonicity.detail}`}
+            : `: ${waterfall.monotonicity.detail}`}
           . Surfaced with the point named, never smoothed away.
         </div>
       )}
@@ -322,7 +322,7 @@ export function LabFrontier({ waterfall }: LabFrontierProps) {
       <div data-testid="frontier-excluded">
         {waterfall.excluded_engines.length === 0 ? (
           <p className={styles.caption}>
-            excluded engines: none — every engine&apos;s book reached this grid
+            excluded engines: none · every engine&apos;s book reached this grid
           </p>
         ) : (
           <div className={styles.withheldList}>

@@ -126,7 +126,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "refused",
       value: null,
-      title: `batch ${String(batchId)} — REFUSED · ${code}${detail === "" ? "" : ` — ${detail}`}${sweep}`,
+      title: `batch ${String(batchId)} · REFUSED · ${code}${detail === "" ? "" : `: ${detail}`}${sweep}`,
       display: `REFUSED · ${code}`,
     };
   }
@@ -136,7 +136,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} — no health factor published for this point${sweep}`,
+      title: `batch ${String(batchId)} · no health factor published for this point${sweep}`,
       display: EM_DASH,
     };
   }
@@ -145,7 +145,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "infinite",
       value: null,
-      title: `batch ${String(batchId)} — ∞ (no debt; the ratio is unbounded and has no finite geometry)${sweep}`,
+      title: `batch ${String(batchId)} · ∞ (no debt; the ratio is unbounded and has no finite geometry)${sweep}`,
       display: "∞",
     };
   }
@@ -155,7 +155,7 @@ function entryForPoint(point: AddressHistoryPoint, engineName: string): HistoryS
       batchId,
       kind: "unpublished",
       value: null,
-      title: `batch ${String(batchId)} — health factor carries neither wad nor num/den${sweep}`,
+      title: `batch ${String(batchId)} · health factor carries neither wad nor num/den${sweep}`,
       display: EM_DASH,
     };
   }
@@ -227,7 +227,7 @@ export function buildHistorySeries(
       kind: "withheld",
       value: null,
       title:
-        `batch ${String(batchId)} — ${engine.engine} book withheld — ` +
+        `batch ${String(batchId)} · ${engine.engine} book withheld, so this account's state ` +
         `cannot be established (never "no position")`,
       display: "withheld",
     });
@@ -239,8 +239,8 @@ export function buildHistorySeries(
       kind: "no-row",
       value: null,
       title:
-        `batch ${String(batchId)} — no row in this batch: this account has no persisted ` +
-        `${engine.engine} row here (an absence, not a value — the line breaks rather than ` +
+        `batch ${String(batchId)} · no row in this batch: this account has no persisted ` +
+        `${engine.engine} row here (an absence, not a value, so the line breaks rather than ` +
         `drawing across it)`,
       display: "no row",
     });
@@ -271,7 +271,7 @@ export const HF_HISTORY_HEAD = "Health factor across batches";
 
 /** The one-line doctrine that stays VISIBLE. The rest moves behind a details. */
 export const HISTORY_DOCTRINE_LINE =
-  "gaps break the line — hover any tick for that batch's named reason.";
+  "gaps break the line. Hover any tick for that batch's named reason.";
 
 /** The <details> summary carrying the full doctrine paragraph. */
 export const HISTORY_DOCTRINE_SUMMARY = "how gaps and the 1.0 line work";
@@ -283,7 +283,7 @@ export const HISTORY_DOCTRINE_SUMMARY = "how gaps and the 1.0 line work";
  * refusing in plain sight.
  */
 export const DM_DISCLOSURE_LINE =
-  "1.0 here is a disclosure ratio, not the verdict — the engine's own boolean decides.";
+  "1.0 here is a disclosure ratio and not the verdict; the engine's own boolean decides.";
 
 /** How one engine's witnessed axis breaks down. */
 export interface HistoryTally {
@@ -336,14 +336,14 @@ export function engineNeverPresent(engine: AddressHistoryEngine): boolean {
 /** The never-present line that REPLACES the whole chart frame. */
 export function engineNeverPresentLine(engineName: string): string {
   return (
-    `no ${engineName} history — this address has never had a ${engineName} position in the ` +
+    `no ${engineName} history: this address has never had a ${engineName} position in the ` +
     `retained window.`
   );
 }
 
 /** The newest readout when the newest witnessed batch has no row for this engine. */
 export function newestNoRowPhrase(engineName: string): string {
-  return `newest: none — no ${engineName} row in the newest witnessed batch`;
+  return `newest: none · no ${engineName} row in the newest witnessed batch`;
 }
 
 /**
@@ -379,7 +379,7 @@ export function historyMetaLine(
 export function allGapFrameText(tally: HistoryTally): string {
   const other = tally.other > 0 ? ` · ${String(tally.other)} ∞/unpublished` : "";
   return (
-    `nothing plots — all ${String(tally.witnessed)} witnessed batches are gaps for this engine ` +
+    `nothing plots: all ${String(tally.witnessed)} witnessed batches are gaps for this engine ` +
     `(${String(tally.noRow)} no-row · ${String(tally.refused)} refused · ` +
     `${String(tally.withheld)} withheld${other}). A gap is an absence or a refusal, never a ` +
     `zero; hover each tick for its named reason.`

@@ -74,15 +74,15 @@ export function histogramReadingLine(
     const n = belowOneCount(histogram, wadScale);
     return (
       `What this shows: how many accounts sit at each health factor. ${String(n)} of ` +
-      `${computed} are below 1.00, where the engine may liquidate — ` +
+      `${computed} are below 1.00, where the engine may liquidate. ` +
       `${eligibleDebtFragment(badDebt)}.`
     );
   }
   const m = aggregate === undefined ? EM_DASH : String(aggregate.liquidatable_positions);
   return (
-    "What this shows: how many accounts sit at each borrow-headroom ratio — a disclosure, " +
-    `not the engine's trigger. The engine's own verdict counts ${m} of ${computed} ` +
-    `liquidatable — ${eligibleDebtFragment(badDebt)}.`
+    "What this shows: how many accounts sit at each borrow-headroom ratio, which is a " +
+    `disclosure rather than the engine's trigger. The engine's own verdict counts ${m} of ` +
+    `${computed} liquidatable. ${eligibleDebtFragment(badDebt)}.`
   );
 }
 
@@ -111,12 +111,12 @@ export function riskMapReadingLine(result: RiskBinsResult): string {
   const asideClause =
     result.aside.total === 0
       ? "every walked row is plotted"
-      : `${String(result.aside.total)} of ${String(result.total)} walked rows are counted aside, ` +
-        "not plotted";
+      : `${String(result.aside.total)} of ${String(result.total)} walked rows are counted aside ` +
+        "and stay out of the plot";
   return (
     `What this shows: where the book's debt sits by headroom. ${String(count)} of ` +
     `${String(plotted)} plotted accounts have less than ${String(WARN_HEADROOM_PCT)}% of their ` +
-    `borrowing capacity left — Σ debt ${renderEngineAmount(
+    `borrowing capacity left. Σ debt ${renderEngineAmount(
       debt.toString(),
       result.decimals,
     )} in the engine's own unit. ${asideClause}.`

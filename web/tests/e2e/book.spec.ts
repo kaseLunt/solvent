@@ -35,10 +35,10 @@ import {
  * the wire's own `headroom` key, not `liq_distance`).
  */
 const SORT_REMAP_ACK =
-  'sort "hf" is not defined for debt_manager — reset to headroom. The Debt Manager ' +
-  "publishes a strict liquidatable boolean, not a health factor.";
+  'sort "hf" is not defined for debt_manager, so it was reset to headroom. The Debt ' +
+  "Manager publishes a strict liquidatable boolean, not a health factor.";
 
-const WARN_DISCLOSURE = "presentation band < 1.1 — not an engine threshold";
+const WARN_DISCLOSURE = "presentation band < 1.1, set for display and not by the engine";
 
 const CORS = { "access-control-allow-origin": "*" };
 
@@ -188,7 +188,7 @@ test("null bad debt renders an em dash with its reason — never 0", async ({ pa
   await expect(page.getByTestId("book-refused-engines")).toContainText("aave_v3_etherfi");
   // Its stat block renders em dashes, not zeros.
   const aaveStats = page.getByTestId("book-stats-aave_v3_etherfi");
-  await expect(aaveStats).toContainText("withheld — not zero");
+  await expect(aaveStats).toContainText("withheld, no number served");
 });
 
 test("HF histograms are per engine, each on its OWN comparator, counts beside buckets", async ({ page }) => {
@@ -225,7 +225,7 @@ test("a monotone waterfall renders NO violation strip; held_flat and projection 
   // summary (SINGULAR at n=1, W-UX-C micro-ruling 3) + "held flat — {n}
   // inputs named" (the deeper copy pins live in book-charts.spec.ts).
   await expect(heldFlat).toContainText("1 price input held flat");
-  await expect(heldFlat).toContainText("held flat — 1 inputs named");
+  await expect(heldFlat).toContainText("held flat: 1 inputs named");
 });
 
 test("a waterfall monotonicity violation is SURFACED, naming the offending point", async ({ page }) => {
@@ -289,7 +289,7 @@ test("the warn-band disclosure is carried at table and legend level", async ({ p
   // W-HR-A: the map's own warn band is a HEADROOM band now, and it discloses
   // itself as presentation, not as an engine threshold.
   await expect(page.getByTestId("risk-map-warn-disclosure")).toContainText(
-    "presentation band < 10% headroom — not an engine threshold",
+    "presentation band < 10% headroom, set for display and not by the engine",
   );
 
   // W-HR-A: the map states the WHOLE book it walked, with its own as-of and
@@ -435,7 +435,7 @@ test("a 4xx renders the refusal register — envelope code, verbatim message, NO
   await expect(refusal).toContainText(BOOK_ERROR_BAD_REQUEST.error.message);
   // …plus the ruling's trailing copy.
   await expect(refusal).toContainText(
-    "adjust the controls; retrying the identical request cannot succeed.",
+    "Adjust the controls; retrying the identical request cannot succeed.",
   );
   // NO retry button anywhere in the refusal register, and no transport strip.
   await expect(refusal.getByRole("button")).toHaveCount(0);

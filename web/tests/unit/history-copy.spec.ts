@@ -52,7 +52,7 @@ test("a NO-ROW newest reads as an absence, naming the engine — never a bare da
   const tally = tallyHistory(series);
   expect(series.newest?.kind).toBe("no-row");
   expect(historyMetaLine(tally, series.newest, ENGINE.engine, 100)).toContain(
-    `newest: none — no ${ENGINE.engine} row in the newest witnessed batch`,
+    `newest: none · no ${ENGINE.engine} row in the newest witnessed batch`,
   );
 });
 
@@ -75,7 +75,7 @@ test("ENGINE NEVER PRESENT: no point, no withheld batch — one line, no frame",
   // different statement from the account never holding a position.
   expect(engineNeverPresent({ ...ENGINE, points: [], withheld_batch_ids: [4] })).toBe(false);
   expect(engineNeverPresentLine("debt_manager")).toBe(
-    "no debt_manager history — this address has never had a debt_manager position in the " +
+    "no debt_manager history: this address has never had a debt_manager position in the " +
       "retained window.",
   );
 });
@@ -86,7 +86,7 @@ test("all-gap: the frame states the breakdown, and a gap is never a zero", () =>
   const tally = tallyHistory(series);
   expect(tally.plotted).toBe(0);
   expect(allGapFrameText(tally)).toBe(
-    "nothing plots — all 3 witnessed batches are gaps for this engine (2 no-row · 0 refused · " +
+    "nothing plots: all 3 witnessed batches are gaps for this engine (2 no-row · 0 refused · " +
       "1 withheld). A gap is an absence or a refusal, never a zero; hover each tick for its " +
       "named reason.",
   );
@@ -107,10 +107,10 @@ test("∞/unpublished gaps are counted too — the classes still sum to the witn
 
 test("the doctrine shrinks to ONE visible line; the DM disclosure stays visible", () => {
   expect(HISTORY_DOCTRINE_LINE).toBe(
-    "gaps break the line — hover any tick for that batch's named reason.",
+    "gaps break the line. Hover any tick for that batch's named reason.",
   );
   expect(HISTORY_DOCTRINE_SUMMARY).toBe("how gaps and the 1.0 line work");
   expect(DM_DISCLOSURE_LINE).toBe(
-    "1.0 here is a disclosure ratio, not the verdict — the engine's own boolean decides.",
+    "1.0 here is a disclosure ratio and not the verdict; the engine's own boolean decides.",
   );
 });

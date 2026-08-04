@@ -57,14 +57,14 @@ type AddressState =
 
 function describeLookupError(cause: unknown): string {
   if (cause instanceof UnavailableError) {
-    return "no servable batch — the service refuses to answer from nothing (503)";
+    return "no servable batch: the service refuses to answer from nothing (503)";
   }
   if (cause instanceof RateLimitedError) {
     const retry = cause.retryAfterSeconds;
-    return `rate limited (429)${retry === null ? "" : ` — retry after ${String(retry)}s`}`;
+    return `rate limited (429)${retry === null ? "" : `, retry after ${String(retry)}s`}`;
   }
   if (cause instanceof ContractInvariantError) {
-    return `the response contradicts its own contract — refusing to render it (${cause.message})`;
+    return `the response contradicts its own contract, so it is not rendered (${cause.message})`;
   }
   if (cause instanceof SolventHttpError) {
     return `${String(cause.status)} ${cause.code}: ${cause.message}`;
@@ -268,7 +268,7 @@ export function InspectorSurface({ addr }: { addr: string }) {
         </p>
         <h1>Inspector</h1>
         <p className={styles.refusal} role="alert" data-testid="address-refusal">
-          REFUSED · &quot;{addr.slice(0, 64)}&quot; is not an address — the contract requires 0x +
+          REFUSED · &quot;{addr.slice(0, 64)}&quot; is not an address. The contract requires 0x +
           exactly 40 hex digits, verbatim. Nothing was looked up: an invalid input is never
           coerced into a different account.
         </p>
@@ -390,13 +390,13 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
       return (
         <>
           <p className="mono dim" data-testid="found-positive">
-            outcome · {renderLookupOutcome("found")} — {String(lookup.response.positions.length)}{" "}
+            outcome · {renderLookupOutcome("found")} · {String(lookup.response.positions.length)}{" "}
             position(s) in batch {String(lookup.response.batch.id)}
           </p>
           {!lookup.complete && (
             <div className={`${styles.stateCard} ${styles.stateRefused}`} data-testid="found-floor">
               <p className="mono">
-                FLOOR, not a total — these engines could not be consulted:{" "}
+                FLOOR, not a total. These engines could not be consulted:{" "}
                 {lookup.withheldEngines.map((refusal) => refusal.engine).join(", ")}. More positions
                 may exist behind them.
               </p>
@@ -410,7 +410,7 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
           <h2>no position in this batch</h2>
           <p>
             A definitive answer, and here is what entitles the service to it: the lookup was{" "}
-            <b>complete</b> — every engine was available to be asked in batch{" "}
+            <b>complete</b>, so every engine was available to be asked in batch{" "}
             <span className="mono">{String(lookup.response.batch.id)}</span>, and none withheld its
             book (withheld engines: none).
           </p>
@@ -424,7 +424,7 @@ function FoundBlock({ lookup }: { lookup: AddressLookup }) {
           <p>
             The answer to &quot;does this address hold a position?&quot; cannot be established:
             an engine&apos;s whole book is withheld in the newest servable batch. This is a
-            statement about the service&apos;s coverage — it is NEVER the definitive negative.
+            statement about the service&apos;s coverage, and it is NEVER the definitive negative.
           </p>
           <ul className={styles.withheldList}>
             {lookup.withheldEngines.map((refusal) => (

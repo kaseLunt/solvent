@@ -95,7 +95,7 @@ export function LabStatePair({
   after: RefinedStressState | null;
 }) {
   if (before === null || after === null) {
-    return <p className={styles.caption}>state pair withheld — see the result&apos;s reason</p>;
+    return <p className={styles.caption}>state pair withheld · see the result&apos;s reason</p>;
   }
   const newlyEligible = !before.eligible && after.eligible;
   return (
@@ -147,7 +147,7 @@ export function LabStatePair({
         </table>
       </div>
       <p className={styles.caption} data-testid="warn-band-disclosure">
-        warn (&lt; {WARN_HF_RATIO}) is a presentation band on a healthy verdict — eligibility is
+        warn (&lt; {WARN_HF_RATIO}) is a presentation band on a healthy verdict, and eligibility is
         the engine&apos;s own comparator, verbatim · collateral/debt values are exact integers in
         the engine&apos;s native scale, verbatim from the wire
       </p>
@@ -240,7 +240,7 @@ export function LabHeldFlat({
   if (heldFlat.length === 0) {
     return (
       <p className={styles.caption} data-testid="held-flat">
-        held_flat: none — {emptyClaim}
+        held_flat: none · {emptyClaim}
       </p>
     );
   }
@@ -284,7 +284,7 @@ export function LabOutOfModel({ items }: { items: readonly string[] }) {
   if (items.length === 0) return null;
   return (
     <details className={styles.disclosure} data-testid="out-of-model">
-      <summary>out of model — {items.length} exclusions named</summary>
+      <summary>out of model · {items.length} exclusions named</summary>
       <ul>
         {items.map((item) => (
           <li key={item}>{item}</li>
@@ -314,7 +314,7 @@ function ResultView({ result }: { result: RefinedScenarioResult }) {
   if (!result.applicable) {
     return (
       <div className={styles.notApplicable} data-testid="not-applicable">
-        <EngineChip engine={result.engine} /> not applicable —{" "}
+        <EngineChip engine={result.engine} /> not applicable ·{" "}
         {result.reason ?? "no reason served (contract violation: never silence)"}
       </div>
     );
@@ -339,7 +339,7 @@ function ResultView({ result }: { result: RefinedScenarioResult }) {
             <LabStatePair before={result.before} after={result.after} />
             {identical && (
               <p className={styles.bitIdentical} data-testid="bit-identical">
-                before ≡ after — the served states are bit-identical
+                before ≡ after · the served states are bit-identical
               </p>
             )}
           </div>
@@ -399,7 +399,7 @@ export function LabScenarioDetail({ scenario }: { scenario: RefinedScenario }) {
         <dd data-testid="scenario-shocks">
           {scenario.shocks.length === 0
             ? hasRealization
-              ? "none — no oracle mark moves; this scenario's axis is market realization"
+              ? "none · no oracle mark moves; this scenario's axis is market realization"
               : "none"
             : scenario.shocks.map((shock, index) => (
                 <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>

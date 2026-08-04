@@ -471,7 +471,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
           setNotice(
             `batch ${String(cause.cursorBatchId)} was superseded${
               cause.currentBatchId !== null ? ` by batch ${String(cause.currentBatchId)}` : ""
-            } mid-pagination — restarted from page one against the fresh batch`,
+            } mid-pagination, so the walk restarted from page one against the fresh batch`,
           );
           resetRef.current();
         }
@@ -751,13 +751,13 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
 
   const empty =
     envelope?.refused === true
-      ? `engine withheld — ${envelope.refusalCode ?? "unnamed refusal"}: ${
+      ? `engine withheld · ${envelope.refusalCode ?? "unnamed refusal"}: ${
           envelope.refusalDetail ?? "the whole book is withheld on this batch"
         } (total is ${EM_DASH}, not 0)`
       : failure !== null
         ? failure.register === "transport"
-          ? `page fetch failed — ${failure.message}`
-          : `request refused — ${failure.code}: ${failure.message}`
+          ? `page fetch failed: ${failure.message}`
+          : `request refused · ${failure.code}: ${failure.message}`
         : dustActive &&
             hidden !== null &&
             hidden > 0 &&
@@ -777,7 +777,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
   return (
     <section className={styles.section} aria-label="position table">
       <div className={styles.sectionHead}>
-        <h2>Positions — batch-stable pages, one engine at a time</h2>
+        <h2>Positions: batch-stable pages, one engine at a time</h2>
         <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
           <i aria-hidden /> warn = {engine === "debt_manager" ? WARN_HEADROOM_DISCLOSURE : WARN_BAND_DISCLOSURE}
         </span>
@@ -867,7 +867,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
           <span>
             {failure.message}
             {failure.register === "refusal"
-              ? " — adjust the controls; retrying the identical request cannot succeed."
+              ? ". Adjust the controls; retrying the identical request cannot succeed."
               : failure.retryAfterSeconds !== null
                 ? ` (retry after ${String(failure.retryAfterSeconds)}s)`
                 : ""}
@@ -911,7 +911,7 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         maxHeight="70vh"
         windowing={{ rowHeight: ROW_HEIGHT, overscan: OVERSCAN }}
         onEndSentinel={handleEndSentinel}
-        scrollRegionLabel={`positions for ${engine} — scrollable rows`}
+        scrollRegionLabel={`positions for ${engine} · scrollable rows`}
         ariaLabel={`positions for ${engine}`}
         empty={empty}
         footer={

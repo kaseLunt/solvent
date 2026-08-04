@@ -79,12 +79,12 @@ export const HEADROOM_BANDS: readonly HeadroomBand[] = [
   {
     id: "breached",
     label: "breached",
-    meaning: "debt is already past the liquidation threshold — no capacity left at all",
+    meaning: "debt is already past the liquidation threshold, so no capacity is left at all",
   },
   {
     id: "0-2",
     label: "0–2%",
-    meaning: "under 2% of borrowing capacity left — interest alone can cross the boundary",
+    meaning: "under 2% of borrowing capacity left, so interest alone can cross the boundary",
   },
   { id: "2-5", label: "2–5%", meaning: "2–5% of borrowing capacity left before liquidation" },
   { id: "5-10", label: "5–10%", meaning: "5–10% of borrowing capacity left before liquidation" },
@@ -112,25 +112,25 @@ export const HEADROOM_BREACHED_BAND = 0;
  */
 export const HEADROOM_LEGEND =
   "Headroom = the share of this account's borrowing capacity still unused before " +
-  "liquidation — (liquidation threshold − debt) ÷ liquidation threshold, in the engine's own " +
-  "comparator; 0% is the boundary and `breached` is already past it.";
+  "liquidation: (liquidation threshold − debt) ÷ liquidation threshold, in the engine's own " +
+  "comparator. 0% is the boundary and `breached` is already past it.";
 
 /** The Headroom column header's own title attribute. */
 export const HEADROOM_HEADER_TITLE =
-  "how much of this account's borrowing capacity is still unused before liquidation — " +
-  "truncated, never rounded up.";
+  "how much of this account's borrowing capacity is still unused before liquidation, " +
+  "truncated and never rounded up.";
 
 /** What a row with no debt gets instead of a percent — never a 100% claim. */
 export const HEADROOM_NO_DEBT_LABEL = "no debt";
 export const HEADROOM_NO_DEBT_TITLE =
-  "No debt — there is no liquidation boundary to have headroom from. Not a zero, and not " +
-  "the safest account on the book: an account with nothing borrowed is simply outside this " +
-  "metric.";
+  "No debt, so there is no liquidation boundary to have headroom from. An account with " +
+  "nothing borrowed sits outside this metric, which is why it carries no percent and no " +
+  "place in the ranking.";
 
 /** What a row whose headroom cannot be derived gets — an unknowable, not a zero. */
 export const HEADROOM_UNKNOWN_TITLE =
   "Headroom is not derivable for this row: the engine published no usable threshold/debt " +
-  "pair. Unknown — never a zero, and never 'safe'.";
+  "pair. The value is unknown, which is a different thing from 0% and from safe.";
 
 /** Floor division for bigints (JS `/` truncates toward zero; this floors). */
 function floorDiv(numerator: bigint, denominator: bigint): bigint {
@@ -234,4 +234,4 @@ export function headroomBandMeaning(band: number): string {
 /** The warn-band disclosure for headroom surfaces — derived, never retyped. */
 export const WARN_HEADROOM_DISCLOSURE = `presentation band < ${String(
   WARN_HEADROOM_PCT,
-)}% headroom — not an engine threshold`;
+)}% headroom, set for display and not by the engine`;

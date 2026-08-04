@@ -115,19 +115,21 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
   test("the dust group title", () => {
     expect(DUST_GROUP_TITLE).toBe(
       "hide rows where max(collateral, debt) is below the step, in the engine's own value " +
-        "unit — hidden rows stay counted here and in every aggregate above; refused and " +
+        "unit. Hidden rows stay counted here and in every aggregate above; refused and " +
         "null-valued rows are never hidden",
     );
   });
 
   test("the refused-first chip title", () => {
     expect(REFUSED_FIRST_CHIP_TITLE).toBe(
-      "sort=status — refused rows ranked first for triage, then risk order",
+      "sort=status: refused rows ranked first for triage, then risk order",
     );
   });
 
   test("the amended footer constant", () => {
-    expect(FOOTER_REFUSED_NEVER_DUST).toBe("refused rows stay visible and counted — never dust");
+    expect(FOOTER_REFUSED_NEVER_DUST).toBe(
+      "refused rows stay visible and counted; the dust step never hides them",
+    );
   });
 
   test("footer accounting, dust active", () => {
@@ -155,7 +157,7 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
 
   test("the dust disclosure span — bound form, then the exact form at exhaustion", () => {
     expect(dustDisclosureBound(45, "1", "45")).toBe(
-      "hidden: 45 rows below 1 · Σ debt ≤ 45 (bound — every hidden row is below the step) · ",
+      "hidden: 45 rows below 1 · Σ debt ≤ 45 (bound: every hidden row is below the step) · ",
     );
     expect(dustDisclosureExact(45, "1", "12.480021")).toBe(
       "hidden: 45 rows below 1 · Σ debt 12.480021 exact · ",
@@ -164,24 +166,24 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
 
   test("the liquidatable disclosure tail", () => {
     expect(liquidatableDisclosureTail(3)).toBe(
-      " liquidatable on this book · 3 among loaded rows — the rest are below the dust step " +
+      " liquidatable on this book · 3 among loaded rows; the rest are below the dust step " +
         "or on unloaded pages",
     );
   });
 
   test("the empty filtered walk: hidden, not absent", () => {
     expect(emptyFilteredWalk("1", 2, "2")).toBe(
-      "no rows at or above the dust step (1) — 2 rows below it are hidden, not absent · " +
-        "Σ debt ≤ 2 · set dust off to see them",
+      "no rows at or above the dust step (1) · 2 rows below it are hidden by the filter and " +
+        "still counted · Σ debt ≤ 2 · set dust off to see them",
     );
   });
 
   test("the risk-map dust legend (W-UX-D handoff)", () => {
     expect(dustMapLegend("1")).toBe(
-      "dust below 1 is excluded at the source — this map shows the filtered walk only",
+      "dust below 1 is excluded at the source, so this map shows the filtered walk only",
     );
     expect(dustMapLegend("1k")).toBe(
-      "dust below 1k is excluded at the source — this map shows the filtered walk only",
+      "dust below 1k is excluded at the source, so this map shows the filtered walk only",
     );
   });
 });

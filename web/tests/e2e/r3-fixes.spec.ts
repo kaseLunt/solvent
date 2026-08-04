@@ -248,7 +248,7 @@ test("(3) the legend states REACHABILITY, and stops contradicting the covers hov
   // this test then reads it.
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
       "reason. The HF column stays the verdict.",
   );
 
@@ -269,7 +269,7 @@ test("(3) the legend states REACHABILITY, and stops contradicting the covers hov
   await expect(cell).toHaveAttribute(
     "title",
     "5–10% of borrowing capacity left before liquidation Collateral outside the shocked asset already covers the debt at the " +
-      "liquidation threshold — no fall of the shocked asset alone reaches the boundary; " +
+      "liquidation threshold, so no fall of the shocked asset alone reaches the boundary; " +
       "interest or parameter changes still can. Wire: 'collateral outside the factor already " +
       "covers the debt at threshold'.",
   );

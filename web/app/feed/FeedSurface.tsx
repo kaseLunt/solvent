@@ -152,8 +152,8 @@ export function FeedSurface() {
       restartWalk();
       setNotice(
         candidate === null
-          ? `since_block ${String(sinceBlock)} dropped — ${SINCE_BLOCK_IMPOSSIBILITY}`
-          : `since_block ${String(sinceBlock)} dropped — block heights are chain-scoped, and ${candidate} lives on a different chain`,
+          ? `since_block ${String(sinceBlock)} dropped: ${SINCE_BLOCK_IMPOSSIBILITY}`
+          : `since_block ${String(sinceBlock)} dropped: block heights are chain-scoped, and ${candidate} lives on a different chain`,
       );
       return;
     }
@@ -185,7 +185,7 @@ export function FeedSurface() {
       return;
     }
     if (!/^[0-9]+$/.test(trimmed)) {
-      setNotice(`"${trimmed.slice(0, 32)}" is not a block number — nothing was requested`);
+      setNotice(`"${trimmed.slice(0, 32)}" is not a block number, so nothing was requested`);
       return;
     }
     setSinceBlock(Number(trimmed));
@@ -194,16 +194,16 @@ export function FeedSurface() {
 
   const empty =
     refusal !== null
-      ? `page refused — ${refusal.code ?? "bad_request"}: restart below`
+      ? `page refused · ${refusal.code ?? "bad_request"}: restart below`
       : error !== null
-        ? `page fetch failed — ${error.message}`
+        ? `page fetch failed: ${error.message}`
         : loading || rows.length === 0
           ? "loading the feed…"
           : "no rows on this page";
 
   const emptyExhausted =
     !hasMore && rows.length === 0 && error === null
-      ? "no custodied chain actions match this filter — an empty page is a real answer, not a failure"
+      ? "no custodied chain actions match this filter. An empty page here is a real answer from the service."
       : empty;
 
   return (
@@ -212,9 +212,9 @@ export function FeedSurface() {
       <div className={styles.head}>
         <h1>Feed</h1>
         <p>
-          Chain actions as recorded — borrows, repays, supplies, withdrawals, liquidations. The
+          Chain actions as recorded: borrows, repays, supplies, withdrawals, liquidations. The
           live strip shows the stream&apos;s posture now; the list below pages through durable
-          history — the two never blend.
+          history. The two never blend.
         </p>
       </div>
 
@@ -225,7 +225,7 @@ export function FeedSurface() {
           live strip above and the paged record below stay two instruments
           with two names — never one blended stream. */}
       <div className={styles.sectionHead}>
-        <h2>History — recorded chain actions</h2>
+        <h2>History: recorded chain actions</h2>
       </div>
 
       <div className={styles.controls}>
@@ -287,8 +287,8 @@ export function FeedSurface() {
       <div className={styles.controls}>
         {view === "ledger" ? (
           <span className={styles.impossible} data-testid="types-ledger-note">
-            type filter pinned to <span className="mono">liquidation</span> by the ledger view —
-            the display vocabulary chips return with the all-actions view.
+            type filter pinned to <span className="mono">liquidation</span> by the ledger view.
+            The display vocabulary chips return with the all-actions view.
           </span>
         ) : (
           <span className={styles.controlGroup} data-testid="type-chips">
@@ -339,7 +339,7 @@ export function FeedSurface() {
           </span>
         ) : (
           <span className={styles.impossible} data-testid="since-block-impossible">
-            since_block — {SINCE_BLOCK_IMPOSSIBILITY}
+            since_block · {SINCE_BLOCK_IMPOSSIBILITY}
           </span>
         )}
       </div>
@@ -348,13 +348,13 @@ export function FeedSurface() {
         {mode === "cross-engine" ? (
           <>
             ordered by <b>custodied header time</b> (block_time DESC) with a deterministic
-            chain-aware tiebreak — block heights are never compared across chains; rows without
-            header time follow in the disclosed untimed tail.
+            chain-aware tiebreak. Block heights are never compared across chains, and rows
+            without header time follow in the disclosed untimed tail.
           </>
         ) : (
           <>
-            ordered by <b>block height</b> (block, tx, log, seq) DESC — heights are comparable
-            within {engine ?? "one chain"}&apos;s own chain.
+            ordered by <b>block height</b> (block, tx, log, seq) DESC, because heights are
+            comparable within {engine ?? "one chain"}&apos;s own chain.
           </>
         )}
       </p>
@@ -427,10 +427,10 @@ export function FeedSurface() {
       </div>
 
       <p className={styles.sectionNote}>
-        block_time is chain-asserted header custody — null until custodied, in which case the
-        block number renders instead; a timestamp is never invented. Amounts are the engine&apos;s
-        own accounting units, named per row — a scaled or normalized value is never dressed up as
-        a token or USD figure.
+        block_time is chain-asserted header custody: null until custodied, in which case the
+        block number renders instead. A timestamp is never invented. Amounts are the engine&apos;s
+        own accounting units, named per row, and a scaled or normalized value is never dressed up
+        as a token or USD figure.
       </p>
     </>
   );

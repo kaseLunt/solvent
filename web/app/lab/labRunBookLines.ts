@@ -76,7 +76,7 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   const regionTail =
     before.hf_histogram.comparator === "hf_wad"
       ? "where this engine may liquidate"
-      : "the borrow-headroom ratio — a DISCLOSURE, not this engine's trigger";
+      : "the borrow-headroom ratio, a DISCLOSURE rather than this engine's trigger";
 
   // THE NET CAVEAT, in so many words. Two populations subtracted is a NET
   // change and nothing else: an account that fell below 1.00 and another that
@@ -180,7 +180,7 @@ export function moversDisclosure(engine: LabRunBookEngine): string {
   }
   return (
     `Showing the top ${String(shown)} of ${String(total)} accounts ${subject.clause}, ` +
-    `${subject.ranking} — ${String(total - shown)} are not on this page.`
+    `${subject.ranking}; ${String(total - shown)} are not on this page.`
   );
 }
 
@@ -249,7 +249,7 @@ export function collateralReadingLine(
   const head =
     `What this shows: which assets make up this engine's collateral ${side} the shock. ` +
     `${String(counted.length)} ${counted.length === 1 ? "asset sums" : "assets sum"} to ${total}, ` +
-    `this engine's own USD at ${String(usdDecimals)} decimals — never added to another engine's.`;
+    `this engine's own USD at ${String(usdDecimals)} decimals, never added to another engine's.`;
 
   if (uncounted.length === 0) {
     return head;
@@ -257,7 +257,7 @@ export function collateralReadingLine(
   const unpricedClause =
     unpriced.length === 0
       ? ""
-      : ` ${String(unpriced.length)} of those ${unpriced.length === 1 ? "carries" : "carry"} no price at all, so ${unpriced.length === 1 ? "its worth is" : "their worth is"} UNKNOWABLE — not zero.`;
+      : ` ${String(unpriced.length)} of those ${unpriced.length === 1 ? "carries" : "carry"} no price at all, so ${unpriced.length === 1 ? "its worth is" : "their worth is"} UNKNOWABLE rather than zero.`;
   return (
     `${head} ${String(uncounted.length)} further ${uncounted.length === 1 ? "holding is" : "holdings are"} ` +
     `listed with NO value, and ${uncounted.length === 1 ? "it is" : "they are"} outside that total.${unpricedClause}`

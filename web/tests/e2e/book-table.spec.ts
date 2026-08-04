@@ -155,7 +155,7 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
   await expect(dustGroup).toHaveAttribute(
     "title",
     "hide rows where max(collateral, debt) is below the step, in the engine's own value " +
-      "unit — hidden rows stay counted here and in every aggregate above; refused and " +
+      "unit. Hidden rows stay counted here and in every aggregate above; refused and " +
       "null-valued rows are never hidden",
   );
   await expect(dustGroup.getByRole("button", { name: "<1", exact: true })).toHaveAttribute(
@@ -186,16 +186,18 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
   // The liquidatable line: the aggregate's verdict count (crit tone) vs the
   // loaded rows — the hidden liquidatable dust row cannot vanish silently.
   await expect(page.getByTestId("liquidatable-disclosure")).toHaveText(
-    "1 liquidatable on this book · 0 among loaded rows — the rest are below the dust step " +
+    "1 liquidatable on this book · 0 among loaded rows; the rest are below the dust step " +
       "or on unloaded pages",
   );
 
   // The amended footer constant.
-  await expect(page.getByText("refused rows stay visible and counted — never dust")).toBeVisible();
+  await expect(
+    page.getByText("refused rows stay visible and counted; the dust step never hides them"),
+  ).toBeVisible();
 
   // The risk map discloses the source-side filter and the three-part label.
   await expect(page.getByTestId("risk-map-dust-legend")).toHaveText(
-    "dust below 1 is excluded at the source — this map shows the filtered walk only",
+    "dust below 1 is excluded at the source, so this map shows the filtered walk only",
   );
   // W-HR-A: the map walks the WHOLE filtered book and states it, with the
   // unfiltered on-book count beside it — there is no loaded/qualifying
@@ -259,8 +261,8 @@ test("empty filtered walk: hidden rows are named as hidden, not absent — dust 
 
   // The empty state names the hidden rows and the bound (2 × the step).
   await expect(page.getByText(/no rows at or above the dust step/)).toHaveText(
-    "no rows at or above the dust step (1) — 2 rows below it are hidden, not absent · " +
-      "Σ debt ≤ 2 · set dust off to see them",
+    "no rows at or above the dust step (1) · 2 rows below it are hidden by the filter and " +
+      "still counted · Σ debt ≤ 2 · set dust off to see them",
   );
   await expect(page.getByTestId(ACCOUNTING)).toHaveText(
     "0 loaded of 0 qualifying (dust <1) · 2 hidden below step · 2 on book · sort headroom ▲",
@@ -416,7 +418,7 @@ test("refused first: sort=status via the ONE standalone chip — indicators clea
   const chip = page.getByTestId("refused-first-chip");
   await expect(chip).toHaveAttribute(
     "title",
-    "sort=status — refused rows ranked first for triage, then risk order",
+    "sort=status: refused rows ranked first for triage, then risk order",
   );
 
   await chip.click();
@@ -587,7 +589,7 @@ test("windowing bounds the DOM: 1,000 loaded rows render as a slice, footer alwa
   // Walk to the end: scrolling to the bottom brings the sentinel within its
   // 600px margin and the walk continues (the observer's async cadence may
   // batch a page or two per pass, so the loop scrolls until exhaustion).
-  const region = page.getByRole("region", { name: "positions for aave_v3_etherfi — scrollable rows" });
+  const region = page.getByRole("region", { name: "positions for aave_v3_etherfi · scrollable rows" });
   await expect(async () => {
     await region.evaluate((element) => {
       element.scrollTop = element.scrollHeight;

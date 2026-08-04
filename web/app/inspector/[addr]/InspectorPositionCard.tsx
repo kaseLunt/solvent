@@ -48,7 +48,7 @@ import type { ChainEvent, ParamChange } from "@/lib/inspector-data";
 import { ExplainButton } from "@/components/EvidenceDrawer";
 import styles from "../inspector.module.css";
 
-const WARN_DISCLOSURE = "warn band <1.1 — presentation band, not an engine threshold";
+const WARN_DISCLOSURE = "warn band <1.1, set for display and not by the engine";
 
 export interface InspectorPositionCardProps {
   position: RefinedPosition;
@@ -151,16 +151,16 @@ function aaveFormula(position: RefinedPosition): string {
   const wad = hf === null ? null : hf.wad;
   const result =
     position.status === "refused"
-      ? `REFUSED · ${position.refusal?.code ?? "unnamed"} — no number is served`
+      ? `REFUSED · ${position.refusal?.code ?? "unnamed"} · no number is served`
       : hf?.infinite === true
-        ? "∞  // no debt — the ratio is unbounded"
+        ? "∞  // no debt, so the ratio is unbounded"
         : wad === null
           ? `${EM_DASH}  // not published`
-          : `${wad} wad  // wadDiv half-up composite — rev-3, deployed-source-proven`;
+          : `${wad} wad  // wadDiv half-up composite, rev-3, deployed-source-proven`;
   return (
     `HF = floor( floor( (Σ(Cᵢ · LT_bpsᵢ) × 1e18 + ⌊D/2⌋) / D ) / 10⁴ )\n` +
     `   Σ(Cᵢ · LT_bpsᵢ) = ${num}\n` +
-    `   D = ${den}   // debt never understated — ceil per leg\n` +
+    `   D = ${den}   // debt never understated, ceil per leg\n` +
     `   = ${result}`
   );
 }
@@ -168,10 +168,10 @@ function aaveFormula(position: RefinedPosition): string {
 function dmFormula(position: RefinedPosition): string {
   const verdict =
     position.status === "refused"
-      ? `REFUSED · ${position.refusal?.code ?? "unnamed"} — no verdict is served`
+      ? `REFUSED · ${position.refusal?.code ?? "unnamed"} · no verdict is served`
       : position.liquidation_verdict;
   return (
-    `liquidatable ⇔ debt > maxBorrowLT   // STRICT boolean — equality is HEALTHY\n` +
+    `liquidatable ⇔ debt > maxBorrowLT   // STRICT boolean, equality is HEALTHY\n` +
     `   debt        = ${position.borrowings ?? EM_DASH}\n` +
     `   maxBorrowLT = ${position.max_borrow_lt ?? EM_DASH}\n` +
     `   ⇒ ${verdict}`
@@ -351,7 +351,7 @@ export function InspectorPositionCard({
           ) : (
             <span className={`${styles.v} ${styles.vDim}`}>
               {paramChanges === null
-                ? `param timeline unavailable${paramsError === null ? "" : ` — ${paramsError}`}`
+                ? `param timeline unavailable${paramsError === null ? "" : `: ${paramsError}`}`
                 : "no timeline row served for this asset in the fetched window"}
             </span>
           )}
@@ -422,7 +422,7 @@ export function InspectorPositionCard({
             {value}
           </ExplainButton>{" "}
           <span className={styles.vDim}>
-            · lowest healthy — ceil(P*): still healthy at exactly this price
+            · lowest healthy · ceil(P*): still healthy at exactly this price
           </span>
           {lp.diagnostic && <span className={`${styles.verdict} ${styles.verdictWarn}`}>diagnostic</span>}
           {lp.already_breached && <span className={`${styles.verdict} ${styles.verdictCrit}`}>already breached</span>}
@@ -611,7 +611,7 @@ export function InspectorPositionCard({
                   <span className={`${styles.v} ${styles.vCrit}`}>∅ never swept</span>
                 )
               ) : (
-                <span className={`${styles.v} ${styles.vDim}`}>n/a — engine has no sweeper</span>
+                <span className={`${styles.v} ${styles.vDim}`}>n/a · engine has no sweeper</span>
               )}
             </div>
             <div className={styles.kvRow}>
@@ -655,8 +655,8 @@ export function InspectorPositionCard({
             <div className={styles.kvRow}>
               <span className={styles.k}>Welds</span>
               <span className={`${styles.v} ${styles.vDim}`}>
-                reconcile welds are published by /v1/evidence (Proof Center) — this view is LIVE ·
-                WATERMARKED, not PROOF · EXACT @ PIN
+                reconcile welds are published by /v1/evidence (Proof Center). This view is
+                LIVE · WATERMARKED, not PROOF · EXACT @ PIN
               </span>
             </div>
           </div>

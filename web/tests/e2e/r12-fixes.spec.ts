@@ -121,7 +121,7 @@ test("(A) A CONTRADICTORY 200: every covered cell refuses, and the DETAIL refuse
   await expect(batchLine).not.toContainText("results shown together");
   await expect(batchLine).not.toContainText("Every DISPLAYED result was measured at that batch");
   await expect(batchLine).toContainText(
-    "1 run(s) were served a book that CONTRADICTS ITSELF — an engine named twice, or named as " +
+    "1 run(s) were served a book that CONTRADICTS ITSELF: an engine named twice, or named as " +
       "served and withheld at once, which is a body that names somebody twice rather than one " +
       "that names nobody",
   );
@@ -224,7 +224,7 @@ test("(B) A v2 ANSWER AGAINST A RETAINED v1 LISTING reads DEFINITION CHANGED, ne
   // The header counts it in its own terms, and names the only thing that fixes
   // it — a fresh listing, not a re-run.
   await expect(batchLine).toContainText(
-    "1 run(s) answered for a committed definition this page is no longer showing — refresh the " +
+    "1 run(s) answered for a committed definition this page is no longer showing. Refresh the " +
       "listing to run against the current one",
   );
 

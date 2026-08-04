@@ -40,8 +40,8 @@ export function ObservatoryPointDetail({
         {entry.point === null ? (
           <>
             <p className="mono">
-              <b>ABSENT — NO COMPLETE BATCH IN THIS BUCKET</b> — the rollup captured nothing for
-              this hour. (An absence, not a refusal: no complete risk batch existed to observe.)
+              <b>ABSENT · NO COMPLETE BATCH IN THIS BUCKET</b>. The rollup captured nothing for
+              this hour, because no complete risk batch existed to observe. Nobody refused it.
             </p>
             <p className={styles.detailNote}>
               an absent bucket is a hole in the record, stated by name. nothing is interpolated
@@ -79,7 +79,7 @@ function DetailBody({
         <dd>
           {point.refused ? (
             <>
-              <RefusedTag reason={point.refusal_code ?? "unnamed"} /> — the engine&apos;s whole
+              <RefusedTag reason={point.refusal_code ?? "unnamed"} /> · the engine&apos;s whole
               book was withheld at capture time
             </>
           ) : (
@@ -91,7 +91,7 @@ function DetailBody({
         <dd>
           block {formatBlock(point.last_block)}{" "}
           <span className="dim">
-            (the engine&apos;s balances watermark at capture — never a chain head observed later)
+            (the engine&apos;s balances watermark at capture, never a chain head observed later)
           </span>
         </dd>
 
@@ -107,7 +107,7 @@ function DetailBody({
         <dt>materialization key</dt>
         <dd data-testid="observatory-point-mkey" className="mono">
           {point.materialization_key}{" "}
-          <span className="dim">(copied at write time — attribution that survives retention)</span>
+          <span className="dim">(copied at write time, so the attribution survives retention)</span>
         </dd>
 
         <dt>reorg posture at compute</dt>
@@ -116,7 +116,7 @@ function DetailBody({
             <>none unacked</>
           ) : (
             <span className="crit-t">
-              {String(point.max_epoch_at_compute - point.acked_epoch)} unacked epoch(s) — acked{" "}
+              {String(point.max_epoch_at_compute - point.acked_epoch)} unacked epoch(s) · acked{" "}
               {String(point.acked_epoch)} of {String(point.max_epoch_at_compute)}
             </span>
           )}{" "}
@@ -127,7 +127,7 @@ function DetailBody({
         <dd>
           {usd(point.debt_usd)}
           {point.debt_usd === null && (
-            <span className="dim"> — null because the book was withheld; not zero</span>
+            <span className="dim">, null because the book was withheld and never zero</span>
           )}
         </dd>
 
@@ -135,7 +135,7 @@ function DetailBody({
         <dd>
           {usd(point.collateral_usd)}
           {point.collateral_usd === null && (
-            <span className="dim"> — null because the book was withheld; not zero</span>
+            <span className="dim">, null because the book was withheld and never zero</span>
           )}
         </dd>
 
@@ -154,15 +154,16 @@ function DetailBody({
             <>
               {EM_DASH}{" "}
               <span className="dim">
-                unrecorded — this point predates migration 00018 and its batch was pruned before
-                the stamp could be recovered. an absent record, not &quot;no sweeper&quot;.
+                unrecorded: this point predates migration 00018 and its batch was pruned before
+                the stamp could be recovered. the record is missing here, and it is not a claim
+                that the engine has no sweeper.
               </span>
             </>
           ) : point.sweep === null ? (
             <>
               none{" "}
               <span className="dim">
-                (recorded: this engine has no collateral sweep — its balances are event-derived)
+                (recorded: this engine has no collateral sweep, so its balances are event-derived)
               </span>
             </>
           ) : (
@@ -173,7 +174,7 @@ function DetailBody({
                 {point.sweep.generation_open ? " (pass in flight)" : " (pass complete)"}
               </span>{" "}
               <span className="dim">
-                — the observed batch&apos;s own sweep stamp; the liquidatable count above
+                · the observed batch&apos;s own sweep stamp; the liquidatable count above
                 aggregates THIS sweep-cut, not the bucket&apos;s block clock. last successful
                 write{" "}
                 {point.sweep.max_updated_at === null
@@ -208,7 +209,7 @@ function DetailBody({
                 <td>{rate.value}</td>
                 <td data-testid="observatory-rate-scale">
                   {rate.scale === "unstated" ? (
-                    <span className="dim">unstated — kind outside the known vocabulary</span>
+                    <span className="dim">unstated · kind outside the known vocabulary</span>
                   ) : (
                     rate.scale
                   )}

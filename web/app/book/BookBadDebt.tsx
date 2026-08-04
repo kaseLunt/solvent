@@ -80,7 +80,7 @@ export function BookBadDebt({ badDebt }: { badDebt: readonly BadDebt[] }) {
         rowKey={(row) => row.engine}
         rowTone={(row) => (row.refused ? "refused" : "default")}
         ariaLabel="bad-debt census per engine"
-        empty="no bad-debt lines were served on this batch — a statement about the service, not a zero"
+        empty="no bad-debt lines were served on this batch. That is a fact about the service, and no engine's bad debt is reported as zero."
       />
     </section>
   );

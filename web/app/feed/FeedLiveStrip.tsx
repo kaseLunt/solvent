@@ -84,7 +84,7 @@ export function FeedLiveStrip() {
         </span>
       ) : (
         <span data-testid="feed-live-none">
-          no batch delivered on this connection — nothing is pretended
+          no batch delivered on this connection, and nothing is pretended
         </span>
       )}
 
@@ -98,7 +98,7 @@ export function FeedLiveStrip() {
       )}
 
       <span className={styles.liveLaw}>
-        current connection only — live posture is never history; the durable feed below is
+        current connection only. Live posture is never history; the durable feed below is
         custodied chain fact, and posture replay arrives with P4&apos;s outbox.
       </span>
     </div>

@@ -71,14 +71,14 @@ export const LAB_DEK_LOADING =
 
 /** `/v1/book` served no waterfall: an absence, named, never a flat frontier. */
 export const LAB_DEK_NO_WATERFALL =
-  "The book carries no loss frontier on this batch — the waterfall the whole-book grid is " +
-  "read from was not served, so there is no cliff to state. That is an absence, not a book " +
-  "with nothing in it.";
+  "The book carries no loss frontier on this batch. The waterfall the whole-book grid is " +
+  "read from was not served, so there is no cliff to state. That absence is about the " +
+  "waterfall, and it says nothing about what sits on the book.";
 
 /** A waterfall with no grid points: same law, a different absence. */
 export const LAB_DEK_NO_GRID =
-  "The served loss frontier carries no grid points, so no step can be read. An empty grid is " +
-  "a statement about this batch's waterfall, never a claim that nothing breaks.";
+  "The served loss frontier carries no grid points, so no step can be read. An empty grid " +
+  "describes this batch's waterfall and makes no claim about what would break.";
 
 function accountsPhrase(count: number, engine: string, withNoun: boolean): string {
   const noun = withNoun ? (count === 1 ? " account" : " accounts") : "";
@@ -173,7 +173,7 @@ function terminalClause(lead: FrontierCell, terminal: FrontierStep): string {
   const others = terminal.cells.filter(
     (cell) => cell.engine !== lead.engine && cell.badDebt > 0n,
   );
-  const rest = others.length === 0 ? "" : ` — and ${badDebtPhrase(others, "reaches")} at that same step`;
+  const rest = others.length === 0 ? "" : `, and ${badDebtPhrase(others, "reaches")} at that same step`;
   return `By ${terminal.move}, ${lead.engine}'s Σ eligible debt reaches ${sigma}${own}${rest}.`;
 }
 
@@ -230,7 +230,7 @@ function noCliffSolvencyClause(view: FrontierView, terminal: FrontierStep): stri
   const insolvent = terminal.cells.filter((cell) => cell.badDebt > 0n);
   if (insolvent.length > 0) {
     return (
-      ` — and ${badDebtPhrase(insolvent, "still reaches")} ${when}: a book can be ` +
+      `, and ${badDebtPhrase(insolvent, "still reaches")} ${when}: a book can be ` +
       "insolvent with nothing new becoming liquidatable"
     );
   }
@@ -257,7 +257,7 @@ function censusClause(view: FrontierView): string {
   if (standing.length === 0) {
     return "No account is eligible at the unshocked mark either.";
   }
-  return `${joinEngineCounts(standing)} ${isSingular(standing) ? "is" : "are"} already eligible at the unshocked mark — a standing census, not a projection.`;
+  return `${joinEngineCounts(standing)} ${isSingular(standing) ? "is" : "are"} already eligible at the unshocked mark. That is a standing census rather than a projection.`;
 }
 
 /** Named absences that would otherwise read as a clean grid. */
@@ -274,7 +274,7 @@ function caveatClauses(waterfall: Waterfall, view: FrontierView): string {
         ? "at a point the wire did not name"
         : `at ${waterfall.monotonicity.engine} step ${String(waterfall.monotonicity.index)}`;
     clauses.push(
-      `the eligible-debt series breaks its monotonicity invariant ${where} — read the frontier with that point named, not smoothed`,
+      `the eligible-debt series breaks its monotonicity invariant ${where}, so read the frontier with that point named rather than smoothed`,
     );
   }
   if (waterfall.excluded_engines.length > 0) {
@@ -282,8 +282,8 @@ function caveatClauses(waterfall: Waterfall, view: FrontierView): string {
     const names = waterfall.excluded_engines.map((refusal) => refusal.engine).join(", ");
     clauses.push(
       count === 1
-        ? `1 engine's whole book is withheld from this grid (${names}) — its side is unknown, not zero`
-        : `${String(count)} engines' whole books are withheld from this grid (${names}) — their side is unknown, not zero`,
+        ? `1 engine's whole book is withheld from this grid (${names}), so its side is unknown rather than zero`
+        : `${String(count)} engines' whole books are withheld from this grid (${names}), so their side is unknown rather than zero`,
     );
   }
   return clauses.length === 0 ? "" : ` ${clauses.join("; ")}.`;
@@ -320,7 +320,7 @@ export function labDek(waterfall: Waterfall | null): string {
     // rather than invented.
     const solvency =
       terminal === undefined || lead === null ? "" : noCliffSolvencyClause(view, terminal);
-    return `Nothing new becomes liquidatable anywhere on this grid — not even at ${reach}${solvency}. ${censusClause(view)}${caveats}`;
+    return `Nothing new becomes liquidatable anywhere on this grid, not even at ${reach}${solvency}. ${censusClause(view)}${caveats}`;
   }
 
   const cliff = view.steps[view.cliffIndex];
@@ -341,5 +341,5 @@ export function labDek(waterfall: Waterfall | null): string {
 
   // SHAPE A — the cliff sits further down the grid.
   const at = cliff?.prose ?? cliff?.move ?? "a lower step";
-  return `Nothing new becomes liquidatable until ${axis} is ${at} — then ${cliffCounts} ${isSingular(cliffEntries) ? "crosses" : "cross"}.${tail}${caveats}`;
+  return `Nothing new becomes liquidatable until ${axis} is ${at}. Then ${cliffCounts} ${isSingular(cliffEntries) ? "crosses" : "cross"}.${tail}${caveats}`;
 }

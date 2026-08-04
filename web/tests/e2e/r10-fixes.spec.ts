@@ -281,7 +281,7 @@ test("(3) RECEDED WATERMARK, MATCHING FRONTIER: no “different batch” claim o
   // batch from it — and the claim names the COHORT, not "this table", because a
   // SUPERSEDED row displayed on this table is pinned to batch 1 already.
   await expect(batchLine).toContainText(
-    "The loss frontier above reads batch #1 — a different batch from this table's displayed cohort",
+    "The loss frontier above reads batch #1, a different batch from this table's displayed cohort",
   );
 
   // ---- THE ANCHOR ROW RE-RUNS AND COMES BACK OLDER ------------------------
@@ -302,7 +302,7 @@ test("(3) RECEDED WATERMARK, MATCHING FRONTIER: no “different batch” claim o
   // displayed result on that table was measured at batch 1.
   await expect(batchLine).not.toContainText("a different batch");
   await expect(batchLine).toContainText(
-    "The loss frontier above reads batch #1 — the same batch 2 of the 2 displayed row(s) are pinned to.",
+    "The loss frontier above reads batch #1: the same batch 2 of the 2 displayed row(s) are pinned to.",
   );
   // And no same-claim is smuggled in for the table either: there is no cohort.
   await expect(batchLine).toContainText("This table names no cohort of its own");

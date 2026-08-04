@@ -22,7 +22,7 @@ export default function InspectorPage() {
         <p>
           Look up one address: its current position, the price inputs behind it, its distance to
           liquidation, and its history across batches. Anything the service cannot defend renders
-          as a named refusal — never a guess.
+          as a named refusal, never a guess.
         </p>
       </div>
       <AddressEntry />

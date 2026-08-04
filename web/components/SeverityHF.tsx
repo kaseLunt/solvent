@@ -33,7 +33,7 @@ export interface SeverityHFProps {
 export function SeverityHF({ verdict, display, ratio, infinite }: SeverityHFProps) {
   if (infinite === true) {
     return (
-      <span className={`${styles.hf} ${styles.none}`} title="no debt — the ratio is unbounded">
+      <span className={`${styles.hf} ${styles.none}`} title="no debt, so the ratio is unbounded">
         ∞
       </span>
     );

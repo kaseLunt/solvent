@@ -49,16 +49,16 @@ export function comparatorFor(engine: string): string {
   switch (engine) {
     case "aave_v3_etherfi":
       return (
-        "aave_v3_etherfi: liquidatable ⇔ hf_wad < 1e18, STRICTLY — equality is healthy. " +
+        "aave_v3_etherfi: liquidatable ⇔ hf_wad < 1e18, STRICTLY, so equality is healthy. " +
         "Compared ON THE WAD the pool computed; never re-derived from a float."
       );
     case "debt_manager":
       return (
-        "debt_manager: liquidatable ⇔ debt > maxBorrowLT — the engine's STRICT boolean; " +
+        "debt_manager: liquidatable ⇔ debt > maxBorrowLT, the engine's STRICT boolean; " +
         "equality is healthy. No continuous health factor exists on this engine."
       );
     default:
-      return `comparator not known for engine "${engine}" — refusing to guess`;
+      return `comparator not known for engine "${engine}", and this surface is refusing to guess`;
   }
 }
 
@@ -84,7 +84,7 @@ function reorgPostureRow(stamp: Stamp | undefined): EvidenceRow {
     ? { label: "reorg posture", value: "none unacked", tone: "ok" }
     : {
         label: "reorg posture",
-        value: `${String(unacked)} unacked epoch(s) at compute — acked ${String(stamp.acked_epoch)} of ${String(stamp.max_epoch_at_compute)}`,
+        value: `${String(unacked)} unacked epoch(s) at compute · acked ${String(stamp.acked_epoch)} of ${String(stamp.max_epoch_at_compute)}`,
         tone: "crit",
       };
 }
@@ -100,7 +100,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
       { label: "computed_at", value: batch.computed_at },
       { label: "producer · status", value: `${batch.producer} · ${batch.status}` },
       ...(batch.supersession.superseded
-        ? [{ label: "supersession", value: "SUPERSEDED — the flag is the contract", tone: "warn" as const }]
+        ? [{ label: "supersession", value: "SUPERSEDED · the flag is the contract", tone: "warn" as const }]
         : []),
       {
         label: "engine watermark",
@@ -113,7 +113,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
       reorgPostureRow(stamp),
       {
         label: "materialization key",
-        value: "not served on this surface — published by /v1/evidence (Proof Center)",
+        value: "not served on this surface · published by /v1/evidence (Proof Center)",
         tone: "dim",
       },
     ],
@@ -127,14 +127,14 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
       { label: "params", value: `block ${formatBlock(asOf.params_block)}`, tone: "ok" },
       position.engine === "debt_manager"
         ? { label: "sweep", value: `block ${formatBlock(asOf.sweep_block)}`, tone: "ok" }
-        : { label: "sweep", value: "n/a — engine has no sweeper", tone: "dim" },
+        : { label: "sweep", value: "n/a · engine has no sweeper", tone: "dim" },
       {
         label: "oldest price input",
         value: asOf.oldest_price_input ?? "none",
         tone: asOf.oldest_price_input === null ? "dim" : "default",
       },
       asOf.stale_price_inputs
-        ? { label: "stale price inputs", value: "YES — flagged, and the flag propagates", tone: "warn" }
+        ? { label: "stale price inputs", value: "YES · flagged, and the flag propagates", tone: "warn" }
         : { label: "stale price inputs", value: "none", tone: "ok" },
     ],
   };
@@ -158,7 +158,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
   if (position.refusal !== null) {
     flagRows.push({
       label: "refusal",
-      value: `${position.refusal.code} — ${position.refusal.detail}`,
+      value: `${position.refusal.code}: ${position.refusal.detail}`,
       tone: "crit",
     });
   }
@@ -173,7 +173,7 @@ function positionSections(position: RefinedPosition, batch: Batch): EvidenceSect
 }
 
 const OPERATIONAL_NOTE =
-  "LIVE · WATERMARKED — served from the newest servable batch under its per-input watermark " +
+  "LIVE · WATERMARKED, served from the newest servable batch under its per-input watermark " +
   "vector. PROOF · EXACT @ PIN (reconcile-welded) is published by /v1/evidence, not asserted here.";
 
 /** Assemble a full descriptor: the number's own rows + the shared position chain. */
@@ -205,7 +205,7 @@ export function hfEvidence(position: RefinedPosition, batch: Batch, subject: str
           { label: "hf_wad (18-dec)", value: hf.wad ?? EM_DASH },
           { label: "numerator Σ(Cᵢ·LTᵢ)", value: hf.num ?? EM_DASH },
           { label: "denominator D (debt)", value: hf.den ?? EM_DASH },
-          { label: "infinite", value: hf.infinite ? "true — no debt" : "false" },
+          { label: "infinite", value: hf.infinite ? "true · no debt" : "false" },
           { label: "contract note", value: hf.note, tone: "dim" },
         ];
   return positionNumberEvidence(position, batch, { title: "EXPLAIN · HEALTH FACTOR", subject, rows });
@@ -240,7 +240,7 @@ export function totalEvidence(
     rows: [
       {
         label: `${field} (raw)`,
-        value: raw ?? `${EM_DASH} (null — not established; never rendered as 0)`,
+        value: raw ?? `${EM_DASH} (null, not established, and never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
       { label: "value decimals", value: String(position.value_decimals) },
@@ -269,7 +269,7 @@ export function dmComparandEvidence(
     rows: [
       {
         label: which,
-        value: raw ?? `${EM_DASH} (null — not established; never rendered as 0)`,
+        value: raw ?? `${EM_DASH} (null, not established, and never rendered as 0)`,
         tone: raw === null ? "dim" : "default",
       },
       { label: "comparator side", value: which === "borrowings" ? "left (debt)" : "right (threshold)" },
@@ -297,19 +297,19 @@ export function liquidationPriceEvidence(
           {
             label: "ceil disclosure",
             value:
-              "ceil(P*): at exactly this price the position is still HEALTHY — liquidation begins strictly below it.",
+              "ceil(P*): at exactly this price the position is still HEALTHY, and liquidation begins strictly below it.",
             tone: "dim",
           },
           { label: "axis", value: lp.axis },
           {
             label: "solve",
             value: lp.diagnostic
-              ? "DIAGNOSTIC — single-asset ceteris-paribus variant (other counted collateral held)"
-              : "factor-level closed form — all assets on the axis move together",
+              ? "DIAGNOSTIC · single-asset ceteris-paribus variant (other counted collateral held)"
+              : "factor-level closed form · all assets on the axis move together",
             tone: lp.diagnostic ? "warn" : "default",
           },
           ...(lp.already_breached
-            ? [{ label: "already breached", value: "true — the boundary is behind the current price", tone: "crit" as const }]
+            ? [{ label: "already breached", value: "true · the boundary is behind the current price", tone: "crit" as const }]
             : []),
           // Wave R1 item 2: the WIRE FIELD name (this is the evidence
           // register — the field is what the reader came to check), with the
@@ -318,7 +318,7 @@ export function liquidationPriceEvidence(
             ? [
                 {
                   label: "never_liquidatable (wire field)",
-                  value: `true — ${noPricePathTitle(lp.reason)}`,
+                  value: `true · ${noPricePathTitle(lp.reason)}`,
                   tone: "dim" as const,
                 },
               ]
@@ -345,7 +345,7 @@ export function priceInputEvidence(
       },
       {
         label: "chain-asserted as-of",
-        value: input.source_as_of ?? "none — DB insert time is never substituted",
+        value: input.source_as_of ?? "none · DB insert time is never substituted",
         tone: input.source_as_of === null ? "warn" : "default",
       },
       {
@@ -406,7 +406,7 @@ export function legEvidence(
         value:
           leg.liq_threshold === null
             ? EM_DASH
-            : `${paramPercent(leg.liq_threshold, position.engine)} — raw ${leg.liq_threshold}`,
+            : `${paramPercent(leg.liq_threshold, position.engine)} · raw ${leg.liq_threshold}`,
       },
       // Wave R3 (round-10 HIGH): the bonus is a par-based MULTIPLIER on Aave
       // (10500 = 1.05x = a 5% premium) and the PREMIUM ITSELF on the Debt
@@ -451,7 +451,7 @@ export type EvidenceManifest = components["schemas"]["EvidenceResponse"];
 type ManifestReconcile = components["schemas"]["ReconcileSummary"];
 type ManifestSubstrate = components["schemas"]["SubstrateRef"];
 
-const NO_REASON = "the manifest served no reason — stated as absent, never invented";
+const NO_REASON = "the manifest served no reason, so the absence is stated rather than invented";
 
 /** The proof subject's status. Anything but `accepted` must render LOUDLY. */
 export type ProofSubjectStatus =
@@ -485,7 +485,7 @@ export function deriveProofSubjectStatus(manifest: EvidenceManifest): ProofSubje
     return {
       kind: "rejected",
       reconcile,
-      detail: `verdict "pass" with exit code ${String(reconcile.exit_code)} — internally inconsistent receipt`,
+      detail: `verdict "pass" with exit code ${String(reconcile.exit_code)}, an internally inconsistent receipt`,
     };
   }
   if (reconcile.gated_drift !== 0 || reconcile.gated_exact !== reconcile.gated_rows) {
@@ -527,7 +527,7 @@ export function proofSubjectStatus(manifest: EvidenceManifest): ProofSubjectStat
     return derived;
   }
   const contradiction =
-    `CONTRADICTION — the wire's proof_subject.status "${wire.status}" contradicts the ` +
+    `CONTRADICTION · the wire's proof_subject.status "${wire.status}" contradicts the ` +
     `receipt's own conjunction "${derived.kind}"; refusing the proof badge and rendering ` +
     `the contradiction`;
   if (derived.kind === "unavailable") {
@@ -572,14 +572,14 @@ export function liveSubjectStatus(manifest: EvidenceManifest): LiveSubjectStatus
     return {
       kind: "no-batch",
       reason:
-        `CONTRADICTION — the wire's live_subject.status "${wire.status}" contradicts a ` +
+        `CONTRADICTION · the wire's live_subject.status "${wire.status}" contradicts a ` +
         `non-null substrate; refusing to claim a serving batch under a contradictory manifest`,
     };
   }
   return {
     kind: "no-batch",
     reason:
-      `CONTRADICTION — the wire claims "serving" while substrate is null; ` +
+      `CONTRADICTION · the wire claims "serving" while substrate is null; ` +
       `refusing to claim a serving batch (derived reason: ${derived.reason})`,
   };
 }
@@ -592,21 +592,21 @@ export function proofPin(reconcile: ManifestReconcile): string {
 const PROOF_COMPARATOR =
   "PROOF · EXACT @ PIN ⇔ the committed reconcile receipt's OWN verdict: result \"pass\", " +
   "exit code 0, gated_exact == gated_rows, gated_drift == 0, and every per-engine weld " +
-  "rows_exact == rows_compared. This surface republishes the committed receipt — it " +
-  "recomputes nothing — and the pin is the receipt's comparison sha.";
+  "rows_exact == rows_compared. This surface republishes the committed receipt and recomputes " +
+  "nothing, and the pin is the receipt's comparison sha.";
 
 const LIVE_COMPARATOR =
   "No comparator applies: the live subject is the currently-serving batch's IDENTITY " +
   "(materialization key, substrate digest) under its watermark vector. It is never compared " +
-  "against the proof — exactness claims live ONLY on the proof subject, at its pin.";
+  "against the proof; exactness claims live ONLY on the proof subject, at its pin.";
 
 const PROVEN_NOTE =
-  "PROOF · EXACT @ PIN — reconcile-welded numbers at the receipt's pinned run. The proof " +
+  "PROOF · EXACT @ PIN: reconcile-welded numbers at the receipt's pinned run. The proof " +
   "speaks for its pin and ONLY its pin: the currently-serving batch is the LIVE subject " +
   "and does not inherit this exactness.";
 
 const LIVE_NOTE =
-  "LIVE · WATERMARKED — the currently-serving batch under its per-input watermark vector. " +
+  "LIVE · WATERMARKED: the currently-serving batch under its per-input watermark vector. " +
   "It does NOT inherit the proof subject's exactness: reconcile welds bind the receipt's " +
   "pinned run, not this batch.";
 
@@ -617,7 +617,7 @@ function buildIdentitySection(manifest: EvidenceManifest): EvidenceSection {
     rows: [
       {
         label: "commit",
-        value: manifest.commit ?? `${EM_DASH} (no build stamp — never guessed)`,
+        value: manifest.commit ?? `${EM_DASH} (no build stamp, and never guessed)`,
         tone: manifest.commit === null ? "dim" : "default",
       },
       { label: "service", value: `${service.name} · ${service.version}` },
@@ -639,10 +639,10 @@ function feedsRegistrySection(manifest: EvidenceManifest): EvidenceSection {
       { label: "registry fingerprint", value: feeds.registry_fingerprint },
       { label: "file sha256", value: feeds.file_sha256 },
       welded
-        ? { label: "fingerprint weld", value: "identical to service.registry_fingerprint — by construction", tone: "ok" }
+        ? { label: "fingerprint weld", value: "identical to service.registry_fingerprint, by construction", tone: "ok" }
         : {
             label: "fingerprint weld",
-            value: "MISMATCH against service.registry_fingerprint — the contract says these are identical by construction",
+            value: "MISMATCH against service.registry_fingerprint, which the contract says are identical by construction",
             tone: "crit",
           },
     ],
@@ -655,17 +655,17 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
 
   const statusRow: EvidenceRow =
     status.kind === "accepted"
-      ? { label: "status", value: "ACCEPTED — every gated row welded exact", tone: "ok" }
+      ? { label: "status", value: "ACCEPTED · every gated row welded exact", tone: "ok" }
       : status.kind === "rejected"
-        ? { label: "status", value: `REJECTED — ${status.detail}`, tone: "crit" }
-        : { label: "status", value: `UNAVAILABLE — ${status.reason}`, tone: "crit" };
+        ? { label: "status", value: `REJECTED · ${status.detail}`, tone: "crit" }
+        : { label: "status", value: `UNAVAILABLE · ${status.reason}`, tone: "crit" };
 
   const sections: EvidenceSection[] = [{ title: "THIS SUBJECT", rows: [statusRow] }];
 
   if (status.kind !== "unavailable") {
     const reconcile = status.reconcile;
     sections.push({
-      title: "RECEIPT — COMMITTED ARTIFACT",
+      title: "RECEIPT · COMMITTED ARTIFACT",
       rows: [
         { label: "schema", value: reconcile.schema, tone: "dim" },
         { label: "result · exit", value: `${reconcile.result} · ${String(reconcile.exit_code)}` },
@@ -698,14 +698,14 @@ export function proofSubjectEvidence(manifest: EvidenceManifest): EvidenceDescri
       status.kind === "accepted"
         ? `PROOF · EXACT @ ${proofPin(status.reconcile)}`
         : status.kind === "rejected"
-          ? `RECEIPT REJECTED — ${status.detail}`
+          ? `RECEIPT REJECTED · ${status.detail}`
           : "NO COMMITTED RECEIPT",
     comparator: PROOF_COMPARATOR,
     marker: status.kind === "accepted" ? "proven" : "operational",
     markerNote:
       status.kind === "accepted"
         ? PROVEN_NOTE
-        : "NOT PROVEN — no unqualified committed receipt backs this deployment; nothing here may " +
+        : "NOT PROVEN: no unqualified committed receipt backs this deployment; nothing here may " +
           "wear the PROOF · EXACT badge, and the deployment identity above stays operational.",
     sections,
   };
@@ -720,7 +720,7 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
       ? [
           {
             title: "THIS SUBJECT",
-            rows: [{ label: "status", value: "SERVING — newest servable batch", tone: "ok" }],
+            rows: [{ label: "status", value: "SERVING · newest servable batch", tone: "ok" }],
           },
           {
             title: "SERVING BATCH · IDENTITY",
@@ -731,7 +731,7 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
                 label: "substrate digest",
                 value:
                   status.substrate.substrate_digest === ""
-                    ? `${EM_DASH} (predates substrate-digest custody — an honest gap, not a digest)`
+                    ? `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`
                     : status.substrate.substrate_digest,
                 tone: status.substrate.substrate_digest === "" ? "dim" : "default",
               },
@@ -747,7 +747,7 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
               { label: "reason", value: status.reason, tone: "crit" },
               {
                 label: "materialization key",
-                value: `${EM_DASH} — no batch, no key; never fabricated`,
+                value: `${EM_DASH} · no batch, no key; never fabricated`,
                 tone: "dim",
               },
             ],
@@ -758,7 +758,7 @@ export function liveSubjectEvidence(manifest: EvidenceManifest): EvidenceDescrip
     title: "EXPLAIN · LIVE SUBJECT",
     subject:
       status.kind === "serving"
-        ? `batch #${String(status.substrate.batch_id)} — LIVE · WATERMARKED`
+        ? `batch #${String(status.substrate.batch_id)} · LIVE · WATERMARKED`
         : "NO SERVABLE BATCH",
     comparator: LIVE_COMPARATOR,
     marker: "operational",

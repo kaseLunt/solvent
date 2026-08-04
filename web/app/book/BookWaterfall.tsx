@@ -46,8 +46,8 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
         </div>
         <div className={styles.panel}>
           <div className={styles.emptyReason}>
-            no waterfall was served on this batch — the down-grid was not computed, which is a
-            statement about the SERVICE, not a claim that nothing is at risk.
+            no waterfall was served on this batch: the down-grid was not computed. That is a
+            statement about the SERVICE, and it makes no claim about what is at risk.
           </div>
         </div>
       </section>
@@ -62,7 +62,7 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
     <section className={styles.section} aria-label="liquidation waterfall">
       <div className={styles.sectionHead}>
         <h2>
-          Liquidation waterfall — {waterfall.scenario_id} ({waterfall.scenario_version}) · axis{" "}
+          Liquidation waterfall · {waterfall.scenario_id} ({waterfall.scenario_version}) · axis{" "}
           {waterfall.axis}
         </h2>
         <ProjectionBadge />
@@ -82,9 +82,9 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
             {waterfall.monotonicity.factor !== undefined
               ? ` (factor ${factorTimesLabel(waterfall.monotonicity.factor, waterfall.grid_scale)})`
               : ""}
-            {" — "}
+            {" · "}
             {waterfall.monotonicity.detail ?? "the debt-eligible series is not monotone"}. The points
-            are served as computed, not smoothed.
+            are served exactly as computed, with no smoothing.
           </span>
         </div>
       )}
@@ -95,7 +95,7 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
             <span key={refusal.engine ?? refusal.code}>
               <RefusedTag reason={refusal.code ?? "withheld"} />{" "}
               <b>{refusal.engine}</b> is absent from every point of this waterfall
-              {refusal.detail !== undefined ? ` — ${refusal.detail}` : ""}
+              {refusal.detail !== undefined ? `: ${refusal.detail}` : ""}
             </span>
           ))}
         </div>
@@ -133,12 +133,12 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
 
       <div className={styles.panel} style={{ marginTop: "var(--sp-3)" }}>
         <div className={styles.panelHead}>
-          <span>held flat — price inputs the propagation matrix did not describe</span>
+          <span>held flat · price inputs the propagation matrix did not describe</span>
         </div>
         <div className={styles.panelBody} data-testid="waterfall-held-flat">
           {waterfall.held_flat.length === 0 ? (
             <span className={styles.sectionNote}>
-              empty — the claim that the matrix covered the whole book
+              empty, which is the claim that the matrix covered the whole book
             </span>
           ) : (
             <>

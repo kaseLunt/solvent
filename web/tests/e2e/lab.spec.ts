@@ -121,7 +121,7 @@ test("COLD ARRIVAL: dek + frontier + matrix + committed list, with ZERO run requ
   await expect(page.getByTestId("lab-dek")).toHaveText(
     `The first step already bites: ETH down 10% makes 1 account on aave_v3_etherfi newly ` +
       `liquidatable. By ${MINUS}50%, aave_v3_etherfi's Σ eligible debt reaches $6,000 and its ` +
-      `bad debt $2,190.47619048 — and debt_manager's bad debt reaches $2,219.801981 at that ` +
+      `bad debt $2,190.47619048, and debt_manager's bad debt reaches $2,219.801981 at that ` +
       `same step.`,
   );
   // NEVER SUMMED: the two books total $4,410.278171, a number that appears
@@ -193,7 +193,7 @@ test("the frontier renders the wire's caveats VERBATIM and never plots a withhel
     "realized ≤ eligible",
   );
   // The dek says unknown, never zero.
-  await expect(page.getByTestId("lab-dek")).toContainText("its side is unknown, not zero");
+  await expect(page.getByTestId("lab-dek")).toContainText("its side is unknown rather than zero");
 });
 
 test("a monotonicity violation is SURFACED with its point named, never smoothed", async ({
@@ -243,7 +243,7 @@ test("the matrix renders ALL FIVE cell states, and not-covered never looks like 
   const cell = (scenario: string, engine: number) =>
     page.locator(`[data-testid="matrix-row"][data-scenario-id="${scenario}"] td`).nth(engine);
 
-  // 1. NOT COVERED — structural, from the listing, with zero runs issued.
+  // 1. NOT COVERED · structural, from the listing, with zero runs issued.
   //    dm_rate_horizon_plus_200bps is defined for debt_manager only.
   const notCovered = cell("dm_rate_horizon_plus_200bps", 1);
   await expect(notCovered).toHaveAttribute("data-cell-state", "not-covered");
@@ -359,7 +359,7 @@ test("the matrix discloses that the frontier reads its OWN batch", async ({ page
     .click();
   // book.json is batch 1; the run is batch 2. The two are named, never merged.
   await expect(page.getByTestId("matrix-batch-line")).toContainText(
-    "The loss frontier above reads batch #1 — a different batch from this table",
+    "The loss frontier above reads batch #1, a different batch from this table",
   );
 });
 
@@ -640,7 +640,7 @@ test("boundary group and PROJECTION panel render from the DM fixture's data", as
   await expect(group).toContainText("Stablecoin depeg to 0.995 (inside the snap band)");
   await expect(group).toContainText("995/1000");
   await expect(group).toContainText(`${MINUS}0.5%`);
-  await expect(group).toContainText("no-op — served states bit-identical");
+  await expect(group).toContainText("no-op · served states bit-identical");
 
   // The rate scenario: a PROJECTION, delta-only, sealed horizon verdicts, and
   // the wire's own no-time-to-liquidatable statement.

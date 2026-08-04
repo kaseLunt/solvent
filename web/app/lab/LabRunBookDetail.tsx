@@ -105,7 +105,7 @@ function Distribution({
                   rx={1}
                 >
                   <title>
-                    eligible territory — the engine liquidates strictly below 1.00 on the wad
+                    eligible territory: the engine liquidates strictly below 1.00 on the wad
                   </title>
                 </rect>
               )}
@@ -130,7 +130,7 @@ function Distribution({
       </svg>
       <div className={styles.histAside}>
         <span className={styles.histBadge} data-testid={`runbook-hist-refused-${side}`}>
-          refused {String(histogram.refused_count)} — rows counted here, never dropped
+          refused {String(histogram.refused_count)} · rows counted here, never dropped
         </span>
         <span>∞ no-debt {String(histogram.infinite_count)}</span>
       </div>

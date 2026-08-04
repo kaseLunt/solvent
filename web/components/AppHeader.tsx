@@ -45,7 +45,7 @@ export function AppHeader() {
   return (
     <header className={styles.header}>
       <div className={styles.topRow}>
-        <Link href="/book" className={styles.brand} aria-label="Solvent — go to the Book">
+        <Link href="/book" className={styles.brand} aria-label="Solvent · go to the Book">
           <span className={styles.wordmark}>
             SOLVENT<span>·</span>
           </span>

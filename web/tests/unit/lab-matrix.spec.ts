@@ -129,7 +129,7 @@ test("axisFamilyWords joins reader words, never field names", () => {
 });
 
 // ---------------------------------------------------------------------------
-// NOT COVERED — structural, from the listing, before any run.
+// NOT COVERED · structural, from the listing, before any run.
 // ---------------------------------------------------------------------------
 
 test("NOT COVERED comes from the committed listing and is knowable with ZERO runs", () => {
@@ -513,8 +513,8 @@ test("R9 — THE HEADER: with no current result, it NAMES NO COHORT at the water
   // truthfully.
   expect(line).toBe(
     "batch #2 is the newest batch this table has seen and the floor its as-of never falls " +
-      "below — but NO result now displayed was measured at it. 2 row(s) are displayed and " +
-      "every one of them is OLDER, marked SUPERSEDED at its own batch pin — there is no " +
+      "below, but NO result now displayed was measured at it. 2 row(s) are displayed and " +
+      "every one of them is OLDER, marked SUPERSEDED at its own batch pin, so there is no " +
       "batch #2 cohort here to read them as one.",
   );
 
@@ -533,7 +533,7 @@ test("R9 — WHEN CURRENT RESULTS EXIST THE SENTENCE IS UNCHANGED, watermark or 
   // not rewrite the true one.
   expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), null)).toBe(
     "results shown together were measured at batch #2. 1 row(s) still hold an older batch's " +
-      "result and are marked SUPERSEDED — they are shown, never blended into the sentence above.",
+      "result and are marked SUPERSEDED. They are shown, never blended into the sentence above.",
   );
   // …and with every displayed result on the anchor, the same as before.
   //
@@ -609,7 +609,7 @@ test("R9 — the no-run and frontier clauses are carried through the header mode
   // table actually claims is the batch its DISPLAYED COHORT was measured at, so
   // that is what the comparison now names.
   expect(batchHeaderLine(resolveBatchCohort(settledAtTwo(), 1), 1)).toContain(
-    "The loss frontier above reads batch #1 — a different batch from this table's displayed " +
+    "The loss frontier above reads batch #1, a different batch from this table's displayed " +
       "cohort, which is why the two are never read as one number.",
   );
   // Same batch on both: disclosed, with no difference claimed.
@@ -695,7 +695,7 @@ test("R10 — A FIRST RUN IN FLIGHT: the header says the run is out, never that 
   const line = batchHeaderLine(cohort, null);
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) are in flight. There is no batch " +
-      "for this table to be as of — and this is NOT “not run”: every row counted here was " +
+      "for this table to be as of, and this is NOT “not run”: every row counted here was " +
       "asked, and each says in its own cell what became of the asking.",
   );
 
@@ -722,7 +722,7 @@ test("R10 — A FIRST RUN THAT FAILED: N run(s) ended without a served result, i
   const line = batchHeaderLine(cohort, null);
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) ended without a served result. " +
-      "There is no batch for this table to be as of — and this is NOT “not run”: every row " +
+      "There is no batch for this table to be as of, and this is NOT “not run”: every row " +
       "counted here was asked, and each says in its own cell what became of the asking.",
   );
 
@@ -773,7 +773,7 @@ test("R10 — THE HELD PIN: a re-running row holding an OLDER batch is disclosed
   expect(line).toBe(
     "results shown together were measured at batch #2. Every DISPLAYED result was measured at " +
       "that batch. 1 re-running row(s) still hold a result at batch #1 while the request is " +
-      "out — held evidence, displayed nowhere, and never part of the cohort above. 1 row(s) " +
+      "out · held evidence, displayed nowhere, and never part of the cohort above. 1 row(s) " +
       "have a run in flight; the batch above is a WATERMARK and never moves backwards while " +
       "one is, so nothing older repaints as current.",
   );
@@ -830,7 +830,7 @@ test("R10 — THE RECEDED SEQUENCE with a MATCHING frontier makes NO “differen
   // displayed result on that table was measured at batch 1.
   expect(line).not.toContain("a different batch");
   expect(line).toContain(
-    "The loss frontier above reads batch #1 — the same batch 2 of the 2 displayed row(s) are " +
+    "The loss frontier above reads batch #1: the same batch 2 of the 2 displayed row(s) are " +
       "pinned to.",
   );
   // No table-wide same-claim either: there is no cohort, so none is invented.
@@ -863,7 +863,7 @@ test("R10 — WITH a displayed cohort the frontier is compared against the COHOR
   // is pinned to batch 1 — the frontier's own batch.
   const different = batchHeaderLine(withCohort, 1);
   expect(different).toContain(
-    "The loss frontier above reads batch #1 — a different batch from this table's displayed cohort",
+    "The loss frontier above reads batch #1, a different batch from this table's displayed cohort",
   );
   expect(different).not.toContain("a different batch from this table,");
 });
@@ -1026,8 +1026,8 @@ test("R11 — THE HEADER: no cohort claim, and the state is NAMED as a served bo
 
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) were served a book that named none " +
-      "of the row's covered engines — a served book, but not a served result. There is no batch " +
-      "for this table to be as of — and this is NOT “not run”: every row counted here was asked, " +
+      "of the row's covered engines: a served book, but not a served result. There is no batch " +
+      "for this table to be as of, and this is NOT “not run”: every row counted here was asked, " +
       "and each says in its own cell what became of the asking.",
   );
 
@@ -1061,7 +1061,7 @@ test("R11 — the ALL-HOLE clause rides BESIDE a real cohort, and never inside i
   expect(line).toBe(
     "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
       "that batch. 1 row(s) were SERVED A BOOK that named none of the engines their committed " +
-      "definition covers — every covered cell there reads UNANSWERED, so the row displays no " +
+      "definition covers, so every covered cell there reads UNANSWERED, so the row displays no " +
       "result, pins no batch, and is no part of the sentence above. That is not a run that " +
       "ended without a book: the book arrived and named nobody.",
   );
@@ -1189,10 +1189,9 @@ test("R11 — A RE-RUN THAT COMES BACK NAMING NOBODY: the watermark holds, the c
 
   const line = batchHeaderLine(cohort, null);
   expect(line).toBe(
-    "batch #2 is the newest batch this table has seen and the floor its as-of never falls below " +
-      "— but NO result now displayed was measured at it. No row is displaying a result at all " +
+    "batch #2 is the newest batch this table has seen and the floor its as-of never falls below, but NO result now displayed was measured at it. No row is displaying a result at all " +
       "right now, so there is no cohort to read together. 1 row(s) were SERVED A BOOK that named " +
-      "none of the engines their committed definition covers — every covered cell there reads " +
+      "none of the engines their committed definition covers, so every covered cell there reads " +
       "UNANSWERED, so the row displays no result, pins no batch, and is no part of the sentence " +
       "above. That is not a run that ended without a book: the book arrived and named nobody.",
   );
@@ -1248,7 +1247,7 @@ test("R11 — the three ways a run can leave a row empty are counted SEPARATELY"
   expect(line).toContain("1 run(s) are in flight");
   expect(line).toContain("1 run(s) ended without a served result");
   expect(line).toContain(
-    "1 run(s) were served a book that named none of the row's covered engines — a served book, " +
+    "1 run(s) were served a book that named none of the row's covered engines: a served book, " +
       "but not a served result",
   );
   expect(line).not.toContain("no run has been issued yet");
@@ -1502,9 +1501,9 @@ test("R12/1 — THE HEADER: named as a contradiction, and never as “named nobo
 
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) were served a book that CONTRADICTS " +
-      "ITSELF — an engine named twice, or named as served and withheld at once, which is a body " +
+      "ITSELF: an engine named twice, or named as served and withheld at once, which is a body " +
       "that names somebody twice rather than one that names nobody. There is no batch for this " +
-      "table to be as of — and this is NOT “not run”: every row counted here was asked, and each " +
+      "table to be as of, and this is NOT “not run”: every row counted here was asked, and each " +
       "says in its own cell what became of the asking.",
   );
 
@@ -1533,10 +1532,10 @@ test("R12/1 — the contradiction clause rides BESIDE a real cohort, never insid
 
   expect(batchHeaderLine(cohort, null)).toBe(
     "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
-      "that batch. 1 row(s) were served a book that CONTRADICTS ITSELF — an engine named twice " +
+      "that batch. 1 row(s) were served a book that CONTRADICTS ITSELF: an engine named twice " +
       "within an array, or named as served and withheld at once. A body that answers a cell two " +
       "ways answers it no way, so the whole response is refused for presentation: no cell, no " +
-      "pin, and no part of the sentence above. That is not a book that named nobody — this one " +
+      "pin, and no part of the sentence above. That is not a book that named nobody; this one " +
       "named somebody twice.",
   );
 
@@ -1703,8 +1702,8 @@ test("R12/2 — THE CELL and THE HEADER agree: DEFINITION CHANGED, never ALL-HOL
   const line = batchHeaderLine(cohort, null);
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) answered for a committed definition " +
-      "this page is no longer showing — refresh the listing to run against the current one. " +
-      "There is no batch for this table to be as of — and this is NOT “not run”: every row " +
+      "this page is no longer showing. Refresh the listing to run against the current one. " +
+      "There is no batch for this table to be as of, and this is NOT “not run”: every row " +
       "counted here was asked, and each says in its own cell what became of the asking.",
   );
   expect(line).not.toContain("named none of the row's covered engines");
@@ -1728,8 +1727,7 @@ test("R12/2 — the definition-changed clause rides BESIDE a real cohort", () =>
 
   expect(batchHeaderLine(cohort, null)).toBe(
     "results shown together were measured at batch #1. Every DISPLAYED result was measured at " +
-      "that batch. 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing " +
-      "— the committed set moved after this page loaded. Nothing failed and nothing was " +
+      "that batch. 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing: the committed set moved after this page loaded. Nothing failed and nothing was " +
       "withheld: a result computed for one definition is simply never read against the coverage " +
       "of another, so the row is not classified, pins no batch, and is no part of the sentence " +
       "above. Refresh the committed listing to run against the current definition.",
@@ -1751,7 +1749,7 @@ test("R12/2 — THE REFRESH PATH: with the v2 listing the SAME stored answer cla
   expect(cohort.anchorBatchId).toBe(1);
 
   // The v2 definition covers aave alone, so aave carries the result and
-  // debt_manager is NOT COVERED — a property of the DEFINITION, exactly as it
+  // debt_manager is NOT COVERED · a property of the DEFINITION, exactly as it
   // has always been, now read against the right one.
   const served = cellState({
     scenario: ETHFI_V2,
@@ -2178,11 +2176,11 @@ test("R13/2 — A CLEAN HELD RESULT keeps R8's wording, verbatim, on both surfac
   // The R8 assertions, unchanged — this response IS presented, so calling it a
   // result is the honest thing and nothing about it moves.
   expect(matrix.line).toBe(
-    `re-run ended without a book — ${RERUN_503} The cells still show what this row already ` +
+    `re-run ended without a book. ${RERUN_503} The cells still show what this row already ` +
       `measured, at its own batch.`,
   );
   expect(detail.line).toBe(
-    `the re-run ended without a book — ${RERUN_503} The result below is the one this row already ` +
+    `the re-run ended without a book. ${RERUN_503} The result below is the one this row already ` +
       `held, at the batch it was measured on; nothing was overwritten and nothing was invented ` +
       `in its place.`,
   );
@@ -2352,7 +2350,7 @@ test("R13b — the clean case is untouched by the new parameter", () => {
   const matrix = rerunFailedBanner(phase, IDENTITY_LISTED.get(ETH.id), "matrix", ETH.engines);
   expect(matrix?.retained).toBe("result");
   expect(matrix?.line).toBe(
-    `re-run ended without a book — ${RERUN_503} The cells still show what this row already ` +
+    `re-run ended without a book. ${RERUN_503} The cells still show what this row already ` +
       `measured, at its own batch.`,
   );
 });
@@ -2756,8 +2754,8 @@ test("R14/1 — THE HEADER: an attempt is never called an answer, and never call
   const line = batchHeaderLine(cohort, null);
   expect(line).toBe(
     "no result has been served to this table yet: 1 run(s) were ASKED under a committed " +
-      "definition this page is no longer showing and never came back with a book of their own — " +
-      "re-run to ask under the current one. There is no batch for this table to be as of — and " +
+      "definition this page is no longer showing and never came back with a book of their own, so " +
+      "re-run to ask under the current one. There is no batch for this table to be as of, and " +
       "this is NOT “not run”: every row counted here was asked, and each says in its own cell " +
       "what became of the asking.",
   );
@@ -2809,7 +2807,7 @@ test("R14/1 — the attempt clause rides BESIDE a real cohort, and beside R12's 
   // R12's sentence, byte for byte, with its own count of ONE — the attempt is
   // not folded into it.
   expect(line).toContain(
-    "1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing — the " +
+    "1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing: the " +
       "committed set moved after this page loaded.",
   );
   expect(line).toContain("Refresh the committed listing to run against the current definition.");
@@ -3063,7 +3061,7 @@ const R15_ANCHORED_LEAD =
 /** The RUNNING arm, anchored. It names no remedy — that is the whole finding. */
 const R15_RUNNING_ANCHORED =
   " 1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and their " +
-  "request is STILL OUT — an attempt carries only the identity it was DISPATCHED under, and " +
+  "request is STILL OUT. An attempt carries only the identity it was DISPATCHED under, and " +
   "that identity is not this row's. Nothing has settled: whatever the request answers will be " +
   "judged by the identity the RESPONSE publishes for itself, so the row pins no batch and is " +
   "no part of the sentence above. There is nothing to do here until it settles.";
@@ -3071,27 +3069,27 @@ const R15_RUNNING_ANCHORED =
 /** The SETTLED arm, anchored — R14's wording, byte for byte. */
 const R15_SETTLED_ANCHORED =
   " 1 row(s) were ASKED under a COMMITTED DEFINITION this page is no longer showing and never " +
-  "came back with a book of their own — an attempt carries only the identity it was DISPATCHED " +
+  "came back with a book of their own. An attempt carries only the identity it was DISPATCHED " +
   "under, and that identity is not this row's. Nothing answered and nothing was refused, so the " +
   "attempt is counted as neither in flight nor unanswered, pins no batch, and is no part of the " +
-  "sentence above. Re-run the row to ask under the current definition — a listing refresh " +
+  "sentence above. Re-run the row to ask under the current definition, and a listing refresh " +
   "resolves nothing here, because the listing is already the current one.";
 
 /** The no-anchor arm's facts, each as `firstResultPendingClause` builds it. */
 const R15_RUNNING_FACT =
   "1 run(s) were ASKED under a committed definition this page is no longer showing and the " +
-  "request is STILL OUT — whatever it answers will be judged by the identity the response " +
+  "request is STILL OUT. Whatever it answers will be judged by the identity the response " +
   "publishes for itself, so there is nothing to do here until it settles";
 
 const R15_SETTLED_FACT =
   "1 run(s) were ASKED under a committed definition this page is no longer showing and never " +
-  "came back with a book of their own — re-run to ask under the current one";
+  "came back with a book of their own, so re-run to ask under the current one";
 
 /** The no-anchor arm's frame, around whatever facts it was given. */
 function r15Pending(facts: string): string {
   return (
     `no result has been served to this table yet: ${facts}. There is no batch for this table ` +
-    `to be as of — and this is NOT “not run”: every row counted here was asked, and each says ` +
+    `to be as of, and this is NOT “not run”: every row counted here was asked, and each says ` +
     `in its own cell what became of the asking.`
   );
 }
@@ -3271,7 +3269,7 @@ test("R15 — THE DETAIL TAIL never contradicts the reason it is appended to", (
   // out". One paragraph, two mutually exclusive claims about one request.
   const runningTail = attemptChangedNote(running, "detail");
   expect(runningTail).toBe(
-    "This panel therefore shows no aggregate, no delta and no outcome register from it — and " +
+    "This panel therefore shows no aggregate, no delta and no outcome register from it, and " +
       "there is nothing to do here until the request settles.",
   );
   expect(runningTail).not.toContain("came back");
@@ -3284,7 +3282,7 @@ test("R15 — THE DETAIL TAIL never contradicts the reason it is appended to", (
   // …and the SETTLED tail is R14's, unchanged, because R14 was right about it.
   expect(attemptChangedNote(settled, "detail")).toBe(
     "No book came back from it, so there is nothing here for a listing refresh to make " +
-      "readable — this panel shows no aggregate, no delta and no outcome register from it.",
+      "readable, so this panel shows no aggregate, no delta and no outcome register from it.",
   );
 });
 
@@ -3667,7 +3665,7 @@ test("R16/1 — THE LISTING UNMOVED: the same phase classifies as ITSELF, in R8'
   expect(banner?.retained).toBe("result");
   expect(banner?.attemptChanged).toBe(false);
   expect(banner?.line).toBe(
-    `re-run ended without a book — ${R16_404} The cells still show what this row already ` +
+    `re-run ended without a book. ${R16_404} The cells still show what this row already ` +
       `measured, at its own batch.`,
   );
   const cell = cellState({
@@ -3817,12 +3815,12 @@ const R17_ALL_HOLE_V2 = { ...RUN_BOOK_WEETH_V2, engines: [], excluded_engines: [
 
 /** The UNANSWERED clause, anchored — R10's sentence, unmoved and unedited. */
 const R17_UNANSWERED_ANCHORED =
-  " 1 row(s) display UNANSWERED — their run ended without a served book, which is neither a " +
+  " 1 row(s) display UNANSWERED: their run ended without a served book, which is neither a " +
   "zero nor a “not run”, and joins no batch sentence here.";
 
 /** R12's ANSWER arm, anchored — the account the finding says the row used to get. */
 const R12_ANSWER_ANCHORED =
-  " 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing — the committed " +
+  " 1 row(s) answered for a COMMITTED DEFINITION this page is no longer showing: the committed " +
   "set moved after this page loaded. Nothing failed and nothing was withheld: a result computed " +
   "for one definition is simply never read against the coverage of another, so the row is not " +
   "classified, pins no batch, and is no part of the sentence above. Refresh the committed " +
@@ -4217,7 +4215,7 @@ test("R17/1 — A PRESENTED RETAINED BODY STILL OUTRANKS: R16's arm, verbatim", 
     expect(banner?.retained, what).toBe("result");
     expect(banner?.attemptChanged, what).toBe(false);
     expect(banner?.line, what).toBe(
-      `re-run ended without a book — ${R16_404} The cells still show what this row already ` +
+      `re-run ended without a book. ${R16_404} The cells still show what this row already ` +
         `measured, at its own batch.`,
     );
   }

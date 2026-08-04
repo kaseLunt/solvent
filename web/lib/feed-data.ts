@@ -141,7 +141,7 @@ export const SINCE_BLOCK_IMPOSSIBILITY =
  */
 export function assertFeedScopeLawful(scope: FeedScope): void {
   if (scope.sinceBlock !== null && scope.engine === null) {
-    throw new Error(`refused locally, never sent — ${SINCE_BLOCK_IMPOSSIBILITY}`);
+    throw new Error(`refused locally, never sent: ${SINCE_BLOCK_IMPOSSIBILITY}`);
   }
 }
 

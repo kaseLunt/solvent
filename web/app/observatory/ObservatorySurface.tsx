@@ -62,8 +62,8 @@ export function ObservatorySurface() {
         <h1>Observatory</h1>
         <p>
           How each engine&apos;s book has moved, hour by hour, in a record that outlives batch
-          retention. An hour with no complete batch renders as a hole — never smoothed, never
-          zero.
+          retention. An hour with no complete batch renders as a hole, which is never smoothed
+          over and never drawn as a zero.
         </p>
       </div>
 
@@ -84,7 +84,7 @@ export function ObservatorySurface() {
           </button>
         ))}
         <span className={styles.controlNote}>
-          one engine per view — engines are never combined onto one axis
+          one engine per view · engines are never combined onto one axis
         </span>
       </div>
 
@@ -139,15 +139,15 @@ function EngineSeriesView({ engine }: { engine: ObservatoryEngine }) {
       {state.phase === "degraded" && (
         <div className={styles.refusalPanel} data-testid="observatory-degraded" role="status">
           <h2>
-            <RefusedTag reason="ROLLUP UNAVAILABLE" /> observatory rollup unavailable — a named
-            state, not an empty chart
+            <RefusedTag reason="ROLLUP UNAVAILABLE" /> observatory rollup unavailable, a named
+            state rather than an empty chart
           </h2>
           <p>the service said: {state.serverMessage}</p>
           <p>
             this deployment&apos;s database predates the observatory rollup (migration 00016):
-            the durable series does not exist here yet. that is a fact about the deployment —
-            never rendered as an empty history, a flat line, or a zero. live per-batch posture
-            still exists on the Book.
+            the durable series does not exist here yet. that is a fact about the deployment, and
+            it is never rendered as an empty history, a flat line, or a zero. live per-batch
+            posture still exists on the Book.
           </p>
         </div>
       )}
@@ -155,7 +155,7 @@ function EngineSeriesView({ engine }: { engine: ObservatoryEngine }) {
       {state.phase === "error" && (
         <div className={styles.warnStrip} role="alert">
           <b>SERIES FETCH FAILED</b>
-          <span>{state.message} — the record is unavailable, not empty.</span>
+          <span>{state.message}. The record is unavailable, and none of it is being shown as empty.</span>
         </div>
       )}
 
@@ -163,8 +163,8 @@ function EngineSeriesView({ engine }: { engine: ObservatoryEngine }) {
         <div className={styles.panel}>
           <div className={styles.emptyReason} data-testid="observatory-empty">
             the rollup answered but carries no buckets for <b>{state.response.engine}</b> in the
-            served range ({describeRange(state.response.from, state.response.to)}) — a young
-            record or an empty window, never an empty-book claim.
+            served range ({describeRange(state.response.from, state.response.to)}), which means a
+            young record or an empty window rather than an empty book.
           </div>
         </div>
       )}
@@ -220,7 +220,7 @@ function ObservatoryBody({
               value={displayMetric(newest, "debt_usd", response.usd_decimals)}
               sub={
                 newest.refused
-                  ? `withheld — not zero (${newest.refusal_code ?? "unnamed"})`
+                  ? `withheld, no number served (${newest.refusal_code ?? "unnamed"})`
                   : `bucket ${newest.bucket_start}`
               }
             />
@@ -229,7 +229,7 @@ function ObservatoryBody({
               value={displayMetric(newest, "collateral_usd", response.usd_decimals)}
               sub={
                 newest.refused
-                  ? `withheld — not zero (${newest.refusal_code ?? "unnamed"})`
+                  ? `withheld, no number served (${newest.refusal_code ?? "unnamed"})`
                   : `bucket ${newest.bucket_start}`
               }
             />
@@ -238,7 +238,7 @@ function ObservatoryBody({
               value={displayMetric(newest, "accounts", response.usd_decimals)}
               sub={
                 newest.refused
-                  ? "withheld — not zero"
+                  ? "withheld, no number served"
                   : `${String(newest.refused_positions)} refused position row(s) in this bucket`
               }
             />
@@ -247,7 +247,7 @@ function ObservatoryBody({
               value={displayMetric(newest, "liquidatable_positions", response.usd_decimals)}
               sub={
                 newest.refused
-                  ? "withheld — not zero"
+                  ? "withheld, no number served"
                   : "the engine's own verdicts, counted at capture"
               }
               tone={

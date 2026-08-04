@@ -151,7 +151,7 @@ export async function runBookScenario(
       kind: "no-batch",
       message:
         envelope?.message ??
-        "no complete risk batch is available — a statement about the service, not about the book",
+        "no complete risk batch is available. That is a statement about the service, not about the book",
       retryAfterSeconds: retryAfter(res.headers.get("retry-after"), envelope),
     };
   }

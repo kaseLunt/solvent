@@ -89,7 +89,7 @@ test("resting render: one engine's series, exact values, as-of stated, notes and
     "a withheld bucket carries NULL totals",
   );
   await expect(page.getByText("4 captured · 0 withheld · 1 absent")).toBeVisible();
-  await expect(page.getByText("native hourly buckets — every captured bucket served verbatim")).toBeVisible();
+  await expect(page.getByText("native hourly buckets · every captured bucket served verbatim")).toBeVisible();
 
   // No DM values leak into the aave view (engines never combined).
   await expect(page.locator("body")).not.toContainText("$309.593004");
@@ -155,7 +155,7 @@ test("the DEGRADED response is a NAMED state — never an empty chart, never zer
   const degraded = page.getByTestId("observatory-degraded");
   await expect(degraded).toBeVisible();
   await expect(degraded).toContainText("ROLLUP UNAVAILABLE");
-  await expect(degraded).toContainText("a named state, not an empty chart");
+  await expect(degraded).toContainText("a named state rather than an empty chart");
   // The server's own message, verbatim.
   await expect(degraded).toContainText("observatory_points does not exist on this database");
   // No chart pretends an empty history; no zero is fabricated anywhere.
@@ -236,7 +236,7 @@ test("the sweep clock renders all three states honestly — stamped, recorded no
   await page.getByTestId("observatory-engine-debt_manager").click();
 
   await expect(sweep).toContainText("—");
-  await expect(sweep).toContainText("unrecorded — this point predates migration 00018");
+  await expect(sweep).toContainText("unrecorded: this point predates migration 00018");
   await expect(sweep).not.toContainText("no collateral sweep");
   await expect(sweep).not.toContainText("swept ·");
 });
@@ -249,7 +249,7 @@ test("a WITHHELD bucket stays visible with its named refusal — em dashes, neve
   // The newest bucket IS the withheld one: the strip refuses honestly.
   const newest = page.getByTestId("observatory-newest");
   await expect(newest).toContainText("REFUSED · FLAG_CUSTODY_UNPROVEN");
-  await expect(newest).toContainText("withheld — not zero");
+  await expect(newest).toContainText("withheld, no number served");
   await expect(newest).toContainText("—");
   await expect(newest).not.toContainText("$0");
 
@@ -263,7 +263,7 @@ test("a WITHHELD bucket stays visible with its named refusal — em dashes, neve
   // The bucket record (default-selected) names the refusal and keeps nulls null.
   const detail = page.getByTestId("observatory-point-detail");
   await expect(detail).toContainText("REFUSED · FLAG_CUSTODY_UNPROVEN");
-  await expect(detail).toContainText("null because the book was withheld; not zero");
+  await expect(detail).toContainText("null because the book was withheld and never zero");
   await expect(detail).not.toContainText("$0");
 
   // The bucket census counts the withheld bucket instead of dropping it.

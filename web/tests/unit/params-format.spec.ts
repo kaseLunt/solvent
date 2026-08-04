@@ -147,13 +147,13 @@ test("the RAW multiplier is disclosed beside the premium — the wire value is n
 
 test("the evidence register states the premium AND what the raw integer IS", () => {
   expect(liqBonusEvidenceValue("10500", "aave_v3_etherfi")).toBe(
-    "5% premium — raw multiplier 10500 (10000 = par)",
+    "5% premium · raw multiplier 10500 (10000 = par)",
   );
   expect(liqBonusEvidenceValue("10600", "aave_v3_etherfi")).toBe(
-    "6% premium — raw multiplier 10600 (10000 = par)",
+    "6% premium · raw multiplier 10600 (10000 = par)",
   );
   expect(liqBonusEvidenceValue("3500000000000000000", "debt_manager")).toBe(
-    "3.5% premium — raw 3500000000000000000, published as the premium itself",
+    "3.5% premium · raw 3500000000000000000, published as the premium itself",
   );
   expect(liqBonusEvidenceValue(null, "aave_v3_etherfi")).toBe(EM_DASH);
 });

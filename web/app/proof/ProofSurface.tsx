@@ -126,30 +126,30 @@ function ProofSubjectCard({
         </ExplainButton>
       </h2>
       <p className={styles.subjectCaption}>
-        the pinned, exactly-reproducible acceptance evidence — the committed reconcile receipt and
+        the pinned, exactly-reproducible acceptance evidence: the committed reconcile receipt and
         the build it speaks for. Never the live batch.
       </p>
 
       <div className={styles.subjectBody}>
         {status.kind === "accepted" && (
           <Row label="status" tone="ok" testId="proof-status">
-            ACCEPTED — every gated row welded exact
+            ACCEPTED · every gated row welded exact
           </Row>
         )}
         {status.kind === "rejected" && (
           <Row label="status" tone="crit">
-            REJECTED — {status.detail}
+            REJECTED · {status.detail}
           </Row>
         )}
         {status.kind === "unavailable" && (
           <Row label="status" tone="crit">
-            UNAVAILABLE — {pub(status.reason)}
+            UNAVAILABLE · {pub(status.reason)}
           </Row>
         )}
 
         {status.kind !== "unavailable" && (
           <>
-            <div className={styles.cardSection}>RECEIPT — COMMITTED ARTIFACT</div>
+            <div className={styles.cardSection}>RECEIPT · COMMITTED ARTIFACT</div>
             <Row label="result · exit">
               {status.reconcile.result} · {String(status.reconcile.exit_code)}
             </Row>
@@ -184,7 +184,7 @@ function ProofSubjectCard({
         <div className={styles.cardSection}>BUILD · CONFIG IDENTITY</div>
         <Row label="commit" tone={manifest.commit === null ? "dim" : "default"}>
           {manifest.commit === null ? (
-            `${EM_DASH} (no build stamp — never guessed)`
+            `${EM_DASH} (no build stamp, and never guessed)`
           ) : (
             <Ident value={manifest.commit} copyLabel="copy commit" />
           )}
@@ -209,8 +209,8 @@ function ProofSubjectCard({
         </Row>
         <Row label="fingerprint weld" tone={fingerprintWelded ? "ok" : "crit"}>
           {fingerprintWelded
-            ? "identical to service fingerprint — by construction"
-            : "MISMATCH against service fingerprint — the contract says these are identical by construction"}
+            ? "identical to service fingerprint, by construction"
+            : "MISMATCH against service fingerprint, which the contract says are identical by construction"}
         </Row>
       </div>
     </section>
@@ -245,7 +245,7 @@ function LiveSubjectCard({
         </ExplainButton>
       </h2>
       <p className={styles.subjectCaption}>
-        the currently-serving batch&apos;s identity — watermarked, operational, and NOT
+        the currently-serving batch&apos;s identity: watermarked, operational, and NOT
         reconcile-welded. Exactness lives on the proof subject, at its pin.
       </p>
 
@@ -264,7 +264,7 @@ function LiveSubjectCard({
               tone={status.substrate.substrate_digest === "" ? "dim" : "default"}
             >
               {status.substrate.substrate_digest === "" ? (
-                `${EM_DASH} (predates substrate-digest custody — an honest gap, not a digest)`
+                `${EM_DASH} (predates substrate-digest custody, so this is an honest gap rather than a digest)`
               ) : (
                 <Ident
                   value={status.substrate.substrate_digest}
@@ -282,7 +282,7 @@ function LiveSubjectCard({
               {pub(status.reason)}
             </Row>
             <Row label="materialization key" tone="dim" testId="materialization-key">
-              {EM_DASH} — no batch, no key; never fabricated
+              {EM_DASH} · no batch, no key; never fabricated
             </Row>
           </>
         )}
@@ -331,7 +331,7 @@ export function ProofSurface() {
         <h1>Proof</h1>
         <p>
           What this deployment is, exactly: the pinned proof of its last reconcile and the
-          identity of the batch it serves now. Nothing here is measured on request — every field
+          identity of the batch it serves now. Nothing here is measured on request: every field
           is carried by the build or persisted by a batch.
         </p>
         <p className={styles.crossLink}>
@@ -354,7 +354,7 @@ export function ProofSurface() {
             {state.message}
             {state.retryAfterSeconds !== null &&
               ` (retry after ${String(state.retryAfterSeconds)}s)`}{" "}
-            — the manifest could not be fetched. Nothing is substituted for it: no cached proof,
+            · the manifest could not be fetched. Nothing is substituted for it: no cached proof,
             no assumed batch, no fabricated key.
           </span>
         </div>
@@ -441,7 +441,7 @@ export function ProofSurface() {
                 )
               }
               tone={state.manifest.substrate === null ? "dim" : "default"}
-              note={state.manifest.substrate === null ? "(no servable batch — not fabricated)" : undefined}
+              note={state.manifest.substrate === null ? "(no servable batch, and nothing fabricated)" : undefined}
             />
             <StampItem
               label="commit"

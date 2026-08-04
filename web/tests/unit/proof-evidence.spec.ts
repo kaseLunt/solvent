@@ -95,7 +95,7 @@ test("a missing receipt is UNAVAILABLE with the served reason; an absent reason 
   expect(bare.kind).toBe("unavailable");
   if (bare.kind === "unavailable") {
     expect(bare.reason).toContain("served no reason");
-    expect(bare.reason).toContain("never invented");
+    expect(bare.reason).toContain("stated rather than invented");
   }
 });
 

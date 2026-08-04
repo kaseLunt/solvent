@@ -73,7 +73,7 @@ export function AddressEntry() {
     const candidate = value.trim();
     if (!isAddress(candidate)) {
       setRefused(
-        `REFUSED · not an address — the contract requires 0x + exactly 40 hex digits, verbatim. ` +
+        `REFUSED · not an address. The contract requires 0x + exactly 40 hex digits, verbatim. ` +
           `Nothing was looked up.`,
       );
       return;
@@ -109,14 +109,14 @@ export function AddressEntry() {
         </p>
       )}
       <p className={styles.entryLaw}>
-        strict 0x-40hex — an invalid input is refused inline, never coerced into a different
+        strict 0x-40hex · an invalid input is refused inline, never coerced into a different
         account
       </p>
 
       {recents.length > 0 && (
         <div className={styles.recent}>
           <div className={styles.recentLabel}>
-            recent lookups — stored locally in this browser only
+            recent lookups · stored locally in this browser only
           </div>
           <ul className={styles.recentList}>
             {recents.map((address) => (

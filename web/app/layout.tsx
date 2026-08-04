@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "Solvent — ether.fi risk observatory",
+    default: "Solvent · ether.fi risk observatory",
     template: "%s · Solvent",
   },
   description:

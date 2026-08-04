@@ -109,7 +109,7 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
   return (
     <section className={styles.panel} data-testid="book-engine" data-engine={engine.engine}>
       <p className={styles.panelTitle}>
-        <EngineChip engine={engine.engine} /> · usd_decimals {engine.usd_decimals} — this
+        <EngineChip engine={engine.engine} /> · usd_decimals {engine.usd_decimals} · this
         engine&apos;s own unit; never summed across engines
       </p>
       <div className={styles.tableWrap}>
@@ -141,7 +141,7 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
         <StatCard
           label="Δ eligible debt · DELTA-ONLY"
           value={money(engine.eligible_debt_delta_usd)}
-          sub="after minus before — the scenario's own contribution"
+          sub="after minus before, the scenario's own contribution"
         />
         <StatCard
           label="Δ bad debt · DELTA-ONLY"
@@ -191,12 +191,12 @@ function holeDisclosure(hole: readonly string[], coveredCount: number): string {
   const one = hole.length === 1;
   return (
     `AN INCOMPLETE BOOK: this run returned neither a result nor a refusal for ` +
-    `${engineList(hole)} — ${one ? "an engine" : "engines"} this scenario's committed ` +
-    `definition covers. That absence is a HOLE, not a refusal and not a zero: nobody withheld ` +
-    `${one ? "it" : "them"}, and this surface will not fill a hole with a zero. ` +
+    `${engineList(hole)}, ${one ? "an engine" : "engines"} this scenario's committed ` +
+    `definition covers. That absence is a HOLE: nobody refused ${one ? "it" : "them"} and ` +
+    `nobody withheld ${one ? "it" : "them"}, and this surface will not fill a hole with a zero. ` +
     `${String(coveredCount - hole.length)} of the ${String(coveredCount)} covered engine(s) ` +
-    `reached this run, so no completeness claim is made here — those cells read UNANSWERED in ` +
-    `the matrix above.`
+    `reached this run, so no completeness claim is made here, and those cells read UNANSWERED ` +
+    `in the matrix above.`
   );
 }
 
@@ -213,7 +213,7 @@ function allHoleDisclosure(covered: readonly string[], batchId: number): string 
   return (
     `${engineList(covered)} ${covered.length === 1 ? "is" : "are"} named in neither engines[] ` +
     `nor excluded_engines[], so every covered cell of this row reads UNANSWERED. Nothing here ` +
-    `was refused and no absence is a zero — the book arrived and named nobody. It was measured ` +
+    `was refused and no absence is a zero: the book arrived and named nobody. It was measured ` +
     `at batch #${String(batchId)}, and no cell on this page is part of that batch's cohort. ` +
     `This panel therefore shows no aggregate, no delta and no completeness claim from it.`
   );
@@ -255,7 +255,7 @@ function BookResult({
         <dt>shocks</dt>
         <dd>
           {response.shocks.length === 0
-            ? "none — no oracle mark moves; this scenario's axis is market realization"
+            ? "none · no oracle mark moves; this scenario's axis is market realization"
             : response.shocks.map((shock, index) => (
                 <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
                   {index > 0 && " · "}
@@ -273,7 +273,7 @@ function BookResult({
         {response.excluded_engines.length === 0 ? (
           complete ? (
             <p className={styles.caption}>
-              excluded engines: none — every engine&apos;s book reached the run
+              excluded engines: none · every engine&apos;s book reached the run
             </p>
           ) : null
         ) : (
@@ -304,7 +304,7 @@ function BookResult({
       />
 
       <section className={styles.panel} data-testid="book-coverage">
-        <p className={styles.panelTitle}>coverage — what reached the run&apos;s arithmetic</p>
+        <p className={styles.panelTitle}>coverage · what reached the run&apos;s arithmetic</p>
         <dl className={styles.kv}>
           <dt>batch positions</dt>
           <dd>{response.coverage.batch_positions}</dd>
@@ -320,7 +320,7 @@ function BookResult({
               <span className={styles["tone-ok"]}>true</span>
             ) : (
               <span className={styles["tone-warn"]}>
-                false — withheld:{" "}
+                false · withheld:{" "}
                 {response.coverage.withheld_engines.map((e) => e.engine).join(", ") || "(named above)"}
               </span>
             )}
@@ -368,7 +368,7 @@ function BookRefusedView({ id, refusal }: { id: string; refusal: BookRefusal }) 
   return refusal.kind === "contradicted" ? (
     <div className={styles.errorState} data-testid="runbook-contradicted">
       <b>refusing to render: the served book contradicts itself.</b> {refusal.reason} This panel
-      shows no aggregate, no delta and no refusal register from it — picking either arm would be
+      shows no aggregate, no delta and no refusal register from it, because picking either arm would be
       this surface answering a question the response left answered two ways. Re-run{" "}
       <span className="mono">{id}</span> to ask for a body that answers it once.
     </div>
@@ -535,14 +535,14 @@ function OutcomeView({
         <div className={styles.errorState}>
           rate limited (429)
           {outcome.retryAfterSeconds !== null
-            ? ` — the service says retry after ${String(outcome.retryAfterSeconds)}s`
-            : " — the service did not say when to retry"}
+            ? `, and the service says retry after ${String(outcome.retryAfterSeconds)}s`
+            : ", and the service did not say when to retry"}
         </div>
       );
     case "unreachable":
       return (
         <div className={styles.errorState}>
-          the API could not be reached — no HTTP response ({outcome.message}). This says
+          the API could not be reached · no HTTP response ({outcome.message}). This says
           nothing about the book.
         </div>
       );
@@ -602,13 +602,13 @@ function CommittedDetail({
         <dd>{scenario.path_assumption}</dd>
         <dt>defined for</dt>
         <dd data-testid="committed-engines">
-          {scenario.engines.join(", ")} — an engine absent here is outside this scenario&apos;s
+          {scenario.engines.join(", ")} · an engine absent here is outside this scenario&apos;s
           MODEL, which is not the same statement as a withheld engine
         </dd>
         <dt>shocks</dt>
         <dd data-testid="committed-shocks">
           {scenario.shocks.length === 0
-            ? "none — no oracle mark moves; this scenario's information lives on another axis"
+            ? "none · no oracle mark moves; this scenario's information lives on another axis"
             : scenario.shocks.map((shock, index) => (
                 <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
                   {index > 0 && " · "}
@@ -632,13 +632,13 @@ function CommittedDetail({
           {phase.kind === "running" ? "running…" : "run book-wide"}
         </button>
         <span className={styles.hint}>
-          POST /v1/scenarios/{scenario.id}/run-book — computed on request over the newest
+          POST /v1/scenarios/{scenario.id}/run-book · computed on request over the newest
           servable batch; writes nothing
         </span>
       </div>
       {phase.kind === "running" && staleAttempt === null && (
         <p className={styles.pendingState} data-testid="book-running">
-          running <span className="mono">{scenario.id}</span> over the whole book — request in
+          running <span className="mono">{scenario.id}</span> over the whole book · request in
           flight
         </p>
       )}
@@ -987,7 +987,7 @@ function LabBookPanelInner() {
 
       {book.phase === "loading" ? (
         <p className={styles.pendingState} data-testid="frontier-loading">
-          reading the book&apos;s loss frontier — <span className="mono">GET /v1/book</span> in
+          reading the book&apos;s loss frontier · <span className="mono">GET /v1/book</span> in
           flight
         </p>
       ) : book.phase === "ok" ? (
@@ -995,21 +995,21 @@ function LabBookPanelInner() {
       ) : (
         <div className={styles.errorState} data-testid="frontier-refused">
           {book.phase === "no-batch"
-            ? `no servable batch (503): ${book.message} — a statement about the SERVICE, never an empty book`
+            ? `no servable batch (503): ${book.message} That is a statement about the SERVICE, never an empty book.`
             : `the book could not be read: ${book.message}`}
         </div>
       )}
 
       {listing.phase === "loading" && (
         <p className={styles.pendingState} data-testid="listing-loading">
-          reading the committed scenario set — <span className="mono">GET /v1/scenarios</span>{" "}
+          reading the committed scenario set · <span className="mono">GET /v1/scenarios</span>{" "}
           in flight. It is CONFIGURATION, not batch data, so it answers with no batch at all.
         </p>
       )}
       {listing.phase === "error" && (
         <div className={styles.errorState} data-testid="listing-error">
           the committed scenario set could not be read: {listing.message}. No scenario list is
-          hardcoded here and none is invented — the matrix stays absent rather than partial.
+          hardcoded here and none is invented, so the matrix stays absent rather than partial.
         </div>
       )}
       {listing.phase === "ok" && (
@@ -1021,7 +1021,7 @@ function LabBookPanelInner() {
           {refreshError !== null && (
             <div className={styles.errorState} data-testid="listing-refresh-error">
               the committed scenario set could not be re-read: {refreshError}. The rows below are
-              still the ones this page loaded — nothing was replaced and nothing was invented.
+              still the ones this page loaded; nothing was replaced and nothing was invented.
             </div>
           )}
           <LabMatrix

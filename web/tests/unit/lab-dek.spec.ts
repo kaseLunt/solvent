@@ -116,7 +116,7 @@ test("CLIFF AT THE FIRST SHOCKED STEP — the fixture's own shape, stated as suc
   expect(labDek(BASE)).toBe(
     `The first step already bites: ETH down 10% makes 1 account on aave_v3_etherfi newly ` +
       `liquidatable. By ${MINUS}50%, aave_v3_etherfi's Σ eligible debt reaches $6,000 and its ` +
-      `bad debt $2,190.47619048 — and debt_manager's bad debt reaches $2,219.801981 at that ` +
+      `bad debt $2,190.47619048, and debt_manager's bad debt reaches $2,219.801981 at that ` +
       `same step.`,
   );
   // NEVER SUMMED: $2,190.47619048 + $2,219.801981 = $4,410.278171. The two
@@ -136,9 +136,9 @@ test("CLIFF AT STEP k — nothing new until the shock deepens", () => {
   // the terminal bad-debt clause was lead-only, so shape A hid the non-lead
   // engine's $2,219.801981 exactly as shape B did.
   expect(labDek(moved)).toBe(
-    `Nothing new becomes liquidatable until ETH is down 20% — then 1 account on ` +
+    `Nothing new becomes liquidatable until ETH is down 20%. Then 1 account on ` +
       `aave_v3_etherfi crosses. By ${MINUS}50%, aave_v3_etherfi's Σ eligible debt reaches ` +
-      `$6,000 and its bad debt $2,190.47619048 — and debt_manager's bad debt reaches ` +
+      `$6,000 and its bad debt $2,190.47619048, and debt_manager's bad debt reaches ` +
       `$2,219.801981 at that same step.`,
   );
   // COMPUTED, not asserted: the same input with the cliff one step deeper says
@@ -163,12 +163,12 @@ test("NO CLIFF ANYWHERE — the terminal clause is STATED, and the census is a c
   // The baseline count must still NOT be read as a cliff — that law is
   // unchanged and is why the census clause is still the next sentence.
   expect(labDek(waterfallOf(BOOK_ENGINE_REFUSED))).toBe(
-    `Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50% — and ` +
+    `Nothing new becomes liquidatable anywhere on this grid, not even at ETH down 50%, and ` +
       `debt_manager's bad debt still reaches $2,219.801981 by ${MINUS}50%: a book can be ` +
       `insolvent with nothing new becoming liquidatable. ` +
-      `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
-      `census, not a projection. 1 engine's whole book is withheld from this grid ` +
-      `(aave_v3_etherfi) — its side is unknown, not zero.`,
+      `1 account on debt_manager is already eligible at the unshocked mark. That is a standing ` +
+      `census rather than a projection. 1 engine's whole book is withheld from this grid ` +
+      `(aave_v3_etherfi), so its side is unknown rather than zero.`,
   );
 });
 
@@ -182,11 +182,11 @@ test("NO CLIFF × COMPUTED-ZERO BAD DEBT — an absence, in words, scoped to the
   // served point, and the clause checks every served point before making it.
   const clean = withoutBadDebt(waterfallOf(BOOK_ENGINE_REFUSED));
   expect(labDek(clean)).toBe(
-    `Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50%, with ` +
+    `Nothing new becomes liquidatable anywhere on this grid, not even at ETH down 50%, with ` +
       `no bad debt on debt_manager's book anywhere on this grid. ` +
-      `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
-      `census, not a projection. 1 engine's whole book is withheld from this grid ` +
-      `(aave_v3_etherfi) — its side is unknown, not zero.`,
+      `1 account on debt_manager is already eligible at the unshocked mark. That is a standing ` +
+      `census rather than a projection. 1 engine's whole book is withheld from this grid ` +
+      `(aave_v3_etherfi), so its side is unknown rather than zero.`,
   );
   expect(labDek(clean)).not.toContain("bad debt $0");
   expect(labDek(clean)).not.toContain("$0");
@@ -202,12 +202,12 @@ test("NO CLIFF × ONE BASELINE POINT — the terminal clause still lands, in the
     points: waterfallOf(BOOK_ENGINE_REFUSED).points.slice(0, 1),
   };
   expect(labDek(baselineOnly)).toBe(
-    `Nothing new becomes liquidatable anywhere on this grid — not even at anywhere the grid ` +
-      `reaches — and debt_manager's bad debt still reaches $239.603961 at the unshocked mark: ` +
+    `Nothing new becomes liquidatable anywhere on this grid, not even at anywhere the grid ` +
+      `reaches, and debt_manager's bad debt still reaches $239.603961 at the unshocked mark: ` +
       `a book can be insolvent with nothing new becoming liquidatable. ` +
-      `1 account on debt_manager is already eligible at the unshocked mark — a standing ` +
-      `census, not a projection. 1 engine's whole book is withheld from this grid ` +
-      `(aave_v3_etherfi) — its side is unknown, not zero.`,
+      `1 account on debt_manager is already eligible at the unshocked mark. That is a standing ` +
+      `census rather than a projection. 1 engine's whole book is withheld from this grid ` +
+      `(aave_v3_etherfi), so its side is unknown rather than zero.`,
   );
   // COMPUTED, not asserted: the amount is the BASELINE point's own bad debt,
   // not the deeper grid's — a different served point produces a different number.
@@ -234,10 +234,10 @@ test("NO CLIFF × ONE BASELINE POINT — the terminal clause still lands, in the
 const NO_CLIFF_TWO_ENGINES = withoutAnyCliff(BASE);
 
 /** Shape C's opening, up to the solvency clause — shared by the four arms. */
-const NO_CLIFF_HEAD = "Nothing new becomes liquidatable anywhere on this grid — not even at ETH down 50%";
+const NO_CLIFF_HEAD = "Nothing new becomes liquidatable anywhere on this grid, not even at ETH down 50%";
 /** …and its tail. `book.json` withholds nothing, so there is no caveat clause. */
 const NO_CLIFF_TAIL =
-  " 1 account on debt_manager is already eligible at the unshocked mark — a standing census, not a projection.";
+  " 1 account on debt_manager is already eligible at the unshocked mark. That is a standing census rather than a projection.";
 
 test("R9 NO CLIFF × BAD DEBT ON THE NON-LEAD ENGINE ONLY — it is NAMED, not omitted", () => {
   // DERIVED NEGATIVE: silence the LEAD's bad debt everywhere and leave the
@@ -247,7 +247,7 @@ test("R9 NO CLIFF × BAD DEBT ON THE NON-LEAD ENGINE ONLY — it is NAMED, not o
   // book whose OTHER served engine reaches $2,219.801981 by −50%.
   const nonLeadOnly = withoutBadDebtOn(NO_CLIFF_TWO_ENGINES, [LEAD]);
   expect(labDek(nonLeadOnly)).toBe(
-    `${NO_CLIFF_HEAD} — and ${NON_LEAD}'s bad debt still reaches ${NON_LEAD_BAD} by ${MINUS}50%: ` +
+    `${NO_CLIFF_HEAD}, and ${NON_LEAD}'s bad debt still reaches ${NON_LEAD_BAD} by ${MINUS}50%: ` +
       `a book can be insolvent with nothing new becoming liquidatable.${NO_CLIFF_TAIL}`,
   );
   // AND THE ALL-CLEAR IS GONE. The clean wording is a claim about every served
@@ -257,7 +257,7 @@ test("R9 NO CLIFF × BAD DEBT ON THE NON-LEAD ENGINE ONLY — it is NAMED, not o
 
 test("R9 NO CLIFF × BAD DEBT ON BOTH ENGINES — both NAMED, in their own decimals, NEVER summed", () => {
   expect(labDek(NO_CLIFF_TWO_ENGINES)).toBe(
-    `${NO_CLIFF_HEAD} — and ${LEAD}'s bad debt still reaches ${LEAD_BAD} and ${NON_LEAD}'s ` +
+    `${NO_CLIFF_HEAD}, and ${LEAD}'s bad debt still reaches ${LEAD_BAD} and ${NON_LEAD}'s ` +
       `still reaches ${NON_LEAD_BAD} by ${MINUS}50%: a book can be insolvent with nothing new ` +
       `becoming liquidatable.${NO_CLIFF_TAIL}`,
   );
@@ -274,7 +274,7 @@ test("R9 NO CLIFF × BAD DEBT ON THE LEAD ONLY — the wording is UNCHANGED", ()
   // rewriting the single-engine reading.
   const leadOnly = withoutBadDebtOn(NO_CLIFF_TWO_ENGINES, [NON_LEAD]);
   expect(labDek(leadOnly)).toBe(
-    `${NO_CLIFF_HEAD} — and ${LEAD}'s bad debt still reaches ${LEAD_BAD} by ${MINUS}50%: ` +
+    `${NO_CLIFF_HEAD}, and ${LEAD}'s bad debt still reaches ${LEAD_BAD} by ${MINUS}50%: ` +
       `a book can be insolvent with nothing new becoming liquidatable.${NO_CLIFF_TAIL}`,
   );
   expect(labDek(leadOnly)).not.toContain(NON_LEAD_BAD);
@@ -319,7 +319,10 @@ test("R9 NO CLIFF × THE CLEAN SCOPE IS EARNED ACROSS ENGINES, not just across p
     `${NO_CLIFF_HEAD}, with no bad debt on ${LEAD}'s or ${NON_LEAD}'s book by ${MINUS}50%.` +
       NO_CLIFF_TAIL,
   );
-  expect(labDek(terminalClean)).not.toContain("anywhere on this grid,");
+  // The grid-scoped clean clause is the only thing that would END a clause with
+  // "on this grid."; the step-scoped one ends at the move. Both spellings of the
+  // regression are pinned.
+  expect(labDek(terminalClean)).not.toContain("on this grid.");
   expect(labDek(terminalClean)).not.toContain("book anywhere on this grid");
 });
 
@@ -335,7 +338,7 @@ test("R9 NO CLIFF × A WITHHELD ENGINE STAYS OUTSIDE THE CLEAN CLAIM", () => {
   expect(sentence).not.toContain("aave_v3_etherfi's or");
   // Its side is stated as UNKNOWN, in the caveat, in the same sentence.
   expect(sentence).toContain(
-    "1 engine's whole book is withheld from this grid (aave_v3_etherfi) — its side is unknown, not zero",
+    "1 engine's whole book is withheld from this grid (aave_v3_etherfi), so its side is unknown rather than zero",
   );
 });
 
@@ -349,7 +352,7 @@ test("R9 SHAPE B × BAD DEBT ON THE NON-LEAD ONLY — the Σ stays lead-scoped, 
   expect(labDek(nonLeadOnly)).toBe(
     `The first step already bites: ETH down 10% makes 1 account on ${LEAD} newly liquidatable. ` +
       `By ${MINUS}50%, ${LEAD}'s Σ eligible debt reaches $6,000 with no bad debt on its book at ` +
-      `that step — and ${NON_LEAD}'s bad debt reaches ${NON_LEAD_BAD} at that same step.`,
+      `that step, and ${NON_LEAD}'s bad debt reaches ${NON_LEAD_BAD} at that same step.`,
   );
   // "its book" is possessive and the possessor is NAMED two clauses earlier, so
   // the clean half cannot be read as a statement about the book as a whole.
@@ -359,7 +362,7 @@ test("R9 SHAPE B × BAD DEBT ON THE NON-LEAD ONLY — the Σ stays lead-scoped, 
 test("R9 SHAPE A × BAD DEBT ON BOTH — both named after the cliff clause, never summed", () => {
   const laterCliff = withNewly(BASE, { 1: { aave_v3_etherfi: 0 }, 2: { aave_v3_etherfi: 1 } });
   const sentence = labDek(laterCliff);
-  expect(sentence).toContain(`and its bad debt ${LEAD_BAD} — and ${NON_LEAD}'s bad debt reaches ${NON_LEAD_BAD} at that same step.`);
+  expect(sentence).toContain(`and its bad debt ${LEAD_BAD}, and ${NON_LEAD}'s bad debt reaches ${NON_LEAD_BAD} at that same step.`);
   expect(sentence).not.toContain("4,410");
 });
 
@@ -373,7 +376,7 @@ test("R9 SHAPE B × EVERY SERVED ENGINE CLEAN — the lead-scoped wording is UNC
       `By ${MINUS}50%, ${LEAD}'s Σ eligible debt reaches $6,000 with no bad debt on its book at ` +
       `that step.`,
   );
-  expect(labDek(clean)).not.toContain(" — and ");
+  expect(labDek(clean)).not.toContain(`, and ${NON_LEAD}'s`);
 });
 
 test("BAD DEBT IS STATED IN EVERY SHAPE — and the claim is exercised on every shape", () => {
@@ -461,13 +464,15 @@ test("the lead engine FOLLOWS THE DATA — raise the other book and the name cha
 test("a broken monotonicity invariant is NAMED, with the offending point", () => {
   const sentence = labDek(waterfallOf(BOOK_MONOTONICITY_VIOLATION));
   expect(sentence).toContain("breaks its monotonicity invariant at debt_manager step 2");
-  expect(sentence).toContain("not smoothed");
+  expect(sentence).toContain("rather than smoothed");
 });
 
 test("no waterfall and no grid are ABSENCES, each named, neither a flat frontier", () => {
   expect(labDek(null)).toBe(LAB_DEK_NO_WATERFALL);
   expect(labDek({ ...BASE, points: [] })).toBe(LAB_DEK_NO_GRID);
-  expect(LAB_DEK_NO_WATERFALL).toContain("That is an absence, not a book with nothing in it.");
+  expect(LAB_DEK_NO_WATERFALL).toContain(
+    "That absence is about the waterfall, and it says nothing about what sits on the book.",
+  );
 });
 
 test("the loading dek states what the surface IS — it invents no number", () => {

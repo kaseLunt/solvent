@@ -214,7 +214,7 @@ export function BookSurface() {
             <RefusedTag reason="NO SERVABLE BATCH" /> {state.message}
             {state.retryAfterSeconds !== null &&
               ` (retry after ${String(state.retryAfterSeconds)}s)`}{" "}
-            — nothing on this surface is rendered as zero.
+            · nothing on this surface is rendered as zero.
           </div>
         </div>
       )}
@@ -222,7 +222,7 @@ export function BookSurface() {
       {state.phase === "error" && (
         <div className={styles.warnStrip} role="alert">
           <b>BOOK FETCH FAILED</b>
-          <span>{state.message} — the aggregates are unavailable, not zero.</span>
+          <span>{state.message}. The aggregates are unavailable, and none of them is zero.</span>
         </div>
       )}
 
@@ -232,7 +232,7 @@ export function BookSurface() {
             <div className={styles.refusalStrip} data-testid="book-refused-engines">
               {state.book.refused_engines.map((refusal) => (
                 <span key={refusal.engine ?? refusal.code}>
-                  <RefusedTag reason={refusal.code ?? "withheld"} /> <b>{refusal.engine}</b> — whole
+                  <RefusedTag reason={refusal.code ?? "withheld"} /> <b>{refusal.engine}</b>: whole
                   book withheld on this batch
                   {refusal.detail !== undefined ? `: ${refusal.detail}` : ""}
                 </span>
@@ -313,7 +313,7 @@ export function BookSurface() {
             tone="dim"
             note={
               <>
-                (materialization key is served by /v1/evidence —{" "}
+                (materialization key is served by /v1/evidence,{" "}
                 <Link href="/proof">see /proof</Link>; not fabricated here)
               </>
             }
@@ -323,7 +323,7 @@ export function BookSurface() {
             value={
               state.book.coverage.stress_coverage_is_full
                 ? "full"
-                : `partial — ${String(state.book.coverage.excluded_by_this_layer)} excluded, ${String(
+                : `partial · ${String(state.book.coverage.excluded_by_this_layer)} excluded, ${String(
                     state.book.coverage.withheld_engines.length,
                   )} engine(s) withheld`
             }

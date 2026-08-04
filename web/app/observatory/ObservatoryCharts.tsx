@@ -82,17 +82,17 @@ export function ObservatoryCharts({
       <div className={styles.legend} data-testid="observatory-legend">
         <span>
           <i className={styles.legendLine} aria-hidden />
-          captured buckets — the line never interpolates across a gap
+          captured buckets · the line never interpolates across a gap
         </span>
         <span>
           <i className={styles.legendTick} aria-hidden />
-          absent bucket — no complete batch in this bucket
+          absent bucket · no complete batch in this bucket
         </span>
         <span>
           <i className={styles.legendSwatchWarn} aria-hidden />
-          withheld bucket — the book was refused; totals null, never 0
+          withheld bucket · the book was refused, so totals are null and never 0
         </span>
-        <span className="dim">zero floor drawn — the scale never crops it away</span>
+        <span className="dim">zero floor drawn · the scale never crops it away</span>
         <span className="dim">click any bucket for its full record</span>
       </div>
     </>

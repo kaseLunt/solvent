@@ -324,7 +324,7 @@ test("(2) THE ROUND-11 DEFECT: the legend and the NO-DEBT hover no longer contra
 
   await expect(legend).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
       "reason. The HF column stays the verdict.",
   );
   await expect(cell).toHaveAttribute(
@@ -369,7 +369,7 @@ test("(2) the reason-neutral legend still sits honestly over the COVERS arm", as
 
   await expect(page.getByTestId("no-price-path-legend")).toHaveText(
     "no price path = no downward move along the committed price axis reaches liquidation for " +
-      "this account — non-price paths are not evaluated here; each cell's hover names its " +
+      "this account. Non-price paths are not evaluated here; each cell's hover names its " +
       "reason. The HF column stays the verdict.",
   );
   // This arm's hover is where "interest or parameter changes still can" belongs
@@ -381,7 +381,7 @@ test("(2) the reason-neutral legend still sits honestly over the COVERS arm", as
   ).toHaveAttribute(
     "title",
     "5–10% of borrowing capacity left before liquidation Collateral outside the shocked asset already covers the debt at the " +
-      "liquidation threshold — no fall of the shocked asset alone reaches the boundary; " +
+      "liquidation threshold, so no fall of the shocked asset alone reaches the boundary; " +
       "interest or parameter changes still can. Wire: 'collateral outside the factor already " +
       "covers the debt at threshold'.",
   );

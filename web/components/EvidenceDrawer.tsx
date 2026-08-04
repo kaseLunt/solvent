@@ -59,14 +59,14 @@ export function EvidenceDrawer({ descriptor, onClose }: EvidenceDrawerProps) {
             </section>
           ))}
 
-          <div className={styles.sectionHead}>COMPARATOR — VERBATIM</div>
+          <div className={styles.sectionHead}>COMPARATOR · VERBATIM</div>
           <pre className={`${styles.formula} ${styles.comparatorFormula}`}>
             {descriptor.comparator}
           </pre>
 
           <div className={styles.sectionHead}>OPERATIONAL VS PROVEN</div>
           <p className={styles.disclosure}>
-            {descriptor.marker === "operational" ? "OPERATIONAL — " : "PROVEN — "}
+            {descriptor.marker === "operational" ? "OPERATIONAL · " : "PROVEN · "}
             {descriptor.markerNote}
           </p>
         </div>

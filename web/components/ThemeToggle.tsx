@@ -61,8 +61,8 @@ export function ThemeToggle() {
       type="button"
       className={styles.themeToggle}
       onClick={cycle}
-      aria-label={`theme: ${choice} — click to change`}
-      title="theme override — system / light / dark"
+      aria-label={`theme: ${choice} · click to change`}
+      title="theme override · system / light / dark"
     >
       THEME · {choice.toUpperCase()}
     </button>

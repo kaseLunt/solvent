@@ -176,8 +176,8 @@ export function legParamsDisclosure(liqBonus: string | null, engine: string): st
 export function liqBonusEvidenceValue(value: string | null, engine: string): string {
   if (value === null) return EM_DASH;
   return liqBonusIsParMultiplier(engine)
-    ? `${liqBonusPercent(value, engine)} premium — raw multiplier ${value} (${AAVE_BONUS_PAR_BPS} = par)`
-    : `${liqBonusPercent(value, engine)} premium — raw ${value}, published as the premium itself`;
+    ? `${liqBonusPercent(value, engine)} premium · raw multiplier ${value} (${AAVE_BONUS_PAR_BPS} = par)`
+    : `${liqBonusPercent(value, engine)} premium · raw ${value}, published as the premium itself`;
 }
 
 /**
