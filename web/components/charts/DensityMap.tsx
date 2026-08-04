@@ -93,6 +93,12 @@ const ROW_H = 28;
 const MARGIN = { top: 10, right: 80, bottom: 48, left: 100 };
 const MARGINAL_BAR_MAX = 72;
 const MARGINAL_PAD = 8;
+/**
+ * Below one rendered pixel a bar has no readable length, so a nonzero band
+ * takes a PRESENCE MARK instead of a floored bar (RM-7 / AC-15). The floor is
+ * on the MARKER, never on the quantity.
+ */
+const MARGINAL_PRESENCE_MIN = 1;
 
 /** RM-1: the compressed sub-$1 lane, and the gap the break glyph occupies. */
 const LANE_W = 48;
@@ -479,20 +485,47 @@ export function DensityMap({
           {result.bandTotals.map((marginal) => {
             const length = barLength(marginal.debt, marginalPeak, MARGINAL_BAR_MAX);
             if (length <= 0) return null;
+            // RM-7 / AC-15: the rendered width IS the proportion. The old 1.5px
+            // floor was applied to the drawn width while `data-length` kept the
+            // true value, so a band holding $1 against a $1M peak drew at over
+            // 2% of the common scale and the ratio the bar exists to carry was
+            // false in the one direction a reader cannot check by eye.
+            //
+            // A Σ too small to reach a pixel keeps a PRESENCE MARK instead: a
+            // dot at the axis, a different FORM from a bar, carrying no length
+            // anyone could read as a quantity. Nonzero never vanishes, and
+            // never by borrowing width it does not have.
+            const subPixel = length < MARGINAL_PRESENCE_MIN;
             return (
-              <rect
-                key={`marginal-${String(marginal.band)}`}
-                className={styles.barFlow}
-                data-testid="density-band-bar"
-                data-band={String(marginal.band)}
-                data-length={length.toFixed(4)}
-                x={MARGIN.left + plotW + MARGINAL_PAD}
-                y={bandCenter(marginal.band) - 5}
-                width={Math.max(length, 1.5)}
-                height={10}
-              >
-                <title>{marginal.title}</title>
-              </rect>
+              <g key={`marginal-${String(marginal.band)}`}>
+                <rect
+                  className={styles.barFlow}
+                  data-testid="density-band-bar"
+                  data-band={String(marginal.band)}
+                  data-length={length.toFixed(6)}
+                  x={MARGIN.left + plotW + MARGINAL_PAD}
+                  y={bandCenter(marginal.band) - 5}
+                  width={length}
+                  height={10}
+                >
+                  <title>{marginal.title}</title>
+                </rect>
+                {subPixel && (
+                  <circle
+                    className={styles.presenceMark}
+                    data-testid="density-band-presence"
+                    data-band={String(marginal.band)}
+                    cx={MARGIN.left + plotW + MARGINAL_PAD + 1.5}
+                    cy={bandCenter(marginal.band)}
+                    r={1.5}
+                  >
+                    <title>
+                      {`${marginal.title} · nonzero, and below one rendered pixel on the ` +
+                        `common bar scale. This dot marks presence and carries no length.`}
+                    </title>
+                  </circle>
+                )}
+              </g>
             );
           })}
 
@@ -569,10 +602,19 @@ function layout(result: RiskBinsResult, width: number) {
     : Math.max(result.xMaxExp - result.xMinExp, 0.5);
   const mainOrigin = laneRendered ? 0 : result.xMinExp;
 
+  // THE LANE'S OWN COORDINATE, whose ZERO BOUNDARY IS `laneRight`.
+  //
+  // `px(0)` is `mainLeft`, which sits LANE_GAP (14px) beyond the lane, because
+  // exponent 0 belongs to the main axis. That is right for a mark and wrong for
+  // a lane bin's UPPER EDGE: bin −1 spans exponents [−0.5, 0), and taking its
+  // upper edge through `px` stretched it 14px past the lane and straight over
+  // bin −2, so two adjacent sub-$1 bins painted on top of each other. Every
+  // edge of a lane bin is measured HERE, where 0 lands exactly on `laneRight`.
+  const laneX = (exponent: number): number =>
+    laneLeft + ((exponent - result.xMinExp) / laneSpan) * LANE_W;
+
   const px = (exponent: number): number => {
-    if (laneRendered && exponent < 0) {
-      return laneLeft + ((exponent - result.xMinExp) / laneSpan) * LANE_W;
-    }
+    if (laneRendered && exponent < 0) return laneX(exponent);
     return mainLeft + ((exponent - mainOrigin) / mainSpan) * (mainRight - mainLeft);
   };
 
@@ -634,15 +676,23 @@ function layout(result: RiskBinsResult, width: number) {
   const ticks = decades.filter((_value, index) => index % stride === 0);
 
   // AC-9: a lane bin stays INSIDE the lane, and never thinner than 1.5px.
+  //
+  // BOTH edges of a lane bin come from `laneX`, never from `px`. The bin's
+  // upper edge is an exponent the lane owns even when that exponent is 0, and
+  // routing it through `px` put it on the far side of the break glyph.
   const binRect = (xIndex: number): { x: number; width: number } => {
-    const raw1 = px(xIndex / 2);
-    const raw2 = px((xIndex + 1) / 2);
-    const rectWidth = Math.max(raw2 - raw1 - 2, 1.5);
+    const lo = xIndex / 2;
+    const hi = (xIndex + 1) / 2;
     if (laneRendered && xIndex < 0) {
-      const clampedX = Math.min(Math.max(raw1 + 1, laneLeft), laneRight - rectWidth);
+      const left = laneX(lo);
+      const right = laneX(hi);
+      const rectWidth = Math.max(right - left - 2, 1.5);
+      const clampedX = Math.min(Math.max(left + 1, laneLeft), laneRight - rectWidth);
       return { x: clampedX, width: rectWidth };
     }
-    return { x: raw1 + 1, width: rectWidth };
+    const raw1 = px(lo);
+    const raw2 = px(hi);
+    return { x: raw1 + 1, width: Math.max(raw2 - raw1 - 2, 1.5) };
   };
 
   // RM-9 CALLOUT PACKING, deterministic and in debt-rank order: the biggest

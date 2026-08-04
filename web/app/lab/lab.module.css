@@ -747,6 +747,23 @@
   fill: var(--crit);
 }
 
+/* LAW-3 / CX-7: chart text is 12 RENDERED px, so the chart is never scaled.
+   Below its authored width the frame scrolls instead of shrinking the ink. */
+.chartScroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* PRESENCE, NOT SHARE (CX-6) — the Book's law, mirrored. A bucket whose share
+   cannot reach one rendered pixel keeps a dot rather than a floored bar. */
+.histPresence {
+  fill: var(--accent);
+}
+
+.histPresenceEligible {
+  fill: var(--crit);
+}
+
 .histBaseline {
   stroke: var(--line);
   stroke-width: 1;

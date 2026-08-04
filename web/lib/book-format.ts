@@ -104,13 +104,21 @@ export function sharePercent(count: number, denominator: number): string | null 
 }
 
 /**
- * The share as a 0–1 BAR FRACTION, exact-integer derived and clamped.
- * Geometry only — the printed percent is `sharePercent`.
+ * CX-6 GEOMETRY — the bar's proportional length in px, exact-integer derived.
+ *
+ * This replaces a permille bar fraction, which resolved the share to 1/1000
+ * and then had a 1.5px nonempty floor applied on top. On a 240px axis that
+ * floor drew 0.625% of the axis, so a bucket the row label truthfully printed
+ * as `0%` occupied more ink than a bucket at a real 0.5%, and the two were
+ * indistinguishable. The share is taken here in the AXIS' OWN pixel space at a
+ * millionth of a pixel, and NO floor is applied: a length below what a pixel
+ * can carry is not a small length, it is a length the picture cannot state,
+ * and the caller marks presence with a different form instead.
  */
-export function shareFraction(count: number, denominator: number): number {
-  if (denominator <= 0) return 0;
-  const permille = Number((BigInt(count) * 1000n) / BigInt(denominator));
-  return Math.min(permille / 1000, 1);
+export function shareBarWidth(count: number, denominator: number, axisPx: number): number {
+  if (denominator <= 0 || count <= 0 || axisPx <= 0) return 0;
+  const micros = (BigInt(count) * BigInt(Math.round(axisPx * 1_000_000))) / BigInt(denominator);
+  return Math.min(Number(micros) / 1_000_000, axisPx);
 }
 
 /**

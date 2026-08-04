@@ -115,6 +115,15 @@
   fill: var(--crit);
 }
 
+/* PRESENCE, NOT LENGTH (RM-7 / AC-15). A band whose exact Σ is nonzero but
+   below one rendered pixel on the common bar scale keeps a dot rather than a
+   floored bar: a floor would let a $1 band draw like a 2%-of-peak band, and
+   the ratio between two bars is the only thing the marginal column claims.
+   A DIFFERENT FORM, deliberately, so nobody reads a length off it. */
+.presenceMark {
+  fill: var(--ink-2);
+}
+
 .connector {
   stroke: var(--ink-3);
   stroke-width: 1;

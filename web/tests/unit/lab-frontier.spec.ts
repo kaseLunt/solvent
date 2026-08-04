@@ -30,6 +30,7 @@ import {
   cliffClause,
   eligibilityNoteVerbatim,
   frontierAxisTitles,
+  frontierBadDebtZeroLine,
   frontierCliffLabel,
   frontierLedgerMaxChars,
   frontierLedgerRows,
@@ -336,9 +337,78 @@ test("an all-zero bad-debt series states the zero rather than drawing an empty r
   expect(FRONTIER_BAD_DEBT_ALL_ZERO).toBe(
     "Bad debt is $0 at every step on this grid. That is a computed zero from the served waterfall.",
   );
+  // Every grid sample is served here, so the whole-grid claim is EARNED.
+  expect(series.points).toHaveLength(series.grid.length);
+  expect(frontierBadDebtZeroLine(series.points.length, series.grid.length)).toBe(
+    FRONTIER_BAD_DEBT_ALL_ZERO,
+  );
   // …and the row's own ledger cells still print the computed zero, exactly.
   const badDebt = frontierLedgerRows(series).find((row) => row.key === "bad-debt");
   expect(badDebt?.cells.every((cell) => cell === "$0")).toBe(true);
+});
+
+// W-CH-B finding 1 — the ZERO-PLUS-HOLE case, which the old code got wrong.
+//
+// `peakBadDebt` maximises over SERVED points, so a grid that is all zeros
+// where it was served and unserved elsewhere produced exactly the same 0n as a
+// fully served all-zero grid. The panel then printed "Bad debt is $0 at every
+// step on this grid" while the ledger three lines below printed em dashes for
+// the unserved columns. That is the one conflation this surface exists to
+// prevent, stated by the surface itself.
+test("an all-zero bad-debt grid WITH a hole claims only the SERVED samples", () => {
+  const waterfall = holedWaterfall();
+  for (const point of waterfall.points) {
+    for (const engine of point.engines) engine.cumulative_bad_debt_usd = "0";
+  }
+  const series = aaveSeries(waterfall);
+  // The trap: the peak is zero, exactly as in the fully-served case.
+  expect(series.peakBadDebt).toBe(0n);
+  expect(series.grid).toHaveLength(6);
+  expect(series.points).toHaveLength(5);
+
+  const line = frontierBadDebtZeroLine(series.points.length, series.grid.length);
+  // The whole-grid sentence is NOT reachable when a sample is unserved.
+  expect(line).not.toBe(FRONTIER_BAD_DEBT_ALL_ZERO);
+  expect(line).not.toContain("every step on this grid");
+  expect(line).toBe(
+    "Bad debt is $0 at the 5 samples this engine served. 1 of 6 samples was not served, and " +
+      "bad debt there is unknown rather than zero.",
+  );
+
+  // And the ledger it sits above says the same thing in its own cells: $0
+  // where served, em dash where not. The sentence and the grid agree.
+  const badDebt = frontierLedgerRows(series).find((row) => row.key === "bad-debt");
+  expect(badDebt?.cells).toEqual(["$0", "$0", "$0", "—", "$0", "$0"]);
+});
+
+test("the zero sentence scales its claim to what was served", () => {
+  // Fully served: the whole-grid claim.
+  expect(frontierBadDebtZeroLine(6, 6)).toBe(FRONTIER_BAD_DEBT_ALL_ZERO);
+  // One hole, singular grammar.
+  expect(frontierBadDebtZeroLine(5, 6)).toBe(
+    "Bad debt is $0 at the 5 samples this engine served. 1 of 6 samples was not served, and " +
+      "bad debt there is unknown rather than zero.",
+  );
+  // Several holes, plural grammar.
+  expect(frontierBadDebtZeroLine(2, 6)).toBe(
+    "Bad debt is $0 at the 2 samples this engine served. 4 of 6 samples were not served, and " +
+      "bad debt there is unknown rather than zero.",
+  );
+  // One served sample, singular grammar on the served side too.
+  expect(frontierBadDebtZeroLine(1, 6)).toBe(
+    "Bad debt is $0 at the 1 sample this engine served. 5 of 6 samples were not served, and " +
+      "bad debt there is unknown rather than zero.",
+  );
+  // Nothing served at all: there is no zero to claim anywhere.
+  expect(frontierBadDebtZeroLine(0, 6)).toBe(
+    "This engine served no sample on this grid, so bad debt is unknown at all 6 samples rather " +
+      "than zero.",
+  );
+  expect(frontierBadDebtZeroLine(0, 6)).not.toContain("$0");
+  // No em-dash prose anywhere in the register.
+  for (const served of [6, 5, 2, 1, 0]) {
+    expect(frontierBadDebtZeroLine(served, 6)).not.toContain("—");
+  }
 });
 
 test.describe("the FINAL COPY block, verbatim (LF-2, LF-8, LF-11)", () => {

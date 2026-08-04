@@ -27,7 +27,7 @@
 
 import type { LabRunBookEngine, RunBookAggregate } from "@/lib/runbook";
 import { EM_DASH, renderNullableDecimal } from "@/lib/format";
-import { sharePercent, shareFraction } from "@/lib/book-format";
+import { sharePercent, shareBarWidth } from "@/lib/book-format";
 import {
   RISK_BAND_METHOD,
   riskBandDenominatorLine,
@@ -52,6 +52,9 @@ const COUNT_W = 64;
 /** CX-6: the common percent axis and the gutter its labels need. */
 const PERCENT_TICKS = [0, 50, 100] as const;
 const AXIS_H = 20;
+/** Same law as the Book's: the floor is on the MARKER, never on the quantity. */
+const PRESENCE_MIN = 1;
+const PRESENCE_R = 1.5;
 
 // ---------------------------------------------------------------------------
 // B1 — the BEFORE/AFTER histogram pair
@@ -88,13 +91,19 @@ function Distribution({
       <p className={styles.denominatorLine} data-testid={`runbook-hist-denominator-${side}`}>
         {riskBandDenominatorLine(denominator)}
       </p>
+      {/* LAW-3 / CX-7, the Book's fix mirrored: `maxWidth: 100%` scaled the
+          whole picture inside a narrow side, and viewBox scaling shrinks a
+          12px label without changing what `getComputedStyle` reports. Authored
+          width is kept and the frame scrolls. */}
+      <div className={styles.chartScroll} data-testid={`runbook-hist-frame-${side}`}>
       <svg
         width={width}
         height={height}
         viewBox={`0 0 ${String(width)} ${String(height)}`}
         role="img"
         aria-label={`risk-band distribution ${side} the shock for ${engine} on comparator ${histogram.comparator}`}
-        style={{ display: "block", maxWidth: "100%", height: "auto" }}
+        style={{ display: "block" }}
+        data-testid={`runbook-hist-svg-${side}`}
       >
         <line
           className={styles.histBaseline}
@@ -125,8 +134,11 @@ function Distribution({
         ))}
         {histogram.buckets.map((bucket, index) => {
           const y = index * ROW_H + 4;
-          const barWidth =
-            bucket.count === 0 ? 0 : Math.max(shareFraction(bucket.count, denominator) * BAR_MAX, 1.5);
+          // CX-6 geometry, the Book's law mirrored: the rendered width IS the
+          // share, with no floor riding it. A bucket too small to reach a
+          // pixel keeps a presence dot, a different form from a bar.
+          const barWidth = shareBarWidth(bucket.count, denominator, BAR_MAX);
+          const subPixel = bucket.count > 0 && barWidth < PRESENCE_MIN;
           const percent = sharePercent(bucket.count, denominator);
           const belowOne =
             eligibleTint && bucket.upper_wad !== null && BigInt(bucket.upper_wad) <= scale;
@@ -153,11 +165,28 @@ function Distribution({
               {barWidth > 0 && (
                 <rect
                   className={belowOne ? styles.histBarEligible : styles.histBar}
+                  data-testid="runbook-hist-bar"
+                  data-bucket={bucket.label}
                   x={LABEL_W + 6}
                   y={y + 2}
                   width={barWidth}
                   height={ROW_H - 8}
                 />
+              )}
+              {subPixel && (
+                <circle
+                  className={belowOne ? styles.histPresenceEligible : styles.histPresence}
+                  data-testid="runbook-hist-presence"
+                  data-bucket={bucket.label}
+                  cx={LABEL_W + 6 + PRESENCE_R}
+                  cy={y + 2 + (ROW_H - 8) / 2}
+                  r={PRESENCE_R}
+                >
+                  <title>
+                    {`${String(bucket.count)} accounts, a share too small to draw at one pixel ` +
+                      `on this axis. This dot marks presence and carries no length.`}
+                  </title>
+                </circle>
               )}
               <text
                 className={styles.histCount}
@@ -172,6 +201,7 @@ function Distribution({
           );
         })}
       </svg>
+      </div>
       {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
       <div className={styles.histAside}>
         <span data-testid={`runbook-hist-no-debt-${side}`}>

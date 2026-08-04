@@ -209,6 +209,22 @@ const POSITIONS_AAVE_SUPERSEDED = {
   },
 };
 
+/**
+ * DERIVED FIXTURE (provenance): the landed `positions-aave-page-1.json` with
+ * `next_cursor = null` (so the walk terminates against a constant mock) and
+ * every row's `total_debt` set to `"0"`. A borrower with nothing outstanding is
+ * an ordinary book row, and its debt cell is a COMPUTED zero — the thing the
+ * Book's fetch-failure strip used to claim did not exist on the page.
+ */
+const POSITIONS_COMPUTED_ZERO_DEBT = {
+  ...POSITIONS_AAVE_PAGE_1,
+  next_cursor: null,
+  positions: POSITIONS_AAVE_PAGE_1.positions.map((position) => ({
+    ...position,
+    total_debt: "0",
+  })),
+};
+
 /** An SSE `unavailable` frame carrying the server's OWN staleness statement. */
 const SSE_UNAVAILABLE_FRAME =
   `event: unavailable\ndata: ${JSON.stringify({
@@ -323,6 +339,11 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       await expect(page.getByTestId("book-no-batch")).toContainText("NO SERVABLE BATCH");
       await expect(page.getByTestId("book-no-batch")).toContainText("statement about the SERVICE");
+      // Scoped to the aggregates this block stands in for: the positions table
+      // walks its own endpoint and may serve a computed zero below.
+      await expect(page.getByTestId("book-no-batch")).toContainText(
+        "unavailable aggregate values are not rendered as zero",
+      );
       // The positions table refuses in the refusal register (W-UX-B): the
       // server's sentence verbatim, its own retry named, NO retry button.
       const refusal = page.getByTestId("positions-refusal");
@@ -347,7 +368,13 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("rate limit");
-      await expect(strip).toContainText("unavailable, and nothing here is rendered as zero");
+      // The claim is SCOPED to what this strip lost. The positions table walks
+      // its own endpoint and may render a computed zero below, so a page-wide
+      // "nothing here is rendered as zero" was an over-claim.
+      await expect(strip).toContainText(
+        "The aggregates are unavailable. Unavailable aggregate values are not rendered as zero.",
+      );
+      await expect(strip).not.toContainText("nothing here is rendered as zero");
       await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
     },
   },
@@ -363,7 +390,65 @@ const MATRIX: Cell[] = [
     verify: async (page) => {
       const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
       await expect(strip).toContainText("failed to build the response");
-      await expect(strip).toContainText("unavailable, and nothing here is rendered as zero");
+      // The claim is SCOPED to what this strip lost. The positions table walks
+      // its own endpoint and may render a computed zero below, so a page-wide
+      // "nothing here is rendered as zero" was an over-claim.
+      await expect(strip).toContainText(
+        "The aggregates are unavailable. Unavailable aggregate values are not rendered as zero.",
+      );
+      await expect(strip).not.toContainText("nothing here is rendered as zero");
+    },
+  },
+  {
+    // W-CH-B finding 6 — THE SCOPE OF A REFUSAL CLAIM.
+    //
+    // The strip used to say "nothing here is rendered as zero", which is a
+    // claim about the whole page. The positions table walks its OWN endpoint
+    // and keeps serving while /v1/book is down, so a row with no borrowings
+    // legitimately renders a COMPUTED ZERO directly beneath the strip. An
+    // over-claimed refusal costs the same trust a hidden one does: the reader
+    // sees the register contradicted and stops reading it.
+    surface: "book",
+    state: "error:500-book-with-positions-computed-zero",
+    path: "/book?engine=aave_v3_etherfi&dust=off",
+    mock: async (page) => {
+      await muteStream(page);
+      await page.route("**/v1/book", (route) => fulfillJson(route, FEED_ERROR_INTERNAL, 500));
+      await page.route("**/v1/positions*", (route) =>
+        fulfillJson(route, POSITIONS_COMPUTED_ZERO_DEBT),
+      );
+    },
+    verify: async (page) => {
+      const strip = page.getByRole("alert").filter({ hasText: "BOOK FETCH FAILED" });
+      await expect(strip).toContainText("failed to build the response");
+      // SCOPED to what this strip lost.
+      await expect(strip).toContainText(
+        "The aggregates are unavailable. Unavailable aggregate values are not rendered as zero.",
+      );
+      await expect(strip).not.toContainText("nothing here is rendered as zero");
+      // No aggregate rendered a zero: the stat rows are absent entirely.
+      await expect(page.getByTestId("book-stats-aave_v3_etherfi")).toHaveCount(0);
+
+      // …and the positions table BELOW it renders a real computed zero, which
+      // is exactly why the old sentence was false.
+      const table = page.getByRole("table", { name: "positions for aave_v3_etherfi" });
+      await expect(table).toBeVisible();
+      // `textContent`, not `innerText`: the header register is uppercased by
+      // CSS, and `innerText` returns what the transform painted.
+      const headers = await table
+        .locator("thead th")
+        .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ""));
+      const debtColumn = headers.findIndex((header) => header.includes("Debt"));
+      expect(debtColumn).toBeGreaterThan(-1);
+      const debtCell = table
+        .locator("tbody tr:not([data-testid='window-spacer'])")
+        .first()
+        .locator("td")
+        .nth(debtColumn);
+      // A COMPUTED ZERO, printed as a number. Not an em dash, which is what an
+      // unknowable prints, and which the strip's claim is actually about.
+      await expect(debtCell).toHaveText("0");
+      await expect(debtCell).not.toHaveText("—");
     },
   },
   {

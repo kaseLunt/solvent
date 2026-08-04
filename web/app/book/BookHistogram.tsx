@@ -36,7 +36,7 @@ import {
   riskBandPanelAria,
   riskBandRefusedRow,
 } from "@/lib/book-copy";
-import { sharePercent, shareFraction } from "@/lib/book-format";
+import { sharePercent, shareBarWidth } from "@/lib/book-format";
 import { histogramReadingLine } from "./readingLines";
 import styles from "./book.module.css";
 
@@ -47,6 +47,13 @@ const COUNT_W = 64;
 /** CX-6: the common percent axis and the gutter its labels need. */
 const PERCENT_TICKS = [0, 50, 100] as const;
 const AXIS_H = 20;
+/**
+ * Below one rendered pixel a bar states no share, so a nonempty bucket takes a
+ * presence dot instead of a floored bar. The floor is on the MARKER, never on
+ * the quantity (LAW-3 is about rendered pixels; so is this).
+ */
+const PRESENCE_MIN = 1;
+const PRESENCE_R = 1.5;
 
 function EnginePanel({
   histogram,
@@ -99,14 +106,21 @@ function EnginePanel({
         <p className={styles.denominatorLine} data-testid={`hist-denominator-${histogram.engine}`}>
           {riskBandDenominatorLine(denominator)}
         </p>
-        <svg
-          width={width}
-          height={height}
-          viewBox={`0 0 ${String(width)} ${String(height)}`}
-          role="img"
-          aria-label={riskBandPanelAria(histogram.engine, histogram.comparator)}
-          style={{ display: "block", maxWidth: "100%", height: "auto" }}
-        >
+        {/* LAW-3 / CX-7: RENDERED pixels. `maxWidth: 100%` let a narrow panel
+            scale the whole picture, and a viewBox scale of 0.6 turns a 12px
+            label into a 7px one that `getComputedStyle` still reports as 12px.
+            The chart keeps its authored width and the frame scrolls, which is
+            the spec's own answer: minimum width, horizontal scroll below it. */}
+        <div className={styles.chartScroll} data-testid={`hist-frame-${histogram.engine}`}>
+          <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${String(width)} ${String(height)}`}
+            role="img"
+            aria-label={riskBandPanelAria(histogram.engine, histogram.comparator)}
+            style={{ display: "block" }}
+            data-testid={`hist-svg-${histogram.engine}`}
+          >
           <line
             className={styles.histBaseline}
             x1={LABEL_W + 4}
@@ -139,8 +153,12 @@ function EnginePanel({
           ))}
           {histogram.buckets.map((bucket, index) => {
             const y = index * ROW_H + 4;
-            const share = shareFraction(bucket.count, denominator);
-            const barWidth = bucket.count === 0 ? 0 : Math.max(share * BAR_MAX, 1.5);
+            // CX-6 geometry: the rendered width IS the share. No floor rides
+            // it, because a floor makes a 0.0x% bucket look like a 0.6% one.
+            // A count too small to reach a pixel keeps a PRESENCE MARK, which
+            // is a dot rather than a bar so no length can be read off it.
+            const barWidth = shareBarWidth(bucket.count, denominator, BAR_MAX);
+            const subPixel = bucket.count > 0 && barWidth < PRESENCE_MIN;
             const percent = sharePercent(bucket.count, denominator);
             // Crit tint only where the comparator itself defines eligibility:
             // the whole bucket sits strictly below 1.00 on the wad.
@@ -174,11 +192,28 @@ function EnginePanel({
                 {barWidth > 0 && (
                   <rect
                     className={belowOne ? styles.histBarEligible : styles.histBar}
+                    data-testid="hist-bar"
+                    data-bucket={bucket.label}
                     x={LABEL_W + 6}
                     y={y + 2}
                     width={barWidth}
                     height={ROW_H - 8}
                   />
+                )}
+                {subPixel && (
+                  <circle
+                    className={belowOne ? styles.histPresenceEligible : styles.histPresence}
+                    data-testid="hist-presence"
+                    data-bucket={bucket.label}
+                    cx={LABEL_W + 6 + PRESENCE_R}
+                    cy={y + 2 + (ROW_H - 8) / 2}
+                    r={PRESENCE_R}
+                  >
+                    <title>
+                      {`${String(bucket.count)} accounts, a share too small to draw at one ` +
+                        `pixel on this axis. This dot marks presence and carries no length.`}
+                    </title>
+                  </circle>
                 )}
                 {/* CX-6 / CX-8: `{count} · {pct}%`, the percent from exact
                     integer arithmetic. A zero denominator yields NO percentage
@@ -195,7 +230,8 @@ function EnginePanel({
               </g>
             );
           })}
-        </svg>
+          </svg>
+        </div>
         {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
         <div className={styles.histAside}>
           <span data-testid={`hist-no-debt-${histogram.engine}`}>

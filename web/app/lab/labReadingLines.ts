@@ -184,6 +184,36 @@ export const FRONTIER_NOT_SERVED_TITLE =
 export const FRONTIER_BAD_DEBT_ALL_ZERO =
   "Bad debt is $0 at every step on this grid. That is a computed zero from the served waterfall.";
 
+/**
+ * LF-7 WHEN THE GRID HAS HOLES — the sentence row 2's absence is allowed to make.
+ *
+ * `peakBadDebt` is a maximum over the points this engine SERVED, so a grid
+ * that is all zeros where it was served and unknown where it was not produces
+ * exactly the same zero. Claiming "$0 at every step on this grid" there would
+ * state a computed zero for samples the ledger is at that very moment printing
+ * as em dashes, which is the one conflation this whole surface exists to
+ * prevent. The all-zero sentence is therefore reachable ONLY when every grid
+ * sample carries a served cell; otherwise the served zeros are claimed as
+ * zeros and the holes are left unknown, in the ledger's own vocabulary.
+ */
+export function frontierBadDebtZeroLine(servedSamples: number, gridSamples: number): string {
+  const holes = gridSamples - servedSamples;
+  if (holes <= 0) return FRONTIER_BAD_DEBT_ALL_ZERO;
+  if (servedSamples <= 0) {
+    return (
+      `This engine served no sample on this grid, so bad debt is unknown at all ` +
+      `${String(gridSamples)} samples rather than zero.`
+    );
+  }
+  return (
+    `Bad debt is $0 at the ${String(servedSamples)} ` +
+    `${servedSamples === 1 ? "sample" : "samples"} this engine served. ` +
+    `${String(holes)} of ${String(gridSamples)} ` +
+    `${holes === 1 ? "samples was" : "samples were"} not served, and bad debt there is ` +
+    `unknown rather than zero.`
+  );
+}
+
 /** CX-3: the ledger row that used to be mislabeled as a gross arrival count. */
 export const FRONTIER_FIRST_ELIGIBLE_LABEL = "first eligible on grid";
 

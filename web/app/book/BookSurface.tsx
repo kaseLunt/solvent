@@ -214,7 +214,10 @@ export function BookSurface() {
             <RefusedTag reason="NO SERVABLE BATCH" /> {state.message}
             {state.retryAfterSeconds !== null &&
               ` (retry after ${String(state.retryAfterSeconds)}s)`}{" "}
-            · nothing on this surface is rendered as zero.
+            {/* Scoped for the same reason the fetch-failure strip is: the
+                positions table below walks its own endpoint and may serve a
+                computed zero while no batch is servable here. */}
+            · unavailable aggregate values are not rendered as zero.
           </div>
         </div>
       )}
@@ -222,7 +225,16 @@ export function BookSurface() {
       {state.phase === "error" && (
         <div className={styles.warnStrip} role="alert">
           <b>BOOK FETCH FAILED</b>
-          <span>{state.message}. The aggregates are unavailable, and nothing here is rendered as zero.</span>
+          {/* SCOPE. The old sentence said "nothing here is rendered as zero",
+              which is a claim about the whole page — and the positions table
+              below walks its OWN endpoint and legitimately renders computed
+              zeros while /v1/book is down. Over-claiming a refusal is the same
+              failure as hiding one: the reader stops trusting the register.
+              This strip speaks for the AGGREGATES, which are what it lost. */}
+          <span>
+            {state.message}. The aggregates are unavailable. Unavailable aggregate values are not
+            rendered as zero.
+          </span>
         </div>
       )}
 

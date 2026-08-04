@@ -115,6 +115,10 @@
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--panel);
+  /* A grid item's automatic minimum size is its content, so without this the
+     panel refuses to narrow and the whole grid overflows the page instead of
+     the chart frame scrolling inside it (LAW-3). */
+  min-width: 0;
 }
 
 .panelHead {
@@ -392,6 +396,18 @@
   fill: var(--crit);
 }
 
+/* PRESENCE, NOT SHARE (CX-6). A bucket whose share cannot reach one rendered
+   pixel keeps a dot rather than a floored bar: the old 1.5px floor drew 0.625%
+   of a 240px axis, so a bucket the row label printed as `0%` outdrew a bucket
+   at a real 0.4%. A DIFFERENT FORM, so no length can be read off it. */
+.histPresence {
+  fill: var(--accent);
+}
+
+.histPresenceEligible {
+  fill: var(--crit);
+}
+
 /* The eligible-bucket FORM cue (design SHOULD-FIX 10): the .sev.crit-style
    8px filled square before the bucket label — form beyond hue. */
 .histEligibleMark {
@@ -402,6 +418,13 @@
   stroke: var(--line);
   stroke-width: 1;
   shape-rendering: crispEdges;
+}
+
+/* LAW-3 / CX-7: chart text is 12 RENDERED px, so the chart is never scaled.
+   Below its authored width the frame scrolls instead of shrinking the ink. */
+.chartScroll {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .histAside {

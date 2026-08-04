@@ -53,7 +53,7 @@ import {
   WATERFALL_SECTION_NOTE,
   wireNotesSummary,
 } from "../../lib/book-copy";
-import { sharePercent, shareFraction } from "../../lib/book-format";
+import { sharePercent, shareBarWidth } from "../../lib/book-format";
 import { BOOK } from "../fixtures/book";
 
 const WAD = 10n ** 18n;
@@ -432,16 +432,51 @@ test.describe("CX-6 — percent share by exact integer arithmetic", () => {
   });
 
   test("a bucket at 100% spans the full axis, and a zero bucket draws none", () => {
-    expect(shareFraction(1, 1)).toBe(1);
-    expect(shareFraction(0, 4)).toBe(0);
-    expect(shareFraction(1, 4)).toBeCloseTo(0.25, 9);
+    expect(shareBarWidth(1, 1, 240)).toBe(240);
+    expect(shareBarWidth(0, 4, 240)).toBe(0);
+    expect(shareBarWidth(1, 4, 240)).toBeCloseTo(60, 9);
+    expect(shareBarWidth(1, 2, 168)).toBeCloseTo(84, 9);
+  });
+
+  // W-CH-B finding 4: the geometry carries the TRUE share, at a precision the
+  // old permille fraction did not have, and with NO width floor on top of it.
+  //
+  // The old path was `max(trunc(count*1000/den)/1000 * BAR_MAX, 1.5)`. On the
+  // Book's 240px axis that floor is 0.625% of the axis, so a bucket the row
+  // label truthfully printed as `0%` drew MORE ink than a bucket at a real
+  // 0.5%, and every share below 0.1% collapsed to the same three shapes.
+  test("a tiny share renders its TRUE width, with no floor and no permille collapse", () => {
+    // 1 of 10,000 is 0.01%: 0.024px on a 240px axis. The old permille path
+    // truncated the share to 0 and then floored the bar to 1.5px — 62x too
+    // long, and identical to the bar drawn for 1 of 1,000,000.
+    expect(shareBarWidth(1, 10_000, 240)).toBeCloseTo(0.024, 6);
+    expect(shareBarWidth(1, 1_000_000, 240)).toBeCloseTo(0.00024, 8);
+    // Two shares three orders of magnitude apart draw three orders of
+    // magnitude apart. Under the floor they were the same 1.5px.
+    expect(shareBarWidth(1, 10_000, 240) / shareBarWidth(1, 1_000_000, 240)).toBeCloseTo(100, 4);
+    // Nothing is rounded UP to a visible width, on either axis.
+    expect(shareBarWidth(1, 10_000, 240)).toBeLessThan(1);
+    expect(shareBarWidth(1, 10_000, 168)).toBeLessThan(1);
+    // The 0.625% overstatement the floor produced is gone: a bucket printed
+    // as `0%` now occupies less than a tenth of a percent of the axis.
+    expect(sharePercent(1, 10_000)).toBe("0");
+    expect(shareBarWidth(1, 10_000, 240) / 240).toBeLessThan(0.001);
+  });
+
+  test("the width is exact-integer derived and never exceeds the axis", () => {
+    // A denominator smaller than the count cannot draw past the axis end.
+    expect(shareBarWidth(5, 1, 240)).toBe(240);
+    // TRUNCATION, never rounding: 1/7 of 240 is 34.285714285…, and the
+    // rendered width is the truncated micro-pixel, which can only understate.
+    expect(shareBarWidth(1, 7, 240)).toBe(34.285714);
+    expect(shareBarWidth(1, 7, 240)).toBeLessThan(240 / 7);
   });
 
   // CX-8
   test("NO percentage renders against a zero denominator", () => {
     expect(sharePercent(0, 0)).toBeNull();
     expect(sharePercent(5, 0)).toBeNull();
-    expect(shareFraction(5, 0)).toBe(0);
+    expect(shareBarWidth(5, 0, 240)).toBe(0);
   });
 
   // CX-8

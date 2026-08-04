@@ -59,8 +59,8 @@ import {
   frontierReadingLine,
   frontierSeparatorLine,
   frontierSeriesReadingLine,
+  frontierBadDebtZeroLine,
   FRONTIER_ANSWER_SUPPLEMENT,
-  FRONTIER_BAD_DEBT_ALL_ZERO,
   FRONTIER_INDEPENDENT_SCALE_WARNING,
   FRONTIER_NOT_SERVED,
   FRONTIER_NOT_SERVED_TITLE,
@@ -127,7 +127,14 @@ function FrontierPanel({
   const row2Top = niceTop(series.peakBadDebt);
   // LF-7: an empty second row would read as absent data, so it is not drawn
   // and a STATED zero renders in its place.
+  //
+  // `peakBadDebt` is a maximum over SERVED points only, so the sentence that
+  // replaces the row has to know how much of the grid was served: an all-zero
+  // served set on a grid with holes is not "$0 at every step", and the ledger
+  // beneath is printing em dashes for those very columns.
   const drawRow2 = series.peakBadDebt > 0n;
+  const servedSamples = series.points.length;
+  const gridSamples = series.grid.length;
 
   const row1Height = ROW_LABEL_H + ROW1_PLOT_H + 6;
   const row2Height = ROW_LABEL_H + ROW2_PLOT_H + AXIS_H;
@@ -289,8 +296,13 @@ function FrontierPanel({
               {frontierSeparatorLine(renderUsdAmount(row2Top.toString(), series.usdDecimals))}
             </p>
           ) : (
-            <p className={styles.frontierSeparator} data-testid="frontier-bad-debt-zero">
-              {FRONTIER_BAD_DEBT_ALL_ZERO}
+            <p
+              className={styles.frontierSeparator}
+              data-testid="frontier-bad-debt-zero"
+              data-served={String(servedSamples)}
+              data-holes={String(gridSamples - servedSamples)}
+            >
+              {frontierBadDebtZeroLine(servedSamples, gridSamples)}
             </p>
           )}
 

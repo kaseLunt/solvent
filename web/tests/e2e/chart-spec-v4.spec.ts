@@ -216,6 +216,68 @@ test("AC-9/AC-11: sub-$1 bins live inside the lane, at least 1.5px wide, order p
   expect(sorted[0]?.x).toBeLessThan(sorted[1]?.x ?? 0);
 });
 
+// W-CH-B finding 2 — ADJACENT SUB-$1 BINS MUST NOT PAINT OVER EACH OTHER.
+//
+// `px(0)` is `mainLeft`, which is 14px BEYOND the lane's right edge, because
+// exponent 0 belongs to the main axis. Bin −1 spans exponents [−0.5, 0), so
+// taking its UPPER edge through `px` stretched it across the break glyph; the
+// clamp then slid it back into the lane at that inflated width and it covered
+// bin −2. Two bins in the SAME band, in the same lane, drew as one.
+//
+// $0.10 is xIndex −2 and $0.50 is xIndex −1 (both at 6 decimals), so xMinExp
+// is −1 and the lane holds exactly two half-decade slots. That is the tightest
+// arrangement the lane can have, and the one the bug destroyed.
+test("W-CH-B: adjacent sub-$1 bins share the lane's own scale and never overlap", async ({
+  page,
+}) => {
+  await openMap(
+    page,
+    [
+      { account: account(0), debt: "100000", wad: HEALTHY_WAD }, // $0.10 → xIndex −2
+      { account: account(1), debt: "500000", wad: HEALTHY_WAD }, // $0.50 → xIndex −1
+      { account: account(2), debt: "10000000000", wad: HEALTHY_WAD }, // $10,000, lane exists
+    ],
+    6,
+  );
+  await expect(page.getByTestId("density-grid")).toHaveAttribute("data-lane", "true");
+
+  const lane = await page.getByTestId("risk-bin").evaluateAll((nodes) =>
+    nodes
+      .map((node) => ({
+        band: Number(node.getAttribute("data-band")),
+        xIndex: Number(node.getAttribute("data-x-index")),
+        x: Number(node.getAttribute("x")),
+        width: Number(node.getAttribute("width")),
+      }))
+      .filter((bin) => bin.xIndex < 0)
+      .sort((a, b) => a.xIndex - b.xIndex),
+  );
+  expect(lane.map((bin) => bin.xIndex)).toEqual([-2, -1]);
+  // The two sit in the SAME band row, so an overlap here IS an occlusion.
+  expect(lane[0]?.band).toBe(lane[1]?.band);
+
+  // Both slots are the same half-decade, so both bins are the same width. The
+  // bug widened only bin −1, by the lane gap: 22px against 36px.
+  expect(lane[0]?.width).toBeCloseTo(lane[1]?.width ?? -1, 6);
+
+  // NO OVERLAP: bin −2's right edge is at or before bin −1's left edge.
+  const leftEdge = lane[0]?.x ?? 0;
+  const leftWidth = lane[0]?.width ?? 0;
+  const rightEdge = lane[1]?.x ?? 0;
+  expect(leftEdge + leftWidth).toBeLessThanOrEqual(rightEdge + 0.001);
+
+  // AC-9 still holds: both stay inside the lane and clear the 1.5px floor.
+  for (const bin of lane) {
+    expect(bin.x).toBeGreaterThanOrEqual(MARGIN_LEFT);
+    expect(bin.x + bin.width).toBeLessThanOrEqual(MARGIN_LEFT + LANE_W + 0.001);
+    expect(bin.width).toBeGreaterThanOrEqual(1.5);
+  }
+  // And neither reaches across the break glyph into the main axis.
+  for (const bin of lane) {
+    expect(bin.x + bin.width).toBeLessThan(MARGIN_LEFT + LANE_W + LANE_GAP);
+  }
+});
+
 // ===========================================================================
 // RM-11 / LAW-3 — rendered pixels
 // ===========================================================================
@@ -304,19 +366,80 @@ test("AC-15: the seven marginal bars share ONE scale, and a zero band draws no i
     ],
     6,
   );
+  // The measurement is the RENDERED rect, not the attribute the component
+  // chose to publish: `data-length` carried the true proportion all along
+  // while `width` was floored, so reading `data-length` could not see the
+  // floor at all. The map renders 1:1 (AC-12), so a rendered px IS a user unit.
   const bars = await page.getByTestId("density-band-bar").evaluateAll((nodes) =>
     nodes.map((node) => ({
       band: Number(node.getAttribute("data-band")),
       length: Number(node.getAttribute("data-length")),
+      width: Number(node.getAttribute("width")),
+      rendered: node.getBoundingClientRect().width,
     })),
   );
   // A zero-Σ band renders NO rect: a bar of length zero is not a small bar.
   expect(bars).toHaveLength(2);
   const short = bars.find((bar) => bar.band === 3);
   const long = bars.find((bar) => bar.band === 5);
-  expect(long?.length).toBeGreaterThan(0);
-  // The RATIO of the two bar lengths equals the ratio of their exact Σ debt.
-  expect(Math.abs((short?.length ?? 0) - (long?.length ?? 0) / 3)).toBeLessThan(0.5);
+  expect(long?.rendered).toBeGreaterThan(0);
+  // The RATIO of the two RENDERED widths equals the ratio of their exact Σ.
+  expect(Math.abs((short?.rendered ?? 0) - (long?.rendered ?? 0) / 3)).toBeLessThan(0.5);
+  // The published proportion and the drawn width are the SAME number.
+  for (const bar of bars) {
+    expect(bar.width).toBeCloseTo(bar.length, 6);
+    expect(bar.rendered).toBeCloseTo(bar.length, 0);
+  }
+});
+
+// W-CH-B finding 3 — THE 1.5px FLOOR FALSIFIED THE PROPORTION.
+//
+// The marginal column's only claim is the ratio between two bars, and the old
+// code drew `max(length, 1.5)` while publishing the true `length` in a data
+// attribute. A band holding $0.01 against a $1,000 peak has a true length of
+// 0.00072px on the 72px scale; it drew at 1.5px, which is over 2% of the
+// scale — 2,000x its share, and identical to the bar a band 1,000x larger
+// would get. The AC-15 assertion above read the attribute, so it never saw it.
+test("W-CH-B / AC-15: a marginal bar's RENDERED width is its true share at an extreme ratio", async ({
+  page,
+}) => {
+  await openMap(
+    page,
+    [
+      { account: account(0), debt: "10000", wad: HEALTHY_WAD }, // $0.01, band 3
+      { account: account(1), debt: "1000000000", wad: ROOMY_WAD }, // $1,000, band 5
+    ],
+    6,
+  );
+  const bars = await page.getByTestId("density-band-bar").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      band: Number(node.getAttribute("data-band")),
+      width: Number(node.getAttribute("width")),
+      rendered: node.getBoundingClientRect().width,
+    })),
+  );
+  expect(bars).toHaveLength(2);
+  const tiny = bars.find((bar) => bar.band === 3);
+  const peak = bars.find((bar) => bar.band === 5);
+
+  // The peak band takes the whole 72px column.
+  expect(peak?.width).toBeCloseTo(72, 3);
+  // The tiny band draws its TRUE share, 1/100,000 of the peak. Under the floor
+  // this was 1.5px, so the two bars claimed a ratio of 48:1 for a real one of
+  // 100,000:1 — the exact reading the marginal column exists to give.
+  expect(tiny?.width).toBeCloseTo(0.00072, 8);
+  expect(tiny?.width).toBeLessThan(0.5);
+  expect(tiny?.rendered).toBeLessThan(0.5);
+  expect((tiny?.width ?? 0) / (peak?.width ?? 1)).toBeCloseTo(1 / 100_000, 9);
+
+  // NONZERO NEVER VANISHES: the band keeps a PRESENCE MARK, which is a dot
+  // rather than a bar, so no length can be read off it. The peak band, whose
+  // bar states its own length, does not get one.
+  const presence = await page
+    .getByTestId("density-band-presence")
+    .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-band"))));
+  expect(presence).toEqual([3]);
+  await expect(page.getByTestId("density-band-presence")).toHaveCount(1);
 });
 
 test("AC-16: no currency text floats inside the risk-map SVG except the axis ticks", async ({
@@ -789,6 +912,22 @@ async function openFrontier(page: Page, book: unknown): Promise<void> {
   await expect(page.getByTestId("lab-frontier")).toBeVisible();
 }
 
+/** Run one committed scenario, the way `runbook-bsplit.spec.ts` does. */
+async function openRunBook(page: Page, runBook: unknown): Promise<void> {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route(`${API}/v1/scenarios`, (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body: fixture("scenarios.json") }),
+  );
+  await page.route(`${API}/v1/book`, (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body: fixture("book.json") }),
+  );
+  await page.route(`${API}/v1/scenarios/*/run-book`, (route) => fulfillJson(route, runBook));
+  await page.goto("/lab");
+  await page.locator('[data-testid="lab-chip"][data-scenario-id="eth_minus_30"]').click();
+  await page.getByTestId("run-book-button").click();
+  await expect(page.getByTestId("book-result")).toBeVisible();
+}
+
 test("AC-34/AC-35/AC-36/AC-37: two rows, separate tick sets, a separator carrying row 2's top, no stray money", async ({
   page,
 }) => {
@@ -982,6 +1121,55 @@ test("AC-46: an all-zero bad-debt grid draws no row 2 and states the zero", asyn
   await expect(panel.getByTestId("frontier-bad-debt-zero")).toHaveText(
     "Bad debt is $0 at every step on this grid. That is a computed zero from the served waterfall.",
   );
+  // The whole-grid claim is EARNED here: every sample carries a served cell.
+  await expect(panel.getByTestId("frontier-bad-debt-zero")).toHaveAttribute("data-holes", "0");
+  await expect(panel.getByTestId("frontier-not-served")).toHaveCount(0);
+});
+
+// W-CH-B finding 1 — ZERO PLUS HOLE, the combination the sentence got wrong.
+//
+// `peakBadDebt` maximises over SERVED points, so this grid yields the same 0n
+// as the fully-served one above and row 2 is dropped the same way. The old
+// copy then claimed "$0 at every step on this grid" while the ledger directly
+// beneath printed em dashes for the unserved column and the axis printed `not
+// served` under its tick. A computed zero and an unknowable were stated as the
+// same thing, on the surface whose whole job is telling them apart.
+test("W-CH-B / AC-46: an all-zero bad-debt grid WITH a hole claims only the served samples", async ({
+  page,
+}) => {
+  const book = referenceBook();
+  for (const point of book.waterfall?.points ?? []) {
+    for (const engine of point.engines) engine.cumulative_bad_debt_usd = "0";
+  }
+  const point = book.waterfall?.points[3];
+  if (point === undefined) throw new Error("fixture shape drifted");
+  point.engines = point.engines.filter((engine) => engine.engine !== "aave_v3_etherfi");
+  const gridPoints = book.waterfall?.points.length ?? 0;
+
+  await openFrontier(page, book);
+  const panel = page.getByTestId("frontier-panel").first();
+  await expect(panel).toHaveAttribute("data-engine", "aave_v3_etherfi");
+
+  // Row 2 is still dropped — the peak over served points is still zero.
+  await expect(panel.getByTestId("frontier-row2")).toHaveAttribute("data-drawn", "false");
+  await expect(panel.getByTestId("frontier-row2-bar")).toHaveCount(0);
+
+  // The hole is on the axis and in the ledger, as an unknown.
+  await expect(panel.locator("[data-testid='frontier-not-served'][data-column='3']")).toHaveCount(1);
+  const holed = panel.locator("[data-testid='frontier-ledger-cell'][data-column='3']");
+  await expect(holed).toHaveCount(5);
+  for (let i = 0; i < 5; i += 1) await expect(holed.nth(i)).toHaveText("—");
+
+  // …so the sentence in row 2's place claims the SERVED samples and no more.
+  const stated = panel.getByTestId("frontier-bad-debt-zero");
+  await expect(stated).toHaveAttribute("data-served", String(gridPoints - 1));
+  await expect(stated).toHaveAttribute("data-holes", "1");
+  await expect(stated).toHaveText(
+    `Bad debt is $0 at the ${String(gridPoints - 1)} samples this engine served. 1 of ` +
+      `${String(gridPoints)} samples was not served, and bad debt there is unknown rather ` +
+      `than zero.`,
+  );
+  await expect(stated).not.toContainText("every step on this grid");
 });
 
 test("AC-47/AC-48: METHOD and LEDGER wiring, and the STATE caveats before the SVG", async ({
@@ -1110,7 +1298,316 @@ test("AC-53: bars are a share of the NAMED denominator on a 0–100% axis", asyn
   await expect(panel.getByTestId("hist-refused-aave_v3_etherfi")).toContainText("refused: ");
 });
 
-test("AC-54: every chart text node is at least 12 CSS px and clears 4.5:1, in both themes", async ({
+// ---------------------------------------------------------------------------
+// W-CH-B finding 4 — A TINY SHARE DREW LIKE A REAL ONE, ON BOTH SURFACES.
+//
+// The old geometry was `max(trunc(count*1000/den)/1000 * BAR_MAX, 1.5)`. Two
+// separate falsifications rode that one line:
+//
+//   the PERMILLE TRUNCATION collapsed every share below 0.1% to zero, so a
+//   bucket at 0.01% and a bucket at 0.00001% became the same bar;
+//   the 1.5px FLOOR then drew that zero at 0.625% of the Book's 240px axis, so
+//   a bucket the row label truthfully printed as `0%` occupied more ink than a
+//   bucket at a real 0.5%.
+//
+// Both surfaces carry the same law and both are pinned here.
+// ---------------------------------------------------------------------------
+
+/** BOOK with one 1-account bucket against a 10,000-account bucket. */
+function bookWithTinyShare(): unknown {
+  const book = structuredClone(BOOK) as {
+    hf_histogram: { engines: { engine: string; buckets: { label: string; count: number }[] }[] };
+  };
+  const aave = book.hf_histogram.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+  if (aave === undefined) throw new Error("fixture shape drifted: no aave histogram");
+  for (const bucket of aave.buckets) bucket.count = 0;
+  const tiny = aave.buckets[3];
+  const bulk = aave.buckets[7];
+  if (tiny === undefined || bulk === undefined) throw new Error("fixture shape drifted");
+  tiny.count = 1;
+  bulk.count = 10_000;
+  return book;
+}
+
+test("W-CH-B / AC-53: a 1-in-10,001 bucket draws its TRUE share on the Book histogram", async ({
+  page,
+}) => {
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => fulfillJson(route, bookWithTinyShare()));
+  await page.route("**/v1/positions*", (route) =>
+    fulfillJson(route, positionsPage([{ account: account(0), debt: "150000000", wad: HEALTHY_WAD }], 6)),
+  );
+  await page.goto("/book?engine=aave_v3_etherfi&dust=off");
+
+  const panel = page.getByTestId("book-histogram-aave_v3_etherfi");
+  await expect(panel.getByTestId("hist-denominator-aave_v3_etherfi")).toContainText("10,001");
+
+  const bars = await panel.getByTestId("hist-bar").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      bucket: node.getAttribute("data-bucket") ?? "",
+      width: Number(node.getAttribute("width")),
+      rendered: node.getBoundingClientRect().width,
+    })),
+  );
+  expect(bars).toHaveLength(2);
+  const tiny = bars.find((bar) => bar.width < 1);
+  const bulk = bars.find((bar) => bar.width >= 1);
+
+  // 1 of 10,001 is 0.00999…%, which is 0.023997px on the 240px axis.
+  expect(tiny?.width).toBeCloseTo(0.023997, 6);
+  // The floor drew this at 1.5px — 62x too long, and 0.625% of the axis.
+  expect(tiny?.width).toBeLessThan(0.5);
+  expect(tiny?.rendered).toBeLessThan(0.5);
+  // 10,000 of 10,001 takes almost the whole axis, and the RATIO of the two
+  // rendered widths is the ratio of the two counts.
+  expect(bulk?.width).toBeCloseTo(239.976002, 5);
+  expect((tiny?.width ?? 0) / (bulk?.width ?? 1)).toBeCloseTo(1 / 10_000, 7);
+
+  // The row label and the bar now AGREE: a bucket printed as `0%` occupies
+  // less than a tenth of a percent of the axis instead of 0.625% of it.
+  const rows = await panel
+    .getByTestId("hist-row-label")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ""));
+  expect(rows).toContain("1 · 0%");
+  expect((tiny?.width ?? 0) / 240).toBeLessThan(0.001);
+
+  // NONZERO NEVER VANISHES: the bucket keeps a presence dot, a different form
+  // from a bar, and the bucket that states its own share does not get one.
+  const presence = await panel
+    .getByTestId("hist-presence")
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-bucket") ?? ""));
+  expect(presence).toHaveLength(1);
+  expect(presence[0]).toBe(tiny?.bucket);
+});
+
+test("W-CH-B / AC-53: the run-book distributions carry the same true-share law", async ({
+  page,
+}) => {
+  const runBook = JSON.parse(fixture("run-book.eth_minus_30.json")) as {
+    engines: {
+      engine: string;
+      before: { hf_histogram: { buckets: { label: string; count: number }[] } };
+      after: { hf_histogram: { buckets: { label: string; count: number }[] } };
+    }[];
+  };
+  const aave = runBook.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+  if (aave === undefined) throw new Error("fixture shape drifted: no aave engine");
+  for (const side of [aave.before, aave.after]) {
+    for (const bucket of side.hf_histogram.buckets) bucket.count = 0;
+    const tiny = side.hf_histogram.buckets[3];
+    const bulk = side.hf_histogram.buckets[7];
+    if (tiny === undefined || bulk === undefined) throw new Error("fixture shape drifted");
+    tiny.count = 1;
+    bulk.count = 10_000;
+  }
+  await openRunBook(page, runBook);
+
+  const pair = page.locator(
+    '[data-testid="runbook-histogram-pair"][data-engine="aave_v3_etherfi"]',
+  );
+  await expect(pair.getByTestId("runbook-hist-denominator-before")).toContainText("10,001");
+
+  const bars = await pair
+    .getByTestId("runbook-hist-bar")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        bucket: node.getAttribute("data-bucket") ?? "",
+        width: Number(node.getAttribute("width")),
+      })),
+    );
+  // Two buckets on each of the two sides.
+  expect(bars).toHaveLength(4);
+  const tiny = bars.filter((bar) => bar.width < 1);
+  const bulk = bars.filter((bar) => bar.width >= 1);
+  expect(tiny).toHaveLength(2);
+  expect(bulk).toHaveLength(2);
+  // The run-book axis is 168px wide: 1 of 10,001 is 0.0167982px on it.
+  for (const bar of tiny) {
+    expect(bar.width).toBeCloseTo(0.016798, 6);
+    expect(bar.width).toBeLessThan(0.5);
+  }
+  for (const bar of bulk) expect(bar.width).toBeCloseTo(167.983201, 5);
+  expect((tiny[0]?.width ?? 0) / (bulk[0]?.width ?? 1)).toBeCloseTo(1 / 10_000, 7);
+
+  // One presence dot per side, on the bucket whose bar cannot state its share.
+  await expect(pair.getByTestId("runbook-hist-presence")).toHaveCount(2);
+  const rows = await pair
+    .getByTestId("runbook-hist-row-label")
+    .evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ""));
+  expect(rows.filter((row) => row === "1 · 0%")).toHaveLength(2);
+});
+
+// ===========================================================================
+// AC-54 / CX-7 / LAW-3 — 12 RENDERED CSS px, on EVERY chart this wave changed,
+// at both ends of the responsive range, in both themes.
+//
+// W-CH-B REWROTE THIS. The old check was vacuous three ways over:
+//
+//   it looked at TWO of the changed regions (the density grid and the risk-map
+//   ledger) and skipped the histograms this wave rewrote outright;
+//   it ran at ONE viewport, so the narrow end, where scaling happens, was
+//   never visited;
+//   and it read `getComputedStyle(node).fontSize`, which reports the AUTHORED
+//   size. A viewBox scale of 0.6 leaves that string at `12px` while the reader
+//   gets 7.2px. `BookHistogram` and `LabRunBookDetail` carried
+//   `maxWidth: 100%`, so they did exactly that below their authored width, and
+//   this test passed anyway.
+//
+// The measurement is the SCREEN CTM now: `getScreenCTM().a` is the factor from
+// SVG user units to rendered CSS px, so `fontSize × a` is the size a reader
+// actually gets, and it is cross-checked against boundingBox ÷ viewBox on the
+// root. The law is the spec's own (LAW-3): render 1:1 from a measured width,
+// with a minimum width and horizontal scroll below it. So a chart may never be
+// scaled down, and a chart wider than its container must sit in a scroll
+// container.
+// ===========================================================================
+
+// NARROW is below every changed chart's authored width, so each one has to
+// answer LAW-3 here: keep 1:1 and scroll, or fail. The run-book's sides are
+// only 340px wide, which is why the narrow end has to be this narrow.
+const NARROW = { width: 360, height: 1000 };
+const WIDE = { width: 1500, height: 1100 };
+
+interface ChartAudit {
+  root: string;
+  /** boundingBox ÷ viewBox on the root SVG; 1 for an HTML region. */
+  boxScale: number;
+  /** `getScreenCTM().a` on the root SVG; 1 for an HTML region. */
+  ctmScale: number;
+  /** The root is wider than the box that has to hold it. */
+  overflows: boolean;
+  /** An ancestor establishes a horizontal scroll container. */
+  scrollable: boolean;
+  nodes: { text: string; rendered: number; color: string }[];
+}
+
+/**
+ * Measure every chart region named by `selectors`, in RENDERED px.
+ *
+ * The node set is deliberately the same one the old check used — `text`, `td`,
+ * `th`, `p`, `h4` — so nothing is traded away for the new dimensions.
+ */
+async function auditCharts(
+  page: Page,
+  selectors: readonly string[],
+): Promise<{ charts: ChartAudit[]; panel: string }> {
+  return page.evaluate((sel) => {
+    const charts: ChartAudit[] = [];
+    for (const selector of sel) {
+      for (const root of Array.from(document.querySelectorAll(selector))) {
+        const box = root.getBoundingClientRect();
+        const isSvg = root.tagName.toLowerCase() === "svg";
+        const svg = isSvg ? (root as unknown as SVGSVGElement) : null;
+        const viewBoxWidth = svg?.viewBox.baseVal.width ?? 0;
+        const ctm = svg?.getScreenCTM() ?? null;
+        // The box that has to hold the chart: the nearest ancestor that is not
+        // the chart itself. If the chart is wider, something must scroll.
+        const holder = root.parentElement;
+        const holderWidth = holder?.clientWidth ?? box.width;
+        let scrollable = false;
+        for (let node = root.parentElement; node !== null; node = node.parentElement) {
+          const overflowX = getComputedStyle(node).overflowX;
+          if (overflowX === "auto" || overflowX === "scroll") {
+            scrollable = true;
+            break;
+          }
+        }
+        const nodes: { text: string; rendered: number; color: string }[] = [];
+        for (const node of Array.from(root.querySelectorAll("text, td, th, p, h4"))) {
+          const text = (node.textContent ?? "").trim();
+          if (text.length === 0) continue;
+          const style = getComputedStyle(node);
+          const size = Number.parseFloat(style.fontSize);
+          const own =
+            node.tagName.toLowerCase() === "text"
+              ? ((node as unknown as SVGGraphicsElement).getScreenCTM()?.a ?? 1)
+              : 1;
+          nodes.push({
+            text,
+            rendered: size * own,
+            color: node.tagName.toLowerCase() === "text" ? style.fill : style.color,
+          });
+        }
+        charts.push({
+          root: root.getAttribute("data-testid") ?? selector,
+          boxScale: isSvg && viewBoxWidth > 0 ? box.width / viewBoxWidth : 1,
+          ctmScale: ctm?.a ?? 1,
+          overflows: box.width > holderWidth + 1,
+          scrollable,
+          nodes,
+        });
+      }
+    }
+    const probe = document.createElement("span");
+    probe.style.color = getComputedStyle(document.documentElement)
+      .getPropertyValue("--panel")
+      .trim();
+    document.body.append(probe);
+    const panel = getComputedStyle(probe).color;
+    probe.remove();
+    return { charts, panel };
+  }, selectors);
+}
+
+/** The whole law, applied to one page's charts at one viewport in one theme. */
+async function expectRenderedTypography(
+  page: Page,
+  selectors: readonly string[],
+  expectedRegions: number,
+  label: string,
+): Promise<void> {
+  const { charts, panel } = await auditCharts(page, selectors);
+  expect(charts.length, `${label}: chart regions found`).toBe(expectedRegions);
+  let measured = 0;
+  for (const chart of charts) {
+    const where = `${label} · ${chart.root}`;
+    // 1:1 OR SCROLL. Never a scale factor: an SVG scaled to 0.6 keeps
+    // reporting 12px font while rendering 7.2px of it.
+    expect(chart.ctmScale, `${where}: CTM scale`).toBeGreaterThanOrEqual(0.999);
+    expect(chart.boxScale, `${where}: box ÷ viewBox`).toBeGreaterThanOrEqual(0.999);
+    // …and the two measures agree, so neither can be lying alone.
+    expect(Math.abs(chart.ctmScale - chart.boxScale), `${where}: scale agreement`).toBeLessThan(
+      0.01,
+    );
+    // A chart wider than the box holding it scrolls rather than shrinking.
+    if (chart.overflows) {
+      expect(chart.scrollable, `${where}: wider than its holder, so it must scroll`).toBe(true);
+    }
+    for (const node of chart.nodes) {
+      expect(node.rendered, `${where}: "${node.text}" rendered px`).toBeGreaterThanOrEqual(12);
+      expect(
+        contrastOf(node.color, panel),
+        `${where}: "${node.text}" (${node.color})`,
+      ).toBeGreaterThanOrEqual(4.5);
+      measured += 1;
+    }
+  }
+  expect(measured, `${label}: text nodes measured`).toBeGreaterThan(5);
+}
+
+/** Both themes, at one viewport, on one set of chart regions. */
+async function expectBothThemes(
+  page: Page,
+  selectors: readonly string[],
+  expectedRegions: number,
+  viewport: { width: number; height: number },
+  surface: string,
+): Promise<void> {
+  await page.setViewportSize(viewport);
+  for (const theme of ["light", "dark"] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.setAttribute("data-theme", value);
+    }, theme);
+    await expectRenderedTypography(
+      page,
+      selectors,
+      expectedRegions,
+      `${surface} @${String(viewport.width)}px ${theme}`,
+    );
+  }
+}
+
+test("AC-54: the risk map and the risk-band distributions render 12px at both breakpoints", async ({
   page,
 }) => {
   await openMap(
@@ -1123,48 +1620,38 @@ test("AC-54: every chart text node is at least 12 CSS px and clears 4.5:1, in bo
     ],
     6,
   );
+  // The density grid, its ledger, and BOTH engine histograms.
+  const selectors = [
+    "[data-testid='density-grid']",
+    "[data-testid='risk-map-ledger']",
+    "svg[data-testid^='hist-svg-']",
+  ];
+  await expect(page.locator("svg[data-testid^='hist-svg-']")).toHaveCount(2);
+  await expectBothThemes(page, selectors, 4, NARROW, "book");
+  await expectBothThemes(page, selectors, 4, WIDE, "book");
+});
 
-  for (const theme of ["light", "dark"] as const) {
-    await page.evaluate((value) => {
-      document.documentElement.setAttribute("data-theme", value);
-    }, theme);
-    const nodes = await page.evaluate(() => {
-      const roots = Array.from(
-        document.querySelectorAll(
-          "[data-testid='density-grid'], [data-testid='risk-map-ledger']",
-        ),
-      );
-      const out: { text: string; size: number; color: string }[] = [];
-      for (const root of roots) {
-        for (const node of Array.from(root.querySelectorAll("text, td, th, p, h4"))) {
-          const text = (node.textContent ?? "").trim();
-          if (text.length === 0) continue;
-          const style = getComputedStyle(node);
-          out.push({
-            text,
-            size: Number.parseFloat(style.fontSize),
-            color: node.tagName.toLowerCase() === "text" ? style.fill : style.color,
-          });
-        }
-      }
-      const probe = document.createElement("span");
-      probe.style.color = getComputedStyle(document.documentElement)
-        .getPropertyValue("--panel")
-        .trim();
-      document.body.append(probe);
-      const panel = getComputedStyle(probe).color;
-      probe.remove();
-      return { out, panel };
-    });
-    expect(nodes.out.length).toBeGreaterThan(5);
-    for (const node of nodes.out) {
-      expect(node.size, `${theme}: "${node.text}"`).toBeGreaterThanOrEqual(12);
-      expect(
-        contrastOf(node.color, nodes.panel),
-        `${theme}: "${node.text}" (${node.color})`,
-      ).toBeGreaterThanOrEqual(4.5);
-    }
-  }
+test("AC-54: the loss frontier renders 12px at both breakpoints", async ({ page }) => {
+  await openFrontier(page, referenceBook());
+  const panel = page.getByTestId("frontier-panel").first();
+  await expect(panel.getByTestId("frontier-row1")).toBeVisible();
+  // Two engine panels, each with row 1, row 2 and a ledger.
+  const selectors = [
+    "[data-testid='frontier-row1']",
+    "[data-testid='frontier-row2']",
+    "[data-testid='frontier-ledger']",
+  ];
+  await expectBothThemes(page, selectors, 6, NARROW, "lab");
+  await expectBothThemes(page, selectors, 6, WIDE, "lab");
+});
+
+test("AC-54: the run-book distributions render 12px at both breakpoints", async ({ page }) => {
+  await openRunBook(page, JSON.parse(fixture("run-book.eth_minus_30.json")));
+  // Two engines × before/after.
+  const selectors = ["svg[data-testid^='runbook-hist-svg-']"];
+  await expect(page.locator("svg[data-testid^='runbook-hist-svg-']")).toHaveCount(4);
+  await expectBothThemes(page, selectors, 4, NARROW, "run-book");
+  await expectBothThemes(page, selectors, 4, WIDE, "run-book");
 });
 
 test("AC-55: the risk map renders no reference to a token that does not exist", async ({ page }) => {
