@@ -224,6 +224,78 @@
 //     census read four ways, and all four answer to it now.
 //     THIRTY-SIX mutants hold the file.
 //
+//     WAVE W-BS-H. Wave W-BS-G ended by ENUMERATING what was left: seventeen
+//     edit paths in five classes. Reading that list is the finding. Every one of
+//     the seven waves before it worked the same way — a round broke a field, the
+//     field got a law — and the residue is therefore always the fields nobody
+//     reached for. `usd_decimals` was free for six waves. The histogram's `note`
+//     was free for six waves. Every byte of `batch` — the id a reader joins on,
+//     the `status` a reader trusts to mean finished, the watermarks a reader
+//     reads staleness off — was free for all seven, because no round happened to
+//     touch them. A guard assembled field by field covers exactly the fields
+//     somebody thought of, and its coverage cannot be stated without re-deriving
+//     it by hand.
+//
+//     SO THE QUESTION IS INVERTED. `checkResponse` now walks the body's ENTIRE
+//     key tree — recursively, arrays included, empty arrays included — and every
+//     leaf must be in exactly one of three registers: DERIVED (the derivation
+//     composes it and compares it), ANCHORED (a frozen literal or a frozen
+//     sentence, re-proved against its committed source), or ENUMERATED-UNPINNED
+//     (free, by a decision written down, with a one-line reason a reviewer can
+//     reject). A leaf in NO register fails generation naming its own path; a leaf
+//     in TWO fails as well, because a field claimed by two registers is a field
+//     whose coverage nobody can state. The registers ARE the guard's coverage,
+//     and they can no longer drift from what the guard does, because the body
+//     itself is what walks them.
+//
+//     THE ENVELOPE JOINED THE FILE'S SOURCES. Filling the ANCHORED register
+//     meant freezing what had only ever ridden in on a spread: the batch and its
+//     watermarks and its supersession, the coverage sentence, the response
+//     notes, the out-of-model caveats, every engine's `note`, `movers_note`,
+//     `projection` and `market_realization`, and every non-ratio byte of the
+//     disclosures (`source`, `snapped`, `base_snapped`, `cap_bound`). Prose is
+//     frozen as a truncated SHA-256 plus its opening clause — `frozenLiteral`'s
+//     discipline at paragraph length — because a paragraph pasted in as a
+//     literal is a paragraph nobody re-reads, and because `FROZEN_RUNBOOK_EXAMPLE`
+//     re-reads the file GENERATION reads, so anything carried rather than pinned
+//     is one pen held twice.
+//
+//     AND FOUR SELF-CONTRADICTIONS WERE PINNED, each a body agreeing with itself
+//     about a number while disagreeing with itself about what the number means:
+//
+//       LAW 13. `shocks[]` — the scenario definition the page SHOWS — was pinned
+//       by nothing. Every propagation law reads the COMMITTED registry, so a body
+//       could publish `shocks: []` ("nothing was shocked") while disclosing a
+//       70/100 move on every price and moving every aggregate by it, and all
+//       twelve laws read green. The disclosed definition is now asserted equal to
+//       the committed one, AND each applied factor is re-composed from the body's
+//       OWN disclosed axes.
+//       LAW 14. `batch.age_seconds` — how stale a reader is TOLD the numbers are
+//       — is `served_at - computed_at`, and the sweep's own age is measured from
+//       the compute stamp. `served_at` is the one leaf this file leaves free, and
+//       a free clock beside a stated age is two disclosures that can drift.
+//       LAW 15. `excluded_engines[]` and `coverage.withheld_engines[]` are one
+//       roster read twice — the `run-book.contradictory` shape — and only the
+//       second was composed.
+//       LAW 16. `market_realization` belongs to the SCENARIO ("present when the
+//       scenario carries a market-realization axis"), so its presence answers to
+//       the committed registry rather than to the body announcing it.
+//       LAW 17. The engine's exponent is stated twice — as `usd_decimals`, which
+//       every number is READ at, and as a numeral inside a sentence a reader
+//       believes. Anchoring the sentence proves it is the one its source carries;
+//       it cannot prove it is TRUE OF THIS BODY. Re-freeze a wrong sentence and
+//       both pins pass while the page says to read $6,500.00 at 18 decimals.
+//
+//     THE CENSUS GAINED ITS THIRD TERM. `checkSide` read a side's account census
+//     as `buckets + infinite`, which is right only while `refused_count` is zero
+//     — and it is zero on every body here, which is exactly why it was never
+//     questioned. A position this layer could not rebuild is still a position the
+//     run measured over (`handlers.go:700-714`), so the invariant is
+//     `buckets + infinite + refused === accounts`. A law that happens to be true
+//     is not a law.
+//
+//     FORTY-SIX mutants hold the file.
+//
 //  3. run-book.weeth.batch2.json and run-book.eth_minus_30.batch2.json — files
 //     2 and the run-book example with ONE field changed: the batch id, plus its
 //     `computed_at` advanced to stay ordered. These are the SUPERSESSION
@@ -389,6 +461,99 @@
 //     it forgives — which is what makes the banked contract repair
 //     self-enforcing. The eth_minus_30 body, whose disclosures this generator
 //     composes itself, takes none.
+//
+//     ONE DEFECT IN THIS PAIR WAS THIS FILE'S OWN, AND WAVE W-BS-H REPAIRED IT.
+//     The `.swap` body restates the counted balance at 3 weETH — 1200000000000
+//     against the same 600000000000 of debt — and carried the example's
+//     `1.10 – 1.25` census unchanged. At the committed 8100 bps that account sits
+//     at 1200/600 x 0.81 = 1.62, the `1.50 – 2.00` bucket; even the example's OWN
+//     implied 8250-9375 bps would put 3 weETH at 1.65 or above. No threshold
+//     reconciles them, so the census was falsifiable with NO reference to the
+//     recorded example defect — which is what tells the two apart. The COLLISION
+//     body carries the example's own money (2 weETH, 800000000000) and its census
+//     is the example's book, still carried, still recorded. The `.swap` body
+//     carries money THIS GENERATOR restated, and a census describing a book it
+//     does not serve. The carry is conditional now — a carry records a defect in
+//     the EXAMPLE'S OWN BOOK, and a body that restates the book is not that book
+//     — so the swap side takes the derived placement and its four histogram bytes
+//     were regenerated to match. Mutant AT moves them back.
+//
+// ===========================================================================
+// THE GUARD'S CLAIMED COVERAGE, AND ITS KNOWN LIMITS (WAVE W-BS-H)
+// ===========================================================================
+//
+// This is the one place a reviewer reads what the guard claims and where it
+// stops. Nothing below is an aspiration: each limit is a thing that is TRUE of
+// this file right now, and each is here because it cannot be closed rather than
+// because closing it was deferred.
+//
+// WHAT IS GUARDED. Three bodies go through `checkResponse` — the eth_minus_30
+// run-book and the collision pair — and for those three, every leaf of the
+// response is in exactly one register, enforced by the completeness law over the
+// body's own key tree. Not "every leaf somebody listed": every leaf the body
+// HAS. A field added to any of them, by any hand, fails generation until it is
+// registered.
+//
+// LIMIT (i) — THE IRREDUCIBLE TWO-PLACE EDIT. An ANCHORED value is a frozen
+// literal or digest in this file, re-proved every run against a committed source
+// somewhere else: `api/openapi.yaml`'s example (via the run-book fixture),
+// `internal/risk/scenarios/*.json`, `stress-aave.json`, the /v1/params example.
+// Change one and generation stops naming the field. Change BOTH — the literal
+// here and the provenance it is proved against, in agreement — and the guard is
+// silent, because at that point the two independent readings genuinely agree and
+// there is nothing left in the repository to disagree with them. That is not a
+// hole to be plugged; it is what "frozen against a source" MEANS. What the
+// arrangement buys is that the edit cannot be accidental, cannot be one-sided,
+// and cannot be quiet: it touches two files and leaves both in the diff.
+//
+//   The same floor holds for a DERIVED value, one step further out. The
+//   derivation is arithmetic over frozen inputs, so moving a derived number
+//   means moving an input — which is limit (i) again, plus the arithmetic
+//   agreeing. And a leaf in ENUMERATED-UNPINNED is free by construction; the
+//   register is deliberately tiny for that reason, and removing an entry without
+//   pinning its field makes the completeness law fail on that field (mutant AL),
+//   so the register cannot be used as a place to put things to stop checking
+//   them.
+//
+// LIMIT (ii) — THE DELIBERATELY UNGUARDED FIXTURES. Most files this generator
+// writes are MALFORMED ON PURPOSE. They exist to reproduce a defect the product
+// must survive, and a guard that refused them would be refusing the evidence.
+// They are named here so that "unguarded" is a decision on the record rather
+// than a gap somebody might mistake for coverage:
+//
+//   run-book.weeth.batch2 / .eth_minus_30.batch2 / .names-nobody.batch2 (item 3)
+//       one field moved — the batch id, with `computed_at` advanced to stay
+//       ordered. They are SUPERSESSION inputs, and the point is a body identical
+//       in everything but the batch it was measured at. `batch.id` and
+//       `computed_at` are ANCHORED on the three bodies the completeness law
+//       walks; these variants are a separate transform it never sees.
+//   run-book.weeth-withheld (item 4)        an engine withheld, fail-closed.
+//   run-book.names-nobody (item 5)          both engine arrays emptied under a
+//                                           healthy-looking envelope.
+//   run-book.contradictory (item 6)         one engine served AND withheld — the
+//                                           exact shape law 15 makes impossible
+//                                           in a GENERATED body.
+//   run-book.named-twice (item 7)           two results offered for one cell.
+//   scenarios.v2 + run-book.ethfi_minus_50.v2 (item 8)
+//                                           both individually valid; the defect
+//                                           is the JOIN between them.
+//   scenarios.removed (item 9)              a committed scenario delisted.
+//   scenarios.relisted + run-book.weeth.v2 (item 10)
+//                                           the same scenario republished re-cut.
+//   run-book.partial-hole (item 11)         a row dropped with no refusal
+//                                           recorded beside it.
+//
+//   Each is a documented transform of bytes that ARE checked — the contract
+//   example, or item 1's mechanically-derived listing — so none is hand-shaped
+//   wire data. What is unguarded is the transform's OUTPUT, deliberately,
+//   because the output's whole purpose is to be a body the product should refuse
+//   to render honestly.
+//
+// AND THAT IS THE WHOLE LIST. After this wave, the ways to change what an honest
+// user sees without failing generation are exactly (i) and (ii). There is no
+// third: the completeness law leaves no leaf unclaimed on a guarded body, and
+// every register entry resolves to arithmetic over frozen inputs, to a frozen
+// pin over a committed source, or to a written-down reason.
 //
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
@@ -801,9 +966,24 @@ const belowOne = (histogram) =>
     0,
   );
 
-/** buckets + infinite — every account this side measured. */
+/**
+ * buckets + infinite + refused — the SERVER'S OWN account invariant (Wave
+ * W-BS-H, residual class E).
+ *
+ * `p5_runbook.go:418-430, 578-583` adds a covered engine's unrebuildable
+ * positions to `refused_count` on BOTH sides, and `handlers.go:700-714` counts
+ * them in `accounts` all the same: a position this layer could not rebuild is
+ * still a position the run measured over. The old reading was `buckets +
+ * infinite`, which is correct only while `refused_count` is zero — and it is
+ * zero on every body this file writes, which is exactly why the arithmetic was
+ * never questioned. A law that happens to be true is not a law; the moment a
+ * fixture carries a refusal, `buckets + infinite` would have quietly demanded
+ * that `accounts` UNDERCOUNT the run by the refused rows.
+ */
 const census = (histogram) =>
-  histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) + histogram.infinite_count;
+  histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0) +
+  histogram.infinite_count +
+  histogram.refused_count;
 
 // --- THE HOLDING ANCHOR (Wave W-BS-E) --------------------------------------
 //
@@ -895,9 +1075,13 @@ const holdingAnchor = (declarations) => {
  */
 const checkSide = (name, side) => {
   if (census(side.hf_histogram) !== side.accounts) {
+    const histogram = side.hf_histogram;
+    const placed = histogram.buckets.reduce((sum, bucket) => sum + bucket.count, 0);
     fail(
-      `${name} histogram census ${String(census(side.hf_histogram))} ` +
-        `!= accounts ${String(side.accounts)}`,
+      `${name} histogram census ${String(census(histogram))} ` +
+        `!= accounts ${String(side.accounts)} — ${String(placed)} placed in buckets + ` +
+        `${String(histogram.infinite_count)} unbounded + ${String(histogram.refused_count)} ` +
+        `refused IS the set of accounts this side measured`,
     );
   }
   if (belowOne(side.hf_histogram) !== side.eligible_accounts) {
@@ -1045,6 +1229,53 @@ const frozenLiteral = (what, literal, sourced) => {
   }
   return literal;
 };
+
+/**
+ * A frozen SENTENCE, re-proved the same way (Wave W-BS-H).
+ *
+ * The envelope this generator carries from the contract example is mostly PROSE
+ * — disclosure notes, out-of-model caveats, the supersession sentence — and a
+ * paragraph pasted into this file as a literal is a paragraph nobody re-reads.
+ * So a sentence is frozen as a TRUNCATED SHA-256 plus the opening clause: the
+ * excerpt tells a reviewer which sentence is meant, and the digest is what
+ * actually holds, byte for byte, including the bytes the excerpt does not show.
+ *
+ * This is `frozenLiteral`'s discipline at prose length, and it exists for the
+ * same reason: `FROZEN_RUNBOOK_EXAMPLE` re-reads the file GENERATION reads, so
+ * a value carried across rather than pinned is ONE PEN HELD TWICE (Wave W-BS-G,
+ * finding 3).
+ */
+const frozenText = (what, digest, excerpt, sourced) => {
+  if (typeof sourced !== "string") {
+    fail(
+      `THE FROZEN ${what} was frozen as the sentence beginning ${JSON.stringify(excerpt)}, but the ` +
+        `committed source now carries ${JSON.stringify(sourced)}, which is not a sentence at all`,
+    );
+  }
+  const got = createHash("sha256").update(sourced, "utf8").digest("hex").slice(0, 16);
+  if (got !== digest) {
+    fail(
+      `THE FROZEN ${what} digests ${digest} over the sentence beginning\n        ` +
+        `${JSON.stringify(excerpt)}\n        but the committed source it was frozen from now ` +
+        `digests ${got} over\n        ${JSON.stringify(sourced.slice(0, 120))}\n        — a frozen ` +
+        `sentence is re-proved against its provenance every run, so this is the SOURCE moving: ` +
+        `read the new wording before re-freezing it`,
+    );
+  }
+  if (!sourced.startsWith(excerpt)) {
+    fail(
+      `THE FROZEN ${what} digests correctly but does not begin ${JSON.stringify(excerpt)} — the ` +
+        `excerpt is what a reviewer reads instead of the digest, so it may not drift from the bytes`,
+    );
+  }
+  return sourced;
+};
+
+/** The frozen form of a sentence: a truncated digest plus its opening clause. */
+const text = (digest, excerpt) => ({ digest, excerpt });
+
+/** An empty array is a leaf in its own right — the claim that NOTHING is there. */
+const EMPTY_ARRAY = Symbol("an empty array");
 
 // --- THE SERIALIZER'S OWN CONSTANTS, FROZEN (Wave W-BS-G, finding 1) --------
 //
@@ -1396,6 +1627,187 @@ const freezeExampleBaseline = (example) => {
 };
 
 freezeExampleBaseline(FROZEN_RUNBOOK_EXAMPLE);
+
+// ===========================================================================
+// THE LEAF WALK (WAVE W-BS-H)
+// ===========================================================================
+//
+// Every law in this file so far was written by somebody who went LOOKING for a
+// field. That is the shape of all five residual classes Wave W-BS-G enumerated:
+// a field is free not because anybody decided it should be, but because nobody
+// thought to name it. `usd_decimals` was free for six waves. So was the
+// histogram's `note`. So was every byte of `batch`.
+//
+// The remedy is to stop asking "is this field covered?" one field at a time and
+// ask the WHOLE TREE at once. `responseLeaves` walks a body to its leaves —
+// through objects, through arrays, to the scalars a reader actually sees — and
+// the completeness law below requires every one of them to be in exactly one
+// named registry. A leaf in none of them FAILS GENERATION naming its own path.
+
+/**
+ * Every leaf of `value` as `[concrete path, leaf value]`, in tree order.
+ *
+ * An EMPTY ARRAY is a leaf: `held_flat: []` is not the absence of a claim, it
+ * is the claim that nothing was held, and a walk that skipped it would leave
+ * the emptiest disclosure in the file unpinned.
+ */
+const responseLeaves = (value, prefix = "", out = []) => {
+  if (value === null || typeof value !== "object") {
+    out.push([prefix, value]);
+    return out;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      out.push([`${prefix}[]`, EMPTY_ARRAY]);
+      return out;
+    }
+    value.forEach((entry, index) => responseLeaves(entry, `${prefix}[${index}]`, out));
+    return out;
+  }
+  for (const key of Object.keys(value)) {
+    responseLeaves(value[key], prefix === "" ? key : `${prefix}.${key}`, out);
+  }
+  return out;
+};
+
+/** A concrete leaf path with every array index collapsed: the REGISTRY key. */
+const leafPattern = (path) => path.replace(/\[\d+\]/g, "[]");
+
+/** How a leaf reads in a refusal — the sentinel included. */
+const leafShown = (value) =>
+  value === EMPTY_ARRAY ? "[] (an empty array)" : JSON.stringify(value);
+
+// --- THE EXAMPLE'S OWN ENVELOPE, FROZEN (Wave W-BS-H) ----------------------
+//
+// `FROZEN_EXAMPLE_BASELINE` froze the example's ARITHMETIC. Its ENVELOPE — the
+// batch, the watermarks, the supersession, the coverage sentence, the response
+// notes, every engine's `note`, `movers_note`, `projection` and
+// `market_realization` — rode in by object spread and was read by nothing. That
+// is class A of Wave W-BS-G's enumeration, and it is where a wrong user-visible
+// byte was cheapest to produce: a reader is TOLD what the numbers mean by these
+// strings, and a batch a reader trusts to be complete is `batch.status`.
+//
+// Each is frozen below with the example's own bytes as its provenance, and
+// `freezeExampleEnvelope` re-proves every one against the freshly-parsed example
+// EVERY RUN. It also runs the leaf walk over the example's anchored subtree and
+// refuses any anchored leaf this table does NOT name — so the freeze is itself
+// complete, and a field the contract example grows cannot arrive unfrozen.
+const FROZEN_EXAMPLE_ENVELOPE = new Map([
+  ["batch.id", 1],
+  ["batch.computed_at", "2026-07-29T10:00:00Z"],
+  ["batch.producer", "riskd"],
+  ["batch.status", "complete"],
+  ["batch.refused_count", 2],
+  ["batch.refused_engines[]", EMPTY_ARRAY],
+  ["batch.flagged_count", 1],
+  ["batch.watermarks[0].engine", "aave_v3_etherfi"],
+  ["batch.watermarks[0].chain_id", 1],
+  ["batch.watermarks[0].last_block", 25635618],
+  ["batch.watermarks[0].acked_epoch", 0],
+  ["batch.watermarks[0].max_epoch_at_compute", 0],
+  // The aave engine runs no sweep, and NULL is the disclosure that says so.
+  ["batch.watermarks[0].sweep", null],
+  ["batch.watermarks[1].engine", "debt_manager"],
+  ["batch.watermarks[1].chain_id", 10],
+  ["batch.watermarks[1].last_block", 154796552],
+  ["batch.watermarks[1].acked_epoch", 0],
+  ["batch.watermarks[1].max_epoch_at_compute", 0],
+  ["batch.watermarks[1].sweep.rows", 3],
+  ["batch.watermarks[1].sweep.failed", 1],
+  ["batch.watermarks[1].sweep.success_sum", "309593004"],
+  ["batch.watermarks[1].sweep.max_updated_at", "2026-07-29T09:40:00Z"],
+  ["batch.watermarks[1].sweep.generation", 4],
+  ["batch.watermarks[1].sweep.generation_open", false],
+  ["batch.supersession.superseded", false],
+  ["batch.supersession.legs[]", EMPTY_ARRAY],
+  ["batch.supersession.note", text("1e2f0c3377fe6271", "a superseded batch is still served: the flag")],
+  ["scenario_config_version", "v1"],
+  ["label", "weETH market depeg to 0.95 (oracles held)"],
+  ["description", text("48897232abf08d4b", "weETH trades 5 percent below its redemption ")],
+  ["path_assumption", text("a33afc9e81f1fd0d", "oracle marks held exactly; market value is a")],
+  ["out_of_model[0]", text("4b9449973c74d69c", "liquidator liquidity, gas costs, execution l")],
+  ["out_of_model[1]", text("79a5a7ac35d4e29f", "seizure is modeled PRO-RATA over a position'")],
+  // `excluded_engines[]` is NOT frozen here: law 15 derives it from the withheld
+  // roster the derivation composes, so freezing it too would be two registers
+  // claiming one leaf — which the completeness law refuses in its own right.
+  ["coverage.note", text("90fd6b96c7c44a86", "every position the batch carries reached the")],
+  ["notes[0]", text("a11aaae34adb7eeb", "aggregates are per engine in each engine's O")],
+  ["engines[0].note", text("0440e01766848af7", "oracle marks held: before and after aggregat")],
+  ["engines[0].movers_note", text("e6f51a236a09295d", "RANKED BY HEALTH-FACTOR DROP: before minus a")],
+  ["engines[0].projection", null],
+  ["engines[0].market_realization.hfs_unchanged", true],
+  ["engines[0].market_realization.execution_shortfall_usd", "40000000000"],
+  ["engines[0].market_realization.bad_debt_at_liquidation_usd", "0"],
+  ["engines[0].market_realization.usd_decimals", 8],
+  ["engines[0].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
+  ["engines[0].market_realization.note", text("5483193594ac1b43", "market value is NOT an oracle mark: this sce")],
+  ["engines[1].note", text("20511f4ce03c0789", "delta-only: zero deltas here are THE FINDING")],
+  ["engines[1].movers_note", text("7c127dc90477c0f0", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
+  ["engines[1].projection", null],
+  ["engines[1].market_realization.hfs_unchanged", true],
+  ["engines[1].market_realization.execution_shortfall_usd", "200000000"],
+  ["engines[1].market_realization.bad_debt_at_liquidation_usd", "0"],
+  ["engines[1].market_realization.usd_decimals", 6],
+  ["engines[1].market_realization.seizure_model", "pro-rata-over-counted-collateral"],
+  ["engines[1].market_realization.note", "same axis, this engine's own 6-decimal USD."],
+]);
+
+/** Assert one frozen envelope entry — literal, sentence or empty array. */
+const freezeEnvelopeLeaf = (what, frozen, sourced) => {
+  if (frozen !== null && typeof frozen === "object" && !Array.isArray(frozen) && "digest" in frozen) {
+    return frozenText(what, frozen.digest, frozen.excerpt, sourced);
+  }
+  if (frozen === EMPTY_ARRAY || sourced === EMPTY_ARRAY) {
+    if (frozen !== sourced) {
+      fail(
+        `THE FROZEN ${what} is ${leafShown(frozen)}, but the committed source it was frozen from ` +
+          `now reads ${leafShown(sourced)} — an empty array is a CLAIM that nothing is there, and ` +
+          `it is frozen as firmly as any value`,
+      );
+    }
+    return sourced;
+  }
+  return frozenLiteral(what, frozen, sourced);
+};
+
+/**
+ * Re-prove the frozen envelope against the example READ OFF DISK, in BOTH
+ * directions — and refuse an anchored leaf the table does not name.
+ *
+ * Written as a function of the example so its own failure can be WATCHED rather
+ * than only asserted (mutant AK).
+ */
+const freezeExampleEnvelope = (example) => {
+  const seen = new Set();
+  for (const [path, value] of responseLeaves(example)) {
+    // The holding anchor (law 9) owns the itemization's bytes; this freeze owns
+    // the ENVELOPE, which is everything a reader is shown that no holding, no
+    // aggregate and no disclosure arithmetic accounts for.
+    if (RESPONSE_ANCHORED_LEAVES.get(leafPattern(path))?.by !== "response") {
+      continue;
+    }
+    if (!FROZEN_EXAMPLE_ENVELOPE.has(path)) {
+      fail(
+        `the contract's run-book 200 example carries an ANCHORED envelope leaf this file has never ` +
+          `frozen:\n        ${path} = ${leafShown(value)}\n        Every byte a reader is shown ` +
+          `answers to a source. Freeze it above with its provenance, or move it to the ` +
+          `ENUMERATED-UNPINNED register with a reason a reviewer can reject.`,
+      );
+    }
+    seen.add(path);
+    freezeEnvelopeLeaf(`example ${path}`, FROZEN_EXAMPLE_ENVELOPE.get(path), value);
+  }
+  for (const path of FROZEN_EXAMPLE_ENVELOPE.keys()) {
+    if (!seen.has(path)) {
+      fail(
+        `the frozen envelope pins ${path}, which the contract's run-book 200 example NO LONGER ` +
+          `carries — a pin on an absent field forgives the field's absence, so re-review it rather ` +
+          `than leaving it here`,
+      );
+    }
+  }
+  return FROZEN_EXAMPLE_ENVELOPE;
+};
 
 /** floor(amount × price / 10^decimals) — every engine's own valuation. */
 const derivedValue = (amount, price, decimals) => (amount * price) / 10n ** BigInt(decimals);
@@ -2109,10 +2521,59 @@ const checkPropagation = (
   // THE MATRIX IS THE RESPONSE'S OWN. A body is measured against the scenario it
   // says it answers, read from the committed registry by that id — never against
   // whichever matrix this generator happens to have open.
-  const { rows: propagation, composedFactor } = matrixFor(committedScenario(response.scenario_id));
+  const committed = committedScenario(response.scenario_id);
+  const { rows: propagation, composedFactor } = matrixFor(committed);
   const chains = new Map(
     response.batch.watermarks.map((watermark) => [watermark.engine, watermark.chain_id]),
   );
+
+  // LAW 13: THE DISCLOSED DEFINITION IS THE ONE THAT WAS APPLIED (Wave W-BS-H,
+  // residual A.7).
+  //
+  // `shocks[]` is the scenario definition this body PUBLISHES — the axes and
+  // factors a reader is shown as the thing that was done to the book. Every
+  // other propagation law reads the COMMITTED registry instead, and law 4 binds
+  // `applied_shocks` to the matrix that registry composes. So the one artefact
+  // a reader actually sees was pinned by nothing: a body could publish
+  // `shocks: []` — "nothing was shocked" — while disclosing a 70/100 move on
+  // every price and moving every aggregate by it, and the whole guard read
+  // green. The disclosed definition and the applied physics are the same
+  // scenario or the page is describing a run that did not happen.
+  const disclosedShocks = JSON.stringify(
+    response.shocks.map((shock) => [shock.axis, String(shock.factor_num), String(shock.factor_den)]),
+  );
+  const committedShocks = JSON.stringify(
+    committed.shocks.map((shock) => [shock.axis, String(shock.factor_num), String(shock.factor_den)]),
+  );
+  if (disclosedShocks !== committedShocks) {
+    fail(
+      `${name} discloses shocks ${disclosedShocks} but the committed ${response.scenario_id} ` +
+        `registry entry — the one ApplyScenario reads and every law here composes from — carries ` +
+        `${committedShocks}: the definition a reader is SHOWN is the definition that was APPLIED`,
+    );
+  }
+  // AND THE APPLIED FACTORS COMPOSE FROM IT. Law 4 already binds each factor to
+  // the matrix; this binds it to the body's OWN disclosed axes, so the two
+  // halves of the disclosure cannot be true separately and false together.
+  const disclosedFactor = matrixFor({
+    shocks: response.shocks,
+    propagation: committed.propagation,
+  }).composedFactor;
+  for (const entry of response.applied_shocks) {
+    const row = propagation.get(responseKey(entry.chain_id, entry.asset));
+    if (row === undefined) {
+      continue; // law 4's own refusal, below, names it
+    }
+    const [num, den] = disclosedFactor(row);
+    if (BigInt(entry.factor_num) * den !== BigInt(entry.factor_den) * num) {
+      fail(
+        `${name} applies ${entry.factor_num}/${entry.factor_den} to ${entry.asset}, but composing ` +
+          `THIS BODY'S OWN disclosed shocks[] over that asset's propagation row gives ` +
+          `${String(num)}/${String(den)} — an applied shock is the disclosed definition evaluated, ` +
+          `never a factor beside it`,
+      );
+    }
+  }
 
   const applied = new Map();
   for (const entry of response.applied_shocks) {
@@ -2631,6 +3092,318 @@ const checkPropagation = (
   }
 };
 
+// ===========================================================================
+// THE COMPLETENESS LAW (WAVE W-BS-H): A FIELD CANNOT BE FREE BECAUSE NOBODY
+// THOUGHT TO NAME IT
+// ===========================================================================
+//
+// Seven waves of this file were written the same way: Codex broke a field, the
+// field got a law. `usd_decimals` was free until round 32 moved the Debt
+// Manager's 6 to 18. The histogram's `note` was free until round 32 rewrote it.
+// Every byte of `batch` — the id a reader joins on, the `status` a reader trusts
+// to mean complete, the watermarks a reader reads staleness off — was free
+// through all seven, because no round happened to reach for them.
+//
+// That is not a sequence of oversights. It is the METHOD failing: a guard
+// assembled field by field covers exactly the fields somebody thought of, and
+// its coverage is therefore unknowable without re-deriving it by hand. Wave
+// W-BS-G's residual enumeration is what that unknowability looks like written
+// down — seventeen edit paths, five classes, and no way to be sure the list was
+// itself complete.
+//
+// SO THE QUESTION IS INVERTED. `responseLeaves` walks the WHOLE body to its
+// leaves, and every leaf must be in EXACTLY ONE of three registers:
+//
+//   DERIVED              the derivation composes it and compares it, or a law
+//                        above computes it from quantities that are themselves
+//                        derived. The number answers to arithmetic.
+//   ANCHORED             a frozen literal or a frozen sentence, re-proved
+//                        against its committed source every run — either the
+//                        response anchor declared beside the body, or the
+//                        holding anchor of law 9.
+//   ENUMERATED-UNPINNED  free, by a decision somebody wrote down, with a
+//                        one-line reason a reviewer can reject.
+//
+// A leaf in none of them FAILS GENERATION, naming its own path. A leaf in two
+// fails as well: a field claimed by two registers is a field whose coverage
+// nobody can state. The registers are the guard's coverage, written in one
+// place, and they can no longer drift from what the guard actually does —
+// because the body itself is what walks them.
+
+/** Both sides of an engine carry the same aggregate shape. */
+const bothSides = (suffix) => [`engines[].before.${suffix}`, `engines[].after.${suffix}`];
+
+/**
+ * REGISTER 1 — DERIVED. The clause that composes the value and compares it.
+ */
+const RESPONSE_DERIVED_LEAVES = new Map([
+  ["scenario_id", "checkDerivation: the body answers the scenario the derivation modelled"],
+  ["scenario_version", "checkDerivation: the same, on the version"],
+
+  // THE DISCLOSED SCENARIO DEFINITION (law 13, Wave W-BS-H, residual A.7).
+  ["shocks[]", "law 13: the disclosed definition is the committed registry's, empty included"],
+  ["shocks[].axis", "law 13: every disclosed axis is one the committed registry shocks"],
+  ["shocks[].factor_num", "law 13: the disclosed factor is the committed one"],
+  ["shocks[].factor_den", "law 13: the disclosed factor is the committed one"],
+
+  ["applied_shocks[]", "laws 1/3/5: exactly the priced inputs the committed matrix moves"],
+  ["applied_shocks[].asset", "laws 3/4: keyed to the matrix, witnessed by an itemization that moved"],
+  ["applied_shocks[].chain_id", "laws 3/4: the same key's other half"],
+  ["applied_shocks[].factor_num", "laws 4 and 13: the factor the matrix composes from shocks[]"],
+  ["applied_shocks[].factor_den", "laws 4 and 13: the factor the matrix composes from shocks[]"],
+  ["applied_shocks[].before", "law 10: it values the itemized amount at the itemized before value"],
+  ["applied_shocks[].after", "law 10 + law 4: the same, after the disclosed factor"],
+
+  ["held_flat[]", "law 11: held flat is exhaustive, and nothing floats free in it"],
+  ["held_flat[].asset", "laws 6/11: an input NO propagation row describes, witnessed by an itemization"],
+  ["held_flat[].chain_id", "laws 6/11: the same key's other half"],
+  ["held_flat[].value", "law 10: it values the itemized amount at BOTH sides' itemized value"],
+
+  ["coverage.batch_positions", "checkDerivation: the example's own census plus what this file injects"],
+  ["coverage.in_book", "checkDerivation: the same"],
+  ["coverage.refused_in_batch", "checkDerivation: the same"],
+  ["coverage.excluded_by_this_layer", "checkDerivation: the length of the roster beside it"],
+  ["coverage.excluded[]", "checkDerivation: the frozen refusal roster, empty included"],
+  ["coverage.withheld_engines[]", "checkDerivation: the frozen withheld roster, empty included"],
+  ["coverage.stress_coverage_is_full", "checkDerivation: the contract's fail-closed conjunction, recomputed"],
+  ["excluded_engines[]", "law 15: the top-level roster IS coverage.withheld_engines, read twice"],
+
+  ["batch.position_count", "checkDerivation: welded to coverage.batch_positions"],
+  ["batch.age_seconds", "law 14: served_at minus computed_at, the batch's own clock"],
+  ["batch.watermarks[].sweep.age_seconds", "law 14: computed_at minus the sweep's own max_updated_at"],
+
+  ["engines[].engine", "checkDerivation: the engine set is the derivation's, in order"],
+  ["engines[].usd_decimals", "checkDerivation: the serializer's own frozen constant"],
+  ["engines[].market_realization", "law 16: NULL exactly when the committed scenario carries no market-realization axis"],
+  ["engines[].movers_total", "checkDerivation: the count of accounts the derivation's arithmetic moves"],
+  ["engines[].newly_eligible_accounts", "checkResponse: after minus before, over derived sides"],
+  ["engines[].eligible_debt_delta_usd", "checkResponse: after minus before, over derived sides"],
+  ["engines[].bad_debt_delta_usd", "checkResponse: after minus before, over derived sides"],
+
+  ["engines[].movers[]", "checkDerivation: the mover SET is derived, so an empty one is derived too"],
+  ["engines[].movers[].account", "checkDerivation: exactly the accounts the derivation's arithmetic moves"],
+  ["engines[].movers[].engine", "law 12: a mover is serialized inside the engine that ranked it"],
+  ["engines[].movers[].hf_before_wad", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_after_wad", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_drop_wad", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_before_num", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_before_den", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_after_num", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].hf_after_den", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].became_eligible", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+  ["engines[].movers[].debt_usd", "checkDerivation moverFields, or law 12's NULL for a silent engine"],
+
+  ...bothSides("accounts").map((path) => [path, "checkDerivation: the side's derived census"]),
+  ...bothSides("eligible_accounts").map((path) => [path, "checkDerivation: the derived eligibility test"]),
+  ...bothSides("total_collateral_usd").map((path) => [path, "checkDerivation: the derived itemization's counted sum"]),
+  ...bothSides("total_debt_usd").map((path) => [path, "checkDerivation: the frozen borrowings"]),
+  ...bothSides("eligible_debt_usd").map((path) => [path, "checkDerivation: the derived eligible borrowings"]),
+  ...bothSides("collateral_at_risk_usd").map((path) => [path, "checkDerivation: the waterfall's own measure"]),
+  ...bothSides("bad_debt_usd").map((path) => [path, "checkDerivation: the waterfall's own measure"]),
+  ...bothSides("collateral_by_asset[].value_usd").map((path) => [
+    path,
+    "checkDerivation: the frozen amount re-valued at the frozen SOURCE-SIDE price through the matrix",
+  ]),
+  ...bothSides("hf_histogram.comparator").map((path) => [path, "checkDerivation: the engine's own frozen comparator"]),
+  ...bothSides("hf_histogram.wad_scale").map((path) => [path, "checkDerivation: the frozen bucket shape"]),
+  ...bothSides("hf_histogram.infinite_count").map((path) => [path, "checkDerivation: the derived census"]),
+  ...bothSides("hf_histogram.refused_count").map((path) => [path, "checkDerivation: composed FROM the refusal census"]),
+  ...bothSides("hf_histogram.note").map((path) => [path, "checkDerivation: the frozen sentence the page renders"]),
+  ...bothSides("hf_histogram.buckets[].label").map((path) => [path, "checkDerivation: the frozen bucket shape"]),
+  ...bothSides("hf_histogram.buckets[].lower_wad").map((path) => [path, "checkDerivation: the frozen bucket shape"]),
+  ...bothSides("hf_histogram.buckets[].upper_wad").map((path) => [path, "checkDerivation: the frozen bucket shape"]),
+  ...bothSides("hf_histogram.buckets[].count").map((path) => [
+    path,
+    "checkDerivation: every modelled account dropped where the server's own test drops it",
+  ]),
+]);
+
+/**
+ * REGISTER 2 — ANCHORED. `by` names WHICH anchor holds it.
+ *
+ *   "response"  the response anchor declared beside the body — a frozen literal
+ *               or a frozen sentence, re-proved against its committed source.
+ *   "holding"   law 9's holding anchor, which pins every byte of a holding a
+ *               scenario does not write.
+ */
+const RESPONSE_ANCHORED_LEAVES = new Map([
+  ["label", { by: "response", why: "the committed definition's own label" }],
+  ["description", { by: "response", why: "the committed definition's own description" }],
+  ["path_assumption", { by: "response", why: "the committed definition's own path assumption" }],
+  ["out_of_model[]", { by: "response", why: "the committed definition's own caveats, in order" }],
+  ["notes[]", { by: "response", why: "the contract example's own response-level disclosure" }],
+  ["scenario_config_version", { by: "response", why: "the contract example's own set token" }],
+  ["coverage.note", { by: "response", why: "the contract example's own coverage sentence" }],
+
+  ["batch.id", { by: "response", why: "the contract example's own batch identity" }],
+  ["batch.computed_at", { by: "response", why: "the contract example's own compute stamp" }],
+  ["batch.producer", { by: "response", why: "the contract example's own producer" }],
+  ["batch.status", { by: "response", why: "the contract example's own status — what a reader trusts to mean complete" }],
+  ["batch.refused_count", { by: "response", why: "the contract example's own batch refusal count" }],
+  ["batch.flagged_count", { by: "response", why: "the contract example's own flagged count" }],
+  ["batch.refused_engines[]", { by: "response", why: "the contract example's own roster, empty included" }],
+  ["batch.supersession.superseded", { by: "response", why: "the contract example's own supersession flag" }],
+  ["batch.supersession.legs[]", { by: "response", why: "the contract example's own legs, empty included" }],
+  ["batch.supersession.note", { by: "response", why: "the contract example's own supersession sentence" }],
+  ["batch.watermarks[].engine", { by: "response", why: "the contract example's own watermark" }],
+  ["batch.watermarks[].chain_id", { by: "response", why: "the chain every propagation key in this body is read on" }],
+  ["batch.watermarks[].last_block", { by: "response", why: "the contract example's own watermark" }],
+  ["batch.watermarks[].acked_epoch", { by: "response", why: "the contract example's own watermark" }],
+  ["batch.watermarks[].max_epoch_at_compute", { by: "response", why: "the contract example's own watermark" }],
+  ["batch.watermarks[].sweep", { by: "response", why: "NULL is the disclosure that this engine runs no sweep" }],
+  ["batch.watermarks[].sweep.rows", { by: "response", why: "the contract example's own sweep" }],
+  ["batch.watermarks[].sweep.failed", { by: "response", why: "the contract example's own sweep" }],
+  ["batch.watermarks[].sweep.success_sum", { by: "response", why: "the contract example's own sweep" }],
+  ["batch.watermarks[].sweep.max_updated_at", { by: "response", why: "the contract example's own sweep" }],
+  ["batch.watermarks[].sweep.generation", { by: "response", why: "the contract example's own sweep" }],
+  ["batch.watermarks[].sweep.generation_open", { by: "response", why: "the contract example's own sweep" }],
+
+  ["engines[].note", { by: "response", why: "the sentence the page renders beside the deltas" }],
+  ["engines[].movers_note", { by: "response", why: "the sentence that says whether the ranking is COMPLETE" }],
+  ["engines[].projection", { by: "response", why: "the contract example's own NULL — this file composes no projection" }],
+  ["engines[].market_realization.hfs_unchanged", { by: "response", why: "the contract example's own realization axis" }],
+  ["engines[].market_realization.execution_shortfall_usd", { by: "response", why: "the contract example's own shortfall" }],
+  ["engines[].market_realization.bad_debt_at_liquidation_usd", { by: "response", why: "the contract example's own figure" }],
+  ["engines[].market_realization.usd_decimals", { by: "response", why: "the unit that shortfall is READ at" }],
+  ["engines[].market_realization.seizure_model", { by: "response", why: "the contract example's own seizure model" }],
+  ["engines[].market_realization.note", { by: "response", why: "the contract example's own realization sentence" }],
+
+  ["applied_shocks[].source", { by: "response", why: "WHICH oracle moved — a frozen literal of this body's own inputs" }],
+  ["applied_shocks[].snapped", { by: "response", why: "a stable-band snap this generator does not model, frozen false" }],
+  ["applied_shocks[].base_snapped", { by: "response", why: "the same, on the base leg" }],
+  ["applied_shocks[].cap_bound", { by: "response", why: "whether an Aave price cap BOUND — frozen false, and checked" }],
+  ["held_flat[].source", { by: "response", why: "WHICH oracle held — a frozen literal of this body's own inputs" }],
+
+  ...bothSides("collateral_by_asset[].asset").map((path) => [path, { by: "holding", why: "law 9" }]),
+  ...bothSides("collateral_by_asset[].amount").map((path) => [path, { by: "holding", why: "law 9" }]),
+  ...bothSides("collateral_by_asset[].decimals").map((path) => [path, { by: "holding", why: "law 9" }]),
+  ...bothSides("collateral_by_asset[].symbol").map((path) => [path, { by: "holding", why: "law 9" }]),
+  ...bothSides("collateral_by_asset[].unpriced").map((path) => [path, { by: "holding", why: "law 9" }]),
+  ...bothSides("collateral_by_asset[].note").map((path) => [path, { by: "holding", why: "law 9" }]),
+]);
+
+/**
+ * REGISTER 3 — ENUMERATED-UNPINNED. Free, by a decision written down, each with
+ * a one-line reason a reviewer can REJECT.
+ *
+ * This register is the honest residue, and it is meant to stay a list a person
+ * can read in one breath. An entry here is not a gap that was missed; it is a
+ * gap somebody argued for. Deleting an entry without pinning the field makes
+ * the completeness law fail on that field — which is mutant AL.
+ */
+const RESPONSE_UNPINNED_LEAVES = new Map([
+  [
+    "served_at",
+    "stamped by the SERVING layer at the instant the response leaves, not computed from the batch " +
+      "— no law in a fixture generator can pin a clock, and pinning it to the example's would " +
+      "assert a value that says nothing about the run. Its COHERENCE is still held: law 14 makes " +
+      "batch.age_seconds answer to it.",
+  ],
+]);
+
+// THE FROZEN ENVELOPE, RE-PROVED — now that the anchored register exists to say
+// which leaves it has to cover. Every body below anchors to what this returns.
+freezeExampleEnvelope(FROZEN_RUNBOOK_EXAMPLE);
+
+/**
+ * One served leaf against its declared anchor.
+ *
+ * `freezeEnvelopeLeaf` reads the other direction — a frozen pin against the
+ * committed SOURCE it was taken from, where a mismatch means the source moved.
+ * Here the pin is settled and the BODY is what is being judged, so the sentence
+ * says so: this is a generated response diverging from the bytes it was composed
+ * to carry, which is a different failure and gets different words.
+ */
+const checkAnchoredLeaf = (name, path, frozen, served) => {
+  const digested =
+    frozen !== null && typeof frozen === "object" && !Array.isArray(frozen) && "digest" in frozen;
+  const ok = digested
+    ? typeof served === "string" &&
+      createHash("sha256").update(served, "utf8").digest("hex").slice(0, 16) === frozen.digest
+    : frozen === served;
+  if (ok) {
+    return;
+  }
+  const want = digested
+    ? `the frozen sentence beginning ${JSON.stringify(frozen.excerpt)}`
+    : leafShown(frozen);
+  fail(
+    `${name} serves ${path} = ${leafShown(served)}, but its declared response ANCHOR pins ${want} ` +
+      `— the envelope is every byte a reader is SHOWN that no holding, no aggregate and no ` +
+      `disclosure arithmetic accounts for, and it answers to a source like everything else`,
+  );
+};
+
+/**
+ * THE COMPLETENESS LAW ITSELF.
+ *
+ * `anchor` is the response anchor declared beside the body: concrete leaf path
+ * to frozen literal / frozen sentence / empty-array sentinel. The registers are
+ * parameters so the law's OWN failure can be watched (mutant AL) rather than
+ * only asserted.
+ */
+const checkCompleteness = (
+  name,
+  response,
+  anchor,
+  registers = {
+    derived: RESPONSE_DERIVED_LEAVES,
+    anchored: RESPONSE_ANCHORED_LEAVES,
+    unpinned: RESPONSE_UNPINNED_LEAVES,
+  },
+) => {
+  if (!(anchor instanceof Map) || anchor.size === 0) {
+    fail(
+      `${name} is checked with NO declared response anchor, so every envelope byte a reader is ` +
+        `SHOWN — the batch, the notes, the disclosure sentences — is pinned to nothing`,
+    );
+  }
+  const consumed = new Set();
+  for (const [path, value] of responseLeaves(response)) {
+    const pattern = leafPattern(path);
+    const registered = [
+      registers.derived.has(pattern) ? "DERIVED" : null,
+      registers.anchored.has(pattern) ? "ANCHORED" : null,
+      registers.unpinned.has(pattern) ? "ENUMERATED-UNPINNED" : null,
+    ].filter((entry) => entry !== null);
+    if (registered.length === 0) {
+      fail(
+        `${name} serves ${path} = ${leafShown(value)}, which is in NO register — a field cannot be ` +
+          `free because nobody thought to name it. Put it in DERIVED (compose it and compare it), ` +
+          `in ANCHORED (freeze it against its committed source), or in ENUMERATED-UNPINNED with a ` +
+          `one-line reason a reviewer can reject.`,
+      );
+    }
+    if (registered.length > 1) {
+      fail(
+        `${name} serves ${path}, which ${registered.join(" AND ")} both claim — a leaf claimed by ` +
+          `two registers is a leaf whose coverage nobody can state; exactly one register owns it`,
+      );
+    }
+    if (registered[0] !== "ANCHORED" || registers.anchored.get(pattern).by !== "response") {
+      continue;
+    }
+    if (!anchor.has(path)) {
+      fail(
+        `${name} serves the response-ANCHORED leaf ${path} = ${leafShown(value)}, which the ` +
+          `declared anchor does not name — an anchored field with no anchor entry is anchored to ` +
+          `nothing`,
+      );
+    }
+    consumed.add(path);
+    checkAnchoredLeaf(name, path, anchor.get(path), value);
+  }
+  for (const path of anchor.keys()) {
+    if (!consumed.has(path)) {
+      fail(
+        `${name} serves NO leaf at ${path}, which the declared response ANCHOR pins — a body may ` +
+          `not drop an envelope field its own source carries, and a walk over what is THERE can ` +
+          `never see what is not`,
+      );
+    }
+  }
+};
+
 const checkResponse = (name, response, declared) => {
   checkPropagation(name, response, declared);
   for (const side of ["before", "after"]) {
@@ -2743,11 +3516,131 @@ const checkResponse = (name, response, declared) => {
       }
     }
   }
-  // THE SECOND PEN, LAST. Every property law above has had its say and given
-  // its own named refusal; what remains is the question no property of a body
-  // can answer — whether the numbers are THE RIGHT NUMBERS. The derivation was
+  // THE SECOND PEN. Every property law above has had its say and given its own
+  // named refusal; what remains is the question no property of a body can
+  // answer — whether the numbers are THE RIGHT NUMBERS. The derivation was
   // composed from the frozen sources before this body was read.
   checkDerivation(name, response, declared?.derivation);
+
+  // ===== THE READINGS THE DERIVATION CANNOT MAKE (Wave W-BS-H) ==============
+  //
+  // These four run AFTER the second pen, and the order is the point. Each of
+  // them compares one disclosure against ANOTHER disclosure — a stated age
+  // against the two stamps beside it, a roster against the roster it duplicates,
+  // a realization against the scenario's own axis, a sentence against the scale
+  // it names. Where the derivation composes either side, the derivation is the
+  // stronger statement and owns the refusal; these own only what is left: the
+  // case where every composed value is RIGHT and the body still contradicts
+  // itself about what those values mean.
+
+  // LAW 17, LAST: THE NOTE MAY NOT CONTRADICT THE SCALE IT NAMES (Wave W-BS-H,
+  // residual A.1).
+  //
+  // `engines[].note` is ANCHORED to a frozen sentence and `usd_decimals` is
+  // DERIVED from the serializer's own constant — so both halves of this fact are
+  // already pinned, separately, and that is precisely the gap. An anchor proves
+  // a sentence is the one its source carries; it cannot prove the sentence is
+  // TRUE OF THIS BODY. The serving layer writes the engine's own exponent INTO
+  // the words ("in this engine's own 6-decimal unit"), so a body states its
+  // scale twice: once as the exponent every number is READ at, and once as a
+  // numeral in a sentence a reader believes. Re-freeze the wrong sentence — the
+  // ordinary way this drifts, when a later wave edits `engineNote` and updates
+  // the digest without reading the words — and both pins are satisfied while the
+  // page tells a reader to read $6,500.00 at an exponent the numbers are not in.
+  //
+  // It runs AFTER the derivation deliberately. A body whose SCALE is wrong is
+  // the derivation's refusal, not this one's; this law owns only the case where
+  // the scale is right and the sentence beside it disagrees.
+  // LAW 14: THE BATCH'S OWN CLOCK IS COHERENT (Wave W-BS-H). `served_at` is the
+  // one leaf this file leaves free, and a free clock beside a stated age is two
+  // disclosures that can drift: `batch.age_seconds` is how STALE a reader is
+  // told the numbers are, and it is `served_at - computed_at`. The sweep's own
+  // age is measured from the COMPUTE stamp instead, because a sweep's staleness
+  // is a property of the batch and not of when somebody asked for it. Both
+  // identities hold to the second in the contract's own example, which is the
+  // provenance for reading them as the server's arithmetic rather than as
+  // decoration.
+  const seconds = (from, to) => (Date.parse(to) - Date.parse(from)) / 1000;
+  const servedAge = seconds(response.batch.computed_at, response.served_at);
+  if (response.batch.age_seconds !== servedAge) {
+    fail(
+      `${name} publishes batch.age_seconds ${String(response.batch.age_seconds)}, but it was ` +
+        `computed at ${response.batch.computed_at} and served at ${response.served_at}, which is ` +
+        `${String(servedAge)} seconds — the stated age of a batch is how stale a reader is told ` +
+        `the numbers are, so it answers to the two stamps beside it`,
+    );
+  }
+  for (const watermark of response.batch.watermarks) {
+    if (watermark.sweep === null) {
+      continue;
+    }
+    const sweepAge = seconds(watermark.sweep.max_updated_at, response.batch.computed_at);
+    if (watermark.sweep.age_seconds !== sweepAge) {
+      fail(
+        `${name} publishes a ${watermark.engine} sweep age of ` +
+          `${String(watermark.sweep.age_seconds)} seconds over rows last updated at ` +
+          `${watermark.sweep.max_updated_at} for a batch computed at ${response.batch.computed_at}, ` +
+          `which is ${String(sweepAge)} — a sweep's staleness is measured from the COMPUTE stamp`,
+      );
+    }
+  }
+  // LAW 15: ONE WITHHELD ROSTER, READ TWICE. `excluded_engines[]` at the top
+  // level and `coverage.withheld_engines[]` are the same set of refused engine
+  // books (item 4's own rule: the withheld engine gets the refusal in BOTH), and
+  // `checkDerivation` composes only the second. A body that names an engine in
+  // one and not the other is the `run-book.contradictory` shape — served and
+  // withheld at once — which is a DELIBERATE fixture there and must never be a
+  // silent possibility in a generated body.
+  const excludedNames = response.excluded_engines.map((entry) => entry.engine).join(" ");
+  const withheldNames = response.coverage.withheld_engines.map((entry) => entry.engine).join(" ");
+  if (excludedNames !== withheldNames) {
+    fail(
+      `${name} names [${excludedNames}] in excluded_engines but [${withheldNames}] in ` +
+        `coverage.withheld_engines — a withheld engine's refusal is recorded in BOTH, so the two ` +
+        `rosters are one census read twice and cannot disagree`,
+    );
+  }
+  // LAW 16: THE REALIZATION AXIS IS THE SCENARIO'S, NOT THE BODY'S. The contract
+  // says `market_realization` is "present when the scenario carries a
+  // market-realization axis", and the committed registry is where that axis
+  // lives — so whether the field is NULL is decided by the scenario this body
+  // answers, never announced by the body. `eth_minus_30` carries no
+  // `market_realizations`; `weeth_market_depeg_oracles_held` carries two.
+  const realizations = committedScenario(response.scenario_id).market_realizations ?? [];
+  for (const engine of response.engines) {
+    const carries = engine.market_realization !== null && engine.market_realization !== undefined;
+    if (carries !== realizations.length > 0) {
+      fail(
+        `${name} ${engine.engine} serves market_realization ` +
+          `${carries ? "an object" : shown(engine.market_realization)}, but the committed ` +
+          `${response.scenario_id} registry entry carries ${String(realizations.length)} ` +
+          `market-realization rows — the axis belongs to the SCENARIO, so a body may neither ` +
+          `invent a realization the scenario has no axis for nor withhold one it does`,
+      );
+    }
+  }
+  for (const engine of response.engines) {
+    for (const [field, sentence] of [
+      ["note", engine.note],
+      ["movers_note", engine.movers_note],
+    ]) {
+      const claimed = /\b(\d+)-decimal\b/.exec(sentence ?? "");
+      if (claimed !== null && Number(claimed[1]) !== engine.usd_decimals) {
+        fail(
+          `${name} ${engine.engine} publishes usd_decimals ${String(engine.usd_decimals)} while its ` +
+            `own ${field} calls the unit ${claimed[1]}-decimal — the sentence is what a reader is ` +
+            `TOLD the numbers are in, so a body cannot state its scale twice and disagree with itself`,
+        );
+      }
+    }
+  }
+
+  // THE WHOLE TREE, LAST OF ALL. Every law in this file was written by somebody
+  // who went LOOKING for a field, and each one above has now had its say. This
+  // one asks the BODY which fields it has, and refuses any leaf no register
+  // claims — so it is a last resort by construction: it fires exactly where no
+  // named law reached, which is the only place a wrong byte can still be born.
+  checkCompleteness(name, response, declared?.anchor);
 };
 
 /** The example's own COUNTED sentence, reused rather than paraphrased. */
@@ -3886,9 +4779,159 @@ const ETH_DERIVATION = (() => {
   };
 })();
 
+// --- THIS BODY'S RESPONSE ANCHOR (Wave W-BS-H) -----------------------------
+//
+// The completeness law requires every response-ANCHORED leaf to carry a frozen
+// expectation. Most of this body's envelope is the contract example's, already
+// frozen at `FROZEN_EXAMPLE_ENVELOPE` — the batch, the watermarks, the
+// supersession, the coverage sentence, the response notes, the set token. What
+// moves is what item 2 RE-IDENTIFIES and what this generator COMPOSES, and each
+// of those is frozen below in its own right rather than read back off the body:
+// an anchor taken from `engineNote(8)` would be the generating pen holding the
+// checking pen's hand, which is Wave W-BS-G's finding 3 in miniature.
+//
+//   label / description / path_assumption / out_of_model[]
+//       the eth_minus_30 definition, re-identified from the committed listing.
+//       Cross-proved against `internal/risk/scenarios/eth_minus_30.json` below —
+//       a SECOND committed file, not the one generation reads.
+//   engines[].note / engines[].movers_note
+//       composed by this generator from the serving layer's own templates.
+//       Frozen as digests, so a template edit stops generation rather than
+//       silently republishing new words under an old review.
+//   engines[].market_realization
+//       NULL on both engines: eth_minus_30 carries no market-realization axis.
+//       Law 16 proves that against the committed registry independently.
+//   applied_shocks[].source / .snapped / .base_snapped / .cap_bound
+//   held_flat[].source
+//       WHICH oracle moved or held, and whether a band or a cap bound. Not one
+//       of them is a ratio, so not one is visible to laws 1-10: `cap_bound`
+//       false is this body's claim that no Aave price cap BOUND on the way down.
+const FROZEN_ETH_ENVELOPE = new Map([
+  ["label", "ETH -30 percent"],
+  ["description", text("c1951004bd976332", "Factor shock on ETH/USD. Every ETH-linked co")],
+  ["path_assumption", text("b781952ef4e14337", "instantaneous mark at the shocked level; sin")],
+  ["out_of_model[0]", text("9ca6adc0cc1b008e", "oracle lag and heartbeat behaviour during th")],
+  ["out_of_model[1]", text("093d256536e771f7", "deviation-trigger discreteness (a feed moves")],
+  ["out_of_model[2]", text("4b9449973c74d69c", "liquidator liquidity, gas costs, execution l")],
+  ["out_of_model[3]", text("39e2edaa4bb9fb8f", "market correlations not mechanically implied")],
+  ["out_of_model[4]", text("db68886bf0d25c81", "intra-sample price wicks: prices are 60-seco")],
+  ["out_of_model[5]", text("5cbc2fdf2cf309eb", "Aave price caps are checked, not assumed: a ")],
+  ["engines[0].note", text("2b975fdec80b1422", "delta-only: after minus before over the posi")],
+  ["engines[0].movers_note", text("042fe202262632e4", "RANKED BY HEALTH-FACTOR DROP: before minus a")],
+  ["engines[1].note", text("6b36d91662d0d07a", "delta-only: after minus before over the posi")],
+  ["engines[1].movers_note", text("b6cf9a08427c2b70", "RANKED BY THE DEBT THAT BECAME ELIGIBLE: onl")],
+  // `market_realization` itself is NOT pinned here: law 16 derives its NULLity
+  // from the committed registry's own market-realization axis, so an anchor row
+  // would be a second register claiming one leaf. Only its CHILDREN are
+  // anchored, and this body drops them — see FROZEN_ETH_ENVELOPE_DROPPED.
+  // Sorted by `${asset}|${chain_id}|${source}`, the server's own disclosure order.
+  ["applied_shocks[0].source", "priceproviderv2"],
+  ["applied_shocks[0].snapped", false],
+  ["applied_shocks[0].base_snapped", false],
+  ["applied_shocks[0].cap_bound", false],
+  ["applied_shocks[1].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
+  ["applied_shocks[1].snapped", false],
+  ["applied_shocks[1].base_snapped", false],
+  ["applied_shocks[1].cap_bound", false],
+  ["held_flat[0].source", "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"],
+  ["held_flat[1].source", "priceproviderv2"],
+]);
+
+/**
+ * The example's envelope leaves this body does NOT carry.
+ *
+ * `market_realization` goes from an OBJECT to NULL, so its six leaves stop
+ * existing and their pins would otherwise sit on fields that are gone — which
+ * the completeness law refuses in its own right ("a body may not drop an
+ * envelope field its own source carries"). Dropping them here is the statement
+ * that their absence is INTENDED, and law 16 is what proves the intention is
+ * the committed scenario's rather than this file's.
+ */
+const FROZEN_ETH_ENVELOPE_DROPPED = [
+  "engines[0].market_realization.hfs_unchanged",
+  "engines[0].market_realization.execution_shortfall_usd",
+  "engines[0].market_realization.bad_debt_at_liquidation_usd",
+  "engines[0].market_realization.usd_decimals",
+  "engines[0].market_realization.seizure_model",
+  "engines[0].market_realization.note",
+  "engines[1].market_realization.hfs_unchanged",
+  "engines[1].market_realization.execution_shortfall_usd",
+  "engines[1].market_realization.bad_debt_at_liquidation_usd",
+  "engines[1].market_realization.usd_decimals",
+  "engines[1].market_realization.seizure_model",
+  "engines[1].market_realization.note",
+];
+
+/**
+ * Build one body's response anchor: the frozen example's envelope, with the
+ * leaves this body re-identifies DROPPED and REPLACED.
+ *
+ * Both directions are asserted. A drop that drops nothing, or an override that
+ * overrides nothing the example carried and is not a leaf the example lacks,
+ * would be a pin nobody reads — so the arithmetic of the overlay is checked
+ * rather than assumed.
+ */
+const responseAnchor = (what, dropped, overrides) => {
+  const anchor = new Map(FROZEN_EXAMPLE_ENVELOPE);
+  for (const path of dropped) {
+    if (!anchor.delete(path)) {
+      fail(
+        `${what} drops the anchored leaf ${path}, which the frozen example envelope does not ` +
+          `carry — a drop that drops nothing is a line nobody reads`,
+      );
+    }
+  }
+  for (const [path, value] of overrides) {
+    anchor.set(path, value);
+  }
+  return anchor;
+};
+
+// THE RE-IDENTIFIED HALF, CROSS-PROVED AGAINST A SECOND COMMITTED FILE. Item 2
+// takes label / description / path_assumption / out_of_model from the wire
+// definition in `stress-aave.json`; the digests above are re-proved here against
+// the GO REGISTRY's own entry, which `risk.LoadScenarios` reads and which this
+// generator never composes a body from. Two committed files, one expectation.
+//
+// `out_of_model` is a SUBSET there — the wire listing carries six of the
+// registry's eight — so it is proved by MEMBERSHIP rather than by equality,
+// which is the strongest true statement about it: a re-identified body may drop
+// a committed caveat, but it may never invent one.
+{
+  for (const [path, field] of [
+    ["label", "label"],
+    ["description", "description"],
+    ["path_assumption", "path_assumption"],
+  ]) {
+    freezeEnvelopeLeaf(
+      `eth_minus_30 ${field}, against the committed Go registry`,
+      FROZEN_ETH_ENVELOPE.get(path),
+      ethCommitted[field],
+    );
+  }
+  const registryCaveats = new Set(ethCommitted.out_of_model);
+  for (const [path, frozen] of FROZEN_ETH_ENVELOPE) {
+    if (!path.startsWith("out_of_model[")) {
+      continue;
+    }
+    const carried = [...registryCaveats].find(
+      (caveat) =>
+        createHash("sha256").update(caveat, "utf8").digest("hex").slice(0, 16) === frozen.digest,
+    );
+    if (carried === undefined) {
+      fail(
+        `the frozen ${path} — the caveat beginning ${JSON.stringify(frozen.excerpt)} — is NOT one ` +
+          `the committed eth_minus_30 registry entry carries: a re-identified body may drop a ` +
+          `committed out-of-model caveat, but it may never invent one`,
+      );
+    }
+  }
+}
+
 const ETH_DECLARED = {
   unitemizedInputs: UNITEMIZED_INPUTS,
   holdings: ETH_HOLDINGS,
+  anchor: responseAnchor("run-book.eth_minus_30", FROZEN_ETH_ENVELOPE_DROPPED, FROZEN_ETH_ENVELOPE),
   derivation: ETH_DERIVATION,
 };
 
@@ -4562,7 +5605,7 @@ refuses(
 // nobody. The claim is a refusal disclosure with no refusal behind it.
 refuses(
   "AA: refusals invented — seven positions counted out of a distribution nothing excluded",
-  "publishes an hf_histogram refused_count of 7, but the derivation composes 0",
+  "histogram census 8 != accounts 1 — 1 placed in buckets + 0 unbounded + 7 refused",
   (mutant) => {
     for (const engine of mutant.engines) {
       for (const side of ["before", "after"]) {
@@ -4571,6 +5614,22 @@ refuses(
     }
   },
 );
+
+// AA MOVED LAWS IN WAVE W-BS-H, and the move is the class-E finding. Until this
+// wave `checkSide` read a side's census as `buckets + infinite`, which is right
+// only while `refused_count` is zero — and it is zero on every body this file
+// writes, so the arithmetic was never questioned. `refused_count` counts
+// positions on a COVERED engine this layer could not rebuild, and
+// `handlers.go:700-714` counts those in `accounts` all the same: a position the
+// run could not rebuild is still a position the run measured over. So the
+// invariant is `buckets + infinite + refused === accounts`, and AA — which
+// invents seven refusals and moves nothing else — is now refused by the
+// ARITHMETIC rather than by the derivation. The old law would have passed it and
+// then quietly demanded that `accounts` undercount the run by seven.
+//
+// The derivation's own `refused_count` law keeps its witness at AQ, below: with
+// the census tightened, no BODY edit can reach that law without breaking the
+// arithmetic first, so it is probed against a doctored DERIVATION instead.
 
 // AB. THE NOTE FALSIFIED. The note is the sentence the page RENDERS beside the
 // distribution — it is what a reader is TOLD the buckets mean. The rewrite below
@@ -4930,6 +5989,48 @@ const NOT_COUNTED_NOTE =
  * declares. An anchor read back off the produced body would only ever prove that
  * the body equals itself, which is the whole class of defect round 30 found.
  */
+/**
+ * THE CENSUS FOLLOWS THE MONEY (Wave W-BS-H, the sanctioned class-C repair).
+ *
+ * The `.swap` body exists to restate the counted balance, and until this wave it
+ * restated the balance and carried the example's DISTRIBUTION unchanged: 3 weETH
+ * — 1200000000000 against the same 600000000000 of debt — drawn in `1.10 – 1.25`.
+ * That is falsifiable with NO reference to the recorded example defect, and the
+ * arithmetic is one line: at the committed 8100 bps the account sits at
+ * 1200/600 x 0.81 = 1.62, which is the `1.50 – 2.00` bucket. Even under the
+ * example's OWN implied threshold — the 8250-9375 bps its `1.10 – 1.25` on 2
+ * weETH would require — 3 weETH lands at 1.65 or above. No threshold anywhere
+ * reconciles 3 weETH of that collateral with that bucket.
+ *
+ * THE DEFECT WAS THIS TRANSFORM'S, NOT THE EXAMPLE'S, and the difference is what
+ * licenses the repair. The example itemizes 2 weETH at 800000000000 and draws
+ * `1.10 – 1.25`; the collision body carries that money untouched, so its census
+ * is the example's own book and its disagreement with /v1/params is the recorded
+ * contract defect this file has no standing to fix. The `.swap` body carries
+ * money THIS GENERATOR restated and a census it did not — a census describing a
+ * book the body does not serve. So the rule is the money's:
+ *
+ *   a carry records a defect in the EXAMPLE'S OWN BOOK. A body that restates the
+ *   book is not that book, and takes the derivation's placement instead.
+ *
+ * `collisionDerivation` reaches the same rule from its own frozen inputs, in its
+ * own arithmetic, and the two must agree.
+ */
+const collidingHistogram = (aggregate, countedValue) => {
+  const carried = BigInt(aggregate.total_collateral_usd);
+  const restated = BigInt(countedValue);
+  if (restated === carried) {
+    return aggregate.hf_histogram;
+  }
+  // Aave's own health-factor rational, never divided out:
+  // sum(collateral x liq_threshold) / (debt x 10000).
+  return histogramForOneRational(
+    aggregate.hf_histogram,
+    restated * AAVE_LT_BPS,
+    BigInt(aggregate.total_debt_usd) * BPS,
+  );
+};
+
 const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) => {
   const exampleAave = runBookExample.engines.find((engine) => engine.engine === "aave_v3_etherfi");
   const exampleCounted = exampleAave.before.collateral_by_asset.find(
@@ -4947,6 +6048,10 @@ const withCollidingCollateral = (countedAmount, countedValue, notCountedAmount) 
     return {
       ...aggregate,
       total_collateral_usd: countedValue,
+      // THE CENSUS FOLLOWS THE MONEY. Unchanged for a body serving the example's
+      // own collateral; re-placed by this engine's own arithmetic for a body
+      // that restates it.
+      hf_histogram: collidingHistogram(aggregate, countedValue),
       collateral_by_asset: [
         { ...counted, amount: countedAmount, value_usd: countedValue },
         // Same asset, same `unpriced: false`, a DIFFERENT disclosure — the
@@ -5306,30 +6411,45 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
    * why the Debt Manager side cannot take a derived placement either, is under
    * THE RECORDED HISTOGRAM CARRIES above.
    *
-   * A THIRD THING THIS CARRY HIDES, RECORDED AND NOT FIXED. The `.swap` body
-   * restates the counted balance at 3 weETH — 1200000000000 against the same
-   * 600000000000 of debt, a health factor of 1.62 at the committed 8100 bps —
-   * while carrying the example's `1.10 – 1.25` census unchanged. No threshold
-   * reconciles those: the example's own implied 8250-9375 bps would put 3 weETH
-   * at 1.65 or above, so the swap body's census is falsifiable WITHOUT reference
-   * to the recorded example defect. The carry is still owed here (the two
-   * disagree, so `carriedCensus` does not delete it), but it is owed for a
-   * DIFFERENT reason than the collision body's, and repairing it means moving
-   * the swap fixture's own histogram bytes — which this wave has no mandate to
-   * do. Recorded for the next round rather than quietly carried.
+   * A THIRD THING THIS CARRY HID — REPAIRED IN WAVE W-BS-H, and the repair is
+   * the reason the carry is now conditional. The `.swap` body restates the
+   * counted balance at 3 weETH (1200000000000 against the same 600000000000 of
+   * debt) and used to carry the example's `1.10 – 1.25` census unchanged. That
+   * census was falsifiable WITHOUT reference to the recorded example defect: at
+   * the committed 8100 bps the account sits at 1.62, and even the example's own
+   * implied 8250-9375 bps would put 3 weETH at 1.65 or above. No threshold
+   * reconciles them.
+   *
+   * A CARRY RECORDS A DEFECT IN THE EXAMPLE'S OWN BOOK, so it is owed only where
+   * the body serves the example's own money. `restatesTheBook` is that test, in
+   * the derivation's own hand: a side whose derived counted collateral differs
+   * from the frozen baseline is not the book the carried census describes, and
+   * takes the DERIVED placement. The collision body (2 weETH, 800000000000 — the
+   * example's own) still carries, and its ledger entry still prints. The `.swap`
+   * body (3 weETH, 1200000000000 — this generator's) is placed at `1.50 – 2.00`,
+   * where the arithmetic puts it, and its fixture bytes were regenerated to
+   * match. `withCollidingCollateral` reaches the same rule from the other side.
    */
+  const restatesTheBook = (engineName, items, side) =>
+    items[side].counted !== BigInt(FROZEN_EXAMPLE_BASELINE[engineName][side].total_collateral_usd);
+
   const sideFrom = (engineName, items, side, baselinePlacement) => {
     const baseline = FROZEN_EXAMPLE_BASELINE[engineName][side];
+    const meta = frozenHistogramMeta(engineName, INJECTED_REFUSALS);
     return {
       values: items[side].values,
-      histogram: carriedCensus(
-        `${what} ${engineName} census (${side} side)`,
-        FROZEN_HISTOGRAM_SHAPE,
-        frozenCarried(engineName, side),
-        [baselinePlacement],
-        [],
-        frozenHistogramMeta(engineName, INJECTED_REFUSALS),
-      ),
+      histogram: restatesTheBook(engineName, items, side)
+        ? // THE DERIVATION IS THE AUTHORITY. This body does not serve the book
+          // the carried census describes, so the census has no standing over it.
+          derivedHistogram(FROZEN_HISTOGRAM_SHAPE, null, [baselinePlacement], meta)
+        : carriedCensus(
+            `${what} ${engineName} census (${side} side)`,
+            FROZEN_HISTOGRAM_SHAPE,
+            frozenCarried(engineName, side),
+            [baselinePlacement],
+            [],
+            meta,
+          ),
       aggregate: {
         accounts: String(baseline.accounts),
         eligible_accounts: String(baseline.eligible_accounts),
@@ -5396,9 +6516,22 @@ const collisionDerivation = (what, countedAmount, notCountedAmount) => {
   };
 };
 
+/**
+ * THE COLLISION PAIR'S RESPONSE ANCHOR (Wave W-BS-H).
+ *
+ * These two bodies carry the contract example's ENVELOPE untouched — they add
+ * one NOT-COUNTED collateral row and restate one balance, and nothing else — so
+ * their anchor IS the frozen example envelope, with nothing dropped and nothing
+ * overridden. That the overlay is empty is asserted rather than assumed: an
+ * anchor built by a call that could have dropped or replaced a leaf, and did
+ * neither, is a stronger statement than one written out by hand.
+ */
+const COLLISION_ANCHOR = responseAnchor("the collision pair", [], []);
+
 const COLLISION_DECLARED = {
   undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
   holdings: collision.holdings,
+  anchor: COLLISION_ANCHOR,
   derivation: collisionDerivation(
     "run-book.collateral-collision",
     COLLISION_COUNTED_AMOUNT,
@@ -5407,15 +6540,18 @@ const COLLISION_DECLARED = {
 };
 
 checkResponse("run-book.collateral-collision", collision.response, COLLISION_DECLARED);
-checkResponse("run-book.collateral-collision.swap", collisionSwap.response, {
+const COLLISION_SWAP_DECLARED = {
   undisclosedInputs: EXAMPLE_UNDISCLOSED_INPUTS,
   holdings: collisionSwap.holdings,
+  anchor: COLLISION_ANCHOR,
   derivation: collisionDerivation(
     "run-book.collateral-collision.swap",
     COLLISION_SWAP_COUNTED_AMOUNT,
     COLLISION_SWAP_NOT_COUNTED_AMOUNT,
   ),
-});
+};
+
+checkResponse("run-book.collateral-collision.swap", collisionSwap.response, COLLISION_SWAP_DECLARED);
 
 // --- THE ROUND-30 MUTANTS THAT NEED THE COLLIDING PAIR ---------------------
 //
@@ -5636,6 +6772,190 @@ refusesGeneration(
       [],
       frozenHistogramMeta("debt_manager", 0),
     ),
+);
+
+// --- WAVE W-BS-H: ONE MUTANT PER NEW LAW FAMILY ----------------------------
+//
+// The completeness law, its own register, the response anchor, the four new
+// cross-field laws, the tightened census and the repaired bucket. Each is
+// refused for a reason unique to it, which the register at the end proves.
+
+// AK. THE DISCLOSED DEFINITION EMPTIED (law 13, residual A.7). The body keeps
+// every applied shock, every moved price and every aggregate, and publishes
+// `shocks: []` — "nothing was shocked" — beside them. Every propagation law read
+// the COMMITTED registry, so all thirteen of them stayed green over a page whose
+// own headline said the scenario did nothing.
+refuses(
+  "AK: the disclosed definition emptied — a 70/100 book that says it shocked nothing",
+  'discloses shocks [] but the committed eth_minus_30 registry entry',
+  (mutant) => {
+    mutant.shocks = [];
+  },
+);
+
+// AL. THE REGISTER NARROWED (the completeness law, watched as itself). Delete an
+// ENUMERATED-UNPINNED entry without pinning the field and the law must fail ON
+// THAT FIELD — otherwise the third register is a place to put things to make
+// them stop being checked, which is the opposite of what it is for.
+refusesGeneration(
+  "AL: the ENUMERATED-UNPINNED register narrowed — the completeness law must fail on the freed field",
+  'serves served_at = "2026-07-29T10:00:05Z", which is in NO register',
+  () =>
+    checkCompleteness("probe", ethRunBook, ETH_DECLARED.anchor, {
+      derived: RESPONSE_DERIVED_LEAVES,
+      anchored: RESPONSE_ANCHORED_LEAVES,
+      unpinned: new Map(),
+    }),
+);
+
+// AM. A FIELD NOBODY NAMED. This is the whole wave in one probe: a body grows a
+// leaf — a plausible one, a median the page could render beside the buckets —
+// and NO law in this file was written for it, because no law is ever written for
+// a field that does not exist yet. Seven waves of this guard were assembled by
+// adding a law each time a round broke a field; the completeness law is what
+// stops the eighth from being needed.
+refuses(
+  "AM: a leaf in no register — the body grows a field no law was ever written for",
+  'serves engines[0].before.hf_histogram.median_wad = "1080000000000000000", which is in NO register',
+  (mutant) => {
+    mutant.engines[0].before.hf_histogram.median_wad = "1080000000000000000";
+  },
+);
+
+// AN. AN ENVELOPE BYTE MOVED (the response anchor, residual class A). `status` is
+// how a reader knows the batch is finished. It rode in by object spread through
+// seven waves and was read by nothing — so a body could serve every number
+// correctly under a batch that says it is still running, or the reverse.
+refuses(
+  "AN: the batch's own status rewritten — every number correct under a batch that never finished",
+  'serves batch.status = "partial", but its declared response ANCHOR pins "complete"',
+  (mutant) => {
+    mutant.batch.status = "partial";
+  },
+);
+
+// AO. THE STATED AGE DETACHED FROM THE CLOCK (law 14). `served_at` is the one
+// leaf this file leaves free, and `batch.age_seconds` is how stale a reader is
+// TOLD the numbers are. A free clock beside a stated age is two disclosures that
+// can drift: fifteen minutes of staleness invented over the same two stamps.
+refuses(
+  "AO: the stated age detached from the clock — fifteen minutes invented over the same two stamps",
+  "publishes batch.age_seconds 900, but it was computed at",
+  (mutant) => {
+    mutant.batch.age_seconds = 900;
+  },
+);
+
+// AP. WITHHELD IN ONE ROSTER, SERVED IN THE OTHER (law 15). This is the
+// `run-book.contradictory` shape — an engine named as refused while its numbers
+// are served — reproduced inside a GENERATED body, where it must be impossible.
+// `checkDerivation` composed `coverage.withheld_engines` alone, so the top-level
+// roster beside it answered to nothing.
+refuses(
+  "AP: withheld in one roster and served in the other — the contradictory shape, generated",
+  "names [debt_manager] in excluded_engines but [] in coverage.withheld_engines",
+  (mutant) => {
+    mutant.excluded_engines = [
+      { engine: "debt_manager", code: "FLAG_CUSTODY_UNPROVEN", reason: "custody unproven" },
+    ];
+  },
+);
+
+// AQ. A REALIZATION AXIS THE SCENARIO DOES NOT HAVE (law 16). `market_realization`
+// is the shortfall a liquidator would eat, and the contract says it is present
+// "when the scenario carries a market-realization axis". eth_minus_30 carries
+// none — its committed registry entry has no `market_realizations` — so this body
+// publishes null on both engines. Grafting the example's realization onto it
+// invents a whole second output axis for a scenario that has no such axis, and
+// every law in the file read green.
+refuses(
+  "AQ: a realization axis grafted on — a shortfall for a scenario with no shortfall axis",
+  "serves market_realization an object, but the committed eth_minus_30 registry entry carries 0",
+  (mutant) => {
+    mutant.engines[0].market_realization = {
+      hfs_unchanged: true,
+      execution_shortfall_usd: "40000000000",
+      bad_debt_at_liquidation_usd: "0",
+      usd_decimals: 8,
+      seizure_model: "pro-rata-over-counted-collateral",
+      note: "grafted",
+    };
+  },
+);
+
+// AR. THE SENTENCE RE-FROZEN AROUND THE WRONG NUMERAL (law 17, residual A.1).
+//
+// The note is ANCHORED and `usd_decimals` is DERIVED, so both halves of the
+// engine's scale are pinned — separately, which is the gap. This probe is the
+// way that drift actually happens: a later wave edits the note's wording, the
+// digest is re-frozen to whatever the template now emits, and nobody reads the
+// numeral. The anchor is therefore given the FALSIFIED sentence to pin, so it
+// passes; the derivation still composes 8, so it passes; and law 17 is the only
+// thing left that can notice the page is telling a reader to read the aave
+// engine's 8-decimal money at 18 decimals.
+const FALSIFIED_DECIMALS_NOTE = engineNote(8).replace("8-decimal", "18-decimal");
+
+refuses(
+  "AR: the note re-frozen around the wrong numeral — the scale stated twice, disagreeing",
+  "publishes usd_decimals 8 while its own note calls the unit 18-decimal",
+  (mutant) => {
+    mutant.engines[0].note = FALSIFIED_DECIMALS_NOTE;
+    return {
+      anchor: new Map(ETH_DECLARED.anchor).set(
+        "engines[0].note",
+        text(
+          createHash("sha256").update(FALSIFIED_DECIMALS_NOTE, "utf8").digest("hex").slice(0, 16),
+          FALSIFIED_DECIMALS_NOTE.slice(0, 44),
+        ),
+      ),
+    };
+  },
+);
+
+// AS. THE DERIVATION'S OWN REFUSAL COUNT, WATCHED WHERE IT STILL CAN BE. With the
+// census tightened (AA), no BODY edit can reach `checkDerivation`'s
+// `refused_count` law without breaking the arithmetic first — the two laws now
+// pin one field and the cheaper one fires. So the law is probed against a
+// doctored DERIVATION instead: one that expects a refusal the honest body does
+// not carry. A law that can no longer be reached from the outside is still a law
+// that has to work.
+refusesGeneration(
+  "AS: the derivation expects a refusal the body does not carry — the second reading, still watched",
+  "publishes an hf_histogram refused_count of 0, but the derivation composes 1",
+  () =>
+    checkDerivation("probe", ethRunBook, {
+      ...ETH_DERIVATION,
+      engines: ETH_DERIVATION.engines.map((engine) => ({
+        ...engine,
+        before: {
+          ...engine.before,
+          histogram: { ...engine.before.histogram, refused_count: 1 },
+        },
+      })),
+    }),
+);
+
+// AT. THE REPAIRED BUCKET MOVED BACK (the sanctioned class-C repair, watched).
+//
+// The `.swap` body's aave account is drawn where its own money puts it —
+// 1200000000000 of collateral against 600000000000 of debt at the committed 8100
+// bps is 1.62, the `1.50 – 2.00` bucket. This puts it back in the `1.10 – 1.25`
+// the fixture carried before this wave, which is the census of a book with 2
+// weETH in it and not 3. The carry is CONDITIONAL now, so the derivation places
+// this side itself and is the only thing in the file that knows the difference
+// between the example's money and this generator's.
+refuses(
+  "AT: the repaired bucket moved back — the swap body redrawn on the example's collateral",
+  'counts 1 accounts in hf_histogram bucket "1.10 – 1.25", but the derivation places 0 there',
+  (mutant) => {
+    for (const side of ["before", "after"]) {
+      const histogram = mutant.engines.find((engine) => engine.engine === "aave_v3_etherfi")[side]
+        .hf_histogram;
+      histogram.buckets.find((bucket) => bucket.label === "1.50 – 2.00").count = 0;
+      histogram.buckets.find((bucket) => bucket.label === "1.10 – 1.25").count = 1;
+    }
+  },
+  { response: collisionSwap.response, declared: COLLISION_SWAP_DECLARED },
 );
 
 write("run-book.collateral-collision.json", collision.response);
