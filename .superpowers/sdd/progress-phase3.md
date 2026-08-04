@@ -3766,3 +3766,72 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   owner's VPS + domain (spec §12); npm publish @solvent/client;
   README/demo path; the deferred report-only surveys
   (handleAddressHistory three-instant read; riskd previousPrices).
+- **THE B-SPLIT TRAIN: CONTRACT 1.6.0 SHIPPED AND REVIEW-CLEAN —
+  ROUNDS 27–34, ROUND 34 SHIP (19:20 Aug 3)**: owner said "go ahead
+  with the bsplit" and the train ran W-BS-A (24809c4, the atomic
+  1.6.0 feature wave: hf_histogram on both RunBookAggregate sides
+  with the bucket law EXTRACTED to one function shared with the
+  serving surface; movers[] ranked by each engine's own verdict —
+  aave HF-drop in wads, DM debt-that-flipped-eligible — cap 20 named,
+  movers_total=flips-only pinned against the net count; and
+  collateral_by_asset keyed by asset AND disclosure, the unpriced
+  premise falsified live: ErrMissingPrice refuses the whole position,
+  so the reachable unknowable is a live balance with collateral
+  disabled and no witness, value_usd null never "0"; all derived in
+  the ONE existing measure walk; run-book persists nothing; web:
+  before/after pair on ONE count scale, movers table, breakdown, all
+  downstream of the R11–R17 gates), then EIGHT adversarial rounds and
+  seven hardening waves on its test surface: W-BS-B e2c56ce (coherent
+  fixture book, net-honest copy, links that go where they claim,
+  disclosure-keyed rows, the mixed-direction DB fixture whose DM
+  analogue was PROVEN unconstructible from honest rows and rode as
+  the control); W-BS-C 43c287e (a fixture may only claim what the
+  evaluator could serve: the declared-asset construction from the
+  registry's own propagation row, the Aave engine RE-MEASURED from
+  committed bytes with the 8100-reproduces-both-rationals proof, the
+  7-law propagation guard with mutants refused on every generation
+  run); W-BS-D 0c6d06a (the guard learns CONSERVATION: only prices
+  move); W-BS-E b0cbc53 (ANCHORING: a body cannot vouch for itself;
+  frozen exemption sets that demand their own deletion when the
+  recorded defects repair); W-BS-F 752ff9b (the guard RE-DERIVES from
+  frozen sources through its own arithmetic — two pens; the frozen
+  literals re-proved against their provenance every run); W-BS-G
+  e817ea6 (the user-visible fields join the derivation; the empty
+  mover loop that DISPROVED a disclosed fallback belief is watched;
+  both pens stop sharing a file); W-BS-H 81a13a4 (THE COMPLETENESS
+  LAW: every leaf DERIVED, ANCHORED, or ENUMERATED-UNPINNED-with-
+  reason — the unpinned register is ONE entry, served_at; the
+  sanctioned class-C bucket repair; the coverage statement names its
+  limits); W-BS-I 6aec405 (round 33 falsified "no third path"
+  honestly — a leaf FILED IN THE WRONG REGISTER served $400 of
+  execution shortfall over zero eligible accounts; realization money
+  moved to DERIVED via closed-form identities of production's own
+  arithmetic, the $620 bad debt the example zeroed now served
+  honestly, the full 43-entry ANCHORED audit under the stated test,
+  and LIMIT (iii) — the register assignment itself — written into
+  the coverage statement rather than papered over). ROUND 34: SHIP,
+  zero findings — the closed forms, the chain-10 registry mismatch,
+  all 38 anchored reasons, law 18, and the mutant isolation ALL HELD.
+  THE GUARD'S END STATE: 51 named-reason mutants with mechanical
+  uniqueness; an exact 137-pattern partition; the two-place
+  literal+provenance floor; the deliberately malformed fixtures
+  enumerated with reasons; register misassignment mitigated by a
+  stated test and a written reason per survivor. THE CONTRACT-DEFECT
+  LEDGER (all found by the derivation, none this repo's fixtures'
+  fault, all self-enforcing or banked for ONE example-repair wave):
+  (1) the run-book example's held_flat:[] where production names
+  every input; (2) its aave histogram bucket vs the contract's own
+  /v1/params LT; (3) its DM census vs its own threshold (0.6926 drawn
+  as 0.90–1.00); (4) its market_realization.note matching no engine's
+  serializer; (5) its $400 shortfall over zero eligible accounts.
+  Tallies at HEAD 6aec405: web 759/760 (1 pre-existing conditional
+  skip); client 320/320; store+api Go suites ok; contract 1.6.0
+  everywhere; full stack live (api-24809c4.exe — Go unchanged since —
+  :3111 at HEAD; riskd daemon past batch #1500). REMAINING in W3:
+  the contract-example repair wave (five ledgered defects, exits
+  armed); the deploy gate (owner: VPS + domain, spec §12); npm
+  publish; the deferred report-only surveys. AGENT-OPS note for the
+  record: one wave deleted a stale 171-byte untracked server log
+  (web/r15-server.log) misjudging its provenance — disclosed
+  immediately, no tracked file touched, no recovery possible or
+  needed.
