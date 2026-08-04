@@ -3,7 +3,7 @@
   "batch": {
     "id": 2,
     "computed_at": "2026-07-29T10:00:30Z",
-    "age_seconds": 5,
+    "age_seconds": 0,
     "producer": "riskd",
     "status": "complete",
     "position_count": 6,

@@ -522,9 +522,10 @@
 //
 //   run-book.weeth.batch2 / .eth_minus_30.batch2 / .names-nobody.batch2 (item 3)
 //       one field moved — the batch id, with `computed_at` advanced to stay
-//       ordered. They are SUPERSESSION inputs, and the point is a body identical
-//       in everything but the batch it was measured at. `batch.id` and
-//       `computed_at` are ANCHORED on the three bodies the completeness law
+//       ordered and `age_seconds` DERIVED from the pair rather than carried over
+//       from the source body. They are SUPERSESSION inputs, and the point is a
+//       body identical in everything but the batch it was measured at. `batch.id`
+//       and `computed_at` are ANCHORED on the three bodies the completeness law
 //       walks; these variants are a separate transform it never sees.
 //   run-book.weeth-withheld (item 4)        an engine withheld, fail-closed.
 //   run-book.names-nobody (item 5)          both engine arrays emptied under a
@@ -547,6 +548,34 @@
 //   wire data. What is unguarded is the transform's OUTPUT, deliberately,
 //   because the output's whole purpose is to be a body the product should refuse
 //   to render honestly.
+//
+//   AND THE ONE THING THAT IS GUARDED ON ALL OF THEM (Wave W-EX-C): THE CLOCK.
+//   Every body `write` emits — the three `checkResponse` bodies and all of the
+//   deliberately-malformed ones alike — is walked for stated ages, and any age
+//   its own stamps do not support stops generation (`clock-law.mjs`, and the
+//   block above `write`). This is a real narrowing of limit (ii), not a hole in
+//   it, and the boundary is worth stating precisely:
+//
+//     WHY IT IS SAFE TO GUARD THESE BODIES. Their deliberate wrongness lives in
+//     ENGINE ARRAYS, coverage claims and identity stamps — the shapes the
+//     product must refuse to render honestly. Not one of them is a clock. A law
+//     that reads only `served_at`, the stamps an age is measured from, and the
+//     ages beside them therefore has nothing to disagree with, and running the
+//     FULL `checkResponse` over them would refuse their purpose outright.
+//
+//     WHY IT WAS WORTH DOING. The three `.batch2` bodies carried
+//     `age_seconds: 5` beside a `computed_at` 25 seconds AFTER their own
+//     `served_at` — an age no response can state, since production floors a
+//     negative one at zero. Codex round 36 confirmed those bytes are NOT
+//     rendered (the lab matrix reads batch IDENTITY, never the batch age), so
+//     nothing was displaying them wrongly. They were fixed anyway: a byte no
+//     surface reads today is a byte nobody checks tomorrow, and the law that
+//     makes it unconstructible costs one walk.
+//
+//     WHERE THE BOUNDARY IS. The clock law must not grow. The moment it takes
+//     an opinion about money, counts or coverage it starts refusing the very
+//     fixtures whose purpose is to be refused BY THE PRODUCT, and limit (ii)
+//     stops being a decision on the record and becomes a fight with the guard.
 //
 // LIMIT (iii) — THE REGISTER ASSIGNMENT ITSELF (WAVE W-BS-I, and the amendment
 // wave W-BS-H's own claim needed). W-BS-H closed with "the ways to change what an
@@ -591,6 +620,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { ageSeconds, checkClocks } from "./clock-law.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..");
 const contractPath = path.join(repoRoot, "api", "openapi.yaml");
@@ -610,9 +641,62 @@ try {
 }
 
 const read = (name) => JSON.parse(readFileSync(path.join(here, name), "utf8"));
+
+// --- THE CLOCK LAW, AND EXACTLY HOW FAR IT REACHES -------------------------
+//
+// Most files this generator writes are MALFORMED ON PURPOSE (LIMIT (ii), far
+// above): they reproduce defects the product must survive, and `checkResponse`
+// — the full derivation-and-completeness guard — is deliberately NOT run over
+// them, because a guard that refused them would be refusing the evidence.
+//
+// A CLOCK law is a different size of thing, and it can run over all of them.
+// The deliberate wrongness in these bodies lives in ENGINE ARRAYS, coverage
+// claims and identity stamps; not one of them is a clock. So every body this
+// file writes is walked for stated ages, and only for stated ages: `served_at`,
+// the stamps an age can be measured from, and the ages beside them. Nothing
+// else is inspected, and nothing else may be added here — the moment this law
+// grows an opinion about money or coverage it starts refusing the fixtures
+// whose whole purpose is to be refused by the product.
+//
+// WHY IT WAS NEEDED (Codex round 36, the banked item). The three `.batch2`
+// bodies below carried `batch.age_seconds: 5` beside a `computed_at` 25 seconds
+// AFTER their own `served_at`. Production floors a negative age at zero
+// (`cmd/api/meta.go:255-261`), so 0 is the only value that response could
+// carry, and 5 was a fixture inventing a freshness no server can state. Round
+// 36 confirmed those bytes are not RENDERED — the lab matrix reads batch
+// IDENTITY, never the batch age — which is exactly why the law is worth having
+// rather than worth arguing about: a byte nobody reads today is a byte nobody
+// checks tomorrow, and it costs one walk to make it impossible.
+const clockTrios = {};
 const write = (name, body) => {
+  const clocks = checkClocks(body);
+  if (clocks.failures.length > 0) {
+    fail(
+      `${name} states an age its own stamps do not support:\n  ${clocks.failures.join("\n  ")}`,
+    );
+  }
+  clockTrios[name] = clocks.checked;
   writeFileSync(path.join(here, name), `${JSON.stringify(body, null, 2)}\n`);
   console.log(`wrote   ${name}`);
+};
+
+// Every clock trio this generator emits, counted. A law that quietly stopped
+// matching would pass exactly as silently as the wrong byte it replaced, so the
+// total is pinned: 2 per run-book body (the batch's own age over `computed_at`,
+// and the debt_manager sweep's over `max_updated_at`) across the thirteen
+// bodies that carry a batch envelope, and 0 for the four scenario listings,
+// which carry `served_at` and no age at all.
+const CLOCK_TRIOS_TOTAL = 26;
+const checkClockCensus = () => {
+  const total = Object.values(clockTrios).reduce((sum, n) => sum + n, 0);
+  if (total !== CLOCK_TRIOS_TOTAL) {
+    fail(
+      `the clock law found ${total} stamp/age trios across ${Object.keys(clockTrios).length} ` +
+        `written files; ${CLOCK_TRIOS_TOTAL} are pinned. A law that stops matching passes as ` +
+        `silently as the wrong byte it exists to catch, so the count is part of the law.\n  ` +
+        JSON.stringify(clockTrios),
+    );
+  }
 };
 
 const fail = (message) => {
@@ -6401,19 +6485,35 @@ refuses(
   },
 );
 
-write("run-book.eth_minus_30.json", ethRunBook);
-write("run-book.eth_minus_30.batch2.json", {
-  ...ethRunBook,
-  batch: { ...ethRunBook.batch, id: ethRunBook.batch.id + 1, computed_at: "2026-07-29T10:00:30Z" },
-});
-write("run-book.weeth.batch2.json", {
-  ...runBookExample,
+// --- THE `.batch2` TRANSFORM ------------------------------------------------
+//
+// One field moved: the batch id, with `computed_at` advanced to keep the two
+// batches ordered. The bodies are SUPERSESSION inputs and their whole point is
+// to be identical in everything but the batch they were measured at, so the
+// transform is deliberately minimal.
+//
+// `age_seconds` is DERIVED, never written. It used to travel unchanged from the
+// source body — 5 seconds — beside a `computed_at` 25 seconds AFTER the body's
+// own `served_at`, which is a freshness no response can state: production
+// measures the age as `served_at − computed_at` FLOORED AT ZERO
+// (`cmd/api/meta.go:255-261`), so the only servable value here is 0. Deriving
+// it means the age answers to the two stamps rather than to whatever the source
+// body happened to carry, and moving `computed_at` again cannot desynchronize
+// them.
+const BATCH2_COMPUTED_AT = "2026-07-29T10:00:30Z";
+const atNextBatch = (body) => ({
+  ...body,
   batch: {
-    ...runBookExample.batch,
-    id: runBookExample.batch.id + 1,
-    computed_at: "2026-07-29T10:00:30Z",
+    ...body.batch,
+    id: body.batch.id + 1,
+    computed_at: BATCH2_COMPUTED_AT,
+    age_seconds: Number(ageSeconds(BATCH2_COMPUTED_AT, body.served_at)),
   },
 });
+
+write("run-book.eth_minus_30.json", ethRunBook);
+write("run-book.eth_minus_30.batch2.json", atNextBatch(ethRunBook));
+write("run-book.weeth.batch2.json", atNextBatch(runBookExample));
 
 // --- 4: the withheld-engine run -------------------------------------------
 
@@ -6450,10 +6550,7 @@ const namesNobody = {
 };
 
 write("run-book.names-nobody.json", namesNobody);
-write("run-book.names-nobody.batch2.json", {
-  ...namesNobody,
-  batch: { ...namesNobody.batch, id: namesNobody.batch.id + 1, computed_at: "2026-07-29T10:00:30Z" },
-});
+write("run-book.names-nobody.batch2.json", atNextBatch(namesNobody));
 
 // --- 6: the 200 that CONTRADICTS ITSELF (Wave R12, finding 1) --------------
 //
@@ -7749,4 +7846,13 @@ for (const mutant of MUTANTS) {
 }
 console.log(
   `checked ${String(MUTANTS.length)} mutants — each refused, each for a reason unique to its law`,
+);
+
+// --- THE CLOCK CENSUS -------------------------------------------------------
+//
+// Last, because it counts what every `write` above found. See the block beside
+// `write` for the law, and LIMIT (ii) for exactly how far it reaches.
+checkClockCensus();
+console.log(
+  `checked ${String(CLOCK_TRIOS_TOTAL)} stamp/age trios — every stated age answers to the stamps beside it`,
 );

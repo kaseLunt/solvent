@@ -59,6 +59,13 @@
 //     event: `batch` is the /v1/positions example's batch envelope VERBATIM;
 //     the scalar fields satisfy the schema's required list.
 //
+// EVERY emitted body is walked by the CLOCK LAW (`clock-law.mjs`) before it is
+// written: any age it states is re-derived from the stamps printed beside it,
+// with production's own arithmetic. A copy-verbatim promise is only as fresh as
+// the last run of the generator that makes it, and this file learned that the
+// expensive way — see the block above `emit` for the defect and the census that
+// keeps the law from quietly matching nothing.
+//
 // YAML parsing uses the client package's own pinned `yaml` devDependency
 // (installed by `scripts/ensure-client.mjs`) — no new web dependency.
 
@@ -67,13 +74,87 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { checkClocks } from "./clock-law.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..");
 const contractPath = path.join(repoRoot, "api", "openapi.yaml");
 
+// --- THE CLOCK LAW (Wave W-EX-C; Codex round 36 finding 4) ------------------
+//
+// THE DEFECT, EXACTLY. `feed-posture-snapshot.json` copies the `/v1/positions`
+// example's batch envelope VERBATIM — the provenance record above says so, and
+// the code below does exactly that. But Wave W-EX-B repaired the contract's own
+// sweep age (1200 -> 1205, because 10:00:05Z minus 09:40:00Z is 1205 and the
+// old byte was the age measured from `computed_at`) and NOBODY RE-RAN THIS
+// GENERATOR. So the committed output kept the pre-repair byte while its
+// generator's promise stayed true. That is the whole class: a copy-verbatim
+// generator is only as fresh as its last run, and nothing here said so.
+//
+// `PostureRibbon.tsx` prints `sweep.age_seconds` verbatim and two e2e suites
+// serve this file as the SSE snapshot frame, so the stale byte was teaching the
+// product's own tests an understated freshness.
+//
+// The repair is not "re-run it". Re-running fixes today's byte and leaves the
+// class alive. Every body this generator emits now goes through `checkClocks`
+// (`clock-law.mjs`), which re-derives every stated age from the stamps printed
+// beside it using production's own arithmetic — so a stale clock byte cannot
+// SURVIVE a run, whether it arrived by a copy going stale or by a hand edit.
+//
+// The census below closes the other half: a law that stopped matching would
+// pass just as quietly as the stale byte did.
+const clockTrios = {};
+
 const emit = (name, value) => {
+  const clocks = checkClocks(value);
+  if (clocks.failures.length > 0) {
+    console.error(
+      `generate-feed.mjs: ${name} states an age its own stamps do not support:\n  ` +
+        clocks.failures.join("\n  "),
+    );
+    process.exit(1);
+  }
+  clockTrios[name] = clocks.checked;
   writeFileSync(path.join(here, name), `${JSON.stringify(value, null, 2)}\n`, "utf8");
   console.log(`wrote   ${name}`);
+};
+
+// Every file this generator writes, and how many stamp/age trios the clock law
+// found in it. Pinned so that a law which stops matching is a DIFF rather than
+// a silent pass: the stale 1200 lived in the one file that carries a trio at
+// all, and a walk that quietly stopped visiting it would restore the defect
+// with every test still green.
+const CLOCK_TRIOS = {
+  "feed-cross-page-1.json": 0,
+  "feed-cross-page-2.json": 0,
+  "feed-cross-timed.json": 0,
+  "feed-engine-aave-page-1.json": 0,
+  "feed-engine-aave-since.json": 0,
+  "feed-liquidations.json": 0,
+  "feed-empty.json": 0,
+  "feed-units.json": 0,
+  "feed-error-bad-cursor.json": 0,
+  "feed-error-internal.json": 0,
+  // TWO trios, not one: the copied batch envelope states `batch.age_seconds`
+  // over its own `computed_at` AND the debt_manager sweep states one over its
+  // own `max_updated_at`. The sweep's was the stale byte; the batch's was
+  // already right, and pinning both is what makes "the law visited this file"
+  // a countable claim rather than an impression.
+  "feed-posture-snapshot.json": 2,
+};
+
+const checkClockCensus = () => {
+  const got = JSON.stringify(clockTrios, Object.keys(CLOCK_TRIOS).sort(), 2);
+  const want = JSON.stringify(CLOCK_TRIOS, Object.keys(CLOCK_TRIOS).sort(), 2);
+  if (got !== want || Object.keys(clockTrios).length !== Object.keys(CLOCK_TRIOS).length) {
+    console.error(
+      "generate-feed.mjs: the clock-law census moved. Every emitted file and the number of\n" +
+        "stamp/age trios the law found in it are pinned, so a file that stops being walked —\n" +
+        "or one that grows a clock nobody noticed — stops generation rather than passing.\n" +
+        `  found:  ${JSON.stringify(clockTrios)}\n  pinned: ${JSON.stringify(CLOCK_TRIOS)}`,
+    );
+    process.exit(1);
+  }
 };
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -411,3 +492,5 @@ emit("feed-posture-snapshot.json", {
   poll_interval_seconds: 15,
   note: "snapshot-on-connect: the base frame every connection receives before any tick.",
 });
+
+checkClockCensus();

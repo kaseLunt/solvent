@@ -75,12 +75,35 @@ package main
 // a fixed instant, and the example carries it verbatim. That is exactly why the
 // sweep's age can be derived from the example's own bytes.
 //
+// # What coherence alone could not see (Wave W-EX-C, Codex round 36)
+//
+// Coherence against the SERVED body proves the response agrees WITH ITSELF, and
+// that is strictly weaker than it reads. All four fields come from ONE instant,
+// so a `v.Now` that REGRESSED to a shared old anchor emits a body in which every
+// one of them coheres and every age is understated — and `normalizeServeTime`
+// then overwrites those very fields, so the byte comparison passes too. The
+// defect would survive both readings.
+//
+// Two readings that appeal to something OUTSIDE the body close it, and they run
+// before the normalizer touches anything:
+//
+//	requireRawStampsAreThePersistedOnes  the two anchors the ages are measured
+//	                                     FROM are what the database holds
+//	requireServedAtWithinDBClock         `served_at` is inside a bracket of
+//	                                     `SELECT now()` readings taken either
+//	                                     side of the request
+//
+// `TestRunBookExampleCoherenceCannotSeeARegressedAnchor` is the negative that
+// keeps the split honest: it builds the regressed-anchor body, proves coherence
+// PASSES on it, and proves each of the two outside readings refuses it.
+//
 // EVERY OTHER BYTE OF THE EXAMPLE IS ASSERTED EQUAL. Editing the example by
 // hand — adding a note the server does not compose, moving a bucket, inventing
 // a shortfall — fails here.
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -273,20 +296,31 @@ func exampleAgeSeconds(t *testing.T, now time.Time, stamp any) float64 {
 //     statement about the server rather than about the document.
 //   - against the CONTRACT EXAMPLE it proves the document's is, and it fails
 //     naming the arithmetic rather than as an anonymous byte diff.
-func requireTemporalCoherence(t *testing.T, what string, body map[string]any) {
+// exampleStatesAge reports whether a body's stated age IS the derived one. It is
+// total over any decoded JSON value: an age of the wrong TYPE — a string, a
+// null, an array — is a stated age the body does not support, never a panic.
+func exampleStatesAge(want float64, stated any) bool {
+	got, ok := stated.(float64)
+	return ok && got == want
+}
+
+func temporalCoherenceFailures(t *testing.T, what string, body map[string]any) []string {
 	t.Helper()
 	require.Contains(t, body, "served_at")
 	served := exampleInstant(t, body["served_at"])
 
+	var out []string
 	batch := asMap(t, body["batch"])
 	require.Contains(t, batch, "computed_at")
 	require.Contains(t, batch, "age_seconds")
-	require.Equal(t, exampleAgeSeconds(t, served, batch["computed_at"]), batch["age_seconds"],
-		"%s states a batch age its own two stamps contradict: `batch.age_seconds` IS `served_at` (%v) "+
-			"minus `batch.computed_at` (%v), floored at zero, because production measures both from the "+
-			"one database instant it serves at (cmd/api/meta.go:125). A stated age no response at the "+
-			"stated instant can carry is an understated staleness a reader has no way to catch.",
-		what, body["served_at"], batch["computed_at"])
+	if want := exampleAgeSeconds(t, served, batch["computed_at"]); !exampleStatesAge(want, batch["age_seconds"]) {
+		out = append(out, fmt.Sprintf(
+			"%s states a batch age its own two stamps contradict: `batch.age_seconds` is %v, but `served_at` (%v) "+
+				"minus `batch.computed_at` (%v), floored at zero, IS %v — because production measures both from the "+
+				"one database instant it serves at (cmd/api/meta.go:125). A stated age no response at the stated "+
+				"instant can carry is an understated staleness a reader has no way to catch.",
+			what, batch["age_seconds"], body["served_at"], batch["computed_at"], want))
+	}
 
 	for i, w := range asList(t, batch["watermarks"]) {
 		m := asMap(t, w)
@@ -296,15 +330,155 @@ func requireTemporalCoherence(t *testing.T, what string, body map[string]any) {
 		}
 		require.Contains(t, sweep, "max_updated_at")
 		require.Contains(t, sweep, "age_seconds")
-		require.Equal(t, exampleAgeSeconds(t, served, sweep["max_updated_at"]), sweep["age_seconds"],
-			"%s states a %v sweep age its own stamps contradict: `batch.watermarks[%d].sweep.age_seconds` "+
-				"IS `served_at` (%v) minus that sweep's OWN `max_updated_at` (%v), floored at zero — the SAME "+
-				"database instant `batch.age_seconds` answers to (cmd/api/meta.go:156-177, and the contract's "+
-				"own SweepStamp prose: \"the database clock at SERVE time minus the stamp\"). The stamp is "+
-				"immutable capture-time evidence; only its age is measured, and it is measured from the serve "+
-				"instant, never from the compute stamp.",
-			what, m["engine"], i, body["served_at"], sweep["max_updated_at"])
+		want := exampleAgeSeconds(t, served, sweep["max_updated_at"])
+		if exampleStatesAge(want, sweep["age_seconds"]) {
+			continue
+		}
+		out = append(out, fmt.Sprintf(
+			"%s states a %v sweep age its own stamps contradict: `batch.watermarks[%d].sweep.age_seconds` is %v, but "+
+				"`served_at` (%v) minus that sweep's OWN `max_updated_at` (%v), floored at zero, IS %v — the SAME "+
+				"database instant `batch.age_seconds` answers to (cmd/api/meta.go:156-177, and the contract's own "+
+				"SweepStamp prose: \"the database clock at SERVE time minus the stamp\"). The stamp is immutable "+
+				"capture-time evidence; only its age is measured, and it is measured from the serve instant, never "+
+				"from the compute stamp.",
+			what, m["engine"], i, sweep["age_seconds"], body["served_at"], sweep["max_updated_at"], want))
 	}
+	return out
+}
+
+func requireTemporalCoherence(t *testing.T, what string, body map[string]any) {
+	t.Helper()
+	require.Empty(t, temporalCoherenceFailures(t, what, body))
+}
+
+// dbClockBracket is the pair of DATABASE-clock readings one request was issued
+// BETWEEN: `Lo` immediately before it left, `Hi` immediately after it returned.
+//
+// # Why a served body needs one (Codex round 36, finding 1)
+//
+// `temporalCoherenceFailures` proves a body agrees WITH ITSELF, and round 36
+// named exactly how far short of freshness that falls. Every clock field on a
+// response is one instant read several ways, so a `v.Now` that REGRESSED to a
+// shared old anchor — the batch's own `computed_at`, a restored snapshot's
+// instant, a frozen clock — produces a body in which `served_at`,
+// `batch.age_seconds` and every sweep age cohere PERFECTLY while every age the
+// body states is understated. Coherence has no clock outside the body to appeal
+// to, so it passes; `normalizeServeTime` then overwrites those very fields with
+// the document's stylistic ones, so the byte comparison passes too. The defect
+// would survive both readings of the strongest law in this file.
+//
+// The bracket is the outside witness. It is read through the SAME authority
+// production stamps from — `SELECT now()` on the service's own pool
+// (`internal/store/derive.go`'s `Store.Now`) — so the bound and the stamp under
+// test answer to ONE clock rather than to two that are free to disagree, and it
+// is exact rather than tolerant: `served_at` is rendered at microsecond
+// precision (`time.Time`'s RFC3339Nano), so no truncation slack is owed and
+// none is given.
+type dbClockBracket struct{ Lo, Hi time.Time }
+
+// readDBClock takes one reading of the database clock — production's authority,
+// not this process's wall clock.
+func readDBClock(t *testing.T, f *apiFixture) time.Time {
+	t.Helper()
+	now, err := f.store.Now(f.ctx)
+	require.NoError(t, err)
+	return now.UTC()
+}
+
+// postJSONBracketed posts and returns the body together with the two database
+// instants the request happened between.
+func (f *apiFixture) postJSONBracketed(t *testing.T, path, contractPath string, status int) (map[string]any, dbClockBracket) {
+	t.Helper()
+	lo := readDBClock(t, f)
+	body := f.postJSON(t, path, contractPath, status)
+	return body, dbClockBracket{Lo: lo, Hi: readDBClock(t, f)}
+}
+
+// servedAtBracketFailure says why a body's `served_at` is not an instant this
+// request could have been served at, or "" when it is one.
+//
+// It returns rather than asserts so the mutant
+// (`TestRunBookExampleCoherenceCannotSeeARegressedAnchor`) can prove the bracket
+// REFUSES a body without failing the run that proves it.
+func servedAtBracketFailure(t *testing.T, what string, body map[string]any, b dbClockBracket) string {
+	t.Helper()
+	require.Contains(t, body, "served_at")
+	served := exampleInstant(t, body["served_at"])
+	if !served.Before(b.Lo) && !served.After(b.Hi) {
+		return ""
+	}
+	side := "BEFORE the reading taken immediately before the request"
+	if served.After(b.Hi) {
+		side = "AFTER the reading taken immediately after the request returned"
+	}
+	return fmt.Sprintf(
+		"%s stamps served_at %v, which is %s: the request was issued between database instants %v and %v, and "+
+			"`served_at` IS the database clock read inside the serving snapshot (cmd/api/read.go:342, "+
+			"cmd/api/p5_runbook.go:511), so any instant outside that bracket is a clock this service did not serve "+
+			"at. This is the reading that self-agreement cannot make: a `v.Now` regressed to a shared old anchor "+
+			"leaves every stated age COHERENT and every one of them understated.",
+		what, body["served_at"], side, b.Lo.Format(time.RFC3339Nano), b.Hi.Format(time.RFC3339Nano))
+}
+
+func requireServedAtWithinDBClock(t *testing.T, what string, body map[string]any, b dbClockBracket) {
+	t.Helper()
+	require.Empty(t, servedAtBracketFailure(t, what, body, b))
+}
+
+// requireRawStampsAreThePersistedOnes reads the two stamps the ages are measured
+// FROM back out of the database and requires the RAW body to carry them.
+//
+// The bracket pins the instant the body was served at; this pins the instants it
+// was measured from. Together they leave `normalizeServeTime` nothing to launder:
+// a body whose anchors moved is refused BEFORE the normalizer overwrites them,
+// naming which anchor moved and what the database actually holds.
+//
+//   - `batch.computed_at` is written by the database at batch-write time
+//     (`internal/store/risk.go`'s `INSERT INTO risk_batches ... now()`), so the
+//     seeded value is whatever that write stamped and is read back here rather
+//     than re-typed as a literal.
+//   - `sweep.max_updated_at` is seeded by `seedSubstrate` to `fxSweepUpdatedAt`
+//     and is IMMUTABLE capture-time evidence, so the body must carry it verbatim.
+//     That is what makes deriving its age from the body's own bytes legitimate.
+func requireRawStampsAreThePersistedOnes(t *testing.T, f *apiFixture, body map[string]any) {
+	t.Helper()
+	var persisted time.Time
+	require.NoError(t, f.admin.QueryRow(f.ctx,
+		`SELECT computed_at FROM risk_batches WHERE id = $1`, f.batchID).Scan(&persisted))
+
+	batch := asMap(t, body["batch"])
+	got := exampleInstant(t, batch["computed_at"])
+	require.True(t, persisted.UTC().Equal(got),
+		"the served `batch.computed_at` is %v, but the database holds %v for batch %d. `computed_at` is a PERSISTED "+
+			"anchor, not a measured one: the served body may not restate it.",
+		batch["computed_at"], persisted.UTC().Format(time.RFC3339Nano), f.batchID)
+
+	sweeps := 0
+	for i, w := range asList(t, batch["watermarks"]) {
+		m := asMap(t, w)
+		sweep, ok := m["sweep"].(map[string]any)
+		if !ok {
+			continue
+		}
+		require.Contains(t, sweep, "max_updated_at")
+		require.True(t, fxSweepUpdatedAt.Equal(exampleInstant(t, sweep["max_updated_at"])),
+			"`batch.watermarks[%d].sweep.max_updated_at` is %v, but `seedSubstrate` stamped the sweep census at %v. "+
+				"The stamp is immutable capture-time evidence; only its AGE is measured.",
+			i, sweep["max_updated_at"], fxSweepUpdatedAt.Format(time.RFC3339))
+		sweeps++
+	}
+	require.Equal(t, 1, sweeps, "the example's book carries exactly one sweep stamp")
+}
+
+// exampleDeepCopy round-trips a decoded body through JSON, so a mutant built
+// from a served body cannot reach back into it.
+func exampleDeepCopy(t *testing.T, body map[string]any) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	var out map[string]any
+	require.NoError(t, json.Unmarshal(raw, &out))
+	return out
 }
 
 func normalizeServeTime(t *testing.T, body map[string]any) {
@@ -387,13 +561,29 @@ func runBookContractExample(t *testing.T) map[string]any {
 func TestRunBookExampleIsAServedBody(t *testing.T) {
 	f := newRunBookExampleFixture(t)
 
-	served := f.postJSON(t, "/v1/scenarios/"+exScenarioID+"/run-book", runBookContractPath, http.StatusOK)
+	served, clock := f.postJSONBracketed(t,
+		"/v1/scenarios/"+exScenarioID+"/run-book", runBookContractPath, http.StatusOK)
 
-	// PRODUCTION'S OWN CLOCK, BEFORE ANYTHING IS OVERWRITTEN. The four measured
-	// fields are one instant read four ways, so a real response is temporally
-	// coherent by construction. Asserting it HERE is what earns the right to
-	// demand the same of the document: if this ever failed, the defect would be
-	// the server's and normalizing the example to match would hide it.
+	// PRODUCTION'S OWN CLOCK, BEFORE ANYTHING IS OVERWRITTEN — read three ways,
+	// because round 36 showed that only the first of them is a statement about
+	// the document and the other two are what make it a statement about TIME.
+	//
+	//  1. THE ANCHORS ARE THE PERSISTED ONES. `batch.computed_at` is what the
+	//     database stamped at batch-write time and `sweep.max_updated_at` is what
+	//     `seedSubstrate` stamped; a body that restated either would be measuring
+	//     its ages from an instant no row holds.
+	requireRawStampsAreThePersistedOnes(t, f, served)
+	//  2. `served_at` IS AN INSTANT THIS REQUEST HAPPENED AT. The bracket is the
+	//     only reading here that appeals to a clock OUTSIDE the body, and it is
+	//     the one that catches a `v.Now` regressed to a shared old anchor — the
+	//     shape under which all three fields cohere while every age is
+	//     understated (`TestRunBookExampleCoherenceCannotSeeARegressedAnchor`).
+	requireServedAtWithinDBClock(t, "the served run-book body", served, clock)
+	//  3. AND THE AGES ARE ARITHMETIC OVER THOSE ANCHORS. With (1) and (2)
+	//     standing, coherence is no longer self-agreement: both instants are
+	//     pinned to something outside the body, so the ages derived from them
+	//     are too. If this ever failed, the defect would be the server's and
+	//     normalizing the example to match would hide it.
 	requireTemporalCoherence(t, "the served run-book body", served)
 
 	normalizeServeTime(t, served)
@@ -422,6 +612,99 @@ func TestRunBookExampleIsAServedBody(t *testing.T) {
 			"The example is CAPTURED, never composed: re-run this test's book through the handler and transplant the response.\n"+
 			"Normalized serve-time fields (the only ones a document may differ on): %v",
 		runBookExampleServeTimeFields)
+}
+
+// TestRunBookExampleCoherenceCannotSeeARegressedAnchor is Codex round 36's
+// finding 1, standing as a law in its own right.
+//
+// THE MUTATION THIS KILLS: a `v.Now` that REGRESSES to a shared old anchor —
+// a frozen clock, a restored snapshot, a handler that reached for the batch's
+// own `computed_at` instead of the serving instant. Every clock field on a
+// response is one instant read several ways, so under that mutation the body
+// stays PERFECTLY COHERENT and every age it states is understated.
+//
+// This test builds exactly that body and proves the three readings split:
+//
+//	temporal coherence     PASSES — self-agreement is not freshness
+//	the served_at bracket  REFUSES — the instant is not one this request had
+//	the persisted anchor   REFUSES — `computed_at` is not what the row holds
+//
+// The anchor it regresses to is `fxBase`, the fixture's own reference instant,
+// and the sweep age the mutant coheres at is 1200 — which is not an arbitrary
+// wrong number. It is EXACTLY the byte Codex round 35 found in the contract:
+// the sweep age measured from `computed_at` rather than from the serve instant.
+// Round 35 fixed the document; round 36 found that the law which blessed the
+// fix would also have blessed a SERVER that produced it.
+func TestRunBookExampleCoherenceCannotSeeARegressedAnchor(t *testing.T) {
+	f := newRunBookExampleFixture(t)
+	served, clock := f.postJSONBracketed(t,
+		"/v1/scenarios/"+exScenarioID+"/run-book", runBookContractPath, http.StatusOK)
+
+	// The regression target must be in the past of the bracket, or the mutant
+	// would be testing nothing. Every seeded stamp is relative to `fxBase`, so
+	// a database clock at or before it is a fixture that cannot run at all.
+	require.True(t, fxBase.Before(clock.Lo),
+		"the fixture's reference instant %v is not in the past of the database clock (%v) — this suite's stamps are all relative to it",
+		fxBase.Format(time.RFC3339), clock.Lo.Format(time.RFC3339Nano))
+
+	// THE MUTANT: one instant, read everywhere. `served_at` and `computed_at`
+	// both become the old anchor, and both ages are DERIVED from it exactly as
+	// production would derive them — which is what makes the body coherent
+	// rather than merely wrong.
+	mutant := exampleDeepCopy(t, served)
+	anchor := fxBase.UTC().Format(time.RFC3339)
+	mutant["served_at"] = anchor
+	batch := asMap(t, mutant["batch"])
+	batch["computed_at"] = anchor
+	batch["age_seconds"] = exampleAgeSeconds(t, fxBase, batch["computed_at"])
+	sweepAges := []any{}
+	for _, w := range asList(t, batch["watermarks"]) {
+		m := asMap(t, w)
+		sweep, ok := m["sweep"].(map[string]any)
+		if !ok {
+			continue
+		}
+		sweep["age_seconds"] = exampleAgeSeconds(t, fxBase, sweep["max_updated_at"])
+		sweepAges = append(sweepAges, sweep["age_seconds"])
+	}
+
+	// (0) IT IS THE ROUND-35 BYTE. The stamp is 20 minutes before the anchor, so
+	// the age this body coheres at is the 1200 the contract used to publish.
+	require.Equal(t, []any{float64(1200)}, sweepAges,
+		"the regressed anchor reproduces the round-35 defect exactly: a sweep age measured from `computed_at`")
+	require.Equal(t, float64(0), batch["age_seconds"],
+		"a batch whose serve instant IS its compute instant states zero age — the maximum possible freshness claim")
+
+	// (1) AND IT COHERES. This is the finding: the strongest reading this file
+	// had of a served body cannot tell the difference.
+	require.Empty(t, temporalCoherenceFailures(t, "the regressed-anchor body", mutant),
+		"a body built from ONE anchor read everywhere is coherent BY CONSTRUCTION. If this ever fails, the "+
+			"coherence law has grown a reading that appeals to something outside the body, and this test's "+
+			"whole premise needs restating.")
+
+	// (2) THE BRACKET REFUSES IT — the outside witness, doing the work
+	// coherence structurally cannot.
+	require.NotEmpty(t, servedAtBracketFailure(t, "the regressed-anchor body", mutant, clock),
+		"the database-clock bracket accepted an instant this request cannot have been served at (%v, against a "+
+			"request issued between %v and %v). Without this reading, a stopped clock serves understated ages "+
+			"under a body that agrees with itself in every field.",
+		anchor, clock.Lo.Format(time.RFC3339Nano), clock.Hi.Format(time.RFC3339Nano))
+
+	// (3) SO DOES THE PERSISTED-ANCHOR READING, independently: the mutant moved
+	// `computed_at`, and the database still holds what it stamped at write time.
+	var persisted time.Time
+	require.NoError(t, f.admin.QueryRow(f.ctx,
+		`SELECT computed_at FROM risk_batches WHERE id = $1`, f.batchID).Scan(&persisted))
+	require.False(t, persisted.UTC().Equal(exampleInstant(t, batch["computed_at"])),
+		"the mutant's `computed_at` (%v) equals the persisted one (%v), so the two refusals are not independent — "+
+			"the regression target must be an anchor the database does not hold",
+		anchor, persisted.UTC().Format(time.RFC3339Nano))
+
+	// And the UNMUTATED body passes all three, so none of the above is a law
+	// that refuses everything.
+	requireRawStampsAreThePersistedOnes(t, f, served)
+	requireServedAtWithinDBClock(t, "the served run-book body", served, clock)
+	require.Empty(t, temporalCoherenceFailures(t, "the served run-book body", served))
 }
 
 // TestRunBookExampleHeldFlatNamesEveryPriceInput is the ledgered defect 1 as a

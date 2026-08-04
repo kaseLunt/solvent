@@ -61,7 +61,12 @@ const BATCH: Schemas["Batch"] = {
         failed: 1,
         success_sum: "309593004",
         max_updated_at: "2026-07-29T09:40:00Z",
-        age_seconds: 1200,
+        // SERVE-time minus the stamp: 10:00:05Z - 09:40:00Z. This file said 1200
+        // — the age measured from `computed_at` — which is the round-35 defect
+        // the contract itself carried until Wave W-EX-B repaired it. The claim
+        // above is "verbatim", and a hand-copied verbatim is only as fresh as
+        // its last copy; this one was two waves stale.
+        age_seconds: 1205,
         generation: 4,
         generation_open: false,
       },

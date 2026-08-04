@@ -213,6 +213,15 @@ func newBareAPIFixture(t *testing.T) *apiFixture {
 	return &apiFixture{ctx: ctx, dsn: dsn, store: s, admin: admin}
 }
 
+// fxSweepUpdatedAt is the instant `seedSubstrate`'s sweep census is stamped at.
+// It is named rather than written inline because it is IMMUTABLE capture-time
+// evidence that surfaces verbatim on every batch envelope, and a test that
+// wants to prove a served body carries the SEEDED stamp (rather than one the
+// serve layer restated) must read the seeder's own value instead of re-typing
+// a literal that could drift away from it —
+// `requireRawStampsAreThePersistedOnes` is that test.
+var fxSweepUpdatedAt = fxBase.Add(-20 * time.Minute)
+
 // seedSubstrate lays down the live-read surfaces: the cursor vector the
 // supersession legs are judged against, the sweep census, the price table, and
 // the rate indexes.
@@ -266,7 +275,7 @@ func (f *apiFixture) seedSubstrate(t *testing.T) {
 		_, err := f.admin.Exec(f.ctx,
 			`INSERT INTO snapshot_sweeps (engine, account, last_attempt_block, last_success_block, status, updated_at)
 			 VALUES ($1,$2,$3,$4,$5,$6)`,
-			risk.DMEngine, mustAddr(sw.acct).Bytes(), sw.attempt, sw.success, sw.status, fxBase.Add(-20*time.Minute))
+			risk.DMEngine, mustAddr(sw.acct).Bytes(), sw.attempt, sw.success, sw.status, fxSweepUpdatedAt)
 		require.NoError(t, err)
 	}
 
