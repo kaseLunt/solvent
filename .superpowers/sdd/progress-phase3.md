@@ -3835,3 +3835,67 @@ this file → `docs/plans/2026-07-28-solvent-phase3-risk-engine-api.md` →
   (web/r15-server.log) misjudging its provenance — disclosed
   immediately, no tracked file touched, no recovery possible or
   needed.
+- **THE EXAMPLE-REPAIR ARC: THE CONTRACT'S OWN EXAMPLES BECOME LAW —
+  ROUNDS 35–39, ROUND 39 SHIP (00:54 Aug 4)**: owner said "do the
+  example repair wave" and the arc ran four waves + one amendment.
+  W-EX-A 4c8b4ad: the run-book 200 example became A BODY PRODUCTION
+  ACTUALLY SERVED — TestRunBookExampleIsAServedBody seeds the
+  example's own book through the production writer, runs the real
+  handler, and asserts the yaml equals the served body modulo four
+  NAMED serve-time fields, proven failing against the old example
+  first; all FIVE ledgered defects discharged plus a SIXTH found in
+  repair (the DM's mainnet weETH address on chain 10 — which had been
+  silently load-bearing for an earlier guard proof); two derivation
+  errors in the generator corrected against production; every armed
+  self-enforcing exit fired and every dead licence deleted; the
+  defect ledger EMPTIED. W-EX-B 2178014: the five-second lie died
+  (sweep age 1200→1205; the normalizer DERIVES ages from the body's
+  own bytes and asserts temporal coherence against the served body
+  AND the document; ROOT CAUSE NAMED: generator law 14 and the
+  example each vouched for the other's wrong reading), the
+  /v1/positions example and a hand-built client body fixed, and NEW
+  example-clock.test.ts re-derives every stated age in the whole
+  contract beside its own timestamps (9/9, teeth proven by path-named
+  failure) — the class closed document-wide. W-EX-C 27febe1: clocks
+  need PROVENANCE (the served body bracketed by the database's own
+  SELECT now(); raw stamps read back from the seeded rows; the
+  regressed-anchor mutant proves coherent-but-understated fails the
+  bracket), CENSUS (the walker classifies before it filters — 12
+  roots, 13 candidates, 8 checked, pinned; it caught its author's own
+  root-list guess), and EXACTNESS (BigInt-nanosecond RFC3339
+  arithmetic reproducing Go's clamp-then-truncate; the refuted naive
+  parse kept in-file as evidence: 1205 vs 1204n on the sub-millisecond
+  boundary); the ONE wrong byte a demo user could SEE — the feed
+  snapshot's 1200 in the ribbon over SSE — was stale generator OUTPUT
+  (the contract was repaired and nobody re-ran the generator), fixed
+  along with inspector.ts's same defect behind the same verbatim
+  claim; clock-law.mjs became the ONE arithmetic imported by both
+  generators; the three .batch2 impossible ages derived to the only
+  servable value under a narrow law whose scope boundary is recorded
+  in three parts. W-EX-D 90fd29c + amendment 7561ebc: the clock law
+  joined the path every suite run takes — fixture-clock-law.spec.ts
+  imports the REAL module by file URL (surface pinned), walks every
+  committed fixture with the list derived recursively from the
+  directory (the amendment: round 38 caught the flat readdir; the
+  recursion is now proven at three depths in a synthetic tree, and
+  the nested regression fails five ways by relative path), reads the
+  generators' own pins out of their source with the extraction yield
+  itself pinned, and mutation-proves the module's own exports.
+  ELEVEN fixtures from generators with no clock guard are now
+  permanently watched. ROUND 39: SHIP, zero findings — the synthetic
+  proof invokes the same collector, everything fails closed. THE ARC'S
+  LESSON, in one line per wave: an example is a claim the server must
+  be able to make; a law and its example must never vouch for each
+  other; agreement is not provenance; and a guard that only runs when
+  someone remembers to run it is not a gate. Tallies at HEAD 7561ebc:
+  web 827/828 (1 pre-existing conditional skip); client 344/344 (15
+  files incl the two new clock suites); cmd/api ok with the three
+  standing example tests; generators idempotent (50 mutants, 26
+  trios); contract 1.6.0; full stack live at HEAD (api-2178014.exe —
+  Go unchanged since — :3111 current; riskd daemon healthy).
+  REMAINING IN W3: ONE banked ticket (generate-book.mjs stale outputs
+  — book*.json missing EngineBucket.sweep since 1.2.2, seen from both
+  sides, not user-visible today); the two deferred report-only
+  surveys; and THE DEPLOY GATE (owner: VPS + domain, spec §12) →
+  scoped DB roles, npm publish @solvent/client, README/demo, the
+  stranger walk, P5 exit review, P4 entry per D-014.
