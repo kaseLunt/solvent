@@ -519,8 +519,32 @@
             "source": "priceproviderv2"
           },
           {
-            "after": "500000",
+            "after": "2000000",
             "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+            "base_snapped": true,
+            "before": "2000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000",
+            "factor_num": "995",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "750000",
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+            "base_snapped": true,
+            "before": "750000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000",
+            "factor_num": "998",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "500000",
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
             "base_snapped": false,
             "before": "500000",
             "cap_bound": true,
@@ -531,8 +555,32 @@
             "source": "priceproviderv2"
           },
           {
+            "after": "900000",
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "base_snapped": false,
+            "before": "900000",
+            "cap_bound": true,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "80",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "1200000",
+            "asset": "0x4200000000000000000000000000000000000006",
+            "base_snapped": false,
+            "before": "1200000",
+            "cap_bound": true,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "90",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
             "after": "1000000",
-            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+            "asset": "0x4200000000000000000000000000000000000042",
             "base_snapped": false,
             "before": "1000000",
             "cap_bound": false,
@@ -543,8 +591,20 @@
             "source": "priceproviderv2"
           },
           {
+            "after": "3000000",
+            "asset": "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
+            "base_snapped": false,
+            "before": "3000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1",
+            "factor_num": "1",
+            "snapped": true,
+            "source": "priceproviderv2"
+          },
+          {
             "after": "4000000",
-            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+            "asset": "0x5f46d540b6eD704C3c8789105F30E075AA900726",
             "base_snapped": false,
             "before": "4000000",
             "cap_bound": false,
@@ -555,10 +615,34 @@
             "source": "priceproviderv2"
           },
           {
+            "after": "2500000",
+            "asset": "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+            "base_snapped": false,
+            "before": "2500000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1",
+            "factor_num": "1",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
             "after": "500",
-            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
             "base_snapped": false,
             "before": "500",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000000",
+            "factor_num": "1000001",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "700",
+            "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+            "base_snapped": false,
+            "before": "700",
             "cap_bound": false,
             "chain_id": 10,
             "factor_den": "1000000",
@@ -568,15 +652,15 @@
           }
         ],
         "marks_moved": 1,
-        "marks_held_by_declared_factor": 2,
-        "marks_held_by_transform": 3,
-        "marks_held_by_arithmetic": 1,
-        "marks_snapped": 2,
-        "marks_base_snapped": 1,
-        "marks_cap_bound": 1,
+        "marks_held_by_declared_factor": 4,
+        "marks_held_by_transform": 7,
+        "marks_held_by_arithmetic": 2,
+        "marks_snapped": 3,
+        "marks_base_snapped": 3,
+        "marks_cap_bound": 3,
         "held_flat_marks": 0,
         "held_flat_assets": [],
-        "note": "PARTLY REACHED: 1 of the 7 marks this scenario's matrix describes moved. Of the held marks: 3 pinned by a pricing transform, 2 held at the factor the definition declared, 1 unchanged by exact-integer arithmetic. The counts are a partition; the flag census (2 snapped, 1 base-snapped, 1 cap-bound) attributes no cause."
+        "note": "PARTLY REACHED: 1 of the 14 marks this scenario's matrix describes moved. Of the held marks: 7 pinned by a pricing transform, 4 held at the factor the definition declared, 2 unchanged by exact-integer arithmetic. The counts are a partition; the flag census (3 snapped, 3 base-snapped, 3 cap-bound) attributes no cause."
       },
       "covered_engines": [
         "debt_manager"

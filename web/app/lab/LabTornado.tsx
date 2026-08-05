@@ -73,6 +73,7 @@ import {
   tornadoFloorSentence,
   tornadoHeaderLine,
   TORNADO_METHOD,
+  TORNADO_SET_IN_FLIGHT_REASON,
   type TornadoBarInput,
   type TornadoHeaderRefusal,
 } from "./tornadoLines";
@@ -95,7 +96,11 @@ import styles from "./lab.module.css";
 export interface TornadoDispatch {
   /** The deep-link ids filtered BEFORE this dispatch; empty for a manual run. */
   filteredIds: readonly string[];
-  /** The §9.2 sentence composed at dispatch; null when nothing was filtered. */
+  /**
+   * The §9.2 sentence composed at dispatch, in dispatch-time PAST TENSE (r58
+   * item 6): it states what the dispatch omitted, never what the live listing
+   * publishes now. Null when nothing was filtered.
+   */
   notice: string | null;
 }
 
@@ -157,12 +162,18 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
 
   // NO DENOMINATOR is decided by `barLength`, never here: an answered engine
   // whose before-side debt is exactly "0" draws no bar and divides nothing.
-  const drawable: { scenarioId: string; ratio: number }[] = [];
+  // R58 item 5 — the exact magnitude pair rides beside the layout ratio, so
+  // the geometry orders rows by cross-multiplied bigints, never by the
+  // clamped float.
+  const drawable: TornadoBarInput[] = [];
   const noDenominator: { scenarioId: string; sentence: string }[] = [];
   for (const entry of entries) {
     const bar = barLength(entry.summary);
-    if (bar.drawn) drawable.push({ scenarioId: entry.scenarioId, ratio: bar.ratio });
-    else noDenominator.push({ scenarioId: entry.scenarioId, sentence: bar.sentence });
+    if (bar.drawn) {
+      drawable.push({ scenarioId: entry.scenarioId, ratio: bar.ratio, exact: bar.exact });
+    } else {
+      noDenominator.push({ scenarioId: entry.scenarioId, sentence: bar.sentence });
+    }
   }
 
   const longestId = drawable.reduce((max, row) => Math.max(max, row.scenarioId.length), 0);
@@ -692,13 +703,20 @@ function TornadoResult({
                     >
                       <td>{result.scenario_id}</td>
                       <td>{engine.engine}</td>
-                      <td colSpan={6}>
+                      <td colSpan={5}>
                         market_realization · hfs unchanged:{" "}
                         {block.hfs_unchanged ? "true" : "false"} · execution shortfall{" "}
                         {renderUsdAmount(block.execution_shortfall_usd, block.usd_decimals)} · bad
                         debt at liquidation{" "}
                         {renderUsdAmount(block.bad_debt_at_liquidation_usd, block.usd_decimals)} ·
                         seizure model: {block.seizure_model}
+                      </td>
+                      {/* R58 item 3 — for this scenario the block IS the answer,
+                          so the out-of-model clause must ride ITS row too: the
+                          same clause, from the same committed-listing join the
+                          numeric rows read. */}
+                      <td data-testid="tornado-out-of-model">
+                        {outOfModelClause(result.scenario_id)}
                       </td>
                     </tr>,
                   );
@@ -715,7 +733,7 @@ function TornadoResult({
                     >
                       <td>{result.scenario_id}</td>
                       <td>{engine.engine}</td>
-                      <td colSpan={6}>
+                      <td colSpan={5}>
                         projection · {block.basis} · {block.annual_delta_bps >= 0 ? "+" : ""}
                         {String(block.annual_delta_bps)} bps annual · prices held flat:{" "}
                         {block.prices_held_flat ? "true" : "false"} ·{" "}
@@ -733,6 +751,13 @@ function TornadoResult({
                                 : String(h.becomes_liquidatable)),
                           )
                           .join(" · ")}
+                      </td>
+                      {/* R58 item 3 — same clause, same join, on the projection
+                          block row: the block is this scenario's answer and may
+                          not shed the committed exclusions the numeric rows
+                          disclose. */}
+                      <td data-testid="tornado-out-of-model">
+                        {outOfModelClause(result.scenario_id)}
                       </td>
                     </tr>,
                   );
@@ -852,6 +877,15 @@ export function LabTornado({
         >
           {running ? "running…" : `run ${String(pickedIds.length)} as one set`}
         </button>
+        {/* R58 item 2 — while a set run is in flight the affordance is disabled
+            WITH ITS REASON in the open, in the disabled-reason register the
+            re-run affordance already uses. One settlement writes the shared
+            rows; a second dispatch would race it, so none is accepted. */}
+        {running && (
+          <span className={styles.hint} data-testid="tornado-run-disabled-reason">
+            {TORNADO_SET_IN_FLIGHT_REASON}
+          </span>
+        )}
         <span className={styles.hint} data-testid="tornado-charge-hint">
           {tornadoChargeHint(pickedIds.length)}
         </span>

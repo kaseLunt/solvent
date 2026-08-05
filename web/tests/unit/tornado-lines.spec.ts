@@ -48,6 +48,7 @@ import {
   tornadoFloorSentence,
   tornadoHeaderLine,
   TORNADO_METHOD,
+  TORNADO_SET_IN_FLIGHT_REASON,
 } from "../../app/lab/tornadoLines";
 
 const LISTED = ["eth_minus_30", "ethfi_minus_50", "dm_rate_horizon_plus_200bps"];
@@ -80,6 +81,7 @@ test.describe("the deep-link decision", () => {
       filteredIds: [],
       overCap: false,
       notice: null,
+      dispatchNotice: null,
     });
   });
 
@@ -229,21 +231,26 @@ test.describe("the composed header (§9.6)", () => {
     ).toContain("a re-run would be refused");
   });
 
-  test("filtered deep-link ids ride the header when non-empty, and only then", () => {
+  test("filtered deep-link ids ride the header when non-empty, in dispatch-time past tense", () => {
     const clean = tornadoHeaderLine({
       response: headerResponse("still_newest", 7),
       drawnScenarioIds: [],
       filteredDeepLinkIds: [],
     });
     expect(clean).not.toContain("filtered from the deep link");
+    // R58 item 6 — this header only ever renders a SETTLED dispatch, so its
+    // clause states what was not published AT DISPATCH, never "here": a
+    // listing refresh that publishes the id later must not make this line a
+    // false present-tense statement.
     const filtered = tornadoHeaderLine({
       response: headerResponse("still_newest", 7),
       drawnScenarioIds: [],
       filteredDeepLinkIds: ["ghost_one", "ghost_two"],
     });
     expect(filtered).toContain(
-      "filtered from the deep link, not published here: ghost_one, ghost_two",
+      "filtered from the deep link, not published AT DISPATCH: ghost_one, ghost_two",
     );
+    expect(filtered).not.toContain("not published here");
   });
 });
 
@@ -778,33 +785,280 @@ test.describe("r57 item 8 — the drawn count counts RECTS; measured zero gets i
   });
 });
 
-test.describe("r57 item 12b — the cause figures come from the cause counts, never a reach total", () => {
+test.describe("r57 item 12b / r58 item 7 — the cause figures come from the cause counts, never a reach total", () => {
+  // The de-confounded split, mirroring the regenerated fixture: 14 applied
+  // rows, 1 moved, causes 7/4/2, flag census 3/3/3. Every cause differs from
+  // every other cause and from every non-cause figure (applied length 14,
+  // moved 1, declared 1, flags 3/3/3, flag sums 6/6/6/9).
+  const splitReach = {
+    ...cellResult().shock_reach,
+    reach: "some_marks_held",
+    applied_shocks: Array.from({ length: 14 }, () => ({})),
+    marks_moved: 1,
+    marks_held_by_transform: 7,
+    marks_held_by_declared_factor: 4,
+    marks_held_by_arithmetic: 2,
+    marks_snapped: 3,
+    marks_base_snapped: 3,
+    marks_cap_bound: 3,
+  };
+
   test("the asymmetric split prints exactly its three cause figures", () => {
     // KILLS: a renderer sourcing the cause sentence from len(applied_shocks)
-    // (7), marks_moved (1... distinct), the flag census (2/1/1, sum 4) or
-    // declared_shocks: every confound differs from every cause figure printed.
+    // (14), marks_moved (1), declared_shocks (1), the flag census (3/3/3) or
+    // any flag sum (6/6/6/9): every confound differs from every cause figure
+    // printed, so the wrong source prints a wrong number here.
     const split = cellResult({
-      shock_reach: {
-        ...cellResult().shock_reach,
-        reach: "some_marks_held",
-        applied_shocks: [{}, {}, {}, {}, {}, {}, {}],
-        marks_moved: 1,
-        marks_held_by_transform: 3,
-        marks_held_by_declared_factor: 2,
-        marks_held_by_arithmetic: 1,
-        marks_snapped: 2,
-        marks_base_snapped: 1,
-        marks_cap_bound: 1,
-      },
+      shock_reach: splitReach,
     } as unknown as Partial<SetRunScenarioResult>);
     expect(heldCauseSentence(split)).toBe(
-      "Of the held marks: 3 pinned by the stable snap, a snapped base or a bound cap, " +
-        "2 held at the factor this scenario declared for them, " +
-        "1 unchanged by exact-integer arithmetic.",
+      "Of the held marks: 7 pinned by the stable snap, a snapped base or a bound cap, " +
+        "4 held at the factor this scenario declared for them, " +
+        "2 unchanged by exact-integer arithmetic.",
     );
-    expect(heldCauseSentence(split)).not.toContain("7");
-    expect(heldCauseSentence(split)).not.toContain("4");
+    expect(heldCauseSentence(split)).not.toContain("14");
+    expect(heldCauseSentence(split)).not.toContain("3");
+    expect(heldCauseSentence(split)).not.toContain("9");
+    expect(heldCauseSentence(split)).not.toContain("6");
+    expect(heldCauseSentence(split)).not.toContain("1 ");
     expect(heldCauseSentence(split)).not.toMatch(/\d+ of \d+ snapped/);
+  });
+
+  test("r58 item 7 — the law itself asserts pairwise distinctness, so a re-confounded edit fails HERE", () => {
+    // KILLS: a future edit that quietly re-confounds a cause with a non-cause
+    // (r58's escape was declared-factor == marks_snapped and arithmetic ==
+    // marks_moved): the figures this law pins must stay pairwise distinct or
+    // this assertion goes red before any rendering is even consulted.
+    const causes = [
+      splitReach.marks_held_by_transform,
+      splitReach.marks_held_by_declared_factor,
+      splitReach.marks_held_by_arithmetic,
+    ];
+    expect(new Set(causes).size).toBe(3);
+    const nonCauses = [
+      splitReach.marks_snapped,
+      splitReach.marks_base_snapped,
+      splitReach.marks_cap_bound,
+      splitReach.marks_moved,
+      splitReach.applied_shocks.length,
+      splitReach.declared_shocks,
+      splitReach.marks_snapped + splitReach.marks_base_snapped,
+      splitReach.marks_snapped + splitReach.marks_cap_bound,
+      splitReach.marks_base_snapped + splitReach.marks_cap_bound,
+      splitReach.marks_snapped + splitReach.marks_base_snapped + splitReach.marks_cap_bound,
+    ];
+    for (const cause of causes) {
+      expect(nonCauses, `cause figure ${String(cause)} is impersonated by a non-cause figure`).not.toContain(cause);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-TN-C (Codex round 58). The laws below each name the mutant they kill.
+// ---------------------------------------------------------------------------
+
+test.describe("r58 item 1 — duplicate requested ids refuse the whole set", () => {
+  test("the [a] vs [a,a] case refuses, naming the duplicated id", () => {
+    // KILLS: the Set-collapsing gate — a dispatch of ["a_one"] against a body
+    // whose requested_scenario_ids is ["a_one", "a_one"] (one result,
+    // scenarios_evaluated 1) collapsed set-equal and was admitted, under a
+    // header claiming "of 2 requested".
+    const body = {
+      requested_scenario_ids: ["a_one", "a_one"],
+      results: [{ scenario_id: "a_one" }],
+      evaluation: { scenarios_evaluated: 1 },
+    } as unknown as RunBookSetResponse;
+    const contradiction = setContradiction(body, ["a_one"]);
+    expect(contradiction).not.toBeNull();
+    expect(contradiction?.faults.join(" ")).toContain(
+      "a_one appears 2 times in requested_scenario_ids; a set names each id once",
+    );
+  });
+
+  test("the duplicate gate admits nothing else about the body: a clean set-equal body still passes", () => {
+    expect(setContradiction(gateBody(["a_one", "b_two"]), ["b_two", "a_one"])).toBeNull();
+  });
+});
+
+test.describe("r58 item 2 — the in-flight guard's reason is composed here and pinned", () => {
+  test("the reason names the race, in the disabled-reason register", () => {
+    // KILLS: a silently disabled affordance, or a reason that drifts from the
+    // sentence the e2e law pins on the surface.
+    expect(TORNADO_SET_IN_FLIGHT_REASON).toContain("disabled: a set run is in flight");
+    expect(TORNADO_SET_IN_FLIGHT_REASON).toContain("its settlement writes these rows");
+    expect(TORNADO_SET_IN_FLIGHT_REASON).toContain("a second dispatch would race it");
+  });
+});
+
+test.describe("r58 item 4 — the mandatory block is judged PER ANSWERED ENGINE", () => {
+  const twoEngineResult = (
+    reach: "projection_no_spot_pass" | "no_shocks_declared",
+    blocks: { aave: boolean; dm: boolean },
+  ) => {
+    const block = reach === "projection_no_spot_pass" ? "projection" : "market_realization";
+    const blockValue = {} as SetRunEngineSummary["projection"];
+    return cellResult({
+      covered_engines: ["aave_v3_etherfi", "debt_manager"],
+      shock_reach: { ...cellResult().shock_reach, reach },
+      engines: [
+        cellEngine({
+          engine: "aave_v3_etherfi",
+          [block]: blocks.aave ? blockValue : null,
+        } as Partial<SetRunEngineSummary>),
+        cellEngine({ [block]: blocks.dm ? blockValue : null } as Partial<SetRunEngineSummary>),
+      ],
+      positions_answered: 2,
+    });
+  };
+  const TWO_ENGINES = ["aave_v3_etherfi", "debt_manager"];
+
+  test("a projection block on aave alone fires the missing-block arm NAMING debt_manager, while aave still renders", () => {
+    // KILLS: the engines.some(...) check — one engine's block let the other
+    // answered engine's missing MANDATORY block pass, and the sentence pointed
+    // at "the projection row" as if every engine had answered.
+    const cell = tornadoCellState(
+      twoEngineResult("projection_no_spot_pass", { aave: true, dm: false }),
+      "v1",
+      LISTED_IDENTITY,
+      TWO_ENGINES,
+    );
+    expect(cell.state).toBe("projection-no-spot-pass");
+    if (cell.state !== "projection-no-spot-pass") return;
+    expect(cell.sentence).toContain("debt_manager answered without the projection block");
+    expect(cell.sentence).toContain("mandatory on every answered engine");
+    expect(cell.sentence).toContain("contract defect, never a zero");
+    expect(cell.sentence).toContain(
+      "aave_v3_etherfi still renders its projection row in the ledger below",
+    );
+    expect(cell.sentence).not.toContain("ledger below is the answer");
+  });
+
+  test("both engines carrying the projection block keeps the unqualified pointer, unchanged", () => {
+    const cell = tornadoCellState(
+      twoEngineResult("projection_no_spot_pass", { aave: true, dm: true }),
+      "v1",
+      LISTED_IDENTITY,
+      TWO_ENGINES,
+    );
+    if (cell.state !== "projection-no-spot-pass") throw new Error(cell.state);
+    expect(cell.sentence).toContain("The projection row in the ledger below is the answer.");
+    expect(cell.sentence).not.toContain("contract defect");
+  });
+
+  test("the market-realization arm keeps the same law: missing on dm is named while aave renders", () => {
+    const cell = tornadoCellState(
+      twoEngineResult("no_shocks_declared", { aave: true, dm: false }),
+      "v1",
+      LISTED_IDENTITY,
+      TWO_ENGINES,
+    );
+    if (cell.state !== "no-shock-declared") throw new Error(cell.state);
+    expect(cell.sentence).toContain("debt_manager answered without the market-realization block");
+    expect(cell.sentence).toContain("contract defect, never a zero");
+    expect(cell.sentence).toContain(
+      "aave_v3_etherfi still renders its market-realization row in the ledger below",
+    );
+
+    const both = tornadoCellState(
+      twoEngineResult("no_shocks_declared", { aave: true, dm: true }),
+      "v1",
+      LISTED_IDENTITY,
+      TWO_ENGINES,
+    );
+    if (both.state !== "no-shock-declared") throw new Error(both.state);
+    expect(both.sentence).toContain(
+      "Its information lives in the market-realization row in the ledger below.",
+    );
+  });
+});
+
+test.describe("r58 item 5 — ORDER is decided by the EXACT ratio, never the clamped float", () => {
+  test("the r58 pair: true ratios 1e12 and 1e12+1 clamp to one float, and the larger still sorts first", () => {
+    // KILLS: sorting by the clamped float — both true ratios saturate at the
+    // 1e12 ceiling, the stable sort then kept request order, and the smaller
+    // ranked above the larger with equal widths.
+    const smaller = barLength(
+      cellEngine({ eligible_debt_delta_usd: "1000000000000", total_debt_usd_before: "1" }),
+    );
+    const larger = barLength(
+      cellEngine({ eligible_debt_delta_usd: "1000000000001", total_debt_usd_before: "1" }),
+    );
+    if (!smaller.drawn || !larger.drawn) throw new Error("both rows must draw");
+    // The clamp really does collapse the two onto one float ...
+    expect(smaller.ratio).toBe(larger.ratio);
+    const geometry = tornadoBarGeometry(
+      [
+        { scenarioId: "smaller_but_first", ratio: smaller.ratio, exact: smaller.exact },
+        { scenarioId: "larger_but_second", ratio: larger.ratio, exact: larger.exact },
+      ],
+      400,
+    );
+    // ... and the exact cross-multiplied comparison still orders the larger first.
+    expect(geometry.bars.map((bar) => bar.scenarioId)).toEqual([
+      "larger_but_second",
+      "smaller_but_first",
+    ]);
+    // Widths may still clamp equal: that is layout, and the ledger carries the
+    // exact strings.
+    expect(geometry.bars[0]?.width).toBe(geometry.bars[1]?.width);
+  });
+
+  test("a TRUE exact tie takes deterministic id order", () => {
+    const zuluBar = barLength(
+      cellEngine({ eligible_debt_delta_usd: "5", total_debt_usd_before: "10" }),
+    );
+    const alphaBar = barLength(
+      cellEngine({ eligible_debt_delta_usd: "-5", total_debt_usd_before: "10" }),
+    );
+    if (!zuluBar.drawn || !alphaBar.drawn) throw new Error("both rows must draw");
+    const geometry = tornadoBarGeometry(
+      [
+        { scenarioId: "zulu", ratio: zuluBar.ratio, exact: zuluBar.exact },
+        { scenarioId: "alpha", ratio: alphaBar.ratio, exact: alphaBar.exact },
+      ],
+      400,
+    );
+    expect(geometry.bars.map((bar) => bar.scenarioId)).toEqual(["alpha", "zulu"]);
+  });
+});
+
+test.describe("r58 item 6 — the dispatch record speaks in dispatch-time past tense", () => {
+  test("deepLinkDecision composes BOTH notices: live present tense, stored past tense", () => {
+    // KILLS: storing the live present-tense notice into the dispatch record —
+    // after a listing refresh publishes a filtered id, the settled surface
+    // read "this deployment publishes N of them" as a false present-tense
+    // statement about ids the dispatch really did omit.
+    const decision = deepLinkDecision(
+      null,
+      "eth_minus_30,stable_depeg_0995_in_band,nope_id",
+      LISTED,
+    );
+    expect(decision.kind).toBe("set");
+    if (decision.kind !== "set") return;
+    // The PRE-dispatch notice keeps the live listing's present tense.
+    expect(decision.notice).toContain("this deployment publishes 1 of them");
+    expect(decision.notice).not.toContain("when the set was dispatched");
+    // The stored record states the dispatch, in the past.
+    expect(decision.dispatchNotice).toContain(
+      "This deployment did not publish these ids when the set was dispatched: " +
+        "stable_depeg_0995_in_band and nope_id.",
+    );
+    expect(decision.dispatchNotice).toContain("You asked for 3 scenario(s).");
+    expect(decision.dispatchNotice).toContain("Only the 1 published one(s) were dispatched.");
+    expect(decision.dispatchNotice).not.toContain("this deployment publishes");
+    expect(decision.dispatchNotice).not.toContain("Not published here");
+  });
+
+  test("a clean link stores no dispatch notice, and the wildcard clause rides both notices", () => {
+    const clean = deepLinkDecision(null, "eth_minus_30", LISTED);
+    if (clean.kind !== "set") throw new Error(clean.kind);
+    expect(clean.dispatchNotice).toBeNull();
+
+    const wildcard = deepLinkDecision(null, "*,eth_minus_30", LISTED);
+    if (wildcard.kind !== "set") throw new Error(wildcard.kind);
+    expect(wildcard.notice).toContain("A * is never expanded");
+    expect(wildcard.dispatchNotice).toContain("A * is never expanded");
+    expect(wildcard.dispatchNotice).toContain("when the set was dispatched");
   });
 });
 

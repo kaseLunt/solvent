@@ -92,14 +92,18 @@
 //         6904109 at 2592000s; `becomes_liquidatable` exercises false AND
 //         null, because null is "not stated", never false.
 //       ethfi_minus_50 — reshaped from `every_mark_moved` to `some_marks_held`
-//         with a DE-CONFOUNDED cause split (r57 item 12b): 7 applied rows,
-//         1 moved, 3 held by a transform, 2 held at the declared factor
-//         (one of them snapped at 1/1 — the §2.5 partition-order case), 1 held
-//         by exact-integer arithmetic. transform-held (3) ≠ applied length (7)
-//         ≠ marks_moved (1) ≠ the flag census (snapped 2, base 1, cap 1,
-//         sum 4), so a renderer sourcing the cause sentence from any reach
-//         total goes red. The bar still draws: partly reached is a real bar
-//         with a stated qualification.
+//         with a DE-CONFOUNDED cause split (r57 item 12b, hardened by r58
+//         item 7): 14 applied rows, 1 moved, 7 held by a transform, 4 held at
+//         the declared factor (two of them snapped at 1/1, the §2.5
+//         partition-order case), 2 held by exact-integer arithmetic. ALL THREE
+//         cause figures (7/4/2) differ pairwise from each other AND from every
+//         non-cause figure a renderer could source instead: applied length
+//         (14), marks_moved (1), declared_shocks (1), the flag census (snapped
+//         3, base 3, cap 3), and every sum of those flags (6, 6, 6, 9). The
+//         r58 confound was declared-factor == marks_snapped and arithmetic ==
+//         marks_moved; the check below refuses generation if any such pair
+//         ever collides again. The bar still draws: partly reached is a real
+//         bar with a stated qualification.
 //
 //  5. run-book-set.scenarios.json — the committed listing scenarios.json
 //     EXTENDED with the two definitions the contract's own 200 example
@@ -318,6 +322,9 @@ if (pristineAaveRow === undefined || pristineDmRow === undefined) {
 
 // The (chain 10) asset pool the committed scenarios themselves shock and hold
 // flat, reused so every applied row names an address the committed set names.
+// Extended for r58 item 7 (the 14-row de-confounded cause split needs 13
+// distinct held marks); every added address is still read out of the committed
+// scenario definition files under internal/risk/scenarios/, never invented.
 const OP_ASSETS = [
   "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
   "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
@@ -325,6 +332,13 @@ const OP_ASSETS = [
   "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
   "0x939778D83b46B456224A33Fb59630B11DEC56663",
   "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+  "0x4200000000000000000000000000000000000006",
+  "0x4200000000000000000000000000000000000042",
+  "0x68f180fcCe6836688e9084f035309E29Bf0A2095",
+  "0x5f46d540b6eD704C3c8789105F30E075AA900726",
+  "0x657e8C867D8B37dCC18fA4Caead9C45EB088C642",
+  "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+  "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
 ];
 const appliedRow = (asset, factorNum, factorDen, before, after, flags = {}) => ({
   after,
@@ -340,24 +354,33 @@ const appliedRow = (asset, factorNum, factorDen, before, after, flags = {}) => (
 });
 
 // ethfi_minus_50, RE-IDENTIFIED byte-for-byte from the committed definition —
-// now the `some_marks_held` arm with the DE-CONFOUNDED cause split (r57 12b).
+// now the `some_marks_held` arm with the DE-CONFOUNDED cause split (r57 12b,
+// hardened by r58 item 7: every cause figure is pairwise distinct from every
+// other cause figure and from every non-cause figure, checked below).
 const ethfiApplied = [
   // 1 — the definition's own mark, MOVED at its own 50/100 factor.
   appliedRow(ethfiDefinition.shocks[0].asset, 50, 100, "2000000", "1000000"),
-  // 2..4 — held by a TRANSFORM: non-identity factors carrying a snap, a
-  // snapped base and a bound cap respectively, each back at its before value.
+  // 2..8 — held by a TRANSFORM: non-identity factors carrying a snap (1), a
+  // snapped base (3) or a bound cap (3), each back at its before value.
   appliedRow(OP_ASSETS[0], 995, 1000, "1000000", "1000000", { snapped: true }),
   appliedRow(OP_ASSETS[1], 995, 1000, "1000000", "1000000", { base_snapped: true }),
-  appliedRow(OP_ASSETS[2], 90, 100, "500000", "500000", { cap_bound: true }),
-  // 5..6 — held at the DECLARED factor 1/1. Row 5 also carries snapped: true,
-  // which is §2.5's partition-order case: a par-marked stable under 1/1 comes
-  // back snapped and unmoved, and its hold is attributed to the DEFINITION,
-  // never to the snap.
-  appliedRow(OP_ASSETS[3], 1, 1, "1000000", "1000000", { snapped: true }),
-  appliedRow(OP_ASSETS[4], 1, 1, "4000000", "4000000"),
-  // 7 — held by EXACT-INTEGER ARITHMETIC: a non-identity factor, no flags,
-  // and floor(500 × 1000001/1000000) = 500.
-  appliedRow(OP_ASSETS[5], 1000001, 1000000, "500", "500"),
+  appliedRow(OP_ASSETS[2], 995, 1000, "2000000", "2000000", { base_snapped: true }),
+  appliedRow(OP_ASSETS[3], 998, 1000, "750000", "750000", { base_snapped: true }),
+  appliedRow(OP_ASSETS[4], 90, 100, "500000", "500000", { cap_bound: true }),
+  appliedRow(OP_ASSETS[5], 80, 100, "900000", "900000", { cap_bound: true }),
+  appliedRow(OP_ASSETS[6], 90, 100, "1200000", "1200000", { cap_bound: true }),
+  // 9..12 — held at the DECLARED factor 1/1. Rows 9 and 10 also carry
+  // snapped: true, which is §2.5's partition-order case: a par-marked stable
+  // under 1/1 comes back snapped and unmoved, and its hold is attributed to
+  // the DEFINITION, never to the snap.
+  appliedRow(OP_ASSETS[7], 1, 1, "1000000", "1000000", { snapped: true }),
+  appliedRow(OP_ASSETS[8], 1, 1, "3000000", "3000000", { snapped: true }),
+  appliedRow(OP_ASSETS[9], 1, 1, "4000000", "4000000"),
+  appliedRow(OP_ASSETS[10], 1, 1, "2500000", "2500000"),
+  // 13..14 — held by EXACT-INTEGER ARITHMETIC: non-identity factors, no flags,
+  // floor(500 × 1000001/1000000) = 500 and floor(700 × 1000001/1000000) = 700.
+  appliedRow(OP_ASSETS[11], 1000001, 1000000, "500", "500"),
+  appliedRow(OP_ASSETS[12], 1000001, 1000000, "700", "700"),
 ];
 const ethfiReach = {
   declared_shocks: ethfiDefinition.shocks.length,
@@ -365,19 +388,19 @@ const ethfiReach = {
   reach: "some_marks_held",
   applied_shocks: ethfiApplied,
   marks_moved: 1,
-  marks_held_by_declared_factor: 2,
-  marks_held_by_transform: 3,
-  marks_held_by_arithmetic: 1,
-  marks_snapped: 2,
-  marks_base_snapped: 1,
-  marks_cap_bound: 1,
+  marks_held_by_declared_factor: 4,
+  marks_held_by_transform: 7,
+  marks_held_by_arithmetic: 2,
+  marks_snapped: 3,
+  marks_base_snapped: 3,
+  marks_cap_bound: 3,
   held_flat_marks: 0,
   held_flat_assets: [],
   note:
-    "PARTLY REACHED: 1 of the 7 marks this scenario's matrix describes moved. Of the held " +
-    "marks: 3 pinned by a pricing transform, 2 held at the factor the definition declared, " +
-    "1 unchanged by exact-integer arithmetic. The counts are a partition; the flag census " +
-    "(2 snapped, 1 base-snapped, 1 cap-bound) attributes no cause.",
+    "PARTLY REACHED: 1 of the 14 marks this scenario's matrix describes moved. Of the held " +
+    "marks: 7 pinned by a pricing transform, 4 held at the factor the definition declared, " +
+    "2 unchanged by exact-integer arithmetic. The counts are a partition; the flag census " +
+    "(3 snapped, 3 base-snapped, 3 cap-bound) attributes no cause.",
 };
 
 const ethfiResult = {
@@ -455,12 +478,50 @@ const ethfiResult = {
   if (moved + byDeclared + byTransform + byArithmetic !== rows.length) {
     fail("variant: ethfi's cause split is not a partition of its applied rows");
   }
-  // r57 item 12b — the de-confound. The transform-held cause count must equal
-  // NO reach total a lazy renderer could reach for instead.
+  // r57 item 12b, hardened by r58 item 7 — the de-confound covers ALL THREE
+  // cause figures, not just the transform count. Each cause must differ from
+  // each other cause AND from every non-cause figure a renderer could source
+  // instead: the flag census, its sums, marks_moved, the applied length and
+  // the declared count. r58's escape was declared-factor == marks_snapped and
+  // arithmetic == marks_moved; any such pair stops generation here.
   const flagSum = census.marks_snapped + census.marks_base_snapped + census.marks_cap_bound;
-  const confounds = [rows.length, moved, census.marks_snapped, flagSum, ethfiReach.declared_shocks];
-  if (confounds.some((n) => n === byTransform)) {
-    fail("variant: the transform-held count is confounded with a reach total again");
+  const causes = {
+    marks_held_by_transform: byTransform,
+    marks_held_by_declared_factor: byDeclared,
+    marks_held_by_arithmetic: byArithmetic,
+  };
+  const nonCauses = {
+    marks_snapped: census.marks_snapped,
+    marks_base_snapped: census.marks_base_snapped,
+    marks_cap_bound: census.marks_cap_bound,
+    marks_moved: moved,
+    applied_length: rows.length,
+    declared_shocks: ethfiReach.declared_shocks,
+    "marks_snapped+marks_base_snapped": census.marks_snapped + census.marks_base_snapped,
+    "marks_snapped+marks_cap_bound": census.marks_snapped + census.marks_cap_bound,
+    "marks_base_snapped+marks_cap_bound": census.marks_base_snapped + census.marks_cap_bound,
+    flag_sum: flagSum,
+  };
+  const causeEntries = Object.entries(causes);
+  for (let i = 0; i < causeEntries.length; i += 1) {
+    for (let j = i + 1; j < causeEntries.length; j += 1) {
+      if (causeEntries[i][1] === causeEntries[j][1]) {
+        fail(
+          `variant: ${causeEntries[i][0]} and ${causeEntries[j][0]} are confounded at ` +
+            `${causeEntries[i][1]}; a renderer swapping the two would print the right number`,
+        );
+      }
+    }
+  }
+  for (const [causeName, causeValue] of causeEntries) {
+    for (const [nonCauseName, nonCauseValue] of Object.entries(nonCauses)) {
+      if (causeValue === nonCauseValue) {
+        fail(
+          `variant: ${causeName} (${causeValue}) is confounded with ${nonCauseName}; a renderer ` +
+            "sourcing the wrong figure would print the right number and this fixture could not catch it",
+        );
+      }
+    }
   }
   if (rows.length === moved || rows.length === flagSum) {
     fail("variant: the applied length is confounded with another reach total");

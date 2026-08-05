@@ -35,7 +35,15 @@
 //     and ?scenarios=* is refused by name;
 //   - the deep-link notice and header clause describe the DISPATCH from the
 //     run's own stored record, surviving a listing refresh that publishes a
-//     filtered id (r57 item 11);
+//     filtered id (r57 item 11), and both speak in dispatch-time PAST tense
+//     (r58 item 6) so the survival never reads as a false present-tense
+//     statement;
+//   - while a set run is in flight the run affordance is disabled WITH its
+//     reason and a second dispatch (UI or a direct second auto-run) is
+//     refused at the source: exactly one POST reaches the sink (r58 item 2);
+//   - the committed cause fixture's three figures are pairwise distinct from
+//     each other and from every non-cause figure, asserted over the bytes
+//     themselves (r58 item 7);
 //   - a 200 set settle restores every matrix row's prior phase EXACTLY: true
 //     idle for rows that held nothing, original stamps and rerunFailed records
 //     for rows that held evidence, and a set-aware empty-state sentence where
@@ -373,14 +381,19 @@ test("?scenarios= rides the listing arrival: one POST, only published ids, filte
   await expect(page.getByTestId("tornado-header")).toBeVisible();
   expect(posts).toEqual([JSON.stringify({ scenario_ids: EXAMPLE_IDS })]);
 
+  // R58 item 6 — this is the SETTLED surface: the notice it renders is the
+  // run's stored dispatch record, in dispatch-time past tense.
   const notice = page.getByTestId("tornado-deeplink-notice");
-  await expect(notice).toContainText("You asked for 4 scenario(s)");
-  await expect(notice).toContainText("this deployment publishes 3 of them");
-  await expect(notice).toContainText("nope_id");
+  await expect(notice).toContainText("You asked for 4 scenario(s).");
+  await expect(notice).toContainText(
+    "This deployment did not publish these ids when the set was dispatched: nope_id.",
+  );
+  await expect(notice).toContainText("Only the 3 published one(s) were dispatched.");
+  await expect(notice).not.toContainText("this deployment publishes");
 
-  // §9.6 — the filtered ids ride the composed header too.
+  // §9.6 — the filtered ids ride the composed header too, in the same tense.
   await expect(page.getByTestId("tornado-header")).toContainText(
-    "filtered from the deep link, not published here: nope_id",
+    "filtered from the deep link, not published AT DISPATCH: nope_id",
   );
 });
 
@@ -478,19 +491,20 @@ test("ordering, sign, the REAL axis side, NO DENOMINATOR, the cause split and th
       .locator('[data-testid="tornado-bar"]'),
   ).toHaveCount(0);
 
-  // r57 item 12b — THE DE-CONFOUNDED CAUSE SPLIT. ethfi is PARTLY REACHED and
-  // its three cause figures (3/2/1) equal NO reach total on the wire: applied
-  // length is 7, marks_moved is 1, the flag census is 2/1/1 (sum 4). A
-  // renderer sourcing the cause from any of those goes red here.
+  // r57 item 12b / r58 item 7 — THE DE-CONFOUNDED CAUSE SPLIT. ethfi is PARTLY
+  // REACHED and its three cause figures (7/4/2) are pairwise distinct AND equal
+  // NO reach figure on the wire: applied length is 14, marks_moved is 1,
+  // declared_shocks is 1, the flag census is 3/3/3 (pair sums 6/6/6, total 9).
+  // A renderer sourcing any cause from any of those goes red here.
   const partly = page.locator(
     '[data-testid="tornado-state"][data-state="partly-reached"]',
   );
   await expect(partly).toHaveCount(1);
   await expect(partly).toContainText("PARTLY REACHED");
-  await expect(partly).toContainText("1 of 7 marks");
-  await expect(partly).toContainText("3 pinned by the stable snap, a snapped base or a bound cap");
-  await expect(partly).toContainText("2 held at the factor this scenario declared for them");
-  await expect(partly).toContainText("1 unchanged by exact-integer arithmetic");
+  await expect(partly).toContainText("1 of 14 marks");
+  await expect(partly).toContainText("7 pinned by the stable snap, a snapped base or a bound cap");
+  await expect(partly).toContainText("4 held at the factor this scenario declared for them");
+  await expect(partly).toContainText("2 unchanged by exact-integer arithmetic");
   await expect(partly).not.toContainText(/\d+ of \d+ snapped/);
 
   // r57 item 5 — the structurally-zero arms point at blocks that EXIST. The
@@ -523,6 +537,12 @@ test("ordering, sign, the REAL axis side, NO DENOMINATOR, the cause split and th
   );
   await expect(weethDmBlock).toContainText("execution shortfall $3,100");
   await expect(weethDmBlock).toContainText("bad debt at liquidation $1,250");
+  // r58 item 3 — the block rows carry the out_of_model clause too, same
+  // grammar, from the same committed-listing join: for these scenarios the
+  // block IS the answer, and the answer may not shed the committed exclusions
+  // the numeric rows disclose.
+  await expect(weethAaveBlock).toContainText("read with 6 committed out-of-model exclusion(s)");
+  await expect(weethDmBlock).toContainText("read with 6 committed out-of-model exclusion(s)");
 
   const projectionBlock = page.locator(
     '[data-testid="tornado-ledger-block"][data-block="projection"]',
@@ -536,6 +556,10 @@ test("ordering, sign, the REAL axis side, NO DENOMINATOR, the cause split and th
   // A null becomes_liquidatable is NOT STATED — a different fact from false.
   await expect(projectionBlock).toContainText(
     "horizon 2592000s: debt $4,200, projected $4,206.904109, additional interest $6.904109, becomes liquidatable: not stated",
+  );
+  // r58 item 3 — the projection block row carries the clause too.
+  await expect(projectionBlock).toContainText(
+    "read with 7 committed out-of-model exclusion(s)",
   );
 
   // The movement grammar, both halves: the plain K of M, and the
@@ -585,6 +609,60 @@ test("ordering, sign, the REAL axis side, NO DENOMINATOR, the cause split and th
   for (const box of labelBoxes) {
     expect(box.x, `row label clips left: ${box.label}`).toBeGreaterThanOrEqual(0);
   }
+});
+
+test("r58 item 7 — the committed fixture's cause figures are impersonated by NO other figure", () => {
+  // KILLS: a fixture edit that re-confounds a cause figure with a non-cause
+  // figure without going through the generator's own refusal (the r58 escape:
+  // declared-factor == marks_snapped at 2, arithmetic == marks_moved at 1).
+  // This law reads the committed bytes the suite actually serves, so a silent
+  // re-confound goes red here even if every rendering law still passes.
+  const body = JSON.parse(fixture("run-book-set.no-denominator.json")) as {
+    results: {
+      scenario_id: string;
+      shock_reach: {
+        applied_shocks: unknown[];
+        declared_shocks: number;
+        marks_moved: number;
+        marks_held_by_declared_factor: number;
+        marks_held_by_transform: number;
+        marks_held_by_arithmetic: number;
+        marks_snapped: number;
+        marks_base_snapped: number;
+        marks_cap_bound: number;
+      };
+    }[];
+  };
+  const reach = body.results.find((result) => result.scenario_id === "ethfi_minus_50")?.shock_reach;
+  if (reach === undefined) throw new Error("the fixture lost its ethfi_minus_50 result");
+  const causes = [
+    reach.marks_held_by_transform,
+    reach.marks_held_by_declared_factor,
+    reach.marks_held_by_arithmetic,
+  ];
+  // Pairwise distinct from EACH OTHER ...
+  expect(new Set(causes).size).toBe(3);
+  // ... and from EVERY non-cause figure a renderer could source instead,
+  // including the flag census's sums.
+  const nonCauses = [
+    reach.marks_snapped,
+    reach.marks_base_snapped,
+    reach.marks_cap_bound,
+    reach.marks_moved,
+    reach.applied_shocks.length,
+    reach.declared_shocks,
+    reach.marks_snapped + reach.marks_base_snapped,
+    reach.marks_snapped + reach.marks_cap_bound,
+    reach.marks_base_snapped + reach.marks_cap_bound,
+    reach.marks_snapped + reach.marks_base_snapped + reach.marks_cap_bound,
+  ];
+  for (const cause of causes) {
+    expect(nonCauses, `cause figure ${String(cause)} is impersonated by a non-cause figure`).not.toContain(
+      cause,
+    );
+  }
+  // The figures the rendering laws above pin are exactly these.
+  expect(causes).toEqual([7, 4, 2]);
 });
 
 test("r57 item 7 — a floored bar is flagged on the rect and disclosed by the computed sentence", async ({
@@ -739,6 +817,73 @@ test("r57 item 4 — a refused result contributes NOTHING: no ledger row, no rea
   await expect(page.getByTestId("tornado-ledger")).not.toContainText(
     "4 pinned by the stable snap",
   );
+});
+
+// ---------------------------------------------------------------------------
+// r58 item 2 — no second dispatch while a set is in flight
+// ---------------------------------------------------------------------------
+
+test("r58 item 2 — a dispatch during an in-flight set is refused: ONE POST, a visible reason, re-enabled on settle", async ({
+  page,
+}) => {
+  // KILLS: the unguarded overlap — set B captured set A's lossy running phases
+  // as its priors, and B's 200 settle restored bare outcomes under A's stamp,
+  // dropping rerunFailed records. With the guard removed, the pushState
+  // auto-run below dispatches a second POST while the first is still in
+  // flight, and the sink counts 2.
+  const posts: string[] = [];
+  let scenarioReads = 0;
+  let releaseSettle: () => void = () => undefined;
+  const settleGate = new Promise<void>((resolve) => {
+    releaseSettle = resolve;
+  });
+  await mockCold(page, () => {
+    scenarioReads += 1;
+    return fixture("scenarios.json");
+  });
+  await page.route(`${API}/v1/scenarios/run-book-set`, async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: CORS, body: "" });
+    }
+    posts.push(route.request().postData() ?? "");
+    // The mock settles SLOWLY, on this test's own signal: the in-flight window
+    // is held open for as long as the second-dispatch attempts need.
+    await settleGate;
+    return json(route, fixture("run-book-set.no-denominator.json"));
+  });
+
+  await page.goto(VARIANT_LINK);
+  await expect(page.getByTestId("tornado-running")).toBeVisible();
+  await expect.poll(() => posts.length).toBe(1);
+
+  // The UI attempt: the affordance is DISABLED, with its reason in the open —
+  // never a silently dead button.
+  await expect(page.getByTestId("tornado-run")).toBeDisabled();
+  const reason = page.getByTestId("tornado-run-disabled-reason");
+  await expect(reason).toContainText("a set run is in flight");
+  await expect(reason).toContainText("its settlement writes these rows");
+  await expect(reason).toContainText("a second dispatch would race it");
+
+  // The direct attempt: a client-side URL change re-fires the ?scenarios=
+  // auto-run against the listing WHILE the first set is still in flight.
+  await page.evaluate(() => {
+    window.history.pushState(null, "", "/lab?scenarios=eth_minus_30");
+  });
+  // The effect provably ran — it re-read the listing — and still nothing
+  // second reached the sink: the guard refuses the dispatch at the source.
+  await expect
+    .poll(() => scenarioReads, { message: "the deep-link effect re-fires on the new URL" })
+    .toBeGreaterThanOrEqual(2);
+  expect(posts).toHaveLength(1);
+
+  // The settlement releases the guard: the reason clears and the affordance
+  // re-enables.
+  releaseSettle();
+  await expect(page.getByTestId("tornado-header")).toBeVisible();
+  await expect(page.getByTestId("tornado-run-disabled-reason")).toHaveCount(0);
+  await page.locator('[data-testid="tornado-pick"][data-scenario-id="eth_minus_30"]').check();
+  await expect(page.getByTestId("tornado-run")).toBeEnabled();
+  expect(posts).toHaveLength(1);
 });
 
 // ---------------------------------------------------------------------------
@@ -1016,12 +1161,16 @@ test("r57 item 3 — an older non-ok single-run phase survives a newer 200 set w
 // r57 item 11 — the dispatch record survives the listing
 // ---------------------------------------------------------------------------
 
-test("r57 item 11 — a settled run keeps saying B was filtered after a refresh that publishes B", async ({
+test("r57 item 11 / r58 item 6 — a settled run keeps saying B was filtered AT DISPATCH after a refresh that publishes B", async ({
   page,
 }) => {
-  // KILLS: the notice and header clause recomputed from the LIVE listing — a
-  // refresh that starts publishing ghost_b would silently un-filter a request
-  // that already ran without it.
+  // KILLS (r57 11): the notice and header clause recomputed from the LIVE
+  // listing — a refresh that starts publishing ghost_b would silently
+  // un-filter a request that already ran without it.
+  // KILLS (r58 6): the stored record carrying the live PRESENT-tense sentence
+  // — after the refresh publishes ghost_b, "this deployment publishes N of
+  // them ... Not published here: ghost_b" became a false statement about the
+  // listing on screen. The settled surface speaks in dispatch-time past tense.
   const posts: string[] = [];
   let ghostPublished = false;
   await mockCold(page, () =>
@@ -1037,11 +1186,13 @@ test("r57 item 11 — a settled run keeps saying B was filtered after a refresh 
   await expect(header).toBeVisible();
   expect(posts).toEqual([JSON.stringify({ scenario_ids: VARIANT_IDS })]);
   await expect(header).toContainText(
-    "filtered from the deep link, not published here: ghost_b",
+    "filtered from the deep link, not published AT DISPATCH: ghost_b",
   );
   const notice = page.getByTestId("tornado-deeplink-notice");
-  await expect(notice).toContainText("this deployment publishes 4 of them");
-  await expect(notice).toContainText("ghost_b");
+  await expect(notice).toContainText(
+    "This deployment did not publish these ids when the set was dispatched: ghost_b.",
+  );
+  await expect(notice).not.toContainText("this deployment publishes");
 
   // Earn the refresh affordance (a definition-changed row via the v2 single
   // run), then refresh onto a listing that DOES publish ghost_b.
@@ -1059,10 +1210,17 @@ test("r57 item 11 — a settled run keeps saying B was filtered after a refresh 
 
   // THE LAW: the settled run's notice and header clause describe the DISPATCH,
   // from the run's own stored record — ghost_b stays named as filtered, because
-  // the request that ran really did omit it.
+  // the request that ran really did omit it — and (r58 item 6) they say so in
+  // dispatch-time past tense, so the survival is a true sentence beside a
+  // listing that now publishes ghost_b.
   await expect(header).toContainText(
-    "filtered from the deep link, not published here: ghost_b",
+    "filtered from the deep link, not published AT DISPATCH: ghost_b",
   );
-  await expect(page.getByTestId("tornado-deeplink-notice")).toContainText("ghost_b");
+  const settledNotice = page.getByTestId("tornado-deeplink-notice");
+  await expect(settledNotice).toContainText(
+    "This deployment did not publish these ids when the set was dispatched: ghost_b.",
+  );
+  await expect(settledNotice).not.toContainText("this deployment publishes");
+  await expect(settledNotice).not.toContainText("Not published here");
   expect(posts).toHaveLength(1);
 });

@@ -64,6 +64,27 @@ export function setContradiction(
 ): SetContradiction | null {
   const faults: string[] = [];
   const seen = new Set<string>();
+
+  // R58 ITEM 1 — DUPLICATES REFUSE FIRST, before any set arithmetic. Collapsing
+  // `requested_scenario_ids` into a Set let a body claiming ["a", "a"] against a
+  // dispatch of ["a"] grade itself set-equal: one result, scenarios_evaluated 1,
+  // and a header claiming "of 2 requested". A list that names an id twice is not
+  // a set, so no set-equality question is even well-posed of it: the duplicated
+  // id is named and the body refuses whole, and set-equality is judged only
+  // after this gate passes.
+  const requestedCounts = new Map<string, number>();
+  for (const id of response.requested_scenario_ids) {
+    requestedCounts.set(id, (requestedCounts.get(id) ?? 0) + 1);
+  }
+  for (const [id, count] of requestedCounts) {
+    if (count > 1) {
+      faults.push(
+        `${id} appears ${String(count)} times in requested_scenario_ids; a set names each id once`,
+      );
+    }
+  }
+  if (faults.length > 0) return { faults: [...new Set(faults)] };
+
   const requested = new Set(response.requested_scenario_ids);
   const dispatched = new Set(dispatchedIds);
 
@@ -186,6 +207,51 @@ function engineListWords(engines: readonly string[]): string {
 }
 
 /**
+ * R58 ITEM 4 — THE MANDATORY BLOCK IS JUDGED PER ANSWERED ENGINE, never with
+ * `engines.some(...)`. The contract makes the block mandatory on the engine row
+ * (api/openapi.yaml: `market_realization` / `projection` are "MANDATORY
+ * whenever the committed definition declares" them), so a block present on ONE
+ * answered engine says nothing about a sibling that answered without its own:
+ * that sibling's absence is a contract defect, NAMED by engine, while the
+ * engines that do carry the block still render theirs as ledger rows.
+ */
+function mandatoryBlockClause(
+  result: SetRunScenarioResult,
+  block: "projection" | "market_realization",
+): string {
+  const label = block === "projection" ? "projection" : "market-realization";
+  const missing: string[] = [];
+  const present: string[] = [];
+  for (const engine of result.engines) {
+    (engine[block] === null ? missing : present).push(engine.engine);
+  }
+  const consequence =
+    block === "projection" ? "there is no answer to point at" : "its information is absent";
+  if (result.engines.length === 0) {
+    return (
+      `No engine of this result carries the ${label} block the contract makes mandatory here, ` +
+      `so ${consequence}: that absence is a contract defect, never a zero.`
+    );
+  }
+  if (missing.length === 0) {
+    return block === "projection"
+      ? "The projection row in the ledger below is the answer."
+      : "Its information lives in the market-realization row in the ledger below.";
+  }
+  const defect =
+    `${engineListWords(missing)} answered without the ${label} block the contract makes ` +
+    `mandatory on every answered engine here`;
+  if (present.length === 0) {
+    return `${defect}, so ${consequence}: that absence is a contract defect, never a zero.`;
+  }
+  const still =
+    present.length === 1
+      ? `${present[0] ?? ""} still renders its ${label} row in the ledger below.`
+      : `${engineListWords(present)} still render their ${label} rows in the ledger below.`;
+  return `${defect}: that absence is a contract defect, never a zero. ${still}`;
+}
+
+/**
  * The cell for one result.
  *
  * Order matters: a contradicting body is refused before its identity is judged,
@@ -248,35 +314,30 @@ export function tornadoCellState(
     case "projection_no_spot_pass":
       // R57 item 5 — the sentence points at a block only when that block will
       // actually render as its own ledger row; a pointer at a block the page
-      // does not show is a dangling reference, and a missing mandatory block
-      // is named as the defect it is rather than papered over.
+      // does not show is a dangling reference. R58 item 4 — the block is
+      // mandatory PER ANSWERED ENGINE: an engine that answered without its own
+      // block is a contract defect named by engine, never covered for by a
+      // sibling's block (`mandatoryBlockClause`).
       return {
         state: "projection-no-spot-pass",
         sentence:
           "This scenario is a PROJECTION: no spot pass ran, so the three deltas are zero by construction and no bar is " +
           "drawn. Its declared shocks were not applied to any mark. " +
-          (result.engines.some((engine) => engine.projection !== null)
-            ? "The projection row in the ledger below is the answer."
-            : "No engine of this result carries the projection block the contract makes mandatory " +
-              "here, so there is no answer to point at: that absence is a contract defect, never " +
-              "a zero."),
+          mandatoryBlockClause(result, "projection"),
       };
     case "no_shocks_declared":
       // The three deltas are zero BY CONSTRUCTION and the scenario's whole
       // information content is `market_realization`. A zero-length bar beside a
       // real one is the reading this state exists to refuse, and the sentence is
       // its own: nothing was ASKED FOR here, so nothing was swallowed and
-      // nothing was declared held either.
+      // nothing was declared held either. R58 item 4 — the block is mandatory
+      // per answered engine, same law as the projection arm.
       return {
         state: "no-shock-declared",
         sentence:
           "This scenario declares no price shock at all, so the three deltas are zero by construction and say nothing " +
           "about the book's sensitivity. No bar is drawn. " +
-          (result.engines.some((engine) => engine.market_realization !== null)
-            ? "Its information lives in the market-realization row in the ledger below."
-            : "No engine of this result carries the market-realization block the contract makes " +
-              "mandatory here, so its information is absent: that absence is a contract defect, " +
-              "never a zero."),
+          mandatoryBlockClause(result, "market_realization"),
       };
     case "all_shocks_declared_at_identity":
       return {
@@ -366,9 +427,20 @@ function noShockReachedSentence(result: SetRunScenarioResult): string {
   );
 }
 
+/**
+ * R58 ITEM 5 — the EXACT magnitude the ORDER is decided by: |delta| and the
+ * before-side denominator, as bigints straight off the wire strings. The float
+ * `ratio` is width-only; two true ratios that both clamp to the ceiling (1e12
+ * and 1e12+1) are still ordered correctly by cross-multiplying these.
+ */
+export interface BarMagnitude {
+  absDelta: bigint;
+  before: bigint;
+}
+
 /** Whether an answered engine may draw a bar at all, and the length if it may. */
 export type BarLength =
-  | { drawn: true; ratio: number }
+  | { drawn: true; ratio: number; exact: BarMagnitude }
   | { drawn: false; reason: "no-denominator"; sentence: string };
 
 // R57 item 6 — the layout ratio's exact-arithmetic bounds. `Number(bigint)`
@@ -413,6 +485,13 @@ export function barLength(engine: SetRunEngineSummary): BarLength {
     };
   }
   const numerator = BigInt(engine.eligible_debt_delta_usd);
+  // R58 item 5 — the exact pair travels WITH the ratio: the clamp below can
+  // collapse two different true ratios onto one float, so ordering is decided
+  // downstream by cross-multiplied bigints and the float stays width-only.
+  const exact: BarMagnitude = {
+    absDelta: numerator < 0n ? -numerator : numerator,
+    before: denominator < 0n ? -denominator : denominator,
+  };
   // Exact bigint division truncates toward zero, so the sign survives; the
   // clamp keeps the quotient inside float range whatever the operands were.
   const scaled = (numerator * RATIO_SCALE) / denominator;
@@ -420,9 +499,9 @@ export function barLength(engine: SetRunEngineSummary): BarLength {
     scaled > RATIO_CEILING ? RATIO_CEILING : scaled < -RATIO_CEILING ? -RATIO_CEILING : scaled;
   const ratio = Number(clamped) / Number(RATIO_SCALE);
   if (ratio === 0 && numerator !== 0n) {
-    return { drawn: true, ratio: numerator > 0n ? RATIO_EPSILON : -RATIO_EPSILON };
+    return { drawn: true, ratio: numerator > 0n ? RATIO_EPSILON : -RATIO_EPSILON, exact };
   }
-  return { drawn: true, ratio };
+  return { drawn: true, ratio, exact };
 }
 
 /**

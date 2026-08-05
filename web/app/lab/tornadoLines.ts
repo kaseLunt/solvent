@@ -22,7 +22,7 @@ import {
   type RunBookSetResponse,
   type SetRunOutcome,
 } from "../../lib/runbookSet";
-import { freshnessClause } from "./tornadoCells";
+import { freshnessClause, type BarMagnitude } from "./tornadoCells";
 
 // ---------------------------------------------------------------------------
 // §9.2 — the deep link. Parsed against the LISTING IN HAND, never dispatched
@@ -52,8 +52,20 @@ export type DeepLinkDecision =
       filteredIds: string[];
       /** More publishable ids than the contract's cap: nothing dispatches. */
       overCap: boolean;
-      /** The visible sentence for whatever was filtered or refused; null when clean. */
+      /**
+       * The visible PRE-dispatch sentence, PRESENT tense, describing the live
+       * listing in hand; null when clean. Rendered only while no run has been
+       * dispatched.
+       */
       notice: string | null;
+      /**
+       * R58 item 6 — the same disclosure in DISPATCH-TIME PAST TENSE, the one
+       * that travels into the run's stored dispatch record. A settled surface
+       * describes what the dispatch omitted, and a listing refresh that later
+       * publishes a filtered id must not flip that record into a false
+       * present-tense statement about the current deployment.
+       */
+      dispatchNotice: string | null;
     };
 
 /** "a, b and c" — the house list vocabulary. */
@@ -104,31 +116,46 @@ export function deepLinkDecision(
   const filteredIds = askedIds.filter((id) => !listed.has(id));
   const overCap = runIds.length > MAX_SET_RUN_SCENARIOS;
 
+  // The tense-stable clauses, shared by both notices: the wildcard refusal and
+  // the cap refusal state facts that do not age.
+  const wildcardClause = filteredIds.includes("*")
+    ? "A * is never expanded: a link whose meaning changes when the committed set changes is a link that " +
+      "lies to whoever opens it tomorrow, so this surface has no implicit all."
+    : null;
+  const overCapClause = overCap
+    ? `This link names ${String(runIds.length)} published scenarios and the contract caps one set-run at ` +
+      `${String(MAX_SET_RUN_SCENARIOS)}. Nothing was dispatched and nothing was silently truncated: trim ` +
+      `the link to at most ${String(MAX_SET_RUN_SCENARIOS)} ids.`
+    : null;
+  const dispatchedTail = overCap
+    ? ""
+    : runIds.length > 0
+      ? ` Only the ${String(runIds.length)} published one(s) were dispatched.`
+      : " Nothing was dispatched.";
+
   const clauses: string[] = [];
   if (filteredIds.length > 0) {
     clauses.push(
       `You asked for ${String(askedIds.length)} scenario(s); this deployment publishes ` +
         `${String(runIds.length)} of them. Not published here: ${listWords(filteredIds)}.` +
-        (overCap
-          ? ""
-          : runIds.length > 0
-            ? ` Only the ${String(runIds.length)} published one(s) were dispatched.`
-            : " Nothing was dispatched."),
+        dispatchedTail,
     );
   }
-  if (filteredIds.includes("*")) {
-    clauses.push(
-      "A * is never expanded: a link whose meaning changes when the committed set changes is a link that " +
-        "lies to whoever opens it tomorrow, so this surface has no implicit all.",
+  if (wildcardClause !== null) clauses.push(wildcardClause);
+  if (overCapClause !== null) clauses.push(overCapClause);
+
+  // R58 item 6 — the DISPATCH-TIME account of the same filtering, past tense
+  // throughout: it describes the request that ran, never the listing on screen.
+  const dispatchClauses: string[] = [];
+  if (filteredIds.length > 0) {
+    dispatchClauses.push(
+      `You asked for ${String(askedIds.length)} scenario(s). This deployment did not publish these ` +
+        `ids when the set was dispatched: ${listWords(filteredIds)}.` +
+        dispatchedTail,
     );
   }
-  if (overCap) {
-    clauses.push(
-      `This link names ${String(runIds.length)} published scenarios and the contract caps one set-run at ` +
-        `${String(MAX_SET_RUN_SCENARIOS)}. Nothing was dispatched and nothing was silently truncated: trim ` +
-        `the link to at most ${String(MAX_SET_RUN_SCENARIOS)} ids.`,
-    );
-  }
+  if (wildcardClause !== null) dispatchClauses.push(wildcardClause);
+  if (overCapClause !== null) dispatchClauses.push(overCapClause);
 
   return {
     kind: "set",
@@ -137,6 +164,7 @@ export function deepLinkDecision(
     filteredIds,
     overCap,
     notice: clauses.length === 0 ? null : clauses.join(" "),
+    dispatchNotice: dispatchClauses.length === 0 ? null : dispatchClauses.join(" "),
   };
 }
 
@@ -163,7 +191,13 @@ export interface TornadoHeaderInput {
    * the renderer because those gates are not knowable from the response alone.
    */
   drawnScenarioIds: readonly string[];
-  /** The §9.2 filtered deep-link ids; empty when the run was not deep-linked. */
+  /**
+   * The §9.2 filtered deep-link ids, from the run's own STORED dispatch record;
+   * empty when the run was not deep-linked. R58 item 6 — this header only ever
+   * describes a settled dispatch, so its clause speaks in dispatch-time past
+   * tense: what was not published AT DISPATCH stays filtered even if a listing
+   * refresh publishes the id later.
+   */
   filteredDeepLinkIds: readonly string[];
   /**
    * R57 item 4 — the results the cell layer REFUSED (contradictory result,
@@ -244,7 +278,7 @@ export function tornadoHeaderLine(input: TornadoHeaderInput): string {
   }
   if (filteredDeepLinkIds.length > 0) {
     parts.push(
-      `filtered from the deep link, not published here: ${filteredDeepLinkIds.join(", ")}`,
+      `filtered from the deep link, not published AT DISPATCH: ${filteredDeepLinkIds.join(", ")}`,
     );
   }
   return parts.join(" · ");
@@ -385,6 +419,13 @@ export interface TornadoBarInput {
   scenarioId: string;
   /** `barLength(...).ratio` — signed, dimensionless, layout-only. */
   ratio: number;
+  /**
+   * R58 item 5 — `barLength(...).exact`: the pair the ORDER is decided by.
+   * The clamp collapses 1e12 and 1e12+1 onto one float, so sorting by the
+   * float lets a smaller true ratio rank above a larger one; the exact
+   * cross-multiplied comparison cannot. The float stays width-only.
+   */
+  exact?: BarMagnitude;
 }
 
 /** The tornado's visibility floor, rendered CSS px — the same 1.5 the flow discloses. */
@@ -411,7 +452,13 @@ export interface TornadoBarPlacement {
 export interface TornadoGeometry {
   /** The zero axis, px from the plot's left edge — the diverging center. */
   axisX: number;
-  /** Sorted by |ratio| descending (the tornado's reading order); ties keep input order. */
+  /**
+   * Sorted by |ratio| descending (the tornado's reading order). R58 item 5 —
+   * when both rows carry the exact pair, order is decided by cross-multiplied
+   * bigints (|d1|·b2 against |d2|·b1), never by the clamped float, and a TRUE
+   * exact tie takes deterministic scenario-id order. Rows without the exact
+   * pair fall back to the float, where ties keep input order.
+   */
   bars: TornadoBarPlacement[];
   maxAbsRatio: number;
   /** How many bars the visibility floor lifted off the panel's own scale. */
@@ -437,7 +484,21 @@ export function tornadoBarGeometry(
   const halfSpan = Math.max(axisX - 8, 1);
   const maxAbsRatio = rows.reduce((max, row) => Math.max(max, Math.abs(row.ratio)), 0);
   const bars = [...rows]
-    .sort((a, b) => Math.abs(b.ratio) - Math.abs(a.ratio))
+    .sort((a, b) => {
+      // R58 item 5 — ORDER IS DECIDED EXACTLY. The clamp saturates the float at
+      // its ceiling, so two different true ratios can carry one float; the
+      // cross-multiplied bigint comparison never divides, never clamps and
+      // never rounds. Widths may still clamp equal: that is layout, and the
+      // ledger carries the exact strings.
+      if (a.exact !== undefined && b.exact !== undefined) {
+        const left = a.exact.absDelta * b.exact.before;
+        const right = b.exact.absDelta * a.exact.before;
+        if (left !== right) return left > right ? -1 : 1;
+        // A TRUE exact tie takes deterministic id order.
+        return a.scenarioId < b.scenarioId ? -1 : a.scenarioId > b.scenarioId ? 1 : 0;
+      }
+      return Math.abs(b.ratio) - Math.abs(a.ratio);
+    })
     .map((row) => {
       const negative = row.ratio < 0;
       const scaledWidth =
@@ -493,6 +554,18 @@ export const TORNADO_METHOD =
   "a dimensionless layout quantity, never printed and never rounded into a claim. Every printed " +
   "number is the wire's exact decimal string at the engine's own usd_decimals. One axis per engine, " +
   "never one across engines; no cross-engine total, sum or average exists anywhere on this surface.";
+
+/**
+ * R58 item 2 — the run affordance's visible reason while a set run is in
+ * flight. Concurrency is forbidden AT THE SOURCE: one settlement writes the
+ * matrix rows this surface shares, so a second dispatch would race it — the
+ * same in-flight bound semantics the server itself keeps. The affordance is
+ * disabled with this reason in the open, and `runSet` refuses a call anyway
+ * (belt and braces); the reason clears when the set settles.
+ */
+export const TORNADO_SET_IN_FLIGHT_REASON =
+  "disabled: a set run is in flight; its settlement writes these rows, so a second dispatch " +
+  "would race it.";
 
 /**
  * The dispatch affordance's charge disclosure, in the run-hint register the

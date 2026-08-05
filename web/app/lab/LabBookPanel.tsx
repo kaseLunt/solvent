@@ -893,6 +893,11 @@ function LabBookPanelInner() {
   const setSeq = useRef(0);
   const autoRan = useRef<string | null>(null);
   const autoRanSet = useRef<string | null>(null);
+  // R58 ITEM 2 — WHETHER A SET RUN IS IN FLIGHT, as a ref because `runSet` is
+  // dependency-free and must read it at call time. While it is true no second
+  // set dispatch is accepted from anywhere: one settlement writes the shared
+  // rows, and a second dispatch would race it.
+  const setInFlight = useRef(false);
 
   // A RUN NEVER ERASES THE EVIDENCE IT IS RE-RUNNING (Wave R8, Codex round-16
   // finding 2).
@@ -1017,6 +1022,17 @@ function LabBookPanelInner() {
   // POST, and the notice composed for them) travels into the TornadoRun, so
   // the settled surface describes the dispatch it renders and never a listing
   // that changed since.
+  //
+  // R58 ITEM 2 — NO SECOND SET DISPATCH WHILE ONE IS IN FLIGHT. Two overlapping
+  // sets corrupt each other's restore path: set A converts a settled phase into
+  // a lossy running phase, set B captures THAT as the row's prior, and B's 200
+  // settle restores a bare outcome under A's stamp — dropping rerunFailed
+  // records and rewriting which request the evidence belongs to. Concurrency is
+  // forbidden at the source instead: the run affordance is disabled with a
+  // visible reason while a set is in flight, the ?scenarios= auto-run flows
+  // through this same callback, and this early return is the belt and braces
+  // for any caller that asks anyway. This matches the server's own in-flight
+  // bound semantics.
   const runSet = useCallback(
     (
       ids: readonly string[],
@@ -1024,6 +1040,8 @@ function LabBookPanelInner() {
       dispatch: TornadoDispatch = { filteredIds: [], notice: null },
     ) => {
       if (ids.length === 0) return;
+      if (setInFlight.current) return;
+      setInFlight.current = true;
       const mySet = ++setSeq.current;
       const seqs = new Map<string, number>();
       const attempts = new Map<string, ScenarioIdentity | undefined>();
@@ -1058,6 +1076,9 @@ function LabBookPanelInner() {
       });
       setTornado({ kind: "running", ids: [...ids], dispatch });
       void runBookSet(solventBaseUrl(), ids).then((outcome: SetRunOutcome) => {
+        // R58 item 2 — the settlement releases the in-flight guard: dispatches
+        // are serial, so this settlement is the guard's own.
+        setInFlight.current = false;
         // A later set-run owns the tornado surface; this one only settles rows
         // whose per-row sequence it still holds.
         if (setSeq.current === mySet) {
@@ -1191,11 +1212,14 @@ function LabBookPanelInner() {
             // R57 ITEM 11 — the filtered ids and the notice are STORED with the
             // run at this instant: they describe THIS dispatch, and a listing
             // refresh that later publishes a filtered id does not rewrite what
-            // this request omitted.
+            // this request omitted. R58 ITEM 6 — the stored sentence is the
+            // DISPATCH-TIME one, past tense: the settled surface states what
+            // was not published when the set was dispatched, never a
+            // present-tense claim about the listing on screen.
             runSet(
               decision.runIds,
               rowIdentity(response.scenarios, response.scenario_config_version),
-              { filteredIds: decision.filteredIds, notice: decision.notice },
+              { filteredIds: decision.filteredIds, notice: decision.dispatchNotice },
             );
           }
         },
