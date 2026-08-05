@@ -1,9 +1,17 @@
-# status: REV2 | pending Codex gate
+# status: REV3 | pending Codex gate
 
 « CONTRACT 1.7.0 (ADDITIVE) : BATCH-PINNED MULTI-SCENARIO EVALUATION (SET-RUN) »
 
-Revision 2. Every semantic claim below was re-derived from the code named beside
+Revision 3. Every semantic claim below was re-derived from the code named beside
 it. Research pass only: nothing in the repo outside this file was modified.
+
+Revision 3 closes seven findings against revision 2. The load-bearing one is a
+**third structurally-zero class**: a scenario that declares its shocks at the
+**identity factor 1/1**, which `dm_composition_census` does eight times over.
+Revision 2's `shock_reach` had no arm for it, so that scenario would have been
+served under `no_mark_moved` with a published cause naming the oracle for a hold
+the definition itself asked for. A component built to stop a false cause being
+published beside a zero was publishing one. Section 2.5 is the repair.
 
 ---
 
@@ -67,13 +75,16 @@ code does not support, the correction is in the third column.
 | The Aave movement count has an **excluded population**, and the code insists it be named | `cmd/api/p5_runbook.go:779-783` skips an account when `b.infinite \|\| a.infinite \|\| b.hfWad == nil \|\| a.hfWad == nil`; `p5_runbook.go:772-775` skips any before-side account absent from the after side, on both engines. `runBookMoversNote` (`:843-845`) serves "An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here, it is not a quiet zero." | `hf_dropped_accounts: 0` beside `accounts: 46` reads as "none of 46 health factors dropped" when the truth may be "most of the 46 carry no health factor at all". The denominator of the movement count must be on the wire, not only in prose. |
 | The count of debt-free accounts is published today, and only inside the histogram | `cmd/api/p5_runbook.go:266-267` increments `m.infinite`; `p5_runbook.go:304` serves it as `hf_histogram.infinite_count`, described at `:308` as "accounts with no debt" | A summary that drops the histogram drops the only published count of the population the Aave movement rule cannot test. |
 | `AppliedShock` is the **only** wire carrier of `snapped`, `base_snapped`, `cap_bound` | `api/openapi.yaml:2387-2391`, `snapped` described as "The Debt Manager's stable snap band swallowed the move"; built per run at `cmd/api/p5_runbook.go:471-486` from the batch's own before and after price values | `ScenarioDefinition` (`api/openapi.yaml:2494-2497`) publishes `[id, version, label, description, path_assumption, engines, shocks, out_of_model]` and **not** `propagation`, so a scenario file's `stable_snap` is on no wire a set-run client can reach. Whether a requested shock actually moved a price is derivable from nothing else the set-run would serve. |
-| A committed **control** scenario exists whose correct answer is all zeros | `internal/risk/scenarios/stable_depeg_0995_in_band.json`: three OP stables at 995/1000, `stable_snap: true` on every propagation row, description "995000 lies STRICTLY INSIDE the snap band (990000, 1010000), so PriceProviderV2 pins it back to exactly 1e6 and nothing moves", `out_of_model` "this scenario is the CONTROL: it must produce zero change on every position" | Beside `stable_depeg_099_boundary` (0.99, band open, does not snap) drawing a real bar, an undisclosed all-zero row reads as "the book is insensitive to a 0.5 percent depeg" when the truth is "the oracle pins any sub-1-percent depeg to par, so this scenario tests the oracle and not the book". `stable_depeg_098_unsnapped` is the partly-snapped case and any binding Aave cap adapter is the third. |
+| A committed **control** scenario exists whose correct answer is all zeros | `internal/risk/scenarios/stable_depeg_0995_in_band.json`: three OP stables shocked at 995/1000, description "995000 lies STRICTLY INSIDE the snap band (990000, 1010000), so PriceProviderV2 pins it back to exactly 1e6 and nothing moves", `out_of_model` "this scenario is the CONTROL: it must produce zero change on every position" | Beside `stable_depeg_099_boundary` (0.99, band open at `internal/risk/math.go:346-356`, does not snap) drawing a real bar, an undisclosed all-zero row reads as "the book is insensitive to a 0.5 percent depeg" when the truth is "the oracle pins any sub-1-percent depeg to par, so this scenario tests the oracle and not the book". |
+| That control's propagation matrix has **four** rows and **two different snap flags**, and no row carries both | the same file: USDC, USDT and frxUSD carry `stable_snap: true`; liquidUSD carries `base_stable_snap: true` and `base_asset` USDC. `internal/risk/scenario.go:417-418` refuses a row carrying both, on the ground that a config with a `baseAsset` may not be `isStableToken`. `scenario.go:707-726` (`case r.BaseStableSnap:`) assigns `baseSnapped` only and leaves `snapped` at the `false` it was initialized with at `scenario.go:704` | The liquidUSD row is served `snapped: false, base_snapped: true`. Any law of the form "every applied row carries `snapped: true`" is **red on arrival** against the committed file, and any client sentence of the form "K of K snapped" prints "3 of 4" under a header claiming nothing moved. The served counts are `marks_snapped: 3`, `marks_base_snapped: 1`, `len(applied_shocks): 4`, `marks_moved: 0`. That scenario's own `out_of_model` puts liquidUSD at 27.1 percent of book collateral, so the fourth row is on any faithful book. |
+| A committed scenario declares eight shocks and **every one is the identity factor 1/1** | `internal/risk/scenarios/dm_composition_census.json`: 8 shocks, all `factor_num: 1, factor_den: 1`, 9 propagation rows, none carrying `stable_snap` or `base_stable_snap`. Its description calls the 1/1 factors "the disclosed decision to hold each mark", chosen over an invented stress magnitude; its `path_assumption` says "no move is asserted". `internal/risk/scenario.go:744-749` appends an `AppliedShock` for **every** price the matrix describes, whatever the factor; `scenario.go:733-734` gives `after = MulDivFloor(before, 1, 1) == before` | A third structurally-zero class, with a third cause. This scenario serves a **non-empty** `applied_shocks`, `marks_moved: 0`, `marks_snapped: 0`, `marks_base_snapped: 0`, and three zero deltas. "The pricing transform swallowed the move" is false of it: nothing swallowed anything, the definition asked for the hold. A summary that publishes the oracle as the cause publishes a wrong cause beside a true zero, which is the same defect class as a mislabelled movement count. |
+| `Applied` and `HeldFlat` are keyed off the **propagation matrix**, never off the shock list | `internal/risk/scenario.go:682-689`: each price is looked up by `(chain_id, asset)` in `responses`, and every miss goes to `HeldFlat` and never to `Applied`. `Shock.asset` is optional (`api/openapi.yaml:2368`) and every committed ETH-family scenario declares `{axis: eth_usd, factor_num, factor_den}` with **no asset at all**. `scenario.go:485-491` requires only that each shocked **axis** be referenced by some matrix row | "No position in this book holds an asset this scenario names" is not a sentence the code can support: for the ETH family the shock names no asset, and a legal scenario may shock asset X, the book may hold X, and X's mark still lands in `held_flat` because X has no matrix row of its own. The true condition for an empty applied set is "no price input in this scenario's book is described by this scenario's propagation matrix", and the honest pointer beside it is `held_flat`. |
 | That scenario's own text points at the missing field | the same file's `out_of_model`: "eUSD ... is therefore correctly HELD FLAT by this scenario; it appears in the held-flat disclosure rather than the propagation matrix" | The committed configuration already refers a reader to a disclosure. A response that omits it sends the reader nowhere. |
 | A **projection** scenario declares a shock and runs no `ApplyScenario` pass at all | `internal/risk/scenarios/dm_rate_horizon_plus_200bps.json` has one shock and a projection; `cmd/api/p5_runbook.go:462` gates the whole pass on `sc.Projection == nil` and `:489-491` sets `afterInputs = beforeInputs` | Its applied-shock set is empty **for a different reason** than a shock that reached nothing. An empty array with no arm to explain it is a third wrong reading. |
-| A scenario may declare **no** shock | `internal/risk/scenarios/weeth_market_depeg_oracles_held.json`: 0 shocks, 2 market realizations. The pass still runs, vacuously | "No shock reached the book" and "no shock was asked for" are different facts and need different sentences. |
+| A scenario may declare **no** shock, and its applied set is empty only because its **matrix** is empty | `internal/risk/scenarios/weeth_market_depeg_oracles_held.json`: 0 shocks, 0 propagation rows, 2 market realizations. `cmd/api/p5_runbook.go:462` still runs the pass because `sc.Projection == nil`, and `scenario.go:395` admits a scenario with zero shocks and a non-empty matrix | Three facts, three sentences: "no shock was asked for", "a shock was asked for at the identity factor", and "a shock was asked for and no mark the matrix describes is in this book". They are different and none of them is "the oracle swallowed the move". And the empty applied set here is a property of **this file**, not of the zero-shock case: a zero-shock scenario with a non-empty matrix would serve applied rows at factor 1/1, some of them `snapped: true` on a par-marked stable (`scenario.go:727-732`). |
 | Aave debt is **priced**, so it moves under a price shock | `cmd/api/p5_runbook.go:663` sums `h.TotalDebtBase`; `internal/risk/aave.go:182` `rv.DebtBase = MulDivCeil(rv.LiveDebt, p.Value, den)` | An engine's total debt has a before side and an after side, and on Aave they differ. A single `total_debt_usd` is a denominator whose side is unstated. DM's `Borrowings` is `in.DebtUSD` carried through (`internal/risk/dm.go:104`, `165`) and is shock-invariant, which is why a DM-only test cannot see this. |
 | `coverage.excluded` holds **reconstruction failures only** | `cmd/api/handlers.go:690-716`: `refused_in_batch` counts `p.Status == store.RiskPositionRefused`; `excluded_by_this_layer` and `excluded[]` count `p.reconstructionErr != ""` | The two classes are kept strictly apart in the census. |
-| `refusedByEngine` **mixes** those two classes | `cmd/api/p5_runbook.go:424-430` increments for every covered-engine position with `p.input == nil`; `cmd/api/read.go:692-707` skips non-`Computed` rows **without** setting `reconstructionErr` | A batch-refused row has `input == nil` and an empty `reconstructionErr`, so today's `refused_positions` is refused-in-batch plus unrebuildable, under a label that names only the second. The set-run must serve the two separately. |
+| `refusedByEngine` **mixes** two classes, and the number it feeds mixes a **third** | `cmd/api/p5_runbook.go:428` increments for every covered-engine position with `p.input == nil`; `cmd/api/read.go:692-707` skips non-`Computed` rows **without** setting `reconstructionErr`. That count is then folded into **both sides'** histogram at `p5_runbook.go:581-583` (`eb.refused += n; ea.refused += n`), and `m.refused` is **also** incremented at `p5_runbook.go:272` for a **rebuilt** position whose `bucketIndexOf` returns `< 0` | A batch-refused row has `input == nil` and an empty `reconstructionErr`, so `refusedByEngine` is refused-in-batch plus unrebuildable in one integer. `RunBookEngine` has **no** `refused_positions` property at all (`api/openapi.yaml:3936-3942` requires `[engine, usd_decimals, before, after, newly_eligible_accounts, eligible_debt_delta_usd, bad_debt_delta_usd, movers, movers_total, movers_note, market_realization, projection, note]`), so the number the run-book actually publishes is `before.hf_histogram.refused_count`, which is **three** classes: refused-in-batch, unrebuildable, and rebuilt-with-no-comparator. Its served label (`p5_runbook.go:308`) says "`refused_count` is positions carrying no comparator", which names only the third. So the set-run must serve the first two **separately and under their own names**, and must never be reconciled against `refused_count`, which counts a wider population. |
 | The position status vocabulary is closed | `internal/store/risk.go:1563-1568`: `computed`, `refused` | `input == nil` implies refused-in-batch or unrebuildable, with no third case. That is what makes an exact census partition possible. |
 | `measureRunBook` and `Waterfall` **return on the first bad position** | `cmd/api/p5_runbook.go:656-698`; `internal/risk/waterfall.go:226-239` | Measuring the **whole** book, rather than the engines the request actually needs, would let a defective position on an engine no requested scenario covers refuse the whole set. The shared measure must be **union-scoped**, and each after measure must be **scenario-scoped**. |
 | An empty or fully refused book serves an all-zero engine row under a green census | `cmd/api/p5_runbook.go:720` returns before the Waterfall when the book is empty; `p5_runbook.go:570-576` substitutes `newRunMeasure()` when an engine has no measure; `cmd/api/handlers.go:714` sets `StressCoverageIsFull = ExcludedByThisLayer == 0 && len(withheld) == 0`; `cmd/api/read.go:398-406` "Zero POSITIONS stay legal" | A batch whose positions are all refused yields `excluded_by_this_layer: 0`, no withheld engine, `stress_coverage_is_full: true`, `in_book: 0`, and every aggregate `"0"`, including the denominator. An engine with zero measurable accounts must be a **named absence**, never a numeric row. |
@@ -193,7 +204,9 @@ shocks                 Shock[]   exact rationals, as everywhere. What was REQUES
 
 shock_reach            SetRunShockReach   required, never null. What ARRIVED.
                                  Whether the requested shock moved a mark at all,
-                                 and what swallowed it if not. Section 2.5.
+                                 and WHICH of the three causes held it if not:
+                                 the definition's own identity factor, a pricing
+                                 transform, or exact-integer arithmetic. Section 2.5.
 
 covered_engines        string[]  the committed definition's `engines`, echoed
 withheld_engines       string[]  names only. The code and detail for each is in
@@ -247,80 +260,195 @@ shocked number without it is reading it wrong.
 what the model omits. `shock_reach` is arithmetic about what this batch's own
 prices did under this scenario's own factors, and it is different on every batch.
 
-### 2.5 `SetRunShockReach`, and the control that renders as three zero bars
+### 2.5 `SetRunShockReach`, and the three ways a zero delta gets a false cause
 
-This component exists because of a wrong reading this deployment can produce
-today, from a scenario committed today.
+This component exists because of wrong readings this deployment can produce
+today, from scenarios committed today. There are **three** of them, and revision
+2 had an arm for only one.
 
+**Class 1: the oracle swallowed the move.**
 `internal/risk/scenarios/stable_depeg_0995_in_band.json` shocks three OP stables
-by 995/1000. Its `propagation` rows all carry `stable_snap: true`, its
-description says "995000 lies STRICTLY INSIDE the snap band (990000, 1010000), so
-PriceProviderV2 pins it back to exactly 1e6 and nothing moves", and its
-`out_of_model` says "this scenario is the CONTROL: it must produce zero change on
-every position". In a summary that carries only the three deltas it serves
-`eligible_debt_delta_usd: "0"`, `bad_debt_delta_usd: "0"`,
+by 995/1000. Its propagation matrix has **four** rows: USDC, USDT and frxUSD
+carry `stable_snap: true`, and liquidUSD carries `base_stable_snap: true` over a
+USDC base. Its description says "995000 lies STRICTLY INSIDE the snap band
+(990000, 1010000), so PriceProviderV2 pins it back to exactly 1e6 and nothing
+moves", and its `out_of_model` says "this scenario is the CONTROL: it must
+produce zero change on every position". In a summary that carries only the three
+deltas it serves `eligible_debt_delta_usd: "0"`, `bad_debt_delta_usd: "0"`,
 `eligible_accounts_delta: 0`, `market_realization: null`, `projection: null`,
 beside a real `before_eligible_debt_usd` and beside `shocks: [995/1000, ...]`.
+Next to `stable_depeg_099_boundary` (0.99, the band open at
+`internal/risk/math.go:346-356`, so it does **not** snap) drawing a real bar, a
+reader concludes "the book is insensitive to a 0.5 percent depeg". The truth is
+"the oracle pins any sub-1-percent depeg to par, so this scenario tests the
+oracle and not the book". That is section 2.6's own law violated in exactly the
+form it names: not an unknowable rendered as zero, but a known and serious result
+rendered as zero.
 
-Next to `stable_depeg_099_boundary` (0.99, band open, does **not** snap) drawing
-a real bar, a reader concludes "the book is insensitive to a 0.5 percent depeg".
-The truth is "the oracle pins any sub-1-percent depeg to par, so this scenario
-tests the oracle and not the book". That is section 2.6's own law violated in
-exactly the form it names: not an unknowable rendered as zero, but a known and
-serious result rendered as zero.
+The two snap flags on that file are **different flags and both are load-bearing**.
+`scenario.go:417-418` refuses a row carrying both, and `case r.BaseStableSnap:`
+(`scenario.go:707-726`) assigns `baseSnapped` only, leaving `snapped` at the
+`false` of `scenario.go:704`. The liquidUSD row is therefore served
+`snapped: false, base_snapped: true`, and the served counts are
+`marks_snapped: 3`, `marks_base_snapped: 1`, `len(applied_shocks): 4`,
+`marks_moved: 0`. Any law or client sentence written over `snapped` alone is
+wrong on the very file the component exists for, and liquidUSD is 27.1 percent of
+book collateral by that scenario's own `out_of_model`, so the fourth row is not a
+corner case.
 
-Nothing else on this surface can carry the fact. `ScenarioDefinition`
+**Class 2: the scenario declared the identity factor.** This is the class
+revision 2 had no arm for, and it is the reason for revision 3.
+`internal/risk/scenarios/dm_composition_census.json` declares **eight** shocks
+and every one of them is `factor_num: 1, factor_den: 1`. Its own committed
+description says so: every axis it introduces is shocked by the explicit factor
+1/1, "the disclosed decision to hold each mark", adjudicated preferable to an
+invented stress magnitude; its `path_assumption` says "no move is asserted". Its
+nine-row propagation matrix puts one `applied_shocks` row on the wire for every
+price in the book that matrix describes, because `scenario.go:744-749` appends an
+`AppliedShock` for every matched price **whatever the factor**, and
+`after = MulDivFloor(before, 1, 1) == before` on all of them (`scenario.go:733-734`;
+no row in that file carries `stable_snap` or `base_stable_snap`, and DM price
+inputs carry no cap). So it serves a **non-empty** applied set with
+`marks_moved: 0`, `marks_snapped: 0` and `marks_base_snapped: 0`.
+
+Run it through revision 2's six-arm derivation and it landed in `no_mark_moved`,
+whose stated meaning was "the pricing transform swallowed the move, not ...
+the book is insensitive", and whose client cell read "every shocked mark came
+back at the value it started at (K of K snapped)": here, "0 of 9 snapped".
+**Nothing swallowed anything.** The definition asked for the hold, in writing, as
+the recorded alternative to fabricating a magnitude. Publishing the oracle as the
+cause of that zero is a wrong number in the same sense as a movement count under
+the wrong label, and it is worse than silence, because a false cause carries
+authority a bare zero does not. Section 1 already drew this distinction ("no
+shock reached the book" and "no shock was asked for" are different facts) and
+revision 2 implemented only the `declared_shocks == 0` half of it. A shock
+declared **at the identity factor** is a third fact, and it gets a third arm.
+
+**Class 3: the mark was held flat.** A price input the matrix does not describe
+is routed to `HeldFlat` and never to `Applied` (`scenario.go:682-689`). That is
+neither a snap nor a decision about a factor; it is a mark the model does not
+claim. `stable_depeg_0995_in_band`'s own `out_of_model` says eUSD "appears in the
+held-flat disclosure rather than the propagation matrix", so the committed
+configuration already refers a reader to a disclosure this response has to carry.
+
+Nothing else on this surface can carry any of the three. `ScenarioDefinition`
 (`api/openapi.yaml:2494-2497`) does not publish `propagation`, so `stable_snap`
 reaches no client through `GET /v1/scenarios`. `AppliedShock`
-(`api/openapi.yaml:2387-2391`) carries `snapped`, `base_snapped` and `cap_bound`,
-and `cmd/api/p5_runbook.go:471-486` builds those rows per run out of the batch's
-own before and after price values, so they are a property of **this batch under
-this scenario** and are derivable from no listing. The same hole hits
-`stable_depeg_098_unsnapped` (partly snapped legs) and any Aave cap adapter that
-binds.
+(`api/openapi.yaml:2375-2391`) carries `factor_num`, `factor_den`, `before`,
+`after`, `snapped`, `base_snapped` and `cap_bound`, and
+`cmd/api/p5_runbook.go:471-486` builds those rows per run out of the batch's own
+before and after price values, so they are a property of **this batch under this
+scenario** and are derivable from no listing.
 
 ```
 SetRunShockReach:
-  declared_shocks     integer          len(definition.shocks). What was ASKED FOR.
-  reach               enum             six arms, derived in the order below
-  applied_shocks      AppliedShock[]   the existing sealed component, verbatim, over
-                                       THIS scenario's own book. Empty in the first
-                                       three arms.
-  marks_moved         integer          applied_shocks rows whose `before` and `after`
-                                       decimal strings DIFFER. The load-bearing count.
-  marks_snapped       integer          rows with snapped == true
-  marks_base_snapped  integer          rows with base_snapped == true
-  marks_cap_bound     integer          rows with cap_bound == true
-  held_flat_marks     integer          distinct held-flat marks over this scenario's book
-  held_flat_assets    Address[]        the distinct assets behind them, sorted. Addresses
-                                       only; the exact held values are on the
-                                       single-scenario route.
-  note                string           the arm's own sentence
+  declared_shocks                integer   len(definition.shocks). What was ASKED FOR.
+  declared_shocks_at_identity    integer   of those, the ones with factor_num == factor_den:
+                                           the definition's own disclosed decision to hold.
+  reach                          enum      SEVEN arms, derived in the order below
+  applied_shocks                 AppliedShock[]  the existing sealed component, verbatim,
+                                           over THIS scenario's own book
+  marks_moved                    integer   applied_shocks rows whose `before` and `after`
+                                           decimal strings DIFFER. The load-bearing count.
+
+  marks_held_by_declared_factor  integer   held rows with factor_num == factor_den: the MODEL
+                                           asked for no move at this mark
+  marks_held_by_transform        integer   held rows at a NON-identity factor carrying snapped,
+                                           base_snapped or cap_bound: a pricing transform
+                                           swallowed the move
+  marks_held_by_arithmetic       integer   held rows at a non-identity factor carrying none of
+                                           those three: exact-integer arithmetic returned the
+                                           value it started from
+
+  marks_snapped                  integer   rows with snapped == true
+  marks_base_snapped             integer   rows with base_snapped == true
+  marks_cap_bound                integer   rows with cap_bound == true
+  held_flat_marks                integer   distinct held-flat marks over this scenario's book
+  held_flat_assets               Address[] the distinct assets behind them, sorted. Addresses
+                                           only; the exact held values are on the
+                                           single-scenario route.
+  note                           string    the arm's own sentence
 ```
 
+**The three `marks_held_by_*` counts are a partition, and the three flag counts
+are not.** Exactly:
+
+> `marks_moved + marks_held_by_declared_factor + marks_held_by_transform +
+> marks_held_by_arithmetic == len(applied_shocks)`
+
+asserted by Test Law 4(i). `marks_snapped`, `marks_base_snapped` and
+`marks_cap_bound` are a **flag census, never a cause attribution**: they may
+overlap each other, they are nonzero on rows that moved, and they are nonzero on
+rows held at the identity factor. Only the partition attributes a cause.
+
+**The partition's order is specified, not left to the implementer.** A held row
+at the identity factor is counted under `marks_held_by_declared_factor` **even
+when it also carries `snapped: true`**. That state is reachable and is not exotic:
+`case r.StableSnap:` computes `ApplyDMStableSnap(MulDivFloor(before, 1, 1))`
+(`scenario.go:727-732`), so a par-marked stable under a 1/1 factor comes back
+snapped and unmoved. Attributing that hold to the snap would say the oracle
+swallowed a move nobody asked for, which is class 2's defect in miniature.
+
 `reach` is derived by a switch **in this order**, with no default arm, so it is
-total:
+total. Arms 1 to 3 are **definition-level** (true of the scenario at every batch)
+and arms 4 to 7 are **book-level**. The definition-level arms are derived first
+because their facts do not depend on the batch: a reader told "this scenario asks
+for no move" needs to know nothing about the book to know why the bars are zero.
 
 | arm | condition | what it means |
 |---|---|---|
-| `projection_no_spot_pass` | `definition.projection != nil` | No `ApplyScenario` pass ran at all (`p5_runbook.go:462`, `:489-491`): the after side **is** the before side. `dm_rate_horizon_plus_200bps` declares a shock and lands here, so an empty `applied_shocks` here means "no pass", not "the shock reached nothing". |
-| `no_shocks_declared` | `declared_shocks == 0` | The definition asks for no price move. `weeth_market_depeg_oracles_held` lands here; its information is in `market_realization`, which Invariant 9 makes mandatory. |
-| `no_shock_reached_the_book` | the pass ran and `len(applied_shocks) == 0` | Shocks were asked for and no position in this scenario's book holds an asset any of them names. The book, not the oracle, is the reason. |
-| `no_mark_moved` | `len(applied_shocks) > 0` and `marks_moved == 0` | Every shocked mark came back at the value it started at. **The control case.** The three deltas are zero because the pricing transform swallowed the move, not because the book is insensitive. |
-| `some_marks_held` | `0 < marks_moved < len(applied_shocks)` | Partly reached. `stable_depeg_098_unsnapped` and any binding cap adapter land here. A bar drawn from this result is a bar over a partly applied shock, and the counts say how partly. |
-| `every_mark_moved` | `marks_moved == len(applied_shocks) > 0` | The shock reached every mark it touched. An all-zero delta under **this** arm is a real finding about the book, and the note says so. |
+| `projection_no_spot_pass` | `definition.projection != nil` | No `ApplyScenario` pass ran at all (`p5_runbook.go:462`, `:489-491`): the after side **is** the before side. `dm_rate_horizon_plus_200bps` lands here, and it declares **one shock, on the `borrow_apy` axis, at the identity factor 1/1**, so arms 2 and 3 would both otherwise claim it. That is why the order is specified and tested rather than assumed. |
+| `no_shocks_declared` | `declared_shocks == 0` | The definition asks for no price move at all. `weeth_market_depeg_oracles_held` lands here; its information is in `market_realization`, which Invariant 9 makes mandatory. `applied_shocks` is **not** structurally empty in this arm: see the emptiness rule below. |
+| `all_shocks_declared_at_identity` | `declared_shocks > 0` and `declared_shocks_at_identity == declared_shocks` | **NEW in revision 3.** Every shock the definition carries is the explicit factor 1/1: the scenario asks for no move, as a **disclosed decision** rather than as an accident. `dm_composition_census` lands here, with a nine-row matrix and a non-empty applied set. The three deltas are zero by construction and the cause is the **definition**, not the oracle and not the book. The note quotes the scenario's own words for the hold and points at `path_assumption`. |
+| `no_shock_reached_the_book` | the pass ran and `len(applied_shocks) == 0` | **No price input in this scenario's book is described by this scenario's propagation matrix.** That, and not "the book holds none of the assets the shock names", is what the code tests: `ApplyScenario` looks each price up by `(chain_id, asset)` in the matrix and routes every miss to `HeldFlat` (`scenario.go:682-689`). Two reasons the shock-list wording is false. A shock need not name an asset: `Shock.asset` is optional (`api/openapi.yaml:2368`) and every committed ETH-family scenario declares `{axis: eth_usd, ...}` with no asset. And `Validate` requires only that each shocked **axis** be referenced by some matrix row (`scenario.go:485-491`), never that a shocked asset have a row of its own, so a legal scenario can shock asset X, the book can hold X, and X's mark still lands in `held_flat`. The arm's note therefore names `held_flat_marks` and points at `held_flat_assets`, which is where the marks went. |
+| `no_mark_moved` | `len(applied_shocks) > 0` and `marks_moved == 0` | Every mark the matrix described came back at the value it started at, and **at least one declared shock was not the identity factor**, because arm 3 is derived first. The three `marks_held_by_*` counts say which cause, per mark. **The control case:** `stable_depeg_0995_in_band` lands here with `marks_held_by_transform == len(applied_shocks)`. |
+| `some_marks_held` | `0 < marks_moved < len(applied_shocks)` | Partly reached. A bar drawn from this result is a bar over a partly applied shock, and the counts say how partly, and by which cause. **No committed scenario produces this arm** (see the exemplar rule below); it ships against a seeded book. |
+| `every_mark_moved` | `marks_moved == len(applied_shocks) > 0` | The shock reached every mark it touched. `stable_depeg_098_unsnapped`, `stable_depeg_099_boundary` and the ETH family all land here. An all-zero delta under **this** arm is a real finding about the book, and the note says so. |
 
-Four rules that the counts must be read under, stated here because each is a
-place a reader would otherwise invent an implication:
+Six rules the counts must be read under, each one a place a reader would
+otherwise invent an implication:
 
 - **`snapped` does not imply `before == after`.** The snap pins the shocked value
   into the band; if the persisted price was already off par, the pinned value
-  differs from it and the mark moved. `marks_snapped` and `marks_moved` are
-  therefore independent counts and no partition is asserted between them.
-  `marks_moved` alone answers "did a price change".
+  differs from it and the mark **moved**. `marks_snapped` and `marks_moved` are
+  independent counts and no partition is asserted between them. `marks_moved`
+  alone answers "did a price change".
 - **`marks_moved <= len(applied_shocks)`**, and each of `marks_snapped`,
   `marks_base_snapped`, `marks_cap_bound` is also `<= len(applied_shocks)`. Those
-  three may overlap each other and are not summed.
+  three may overlap each other and are never summed. The `marks_held_by_*` three
+  **are** summed, with `marks_moved`, to exactly `len(applied_shocks)`.
+- **`applied_shocks` is empty by construction in exactly two arms, and only those
+  two may be asserted.** Arm 1 is empty because no pass ran (`p5_runbook.go:462`,
+  `:489-491`); arm 4 is empty because that is arm 4's own condition. In arms 2 and
+  3 it may be non-empty, and in arm 3 it normally **is**. Revision 2 asserted
+  "empty in exactly the first three arms". That holds for `no_shocks_declared`
+  today only because the single committed zero-shock scenario,
+  `weeth_market_depeg_oracles_held`, also happens to carry an **empty propagation
+  matrix**, which `Validate` (`scenario.go:395`) does not require. A zero-shock
+  scenario with a non-empty matrix would serve applied rows at factor 1/1, some of
+  them `snapped: true`. That is an accident of the committed set, not a law, and
+  it is not asserted.
+- **`some_marks_held` has no committed exemplar, and the spec says so rather than
+  naming one that produces a different arm.** Revision 2 named
+  `stable_depeg_098_unsnapped` in four places. Nothing in that scenario snaps: its
+  own description says "980000 sits outside the snap band, so PriceProviderV2
+  returns the market value and stable collateral re-prices", and
+  `ApplyDMStableSnap` fires only on 990001..1009999
+  (`internal/risk/math.go:346-356`), so USDC, USDT and frxUSD go 1e6 to 980000
+  unsnapped and liquidUSD's base is `snap(980000) = 980000`, also unsnapped. All
+  four marks move: it is `every_mark_moved`, the same arm as `eth_minus_30`. The
+  three stable-depeg files have byte-identical matrix structure (3 `stable_snap`
+  plus 1 `base_stable_snap`) and differ only in the factor, and only 0.995 snaps
+  anything. The arm's fixture is given in Test Law 18 and it is a **seeded book
+  under a committed scenario**: two DM stables under `stable_depeg_0995_in_band`,
+  one persisted at exactly `1000000` and one persisted off par but inside the
+  band, say `1000500`. The par mark is held (`floor(1000000 x 995/1000) = 995000`,
+  snapped back to `1000000`, equal to `before`) and the off-par mark **moves**
+  (`floor(1000500 x 995/1000) = 995497`, snapped to `1000000`, not equal to
+  `1000500`) while carrying `snapped: true`. One fixture gives
+  `marks_moved: 1`, `len(applied_shocks): 2`, `marks_snapped: 2`,
+  `marks_held_by_transform: 1`, and it exercises the first rule above at the same
+  time.
 - **`applied_shocks` is scoped to this scenario's own book** (covered,
   non-withheld engines, section 3.6), which is the same book its engine rows were
   measured over. When a covered engine is withheld, the set-run's applied set may
@@ -329,20 +457,23 @@ place a reader would otherwise invent an implication:
   (`p5_runbook.go:425-440`). Test Law 2's applied-shock row is conditional on no
   covered engine being withheld, and Test Law 13 asserts the subset relation in
   the withheld fixture.
-- **`held_flat_assets` carries addresses, not values.** The full held-flat rows
-  with their exact marks are 2,287 B on a single body and are the single-scenario
-  route's job. What the set needs is the count and the names, so a reader learns
-  that eUSD was held flat and where to go for its value. Naming an absence with a
-  pointer is disclosure; carrying 34 KB of marks a tornado never plots is not.
+- **`held_flat_assets` carries addresses, not values, and it is complete.** The
+  full held-flat rows with their exact marks are 2,287 B on a single measured body
+  and are the single-scenario route's job. The distinct-address list is roughly
+  720 B of that (section 6.4 does the arithmetic), a saving of about three times
+  rather than the ten this document once claimed. It is **not truncated**: a
+  bounded sample of named absences is a hole with a number beside it, which is the
+  one thing this surface may not serve.
 
 **Why not a `shock_did_not_reach` absence in the `SetRunEngineAbsence` manner.**
 Considered and rejected. Shock reach is a property of the **scenario against the
 batch**, not of an engine's measurability, and the engine rows in the
-`no_mark_moved` arm are real: their `before_*` values are a true measurement of a
-real book and must still be served. Suppressing the row would delete a true
-number to hide a true zero. The honest shape keeps the row and publishes the
-cause beside it, which is what `market_realization` and `projection` already do
-for the other two structurally-zero classes.
+`no_mark_moved` and `all_shocks_declared_at_identity` arms are real: their
+`before_*` values are a true measurement of a real book and must still be served.
+Suppressing the row would delete a true number to hide a true zero. The honest
+shape keeps the row and publishes the cause beside it, which is what
+`market_realization` and `projection` already do for the two structurally-zero
+classes they cover.
 
 ### 2.6 `SetRunEngineSummary`, and why it is not "the three deltas"
 
@@ -464,9 +595,10 @@ Eight design points, each closing a specific wrong reading.
   as three zero-length bars, and a reader would conclude they are harmless. That
   is the "an unknowable never renders as zero" law violated in its most expensive
   form: not an unknowable rendered as zero, but a known and serious result
-  rendered as zero. Section 2.5 is the same argument for the two structurally
-  zero classes those two fields do **not** cover: a shock the oracle swallowed,
-  and a mark held flat.
+  rendered as zero. Section 2.5 is the same argument for the **three**
+  structurally zero classes those two fields do **not** cover: a shock the
+  pricing transform swallowed, a shock the definition declared at the identity
+  factor, and a mark the matrix never described, held flat.
 
 - **`before_collateral_at_risk_usd` and `after_collateral_at_risk_usd` are served
   as two sides, never as a delta.** `WaterfallSeries`'s own doc comment
@@ -475,15 +607,37 @@ Eight design points, each closing a specific wrong reading.
   accounts are worth less. A delta on that axis is not a ranking key and must not
   be offered as one.
 
-- **The two refusal counters are split.** `refusedByEngine`
-  (`cmd/api/p5_runbook.go:424-430`) increments for every covered-engine position
-  with `p.input == nil`, and `reconstructAll` (`cmd/api/read.go:692-707`) skips
-  non-`Computed` rows without setting `reconstructionErr`. A batch-refused row
-  therefore has `input == nil` and no reconstruction error, so today's single
-  `refused_positions` is the two classes added together under a label naming only
-  the second, while `coverage()` keeps them strictly apart as separate cells.
-  Two counters, and Invariant 4 ties their sums to the census so the two
-  attributions cannot drift.
+- **The two refusal counters are split, and neither is the number the run-book
+  publishes today.** `refusedByEngine` (`cmd/api/p5_runbook.go:424-430`)
+  increments for every covered-engine position with `p.input == nil`, and
+  `reconstructAll` (`cmd/api/read.go:692-707`) skips non-`Computed` rows without
+  setting `reconstructionErr`, so a batch-refused row has `input == nil` and no
+  reconstruction error and the two classes arrive as one integer. `coverage()`
+  keeps them strictly apart as separate cells; this summary must too.
+
+  What the single-scenario route actually publishes needs stating precisely,
+  because revision 2 got it wrong in two ways and then contradicted its own Test
+  Law 2. `RunBookEngine` has **no `refused_positions` property at all**: its
+  required set is `[engine, usd_decimals, before, after,
+  newly_eligible_accounts, eligible_debt_delta_usd, bad_debt_delta_usd, movers,
+  movers_total, movers_note, market_realization, projection, note]`
+  (`api/openapi.yaml:3936-3942`). The only `refused_positions` in the contract sit
+  on `Aggregate` (`:1822`), `DegradationEngine` (`:3017`),
+  `ObservatorySeriesPoint` (`:4041`) and `BatchAggregate` (`:4140`), none of them
+  computed by `refusedByEngine`. The conflation lives in
+  **`before.hf_histogram.refused_count`**, into which `p5_runbook.go:581-583`
+  folds `refusedByEngine[engine]` on **both** sides. And that field mixes
+  **three** classes, not two: `m.refused` is also incremented at
+  `p5_runbook.go:272` for a **rebuilt** position whose `bucketIndexOf` returns
+  `< 0`. Its served label (`p5_runbook.go:308`) reads "`refused_count` is
+  positions carrying no comparator", which names the third class and neither of
+  the first two.
+
+  The design conclusion survives untouched and gains a prohibition: two counters,
+  tied by Invariant 4 to the census so the attributions cannot drift, and
+  **never reconciled against `hf_histogram.refused_count`**, which counts a wider
+  population under a label describing a narrower one. Test Law 2 states the
+  non-mapping explicitly.
 
 The per-engine `note` carries **only engine-specific clauses**, and there are
 exactly five: this engine's decimals; its `movement_rule` sentence; the
@@ -890,8 +1044,9 @@ is code-first, status-second:** read the error envelope, switch on
 | **`CONTRADICTORY BOOK`** (existing, applied per result) | the three engine arrays are not a partition of `covered_engines`, or an engine repeats within any of them | R12's rule at result granularity. One result contradicting itself refuses **that result only**: it is a statement about one scenario's answer, not about the set's membership. |
 | **`COVERAGE SKEW`** (new) | a result's served `covered_engines` disagrees with the listing's `engines` for that id **while the identity triple agrees** | A contract violation: the definition changed without its `version` moving. Not silently reconciled in either direction. Row refused, named. Test Law 12 is the server-side law that makes this unreachable in a correct deployment. |
 | **`DEFINITION CHANGED`** (existing) | the identity triple on a result disagrees with the listing | Unchanged. `servedIdentity` reads `scenario_id` and `scenario_version` off the result and `scenario_config_version` off the envelope. |
-| **`SHOCK DID NOT REACH`** (new, per result) | `shock_reach.reach` is `no_mark_moved` or `no_shock_reached_the_book` | **No bar, on any engine of that result.** The cell states which: "every shocked mark came back at the value it started at (K of K snapped)", or "no position in this book holds an asset this scenario names". The `before_*` numbers still render, because they are a true measurement. This is the register that keeps `stable_depeg_0995_in_band` from reading as a flat book. |
-| **`PARTLY REACHED`** (new, per result) | `shock_reach.reach === "some_marks_held"` | Bars draw, and the cell carries `marks_moved` of `applied_shocks.length` with the snapped and cap-bound counts. A bar over a partly applied shock is a real bar with a stated qualification, never an unqualified one. |
+| **`SHOCK DID NOT REACH`** (new, per result) | `shock_reach.reach` is `no_mark_moved` or `no_shock_reached_the_book` | **No bar, on any engine of that result.** The cell states which, and it is **composed from the three `marks_held_by_*` counts, never from a single flag count**. For `no_mark_moved`: "every mark this scenario's matrix describes came back at the value it started at: T of M pinned by the stable snap, a snapped base or a bound cap, D held at the factor this scenario declared, A unchanged by exact-integer arithmetic", printing only the nonzero terms. For `no_shock_reached_the_book`: "no price input in this book is described by this scenario's propagation matrix; H marks were held flat instead, listed in `held_flat_assets`". Revision 2 mandated "(K of K snapped)", which prints "3 of 4 snapped" on `stable_depeg_0995_in_band` (three `snapped`, one `base_snapped`) and "0 of 9 snapped" on `dm_composition_census`. Both are false sentences under a true header. The `before_*` numbers still render, because they are a true measurement. |
+| **`DECLARED HOLD`** (new in revision 3, per result) | `shock_reach.reach === "all_shocks_declared_at_identity"` | **No bar, on any engine of that result**, and the cell must **not** borrow `SHOCK DID NOT REACH`'s sentence. "This scenario declares all N of its shocks at the factor 1/1: it asks for no price move, by decision rather than by accident." The scenario's `path_assumption` is shown beside it, because on `dm_composition_census` that field is the disclosure ("no move is asserted"). The three deltas are zero **by construction** and nothing about the book or the oracle may be inferred from them. `applied_shocks` is normally non-empty in this arm and the cell says so, so a reader does not read the emptiness of a bar as the emptiness of a matrix. |
+| **`PARTLY REACHED`** (new, per result) | `shock_reach.reach === "some_marks_held"` | Bars draw, and the cell carries `marks_moved` of `applied_shocks.length` **plus the cause split of the held remainder** (`marks_held_by_declared_factor`, `marks_held_by_transform`, `marks_held_by_arithmetic`), never the flag counts alone. A bar over a partly applied shock is a real bar with a stated qualification, never an unqualified one. |
 | **`PROJECTION, NO SPOT PASS`** (new, per result) | `shock_reach.reach === "projection_no_spot_pass"` | The three delta bars are never drawn for this row. The `projection` block is the cell. Its declared `shocks` are shown as declared and explicitly not applied. |
 | **`NO DENOMINATOR`** (new, per engine cell) | `total_debt_usd_before === "0"` on an answered engine | No bar. The cell states that the engine's book carries no debt to take a share of. Section 9.4 is the axis law this belongs to. |
 | **Movement-denominator disclosure**, not a cell state | `movement_excluded_accounts > 0` on an answered engine | The movement count renders as "K of M accounts", where M is `accounts - movement_excluded_accounts`, never as "K of `accounts`". On Aave a bare "0 of 46" is the wrong number the excluded population exists to prevent. |
@@ -1134,32 +1289,58 @@ sides, both engines, 19 DM assets each), `movers` 9,896 B, histograms 6,302 B,
 `applied_shocks` 966 B, notes and prose about 2,000 B.
 
 Of that list, exactly one item is a thing a tornado must carry:
-**`applied_shocks`, 966 B**. It is the only wire carrier of `snapped`,
-`base_snapped` and `cap_bound` (section 2.5), and without it a snapped control
-and an insensitive book are the same three zero bars. `held_flat`'s 2,287 B is
-carried as a count plus the distinct asset addresses, roughly 150 to 250 B,
-because what the set needs is that a mark was held and which asset it was, not
-the exact value of every mark. Everything else on the list is drill-down and
-stays on the single-scenario route.
+**`applied_shocks`, 966 B**. It is the only wire carrier of `factor_num`,
+`factor_den`, `before`, `after`, `snapped`, `base_snapped` and `cap_bound`
+(section 2.5), and without it a snapped control, a declared hold and an
+insensitive book are the same three zero bars. Everything else on the list except
+`held_flat` is drill-down and stays on the single-scenario route.
+
+**`held_flat` is carried as a count plus the distinct asset addresses, and that
+costs about 720 B, not the 150 to 250 B an earlier pass claimed.** The
+arithmetic, since the claim is load-bearing for the total below. The contract's
+own captured run-book example serves **3** `held_flat` rows, about 427 B compact,
+so about **142 B per row**; the measured 2,287 B on `eth_minus_30` is therefore
+about **16 rows**. Collapsing 16 rows to an address-only array is about
+`16 x 45 B`, roughly **720 B**. The saving against the full rows is about **three
+times**, not ten, and the list is still carried **complete**: a truncated list of
+named absences is a hole with a number beside it. Revision 2's 150 to 250 B was
+inconsistent with its own measurement, and every figure derived from it was
+understated by roughly the same factor.
 
 **Estimated**, and labelled as such because the shape does not exist yet:
-`SetRunEngineSummary` carries 24 scalars, about 490 B, plus an engine-specific
-note of about 230 B (five clauses, not four), so roughly 720 B per engine row. A
-result adds identity, label, path assumption, shocks, three engine arrays and two
-counts, about 500 B, plus `shock_reach` at about 400 B for a one-axis scenario
-and up to about 1.2 KB for an eight-shock one. A two-engine one-axis result is
-therefore about **2.3 KB** and a one-engine one-axis result about **1.6 KB**.
-Fifteen mixed results plus the envelope (batch 1.3 KB, coverage with a per-engine
-census, and the shared `notes[]`) is about **33 to 42 KB**.
 
-That is up from the 25 to 31 KB an earlier pass estimated, and the increase is
-`shock_reach`. It is the right trade: about 10 KB buys the difference between "a
-0.5 percent depeg does nothing to this book" and "the oracle pinned it back to
-par before it reached this book", which is the D-013 defect this whole document
-exists to refuse.
+```
+SetRunEngineSummary   24 scalars about 490 B + a five-clause engine note about 230 B
+                                                                     about   720 B
+SetRunShockReach      applied_shocks           MEASURED 966 B on eth_minus_30
+                      held_flat_assets         about 720 B (derived above)
+                      13 scalars and the enum  about 280 B
+                      the arm's note           about 220 B
+                                                                     about 2,200 B
+result overhead       identity, label, path_assumption, shocks, three
+                      engine arrays, two counts, note              about 500-700 B
+```
+
+A **two-engine one-axis** result is therefore about **4.2 KB** and a
+**one-engine one-axis** result about **3.5 KB**. An eight-shock DM-only result
+(`dm_composition_census`, a nine-row matrix and correspondingly fewer held-flat
+marks) is about the same as a one-engine one-axis result, near **3.6 KB**:
+`shock_reach` trades applied rows against held-flat addresses rather than adding
+both. Fifteen mixed results plus the envelope (batch 1.3 KB, coverage with a
+per-engine census about 700 B, the shared `notes[]` about 1.5 KB, the echoed ids
+about 400 B) is about **52 to 68 KB**.
+
+That is up from the 33 to 42 KB revision 2 estimated and from the 25 to 31 KB an
+earlier pass estimated, and the whole increase is `shock_reach` correctly priced.
+It is still the right trade: about **33 KB** buys the difference between "a 0.5
+percent depeg does nothing to this book", "the oracle pinned it back to par
+before it reached this book" and "this scenario declared every one of its eight
+shocks at 1/1 and asked for nothing to move", which are three different findings
+that render as the same three zero bars without it. That is the D-013 defect this
+whole document exists to refuse, and it is worth 33 KB.
 
 Against 15 full bodies (about 440 KB, extrapolated from the two measurements) the
-ratio is roughly **10 to 13 times**.
+ratio is roughly **7 to 8 times**, not the 10 to 13 revision 2 claimed.
 
 **Decision: summary only. No `detail: "full"` mode in 1.7.0.** Two response
 shapes on one endpoint means two contract examples to capture, two schema sweeps
@@ -1218,16 +1399,20 @@ checks the captured body must satisfy**, and nothing else.
       "path_assumption":      <string>,
       "shocks":               [<Shock, exact rationals>],
       "shock_reach": {
-        "declared_shocks":     <integer, == len(shocks)>,
-        "reach":               <one of the six arms of section 2.5>,
-        "applied_shocks":      [<AppliedShock>, ...],
-        "marks_moved":         <integer>,
-        "marks_snapped":       <integer>,
-        "marks_base_snapped":  <integer>,
-        "marks_cap_bound":     <integer>,
-        "held_flat_marks":     <integer>,
-        "held_flat_assets":    [<Address>, ...],
-        "note":                <the arm's sentence>
+        "declared_shocks":               <integer, == len(shocks)>,
+        "declared_shocks_at_identity":   <integer, <= declared_shocks>,
+        "reach":                         <one of the SEVEN arms of section 2.5>,
+        "applied_shocks":                [<AppliedShock>, ...],
+        "marks_moved":                   <integer>,
+        "marks_held_by_declared_factor": <integer>,
+        "marks_held_by_transform":       <integer>,
+        "marks_held_by_arithmetic":      <integer>,
+        "marks_snapped":                 <integer>,
+        "marks_base_snapped":            <integer>,
+        "marks_cap_bound":               <integer>,
+        "held_flat_marks":               <integer>,
+        "held_flat_assets":              [<Address>, ...],
+        "note":                          <the arm's sentence>
       },
       "covered_engines":      [<engine>, ...],
       "withheld_engines":     [<engine>, ...],
@@ -1245,10 +1430,14 @@ checks the captured body must satisfy**, and nothing else.
 ```
 
 The captured example's id set must include **at least one scenario whose shock
-does not fully reach**, so the `shock_reach` arms are exercised by the contract's
-own example and not only by a test: `stable_depeg_0995_in_band` beside
-`stable_depeg_099_boundary` is the pair the committed set already provides, and
-they differ by one thousandth in the request and by everything in the answer.
+does not fully reach and at least one whose shocks are all declared at the
+identity factor**, so the arms that publish a cause for a zero are exercised by
+the contract's own example and not only by a test. The committed set already
+provides both: `stable_depeg_0995_in_band` beside `stable_depeg_099_boundary`,
+which differ by one thousandth in the request and by everything in the answer,
+and `dm_composition_census`, whose eight shocks are all 1/1. A captured example
+carrying only scenarios that reach is an example in which the component this
+document exists for is never seen.
 
 The 404 refusal example, whose values **can** be written because they are the
 request's own ids echoed back:
@@ -1299,9 +1488,13 @@ specification of the example:
 4. `scenarios_evaluated == len(results) == len(requested_scenario_ids)`.
 5. The engine partition and the count partitions of Invariants 3 and 4.
 6. `freshness` and `newest_servable_batch_id` agree, per the section 5 table.
-7. Per result, `shock_reach.declared_shocks == len(shocks)`,
-   `shock_reach.reach` is the arm section 2.5's ordered derivation yields for that
-   result's own counts, and `marks_moved <= len(applied_shocks)`.
+7. Per result, `shock_reach.declared_shocks == len(shocks)`;
+   `shock_reach.declared_shocks_at_identity` is the count of `shocks[]` entries
+   with `factor_num == factor_den`; `shock_reach.reach` is the arm section 2.5's
+   ordered derivation yields for that result's own counts; `marks_moved <=
+   len(applied_shocks)`; and the held partition closes exactly:
+   `marks_moved + marks_held_by_declared_factor + marks_held_by_transform +
+   marks_held_by_arithmetic == len(applied_shocks)`.
 
 ---
 
@@ -1371,9 +1564,18 @@ specification of the example:
    the set's applied set is a subset. Test Law 13 covers that case.
 
    `refused_in_batch_positions`, `unrebuildable_positions` and
-   `movement_excluded_accounts` have no single-body counterpart (the single body
-   adds the first two into the histogram's `refused_count` and never publishes the
-   third), so their laws are Test Laws 4 and 16.
+   `movement_excluded_accounts` have **no single-body counterpart at all**, and
+   the test must assert that rather than invent one. `RunBookEngine` carries no
+   `refused_positions` property (`api/openapi.yaml:3936-3942`); the nearest number
+   is `before.hf_histogram.refused_count`, which `p5_runbook.go:581-583` loads
+   with `refusedByEngine` (refused-in-batch **plus** unrebuildable) and
+   `p5_runbook.go:272` also increments for a **rebuilt** position carrying no
+   comparator. It is three classes under a label naming one, so the mapping table
+   above must **not** contain a row for it, and the fixture asserts the inequality
+   `refused_in_batch_positions + unrebuildable_positions <=
+   before.hf_histogram.refused_count` rather than an equality, so a future author
+   cannot mistake the histogram field for the sum. Their positive laws are Test
+   Laws 4 and 16.
 
    No materializer runs in the fixture, so the batch cannot move between calls.
    If slicing the shared before measure ever diverges from a per-scenario
@@ -1429,9 +1631,21 @@ specification of the example:
    snapped mark whose persisted price was off par does move, so an assertion that
    `marks_snapped + marks_moved == len(applied_shocks)` would be a false law that
    passes on today's fixtures.
+   (j) per result, the **cause partition closes exactly**:
+   `marks_moved + marks_held_by_declared_factor + marks_held_by_transform +
+   marks_held_by_arithmetic == len(shock_reach.applied_shocks)`, and
+   `declared_shocks_at_identity <= declared_shocks == len(shocks)`. Assert
+   directly that each held row is attributed to exactly one of the three causes,
+   in the order section 2.5 fixes: seed a par-marked stable under a 1/1 factor,
+   which `scenario.go:727-732` returns `snapped: true` and unmoved, and assert it
+   lands in `marks_held_by_declared_factor` and **not** in
+   `marks_held_by_transform` while still counting in `marks_snapped`. This is the
+   clause that keeps the flag census from being read as a cause.
 
    Clause (g) is the one that keeps the two refusal classes from drifting apart,
-   which revision 1 had no clause for; clause (h) is the movement denominator.
+   which revision 1 had no clause for; clause (h) is the movement denominator;
+   clause (j) is the one that keeps a zero from getting a false cause, which
+   revision 2 had no clause for.
 
 5. **`TestSetRunIsAtomicOnAnUnknownId`.** A set containing one uncommitted id
    answers 404, the body names **every** unknown id, no partial body is served,
@@ -1580,48 +1794,144 @@ specification of the example:
     serves `0 of 46` on this deployment's Aave side and reads as "no health factor
     dropped".
 
-17. **`TestSetRunShockReachDisclosesASnappedControl`.** The finding-1 law, and the
-    one this whole component exists for. Seed a batch carrying DM stable
-    collateral. Run the set `{stable_depeg_0995_in_band,
-    stable_depeg_099_boundary}` in one request. Assert:
+17. **`TestSetRunShockReachDisclosesASnappedControlAndADeclaredHold`.** The law
+    this whole component exists for, in **two** halves, because there are two
+    committed scenarios that render as undisclosed zeros and revision 2 covered
+    one.
+
+    **(A) The snapped control.** Seed a batch carrying DM stable collateral
+    including **liquidUSD at 6 price decimals** (`base_stable_snap` refuses any
+    other decimals at `scenario.go:721-723`, and liquidUSD is the only
+    `base_stable_snap` row in the committed set). Run the set
+    `{stable_depeg_0995_in_band, stable_depeg_099_boundary}` in one request.
+    Assert:
 
     (a) the in-band result serves `reach == "no_mark_moved"`, `marks_moved == 0`,
-    `marks_snapped == len(applied_shocks) > 0`, and every `applied_shocks[]` row
-    carries `snapped: true` with `before == after` as exact strings;
-    (b) the boundary result serves `reach == "every_mark_moved"` with
-    `marks_snapped == 0`, because the band is open at 0.99
-    (`api/openapi.yaml:2389`);
-    (c) the in-band result's engine rows are **present**, with a nonzero
+    and **`marks_snapped + marks_base_snapped == len(applied_shocks) > 0`**, with
+    every `applied_shocks[]` row carrying `snapped || base_snapped` and
+    `before == after` as exact strings. With the four-asset fixture the exact
+    split is asserted too: `marks_snapped == 3` (USDC, USDT, frxUSD),
+    `marks_base_snapped == 1` (liquidUSD), `len(applied_shocks) == 4`. Revision 2
+    asserted `marks_snapped == len(applied_shocks)`, which is **false against the
+    committed file**: `scenario.go:417-418` makes the two flags mutually
+    exclusive and `case r.BaseStableSnap:` (`:707-726`) leaves `snapped` at the
+    `false` of `:704`, so the liquidUSD row is `snapped: false,
+    base_snapped: true`. A law red on arrival gets weakened rather than fixed,
+    which is the failure mode Test Law 9 diagnoses;
+    (b) the in-band result serves `marks_held_by_transform == len(applied_shocks)`
+    with `marks_held_by_declared_factor == 0` and
+    `marks_held_by_arithmetic == 0`, so the published cause is the transform and
+    is checkable as such;
+    (c) the boundary result serves `reach == "every_mark_moved"` with
+    `marks_snapped == 0` **and `marks_base_snapped == 0`**, because the band is
+    open at 0.99 (`internal/risk/math.go:346-356`, `api/openapi.yaml:2389`) and
+    liquidUSD's base is `snap(990000) = 990000`, also unsnapped;
+    (d) the in-band result's engine rows are **present**, with a nonzero
     `before_eligible_debt_usd` and three `"0"` deltas, so no true number was
     suppressed to hide a true zero;
-    (d) the in-band result's `note` and `shock_reach.note` both state that the
-    zero is the oracle's doing and not the book's;
-    (e) the two results are distinguishable **from the body alone**, with no join
+    (e) the in-band result's `note` and `shock_reach.note` both state that the
+    zero is the pricing transform's doing and not the book's, and **name both
+    transforms**, not the stable snap alone;
+    (f) the two results are distinguishable **from the body alone**, with no join
     against `GET /v1/scenarios` and no access to `propagation`, which
     `ScenarioDefinition` does not publish (`api/openapi.yaml:2494-2497`).
 
-    Then the general law, over **every** result of every fixture in this file:
-    **an all-zero engine row must carry a published cause.** If all three of
-    `eligible_debt_delta_usd`, `bad_debt_delta_usd` and `eligible_accounts_delta`
-    are zero on every engine of a result, then at least one of these must hold:
-    `reach` is one of the four non-`every_mark_moved` arms; or
-    `market_realization` is non-null; or `projection` is non-null. A result that
-    serves three zeros under `reach == "every_mark_moved"` with neither block is a
-    genuine finding about the book and is allowed **only** when the fixture
-    asserts it deliberately, with the note saying so. A snapped control can never
-    render as an undisclosed zero.
+    **(B) The declared hold.** Run `dm_composition_census` over a DM book holding
+    the census assets. Assert:
 
-18. **`TestSetRunShockReachArmsAreTotalAndOrdered`.** The six arms, each from a
-    committed scenario or a seeded fixture: `projection_no_spot_pass` from
-    `dm_rate_horizon_plus_200bps` (which declares **one** shock and still lands
-    here, so the ordering is exercised, not assumed);  `no_shocks_declared` from
-    `weeth_market_depeg_oracles_held`; `no_shock_reached_the_book` from a book
-    holding none of a scenario's shocked assets; `no_mark_moved` from
-    `stable_depeg_0995_in_band`; `some_marks_held` from
-    `stable_depeg_098_unsnapped`; `every_mark_moved` from `eth_minus_30`. Assert
-    the derivation is a switch with no default, that `applied_shocks` is empty in
-    exactly the first three arms, and that no arm's note is served under another
-    arm.
+    (g) `declared_shocks == 8` and `declared_shocks_at_identity == 8`, read off
+    the committed file, so the fixture rots loudly if a future edit sizes one of
+    those shocks;
+    (h) `reach == "all_shocks_declared_at_identity"`, **not** `no_mark_moved`;
+    (i) `len(applied_shocks) > 0` (its nine-row matrix describes real book
+    prices), `marks_moved == 0`, `marks_snapped == 0`,
+    `marks_base_snapped == 0`, and
+    `marks_held_by_declared_factor == len(applied_shocks)`;
+    (j) the served note names the **definition** as the cause and contains no
+    claim about the oracle, asserted by substring against both directions: it
+    carries the scenario's own disclosure language for the hold, and it does
+    **not** carry the `no_mark_moved` arm's sentence. This is the designed-mutant
+    kill for the revision-2 defect: an implementation that omits arm 3 serves this
+    scenario under `no_mark_moved` with "the pricing transform swallowed the move"
+    beside `0 of 9 snapped`, and fails here.
+
+    Then the general law, over **every** result of every fixture in this file:
+    **an all-zero engine row must carry a published cause, and the cause must be
+    true.** If all three of `eligible_debt_delta_usd`, `bad_debt_delta_usd` and
+    `eligible_accounts_delta` are zero on every engine of a result, then at least
+    one of these must hold: `reach` is one of the **five** non-`every_mark_moved`
+    arms; or `market_realization` is non-null; or `projection` is non-null. And
+    the cause must be **consistent with the counts**: under `no_mark_moved` the
+    held partition must attribute at least one mark to a transform or to
+    arithmetic and none to a declared factor, and under
+    `all_shocks_declared_at_identity` every held mark must be attributed to the
+    declared factor. Revision 2's general law had only the first clause, which
+    `dm_composition_census` satisfied **vacuously while publishing a false
+    cause**, and that is precisely how the defect survived a law written to catch
+    it. A result that serves three zeros under `reach == "every_mark_moved"` with
+    neither block is a genuine finding about the book and is allowed **only** when
+    the fixture asserts it deliberately, with the note saying so.
+
+18. **`TestSetRunShockReachArmsAreTotalAndOrdered`.** The **seven** arms, each
+    from a committed scenario or a seeded book, and the ordering exercised rather
+    than assumed:
+
+    - `projection_no_spot_pass` from `dm_rate_horizon_plus_200bps`. It declares
+      **one** shock, on the `borrow_apy` axis, at the identity factor **1/1**, so
+      arm 2 does not claim it (`declared_shocks == 1`) but **arm 3 would**. Assert
+      it serves arm 1. This is now a real ordering test rather than a decorative
+      one.
+    - `no_shocks_declared` from `weeth_market_depeg_oracles_held` (0 shocks,
+      0 propagation rows, 2 market realizations).
+    - `all_shocks_declared_at_identity` from `dm_composition_census`, with a
+      **non-empty** `applied_shocks`, which is the point.
+    - `no_shock_reached_the_book` from a book holding **no price the scenario's
+      propagation matrix describes**. The fixture must be built on that condition
+      and not on "the book holds none of the shocked assets": for the ETH family
+      the shocks name no asset at all (`Shock.asset` optional at
+      `api/openapi.yaml:2368`), and `Validate` (`scenario.go:485-491`) never
+      requires a shocked asset to have a matrix row. Assert additionally that a
+      book **holding** a shocked asset that has no matrix row of its own still
+      lands here, with that asset counted in `held_flat_marks` and named in
+      `held_flat_assets`, and that the served note names the matrix and not the
+      shock list.
+    - `no_mark_moved` from `stable_depeg_0995_in_band` over the Test Law 17(A)
+      fixture.
+    - `some_marks_held` from a **seeded book**, because the committed set has no
+      exemplar. Revision 2 named `stable_depeg_098_unsnapped` here and in three
+      other places; that scenario snaps nothing (its own description: "980000 sits
+      outside the snap band, so PriceProviderV2 returns the market value and
+      stable collateral re-prices"; `ApplyDMStableSnap` fires only on
+      990001..1009999, `internal/risk/math.go:346-356`) and all four of its marks
+      move, so it is `every_mark_moved`. The fixture is instead
+      `stable_depeg_0995_in_band` over two DM stables, one persisted at exactly
+      `1000000` and one persisted off par but inside the band at `1000500`. The
+      par mark holds (`floor(1000000 x 995/1000) = 995000`, snapped back to
+      `1000000`, equal to `before`); the off-par mark **moves**
+      (`floor(1000500 x 995/1000) = 995497`, snapped to `1000000`, not equal to
+      `1000500`) while still carrying `snapped: true`. Assert
+      `marks_moved == 1`, `len(applied_shocks) == 2`, `marks_snapped == 2`,
+      `marks_held_by_transform == 1`, and `reach == "some_marks_held"`. The same
+      fixture is the standing proof that `snapped` does not imply
+      `before == after`.
+    - `every_mark_moved` from `eth_minus_30`, and **also** from
+      `stable_depeg_098_unsnapped`, asserted explicitly so the corrected claim is
+      pinned by a test rather than by prose.
+
+    Assert the derivation is a switch with **no default arm**, by the same
+    source-level check Test Law 8 uses. Assert that no arm's note is served under
+    another arm. **Do not assert that `applied_shocks` is empty in "the first
+    three arms".** It is empty **by construction** in arm 1 (no pass ran) and arm
+    4 (that is arm 4's condition), and those two are the only ones asserted. In
+    arm 2 it is empty today only because the single committed zero-shock scenario
+    also carries an empty propagation matrix, which `Validate`
+    (`scenario.go:395`) does not require; assert that accident **as a property of
+    the fixture**, with a comment saying so, and assert positively that a seeded
+    zero-shock scenario with a non-empty matrix serves a **non-empty**
+    `applied_shocks` at factor 1/1 whose held rows are attributed to
+    `marks_held_by_declared_factor` and not to `marks_held_by_transform`, even
+    when `marks_snapped` is nonzero. In arm 3 `applied_shocks` is normally
+    non-empty and the test asserts that direction.
 
 19. **`TestSetRunInFlightBoundRefusesWith503AndNeverLeaksASlot`.** With the bound
     set to 1 and a handler seam holding the first request inside the arithmetic,
@@ -1789,14 +2099,26 @@ answered engine (a real state: an engine whose measurable accounts all carry no
 debt), the cell enters `NO DENOMINATOR` and says so. It does not draw a
 zero-length bar, and it does not divide.
 
-**A shock that did not reach draws no bar.** When
-`shock_reach.reach` is `no_mark_moved` or `no_shock_reached_the_book`, every
-engine of that result enters `SHOCK DID NOT REACH` (section 4.3) and no bar is
-drawn for it, at any length, in any panel. A zero-length bar beside a real one is
-the exact reading `stable_depeg_0995_in_band` would otherwise produce, and the
-axis law is where the renderer is forbidden it. When the arm is
-`some_marks_held`, the bar draws **with** the reach counts in the cell, never
-bare.
+**A shock that did not reach draws no bar, and neither does a shock nobody
+asked for.** When `shock_reach.reach` is `no_mark_moved` or
+`no_shock_reached_the_book`, every engine of that result enters `SHOCK DID NOT
+REACH` (section 4.3) and no bar is drawn for it, at any length, in any panel.
+When it is `all_shocks_declared_at_identity`, the result enters `DECLARED HOLD`
+and likewise draws nothing, under its **own** sentence: a scenario that declared
+every shock at 1/1 has a structurally zero delta and borrowing the swallowed-move
+sentence for it would publish a false cause. A zero-length bar beside a real one
+is the exact reading `stable_depeg_0995_in_band` and `dm_composition_census`
+would otherwise produce, and the axis law is where the renderer is forbidden it.
+When the arm is `some_marks_held`, the bar draws **with** the reach counts and
+the held-cause split in the cell, never bare.
+
+**A reach count is never printed as a cause.** `marks_snapped`,
+`marks_base_snapped` and `marks_cap_bound` may be rendered as a flag census and
+never as an answer to "why is this zero". The only cause figures a cell may print
+are `marks_held_by_declared_factor`, `marks_held_by_transform` and
+`marks_held_by_arithmetic`, and a cell that prints "K of K snapped" is forbidden
+outright: it is false on the four-row control (three `snapped`, one
+`base_snapped`) and false on the identity census (zero of nine).
 
 **A movement count is never printed without its denominator.** `hf_dropped_accounts`
 renders as "K of M", where M is `accounts - movement_excluded_accounts`, never as
@@ -1828,9 +2150,11 @@ R13): the set's batch id; the `evaluation.freshness` clause for the arm in force
 with the newer batch id and a re-run affordance in the `superseded` arm, the older
 batch id and the word OLDER in the `newest_is_older` arm, and a disabled
 affordance with its reason in the `none_servable` arm; the count of bars drawn
-against scenarios requested; the count of scenarios whose shock did not reach; the
-count of engines named absent rather than drawn; and, when non-empty, the
-deep-link ids that were filtered.
+against scenarios requested; the count of scenarios whose shock did not reach
+**and, separately, the count that declared no move**, because collapsing the two
+into one figure is the collapse this revision exists to undo; the count of
+engines named absent rather than drawn; and, when non-empty, the deep-link ids
+that were filtered.
 
 ---
 
@@ -1916,7 +2240,7 @@ deep-link ids that were filtered.
    every money quantity and every price mark is an exact decimal integer string.
 
 9. **AN UNKNOWABLE IS NEVER ZERO, AN ABSENCE IS NEVER ZERO, AND A ZERO ALWAYS
-   CARRIES ITS CAUSE.** Four classes, all four disclosed.
+   CARRIES A CAUSE THAT IS TRUE.** Four classes, all four disclosed.
    (a) A withheld engine contributes no row and no zero; it is named in
    `withheld_engines` and in `excluded_engines`.
    (b) A covered engine with no measurable position contributes no row and no
@@ -1926,17 +2250,32 @@ deep-link ids that were filtered.
    zero because it moves no oracle mark, or because it is a projection, never
    renders as three zero bars.
    (d) **`shock_reach` is present on every result**, so a scenario whose three
-   deltas are zero because the pricing transform swallowed the move (a snapped
-   stable), because a cap adapter bound it, because the mark was held flat, or
-   because no position holds the shocked asset, says which. Its six arms are
-   total and ordered, its `applied_shocks` carry `snapped`, `base_snapped` and
-   `cap_bound` verbatim, and `marks_moved` answers "did a price change" from the
-   body alone, with no join and no access to `propagation`, which
-   `ScenarioDefinition` does not publish.
+   deltas are zero says **which cause**, and the cause it publishes is the true
+   one. Its **seven** arms are total and ordered, three of them definition-level
+   and four book-level; its `applied_shocks` carry `factor_num`, `factor_den`,
+   `before`, `after`, `snapped`, `base_snapped` and `cap_bound` verbatim; and
+   `marks_moved` answers "did a price change" from the body alone, with no join
+   and no access to `propagation`, which `ScenarioDefinition` does not publish.
+
+   The causes are four and they are distinguished on the wire, not in prose: a
+   pricing transform swallowed the move (a snapped stable, a snapped **base**, a
+   bound cap) counts in `marks_held_by_transform`; **the definition declared the
+   identity factor 1/1** counts in `marks_held_by_declared_factor` and, when it
+   is true of every declared shock, takes its own arm
+   `all_shocks_declared_at_identity`; exact-integer arithmetic returned the value
+   it started from counts in `marks_held_by_arithmetic`; and a mark the matrix
+   never described counts in `held_flat_marks` and is named in
+   `held_flat_assets`. Those three counts plus `marks_moved` **partition**
+   `applied_shocks` exactly. `marks_snapped`, `marks_base_snapped` and
+   `marks_cap_bound` are a flag census that may overlap and **never** attribute a
+   cause: a par-marked stable under a 1/1 factor is served `snapped: true` and
+   unmoved (`scenario.go:727-732`), and calling that a swallowed move would blame
+   the oracle for a hold the definition asked for.
+
    An all-zero engine row is legal **only** with a published cause from (c) or
-   (d), or as a deliberately asserted finding about the book under
-   `reach == "every_mark_moved"`. A scenario with no answerable engine returns
-   `engines: []` and still counts in `scenarios_evaluated`.
+   (d) that the counts corroborate, or as a deliberately asserted finding about
+   the book under `reach == "every_mark_moved"`. A scenario with no answerable
+   engine returns `engines: []` and still counts in `scenarios_evaluated`.
 
 10. **EVERY DELTA CARRIES ITS BASE AND ITS DENOMINATOR, AND THE DENOMINATOR NAMES
     ITS SIDE.** `eligible_debt_delta_usd` and `bad_debt_delta_usd` are each
@@ -2062,14 +2401,22 @@ deep-link ids that were filtered.
   `web/lib/proof-contract.gen.ts` must be regenerated.
 
 - **Should `shock_reach` be added to the existing `RunBookResponse` too?** OPEN,
-  and probably unnecessary. That body already carries `applied_shocks` and
-  `held_flat` in full, so a client can compute `marks_moved` itself. What it does
-  not carry is the **arm**: nothing on the single body distinguishes "a projection
-  ran no pass" from "the shock reached nothing", and `web/app/lab` derives neither
-  today. A cheap additive middle ground is `shock_reach` minus its
-  `applied_shocks` array (the counts, the arm and the note), about 200 B on a
-  40 KB body. Recommend a following wave, after the set-run's arms have been
-  exercised against real books.
+  and **less optional than revision 2 judged it**. That body already carries
+  `applied_shocks` and `held_flat` in full, so a client can compute `marks_moved`
+  and, since `AppliedShock` publishes `factor_num` and `factor_den`
+  (`api/openapi.yaml:2375-2391`), the per-mark identity test as well. What it does
+  not carry is the **arm** or the **cause partition**: nothing on the single body
+  distinguishes "a projection ran no pass" from "the shock reached nothing" from
+  "every shock was declared at 1/1", and `web/app/lab` derives none of them today.
+  So `POST /v1/scenarios/{id}/run-book` serves `dm_composition_census` and
+  `stable_depeg_0995_in_band` as three zero-length bars with no published cause
+  **right now**, which is the same D-013 hazard as the unmeasurable-engine zero
+  row in the open question below. A cheap additive middle ground is `shock_reach`
+  minus its `applied_shocks` array and minus `held_flat_assets` (the arm, the
+  counts and the note), about 500 B on a 40 KB body, since both omitted arrays are
+  already on that body in full. Recommend a following wave, after the set-run's
+  arms have been exercised against real books, and record the standing hazard on
+  the existing route rather than leaving it implied.
 
 - **Should the tornado deep link pin the batch?** RECOMMEND NO in 1.7.0, and it
   is a genuine trade. A pinned link reproduces exactly what the sender saw, which
@@ -2082,7 +2429,7 @@ deep-link ids that were filtered.
 
 - **Should the set-run offer `detail: "full"`?** RECOMMEND NO. Measured: 12 full
   bodies are 350,604 bytes, 15 extrapolate to about 440 KB, against an estimated
-  33 to 42 KB for the summary shape, a 10 to 13 times difference for data a
+  52 to 68 KB for the summary shape, a 7 to 8 times difference for data a
   tornado does not plot. Two response shapes on one endpoint means two contract
   examples to capture, two schema sweeps and two sets of test laws, and the
   field's mere existence invites routine 440 KB fetches. Drill-down belongs to the
@@ -2208,19 +2555,35 @@ MEASURED, payload. One full `RunBookResponse` (`eth_minus_30`, both engines) is
 histograms 6,302 B, `held_flat` 2,287 B, `out_of_model` 1,214 B, batch envelope
 1,256 B, `applied_shocks` 966 B, notes and prose about 2,000 B. Of that,
 `applied_shocks` is the one item a tornado must carry, because it is the only wire
-carrier of `snapped`, `base_snapped` and `cap_bound`; `held_flat` is carried as a
-count plus distinct addresses; the rest is drill-down. Twelve full bodies are
+carrier of `factor_num`, `factor_den`, `before`, `after`, `snapped`,
+`base_snapped` and `cap_bound`, which are what separate a swallowed move from a
+declared hold from a real finding; `held_flat` is carried as a count plus
+distinct addresses, priced below; the rest is drill-down. Twelve full bodies are
 350,604 B; fifteen extrapolate to about 440 KB.
+
+DERIVED, the held-flat collapse, because an earlier pass asserted it without
+arithmetic. The contract's own captured run-book example serves 3 `held_flat`
+rows in about 427 B compact, so about 142 B per row; the measured 2,287 B on
+`eth_minus_30` is therefore about 16 rows. An address-only array of 16 distinct
+addresses is about `16 x 45 B`, roughly **720 B**, a saving of about three times
+rather than ten. The list is carried complete, never sampled.
 
 ESTIMATED, and only estimated, because the shape does not exist:
 `SetRunEngineSummary` is 24 scalars plus a five-clause engine note, about 720 B;
-`SetRunShockReach` about 400 B for a one-axis scenario and up to about 1.2 KB for
-an eight-shock one; a two-engine one-axis result about 2.3 KB, a one-engine
-one-axis result about 1.6 KB; fifteen mixed results plus envelope and per-engine
-census about 33 to 42 KB. Ratio to shape B about 10 to 13 times. The increase over
-an earlier 25 to 31 KB estimate is `shock_reach`, and it buys the difference
-between "a 0.5 percent depeg does nothing to this book" and "the oracle pinned it
-back to par before it reached this book".
+`SetRunShockReach` about **2.2 KB** (measured `applied_shocks` 966 B, derived
+`held_flat_assets` about 720 B, 13 scalars and an enum about 280 B, the arm's
+note about 220 B), and about the same for an eight-shock DM-only scenario, which
+trades applied rows against held-flat addresses rather than adding both; a
+two-engine one-axis result about **4.2 KB**, a one-engine one-axis result about
+**3.5 KB**; fifteen mixed results plus envelope and per-engine census about
+**52 to 68 KB**. Ratio to shape B about **7 to 8 times**. Revision 2's 33 to 42 KB
+and 10 to 13 times both rested on the 150 to 250 B held-flat figure its own
+measurement contradicts. The increase over the 25 to 31 KB an earlier pass
+estimated is `shock_reach`, correctly priced at about 33 KB across a
+15-scenario set, and it buys the difference between "a 0.5 percent depeg does
+nothing to this book", "the oracle pinned it back to par before it reached this
+book" and "this scenario declared all eight of its shocks at 1/1 and asked for
+nothing to move".
 
 MEMORY. The shared before measure holds one `states` map and per-asset collateral
 maps for the union book for the life of the request, once rather than N times;
@@ -2259,4 +2622,10 @@ binary built from this tree. The latency and payload measurements stand, since
 they are per-scenario. The before-side invariance observation covers 12 of 15 and
 is corroboration only; the structural argument and Test Laws 2 and 3 are what
 carry that claim. No `shock_reach` figure is measured, because the shape does not
-exist; its `applied_shocks` component is measured, at 966 B on `eth_minus_30`.
+exist; its `applied_shocks` component is measured, at 966 B on `eth_minus_30`,
+and its `held_flat_assets` component is **derived** from two measurements (the
+2,287 B `held_flat` block on `eth_minus_30` and the contract's own 3-row captured
+example at about 142 B per row) rather than measured. Every arm and count in
+section 2.5 is derived from the committed scenario files and from
+`internal/risk/scenario.go`, not from an observed body: the deployed binary
+serves no `shock_reach` and could not have exhibited the identity-factor arm.

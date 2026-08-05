@@ -1,6 +1,6 @@
 # Contract 1.7.0 `hf_transitions`: the server-provided before-to-after transition matrix on the scenario run-book
 
-**Status:** REV2. Pending Codex gate. Read-only research; nothing in this document has been written to the repo outside this file.
+**Status:** REV3. Pending Codex gate. Read-only research; nothing in this document has been written to the repo outside this file.
 **Scope:** `POST /v1/scenarios/{id}/run-book`, `RunBookEngine`. Additive only.
 **Supersedes:** `docs/specs/2026-08-04-draft-runbook-transition-matrix.md`.
 
@@ -14,14 +14,18 @@
 - `cmd/api/p5_runbook_bsplit_db_test.go` (`seedMixedDirectionBatch` `:229`, `TestRunBookMoversTotalIsNotTheNetEligibilityChange` `:252-335`)
 - `cmd/api/contract_sweep_law_test.go`, `cmd/api/p5_runbook_bsplit_test.go`, `cmd/api/p5_runbook_example_db_test.go`, `cmd/api/p5_runbook_evidence_db_test.go`
 - `internal/risk/aave.go`, `internal/risk/dm.go`, `internal/risk/math.go`, `internal/risk/scenario.go`, `internal/risk/types.go`, `internal/risk/scenarios/*.json` (15 files)
-- `internal/store/risk.go` (status vocabulary `:1564-1567`, `riskBatchCompleteConjuncts` `:1583-1631`), `internal/store/migrations/00013_risk_tables.sql`
-- `api/openapi.yaml`, `packages/client-ts/test/readme-sync.test.ts`, `packages/client-ts/src/generated/schema.ts`, `packages/client-ts/src/types.ts`, `web/app/lab/labRunBookLines.ts`, `web/tests/fixtures/`
+- `internal/store/risk.go` (the `const` block `:1563-1568`, whose POSITION status vocabulary is `:1566-1567` and whose `:1564` is the unrelated batch status `RiskBatchComplete`; `riskBatchCompleteConjuncts` `:1583-1631`), `internal/store/migrations/00013_risk_tables.sql`
+- `api/openapi.yaml`, `packages/client-ts/test/readme-sync.test.ts` (`SEALED_FIELD_NAMES` `:130-155`, `HAZARDOUS_NAMES` `:165`, the lint regex `:168` applied at `:316`, `MarginProbeBudget` `:195`, `DeepNullableBooleanKeys` `:226-242`, `DeepSchemaSweep` `:257-259`, the two both-ways constants `:297` and `:300`), `packages/client-ts/src/generated/schema.ts`, `packages/client-ts/src/types.ts`
+- `packages/client-ts/src/client.ts` (`SolventClient` `:233`, `SCENARIO_ID_PATTERN` `:106`, **`runBookScenario` `:559`**), `packages/client-ts/dist/client.d.ts` `:294`
+- `web/app/lab/labRunBookLines.ts`, `web/lib/runbook.ts` (module header preamble), `web/tests/fixtures/`
+
+**Quotation law used in this document.** Where a repo string is quoted in a blockquote below, the source's em-dashes are normalized to commas so this document stays inside the no-em-dash prose rule. Those blockquotes are therefore NOT byte-exact against their sources, and each one says so at the point of use. Every other citation is a line reference, not a transcription.
 
 ---
 
 ## 1. Why the two histograms provably cannot do this
 
-The run-book already carries `before.hf_histogram` and `after.hf_histogram` per engine, plus a `movers` list capped at 20. The web layer already states, in its own code, that the flow question is unanswerable from that pair. From `web/app/lab/labRunBookLines.ts`, `histogramShiftReadingLine`:
+The run-book already carries `before.hf_histogram` and `after.hf_histogram` per engine, plus a `movers` list capped at 20. The web layer already states, in its own code, that the flow question is unanswerable from that pair. From `web/app/lab/labRunBookLines.ts`, `histogramShiftReadingLine`'s docblock, joining `:49-52` and `:56-58`, with the source's em-dash after "POPULATIONS" (`:50`) normalized to a comma per the quotation law above:
 
 > "The only quantity derivable here is `belowOne(after) − belowOne(before)`, and that is a difference of two POPULATIONS, not a count of accounts that crossed. An account that fell below 1.00 and another that rose above it cancel exactly, and this response carries nothing that would reveal either. The honest options were: serve the gross count (the API does not), compute it here (impossible from two histograms), or DISCLOSE the limitation."
 
@@ -348,7 +352,7 @@ Lane 9's `kind` is `unmeasured` and its label is `"not measured"`. The 1.6.0 his
 
 ### 2.2 What lane 9 actually holds, and where the reader finds those rows
 
-Lane 9's population is exactly the rows that reached no arithmetic. That is `p.input == nil` on an engine the scenario covers (`cmd/api/p5_runbook.go:424-431`), folded onto BOTH sides' refused tally by the existing handler (`eb.refused += n; ea.refused += n`, `:581-584`), because a shock does not make a row rebuildable.
+Lane 9's population is exactly the rows that reached no arithmetic. That is `p.input == nil` on an engine the scenario covers (the branch is `cmd/api/p5_runbook.go:426-431`, inside the loop opened at `:425`, whose `refusedByEngine` map is declared at `:424`), folded onto BOTH sides' refused tally by the existing handler (`eb.refused += n; ea.refused += n`, `:581-584`), because a shock does not make a row rebuildable.
 
 That population has TWO upstream causes, and they land in two DIFFERENT places on the coverage block. `reconstructAll` never attempts a row whose `Status != store.RiskPositionComputed` (`cmd/api/read.go:692-707`), so a non-computed row always reaches the handler with `reconstructionErr == ""`, and a row with a non-empty `reconstructionErr` is always `computed`. The two causes are therefore disjoint today, and each has its own coverage surface:
 
@@ -357,7 +361,7 @@ That population has TWO upstream causes, and they land in two DIFFERENT places o
 | riskd refused the row | `p.Status == store.RiskPositionRefused` (`cmd/api/handlers.go:701`) | `coverage.refused_in_batch` (a book-wide COUNT; no per-row list on this response) |
 | this layer could not rebuild or could not verify it | `p.reconstructionErr != ""` (`cmd/api/handlers.go:704`) | `coverage.excluded_by_this_layer` and the per-row `coverage.excluded[]` array |
 
-**The first predicate is a POSITIVE test on one token, not a negation.** This matters and it is easy to get wrong: `p.Status != store.RiskPositionComputed` and `p.Status == store.RiskPositionRefused` coincide only because the Go vocabulary is closed to those two tokens (`internal/store/risk.go:1564-1567`), and `risk_positions.status` carries NO CHECK constraint in the schema. Migration 00013 documents the vocabulary in a comment only:
+**The first predicate is a POSITIVE test on one token, not a negation.** This matters and it is easy to get wrong: `p.Status != store.RiskPositionComputed` and `p.Status == store.RiskPositionRefused` coincide only because the Go POSITION vocabulary is closed to those two tokens, `RiskPositionComputed` and `RiskPositionRefused` at `internal/store/risk.go:1566-1567` (the same `const` block opens at `:1563` with `RiskBatchComplete`, which is a BATCH status and not part of this vocabulary), and `risk_positions.status` carries NO CHECK constraint in the schema. Migration 00013 documents the vocabulary in a comment only:
 
 ```sql
     -- 'computed' | 'refused'
@@ -375,7 +379,7 @@ The wire therefore SPLITS the count rather than paraphrasing it: `unmeasured_ref
 **There is no second population in lane 9, and the code proves it.** The draft claimed lane 9 also held "measured rows carrying no comparator on that side". No such row is constructible through `measureRunBook`:
 
 - Aave. `ComputeAaveHealth` initializes `IsInfinite: true` (`internal/risk/aave.go:83`) and sets `out.HealthFactorWad = hf` and `out.IsInfinite = false` in the same block, guarded by `AaveHealthFactorWad`'s `ok` (`internal/risk/aave.go:239-247`), and that function returns `ok=false` exactly when `totalDebtBase <= 0` (`internal/risk/math.go:275-278`). So `HealthFactorWad == nil` if and only if `IsInfinite`, and `runMeasure.bucket` tests `st.infinite` first (`cmd/api/p5_runbook.go:266-269`).
-- Debt Manager. `ComputeDMHealth` initializes `IsInfinite: true` (`internal/risk/dm.go:80`) and sets `HealthFactor` with `IsInfinite = false` only when `borrowings.Sign() > 0` (`internal/risk/dm.go:171-179`), and `NewRational` refuses a non-positive denominator (`internal/risk/types.go:289-296`). `measureRunBook` copies `st.hfNum, st.hfDen` only `if !h.IsInfinite` (`cmd/api/p5_runbook.go:707-709`), so `hfDen > 0` whenever it is non-nil.
+- Debt Manager. `ComputeDMHealth` initializes `IsInfinite: true` (`internal/risk/dm.go:80`) and sets `HealthFactor` with `IsInfinite = false` only when `borrowings.Sign() > 0` (`internal/risk/dm.go:171-178`), and `NewRational` refuses a non-positive denominator (`internal/risk/types.go:289-296`). `measureRunBook` copies `st.hfNum, st.hfDen` only `if !h.IsInfinite` (`cmd/api/p5_runbook.go:707-709`), so `hfDen > 0` whenever it is non-nil.
 
 `bucketIndexOf` returns −1 only for a nil `hfWad` on Aave or a nil/non-positive `hfDen` on the Debt Manager (`cmd/api/handlers.go:548-581`). Neither is reachable from this walk. `runMeasure.refused` is therefore structurally 0 from the walk, and `hf_histogram.refused_count` is 100% the unmeasured fold.
 
@@ -505,7 +509,9 @@ func (m *runMeasure) place(engine string, st *runAccountState) error {
 
 ### 4.3 The unmeasured rows, split by cause with a POSITIVE test on each cause
 
-`refusedByEngine map[string]int` (`cmd/api/p5_runbook.go:424`) becomes a per-engine record. The handler loop already holds the `positionRow`, and it already has both facts:
+`refusedByEngine map[string]int` (`cmd/api/p5_runbook.go:424`) becomes a per-engine record. The handler loop already holds the `positionRow`, and it already has both facts.
+
+**This code sits INSIDE `handleRunBook`, which returns nothing.** `handleRunBook` is `func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request)` (`cmd/api/p5_runbook.go:386`), so a refusal here cannot be a `return fmt.Errorf(...)`. It takes the same form every other refusal on this path takes, `writeError(...)` followed by a bare `return`, modeled exactly on the existing "applying scenario ... refused a verified position" arm (`cmd/api/p5_runbook.go:468-470`). The `fmt.Errorf` form appears in this spec only inside helpers that DO return an error: `measureRunBook` (§4.2, §4.6) and `runBookTransitions` (§4.4, §4.5).
 
 ```go
 type runUnmeasured struct {
@@ -514,38 +520,82 @@ type runUnmeasured struct {
 	excludedByThisLayer int // this layer could not rebuild: listed in coverage.excluded
 }
 
-// In handleRunBook's position loop (cmd/api/p5_runbook.go:425-431), replacing
-// refusedByEngine[p.Engine]++ :
+// Declared where refusedByEngine is today (cmd/api/p5_runbook.go:424), and it
+// REPLACES that map. unmeasuredFor is the get-or-create over it; there is no
+// other writer.
+unmeasuredByEngine := map[string]*runUnmeasured{}
+unmeasuredFor := func(engine string) *runUnmeasured {
+	u := unmeasuredByEngine[engine]
+	if u == nil {
+		u = &runUnmeasured{}
+		unmeasuredByEngine[engine] = u
+	}
+	return u
+}
+
+// In handleRunBook's position loop (the loop opens at cmd/api/p5_runbook.go:425
+// and this branch is :426-431), replacing refusedByEngine[p.Engine]++ :
 if p.input == nil {
 	if covers(sc.Engines, p.Engine) {
+		acct := common.BytesToAddress(p.Account)
+		cause, err := classifyUnmeasured(p.Engine, acct, p.Status, p.reconstructionErr)
+		if err != nil {
+			// THE HANDLER'S OWN REFUSAL FORM: write and return. There is no
+			// error to return from here.
+			writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+			return
+		}
 		u := unmeasuredFor(p.Engine)
-		u.accounts = append(u.accounts, common.BytesToAddress(p.Account))
-		// EACH ARM IS THE POSITIVE PREDICATE OF THE COVERAGE COUNTER IT POINTS AT,
-		// not the negation of the other one. coverage() increments RefusedInBatch on
-		// `p.Status == store.RiskPositionRefused` (handlers.go:701) and
-		// ExcludedByThisLayer on `p.reconstructionErr != ""` (handlers.go:704).
-		// risk_positions.status has NO CHECK constraint (migration 00013:271-272
-		// documents the vocabulary in a comment only), so a third token must not
-		// be silently swept into either count.
-		switch {
-		case p.Status == store.RiskPositionRefused && p.reconstructionErr == "":
+		u.accounts = append(u.accounts, acct)
+		if cause == unmeasuredRefusedInBatch {
 			u.refusedInBatch++
-		case p.Status == store.RiskPositionComputed && p.reconstructionErr != "":
+		} else {
 			u.excludedByThisLayer++
-		default:
-			return fmt.Errorf("run-book: %s account %s reached no arithmetic with status %q "+
-				"and reconstruction error %q; it is in neither coverage.refused_in_batch nor "+
-				"coverage.excluded, so no per-engine count on this response could name a "+
-				"surface that actually holds it",
-				p.Engine, common.BytesToAddress(p.Account).Hex(), p.Status,
-				sanitize(p.reconstructionErr))
 		}
 	}
+	// The ordinary skip for a row that reached no arithmetic. The refusal
+	// above has already left the handler, so this is reached only on the two
+	// live causes and on a row whose engine this scenario does not cover.
 	continue
 }
 ```
 
+**The classification is a PURE function, deliberately, so §7.2 can assert all three of its arms with no database.** The handler holds the `http.ResponseWriter`; the predicate does not need it.
+
+```go
+type unmeasuredCause int
+
+const (
+	unmeasuredRefusedInBatch unmeasuredCause = iota + 1
+	unmeasuredExcludedByThisLayer
+)
+
+// EACH LIVE ARM IS THE POSITIVE PREDICATE OF THE COVERAGE COUNTER IT POINTS AT,
+// not the negation of the other one. coverage() increments RefusedInBatch on
+// `p.Status == store.RiskPositionRefused` (handlers.go:701) and
+// ExcludedByThisLayer on `p.reconstructionErr != ""` (handlers.go:704).
+// risk_positions.status has NO CHECK constraint (migration 00013:271-272
+// documents the vocabulary in a comment only), so a third token must not be
+// silently swept into either count.
+func classifyUnmeasured(engine string, account common.Address, status, reconstructionErr string) (unmeasuredCause, error) {
+	switch {
+	case status == store.RiskPositionRefused && reconstructionErr == "":
+		return unmeasuredRefusedInBatch, nil
+	case status == store.RiskPositionComputed && reconstructionErr != "":
+		return unmeasuredExcludedByThisLayer, nil
+	default:
+		return 0, fmt.Errorf("run-book: %s account %s reached no arithmetic with status %q "+
+			"and reconstruction error %q; it is in neither coverage.refused_in_batch nor "+
+			"coverage.excluded, so no per-engine count on this response could name a "+
+			"surface that actually holds it",
+			engine, account.Hex(), sanitize(status), sanitize(reconstructionErr))
+	}
+}
+```
+
 The two live arms are exhaustive over today's data and the reason is checkable: `reconstructAll` sets `reconstructionErr` only on rows it attempted, and it attempts only `Status == computed` rows (`cmd/api/read.go:692-707`). The `default` arm is what makes the served pointer honest if that ever stops being true, and it fires as a named 500 rather than a wrong count.
+
+Two shape points, because an earlier revision got both wrong. First, the refusal in the LOOP is `writeError(...)` plus a bare `return`, never `return fmt.Errorf(...)`: `handleRunBook` returns nothing, so the `fmt.Errorf` form would not compile there. Second, the two exits sit at different depths on purpose. The refusal leaves the handler outright; the `continue` at the bottom of the branch is the ordinary skip.
 
 The existing both-sides fold (`cmd/api/p5_runbook.go:581-584`) keeps its exact semantics and gains the paired lane entries:
 
@@ -582,7 +632,17 @@ func runBookTransitions(engine string, before, after *runMeasure, dec uint8) (wi
 }
 ```
 
-A refusal here is a defect in this layer, not a property of the data, so it is a 500 with a named reason, exactly like the existing "applying scenario ... refused a verified position" path (`cmd/api/p5_runbook.go:468-470`). It never degrades to a matrix with wrong margins.
+A refusal here is a defect in this layer, not a property of the data, so it is a 500 with a named reason. `runBookTransitions` and `measureRunBook` are helpers that RETURN an error, which is why `fmt.Errorf` is correct inside them; the handler that calls them converts it in the one form `handleRunBook` has, the same one the existing "applying scenario ... refused a verified position" arm uses (`cmd/api/p5_runbook.go:468-470`):
+
+```go
+tr, err := runBookTransitions(engine, mb, ma, dec)
+if err != nil {
+	writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
+	return
+}
+```
+
+It never degrades to a matrix with wrong margins.
 
 ### 4.5 The one-row-one-account check, over EVERY row the matrix places
 
@@ -761,7 +821,7 @@ The draft would have served `held_rows: N, lane_changed_rows: 0` here, which an 
 
 **debt_manager**: `outflows[0]` gets `{to: 0, rows: 1, ...}` (3200/4200 = 0.762 before, 2880/4200 = 0.686 after, both `< 0.90`), plus the unmeasured diagonal. `measured_rows` 1, `held_rows` 1, `lane_changed_rows` 0. The finding the existing test already pins ("the DM distribution does NOT move") becomes explicit as `lane_changed_rows: 0` rather than an inference from two identical histograms.
 
-**The mixed-direction book: three offsetting moves and the debt asymmetry, in one committed body.** From `seedMixedDirectionBatch` plus `eth_minus_30` (§1.1), with all four positions in the book and none refused, so `coverage` reads `batch_positions: 4, in_book: 4, refused_in_batch: 0, excluded_by_this_layer: 0` (pinned at `cmd/api/p5_runbook_bsplit_db_test.go:269-274`).
+**The mixed-direction book: three offsetting moves and the debt asymmetry, in one committed body.** From `seedMixedDirectionBatch` plus `eth_minus_30` (§1.1), with all four positions in the book and none refused, so `coverage` reads `batch_positions: 4, in_book: 4, refused_in_batch: 0, excluded_by_this_layer: 0`. Three of those four are PINNED by the existing test, `batch_positions` and `in_book` and `excluded_by_this_layer` at `cmd/api/p5_runbook_bsplit_db_test.go:270-272` (with `before.accounts` and `after.accounts` at `:273-274`). **`refused_in_batch` is asserted nowhere in that test**; its value of 0 follows from the fixture, where all four positions are written `RiskPositionComputed`, and this spec claims it as derived rather than as pinned. §7.3's end-to-end test is where it becomes pinned.
 
 Aave, `usd_decimals` 8. `from_rows: [1,0,0,1,1,0,0,0,0,0]`, `to_rows: [2,0,0,1,0,0,0,0,0,0]`, `total_rows` 3, `measured_rows` 3, `unmeasured_rows` 0, `held_rows` 0, `lane_changed_rows` 3.
 
@@ -809,24 +869,26 @@ Per-element estimates (JSON, no whitespace):
 
 | element | bytes | note |
 |---|---|---|
-| one cell | 87 to 110 | `{"to":9,"rows":123456,"debt_before_usd":"…","debt_after_usd":"…"}`: 87 with 12-digit debts, ~110 at 21 digits. The draft's cell was ~139 B; dropping the per-cell unmeasured counter (§2.2) removed ~25 B. |
+| one cell | 87 to 105 | `{"to":9,"rows":123456,"debt_before_usd":"600000000000","debt_after_usd":"600000000000"}` is exactly 87 B: a 6-digit `rows` and two 12-digit debts. Widening both debts to 21 digits adds 9 B each, so 105 B, and only a `rows` past 6 digits goes higher. The draft's cell was ~139 B; dropping the per-cell unmeasured counter (§2.2) removed ~25 B. |
 | one lane | 85 to 115 | 85 for a non-bucket lane with both wads null, 115 for a bucket with both edges. No per-lane note. |
 | one empty outflow stub | 21 | `{"from":4,"cells":[]}`. The earlier shape's `{"from":4,"from_rows":0,"cells":[]}` was 35 B; moving the row margin out to a dense array saves 14 B on each of ten stubs and costs 33 B once. |
 | `from_rows` | ~33 | `"from_rows":` plus ten integers |
 | `to_rows` | ~31 | same, shorter key |
 | `comparator` + `wad_scale` | ~63 | |
 | the seven scalars | ~204 | including the two long `unmeasured_*_rows` names |
-| the note | ~1,250 | eleven claims, §4.7 |
+| the note | **2,907** | MEASURED, not estimated: the eleven required claims of §4.7 as written, whitespace normalized, are 345 + 301 + 108 + 145 + 473 + 339 + 319 + 134 + 78 + 162 + 503 characters. `TestRunBookExampleIsAServedBody` means the served string must actually carry them, so this is the note's real size and not a budget for it. |
 
-Fixed cost per engine: lanes ~1.05 KB, ten outflow stubs ~0.21 KB, the two margins ~0.06 KB, comparator and scale ~0.06 KB, scalars ~0.20 KB, note ~1.25 KB, total ~2.83 KB, plus 87 to 110 B per occupied cell.
+An earlier revision of this table carried ~1,250 B here, which was 2.3x low, and every total below it moved. The corrected figures:
+
+Fixed cost per engine: lanes ~1.05 KB, ten outflow stubs ~0.21 KB, the two margins ~0.06 KB, comparator and scale ~0.06 KB, scalars ~0.20 KB (1.58 KB for all of that), plus the note at 2.91 KB, so **~4.49 KB**, plus 87 to 105 B per occupied cell. All KB in this section are 1,000 bytes, and the baseline body is the measured 20,862-byte fixture.
 
 | shape | bytes added per engine | body total | delta |
 |---|---|---|---|
-| contract example, 2 occupied cells per engine | ~3.00 KB | ~26.9 KB | +29% |
-| realistic shocked book, 10 to 25 occupied cells | ~3.9 to 5.6 KB | ~28.7 to 32.1 KB | +38% to +54% |
-| dense cells, all 100 occupied (rejected) | ~13.8 KB | ~48.5 KB | +133% |
+| contract example, 2 occupied cells per engine | ~4.66 KB | ~30.2 KB | +45% |
+| realistic shocked book, 10 to 25 occupied cells | ~5.36 to 7.12 KB | ~31.6 to 35.1 KB | +51% to +68% |
+| dense cells, all 100 occupied (rejected) | ~13.2 to 15.0 KB | ~47.2 to 50.9 KB | +126% to +144% |
 
-The dense row is the entire argument for sparse cells. The note is now the single largest fixed element, and it is the correct place to spend the bytes: every claim in it is a claim the response would otherwise invite a reader to get wrong.
+The dense row is still the entire argument for sparse cells, and the correction does not move that conclusion: dense cells add ~7.8 KB per engine on top of the realistic sparse case, which remains the largest single lever in the table. What the correction does change is the honest headline, from "+29% on the contract example" to "+45%", and the note is now unambiguously the single largest fixed element at 65% of the per-engine fixed cost. That is still the correct place to spend the bytes, because every claim in it is a claim the response would otherwise invite a reader to get wrong, but the price is named at its real size rather than at half of it.
 
 **Compute.** One slice append per position per side, inside walks that already compute the health factor, the bucket index and the debt. One O(P) zip per engine, carrying the distinctness map of §4.5. One O(occupied cells) emit, with no sort (outflows emit in lane order by index, cells ascending by `to` by index). No second walk of the book, no second `risk.Waterfall` evaluation, no additional database read. `handleRunBook` today already performs two full `measureRunBook` walks and two whole-book `risk.Waterfall` evaluations at the identity grid point (`cmd/api/p5_runbook.go:449`, `:492`, `:723`); this addition is well under 1% of that.
 
@@ -842,7 +904,7 @@ A zero-extra-memory variant exists (store `lane int` on `runAccountState` and zi
 
 ### 7.1 The headline: marginal agreement, enforced in Go
 
-`TestRunBookTransitionsAgreeWithBothMarginals` (`cmd/api/p5_runbook_transition_test.go`). Over the SAME `wire()` outputs the response carries, not a re-derivation, for both engines:
+`TestRunBookTransitionsAgreeWithBothMarginals` (`cmd/api/p5_runbook_transition_test.go`, **no DB**: table-driven over `runMeasure` pairs constructed in memory, including the §5.1 and §5.3 shapes, with no seed and no fixture). Over the SAME `wire()` outputs the response carries, not a re-derivation, for both engines:
 
 ```
 for i in 0..laneCount-1:
@@ -858,6 +920,8 @@ where tally(k) = histogram.buckets[k].count for k < N
 
 ### 7.2 The rest of the Go unit laws (`cmd/api/p5_runbook_transition_test.go`, no DB)
 
+**The file split is a repo convention and this section obeys it literally.** `cmd/api` splits every suite into a pure half and a database half by filename, exactly as `p5_runbook_bsplit_test.go` sits beside `p5_runbook_bsplit_db_test.go`. Every `apiFixture` construction skips the whole test when `TEST_DATABASE_URL` is unset (`cmd/api/fixture_db_test.go:53`), so a fixture-driven test placed in the no-DB file does not fail there, it SILENTLY SKIPS, which is worse. `seedMixedDirectionBatch` is a database seed: it is `func (f *apiFixture) seedMixedDirectionBatch` at `cmd/api/p5_runbook_bsplit_db_test.go:229`, and it calls `f.seedAaveUSDCParams` and `f.store.WriteRiskBatch`. So **no test in this table touches `seedMixedDirectionBatch`, `newP5Fixture`, `newRunBookExampleFixture` or any other seed.** The three laws that need that book, including the wave's headline anti-regression, are in §7.3 where they will actually run. Every test below constructs its `runMeasure` pairs and lane slices in memory, or exercises the pure library directly.
+
 | test | claim | mutation killed |
 |---|---|---|
 | `TestRunBookTransitionLanesAreTheHistogramsOwnBuckets` | `lanes[0..N-1]` byte-identical (`label`, `lower_wad`, `upper_wad`) to the served `hf_histogram.buckets`, in order; `lanes[N].kind == "infinite"`; `lanes[N+1].kind == "unmeasured"`; `len(lanes) == len(histogramEdges)+2 == len(outflows) == len(from_rows) == len(to_rows)` | a second edge table; an edge that moves in one place only |
@@ -865,15 +929,12 @@ where tally(k) = histogram.buckets[k].count for k < N
 | `TestRunBookTransitionNamesNoFieldItDoesNotCount` | over the generated schema: every property of `RunBookTransitions`, `RunBookTransitionOutflow` and `RunBookTransitionCell` whose name ends in `rows` is an integer or an array of integers, and no property holding objects has a name ending in `rows` | the `rows`-array-versus-`rows`-count collision returning under a new name |
 | **`TestRunBookTransitionHoldsNoOpinionWhenNothingWasMeasured`** | an engine whose whole covered book is unmeasured serves `measured_rows: 0` with `held_rows` and `lane_changed_rows` BOTH null, and the note carries the "measured no row" sentence | serving `held_rows: N, lane_changed_rows: 0` over a book nobody measured, which is the draft's defect and the exact shape `labRunBookLines.ts` already refuses |
 | `TestRunBookTransitionMovementPartitionsTheMeasured` | when `measured_rows > 0`: `held_rows + lane_changed_rows + unmeasured_rows == total_rows`, and `held_rows` counts only cells with `from == to` over lanes 0..N | counting the (N+1,N+1) cell as "held" |
-| **`TestRunBookTransitionUnmeasuredSplitUsesTheCoverageCountersOwnPredicates`** | the two split counts sum to `unmeasured_rows`, and each is computed by the POSITIVE predicate of the coverage counter it names: `p.Status == store.RiskPositionRefused` for `unmeasured_refused_in_batch_rows` (matching `handlers.go:701`) and `p.reconstructionErr != ""` for `unmeasured_excluded_by_this_layer_rows` (matching `handlers.go:704`). A row satisfying neither is a named error, asserted directly on a synthetic row carrying a third status token | using `p.Status != computed` as a stand-in for `== refused`, which silently absorbs any status the schema's missing CHECK constraint permits, and then points the reader at a coverage count that does not hold the row |
+| **`TestRunBookTransitionUnmeasuredSplitUsesTheCoverageCountersOwnPredicates`** | the two split counts sum to `unmeasured_rows`, and each is computed by the POSITIVE predicate of the coverage counter it names: `p.Status == store.RiskPositionRefused` for `unmeasured_refused_in_batch_rows` (matching `handlers.go:701`) and `p.reconstructionErr != ""` for `unmeasured_excluded_by_this_layer_rows` (matching `handlers.go:704`). A row satisfying neither is a named error. Table-driven directly over the pure `classifyUnmeasured` of §4.3, including a synthetic third status token, so no database is needed to cover all three arms | using `p.Status != computed` as a stand-in for `== refused`, which silently absorbs any status the schema's missing CHECK constraint permits, and then points the reader at a coverage count that does not hold the row |
 | **`TestRunBookTransitionLaneNPlusOneHoldsOnlyUnmeasuredRows`** | `from_rows[N+1] == to_rows[N+1] == unmeasured_rows`, the outflow's only cell is `(N+1, N+1)`, and that cell's two debts are null; no other cell carries a null debt | reusing lane N+1 for a measured row and hiding its debt behind a null |
 | **`TestMeasuredStatesAlwaysCarryAComparator`** | over `ComputeAaveHealth`: `HealthFactorWad != nil` if and only if `!IsInfinite`; over `ComputeDMHealth`: `HealthFactor.Den` is positive if and only if `!IsInfinite`. Table-driven over zero-debt, positive-debt and boundary inputs | the assumption in §2.2 silently ceasing to hold; this is the replacement for the draft's unfailable mixed-cell test |
 | `TestRunBookMeasureRefusesAMeasuredRowItCannotBucket` | `place()` returns the named error rather than incrementing `m.refused` | folding an impossible state into the unmeasured lane |
 | `TestRunBookTransitionInfiniteLaneDebtIsAKnowableZero` | cell `(N, N)` carries `"0"` on both sides, never null | collapsing knowable-zero and unknowable into one representation |
-| `TestRunBookTransitionDebtReconcilesPerSide` | Σ non-null `debt_before_usd` (big.Int over decimal strings) equals `before.total_debt_usd`; Σ non-null `debt_after_usd` equals `after.total_debt_usd`, on both engines of the contract example | a float anywhere; a cell debt taken from the wrong side; a lane-derived debt |
-| **`TestRunBookTransitionDebtIsSummedPerSideNotPerLane`** | run over `seedMixedDirectionBatch` + `eth_minus_30`, where the two Aave totals genuinely DIFFER (`"1640000000000"` against `"1400000000000"`): the (0→3) cell carries `debt_before_usd: "800000000000"` and `debt_after_usd: "560000000000"`, the two other cells carry equal pairs, and both column sums reconcile. Asserts the pair is unequal, so a mutation collapsing the two figures fails rather than passing vacuously | serving one debt figure per cell, or copying one side's figure into both; also kills a test written on a fixture where the two are equal and could never fail |
-| **`TestRunBookTransitionSeparatesOffsettingMoves`** | over `seedMixedDirectionBatch`: the below-1.00 marginal delta is +1 while `lane_changed_rows == 3` and all three off-diagonal cells are present | **the wave's reason for existing.** Any "matrix" reconstructed from the two histograms fails it |
-| **`TestRunBookTransitionLaneChangeIsNotTheMoverCount`** | on the same fixture, `lane_changed_rows == 3`, `movers_total == 2`, `newly_eligible_accounts == 1`, all three on one engine row, and the note contains the disambiguating sentence | serving a lane-crossing count under a name or a description that reads as the mover count |
+| `TestRunBookTransitionDebtReconcilesPerSide` | over IN-MEMORY `runMeasure` pairs carrying hand-written per-row debts, including one pair whose two sides differ: Σ non-null `debt_before_usd` (big.Int over decimal strings) equals the before-side sum and Σ non-null `debt_after_usd` equals the after-side sum, and the two sums are asserted UNEQUAL on that pair so the law cannot pass vacuously. The reconciliation against the SERVED `before.total_debt_usd` and `after.total_debt_usd` is §7.3's, because those aggregates come from a seeded book | a float anywhere; a cell debt taken from the wrong side; a lane-derived debt; a single debt figure copied into both |
 | `TestRunBookTransitionRefusesAMisPairedZip` | unequal lane-slice lengths, or an account mismatch at an index, produce an error (500 with a named reason), never a matrix with wrong margins | a future refactor that filters one side and serves a plausible-looking wrong joint |
 | `TestRunBookTransitionRefusesTwoRowsForOneAccount` | a duplicate account anywhere in the BEFORE lane slice is a named 500, asserted separately for a duplicate among MEASURED entries and for a duplicate between a measured entry and an UNMEASURED one | inheriting `risk_positions`'s primary key as an unstated assumption, and checking only the measured half of the population the note's sentence covers |
 | `TestRunBookMeasureRefusesAnEngineItHasNoArmFor` | a `PositionInput` on a third engine produces the named error instead of being skipped | a covered engine silently in zero cells while every margin still reconciles |
@@ -881,9 +942,18 @@ where tally(k) = histogram.buckets[k].count for k < N
 
 ### 7.3 DB-backed (`cmd/api/p5_runbook_transition_db_test.go`)
 
+Everything here needs a seeded book, so everything here is in the `_db_test` file, per the convention §7.2 states. Three of these laws were misfiled in the no-DB table in an earlier revision, where they would have skipped silently whenever `TEST_DATABASE_URL` was unset (`cmd/api/fixture_db_test.go:53`), taking the wave's stated reason for existing with them.
+
 `TestRunBookServesTheTransitionMatrix`, `newP5Fixture` plus `eth_minus_10`, through the real handler and the real contract validator (`f.postJSON(..., runBookContractPath, 200)`): the Aave crossing appears at `outflows[3].cells[to=1].rows == 1`; the unmeasured row sits at `(9,9)` with two nulls; `unmeasured_refused_in_batch_rows == 1` and `unmeasured_excluded_by_this_layer_rows == 0` on both engines (both fixtures are `Status: refused`); both margins equal the two served histograms field for field; `lane_changed_rows == 1` on Aave and `0` on the Debt Manager.
 
-`TestRunBookTransitionSeparatesOffsettingMovesEndToEnd`, `seedMixedDirectionBatch` plus `eth_minus_30`, through the real handler: the three off-diagonal cells, the three different counts, and the (0→3) cell's two unequal debt strings (§5.3).
+**`TestRunBookTransitionSeparatesOffsettingMoves`** (this is **the wave's reason for existing**, and there is exactly ONE of it: an earlier revision listed both this name in the no-DB table and a `TestRunBookTransitionSeparatesOffsettingMovesEndToEnd` twin here, which was one test written twice). `seedMixedDirectionBatch` plus `eth_minus_30`, through the real handler. It asserts, in one body over one seeded book:
+
+1. **The offsetting moves.** The below-1.00 marginal delta is +1 while `lane_changed_rows == 3`, and all three off-diagonal cells `(4→0)`, `(3→0)` and `(0→3)` are present. Any "matrix" reconstructed from the two histograms fails this.
+2. **Debt is summed per side, not per lane.** The two Aave totals genuinely DIFFER on this book (`"1640000000000"` against `"1400000000000"`): the `(0→3)` cell carries `debt_before_usd: "800000000000"` and `debt_after_usd: "560000000000"`, the two other cells carry equal pairs, and both column sums reconcile against the engine's served `before.total_debt_usd` and `after.total_debt_usd`. The unequal pair is asserted as unequal, so a mutation collapsing the two figures fails rather than passing vacuously. This is the only place in the suite where the two-figure design can be falsified, which is why it must not sit in a file that can skip.
+3. **A lane change is not a mover.** `lane_changed_rows == 3`, `movers_total == 2`, `newly_eligible_accounts == 1`, all three read off one engine row of one response, and the note carries the disambiguating sentence (§4.7 claim 7).
+4. **`coverage` on this book.** `batch_positions: 4, in_book: 4, refused_in_batch: 0, excluded_by_this_layer: 0`. This is where `refused_in_batch: 0` becomes pinned; `cmd/api/p5_runbook_bsplit_db_test.go` asserts the other three and not that one (§5.3).
+
+Mutations killed: serving one debt figure per cell or copying one side's into both; a two-debt test written on a fixture where the two are equal and could never fail; serving a lane-crossing count under a name or description that reads as the mover count.
 
 **The two withheld-engine tests, and why there must be two.** `coverage.in_book` differs from `Σ_engines total_rows` for two reasons that push in opposite directions (§5.4, reasons 2 and 3), so a single fixture can show either a difference or a coincidence, and the committed withheld fixture happens to show the coincidence. Both are pinned:
 
@@ -942,15 +1012,17 @@ The consequence is worth stating plainly rather than leaving implicit: because t
 
 ### 9.2 Two 1.6.0 descriptions that this wave must correct
 
-The draft inherited a false claim from the contract itself. `RunBookHistogram.refused_count`'s description reads:
+The draft inherited a false claim from the contract itself. `RunBookHistogram.refused_count`'s description (`api/openapi.yaml:3807-3814`) opens:
 
 > "Positions on this engine carrying no comparator on this side, including the rows this layer could not rebuild (which are also in `coverage.excluded`)."
 
+That is the description's first sentence, quoted with only the YAML block scalar's line wrapping folded; it carries no em-dash and is otherwise byte-exact.
+
 Both halves are wrong, per §2.2: no measured row carries no comparator, and the rows in question are predominantly riskd refusals, which are in `coverage.refused_in_batch` and NOT in `coverage.excluded`. On the contract's own committed example the sentence points at an empty array.
 
-The served note has the same defect. `runMeasure.wire` composes (`cmd/api/p5_runbook.go:306-309`):
+The served note has the same defect. `runMeasure.wire` composes (`cmd/api/p5_runbook.go:306-309`), quoted here with the source's em-dash at `:308` normalized to a comma per the quotation law in the header, so this blockquote is NOT byte-exact against the served bytes:
 
-> "`infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator, both are counted here rather than dropped..."
+> "`infinite_count` is accounts with no debt and `refused_count` is positions carrying no comparator, both are counted here rather than dropped, so the buckets plus these two account for the whole run."
 
 Two corrections, and they are different kinds of change:
 
@@ -963,7 +1035,7 @@ Both land in this wave. Leaving them would put the lane-9 vocabulary in direct c
 
 ### 9.3 A hazard the client-ts seal cannot see, and why the obvious fix does not compile
 
-`packages/client-ts/test/readme-sync.test.ts` holds `SEALED_FIELD_NAMES` to a compile-time sweep over every field whose type is exactly `boolean | null` at any depth (`DeepNullableBooleanKeys`, `:226-241`; `DeepSchemaSweep`, `:257-259`), and it holds the two BOTH WAYS at module scope:
+`packages/client-ts/test/readme-sync.test.ts` holds `SEALED_FIELD_NAMES` to a compile-time sweep over every field whose type is exactly `boolean | null` at any depth (`DeepNullableBooleanKeys`, `:226-242`; `DeepSchemaSweep`, `:257-259`), and it holds the two BOTH WAYS at module scope:
 
 ```ts
 const everySealedFieldIsListed:  [SealedClassFieldName] extends [ListedFieldName] ? true : "…" = true;  // :297
@@ -974,11 +1046,37 @@ const everyListedFieldIsSealed:  [ListedFieldName] extends [SealedClassFieldName
 
 **The obvious fix is wrong and must not be attempted.** Widening `DeepNullableBooleanKeys`'s leaf test to `number | null` and adding only the two new names to `SEALED_FIELD_NAMES` breaks `npm run verify` at typecheck, immediately. `packages/client-ts/src/generated/schema.ts` already carries **26 distinct `number | null` field names**: `accounts`, `age_seconds`, `amount_decimals`, `anchor_block`, `block_number`, `collateral_index_block`, `covered_from_block`, `current_acked_epoch`, `current_batch_id`, `current_last_block`, `current_max_epoch`, `debt_decimals`, `debt_index_block`, `decimals`, `eligible_positions`, `from_block`, `highest_quarantined_block`, `insolvent_positions`, `liquidatable_positions`, `observed_max_gap_seconds`, `since_block`, `step`, `step_seconds`, `tested_budget_seconds`, `to_block`, `total_positions`. The `everySealedFieldIsListed` direction fails on all 26 at once.
 
-Sealing all 26 is worse, for two reasons the earlier draft did not consider. `HAZARDOUS_NAMES` is `[...SEALED_FIELD_NAMES, ...HEURISTIC_CHAIN_NAMES]` and is compiled directly into the docs-lint regex (`:165-168`), so sealing the whole set would put `liquidatable_positions` into the README's hazard vocabulary, and would put `age_seconds` and `decimals` there too. Those last two are legitimately-falsy quantities: a zero age and a zero decimal count are ordinary values, and `!x` on them is not the hazard the vocabulary describes. Overloading one regex with two different hazard classes makes both weaker.
+Sealing all 26 is worse, and the reason must be stated accurately because an earlier revision of this section overstated it. `HAZARDOUS_NAMES` is `[...SEALED_FIELD_NAMES, ...HEURISTIC_CHAIN_NAMES]` (`:165`) and is compiled directly into the docs-lint regex, `new RegExp(HAZARDOUS_NAMES.join("|"), "iu")` (`:168`), matched UNANCHORED as `suspect.test(chain)` (`:316`).
+
+**`liquidatable_positions` is NOT a new harm: it is already matched today.** `liquidatable` is already a member of `SEALED_FIELD_NAMES` (`:135`), and the match is a substring test, so `!x.liquidatable_positions` is already flagged by today's lint. Adding the longer name as its own alternative changes the regex's behavior on that string not at all. That half of the earlier justification was a harm that has already happened, which is exactly the class of unchecked knock-on claim this document refuses to inherit, so it is withdrawn rather than reworded.
+
+**The surviving reason is `age_seconds` and `decimals`, and it is sufficient.** Neither matches any alternative in today's vocabulary (checked against the twelve members: `found`, `liquidatable`, `used_as_collateral`, `becomes_liquidatable`, `deficit_paired`, `became_eligible`, `liquidation_verdict`, `collateral_use`, `result`, `lookup`, `verdict`, `outcome`), so sealing the whole set genuinely does drag them in for the first time. They are legitimately-falsy quantities: a zero age and a zero decimal count are ordinary values, and `!x` on them is not the withheld-statement hazard the vocabulary describes. Overloading one regex with two different hazard classes makes both weaker, and one new false-positive class is enough to reject the widening on its own.
 
 **The recommendation is a SECOND, PARALLEL law rather than a widened one.** Separate the INVENTORY (closed by the compiler, over the whole class) from the HAZARD VOCABULARY (curated, feeding the regex):
 
-1. Add `DeepNullableNumberKeys` beside `DeepNullableBooleanKeys`, identical recursion, leaf test `[Required<T>[K]] extends [number | null]`, and a `DeepSchemaNumberSweep<Budget>` beside `DeepSchemaSweep`.
+1. Add `DeepNullableNumberKeys` beside `DeepNullableBooleanKeys`, identical recursion, and a `DeepSchemaNumberSweep<Budget>` beside `DeepSchemaSweep`.
+
+   **THE LEAF TEST IS TWO PARTS AND THE SECOND PART IS NOT OPTIONAL.** `DeepNullableBooleanKeys`'s leaf (`packages/client-ts/test/readme-sync.test.ts:234-238`) is not a single `extends`; it is a widening test followed by a null-membership guard:
+
+   ```ts
+   [Required<T>[K]] extends [boolean | null]
+     ? [null] extends [Required<T>[K]]   // :235, THE GUARD
+       ? K
+       : never
+     : never
+   ```
+
+   The inner `[null] extends [Required<T>[K]]` is the entire reason that sweep selects `boolean | null` and NOT plain `boolean`: a plain `boolean` satisfies `boolean extends boolean | null`, so the outer test alone matches it. The new sweep carries the guard verbatim, one type over:
+
+   ```ts
+   [Required<T>[K]] extends [number | null]
+     ? [null] extends [Required<T>[K]]   // THE SAME GUARD, and it is load-bearing
+       ? K
+       : never
+     : never
+   ```
+
+   Dropping it is not a style difference. `src/generated/schema.ts` carries **94 distinct field names declared somewhere as plain `number`** (`accounts`, `acked_epoch`, `advisory_rows`, `algorithm_revision`, `batch_positions`, `count`, `in_book`, `infinite_count`, `movers_total`, `position_count`, `refused_count`, `rows`, `usd_decimals`, `value_decimals` and the rest); **85 of them appear nowhere as `number | null`**, the other 9 being names the two lists share (`accounts`, `age_seconds`, `block_number`, `decimals`, `from_block`, `liquidatable_positions`, `since_block`, `step`, `to_block`, each plain on one schema and nullable on another). So a guardless leaf makes the sweep yield an inventory of 111 names, `NULLABLE_COUNT_FIELD_NAMES` at 28 fails its `everySealedFieldIsListed` direction against it, and `npm run verify` dies at typecheck. That is the exact failure this section exists to forbid, reproduced by its own remedy, so the guard is written out here rather than left to "identical recursion".
 2. Add `export const NULLABLE_COUNT_FIELD_NAMES` listing all 28 names (the 26 above plus `held_rows` and `lane_changed_rows`), held BOTH WAYS against the new sweep exactly as `SEALED_FIELD_NAMES` is. Any future `number | null` field then fails compilation until it is named and considered.
 3. Add `export const HAZARDOUS_COUNT_NAMES = ["held_rows", "lane_changed_rows"] as const` and fold it into `HAZARDOUS_NAMES` alongside `SEALED_FIELD_NAMES` and `HEURISTIC_CHAIN_NAMES`. Only these two reach the docs-lint regex, because only these two carry the withheld-statement hazard.
 4. Reuse `SweepBudget` and the `SweepBudgetExhausted` poison value unchanged; the new sweep must be probed on `MarginProbeBudget` too, or the budget assertion covers only half the class.
@@ -995,15 +1093,15 @@ The alternative, documenting the pair in README prose only, leaves the next such
 
 1. `npm run gen` to regenerate `src/generated/schema.ts`; commit (enforced by `drift.test.ts`).
 2. `src/types.ts`: add `RunBookTransitions`, `RunBookTransitionLane`, `RunBookTransitionOutflow`, `RunBookTransitionCell` aliases to the "Book-wide scenario run" section; add the `TRANSITION_LANE_KINDS` closed enum plus the `satisfies Record<>` weld; bump `CONTRACT_VERSION` to `"1.7.0"`.
-3. No new client METHOD. `runBookScenario` does not exist on `SolventClient` yet; `web/lib/runbook.ts` is the documented stand-in.
-4. `test/readme-sync.test.ts`: per §9.3, add the parallel `number | null` sweep and its both-ways `NULLABLE_COUNT_FIELD_NAMES` law (28 names), and add `HAZARDOUS_COUNT_NAMES` with the two new fields only. Do NOT widen the existing boolean sweep. Note the separate coercion hazard for consumers: `Number(cell.debt_before_usd)` coerces `null` to `0`, and a null cell debt means THIS RUN MEASURED NOTHING and must never be coerced.
+3. **`src/client.ts`: `SolventClient.runBookScenario` ALREADY EXISTS and IS on this checklist.** It is `async runBookScenario(id: string, signal?: AbortSignal): Promise<RunBookResponse>` at `packages/client-ts/src/client.ts:559`, inside `export class SolventClient` (`:233`), refusing an off-pattern id locally against `SCENARIO_ID_PATTERN` (`:106`, used at `:560`) before any request is sent, and it is published at `packages/client-ts/dist/client.d.ts:294`. An earlier revision of this section claimed the method did not exist, propagating the stale header comment in `web/lib/runbook.ts` instead of checking the symbol; the claim is deleted, not softened, because it excluded from the weld the one typed entry point through which `hf_transitions` reaches every consumer of this package. What actually changes: **no new method and no signature change**, because `RunBookResponse` widens through the regenerated schema and every existing call site keeps compiling; and **the method's contract docblock (`:553-558`) must gain the `hf_transitions` sentence**, since it enumerates what the route serves and would otherwise describe a 1.6.0 body while returning a 1.7.0 one.
+4. `test/readme-sync.test.ts`: per §9.3, add the parallel `number | null` sweep and its both-ways `NULLABLE_COUNT_FIELD_NAMES` law (28 names), and add `HAZARDOUS_COUNT_NAMES` with the two new fields only. Do NOT widen the existing boolean sweep. **The new sweep's leaf test must carry the `[null] extends [Required<T>[K]]` guard** copied from `:235`; without it the sweep selects all 94 plain-`number` names and typecheck fails on arrival (§9.3 step 1). Note the separate coercion hazard for consumers: `Number(cell.debt_before_usd)` coerces `null` to `0`, and a null cell debt means THIS RUN MEASURED NOTHING and must never be coerced.
 5. `test/fixtures.test.ts`: no fixture change. The committed client fixtures cover address, book, stress, observatory and meta, and carry no run-book body.
 
 **`web/`**
 
 6. `web/lib/proof-contract.gen.ts` is GENERATED by `tests/fixtures/generate-proof.mjs`; regenerate rather than hand-edit. Three things move: `CONTRACT_META.version` to `"1.7.0"`, the run-book operation `description` (the new ADDED-1.7.0 paragraph plus the §9.2 correction), and its `example` (now carrying `hf_transitions`).
 7. **Regenerate the run-book fixture family.** `web/tests/fixtures/generate.mjs` extracts the contract's 200 example verbatim into `run-book.weeth_market_depeg_oracles_held.json`, and `generate-lab-book.mjs` derives the rest (including `run-book.weeth-withheld.json`, hand-derived at `:6528`). That is 14 files, 253,028 bytes today. The §9.2 note correction touches all of them independently of `hf_transitions`.
-8. `web/lib/runbook.ts` needs no change: `RunBookEngine` is `components["schemas"]["RunBookEngine"]` and `LabRunBookEngine` overrides only `projection`, so `hf_transitions` flows through untouched.
+8. `web/lib/runbook.ts`: **the TYPES need no change, the PREAMBLE does.** `RunBookEngine` is `components["schemas"]["RunBookEngine"]` and `LabRunBookEngine` overrides only `projection`, so `hf_transitions` flows through untouched. But this module's header comment is now false in two places: it says the run-book route's "client method lands LATER" and it closes "Replace with `client.runBookScenario()` when the client grows it." The client HAS grown it (item 3, `client.ts:559`). Leaving a stale "until then" preamble standing beside a shipped method is the same defect class this wave exists to remove, one file over, and it is what an earlier revision of this spec read and believed instead of the code. Correcting the comment costs zero served bytes and belongs in this wave. Whether to retire the stand-in module itself is a separate decision, ledgered in §12.
 9. New component. **Do not name it `LabMatrix`**: `web/app/lab/LabMatrix.tsx` is the scenario-by-engine matrix (Wave W-SD-A) and the collision would be a real one. Use `LabRunBookTransition.tsx` with a pure decision layer in `labTransition.ts` (the `matrixCells.ts` split). Structural requirements only, since another wave owns the copy strings: it consumes `engine.hf_transitions`; ribbon and cell weight is `rows`, with debt as the annotation; a null cell debt renders in the refusal register (the `styles.unpricedTag` named-absence pattern `LabRunBookDetail.tsx` already uses) and never as `$0`; a null `held_rows` or `lane_changed_rows` renders as "this run measured no row on this engine" and never as 0; one count scale within one engine's matrix; no cross-engine aggregate anywhere; the wire's `note` renders verbatim; the Debt Manager comparator gets no crit tint, matching the existing `eligibleTint = comparator === "hf_wad"` asymmetry.
 10. `web/app/lab/labRunBookLines.ts`: `histogramShiftReadingLine`'s NET disclosure must be RETIRED, not reworded. Its central claim ("compute it here (impossible from two histograms)") becomes false the moment this ships, and a stale impossibility caveat beside a served gross count is itself a D-013 defect. The derivation changes from `belowOne(after) − belowOne(before)` (a difference of populations) to a sum over cells whose `to` is a below-one lane and whose `from` is not (a gross crossing count), with the Debt Manager comparator still labeled a disclosure. Two constraints on the rewrite: the sentence must keep `measuredCount`'s exclusion of the unmeasured tail (it is now `measured_rows` on the wire, so the client should read the server's number rather than recompute it), and it must not describe `lane_changed_rows` as a 1.00-crossing count, because it is not one.
 11. Backward compatibility: a 1.6.0-generated validator with `additionalProperties: false` will reject a 1.7.0 body. That is inherent to this contract's style and was equally true at 1.6.0; readers that merely index fields are unaffected. Worth one line in the release note.
@@ -1049,7 +1147,8 @@ The alternative, documenting the pair in README prose only, leaves the next such
 - **SHOULD `lane_changed_rows` BE NAMED SOMETHING ELSE AGAIN?** The name deliberately does not contain "moved", "crossed" or "movers". Alternatives considered: `bucket_changed_rows` (accurate but wrong once the lane vocabulary exceeds the buckets) and `edge_crossings` (implies a particular edge, and breaks the `*_rows` naming law of §2.0). RECOMMENDATION: keep `lane_changed_rows` and rely on the note's claim 7 for the three disambiguations, since no single name distinguishes it from `movers_total` on its own.
 - **SHOULD A PROJECTION OR MARKET-REALIZATION SCENARIO CARRY A MATRIX AT ALL?** Both are exactly diagonal by construction. RECOMMENDATION: serve it, and say only "this scenario moved no row between lanes". Making the field conditional would turn its absence into an ambiguous signal. Do NOT describe the diagonal as corroborating `hfs_unchanged`; §3 gives the reason.
 - **SHOULD THE MIS-PAIRED ZIP, THE DUPLICATE-ACCOUNT CHECK, THE UNCLASSIFIABLE UNMEASURED ROW AND THE MISSING ENGINE ARM 500 OR DEGRADE?** RECOMMENDATION: 500 with a named reason in all four cases, matching the existing "applying scenario ... refused a verified position" path. Inputs here are reconstruction-verified and the two sides are index-aligned by construction, so each is a defect in the serve layer or a violation of a database constraint rather than a property of the data, and a matrix with wrong margins (or a count pointing at a coverage surface that does not hold its rows) is exactly the artifact this wave exists to make unconstructible.
+- **SHOULD `web/lib/runbook.ts` BE RETIRED IN FAVOR OF `client.runBookScenario()`?** The stand-in exists because the route's client method was expected to land later; it landed (`packages/client-ts/src/client.ts:559`). The module still does two things the method does not: it seals the outcome into a union so a deployment 404 renders as "not yet served" rather than as an error, and it refines projections through `refineProjection` before any component sees them. RECOMMENDATION: out of scope for this wave, and correct the false preamble now (§10 item 8). Retiring the module is a `web/` refactor with its own test surface and no bearing on `hf_transitions`, which flows through either path unchanged; doing it here would couple a contract wave to a client-layer migration. Worth a follow-up that re-homes the outcome union on top of the real method rather than beside it.
 - **CLIENT-SIDE MARGIN VALIDATION IN `web/`: should the Lab refuse to render a matrix whose margins disagree with the served histograms?** RECOMMENDATION: yes, following the `matrixCells.ts` precedent ("nothing is classified before it is validated", the CONTRADICTORY BOOK state). The body can arrive from an older or a broken deployment, and rendering a Sankey whose ribbons do not sum to the bars printed beside them is a wrong answer to an honest user.
 - **DOES THE §9.2 SERVED-NOTE CORRECTION BELONG IN THIS WAVE?** RECOMMENDATION: yes. It changes served bytes and forces a re-capture plus a 14-file fixture regeneration, which is real cost, but the alternative is shipping a lane labeled "not measured" whose margin is a field the same body's contract calls "positions carrying no comparator". Two names for one population in one document, one of them false, is a new D-013 defect created by this wave, and deferring the fix is what would create it.
-- **SHOULD `risk_positions.status` GAIN A CHECK CONSTRAINT?** The Go vocabulary is closed to `{computed, refused}` (`internal/store/risk.go:1564-1567`) but the column is bare `TEXT NOT NULL` with the vocabulary in a comment (migration 00013:271-272). §4.3's fail-closed default makes the serving layer honest without it. RECOMMENDATION: out of scope for this wave, because a CHECK constraint is a migration and this wave adds none, and worth a follow-up: the constraint would make §4.3's default arm provably dead rather than merely unreached.
+- **SHOULD `risk_positions.status` GAIN A CHECK CONSTRAINT?** The Go POSITION vocabulary is closed to `{computed, refused}` (`internal/store/risk.go:1566-1567`) but the column is bare `TEXT NOT NULL` with the vocabulary in a comment (migration 00013:271-272). §4.3's fail-closed default makes the serving layer honest without it. RECOMMENDATION: out of scope for this wave, because a CHECK constraint is a migration and this wave adds none, and worth a follow-up: the constraint would make §4.3's default arm provably dead rather than merely unreached.
 - **SHOULD `RunBookHistogram` GAIN THE SAME `unmeasured_*_rows` SPLIT?** It has the same reader problem: `refused_count` alone does not say which coverage field holds those rows. Adding the split there would be additive and cheap. RECOMMENDATION: out of scope for this wave, and worth a follow-up. Note if it is taken up: the histogram is per aggregate and the split is identical on both sides by construction, so it would be served twice per engine for one fact, which argues for leaving it on `hf_transitions` alone.
