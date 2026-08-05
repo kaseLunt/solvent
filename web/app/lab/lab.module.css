@@ -806,6 +806,56 @@
   overflow-wrap: anywhere;
 }
 
+/* ---- Wave W-SK: the lane-transition flow ----
+   Ribbon classes are MOVEMENT classes. Held is muted (nothing moved), changed
+   carries the story, and the unmeasured diagonal is dashed in the warn
+   register (the same register as .unpricedTag) so a bookkeeping identity is
+   visibly not a movement. The crit tint rides ONLY a changed ribbon arriving
+   below 1.00 on the engine whose comparator IS its liquidation test; on the
+   Debt Manager that region is a disclosure and keeps the neutral emphasis. */
+.flowNode {
+  fill: var(--ink-2);
+}
+
+.flowLaneLabel {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-2);
+}
+
+/* A lane empty on this side: no node block, and the label dims so the 10-lane
+   vocabulary stays complete without claiming a population. */
+.flowLaneLabelEmpty {
+  font-family: var(--mono);
+  font-size: 12px;
+  fill: var(--ink-3);
+}
+
+.flowRibbonHeld {
+  stroke: var(--ink-3);
+  opacity: 0.4;
+  fill: none;
+}
+
+.flowRibbonChanged {
+  stroke: var(--accent);
+  opacity: 0.75;
+  fill: none;
+}
+
+.flowRibbonCrit {
+  stroke: var(--crit);
+  opacity: 0.8;
+  fill: none;
+}
+
+.flowRibbonUnmeasured {
+  stroke: var(--warn);
+  opacity: 0.55;
+  stroke-dasharray: 3 5;
+  fill: none;
+}
+
 /* ---- chart spec v4 section template (slots 2, 3, 6) ----
  *
  * STATE renders ABOVE the visual and never inside a <details> (R6, R7): every

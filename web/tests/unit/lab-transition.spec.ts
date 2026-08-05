@@ -28,6 +28,15 @@ import {
   readTransitions,
   transitionRibbons,
 } from "../../app/lab/labTransition";
+import {
+  FLOW_LABEL_W,
+  FLOW_NODE_W,
+  FLOW_RIBBON_MAX,
+  FLOW_RIBBON_MIN,
+  ribbonKind,
+  ribbonThickness,
+  transitionFlowLayout,
+} from "../../app/lab/labTransitionFlow";
 import { RUN_BOOK_ETH, RUN_BOOK_WEETH_BATCH_1 } from "../fixtures/lab-book";
 
 function engineOf(response: { engines: readonly unknown[] }, name: string): LabRunBookEngine {
@@ -303,6 +312,120 @@ test("the ribbon layer carries a null cell debt as a NULL and never as a number"
     expect(ribbon.debtBefore).not.toBeNull();
     expect(ribbon.debtAfter).not.toBeNull();
   }
+});
+
+// ---------------------------------------------------------------------------
+// THE FLOW'S GEOMETRY LAWS (Wave W-SK) — pure, no browser
+// ---------------------------------------------------------------------------
+
+test("ribbon thickness: one linear scale, anchored at the widest cell, floored at visibility", () => {
+  // The widest cell takes the maximum, exactly.
+  expect(ribbonThickness(100, 100)).toBe(FLOW_RIBBON_MAX);
+  expect(ribbonThickness(1, 1)).toBe(FLOW_RIBBON_MAX);
+  // A 1-row cell in a large matrix stays visible as the hairline floor — and
+  // the floor cannot be confused with a larger cell, which draws thicker.
+  expect(ribbonThickness(1, 1000)).toBe(FLOW_RIBBON_MIN);
+  expect(ribbonThickness(1, 1000)).toBeLessThan(ribbonThickness(500, 1000));
+  // ONE LINEAR SCALE above the floor: twice the rows is twice the ink.
+  expect(ribbonThickness(50, 100)).toBeCloseTo(FLOW_RIBBON_MAX / 2);
+  expect(ribbonThickness(25, 100) * 2).toBeCloseTo(ribbonThickness(50, 100));
+  // An absent cell draws NOTHING. `transitionRibbons` never emits rows 0, and
+  // the scale refuses to invent ink for one anyway.
+  expect(ribbonThickness(0, 100)).toBe(0);
+});
+
+test("the unmeasured diagonal is its OWN class, never held and never changed", () => {
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const ribbons = transitionRibbons(engine.hf_transitions);
+
+  const unmeasured = ribbons.find((ribbon) => ribbon.unmeasured);
+  if (unmeasured === undefined) throw new Error("the fixture carries no unmeasured cell");
+  // It IS a diagonal cell — and still not "held": nothing was measured, so
+  // nothing can be said to have held its lane.
+  expect(unmeasured.from).toBe(unmeasured.to);
+  expect(unmeasured.held).toBe(true);
+  expect(ribbonKind(unmeasured)).toBe("unmeasured");
+
+  const held = ribbons.find((ribbon) => ribbon.held && !ribbon.unmeasured);
+  if (held === undefined) throw new Error("the fixture carries no held-measured cell");
+  expect(ribbonKind(held)).toBe("held");
+  expect(ribbonKind(held)).not.toBe(ribbonKind(unmeasured));
+
+  const changed = ribbons.find((ribbon) => !ribbon.held);
+  if (changed === undefined) throw new Error("the fixture carries no lane-changed cell");
+  expect(ribbonKind(changed)).toBe("changed");
+});
+
+test("the flow lays out ONLY what exists: occupied cells, nonempty nodes, the whole vocabulary", () => {
+  const engine = engineOf(RUN_BOOK_ETH, "aave_v3_etherfi");
+  const t = engine.hf_transitions;
+  const layout = transitionFlowLayout(t, 900);
+
+  // One ribbon per OCCUPIED cell — an absent cell is absent from the layout.
+  expect(layout.ribbons).toHaveLength(transitionRibbons(t).length);
+  for (const flow of layout.ribbons) {
+    expect(flow.thickness).toBeGreaterThan(0);
+    expect(flow.x1).toBeLessThan(flow.x2);
+  }
+
+  // NONEMPTY-ONLY NODES: exactly the lanes whose side margin is nonzero, and
+  // each node carries the wire's own margin integer.
+  const nonzero = (margin: readonly number[]) =>
+    margin.flatMap((rows, lane) => (rows > 0 ? [lane] : []));
+  const beforeNodes = layout.nodes.filter((node) => node.side === "before");
+  const afterNodes = layout.nodes.filter((node) => node.side === "after");
+  expect(beforeNodes.map((node) => node.lane)).toEqual(nonzero(t.from_rows));
+  expect(afterNodes.map((node) => node.lane)).toEqual(nonzero(t.to_rows));
+  for (const node of layout.nodes) {
+    const margin = node.side === "before" ? t.from_rows[node.lane] : t.to_rows[node.lane];
+    expect(node.rows).toBe(margin);
+    expect(node.height).toBeGreaterThan(0);
+  }
+
+  // THE COMPLETE VOCABULARY: every lane labels BOTH sides, dimmed exactly where
+  // that side's margin is zero, and every printed count is the wire's integer.
+  expect(layout.labels).toHaveLength(t.lanes.length * 2);
+  for (const label of layout.labels) {
+    const margin =
+      (label.side === "before" ? t.from_rows[label.lane] : t.to_rows[label.lane]) ?? 0;
+    expect(label.empty).toBe(margin === 0);
+    expect(label.text).toBe(`${t.lanes[label.lane]?.label ?? ""} · ${String(margin)}`);
+  }
+
+  // The measured width is respected: nothing is laid out past either edge.
+  expect(layout.width).toBe(900);
+  for (const node of layout.nodes) {
+    expect(node.x).toBeGreaterThanOrEqual(FLOW_LABEL_W);
+    expect(node.width).toBe(FLOW_NODE_W);
+    expect(node.x + node.width).toBeLessThanOrEqual(900 - FLOW_LABEL_W);
+  }
+});
+
+test("the crit tint follows the comparator asymmetry, never the lane alone", () => {
+  const aave = engineOf(RUN_BOOK_ETH, "aave_v3_etherfi");
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const aaveLayout = transitionFlowLayout(aave.hf_transitions, 900);
+  const dmLayout = transitionFlowLayout(dm.hf_transitions, 900);
+
+  // On the wad engine, crit rides EXACTLY the changed arrivals below 1.00.
+  const region = new Set(belowOneLanes(aave.hf_transitions));
+  for (const flow of aaveLayout.ribbons) {
+    expect(flow.crit).toBe(flow.kind === "changed" && region.has(flow.ribbon.to));
+  }
+  expect(aaveLayout.ribbons.filter((flow) => flow.crit)).toHaveLength(1);
+
+  // The Debt Manager HAS a below-1.00 arrival on this very book (lane 5 to
+  // lane 1) and it still takes no crit: its lanes are the exact rational
+  // maxBorrowLT/borrowings, a DISCLOSURE and not its liquidation trigger. The
+  // two engines' arrivals are asymmetric on purpose (5→1 versus 3→0), so a
+  // mirror-image bug cannot satisfy both assertions.
+  const arrival = dmLayout.ribbons.find(
+    (flow) => flow.ribbon.from === 5 && flow.ribbon.to === 1,
+  );
+  if (arrival === undefined) throw new Error("the DM fixture lost its below-1.00 arrival");
+  expect(arrival.kind).toBe("changed");
+  expect(arrival.crit).toBe(false);
+  expect(dmLayout.ribbons.some((flow) => flow.crit)).toBe(false);
 });
 
 test("the ribbons are the OCCUPIED cells only, each labelled by its two lanes", () => {

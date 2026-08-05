@@ -18,6 +18,17 @@
 //   - a body whose margins disagree with its own distributions is REFUSED with
 //     its reasons, never drawn;
 //   - none of it renders when the row holds no served book.
+//
+// Wave W-SK adds the flow VISUAL's laws:
+//   - one ribbon per occupied cell, classed held / changed / unmeasured, the
+//     class counts pinned to the fixture;
+//   - the crit tint rides Aave's below-1.00 arrival and NEVER the Debt
+//     Manager's, whose same region is a disclosure;
+//   - a zero-count side draws no node block while its dimmed label keeps the
+//     10-lane vocabulary complete;
+//   - a refused matrix draws NO SVG at all;
+//   - every text node inside the flow speaks the lane-label and margin-count
+//     vocabulary and nothing else.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -190,6 +201,9 @@ test("A CONTRADICTORY MATRIX IS NOT DRAWN, and the page says why", async ({ page
   // No cell table is drawn at all — the refusal replaces the picture rather
   // than sitting beside it.
   await expect(matrix.getByTestId("runbook-transition-cells")).toHaveCount(0);
+  // And NO flow SVG either: a refused matrix never renders an empty-looking
+  // flow, it renders the refusal sentence alone.
+  await expect(matrix.getByTestId("runbook-transition-flow")).toHaveCount(0);
 
   // AND THE OTHER ENGINE IS UNAFFECTED: the refusal is per engine, and a body
   // with one broken engine still serves the one that is whole.
@@ -211,6 +225,7 @@ test("the matrix does not render when the row holds no served book", async ({ pa
 
   await expect(page.getByTestId("book-result")).toHaveCount(0);
   await expect(page.getByTestId("runbook-transition")).toHaveCount(0);
+  await expect(page.getByTestId("runbook-transition-flow")).toHaveCount(0);
 });
 
 test("a WITHHELD engine has no matrix at all, and the served engine still has one", async ({
@@ -232,4 +247,166 @@ test("a WITHHELD engine has no matrix at all, and the served engine still has on
   const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
   await expect(dm).toHaveAttribute("data-state", "ok");
   await expect(dm.getByTestId("runbook-transition-unmeasured")).toHaveText("1");
+  // The served engine's flow renders; the withheld engine has none to draw.
+  await expect(dm.getByTestId("runbook-transition-flow")).toHaveCount(1);
+});
+
+// ---------------------------------------------------------------------------
+// Wave W-SK — the flow VISUAL
+// ---------------------------------------------------------------------------
+
+test("the flow draws ONE ribbon per occupied cell, classed by movement", async ({ page }) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+
+  // Aave: two occupied cells — the (3→0) fall and the (9,9) unmeasured
+  // diagonal. Nothing else is drawn: an absent cell is absent ink.
+  const aave = page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]');
+  await expect(aave.getByTestId("runbook-transition-flow")).toHaveCount(1);
+  await expect(aave.locator('[data-testid="runbook-transition-ribbon"]')).toHaveCount(2);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-ribbon"][data-kind="changed"]'),
+  ).toHaveCount(1);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-ribbon"][data-kind="held"]'),
+  ).toHaveCount(0);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-ribbon"][data-kind="unmeasured"]'),
+  ).toHaveCount(1);
+
+  // Debt Manager: four occupied cells — (0→0) and (6→6) held, (5→1) changed,
+  // (9,9) unmeasured.
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  await expect(dm.locator('[data-testid="runbook-transition-ribbon"]')).toHaveCount(4);
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-kind="changed"]'),
+  ).toHaveCount(1);
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-kind="held"]'),
+  ).toHaveCount(2);
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-kind="unmeasured"]'),
+  ).toHaveCount(1);
+  // The unmeasured diagonal sits on from === to and is still NOT classed held:
+  // nothing was measured, so nothing can be said to have held.
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-from="9"][data-to="9"]'),
+  ).toHaveAttribute("data-kind", "unmeasured");
+});
+
+test("the crit tint rides Aave's below-1.00 arrival and NEVER the Debt Manager's", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+
+  // Aave's comparator IS the pool's liquidation test, so its lane-changed
+  // arrival below 1.00 carries the crit tint — and it is the only ribbon that
+  // does.
+  const aave = page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]');
+  const arrival = aave.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="3"][data-to="0"]',
+  );
+  await expect(arrival).toHaveAttribute("data-kind", "changed");
+  await expect(arrival).toHaveAttribute("data-crit", "true");
+  await expect(
+    aave.locator('[data-testid="runbook-transition-ribbon"][data-crit="true"]'),
+  ).toHaveCount(1);
+
+  // The Debt Manager HAS a below-1.00 arrival on this same book (5→1) and it
+  // still takes no crit: its lanes are the exact rational, a disclosure and
+  // not its liquidation trigger. The two engines' arrivals are asymmetric on
+  // purpose (5→1 versus 3→0), so a mirror-image bug cannot pass both.
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  const dmArrival = dm.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="5"][data-to="1"]',
+  );
+  await expect(dmArrival).toHaveCount(1);
+  await expect(dmArrival).toHaveAttribute("data-kind", "changed");
+  await expect(dmArrival).toHaveAttribute("data-crit", "false");
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-crit="true"]'),
+  ).toHaveCount(0);
+});
+
+test("a lane empty on one side draws NO node block there, and its dimmed label keeps the vocabulary", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+  const aave = page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]');
+
+  // Aave's margins occupy lanes {3, 9} before and {0, 9} after: four node
+  // blocks, and none anywhere else.
+  await expect(aave.locator('[data-testid="runbook-transition-flow-node"]')).toHaveCount(4);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-flow-node"][data-side="before"][data-lane="3"]'),
+  ).toHaveCount(1);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-flow-node"][data-side="before"][data-lane="0"]'),
+  ).toHaveCount(0);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-flow-node"][data-side="after"][data-lane="0"]'),
+  ).toHaveCount(1);
+  await expect(
+    aave.locator('[data-testid="runbook-transition-flow-node"][data-side="after"][data-lane="3"]'),
+  ).toHaveCount(0);
+
+  // The vocabulary stays complete: all 10 lanes label BOTH sides, dimmed
+  // exactly where that side holds no row.
+  await expect(aave.locator('[data-testid="runbook-transition-flow-label"]')).toHaveCount(20);
+  await expect(
+    aave.locator(
+      '[data-testid="runbook-transition-flow-label"][data-side="before"][data-lane="0"]',
+    ),
+  ).toHaveAttribute("data-empty", "true");
+  await expect(
+    aave.locator('[data-testid="runbook-transition-flow-label"][data-side="after"][data-lane="0"]'),
+  ).toHaveAttribute("data-empty", "false");
+});
+
+test("every text node in the flow speaks the lane-label and margin vocabulary, nothing else", async ({
+  page,
+}) => {
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+  const body = JSON.parse(fixture("run-book.eth_minus_30.json")) as {
+    engines: {
+      engine: string;
+      hf_transitions: {
+        lanes: { label: string }[];
+        from_rows: number[];
+        to_rows: number[];
+      };
+    }[];
+  };
+
+  for (const engineBody of body.engines) {
+    const t = engineBody.hf_transitions;
+    const svg = page
+      .locator(`[data-testid="runbook-transition"][data-engine="${engineBody.engine}"]`)
+      .getByTestId("runbook-transition-flow");
+
+    // THE SWEEP: every <text> in the SVG is a lane label with its margin
+    // count. No stray words, no number that exists only as decoration.
+    const texts = await svg.locator("text").allTextContents();
+    expect(texts).toHaveLength(t.lanes.length * 2);
+    const labels = new Set(t.lanes.map((lane) => lane.label));
+    for (const text of texts) {
+      const match = /^(.+) · (\d+)$/.exec(text);
+      expect(match, `stray flow text: ${text}`).not.toBeNull();
+      expect(labels.has(match?.[1] ?? ""), `stray flow label: ${text}`).toBe(true);
+    }
+
+    // And each label's count is the WIRE's margin integer for that side and
+    // lane, so the picture reads without the table (LAW-5).
+    for (const [side, margins] of [
+      ["before", t.from_rows],
+      ["after", t.to_rows],
+    ] as const) {
+      for (let lane = 0; lane < margins.length; lane += 1) {
+        await expect(
+          svg.locator(
+            `[data-testid="runbook-transition-flow-label"][data-side="${side}"][data-lane="${String(lane)}"]`,
+          ),
+        ).toHaveText(`${t.lanes[lane]?.label ?? ""} · ${String(margins[lane])}`);
+      }
+    }
+  }
 });
