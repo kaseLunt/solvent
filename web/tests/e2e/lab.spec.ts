@@ -258,7 +258,16 @@ test("the matrix renders ALL FIVE cell states, and not-covered never looks like 
   const result = cell("eth_minus_30", 2);
   await expect(result).toHaveAttribute("data-cell-state", "result");
   await expect(result).toContainText("$1,500"); // 1500000000 @ 6dp, grouped
-  await expect(result).toContainText("DELTA-ONLY");
+  // W-3L: the DELTA-ONLY basis is stated ONCE for the whole grid in its METHOD
+  // line rather than once per cell. The cell's sub shrinks to its own two
+  // facts, and the BATCH PIN moved OUT of the title into rendered text — a
+  // batch id is a number, and LAW-5 gives a number no home behind a hover.
+  await expect(page.getByTestId("matrix-method")).toContainText("DELTA-ONLY");
+  await expect(page.getByTestId("matrix-method")).toContainText(
+    "no total column, because engine books are never summed",
+  );
+  await expect(result).toContainText("net eligible accounts +1");
+  await expect(result).toContainText("batch #1");
 
   // 4. WITHHELD — a refusal, with its code, on an engine the DEFINITION names.
   await page
@@ -278,8 +287,10 @@ test("the matrix renders ALL FIVE cell states, and not-covered never looks like 
   await expect(withheld).not.toContainText("NOT COVERED");
   await expect(notCovered).not.toContainText("FLAG_CUSTODY_UNPROVEN");
 
-  // No total column, ever: engine books are never summed.
-  await expect(page.getByTestId("matrix-legend")).toContainText("no total column");
+  // No total column, ever: engine books are never summed. W-3L moved the
+  // clause out of the legend's tail and into the grid's METHOD line, which is
+  // where the basis for every cell is now stated once.
+  await expect(page.getByTestId("matrix-method")).toContainText("no total column");
   await expect(page.locator('[data-testid="matrix-table"] thead th')).toHaveCount(4); // scenario + 2 engines + run
 });
 

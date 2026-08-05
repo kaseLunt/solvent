@@ -222,13 +222,16 @@ test("a monotone waterfall renders NO violation strip; held_flat and projection 
   await expect(page.getByTestId("waterfall-monotonicity")).toHaveCount(0);
   await expect(page.getByText("PROJECTION", { exact: true })).toBeVisible();
 
+  // W-UX-D caption (a) + W-3L: the counted-disclosure pattern. The always-
+  // visible COUNT summary (SINGULAR at n=1, W-UX-C micro-ruling 3) sits in
+  // STATE above the bars; the NAMED list sits in the section's FORENSICS.
   const heldFlat = page.getByTestId("waterfall-held-flat");
-  await expect(heldFlat).toContainText("0xA0b8…eB48"); // the held-flat USDC input
-  // W-UX-D caption (a): the counted-disclosure pattern — always-visible
-  // summary (SINGULAR at n=1, W-UX-C micro-ruling 3) + "held flat — {n}
-  // inputs named" (the deeper copy pins live in book-charts.spec.ts).
   await expect(heldFlat).toContainText("1 price input held flat");
-  await expect(heldFlat).toContainText("held flat: 1 inputs named");
+  await expect(heldFlat).not.toContainText("0xA0b8…eB48");
+
+  const forensics = page.getByTestId("waterfall-forensics");
+  await expect(forensics).toContainText("1 held-flat inputs named");
+  await expect(forensics).toContainText("0xA0b8…eB48"); // the held-flat USDC input
 });
 
 test("a waterfall monotonicity violation is SURFACED, naming the offending point", async ({ page }) => {

@@ -357,6 +357,23 @@
   color: var(--ink-3);
 }
 
+/* THE ORDERING-IN-FORCE STRIP (W-3L): a dedicated line under the controls,
+ * in the method register, never inside an expandable. It exists because a
+ * statement about what the rows are actually ordered by used to sit in the
+ * chip row at chip weight and read as another control. */
+.orderingStrip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+  margin: calc(-1 * var(--sp-2)) 0 var(--sp-3);
+  padding: 6px 10px;
+  border-left: 2px solid var(--line);
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+}
+
 /* ---- histogram svg ---- */
 
 .histLabel {

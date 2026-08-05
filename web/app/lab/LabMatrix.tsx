@@ -87,6 +87,11 @@ import {
   type LabCellState,
   type MatrixPhase,
 } from "./matrixCells";
+import {
+  MATRIX_FORENSICS_SUMMARY,
+  MATRIX_LEGEND_KEY,
+  MATRIX_METHOD,
+} from "./labPanelLines";
 import styles from "./lab.module.css";
 
 /**
@@ -149,9 +154,15 @@ function Cell({ state }: { state: LabCellState }) {
             {/* CX-2: `newly_eligible_accounts` is a signed NET delta, so the
                 cell states it as one. The card in the panel below carries the
                 full label and the arithmetic; here the sign is the disclosure
-                that makes the number readable at a glance. */}
-            Δ eligible debt · DELTA-ONLY · net eligible accounts{" "}
-            {renderSignedCount(state.engine.newly_eligible_accounts)}
+                that makes the number readable at a glance.
+
+                WAVE W-3L: the DELTA-ONLY basis left this sub for the grid's
+                METHOD line, where it is stated ONCE rather than once per cell.
+                The BATCH PIN moved the other way — out of the `title` and into
+                rendered text, because a batch id is a number and LAW-5 gives a
+                number no home that needs a mouse. */}
+            net eligible accounts {renderSignedCount(state.engine.newly_eligible_accounts)} ·
+            batch #{String(state.batchId)}
           </span>
         </td>
       );
@@ -402,10 +413,13 @@ export function LabMatrix({
           the sequence a browser reaches only through a timing window: an anchor
           row whose re-run SUCCEEDS but returns an OLDER batch, leaving the
           watermark at #N with not one row holding it. */}
-      <p className={styles.caption} data-testid="matrix-batch-line">
+      {/* ---- SLOT 3: ANSWER — the composed batch header, promoted out of the
+              caption register. It is this grid's own as-of claim. ---- */}
+      <p className={styles.answerLine} data-testid="matrix-batch-line">
         {batchHeaderLine(cohort, frontierBatchId)}
       </p>
 
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the grid IS the ledger ---- */}
       <div className={styles.tableWrap}>
         <table className={styles.table} data-testid="matrix-table">
           <thead>
@@ -592,9 +606,36 @@ export function LabMatrix({
         </table>
       </div>
 
+      {/* ---- SLOT 6: METHOD — the basis and the never-summed law, stated
+              ONCE for the whole grid rather than once per cell. ---- */}
+      <p className={styles.methodLine} data-testid="matrix-method">
+        {MATRIX_METHOD}
+      </p>
+
+      {/* ---- THE LEGEND. This is where an expandable is most tempting and is
+              mostly REFUSED.
+
+              A one-line KEY names the six state words. Then every state whose
+              meaning is an ABSENCE or a REFUSAL renders in full, open:
+              WITHHELD, SUPERSEDED, UNANSWERED, CONTRADICTORY BOOK, and all
+              three DEFINITION CHANGED arms. Wave R16 finding 2 exists because
+              this legend once carried ONE case's wording for three and printed
+              a contradiction on every page; collapsing any of them recreates
+              it.
+
+              W-3L RULING, AGAINST THE INVENTORY. The inventory offered NOT
+              COVERED and SUPERSEDED as collapsible. Only NOT COVERED is: it is
+              the one state that is a property of the DEFINITION, knowable
+              before any run, and therefore not an absence of an answer.
+              SUPERSEDED stays open — a supersession is hazard-register content
+              wherever it appears, and this rollout does not carve an exception
+              for the sentence that defines it. ---- */}
+      <p className={styles.answerLine} data-testid="matrix-legend-key">
+        {MATRIX_LEGEND_KEY}
+      </p>
+
       <p className={styles.caption} data-testid="matrix-legend">
-        NOT COVERED = the committed definition does not name that engine, a property of the
-        DEFINITION, knowable before any run · WITHHELD = the engine refused, code and detail
+        WITHHELD = the engine refused, code and detail
         rendered · SUPERSEDED = the result was measured at an older batch and is never blended
         with the current one · UNANSWERED = neither a result nor a refusal reached that cell:
         the run ended without a book, or the book it served named that engine in neither list,
@@ -636,9 +677,18 @@ export function LabMatrix({
         <span data-testid="matrix-legend-dc-settled">
           the run was ASKED under one and never came back with a book of its own, so re-run the
           row; a refresh resolves nothing, the listing is already current
-        </span>{" "}
-        · no total column: engine books are never summed.
+        </span>
       </p>
+
+      {/* ---- SLOT 7: FORENSICS — the ONE definitional prose that is not an
+              absence and not a refusal. ---- */}
+      <details className={styles.disclosure} data-testid="matrix-forensics">
+        <summary>{MATRIX_FORENSICS_SUMMARY}</summary>
+        <p className={styles.caption} data-testid="matrix-legend-not-covered">
+          NOT COVERED = the committed definition does not name that engine, a property of the
+          DEFINITION, knowable before any run.
+        </p>
+      </details>
     </section>
   );
 }

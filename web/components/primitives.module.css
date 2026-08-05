@@ -44,6 +44,17 @@
   margin-top: 3px;
 }
 
+/* The card's METHOD slot (W-3L): comparator / basis / unit, one line, always
+ * visible. Never a home for a refusal — that stays in .statSub. */
+.statMethod {
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+  padding-top: 3px;
+}
+
 /* ---- EngineChip (.engine) ---- */
 .engine {
   font-family: var(--mono);
@@ -144,6 +155,34 @@
   font-family: var(--mono);
   font-size: var(--fs-caption);
   color: var(--ink-2);
+}
+
+/* The keepOpen split (W-3L): the neutral pins sit behind a counted summary,
+ * inline with the pins that never collapse. */
+.stampDisclosure summary {
+  cursor: pointer;
+  color: var(--ink-3);
+  list-style: none;
+}
+
+.stampDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.stampDisclosure summary::before {
+  content: "▸ ";
+  color: var(--ink-3);
+}
+
+.stampDisclosure[open] summary::before {
+  content: "▾ ";
+}
+
+.stampHidden {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  margin-top: 8px;
 }
 
 .stampItem b {

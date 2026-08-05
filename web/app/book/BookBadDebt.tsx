@@ -10,6 +10,7 @@ import { EngineChip } from "@/components/EngineChip";
 import { RefusedTag } from "@/components/RefusedTag";
 import { groupDecimalString } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
+import { BAD_DEBT_METHOD, badDebtAnswer } from "./readingLines";
 import styles from "./book.module.css";
 
 function usdCell(value: string | null, decimals: number): string {
@@ -65,20 +66,31 @@ const COLUMNS: ReadonlyArray<Column<BadDebt>> = [
   },
 ];
 
+// WAVE W-3L — ON THE SECTION TEMPLATE.
+//
+//   HEAD      the section heading.
+//   ANSWER    the standing loss as a computed sentence, per engine, never
+//             summed, with a withheld engine present AS unknown.
+//   VISUAL /  the table. Its cells are the exact served strings, so the two
+//   LEDGER    slots coincide and no second copy is drawn.
+//   METHOD    the null-never-zero law.
+//
+// No FORENSICS: the inventory offers the count columns as collapsible only if
+// the table needs to narrow, and it does not. The bad-debt column, the refused
+// rows and every null count cell stay in the open table.
 export function BookBadDebt({ badDebt }: { badDebt: readonly BadDebt[] }) {
   return (
     <section className={styles.section} aria-label="bad-debt census">
       <div className={styles.sectionHead}>
         <h2>Bad debt standing now</h2>
-        <span className={styles.sectionNote}>
-          a withheld engine is an em dash with its reason, never 0
-        </span>
       </div>
       <DataTable
         columns={COLUMNS}
         rows={badDebt}
         rowKey={(row) => row.engine}
         rowTone={(row) => (row.refused ? "refused" : "default")}
+        takeaway={<span data-testid="bad-debt-answer">{badDebtAnswer(badDebt)}</span>}
+        method={<span data-testid="bad-debt-method">{BAD_DEBT_METHOD}</span>}
         ariaLabel="bad-debt census per engine"
         empty="no bad-debt lines were served on this batch. That is a fact about the service, and no engine's bad debt is reported as zero."
       />

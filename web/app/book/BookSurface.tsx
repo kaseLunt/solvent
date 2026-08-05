@@ -296,7 +296,17 @@ export function BookSurface() {
       )}
 
       {state.phase === "ok" && (
-        <Stampline>
+        // WAVE W-3L — the keepOpen split. The strip used to put a neutral
+        // batch id and a `gate withheld: …` at identical visual weight. Now:
+        //
+        //   INLINE, always — gate, coverage, and the marks vector whenever it
+        //   carries a failed sweep. All three are refusal- or coverage-class,
+        //   and `coverage: partial` in particular is a withheld-engine
+        //   statement rather than a metric.
+        //   COLLAPSED — batch and key, behind a summary that COUNTS them. The
+        //   head already carries the freshness line verbatim, so its stampline
+        //   twin is the safest thing on this surface to fold.
+        <Stampline collapse summaryTestId="book-stamp-evidence-summary">
           {/* The stampline carries the SAME freshness line as the head (Wave
               R1 item 3) — its own `batch` label supplies the leading word. */}
           <StampItem
@@ -313,11 +323,16 @@ export function BookSurface() {
             label="marks"
             value={marksSummary(state.book.batch.watermarks)}
             tone={state.book.batch.watermarks.some((stamp) => (stamp.sweep?.failed ?? 0) > 0) ? "warn" : "ok"}
+            testId="book-stamp-marks"
           />
           <StampItem
             label="gate"
             value={gatePosture(state.book.engines.length, state.book.refused_engines)}
             tone={state.book.refused_engines.length === 0 ? "ok" : "warn"}
+            /* HAZARD: a gate stating `withheld: …` is a refusal. It is inline
+               whatever its tone, so a future all-clear tone cannot fold it. */
+            keepOpen
+            testId="book-stamp-gate"
           />
           <StampItem
             label="key"
@@ -340,6 +355,10 @@ export function BookSurface() {
                   )} engine(s) withheld`
             }
             tone={state.book.coverage.stress_coverage_is_full ? "ok" : "warn"}
+            /* HAZARD: coverage-partial is a withheld-engine statement, so this
+               pin never collapses in either direction. */
+            keepOpen
+            testId="book-stamp-coverage"
           />
         </Stampline>
       )}

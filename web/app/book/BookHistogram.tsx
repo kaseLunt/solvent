@@ -32,9 +32,11 @@ import {
   RISK_BAND_HEADING,
   RISK_BAND_METHOD,
   riskBandDenominatorLine,
+  riskBandForensicsSummary,
   riskBandNoDebtRow,
   riskBandPanelAria,
   riskBandRefusedRow,
+  riskBandTintClause,
 } from "@/lib/book-copy";
 import { sharePercent, shareBarWidth } from "@/lib/book-format";
 import { histogramReadingLine } from "./readingLines";
@@ -98,15 +100,30 @@ function EnginePanel({
         <span className={styles.comparator}>comparator: {histogram.comparator}</span>
       </div>
       <div className={styles.panelBody}>
-        {/* The computed reading line (SUPPLEMENT §17) — primary register,
-            top of the panel body, derived from the same wire response. */}
-        <p className={styles.readingLine} data-testid={`hist-reading-${histogram.engine}`}>
+        {/* ---- SLOT 2: STATE — everything that qualifies the bars, BEFORE the
+                bars (R6), and never inside a <details> (R3 / R7). The two
+                accounting counts MOVED UP from under the chart: an unknowable
+                and a no-comparator population both change what the shares
+                mean, so they cannot be read after the shape. ---- */}
+        <div className={styles.stateSlot} data-testid={`hist-state-${histogram.engine}`}>
+          <span data-testid={`hist-denominator-${histogram.engine}`}>
+            {riskBandDenominatorLine(denominator)}
+          </span>
+          <span data-testid={`hist-no-debt-${histogram.engine}`}>
+            {riskBandNoDebtRow(histogram.infinite_count)} · counted here, outside the denominator
+          </span>
+          <span data-testid={`hist-refused-${histogram.engine}`}>
+            {riskBandRefusedRow(histogram.refused_count)} · rows withheld and counted here
+          </span>
+        </div>
+        {/* ---- SLOT 3: ANSWER — computed from the same wire response ---- */}
+        <p className={styles.answerLine} data-testid={`hist-reading-${histogram.engine}`}>
           {histogramReadingLine(histogram, aggregate, badDebt, wadScale)}
         </p>
-        <p className={styles.denominatorLine} data-testid={`hist-denominator-${histogram.engine}`}>
-          {riskBandDenominatorLine(denominator)}
-        </p>
-        {/* LAW-3 / CX-7: RENDERED pixels. `maxWidth: 100%` let a narrow panel
+        {/* ---- SLOT 4 + 5: VISUAL, with the exact count and share as direct
+                labels beside each bar (CX-6), so the LEDGER is served in
+                place. ----
+            LAW-3 / CX-7: RENDERED pixels. `maxWidth: 100%` let a narrow panel
             scale the whole picture, and a viewBox scale of 0.6 turns a 12px
             label into a 7px one that `getComputedStyle` still reports as 12px.
             The chart keeps its authored width and the frame scrolls, which is
@@ -232,19 +249,31 @@ function EnginePanel({
           })}
           </svg>
         </div>
-        {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
-        <div className={styles.histAside}>
-          <span data-testid={`hist-no-debt-${histogram.engine}`}>
-            {riskBandNoDebtRow(histogram.infinite_count)}
-          </span>
-          <span className={styles.badge} data-testid={`hist-refused-${histogram.engine}`}>
-            {riskBandRefusedRow(histogram.refused_count)} · rows withheld and counted here
-          </span>
-        </div>
+        {/* ---- SLOT 6: METHOD — encoding, denominator, and the tint rule.
+                The eligible-territory explanation used to live ONLY in an SVG
+                <title>, which is hover sugar (LAW-5). It is a sentence here. ---- */}
         <p className={styles.methodLine} data-testid={`hist-method-${histogram.engine}`}>
-          {RISK_BAND_METHOD}
+          {RISK_BAND_METHOD} {riskBandTintClause(histogram.comparator)}
         </p>
-        <p className={styles.panelNote}>{histogram.note}</p>
+
+        {/* ---- SLOT 7: FORENSICS — the wire's own note verbatim and the
+                bucket boundaries. It holds no refusal and no count that exists
+                nowhere else: both accounting rows are in STATE above (R3). ---- */}
+        <details className={styles.disclosure} data-testid={`hist-forensics-${histogram.engine}`}>
+          <summary>{riskBandForensicsSummary(histogram.buckets.length)}</summary>
+          <p className={styles.forensicsLine} data-testid={`hist-wire-note-${histogram.engine}`}>
+            {histogram.note}
+          </p>
+          <ul className={styles.forensicsList} data-testid={`hist-bounds-${histogram.engine}`}>
+            {histogram.buckets.map((bucket) => (
+              <li key={bucket.label}>
+                {bucket.label} · upper bound{" "}
+                {bucket.upper_wad === null ? "unbounded" : bucket.upper_wad} · {String(bucket.count)}{" "}
+                accounts
+              </li>
+            ))}
+          </ul>
+        </details>
       </div>
     </div>
   );

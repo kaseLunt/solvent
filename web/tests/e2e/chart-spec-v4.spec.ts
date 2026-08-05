@@ -1360,11 +1360,46 @@ test("AC-53: bars are a share of the NAMED denominator on a 0–100% axis", asyn
   // The single 100% bucket spans the FULL 240px axis.
   expect(Math.max(...widths)).toBeCloseTo(240, 0);
 
-  // The accounting rows are their own rows beneath the bars.
+  // The accounting rows are their own rows, never folded into the denominator.
+  // W-3L moved them ABOVE the bars into the STATE slot (R6): a no-comparator
+  // population and an unknowable both change what the shares mean, so they
+  // cannot be read after the shape. Each keeps its exact CX-6 sentence and
+  // adds the clause that says it sits outside the denominator.
   await expect(panel.getByTestId("hist-no-debt-aave_v3_etherfi")).toHaveText(
-    /^no debt \(no comparator\): \d+$/,
+    /^no debt \(no comparator\): \d+ · counted here, outside the denominator$/,
   );
   await expect(panel.getByTestId("hist-refused-aave_v3_etherfi")).toContainText("refused: ");
+  // R6 / R7: both accounting rows render BEFORE the SVG and outside every
+  // <details>.
+  const asideOrder = await panel.evaluate((node) => {
+    const all = Array.from(node.querySelectorAll("*"));
+    const at = (id: string) => {
+      const found = node.querySelector(`[data-testid="${id}"]`);
+      return found === null ? -1 : all.indexOf(found);
+    };
+    return {
+      denominator: at("hist-denominator-aave_v3_etherfi"),
+      noDebt: at("hist-no-debt-aave_v3_etherfi"),
+      refused: at("hist-refused-aave_v3_etherfi"),
+      svg: at("hist-svg-aave_v3_etherfi"),
+      method: at("hist-method-aave_v3_etherfi"),
+      forensics: at("hist-forensics-aave_v3_etherfi"),
+    };
+  });
+  expect(asideOrder.denominator).toBeGreaterThanOrEqual(0);
+  expect(asideOrder.noDebt).toBeGreaterThan(asideOrder.denominator);
+  expect(asideOrder.refused).toBeGreaterThan(asideOrder.noDebt);
+  expect(asideOrder.svg).toBeGreaterThan(asideOrder.refused);
+  expect(asideOrder.method).toBeGreaterThan(asideOrder.svg);
+  expect(asideOrder.forensics).toBeGreaterThan(asideOrder.method);
+  await expect(
+    panel.getByTestId("hist-forensics-aave_v3_etherfi").getByTestId("hist-refused-aave_v3_etherfi"),
+  ).toHaveCount(0);
+
+  // The tint asymmetry is a SENTENCE on the panel now, not only an SVG title.
+  await expect(panel.getByTestId("hist-method-aave_v3_etherfi")).toContainText(
+    "Buckets below 1.00 are tinted",
+  );
 });
 
 // ---------------------------------------------------------------------------

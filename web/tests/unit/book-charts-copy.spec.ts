@@ -23,7 +23,14 @@ import {
   gridPercentLabel,
 } from "../../app/book/waterfallView";
 import {
+  BAD_DEBT_METHOD,
+  LIQUIDATABLE_CARD_METHOD,
+  badDebtAnswer,
   belowOneCount,
+  engineStatsAnswer,
+  engineStatsMethod,
+  engineStatsSplitLine,
+  engineStatsWithheldAnswer,
   histogramReadingLine,
   liquidatableCardSub,
   riskMapCalloutOverflowNote,
@@ -236,22 +243,109 @@ test.describe("histogram reading lines (§17) — computed, never asserted", () 
     expect(belowOneCount(mutated, WAD)).toBe(14);
   });
 
+  // W-3L moved the Σ from the Liquidatable card's `sub` into the block's
+  // ANSWER. The law is unchanged and is re-pinned at equal strength on the
+  // sentence that now carries the adjective.
   test("a withheld Σ renders the em dash — never the adjective without the Σ, never 0", () => {
-    expect(liquidatableCardSub(undefined)).toBe(
-      "of computed positions, engine's own comparator · Σ eligible debt —",
-    );
-    if (dmBadDebt === undefined) throw new Error("fixture shape drifted");
+    if (dmAgg === undefined || dmBadDebt === undefined) throw new Error("fixture shape drifted");
+    expect(engineStatsAnswer(dmAgg, undefined)).toContain("Σ eligible debt —");
+    expect(engineStatsAnswer(dmAgg, undefined)).not.toContain("$0");
     const withheld = structuredClone(dmBadDebt);
     withheld.eligible_debt_usd = null;
-    expect(liquidatableCardSub(withheld)).toBe(
-      "of computed positions, engine's own comparator · Σ eligible debt —",
+    expect(engineStatsAnswer(dmAgg, withheld)).toContain("Σ eligible debt —");
+    expect(engineStatsAnswer(dmAgg, withheld)).not.toContain("$0");
+  });
+
+  test("the per-engine ANSWER carries the count, its denominator and the Σ", () => {
+    if (dmAgg === undefined) throw new Error("fixture shape drifted");
+    expect(engineStatsAnswer(dmAgg, dmBadDebt)).toBe(
+      "debt_manager: 1 of 1 computed positions liquidatable · Σ eligible debt $4,200.",
     );
   });
 
-  test("the Liquidatable card sub carries the Σ", () => {
-    expect(liquidatableCardSub(dmBadDebt)).toBe(
-      "of computed positions, engine's own comparator · Σ eligible debt $4,200",
+  test("MUTATE the aggregate and the ANSWER changes — nothing is hardcoded (R4)", () => {
+    if (dmAgg === undefined) throw new Error("fixture shape drifted");
+    const mutated = structuredClone(dmAgg);
+    mutated.liquidatable_positions = 1234;
+    mutated.computed_positions = 5678;
+    expect(engineStatsAnswer(mutated, dmBadDebt)).toContain(
+      "1,234 of 5,678 computed positions liquidatable",
     );
+  });
+
+  test("the Liquidatable card sub narrows to the DENOMINATOR alone", () => {
+    expect(liquidatableCardSub(8214)).toBe("of 8,214 computed positions");
+    expect(liquidatableCardSub(8214)).not.toContain("Σ");
+    expect(liquidatableCardSub(8214)).not.toContain("comparator");
+  });
+
+  test("the comparator clause is the card's METHOD slot, not its sub", () => {
+    expect(LIQUIDATABLE_CARD_METHOD).toBe("engine's own comparator");
+  });
+
+  test("the withheld-engine ANSWER states unknown, never zero", () => {
+    if (aaveAgg === undefined) throw new Error("fixture shape drifted");
+    const refused = structuredClone(aaveAgg);
+    refused.refused = true;
+    refused.refusal = { engine: refused.engine, code: "ENGINE_WITHHELD", detail: "gate closed", note: "" };
+    const line = engineStatsWithheldAnswer(refused);
+    expect(line).toContain("ENGINE_WITHHELD");
+    expect(line).toContain("unknown rather than zero");
+    expect(line).not.toContain("0 of");
+  });
+
+  test("the position split is COMPUTED and groups its counts", () => {
+    if (aaveAgg === undefined) throw new Error("fixture shape drifted");
+    const mutated = structuredClone(aaveAgg);
+    mutated.positions = 12345;
+    mutated.computed_positions = 12000;
+    mutated.refused_positions = 300;
+    mutated.flagged_positions = 45;
+    expect(engineStatsSplitLine(mutated)).toBe(
+      "12,345 positions · 12,000 computed · 300 refused · 45 flagged",
+    );
+  });
+
+  test("the engine METHOD line ends in the wire's own unit_note, verbatim", () => {
+    if (aaveAgg === undefined) throw new Error("fixture shape drifted");
+    expect(engineStatsMethod(aaveAgg)).toContain(aaveAgg.unit_note);
+    expect(engineStatsMethod(aaveAgg)).toContain("engines are never combined");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-3L — the bad-debt census ANSWER: per engine, never summed, and a withheld
+// engine present IN the sentence as unknown rather than dropped from it.
+// ---------------------------------------------------------------------------
+
+test.describe("the bad-debt census answer", () => {
+  test("names every engine and never sums them", () => {
+    const line = badDebtAnswer(BOOK.bad_debt);
+    expect(line).toContain("aave_v3_etherfi");
+    expect(line).toContain("debt_manager");
+    expect(line).toContain("Engine books are never summed.");
+  });
+
+  test("a withheld engine renders an em dash IN the sentence, never a zero", () => {
+    const rows = structuredClone(BOOK.bad_debt);
+    const first = rows[0];
+    if (first === undefined) throw new Error("fixture shape drifted");
+    first.refused = true;
+    first.refusal = { engine: first.engine, code: "ENGINE_WITHHELD", detail: "gate closed", note: "" };
+    first.current_bad_debt_usd = null;
+    const line = badDebtAnswer(rows);
+    expect(line).toContain(`— on ${first.engine} (ENGINE_WITHHELD, unknown rather than zero)`);
+    expect(line).toContain(first.engine);
+  });
+
+  test("an empty census states the service fact, and reports no zero", () => {
+    const line = badDebtAnswer([]);
+    expect(line).toContain("is reported as zero");
+    expect(line).not.toContain("$0");
+  });
+
+  test("the census METHOD carries the null-never-zero law", () => {
+    expect(BAD_DEBT_METHOD).toContain("never 0");
   });
 });
 

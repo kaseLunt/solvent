@@ -296,6 +296,51 @@ export function legacySortRegister(sort: HonoredLegacySort, reversed: boolean): 
 export const SORT_LIQ_DISTANCE_HONORED = legacySortRegister("liq_distance", false);
 
 /**
+ * WAVE W-3L, TEMPLATE SLOT 3 — the positions table's ANSWER, COMPUTED from
+ * the walk it sits above (R4).
+ *
+ * The table used to open on three stacked legend lines and no verdict: a
+ * reader met the metric's definition, the warn band and the price-path scope
+ * before a single row, and never learned what the rows in front of them were
+ * ordered by. This sentence names the engine, the ranking IN FORCE and its
+ * direction, and the coverage of the walk so far.
+ *
+ * The RANKING clause is the applied sort, not a column's claim — the same
+ * identity the footer's register uses, so an honored deprecated key names
+ * itself here too rather than letting a Headroom header speak for it.
+ */
+export function positionsAnswerLine(args: {
+  engine: PositionsEngine;
+  sort: AppliedBookSort;
+  reversed: boolean;
+  loaded: number;
+  /** Pre-rendered: an em dash when the qualifying total is unknowable. */
+  qualifying: string;
+  /** Pre-rendered: an em dash when the book aggregate is unusable. */
+  onBook: string;
+}): string {
+  const dir = args.reversed ? reversedWireDir(args.sort) : canonicalWireDir(args.sort);
+  const order =
+    dir === null ? "refused rows first" : dir === "asc" ? "ascending" : "descending";
+  return (
+    `${args.engine}, ranked by ${bookSortFooterLabel(args.sort)}, ${order}. ` +
+    `${args.loaded.toLocaleString("en-US")} of ${args.qualifying} qualifying rows loaded, ` +
+    `${args.onBook} on book.`
+  );
+}
+
+/**
+ * WAVE W-3L — the label on the dedicated ORDERING IN FORCE strip.
+ *
+ * Both register spans (`SORT_HF_REMAP_ACK` and `legacySortRegister`) used to
+ * sit inside the chip row at chip weight, so a load-bearing statement about
+ * what the rows are actually ordered by read as another control. They move to
+ * their own line under the controls, in the method register, and never enter
+ * an expandable: a supersession-class disclosure is not a footnote.
+ */
+export const ORDERING_IN_FORCE_LABEL = "ordering in force";
+
+/**
  * The Book column → the wire key it ranks by. Since 1.5.0 that is the IDENTITY
  * on every column, including Headroom, on BOTH engines.
  *

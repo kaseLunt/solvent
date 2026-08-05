@@ -43,6 +43,14 @@ import {
   histogramShiftReadingLine,
   moversDisclosure,
 } from "./labRunBookLines";
+import {
+  COLLATERAL_DISCLOSURE_METHOD,
+  MOVERS_FORENSICS_SUMMARY,
+  MOVERS_METHOD,
+  collateralGroupAnswer,
+  runbookHistogramForensicsSummary,
+  runbookHistogramMethod,
+} from "./labPanelLines";
 import styles from "./lab.module.css";
 
 const BAR_MAX = 168;
@@ -88,9 +96,21 @@ function Distribution({
   return (
     <div className={styles.histSide} data-testid={`runbook-hist-${side}`} data-engine={engine}>
       <p className={styles.histSideTitle}>{side} the shock</p>
-      <p className={styles.denominatorLine} data-testid={`runbook-hist-denominator-${side}`}>
-        {riskBandDenominatorLine(denominator)}
-      </p>
+      {/* ---- SLOT 2: this side's STATE. The accounting counts MOVED UP from
+              under the chart (R6): a no-comparator population and an
+              unknowable both change what these shares mean, so neither may be
+              read after the shape. Both stay outside every disclosure. ---- */}
+      <div className={styles.stateSlot} data-testid={`runbook-hist-state-${side}`}>
+        <span data-testid={`runbook-hist-denominator-${side}`}>
+          {riskBandDenominatorLine(denominator)}
+        </span>
+        <span data-testid={`runbook-hist-no-debt-${side}`}>
+          {riskBandNoDebtRow(histogram.infinite_count)} · counted here, outside the denominator
+        </span>
+        <span data-testid={`runbook-hist-refused-${side}`}>
+          {riskBandRefusedRow(histogram.refused_count)} · rows counted here, never dropped
+        </span>
+      </div>
       {/* LAW-3 / CX-7, the Book's fix mirrored: `maxWidth: 100%` scaled the
           whole picture inside a narrow side, and viewBox scaling shrinks a
           12px label without changing what `getComputedStyle` reports. Authored
@@ -202,15 +222,6 @@ function Distribution({
         })}
       </svg>
       </div>
-      {/* CX-6 THE ACCOUNTING ROWS: never folded into the denominator. */}
-      <div className={styles.histAside}>
-        <span data-testid={`runbook-hist-no-debt-${side}`}>
-          {riskBandNoDebtRow(histogram.infinite_count)}
-        </span>
-        <span className={styles.histBadge} data-testid={`runbook-hist-refused-${side}`}>
-          {riskBandRefusedRow(histogram.refused_count)} · rows counted here, never dropped
-        </span>
-      </div>
     </div>
   );
 }
@@ -229,17 +240,38 @@ export function LabRunBookHistogramPair({ engine }: { engine: LabRunBookEngine }
           comparator: {engine.before.hf_histogram.comparator}
         </span>
       </p>
-      <p className={styles.readingLine} data-testid="runbook-hist-reading">
+      {/* ---- SLOT 3: ANSWER — the computed shift, with its own limits ---- */}
+      <p className={styles.answerLine} data-testid="runbook-hist-reading">
         {histogramShiftReadingLine(engine)}
       </p>
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER — exact counts beside each bar ---- */}
       <div className={styles.histPair}>
         <Distribution aggregate={engine.before} side="before" engine={engine.engine} />
         <Distribution aggregate={engine.after} side="after" engine={engine.engine} />
       </div>
+      {/* ---- SLOT 6: METHOD — the shared scale and the tint asymmetry, both
+              stated ON THE PAGE rather than in a source comment ---- */}
       <p className={styles.methodLine} data-testid="runbook-hist-method">
-        {RISK_BAND_METHOD}
+        {runbookHistogramMethod(engine.before.hf_histogram.comparator, RISK_BAND_METHOD)}
       </p>
-      <p className={styles.noteText}>{engine.after.hf_histogram.note}</p>
+      {/* ---- SLOT 7: FORENSICS — the wire note and the bucket boundaries.
+              It holds no count that exists nowhere else (R3). ---- */}
+      <details className={styles.disclosure} data-testid="runbook-hist-forensics">
+        <summary>
+          {runbookHistogramForensicsSummary(engine.after.hf_histogram.buckets.length)}
+        </summary>
+        <p className={styles.noteText} data-testid="runbook-hist-wire-note">
+          {engine.after.hf_histogram.note}
+        </p>
+        <ul data-testid="runbook-hist-bounds">
+          {engine.after.hf_histogram.buckets.map((bucket) => (
+            <li key={bucket.label}>
+              {bucket.label} · upper bound{" "}
+              {bucket.upper_wad === null ? "unbounded" : bucket.upper_wad}
+            </li>
+          ))}
+        </ul>
+      </details>
     </section>
   );
 }
@@ -314,8 +346,12 @@ export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
       data-movers-total={String(engine.movers_total)}
       aria-label={`accounts moved by this scenario on ${engine.engine}`}
     >
+      {/* ---- SLOT 1: HEAD ---- */}
       <p className={styles.panelTitle}>Accounts this scenario moved</p>
-      <p className={styles.readingLine} data-testid="runbook-movers-disclosure">
+      {/* ---- SLOT 3: ANSWER — carries the TRUNCATION COUNT. That count
+              staying here is the precondition for the wire note collapsing
+              below: a silent cap is the defect the note exists to prevent. ---- */}
+      <p className={styles.answerLine} data-testid="runbook-movers-disclosure">
         {moversDisclosure(engine)}
       </p>
       {engine.movers.length > 0 && (
@@ -348,11 +384,20 @@ export function LabRunBookMovers({ engine }: { engine: LabRunBookEngine }) {
           </table>
         </div>
       )}
-      {/* The server's own statement of its ranking rule AND its truncation,
-          VERBATIM. This is the sentence that makes the cap not-silent. */}
-      <p className={styles.noteText} data-testid="runbook-movers-note">
-        {engine.movers_note}
+      {/* ---- SLOT 6: METHOD ---- */}
+      <p className={styles.methodLine} data-testid="runbook-movers-method">
+        {MOVERS_METHOD}
       </p>
+      {/* ---- SLOT 7: FORENSICS — the server's own statement of its ranking
+              rule AND its truncation, VERBATIM. This is legal ONLY because
+              the truncation count is in the ANSWER above; if that count ever
+              leaves the visible line, this note comes back out with it. ---- */}
+      <details className={styles.disclosure} data-testid="runbook-movers-forensics">
+        <summary>{MOVERS_FORENSICS_SUMMARY}</summary>
+        <p className={styles.noteText} data-testid="runbook-movers-note">
+          {engine.movers_note}
+        </p>
+      </details>
     </section>
   );
 }
@@ -373,7 +418,9 @@ function CollateralSide({
   return (
     <div className={styles.collateralSide} data-testid={`runbook-collateral-${side}`}>
       <p className={styles.histSideTitle}>{side} the shock</p>
-      <p className={styles.readingLine} data-testid={`runbook-collateral-reading-${side}`}>
+      {/* This side's own computed reading, open. A side carrying an UNPRICED
+          or NOT COUNTED row may not collapse, and neither side does. */}
+      <p className={styles.answerLine} data-testid={`runbook-collateral-reading-${side}`}>
         {collateralReadingLine(aggregate, usdDecimals, side)}
       </p>
       <div className={styles.tableWrap}>
@@ -443,7 +490,20 @@ export function LabRunBookCollateral({ engine }: { engine: LabRunBookEngine }) {
       data-engine={engine.engine}
       aria-label={`collateral by asset before and after for ${engine.engine}`}
     >
+      {/* ---- SLOT 1: HEAD ---- */}
       <p className={styles.panelTitle}>Collateral by asset · per side</p>
+      {/* ---- SLOT 3: ANSWER — across both sides, carrying the COUNT of
+              holdings with no price witness (hazard). ---- */}
+      <p className={styles.answerLine} data-testid="runbook-collateral-answer">
+        {collateralGroupAnswer(engine)}
+      </p>
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER ----
+          W-3L RULING, AGAINST THE INVENTORY. The inventory offered the side a
+          reader is not comparing as collapsible, gated on that side having
+          zero UNPRICED / NOT COUNTED rows. Both sides stay open: the gate is
+          data-dependent, so the panel's shape would change under the reader
+          between two runs of the same scenario, and a refusal register that
+          appears and disappears teaches nothing. Nothing here is collapsed. */}
       <div className={styles.histPair}>
         <CollateralSide
           aggregate={engine.before}
@@ -452,6 +512,10 @@ export function LabRunBookCollateral({ engine }: { engine: LabRunBookEngine }) {
         />
         <CollateralSide aggregate={engine.after} side="after" usdDecimals={engine.usd_decimals} />
       </div>
+      {/* ---- SLOT 6: METHOD — the three disclosure kinds, named ---- */}
+      <p className={styles.methodLine} data-testid="runbook-collateral-method">
+        {COLLATERAL_DISCLOSURE_METHOD}
+      </p>
     </section>
   );
 }

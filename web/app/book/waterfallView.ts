@@ -41,6 +41,47 @@ export function gridPercentLabel(factor: string, gridScale: string): string {
   return factorDistancePercent(parseDecimal(factor), parseDecimal(gridScale)) ?? "?";
 }
 
+/**
+ * WAVE W-3L, SLOT 3 — the per-engine ANSWER, COMPUTED from the same points
+ * the bars render (R4).
+ *
+ * The Book drew this grid and never said what it meant; the Lab computes
+ * exactly this sentence one route over. The derivation is reused, not the
+ * copy: this panel's claim is about the DEEPEST SAMPLED point of a Book-side
+ * down-grid, which is not the Lab's cliff claim.
+ *
+ * It states the bad-debt figure in reader words, so the definitional legend
+ * that used to sit beside the grid is no longer load-bearing for the reading.
+ */
+export function waterfallEngineAnswer(waterfall: Waterfall, engine: string): string {
+  let deepest: { index: number; factor: string; at: Waterfall["points"][number]["engines"][number] } | null =
+    null;
+  for (const point of waterfall.points) {
+    const at = point.engines.find((candidate) => candidate.engine === engine);
+    if (at === undefined) continue;
+    if (deepest === null || point.index > deepest.index) {
+      deepest = { index: point.index, factor: point.factor, at };
+    }
+  }
+  if (deepest === null) {
+    return (
+      `${engine} is absent from every point of this waterfall, so this grid makes no claim ` +
+      `about it.`
+    );
+  }
+  const { at } = deepest;
+  const where =
+    deepest.index === 0
+      ? "At the unshocked point"
+      : `By ${gridPercentLabel(deepest.factor, waterfall.grid_scale)}`;
+  return (
+    `${where}, ${engine} could liquidate ${usd(at.cumulative_debt_eligible_usd, at.usd_decimals)} ` +
+    `of debt across ${groupDecimalString(String(at.cumulative_eligible_accounts))} accounts, and ` +
+    `${usd(at.cumulative_bad_debt_usd, at.usd_decimals)} would still be owed after all ` +
+    `collateral is seized. Engine books are never summed.`
+  );
+}
+
 /** Build one engine's step list from the wire waterfall — pure, exact. */
 export function buildWaterfallSteps(waterfall: Waterfall, engine: string): WaterfallStep[] {
   const steps: WaterfallStep[] = [];

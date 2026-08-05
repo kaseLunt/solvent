@@ -1,6 +1,11 @@
 import { compareRatio, type RefinedScenario, type RefinedScenarioResult } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { FactorText } from "./LabScenarioDetail";
+import {
+  boundaryForensicsSummary,
+  boundaryGroupAnswer,
+  boundaryMemberTally,
+} from "./labPanelLines";
 import styles from "./lab.module.css";
 
 /**
@@ -44,38 +49,30 @@ function distinctFactors(scenario: RefinedScenario): { num: number; den: number 
   return out;
 }
 
+/**
+ * One member's outcome, in the open.
+ *
+ * WAVE W-3L: the SNAP COUNTS left this line for the panel's FORENSICS, which
+ * is legal only because the group's ANSWER carries their totals — a `snapped`
+ * or `base_snapped` YES is a modelling disclosure and may never exist solely
+ * behind a fold. `not applicable` keeps its SERVED REASON here, always: that
+ * is a refusal-class outcome and never collapses.
+ */
 function resultSummary(result: RefinedScenarioResult) {
   if (!result.applicable) {
     return (
-      <span className="mono dim">
+      <span className="mono dim" data-testid="boundary-not-applicable">
         not applicable · {result.reason ?? "no reason served"}
       </span>
     );
   }
-  const identical =
-    result.before !== null &&
-    result.after !== null &&
-    result.before.health_factor_wad === result.after.health_factor_wad &&
-    result.before.health_factor_num === result.after.health_factor_num &&
-    result.before.health_factor_den === result.after.health_factor_den &&
-    result.before.collateral_usd === result.after.collateral_usd &&
-    result.before.debt_usd === result.after.debt_usd &&
-    result.before.eligible === result.after.eligible;
-  const snappedCount = result.applied_shocks.filter((shock) => shock.snapped).length;
-  const baseSnapped = result.applied_shocks.filter((shock) => shock.base_snapped).length;
+  const { identical } = boundaryMemberTally(result);
   return (
     <span className="mono">
       {identical ? (
         <span className={styles["tone-ok"]}>no-op · served states bit-identical</span>
       ) : (
         <span className={styles["tone-warn"]}>re-priced · served states moved</span>
-      )}
-      {result.applied_shocks.length > 0 && (
-        <span className="dim">
-          {" "}
-          · shocks applied {result.applied_shocks.length} · snapped {snappedCount} · base_snapped{" "}
-          {baseSnapped}
-        </span>
       )}
     </span>
   );
@@ -93,15 +90,16 @@ export function LabBoundaryGroup({ scenarios }: { scenarios: readonly RefinedSce
   if (group.length === 0) return null;
   return (
     <section className={styles.panel} data-testid="lab-boundary-group">
-      <p className={styles.panelTitle}>
-        stable-snap boundary set · {group.length} committed member
-        {group.length === 1 ? "" : "s"}
+      {/* ---- SLOT 1: HEAD ---- */}
+      <p className={styles.panelTitle}>stable-snap boundary set</p>
+
+      {/* ---- SLOT 3: ANSWER — members, re-pricings and the SNAP TOTALS,
+              computed from the same results the grid renders (R4). ---- */}
+      <p className={styles.answerLine} data-testid="boundary-answer">
+        {boundaryGroupAnswer(group)}
       </p>
-      <p className={styles.caption}>
-        grouped from the wire: every committed scenario whose shocks all ride the{" "}
-        <span className="mono">stable_usd</span> axis. Only served members render, so a missing
-        boundary point is absent rather than invented.
-      </p>
+
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the member grid ---- */}
       <div className={styles.boundaryGrid}>
         {group.map((scenario) => (
           <div
@@ -130,6 +128,36 @@ export function LabBoundaryGroup({ scenarios }: { scenarios: readonly RefinedSce
           </div>
         ))}
       </div>
+
+      {/* ---- SLOT 6: METHOD — the derivation, and the ABSENCE clause. That
+              second sentence is a disclosure about what is NOT here, so it
+              stays in the open line and never moves into the disclosure. ---- */}
+      <p className={styles.methodLine} data-testid="boundary-method">
+        Grouped from the wire: every committed scenario whose shocks all ride the{" "}
+        <span className="mono">stable_usd</span> axis. Only served members render, so a missing
+        boundary point is absent rather than invented.
+      </p>
+
+      {/* ---- SLOT 7: FORENSICS — the per-member snap counts. Legal only
+              because their TOTALS ride the ANSWER above. ---- */}
+      <details className={styles.disclosure} data-testid="boundary-forensics">
+        <summary>{boundaryForensicsSummary(group.length)}</summary>
+        <ul>
+          {group.map((scenario) =>
+            scenario.results.map((result) => {
+              const tally = boundaryMemberTally(result);
+              return (
+                <li key={`${scenario.id}-${result.engine}-${result.account}`}>
+                  <span className="mono">
+                    {scenario.id} · {result.engine} · shocks applied {tally.applied} · snapped{" "}
+                    {tally.snapped} · base_snapped {tally.baseSnapped}
+                  </span>
+                </li>
+              );
+            }),
+          )}
+        </ul>
+      </details>
     </section>
   );
 }

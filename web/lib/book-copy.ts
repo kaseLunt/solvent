@@ -51,6 +51,19 @@ export function heldFlatDetailsSummary(n: number): string {
 }
 
 /**
+ * WAVE W-3L — the Book waterfall's FORENSICS summary (template slot 7).
+ *
+ * It COUNTS the held-flat inputs it hides, because the count itself stays
+ * visible in STATE and this line must agree with it. What sits behind the
+ * disclosure is a named list, a definition and a wire note: no refusal, no
+ * unknowable, and no count that exists nowhere else (R3).
+ */
+export function waterfallForensicsSummary(n: number): string {
+  const held = n === 0 ? "no held-flat inputs" : `${String(n)} held-flat inputs named`;
+  return `Exact data: ${held}, the bad-debt definition, and the wire's eligibility note`;
+}
+
+/**
  * Caption (a) — the held-flat value column header. The wire declares no
  * decimals for `held_flat[].value`, so scaling it to USD would be
  * fabrication; the header says so instead.
@@ -130,4 +143,25 @@ export function riskBandNoDebtRow(count: number): string {
 
 export function riskBandRefusedRow(count: number): string {
   return `refused: ${count.toLocaleString("en-US")}`;
+}
+
+/**
+ * WAVE W-3L — THE TINT ASYMMETRY, SAID OUT LOUD (template slot 6).
+ *
+ * Sub-1.00 buckets tint crit on the wad comparator and on no other, and the
+ * only place that was explained was inside the wire note and an SVG `<title>`.
+ * A `<title>` is hover sugar (LAW-5) and a wire note is not a method line, so
+ * the rule now renders as a sentence on the panel that obeys it.
+ */
+export function riskBandTintClause(comparator: string): string {
+  return comparator === "hf_wad"
+    ? "Buckets below 1.00 are tinted because this engine's own comparator makes that region " +
+        "eligible for liquidation."
+    : "No bucket is tinted: this engine's buckets are a disclosure and its eligibility comes " +
+        "from a strict boolean, not from a bucket boundary.";
+}
+
+/** WAVE W-3L — the risk-band panel's FORENSICS summary (template slot 7). */
+export function riskBandForensicsSummary(buckets: number): string {
+  return `Exact data: the wire's own note and ${String(buckets)} bucket boundaries`;
 }

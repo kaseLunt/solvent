@@ -76,6 +76,14 @@ import {
 import { HfsUnchangedBanner, LabRealization } from "./LabRealization";
 import { LabProjectionView } from "./LabProjectionView";
 import {
+  BOOK_RESULT_FORENSICS_SUMMARY,
+  BOOK_RESULT_METHOD,
+  bookResultAnswer,
+  engineResultAnswer,
+  engineResultForensicsSummary,
+  engineResultMethod,
+} from "./labPanelLines";
+import {
   LabRunBookCollateral,
   LabRunBookHistogramPair,
   LabRunBookMovers,
@@ -92,14 +100,11 @@ const AGGREGATE_ROWS = [
   { key: "total_collateral_usd", label: "total collateral", money: true },
   { key: "total_debt_usd", label: "total debt", money: true },
   { key: "eligible_debt_usd", label: "eligible debt", money: true },
-  // SUPPLEMENT caption (c): the reader caption rides this row as its title —
-  // a dip in this series is honest arithmetic, not missing data.
-  {
-    key: "collateral_at_risk_usd",
-    label: "collateral at risk",
-    money: true,
-    title: AT_RISK_READER_CAPTION,
-  },
+  // SUPPLEMENT caption (c) — W-3L: the reader caption used to ride this row
+  // as a `title`, which made a method disclosure reachable only by hover. It
+  // is now a clause of the panel's METHOD line, above this table rather than
+  // inside it.
+  { key: "collateral_at_risk_usd", label: "collateral at risk", money: true },
   { key: "bad_debt_usd", label: "bad debt", money: true },
 ] as const;
 
@@ -128,30 +133,17 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
   };
   return (
     <section className={styles.panel} data-testid="book-engine" data-engine={engine.engine}>
+      {/* ---- SLOT 1: HEAD ---- */}
       <p className={styles.panelTitle}>
-        <EngineChip engine={engine.engine} /> · usd_decimals {engine.usd_decimals} · this
-        engine&apos;s own unit; never summed across engines
+        <EngineChip engine={engine.engine} />
       </p>
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>aggregate</th>
-              <th className={styles.num}>before</th>
-              <th className={styles.num}>after</th>
-            </tr>
-          </thead>
-          <tbody>
-            {AGGREGATE_ROWS.map((row) => (
-              <tr key={row.key}>
-                <td title={"title" in row ? row.title : undefined}>{row.label}</td>
-                <td className={styles.num}>{cell(row, "before")}</td>
-                <td className={styles.num}>{cell(row, "after")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+
+      {/* ---- SLOT 3: ANSWER — the three cards as one computed sentence ---- */}
+      <p className={styles.answerLine} data-testid="book-engine-answer">
+        {engineResultAnswer(engine)}
+      </p>
+
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the three cards ---- */}
       <div className={styles.statRow}>
         <StatCard
           label={NET_ELIGIBLE_LABEL}
@@ -176,9 +168,49 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
           sub="same delta-only basis"
         />
       </div>
+      {/* ---- SLOT 6: METHOD — the unit, the never-summed law, and the
+              collateral-at-risk caption PROMOTED out of the `title` it used to
+              live in. The row it annotated is in FORENSICS now, so the caption
+              had to move UP, not down with it. ---- */}
+      <p className={styles.methodLine} data-testid="book-engine-method">
+        {engineResultMethod(engine, AT_RISK_READER_CAPTION)}
+      </p>
+
+      {/* ---- SLOT 7: FORENSICS — the seven-row before/after ledger and the
+              wire's own note. Nothing here is refusal-class: this block only
+              renders from a SERVED result, downstream of every refusal and
+              hole gate. ---- */}
+      <details className={styles.disclosure} data-testid="book-engine-forensics">
+        <summary>{engineResultForensicsSummary(AGGREGATE_ROWS.length)}</summary>
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>aggregate</th>
+                <th className={styles.num}>before</th>
+                <th className={styles.num}>after</th>
+              </tr>
+            </thead>
+            <tbody>
+              {AGGREGATE_ROWS.map((row) => (
+                <tr key={row.key}>
+                  <td>{row.label}</td>
+                  <td className={styles.num}>{cell(row, "before")}</td>
+                  <td className={styles.num}>{cell(row, "after")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className={styles.noteText} data-testid="book-engine-note">
+          {engine.note}
+        </p>
+      </details>
+
       {/* Contract 1.6.0. These render ONLY from a SERVED result: they sit
           inside EngineResult, downstream of every refusal/hole gate, so a row
-          that holds no book still shows nothing. */}
+          that holds no book still shows nothing. Each is templated in its own
+          file and keeps its own seven slots. */}
       <LabRunBookHistogramPair engine={engine} />
       <LabRunBookMovers engine={engine} />
       <LabRunBookCollateral engine={engine} />
@@ -189,7 +221,6 @@ function EngineResult({ engine }: { engine: LabRunBookEngine }) {
         </>
       )}
       {engine.projection !== null && <LabProjectionView projection={engine.projection} />}
-      <p className={styles.noteText}>{engine.note}</p>
     </section>
   );
 }
@@ -276,26 +307,11 @@ function BookResult({
         </span>
       </div>
       <p className={styles.description}>{response.description}</p>
-      <dl className={styles.kv}>
-        <dt>path assumption</dt>
-        <dd>{response.path_assumption}</dd>
-        <dt>shocks</dt>
-        <dd>
-          {response.shocks.length === 0
-            ? "none · no oracle mark moves; this scenario's axis is market realization"
-            : response.shocks.map((shock, index) => (
-                <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
-                  {index > 0 && " · "}
-                  {shock.axis} <FactorText num={shock.factor_num} den={shock.factor_den} />
-                </span>
-              ))}
-        </dd>
-      </dl>
 
-      {response.engines.map((engine) => (
-        <EngineResult key={engine.engine} engine={engine} />
-      ))}
-
+      {/* ---- SLOT 2: STATE — every absence, BEFORE the numbers it qualifies
+              (R6). The excluded/hole block MOVED UP from below the engine
+              blocks: a reader who learns about a hole after reading two
+              screens of aggregates has already read them as a whole book. ---- */}
       <div data-testid="book-excluded">
         {response.excluded_engines.length === 0 ? (
           complete ? (
@@ -324,39 +340,86 @@ function BookResult({
         )}
       </div>
 
+      {/* HAZARD: a coverage that is NOT full is a withheld-engine statement.
+          It stays here in the open, while the raw counts it sits among move
+          into FORENSICS below. */}
+      {!response.coverage.stress_coverage_is_full && (
+        <p className={styles.caption} data-testid="book-coverage-not-full">
+          <span className={styles["tone-warn"]}>
+            stress_coverage_is_full: false · withheld:{" "}
+            {response.coverage.withheld_engines.map((e) => e.engine).join(", ") ||
+              "(named above)"}
+          </span>
+        </p>
+      )}
+
+      {/* ---- SLOT 3: ANSWER — computed from response.engines (R4) ---- */}
+      <p className={styles.answerLine} data-testid="book-result-answer">
+        {bookResultAnswer(response.engines)}
+      </p>
+
+      {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the per-engine blocks ---- */}
+      {response.engines.map((engine) => (
+        <EngineResult key={engine.engine} engine={engine} />
+      ))}
+
       <LabAppliedShocks shocks={response.applied_shocks} />
       <LabHeldFlat
         heldFlat={response.held_flat}
         emptyClaim="the claim that the propagation matrix covered the whole run"
       />
+      <LabOutOfModel items={response.out_of_model} />
 
-      <section className={styles.panel} data-testid="book-coverage">
-        <p className={styles.panelTitle}>coverage · what reached the run&apos;s arithmetic</p>
+      {/* ---- SLOT 6: METHOD ---- */}
+      <p className={styles.methodLine} data-testid="book-result-method">
+        {BOOK_RESULT_METHOD}
+      </p>
+
+      {/* ---- SLOT 7: FORENSICS — the path assumption, the shock list and the
+              coverage COUNTS. The coverage panel's one refusal-class row
+              (`stress_coverage_is_full: false`) is hoisted into STATE above,
+              so nothing withheld sits behind this summary (R3). ---- */}
+      <details className={styles.disclosure} data-testid="book-result-forensics">
+        <summary>{BOOK_RESULT_FORENSICS_SUMMARY}</summary>
         <dl className={styles.kv}>
-          <dt>batch positions</dt>
-          <dd>{response.coverage.batch_positions}</dd>
-          <dt>in book</dt>
-          <dd>{response.coverage.in_book}</dd>
-          <dt>refused in batch</dt>
-          <dd>{response.coverage.refused_in_batch}</dd>
-          <dt>excluded by this layer</dt>
-          <dd>{response.coverage.excluded_by_this_layer}</dd>
-          <dt>stress_coverage_is_full</dt>
+          <dt>path assumption</dt>
+          <dd>{response.path_assumption}</dd>
+          <dt>shocks</dt>
           <dd>
-            {response.coverage.stress_coverage_is_full ? (
-              <span className={styles["tone-ok"]}>true</span>
-            ) : (
-              <span className={styles["tone-warn"]}>
-                false · withheld:{" "}
-                {response.coverage.withheld_engines.map((e) => e.engine).join(", ") || "(named above)"}
-              </span>
-            )}
+            {response.shocks.length === 0
+              ? "none · no oracle mark moves; this scenario's axis is market realization"
+              : response.shocks.map((shock, index) => (
+                  <span key={`${shock.axis}-${shock.asset ?? String(index)}`}>
+                    {index > 0 && " · "}
+                    {shock.axis} <FactorText num={shock.factor_num} den={shock.factor_den} />
+                  </span>
+                ))}
           </dd>
         </dl>
-        <p className={styles.noteText}>{response.coverage.note}</p>
-      </section>
+        <section data-testid="book-coverage">
+          <p className={styles.panelTitle}>coverage · what reached the run&apos;s arithmetic</p>
+          <dl className={styles.kv}>
+            <dt>batch positions</dt>
+            <dd>{response.coverage.batch_positions}</dd>
+            <dt>in book</dt>
+            <dd>{response.coverage.in_book}</dd>
+            <dt>refused in batch</dt>
+            <dd>{response.coverage.refused_in_batch}</dd>
+            <dt>excluded by this layer</dt>
+            <dd>{response.coverage.excluded_by_this_layer}</dd>
+            <dt>stress_coverage_is_full</dt>
+            <dd>
+              {response.coverage.stress_coverage_is_full ? (
+                <span className={styles["tone-ok"]}>true</span>
+              ) : (
+                <span className={styles["tone-warn"]}>false · named in full above</span>
+              )}
+            </dd>
+          </dl>
+          <p className={styles.noteText}>{response.coverage.note}</p>
+        </section>
+      </details>
 
-      <LabOutOfModel items={response.out_of_model} />
       {/* SUPPLEMENT caption (c): the wire notes stay VERBATIM, behind the
           counted-disclosure pattern — counted always, one click to the text. */}
       {response.notes.length > 0 && (

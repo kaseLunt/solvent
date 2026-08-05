@@ -184,10 +184,13 @@ test("(1) AN HONORED liq_distance LINK: the ordering the link names is the order
   // small capacity, but only $50k of room) leads WHALE (2% of a large one, and
   // $200k of room). Under the Headroom ranking these two are the other way
   // round — which is exactly what made the silent rewrite a different book.
+  // W-3L (LAW-5): the price-path arm now renders a VISIBLE marker beside the
+  // headroom reading. It used to exist only inside the cell's `title`, which
+  // put the `distance` arm's NUMBER nowhere a keyboard reader could reach.
   const headroomCells = page.getByTestId("headroom-value");
   await expect(headroomCells).toHaveCount(2);
-  await expect(headroomCells.nth(0)).toHaveText("50% ≥50%");
-  await expect(headroomCells.nth(1)).toHaveText("2% 2–5%");
+  await expect(headroomCells.nth(0)).toHaveText("50% ≥50% · no solve");
+  await expect(headroomCells.nth(1)).toHaveText("2% 2–5% · no solve");
 
   // THE REGISTER NAMES WHAT IS APPLIED, in reader words rather than a wire
   // token, and says plainly that it is not the ratio the column prints.
@@ -227,8 +230,8 @@ test("(1) AN HONORED liq_distance LINK: the ordering the link names is the order
   // The table asks for the column's own key...
   await expect.poll(() => sorts).toContain("headroom");
   // ...the rows arrive in the RATIO order, which is the reverse of the above...
-  await expect(headroomCells.nth(0)).toHaveText("2% 2–5%");
-  await expect(headroomCells.nth(1)).toHaveText("50% ≥50%");
+  await expect(headroomCells.nth(0)).toHaveText("2% 2–5% · no solve");
+  await expect(headroomCells.nth(1)).toHaveText("50% ≥50% · no solve");
   // ...the header now carries the indicator it had refused to carry...
   await expect(headroomHeader).toHaveAttribute("aria-sort", "ascending");
   // ...the register is gone, because the ranking it described is gone...

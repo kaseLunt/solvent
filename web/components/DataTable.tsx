@@ -96,6 +96,20 @@ export interface DataTableProps<Row> {
   onEndSentinel?: (visible: boolean, walkLength: number) => void;
   /** aria-label for the scroll region (defaults to `ariaLabel`). */
   scrollRegionLabel?: string;
+  /**
+   * The section template's ANSWER slot (W-3L): one computed sentence, rendered
+   * ABOVE the sticky header and OUTSIDE the scroll region, so it is readable
+   * at any scroll depth and cannot be scrolled past.
+   *
+   * It is a plain node, never a `<details>`: this primitive offers no way to
+   * collapse it, which is what keeps the hazard register safe by construction.
+   */
+  takeaway?: ReactNode;
+  /**
+   * The section template's METHOD slot (W-3L): one line under the takeaway —
+   * encoding, unit, as-of. Also never collapsible.
+   */
+  method?: ReactNode;
   /** Rendered inside the wrapper below the table (pagination controls). */
   footer?: ReactNode;
   /**
@@ -117,6 +131,8 @@ export function DataTable<Row>({
   windowing,
   onEndSentinel,
   scrollRegionLabel,
+  takeaway,
+  method,
   footer,
   empty,
   ariaLabel,
@@ -277,6 +293,16 @@ export function DataTable<Row>({
 
   return (
     <div className={styles.wrap}>
+      {takeaway !== undefined && (
+        <p className={styles.takeaway} data-testid="table-takeaway">
+          {takeaway}
+        </p>
+      )}
+      {method !== undefined && (
+        <p className={styles.tableMethod} data-testid="table-method">
+          {method}
+        </p>
+      )}
       {scroll ? (
         <div
           ref={scrollRef}

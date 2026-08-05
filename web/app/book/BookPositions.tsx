@@ -79,7 +79,9 @@ import {
   isHonoredLegacySort,
   legacySortRegister,
   normalizeBookQuery,
+  ORDERING_IN_FORCE_LABEL,
   POSITIONS_ENGINES,
+  positionsAnswerLine,
   reversedWireDir,
   SORT_HF_REMAP_ACK,
   type AppliedBookSort,
@@ -123,7 +125,7 @@ import {
 import { toPositionRow, type PositionRow } from "./positionRow";
 import { BookRiskMap } from "./BookRiskMap";
 import { useFullBookWalk } from "./useFullBookWalk";
-import { noPricePathLegendFor, pricePathDetail } from "@/lib/liq-distance";
+import { NO_PRICE_PATH_LABEL, noPricePathLegendFor, pricePathDetail } from "@/lib/liq-distance";
 import { WARN_BAND_DISCLOSURE } from "./warnBand";
 import styles from "./book.module.css";
 
@@ -180,6 +182,40 @@ function pricePathFor(row: PositionRow): string | null {
 }
 
 /**
+ * THE PRICE-PATH MARKER, RENDERED (Wave W-3L — LAW-5).
+ *
+ * W-HR-A demoted the whole price-path statement into the Headroom cell's
+ * `title`, and one of its arms carries a NUMBER: "weETH must move −12.4% to
+ * reach this engine's boundary". A `<title>` is hover sugar, so that number
+ * existed nowhere a keyboard reader could reach it — the exact defect LAW-5
+ * names ("no number may exist only in a `<title>`"), and the reason the
+ * inventory ruled the statement had to leave the title.
+ *
+ * The marker is a short VISIBLE element carrying the arm and, where the wire
+ * published one, the exact distance. The full sentence keeps riding the title
+ * as sugar and the always-open legend above the table explains the vocabulary,
+ * so nothing is reachable only by hover any more.
+ *
+ * `breached` renders no marker: the Headroom cell already says `breached` or
+ * `liquidatable` in its own words, and repeating it would be noise.
+ */
+function pricePathMarker(row: PositionRow): string | null {
+  const ld = row.liqDistance;
+  switch (ld.kind) {
+    case "distance":
+      return ld.display === null
+        ? null
+        : `${ld.assetLabel ?? "price axis"} ${ld.display}`;
+    case "never":
+      return NO_PRICE_PATH_LABEL;
+    case "none":
+      return "no solve";
+    case "breached":
+      return null;
+  }
+}
+
+/**
  * THE Headroom cell (Wave W-HR-A) — the column that replaced Liq. distance.
  *
  * Every arm is a different FACT and renders as one:
@@ -199,6 +235,16 @@ function headroomCell(row: PositionRow) {
   const pricePath = pricePathFor(row);
   const withPricePath = (sentence: string) =>
     pricePath === null ? sentence : `${sentence} ${pricePath}`;
+  const marker = pricePathMarker(row);
+  // LAW-5: the marker RENDERS. It is never the only copy of anything, and it
+  // is never the reason a number would otherwise be unreachable.
+  const markerNode =
+    marker === null ? null : (
+      <span className="dim" data-testid="price-path-marker">
+        {" "}
+        · {marker}
+      </span>
+    );
 
   if (row.status === "refused") {
     return (
@@ -212,6 +258,7 @@ function headroomCell(row: PositionRow) {
       return (
         <span className="dim" title={withPricePath(HEADROOM_NO_DEBT_TITLE)}>
           {HEADROOM_NO_DEBT_LABEL}
+          {markerNode}
         </span>
       );
     case "unknown":
@@ -225,6 +272,7 @@ function headroomCell(row: PositionRow) {
           )}
         >
           {EM_DASH}
+          {markerNode}
         </span>
       );
     case "headroom": {
@@ -239,6 +287,7 @@ function headroomCell(row: PositionRow) {
           <span className="crit-t" title={title} data-testid="headroom-breached">
             {row.verdict === "liquidatable" ? "liquidatable" : "breached"}
             {row.headroom.display !== null && <span className="dim"> {row.headroom.display}</span>}
+            {markerNode}
           </span>
         );
       }
@@ -246,6 +295,7 @@ function headroomCell(row: PositionRow) {
         <span title={title} data-testid="headroom-value">
           {row.headroom.display}
           <span className="dim"> {headroomBandLabel(band)}</span>
+          {markerNode}
         </span>
       );
     }
@@ -776,24 +826,37 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
 
   return (
     <section className={styles.section} aria-label="position table">
+      {/* ---- SLOT 1: HEAD ---- */}
       <div className={styles.sectionHead}>
         <h2>Positions: batch-stable pages, one engine at a time</h2>
+      </div>
+
+      {/* ---- SLOT 2: STATE — everything that qualifies the rows, before the
+              rows (R6), and outside every collapsible.
+
+              W-3L RULING, AGAINST THE INVENTORY. The inventory offered both of
+              these as collapsible on the grounds that neither is a refusal.
+              They stay open:
+
+                - the WARN-BAND disclosure defines the tint a reader sees on
+                  rows in front of them, and the risk map keeps its twin open
+                  in STATE. Two panels on one page cannot disagree about
+                  whether the same sentence is foldable.
+                - the NO-PRICE-PATH legend qualifies cells that render an em
+                  dash and cells that render a `no price path` marker. The
+                  same content class is a hard hazard on the Inspector card
+                  ("the axis-scoped no-price-path badge"), and a qualifier
+                  behind a fold on the number it qualifies is the D-013
+                  reading this rollout exists to remove. ---- */}
+      <div className={styles.stateSlot} data-testid="positions-state">
         <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
           <i aria-hidden /> warn = {engine === "debt_manager" ? WARN_HEADROOM_DISCLOSURE : WARN_BAND_DISCLOSURE}
         </span>
-        {/* W-HR-A: the Headroom column's one-sentence legend. RENDERED, not
-            hover-only — a reader without a mouse gets the metric's definition,
-            in reader words, before they read a single number under it. */}
-        <span className={styles.sectionNote} data-testid="headroom-legend">
-          {HEADROOM_LEGEND}
-        </span>
         {/* Wave R1 item 1, DEMOTED by W-HR-A: the price-path statement is no
-            longer a column, so this line explains the hover that now carries
-            it. The words are unchanged; only the clause naming the surviving
-            verdict element differs per engine. */}
-        <span className={styles.sectionNote} data-testid="no-price-path-legend">
-          {noPricePathLegendFor(engine)}
-        </span>
+            longer a column, so this line explains the marker and hover that
+            now carry it. The words are unchanged; only the clause naming the
+            surviving verdict element differs per engine. */}
+        <span data-testid="no-price-path-legend">{noPricePathLegendFor(engine)}</span>
       </div>
 
       <div className={styles.controls}>
@@ -835,24 +898,36 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         >
           refused first
         </button>
-        {sortAck !== null && (
-          <span className={styles.sortAck} data-testid="sort-remap-ack">
-            {sortAck}
-          </span>
-        )}
-        {/* WAVE R7, EXTENDED BY R8 — the honored deprecated ranking, NAMED for
-            as long as it is the one in force. Not an acknowledgment (nothing
-            was remapped) and so not a one-shot: it is the sort register, and it
-            disappears the moment a sort control moves the table onto a column.
-            It carries the DIRECTION as well as the key, because the direction
-            is half of what the link asked for — and dropping that half is
-            exactly the defect R8 closed. */}
-        {isHonoredLegacySort(sort) && (
-          <span className={styles.sortAck} data-testid="legacy-sort-register">
-            {legacySortRegister(sort, reversed)}
-          </span>
-        )}
       </div>
+
+      {/* ---- THE ORDERING-IN-FORCE STRIP (W-3L). Controls are controls; a
+              statement about what the rows are ACTUALLY ordered by is not a
+              chip. Both registers move here, on their own line, in the method
+              register, and never inside an expandable: `legacy-sort-register`
+              is supersession-class, because no column header may claim an
+              ordering the service actually applied. ---- */}
+      {(sortAck !== null || isHonoredLegacySort(sort)) && (
+        <div className={styles.orderingStrip} data-testid="positions-ordering">
+          <span className={styles.controlLabel}>{ORDERING_IN_FORCE_LABEL}</span>
+          {sortAck !== null && (
+            <span className={styles.sortAck} data-testid="sort-remap-ack">
+              {sortAck}
+            </span>
+          )}
+          {/* WAVE R7, EXTENDED BY R8 — the honored deprecated ranking, NAMED
+              for as long as it is the one in force. Not an acknowledgment
+              (nothing was remapped) and so not a one-shot: it is the sort
+              register, and it disappears the moment a sort control moves the
+              table onto a column. It carries the DIRECTION as well as the key,
+              because the direction is half of what the link asked for — and
+              dropping that half is exactly the defect R8 closed. */}
+          {isHonoredLegacySort(sort) && (
+            <span className={styles.sortAck} data-testid="legacy-sort-register">
+              {legacySortRegister(sort, reversed)}
+            </span>
+          )}
+        </div>
+      )}
 
       {notice !== null && (
         <div className={styles.notice} role="status" data-testid="batch-superseded-notice">
@@ -913,6 +988,22 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
         onEndSentinel={handleEndSentinel}
         scrollRegionLabel={`positions for ${engine} · scrollable rows`}
         ariaLabel={`positions for ${engine}`}
+        /* ---- SLOT 3: ANSWER — computed from the walk this table renders ---- */
+        takeaway={
+          <span data-testid="positions-answer">
+            {positionsAnswerLine({
+              engine,
+              sort,
+              reversed,
+              loaded: rows.length,
+              qualifying: qualifyingDisplay,
+              onBook: onBookDisplay,
+            })}
+          </span>
+        }
+        /* ---- SLOT 6: METHOD — the Headroom column's definition, RENDERED
+                (not hover-only), directly above the column it defines. ---- */
+        method={<span data-testid="headroom-legend">{HEADROOM_LEGEND}</span>}
         empty={empty}
         footer={
           <LoadMoreFooter

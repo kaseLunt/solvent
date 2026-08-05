@@ -123,10 +123,112 @@ export function riskMapReadingLine(result: RiskBinsResult): string {
   );
 }
 
-/** The Liquidatable stat card's sub: never the adjective without the Σ. */
-export function liquidatableCardSub(badDebt: BadDebt | undefined): string {
-  return `of computed positions, engine's own comparator · ${eligibleDebtFragment(badDebt)}`;
+// ---------------------------------------------------------------------------
+// Wave W-3L — the per-engine aggregate block on the section template.
+//
+// The Σ used to ride the Liquidatable card's `sub`, packed together with the
+// denominator and the comparator clause: three statements in one dim line
+// under a number, where the Σ is the reason anyone reads the block at all. It
+// moves UP into the ANSWER, the `sub` narrows to the denominator alone, and
+// the comparator clause becomes the card's own `method`.
+//
+// The law "never the adjective without the Σ" is unchanged. It now binds the
+// ANSWER, which is the sentence carrying the adjective.
+// ---------------------------------------------------------------------------
+
+/** The Liquidatable stat card's sub: the DENOMINATOR, and nothing else. */
+export function liquidatableCardSub(computedPositions: number): string {
+  return `of ${groupDecimalString(String(computedPositions))} computed positions`;
 }
+
+/** The Liquidatable card's METHOD slot: what decides the verdict. */
+export const LIQUIDATABLE_CARD_METHOD = "engine's own comparator";
+
+/**
+ * SLOT 3 — the per-engine ANSWER, computed from the same /v1/book response the
+ * four cards render (R4). It carries the count, its denominator and the Σ, so
+ * a reader who reads one sentence has read the block's verdict.
+ */
+export function engineStatsAnswer(aggregate: Aggregate, badDebt: BadDebt | undefined): string {
+  return (
+    `${aggregate.engine}: ${groupDecimalString(String(aggregate.liquidatable_positions))} of ` +
+    `${groupDecimalString(String(aggregate.computed_positions))} computed positions ` +
+    `liquidatable · ${eligibleDebtFragment(badDebt)}.`
+  );
+}
+
+/**
+ * SLOT 3, the WITHHELD arm. An engine the batch refused has no count and no Σ,
+ * and the sentence says which of the two it is: unknown, never zero. It renders
+ * in the same open register as the served arm (hazard: the withheld block is
+ * never layered).
+ */
+export function engineStatsWithheldAnswer(aggregate: Aggregate): string {
+  const code = aggregate.refusal === null ? "withheld" : aggregate.refusal.code;
+  return (
+    `${aggregate.engine}: withheld on this batch (${code}). No verdict and no total is ` +
+    `served for this engine, so its side of the book is unknown rather than zero.`
+  );
+}
+
+/**
+ * SLOT 6 — the per-engine METHOD line: what the numbers are measured against,
+ * then the wire's own unit note VERBATIM. Two clauses, one line, never
+ * collapsed.
+ */
+export function engineStatsMethod(aggregate: Aggregate): string {
+  return (
+    `Counts are over computed positions on this engine's own comparator; engines are never ` +
+    `combined. ${aggregate.unit_note}`
+  );
+}
+
+/** SLOT 2 / SLOT 7 — the raw position split, in one line. */
+export function engineStatsSplitLine(aggregate: Aggregate): string {
+  return (
+    `${groupDecimalString(String(aggregate.positions))} positions · ` +
+    `${groupDecimalString(String(aggregate.computed_positions))} computed · ` +
+    `${groupDecimalString(String(aggregate.refused_positions))} refused · ` +
+    `${groupDecimalString(String(aggregate.flagged_positions))} flagged`
+  );
+}
+
+/** SLOT 7's summary for the clean case (zero refused positions). */
+export const ENGINE_STATS_FORENSICS_SUMMARY = "Exact data: the position split for this engine";
+
+// ---------------------------------------------------------------------------
+// Wave W-3L — the bad-debt census ANSWER.
+//
+// The standing loss is arguably the single most important number on /book and
+// it had to be read out of a table cell. It now leads the section as a
+// computed sentence, PER ENGINE and never summed — and a withheld engine
+// appears IN the sentence as unknown rather than being dropped from it, which
+// is the difference between "the other engine reported nothing" and "there is
+// nothing to report".
+// ---------------------------------------------------------------------------
+
+/** SLOT 3 for the bad-debt census, computed from the rows the table renders. */
+export function badDebtAnswer(rows: readonly BadDebt[]): string {
+  if (rows.length === 0) {
+    return (
+      "No engine's bad debt was served on this batch. That is a fact about the service, and no " +
+      "engine's bad debt is reported as zero."
+    );
+  }
+  const parts = rows.map((row) => {
+    if (row.refused || row.current_bad_debt_usd === null) {
+      const code = row.refusal?.code ?? "withheld";
+      return `${EM_DASH} on ${row.engine} (${code}, unknown rather than zero)`;
+    }
+    return `${usd(row.current_bad_debt_usd, row.usd_decimals)} on ${row.engine}`;
+  });
+  return `Standing bad debt: ${parts.join(" · ")}. Engine books are never summed.`;
+}
+
+/** SLOT 6 for the bad-debt census: the null-never-zero law, in one line. */
+export const BAD_DEBT_METHOD =
+  "Measured at the unshocked grid point on each engine's own book. A withheld engine is an em " +
+  "dash with its reason, never 0.";
 
 // ---------------------------------------------------------------------------
 // The chart spec v4 FINAL COPY block for the risk map, verbatim.

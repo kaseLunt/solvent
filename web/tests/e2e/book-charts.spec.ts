@@ -101,16 +101,61 @@ test("reading lines render per panel from the served /v1/book values", async ({ 
     "a disclosure only",
   );
 
-  // §17 — the Liquidatable card: never the adjective without the Σ.
-  await expect(page.getByTestId("book-stats-debt_manager")).toContainText(
-    "of computed positions, engine's own comparator · Σ eligible debt $4,200",
+  // §17 — never the adjective without the Σ. W-3L moved the Σ out of the
+  // Liquidatable card's sub and into the block's ANSWER, which is the sentence
+  // that now carries the adjective. Same law, re-pinned where it binds.
+  await expect(page.getByTestId("book-stats-answer-debt_manager")).toHaveText(
+    "debt_manager: 1 of 1 computed positions liquidatable · Σ eligible debt $4,200.",
   );
-  const aaveCard = page.getByTestId("book-stats-aave_v3_etherfi");
-  await expect(aaveCard).toContainText(
-    "of computed positions, engine's own comparator · Σ eligible debt $0",
+  await expect(page.getByTestId("book-stats-answer-aave_v3_etherfi")).toHaveText(
+    "aave_v3_etherfi: 0 of 1 computed positions liquidatable · Σ eligible debt $0.",
   );
   // The inverted zero-member pin: no vacuous "all dust" over zero members.
+  const aaveCard = page.getByTestId("book-stats-aave_v3_etherfi");
   await expect(aaveCard).not.toContainText("all dust");
+
+  // The card's sub narrows to the DENOMINATOR alone; the comparator clause is
+  // its own METHOD slot. Neither slot is collapsible.
+  await expect(page.getByTestId("book-stat-liquidatable-debt_manager-sub")).toHaveText(
+    "of 1 computed positions",
+  );
+  await expect(page.getByTestId("book-stat-liquidatable-debt_manager-method")).toHaveText(
+    "engine's own comparator",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// W-3L — the per-engine aggregate block on the seven-slot template.
+// ---------------------------------------------------------------------------
+
+test("book stat block: slot order is STATE, ANSWER, cards, METHOD (DOM order)", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page);
+
+  // The DM fixture carries refused_positions = 1, so the split is
+  // refusal-class and renders OPEN in STATE — never behind the expandable.
+  const block = page.getByTestId("book-stats-debt_manager");
+  const order = await block.evaluate((node) => {
+    const ids = [
+      "book-stats-state-debt_manager",
+      "book-stats-answer-debt_manager",
+      "book-stat-liquidatable-debt_manager",
+      "book-stats-method-debt_manager",
+    ];
+    return ids.map((id) => {
+      const found = node.querySelector(`[data-testid="${id}"]`);
+      return found === null ? -1 : Array.prototype.indexOf.call(node.querySelectorAll("*"), found);
+    });
+  });
+  expect(order.every((index) => index >= 0)).toBe(true);
+  expect(order).toEqual([...order].sort((a, b) => a - b));
+
+  // HAZARD: with refusals counted, no expandable exists on this block at all.
+  await expect(page.getByTestId("book-stats-forensics-debt_manager")).toHaveCount(0);
+  await expect(page.getByTestId("book-stats-split-debt_manager")).toBeVisible();
 });
 
 test("MUTATE the fixture and the reading lines change — computed, not hardcoded", async ({
@@ -171,18 +216,73 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
   );
   await expect(page.getByText("PROJECTION", { exact: true })).toBeVisible();
 
-  // The one dim legend line under the panel grid, verbatim.
+  // W-3L, SLOT 3: the panel's own computed ANSWER, stating the deepest
+  // sampled point in reader words — including what bad debt MEANS, which is
+  // why the definitional legend below may sit in FORENSICS.
+  await expect(page.getByTestId("waterfall-answer-debt_manager")).toContainText(
+    "would still be owed after all collateral is seized",
+  );
+  await expect(page.getByTestId("waterfall-answer-debt_manager")).toContainText(
+    "Engine books are never summed.",
+  );
+
+  // The definitional legend, verbatim, now in the FORENSICS slot.
   await expect(page.getByTestId("waterfall-bad-debt-legend")).toHaveText(
     "bad debt = debt still owed after all collateral is seized, the protocol's loss at that price.",
   );
 
-  // Caption (b): the primary gloss; the wire eligibility_note stays dim + verbatim.
+  // Caption (b): the primary gloss, now the panel's METHOD line.
   await expect(page.getByTestId("eligible-gloss")).toHaveText(
     '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
       "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
       "the remainder.",
   );
-  await expect(page.getByTestId("waterfall-held-flat")).toContainText("closes in two passes");
+  // The wire eligibility_note stays rendered verbatim, in FORENSICS.
+  await expect(page.getByTestId("waterfall-eligibility-note")).toContainText(
+    "closes in two passes",
+  );
+});
+
+test("waterfall slot order: STATE (held-flat count) before the bars, METHOD and FORENSICS after", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page);
+
+  await expect(page.getByTestId("waterfall-forensics")).toBeAttached();
+  const order = await page.evaluate(() => {
+    const all = Array.from(document.querySelectorAll("*"));
+    const at = (id: string) => {
+      const node = document.querySelector(`[data-testid="${id}"]`);
+      return node === null ? -1 : all.indexOf(node);
+    };
+    return {
+      note: at("waterfall-section-note"),
+      heldFlat: at("waterfall-held-flat"),
+      answer: at("waterfall-answer-debt_manager"),
+      panel: at("book-waterfall-debt_manager"),
+      method: at("eligible-gloss"),
+      forensics: at("waterfall-forensics"),
+    };
+  });
+  expect(order.note).toBeGreaterThanOrEqual(0);
+  // R6: the held-flat COUNT qualifies every bar, so it renders before them.
+  expect(order.heldFlat).toBeGreaterThan(order.note);
+  expect(order.panel).toBeGreaterThan(order.heldFlat);
+  expect(order.answer).toBeGreaterThan(order.panel);
+  expect(order.method).toBeGreaterThan(order.answer);
+  expect(order.forensics).toBeGreaterThan(order.method);
+
+  // FORENSICS is a native <details>, closed by default.
+  const forensics = page.getByTestId("waterfall-forensics");
+  expect(await forensics.evaluate((node) => node.tagName.toLowerCase())).toBe("details");
+  expect(await forensics.evaluate((node) => (node as HTMLDetailsElement).open)).toBe(false);
+
+  // HAZARD: the held-flat COUNT is never a descendant of the disclosure.
+  await expect(
+    page.getByTestId("waterfall-forensics").getByTestId("held-flat-summary"),
+  ).toHaveCount(0);
 });
 
 test("at_risk_note is ABSENT from the Book waterfall panel — and SURVIVES in the Developers raw register", async ({
@@ -208,25 +308,30 @@ test("held flat (Book): the counted-disclosure pattern, raw units by design", as
   await openBook(page);
 
   const heldFlat = page.getByTestId("waterfall-held-flat");
-  // The always-visible summary, verbatim.
+  // The always-visible COUNT summary, verbatim — in STATE, above the bars.
   await expect(heldFlat.getByTestId("held-flat-summary")).toHaveText(
     "1 price input held flat. The scenario did not move these prices, so positions priced by " +
       "them are stressed at stale marks. Each one keeps its standing value, and the scenario " +
       "is blind to where it would have gone.",
   );
-  // The counted details line; open it and check the table.
-  const summary = heldFlat.locator("summary");
-  await expect(summary).toHaveText("held flat: 1 inputs named");
+
+  // W-3L: the NAMED LIST moved into the section's FORENSICS slot, whose
+  // summary COUNTS what it holds so the two lines can never disagree.
+  const forensics = page.getByTestId("waterfall-forensics");
+  const summary = forensics.locator("summary");
+  await expect(summary).toHaveText(
+    "Exact data: 1 held-flat inputs named, the bad-debt definition, and the wire's eligibility note",
+  );
   await summary.click();
   await expect(
-    heldFlat.getByRole("columnheader", {
+    forensics.getByRole("columnheader", {
       name: "held value (source's raw units, unscaled by design)",
     }),
   ).toBeVisible();
   // The value is the source's RAW units (string surgery grouping only —
   // never scaled to a fabricated USD form).
-  await expect(heldFlat).toContainText("100,000,000");
-  await expect(heldFlat).not.toContainText("$100,000,000");
+  await expect(forensics).toContainText("100,000,000");
+  await expect(forensics).not.toContainText("$100,000,000");
 });
 
 // ---------------------------------------------------------------------------
@@ -690,7 +795,7 @@ test("Lab held flat (address mode): counted details, raw-units header", async ({
   await expect(heldFlat).toContainText("100000000"); // the source's raw units, verbatim
 });
 
-test("Lab realization: the eligible-vs-realized gloss rides the sub as title", async ({
+test("Lab realization: the eligible-vs-realized gloss is RENDERED, not a hover", async ({
   page,
 }) => {
   await mockStress(page, STRESS_AAVE.address, fixture("stress-aave.json"));
@@ -699,12 +804,25 @@ test("Lab realization: the eligible-vs-realized gloss rides the sub as title", a
     .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
     .click();
 
-  await expect(page.getByTestId("realized-leq-eligible").first()).toHaveAttribute(
-    "title",
+  // W-3L: the gloss used to ride this sub as a `title`, which made it
+  // reachable only with a mouse. It is a clause of the panel's METHOD line
+  // now — same words, rendered — and the sub carries no title at all.
+  const gloss =
     '"Eligible" = debt the engine is entitled to liquidate at that price. What actually ' +
-      "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
-      "the remainder.",
+    "closes can be less: the Debt Manager liquidates in two passes, half the debt, then " +
+    "the remainder.";
+  await expect(page.getByTestId("seizure-model").first()).toContainText(gloss);
+  await expect(page.getByTestId("realized-leq-eligible").first()).not.toHaveAttribute(
+    "title",
+    gloss,
   );
+  // And the method line is never inside a disclosure.
+  expect(
+    await page
+      .getByTestId("seizure-model")
+      .first()
+      .evaluate((node) => node.closest("details") !== null),
+  ).toBe(false);
 });
 
 test("Lab run-book: wire notes become a counted verbatim details; collateral-at-risk carries the reader caption", async ({
@@ -747,9 +865,28 @@ test("Lab run-book: wire notes become a counted verbatim details; collateral-at-
     "aggregates are per engine in each engine's OWN unit and decimals",
   );
 
-  // Caption (c): the reader caption as title on the collateral-at-risk row —
-  // one per engine table, never dropped.
-  const captioned = page.locator('td[title*="re-measured at each price step"]');
+  // Caption (c) — W-3L: the reader caption is RENDERED in each engine
+  // panel's METHOD line, one per engine, never dropped. It used to sit in a
+  // `td[title]`, which is hover sugar: a dip in the collateral-at-risk series
+  // is honest arithmetic, and a reader who never hovers read it as missing
+  // data. The hazard is that this caption moves UP, never down with the table
+  // row it annotates — so it renders ABOVE the disclosure that now holds it.
+  const captioned = page.getByTestId("book-engine-method");
   await expect(captioned).toHaveCount(2);
-  await expect(captioned.first()).toHaveText("collateral at risk");
+  await expect(captioned.first()).toContainText("re-measured at each price step");
+  await expect(page.locator('td[title*="re-measured at each price step"]')).toHaveCount(0);
+
+  const order = await page.evaluate(() => {
+    const all = Array.from(document.querySelectorAll("*"));
+    const method = document.querySelector('[data-testid="book-engine-method"]');
+    const forensics = document.querySelector('[data-testid="book-engine-forensics"]');
+    return {
+      method: method === null ? -1 : all.indexOf(method),
+      forensics: forensics === null ? -1 : all.indexOf(forensics),
+      collapsed: method === null ? true : method.closest("details") !== null,
+    };
+  });
+  expect(order.method).toBeGreaterThanOrEqual(0);
+  expect(order.forensics).toBeGreaterThan(order.method);
+  expect(order.collapsed).toBe(false);
 });

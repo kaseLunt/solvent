@@ -19,6 +19,11 @@ import { EM_DASH } from "@/lib/format";
 import { WARN_HF_RATIO } from "@/lib/severity";
 import { HfsUnchangedBanner, LabRealization } from "./LabRealization";
 import { LabProjectionView } from "./LabProjectionView";
+import {
+  appliedShocksDetailsSummary,
+  appliedShocksSummary,
+  shockFlagTally,
+} from "./labPanelLines";
 import styles from "./lab.module.css";
 
 // ---------------------------------------------------------------------------
@@ -179,11 +184,28 @@ function ShockFlags({
   );
 }
 
-/** The wire's applied shocks: exact factors, before→after, disclosures. */
+/**
+ * The wire's applied shocks: exact factors, before→after, disclosures.
+ *
+ * WAVE W-3L — ON THE COUNTED-DISCLOSURE PATTERN. This was the one shared
+ * fragment with no summary at all: a bare table whose `disclosures` column was
+ * the only place a reader could learn that a shock had been snapped to a cap,
+ * and only by scanning every row. It now leads with the COUNTS, on the
+ * LabHeldFlat / LabOutOfModel shape, and the per-row flags sit behind a
+ * counted disclosure. The counts never collapse: a snapped shock is not the
+ * shock the scenario asked for, and that is a claim about the whole result.
+ */
 export function LabAppliedShocks({ shocks }: { shocks: readonly AppliedShock[] }) {
   if (shocks.length === 0) return null;
+  const tally = shockFlagTally(shocks);
   return (
-    <div className={styles.tableWrap} data-testid="applied-shocks">
+    <div data-testid="applied-shocks">
+      <p className={styles.caption} data-testid="applied-shocks-summary">
+        {appliedShocksSummary(tally)}
+      </p>
+      <details className={styles.disclosure} data-testid="applied-shocks-details">
+        <summary>{appliedShocksDetailsSummary(tally.applied)}</summary>
+        <div className={styles.tableWrap}>
       <table className={styles.table}>
         <thead>
           <tr>
@@ -219,6 +241,8 @@ export function LabAppliedShocks({ shocks }: { shocks: readonly AppliedShock[] }
           ))}
         </tbody>
       </table>
+        </div>
+      </details>
     </div>
   );
 }

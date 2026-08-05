@@ -30,12 +30,32 @@ import {
   BAD_DEBT_LEGEND,
   ELIGIBLE_REALIZED_GLOSS,
   HELD_FLAT_VALUE_HEADER,
-  heldFlatDetailsSummary,
   heldFlatSummary,
+  waterfallForensicsSummary,
   WATERFALL_SECTION_NOTE,
 } from "@/lib/book-copy";
-import { buildWaterfallSteps, factorTimesLabel } from "./waterfallView";
+import { buildWaterfallSteps, factorTimesLabel, waterfallEngineAnswer } from "./waterfallView";
 import styles from "./book.module.css";
+
+// WAVE W-3L — ON THE SECTION TEMPLATE (chart spec v4 §1).
+//
+//   HEAD      scenario id / version / axis, PROJECTION badge.
+//   STATE     section note, monotonicity violation, excluded engines, and the
+//             HELD-FLAT COUNT — all four qualify every bar below them, so R6
+//             puts them before the bars. The held-flat summary MOVED UP from
+//             under the grid for exactly that reason.
+//   ANSWER    per engine panel, computed from the deepest sampled point.
+//   VISUAL    the step charts. Their exact money strings are DIRECT LABELS
+//             column-aligned to their bars, so the LEDGER slot is served in
+//             place and no second copy is drawn (R2).
+//   METHOD    the eligible-vs-realized gloss.
+//   FORENSICS the held-flat NAMED LIST, the bad-debt legend, and the wire's
+//             own eligibility_note verbatim.
+//
+// Hazards held open: MONOTONICITY VIOLATION, `waterfall-excluded`, the
+// held_flat COUNT and its empty-case positive claim, and the null-waterfall
+// panel. `at_risk_note` stays unrendered here by design — this panel does not
+// draw the series it governs.
 
 export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
   if (waterfall === null) {
@@ -101,21 +121,34 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
         </div>
       )}
 
-      {/* The eligible-vs-realized gloss (SUPPLEMENT caption b): the primary
-          register at the head of the panel area; the wire's own
-          eligibility_note stays rendered, dim, verbatim, below. */}
-      <p className={styles.gloss} data-testid="eligible-gloss">
-        {ELIGIBLE_REALIZED_GLOSS}
-      </p>
+      {/* ---- SLOT 2 (cont.): the HELD-FLAT COUNT. A price the scenario never
+              moved is a held INPUT to every bar below, so R6 puts the count
+              here rather than under the grid. The count and the empty-case
+              positive claim never collapse; only the named list does. ---- */}
+      <div className={styles.stateSlot} data-testid="waterfall-held-flat">
+        {waterfall.held_flat.length === 0 ? (
+          <span data-testid="held-flat-empty">
+            held flat: none. That is the claim that the matrix covered the whole book.
+          </span>
+        ) : (
+          <span data-testid="held-flat-summary">{heldFlatSummary(waterfall.held_flat.length)}</span>
+        )}
+      </div>
 
       <div className={styles.panelGrid}>
         {engineIds.map((engine) => (
           <div className={styles.panel} key={engine} data-testid={`book-waterfall-${engine}`}>
+            {/* ---- SLOT 1: panel HEAD ---- */}
             <div className={styles.panelHead}>
               <EngineChip engine={engine} />
               <span className={styles.comparator}>cumulative eligible debt · usd</span>
             </div>
             <div className={styles.panelBody}>
+              {/* ---- SLOT 3: ANSWER — computed from this engine's own points ---- */}
+              <p className={styles.answerLine} data-testid={`waterfall-answer-${engine}`}>
+                {waterfallEngineAnswer(waterfall, engine)}
+              </p>
+              {/* ---- SLOT 4 + 5: VISUAL, with its exact money as direct labels ---- */}
               <WaterfallSteps
                 label={`liquidation waterfall for ${engine}`}
                 steps={buildWaterfallSteps(waterfall, engine)}
@@ -127,55 +160,50 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
         ))}
       </div>
 
-      <p className={styles.legendLine} data-testid="waterfall-bad-debt-legend">
-        {BAD_DEBT_LEGEND}
+      {/* ---- SLOT 6: METHOD — the eligible-vs-realized gloss ---- */}
+      <p className={styles.methodLine} data-testid="eligible-gloss">
+        {ELIGIBLE_REALIZED_GLOSS}
       </p>
 
-      <div className={styles.panel} style={{ marginTop: "var(--sp-3)" }}>
-        <div className={styles.panelHead}>
-          <span>held flat · price inputs the propagation matrix did not describe</span>
-        </div>
-        <div className={styles.panelBody} data-testid="waterfall-held-flat">
-          {waterfall.held_flat.length === 0 ? (
-            <span className={styles.sectionNote}>
-              empty, which is the claim that the matrix covered the whole book
-            </span>
-          ) : (
-            <>
-              <p className={styles.heldFlatSummary} data-testid="held-flat-summary">
-                {heldFlatSummary(waterfall.held_flat.length)}
-              </p>
-              <details className={styles.disclosure}>
-                <summary>{heldFlatDetailsSummary(waterfall.held_flat.length)}</summary>
-                <div className={styles.tableWrap}>
-                  <table className={styles.heldFlatTable}>
-                    <thead>
-                      <tr>
-                        <th>held flat (matrix did not move this price)</th>
-                        <th>source</th>
-                        <th className={styles.num}>{HELD_FLAT_VALUE_HEADER}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {waterfall.held_flat.map((held) => (
-                        <tr key={`${String(held.chain_id)}-${held.asset}-${held.source}`}>
-                          <td>
-                            <AddressMono address={held.asset} copy={false} />{" "}
-                            <span className="mono dim">chain {String(held.chain_id)}</span>
-                          </td>
-                          <td className="mono dim">{held.source}</td>
-                          <td className={styles.num}>{groupDecimalString(held.value)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
-            </>
-          )}
-          <p className={styles.panelNote}>{waterfall.eligibility_note}</p>
-        </div>
-      </div>
+      {/* ---- SLOT 7: FORENSICS — the named held-flat list, the definitional
+              legend, and the wire's own note verbatim. It holds no refusal,
+              no count and no unknowable: those are in STATE above (R3). ---- */}
+      <details className={styles.disclosure} data-testid="waterfall-forensics">
+        <summary>{waterfallForensicsSummary(waterfall.held_flat.length)}</summary>
+
+        {waterfall.held_flat.length > 0 && (
+          <div className={styles.tableWrap}>
+            <table className={styles.heldFlatTable}>
+              <thead>
+                <tr>
+                  <th>held flat (matrix did not move this price)</th>
+                  <th>source</th>
+                  <th className={styles.num}>{HELD_FLAT_VALUE_HEADER}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {waterfall.held_flat.map((held) => (
+                  <tr key={`${String(held.chain_id)}-${held.asset}-${held.source}`}>
+                    <td>
+                      <AddressMono address={held.asset} copy={false} />{" "}
+                      <span className="mono dim">chain {String(held.chain_id)}</span>
+                    </td>
+                    <td className="mono dim">{held.source}</td>
+                    <td className={styles.num}>{groupDecimalString(held.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className={styles.forensicsLine} data-testid="waterfall-bad-debt-legend">
+          {BAD_DEBT_LEGEND}
+        </p>
+        <p className={styles.forensicsLine} data-testid="waterfall-eligibility-note">
+          {waterfall.eligibility_note}
+        </p>
+      </details>
     </section>
   );
 }

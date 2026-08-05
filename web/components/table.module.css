@@ -7,6 +7,29 @@
   background: var(--panel);
 }
 
+/* The section template's ANSWER + METHOD slots (W-3L), above the sticky
+ * header and outside the scroll region. Neither is ever collapsible. */
+.takeaway {
+  margin: 0;
+  padding: 12px 14px 0;
+  font-size: 14px;
+  color: var(--ink);
+  max-width: 82ch;
+}
+
+.tableMethod {
+  margin: 0;
+  padding: 6px 14px 0;
+  font-family: var(--mono);
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  max-width: 96ch;
+}
+
+.takeaway + .tableMethod {
+  padding-top: 4px;
+}
+
 /* The internal scroll region (W-UX-C point 13): rows scroll under the sticky
  * header while the footer accounting stays outside, always visible. Keyboard-
  * reachable (tabIndex=0, role=region) with the global focus ring drawn
