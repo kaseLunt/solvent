@@ -66,10 +66,24 @@ function resultSummary(result: RefinedScenarioResult) {
       </span>
     );
   }
-  const { identical } = boundaryMemberTally(result);
+  // THREE ARMS, because there are three outcomes. A member whose states were
+  // withheld re-priced nothing, and calling it "re-priced · served states
+  // moved" invented a movement out of an absence, which is the same defect the
+  // group's ANSWER count carried. The withheld arm is refusal-class and keeps the
+  // register the state pair itself uses.
+  const { comparison } = boundaryMemberTally(result);
+  if (comparison === "withheld") {
+    return (
+      <span className="mono" data-testid="boundary-states-withheld">
+        <span className={styles["tone-warn"]}>
+          state pair withheld · nothing to compare, and no movement is claimed
+        </span>
+      </span>
+    );
+  }
   return (
     <span className="mono">
-      {identical ? (
+      {comparison === "identical" ? (
         <span className={styles["tone-ok"]}>no-op · served states bit-identical</span>
       ) : (
         <span className={styles["tone-warn"]}>re-priced · served states moved</span>

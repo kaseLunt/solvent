@@ -23,6 +23,7 @@ import {
   appliedShocksDetailsSummary,
   appliedShocksSummary,
   shockFlagTally,
+  statesBitIdentical,
 } from "./labPanelLines";
 import styles from "./lab.module.css";
 
@@ -322,18 +323,6 @@ export function LabOutOfModel({ items }: { items: readonly string[] }) {
 // One result of one scenario for one address.
 // ---------------------------------------------------------------------------
 
-function bitIdentical(before: RefinedStressState, after: RefinedStressState): boolean {
-  return (
-    before.health_factor_wad === after.health_factor_wad &&
-    before.health_factor_num === after.health_factor_num &&
-    before.health_factor_den === after.health_factor_den &&
-    before.infinite === after.infinite &&
-    before.eligible === after.eligible &&
-    before.collateral_usd === after.collateral_usd &&
-    before.debt_usd === after.debt_usd
-  );
-}
-
 function ResultView({ result }: { result: RefinedScenarioResult }) {
   if (!result.applicable) {
     return (
@@ -350,8 +339,11 @@ function ResultView({ result }: { result: RefinedScenarioResult }) {
   // contrast — what the protocol sees vs what the market realizes. Keyed off
   // the DATA (the realization's presence), never off a scenario id.
   if (realization !== null) {
-    const identical =
-      result.before !== null && result.after !== null && bitIdentical(result.before, result.after);
+    // ONE equality test, shared with the boundary group's tally. The local
+    // twin that used to live here omitted `max_borrow_lt`, so a pair whose only
+    // movement was on that row rendered the bit-identical banner directly under
+    // a table showing the two values differing.
+    const identical = statesBitIdentical(result.before, result.after);
     return (
       <div data-testid="flagship-contrast">
         <div className={styles.contrast}>

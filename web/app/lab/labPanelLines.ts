@@ -16,6 +16,7 @@ import type {
   RefinedProjection,
   RefinedScenario,
   RefinedScenarioResult,
+  RefinedStressState,
   Shortfall,
 } from "@solvent/client";
 import {
@@ -116,12 +117,92 @@ export const PROJECTION_FORENSICS_SUMMARY =
   "Exact data: the APY observation block, the native-scale caption, and the wire's own note";
 
 // ---------------------------------------------------------------------------
+// THE STATE PAIR'S OWN EQUALITY TEST: one helper, both callers.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every field of a served state this app puts on a screen.
+ *
+ * THE DEFECT THIS CLOSES (Codex round 47). Two comparisons existed, they
+ * disagreed, and both were short. The boundary group's tally omitted `infinite`
+ * and `max_borrow_lt`; the scenario detail's `bitIdentical` omitted
+ * `max_borrow_lt`. `LabStatePair` renders both of them. An infinite health
+ * factor is a whole different cell and `max_borrow_lt` has its own row, so a
+ * pair that moved only there rendered "before ≡ after · the served states are
+ * bit-identical" directly beneath a table showing the two values differing.
+ *
+ * The list is exhaustive against `RefinedStressState` rather than against what
+ * a component happens to read today: a wire field that starts being served and
+ * starts being rendered must not be able to slip past the claim silently. The
+ * type alias below is what enforces it: add a field to the contract and this
+ * file stops compiling until the field is listed here.
+ */
+const COMPARED_STATE_FIELDS = [
+  "health_factor_wad",
+  "health_factor_num",
+  "health_factor_den",
+  "infinite",
+  "eligible",
+  "collateral_usd",
+  "debt_usd",
+  "max_borrow_lt",
+  "liquidation_verdict",
+] as const satisfies readonly (keyof RefinedStressState)[];
+
+type ComparedStateField = (typeof COMPARED_STATE_FIELDS)[number];
+
+/** `T` must be `never`, or this alias fails its own constraint. */
+type AssertNever<T extends never> = T;
+
+/**
+ * COMPILE-TIME EXHAUSTIVENESS. Resolves only while `COMPARED_STATE_FIELDS`
+ * names every field of a served state; a field the list forgets makes the
+ * `Exclude` non-empty and the constraint above rejects it.
+ */
+export type EveryServedStateFieldIsCompared = AssertNever<
+  Exclude<keyof RefinedStressState, ComparedStateField>
+>;
+
+/**
+ * What a before/after pair actually is.
+ *
+ * `withheld` is its own answer and never folds into `moved`: a result that
+ * served no state pair did not re-price anything, and counting it as a
+ * re-pricing invents a movement out of an absence. `LabStatePair` renders that
+ * case as "state pair withheld", so the count beside it has to agree.
+ */
+export type StatePairComparison = "identical" | "moved" | "withheld";
+
+export function compareStatePair(
+  before: RefinedStressState | null,
+  after: RefinedStressState | null,
+): StatePairComparison {
+  if (before === null || after === null) return "withheld";
+  return COMPARED_STATE_FIELDS.every((field) => before[field] === after[field])
+    ? "identical"
+    : "moved";
+}
+
+/**
+ * THE ONE PREDICATE BEHIND EVERY "bit-identical" WORD ON THIS PAGE. A pair with
+ * a missing side is not identical: there is nothing to have been identical to.
+ */
+export function statesBitIdentical(
+  before: RefinedStressState | null,
+  after: RefinedStressState | null,
+): boolean {
+  return compareStatePair(before, after) === "identical";
+}
+
+// ---------------------------------------------------------------------------
 // LabBoundaryGroup — the stable-snap boundary set.
 // ---------------------------------------------------------------------------
 
 /** How one member's served states came out, and how it was snapped. */
 export interface BoundaryMemberTally {
-  /** Both states served and bit-identical on every compared field. */
+  /** Which of the three the served pair is, before applicability is applied. */
+  comparison: StatePairComparison;
+  /** Both states served and bit-identical on every rendered field. */
   identical: boolean;
   snapped: number;
   baseSnapped: number;
@@ -130,18 +211,10 @@ export interface BoundaryMemberTally {
 
 /** Compare one result's before/after on every field the panel calls served. */
 export function boundaryMemberTally(result: RefinedScenarioResult): BoundaryMemberTally {
-  const identical =
-    result.applicable &&
-    result.before !== null &&
-    result.after !== null &&
-    result.before.health_factor_wad === result.after.health_factor_wad &&
-    result.before.health_factor_num === result.after.health_factor_num &&
-    result.before.health_factor_den === result.after.health_factor_den &&
-    result.before.collateral_usd === result.after.collateral_usd &&
-    result.before.debt_usd === result.after.debt_usd &&
-    result.before.eligible === result.after.eligible;
+  const comparison = compareStatePair(result.before, result.after);
   return {
-    identical,
+    comparison,
+    identical: result.applicable && comparison === "identical",
     snapped: result.applied_shocks.filter((shock) => shock.snapped).length,
     baseSnapped: result.applied_shocks.filter((shock) => shock.base_snapped).length,
     applied: result.applied_shocks.length,
@@ -157,23 +230,33 @@ export function boundaryMemberTally(result: RefinedScenarioResult): BoundaryMemb
  */
 export function boundaryGroupAnswer(group: readonly RefinedScenario[]): string {
   let repriced = 0;
+  let withheld = 0;
   let snapped = 0;
   let baseSnapped = 0;
   let notApplicable = 0;
   for (const scenario of group) {
     for (const result of scenario.results) {
       const tally = boundaryMemberTally(result);
+      // THREE OUTCOMES, NOT TWO. An applicable result that served no state
+      // pair is a withheld measurement, and it used to land in the re-priced
+      // count purely because the equality test could not be true of a null.
       if (!result.applicable) notApplicable += 1;
-      else if (!tally.identical) repriced += 1;
+      else if (tally.comparison === "withheld") withheld += 1;
+      else if (tally.comparison === "moved") repriced += 1;
       snapped += tally.snapped;
       baseSnapped += tally.baseSnapped;
     }
   }
   const members = group.length === 1 ? "1 committed member" : `${String(group.length)} committed members`;
   const naClause = notApplicable === 0 ? "" : ` ${String(notApplicable)} served no applicable result.`;
+  const withheldClause =
+    withheld === 0
+      ? ""
+      : ` ${String(withheld)} served no state pair to compare, which is a withheld measurement ` +
+        `and not a re-pricing.`;
   return (
     `${members} on the stable_usd axis. ${String(repriced)} re-priced this address's served ` +
-    `states.${naClause} ${String(snapped)} shocks snapped to a cap and ` +
+    `states.${naClause}${withheldClause} ${String(snapped)} shocks snapped to a cap and ` +
     `${String(baseSnapped)} snapped at the base.`
   );
 }
@@ -286,10 +369,18 @@ export const MATRIX_METHOD =
  * The legend's one-line KEY. It names the six state words and nothing else;
  * every definition that describes an absence or a refusal renders in full
  * beneath it, in the open.
+ *
+ * "Six cell states" was a MISCOUNT (Codex round 47). `LabCellState` has NINE
+ * arms: these six plus `not-run`, `running` and `result`, which are the three
+ * ordinary ones a reader never needs a legend for. The legend never defined
+ * those three and was never going to, so the fix is the word the sentence was
+ * missing rather than three more definitions: what this key enumerates is the
+ * EXCEPTIONAL states, and it now says so instead of claiming the grid has six
+ * states in total.
  */
 export const MATRIX_LEGEND_KEY =
-  "Six cell states: NOT COVERED · WITHHELD · SUPERSEDED · UNANSWERED · CONTRADICTORY BOOK · " +
-  "DEFINITION CHANGED.";
+  "Six exceptional cell states: NOT COVERED · WITHHELD · SUPERSEDED · UNANSWERED · " +
+  "CONTRADICTORY BOOK · DEFINITION CHANGED.";
 
 /** SLOT 7's summary for the matrix legend. */
 export const MATRIX_FORENSICS_SUMMARY =
@@ -395,6 +486,21 @@ export const MOVERS_FORENSICS_SUMMARY =
  * The count of holdings with no price witness rides the visible sentence: the
  * inventory makes that count a condition of anything else on this panel
  * collapsing, and an unpriced balance is a refusal with an intact amount.
+ *
+ * THE TWO MEANINGS OF A NULL VALUE ARE SEPARATE SENTENCES (Codex round 47).
+ * `value_usd: null` is served for two unrelated reasons, and this line used to
+ * pool them and then call the pool "unknowable rather than zero":
+ *
+ *   UNPRICED (unpriced: true)     no price witness describes the balance, so
+ *                                 no USD figure is knowable at all.
+ *   NOT COUNTED (unpriced: false) the balance is exact and known, and this
+ *                                 engine assigns it no counted USD value.
+ *
+ * A NOT COUNTED holding is not unknowable. The wire's own note says the
+ * arithmetic assigned it no value, so describing it that way told a reader the
+ * data was missing when what is actually true is that the engine excluded it.
+ * Each count now carries its own clause, and the shared clause claims only what
+ * is true of both: neither is inside a total.
  */
 export function collateralGroupAnswer(engine: {
   before: { collateral_by_asset: readonly { value_usd: string | null; unpriced: boolean }[] };
@@ -416,22 +522,43 @@ export function collateralGroupAnswer(engine: {
   );
   const uncounted = uncountedBefore + uncountedAfter;
   const unpriced = unpricedBefore + unpricedAfter;
+  const notCounted = uncounted - unpriced;
   if (uncounted === 0) {
     return (
       "Collateral by asset, before and after the shock. Every holding on both sides carries a " +
       "counted value."
     );
   }
+  const clauses: string[] = [];
+  if (unpriced > 0) {
+    clauses.push(
+      `${String(unpriced)} ${unpriced === 1 ? "is" : "are"} UNPRICED: no price witness ` +
+        `describes ${unpriced === 1 ? "that balance" : "those balances"}, so ` +
+        `${unpriced === 1 ? "its" : "their"} worth is unknowable rather than zero.`,
+    );
+  }
+  if (notCounted > 0) {
+    clauses.push(
+      `${String(notCounted)} ${notCounted === 1 ? "is" : "are"} NOT COUNTED: the balance is ` +
+        `exact and known, and this engine assigns it no counted USD value.`,
+    );
+  }
   return (
     `Collateral by asset, before and after the shock. ${String(uncounted)} ` +
     `${uncounted === 1 ? "holding is" : "holdings are"} listed with no value across the two ` +
-    `sides, ${String(unpriced)} of them with no price witness at all. Those balances are ` +
-    `unknowable rather than zero, and they sit outside every total on this panel.`
+    `sides. ${clauses.join(" ")} Neither kind sits inside a total on this panel.`
   );
 }
 
-/** SLOT 6 for the collateral breakdown: the three disclosure kinds, named. */
+/**
+ * SLOT 6 for the collateral breakdown: the three disclosure kinds, named.
+ *
+ * NOT COUNTED used to read "a value exists but this engine does not count it",
+ * which promises a figure the wire never served and the panel therefore cannot
+ * show. What exists is the BALANCE, exact; the USD value was never assigned.
+ */
 export const COLLATERAL_DISCLOSURE_METHOD =
   "Every row carries one of three disclosures: COUNTED (a served value, inside the total), " +
-  "UNPRICED (no price witness, so no value exists to serve), or NOT COUNTED (a value exists " +
-  "but this engine does not count it). Amounts stay exact on all three.";
+  "UNPRICED (no price witness describes the balance, so no USD value is knowable and none is " +
+  "invented), or NOT COUNTED (the balance is exact and known, and this engine assigns it no " +
+  "counted USD value). Amounts stay exact on all three, and only COUNTED is inside the total.";
