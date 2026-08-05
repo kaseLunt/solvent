@@ -9,13 +9,18 @@ package main
 // against a comment.
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kaselunt/solvent/internal/risk"
@@ -162,9 +167,19 @@ func TestSetRunShockReachArmIsTotalAndHasNoDefaultArm(t *testing.T) {
 // different hat.
 func TestSetRunShockReachNoteIsTheArmsOwn(t *testing.T) {
 	sc := risk.Scenario{ID: "x", Version: "v1", PathAssumption: "no move is asserted"}
+	// TWO APPLIED ROWS, BOTH HELD BY A TRANSFORM. Arm 5's sentence is COMPOSED
+	// from the cause counts (TestSetRunNoMarkMovedNamesTheCauseItsCountsShow pins
+	// every composition), so the facts here have to name one — and the
+	// transform-only composition is the one the declared-hold arm must not
+	// borrow, which is what the substring assertions below are about.
+	reach := wireSetRunShockReach{
+		DeclaredShocks:       8,
+		AppliedShocks:        []wireAppliedShock{{}, {}},
+		MarksHeldByTransform: 2,
+	}
 	notes := map[string]string{}
 	for _, arm := range setRunReachArms {
-		n := setRunShockReachNote(arm, sc, wireSetRunShockReach{DeclaredShocks: 8, AppliedShocks: []wireAppliedShock{{}, {}}})
+		n := setRunShockReachNote(arm, sc, reach)
 		require.NotEmpty(t, n, "arm %q serves no sentence at all", arm)
 		for other, seen := range notes {
 			require.NotEqual(t, seen, n, "arms %q and %q serve the SAME sentence", other, arm)
@@ -183,6 +198,203 @@ func TestSetRunShockReachNoteIsTheArmsOwn(t *testing.T) {
 	require.NotContains(t, hold, "swallow")
 	require.Contains(t, notes[reachNoMarkMoved], "PRICING TRANSFORMS",
 		"the no-mark-moved sentence is the one that names the transform, and it is the one the declared hold must not borrow")
+}
+
+// TestSetRunNoMarkMovedNamesTheCauseItsCountsShow pins arm 5's sentence to the
+// COUNTS THE SAME RESPONSE SERVES, in every composition those counts admit.
+//
+// The arm's condition is "rows were applied and none of them moved", which says
+// nothing about why. Its sentence used to assert one fixed cause — the pricing
+// transforms — while `setRunHeldCause` was busy classifying a third cause,
+// `arithmetic`, for a mark that came back unchanged from `MulDivFloor` with no
+// snap and no cap. On such a book the served sentence blamed the oracle for a
+// hold the oracle had no part in: the same true-zero-under-a-false-cause defect
+// this component exists to refuse, one arm further down.
+func TestSetRunNoMarkMovedNamesTheCauseItsCountsShow(t *testing.T) {
+	sc := risk.Scenario{ID: "x", Version: "v1", PathAssumption: "no move is asserted"}
+	note := func(r wireSetRunShockReach) string {
+		return setRunShockReachNote(reachNoMarkMoved, sc, r)
+	}
+	rows := func(n int) []wireAppliedShock { return make([]wireAppliedShock, n) }
+
+	// Every case is a real partition of its own applied set: moved 0, and the
+	// three cause counts summing to len(applied_shocks) exactly as
+	// `setRunShockReach` refuses to serve anything else.
+	transformOnly := wireSetRunShockReach{
+		DeclaredShocks: 3, AppliedShocks: rows(4), MarksHeldByTransform: 4,
+	}
+	arithmeticOnly := wireSetRunShockReach{
+		DeclaredShocks: 1, AppliedShocks: rows(2), MarksHeldByArithmetic: 2,
+	}
+	mixed := wireSetRunShockReach{
+		DeclaredShocks: 2, AppliedShocks: rows(5), MarksHeldByTransform: 3, MarksHeldByArithmetic: 2,
+	}
+	// The fourth composition, and it is REACHABLE rather than defensive: a
+	// scenario declaring one sized shock and one identity shock, over a book
+	// pricing only the marks the identity shock describes, is not arm 3 (not
+	// every declared shock is at identity) and lands here with every hold at its
+	// declared factor.
+	declaredOnly := wireSetRunShockReach{
+		DeclaredShocks: 2, AppliedShocks: rows(3), MarksHeldByDeclaredFactor: 3,
+	}
+
+	t.Run("transform only", func(t *testing.T) {
+		n := note(transformOnly)
+		require.Contains(t, n, "PRICING TRANSFORMS")
+		require.Contains(t, n, "stable snap")
+		require.Contains(t, n, "snapped stable BASE",
+			"naming the stable snap ALONE is the sentence that is false on the fourth row of the committed control")
+		require.Contains(t, n, "not the book's")
+		require.Contains(t, n, "4", "the sentence carries the count it is derived from")
+		require.NotContains(t, n, "EXACT-INTEGER ARITHMETIC",
+			"no mark was held by arithmetic on this book and the sentence must not claim one was")
+	})
+
+	t.Run("arithmetic only", func(t *testing.T) {
+		n := note(arithmeticOnly)
+		require.Contains(t, n, "EXACT-INTEGER ARITHMETIC")
+		require.Contains(t, n, "No pricing transform pinned any of them")
+		require.NotContains(t, n, "PRICING TRANSFORM",
+			"THE REGRESSION: every mark here was returned unchanged by exact-integer arithmetic, and a sentence naming "+
+				"the pricing transforms as the cause blames the oracle for a hold the oracle had no part in")
+	})
+
+	t.Run("both causes", func(t *testing.T) {
+		n := note(mixed)
+		require.Contains(t, n, "PRICING TRANSFORM")
+		require.Contains(t, n, "EXACT-INTEGER ARITHMETIC")
+		require.Contains(t, n, "3 mark(s) were pinned")
+		require.Contains(t, n, "2 came back unchanged",
+			"a mixed book gets BOTH counts, so a reader can tell which marks belong to which cause instead of being "+
+				"handed one cause for five marks")
+		require.Contains(t, n, "TWO causes")
+	})
+
+	t.Run("neither: every hold is at a declared identity factor", func(t *testing.T) {
+		n := note(declaredOnly)
+		require.Contains(t, n, "DEFINITION's doing")
+		require.NotContains(t, n, "PRICING TRANSFORM")
+		require.NotContains(t, n, "EXACT-INTEGER ARITHMETIC")
+	})
+
+	// AND THE FOUR ARE GENUINELY DIFFERENT SENTENCES. A composition that
+	// collapsed to one string would satisfy the substring rows above the moment
+	// the fixed sentence happened to contain every phrase.
+	seen := map[string]string{}
+	for name, r := range map[string]wireSetRunShockReach{
+		"transform_only": transformOnly, "arithmetic_only": arithmeticOnly,
+		"mixed": mixed, "declared_only": declaredOnly,
+	} {
+		n := note(r)
+		for other, prev := range seen {
+			require.NotEqual(t, prev, n, "compositions %q and %q serve the SAME sentence", other, name)
+		}
+		seen[name] = n
+	}
+	require.Len(t, seen, 4)
+}
+
+// TestDecodeSetRunRequestRequiresTheBodyToEnd is the EOF law at the decoder,
+// with the defect it replaces EXECUTED rather than described.
+func TestDecodeSetRunRequestRequiresTheBodyToEnd(t *testing.T) {
+	decode := func(t *testing.T, body string) (int, bool) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, setRunPath, strings.NewReader(body))
+		_, ok := decodeSetRunRequest(w, r)
+		return w.Code, ok
+	}
+	const one = `{"scenario_ids":["eth_minus_10"]}`
+
+	for _, tc := range []struct{ name, body string }{
+		{"a trailing closing brace", one + "}"},
+		{"two trailing closing braces", one + "}}"},
+		{"a trailing closing bracket", one + "]"},
+		{"two trailing closing brackets", one + "]]"},
+		{"a second object", one + one},
+		{"whitespace and then a token", one + "  \n\t }"},
+		{"a trailing scalar", one + " 7"},
+		{"a trailing comma", one + ","},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, ok := decode(t, tc.body)
+			require.False(t, ok, "the body carries bytes after its one JSON object and was accepted")
+			require.Equal(t, http.StatusBadRequest, code)
+		})
+	}
+
+	for _, tail := range []string{"", "\n", " \t\r\n  "} {
+		_, ok := decode(t, one+tail)
+		require.True(t, ok, "trailing whitespace %q must be accepted: the decoder skips it on its way to EOF, and every "+
+			"client whose HTTP library appends a newline sends it", tail)
+	}
+
+	// THE MUTATION, EXECUTED. The check this replaced was `dec.More()`, which
+	// reports whether another ELEMENT follows inside the value being streamed —
+	// so it answers FALSE at a next byte of `}` or `]` and let both tails
+	// through. Running it here is what makes the cases above REGRESSION cases
+	// rather than a list somebody hopes is exhaustive.
+	for _, body := range []string{one + "}", one + "]", one + "}}", one + "]]"} {
+		dec := json.NewDecoder(strings.NewReader(body))
+		var req setRunRequest
+		require.NoError(t, dec.Decode(&req), "the first value still decodes: %q", body)
+		require.False(t, dec.More(),
+			"`dec.More()` reports another value after %q, so the old check would have caught it and this is not the "+
+				"defect being pinned", body)
+	}
+	// And the check that replaced it sees exactly those bodies.
+	for _, body := range []string{one + "}", one + "]", one + "}}", one + "]]"} {
+		dec := json.NewDecoder(strings.NewReader(body))
+		var req setRunRequest
+		require.NoError(t, dec.Decode(&req))
+		var trailing json.RawMessage
+		require.NotErrorIs(t, dec.Decode(&trailing), io.EOF,
+			"the second decode must NOT reach EOF on %q — that is the whole difference between the two checks", body)
+	}
+}
+
+// TestSetRunHeldFlatAssetsKeepOneAddressOnTwoChains is the pair-identity law at
+// the function's own seam, with the address-only dedupe RUN against the same
+// rows rather than argued about.
+func TestSetRunHeldFlatAssetsKeepOneAddressOnTwoChains(t *testing.T) {
+	usdc := common.HexToAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
+	weeth := common.HexToAddress("0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee")
+	rows := map[string]wireHeldFlat{}
+	for _, h := range []wireHeldFlat{
+		{ChainID: 10, Asset: weeth.Hex(), Source: "priceproviderv2", Value: "4000000"},
+		{ChainID: 1, Asset: usdc.Hex(), Source: "aaveoracle", Value: "100000000"},
+		{ChainID: 10, Asset: usdc.Hex(), Source: "priceproviderv2", Value: "1000000"},
+		// The SAME PAIR twice, from two sources: the dedupe is over the pair, so
+		// this row must collapse into the one above it.
+		{ChainID: 10, Asset: usdc.Hex(), Source: "another", Value: "1000001"},
+	} {
+		rows[heldFlatKey(h)] = h
+	}
+	require.Len(t, rows, 4, "four held-flat ROWS go in")
+
+	got := setRunHeldFlatAssets(rows)
+	require.Equal(t, []wireSetRunHeldFlatAsset{
+		{ChainID: 1, Asset: usdc.Hex()},
+		{ChainID: 10, Asset: usdc.Hex()},
+		{ChainID: 10, Asset: weeth.Hex()},
+	}, got,
+		"THREE identities come out: the repeated (10, USDC) pair collapses, and the one address held on chain 1 AND "+
+			"chain 10 stays TWO entries, ascending on chain id first")
+
+	// ADJACENCY, on the address that has two chains.
+	require.Equal(t, got[0].Asset, got[1].Asset)
+	require.Less(t, got[0].ChainID, got[1].ChainID)
+
+	// THE MUTATION: dedupe the same rows by address alone.
+	assetOnly := map[string]bool{}
+	for _, h := range rows {
+		assetOnly[strings.ToLower(h.Asset)] = true
+	}
+	require.Len(t, assetOnly, 2,
+		"an address-only identity answers TWO entries where the pair identity answers three, and the missing one is a "+
+			"real mark the model did not claim")
+	require.NotEqual(t, len(assetOnly), len(got),
+		"the two identities must DISAGREE on this input, or the pair key is untested by it")
 }
 
 // TestSetRunHeldCauseOrdersTheIdentityFactorFirst pins the ORDER of the cause

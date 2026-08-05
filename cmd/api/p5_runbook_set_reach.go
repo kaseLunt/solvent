@@ -192,10 +192,8 @@ func setRunShockReachNote(arm string, sc risk.Scenario, r wireSetRunShockReach) 
 			"sources are on POST /v1/scenarios/{id}/run-book."
 	case reachNoMarkMoved:
 		return "NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at " +
-			"least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's — the " +
-			"Debt Manager's stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path " +
-			"rather than of any position. " + held + " The `before_*` figures beside this are a true measurement of a real book and " +
-			"nothing was suppressed to hide the zero."
+			"least one declared shock was NOT the identity factor. " + noMarkMovedCauseClause(r) + " " + held +
+			" The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero."
 	case reachSomeMarksHeld:
 		return "PARTLY REACHED: " + strconv.Itoa(r.MarksMoved) + " of " + strconv.Itoa(r.AppliedRows()) +
 			" marks this scenario's matrix describes moved. A bar drawn from this result is a bar over a PARTLY APPLIED shock and it is " +
@@ -208,6 +206,48 @@ func setRunShockReachNote(arm string, sc risk.Scenario, r wireSetRunShockReach) 
 	// Unreachable while `arm` comes from setRunShockReachArm, which returns only
 	// the seven above. A note is never invented for an arm nobody named.
 	return ""
+}
+
+// noMarkMovedCauseClause states arm 5's cause from THE COUNTS THAT ARM SERVES,
+// and never from a fixed sentence.
+//
+// The arm's condition is `AppliedRows > 0 && MarksMoved == 0`, which says
+// nothing about WHY. The cause partition underneath it admits three terms, and
+// `setRunHeldCause` classifies a mark that came back unchanged from
+// `MulDivFloor` with no snap and no cap as `arithmetic` — a hold the pricing
+// transforms had no part in. A sentence that always blamed the transforms was
+// therefore false on every book whose holds are arithmetic, which is the same
+// defect this whole component exists for (a true zero under a false cause),
+// only one arm further down.
+//
+// So the clause is composed: transform-only, arithmetic-only, both, or neither.
+// The fourth is reachable and is not a contradiction — a scenario declaring one
+// sized shock and one identity shock, over a book that prices only the marks the
+// identity shock describes, lands here with every hold at its declared factor.
+func noMarkMovedCauseClause(r wireSetRunShockReach) string {
+	transform, arithmetic := r.MarksHeldByTransform, r.MarksHeldByArithmetic
+	transformTerm := strconv.Itoa(transform) + " mark(s) were pinned by a PRICING TRANSFORM (the Debt Manager's stable " +
+		"snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than " +
+		"of any position)"
+	arithmeticTerm := strconv.Itoa(arithmetic) + " came back unchanged from EXACT-INTEGER ARITHMETIC (the floor of " +
+		"before x factor_num / factor_den landed on the integer it started from, and no pricing transform touched them)"
+	switch {
+	case transform > 0 && arithmetic == 0:
+		return "This zero is the PRICING TRANSFORMS' doing, not the book's: all " + strconv.Itoa(transform) +
+			" held mark(s) were pinned by the Debt Manager's stable snap band, by a snapped stable BASE, or by a bound " +
+			"price cap, each of them a property of the oracle path rather than of any position."
+	case transform == 0 && arithmetic > 0:
+		return "This zero is EXACT-INTEGER ARITHMETIC's doing, not the oracle's and not the book's: all " +
+			strconv.Itoa(arithmetic) + " held mark(s) came back at the value they started at because the floor of " +
+			"before x factor_num / factor_den landed on the integer it started from. No pricing transform pinned any of " +
+			"them, so this sentence claims nothing about a snap or a cap."
+	case transform > 0 && arithmetic > 0:
+		return "This zero has TWO causes on this book and neither of them is the book's sensitivity: " + transformTerm +
+			", and " + arithmeticTerm + "."
+	}
+	return "This zero is the DEFINITION's doing on the marks that were applied: no held mark was pinned by a pricing " +
+		"transform and none came back unchanged from arithmetic, so each was held at an identity factor this scenario " +
+		"declared for it while the scenario also declares a sized shock the book's marks did not answer to."
 }
 
 // heldSplitClause prints ONLY the nonzero cause terms, so a reader is never

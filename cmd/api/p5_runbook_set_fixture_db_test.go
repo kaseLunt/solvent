@@ -8,9 +8,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -72,15 +74,29 @@ func srBody(ids ...string) string {
 	return string(raw)
 }
 
-// srRun posts a set of ids, requires the status, CONTRACT-VALIDATES the body
-// against the declared response for that status, and decodes it.
-func (f *apiFixture) srRun(t *testing.T, status int, ids ...string) map[string]any {
+// srRunRaw posts a set of ids, requires the status, CONTRACT-VALIDATES the body
+// against the declared response for that status, and returns BOTH the bytes
+// exactly as served and the decoded body.
+//
+// The bytes come back because a BYTE law cannot be stated over a decoded map:
+// `encoding/json` discards member order, whitespace and number spelling on the
+// way in, so two responses differing in all three decode to one equal
+// `map[string]any`. A determinism law that only compared the maps would pass on
+// the map walk it exists to catch.
+func (f *apiFixture) srRunRaw(t *testing.T, status int, ids ...string) ([]byte, map[string]any) {
 	t.Helper()
 	got, raw := f.srPost(t, srBody(ids...))
 	require.Equal(t, status, got, "body: %s", truncate(raw))
 	validateContractMethod(t, setRunContractPath, http.MethodPost, status, raw)
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(raw, &out))
+	return raw, out
+}
+
+// srRun is srRunRaw for the laws that are about the VALUES.
+func (f *apiFixture) srRun(t *testing.T, status int, ids ...string) map[string]any {
+	t.Helper()
+	_, out := f.srRunRaw(t, status, ids...)
 	return out
 }
 
@@ -343,6 +359,73 @@ func normalizeSetRunServeTime(t *testing.T, body map[string]any) {
 	}
 	require.Equal(t, 1, sweeps,
 		"the example's book carries exactly one sweep stamp; normalizing a different number of them means the book moved")
+}
+
+// srRawClockMembers are the response members a CLOCK writes, spelled as they
+// appear ON THE WIRE. Two requests issued one after the other read the database
+// clock twice, so these are the ONLY members allowed to differ between two
+// responses to the same request against one batch.
+//
+// They are replaced in the BYTES, by name, rather than by decoding and
+// re-encoding: a round trip through `map[string]any` would destroy the member
+// order the byte law exists to measure, which would leave the "normalized"
+// bodies equal for a reason that has nothing to do with the server.
+var srRawClockMembers = []struct {
+	name string
+	re   *regexp.Regexp
+	with string
+}{
+	{"served_at", regexp.MustCompile(`"served_at":"[^"]*"`), `"served_at":"<CLOCK>"`},
+	{"resolved_at", regexp.MustCompile(`"resolved_at":"[^"]*"`), `"resolved_at":"<CLOCK>"`},
+	{"probed_at", regexp.MustCompile(`"probed_at":"[^"]*"`), `"probed_at":"<CLOCK>"`},
+	// Every `age_seconds` on the body, at the batch and at each sweep: each one
+	// is DERIVED from a clock read against a persisted stamp, so each moves with
+	// the clock rather than with the answer.
+	{"age_seconds", regexp.MustCompile(`"age_seconds":-?[0-9]+`), `"age_seconds":-424242`},
+}
+
+// srNormalizeRawClock replaces those members in the served bytes and REQUIRES
+// each one to have matched. A normalizer that silently normalized nothing makes
+// every comparison beneath it vacuous, which is the failure this whole wave is
+// repairing one level up.
+//
+// Every replacement is itself VALID JSON of the member's own type, so the
+// normalized bytes still parse — the byte laws that follow decode them again to
+// prove that byte-different bodies can decode equal.
+func srNormalizeRawClock(t *testing.T, raw []byte) []byte {
+	t.Helper()
+	out := raw
+	for _, m := range srRawClockMembers {
+		require.Positive(t, len(m.re.FindAll(out, -1)),
+			"the served body carries no `%s` member, so the byte law would be comparing a normalization that did nothing",
+			m.name)
+		out = m.re.ReplaceAll(out, []byte(m.with))
+	}
+	return out
+}
+
+// srFirstByteDifference reports WHERE two bodies diverge, with context, because
+// `bytes.Equal` on a 100 KB body otherwise fails with "false is not true".
+func srFirstByteDifference(a, b []byte) string {
+	i := 0
+	for i < len(a) && i < len(b) && a[i] == b[i] {
+		i++
+	}
+	window := func(s []byte) string {
+		lo, hi := i-80, i+80
+		if lo < 0 {
+			lo = 0
+		}
+		if hi > len(s) {
+			hi = len(s)
+		}
+		return string(s[lo:hi])
+	}
+	if i == len(a) && i == len(b) {
+		return "no difference"
+	}
+	return fmt.Sprintf("first difference at byte %d of %d/%d\n  first:  ...%s...\n  second: ...%s...",
+		i, len(a), len(b), window(a), window(b))
 }
 
 // setRunExampleProbedAt is the instant the contract's example states its

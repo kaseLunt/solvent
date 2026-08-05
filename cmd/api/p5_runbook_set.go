@@ -414,12 +414,23 @@ func decodeSetRunRequest(w http.ResponseWriter, r *http.Request) (setRunRequest,
 		}
 		return req, false
 	}
-	// A second JSON value after the object is a body this endpoint did not read
-	// whole, and reading half a request is how a client's second thought gets
-	// silently dropped.
-	if dec.More() {
+	// THE BODY MUST END. Anything after the object is a body this endpoint did
+	// not read whole, and reading half a request is how a client's second thought
+	// gets silently dropped.
+	//
+	// The check is a second Decode that must reach io.EOF, and `dec.More()` is
+	// NOT that check. `More` answers "is there another ELEMENT in the array or
+	// object I am streaming", so it returns FALSE at a next byte of `}` or `]`:
+	// `{"scenario_ids":["eth_minus_10"]}}` walked past it and was served a 200
+	// over a body whose tail nobody read. EOF is the only tail this endpoint
+	// accepts, and the decoder skips trailing whitespace on its way there, so a
+	// body ending in a newline still passes.
+	var trailing json.RawMessage
+	if err := dec.Decode(&trailing); !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, codeBadRequest,
-			"the request body carries more than one JSON value: this endpoint reads exactly one object carrying `scenario_ids`", nil)
+			"the request body does not end after its one JSON object: this endpoint reads exactly one object carrying "+
+				"`scenario_ids`, and anything following it — a second object, a stray `}` or `]`, any other token — means "+
+				"the body was not read whole. Trailing whitespace is fine; trailing bytes are not", nil)
 		return req, false
 	}
 	return req, true

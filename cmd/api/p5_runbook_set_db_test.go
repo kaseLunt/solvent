@@ -4,6 +4,9 @@ package main
 // atomicity, determinism, the method gate, and the fail-closed census.
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -50,6 +53,34 @@ func newSetRunTwoChainFixture(t *testing.T) *apiFixture {
 	return f
 }
 
+// newSetRunDualHeldFixture holds ONE ADDRESS FLAT ON TWO CHAINS AT ONCE, and
+// the book is built so those two marks are the WHOLE held-flat set.
+//
+//	Aave, chain 1:  weETH  — eth_minus_30's matrix describes it  → applied
+//	                USDC   — the matrix says nothing about it    → HELD FLAT
+//	Debt Manager, chain 10: weETH-on-OP — described              → applied
+//	                        THE SAME USDC ADDRESS — not described → HELD FLAT
+//
+// So `held_flat_assets` is exactly {(1, USDC), (10, USDC)}: two marks, one
+// address, adjacent under the (chain_id, asset) order with nothing between them.
+// One address deployed at one address on two chains is the ordinary case on a
+// book spanning Ethereum and OP, and it is the case an address-only identity
+// cannot state at all.
+func newSetRunDualHeldFixture(t *testing.T) *apiFixture {
+	t.Helper()
+	f := newBareAPIFixture(t)
+	f.seedP5Events(t)
+	f.seedSubstrate(t)
+	f.seedP5ParamHistory(t)
+	dm := srDMWithPrices(srDMPrice(fxAcctDM, fxUSDCEth, fxOPChain, "1000000"))
+	f.srSeed(t, srBatchWrite("set-run-dual-held-1",
+		fxAavePosition(), fxAaveRefused(), dm, fxDMRefused()))
+	f.seedP5Headers(t)
+	f.startServerWithFeeds(t, fxP5Feeds())
+	f.srv.evidence = p5EvidenceStatics(t)
+	return f
+}
+
 // TestSetRunEqualsNSingleRunsAtTheSameBatch is THE EQUIVALENCE LAW, and it is
 // what makes the shared-before optimization safe rather than merely fast.
 //
@@ -64,7 +95,19 @@ func newSetRunTwoChainFixture(t *testing.T) *apiFixture {
 // three calls and any difference is the implementation's.
 func TestSetRunEqualsNSingleRunsAtTheSameBatch(t *testing.T) {
 	f := newSetRunTwoChainFixture(t)
-	ids := []string{"eth_minus_30", "stable_depeg_0995_in_band"}
+	// FOUR SCENARIOS, AND THE LAST TWO ARE NOT DECORATION. `market_realization`
+	// and `projection` are null on BOTH routes for a plain price shock, so a set
+	// made only of price shocks compares null against null on those two rows and
+	// a set-run that dropped both blocks entirely would satisfy the law.
+	// `weeth_market_depeg_oracles_held` carries a realization on every engine it
+	// covers and `dm_rate_horizon_plus_200bps` carries a projection, and each is
+	// asserted NON-NULL as a precondition before it is compared.
+	ids := []string{
+		"eth_minus_30", "stable_depeg_0995_in_band",
+		"weeth_market_depeg_oracles_held", "dm_rate_horizon_plus_200bps",
+	}
+	const realizationID, projectionID = "weeth_market_depeg_oracles_held", "dm_rate_horizon_plus_200bps"
+	comparedRealizations, comparedProjections := 0, 0
 
 	set := f.srRun(t, http.StatusOK, ids...)
 	require.Empty(t, asList(t, set["excluded_engines"]),
@@ -111,6 +154,27 @@ func TestSetRunEqualsNSingleRunsAtTheSameBatch(t *testing.T) {
 			require.Equal(t, after["total_debt_usd"], sum["total_debt_usd_after"], "%s/%s", id, engine)
 			require.Equal(t, before["total_collateral_usd"], sum["total_collateral_usd_before"], "%s/%s", id, engine)
 			require.Equal(t, after["total_collateral_usd"], sum["total_collateral_usd_after"], "%s/%s", id, engine)
+			// THE TWO OPTIONAL BLOCKS, WITH THE PRECONDITION SAID OUT LOUD FIRST.
+			// `require.Equal(nil, nil)` passes against a route that never built
+			// the block at all, so on the two scenarios that carry one the
+			// non-nullness is asserted on BOTH routes before the comparison, and
+			// the comparisons are COUNTED so a scenario silently losing its
+			// block cannot leave this law vacuous again.
+			if id == realizationID {
+				require.NotNil(t, one["market_realization"],
+					"%s/%s: the single route serves no `market_realization` for the scenario chosen to carry one — the "+
+						"comparison below would be null against null, which is what this law was failing to test", id, engine)
+				require.NotNil(t, sum["market_realization"],
+					"%s/%s: the set-run dropped the `market_realization` block the single route serves", id, engine)
+				comparedRealizations++
+			}
+			if id == projectionID && engine == risk.DMEngine {
+				require.NotNil(t, one["projection"],
+					"%s/%s: the single route serves no `projection` for the scenario chosen to carry one", id, engine)
+				require.NotNil(t, sum["projection"],
+					"%s/%s: the set-run dropped the `projection` block the single route serves", id, engine)
+				comparedProjections++
+			}
 			require.Equal(t, one["market_realization"], sum["market_realization"], "%s/%s", id, engine)
 			require.Equal(t, one["projection"], sum["projection"], "%s/%s", id, engine)
 
@@ -164,7 +228,11 @@ func TestSetRunEqualsNSingleRunsAtTheSameBatch(t *testing.T) {
 			asset string
 		}
 		seen := map[pair]bool{}
-		var want []map[string]any
+		// An EMPTY LIST rather than a nil one: `dm_rate_horizon_plus_200bps`
+		// runs no ApplyScenario pass at all, so it holds nothing flat and the
+		// served array is `[]`. Comparing that against a nil slice fails on the
+		// difference between "no marks" and "no array", which is not this law.
+		want := []map[string]any{}
 		for _, h := range held {
 			m := asMap(t, h)
 			p := pair{chain: uint64(intOf(t, m["chain_id"])), asset: m["asset"].(string)}
@@ -210,6 +278,95 @@ func TestSetRunEqualsNSingleRunsAtTheSameBatch(t *testing.T) {
 	require.True(t, appliedChains[1], "the fixture must price %s on chain 1, where the matrix describes it", fxWeETHEth.Hex())
 	require.True(t, heldChains[10], "the fixture must price the SAME address on chain 10, where the matrix does not — "+
 		"without it, one address on two chains is never exercised and the pair identity is unfalsifiable")
+
+	// AND THE TWO OPTIONAL BLOCKS WERE GENUINELY COMPARED, on a non-null value,
+	// at least once each. Without this the ids above could drift to a set that
+	// carries neither block and every row of the mapping would still be green.
+	require.Positive(t, comparedRealizations,
+		"no engine row carried a `market_realization` on %s, so the mapping compared null against null and a set-run that "+
+			"never built the block would have passed", realizationID)
+	require.Positive(t, comparedProjections,
+		"no engine row carried a `projection` on %s, so the mapping compared null against null and a set-run that never "+
+			"built the block would have passed", projectionID)
+}
+
+// TestSetRunHeldFlatNamesOneAddressOnBothChains is the OTHER half of the
+// pair-identity law, and it is the half no fixture stated.
+//
+// newSetRunTwoChainFixture gives one address two DIFFERENT fates (applied on
+// chain 1, held flat on chain 10). That proves the pair survives a SPLIT, and it
+// says nothing about the dedupe: with one held-flat entry for the address there
+// is nothing for an address-only key to collapse. This book holds the SAME
+// ADDRESS FLAT ON BOTH CHAINS in one result, which is the state where an
+// address-only identity serves ONE entry beside `held_flat_marks: 2`.
+func TestSetRunHeldFlatNamesOneAddressOnBothChains(t *testing.T) {
+	f := newSetRunDualHeldFixture(t)
+	res := srResults(t, f.srRun(t, http.StatusOK, "eth_minus_30"))["eth_minus_30"]
+	reach := asMap(t, res["shock_reach"])
+
+	// (a) THE WHOLE HELD-FLAT SET, PINNED. Both marks survive the dedupe, both
+	// carry the same address, and they differ only in the chain id — which is
+	// exactly the pair an address-only list cannot represent.
+	got := []map[string]any{}
+	for _, a := range asList(t, reach["held_flat_assets"]) {
+		got = append(got, asMap(t, a))
+	}
+	require.Equal(t, []map[string]any{
+		{"chain_id": float64(1), "asset": fxUSDCEth.Hex()},
+		{"chain_id": float64(10), "asset": fxUSDCEth.Hex()},
+	}, got, "the held-flat identities are the two (chain_id, asset) PAIRS this book holds flat, both of them")
+	require.Equal(t, 2, intOf(t, reach["held_flat_marks"]),
+		"and `held_flat_marks` counts the same two marks, so the list accounts for the count exactly")
+
+	// (b) ADJACENT, AND CHAIN ID FIRST. The two entries for one address sit next
+	// to each other in the served order, ascending on the chain id — the order
+	// `setRunHeldFlatAssets` states — rather than wherever a map walk left them.
+	i, j := -1, -1
+	for k, a := range got {
+		switch intOf(t, a["chain_id"]) {
+		case 1:
+			i = k
+		case 10:
+			j = k
+		}
+	}
+	require.NotEqual(t, -1, i)
+	require.Equal(t, i+1, j, "the two marks for one address must sort ADJACENTLY, chain 1 before chain 10")
+
+	// (c) THE ORDER IS THE STATED ONE over the whole list, not just this pair.
+	var keys []string
+	for _, a := range got {
+		keys = append(keys, fmt.Sprintf("%020d|%s", intOf(t, a["chain_id"]), strings.ToLower(a["asset"].(string))))
+	}
+	sorted := append([]string(nil), keys...)
+	sort.Strings(sorted)
+	require.Equal(t, sorted, keys, "held_flat_assets is not ascending on (chain_id, lowercased asset)")
+
+	// (d) THE MUTATION, RUN AGAINST THE SERVED ROWS. Dedupe the SAME identities
+	// by address alone and the list loses a mark it still counts.
+	assetOnly := map[string]bool{}
+	for _, a := range got {
+		assetOnly[strings.ToLower(a["asset"].(string))] = true
+	}
+	require.Len(t, assetOnly, 1,
+		"the two served identities share one address, so the address-only projection of them has ONE element — that is "+
+			"the fixture being discriminating rather than the law being satisfied")
+	require.NotEqual(t, len(assetOnly), intOf(t, reach["held_flat_marks"]),
+		"an address-only `held_flat_assets` would serve 1 entry beside `held_flat_marks: 2`: a named absence that names "+
+			"the wrong thing, on the one surface whose job is to say which marks the model did not claim")
+
+	// (e) AND THE SINGLE ROUTE AGREES, mark for mark, so the pair is a property
+	// of the book rather than of this endpoint's bookkeeping.
+	single := f.postJSON(t, "/v1/scenarios/eth_minus_30/run-book", runBookContractPath, http.StatusOK)
+	chains := map[int]bool{}
+	for _, h := range asList(t, single["held_flat"]) {
+		m := asMap(t, h)
+		if strings.EqualFold(m["asset"].(string), fxUSDCEth.Hex()) {
+			chains[intOf(t, m["chain_id"])] = true
+		}
+	}
+	require.True(t, chains[1] && chains[10],
+		"the single route must hold the same address flat on both chains, or the set-run's two entries are its own invention")
 }
 
 // TestSetRunBeforeSideIsScenarioInvariant enumerates ELEVEN fields and never
@@ -516,6 +673,55 @@ func TestSetRunRefusesDuplicatesAndOverCap(t *testing.T) {
 	})
 }
 
+// TestSetRunRefusesABodyThatDoesNotEnd is the SERVED half of the EOF law: the
+// exact tails that used to be answered 200, refused with a 400 that says what is
+// wrong, and the one tail that is genuinely fine still served.
+//
+// The tails are not a guess. `json.Decoder.More()` reports whether another
+// ELEMENT follows in the value it is streaming and answers FALSE at a next byte
+// of `}` or `]`, so those two bytes — and only those two — walked past the old
+// check. Each is a regression case here.
+func TestSetRunRefusesABodyThatDoesNotEnd(t *testing.T) {
+	f := newP5Fixture(t)
+	one := srBody("eth_minus_10")
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"a trailing closing brace", one + "}"},
+		{"two trailing closing braces", one + "}}"},
+		{"a trailing closing bracket", one + "]"},
+		{"two trailing closing brackets", one + "]]"},
+		{"a second object", one + srBody("eth_minus_20")},
+		{"whitespace and then a token", one + "   \n\t  }"},
+		{"whitespace and then a second object", one + "\n\n" + srBody("eth_minus_20")},
+		{"a trailing scalar", one + " 7"},
+		{"a trailing comma", one + ","},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, raw := f.srPost(t, tc.body)
+			require.Equal(t, http.StatusBadRequest, status,
+				"the body carries bytes after its one JSON object and was answered %d; a 200 here is half a request "+
+					"served, with the client's second thought silently dropped. body: %s", status, truncate(raw))
+			validateContractMethod(t, setRunContractPath, http.MethodPost, http.StatusBadRequest, raw)
+			require.Contains(t, string(raw), "does not end after its one JSON object")
+			require.NotContains(t, string(raw), `"results"`, "a refusal carries no fragment of the answer it refused")
+		})
+	}
+
+	// AND THE TAIL THAT IS FINE. `json.Decoder` skips whitespace on its way to
+	// EOF, so a body ending in a newline is a body that ended — refusing it
+	// would break every client whose HTTP library adds one.
+	for _, tail := range []string{"", "\n", "  \t\r\n  "} {
+		status, raw := f.srPost(t, one+tail)
+		require.Equal(t, http.StatusOK, status,
+			"trailing whitespace %q was refused; the law is about trailing BYTES, not about formatting. body: %s",
+			tail, truncate(raw))
+		validateContractMethod(t, setRunContractPath, http.MethodPost, http.StatusOK, raw)
+	}
+}
+
 // TestSetRunResultsAreInRequestOrder: the client asked in an order and gets its
 // answer back in it. A tornado's row order is the client's to choose.
 func TestSetRunResultsAreInRequestOrder(t *testing.T) {
@@ -537,21 +743,58 @@ func TestSetRunResultsAreInRequestOrder(t *testing.T) {
 }
 
 // TestSetRunIsByteDeterministic: two identical requests against one batch serve
-// byte-identical responses modulo the three clock fields and the ages derived
-// from them.
+// byte-identical responses modulo the clock members and the ages derived from
+// them.
+//
+// The comparison is over the BYTES AS SERVED, captured before either body is
+// parsed. Comparing two decoded `map[string]any` values does not state this law
+// at all: `encoding/json` discards member order, whitespace and number spelling
+// on the way in, so a response whose members came out in a different order
+// decodes to an EQUAL map. The parsed comparison is kept beneath the byte one as
+// a diagnostic — when both fail, the map diff says WHICH value moved — and the
+// mutation control at the end proves the two comparisons are not the same
+// assertion.
 func TestSetRunIsByteDeterministic(t *testing.T) {
 	f := newSetRunTwoChainFixture(t)
 	ids := []string{"eth_minus_30", "stable_depeg_0995_in_band", "dm_composition_census"}
 
-	first := f.srRun(t, http.StatusOK, ids...)
-	second := f.srRun(t, http.StatusOK, ids...)
+	firstRaw, first := f.srRunRaw(t, http.StatusOK, ids...)
+	secondRaw, second := f.srRunRaw(t, http.StatusOK, ids...)
+
+	firstBytes := srNormalizeRawClock(t, firstRaw)
+	secondBytes := srNormalizeRawClock(t, secondRaw)
+	require.True(t, bytes.Equal(firstBytes, secondBytes),
+		"two identical requests against the same batch served DIFFERENT BYTES. Every array on this surface is ordered by "+
+			"a stated key — engine name, `appliedShockKey`, and (chain_id, asset) for held-flat identities — so a "+
+			"difference here is a map walk reaching the wire.\n%s",
+		srFirstByteDifference(firstBytes, secondBytes))
+
+	// THE SECONDARY, PARSED COMPARISON. It is strictly weaker than the line
+	// above and it is kept because it names the field that moved.
 	for _, body := range []map[string]any{first, second} {
 		normalizeSetRunServeTime(t, body)
 	}
 	require.Equal(t, first, second,
-		"two identical requests against the same batch served different bytes. Every array on this surface is ordered by "+
-			"a stated key — engine name, `appliedShockKey`, and (chain_id, asset) for held-flat identities — so a "+
-			"difference here is a map walk reaching the wire.")
+		"the two bodies decode to different values — a difference in the ANSWER rather than in its serialization")
+
+	// THE MUTATION CONTROL, so the byte law is not silently the parsed one. A
+	// re-marshal through `map[string]any` produces bytes the server never wrote
+	// (Go sorts map keys, and the server writes struct field order), and the two
+	// still decode EQUAL. That is the state the parsed comparison cannot see, and
+	// it is the state a map walk on the wire would produce.
+	var reparsed map[string]any
+	require.NoError(t, json.Unmarshal(firstBytes, &reparsed))
+	remarshalled, err := json.Marshal(reparsed)
+	require.NoError(t, err)
+	require.False(t, bytes.Equal(firstBytes, remarshalled),
+		"the re-marshal produced the server's own bytes, so this control proves nothing and the byte law needs a "+
+			"different mutation")
+	var a, b map[string]any
+	require.NoError(t, json.Unmarshal(firstBytes, &a))
+	require.NoError(t, json.Unmarshal(remarshalled, &b))
+	require.Equal(t, a, b,
+		"two byte-DIFFERENT bodies must decode equal, which is exactly why `require.Equal` over decoded maps is not a "+
+			"byte law and why this test captures the response before parsing it")
 
 	// The ordering laws, stated over the served body rather than trusted.
 	for _, res := range srResults(t, first) {
