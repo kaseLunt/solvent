@@ -404,8 +404,17 @@ test("A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the sentence says the cros
   // The body can arrive from an older or a broken deployment. Rendering a
   // crossing count derived from a matrix whose margins do not match the bars
   // printed beside it is a wrong answer that looks computed, so the sentence
-  // falls back to the NET — which is still a difference of two bars on the page
-  // — and states that the gross was withheld.
+  // states that the gross was withheld and falls back to whatever the two
+  // distributions can still say on their own.
+  //
+  // CORRECTED (Codex round 50). This note used to end "falls back to the NET —
+  // which is still a difference of two bars on the page", and on THIS input
+  // that is not what happens. The mutation below adds five rows to the after
+  // histogram, so the two sides stop measuring the same census, and
+  // `netOnlyMovement` refuses the subtraction rather than printing a difference
+  // taken across two populations. Each side is stated against ITS OWN
+  // denominator and the missing fact is named — asserted below, so the note and
+  // the behaviour cannot drift apart again.
   const honest = engineWith("hf_wad", [
     [4, 0, 1],
     [3, 0, 1],
@@ -427,6 +436,12 @@ test("A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the sentence says the cros
   expect(line).toContain("The gross crossings are NOT stated here");
   expect(line).toContain("disagrees with the two distributions beside it");
   expect(line).not.toContain("moved INTO the region");
+  // And no NET either, on this input: the two censuses differ, so the sentence
+  // says which fact is missing instead of subtracting across them.
+  expect(line).toContain("The two histograms measure different row totals");
+  expect(line).toContain("no net movement is computed here");
+  expect(line).not.toContain("population grew");
+  expect(line).not.toContain("population shrank");
   // The honest body still gets its crossings, so this is not a law that
   // refuses everything.
   expect(histogramShiftReadingLine(honest)).toContain("2 rows moved INTO the region");

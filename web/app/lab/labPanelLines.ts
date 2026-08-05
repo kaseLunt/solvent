@@ -12,12 +12,13 @@
 // Relative imports (not the @/ alias): exercised by the unit specs under
 // Playwright's transpiler as well as by Next.
 
-import type {
-  RefinedProjection,
-  RefinedScenario,
-  RefinedScenarioResult,
-  RefinedStressState,
-  Shortfall,
+import {
+  compareRatio,
+  type RefinedProjection,
+  type RefinedScenario,
+  type RefinedScenarioResult,
+  type RefinedStressState,
+  type Shortfall,
 } from "@solvent/client";
 import {
   renderSignedCount,
@@ -197,6 +198,40 @@ export function statesBitIdentical(
 // ---------------------------------------------------------------------------
 // LabBoundaryGroup — the stable-snap boundary set.
 // ---------------------------------------------------------------------------
+
+/**
+ * WHICH COMMITTED SCENARIOS THE BOUNDARY PANEL RENDERS, derived from the wire:
+ * every member whose shocks all ride the sealed `stable_usd` axis, closest to
+ * par first. No id list is consulted, so the group is exactly what the served
+ * set carries — and when it carries none the panel does not render at all (a
+ * missing boundary point is absent, never invented).
+ *
+ * IT LIVES HERE RATHER THAN BESIDE THE COMPONENT so the group's ANSWER and the
+ * group the ANSWER is computed over come from ONE module a spec can import.
+ * `LabBoundaryGroup.tsx` pulls in CSS modules and the `@/` alias, so a test
+ * reaching for this derivation there would have had to re-implement it — and a
+ * weld that re-implements half of what it is welding proves nothing.
+ */
+export function stableBoundaryScenarios(
+  scenarios: readonly RefinedScenario[],
+): RefinedScenario[] {
+  const group = scenarios.filter(
+    (scenario) =>
+      scenario.shocks.length > 0 && scenario.shocks.every((shock) => shock.axis === "stable_usd"),
+  );
+  // Closest to par first (factor descending) — the band walk reads outward.
+  return [...group].sort((a, b) => {
+    const fa = a.shocks[0];
+    const fb = b.shocks[0];
+    if (fa === undefined || fb === undefined) return 0;
+    return compareRatio(
+      BigInt(fb.factor_num),
+      BigInt(fb.factor_den),
+      BigInt(fa.factor_num),
+      BigInt(fa.factor_den),
+    );
+  });
+}
 
 /** How one member's served states came out, and how it was snapped. */
 export interface BoundaryMemberTally {

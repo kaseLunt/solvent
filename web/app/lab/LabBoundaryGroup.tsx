@@ -1,40 +1,17 @@
-import { compareRatio, type RefinedScenario, type RefinedScenarioResult } from "@solvent/client";
+import type { RefinedScenario, RefinedScenarioResult } from "@solvent/client";
 import { EngineChip } from "@/components/EngineChip";
 import { FactorText } from "./LabScenarioDetail";
 import {
   boundaryForensicsSummary,
   boundaryGroupAnswer,
   boundaryMemberTally,
+  stableBoundaryScenarios,
 } from "./labPanelLines";
 import styles from "./lab.module.css";
 
-/**
- * The stable-snap boundary set, DERIVED FROM THE WIRE: every committed
- * scenario whose shocks all ride the sealed `stable_usd` axis. No id list is
- * consulted, so the group renders exactly the members the committed set
- * carries — and when it carries none, the group does not render at all
- * (a missing boundary point is absent, never invented).
- */
-export function stableBoundaryScenarios(
-  scenarios: readonly RefinedScenario[],
-): RefinedScenario[] {
-  const group = scenarios.filter(
-    (scenario) =>
-      scenario.shocks.length > 0 && scenario.shocks.every((shock) => shock.axis === "stable_usd"),
-  );
-  // Closest to par first (factor descending) — the band walk reads outward.
-  return [...group].sort((a, b) => {
-    const fa = a.shocks[0];
-    const fb = b.shocks[0];
-    if (fa === undefined || fb === undefined) return 0;
-    return compareRatio(
-      BigInt(fb.factor_num),
-      BigInt(fb.factor_den),
-      BigInt(fa.factor_num),
-      BigInt(fa.factor_den),
-    );
-  });
-}
+// The group derivation moved to `labPanelLines` — the same module the ANSWER
+// it feeds lives in — so the e2e weld can compute the group and its sentence
+// from ONE import. This file renders the group; it no longer owns it.
 
 function distinctFactors(scenario: RefinedScenario): { num: number; den: number }[] {
   const seen = new Set<string>();

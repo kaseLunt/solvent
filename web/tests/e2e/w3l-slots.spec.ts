@@ -19,10 +19,31 @@
 // fixture-derived strings on this page (the price-path marker and the matrix's
 // batch line) are compared against the bytes they are computed from rather than
 // against "non-empty".
+//
+// WAVE W-3L-C (Codex round 50). THE SLOTS WERE PINNED; THE SENTENCES IN THEM
+// WERE NOT. Every ANSWER gate on this page asserted visibility, DOM order and a
+// substring — and a substring is satisfied by copy that no longer derives from
+// anything. Replacing `{realizationAnswer(realization)}` with a hardcoded
+// "$0/$0 … delta-only" sentence passed this file AND the 24 helper specs beside
+// it, because those drive the helpers directly and never look at the page: one
+// suite proved the helper computes, the other proved the panel renders, and
+// nothing proved the panel renders THE HELPER.
+//
+// So every converted ANSWER below is now WELDED: the spec imports the helper,
+// feeds it the SAME committed fixture the route serves, and compares the
+// rendered text to the helper's output as a WHOLE STRING. A component that
+// stops calling its helper — or calls it with something else — fails here, and
+// the failure names the sentence.
+//
+// `toHaveText` (not `toContainText`) is the operative choice: it is an equality
+// on the node's whole text, so a hardcoded sentence cannot pass by containing
+// the right words, and a helper whose output drifts cannot pass by still
+// mentioning them.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { refineScenario, type components, type Waterfall } from "@solvent/client";
 import {
   BATCH_SUPERSEDED,
   BOOK,
@@ -34,6 +55,19 @@ import {
   POSITIONS_DM_PAGE_1,
 } from "../fixtures/book";
 import { factorDistancePercent } from "../../lib/book-format";
+import { normalizeBookQuery, positionsAnswerLine } from "../../lib/positions";
+import { waterfallEngineAnswer } from "../../app/book/waterfallView";
+import {
+  bookResultAnswer,
+  boundaryGroupAnswer,
+  collateralGroupAnswer,
+  engineResultAnswer,
+  projectionAnswer,
+  realizationAnswer,
+  stableBoundaryScenarios,
+} from "../../app/lab/labPanelLines";
+
+type Schemas = components["schemas"];
 
 const CORS = { "access-control-allow-origin": "*" };
 
@@ -90,6 +124,19 @@ function expectSlotOrder(order: readonly number[]): void {
 async function expectNotCollapsed(locator: Locator): Promise<void> {
   await expect(locator).toBeAttached();
   expect(await locator.evaluate((node) => node.closest("details") !== null)).toBe(false);
+}
+
+/**
+ * THE WELD. This node's whole text is the helper's whole output — no substring,
+ * no prefix, no "contains the important word".
+ *
+ * It also insists the sentence is a REAL one: a helper that degenerated to an
+ * empty string would otherwise be welded to a panel rendering nothing, and both
+ * halves would agree.
+ */
+async function expectWeld(locator: Locator, expected: string): Promise<void> {
+  expect(expected.length, "the helper produced no sentence to weld to").toBeGreaterThan(0);
+  await expect(locator).toHaveText(expected);
 }
 
 /** Template slot 7: a native `<details>`, closed by default. */
@@ -174,6 +221,25 @@ test("BookWaterfall: STATE before the bars, ANSWER, METHOD, FORENSICS after", as
     ]),
   );
   await expectClosedDetails(page.getByTestId("waterfall-forensics"));
+
+  // THE WELD (round 50). Each engine's ANSWER is `waterfallEngineAnswer` over
+  // the SERVED waterfall — computed here from the same committed bytes the
+  // route fulfils with, and compared whole. Both engines are welded, because
+  // the two carry different decimals and a single-engine gate would pass over a
+  // panel that had quietly hardcoded the other one's sentence.
+  const served = BOOK.waterfall;
+  expect(served, "the book fixture serves no waterfall").not.toBeNull();
+  const waterfall = served as Waterfall;
+  const engines = Array.from(
+    new Set(waterfall.points.flatMap((point) => point.engines.map((entry) => entry.engine))),
+  );
+  expect(engines.length).toBeGreaterThan(1);
+  for (const engine of engines) {
+    await expectWeld(
+      page.getByTestId(`waterfall-answer-${engine}`),
+      waterfallEngineAnswer(waterfall, engine),
+    );
+  }
 });
 
 test("BookWaterfall hazards: held-flat COUNT, MONOTONICITY VIOLATION and EXCLUDED ENGINES all stay open, above the bars", async ({
@@ -272,6 +338,34 @@ test("BookPositions: STATE, controls, ANSWER, METHOD, table in DOM order", async
       "positions-answer",
       "headroom-legend",
     ]),
+  );
+
+  // THE WELD (round 50). The takeaway is `positionsAnswerLine` over the walk
+  // this table renders, and every argument is derived here rather than typed:
+  // the engine/sort/direction come out of the app's OWN deep-link normalizer
+  // fed the URL this test opened, and the three counts come off the served
+  // fixtures. Restating the ranking vocabulary by hand would have welded the
+  // panel to a second opinion about what the URL means.
+  const query = normalizeBookQuery("aave_v3_etherfi", null, null);
+  const aggregate = BOOK.engines.find((candidate) => candidate.engine === query.engine);
+  if (aggregate === undefined) throw new Error("the book fixture serves no aave aggregate");
+  expect(aggregate.refused).toBe(false);
+  const total = POSITIONS_AAVE_PAGE_1.total_positions;
+  expect(total).not.toBeNull();
+  // The walk exhausts both committed pages (page two carries the null cursor),
+  // so `loaded` settles at their combined row count. `toHaveText` retries, so
+  // this is the settled sentence rather than a race against page two.
+  const loaded = POSITIONS_AAVE_PAGE_1.positions.length + POSITIONS_AAVE_PAGE_2.positions.length;
+  await expectWeld(
+    page.getByTestId("positions-answer"),
+    positionsAnswerLine({
+      engine: query.engine,
+      sort: query.sort,
+      reversed: query.reversed,
+      loaded,
+      qualifying: String(total),
+      onBook: String(aggregate.positions),
+    }),
   );
 });
 
@@ -456,6 +550,23 @@ function labFixture(name: string): string {
 }
 
 const LAB_BOOK = JSON.parse(labFixture("book.json")) as { batch: { id: number } };
+
+/**
+ * THE WELD'S OWN SEEDS — the exact bytes the mock routes below fulfil with,
+ * parsed once and typed by the CONTRACT's schemas rather than by a shape this
+ * file invents. Every expected sentence in this file is a helper applied to one
+ * of these; nothing is transcribed.
+ */
+const RUN_BOOK_FLAGSHIP = JSON.parse(
+  labFixture("run-book.weeth_market_depeg_oracles_held.json"),
+) as Schemas["RunBookResponse"];
+const RUN_BOOK_COLLISION = JSON.parse(
+  labFixture("run-book.collateral-collision.json"),
+) as Schemas["RunBookResponse"];
+const STRESS_DM_BODY = JSON.parse(labFixture("stress-dm.json")) as {
+  address: string;
+  scenarios: Schemas["Scenario"][];
+};
 
 async function openLab(page: Page): Promise<void> {
   await page.route("**/v1/stream**", (route) => route.abort());
@@ -665,6 +776,24 @@ test("LabBookPanel EngineResult: ANSWER, cards, METHOD, FORENSICS in DOM order",
   await expect(page.getByTestId("book-engine-method").first()).toContainText(
     "re-measured at each price step",
   );
+
+  // THE WELD (round 50), on BOTH answers this body drives.
+  //
+  // The run book's ANSWER is `bookResultAnswer` over the served `engines[]`,
+  // and each engine panel's ANSWER is `engineResultAnswer` over that engine's
+  // own facts. The per-engine weld is scoped by `data-engine` rather than taken
+  // `.first()`: this fixture serves two engines whose deltas are all zero, so a
+  // panel hardcoded with the OTHER engine's sentence differs by a name alone
+  // and a first-match gate would never see it.
+  expect(RUN_BOOK_FLAGSHIP.engines.length).toBeGreaterThan(1);
+  await expectWeld(
+    page.getByTestId("book-result-answer"),
+    bookResultAnswer(RUN_BOOK_FLAGSHIP.engines),
+  );
+  for (const engine of RUN_BOOK_FLAGSHIP.engines) {
+    const panel = page.locator(`[data-testid="book-engine"][data-engine="${engine.engine}"]`);
+    await expectWeld(panel.getByTestId("book-engine-answer"), engineResultAnswer(engine));
+  }
 });
 
 test("LabRunBook sub-panels: coverage counts before the bars, wire notes behind counted summaries", async ({
@@ -674,13 +803,7 @@ test("LabRunBook sub-panels: coverage counts before the bars, wire notes behind 
   // itemizes weETH twice for the Aave aggregate (COUNTED and NOT COUNTED)
   // beside an UNPRICED holding, so the collateral panel's two null-value
   // meanings are both on screen instead of only one.
-  const collision = JSON.parse(labFixture("run-book.collateral-collision.json")) as {
-    engines: {
-      engine: string;
-      before: { collateral_by_asset: { value_usd: string | null; unpriced: boolean }[] };
-      after: { collateral_by_asset: { value_usd: string | null; unpriced: boolean }[] };
-    }[];
-  };
+  const collision = RUN_BOOK_COLLISION;
   const aave = collision.engines.find((engine) => engine.engine === "aave_v3_etherfi");
   if (aave === undefined) throw new Error("the collision fixture serves no aave engine");
   const rows = [...aave.before.collateral_by_asset, ...aave.after.collateral_by_asset];
@@ -753,6 +876,23 @@ test("LabRunBook sub-panels: coverage counts before the bars, wire notes behind 
   await expect(answer).toContainText("no price witness");
   await expect(answer).toContainText(`${String(notCounted)} are NOT COUNTED`);
   await expect(answer).toContainText("the balance is exact and known");
+
+  // THE WELD (round 50). Both counts above are clauses OF one sentence, and the
+  // sentence is `collateralGroupAnswer` over that engine's two served sides.
+  // The aave arm carries both null-value kinds and the debt_manager arm carries
+  // neither, so this welds the panel to the helper on BOTH of its arms — the
+  // absence claim included, which is the one a hardcoded "every holding is
+  // counted" would slip past.
+  for (const engine of collision.engines) {
+    const enginePanel = page.locator(
+      `[data-testid="runbook-collateral"][data-engine="${engine.engine}"]`,
+    );
+    await expectWeld(
+      enginePanel.getByTestId("runbook-collateral-answer"),
+      collateralGroupAnswer(engine),
+    );
+  }
+
   // METHOD names all three disclosures and promises no hidden figure.
   const method = panel.getByTestId("runbook-collateral-method");
   await expectNotCollapsed(method);
@@ -769,6 +909,29 @@ test("LabRealization: gloss and the delta-only basis are RENDERED, never hovered
   await expectNotCollapsed(page.getByTestId("seizure-model").first());
   await expectClosedDetails(page.getByTestId("realization-forensics").first());
   await expect(page.getByTestId("realization-answer").first()).toContainText("delta-only");
+
+  // THE WELD (round 50), and the counterexample that produced it. This gate
+  // used to be the `toContainText("delta-only")` above and nothing else, so
+  // replacing the panel's `{realizationAnswer(realization)}` with a hardcoded
+  // "$0/$0 … delta-only" sentence passed: the aave arm of this very fixture
+  // reads $0/$0, and `.first()` is the aave arm.
+  //
+  // Both arms are welded, per engine. The debt_manager arm carries the two
+  // nonzero amounts (200000000 / 820000000 at 6 decimals — $200 and $820), so
+  // the hardcode that survived the old gate now fails against the engine whose
+  // numbers it was never the sentence for.
+  const realizing = RUN_BOOK_FLAGSHIP.engines.filter(
+    (engine) => engine.market_realization !== null,
+  );
+  expect(realizing.length).toBeGreaterThan(1);
+  for (const engine of realizing) {
+    const panel = page.locator(`[data-testid="book-engine"][data-engine="${engine.engine}"]`);
+    await expectWeld(
+      panel.getByTestId("realization-answer"),
+      // Non-null by the filter above; the contract types the field nullable.
+      realizationAnswer(engine.market_realization as Schemas["Shortfall"]),
+    );
+  }
 });
 
 test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, reading the LONGEST horizon", async ({
@@ -859,6 +1022,69 @@ test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, 
   await expect(page.getByTestId("projection-forensics")).not.toContainText(
     "Prices are held flat across every horizon",
   );
+
+  // THE WELD (round 50). `projectionAnswer` wants a REFINED projection — the
+  // sealed `liquidation_verdict` union, not the wire's nullable boolean — so
+  // the expectation refines the served scenario through the client's OWN
+  // `refineScenario`, which is the function the page's lookup runs the body
+  // through. Re-deriving a verdict here would have welded the panel to this
+  // spec's opinion of what `becomes_liquidatable: null` means, which is exactly
+  // the read the sealed union exists to take away from callers.
+  const refined = refineScenario(
+    STRESS_DM_BODY.scenarios.find(
+      (candidate) => candidate.id === "dm_rate_horizon_plus_200bps",
+    ) as Schemas["Scenario"],
+  );
+  const refinedProjection = refined.results[0]?.projection;
+  if (refinedProjection === undefined || refinedProjection === null) {
+    throw new Error("the refined scenario serves no projection");
+  }
+  await expectWeld(answer, projectionAnswer(refinedProjection));
+});
+
+test("LabBoundaryGroup: the ANSWER is the group's own helper over the served committed set", async ({
+  page,
+}) => {
+  // THE PANEL WITH NO SLOT GATE AT ALL (Codex round 50). `boundary-answer` was
+  // asserted nowhere in this file, and the copy pins beside it read the member
+  // grid rather than the sentence — so the group's members, its re-pricing
+  // count and its two snap totals could all have been typed by hand.
+  //
+  // The expectation composes the SAME two steps the panel composes: the group
+  // is `stableBoundaryScenarios` over the refined committed set, and the
+  // sentence is `boundaryGroupAnswer` over that group. Both come from the
+  // module the component imports them from.
+  const committed = STRESS_DM_BODY.scenarios.map((scenario) => refineScenario(scenario));
+  const group = stableBoundaryScenarios(committed);
+  expect(group.length).toBeGreaterThan(0);
+  // The group is a SUBSET, so the sentence is a claim about the filter too: a
+  // panel that answered over every served scenario would count differently.
+  expect(group.length).toBeLessThan(committed.length);
+
+  await openLab(page);
+  await page.route(`${LAB_API}/v1/address/${STRESS_DM_BODY.address}/stress`, (route) =>
+    route.fulfill({
+      status: 200,
+      headers: CORS,
+      contentType: "application/json",
+      body: labFixture("stress-dm.json"),
+    }),
+  );
+  await page.getByTestId("mode-address").click();
+  const input = page.getByTestId("lab-address-input");
+  const button = page.getByTestId("run-stress-button");
+  await expect(async () => {
+    await input.fill(STRESS_DM_BODY.address);
+    await expect(button).toBeEnabled({ timeout: 500 });
+  }).toPass();
+  await button.click();
+
+  await expect(page.getByTestId("lab-boundary-group")).toBeVisible();
+  const answer = page.getByTestId("boundary-answer");
+  // R3/R7 still hold on it: the snap totals are a modelling disclosure and may
+  // not live behind the panel's fold.
+  await expectNotCollapsed(answer);
+  await expectWeld(answer, boundaryGroupAnswer(group));
 });
 
 test("LabAppliedShocks: the snap COUNTS are visible, only the per-row flags collapse", async ({
