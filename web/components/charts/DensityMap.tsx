@@ -135,10 +135,51 @@ function bandAxisLabel(index: number): string {
   return index === HEADROOM_BREACHED_BAND ? band.label : `${band.label} left`;
 }
 
-/** Exact-ratio bar length: bigint scaling, so a 30-digit Σ keeps its ratio. */
+/**
+ * Exact-ratio bar length in RENDERED px: bigint long division, so a 30-digit Σ
+ * keeps its ratio.
+ *
+ * W-CH-C. The old body scaled by 1e6 and truncated the ratio BEFORE the px
+ * conversion, so every share under one-millionth of the peak came back as a
+ * flat 0 — and the caller read that 0 as "this band holds nothing", which
+ * dropped the presence mark along with the bar. A band holding $0.000001
+ * against a $1.000001 peak drew EXACTLY what a band holding nothing draws,
+ * which is the one reading the marginal column exists to prevent.
+ *
+ * The division is SIGNIFICANT-DIGIT now, not fixed-decimal: shift the
+ * numerator until it clears the peak, then take 15 more digits, so the
+ * quotient carries a double's full precision at whatever magnitude the ratio
+ * actually has. Only a ratio no double can hold still comes back 0 — and
+ * nothing the caller decides hangs on that number any more.
+ */
 function barLength(value: bigint, peak: bigint, max: number): number {
   if (value <= 0n || peak <= 0n) return 0;
-  return (Number((value * 1_000_000n) / peak) / 1_000_000) * max;
+  if (value >= peak) return max;
+  let numerator = value;
+  let shift = 0;
+  while (numerator < peak) {
+    // Past 1e-300 of the peak there is no double left to land on. The band is
+    // still nonzero and still gets its presence mark; the bar is what stops.
+    if (shift >= 300) return 0;
+    numerator *= 10n;
+    shift += 1;
+  }
+  // `numerator / peak` sits in [1, 10) now, so 15 more digits of long division
+  // put 16 significant digits into the quotient before it becomes a double.
+  const digits = 15;
+  const scaled = Number((numerator * 10n ** BigInt(digits)) / peak);
+  // Divided in two steps: `10 ** (shift + digits)` overflows to Infinity past
+  // 1e308 and would hand back the very zero this function stopped producing.
+  return ((scaled / 10 ** digits) / 10 ** shift) * max;
+}
+
+/**
+ * The proportion the bar publishes, at enough digits that a sub-pixel share
+ * never prints as `0.000000`. A rounded attribute beside an honest rect is the
+ * same lie one layer out.
+ */
+function barLengthAttr(length: number): string {
+  return length.toPrecision(9);
 }
 
 export function DensityMap({
@@ -483,8 +524,13 @@ export function DensityMap({
             y2={bandTop(HEADROOM_BANDS.length)}
           />
           {result.bandTotals.map((marginal) => {
+            // W-CH-C: THE BRANCH IS THE EXACT QUANTITY, never a rounded length.
+            // A zero Σ draws no ink — a bar of length zero is not a small bar —
+            // and everything above zero draws SOMETHING, whatever the ratio
+            // rounds to downstream. Deciding this from `length` is how a
+            // one-millionth share came to render as an empty row.
+            if (marginal.debt <= 0n) return null;
             const length = barLength(marginal.debt, marginalPeak, MARGINAL_BAR_MAX);
-            if (length <= 0) return null;
             // RM-7 / AC-15: the rendered width IS the proportion. The old 1.5px
             // floor was applied to the drawn width while `data-length` kept the
             // true value, so a band holding $1 against a $1M peak drew at over
@@ -498,18 +544,24 @@ export function DensityMap({
             const subPixel = length < MARGINAL_PRESENCE_MIN;
             return (
               <g key={`marginal-${String(marginal.band)}`}>
-                <rect
-                  className={styles.barFlow}
-                  data-testid="density-band-bar"
-                  data-band={String(marginal.band)}
-                  data-length={length.toFixed(6)}
-                  x={MARGIN.left + plotW + MARGINAL_PAD}
-                  y={bandCenter(marginal.band) - 5}
-                  width={length}
-                  height={10}
-                >
-                  <title>{marginal.title}</title>
-                </rect>
+                {/* The rect is drawn when it has a width to draw. Below what a
+                    double can hold there is no proportional mark to make, and
+                    a zero-width rect would only publish a length of zero for a
+                    band that has one — the dot below carries the band instead. */}
+                {length > 0 && (
+                  <rect
+                    className={styles.barFlow}
+                    data-testid="density-band-bar"
+                    data-band={String(marginal.band)}
+                    data-length={barLengthAttr(length)}
+                    x={MARGIN.left + plotW + MARGINAL_PAD}
+                    y={bandCenter(marginal.band) - 5}
+                    width={length}
+                    height={10}
+                  >
+                    <title>{marginal.title}</title>
+                  </rect>
+                )}
                 {subPixel && (
                   <circle
                     className={styles.presenceMark}

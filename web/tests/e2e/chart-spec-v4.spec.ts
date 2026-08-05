@@ -442,6 +442,75 @@ test("W-CH-B / AC-15: a marginal bar's RENDERED width is its true share at an ex
   await expect(page.getByTestId("density-band-presence")).toHaveCount(1);
 });
 
+// W-CH-C finding 1 — THE 6dp TRUNCATION SWALLOWED THE BAND WHOLE.
+//
+// `barLength` scaled by 1e6 and truncated in bigint BEFORE converting to px, so
+// any share under one-millionth of the peak came back as exactly 0 — and the
+// caller's `if (length <= 0) return null` then read that as "this band holds
+// nothing" and dropped the PRESENCE MARK with the bar. A band holding
+// $0.000001 against a $1.000001 peak drew an empty row: pixel for pixel what a
+// band holding nothing draws, in the one column whose whole job is to say a
+// band is not empty.
+//
+// 1 : 1,000,001 is deliberately just past the old cliff — the W-CH-B case above
+// is 1 : 100,000 and survived it — so this fails on the truncation itself and
+// not on some other extreme.
+test("W-CH-C / AC-15: a band under one-millionth of the peak keeps its dot and its ledger row", async ({
+  page,
+}) => {
+  await openMap(
+    page,
+    [
+      { account: account(0), debt: "1", wad: HEALTHY_WAD }, // $0.000001, band 3
+      { account: account(1), debt: "1000001", wad: ROOMY_WAD }, // $1.000001, band 5
+    ],
+    6,
+  );
+
+  const bars = await page.getByTestId("density-band-bar").evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      band: Number(node.getAttribute("data-band")),
+      width: Number(node.getAttribute("width")),
+      length: Number(node.getAttribute("data-length")),
+    })),
+  );
+  expect(bars).toHaveLength(2);
+  const tiny = bars.find((bar) => bar.band === 3);
+  const peak = bars.find((bar) => bar.band === 5);
+
+  // The peak band takes the whole 72px column; the tiny band takes its TRUE
+  // share of it, which is a positive number no reader can see and no reader is
+  // asked to. Under the truncation this was 0 — not small, absent.
+  expect(peak?.width).toBeCloseTo(72, 6);
+  expect(tiny?.width).toBeGreaterThan(0);
+  expect((tiny?.width ?? 0) / (peak?.width ?? 1)).toBeCloseTo(1 / 1_000_001, 12);
+  // The published proportion is the drawn width, at this magnitude too: a
+  // `data-length` rounded to `0.000000` beside a nonzero rect is the same lie
+  // one layer out.
+  expect(tiny?.length).toBeGreaterThan(0);
+  expect(tiny?.length).toBeCloseTo(tiny?.width ?? 0, 12);
+
+  // NONZERO NEVER VANISHES: the dot is the band's presence, and it is decided
+  // by the exact Σ, never by the length that Σ rounded to.
+  const presence = await page
+    .getByTestId("density-band-presence")
+    .evaluateAll((nodes) => nodes.map((node) => Number(node.getAttribute("data-band"))));
+  expect(presence).toEqual([3]);
+
+  // …and the LEDGER, which is where the exact number lives, carries it too.
+  const ledger = await page
+    .getByTestId("risk-map-ledger-band")
+    .evaluateAll((nodes) =>
+      nodes.map((row) =>
+        Array.from(row.querySelectorAll("td")).map((cell) => (cell.textContent ?? "").trim()),
+      ),
+    );
+  expect(ledger[3]?.[1]).toBe("1");
+  expect(Number((ledger[3]?.[2] ?? "0").replace(/[$,]/g, ""))).toBeGreaterThan(0);
+  expect(ledger[5]?.[1]).toBe("1");
+  expect(Number((ledger[5]?.[2] ?? "0").replace(/[$,]/g, ""))).toBeCloseTo(1.000001, 6);
+});
+
 test("AC-16: no currency text floats inside the risk-map SVG except the axis ticks", async ({
   page,
 }) => {
@@ -1462,11 +1531,41 @@ test("W-CH-B / AC-53: the run-book distributions carry the same true-share law",
 // container.
 // ===========================================================================
 
+// W-CH-C SHARPENED IT TWICE MORE.
+//
+//   THE HOLDER WAS THE IMMEDIATE PARENT. The frontier's SVGs and ledger sit
+//   inside a plain width-setting `<div>` that is exactly as wide as they are,
+//   so `root.parentElement` was never the frame that has to scroll. `overflows`
+//   came back false at 360px for a 640px chart, the scroll clause never fired,
+//   and deleting `overflow-x` from `.measuredFrame` would have left this test
+//   green while the whole page scrolled sideways. The frame is NAMED per chart
+//   now, never inferred, and the assertion is on THAT element's own
+//   `overflow-x` — an ancestor scroller somewhere up the tree is not the local
+//   answer LAW-3 asks for.
+//
+//   `>= 0.999` PASSED A 2x SCALE. The bound was one-sided, so a chart rendered
+//   at twice its authored size — a 12px label arriving at 24px, every measured
+//   geometry constant doubled — cleared it comfortably. 1:1 means 1:1: the
+//   assertion is |s − 1| <= 0.001 in both directions.
+
 // NARROW is below every changed chart's authored width, so each one has to
 // answer LAW-3 here: keep 1:1 and scroll, or fail. The run-book's sides are
 // only 340px wide, which is why the narrow end has to be this narrow.
 const NARROW = { width: 360, height: 1000 };
 const WIDE = { width: 1500, height: 1100 };
+
+interface ChartTarget {
+  /** The region measured for rendered typography and 1:1 scale. */
+  root: string;
+  /**
+   * The element LAW-3 designates to hold it — the one that must scroll when
+   * the chart is wider than the space it was given. Named per chart rather
+   * than inferred from the DOM, because an inferred holder is exactly what
+   * made the old clause vacuous. May equal `root` for a region that is its
+   * own frame.
+   */
+  frame: string;
+}
 
 interface ChartAudit {
   root: string;
@@ -1474,44 +1573,39 @@ interface ChartAudit {
   boxScale: number;
   /** `getScreenCTM().a` on the root SVG; 1 for an HTML region. */
   ctmScale: number;
-  /** The root is wider than the box that has to hold it. */
-  overflows: boolean;
-  /** An ancestor establishes a horizontal scroll container. */
-  scrollable: boolean;
+  /** The designated frame's `data-testid`, or null when it does not exist. */
+  frame: string | null;
+  /** What the frame has to hold: the chart itself, or its own wider content. */
+  contentWidth: number;
+  frameClientWidth: number;
+  frameScrollWidth: number;
+  /** The frame's OWN computed `overflow-x`. Not an ancestor's. */
+  frameOverflowX: string;
   nodes: { text: string; rendered: number; color: string }[];
 }
 
 /**
- * Measure every chart region named by `selectors`, in RENDERED px.
+ * Measure every chart region named by `targets`, in RENDERED px.
  *
  * The node set is deliberately the same one the old check used — `text`, `td`,
  * `th`, `p`, `h4` — so nothing is traded away for the new dimensions.
  */
 async function auditCharts(
   page: Page,
-  selectors: readonly string[],
-): Promise<{ charts: ChartAudit[]; panel: string }> {
-  return page.evaluate((sel) => {
+  targets: readonly ChartTarget[],
+): Promise<{ charts: ChartAudit[]; panel: string; docScroll: number; docClient: number }> {
+  return page.evaluate((list) => {
     const charts: ChartAudit[] = [];
-    for (const selector of sel) {
-      for (const root of Array.from(document.querySelectorAll(selector))) {
+    for (const target of list) {
+      for (const root of Array.from(document.querySelectorAll(target.root))) {
         const box = root.getBoundingClientRect();
         const isSvg = root.tagName.toLowerCase() === "svg";
         const svg = isSvg ? (root as unknown as SVGSVGElement) : null;
         const viewBoxWidth = svg?.viewBox.baseVal.width ?? 0;
         const ctm = svg?.getScreenCTM() ?? null;
-        // The box that has to hold the chart: the nearest ancestor that is not
-        // the chart itself. If the chart is wider, something must scroll.
-        const holder = root.parentElement;
-        const holderWidth = holder?.clientWidth ?? box.width;
-        let scrollable = false;
-        for (let node = root.parentElement; node !== null; node = node.parentElement) {
-          const overflowX = getComputedStyle(node).overflowX;
-          if (overflowX === "auto" || overflowX === "scroll") {
-            scrollable = true;
-            break;
-          }
-        }
+        // `closest` starts at the root, so a region that IS its own frame
+        // resolves to itself and still gets measured.
+        const frame = root.closest(target.frame);
         const nodes: { text: string; rendered: number; color: string }[] = [];
         for (const node of Array.from(root.querySelectorAll("text, td, th, p, h4"))) {
           const text = (node.textContent ?? "").trim();
@@ -1529,11 +1623,17 @@ async function auditCharts(
           });
         }
         charts.push({
-          root: root.getAttribute("data-testid") ?? selector,
+          root: root.getAttribute("data-testid") ?? target.root,
           boxScale: isSvg && viewBoxWidth > 0 ? box.width / viewBoxWidth : 1,
           ctmScale: ctm?.a ?? 1,
-          overflows: box.width > holderWidth + 1,
-          scrollable,
+          frame: frame === null ? null : (frame.getAttribute("data-testid") ?? target.frame),
+          // The chart's own rendered width AND whatever else the frame is
+          // holding: a ledger that is its own frame overflows through its
+          // tables, not through its outer box.
+          contentWidth: Math.max(box.width, frame?.scrollWidth ?? 0),
+          frameClientWidth: frame?.clientWidth ?? 0,
+          frameScrollWidth: frame?.scrollWidth ?? 0,
+          frameOverflowX: frame === null ? "" : getComputedStyle(frame).overflowX,
           nodes,
         });
       }
@@ -1545,33 +1645,53 @@ async function auditCharts(
     document.body.append(probe);
     const panel = getComputedStyle(probe).color;
     probe.remove();
-    return { charts, panel };
-  }, selectors);
+    return {
+      charts,
+      panel,
+      docScroll: document.documentElement.scrollWidth,
+      docClient: document.documentElement.clientWidth,
+    };
+  }, targets as ChartTarget[]);
 }
 
 /** The whole law, applied to one page's charts at one viewport in one theme. */
 async function expectRenderedTypography(
   page: Page,
-  selectors: readonly string[],
+  targets: readonly ChartTarget[],
   expectedRegions: number,
   label: string,
 ): Promise<void> {
-  const { charts, panel } = await auditCharts(page, selectors);
+  const { charts, panel, docScroll, docClient } = await auditCharts(page, targets);
   expect(charts.length, `${label}: chart regions found`).toBe(expectedRegions);
   let measured = 0;
   for (const chart of charts) {
     const where = `${label} · ${chart.root}`;
-    // 1:1 OR SCROLL. Never a scale factor: an SVG scaled to 0.6 keeps
-    // reporting 12px font while rendering 7.2px of it.
-    expect(chart.ctmScale, `${where}: CTM scale`).toBeGreaterThanOrEqual(0.999);
-    expect(chart.boxScale, `${where}: box ÷ viewBox`).toBeGreaterThanOrEqual(0.999);
+    // 1:1, in BOTH directions. An SVG scaled to 0.6 keeps reporting 12px font
+    // while rendering 7.2px of it, and one scaled to 2 renders a 24px label
+    // for every geometry constant the spec fixes in rendered px. Neither is
+    // 1:1, and a one-sided `>= 0.999` only ever caught the first.
+    expect(Math.abs(chart.ctmScale - 1), `${where}: CTM scale ${String(chart.ctmScale)}`)
+      .toBeLessThanOrEqual(0.001);
+    expect(Math.abs(chart.boxScale - 1), `${where}: box ÷ viewBox ${String(chart.boxScale)}`)
+      .toBeLessThanOrEqual(0.001);
     // …and the two measures agree, so neither can be lying alone.
     expect(Math.abs(chart.ctmScale - chart.boxScale), `${where}: scale agreement`).toBeLessThan(
       0.01,
     );
-    // A chart wider than the box holding it scrolls rather than shrinking.
-    if (chart.overflows) {
-      expect(chart.scrollable, `${where}: wider than its holder, so it must scroll`).toBe(true);
+    // A chart wider than the frame holding it scrolls IN THAT FRAME rather
+    // than shrinking — and the frame has somewhere to scroll to.
+    expect(chart.frame, `${where}: designated frame missing`).not.toBeNull();
+    if (chart.contentWidth > chart.frameClientWidth + 1) {
+      expect(
+        ["auto", "scroll"],
+        `${where}: frame ${String(chart.frame)} holds ` +
+          `${chart.contentWidth.toFixed(1)}px in ${String(chart.frameClientWidth)}px, ` +
+          `so it must scroll locally (overflow-x: ${chart.frameOverflowX})`,
+      ).toContain(chart.frameOverflowX);
+      expect(
+        chart.frameScrollWidth,
+        `${where}: frame ${String(chart.frame)} scrollWidth`,
+      ).toBeGreaterThan(chart.frameClientWidth);
     }
     for (const node of chart.nodes) {
       expect(node.rendered, `${where}: "${node.text}" rendered px`).toBeGreaterThanOrEqual(12);
@@ -1583,12 +1703,18 @@ async function expectRenderedTypography(
     }
   }
   expect(measured, `${label}: text nodes measured`).toBeGreaterThan(5);
+  // The harm a vacuous scroll clause hides is a page that scrolls sideways.
+  // Charts keep their width and their frames absorb it, so the document never
+  // does.
+  expect(docScroll, `${label}: document scrollWidth vs ${String(docClient)}px`).toBeLessThanOrEqual(
+    docClient + 1,
+  );
 }
 
 /** Both themes, at one viewport, on one set of chart regions. */
 async function expectBothThemes(
   page: Page,
-  selectors: readonly string[],
+  targets: readonly ChartTarget[],
   expectedRegions: number,
   viewport: { width: number; height: number },
   surface: string,
@@ -1600,7 +1726,7 @@ async function expectBothThemes(
     }, theme);
     await expectRenderedTypography(
       page,
-      selectors,
+      targets,
       expectedRegions,
       `${surface} @${String(viewport.width)}px ${theme}`,
     );
@@ -1620,38 +1746,49 @@ test("AC-54: the risk map and the risk-band distributions render 12px at both br
     ],
     6,
   );
-  // The density grid, its ledger, and BOTH engine histograms.
-  const selectors = [
-    "[data-testid='density-grid']",
-    "[data-testid='risk-map-ledger']",
-    "svg[data-testid^='hist-svg-']",
+  // The density grid, its ledger, and BOTH engine histograms — each paired
+  // with the frame LAW-3 makes responsible for holding it.
+  const targets: ChartTarget[] = [
+    { root: "[data-testid='density-grid']", frame: "[data-testid='density-frame']" },
+    // The ledger is its own frame: an HTML region whose tables are the thing
+    // that can outgrow the box.
+    { root: "[data-testid='risk-map-ledger']", frame: "[data-testid='risk-map-ledger']" },
+    { root: "svg[data-testid^='hist-svg-']", frame: "[data-testid^='hist-frame-']" },
   ];
   await expect(page.locator("svg[data-testid^='hist-svg-']")).toHaveCount(2);
-  await expectBothThemes(page, selectors, 4, NARROW, "book");
-  await expectBothThemes(page, selectors, 4, WIDE, "book");
+  await expectBothThemes(page, targets, 4, NARROW, "book");
+  await expectBothThemes(page, targets, 4, WIDE, "book");
 });
 
 test("AC-54: the loss frontier renders 12px at both breakpoints", async ({ page }) => {
   await openFrontier(page, referenceBook());
   const panel = page.getByTestId("frontier-panel").first();
   await expect(panel.getByTestId("frontier-row1")).toBeVisible();
-  // Two engine panels, each with row 1, row 2 and a ledger.
-  const selectors = [
-    "[data-testid='frontier-row1']",
-    "[data-testid='frontier-row2']",
-    "[data-testid='frontier-ledger']",
+  // Two engine panels, each with row 1, row 2 and a ledger. All three sit
+  // inside ONE `frontier-frame`, behind a width-setting inner div — the exact
+  // nesting that made the old immediate-parent check vacuous, so it is the
+  // frame each of the three is audited against.
+  const targets: ChartTarget[] = [
+    { root: "[data-testid='frontier-row1']", frame: "[data-testid='frontier-frame']" },
+    { root: "[data-testid='frontier-row2']", frame: "[data-testid='frontier-frame']" },
+    { root: "[data-testid='frontier-ledger']", frame: "[data-testid='frontier-frame']" },
   ];
-  await expectBothThemes(page, selectors, 6, NARROW, "lab");
-  await expectBothThemes(page, selectors, 6, WIDE, "lab");
+  await expectBothThemes(page, targets, 6, NARROW, "lab");
+  await expectBothThemes(page, targets, 6, WIDE, "lab");
 });
 
 test("AC-54: the run-book distributions render 12px at both breakpoints", async ({ page }) => {
   await openRunBook(page, JSON.parse(fixture("run-book.eth_minus_30.json")));
-  // Two engines × before/after.
-  const selectors = ["svg[data-testid^='runbook-hist-svg-']"];
+  // Two engines × before/after, each in its own scroll frame.
+  const targets: ChartTarget[] = [
+    {
+      root: "svg[data-testid^='runbook-hist-svg-']",
+      frame: "[data-testid^='runbook-hist-frame-']",
+    },
+  ];
   await expect(page.locator("svg[data-testid^='runbook-hist-svg-']")).toHaveCount(4);
-  await expectBothThemes(page, selectors, 4, NARROW, "run-book");
-  await expectBothThemes(page, selectors, 4, WIDE, "run-book");
+  await expectBothThemes(page, targets, 4, NARROW, "run-book");
+  await expectBothThemes(page, targets, 4, WIDE, "run-book");
 });
 
 test("AC-55: the risk map renders no reference to a token that does not exist", async ({ page }) => {

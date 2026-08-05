@@ -347,11 +347,18 @@
 }
 
 /* ---- RM-12 the risk map's ledger ---- */
+/* LAW-3, the ledger's half of it. Every cell here is `white-space: nowrap` —
+   an exact Σ broken across two lines is not an exact Σ — so below about 320px
+   the tables are wider than the column they sit in. Without a scroller of its
+   own the overflow escapes into the page and the whole document scrolls
+   sideways, which is the failure the chart frames above already answer for.
+   The ledger answers it the same way: keep the columns, scroll locally. */
 .mapLedger {
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-5);
   margin-top: var(--sp-3);
+  overflow-x: auto;
 }
 
 .mapLedgerBlock {
