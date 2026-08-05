@@ -45,6 +45,7 @@ import {
   type LabRunBookEngine,
   type RunBookOutcome,
 } from "@/lib/runbook";
+import { runBookSet, type SetRunOutcome } from "@/lib/runbookSet";
 import { LabBatchStamp } from "./LabBatchStamp";
 import { LabFrontier } from "./LabFrontier";
 import { LabMatrix } from "./LabMatrix";
@@ -65,8 +66,15 @@ import {
   type BookRefusal,
   type DefinitionSkew,
   type MatrixPhase,
+  type RowIdentity,
   type ScenarioIdentity,
 } from "./matrixCells";
+import { LabTornado, type TornadoRun } from "./LabTornado";
+import {
+  deepLinkDecision,
+  setFailureAsRunBookOutcome,
+  setRunFailureReason,
+} from "./tornadoLines";
 import {
   FactorText,
   LabAppliedShocks,
@@ -822,6 +830,7 @@ function bookDekFor(state: BookState): string {
 function LabBookPanelInner() {
   const searchParams = useSearchParams();
   const deepLinkId = searchParams.get("scenario");
+  const deepLinkSetParam = searchParams.get("scenarios");
 
   const [listing, setListing] = useState<ListingState>({ phase: "loading" });
   // WAVE R12 — the listing-refresh affordance's own state. It is deliberately
@@ -852,8 +861,15 @@ function LabBookPanelInner() {
   // one on screen", which is a promise a pruned phase could never keep.
   const [phases, setPhases] = useState<ReadonlyMap<string, MatrixPhase>>(new Map());
   const [pickedId, setPickedId] = useState<string | null>(null);
+  // WAVE W-TN — the set-run's own lifecycle. The tornado's RESULT never enters
+  // `phases`: a `SetRunEngineSummary` flowing into `cellState`'s result arm
+  // would render blank histograms and empty collateral tables, the exact
+  // defect matrixCells was built across R8-R17 to prevent (§9.1).
+  const [tornado, setTornado] = useState<TornadoRun>({ kind: "idle" });
   const runSeq = useRef(new Map<string, number>());
+  const setSeq = useRef(0);
   const autoRan = useRef<string | null>(null);
+  const autoRanSet = useRef<string | null>(null);
 
   // A RUN NEVER ERASES THE EVIDENCE IT IS RE-RUNNING (Wave R8, Codex round-16
   // finding 2).
@@ -938,6 +954,104 @@ function LabBookPanelInner() {
     });
   }, []);
 
+  // WAVE W-TN — THE SET DISPATCH (§9.3). One POST, N phases written at once,
+  // each `{kind: "running", attempt}` in the existing MatrixPhase shape, so
+  // R14's dispatch-time identity stamping works unchanged and the whole set is
+  // judged by the definitions on screen at the instant of dispatch.
+  //
+  // ON SETTLE, ONE BODY FANS OUT TO N PHASES — and what each phase becomes
+  // depends on what the settlement WAS:
+  //
+  //   A 200 (valid or not — the set-level gate is the tornado's to render)
+  //   RETURNS EVERY ROW'S HELD EVIDENCE, untouched at its own batch pin. The
+  //   set's answer lives on the tornado surface, never in a matrix cell, so
+  //   the matrix simply shows again what it showed before the dispatch. A row
+  //   that held nothing returns to idle: the matrix speaks for single-run
+  //   phases and the tornado speaks for the set, and neither borrows the
+  //   other's evidence (the R16 lesson, applied before the defect this time).
+  //
+  //   A BODYLESS SETTLEMENT (429, the 503 busy arm, the 503 no-batch arm,
+  //   network) FAILS ALL N ROWS AT ONCE. A row holding an ok book keeps it —
+  //   R8: a run that could not answer says nothing about the answer already
+  //   held — with the failure NAMED beside it in `rerunFailed`, carrying this
+  //   settlement's own identity stamp (R16) and naming WHICH of the four arms
+  //   it was (`setRunFailureReason`). A row with no ok book to keep takes the
+  //   failure AS its outcome, exactly as `run()` settles a first-run failure,
+  //   through `setFailureAsRunBookOutcome` so the arm's sentence survives
+  //   arms `RunBookOutcome` cannot carry verbatim.
+  //
+  // THE PER-ROW SEQUENCE GUARD IS SHARED WITH `run()`: the set bumps each
+  // row's `runSeq`, so a single-run settlement that lands after the set
+  // dispatched is discarded for that row, and a single run dispatched AFTER
+  // the set wins its row back — one map slot, latest request wins, per row.
+  const runSet = useCallback((ids: readonly string[], identity: RowIdentity) => {
+    if (ids.length === 0) return;
+    const mySet = ++setSeq.current;
+    const seqs = new Map<string, number>();
+    const attempts = new Map<string, ScenarioIdentity | undefined>();
+    for (const id of ids) {
+      const seq = (runSeq.current.get(id) ?? 0) + 1;
+      runSeq.current.set(id, seq);
+      seqs.set(id, seq);
+      attempts.set(id, identity.get(id));
+    }
+    setPhases((previous) => {
+      const next = new Map(previous);
+      for (const id of ids) {
+        const prior = previous.get(id);
+        const held =
+          prior?.kind === "outcome"
+            ? prior.outcome
+            : prior?.kind === "running"
+              ? prior.held
+              : undefined;
+        const attempt = attempts.get(id);
+        next.set(
+          id,
+          held === undefined ? { kind: "running", attempt } : { kind: "running", held, attempt },
+        );
+      }
+      return next;
+    });
+    setTornado({ kind: "running", ids: [...ids] });
+    void runBookSet(solventBaseUrl(), ids).then((outcome: SetRunOutcome) => {
+      // A later set-run owns the tornado surface; this one only settles rows
+      // whose per-row sequence it still holds.
+      if (setSeq.current === mySet) {
+        setTornado({ kind: "settled", ids: [...ids], outcome });
+      }
+      setPhases((previous) => {
+        const next = new Map(previous);
+        for (const id of ids) {
+          if (runSeq.current.get(id) !== seqs.get(id)) continue;
+          const prior = previous.get(id);
+          const held = prior?.kind === "running" ? prior.held : undefined;
+          const attempt = attempts.get(id);
+          if (outcome.kind === "ok") {
+            next.set(
+              id,
+              held === undefined ? { kind: "idle" } : { kind: "outcome", outcome: held, attempt },
+            );
+            continue;
+          }
+          const reason = setRunFailureReason(outcome);
+          next.set(
+            id,
+            held !== undefined && held.kind === "ok"
+              ? {
+                  kind: "outcome",
+                  outcome: held,
+                  rerunFailed: { reason, attempt },
+                  attempt,
+                }
+              : { kind: "outcome", outcome: setFailureAsRunBookOutcome(outcome), attempt },
+          );
+        }
+        return next;
+      });
+    });
+  }, []);
+
   // WAVE R12 (Codex round-20 finding 2) — THE LISTING REFRESH.
   //
   // Coverage and identity both come from the committed listing held in this
@@ -985,6 +1099,7 @@ function LabBookPanelInner() {
   useEffect(() => {
     const controller = new AbortController();
     const wanted = searchParams.get("scenario");
+    const wantedSet = searchParams.get("scenarios");
     getSolventClient()
       .scenarios(controller.signal)
       .then(
@@ -995,16 +1110,43 @@ function LabBookPanelInner() {
             configVersion: response.scenario_config_version,
             notes: response.notes,
           });
-          if (wanted === null || autoRan.current === wanted) return;
-          if (!response.scenarios.some((scenario) => scenario.id === wanted)) return;
-          autoRan.current = wanted;
-          // WAVE R14: stamped from the response that just made membership
-          // knowable — the same listing the auto-run's own membership test is
-          // decided by, so the two can never be about different definitions.
-          run(
+          // WAVE W-TN (§9.2) — the TWO deep-link params are decided TOGETHER,
+          // by one pure function, against the listing that just arrived.
+          // `?scenario=` and `?scenarios=` in one URL run NOTHING (the notice
+          // renders below; no precedence is guessed), ids the listing does not
+          // publish are filtered BEFORE dispatch and NAMED, and there is no
+          // `?scenarios=*` — a `*` is an id this deployment does not publish.
+          const decision = deepLinkDecision(
             wanted,
-            rowIdentity(response.scenarios, response.scenario_config_version).get(wanted),
+            wantedSet,
+            response.scenarios.map((scenario) => scenario.id),
           );
+          if (decision.kind === "single") {
+            if (wanted === null || autoRan.current === wanted) return;
+            if (!response.scenarios.some((scenario) => scenario.id === wanted)) return;
+            autoRan.current = wanted;
+            // WAVE R14: stamped from the response that just made membership
+            // knowable — the same listing the auto-run's own membership test is
+            // decided by, so the two can never be about different definitions.
+            run(
+              wanted,
+              rowIdentity(response.scenarios, response.scenario_config_version).get(wanted),
+            );
+            return;
+          }
+          if (
+            decision.kind === "set" &&
+            !decision.overCap &&
+            decision.runIds.length > 0 &&
+            autoRanSet.current !== wantedSet
+          ) {
+            autoRanSet.current = wantedSet;
+            // Stamped from the same arriving listing, for the same R14 reason.
+            runSet(
+              decision.runIds,
+              rowIdentity(response.scenarios, response.scenario_config_version),
+            );
+          }
         },
         (cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -1017,7 +1159,7 @@ function LabBookPanelInner() {
     return () => {
       controller.abort();
     };
-  }, [run, searchParams]);
+  }, [run, runSet, searchParams]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1067,6 +1209,25 @@ function LabBookPanelInner() {
       ? null
       : (scenarios.find((scenario) => scenario.id === deepLinkId) ?? null);
   const selectedId = pickedId ?? deepLinkMember?.id ?? scenarios[0]?.id ?? null;
+  // WAVE W-TN — the deep-link decision, re-derived at render from the listing
+  // on screen (never stored), so the notices below cannot outlive the facts
+  // they describe. The DISPATCH half of the same decision runs in the
+  // listing-arrival callback above, from the same pure function.
+  const deepLinkSet =
+    listing.phase === "ok"
+      ? deepLinkDecision(
+          deepLinkId,
+          deepLinkSetParam,
+          listing.scenarios.map((scenario) => scenario.id),
+        )
+      : ({ kind: "none" } as const);
+  const tornadoDeepLinkNotice =
+    deepLinkSet.kind === "conflict"
+      ? deepLinkSet.notice
+      : deepLinkSet.kind === "set"
+        ? deepLinkSet.notice
+        : null;
+  const tornadoFilteredIds = deepLinkSet.kind === "set" ? deepLinkSet.filteredIds : [];
   const selected = scenarios.find((scenario) => scenario.id === selectedId) ?? null;
   const waterfall: Waterfall | null = book.phase === "ok" ? book.book.waterfall : null;
   const frontierBatchId = book.phase === "ok" ? book.book.batch.id : null;
@@ -1129,6 +1290,21 @@ function LabBookPanelInner() {
             listingRefreshing={refreshing}
             selectedId={selectedId}
             onSelect={setPickedId}
+          />
+
+          {/* WAVE W-TN — the tornado: one batch × N committed scenarios. It
+              shares `phases` (dispatch writes running stamps; the §9.5 cohort
+              rule reads single-run pins) and NOTHING else with the matrix. */}
+          <LabTornado
+            scenarios={listing.scenarios}
+            identities={identities}
+            phases={phases}
+            run={tornado}
+            deepLinkNotice={tornadoDeepLinkNotice}
+            filteredDeepLinkIds={tornadoFilteredIds}
+            onRunSet={(ids) => {
+              runSet(ids, identities);
+            }}
           />
 
           <div className={styles.detailHead}>

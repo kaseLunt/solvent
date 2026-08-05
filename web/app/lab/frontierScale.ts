@@ -56,7 +56,12 @@ export function frontierScale(
   const marginLeft = FRONTIER_MARGIN_LEFT;
   const available = Math.max(measuredWidth - marginLeft - FRONTIER_MARGIN_RIGHT, 1);
   const natural = n > 0 ? available / n : available;
-  const longestValueWidth = maxChars * chPx + FRONTIER_COLUMN_PAD;
+  // CEIL to a whole CSS pixel: a measured chPx is fractional, and a
+  // value-driven `width` that lands on a fraction gets device-pixel-snapped a
+  // hair NARROWER than its viewBox, silently scaling the whole SVG (and its
+  // 12px type) below 1:1. Ceiling widens by under a pixel and the frame
+  // scrolls that hair instead — LAW-3 (rendered CSS pixels), never compression.
+  const longestValueWidth = Math.ceil(maxChars * chPx + FRONTIER_COLUMN_PAD);
   const slot = Math.max(natural, longestValueWidth);
   const plotW = slot * n;
   return {

@@ -856,6 +856,16 @@
   fill: none;
 }
 
+/* A held diagonal arriving below 1.00 on the wad engine (W-SK-B): the crit HUE,
+   because a row that stayed below 1.00 is still in the liquidation set, at the
+   held MUTE, because nothing moved. Changed arrivals keep .flowRibbonCrit's
+   emphasis, so the two stay distinguishable at a glance. */
+.flowRibbonHeldCrit {
+  stroke: var(--crit);
+  opacity: 0.4;
+  fill: none;
+}
+
 /* ---- chart spec v4 section template (slots 2, 3, 6) ----
  *
  * STATE renders ABOVE the visual and never inside a <details> (R6, R7): every
@@ -915,4 +925,24 @@
 
 .exactDataButton:hover {
   color: var(--ink);
+}
+
+/* ---- W-TN: the tornado's pick list. Tokens only; the run button, hint and
+ * state registers reuse the classes the single-run affordance already uses,
+ * so the tornado invents no new register. ---- */
+.tornadoPicks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 8px 0;
+}
+
+.tornadoPick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
 }

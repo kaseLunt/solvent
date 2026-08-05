@@ -1,0 +1,346 @@
+{
+  "batch": {
+    "age_seconds": 5,
+    "computed_at": "2026-07-29T10:00:00Z",
+    "flagged_count": 1,
+    "id": 1,
+    "position_count": 4,
+    "producer": "riskd",
+    "refused_count": 2,
+    "refused_engines": [],
+    "status": "complete",
+    "supersession": {
+      "legs": [],
+      "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock.",
+      "superseded": false
+    },
+    "watermarks": [
+      {
+        "acked_epoch": 0,
+        "chain_id": 1,
+        "engine": "aave_param",
+        "last_block": 25635600,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "acked_epoch": 0,
+        "chain_id": 1,
+        "engine": "aave_v3_etherfi",
+        "last_block": 25635618,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "acked_epoch": 0,
+        "chain_id": 10,
+        "engine": "debt_manager",
+        "last_block": 154796552,
+        "max_epoch_at_compute": 0,
+        "sweep": {
+          "age_seconds": 1205,
+          "failed": 1,
+          "generation": 4,
+          "generation_open": false,
+          "max_updated_at": "2026-07-29T09:40:00Z",
+          "rows": 3,
+          "success_sum": "309593004"
+        }
+      },
+      {
+        "acked_epoch": 0,
+        "chain_id": 1,
+        "engine": "prices:poll:1",
+        "last_block": 25635610,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      },
+      {
+        "acked_epoch": 0,
+        "chain_id": 10,
+        "engine": "prices:poll:10",
+        "last_block": 154796540,
+        "max_epoch_at_compute": 0,
+        "sweep": null
+      }
+    ]
+  },
+  "coverage": {
+    "batch_positions": 4,
+    "book_is_measurable": true,
+    "engines": [
+      {
+        "engine": "aave_v3_etherfi",
+        "measurable": 1,
+        "positions_in_batch": 2,
+        "refused_in_batch": 1,
+        "unrebuildable": 0,
+        "withheld": false
+      },
+      {
+        "engine": "debt_manager",
+        "measurable": 1,
+        "positions_in_batch": 2,
+        "refused_in_batch": 1,
+        "unrebuildable": 0,
+        "withheld": false
+      }
+    ],
+    "excluded": [],
+    "excluded_by_this_layer": 0,
+    "in_book": 2,
+    "note": "THIS CENSUS IS BOOK-SCOPED, not run-scoped: `in_book` is every position THIS LAYER rebuilt over the WHOLE batch, whatever any scenario's model reaches — which is why it is a different component from /v1/book's `coverage`, whose `in_book` counts one run. Every position row is classified by the POSITIVE predicate of the counter it feeds, into exactly one of three classes, so `batch_positions == in_book + refused_in_batch + excluded_by_this_layer` EXACTLY; a row matching none of them refuses the whole request with a named 500 rather than being served under an equality it breaks. `refused_in_batch` is riskd's own refusals, served per row by /v1/positions and /v1/address/{addr}; `excluded_by_this_layer` is rows this service could not rebuild or verify, listed in `excluded`. Neither is ever reconciled against a run-book histogram's `refused_count`, which counts a WIDER population (both of these plus rebuilt rows carrying no comparator) under a label naming only the third.",
+    "refused_in_batch": 2
+  },
+  "evaluation": {
+    "freshness": "still_newest",
+    "newest_servable_batch_id": 1,
+    "note": "Batch 1 was STILL the newest complete servable batch at `probed_at`. That is what was true when this response was built, never a promise about the reader's present.",
+    "probed_at": "2026-07-29T10:00:07Z",
+    "resolved_at": "2026-07-29T10:00:05Z",
+    "scenarios_evaluated": 2
+  },
+  "excluded_engines": [],
+  "notes": [
+    "ONE BATCH: every result here was measured against the single `batch` above, resolved once inside one database snapshot before any arithmetic ran. Cross-scenario comparison is therefore exact by the SHAPE of this response rather than by a client-side check over N independently resolved bodies.",
+    "aggregates are per engine in each engine's OWN unit and decimals; they are never summed, averaged or plotted on one axis across engines. `usd_decimals` on each engine row is that engine's scale.",
+    "deltas are DELTA-ONLY: after minus before, the scenario's own contribution over that scenario's own covered, non-withheld book. The sanctioned denominator is `total_debt_usd_before`; the after side is a different book and a ratio against it answers a question this surface does not ask.",
+    "`out_of_model` is deliberately NOT carried here: it is published verbatim and versioned on GET /v1/scenarios, which a client necessarily already has (that is where these ids came from), and `scenario_id` + `scenario_version` + `scenario_config_version` make the join exact. READING A SHOCKED NUMBER WITHOUT IT IS READING IT WRONG.",
+    "`coverage` is a census of the whole BATCH, not of any one run: it is a different component from /v1/book's `coverage` for exactly that reason. `shock_reach` on each result says whether the declared shock reached a mark at all and, when it did not, WHICH cause held it — a zero delta on this surface always carries a published cause."
+  ],
+  "requested_scenario_ids": [
+    "eth_minus_30",
+    "ethfi_minus_50"
+  ],
+  "results": [
+    {
+      "covered_engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "engines": [
+        {
+          "accounts": 1,
+          "after_collateral_at_risk_usd": "0",
+          "after_eligible_accounts": 0,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "0",
+          "before_eligible_accounts": 0,
+          "before_eligible_debt_usd": "0",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "aave_v3_etherfi",
+          "flipped_to_eligible": null,
+          "hf_dropped_accounts": 0,
+          "infinite_accounts": 1,
+          "market_realization": null,
+          "movement_excluded_accounts": 1,
+          "movement_rule": "hf_strictly_dropped",
+          "note": "DERIVED VARIANT (W-TN): this engine's one measurable account carries no debt, so every debt-side figure is a computed zero and total_debt_usd_before is the zero denominator the axis law refuses to divide by. Collateral still moves under the shock; the movement count's denominator is accounts minus movement_excluded_accounts (1 minus 1 = 0), and the excluded population is named rather than left a quiet zero.",
+          "projection": null,
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "560000000000",
+          "total_collateral_usd_before": "800000000000",
+          "total_debt_usd_after": "0",
+          "total_debt_usd_before": "0",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 8
+        },
+        {
+          "accounts": 2,
+          "after_collateral_at_risk_usd": "2800000000",
+          "after_eligible_accounts": 1,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "239603961",
+          "before_collateral_at_risk_usd": "4000000000",
+          "before_eligible_accounts": 2,
+          "before_eligible_debt_usd": "4200000000",
+          "eligible_accounts_delta": -1,
+          "eligible_debt_delta_usd": "-1050000000",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 0,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1 minus 0 = 1), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+          "projection": null,
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "2800000000",
+          "total_collateral_usd_before": "4000000000",
+          "total_debt_usd_after": "4200000000",
+          "total_debt_usd_before": "4200000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "label": "ETH -30 percent",
+      "note": "IDENTITY: this result is scenario eth_minus_30 at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. SHOCK REACH: EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "positions_answered": 3,
+      "positions_withheld": 0,
+      "scenario_id": "eth_minus_30",
+      "scenario_version": "v1",
+      "shock_reach": {
+        "applied_shocks": [
+          {
+            "after": "2800000000",
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "base_snapped": false,
+            "before": "4000000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "70",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "280000000000",
+            "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+            "base_snapped": false,
+            "before": "400000000000",
+            "cap_bound": false,
+            "chain_id": 1,
+            "factor_den": "100",
+            "factor_num": "70",
+            "snapped": false,
+            "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
+          }
+        ],
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 0,
+        "held_flat_assets": [
+          {
+            "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            "chain_id": 1
+          },
+          {
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+            "chain_id": 10
+          },
+          {
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "chain_id": 10
+          },
+          {
+            "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+            "chain_id": 10
+          },
+          {
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+            "chain_id": 10
+          },
+          {
+            "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+            "chain_id": 10
+          }
+        ],
+        "held_flat_marks": 6,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_moved": 2,
+        "marks_snapped": 0,
+        "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+        "reach": "every_mark_moved"
+      },
+      "shocks": [
+        {
+          "axis": "eth_usd",
+          "factor_den": 100,
+          "factor_num": 70
+        }
+      ],
+      "unmeasurable_engines": [],
+      "withheld_engines": []
+    },
+    {
+      "scenario_id": "ethfi_minus_50",
+      "scenario_version": "v1",
+      "label": "ETHFI -50 percent",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "shocks": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "factor_num": 50,
+          "factor_den": 100
+        }
+      ],
+      "shock_reach": {
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 0,
+        "reach": "every_mark_moved",
+        "applied_shocks": [
+          {
+            "after": "1000000",
+            "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+            "base_snapped": false,
+            "before": "2000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "50",
+            "snapped": false,
+            "source": "priceproviderv2"
+          }
+        ],
+        "marks_moved": 1,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_snapped": 0,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "held_flat_marks": 0,
+        "held_flat_assets": [],
+        "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (1 of 1). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures."
+      },
+      "covered_engines": [
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 2,
+          "after_collateral_at_risk_usd": "2000000000",
+          "after_eligible_accounts": 1,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "4000000000",
+          "before_eligible_accounts": 0,
+          "before_eligible_debt_usd": "0",
+          "eligible_accounts_delta": 1,
+          "eligible_debt_delta_usd": "2100000000",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 1,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "DERIVED VARIANT (W-TN): two measurable accounts, none eligible before, one flipped in. The sanctioned denominator is total_debt_usd_before; the DM's debt is USD-normalized and shock-invariant, so both sides carry the same total.",
+          "projection": null,
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "2000000000",
+          "total_collateral_usd_before": "4000000000",
+          "total_debt_usd_after": "4200000000",
+          "total_debt_usd_before": "4200000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 2,
+      "positions_withheld": 0,
+      "note": "DERIVED VARIANT (W-TN): re-identified byte-for-byte to the committed ethfi_minus_50 definition the web listing publishes; the numbers are documented derivations in generate-run-book-set.mjs, chosen asymmetric so the tornado's ordering and sign handling cannot pass by cancellation."
+    }
+  ],
+  "scenario_config_version": "v1",
+  "served_at": "2026-07-29T10:00:05Z"
+}

@@ -262,13 +262,21 @@ const CENSUS: Record<string, number> = {
   "run-book.weeth.batch2.json": 2,
   "run-book.weeth.v2.json": 2,
   "run-book.weeth_market_depeg_oracles_held.json": 2,
+  // W-TN — the run-book-set family (`generate-run-book-set.mjs`, which imports
+  // the law and pins these same counts in `SET_RUN_CLOCK_TRIOS`). Two trios
+  // each: the batch envelope over `computed_at`, and the debt_manager sweep
+  // over `max_updated_at`. The busy body carries no batch and no clock, so it
+  // is deliberately NOT here.
+  "run-book-set.json": 2,
+  "run-book-set.no-denominator.json": 2,
+  "run-book-set.superseded.json": 2,
   "stress-aave.json": 2,
   "stress-dm.json": 2,
   "stress-unknowable.json": 2,
 };
 
-/** 25 files × 2 trios. Stated separately so a census edit cannot move it silently. */
-const CENSUS_TOTAL = 50;
+/** 28 files × 2 trios. Stated separately so a census edit cannot move it silently. */
+const CENSUS_TOTAL = 56;
 
 // --- the generators' own pins, read out of their source ---------------------
 //
@@ -578,10 +586,11 @@ test.describe("the clock census", () => {
       "a body carrying a batch envelope that the clock law resolves NOTHING in — a batch whose " +
         "age and stamp both went null would otherwise slip past a census that only counts trios.",
     ).toEqual([]);
-    // 24 batch-bearing bodies today; `observatory-series-dm.json` is the
-    // clock-bearing file that carries no batch, which is why the walk is over the
-    // directory rather than over the batch-bearing subset.
-    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(24);
+    // 27 batch-bearing bodies today (W-TN added the three run-book-set 200
+    // bodies; the busy refusal carries no batch); `observatory-series-dm.json`
+    // is the clock-bearing file that carries no batch, which is why the walk is
+    // over the directory rather than over the batch-bearing subset.
+    expect(fixtureFiles.filter((name) => isBatchBearing(readFixture(name)))).toHaveLength(27);
   });
 });
 

@@ -63,9 +63,13 @@ test("LF-8 NO SUPPRESSION: a value wider than the box grows the slot and the fra
   // `$1,877,357.544497` is 17 characters at the Debt Manager's 6 decimals.
   const maxChars = 17;
   const measured = frontierScale(640, 7, chPx, maxChars);
-  const longestValueWidth = maxChars * chPx + FRONTIER_COLUMN_PAD;
+  // CEILED to a whole CSS pixel: a fractional value-driven width snaps to
+  // device pixels a hair NARROWER than its viewBox and silently scales the
+  // SVG below 1:1 (AC-54's 11.9986px). 17 × 7.2 + 16 = 138.4 → 139.
+  const longestValueWidth = Math.ceil(maxChars * chPx + FRONTIER_COLUMN_PAD);
   expect(measured.valueDriven).toBe(true);
-  expect(measured.slot).toBeCloseTo(longestValueWidth, 9);
+  expect(measured.slot).toBe(longestValueWidth);
+  expect(Number.isInteger(measured.slot)).toBe(true);
   // The rendered width EXCEEDS the container: the frame scrolls rather than
   // the ledger dropping a value.
   expect(measured.width).toBeGreaterThan(640);

@@ -249,6 +249,12 @@
   white-space: pre;
   font-family: var(--mono);
   font-size: 12px;
+  /* The probe must measure what .axisLabel RENDERS: both consumers of
+   * useMonoCharWidth (LabFrontier, LabTornado) label with .axisLabel, whose
+   * 0.06em letter-spacing adds 0.72px per glyph at 12px. A probe without it
+   * under-measures by exactly that much and every gutter sized from chPx
+   * clips its first character ("eth_minus_60" rendered ":th_minus_60"). */
+  letter-spacing: 0.06em;
 }
 
 .densityLegend {

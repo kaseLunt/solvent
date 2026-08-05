@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "set_run_busy",
+    "message": "this deployment evaluates at most 2 set-runs concurrently and 2 are running. The request was refused immediately rather than queued, so no connection is held waiting. Nothing here computes when a slot frees, so no Retry-After is offered rather than one invented. This is a statement about the evaluator's capacity and about nothing in the book: the batch is fine.",
+    "max_in_flight": 2,
+    "in_flight": 2
+  }
+}
