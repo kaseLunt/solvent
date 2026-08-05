@@ -39,6 +39,36 @@
 // on the node's whole text, so a hardcoded sentence cannot pass by containing
 // the right words, and a helper whose output drifts cannot pass by still
 // mentioning them.
+//
+// WAVE W-3L-D (Codex round 52). THE WELDS WERE REAL AND THE FIXTURES WERE FLAT.
+// Seven of the eight welds above could not fail, because a weld is an equality
+// between two computations and an equality proves nothing when the numbers on
+// both sides COINCIDE:
+//
+//   waterfall     both engines reach the deepest grid point with exactly one
+//                 eligible account, so the account clause reads the same
+//                 whichever engine's census the panel took it from;
+//   positions     loaded, qualifying and on-book were all 2, so the three
+//                 arguments were interchangeable;
+//   book result   both engines' counts and debt deltas were zero;
+//   engine result all six deltas were zero;
+//   collateral    the two sides were byte-identical, so counting one twice
+//                 gave the same totals as counting both;
+//   projection    both served horizons carried the same verdict, so reading
+//                 the first horizon and reading the longest agreed;
+//   boundary      the group's single member answered exactly as the ONE
+//                 committed scenario that is not in it.
+//
+// Each weld below now runs against a body whose inputs are SEPARATED — either
+// a committed fixture that already carries the separation, or a derived delta
+// of one, provenance-commented at its definition on the pattern
+// `state-matrix.spec.ts` set. Each also carries a NON-COINCIDENCE assertion
+// beside it: the helper applied to the wrong input, compared against the
+// helper applied to the right one, and required to differ. That assertion is
+// what stops a later fixture edit from quietly flattening the weld again.
+//
+// The shape gates and the hazard gates keep the committed bodies they were
+// written against. Only the welds moved.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -79,6 +109,105 @@ function fulfillJson(route: Route, body: unknown, status = 200): Promise<void> {
     body: JSON.stringify(body),
   });
 }
+
+const AAVE = "aave_v3_etherfi";
+
+const COMMITTED_WATERFALL = BOOK.waterfall;
+if (COMMITTED_WATERFALL === null) {
+  throw new Error("the committed book fixture serves no waterfall");
+}
+
+/** The last grid point on the committed waterfall — the one every ANSWER reads. */
+const DEEPEST_POINT_INDEX = COMMITTED_WATERFALL.points.reduce(
+  (deepest, point) => (point.index > deepest ? point.index : deepest),
+  0,
+);
+
+/**
+ * DERIVED FIXTURE (provenance): the committed `book.json` given a THIRD Aave
+ * position, and the deepest grid point that follows from it.
+ *
+ * WHY THE COMMITTED BOOK CANNOT PROVE THE TWO WELDS IT FEEDS. Its Aave book
+ * holds two positions (one computed, one refused) and its Debt Manager book
+ * holds two more, so `aggregate.positions` is 2 on both engines, the served
+ * positions page states 2 qualifying rows, and the walk loads 2. Three
+ * different questions, one answer. On the waterfall the same flatness appears
+ * a second time: both engines arrive at −50% carrying exactly one eligible
+ * account, so the ANSWER's account clause is the same number on either engine.
+ *
+ * WHAT MOVED, and it moves together:
+ *
+ *   the Aave book gains one COMPUTED position (3 = 2 computed + 1 refused),
+ *   with the batch's census, this layer's coverage and the standing HF
+ *   histogram all counting it — the new account stands in the same
+ *   1.05 – 1.10 band as the one already there;
+ *
+ *   the Aave aggregate's collateral and debt grow by that account's own
+ *   $100.00 / $150.00, which is what leaves the waterfall room to make it
+ *   eligible without claiming more eligible debt than the book carries;
+ *
+ *   the DEEPEST grid point (and only that point) brings it in: one account
+ *   ARRIVES there, the running census reaches two, both are insolvent when
+ *   liquidated, and the three cumulative money columns absorb its debt, its
+ *   collateral at risk and its $50.00 shortfall.
+ *
+ * Nothing shallower on the grid moves, so the committed monotonicity claim is
+ * still the served body's own: every column still rises.
+ */
+const BOOK_AAVE_SECOND_ARRIVAL: typeof BOOK = {
+  ...BOOK,
+  batch: { ...BOOK.batch, position_count: 5 },
+  coverage: { ...BOOK.coverage, batch_positions: 5, in_book: 3 },
+  engines: BOOK.engines.map((engine) =>
+    engine.engine !== AAVE
+      ? engine
+      : {
+          ...engine,
+          positions: 3,
+          computed_positions: 2,
+          total_collateral: "810000000000",
+          total_debt: "615000000000",
+        },
+  ),
+  hf_histogram: {
+    ...BOOK.hf_histogram,
+    engines: BOOK.hf_histogram.engines.map((engine) =>
+      engine.engine !== AAVE
+        ? engine
+        : {
+            ...engine,
+            // The Aave engine carries exactly one occupied band, and the new
+            // account stands in it beside the one already counted.
+            buckets: engine.buckets.map((bucket) =>
+              bucket.count === 1 ? { ...bucket, count: 2 } : bucket,
+            ),
+          },
+    ),
+  },
+  waterfall: {
+    ...COMMITTED_WATERFALL,
+    points: COMMITTED_WATERFALL.points.map((point) =>
+      point.index !== DEEPEST_POINT_INDEX
+        ? point
+        : {
+            ...point,
+            engines: point.engines.map((entry) =>
+              entry.engine !== AAVE
+                ? entry
+                : {
+                    ...entry,
+                    newly_eligible_accounts: 1,
+                    cumulative_eligible_accounts: 2,
+                    insolvent_if_liquidated_accounts: 2,
+                    cumulative_debt_eligible_usd: "615000000000",
+                    cumulative_collateral_at_risk_usd: "410000000000",
+                    cumulative_bad_debt_usd: "224047619048",
+                  },
+            ),
+          },
+    ),
+  },
+};
 
 async function openBook(
   page: Page,
@@ -222,18 +351,54 @@ test("BookWaterfall: STATE before the bars, ANSWER, METHOD, FORENSICS after", as
   );
   await expectClosedDetails(page.getByTestId("waterfall-forensics"));
 
-  // THE WELD (round 50). Each engine's ANSWER is `waterfallEngineAnswer` over
-  // the SERVED waterfall — computed here from the same committed bytes the
-  // route fulfils with, and compared whole. Both engines are welded, because
-  // the two carry different decimals and a single-engine gate would pass over a
-  // panel that had quietly hardcoded the other one's sentence.
-  const served = BOOK.waterfall;
-  expect(served, "the book fixture serves no waterfall").not.toBeNull();
+  // THE WELD (round 50, re-fixtured in W-3L-D). Each engine's ANSWER is
+  // `waterfallEngineAnswer` over the SERVED waterfall — computed here from the
+  // same bytes the route fulfils with, and compared whole. Both engines are
+  // welded, because the two carry different decimals and a single-engine gate
+  // would pass over a panel that had quietly hardcoded the other one's
+  // sentence.
+  //
+  // The DERIVED book is what makes the account clause load-bearing: on the
+  // committed one both engines reach the deepest point with a census of 1, so
+  // a panel that read the wrong engine's count — or none at all — printed the
+  // right number anyway.
+  await openBook(page, "/book?engine=aave_v3_etherfi", BOOK_AAVE_SECOND_ARRIVAL);
+  const served = BOOK_AAVE_SECOND_ARRIVAL.waterfall;
+  expect(served, "the derived book serves no waterfall").not.toBeNull();
   const waterfall = served as Waterfall;
   const engines = Array.from(
     new Set(waterfall.points.flatMap((point) => point.engines.map((entry) => entry.engine))),
   );
   expect(engines.length).toBeGreaterThan(1);
+
+  // NON-COINCIDENCE. The deepest point's two engines no longer agree on the one
+  // input they used to share, and the proof is the swap itself: give Aave the
+  // Debt Manager's census and the sentence has to change. On the committed book
+  // it did not.
+  const deepest = waterfall.points.find((point) => point.index === DEEPEST_POINT_INDEX);
+  if (deepest === undefined) throw new Error("the derived waterfall lost its deepest point");
+  const censuses = deepest.engines.map((entry) => entry.cumulative_eligible_accounts);
+  expect(new Set(censuses).size).toBe(censuses.length);
+  const swapped: Waterfall = {
+    ...waterfall,
+    points: waterfall.points.map((point) =>
+      point.index !== DEEPEST_POINT_INDEX
+        ? point
+        : {
+            ...point,
+            engines: point.engines.map((entry, index) => ({
+              ...entry,
+              cumulative_eligible_accounts: censuses[censuses.length - 1 - index] ?? 0,
+            })),
+          },
+    ),
+  };
+  for (const engine of engines) {
+    expect(waterfallEngineAnswer(swapped, engine)).not.toBe(
+      waterfallEngineAnswer(waterfall, engine),
+    );
+  }
+
   for (const engine of engines) {
     await expectWeld(
       page.getByTestId(`waterfall-answer-${engine}`),
@@ -340,33 +505,76 @@ test("BookPositions: STATE, controls, ANSWER, METHOD, table in DOM order", async
     ]),
   );
 
-  // THE WELD (round 50). The takeaway is `positionsAnswerLine` over the walk
-  // this table renders, and every argument is derived here rather than typed:
-  // the engine/sort/direction come out of the app's OWN deep-link normalizer
-  // fed the URL this test opened, and the three counts come off the served
-  // fixtures. Restating the ranking vocabulary by hand would have welded the
-  // panel to a second opinion about what the URL means.
+  // THE WELD (round 50, re-fixtured in W-3L-D). The takeaway is
+  // `positionsAnswerLine` over the walk this table renders, and every argument
+  // is derived here rather than typed: the engine/sort/direction come out of
+  // the app's OWN deep-link normalizer fed the URL this test opened, and the
+  // three counts come off the served bodies. Restating the ranking vocabulary
+  // by hand would have welded the panel to a second opinion about what the URL
+  // means.
+  //
+  // THREE COUNTS, THREE NUMBERS. On the committed pages the sentence read
+  // "2 of 2 qualifying rows loaded, 2 on book", so the three arguments could be
+  // permuted freely and nothing on the page moved. The walk below separates
+  // them and stays honest about how:
+  //
+  //   on book  3 — the derived Aave book's own position count;
+  //   qualifying 2 — the committed page's own `total_positions`, which counts
+  //                  rows qualifying at the table's dust step and is therefore
+  //                  legitimately smaller than the unfiltered book;
+  //   loaded   1 — page one landed and page TWO WAS REFUSED, so the walk is
+  //                genuinely short of its denominator rather than a fixture
+  //                claiming a walk that both finished and came up missing.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await page.route("**/v1/stream**", (route) => route.abort());
+  await page.route("**/v1/book", (route) => fulfillJson(route, BOOK_AAVE_SECOND_ARRIVAL));
+  await page.route("**/v1/positions*", (route) => {
+    const url = new URL(route.request().url());
+    const cursor = url.searchParams.get("cursor");
+    // The MAP's full-book walk carries no `sort`. It gets the committed pages
+    // and exhausts them, so the only thing left mid-flight on this page is the
+    // table whose sentence is under test.
+    if (url.searchParams.get("sort") === null) {
+      return cursor === null
+        ? fulfillJson(route, POSITIONS_AAVE_PAGE_1)
+        : fulfillJson(route, POSITIONS_AAVE_PAGE_2);
+    }
+    return cursor === null
+      ? fulfillJson(route, POSITIONS_AAVE_PAGE_1)
+      : fulfillJson(route, BOOK_ERROR_UNAVAILABLE, 503);
+  });
+  await page.goto("/book?engine=aave_v3_etherfi");
+
   const query = normalizeBookQuery("aave_v3_etherfi", null, null);
-  const aggregate = BOOK.engines.find((candidate) => candidate.engine === query.engine);
-  if (aggregate === undefined) throw new Error("the book fixture serves no aave aggregate");
+  const aggregate = BOOK_AAVE_SECOND_ARRIVAL.engines.find(
+    (candidate) => candidate.engine === query.engine,
+  );
+  if (aggregate === undefined) throw new Error("the derived book serves no aave aggregate");
   expect(aggregate.refused).toBe(false);
   const total = POSITIONS_AAVE_PAGE_1.total_positions;
-  expect(total).not.toBeNull();
-  // The walk exhausts both committed pages (page two carries the null cursor),
-  // so `loaded` settles at their combined row count. `toHaveText` retries, so
-  // this is the settled sentence rather than a race against page two.
-  const loaded = POSITIONS_AAVE_PAGE_1.positions.length + POSITIONS_AAVE_PAGE_2.positions.length;
-  await expectWeld(
-    page.getByTestId("positions-answer"),
-    positionsAnswerLine({
-      engine: query.engine,
-      sort: query.sort,
-      reversed: query.reversed,
-      loaded,
-      qualifying: String(total),
-      onBook: String(aggregate.positions),
-    }),
+  if (total === null) throw new Error("the committed page states no qualifying total");
+  const loaded = POSITIONS_AAVE_PAGE_1.positions.length;
+  expect(new Set([loaded, total, aggregate.positions]).size).toBe(3);
+
+  const args = {
+    engine: query.engine,
+    sort: query.sort,
+    reversed: query.reversed,
+    loaded,
+    qualifying: String(total),
+    onBook: String(aggregate.positions),
+  };
+  // NON-COINCIDENCE: every permutation of the three counts is a DIFFERENT
+  // sentence now, which is what makes the equality below a claim about which
+  // number went where.
+  expect(
+    positionsAnswerLine({ ...args, qualifying: args.onBook, onBook: args.qualifying }),
+  ).not.toBe(positionsAnswerLine(args));
+  expect(positionsAnswerLine({ ...args, loaded: Number(args.qualifying) })).not.toBe(
+    positionsAnswerLine(args),
   );
+
+  await expectWeld(page.getByTestId("positions-answer"), positionsAnswerLine(args));
 });
 
 test("BookPositions hazards: the warn band, the legends, and the degraded SUPERSESSION and REFUSAL registers all stay open", async ({
@@ -568,6 +776,297 @@ const STRESS_DM_BODY = JSON.parse(labFixture("stress-dm.json")) as {
   scenarios: Schemas["Scenario"][];
 };
 
+/**
+ * The committed −30% ETH run book. It is the price-shock body rather than the
+ * flagship one, and that is the whole reason W-3L-D reaches for it: the
+ * flagship scenario holds every oracle (`hfs_unchanged` asserts it), so its
+ * before and after states are byte-identical and all six of its deltas are
+ * zero. Zero is a number every wrong input also produces.
+ */
+const RUN_BOOK_PRICE_SHOCK = JSON.parse(
+  labFixture("run-book.eth_minus_30.json"),
+) as Schemas["RunBookResponse"];
+
+/**
+ * DERIVED FIXTURE (provenance): the committed `run-book.eth_minus_30.json`
+ * with ONE more Debt Manager account arriving in eligibility, carried through
+ * every aggregate the wire states.
+ *
+ * WHY THE COMMITTED BODY IS NOT ENOUGH. Its debt and bad-debt deltas already
+ * differ between the engines, which is most of what the two ANSWERs read. Its
+ * ACCOUNT counts do not: both engines report `newly_eligible_accounts: 1`, so
+ * a panel that hardcoded the count, or took the other engine's, printed the
+ * same "+1" either way.
+ *
+ * WHAT MOVED. The Debt Manager's after-side census goes from 2 eligible
+ * accounts to 3, and the third account is carried at its own size: $50.00 of
+ * debt (which is the last of the $6,170.00 the engine's after side already
+ * states as total debt, so the eligible figure lands on it exactly), $40.00 of
+ * collateral at risk, and the $10.00 shortfall between them. The engine's
+ * three published deltas are recomputed as after minus before over those same
+ * aggregates — nothing here is a delta the two sides beside it disagree with.
+ */
+const RUN_BOOK_SPLIT_DELTAS: Schemas["RunBookResponse"] = {
+  ...RUN_BOOK_PRICE_SHOCK,
+  engines: RUN_BOOK_PRICE_SHOCK.engines.map((engine) =>
+    engine.engine !== "debt_manager"
+      ? engine
+      : {
+          ...engine,
+          newly_eligible_accounts: 2,
+          eligible_debt_delta_usd: "1550000000",
+          bad_debt_delta_usd: "1198118812",
+          after: {
+            ...engine.after,
+            eligible_accounts: 3,
+            eligible_debt_usd: "6170000000",
+            collateral_at_risk_usd: "4355000000",
+            bad_debt_usd: "1857722773",
+          },
+        },
+  ),
+};
+
+/** The first member of a served list, or a named failure — `[0]` is `| undefined` here. */
+function firstOrThrow<T>(rows: readonly T[], what: string): T {
+  const row = rows[0];
+  if (row === undefined) throw new Error(`the committed fixture serves no ${what}`);
+  return row;
+}
+
+/** A served field the derivations below build on, or a named failure. */
+function required<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`the committed fixture serves no ${what}`);
+  }
+  return value;
+}
+
+const NOT_COUNTED_NOTE =
+  "NOT COUNTED AS COLLATERAL: the account holds this balance and the engine assigns none of " +
+  "it a counted USD value on this side. `amount` is exact; none of it is inside " +
+  "`total_collateral_usd`.";
+const UNPRICED_NOTE =
+  "UNPRICED: no price witness describes this balance on this side, so its USD value is " +
+  "UNKNOWABLE — not zero. `amount` is exact; none of it is inside `total_collateral_usd`.";
+
+/**
+ * DERIVED FIXTURE (provenance): the committed
+ * `run-book.collateral-collision.json` with one holding APPENDED per side,
+ * carrying a different disclosure before the shock than after it.
+ *
+ * WHY THE COMMITTED BODY CANNOT PROVE THIS WELD. `collateralGroupAnswer`
+ * counts each side's null-value rows independently and then adds them, and the
+ * collision body's two sides are byte-identical on both engines. A panel that
+ * counted one side and doubled it produced the same three numbers, so the
+ * equality held over a component that had never read the after side at all.
+ *
+ * WHAT MOVED. Both engines gain the same holding on both relevant sides, and
+ * the disclosure it carries is what differs:
+ *
+ *   Aave — NOT COUNTED before the shock, UNPRICED after it, so the two sides
+ *          carry the same number of valueless rows and a different mix;
+ *   Debt Manager — NOT COUNTED on the after side only, against committed sides
+ *          that carry no valueless row at all, so its sentence crosses the
+ *          "every holding carries a counted value" boundary.
+ *
+ * Every appended row carries `value_usd: null`, and the panel's own METHOD
+ * line says only COUNTED is inside the total — so no `total_collateral_usd` on
+ * either side of either engine moves, and none had to be restated.
+ */
+const RUN_BOOK_COLLATERAL_SIDES_DIFFER: Schemas["RunBookResponse"] = {
+  ...RUN_BOOK_COLLISION,
+  engines: RUN_BOOK_COLLISION.engines.map((engine) => {
+    const held = {
+      ...firstOrThrow(engine.before.collateral_by_asset, "collateral row to shape"),
+      asset: "0x000000000000000000000000000000000000FEed",
+      symbol: "sUSDe",
+      amount: "3000000000000000000",
+      value_usd: null,
+    };
+    if (engine.engine !== AAVE) {
+      return {
+        ...engine,
+        after: {
+          ...engine.after,
+          collateral_by_asset: [
+            ...engine.after.collateral_by_asset,
+            { ...held, unpriced: false, note: NOT_COUNTED_NOTE },
+          ],
+        },
+      };
+    }
+    return {
+      ...engine,
+      before: {
+        ...engine.before,
+        collateral_by_asset: [
+          ...engine.before.collateral_by_asset,
+          { ...held, unpriced: false, note: NOT_COUNTED_NOTE },
+        ],
+      },
+      after: {
+        ...engine.after,
+        collateral_by_asset: [
+          ...engine.after.collateral_by_asset,
+          { ...held, unpriced: true, note: UNPRICED_NOTE },
+        ],
+      },
+    };
+  }),
+};
+
+const RATE_SCENARIO_ID = "dm_rate_horizon_plus_200bps";
+const IN_BAND_SCENARIO_ID = "stable_depeg_0995_in_band";
+
+/**
+ * DERIVED FIXTURE (provenance): the committed `stress-dm.json` with the
+ * SHORTEST projection horizon's `becomes_liquidatable` withheld (`null`).
+ *
+ * WHY THE COMMITTED BODY CANNOT PROVE THIS WELD. Both served horizons carry
+ * `true`, so the panel's takeaway read the same either way and a component
+ * that took the first horizon's verdict instead of the longest one's passed.
+ *
+ * WHY THE SHORT HORIZON IS THE ONE WITHHELD. The wire's own note on this
+ * projection says the base accrual is absent from the path and that no
+ * time-to-liquidatable is published from a path that would understate debt
+ * growth. Over 90 days the +200bps step alone is decisive; over 30 it is not,
+ * and a body that says so is stating a withheld verdict rather than a no —
+ * which is exactly the third arm `projectionAnswer` exists to keep separate.
+ */
+const STRESS_DM_SPLIT_HORIZONS: typeof STRESS_DM_BODY = {
+  ...STRESS_DM_BODY,
+  scenarios: STRESS_DM_BODY.scenarios.map((scenario) => {
+    if (scenario.id !== RATE_SCENARIO_ID) return scenario;
+    return {
+      ...scenario,
+      results: scenario.results.map((result) => {
+        const projection = result.projection;
+        if (projection === null) return result;
+        const shortest = projection.horizons.reduce(
+          (best, horizon) => (horizon.horizon_seconds < best ? horizon.horizon_seconds : best),
+          Number.POSITIVE_INFINITY,
+        );
+        return {
+          ...result,
+          projection: {
+            ...projection,
+            horizons: projection.horizons.map((horizon) =>
+              horizon.horizon_seconds === shortest
+                ? { ...horizon, becomes_liquidatable: null }
+                : horizon,
+            ),
+          },
+        };
+      }),
+    };
+  }),
+};
+
+/**
+ * DERIVED FIXTURE (provenance): the committed `stress-dm.json` with TWO more
+ * members on the `stable_usd` axis, both outside the Debt Manager's open snap
+ * band.
+ *
+ * WHY THE COMMITTED BODY CANNOT PROVE THIS WELD. Its stable axis carries one
+ * member, whose result is applicable, bit-identical and shocked by nothing, so
+ * the group's sentence is "1 committed member … 0 re-priced … 0 shocks snapped
+ * … 0 snapped at the base" — WORD FOR WORD what the rate scenario beside it
+ * produces, and the rate scenario is the one member the filter is there to
+ * exclude. A panel answering over the wrong set said the right thing.
+ *
+ * WHAT THE TWO NEW MEMBERS ARE. This address's debt is stable-denominated, so
+ * a depeg the band does not swallow re-prices it:
+ *
+ *   0.975 — outside the open (0.990, 1.010) band, applied as asked, so the
+ *           served debt falls to $4,095.00 and the pair MOVES;
+ *   0.900 — below the model's stable floor, so the engine applied 0.950
+ *           instead and says so on the shock itself (`snapped`, and
+ *           `base_snapped` for the mark it started from). The pair moves to
+ *           the SNAPPED level, $3,990.00, not the asked one.
+ *
+ * The collateral side is weETH and does not move on this axis, which is why
+ * only the debt-bearing fields of the pair differ.
+ */
+const IN_BAND_SCENARIO = required(
+  STRESS_DM_BODY.scenarios.find((scenario) => scenario.id === IN_BAND_SCENARIO_ID),
+  "in-band stable member",
+);
+const IN_BAND_RESULT = firstOrThrow(IN_BAND_SCENARIO.results, "in-band stable result");
+const IN_BAND_BEFORE = required(IN_BAND_RESULT.before, "in-band stable before state");
+
+function depegMember(args: {
+  id: string;
+  label: string;
+  description: string;
+  askedNum: number;
+  appliedNum: number;
+  debtUsd: string;
+  snapped: boolean;
+}): Schemas["Scenario"] {
+  return {
+    ...IN_BAND_SCENARIO,
+    id: args.id,
+    label: args.label,
+    description: args.description,
+    shocks: [{ axis: "stable_usd", factor_num: args.askedNum, factor_den: 1000 }],
+    results: [
+      {
+        ...IN_BAND_RESULT,
+        after: {
+          ...IN_BAND_BEFORE,
+          health_factor_den: args.debtUsd,
+          debt_usd: args.debtUsd,
+        },
+        applied_shocks: [
+          {
+            asset: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            chain_id: 10,
+            source: "dmstable:0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            factor_num: String(args.appliedNum),
+            factor_den: "1000",
+            before: "1000000",
+            after: String(args.appliedNum * 1000),
+            snapped: args.snapped,
+            base_snapped: args.snapped,
+            cap_bound: false,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+const STRESS_DM_WIDER_BAND: typeof STRESS_DM_BODY = {
+  ...STRESS_DM_BODY,
+  scenarios: [
+    ...STRESS_DM_BODY.scenarios,
+    depegMember({
+      id: "stable_depeg_0975_repriced",
+      label: "Stablecoin depeg to 0.975 (outside the snap band)",
+      description:
+        "0.975 falls outside the Debt Manager's open (0.990, 1.010) band, so the mark is " +
+        "applied as asked and this address's stable-denominated debt re-prices with it.",
+      askedNum: 975,
+      appliedNum: 975,
+      debtUsd: "4095000000",
+      snapped: false,
+    }),
+    depegMember({
+      id: "stable_depeg_0900_snapped",
+      label: "Stablecoin depeg to 0.900 (snapped to the model floor)",
+      description:
+        "0.900 sits below the model's stable floor, so the engine applied 0.950 instead. The " +
+        "snap is disclosed on the shock: the shock applied is not the shock the scenario asked " +
+        "for, and the served pair moves to the applied level rather than the asked one.",
+      askedNum: 900,
+      appliedNum: 950,
+      debtUsd: "3990000000",
+      snapped: true,
+    }),
+  ],
+};
+
 async function openLab(page: Page): Promise<void> {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route(`${LAB_API}/v1/scenarios`, (route) =>
@@ -598,24 +1097,21 @@ async function openLab(page: Page): Promise<void> {
  * to the collateral panel, and the withheld / partial-hole bodies are the only
  * way the absence blocks render at all.
  */
+async function runBookBody(page: Page, body: string, scenarioId: string): Promise<void> {
+  await openLab(page);
+  await page.route(`${LAB_API}/v1/scenarios/*/run-book`, (route) =>
+    route.fulfill({ status: 200, headers: CORS, contentType: "application/json", body }),
+  );
+  await page.locator(`[data-testid="lab-chip"][data-scenario-id="${scenarioId}"]`).click();
+  await page.getByTestId("run-book-button").click();
+  await expect(page.getByTestId("book-result")).toBeVisible();
+}
+
 async function runBook(
   page: Page,
   name = "run-book.weeth_market_depeg_oracles_held.json",
 ): Promise<void> {
-  await openLab(page);
-  await page.route(`${LAB_API}/v1/scenarios/*/run-book`, (route) =>
-    route.fulfill({
-      status: 200,
-      headers: CORS,
-      contentType: "application/json",
-      body: labFixture(name),
-    }),
-  );
-  await page
-    .locator('[data-testid="lab-chip"][data-scenario-id="weeth_market_depeg_oracles_held"]')
-    .click();
-  await page.getByTestId("run-book-button").click();
-  await expect(page.getByTestId("book-result")).toBeVisible();
+  await runBookBody(page, labFixture(name), "weeth_market_depeg_oracles_held");
 }
 
 test("LabMatrix: ANSWER, grid, METHOD, legend key, open legend, FORENSICS in DOM order", async ({
@@ -777,20 +1273,48 @@ test("LabBookPanel EngineResult: ANSWER, cards, METHOD, FORENSICS in DOM order",
     "re-measured at each price step",
   );
 
-  // THE WELD (round 50), on BOTH answers this body drives.
+  // THE WELD (round 50, re-fixtured in W-3L-D), on BOTH answers a run book
+  // drives.
   //
   // The run book's ANSWER is `bookResultAnswer` over the served `engines[]`,
   // and each engine panel's ANSWER is `engineResultAnswer` over that engine's
   // own facts. The per-engine weld is scoped by `data-engine` rather than taken
-  // `.first()`: this fixture serves two engines whose deltas are all zero, so a
-  // panel hardcoded with the OTHER engine's sentence differs by a name alone
-  // and a first-match gate would never see it.
-  expect(RUN_BOOK_FLAGSHIP.engines.length).toBeGreaterThan(1);
-  await expectWeld(
-    page.getByTestId("book-result-answer"),
-    bookResultAnswer(RUN_BOOK_FLAGSHIP.engines),
-  );
-  for (const engine of RUN_BOOK_FLAGSHIP.engines) {
+  // `.first()`: a panel hardcoded with the OTHER engine's sentence differs by a
+  // name alone and a first-match gate would never see it.
+  //
+  // The body is the −30% price shock with a separated Debt Manager census,
+  // because the flagship this test's shape assertions run on holds every
+  // oracle: six deltas, all zero, on both engines. Three cards reading "+0",
+  // "$0.00" and "$0.00" cannot tell a computed sentence from a written one.
+  await runBookBody(page, JSON.stringify(RUN_BOOK_SPLIT_DELTAS), "eth_minus_30");
+  const shocked = RUN_BOOK_SPLIT_DELTAS.engines;
+  expect(shocked.length).toBeGreaterThan(1);
+
+  // NON-COINCIDENCE: every figure the two sentences read is nonzero, and no two
+  // engines share one.
+  for (const column of [
+    shocked.map((engine) => String(engine.newly_eligible_accounts)),
+    shocked.map((engine) => engine.eligible_debt_delta_usd),
+    shocked.map((engine) => engine.bad_debt_delta_usd),
+  ]) {
+    expect(new Set(column).size).toBe(column.length);
+    expect(column.every((value) => /[1-9]/.test(value))).toBe(true);
+  }
+  const flattened = shocked.map((engine) => ({
+    ...engine,
+    newly_eligible_accounts: 0,
+    eligible_debt_delta_usd: "0",
+    bad_debt_delta_usd: "0",
+  }));
+  expect(bookResultAnswer(flattened)).not.toBe(bookResultAnswer(shocked));
+  for (const [index, engine] of shocked.entries()) {
+    const flat = flattened[index];
+    if (flat === undefined) throw new Error("the flattened engine list lost a member");
+    expect(engineResultAnswer(flat)).not.toBe(engineResultAnswer(engine));
+  }
+
+  await expectWeld(page.getByTestId("book-result-answer"), bookResultAnswer(shocked));
+  for (const engine of shocked) {
     const panel = page.locator(`[data-testid="book-engine"][data-engine="${engine.engine}"]`);
     await expectWeld(panel.getByTestId("book-engine-answer"), engineResultAnswer(engine));
   }
@@ -877,13 +1401,44 @@ test("LabRunBook sub-panels: coverage counts before the bars, wire notes behind 
   await expect(answer).toContainText(`${String(notCounted)} are NOT COUNTED`);
   await expect(answer).toContainText("the balance is exact and known");
 
-  // THE WELD (round 50). Both counts above are clauses OF one sentence, and the
-  // sentence is `collateralGroupAnswer` over that engine's two served sides.
-  // The aave arm carries both null-value kinds and the debt_manager arm carries
-  // neither, so this welds the panel to the helper on BOTH of its arms — the
-  // absence claim included, which is the one a hardcoded "every holding is
-  // counted" would slip past.
-  for (const engine of collision.engines) {
+  // METHOD names all three disclosures and promises no hidden figure.
+  const method = panel.getByTestId("runbook-collateral-method");
+  await expectNotCollapsed(method);
+  await expect(method).toContainText("only COUNTED is inside the total");
+  await expect(method).not.toContainText("a value exists");
+  await expectNotCollapsed(page.getByTestId("runbook-collateral-row").first());
+
+  // THE WELD (round 50, re-fixtured in W-3L-D). Both counts above are clauses
+  // OF one sentence, and the sentence is `collateralGroupAnswer` over that
+  // engine's TWO served sides. It runs against the sides-differ body, because
+  // the collision body's sides are byte-identical: the helper counts each side
+  // and adds them, so a panel counting one side twice produced the same three
+  // numbers and the equality held over a component that never read the after
+  // side.
+  await runBookBody(
+    page,
+    JSON.stringify(RUN_BOOK_COLLATERAL_SIDES_DIFFER),
+    "weeth_market_depeg_oracles_held",
+  );
+  const census = (
+    side: readonly { value_usd: string | null; unpriced: boolean }[],
+  ): string => {
+    const nulls = side.filter((entry) => entry.value_usd === null);
+    return `${String(nulls.filter((entry) => entry.unpriced).length)}/${String(
+      nulls.filter((entry) => !entry.unpriced).length,
+    )}`;
+  };
+  for (const engine of RUN_BOOK_COLLATERAL_SIDES_DIFFER.engines) {
+    // NON-COINCIDENCE: the two sides' valueless censuses differ, so counting
+    // `before` twice is a different sentence — on the aave arm, which carries
+    // both null-value kinds, AND on the debt_manager arm, which crosses the
+    // "every holding carries a counted value" boundary.
+    expect(census(engine.before.collateral_by_asset)).not.toBe(
+      census(engine.after.collateral_by_asset),
+    );
+    expect(collateralGroupAnswer({ before: engine.before, after: engine.before })).not.toBe(
+      collateralGroupAnswer(engine),
+    );
     const enginePanel = page.locator(
       `[data-testid="runbook-collateral"][data-engine="${engine.engine}"]`,
     );
@@ -892,13 +1447,6 @@ test("LabRunBook sub-panels: coverage counts before the bars, wire notes behind 
       collateralGroupAnswer(engine),
     );
   }
-
-  // METHOD names all three disclosures and promises no hidden figure.
-  const method = panel.getByTestId("runbook-collateral-method");
-  await expectNotCollapsed(method);
-  await expect(method).toContainText("only COUNTED is inside the total");
-  await expect(method).not.toContainText("a value exists");
-  await expectNotCollapsed(page.getByTestId("runbook-collateral-row").first());
 });
 
 test("LabRealization: gloss and the delta-only basis are RENDERED, never hovered", async ({
@@ -940,25 +1488,15 @@ test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, 
   // THE PANEL W-3L CONVERTED AND NEVER GATED. Its slots were asserted only by a
   // test titled for it that touched nothing but the realization panel beside
   // it. The rate axis lives on an address-mode result, so this is where it is.
-  const stress = JSON.parse(labFixture("stress-dm.json")) as {
-    address: string;
-    scenarios: {
-      id: string;
-      results: {
-        projection: {
-          annual_delta_bps: number;
-          prices_held_flat: boolean;
-          horizons: { horizon_seconds: number; becomes_liquidatable: boolean | null }[];
-        } | null;
-      }[];
-    }[];
-  };
-  const scenario = stress.scenarios.find(
-    (candidate) => candidate.id === "dm_rate_horizon_plus_200bps",
-  );
+  //
+  // W-3L-D serves the SPLIT-HORIZON body: the committed one carries the same
+  // verdict on both horizons, so a takeaway reading the first horizon and one
+  // reducing to the longest printed the same sentence.
+  const stress = STRESS_DM_SPLIT_HORIZONS;
+  const scenario = stress.scenarios.find((candidate) => candidate.id === RATE_SCENARIO_ID);
   const projection = scenario?.results[0]?.projection;
   if (projection === undefined || projection === null) {
-    throw new Error("stress-dm.json serves no projection");
+    throw new Error("the split-horizon stress body serves no projection");
   }
   const longest = projection.horizons.reduce((best, horizon) =>
     horizon.horizon_seconds > best.horizon_seconds ? horizon : best,
@@ -967,6 +1505,12 @@ test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, 
   // The longest horizon is NOT the first one served, which is the whole point
   // of a takeaway that reduces rather than reads index 0.
   expect(projection.horizons[0]?.horizon_seconds).not.toBe(longest.horizon_seconds);
+  // NON-COINCIDENCE: the served horizons no longer agree on a verdict either,
+  // so reading the wrong one is a different sentence and not just a different
+  // index.
+  expect(
+    new Set(projection.horizons.map((horizon) => horizon.becomes_liquidatable)).size,
+  ).toBeGreaterThan(1);
 
   await openLab(page);
   await page.route(`${LAB_API}/v1/address/${stress.address}/stress`, (route) =>
@@ -974,7 +1518,7 @@ test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, 
       status: 200,
       headers: CORS,
       contentType: "application/json",
-      body: labFixture("stress-dm.json"),
+      body: JSON.stringify(stress),
     }),
   );
   await page.getByTestId("mode-address").click();
@@ -1030,15 +1574,28 @@ test("LabProjectionView: ANSWER, horizon table, METHOD, FORENSICS in DOM order, 
   // through. Re-deriving a verdict here would have welded the panel to this
   // spec's opinion of what `becomes_liquidatable: null` means, which is exactly
   // the read the sealed union exists to take away from callers.
-  const refined = refineScenario(
-    STRESS_DM_BODY.scenarios.find(
-      (candidate) => candidate.id === "dm_rate_horizon_plus_200bps",
-    ) as Schemas["Scenario"],
-  );
+  const rateScenario = stress.scenarios.find((candidate) => candidate.id === RATE_SCENARIO_ID);
+  if (rateScenario === undefined) throw new Error("the served body lost its rate scenario");
+  const refined = refineScenario(rateScenario);
   const refinedProjection = refined.results[0]?.projection;
   if (refinedProjection === undefined || refinedProjection === null) {
     throw new Error("the refined scenario serves no projection");
   }
+  // NON-COINCIDENCE, in the sealed vocabulary the helper actually reads: feed
+  // every horizon the FIRST one's verdict — the wrong-index read this weld is
+  // here to catch — and the sentence has to move.
+  const firstVerdict = refinedProjection.horizons[0]?.liquidation_verdict;
+  if (firstVerdict === undefined) throw new Error("the refined projection serves no horizon");
+  expect(
+    projectionAnswer({
+      ...refinedProjection,
+      horizons: refinedProjection.horizons.map((horizon) => ({
+        ...horizon,
+        liquidation_verdict: firstVerdict,
+      })),
+    }),
+  ).not.toBe(projectionAnswer(refinedProjection));
+
   await expectWeld(answer, projectionAnswer(refinedProjection));
 });
 
@@ -1054,27 +1611,37 @@ test("LabBoundaryGroup: the ANSWER is the group's own helper over the served com
   // is `stableBoundaryScenarios` over the refined committed set, and the
   // sentence is `boundaryGroupAnswer` over that group. Both come from the
   // module the component imports them from.
-  const committed = STRESS_DM_BODY.scenarios.map((scenario) => refineScenario(scenario));
+  //
+  // W-3L-D serves the WIDER-BAND body. On the committed set the stable axis
+  // held one member whose result was applicable, bit-identical and shocked by
+  // nothing, so the group's sentence was four zeroes and one member — the same
+  // sentence the rate scenario beside it produces, and the rate scenario is
+  // precisely what the filter exists to leave out.
+  const committed = STRESS_DM_WIDER_BAND.scenarios.map((scenario) => refineScenario(scenario));
   const group = stableBoundaryScenarios(committed);
-  expect(group.length).toBeGreaterThan(0);
+  expect(group.length).toBeGreaterThan(1);
   // The group is a SUBSET, so the sentence is a claim about the filter too: a
   // panel that answered over every served scenario would count differently.
   expect(group.length).toBeLessThan(committed.length);
+  // NON-COINCIDENCE: the wrong set — the first served scenario, which is the
+  // rate member the filter drops — no longer produces the group's sentence.
+  expect(boundaryGroupAnswer(committed.slice(0, 1))).not.toBe(boundaryGroupAnswer(group));
+  expect(boundaryGroupAnswer(committed)).not.toBe(boundaryGroupAnswer(group));
 
   await openLab(page);
-  await page.route(`${LAB_API}/v1/address/${STRESS_DM_BODY.address}/stress`, (route) =>
+  await page.route(`${LAB_API}/v1/address/${STRESS_DM_WIDER_BAND.address}/stress`, (route) =>
     route.fulfill({
       status: 200,
       headers: CORS,
       contentType: "application/json",
-      body: labFixture("stress-dm.json"),
+      body: JSON.stringify(STRESS_DM_WIDER_BAND),
     }),
   );
   await page.getByTestId("mode-address").click();
   const input = page.getByTestId("lab-address-input");
   const button = page.getByTestId("run-stress-button");
   await expect(async () => {
-    await input.fill(STRESS_DM_BODY.address);
+    await input.fill(STRESS_DM_WIDER_BAND.address);
     await expect(button).toBeEnabled({ timeout: 500 });
   }).toPass();
   await button.click();
