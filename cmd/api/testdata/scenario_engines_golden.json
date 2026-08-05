@@ -1,0 +1,55 @@
+{
+  "btc_leg_minus_20@v1": [
+    "debt_manager"
+  ],
+  "dm_composition_census@v1": [
+    "debt_manager"
+  ],
+  "dm_rate_horizon_plus_200bps@v1": [
+    "debt_manager"
+  ],
+  "eth_minus_10@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "eth_minus_20@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "eth_minus_30@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "eth_minus_40@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "eth_minus_50@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "eth_minus_60@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "ethfi_minus_50@v1": [
+    "debt_manager"
+  ],
+  "stable_depeg_098_unsnapped@v1": [
+    "debt_manager"
+  ],
+  "stable_depeg_0995_in_band@v1": [
+    "debt_manager"
+  ],
+  "stable_depeg_099_boundary@v1": [
+    "debt_manager"
+  ],
+  "weeth_market_depeg_oracles_held@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ],
+  "weeth_rate_minus_5@v1": [
+    "aave_v3_etherfi",
+    "debt_manager"
+  ]
+}

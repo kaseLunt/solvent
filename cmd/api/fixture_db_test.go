@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -457,6 +458,18 @@ func (f *apiFixture) startServerWithFeeds(t *testing.T, feeds *config.Feeds) {
 	s.cfg.SSEPoll = 150 * time.Millisecond
 	s.cfg.SSEHeartbeat = 200 * time.Millisecond
 	s.limiter = newIPLimiter(s.cfg.RateLimit, s.cfg.RateBurst, s.cfg.RateTTL)
+	// The in-flight bound is composed here for the same reason the limiter is:
+	// this fixture bypasses `run()`. It is the PRODUCTION default, so a law about
+	// the busy refusal narrows it explicitly rather than inheriting a test-only
+	// value that would make the refusal unreachable or trivially reachable.
+	if s.cfg.MaxInflightSetRuns <= 0 {
+		s.cfg.MaxInflightSetRuns = defaultMaxInflightSetRuns
+	}
+	s.setRuns = newSetRunGate(s.cfg.MaxInflightSetRuns)
+	// The set-run's test seam is ALLOCATED here (and left holding nil) so a law
+	// arming it races nothing: the handler reads the atomic pointer, never the
+	// field, exactly as it does for bookInterleave.
+	s.setRunInterleave = &atomic.Pointer[func()]{}
 	s.notifier = newNotifier(f.dsn, s.cfg.SSEPoll)
 
 	nctx, cancel := context.WithCancel(f.ctx)

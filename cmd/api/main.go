@@ -186,6 +186,15 @@ type serverConfig struct {
 	// serve time is exactly the re-derivation design spec §7 forbids.
 	PriceBudgetSeconds int64
 	StepBps            int64
+
+	// MaxInflightSetRuns bounds how many POST /v1/scenarios/run-book-set
+	// evaluations this deployment runs AT ONCE. `maxSetRunScenarios` bounds one
+	// request; this bounds the process. With no ReadTimeout and no WriteTimeout
+	// (deliberate, so SSE is not severed) nothing else does, and each in-flight
+	// set-run holds a whole reconstructed book. The overflow is refused
+	// immediately rather than queued, so worst-case latency stays the
+	// single-request bound.
+	MaxInflightSetRuns int
 }
 
 // server is the composition root.
@@ -235,6 +244,18 @@ type server struct {
 	// configuration path); see readBatchAccounts and
 	// book_prune_race_db_test.go.
 	bookInterleave *atomic.Pointer[func()]
+
+	// setRuns is the non-blocking in-flight bound for POST
+	// /v1/scenarios/run-book-set. It is the DEPLOYMENT's bound; the request
+	// body's `maxItems` is one request's.
+	setRuns *setRunGate
+
+	// setRunInterleave is a TEST-ONLY hook the set-run handler runs while the
+	// in-flight slot is HELD and before the batch read — the point a test needs
+	// to hold one request inside the arithmetic (so a second observes the busy
+	// refusal), or to panic (so the release `defer` is exercised). Nil in
+	// production; the same atomic shape as bookInterleave, for the same reason.
+	setRunInterleave *atomic.Pointer[func()]
 }
 
 // apiDSN resolves the service's database URL.
@@ -311,6 +332,7 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 		},
 		PriceBudgetSeconds: 180,
 		StepBps:            2000,
+		MaxInflightSetRuns: defaultMaxInflightSetRuns,
 	}
 
 	if v := os.Getenv("SOLVENT_API_ADDR"); v != "" {
@@ -381,6 +403,18 @@ func loadServerConfig(configPath, feedsPath string) (*server, error) {
 			return nil, fmt.Errorf("SOLVENT_RISK_STEP_BPS %q: must be a non-negative integer", v)
 		}
 		sc.StepBps = n
+	}
+	if v := os.Getenv("SOLVENT_API_MAX_INFLIGHT_SET_RUNS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("SOLVENT_API_MAX_INFLIGHT_SET_RUNS %q: must be a positive integer", v)
+		}
+		sc.MaxInflightSetRuns = n
+	}
+
+	// FAIL FAST ON A BURST BELOW THE PER-REQUEST CAP.
+	if err := setRunBurstInvariant(sc.RateBurst); err != nil {
+		return nil, err
 	}
 
 	grid, err := resolveWaterfall(byID, sc)
@@ -598,6 +632,7 @@ func run(ctx context.Context, configPath, feedsPath string) error {
 
 	s.notifier = newNotifier(dsn, s.cfg.SSEPoll)
 	s.limiter = newIPLimiter(s.cfg.RateLimit, s.cfg.RateBurst, s.cfg.RateTTL)
+	s.setRuns = newSetRunGate(s.cfg.MaxInflightSetRuns)
 	s.routes()
 
 	go s.notifier.run(ctx)
@@ -689,6 +724,10 @@ func (s *server) routes() {
 	mux.HandleFunc("GET /v1/prices/{asset}", s.handlePrices)
 	mux.HandleFunc("GET /v1/scenarios", s.handleScenarios)
 	mux.HandleFunc("POST /v1/scenarios/{id}/run-book", s.handleRunBook)
+	// Registered as an EXACT pattern (no trailing slash, no wildcard), so
+	// /v1/scenarios/run-book-set/anything does not reach it. Three segments,
+	// so it cannot be mistaken for a committed scenario id.
+	mux.HandleFunc("POST "+setRunPath, s.handleRunBookSet)
 	mux.HandleFunc("GET /v1/batches/{id}", s.handleBatch)
 	mux.HandleFunc("GET /v1/evidence", s.handleEvidence)
 	mux.HandleFunc("GET /v1/stream", s.handleStream)

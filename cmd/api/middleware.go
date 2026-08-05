@@ -171,24 +171,25 @@ func cors(next http.Handler) http.Handler {
 // consequence of how the routes happen to be spelled, and so the 405 carries the
 // same JSON envelope as every other error.
 //
-// The ONE admitted POST is /v1/scenarios/{id}/run-book, which is per-request
-// COMPUTE over the newest servable batch and writes nothing — the read-only
-// property is still enforced structurally by TestAPIIssuesNoWritingSQL, which
-// scans this package's SQL, and by the SELECT-only database role in
-// production. POST here is a statement about request semantics (the evaluation
-// is computed on demand), never about mutation.
+// The TWO admitted POSTs are /v1/scenarios/{id}/run-book and
+// /v1/scenarios/run-book-set, both of which are per-request COMPUTE over the
+// newest servable batch and write nothing — the read-only property is still
+// enforced structurally by TestAPIIssuesNoWritingSQL, which scans this
+// package's SQL, and by the SELECT-only database role in production. POST here
+// is a statement about request semantics (the evaluation is computed on
+// demand), never about mutation.
 func readOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet, r.Method == http.MethodHead, r.Method == http.MethodOptions:
 			next.ServeHTTP(w, r)
-		case r.Method == http.MethodPost && isRunBookPath(r.URL.Path):
+		case r.Method == http.MethodPost && (isRunBookPath(r.URL.Path) || isRunBookSetPath(r.URL.Path)):
 			next.ServeHTTP(w, r)
 		default:
 			w.Header().Set("Allow", "GET, HEAD, OPTIONS")
 			writeError(w, http.StatusMethodNotAllowed, codeBadRequest,
 				"this API is read-only: "+r.Method+" is not accepted on this route "+
-					"(the one POST is /v1/scenarios/{id}/run-book, which computes and writes nothing)", nil)
+					"(the two POSTs are /v1/scenarios/{id}/run-book and /v1/scenarios/run-book-set, which compute and write nothing)", nil)
 		}
 	})
 }
@@ -204,6 +205,11 @@ func isRunBookPath(path string) bool {
 	id, ok := strings.CutSuffix(rest, "/run-book")
 	return ok && id != "" && !strings.Contains(id, "/")
 }
+
+// isRunBookSetPath is an EXACT MATCH, carrying forward the discipline above:
+// the gate opens for exactly the one computed route, never for a path family.
+// `/v1/scenarios/run-book-set/anything` is a 405, not a set-run.
+func isRunBookSetPath(path string) bool { return path == setRunPath }
 
 // notFoundJSON turns net/http's text 404/405 into the JSON envelope.
 //
@@ -237,9 +243,9 @@ func (s *statusSniffer) WriteHeader(status int) {
 		// produced the JSON envelope has set the JSON content type.
 		if ct := s.Header().Get("Content-Type"); ct == "" || strings.HasPrefix(ct, "text/plain") {
 			s.suppress = true
-			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/positions, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/address/{addr}/history, /v1/observatory, /v1/observatory/series, /v1/events, /v1/params, /v1/prices/{asset}, /v1/scenarios, /v1/scenarios/{id}/run-book, /v1/batches/{id}, /v1/evidence, /v1/stream and /v1/meta"
+			code, msg := codeNotFound, "no such route: this API serves /v1/book, /v1/positions, /v1/address/{addr}, /v1/address/{addr}/stress, /v1/address/{addr}/history, /v1/observatory, /v1/observatory/series, /v1/events, /v1/params, /v1/prices/{asset}, /v1/scenarios, /v1/scenarios/{id}/run-book, /v1/scenarios/run-book-set, /v1/batches/{id}, /v1/evidence, /v1/stream and /v1/meta"
 			if status == http.StatusMethodNotAllowed {
-				code, msg = codeBadRequest, "this API is read-only: only GET, HEAD and OPTIONS are accepted (plus POST on /v1/scenarios/{id}/run-book, which computes and writes nothing)"
+				code, msg = codeBadRequest, "this API is read-only: only GET, HEAD and OPTIONS are accepted (plus POST on /v1/scenarios/{id}/run-book and /v1/scenarios/run-book-set, which compute and write nothing)"
 			}
 			s.Header().Set("Content-Type", "application/json; charset=utf-8")
 			s.ResponseWriter.WriteHeader(status)
@@ -339,8 +345,20 @@ func newIPLimiter(rps float64, burst int, ttl time.Duration) *ipLimiter {
 }
 
 // allow reports whether this key may proceed, and how long it should wait if
-// not.
-func (l *ipLimiter) allow(key string) (bool, time.Duration) {
+// not. It is allowN at the ordinary cost of ONE token, so there is one
+// implementation and one place the burst arm lives.
+func (l *ipLimiter) allow(key string) (bool, time.Duration) { return l.allowN(key, 1) }
+
+// allowN charges n tokens at once.
+//
+// It exists because a set-run is up to `maxSetRunScenarios` times the cost of a
+// normal request, and this bucket counts REQUESTS: cost-blind, one client turns
+// burst-40 into 960 scenario evaluations. `ReserveN` is the same reservation
+// `allow` always used, so the `!res.OK()` arm — a burst smaller than the request
+// cost, a bucket that can never admit this request at all — is INHERITED rather
+// than duplicated. A startup check keeps that arm unreachable for a legal
+// set-run by requiring `rate_burst >= maxSetRunScenarios`.
+func (l *ipLimiter) allowN(key string, n int) (bool, time.Duration) {
 	l.mu.Lock()
 	now := l.now()
 	b, ok := l.buckets[key]
@@ -362,7 +380,7 @@ func (l *ipLimiter) allow(key string) (bool, time.Duration) {
 	lim := b.limiter
 	l.mu.Unlock()
 
-	res := lim.ReserveN(now, 1)
+	res := lim.ReserveN(now, n)
 	if !res.OK() {
 		// Burst is smaller than the request cost; a bucket configured this way can
 		// never admit anything, so say so rather than promising a retry.
@@ -397,16 +415,33 @@ func (s *server) rateLimit(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		secs := int64(math.Ceil(wait.Seconds()))
-		if secs < 1 {
-			secs = 1
-		}
-		writeError(w, http.StatusTooManyRequests, codeRateLimited,
-			"rate limit exceeded: this surface admits "+
-				strconv.FormatFloat(float64(s.limiter.limit), 'f', -1, 64)+
-				" requests per second per client address, burst "+
-				strconv.Itoa(s.limiter.burst), &secs)
+		s.writeRateLimited(w, wait, "")
 	})
+}
+
+// writeRateLimited is THE 429 on this service, written from one place.
+//
+// The middleware charges every request one token before any handler is reached;
+// the set-run handler charges the remainder AFTER validation, once it knows how
+// many scenarios were asked for. Both refusals go through here, so there is ONE
+// 429 shape on that route rather than two that are free to drift, and `extra` is
+// the only thing that differs: the set-run names its per-scenario cost so a
+// client is not puzzled by a FIRST request being refused.
+//
+// The `Retry-After` is honest here and is served: `res.DelayFrom(now)` is the
+// instant this TOKEN BUCKET refills, which is a real computation. It is
+// deliberately absent from the set-run's concurrency refusal, where nothing
+// computes when a semaphore slot frees.
+func (s *server) writeRateLimited(w http.ResponseWriter, wait time.Duration, extra string) {
+	secs := int64(math.Ceil(wait.Seconds()))
+	if secs < 1 {
+		secs = 1
+	}
+	writeError(w, http.StatusTooManyRequests, codeRateLimited,
+		"rate limit exceeded: this surface admits "+
+			strconv.FormatFloat(float64(s.limiter.limit), 'f', -1, 64)+
+			" requests per second per client address, burst "+
+			strconv.Itoa(s.limiter.burst)+extra, &secs)
 }
 
 // clientKey is the limiter key: the remote IP, port stripped.

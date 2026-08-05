@@ -249,22 +249,22 @@ type wireRunBookTransitions struct {
 	HeldRows *int `json:"held_rows"`
 	// LaneChangedRows is MEASURED rows whose LANE changed: the gross count the
 	// two histograms structurally could not give. NULL under the same condition.
-	LaneChangedRows *int `json:"lane_changed_rows"`
+	LaneChangedRows *int   `json:"lane_changed_rows"`
 	Note            string `json:"note"`
 }
 
 type wireRunBookEngine struct {
-	Engine                string               `json:"engine"`
-	UsdDecimals           uint8                `json:"usd_decimals"`
-	Before                wireRunBookAggregate `json:"before"`
-	After                 wireRunBookAggregate `json:"after"`
+	Engine      string               `json:"engine"`
+	UsdDecimals uint8                `json:"usd_decimals"`
+	Before      wireRunBookAggregate `json:"before"`
+	After       wireRunBookAggregate `json:"after"`
 	// HFTransitions is the joint distribution the two histograms above cannot
 	// produce: which BEFORE lane each position row left and which AFTER lane it
 	// arrived in. Its margins ARE those two histograms, lane for lane.
 	HFTransitions         wireRunBookTransitions `json:"hf_transitions"`
 	NewlyEligibleAccounts int                    `json:"newly_eligible_accounts"`
-	EligibleDebtDeltaUSD  string               `json:"eligible_debt_delta_usd"`
-	BadDebtDeltaUSD       string               `json:"bad_debt_delta_usd"`
+	EligibleDebtDeltaUSD  string                 `json:"eligible_debt_delta_usd"`
+	BadDebtDeltaUSD       string                 `json:"bad_debt_delta_usd"`
 	// Movers is at most runBookMoversCap rows of the accounts this scenario
 	// moved, ranked by the engine's own rule. MoversTotal is the FULL count —
 	// the slice is a window onto it, never the whole of it, and MoversNote names
@@ -687,7 +687,7 @@ func (s *server) handleRunBook(w http.ResponseWriter, r *http.Request) {
 				}
 				for _, h := range shocked.Scenario.HeldFlat {
 					wh := wireHeldFlat{Asset: h.Asset.Hex(), ChainID: h.ChainID, Source: sanitize(h.Source), Value: orZeroString(h.Value)}
-					heldFlatSet[wh.Asset+"|"+strconv.FormatUint(wh.ChainID, 10)+"|"+wh.Source+"|"+wh.Value] = wh
+					heldFlatSet[heldFlatKey(wh)] = wh
 				}
 			}
 			afterInputs = append(afterInputs, shocked)
@@ -1009,6 +1009,9 @@ func runBookMovers(engine string, before, after *runMeasure) ([]wireRunBookMover
 		b := before.states[acct]
 		a, ok := after.states[acct]
 		if !ok {
+			// The before-side account has no after-side state at all, on EITHER
+			// engine. It is untestable rather than unmoved, which is why
+			// runBookMovementExcluded counts it.
 			continue
 		}
 		switch engine {
@@ -1016,7 +1019,7 @@ func runBookMovers(engine string, before, after *runMeasure) ([]wireRunBookMover
 			// A drop needs a health factor on BOTH sides. A zero-debt account
 			// has none — it is unbounded, not large — so it cannot have dropped
 			// and is not a mover. That exclusion is named in the movers_note.
-			if b.infinite || a.infinite || b.hfWad == nil || a.hfWad == nil {
+			if !runBookMoverTestable(engine, b, a) {
 				continue
 			}
 			drop := new(big.Int).Sub(b.hfWad, a.hfWad)
@@ -1070,6 +1073,63 @@ func runBookMovers(engine string, before, after *runMeasure) ([]wireRunBookMover
 	return out, total
 }
 
+// runBookMoverTestable reports whether runBookMovers can TEST this account for
+// movement at all on this engine.
+//
+// It is ONE predicate with two readers — the movers join above, and
+// runBookMovementExcluded below, which counts the population it turns away.
+// Two copies of it would be two definitions of the movement count's
+// denominator, and the whole point of publishing that denominator is that it
+// answers to the same rule the numerator does.
+//
+// `a == nil` is the before-side account with NO after-side state, which both
+// engines skip. The Aave arm is the health-factor guard: a drop needs a finite
+// health factor on BOTH sides, and a debt-free account has none on either.
+func runBookMoverTestable(engine string, b, a *runAccountState) bool {
+	if b == nil || a == nil {
+		return false
+	}
+	if engine == risk.AaveEngine {
+		return !(b.infinite || a.infinite || b.hfWad == nil || a.hfWad == nil)
+	}
+	return true
+}
+
+// runBookMovementExcluded is the movement count's EXCLUDED POPULATION: the
+// accounts this run measured on the before side that runBookMovers could not
+// test for movement at all.
+//
+// The movement count's denominator is `accounts - movement_excluded_accounts`
+// and it is never `accounts`. On an Aave book of residual dust, "0 movers" out
+// of 46 accounts reads as "no health factor dropped" when the truth can be
+// "44 of the 46 carry no health factor to drop", and the difference between
+// those two sentences is this number.
+func runBookMovementExcluded(engine string, before, after *runMeasure) int {
+	n := 0
+	for acct, b := range before.states {
+		if !runBookMoverTestable(engine, b, after.states[acct]) {
+			n++
+		}
+	}
+	return n
+}
+
+// runBookAaveExclusionClause is the sentence that names the Aave movement
+// count's excluded population. It is a CONSTANT because two surfaces serve it —
+// `movers_note` on the single-scenario route and the per-engine `note` on the
+// set-run — and a paraphrase on either would be a second definition of the same
+// exclusion. `TestSetRunMovementCountPublishesItsDenominator` checks the
+// set-run's note by substring against this exact value.
+const runBookAaveExclusionClause = "An account with no debt has an unbounded health factor on either side, " +
+	"so it has no drop to rank and is not counted here — it is not a quiet zero."
+
+// runBookDMExclusionClause is the Debt Manager's parallel sentence. The DM rule
+// has no health-factor guard, so the only accounts it cannot test are
+// before-side rows with no after-side state at all — a population that is
+// normally empty and is published rather than assumed empty.
+const runBookDMExclusionClause = "The eligibility flip is testable for every account this run measured on both sides, " +
+	"so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero."
+
 // runBookMoversNote names the ranking rule AND the truncation, in the engine's
 // own vocabulary. `shown` and `total` are both in the sentence because a capped
 // list whose cap is invisible is a silent cap.
@@ -1078,8 +1138,7 @@ func runBookMoversNote(engine string, shown, total int, dec uint8) string {
 	switch engine {
 	case risk.AaveEngine:
 		rule = "RANKED BY HEALTH-FACTOR DROP: before minus after, in the pool's own WAD, largest drop first. " +
-			"Only accounts whose health factor STRICTLY DROPPED are movers. An account with no debt has an unbounded health factor on either side, " +
-			"so it has no drop to rank and is not counted here — it is not a quiet zero."
+			"Only accounts whose health factor STRICTLY DROPPED are movers. " + runBookAaveExclusionClause
 	default:
 		rule = "RANKED BY THE DEBT THAT BECAME ELIGIBLE: only accounts whose Debt Manager eligibility FLIPPED false -> true under this scenario are movers, " +
 			"ranked by their debt in this engine's " + strconv.Itoa(int(dec)) + "-decimal USD, largest first. " +
@@ -1152,6 +1211,16 @@ func (s *server) runBookProjection(sc risk.Scenario, v *batchView, run []runPos,
 		})
 	}
 	return out, nil
+}
+
+// heldFlatKey is the dedup identity of ONE held-flat row: the mark, where it
+// lives, who sourced it and what it was held at. The set-run's
+// `shock_reach.held_flat_marks` is `len` of a set keyed by this function and the
+// single route's `held_flat` array is deduplicated by it too, so Test Law 2's
+// `held_flat_marks == len(held_flat)` mapping is an identity rather than a
+// coincidence.
+func heldFlatKey(w wireHeldFlat) string {
+	return w.Asset + "|" + strconv.FormatUint(w.ChainID, 10) + "|" + w.Source + "|" + w.Value
 }
 
 func appliedShockKey(w wireAppliedShock) string {

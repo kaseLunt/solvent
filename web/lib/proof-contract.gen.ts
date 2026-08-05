@@ -3095,6 +3095,598 @@ export const OPERATIONS: readonly ContractOperation[] = [
     "exampleSource": "api/openapi.yaml — POST /v1/scenarios/{id}/run-book 200 example (verbatim)"
   },
   {
+    "method": "POST",
+    "path": "/v1/scenarios/run-book-set",
+    "operationId": "runBookSet",
+    "tag": "scenarios",
+    "summary": "N committed scenarios evaluated against ONE resolved batch",
+    "description": "ADDED 1.7.0, additive. The named committed scenarios — the same set\n`GET /v1/scenarios` publishes — evaluated against a SINGLE batch,\nresolved once inside one database snapshot before any arithmetic runs.\n\nThe point is not speed, though it is roughly two to three times faster\nthan the same ids fetched one at a time. The point is that a\ncross-scenario comparison is TRUE BY THE SHAPE OF THIS RESPONSE: one\nbatch, one census, one envelope, N results. A serial sweep of the\ncommitted set takes about as long as the interval between\nmaterializations, so it straddles a batch boundary roughly half the\ntime — and a comparison assembled from bodies measured on two different\nbooks is not the comparison that was asked for.\n\nALL OR NOTHING. There is no partial 200 and no per-scenario refusal\nregister. An id this deployment does not publish, a duplicate, a\nmalformed id or an over-cap set refuses the WHOLE request before any\nbatch read, naming every offender; any arithmetic refusal is a 500 for\nthe whole set. In a 200, `requested_scenario_ids` and\n`results[].scenario_id` are the same multiset, which is the strongest\nmembership law available: one line to check, impossible to satisfy\nwhile hiding a hole.\n\nWHAT IT DOES NOT CARRY. This is a SUMMARY: no histograms, no\n`collateral_by_asset`, no `movers`, no `held_flat` values, no\n`out_of_model`. Drill-down is `POST /v1/scenarios/{id}/run-book`'s job.\n`out_of_model` in particular is published verbatim and versioned on\n`GET /v1/scenarios`, and `scenario_id` + `scenario_version` +\n`scenario_config_version` make that join exact — reading a shocked\nnumber without it is reading it wrong.\n\nWHAT IT DOES CARRY, AND WHY. Every zero on this surface carries a\npublished cause. Three committed scenarios produce all-zero deltas for\nthree DIFFERENT reasons — an oracle snap band that swallowed the move, a\ndefinition that declared all its shocks at the identity factor 1/1, and\na projection that ran no spot pass at all — and without `shock_reach`\nall three render as the same three zero-length bars. An engine with\nnothing measurable is a NAMED ABSENCE in `unmeasurable_engines` rather\nthan a row of zeros with a `\"0\"` denominator. The movement count carries\nits own denominator, because `hf_dropped_accounts: 0` beside\n`accounts: 46` reads as \"no health factor dropped\" when the truth can be\n\"44 of the 46 carry no health factor to drop\".\n\nCOST AND CONCURRENCY. The limiter is charged one token per scenario\n(`set_run_token_cost_per_scenario` on `/v1/meta`), 1 in the middleware\nand the remainder in the handler after validation, so a malformed or\nunknown-id request costs one token rather than N. At most\n`max_inflight_set_runs` evaluations run at once; the overflow is refused\nIMMEDIATELY with 503 `set_run_busy` rather than queued.",
+    "parameters": [],
+    "responses": [
+      {
+        "code": "200",
+        "ref": null,
+        "description": "One batch, N results."
+      },
+      {
+        "code": "400",
+        "ref": null,
+        "description": "The request body is absent, oversized, not an object, carries an\nunknown field, or `scenario_ids` is empty, over the cap, malformed\nor repeated. Every offending id is named."
+      },
+      {
+        "code": "404",
+        "ref": null,
+        "description": "One or more ids are not committed HERE. The whole set is refused\nrather than partly served, and every unknown id is named."
+      },
+      {
+        "code": "429",
+        "ref": "RateLimited",
+        "description": "The per-client token bucket is empty."
+      },
+      {
+        "code": "500",
+        "ref": "InternalError",
+        "description": "The service failed to build the response. The message is sanitized of endpoint URLs and DSNs."
+      },
+      {
+        "code": "503",
+        "ref": null,
+        "description": "TWO DIFFERENT REFUSALS, STRUCTURALLY DISTINGUISHABLE IN THE BODY. A\nclient dispatches on `error.code`, never on the status.\n\n`set_run_busy` (`SetRunBusyBody`) — the in-flight bound is full.\nThis is a statement about the EVALUATOR'S CAPACITY and about nothing\nin the book: the batch is fine. It carries `max_in_flight` and\n`in_flight`, and it carries NO `Retry-After`, because nothing here\ncomputes when a semaphore slot frees and an invented instant is\nworse than none. It is not 429: that arm tells a client it exceeded\na rate it did not exceed, and its message is discarded by the\nclients that read it.\n\n`unavailable` (`ErrorBody`) — no complete servable batch exists.\nThat IS a statement about the service's data, and it carries\n`Retry-After`."
+      }
+    ],
+    "samplePath": "/v1/scenarios/run-book-set",
+    "sse": false,
+    "example": {
+      "batch": {
+        "age_seconds": 5,
+        "computed_at": "2026-07-29T10:00:00Z",
+        "flagged_count": 1,
+        "id": 1,
+        "position_count": 4,
+        "producer": "riskd",
+        "refused_count": 2,
+        "refused_engines": [],
+        "status": "complete",
+        "supersession": {
+          "legs": [],
+          "note": "a superseded batch is still served: the flag is the contract and it heals at the next materializer pass (design spec §4). The legs are evaluated against a LIVE read of the cursor and epoch tables inside the same snapshot as the database clock.",
+          "superseded": false
+        },
+        "watermarks": [
+          {
+            "acked_epoch": 0,
+            "chain_id": 1,
+            "engine": "aave_param",
+            "last_block": 25635600,
+            "max_epoch_at_compute": 0,
+            "sweep": null
+          },
+          {
+            "acked_epoch": 0,
+            "chain_id": 1,
+            "engine": "aave_v3_etherfi",
+            "last_block": 25635618,
+            "max_epoch_at_compute": 0,
+            "sweep": null
+          },
+          {
+            "acked_epoch": 0,
+            "chain_id": 10,
+            "engine": "debt_manager",
+            "last_block": 154796552,
+            "max_epoch_at_compute": 0,
+            "sweep": {
+              "age_seconds": 1205,
+              "failed": 1,
+              "generation": 4,
+              "generation_open": false,
+              "max_updated_at": "2026-07-29T09:40:00Z",
+              "rows": 3,
+              "success_sum": "309593004"
+            }
+          },
+          {
+            "acked_epoch": 0,
+            "chain_id": 1,
+            "engine": "prices:poll:1",
+            "last_block": 25635610,
+            "max_epoch_at_compute": 0,
+            "sweep": null
+          },
+          {
+            "acked_epoch": 0,
+            "chain_id": 10,
+            "engine": "prices:poll:10",
+            "last_block": 154796540,
+            "max_epoch_at_compute": 0,
+            "sweep": null
+          }
+        ]
+      },
+      "coverage": {
+        "batch_positions": 4,
+        "book_is_measurable": true,
+        "engines": [
+          {
+            "engine": "aave_v3_etherfi",
+            "measurable": 1,
+            "positions_in_batch": 2,
+            "refused_in_batch": 1,
+            "unrebuildable": 0,
+            "withheld": false
+          },
+          {
+            "engine": "debt_manager",
+            "measurable": 1,
+            "positions_in_batch": 2,
+            "refused_in_batch": 1,
+            "unrebuildable": 0,
+            "withheld": false
+          }
+        ],
+        "excluded": [],
+        "excluded_by_this_layer": 0,
+        "in_book": 2,
+        "note": "THIS CENSUS IS BOOK-SCOPED, not run-scoped: `in_book` is every position THIS LAYER rebuilt over the WHOLE batch, whatever any scenario's model reaches — which is why it is a different component from /v1/book's `coverage`, whose `in_book` counts one run. Every position row is classified by the POSITIVE predicate of the counter it feeds, into exactly one of three classes, so `batch_positions == in_book + refused_in_batch + excluded_by_this_layer` EXACTLY; a row matching none of them refuses the whole request with a named 500 rather than being served under an equality it breaks. `refused_in_batch` is riskd's own refusals, served per row by /v1/positions and /v1/address/{addr}; `excluded_by_this_layer` is rows this service could not rebuild or verify, listed in `excluded`. Neither is ever reconciled against a run-book histogram's `refused_count`, which counts a WIDER population (both of these plus rebuilt rows carrying no comparator) under a label naming only the third.",
+        "refused_in_batch": 2
+      },
+      "evaluation": {
+        "freshness": "still_newest",
+        "newest_servable_batch_id": 1,
+        "note": "Batch 1 was STILL the newest complete servable batch at `probed_at`. That is what was true when this response was built, never a promise about the reader's present.",
+        "probed_at": "2026-07-29T10:00:07Z",
+        "resolved_at": "2026-07-29T10:00:05Z",
+        "scenarios_evaluated": 3
+      },
+      "excluded_engines": [],
+      "notes": [
+        "ONE BATCH: every result here was measured against the single `batch` above, resolved once inside one database snapshot before any arithmetic ran. Cross-scenario comparison is therefore exact by the SHAPE of this response rather than by a client-side check over N independently resolved bodies.",
+        "aggregates are per engine in each engine's OWN unit and decimals; they are never summed, averaged or plotted on one axis across engines. `usd_decimals` on each engine row is that engine's scale.",
+        "deltas are DELTA-ONLY: after minus before, the scenario's own contribution over that scenario's own covered, non-withheld book. The sanctioned denominator is `total_debt_usd_before`; the after side is a different book and a ratio against it answers a question this surface does not ask.",
+        "`out_of_model` is deliberately NOT carried here: it is published verbatim and versioned on GET /v1/scenarios, which a client necessarily already has (that is where these ids came from), and `scenario_id` + `scenario_version` + `scenario_config_version` make the join exact. READING A SHOCKED NUMBER WITHOUT IT IS READING IT WRONG.",
+        "`coverage` is a census of the whole BATCH, not of any one run: it is a different component from /v1/book's `coverage` for exactly that reason. `shock_reach` on each result says whether the declared shock reached a mark at all and, when it did not, WHICH cause held it — a zero delta on this surface always carries a published cause."
+      ],
+      "requested_scenario_ids": [
+        "eth_minus_30",
+        "stable_depeg_0995_in_band",
+        "dm_composition_census"
+      ],
+      "results": [
+        {
+          "covered_engines": [
+            "aave_v3_etherfi",
+            "debt_manager"
+          ],
+          "engines": [
+            {
+              "accounts": 1,
+              "after_collateral_at_risk_usd": "560000000000",
+              "after_eligible_accounts": 1,
+              "bad_debt_delta_usd": "66666666667",
+              "before_bad_debt_usd": "0",
+              "before_collateral_at_risk_usd": "0",
+              "before_eligible_accounts": 0,
+              "before_eligible_debt_usd": "0",
+              "eligible_accounts_delta": 1,
+              "eligible_debt_delta_usd": "600000000000",
+              "engine": "aave_v3_etherfi",
+              "flipped_to_eligible": null,
+              "hf_dropped_accounts": 1,
+              "infinite_accounts": 0,
+              "market_realization": null,
+              "movement_excluded_accounts": 0,
+              "movement_rule": "hf_strictly_dropped",
+              "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 8-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is hf_strictly_dropped: `hf_dropped_accounts` counts accounts whose HEALTH FACTOR STRICTLY DROPPED under this scenario, and it is NOT a count of accounts that became eligible for liquidation. `flipped_to_eligible` is null here because this engine does not speak it. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1 minus 0 = 1), never `accounts`: An account with no debt has an unbounded health factor on either side, so it has no drop to rank and is not counted here — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+              "projection": null,
+              "refused_in_batch_positions": 1,
+              "total_collateral_usd_after": "560000000000",
+              "total_collateral_usd_before": "800000000000",
+              "total_debt_usd_after": "600000000000",
+              "total_debt_usd_before": "600000000000",
+              "unrebuildable_positions": 0,
+              "usd_decimals": 8
+            },
+            {
+              "accounts": 1,
+              "after_collateral_at_risk_usd": "2800000000",
+              "after_eligible_accounts": 1,
+              "bad_debt_delta_usd": "1188118812",
+              "before_bad_debt_usd": "239603961",
+              "before_collateral_at_risk_usd": "4000000000",
+              "before_eligible_accounts": 1,
+              "before_eligible_debt_usd": "4200000000",
+              "eligible_accounts_delta": 0,
+              "eligible_debt_delta_usd": "0",
+              "engine": "debt_manager",
+              "flipped_to_eligible": 0,
+              "hf_dropped_accounts": null,
+              "infinite_accounts": 0,
+              "market_realization": null,
+              "movement_excluded_accounts": 0,
+              "movement_rule": "eligibility_flipped_false_to_true",
+              "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1 minus 0 = 1), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+              "projection": null,
+              "refused_in_batch_positions": 1,
+              "total_collateral_usd_after": "2800000000",
+              "total_collateral_usd_before": "4000000000",
+              "total_debt_usd_after": "4200000000",
+              "total_debt_usd_before": "4200000000",
+              "unrebuildable_positions": 0,
+              "usd_decimals": 6
+            }
+          ],
+          "label": "ETH -30 percent",
+          "note": "IDENTITY: this result is scenario eth_minus_30 at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. SHOCK REACH: EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+          "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+          "positions_answered": 2,
+          "positions_withheld": 0,
+          "scenario_id": "eth_minus_30",
+          "scenario_version": "v1",
+          "shock_reach": {
+            "applied_shocks": [
+              {
+                "after": "2800000000",
+                "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+                "base_snapped": false,
+                "before": "4000000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "100",
+                "factor_num": "70",
+                "snapped": false,
+                "source": "priceproviderv2"
+              },
+              {
+                "after": "280000000000",
+                "asset": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+                "base_snapped": false,
+                "before": "400000000000",
+                "cap_bound": false,
+                "chain_id": 1,
+                "factor_den": "100",
+                "factor_num": "70",
+                "snapped": false,
+                "source": "aaveoracle:0x43b64f28a678944e0655404b0b98e443851cc34f"
+              }
+            ],
+            "declared_shocks": 1,
+            "declared_shocks_at_identity": 0,
+            "held_flat_assets": [
+              {
+                "asset": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+                "chain_id": 1
+              },
+              {
+                "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+                "chain_id": 10
+              }
+            ],
+            "held_flat_marks": 6,
+            "marks_base_snapped": 0,
+            "marks_cap_bound": 0,
+            "marks_held_by_arithmetic": 0,
+            "marks_held_by_declared_factor": 0,
+            "marks_held_by_transform": 0,
+            "marks_moved": 2,
+            "marks_snapped": 0,
+            "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (2 of 2). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures.",
+            "reach": "every_mark_moved"
+          },
+          "shocks": [
+            {
+              "axis": "eth_usd",
+              "factor_den": 100,
+              "factor_num": 70
+            }
+          ],
+          "unmeasurable_engines": [],
+          "withheld_engines": []
+        },
+        {
+          "covered_engines": [
+            "debt_manager"
+          ],
+          "engines": [
+            {
+              "accounts": 1,
+              "after_collateral_at_risk_usd": "4000000000",
+              "after_eligible_accounts": 1,
+              "bad_debt_delta_usd": "0",
+              "before_bad_debt_usd": "239603961",
+              "before_collateral_at_risk_usd": "4000000000",
+              "before_eligible_accounts": 1,
+              "before_eligible_debt_usd": "4200000000",
+              "eligible_accounts_delta": 0,
+              "eligible_debt_delta_usd": "0",
+              "engine": "debt_manager",
+              "flipped_to_eligible": 0,
+              "hf_dropped_accounts": null,
+              "infinite_accounts": 0,
+              "market_realization": null,
+              "movement_excluded_accounts": 0,
+              "movement_rule": "eligibility_flipped_false_to_true",
+              "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1 minus 0 = 1), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+              "projection": null,
+              "refused_in_batch_positions": 1,
+              "total_collateral_usd_after": "4000000000",
+              "total_collateral_usd_before": "4000000000",
+              "total_debt_usd_after": "4200000000",
+              "total_debt_usd_before": "4200000000",
+              "unrebuildable_positions": 0,
+              "usd_decimals": 6
+            }
+          ],
+          "label": "Stable depeg to 0.995 (inside the snap band - a true no-op)",
+          "note": "IDENTITY: this result is scenario stable_depeg_0995_in_band at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's — the Debt Manager's stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
+          "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+          "positions_answered": 1,
+          "positions_withheld": 0,
+          "scenario_id": "stable_depeg_0995_in_band",
+          "scenario_version": "v1",
+          "shock_reach": {
+            "applied_shocks": [
+              {
+                "after": "1000000",
+                "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+                "base_snapped": true,
+                "before": "1000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "1000",
+                "factor_num": "995",
+                "snapped": false,
+                "source": "priceproviderv2"
+              },
+              {
+                "after": "1000000",
+                "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+                "base_snapped": false,
+                "before": "1000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "1000",
+                "factor_num": "995",
+                "snapped": true,
+                "source": "priceproviderv2"
+              },
+              {
+                "after": "1000000",
+                "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+                "base_snapped": false,
+                "before": "1000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "1000",
+                "factor_num": "995",
+                "snapped": true,
+                "source": "priceproviderv2"
+              },
+              {
+                "after": "1000000",
+                "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+                "base_snapped": false,
+                "before": "1000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "1000",
+                "factor_num": "995",
+                "snapped": true,
+                "source": "priceproviderv2"
+              }
+            ],
+            "declared_shocks": 3,
+            "declared_shocks_at_identity": 0,
+            "held_flat_assets": [
+              {
+                "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+                "chain_id": 10
+              }
+            ],
+            "held_flat_marks": 2,
+            "marks_base_snapped": 1,
+            "marks_cap_bound": 0,
+            "marks_held_by_arithmetic": 0,
+            "marks_held_by_declared_factor": 0,
+            "marks_held_by_transform": 4,
+            "marks_moved": 0,
+            "marks_snapped": 3,
+            "note": "NO MARK MOVED: every mark this scenario's propagation matrix describes came back at the value it started at, and at least one declared shock was NOT the identity factor. This zero is the PRICING TRANSFORMS' doing, not the book's — the Debt Manager's stable snap band, a snapped stable BASE, or a bound price cap, each of them a property of the oracle path rather than of any position. Of the held marks: 4 pinned by a pricing transform (a stable snap, a snapped base or a bound cap). The `before_*` figures beside this are a true measurement of a real book and nothing was suppressed to hide the zero.",
+            "reach": "no_mark_moved"
+          },
+          "shocks": [
+            {
+              "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+              "axis": "stable_usd",
+              "factor_den": 1000,
+              "factor_num": 995
+            },
+            {
+              "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+              "axis": "stable_usd",
+              "factor_den": 1000,
+              "factor_num": 995
+            },
+            {
+              "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+              "axis": "stable_usd",
+              "factor_den": 1000,
+              "factor_num": 995
+            }
+          ],
+          "unmeasurable_engines": [],
+          "withheld_engines": []
+        },
+        {
+          "covered_engines": [
+            "debt_manager"
+          ],
+          "engines": [
+            {
+              "accounts": 1,
+              "after_collateral_at_risk_usd": "4000000000",
+              "after_eligible_accounts": 1,
+              "bad_debt_delta_usd": "0",
+              "before_bad_debt_usd": "239603961",
+              "before_collateral_at_risk_usd": "4000000000",
+              "before_eligible_accounts": 1,
+              "before_eligible_debt_usd": "4200000000",
+              "eligible_accounts_delta": 0,
+              "eligible_debt_delta_usd": "0",
+              "engine": "debt_manager",
+              "flipped_to_eligible": 0,
+              "hf_dropped_accounts": null,
+              "infinite_accounts": 0,
+              "market_realization": null,
+              "movement_excluded_accounts": 0,
+              "movement_rule": "eligibility_flipped_false_to_true",
+              "note": "UNIT: every money figure on this row is an exact integer in THIS engine's own 6-decimal USD and is never summed, averaged or plotted on one axis with another engine's. `movement_rule` is eligibility_flipped_false_to_true: `flipped_to_eligible` counts eligibility flips FALSE to TRUE only, so it is not `eligible_accounts_delta`, which is a NET and also subtracts any flip back to healthy — five accounts flipping in and five flipping out is a net of 0 and is not \"nothing happened\". `hf_dropped_accounts` is null here because the Debt Manager has no health-factor wad. THE MOVEMENT COUNT'S DENOMINATOR IS `accounts` MINUS `movement_excluded_accounts` (1 minus 0 = 1), never `accounts`: The eligibility flip is testable for every account this run measured on both sides, so the only accounts excluded from it are before-side rows carrying no after-side state at all — it is not a quiet zero. THE SANCTIONED DENOMINATOR is `total_debt_usd_before`. The share a reader may legitimately compute is `eligible_debt_delta_usd` over `total_debt_usd_before` — this scenario's contribution as a fraction of the book as it stands. Aave debt is PRICED and moves under a price shock, so `total_debt_usd_after` is a DIFFERENT book and a ratio against it answers a different question. COLLATERAL AT RISK is served as TWO SIDES and never as a delta: it carries no monotonicity invariant and legitimately FALLS when already-crossed accounts are worth less, so a difference on that axis is not a ranking key and is not offered as one.",
+              "projection": null,
+              "refused_in_batch_positions": 1,
+              "total_collateral_usd_after": "4000000000",
+              "total_collateral_usd_before": "4000000000",
+              "total_debt_usd_after": "4200000000",
+              "total_debt_usd_before": "4200000000",
+              "unrebuildable_positions": 0,
+              "usd_decimals": 6
+            }
+          ],
+          "label": "DM composition census - previously unclaimed assets, explicitly held",
+          "note": "IDENTITY: this result is scenario dm_composition_census at version v1, under the envelope's `scenario_config_version`. Join those three against GET /v1/scenarios for this scenario's `out_of_model`, which is NOT carried here and without which a shocked number is being read wrong. NOT COVERED: aave_v3_etherfi carry rows in this batch and this scenario's committed definition does not cover them, so they are absent from `covered_engines` entirely. That absence is by DEFINITION, never withholding. SHOCK REACH: DECLARED HOLD: all 8 of this scenario's shocks are the explicit identity factor 1/1. It asks for no price move, BY DECISION rather than by accident, and the three deltas are zero BY CONSTRUCTION. The cause is the DEFINITION: nothing about the oracle, the pricing transforms or the book's sensitivity may be inferred from these zeros. `applied_shocks` is normally NON-EMPTY here (1 row(s) on this book), because a matched price is recorded whatever the factor. The definition's own disclosure is its `path_assumption`, served beside this: no move is asserted: every shock in this census is the explicit factor 1/1, so each named mark is held at its current sample BY DECISION, disclosed in the applied-shock record rather than in the held-flat list",
+          "path_assumption": "no move is asserted: every shock in this census is the explicit factor 1/1, so each named mark is held at its current sample BY DECISION, disclosed in the applied-shock record rather than in the held-flat list",
+          "positions_answered": 1,
+          "positions_withheld": 0,
+          "scenario_id": "dm_composition_census",
+          "scenario_version": "v1",
+          "shock_reach": {
+            "applied_shocks": [
+              {
+                "after": "1000000",
+                "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+                "base_snapped": false,
+                "before": "1000000",
+                "cap_bound": false,
+                "chain_id": 10,
+                "factor_den": "1",
+                "factor_num": "1",
+                "snapped": false,
+                "source": "priceproviderv2"
+              }
+            ],
+            "declared_shocks": 8,
+            "declared_shocks_at_identity": 8,
+            "held_flat_assets": [
+              {
+                "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+                "chain_id": 10
+              },
+              {
+                "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+                "chain_id": 10
+              }
+            ],
+            "held_flat_marks": 5,
+            "marks_base_snapped": 0,
+            "marks_cap_bound": 0,
+            "marks_held_by_arithmetic": 0,
+            "marks_held_by_declared_factor": 1,
+            "marks_held_by_transform": 0,
+            "marks_moved": 0,
+            "marks_snapped": 0,
+            "note": "DECLARED HOLD: all 8 of this scenario's shocks are the explicit identity factor 1/1. It asks for no price move, BY DECISION rather than by accident, and the three deltas are zero BY CONSTRUCTION. The cause is the DEFINITION: nothing about the oracle, the pricing transforms or the book's sensitivity may be inferred from these zeros. `applied_shocks` is normally NON-EMPTY here (1 row(s) on this book), because a matched price is recorded whatever the factor. The definition's own disclosure is its `path_assumption`, served beside this: no move is asserted: every shock in this census is the explicit factor 1/1, so each named mark is held at its current sample BY DECISION, disclosed in the applied-shock record rather than in the held-flat list",
+            "reach": "all_shocks_declared_at_identity"
+          },
+          "shocks": [
+            {
+              "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0x4200000000000000000000000000000000000042",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            },
+            {
+              "asset": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E",
+              "axis": "asset_usd",
+              "factor_den": 1,
+              "factor_num": 1
+            }
+          ],
+          "unmeasurable_engines": [],
+          "withheld_engines": []
+        }
+      ],
+      "scenario_config_version": "v1",
+      "served_at": "2026-07-29T10:00:05Z"
+    },
+    "exampleSource": "api/openapi.yaml — POST /v1/scenarios/run-book-set 200 example (verbatim)"
+  },
+  {
     "method": "GET",
     "path": "/v1/evidence",
     "operationId": "getEvidence",
@@ -3608,6 +4200,9 @@ export const OPERATIONS: readonly ContractOperation[] = [
         "large_price_step_bps": 2000,
         "rate_limit_requests_per_second": 20,
         "rate_limit_burst": 40,
+        "max_set_run_scenarios": 24,
+        "set_run_token_cost_per_scenario": 1,
+        "max_inflight_set_runs": 2,
         "sse_heartbeat_seconds": 15,
         "note": "every value here is a POLICY OF THIS DEPLOYMENT or a published cadence, not a measurement. The price ceiling is 2x the budget (design spec §7, R = 2 x T_f): an input past it is REFUSED rather than served stale."
       },

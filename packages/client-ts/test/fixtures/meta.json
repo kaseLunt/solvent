@@ -258,6 +258,9 @@
     "large_price_step_bps": 2000,
     "rate_limit_requests_per_second": 20,
     "rate_limit_burst": 40,
+    "max_set_run_scenarios": 24,
+    "set_run_token_cost_per_scenario": 1,
+    "max_inflight_set_runs": 2,
     "sse_heartbeat_seconds": 15,
     "note": "every value here is a POLICY OF THIS DEPLOYMENT or a published cadence, not a measurement. The price ceiling is 2x the budget (design spec §7, R = 2 x T_f): an input past it is REFUSED rather than served stale."
   },

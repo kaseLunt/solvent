@@ -368,8 +368,18 @@ type wireConstants struct {
 	LargeStepBps            int64   `json:"large_price_step_bps"`
 	RateLimitRPS            float64 `json:"rate_limit_requests_per_second"`
 	RateLimitBurst          int     `json:"rate_limit_burst"`
-	SSEHeartbeatSeconds     int64   `json:"sse_heartbeat_seconds"`
-	Note                    string  `json:"note"`
+	// The set-run policy, published so it is discoverable rather than folklore.
+	// MaxSetRunScenarios bounds ONE request; SetRunTokenCostPerScenario is what
+	// the limiter is charged per scenario (the bucket counts requests, so a
+	// cost-blind charge would let one client turn the burst into 24 times as
+	// many evaluations); MaxInflightSetRuns bounds the DEPLOYMENT and is the
+	// SAME number `SetRunBusyBody.max_in_flight` carries, so a refused client
+	// and a curious one read one figure.
+	MaxSetRunScenarios         int    `json:"max_set_run_scenarios"`
+	SetRunTokenCostPerScenario int    `json:"set_run_token_cost_per_scenario"`
+	MaxInflightSetRuns         int    `json:"max_inflight_set_runs"`
+	SSEHeartbeatSeconds        int64  `json:"sse_heartbeat_seconds"`
+	Note                       string `json:"note"`
 }
 
 type wireService struct {
@@ -536,17 +546,20 @@ func (s *server) handleMeta(w http.ResponseWriter, r *http.Request) {
 		},
 		Disclosures: s.standingDisclosures(),
 		Constants: wireConstants{
-			ConfirmationBlocks:      confirmationBlocks,
-			PricePollSeconds:        pricePollSeconds,
-			DMSweepIntervalSeconds:  dmSweepIntervalSeconds,
-			DMSweepPassSeconds:      dmSweepPassSeconds,
-			DMSweepWorstCaseSeconds: dmSweepIntervalSeconds + dmSweepPassSeconds,
-			PriceBudgetSeconds:      s.cfg.PriceBudgetSeconds,
-			PriceCeilingSeconds:     2 * s.cfg.PriceBudgetSeconds,
-			LargeStepBps:            s.cfg.StepBps,
-			RateLimitRPS:            s.cfg.RateLimit,
-			RateLimitBurst:          s.cfg.RateBurst,
-			SSEHeartbeatSeconds:     int64(s.cfg.SSEHeartbeat / time.Second),
+			ConfirmationBlocks:         confirmationBlocks,
+			PricePollSeconds:           pricePollSeconds,
+			DMSweepIntervalSeconds:     dmSweepIntervalSeconds,
+			DMSweepPassSeconds:         dmSweepPassSeconds,
+			DMSweepWorstCaseSeconds:    dmSweepIntervalSeconds + dmSweepPassSeconds,
+			PriceBudgetSeconds:         s.cfg.PriceBudgetSeconds,
+			PriceCeilingSeconds:        2 * s.cfg.PriceBudgetSeconds,
+			LargeStepBps:               s.cfg.StepBps,
+			RateLimitRPS:               s.cfg.RateLimit,
+			RateLimitBurst:             s.cfg.RateBurst,
+			MaxSetRunScenarios:         maxSetRunScenarios,
+			SetRunTokenCostPerScenario: setRunTokenCostPerScenario,
+			MaxInflightSetRuns:         s.cfg.MaxInflightSetRuns,
+			SSEHeartbeatSeconds:        int64(s.cfg.SSEHeartbeat / time.Second),
 			Note: "every value here is a POLICY OF THIS DEPLOYMENT or a published cadence, not a measurement. " +
 				"The price ceiling is 2x the budget (design spec §7, R = 2 x T_f): an input past it is REFUSED rather than served stale.",
 		},

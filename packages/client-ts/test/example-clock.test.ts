@@ -477,6 +477,9 @@ const CENSUS: Record<string, string> = {
   "GET /v1/positions 200 (application/json) $.batch.watermarks[1].sweep": "checked: max_updated_at",
   "GET /v1/prices/{asset} 200 (application/json) $.series[0].points[0]": "stamp-only: source_as_of",
   "GET /v1/prices/{asset} 200 (application/json) $.series[0].points[1]": "stamp-only: source_as_of",
+  "POST /v1/scenarios/run-book-set 200 (application/json) $.batch": "checked: computed_at",
+  "POST /v1/scenarios/run-book-set 200 (application/json) $.batch.watermarks[2].sweep":
+    "checked: max_updated_at",
   "POST /v1/scenarios/{id}/run-book 200 (application/json) $.batch": "checked: computed_at",
   "POST /v1/scenarios/{id}/run-book 200 (application/json) $.batch.watermarks[2].sweep":
     "checked: max_updated_at",
@@ -495,6 +498,15 @@ const ROOTS: string[] = [
   "GET /v1/positions 200 (application/json)",
   "GET /v1/prices/{asset} 200 (application/json)",
   "GET /v1/scenarios 200 (application/json)",
+  // The set-run declares three examples: the CAPTURED 200 body, the 404 whose
+  // values are the request's own ids echoed back, and the 503 busy body whose
+  // values are the deployment's own published constants. Only the first carries
+  // a clock — the batch envelope and its one sweep stamp — and the other two are
+  // roots this walk collects and finds nothing in, which is itself the statement
+  // that they state no age.
+  "POST /v1/scenarios/run-book-set 200 (application/json)",
+  "POST /v1/scenarios/run-book-set 404 (application/json)",
+  "POST /v1/scenarios/run-book-set 503 (application/json)",
   "POST /v1/scenarios/{id}/run-book 200 (application/json)",
   "components.responses.BatchSuperseded (application/json)",
 ];

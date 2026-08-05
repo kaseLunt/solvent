@@ -179,7 +179,19 @@ export const HEURISTIC_CHAIN_NAMES = ["result", "lookup", "verdict", "outcome"] 
  * decimal count are ordinary values, and `!x` on them is not a withheld
  * statement. Overloading one regex with two hazard classes makes both weaker.
  */
-export const HAZARDOUS_COUNT_NAMES = ["held_rows", "lane_changed_rows"] as const;
+export const HAZARDOUS_COUNT_NAMES = [
+  "held_rows",
+  "lane_changed_rows",
+  // Contract 1.7.0, the set-run. `flipped_to_eligible` and
+  // `hf_dropped_accounts` are the SAME hazard in its purest form: exactly
+  // ONE of them is non-null on every engine row, selected by
+  // `movement_rule`, and the null means "this engine does not speak this
+  // count" while 0 means "the count is a real zero". `!row.flipped_to_eligible`
+  // reads those two statements as one branch — which is precisely the
+  // conflation the split into two fields exists to prevent.
+  "flipped_to_eligible",
+  "hf_dropped_accounts",
+] as const;
 
 /** The whole hazard vocabulary the docs lint matches — ONE const, no hand-list elsewhere. */
 export const HAZARDOUS_NAMES = [
@@ -423,6 +435,16 @@ export const NULLABLE_COUNT_FIELD_NAMES = [
   // Contract 1.7.0, and the two this class was extended for.
   "held_rows",
   "lane_changed_rows",
+  // Contract 1.7.0, the set-run. The two movement counts are ALSO in
+  // HAZARDOUS_COUNT_NAMES above: their null is a withheld statement.
+  "flipped_to_eligible",
+  "hf_dropped_accounts",
+  // `newest_servable_batch_id` is inventoried and deliberately NOT in the lint
+  // vocabulary. Its null means "NO batch satisfies the completeness predicate",
+  // which is a statement rather than a withheld one, and 0 is not a batch id any
+  // deployment can mint — so `!id` cannot conflate two live meanings here the way
+  // it does for the two movement counts.
+  "newest_servable_batch_id",
 ] as const;
 
 type ListedCountFieldName = (typeof NULLABLE_COUNT_FIELD_NAMES)[number];
@@ -613,16 +635,26 @@ describe("the README's fenced TypeScript is compiled documentation", () => {
     expect(numberSweepBudgetCoversTheContract).toBe(true);
     expect(numberSweepBudgetHasMargin).toBe(true);
     expect(everyHazardousCountNameIsInTheInventory).toBe(true);
-    expect(NULLABLE_COUNT_FIELD_NAMES).toHaveLength(28);
+    // 28 through contract 1.7.0's transition matrix, plus the set-run's three:
+    // the two movement counts (linted) and `newest_servable_batch_id` (not).
+    expect(NULLABLE_COUNT_FIELD_NAMES).toHaveLength(31);
 
-    // Only the two withheld-statement fields reach the regex. `age_seconds` and
+    // Only the WITHHELD-STATEMENT fields reach the regex. `age_seconds` and
     // `decimals` are in the inventory and must NOT be linted: a zero age and a
     // zero decimal count are ordinary values, and folding them in would give
-    // one regex two hazard classes and make both weaker.
+    // one regex two hazard classes and make both weaker. The same reasoning
+    // keeps `newest_servable_batch_id` out: its null names a real state and 0 is
+    // not a batch id any deployment can mint.
     for (const name of HAZARDOUS_COUNT_NAMES) {
       expect(falsinessViolations(`if (!t.${name}) render();`), name).toHaveLength(1);
     }
-    for (const name of ["age_seconds", "decimals", "step_seconds", "total_positions"] as const) {
+    for (const name of [
+      "age_seconds",
+      "decimals",
+      "step_seconds",
+      "total_positions",
+      "newest_servable_batch_id",
+    ] as const) {
       expect(NULLABLE_COUNT_FIELD_NAMES).toContain(name);
       expect(falsinessViolations(`if (!x.${name}) render();`), name).toHaveLength(0);
     }
