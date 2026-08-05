@@ -1,6 +1,6 @@
 # Contract 1.7.0 `hf_transitions`: the server-provided before-to-after transition matrix on the scenario run-book
 
-**Status:** REV3. Pending Codex gate. Read-only research; nothing in this document has been written to the repo outside this file.
+**Status:** REV4, gate round 46 findings applied. Read-only research; nothing in this document has been written to the repo outside this file.
 **Scope:** `POST /v1/scenarios/{id}/run-book`, `RunBookEngine`. Additive only.
 **Supersedes:** `docs/specs/2026-08-04-draft-runbook-transition-matrix.md`.
 
@@ -612,6 +612,10 @@ if u := unmeasuredByEngine[engine]; u != nil {
 
 `debtUSD` is nil on both entries, which is what makes cell (9,9)'s two debts null rather than "0".
 
+**THE SPLIT HAS TO REACH THE WIRE BUILDER, AND NOTHING ABOVE CARRIES IT.** This is the correction round 46 forced, and it is a data-path defect rather than a wording one. `runLaneEntry` holds `account`, `lane` and `debtUSD` (§4.2); the fold above appends `{account, lane}` and drops the cause on the floor; `runBookTransitions` as first drafted took `(engine, before, after, dec)`. Every one of those is cause-blind, so `unmeasured_refused_in_batch_rows` and `unmeasured_excluded_by_this_layer_rows` were **not constructible from the builder's own inputs**, and two required fields of §2.1's schema had no derivation. The two counts exist exactly once, on the per-engine `*runUnmeasured` record `classifyUnmeasured` fills, so that record is what the builder is handed.
+
+Deliberately NOT the alternatives. Putting a `cause` field on `runLaneEntry` would put the classification on every measured entry too, where it has no meaning, and would let a measured row carry a refusal cause. Re-deriving the split inside `runBookTransitions` would need the `[]*positionRow` slice, which would make the builder a second reader of `p.Status` and `p.reconstructionErr` and give the repo two places that must agree with `coverage()`. Passing the record keeps the classification in the one function §7.2 tests directly.
+
 ### 4.4 The zip: pairing by POSITION, with an account guard
 
 `beforeInputs` and `afterInputs` are index-aligned by construction. `afterInputs` is built 1:1 from `run` in the same order, or IS `beforeInputs` on a projection, and `ApplyScenario` neither reorders nor drops (`out := in`, then one engine field replaced). `measureRunBook` walks its argument in slice order, so the two per-engine `lanes` slices are index-aligned too.
@@ -619,7 +623,10 @@ if u := unmeasuredByEngine[engine]; u != nil {
 Pairing by index rather than by account map is what makes marginal agreement hold BY CONSTRUCTION. The account equality check is the guard against a future refactor that filters one side:
 
 ```go
-func runBookTransitions(engine string, before, after *runMeasure, dec uint8) (wireRunBookTransitions, error) {
+// u is the per-engine unmeasured record of §4.3, and it is the ONLY carrier of
+// the cause split. nil means this engine folded no unmeasured row, which is a
+// legal book and not a missing argument: a nil record reads as 0 and 0.
+func runBookTransitions(engine string, before, after *runMeasure, dec uint8, u *runUnmeasured) (wireRunBookTransitions, error) {
 	if len(before.lanes) != len(after.lanes) {
 		return wireRunBookTransitions{}, fmt.Errorf(
 			"%s: %d before-lane records against %d after-lane records; the two sides "+
@@ -629,18 +636,46 @@ func runBookTransitions(engine string, before, after *runMeasure, dec uint8) (wi
 	// ... zip, requiring b.account == a.account at each index, accumulating
 	// counts into cell[b.lane][a.lane] and the two debt sums from b.debtUSD and
 	// a.debtUSD respectively (never from the lane) ...
+
+	// unmeasuredRows is counted from the lane slice itself, so the split is
+	// checked against the population the matrix actually placed rather than
+	// against the number the handler believes it folded.
+	unmeasuredRows := 0
+	for _, b := range before.lanes {
+		if b.lane == laneUnmeasured {
+			unmeasuredRows++
+		}
+	}
+	refusedInBatch, excludedByThisLayer := 0, 0
+	if u != nil {
+		refusedInBatch, excludedByThisLayer = u.refusedInBatch, u.excludedByThisLayer
+	}
+	if refusedInBatch+excludedByThisLayer != unmeasuredRows {
+		return wireRunBookTransitions{}, fmt.Errorf(
+			"%s: %d unmeasured rows in the matrix against a cause split of %d refused-in-batch "+
+				"plus %d excluded-by-this-layer; serving that split would point a per-engine "+
+				"count at a coverage surface that does not hold those rows",
+			engine, unmeasuredRows, refusedInBatch, excludedByThisLayer)
+	}
+	// ... UnmeasuredRows = unmeasuredRows,
+	//     UnmeasuredRefusedInBatchRows = refusedInBatch,
+	//     UnmeasuredExcludedByThisLayerRows = excludedByThisLayer ...
 }
 ```
+
+The equality is Invariant 7's wire law checked at the point of construction rather than asserted about it, and it is cheap: two integers against a count the zip already accumulates (it is written as its own loop above only to keep the snippet readable in isolation). It is what makes the two served counts derivations rather than restatements, and it fails closed if a future refactor ever folds a lane-9 entry the classifier never saw.
 
 A refusal here is a defect in this layer, not a property of the data, so it is a 500 with a named reason. `runBookTransitions` and `measureRunBook` are helpers that RETURN an error, which is why `fmt.Errorf` is correct inside them; the handler that calls them converts it in the one form `handleRunBook` has, the same one the existing "applying scenario ... refused a verified position" arm uses (`cmd/api/p5_runbook.go:468-470`):
 
 ```go
-tr, err := runBookTransitions(engine, mb, ma, dec)
+tr, err := runBookTransitions(engine, mb, ma, dec, unmeasuredByEngine[engine])
 if err != nil {
 	writeError(w, http.StatusInternalServerError, codeInternal, err.Error(), nil)
 	return
 }
 ```
+
+`unmeasuredByEngine` is in scope at this call site: it is declared where `refusedByEngine` is today (`cmd/api/p5_runbook.go:424`, §4.3) and the `engines[]` loop that builds each engine's wire object runs later in the same function. A map read of an absent engine yields the nil the signature documents.
 
 It never degrades to a matrix with wrong margins.
 
@@ -946,6 +981,17 @@ Everything here needs a seeded book, so everything here is in the `_db_test` fil
 
 `TestRunBookServesTheTransitionMatrix`, `newP5Fixture` plus `eth_minus_10`, through the real handler and the real contract validator (`f.postJSON(..., runBookContractPath, 200)`): the Aave crossing appears at `outflows[3].cells[to=1].rows == 1`; the unmeasured row sits at `(9,9)` with two nulls; `unmeasured_refused_in_batch_rows == 1` and `unmeasured_excluded_by_this_layer_rows == 0` on both engines (both fixtures are `Status: refused`); both margins equal the two served histograms field for field; `lane_changed_rows == 1` on Aave and `0` on the Debt Manager.
 
+**`TestRunBookTransitionSplitsAnUnrebuildableRowFromARefusedOne`** (NEW in REV4, and it is the end-to-end half the §7.2 table cannot supply). Every committed run-book fixture puts its unmeasured rows in the `refused` cause: `fxAaveRefused` and `fxDMRefused` are both `Status: store.RiskPositionRefused` (`cmd/api/fixture_test.go:254`, `:426`), so `TestRunBookServesTheTransitionMatrix` above pins `unmeasured_excluded_by_this_layer_rows == 0` on both engines and could not distinguish the two counts from a single count copied into the first slot. This law drives the OTHER cause through the real handler.
+
+Fixture: `seedMixedDirectionBatch` plus `eth_minus_30`, whose four rows are all written `RiskPositionComputed` with no refusals, then account **A** (`fxMDAcctDropsA`, the 1.20 to 0.84 row) is made unrebuildable by the committed mutation technique of `TestLiqBonusMutationRefusesTheReconstruction` (`cmd/api/round1_db_test.go:166-212`): `UPDATE risk_position_legs SET liq_bonus = ...` against that account's weETH collateral leg, which `fxMDCollateralDown` writes with a real `LiqBonus` (`cmd/api/fixture_test.go:642`). The statement is **scoped by `(batch_id, engine, account, asset)`** and not by asset alone, because both `fxMDCollateralDown` rows carry a weETH collateral leg and an asset-scoped update would exclude two rows instead of one. The mutation touches no position count, so `riskBatchCompleteConjuncts` still holds and the batch stays servable, which is why that technique is the one reused. Assertions, on the Aave engine of the served body:
+
+1. **The split is the reconstruction cause, not the refusal cause.** `unmeasured_refused_in_batch_rows == 0` and `unmeasured_excluded_by_this_layer_rows == 1`. A mutation that classified on `p.Status != store.RiskPositionComputed` reports 1 and 0 and fails here; against every other fixture in the suite it passes.
+2. **The coverage surfaces the counts point at actually hold the row.** `coverage.refused_in_batch == 0`, `coverage.excluded_by_this_layer == 1`, and `coverage.excluded` carries exactly one entry whose `engine` is `aave_v3_etherfi`, whose `account` is the mutated one and whose `code` is `API_RECONSTRUCTION_MISMATCH` (`cmd/api/handlers.go:704-712`, `read.go:69`). This is the assertion that makes the served pointer checkable rather than decorative: the count that is 1 names the array that has 1 in it, and the count that is 0 names the count that is 0.
+3. **The split sums.** `unmeasured_refused_in_batch_rows + unmeasured_excluded_by_this_layer_rows == unmeasured_rows == 1`, and `from_rows[9] == to_rows[9] == 1` with the only cell of `outflows[9]` being `(9,9)` carrying two null debts. This is the §4.4 construction guard observed on the wire.
+4. **The rest of the matrix loses exactly that row and no other.** Aave `total_rows == 3`, `measured_rows == 2`, `coverage.in_book == 3`; the two surviving measured rows are B `(3→0)` and C `(0→3)`, so `held_rows == 0` and `lane_changed_rows == 2`. The Debt Manager row is untouched: `unmeasured_rows == 0` and both split counts 0, which also pins that a nil `*runUnmeasured` reads as 0 and 0 rather than as a missing argument.
+
+Mutations killed: building the two counts from anything the lane records carry (they carry no cause, §4.3); serving one count and deriving the other by subtraction, which cannot distinguish 0+1 from 1+0; classifying by negation of `computed`; dropping the §4.4 sum guard so a fold the classifier never saw serves a split that does not add up.
+
 **`TestRunBookTransitionSeparatesOffsettingMoves`** (this is **the wave's reason for existing**, and there is exactly ONE of it: an earlier revision listed both this name in the no-DB table and a `TestRunBookTransitionSeparatesOffsettingMovesEndToEnd` twin here, which was one test written twice). `seedMixedDirectionBatch` plus `eth_minus_30`, through the real handler. It asserts, in one body over one seeded book:
 
 1. **The offsetting moves.** The below-1.00 marginal delta is +1 while `lane_changed_rows == 3`, and all three off-diagonal cells `(4→0)`, `(3→0)` and `(0→3)` are present. Any "matrix" reconstructed from the two histograms fails this.
@@ -964,6 +1010,22 @@ Mutations killed: serving one debt figure per cell or copying one side's into bo
 
 - **`TestRunBookExampleIsAServedBody`**: no change to the test, but the contract example must be RE-CAPTURED (run the fixture through the handler, transplant the response). Hand-writing `hf_transitions` into the yaml fails it.
 - **`TestRunBookHistogramCountsWhatItCannotBucket`** (`cmd/api/p5_runbook_bsplit_test.go:121`): **this test changes.** It currently calls `m.bucket(risk.AaveEngine, &runAccountState{hfWad: nil})` directly and asserts the row is counted refused. After §4.2 that call returns the named error. The test is rewritten in two halves: the tally half keeps asserting that the unmeasured fold plus the infinite tally plus the buckets account for the whole run, and the new half asserts that a measured comparator-free state REFUSES with a named reason. The rewrite is not a weakening: today's assertion pins a behavior on a state the handler cannot construct, and the code it pins is exactly what §2.2 shows is dead.
+- **`web/tests/unit/lab-runbook-lines.spec.ts`**: **this file changes, and REV4 adds it to this checklist because §10 item 10 retires the copy it is the standing law for.** Its assertions currently REQUIRE the "NET only, crossings are impossible" reading, so they turn red the moment `histogramShiftReadingLine` is rewritten over the matrix, and leaving it off this list is what would make that rewrite look like a two-line copy edit. Five tests carry the obligation, and the file header's law list at `:12-17` moves with them:
+  - `:129` `"THE NET CAVEAT: the sentence never claims accounts CROSSED, in either direction"`. **Retire the impossibility copy law explicitly**, do not reword it. It asserts `toContain("serves the two populations, not the crossings between them")` and `toContain("no gross crossing count is claimed here")`, and it forbids the exact vocabulary the matrix now licenses: `not.toContain("crossed into that region")`, `not.toContain("left that region")`, `not.toContain("accounts that moved")`. Every one of those five is a claim about what the response CANNOT carry, and `hf_transitions` carries it. The replacement test is named for what is now true (the crossings are served and are DERIVED from the cells) and the negative assertions invert: the sentence must no longer say a gross crossing count is unavailable.
+  - `:106`, `:151`, `:166` (`grew by`, `did not change`, `shrank by`). The net arithmetic and its singular/plural forms stay; what changes is that each must now carry the gross split beside the net rather than a caveat instead of it. `:151` is the case that gains the most: an unchanged population with one entry and one exit is now a statable fact rather than the thing the caveat existed to warn about.
+  - `:207` `"REFUSED ROWS ARE NAMED in the same breath as the shift"`. Its asserted string is `"2 more rows are counted refused and sit in neither distribution"`, and **the second half is now false**: those rows sit in lane N+1, which IS a position in the joint distribution, with `from_rows[N+1] == to_rows[N+1] == unmeasured_rows` and the cause split beside it. The replacement keeps the naming obligation (the rows are still named in the same breath) and states where they sit instead of claiming they sit nowhere. It should read the server's `measured_rows` rather than recomputing `measuredCount`, per §10 item 10.
+
+  **The replacement assertions, over the §5.3 mixed-direction matrix.** Stated as concrete numbers so the rewrite is checkable rather than left to the implementer. The test builds the matrix from the fixture as a TEMPLATE and fills its own cells, exactly as `histogramWith` (`:50-67`) already does for histograms today; it does not depend on `run-book.eth_minus_30.json` carrying that book. With `from_rows: [1,0,0,1,1,0,0,0,0,0]`, `to_rows: [2,0,0,1,0,0,0,0,0,0]` and the three occupied cells `(4→0)`, `(3→0)`, `(0→3)`, over below-one lanes `{0, 1}` (the `belowOneCount` rule the file already pins at `:73-88`):
+
+  | quantity | value | derivation |
+  |---|---|---|
+  | below-one net delta | **+1** | `Σ to_rows[{0,1}] − Σ from_rows[{0,1}]` = 2 − 1. The number today's sentence already carries. |
+  | entries below one | **2** | cells with `to ∈ {0,1}` and `from ∉ {0,1}`: `(4→0)` and `(3→0)` |
+  | exits from below one | **1** | cells with `from ∈ {0,1}` and `to ∉ {0,1}`: `(0→3)` |
+  | all lane changes | **3** | `lane_changed_rows`, read off the wire |
+
+  Four distinct numbers on one engine of one book, which is what makes the test discriminating: a rewrite that prints the net twice, or that prints `lane_changed_rows` where the crossing count belongs, fails. **The three must be asserted independently and the third must NOT be computed from the first two.** `entries + exits == lane_changed_rows` holds on this book only because no measured row here changes lane without crossing the below-one boundary; it is a coincidence of the fixture and not a law, and §4.7 claim 7 is explicit that `lane_changed_rows` counts lane changes and not crossings of any particular edge. The Debt Manager sentence keeps its DISCLOSURE clause unchanged (`:180-205`): the comparator argument of §1.2 is untouched by serving the joint.
+
 - **`TestRunBookMoversTotalIsNotTheNetEligibilityChange`** (`cmd/api/p5_runbook_bsplit_db_test.go:252`): unchanged and now load-bearing for two more claims. It already pins the mixed-direction book's histograms, mover list and net count, which §5.3's matrix must reproduce exactly.
 - **`TestAPIIssuesNoWritingSQL`**: continues to hold; this wave adds no SQL literal.
 - **`TestLiquidatableDisclosureLawSweepsTheWholeContract`**: continues to hold. See §9.1 for why it does not police this subtree and what does.
@@ -975,7 +1037,7 @@ Mutations killed: serving one debt figure per cell or copying one side's into bo
 |---|---|
 | `packages/client-ts/test/drift.test.ts` | regenerating from `api/openapi.yaml` must reproduce `src/generated/schema.ts` byte for byte; run `npm run gen` and commit |
 | `packages/client-ts/test/fixtures.test.ts` | asserts `contract.version === CONTRACT_VERSION`; bump `CONTRACT_VERSION` from `"1.6.0"` to `"1.7.0"` in `src/types.ts:240` |
-| `packages/client-ts/src/types.ts` (new) | `TRANSITION_LANE_KIND_SET = { bucket: true, infinite: true, unmeasured: true } as const satisfies Record<TransitionLaneKind, true>`, the `EVENT_AMOUNT_UNITS` pattern, total both ways, so a lane kind added or removed by the contract breaks the compile |
+| `packages/client-ts/src/types.ts` (new) | **`TransitionLaneKind` is defined here and its definition is `export type TransitionLaneKind = RunBookTransitionLane["kind"]`**, an indexed access on the regenerated schema type rather than a hand-written union. `RunBookTransitionLane.kind` is an INLINE enum on that schema (§2.1) and not a named component, so the `Schemas["EventAmountUnit"]` form used at `types.ts:108` is unavailable and the indexed access is what makes the alias track the contract. Then `const TRANSITION_LANE_KIND_SET = { bucket: true, infinite: true, unmeasured: true } as const satisfies Record<TransitionLaneKind, true>` and `export const TRANSITION_LANE_KINDS = Object.keys(TRANSITION_LANE_KIND_SET) as readonly TransitionLaneKind[]`, the `EVENT_AMOUNT_UNITS` pattern verbatim (`types.ts:190-196`), total BOTH ways: a lane kind the contract adds breaks the compile on a missing key and one it drops breaks it on an excess key. An earlier revision used the name `TransitionLaneKind` without ever saying where it comes from and named the exported constant two different ways in two sections; both are fixed here |
 | `packages/client-ts/test/readme-sync.test.ts` | see §9.3. The existing sweep is typed to `boolean \| null` and cannot see `held_rows` / `lane_changed_rows`; widening it in place does NOT compile, and the replacement is a second, parallel law |
 | `web/tests/unit/proof-contract-fidelity.spec.ts` | re-extracts from the yaml and fails on drift; regenerate `web/lib/proof-contract.gen.ts` |
 | new `web/tests/unit/lab-transition.spec.ts` | the client-side derivation module re-checks marginal agreement AGAINST the served histograms and refuses to render a matrix whose margins disagree; the `matrixCells.ts` precedent ("nothing is classified before it is validated"), applied to a body that could arrive from an older or a broken deployment. It must also assert that a null `held_rows` renders as "not measured" and never as 0 |
@@ -1092,7 +1154,7 @@ The alternative, documenting the pair in README prose only, leaves the next such
 **`packages/client-ts/`**
 
 1. `npm run gen` to regenerate `src/generated/schema.ts`; commit (enforced by `drift.test.ts`).
-2. `src/types.ts`: add `RunBookTransitions`, `RunBookTransitionLane`, `RunBookTransitionOutflow`, `RunBookTransitionCell` aliases to the "Book-wide scenario run" section; add the `TRANSITION_LANE_KINDS` closed enum plus the `satisfies Record<>` weld; bump `CONTRACT_VERSION` to `"1.7.0"`.
+2. `src/types.ts`: add `RunBookTransitions`, `RunBookTransitionLane`, `RunBookTransitionOutflow`, `RunBookTransitionCell` aliases to the "Book-wide scenario run" section; add the `TransitionLaneKind` alias (`= RunBookTransitionLane["kind"]`, §7.5) with its `TRANSITION_LANE_KIND_SET` weld and the `TRANSITION_LANE_KINDS` export derived from it; bump `CONTRACT_VERSION` to `"1.7.0"`.
 3. **`src/client.ts`: `SolventClient.runBookScenario` ALREADY EXISTS and IS on this checklist.** It is `async runBookScenario(id: string, signal?: AbortSignal): Promise<RunBookResponse>` at `packages/client-ts/src/client.ts:559`, inside `export class SolventClient` (`:233`), refusing an off-pattern id locally against `SCENARIO_ID_PATTERN` (`:106`, used at `:560`) before any request is sent, and it is published at `packages/client-ts/dist/client.d.ts:294`. An earlier revision of this section claimed the method did not exist, propagating the stale header comment in `web/lib/runbook.ts` instead of checking the symbol; the claim is deleted, not softened, because it excluded from the weld the one typed entry point through which `hf_transitions` reaches every consumer of this package. What actually changes: **no new method and no signature change**, because `RunBookResponse` widens through the regenerated schema and every existing call site keeps compiling; and **the method's contract docblock (`:553-558`) must gain the `hf_transitions` sentence**, since it enumerates what the route serves and would otherwise describe a 1.6.0 body while returning a 1.7.0 one.
 4. `test/readme-sync.test.ts`: per §9.3, add the parallel `number | null` sweep and its both-ways `NULLABLE_COUNT_FIELD_NAMES` law (28 names), and add `HAZARDOUS_COUNT_NAMES` with the two new fields only. Do NOT widen the existing boolean sweep. **The new sweep's leaf test must carry the `[null] extends [Required<T>[K]]` guard** copied from `:235`; without it the sweep selects all 94 plain-`number` names and typecheck fails on arrival (§9.3 step 1). Note the separate coercion hazard for consumers: `Number(cell.debt_before_usd)` coerces `null` to `0`, and a null cell debt means THIS RUN MEASURED NOTHING and must never be coerced.
 5. `test/fixtures.test.ts`: no fixture change. The committed client fixtures cover address, book, stress, observatory and meta, and carry no run-book body.
@@ -1116,7 +1178,7 @@ The alternative, documenting the pair in README prose only, leaves the next such
 4. **GRAND TOTAL PARTITION.** The sum over every cell of `rows` equals `total_rows` equals `before.accounts + unmeasured_rows` equals `after.accounts + unmeasured_rows`, and `measured_rows == before.accounts == after.accounts`. No position row is in two cells and none is in zero cells. `total_rows` is NOT claimed to equal `coverage.batch_positions`, and `Σ_engines total_rows` is NOT claimed to equal `coverage.in_book`; §5.4 gives the four reasons and shows why an observed equality is not evidence.
 5. **MOVEMENT PARTITION, OVER THE MEASURED ONLY.** When `measured_rows > 0`: `held_rows + lane_changed_rows + unmeasured_rows == total_rows`, where `held_rows` sums cells with `from == to` over lanes 0..N and `lane_changed_rows` sums cells with `from != to` over the same lanes. When `measured_rows == 0`: both are null and `total_rows == unmeasured_rows`.
 6. **SPARSITY IS TOTAL.** Every emitted cell has `rows >= 1`; within an outflow the `to` values are strictly ascending and unique; a lane pair absent from `cells` holds exactly zero rows, a knowable zero made complete by the dense `lanes`, `outflows`, `from_rows` and `to_rows` arrays.
-7. **THE UNMEASURED LIVE ON ONE CELL, AND THEY ARE SPLIT BY CAUSE ON THE COVERAGE COUNTERS' OWN PREDICATES.** `from_rows[N+1] == to_rows[N+1] == unmeasured_rows`; the only cell in outflow N+1 is `(N+1, N+1)`; `unmeasured_refused_in_batch_rows + unmeasured_excluded_by_this_layer_rows == unmeasured_rows`; the first count is incremented on `p.Status == store.RiskPositionRefused`, the same positive predicate `coverage()` uses for `refused_in_batch` (`cmd/api/handlers.go:701`), and the second on `p.reconstructionErr != ""`, the same predicate `coverage()` uses for `excluded` (`:704`); an unmeasured row matching neither is a named 500.
+7. **THE UNMEASURED LIVE ON ONE CELL, AND THEY ARE SPLIT BY CAUSE ON THE COVERAGE COUNTERS' OWN PREDICATES.** `from_rows[N+1] == to_rows[N+1] == unmeasured_rows`; the only cell in outflow N+1 is `(N+1, N+1)`; `unmeasured_refused_in_batch_rows + unmeasured_excluded_by_this_layer_rows == unmeasured_rows`; the first count is incremented on `p.Status == store.RiskPositionRefused`, the same positive predicate `coverage()` uses for `refused_in_batch` (`cmd/api/handlers.go:701`), and the second on `p.reconstructionErr != ""`, the same predicate `coverage()` uses for `excluded` (`:704`); an unmeasured row matching neither is a named 500. The two counts are CARRIED to the wire builder on the per-engine `*runUnmeasured` record (§4.3, §4.4), because nothing else in the data path holds a cause: neither `runLaneEntry` nor the both-sides fold does. The builder re-checks the sum against the lane-N+1 population it actually placed and refuses with a named 500 on disagreement, so the split is derived at the point of construction rather than restated beside it.
 8. **UNKNOWABLE NEVER ZERO.** Cell `(N+1, N+1)` carries `debt_before_usd == null` and `debt_after_usd == null`. Every other emitted cell carries non-null exact decimal strings on both. The string `"0"` is never served for a population this run did not measure.
 9. **KNOWABLE ZERO IS SERVED AS ZERO, ON THE SIDE THAT KNOWS IT.** Cell `(N, N)` carries `"0"` on both sides. In general a cell's debt on one side is the exact sum of the contributing rows' debt AS COMPUTED ON THAT SIDE, never a value inferred from either lane, so a hypothetical cell `(i, N)` with i < N would carry a positive `debt_before_usd` and `"0"` after. That cell is not reachable under any committed scenario (§2.3).
 10. **DEBT RECONCILES PER SIDE, AND THE TWO SIDES CAN DIFFER.** The sum over all cells of `debt_before_usd` (as big.Int over the decimal strings, nulls skipped) equals `before.total_debt_usd` exactly; the sum of `debt_after_usd` equals `after.total_debt_usd` exactly. Both are in this engine's own `usd_decimals` and are never added to another engine's. On the Debt Manager the two sums are equal by construction (`internal/risk/scenario.go:780`); on Aave they differ whenever a shocked asset is a debt leg, witnessed at `"1640000000000"` against `"1400000000000"` by `seedMixedDirectionBatch` under `eth_minus_30`.

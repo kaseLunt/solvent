@@ -1,4 +1,4 @@
-# status: REV3 | pending Codex gate
+# status: REV4 | gate round 46 findings applied
 
 « CONTRACT 1.7.0 (ADDITIVE) : BATCH-PINNED MULTI-SCENARIO EVALUATION (SET-RUN) »
 
@@ -85,7 +85,7 @@ code does not support, the correction is in the third column.
 | Aave debt is **priced**, so it moves under a price shock | `cmd/api/p5_runbook.go:663` sums `h.TotalDebtBase`; `internal/risk/aave.go:182` `rv.DebtBase = MulDivCeil(rv.LiveDebt, p.Value, den)` | An engine's total debt has a before side and an after side, and on Aave they differ. A single `total_debt_usd` is a denominator whose side is unstated. DM's `Borrowings` is `in.DebtUSD` carried through (`internal/risk/dm.go:104`, `165`) and is shock-invariant, which is why a DM-only test cannot see this. |
 | `coverage.excluded` holds **reconstruction failures only** | `cmd/api/handlers.go:690-716`: `refused_in_batch` counts `p.Status == store.RiskPositionRefused`; `excluded_by_this_layer` and `excluded[]` count `p.reconstructionErr != ""` | The two classes are kept strictly apart in the census. |
 | `refusedByEngine` **mixes** two classes, and the number it feeds mixes a **third** | `cmd/api/p5_runbook.go:428` increments for every covered-engine position with `p.input == nil`; `cmd/api/read.go:692-707` skips non-`Computed` rows **without** setting `reconstructionErr`. That count is then folded into **both sides'** histogram at `p5_runbook.go:581-583` (`eb.refused += n; ea.refused += n`), and `m.refused` is **also** incremented at `p5_runbook.go:272` for a **rebuilt** position whose `bucketIndexOf` returns `< 0` | A batch-refused row has `input == nil` and an empty `reconstructionErr`, so `refusedByEngine` is refused-in-batch plus unrebuildable in one integer. `RunBookEngine` has **no** `refused_positions` property at all (`api/openapi.yaml:3936-3942` requires `[engine, usd_decimals, before, after, newly_eligible_accounts, eligible_debt_delta_usd, bad_debt_delta_usd, movers, movers_total, movers_note, market_realization, projection, note]`), so the number the run-book actually publishes is `before.hf_histogram.refused_count`, which is **three** classes: refused-in-batch, unrebuildable, and rebuilt-with-no-comparator. Its served label (`p5_runbook.go:308`) says "`refused_count` is positions carrying no comparator", which names only the third. So the set-run must serve the first two **separately and under their own names**, and must never be reconciled against `refused_count`, which counts a wider population. |
-| The position status vocabulary is closed | `internal/store/risk.go:1563-1568`: `computed`, `refused` | `input == nil` implies refused-in-batch or unrebuildable, with no third case. That is what makes an exact census partition possible. |
+| The position status vocabulary is closed **in Go only**, and nothing below it enforces the closure | `internal/store/risk.go:1563-1568`: `computed`, `refused`. But the column is bare `TEXT NOT NULL` with the vocabulary in a COMMENT (`internal/store/migrations/00013_risk_tables.sql:265-272`), `WriteRiskBatch` binds `p.Status` without validating it (`internal/store/risk.go:1281-1302`), and `reconstructAll` skips a non-`Computed` row **without setting `reconstructionErr`** (`cmd/api/read.go:692-696`) | `input == nil` implies refused-in-batch or unrebuildable **for every status token the Go writer emits**, and for no other. A row carrying a third token is in none of the three census cells while still counting in `batch_positions` (`cmd/api/handlers.go:692`). REV4: the exact census partition is therefore **enforced by a fail-closed reader**, not inherited from the vocabulary. Section 2.9. |
 | `measureRunBook` and `Waterfall` **return on the first bad position** | `cmd/api/p5_runbook.go:656-698`; `internal/risk/waterfall.go:226-239` | Measuring the **whole** book, rather than the engines the request actually needs, would let a defective position on an engine no requested scenario covers refuse the whole set. The shared measure must be **union-scoped**, and each after measure must be **scenario-scoped**. |
 | An empty or fully refused book serves an all-zero engine row under a green census | `cmd/api/p5_runbook.go:720` returns before the Waterfall when the book is empty; `p5_runbook.go:570-576` substitutes `newRunMeasure()` when an engine has no measure; `cmd/api/handlers.go:714` sets `StressCoverageIsFull = ExcludedByThisLayer == 0 && len(withheld) == 0`; `cmd/api/read.go:398-406` "Zero POSITIONS stay legal" | A batch whose positions are all refused yields `excluded_by_this_layer: 0`, no withheld engine, `stress_coverage_is_full: true`, `in_book: 0`, and every aggregate `"0"`, including the denominator. An engine with zero measurable accounts must be a **named absence**, never a numeric row. |
 | Withheld engines still enter the run **on the single-scenario route** | `cmd/api/p5_runbook.go:425-440` filters on `covers(sc.Engines, p.Engine)` only; the withheld skip happens later, at `p5_runbook.go:562-565` | Two consequences. `len(beforeInputs)` (today's `coverage.in_book`) includes positions of a withheld covered engine that contribute no row, so any "positions in the run equals the sum of the engine rows" law is false there. And a defective position on a covered-but-withheld engine reaches `measureRunBook` and `risk.Waterfall` and **500s the single route**, which is the asymmetry Invariant 5 must not paper over. |
@@ -364,11 +364,47 @@ SetRunShockReach:
   marks_base_snapped             integer   rows with base_snapped == true
   marks_cap_bound                integer   rows with cap_bound == true
   held_flat_marks                integer   distinct held-flat marks over this scenario's book
-  held_flat_assets               Address[] the distinct assets behind them, sorted. Addresses
-                                           only; the exact held values are on the
+  held_flat_assets               SetRunHeldFlatAsset[]
+                                           the distinct (chain, asset) identities behind them,
+                                           deduplicated and sorted by (chain_id, asset).
+                                           IDENTITIES only; the exact held values are on the
                                            single-scenario route.
   note                           string    the arm's own sentence
+
+SetRunHeldFlatAsset:                       sealed, additionalProperties: false,
+                                           required: [chain_id, asset]
+  chain_id                       integer   int64. The chain this mark was held flat ON.
+  asset                          Address
 ```
+
+**`held_flat_assets` is a (chain, asset) pair and NOT a bare address, and this is
+a REV4 correction to a shape that lost identity the computation itself keys
+on.** Revision 3 served `Address[]`. Every layer that produces this list is keyed
+by the pair:
+
+- `HeldFlatInput` carries `Asset` **and** `ChainID` (`internal/risk/scenario.go:623-629`);
+- the propagation lookup that decides held-flat-versus-applied is
+  `responses[responseKey(p.ChainID, p.Asset)]` (`scenario.go:670-673`, `:682-689`),
+  and `responseKey` is literally `fmt.Sprintf("%d|%s", chainID, ...)`
+  (`scenario.go:792-794`);
+- the existing wire component for the same fact already requires it: `HeldFlat`
+  is `required: [asset, chain_id, source, value]` (`api/openapi.yaml:1921-1929`).
+
+So an address-only array **collapses two genuinely different marks into one
+entry** whenever the same address appears on two chains, which is not exotic on a
+book spanning Ethereum and OP: the response would then serve `held_flat_marks: 2`
+beside a one-element `held_flat_assets`, and a reader checking the count against
+the list finds a contradiction the body cannot resolve. Worse in the direction
+this document cares about, it would be a **named absence that names the wrong
+thing**: "this mark was held flat" without saying where, on a surface whose whole
+job is to say which marks the model did not claim. `held_flat_marks` is `len` of
+the held-flat rows and `held_flat_assets` is their distinct identities, and with
+the pair those two are reconcilable by construction.
+
+The component is sealed for the same reason every other component here is: it is
+an identity, and an identity that admits extra properties is not one. It carries
+no `source` and no `value`. `HeldFlat` on the single-scenario route carries both
+and remains where a reader goes for them (section 6.4 prices exactly this trade).
 
 **The three `marks_held_by_*` counts are a partition, and the three flag counts
 are not.** Exactly:
@@ -457,13 +493,19 @@ otherwise invent an implication:
   (`p5_runbook.go:425-440`). Test Law 2's applied-shock row is conditional on no
   covered engine being withheld, and Test Law 13 asserts the subset relation in
   the withheld fixture.
-- **`held_flat_assets` carries addresses, not values, and it is complete.** The
-  full held-flat rows with their exact marks are 2,287 B on a single measured body
-  and are the single-scenario route's job. The distinct-address list is roughly
-  720 B of that (section 6.4 does the arithmetic), a saving of about three times
-  rather than the ten this document once claimed. It is **not truncated**: a
-  bounded sample of named absences is a hole with a number beside it, which is the
-  one thing this surface may not serve.
+- **`held_flat_assets` carries (chain, asset) IDENTITIES, not values, and it is
+  complete.** The full held-flat rows with their exact marks and sources are
+  2,287 B on a single measured body and are the single-scenario route's job. The
+  distinct-identity list is roughly 1,090 B of that (section 6.4 does the
+  arithmetic), a saving of about two times rather than the three an address-only
+  list would have given or the ten this document once claimed. The extra ~370 B
+  is the chain id, and it is not optional: the propagation lookup that put these
+  marks in `held_flat` is keyed `(chain_id, asset)` (`scenario.go:670-673`,
+  `:682-689`, `:792-794`), so an address alone does not identify the mark it
+  names. It is **not truncated**: a bounded sample of named absences is a hole
+  with a number beside it, which is the one thing this surface may not serve.
+  Deduplication is over the PAIR, so two chains' entries for one address are two
+  entries and `held_flat_marks` stays reconcilable against the list.
 
 **Why not a `shock_did_not_reach` absence in the `SetRunEngineAbsence` manner.**
 Considered and rejected. Shock reach is a property of the **scenario against the
@@ -777,10 +819,67 @@ Two properties follow, and both are asserted rather than asserted-about:
   `refused_in_batch`, `unrebuildable` equals the corresponding set-level field
   (`batch_positions`, `in_book`, `refused_in_batch`, `excluded_by_this_layer`).
 - `batch_positions == in_book + refused_in_batch + excluded_by_this_layer`,
-  exactly, because the position status vocabulary is closed to
-  `{computed, refused}` (`internal/store/risk.go:1563-1568`) and
-  `reconstructAll` records a reconstruction error for every computed row it fails
-  on. There is no third way for a position to be absent from the book.
+  exactly, **and the census FAILS CLOSED to make that true, rather than
+  asserting it about data nothing constrains.** REV4 repair; see below.
+
+**THE EXACTNESS CLAIM WAS UNEARNED, AND THE REPAIR IS A REFUSAL RATHER THAN A
+REWORDING.** Revision 3 justified the partition by "the position status
+vocabulary is closed to `{computed, refused}`
+(`internal/store/risk.go:1563-1568`)". That vocabulary is closed **in Go and
+nowhere else**, and no layer between the Go constant and this census enforces it:
+
+| layer | what it does with `status` | citation |
+|---|---|---|
+| the column | bare `TEXT NOT NULL`, no CHECK; the vocabulary is a COMMENT one line above it (`-- 'computed' \| 'refused'`) | `internal/store/migrations/00013_risk_tables.sql:265-272` |
+| the writer | binds `p.Status` straight into the INSERT; validates nothing about it | `internal/store/risk.go:1281-1302` |
+| the reader | `reconstructAll` skips any row that is not `RiskPositionComputed` and, crucially, **sets no `reconstructionErr` when it skips** | `cmd/api/read.go:692-696` |
+
+So a row persisted with a third token, say `"compute"`, lands in **no cell of
+this census**: it is not `in_book` (never rebuilt, `p.input == nil`), not
+`refused_in_batch` (`coverage()`'s test is the POSITIVE `p.Status ==
+store.RiskPositionRefused`, `cmd/api/handlers.go:701`), and not
+`excluded_by_this_layer` (`p.reconstructionErr` is empty, `handlers.go:704`).
+`batch_positions` counts it, because that is `len(positions)`
+(`handlers.go:692`). The stated equality would then be **false on a served 200**,
+and worse than false: `book_is_measurable` would read true, `excluded` would be
+empty, and the response would drop a row while publishing a census that says
+nothing was dropped. That is the silent-hole class this whole surface exists to
+refuse, arrived at through an equality the document asserted instead of enforced.
+
+**The census therefore classifies every position row POSITIVELY into exactly
+three classes and refuses the whole request on anything else.** The three, and
+nothing else is admissible:
+
+1. **computed and rebuilt**, that is `p.Status == store.RiskPositionComputed`,
+   `p.reconstructionErr == ""`, `p.input != nil` → `in_book`;
+2. **refused**, that is `p.Status == store.RiskPositionRefused` →
+   `refused_in_batch`;
+3. **computed with a reconstruction failure**, that is
+   `p.Status == store.RiskPositionComputed`, `p.reconstructionErr != ""` →
+   `excluded_by_this_layer` and the `excluded[]` row.
+
+Anything else, whether a third status token, a `refused` row that somehow carries
+a reconstruction error, or a computed row with neither an input nor an error, is
+**500 `internal` with a named error, never a 200**. Section 4.2 carries the
+register row. The message names the engine, the account and the offending status
+verbatim through `sanitize`, and says why the request is refused rather than
+served: no cell of this census could hold that row, so any census served beside
+it would be arithmetic about a book the response does not describe.
+
+This is the same fail-closed shape the transition-matrix spec's
+`classifyUnmeasured` takes for the same reason and against the same missing
+constraint, and the two must stay in step: both classify on the POSITIVE
+predicate of the coverage counter they feed, never on the negation of the other.
+
+**The reader defends regardless of the writer.** Hardening the write path, with a
+`CHECK (status IN ('computed','refused'))` on the column or validation in
+`WriteRiskBatch` (`internal/store/risk.go:1281`), is worth doing and is recorded
+as a follow-on in the open questions, not as a precondition. A CHECK constraint
+is a migration and this wave adds none; more to the point, a census whose
+correctness depends on a constraint in another repo layer is a census that is
+correct by assumption. The constraint would make this refusal arm provably dead.
+Until then it is merely unreached, and it is what keeps the served equality an
+equality.
 
 Note that this partition does **not** hold on the existing single-scenario route,
 where `in_book` is `len(beforeInputs)` and positions on engines the scenario does
@@ -901,7 +1000,11 @@ consider `in_book == 0` and would read green over an unmeasurable book.
    `unmeasurable_engines`, `withheld_engines` and `covered_engines` are sorted by
    engine name; `shock_reach.applied_shocks` is sorted by the same
    `appliedShockKey` the single route uses (`p5_runbook.go:537`) and
-   `shock_reach.held_flat_assets` by address; `coverage.engines` likewise. Two
+   `shock_reach.held_flat_assets` by **`(chain_id, asset)`, chain id ascending
+   first and the lowercased address second**, which is also the key it is
+   deduplicated on; `coverage.engines` likewise. Sorting by address alone would
+   leave the order of two chains' entries for one address unspecified, which is
+   exactly the byte-nondeterminism this clause exists to forbid. Two
    set-runs with the same body against the same batch serve byte-identical
    responses modulo `served_at`, `evaluation.resolved_at`,
    `evaluation.probed_at` and the derived age fields.
@@ -939,9 +1042,27 @@ the whole request: 500.**
 
 Because the shared measure is union-scoped and each after measure is
 scenario-scoped (section 3.6, 3.7), Class 2 fires only on positions the request's
-own scenarios reach. **The set refuses only if a member would have refused
-alone.** The converse does not hold and section 3.6 says why; Invariant 5 states
-the direction that is true and names the exception.
+own scenarios reach. **The set refuses with an ARITHMETIC 500 only if a member
+would have refused alone.** The converse does not hold and section 3.6 says why;
+Invariant 5 states the direction that is true and names the exception.
+
+**The scope word "arithmetic" is load-bearing and REV4 adds it.** The unqualified
+sentence was false, because this endpoint carries refusal sources the
+single-scenario route does not have at all, so no member could have exhibited
+them alone:
+
+- **the freshness probe is SET-ONLY.** `NewestServableBatchAt` (section 3.8) runs
+  once per set-run and exists on no other route; a failure of that statement is a
+  500 with no single-scenario counterpart to compare against.
+- **the census classification is SET-ONLY**, for the same reason
+  `SetRunCoverage` is a new component: the single route's `coverage()` counts an
+  unclassifiable row into `batch_positions` and quietly into nothing else
+  (section 2.9), so it serves 200 where the set-run refuses.
+
+Both are set-level machinery answering set-level questions, and both refuse the
+whole request rather than serving a body they cannot vouch for. The one-way
+implication is a statement about the ARITHMETIC blast radius, the thing the union
+scoping actually bounds, and it is written that way everywhere it appears.
 
 So: **no `scenario_refusals[]` array, and no partial 200.** In a 200,
 `requested_scenario_ids` and `results[].scenario_id` are the same multiset, and
@@ -977,6 +1098,7 @@ What does live inside the 200 is the class that is **not a failure**:
 | 503 | `set_run_busy` | the in-flight set-run bound is full | **`SetRunBusyBody`**, its own type, naming the bound and the count in flight. **No `Retry-After`.** Section 6.2. |
 | 503 | `unavailable` | no complete servable batch | `ErrorBody` plus `Retry-After`, the existing register unchanged |
 | 500 | `internal` | any arithmetic refusal, anywhere in the set | `ErrorBody`. **No partial body.** |
+| 500 | `internal` | **a position row the census cannot classify** into one of section 2.9's three positive classes: a status outside `{computed, refused}`, a `refused` row carrying a reconstruction error, or a computed row with neither an input nor an error | `ErrorBody` naming the engine, the account and the offending status verbatim through `sanitize`. **No partial body and no 200.** This refusal is a property of the BOOK rather than of the arithmetic, so it is reachable on a request whose scenarios would each have served alone; Invariant 5's one-way implication is scoped to arithmetic 500s for exactly this reason. |
 
 ```
 SetRunBusyBody:
@@ -1044,7 +1166,7 @@ is code-first, status-second:** read the error envelope, switch on
 | **`CONTRADICTORY BOOK`** (existing, applied per result) | the three engine arrays are not a partition of `covered_engines`, or an engine repeats within any of them | R12's rule at result granularity. One result contradicting itself refuses **that result only**: it is a statement about one scenario's answer, not about the set's membership. |
 | **`COVERAGE SKEW`** (new) | a result's served `covered_engines` disagrees with the listing's `engines` for that id **while the identity triple agrees** | A contract violation: the definition changed without its `version` moving. Not silently reconciled in either direction. Row refused, named. Test Law 12 is the server-side law that makes this unreachable in a correct deployment. |
 | **`DEFINITION CHANGED`** (existing) | the identity triple on a result disagrees with the listing | Unchanged. `servedIdentity` reads `scenario_id` and `scenario_version` off the result and `scenario_config_version` off the envelope. |
-| **`SHOCK DID NOT REACH`** (new, per result) | `shock_reach.reach` is `no_mark_moved` or `no_shock_reached_the_book` | **No bar, on any engine of that result.** The cell states which, and it is **composed from the three `marks_held_by_*` counts, never from a single flag count**. For `no_mark_moved`: "every mark this scenario's matrix describes came back at the value it started at: T of M pinned by the stable snap, a snapped base or a bound cap, D held at the factor this scenario declared, A unchanged by exact-integer arithmetic", printing only the nonzero terms. For `no_shock_reached_the_book`: "no price input in this book is described by this scenario's propagation matrix; H marks were held flat instead, listed in `held_flat_assets`". Revision 2 mandated "(K of K snapped)", which prints "3 of 4 snapped" on `stable_depeg_0995_in_band` (three `snapped`, one `base_snapped`) and "0 of 9 snapped" on `dm_composition_census`. Both are false sentences under a true header. The `before_*` numbers still render, because they are a true measurement. |
+| **`SHOCK DID NOT REACH`** (new, per result) | `shock_reach.reach` is `no_mark_moved` or `no_shock_reached_the_book` | **No bar, on any engine of that result.** The cell states which, and it is **composed from the three `marks_held_by_*` counts, never from a single flag count**. For `no_mark_moved`: "every mark this scenario's matrix describes came back at the value it started at: T of M pinned by the stable snap, a snapped base or a bound cap, D held at the factor this scenario declared, A unchanged by exact-integer arithmetic", printing only the nonzero terms. For `no_shock_reached_the_book`: "no price input in this book is described by this scenario's propagation matrix; H marks were held flat instead, listed in `held_flat_assets`". Each held-flat entry renders as its asset **with its chain**, never as a bare address: the matrix lookup is keyed `(chain_id, asset)` (`scenario.go:682-689`, `:792-794`), so an address printed alone names a mark the reader cannot locate and, on a book spanning two chains, can read as one absence where there are two. Revision 2 mandated "(K of K snapped)", which prints "3 of 4 snapped" on `stable_depeg_0995_in_band` (three `snapped`, one `base_snapped`) and "0 of 9 snapped" on `dm_composition_census`. Both are false sentences under a true header. The `before_*` numbers still render, because they are a true measurement. |
 | **`DECLARED HOLD`** (new in revision 3, per result) | `shock_reach.reach === "all_shocks_declared_at_identity"` | **No bar, on any engine of that result**, and the cell must **not** borrow `SHOCK DID NOT REACH`'s sentence. "This scenario declares all N of its shocks at the factor 1/1: it asks for no price move, by decision rather than by accident." The scenario's `path_assumption` is shown beside it, because on `dm_composition_census` that field is the disclosure ("no move is asserted"). The three deltas are zero **by construction** and nothing about the book or the oracle may be inferred from them. `applied_shocks` is normally non-empty in this arm and the cell says so, so a reader does not read the emptiness of a bar as the emptiness of a matrix. |
 | **`PARTLY REACHED`** (new, per result) | `shock_reach.reach === "some_marks_held"` | Bars draw, and the cell carries `marks_moved` of `applied_shocks.length` **plus the cause split of the held remainder** (`marks_held_by_declared_factor`, `marks_held_by_transform`, `marks_held_by_arithmetic`), never the flag counts alone. A bar over a partly applied shock is a real bar with a stated qualification, never an unqualified one. |
 | **`PROJECTION, NO SPOT PASS`** (new, per result) | `shock_reach.reach === "projection_no_spot_pass"` | The three delta bars are never drawn for this row. The `projection` block is the cell. Its declared `shocks` are shown as declared and explicitly not applied. |
@@ -1295,15 +1417,21 @@ Of that list, exactly one item is a thing a tornado must carry:
 insensitive book are the same three zero bars. Everything else on the list except
 `held_flat` is drill-down and stays on the single-scenario route.
 
-**`held_flat` is carried as a count plus the distinct asset addresses, and that
-costs about 720 B, not the 150 to 250 B an earlier pass claimed.** The
+**`held_flat` is carried as a count plus the distinct `(chain_id, asset)`
+identities, and that costs about 1,090 B, not the 720 B an address-only array
+would have cost and not the 150 to 250 B an earlier pass claimed.** The
 arithmetic, since the claim is load-bearing for the total below. The contract's
 own captured run-book example serves **3** `held_flat` rows, about 427 B compact,
 so about **142 B per row**; the measured 2,287 B on `eth_minus_30` is therefore
-about **16 rows**. Collapsing 16 rows to an address-only array is about
-`16 x 45 B`, roughly **720 B**. The saving against the full rows is about **three
-times**, not ten, and the list is still carried **complete**: a truncated list of
-named absences is a hole with a number beside it. Revision 2's 150 to 250 B was
+about **16 rows**. Collapsing 16 rows to an address-only array would be about
+`16 x 45 B`, roughly 720 B; the sealed pair is
+`{"chain_id":1,"asset":"0x…40 hex…"}` plus its separator, **68 B**, so
+`16 x 68 B` is roughly **1,090 B**. The saving against the full rows is about
+**two times**, not three and not ten, and the ~370 B difference buys the identity
+the propagation lookup is keyed on (section 2.5): without it two chains' marks
+for one address are one entry and `held_flat_marks` cannot be reconciled against
+the list. The list is still carried **complete**: a truncated list of named
+absences is a hole with a number beside it. Revision 2's 150 to 250 B was
 inconsistent with its own measurement, and every figure derived from it was
 understated by roughly the same factor.
 
@@ -1313,34 +1441,36 @@ understated by roughly the same factor.
 SetRunEngineSummary   24 scalars about 490 B + a five-clause engine note about 230 B
                                                                      about   720 B
 SetRunShockReach      applied_shocks           MEASURED 966 B on eth_minus_30
-                      held_flat_assets         about 720 B (derived above)
+                      held_flat_assets         about 1,090 B (derived above)
                       13 scalars and the enum  about 280 B
                       the arm's note           about 220 B
-                                                                     about 2,200 B
+                                                                     about 2,560 B
 result overhead       identity, label, path_assumption, shocks, three
                       engine arrays, two counts, note              about 500-700 B
 ```
 
-A **two-engine one-axis** result is therefore about **4.2 KB** and a
-**one-engine one-axis** result about **3.5 KB**. An eight-shock DM-only result
+A **two-engine one-axis** result is therefore about **4.6 KB** and a
+**one-engine one-axis** result about **3.9 KB**. An eight-shock DM-only result
 (`dm_composition_census`, a nine-row matrix and correspondingly fewer held-flat
-marks) is about the same as a one-engine one-axis result, near **3.6 KB**:
-`shock_reach` trades applied rows against held-flat addresses rather than adding
+marks) is about the same as a one-engine one-axis result, near **4.0 KB**:
+`shock_reach` trades applied rows against held-flat identities rather than adding
 both. Fifteen mixed results plus the envelope (batch 1.3 KB, coverage with a
 per-engine census about 700 B, the shared `notes[]` about 1.5 KB, the echoed ids
-about 400 B) is about **52 to 68 KB**.
+about 400 B) is about **57 to 74 KB**.
 
-That is up from the 33 to 42 KB revision 2 estimated and from the 25 to 31 KB an
-earlier pass estimated, and the whole increase is `shock_reach` correctly priced.
-It is still the right trade: about **33 KB** buys the difference between "a 0.5
+That is up from the 52 to 68 KB revision 3 estimated (the ~370 B per result the
+chain id costs, times fifteen, is about 5.5 KB of it), from the 33 to 42 KB
+revision 2 estimated and from the 25 to 31 KB an earlier pass estimated, and the
+whole increase is `shock_reach` correctly priced.
+It is still the right trade: about **38 KB** buys the difference between "a 0.5
 percent depeg does nothing to this book", "the oracle pinned it back to par
 before it reached this book" and "this scenario declared every one of its eight
 shocks at 1/1 and asked for nothing to move", which are three different findings
 that render as the same three zero bars without it. That is the D-013 defect this
-whole document exists to refuse, and it is worth 33 KB.
+whole document exists to refuse, and it is worth 38 KB.
 
 Against 15 full bodies (about 440 KB, extrapolated from the two measurements) the
-ratio is roughly **7 to 8 times**, not the 10 to 13 revision 2 claimed.
+ratio is roughly **6 to 8 times**, not the 10 to 13 revision 2 claimed.
 
 **Decision: summary only. No `detail: "full"` mode in 1.7.0.** Two response
 shapes on one endpoint means two contract examples to capture, two schema sweeps
@@ -1411,7 +1541,7 @@ checks the captured body must satisfy**, and nothing else.
         "marks_base_snapped":            <integer>,
         "marks_cap_bound":               <integer>,
         "held_flat_marks":               <integer>,
-        "held_flat_assets":              [<Address>, ...],
+        "held_flat_assets":              [{"chain_id": <int64>, "asset": <Address>}, ...],
         "note":                          <the arm's sentence>
       },
       "covered_engines":      [<engine>, ...],
@@ -1495,6 +1625,15 @@ specification of the example:
    len(applied_shocks)`; and the held partition closes exactly:
    `marks_moved + marks_held_by_declared_factor + marks_held_by_transform +
    marks_held_by_arithmetic == len(applied_shocks)`.
+8. Per result, `shock_reach.held_flat_assets` entries are pairwise distinct on
+   `(chain_id, asset)` and ascending on that pair, and
+   `len(held_flat_assets) <= held_flat_marks` (a chain may hold two marks of one
+   asset from two sources, so the two are not equal in general). The captured
+   example's book must reach at least one held-flat mark, or the component is
+   captured empty and the contract's example never shows its shape.
+9. `coverage.batch_positions == in_book + refused_in_batch +
+   excluded_by_this_layer`, which the captured body satisfies because the census
+   refuses rather than serving a body that would not (section 2.9).
 
 ---
 
@@ -1550,7 +1689,18 @@ specification of the example:
    |---|---|
    | `shock_reach.applied_shocks` | `applied_shocks`, element for element |
    | `shock_reach.held_flat_marks` | `len(held_flat)` |
-   | `shock_reach.held_flat_assets` | the sorted distinct `held_flat[].asset` |
+   | `shock_reach.held_flat_assets` | the distinct `(held_flat[].chain_id, held_flat[].asset)` PAIRS, sorted by that pair |
+
+   **The held-flat row is a pair-for-pair mapping and REV4 states it as one.**
+   The single body's `HeldFlat` requires `chain_id` beside `asset`
+   (`api/openapi.yaml:1921-1929`) because `HeldFlatInput` carries both
+   (`internal/risk/scenario.go:623-629`) and the lookup that produced the row is
+   keyed on both (`scenario.go:682-689`, `:792-794`). Projecting the single
+   body's rows down to addresses before comparing would make the mapping pass
+   against a set-run that had lost the chain id, which is the defect this row is
+   supposed to catch. The fixture must hold **one address on two chains** in the
+   held-flat set, or the mapping is satisfiable by an address-only implementation
+   and the law proves nothing.
 
    The `movers_total` row is **engine-conditional**, selected by
    `movement_rule`. Revision 1 mapped `movers_total` to `flipped_to_eligible` for
@@ -1614,7 +1764,9 @@ specification of the example:
    `positions_answered + positions_withheld == Σ` over `covered_engines` of
    `coverage.engines[e].measurable`.
    (e) `coverage.batch_positions == coverage.in_book + coverage.refused_in_batch
-   + coverage.excluded_by_this_layer`.
+   + coverage.excluded_by_this_layer`. This clause asserts the equality on a
+   served 200; Test Law 25 is what makes it true rather than lucky, by driving
+   the row that would break it and asserting no 200 is served at all.
    (f) Σ over `coverage.engines[]` of each of `positions_in_batch`, `measurable`,
    `refused_in_batch`, `unrebuildable` equals the corresponding set-level field.
    (g) per (result, engine), `refused_in_batch_positions ==
@@ -1893,8 +2045,14 @@ specification of the example:
       requires a shocked asset to have a matrix row. Assert additionally that a
       book **holding** a shocked asset that has no matrix row of its own still
       lands here, with that asset counted in `held_flat_marks` and named in
-      `held_flat_assets`, and that the served note names the matrix and not the
-      shock list.
+      `held_flat_assets` **by its `(chain_id, asset)` pair**, and that the served
+      note names the matrix and not the shock list. Since the matrix is looked up
+      by that pair (`scenario.go:682-689`, `:792-794`), the discriminating
+      fixture is one address with a matrix row on ONE chain and none on the
+      other: the chain that has a row lands in `applied_shocks` and the chain
+      that does not lands in `held_flat_assets`, one address in both arrays under
+      two different chain ids. An address-only list cannot state that book at
+      all, and this is the assertion that says so.
     - `no_mark_moved` from `stable_depeg_0995_in_band` over the Test Law 17(A)
       fixture.
     - `some_marks_held` from a **seeded book**, because the committed set has no
@@ -1995,7 +2153,11 @@ specification of the example:
     batch produce identical bytes modulo the three clock fields and the derived
     ages; `results` follows request order including a deliberately unsorted
     request; every engine-bearing array within a result is sorted by engine name,
-    `applied_shocks` by `appliedShockKey` and `held_flat_assets` by address.
+    `applied_shocks` by `appliedShockKey` and `held_flat_assets` by
+    `(chain_id, asset)`. The fixture must carry **one address held flat on two
+    chains**, so the pair ordering is exercised rather than assumed: an
+    address-only comparator leaves those two entries in an order the map walk
+    chooses, and this is the only assertion that can see it.
 
 23. **`TestReadOnlyGateAdmitsExactlyTwoPosts`.** `POST
     /v1/scenarios/run-book-set` is admitted; `POST
@@ -2006,6 +2168,53 @@ specification of the example:
 
 24. `TestAPIIssuesNoWritingSQL` already sweeps the package; the new file is
     covered with no change.
+
+25. **`TestSetRunCensusRefusesAThirdStatusToken`** (NEW in REV4, and it is the
+    law that earns section 2.9's equality). Test Law 4(e) asserts the census
+    partition on a served body; it cannot fail on a book where the partition is
+    already true, and every committed fixture writes only `computed` and
+    `refused`. This law constructs the row the partition has no cell for.
+
+    Seed any batch through the ordinary writer, then mutate exactly one position
+    row's status to a third token with a direct admin statement:
+    `UPDATE risk_positions SET status = 'compute' WHERE batch_id = $1 AND engine
+    = $2 AND account = $3`. The SQL is admin-side test setup, not handler code,
+    so `TestAPIIssuesNoWritingSQL` is unaffected; the mutation is legal against
+    the schema precisely because the column carries no CHECK
+    (`internal/store/migrations/00013_risk_tables.sql:265-272`), which is the
+    fact under test. It changes no count, so `riskBatchCompleteConjuncts` still
+    holds and the batch is still resolved and servable, so the request gets far
+    enough to reach the census, which is the point.
+
+    Assertions:
+    (a) **No 200 is served.** The response is 500 with `code: "internal"`, and
+    the assertion is on the status and code rather than only on the absence of
+    the equality, because "the 200 was wrong" and "there was no 200" are
+    different outcomes and only the second is this spec's claim.
+    (b) The message names the engine, the account and the offending status
+    verbatim through `sanitize`, so an operator can find the row without reading
+    the code.
+    (c) **The body is not partial:** no `results`, no `coverage`, no `batch`.
+    (d) A control run over the same fixture with the mutation reverted serves
+    200 and satisfies Test Law 4(e), so the law cannot pass by refusing
+    everything.
+    (e) The negative control that pins the DEFECT this replaces: assert directly
+    that the mutated row is counted in `batch_positions` by `coverage()`'s own
+    `len(positions)` (`cmd/api/handlers.go:692`) while matching neither
+    `p.Status == store.RiskPositionRefused` (`:701`) nor `p.reconstructionErr !=
+    ""` (`:704`) and never reaching `p.input` (`cmd/api/read.go:694`). Assert
+    this at the `positionRow` level, in the same package, so the test states the
+    reason the refusal exists and not merely its effect.
+
+    Mutations killed: reintroducing the equality as an assumption inherited from
+    the Go constant; classifying by `p.Status != store.RiskPositionComputed`,
+    which sweeps a third token into `refused_in_batch` and serves a green census
+    pointing at a count that does not hold the row; serving a 200 with a
+    `scenario_refusals`-style apology instead of refusing the request; adding an
+    `otherwise` arm that routes the unclassifiable row into
+    `excluded_by_this_layer`, which would name it in `excluded[]` under
+    `API_RECONSTRUCTION_MISMATCH` and claim this layer tried to rebuild a row it
+    never attempted.
 
 ---
 
@@ -2185,8 +2394,17 @@ that were filtered.
    `positions_answered + positions_withheld == Σ` over `covered_engines` of the
    census's `measurable`. At set level,
    `batch_positions == in_book + refused_in_batch + excluded_by_this_layer`
-   exactly, which holds because the position status vocabulary is closed to
-   `{computed, refused}`. The per-engine census sums to each set-level field, and
+   exactly, **and it holds because the census FAILS CLOSED, not because the
+   status vocabulary is closed.** It is closed in Go
+   (`internal/store/risk.go:1563-1568`) and in no layer beneath: the column has
+   no CHECK (`00013_risk_tables.sql:265-272`), `WriteRiskBatch` validates nothing
+   (`risk.go:1281`), and `reconstructAll` skips a non-computed row without
+   setting `reconstructionErr` (`read.go:692-696`), so a third token would sit in
+   `batch_positions` and in none of the other three. Every row is therefore
+   classified by the POSITIVE predicate of the counter it feeds, into exactly one
+   of section 2.9's three classes, and a row matching none of them refuses the
+   whole request with a named 500 rather than being served under an equality it
+   breaks. The per-engine census sums to each set-level field, and
    per (result, engine) the summary's `accounts`, `refused_in_batch_positions`
    and `unrebuildable_positions` equal the census's `measurable`,
    `refused_in_batch` and `unrebuildable`. `coverage.in_book` is the whole
@@ -2198,11 +2416,19 @@ that were filtered.
    over the same batch, under the explicit mapping of Test Law 2. The shared
    before measure is an optimization, never a different measurement.
 
-   The blast-radius property is a **one-way implication and is stated as one**:
-   because the shared measure is union-scoped over the requested scenarios'
-   covered engines and each after measure is scoped to its own scenario's covered
-   engines, **the set refuses with 500 only if at least one requested scenario
-   would have refused alone.**
+   The blast-radius property is a **one-way implication, scoped to ARITHMETIC,
+   and is stated as both**: because the shared measure is union-scoped over the
+   requested scenarios' covered engines and each after measure is scoped to its
+   own scenario's covered engines, **the set refuses with an ARITHMETIC 500 only
+   if at least one requested scenario would have refused alone.**
+
+   The scope excludes the two SET-ONLY refusal sources, which have no
+   single-scenario counterpart and so cannot be compared against one: the
+   freshness probe (section 3.8, run once per set-run and present on no other
+   route) and the census classification refusal (section 2.9, where the single
+   route serves 200 over a row it silently counts into nothing). Section 4.1
+   names both. Dropping the scope word would make the invariant false on this
+   document's own section 2.9.
 
    The converse is **false**, and the exception is named rather than hidden. On
    the single-scenario route a covered-but-**withheld** engine's reconstructable
@@ -2265,7 +2491,10 @@ that were filtered.
    `all_shocks_declared_at_identity`; exact-integer arithmetic returned the value
    it started from counts in `marks_held_by_arithmetic`; and a mark the matrix
    never described counts in `held_flat_marks` and is named in
-   `held_flat_assets`. Those three counts plus `marks_moved` **partition**
+   `held_flat_assets` **by the `(chain_id, asset)` pair the matrix lookup itself
+   is keyed on** (`internal/risk/scenario.go:682-689`, `:792-794`), so a named
+   absence names one mark and never collapses two chains' marks into one entry.
+   Those three counts plus `marks_moved` **partition**
    `applied_shocks` exactly. `marks_snapped`, `marks_base_snapped` and
    `marks_cap_bound` are a flag census that may overlap and **never** attribute a
    cause: a par-marked stable under a 1/1 factor is served `snapped: true` and
@@ -2335,7 +2564,8 @@ that were filtered.
     byte-identical responses modulo `served_at`, `evaluation.resolved_at`,
     `evaluation.probed_at` and the derived age fields. `results` is in request
     order; every engine-bearing array is sorted by engine name, `applied_shocks`
-    by `appliedShockKey` and `held_flat_assets` by address.
+    by `appliedShockKey` and `held_flat_assets` by `(chain_id, asset)`, the same
+    pair it is deduplicated on.
 
 17. **COST IS BOUNDED, CHARGED, CONCURRENCY IS BOUNDED, AND EVERY REFUSAL SAYS
     WHAT IT IS.** `len(scenario_ids) <= max_set_run_scenarios` (24); the limiter is
@@ -2449,6 +2679,24 @@ that were filtered.
   existing required field means, and it needs its own example re-capture and its
   own client wave.
 
+- **Should `risk_positions.status` gain a CHECK constraint, or `WriteRiskBatch`
+  gain a status validation?** OPEN, RECOMMENDED as a follow-on, and **explicitly
+  not a precondition for this wave.** The Go vocabulary is closed
+  (`internal/store/risk.go:1563-1568`) while the column is bare `TEXT NOT NULL`
+  with the vocabulary in a comment
+  (`internal/store/migrations/00013_risk_tables.sql:265-272`) and the writer binds
+  `p.Status` unvalidated (`risk.go:1281-1302`). Either hardening would make
+  section 2.9's refusal arm **provably dead** rather than merely unreached, and
+  the CHECK is the stronger of the two because it also covers anything that
+  writes the table outside `WriteRiskBatch`. Neither belongs here: a CHECK is a
+  migration and this wave adds none, and more importantly the serving layer must
+  not depend on it. A census that is exact only because another layer is
+  well-behaved is exact by assumption, and this document's whole argument is that
+  an assumption asserted is not an assumption enforced. Ship the fail-closed
+  reader now; harden the writer next, and delete nothing from the reader when it
+  lands. Note the transition-matrix spec carries the same open question about the
+  same column for the same reason, and both should be closed by one change.
+
 - **Per-scenario failure semantics: named refusal inside a 200, or
   all-or-nothing?** RECOMMEND ALL-OR-NOTHING, twice over, and therefore no
   per-scenario refusal register at all. Every current failure mode is either a
@@ -2558,28 +2806,32 @@ histograms 6,302 B, `held_flat` 2,287 B, `out_of_model` 1,214 B, batch envelope
 carrier of `factor_num`, `factor_den`, `before`, `after`, `snapped`,
 `base_snapped` and `cap_bound`, which are what separate a swallowed move from a
 declared hold from a real finding; `held_flat` is carried as a count plus
-distinct addresses, priced below; the rest is drill-down. Twelve full bodies are
+distinct `(chain_id, asset)` identities, priced below; the rest is drill-down. Twelve full bodies are
 350,604 B; fifteen extrapolate to about 440 KB.
 
 DERIVED, the held-flat collapse, because an earlier pass asserted it without
 arithmetic. The contract's own captured run-book example serves 3 `held_flat`
 rows in about 427 B compact, so about 142 B per row; the measured 2,287 B on
-`eth_minus_30` is therefore about 16 rows. An address-only array of 16 distinct
-addresses is about `16 x 45 B`, roughly **720 B**, a saving of about three times
-rather than ten. The list is carried complete, never sampled.
+`eth_minus_30` is therefore about 16 rows. A `(chain_id, asset)` array of 16
+distinct identities is about `16 x 68 B`, roughly **1,090 B**, a saving of about
+two times rather than three or ten. An address-only array would have been about
+`16 x 45 B` or 720 B, and it is rejected because the propagation lookup that
+produced these rows is keyed on the pair (`internal/risk/scenario.go:682-689`,
+`:792-794`) and the existing `HeldFlat` component already requires `chain_id`
+(`api/openapi.yaml:1921-1929`). The list is carried complete, never sampled.
 
 ESTIMATED, and only estimated, because the shape does not exist:
 `SetRunEngineSummary` is 24 scalars plus a five-clause engine note, about 720 B;
-`SetRunShockReach` about **2.2 KB** (measured `applied_shocks` 966 B, derived
-`held_flat_assets` about 720 B, 13 scalars and an enum about 280 B, the arm's
+`SetRunShockReach` about **2.6 KB** (measured `applied_shocks` 966 B, derived
+`held_flat_assets` about 1,090 B, 13 scalars and an enum about 280 B, the arm's
 note about 220 B), and about the same for an eight-shock DM-only scenario, which
-trades applied rows against held-flat addresses rather than adding both; a
-two-engine one-axis result about **4.2 KB**, a one-engine one-axis result about
-**3.5 KB**; fifteen mixed results plus envelope and per-engine census about
-**52 to 68 KB**. Ratio to shape B about **7 to 8 times**. Revision 2's 33 to 42 KB
+trades applied rows against held-flat identities rather than adding both; a
+two-engine one-axis result about **4.6 KB**, a one-engine one-axis result about
+**3.9 KB**; fifteen mixed results plus envelope and per-engine census about
+**57 to 74 KB**. Ratio to shape B about **6 to 8 times**. Revision 2's 33 to 42 KB
 and 10 to 13 times both rested on the 150 to 250 B held-flat figure its own
 measurement contradicts. The increase over the 25 to 31 KB an earlier pass
-estimated is `shock_reach`, correctly priced at about 33 KB across a
+estimated is `shock_reach`, correctly priced at about 38 KB across a
 15-scenario set, and it buys the difference between "a 0.5 percent depeg does
 nothing to this book", "the oracle pinned it back to par before it reached this
 book" and "this scenario declared all eight of its shocks at 1/1 and asked for
@@ -2625,7 +2877,8 @@ carry that claim. No `shock_reach` figure is measured, because the shape does no
 exist; its `applied_shocks` component is measured, at 966 B on `eth_minus_30`,
 and its `held_flat_assets` component is **derived** from two measurements (the
 2,287 B `held_flat` block on `eth_minus_30` and the contract's own 3-row captured
-example at about 142 B per row) rather than measured. Every arm and count in
+example at about 142 B per row) plus a counted per-entry width for the
+`(chain_id, asset)` pair, rather than measured. Every arm and count in
 section 2.5 is derived from the committed scenario files and from
 `internal/risk/scenario.go`, not from an observed body: the deployed binary
 serves no `shock_reach` and could not have exhibited the identity-factor arm.
