@@ -18,6 +18,14 @@
 //     null/zero disagreement between the pair is itself a refusal;
 //   - the crossings are derived FROM THE CELLS and are not `lane_changed_rows`;
 //   - a cell's null debt is carried as a null and never coerced to a number.
+//
+// Wave W-SK-B adds (Codex r56):
+//   - the unmeasured lane is DIAGONAL-ONLY: a cell with exactly one end there
+//     is refused even when every margin balances (the margin-preserving swap);
+//   - the visibility floor is DISCLOSED: floored ribbons are flagged, the
+//     layout counts them, and the 10,000-row collision class is pinned;
+//   - on the wad engine crit rides EVERY arrival below 1.00, held diagonals
+//     included; the Debt Manager's identical shape takes none.
 
 import { expect, test } from "@playwright/test";
 import type { LabRunBookEngine, RunBookTransitions } from "../../lib/runbook";
@@ -33,6 +41,7 @@ import {
   FLOW_NODE_W,
   FLOW_RIBBON_MAX,
   FLOW_RIBBON_MIN,
+  ribbonFloored,
   ribbonKind,
   ribbonThickness,
   transitionFlowLayout,
@@ -61,6 +70,89 @@ function reasonsFor(engine: LabRunBookEngine): string[] {
     throw new Error("expected this body to be refused, and it was accepted");
   }
   return reading.reasons;
+}
+
+/** One side with `rows` added to one bucket AND to its account count. */
+function bumpSide(
+  side: LabRunBookEngine["before"],
+  bucket: number,
+  rows: number,
+): LabRunBookEngine["before"] {
+  return {
+    ...side,
+    accounts: side.accounts + rows,
+    hf_histogram: {
+      ...side.hf_histogram,
+      buckets: side.hf_histogram.buckets.map((b, index) =>
+        index === bucket ? { ...b, count: b.count + rows } : b,
+      ),
+    },
+  };
+}
+
+/**
+ * The engine with 2 rows ADDED that sit in `< 0.90` BEFORE the shock and stay
+ * there: a held diagonal below 1.00, kept consistent on both sides (cells,
+ * margins, histograms, account counts, totals) so `readTransitions` accepts
+ * it as a valid body. Built the W-3L-D way: 2 rows against the Debt Manager's
+ * committed 1-row held diagonal, so a mirror-image bug cannot satisfy both.
+ */
+function withHeldBelowOne(engine: LabRunBookEngine): LabRunBookEngine {
+  const mutated = withMatrix(engine, (t) => ({
+    ...t,
+    outflows: t.outflows.map((outflow) =>
+      outflow.from === 0
+        ? {
+            ...outflow,
+            cells: [
+              { to: 0, rows: 2, debt_before_usd: "120000000000", debt_after_usd: "119000000000" },
+              ...outflow.cells,
+            ],
+          }
+        : outflow,
+    ),
+    from_rows: t.from_rows.map((rows, index) => (index === 0 ? rows + 2 : rows)),
+    to_rows: t.to_rows.map((rows, index) => (index === 0 ? rows + 2 : rows)),
+    total_rows: t.total_rows + 2,
+    measured_rows: t.measured_rows + 2,
+    held_rows: (t.held_rows ?? 0) + 2,
+  }));
+  return {
+    ...mutated,
+    before: bumpSide(mutated.before, 0, 2),
+    after: bumpSide(mutated.after, 0, 2),
+  };
+}
+
+/**
+ * The aave engine with its 3→0 fall widened from 1 row to 100, consistent on
+ * both sides. The 1-row unmeasured diagonal then sits at 1/100 of the one
+ * scale — 0.22px of honest ink — and must render at the floor, FLAGGED.
+ */
+function withWideFall(engine: LabRunBookEngine): LabRunBookEngine {
+  const mutated = withMatrix(engine, (t) => ({
+    ...t,
+    outflows: t.outflows.map((outflow) =>
+      outflow.from === 3
+        ? {
+            ...outflow,
+            cells: outflow.cells.map((cell) =>
+              cell.to === 0 ? { ...cell, rows: cell.rows + 99 } : cell,
+            ),
+          }
+        : outflow,
+    ),
+    from_rows: t.from_rows.map((rows, index) => (index === 3 ? rows + 99 : rows)),
+    to_rows: t.to_rows.map((rows, index) => (index === 0 ? rows + 99 : rows)),
+    total_rows: t.total_rows + 99,
+    measured_rows: t.measured_rows + 99,
+    lane_changed_rows: (t.lane_changed_rows ?? 0) + 99,
+  }));
+  return {
+    ...mutated,
+    before: bumpSide(mutated.before, 3, 99),
+    after: bumpSide(mutated.after, 0, 99),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +261,47 @@ test("a measured count the two sides do not support is refused", () => {
     total_rows: t.total_rows + 1,
   }));
   expect(reasonsFor(broken).join(" ")).toContain("while the two sides beside it report");
+});
+
+test("a cell with exactly ONE end in the unmeasured lane is refused: the margin-preserving swap", () => {
+  // Codex r56's mutant. The Debt Manager's balanced diagonals — (0→0) holds
+  // 1 row, (9→9) holds 1 row — swapped into (0→9) and (9→0). EVERY margin is
+  // unchanged: row sums, column sums, both histograms, all totals. Every sum
+  // check passes, and the picture would draw a measured row dissolving into
+  // the unmeasured lane and an unmeasured row materializing out of it — two
+  // measurements nobody made, rendered as measured movement. Only the
+  // lane-KIND law can refuse it: a row unmeasured in this run is unmeasured
+  // on BOTH sides, because refusal is row-level for the whole run.
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const swapped = withMatrix(engine, (t) => ({
+    ...t,
+    outflows: t.outflows.map((outflow) => {
+      if (outflow.from === 0) {
+        return {
+          ...outflow,
+          cells: outflow.cells.map((cell) => (cell.to === 0 ? { ...cell, to: 9 } : cell)),
+        };
+      }
+      if (outflow.from === 9) {
+        return {
+          ...outflow,
+          cells: outflow.cells.map((cell) => (cell.to === 9 ? { ...cell, to: 0 } : cell)),
+        };
+      }
+      return outflow;
+    }),
+  }));
+  const reasons = reasonsFor(swapped);
+  // BOTH offending cells are named — and NOTHING else fired, which is the
+  // proof the mutant really is margin-preserving: without this check the body
+  // would have been accepted whole.
+  expect(reasons).toHaveLength(2);
+  for (const reason of reasons) {
+    expect(reason).toContain("exactly one end in the unmeasured lane");
+    expect(reason).toContain("unmeasured on both sides");
+  }
+  expect(reasons.join(" ")).toContain("lane 0 (< 0.90) → lane 9 (not measured)");
+  expect(reasons.join(" ")).toContain("lane 9 (not measured) → lane 0 (< 0.90)");
 });
 
 // ---------------------------------------------------------------------------
@@ -334,6 +467,59 @@ test("ribbon thickness: one linear scale, anchored at the widest cell, floored a
   expect(ribbonThickness(0, 100)).toBe(0);
 });
 
+test("the floor's collision class is FLAGGED: widest 10,000, rows 1 and 681 render identical ink", () => {
+  // Codex r56's numbers, pinned exactly. With a 10,000-row widest cell the
+  // linear scale gives a 1-row cell 0.0022px and a 681-row cell 1.4982px —
+  // both render at the 1.5px floor, identical ink across a 681× difference —
+  // and BOTH carry the floored flag, because that identity is the one place
+  // the picture and the advertised scale disagree.
+  expect(ribbonThickness(1, 10000)).toBe(FLOW_RIBBON_MIN);
+  expect(ribbonThickness(681, 10000)).toBe(FLOW_RIBBON_MIN);
+  expect(ribbonThickness(681, 10000)).toBe(ribbonThickness(1, 10000));
+  expect(ribbonFloored(1, 10000)).toBe(true);
+  expect(ribbonFloored(681, 10000)).toBe(true);
+  // 682 rows is the first cell OFF the floor: unflagged and STRICTLY thicker.
+  expect(ribbonFloored(682, 10000)).toBe(false);
+  expect(ribbonThickness(682, 10000)).toBeGreaterThan(FLOW_RIBBON_MIN);
+  expect(ribbonThickness(682, 10000)).toBeGreaterThan(ribbonThickness(681, 10000));
+  // The widest cell is never floored, and an absent cell draws nothing rather
+  // than a flagged nothing.
+  expect(ribbonFloored(10000, 10000)).toBe(false);
+  expect(ribbonFloored(0, 10000)).toBe(false);
+  expect(ribbonFloored(1, 0)).toBe(false);
+});
+
+test("the layout counts its floored ribbons, and zero floored means zero disclosure", () => {
+  // Widen aave's fall to 100 rows, consistently on both sides — a VALID body,
+  // proven by the reader before the layout is asked anything.
+  const wide = withWideFall(engineOf(RUN_BOOK_ETH, "aave_v3_etherfi"));
+  expect(readTransitions(wide).kind).toBe("ok");
+  const layout = transitionFlowLayout(wide.hf_transitions, 900);
+
+  // The 1-row unmeasured diagonal sits at 1/100 of the scale — 0.22px of
+  // honest ink — so it renders AT the floor and is flagged; the 100-row fall
+  // keeps the 22px anchor, unflagged.
+  const fall = layout.ribbons.find((flow) => flow.ribbon.from === 3 && flow.ribbon.to === 0);
+  const diagonal = layout.ribbons.find((flow) => flow.ribbon.from === 9 && flow.ribbon.to === 9);
+  expect(fall?.thickness).toBe(FLOW_RIBBON_MAX);
+  expect(fall?.floored).toBe(false);
+  expect(diagonal?.thickness).toBe(FLOW_RIBBON_MIN);
+  expect(diagonal?.floored).toBe(true);
+  expect(layout.flooredCount).toBe(1);
+  expect(layout.flooredCount).toBe(layout.ribbons.filter((flow) => flow.floored).length);
+
+  // And the committed fixtures, whose widest cell IS 1 row, floor nothing:
+  // the disclosure exists only when a ribbon is actually on the floor, never
+  // as a standing disclaimer.
+  for (const name of ["aave_v3_etherfi", "debt_manager"]) {
+    const served = transitionFlowLayout(engineOf(RUN_BOOK_ETH, name).hf_transitions, 900);
+    expect(served.flooredCount).toBe(0);
+    for (const flow of served.ribbons) {
+      expect(flow.floored).toBe(false);
+    }
+  }
+});
+
 test("the unmeasured diagonal is its OWN class, never held and never changed", () => {
   const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
   const ribbons = transitionRibbons(engine.hf_transitions);
@@ -407,10 +593,12 @@ test("the crit tint follows the comparator asymmetry, never the lane alone", () 
   const aaveLayout = transitionFlowLayout(aave.hf_transitions, 900);
   const dmLayout = transitionFlowLayout(dm.hf_transitions, 900);
 
-  // On the wad engine, crit rides EXACTLY the changed arrivals below 1.00.
+  // On the wad engine, crit rides EXACTLY the arrivals below 1.00. The KIND
+  // does not gate it (W-SK-B ruling: a held row below 1.00 is still in the
+  // liquidation set); the destination lane does, and only there.
   const region = new Set(belowOneLanes(aave.hf_transitions));
   for (const flow of aaveLayout.ribbons) {
-    expect(flow.crit).toBe(flow.kind === "changed" && region.has(flow.ribbon.to));
+    expect(flow.crit).toBe(region.has(flow.ribbon.to));
   }
   expect(aaveLayout.ribbons.filter((flow) => flow.crit)).toHaveLength(1);
 
@@ -425,6 +613,47 @@ test("the crit tint follows the comparator asymmetry, never the lane alone", () 
   if (arrival === undefined) throw new Error("the DM fixture lost its below-1.00 arrival");
   expect(arrival.kind).toBe("changed");
   expect(arrival.crit).toBe(false);
+  expect(dmLayout.ribbons.some((flow) => flow.crit)).toBe(false);
+});
+
+test("crit rides EVERY arrival below 1.00 on the wad engine, held diagonals included", () => {
+  // The W-SK-B ruling: the ledger's semantic wins. A row that STAYED below
+  // 1.00 through the shock is still in the liquidation set, and a reader
+  // using the tint to find that set must see it. The held/changed distinction
+  // stays on the emphasis classes; the HUE is crit for every arrival.
+  const aave = withHeldBelowOne(engineOf(RUN_BOOK_ETH, "aave_v3_etherfi"));
+  expect(readTransitions(aave).kind).toBe("ok");
+  const layout = transitionFlowLayout(aave.hf_transitions, 900);
+
+  const held = layout.ribbons.find((flow) => flow.ribbon.from === 0 && flow.ribbon.to === 0);
+  if (held === undefined) throw new Error("the mutated book lost its held diagonal");
+  expect(held.kind).toBe("held");
+  expect(held.crit).toBe(true);
+
+  const fall = layout.ribbons.find((flow) => flow.ribbon.from === 3 && flow.ribbon.to === 0);
+  if (fall === undefined) throw new Error("the mutated book lost its arrival");
+  expect(fall.kind).toBe("changed");
+  expect(fall.crit).toBe(true);
+
+  // The unmeasured diagonal can NEVER be crit: its lane is not a bucket lane,
+  // so it is never in the below-1.00 region — no verdict over an unknowable.
+  const diagonal = layout.ribbons.find((flow) => flow.kind === "unmeasured");
+  expect(diagonal?.crit).toBe(false);
+  expect(layout.ribbons.filter((flow) => flow.crit)).toHaveLength(2);
+
+  // The Debt Manager's COMMITTED book holds the identical shape — a held
+  // diagonal sitting in `< 0.90` — and takes no crit anywhere: that region is
+  // a disclosure there, not a liquidation verdict. Asymmetric on purpose:
+  // aave holds 2 rows below 1.00 and the DM holds 1, so a mirror-image bug
+  // cannot satisfy both books.
+  expect(held.ribbon.rows).toBe(2);
+  const dm = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const dmLayout = transitionFlowLayout(dm.hf_transitions, 900);
+  const dmHeld = dmLayout.ribbons.find((flow) => flow.ribbon.from === 0 && flow.ribbon.to === 0);
+  if (dmHeld === undefined) throw new Error("the DM fixture lost its held diagonal");
+  expect(dmHeld.ribbon.rows).toBe(1);
+  expect(dmHeld.kind).toBe("held");
+  expect(dmHeld.crit).toBe(false);
   expect(dmLayout.ribbons.some((flow) => flow.crit)).toBe(false);
 });
 

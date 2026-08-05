@@ -21,6 +21,10 @@
 //   3. THE CROSSINGS ARE DERIVED FROM THE CELLS, never from `lane_changed_rows`.
 //      That field counts LANE changes and is not a crossing count of any
 //      particular edge — the server's own note says so.
+//   4. THE UNMEASURED LANE IS DIAGONAL-ONLY (W-SK-B). Refusal is row-level for
+//      the whole run, so a cell with exactly one endpoint in the unmeasured
+//      lane states a measurement nobody made — and it can do so while every
+//      margin still balances, so the margins alone cannot catch it.
 //
 // Relative imports (not the @/ alias): exercised by the unit specs under
 // Playwright's transpiler as well as by Next.
@@ -88,6 +92,28 @@ export function readTransitions(engine: LabRunBookEngine): TransitionReading {
       `the matrix is stated on comparator ${t.comparator} and the distribution beside it on ` +
         `${engine.before.hf_histogram.comparator}`,
     );
+  }
+
+  // THE UNMEASURED LANE IS DIAGONAL-ONLY. A row unmeasured in this run is
+  // unmeasured on BOTH sides — refusal is row-level for the whole run — so a
+  // cell with exactly ONE endpoint in the unmeasured lane states a measurement
+  // nobody made. It is a shape check, not a sum check: swap two balanced
+  // diagonal cells into (measured→unmeasured, unmeasured→measured) and every
+  // margin still balances while the picture draws fabricated measured
+  // movement. Lane KIND, never a hardcoded index.
+  for (const outflow of t.outflows) {
+    const fromUnmeasured = t.lanes[outflow.from]?.kind === LANE_KIND_UNMEASURED;
+    for (const cell of outflow.cells) {
+      const toUnmeasured = t.lanes[cell.to]?.kind === LANE_KIND_UNMEASURED;
+      if (fromUnmeasured !== toUnmeasured) {
+        reasons.push(
+          `the matrix states an outflow with exactly one end in the unmeasured lane, ` +
+            `lane ${String(outflow.from)} (${t.lanes[outflow.from]?.label ?? "unknown"}) → ` +
+            `lane ${String(cell.to)} (${t.lanes[cell.to]?.label ?? "unknown"}), and a row ` +
+            `this run did not measure is unmeasured on both sides`,
+        );
+      }
+    }
   }
 
   // THE MARGINS ARE THE TWO HISTOGRAMS, and they are also the cells' own sums.

@@ -29,6 +29,19 @@
 //   - a refused matrix draws NO SVG at all;
 //   - every text node inside the flow speaks the lane-label and margin-count
 //     vocabulary and nothing else.
+//
+// Wave W-SK-B (Codex r56) adds the laws a stale bundle or a dead CSS module
+// would otherwise pass:
+//   - REAL GEOMETRY: every ribbon's computed stroke-width is the pure layer's
+//     px (pinned as literals, not re-derived), its path spans the two node
+//     columns inside the SVG box, and the kinds present differ pairwise in
+//     computed stroke colour, with the crit ribbon resolving to the crit token;
+//   - THE FLOOR IS DISCLOSED COMPUTED: the method line's floored count matches
+//     the `data-floored="true"` ribbons exactly — zero means NO sentence;
+//   - a cell with exactly one end in the unmeasured lane is REFUSED and draws
+//     no SVG, even though every margin balances;
+//   - on the wad engine the crit HUE rides a held diagonal below 1.00 at the
+//     held mute, and the Debt Manager's identical shape takes none.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -59,6 +72,128 @@ async function runScenario(page: Page, id: string, body: string) {
   await page.locator(`[data-testid="lab-chip"][data-scenario-id="${id}"]`).click();
   await page.getByTestId("run-book-button").click();
   await expect(page.getByTestId("book-result")).toBeVisible();
+}
+
+// ---------------------------------------------------------------------------
+// W-SK-B helpers: consistent inline mutations of the served body (the same
+// mutations the unit spec proves `readTransitions` accepts or refuses), and a
+// probe that resolves a CSS token to the same computed-colour serialization
+// `getComputedStyle(...).stroke` reports.
+// ---------------------------------------------------------------------------
+
+interface TransitionSideBody {
+  accounts: number;
+  hf_histogram: { buckets: { count: number }[] };
+}
+
+interface TransitionEngineBody {
+  engine: string;
+  before: TransitionSideBody;
+  after: TransitionSideBody;
+  hf_transitions: {
+    outflows: {
+      from: number;
+      cells: { to: number; rows: number; debt_before_usd: string | null; debt_after_usd: string | null }[];
+    }[];
+    from_rows: number[];
+    to_rows: number[];
+    total_rows: number;
+    measured_rows: number;
+    held_rows: number | null;
+    lane_changed_rows: number | null;
+  };
+}
+
+function engineBodyOf(body: { engines: TransitionEngineBody[] }, name: string): TransitionEngineBody {
+  const found = body.engines.find((engine) => engine.engine === name);
+  if (found === undefined) throw new Error(`the fixture carries no ${name} engine`);
+  return found;
+}
+
+function bumpBucket(side: TransitionSideBody, bucket: number, rows: number) {
+  side.accounts += rows;
+  const target = side.hf_histogram.buckets[bucket];
+  if (target === undefined) throw new Error("the fixture's histogram lost a bucket");
+  target.count += rows;
+}
+
+/**
+ * aave with 2 rows ADDED that sit in `< 0.90` before the shock and STAY there:
+ * a held diagonal below 1.00, consistent on both sides so the reader accepts
+ * it (the same mutation the unit spec proves reads clean). Asymmetric on
+ * purpose: 2 rows against the DM's committed 1-row held diagonal.
+ */
+function withAaveHeldBelowOne(raw: string): string {
+  const body = JSON.parse(raw) as { engines: TransitionEngineBody[] };
+  const aave = engineBodyOf(body, "aave_v3_etherfi");
+  bumpBucket(aave.before, 0, 2);
+  bumpBucket(aave.after, 0, 2);
+  const t = aave.hf_transitions;
+  const outflow = t.outflows.find((o) => o.from === 0);
+  if (outflow === undefined) throw new Error("the fixture carries no lane-0 outflow");
+  outflow.cells.unshift({
+    to: 0,
+    rows: 2,
+    debt_before_usd: "120000000000",
+    debt_after_usd: "119000000000",
+  });
+  t.from_rows[0] = (t.from_rows[0] ?? 0) + 2;
+  t.to_rows[0] = (t.to_rows[0] ?? 0) + 2;
+  t.total_rows += 2;
+  t.measured_rows += 2;
+  t.held_rows = (t.held_rows ?? 0) + 2;
+  return JSON.stringify(body);
+}
+
+/**
+ * aave with its 3→0 fall widened from 1 row to 100, consistent on both sides.
+ * The 1-row unmeasured diagonal then sits at 1/100 of the one scale — 0.22px
+ * of honest ink — and must render at the floor, flagged and COUNTED.
+ */
+function withAaveWideFall(raw: string): string {
+  const body = JSON.parse(raw) as { engines: TransitionEngineBody[] };
+  const aave = engineBodyOf(body, "aave_v3_etherfi");
+  bumpBucket(aave.before, 3, 99);
+  bumpBucket(aave.after, 0, 99);
+  const t = aave.hf_transitions;
+  const cell = t.outflows.find((o) => o.from === 3)?.cells.find((c) => c.to === 0);
+  if (cell === undefined) throw new Error("the fixture lost its 3→0 fall");
+  cell.rows += 99;
+  t.from_rows[3] = (t.from_rows[3] ?? 0) + 99;
+  t.to_rows[0] = (t.to_rows[0] ?? 0) + 99;
+  t.total_rows += 99;
+  t.measured_rows += 99;
+  t.lane_changed_rows = (t.lane_changed_rows ?? 0) + 99;
+  return JSON.stringify(body);
+}
+
+/**
+ * Codex r56's margin-preserving mutant: the DM's balanced diagonals (0→0 and
+ * 9→9, one row each) swapped into 0→9 and 9→0. Every margin, histogram and
+ * total is UNCHANGED — only the lane-kind law can catch it.
+ */
+function withOneEndedSwap(raw: string): string {
+  const body = JSON.parse(raw) as { engines: TransitionEngineBody[] };
+  const t = engineBodyOf(body, "debt_manager").hf_transitions;
+  for (const outflow of t.outflows) {
+    for (const cell of outflow.cells) {
+      if (outflow.from === 0 && cell.to === 0) cell.to = 9;
+      else if (outflow.from === 9 && cell.to === 9) cell.to = 0;
+    }
+  }
+  return JSON.stringify(body);
+}
+
+/** Resolve a CSS colour (e.g. `var(--crit)`) to its computed serialization. */
+async function resolveColor(page: Page, cssValue: string): Promise<string> {
+  return page.evaluate((value) => {
+    const probe = document.createElement("span");
+    probe.style.color = value;
+    document.body.append(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  }, cssValue);
 }
 
 test("a served run renders ONE transition matrix per engine, with the crossings on the page", async ({
@@ -291,6 +426,76 @@ test("the flow draws ONE ribbon per occupied cell, classed by movement", async (
   await expect(
     dm.locator('[data-testid="runbook-transition-ribbon"][data-from="9"][data-to="9"]'),
   ).toHaveAttribute("data-kind", "unmeasured");
+
+  // W-SK-B: REAL GEOMETRY. The counts above stay green with strokeWidth 0, a
+  // degenerate `d`, or swapped classes; the ink itself is pinned here. Every
+  // cell of this fixture holds 1 row and the widest cell IS 1 row, so every
+  // ribbon renders the 22px anchor exactly — a literal, not re-derived.
+  for (const engineName of ["aave_v3_etherfi", "debt_manager"]) {
+    const svg = page
+      .locator(`[data-testid="runbook-transition"][data-engine="${engineName}"]`)
+      .getByTestId("runbook-transition-flow");
+    const svgWidth = Number(await svg.getAttribute("width"));
+    const svgHeight = Number(await svg.getAttribute("height"));
+    expect(svgWidth).toBeGreaterThan(0);
+    expect(svgHeight).toBeGreaterThan(0);
+
+    const geometry = await svg
+      .locator('[data-testid="runbook-transition-ribbon"]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          kind: node.getAttribute("data-kind") ?? "",
+          d: node.getAttribute("d") ?? "",
+          stroke: getComputedStyle(node).stroke,
+          strokeWidth: getComputedStyle(node).strokeWidth,
+        })),
+      );
+    expect(geometry.length).toBeGreaterThan(0);
+
+    for (const ribbon of geometry) {
+      // (a) The COMPUTED stroke-width is the pure layer's px: positive, and
+      // 22 within a tenth. A zeroed or unstyled stroke fails here.
+      const px = parseFloat(ribbon.strokeWidth);
+      expect(px).toBeGreaterThan(0);
+      expect(Math.abs(px - 22)).toBeLessThanOrEqual(0.1);
+
+      // (b) The path is NOT degenerate: it starts at the left node column
+      // (FLOW_LABEL_W 200 + FLOW_NODE_W 8 = 208) and ends at the right one
+      // (svg width − 208), left strictly before right, both ends inside the
+      // SVG box. `M 0 0` or a flat scribble fails here.
+      const parsed =
+        /^M (-?[\d.]+) (-?[\d.]+) C (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+), (-?[\d.]+) (-?[\d.]+)$/.exec(
+          ribbon.d,
+        );
+      expect(parsed, `degenerate ribbon path: ${ribbon.d}`).not.toBeNull();
+      const numbers = (parsed ?? []).slice(1).map(Number);
+      const startX = numbers[0] ?? NaN;
+      const startY = numbers[1] ?? NaN;
+      const endX = numbers[6] ?? NaN;
+      const endY = numbers[7] ?? NaN;
+      expect(startX).toBe(208);
+      expect(Math.abs(endX - (svgWidth - 208))).toBeLessThanOrEqual(0.1);
+      expect(startX).toBeLessThan(endX);
+      for (const y of [startY, endY]) {
+        expect(y).toBeGreaterThan(0);
+        expect(y).toBeLessThan(svgHeight);
+      }
+    }
+
+    // (c) The kinds PRESENT differ pairwise in computed stroke colour, and one
+    // kind speaks with one colour: swapped or dead classes collapse two kinds
+    // into one hue and fail here.
+    const strokeByKind = new Map<string, string>();
+    for (const ribbon of geometry) {
+      expect(ribbon.stroke).not.toBe("none");
+      const prior = strokeByKind.get(ribbon.kind);
+      if (prior !== undefined) {
+        expect(prior, `two strokes for kind ${ribbon.kind}`).toBe(ribbon.stroke);
+      }
+      strokeByKind.set(ribbon.kind, ribbon.stroke);
+    }
+    expect(new Set(strokeByKind.values()).size).toBe(strokeByKind.size);
+  }
 });
 
 test("the crit tint rides Aave's below-1.00 arrival and NEVER the Debt Manager's", async ({
@@ -325,6 +530,18 @@ test("the crit tint rides Aave's below-1.00 arrival and NEVER the Debt Manager's
   await expect(
     dm.locator('[data-testid="runbook-transition-ribbon"][data-crit="true"]'),
   ).toHaveCount(0);
+
+  // W-SK-B: the attribute is not the ink. The crit ribbon's COMPUTED stroke
+  // resolves to the crit token itself, and the DM's same-region arrival is a
+  // DIFFERENT hue — a swapped class, a dead CSS module, or crit-on-DM all
+  // fail here even while every data-* above stays green.
+  const critColor = await resolveColor(page, "var(--crit)");
+  expect(critColor).not.toBe("");
+  expect(critColor).not.toBe("rgba(0, 0, 0, 0)");
+  const arrivalStroke = await arrival.evaluate((node) => getComputedStyle(node).stroke);
+  expect(arrivalStroke).toBe(critColor);
+  const dmArrivalStroke = await dmArrival.evaluate((node) => getComputedStyle(node).stroke);
+  expect(dmArrivalStroke).not.toBe(critColor);
 });
 
 test("a lane empty on one side draws NO node block there, and its dimmed label keeps the vocabulary", async ({
@@ -409,4 +626,185 @@ test("every text node in the flow speaks the lane-label and margin vocabulary, n
       }
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Wave W-SK-B — the floor disclosed, the one-ended cell refused, the held
+// arrival tinted
+// ---------------------------------------------------------------------------
+
+test("zero floored ribbons render ZERO disclosure: no sentence, no flag, exactly matched", async ({
+  page,
+}) => {
+  // On the served fixture every cell holds 1 row and the widest cell IS 1
+  // row: nothing sits on the visibility floor, so the method line says
+  // NOTHING about it — a standing disclaimer over zero floored ribbons would
+  // be noise a reader learns to skip — and every ribbon states the fact
+  // explicitly as `data-floored="false"`.
+  await runScenario(page, "eth_minus_30", fixture("run-book.eth_minus_30.json"));
+  for (const engineName of ["aave_v3_etherfi", "debt_manager"]) {
+    const panel = page.locator(
+      `[data-testid="runbook-transition"][data-engine="${engineName}"]`,
+    );
+    await expect(panel.getByTestId("runbook-transition-method")).not.toContainText(
+      "visibility floor",
+    );
+    await expect(
+      panel.locator('[data-testid="runbook-transition-ribbon"][data-floored="true"]'),
+    ).toHaveCount(0);
+    const ribbons = panel.locator('[data-testid="runbook-transition-ribbon"]');
+    const count = await ribbons.count();
+    expect(count).toBeGreaterThan(0);
+    for (let index = 0; index < count; index += 1) {
+      await expect(ribbons.nth(index)).toHaveAttribute("data-floored", "false");
+    }
+  }
+});
+
+test("the floored count is COMPUTED and matches the flagged ribbons exactly", async ({ page }) => {
+  // Widen aave's fall to 100 rows (consistent on both sides — the unit spec
+  // proves this body reads clean). The 1-row unmeasured diagonal now sits at
+  // 1/100 of the one scale, renders AT the 1.5px floor, and the method line
+  // must state the count the picture actually shows.
+  await runScenario(
+    page,
+    "eth_minus_30",
+    withAaveWideFall(fixture("run-book.eth_minus_30.json")),
+  );
+  const aave = page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]');
+  await expect(aave).toHaveAttribute("data-state", "ok");
+
+  const method = (await aave.getByTestId("runbook-transition-method").textContent()) ?? "";
+  const sentence = /(\d+) ribbons? (?:is|are) thinner than the 1\.5px visibility floor/.exec(
+    method,
+  );
+  expect(sentence, `no computed floor sentence in: ${method}`).not.toBeNull();
+  const stated = Number(sentence?.[1]);
+  const flagged = await aave
+    .locator('[data-testid="runbook-transition-ribbon"][data-floored="true"]')
+    .count();
+  expect(stated).toBe(flagged);
+  expect(flagged).toBe(1);
+
+  // The flagged ribbon IS the 1-row unmeasured diagonal, drawn at the floor;
+  // the 100-row fall keeps the 22px anchor unflagged — the floor lifts the
+  // small cell, it never rescales the scale.
+  const floored = aave.locator('[data-testid="runbook-transition-ribbon"][data-floored="true"]');
+  await expect(floored).toHaveAttribute("data-from", "9");
+  await expect(floored).toHaveAttribute("data-to", "9");
+  const flooredPx = parseFloat(
+    await floored.evaluate((node) => getComputedStyle(node).strokeWidth),
+  );
+  expect(Math.abs(flooredPx - 1.5)).toBeLessThanOrEqual(0.1);
+  const fall = aave.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="3"][data-to="0"]',
+  );
+  await expect(fall).toHaveAttribute("data-floored", "false");
+  const fallPx = parseFloat(await fall.evaluate((node) => getComputedStyle(node).strokeWidth));
+  expect(Math.abs(fallPx - 22)).toBeLessThanOrEqual(0.1);
+
+  // The DM's matrix is untouched: no floored ribbon, no sentence.
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  await expect(dm.getByTestId("runbook-transition-method")).not.toContainText(
+    "visibility floor",
+  );
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-floored="true"]'),
+  ).toHaveCount(0);
+});
+
+test("a cell with one end in the unmeasured lane is REFUSED and draws NO SVG", async ({
+  page,
+}) => {
+  // Codex r56's margin-preserving mutant, served: the DM's balanced 0→0 and
+  // 9→9 diagonals swapped into 0→9 and 9→0. Every margin still matches both
+  // histograms and every total holds, so a version of this page that only
+  // sums would draw a measured row dissolving into the unmeasured lane and an
+  // unmeasured row materializing out of it — fabricated measured movement.
+  await runScenario(
+    page,
+    "eth_minus_30",
+    withOneEndedSwap(fixture("run-book.eth_minus_30.json")),
+  );
+
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  await expect(dm).toHaveAttribute("data-state", "contradictory");
+  const reasons = dm.getByTestId("runbook-transition-reasons");
+  await expect(reasons).toContainText("exactly one end in the unmeasured lane");
+  await expect(reasons).toContainText("lane 0 (< 0.90) → lane 9 (not measured)");
+  await expect(reasons).toContainText("lane 9 (not measured) → lane 0 (< 0.90)");
+  await expect(reasons).toContainText("unmeasured on both sides");
+  // The refusal REPLACES the picture: no flow SVG, no cell table.
+  await expect(dm.getByTestId("runbook-transition-flow")).toHaveCount(0);
+  await expect(dm.getByTestId("runbook-transition-cells")).toHaveCount(0);
+
+  // And the refusal is per engine: aave's whole matrix still renders.
+  await expect(
+    page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]'),
+  ).toHaveAttribute("data-state", "ok");
+});
+
+test("a held diagonal below 1.00 carries the crit HUE at the held MUTE on aave, and never on the DM", async ({
+  page,
+}) => {
+  // The W-SK-B ruling: the ledger's semantic wins. Serve aave with 2 rows
+  // that sat below 0.90 and STAYED there (the unit spec proves this body
+  // reads clean). Those rows are in the liquidation set, so the tint a reader
+  // uses to find that set must include them — at the held mute, because
+  // nothing moved.
+  await runScenario(
+    page,
+    "eth_minus_30",
+    withAaveHeldBelowOne(fixture("run-book.eth_minus_30.json")),
+  );
+  const aave = page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]');
+  await expect(aave).toHaveAttribute("data-state", "ok");
+
+  const heldArrival = aave.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="0"][data-to="0"]',
+  );
+  await expect(heldArrival).toHaveAttribute("data-kind", "held");
+  await expect(heldArrival).toHaveAttribute("data-crit", "true");
+  const fall = aave.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="3"][data-to="0"]',
+  );
+  await expect(fall).toHaveAttribute("data-kind", "changed");
+  await expect(fall).toHaveAttribute("data-crit", "true");
+  await expect(
+    aave.locator('[data-testid="runbook-transition-ribbon"][data-crit="true"]'),
+  ).toHaveCount(2);
+
+  // The HUE is crit for both arrivals; the EMPHASIS still separates them —
+  // held stays muted below changed, so "already there" and "fell in" remain
+  // two readable statements in one tint.
+  const critColor = await resolveColor(page, "var(--crit)");
+  const heldStroke = await heldArrival.evaluate((node) => getComputedStyle(node).stroke);
+  const fallStroke = await fall.evaluate((node) => getComputedStyle(node).stroke);
+  expect(heldStroke).toBe(critColor);
+  expect(fallStroke).toBe(critColor);
+  const heldOpacity = parseFloat(
+    await heldArrival.evaluate((node) => getComputedStyle(node).opacity),
+  );
+  const fallOpacity = parseFloat(await fall.evaluate((node) => getComputedStyle(node).opacity));
+  expect(heldOpacity).toBeGreaterThan(0);
+  expect(heldOpacity).toBeLessThan(fallOpacity);
+
+  // The method line says what the tint now includes, in the same breath.
+  await expect(aave.getByTestId("runbook-transition-method")).toContainText(
+    "including rows that were already below it before the shock",
+  );
+
+  // The Debt Manager's IDENTICAL shape — its committed held diagonal in
+  // `< 0.90` — takes no crit anywhere: that region is a disclosure there.
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  const dmHeld = dm.locator(
+    '[data-testid="runbook-transition-ribbon"][data-from="0"][data-to="0"]',
+  );
+  await expect(dmHeld).toHaveAttribute("data-kind", "held");
+  await expect(dmHeld).toHaveAttribute("data-crit", "false");
+  await expect(
+    dm.locator('[data-testid="runbook-transition-ribbon"][data-crit="true"]'),
+  ).toHaveCount(0);
+  const dmHeldStroke = await dmHeld.evaluate((node) => getComputedStyle(node).stroke);
+  expect(dmHeldStroke).not.toBe(critColor);
 });

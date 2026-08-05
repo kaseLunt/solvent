@@ -8,6 +8,10 @@
 //     draw two different rulers inside one picture and lie about which flow is
 //     bigger. A 1-row cell keeps a visible hairline floor; the floor is on the
 //     INK, never on the number, and an absent cell draws nothing at all.
+//     A FLOORED RIBBON IS DISCLOSED (W-SK-B): the floor breaks the scale for
+//     exactly the cells it lifts, so `ribbonFloored` flags each one, the
+//     layout counts them, and the panel prints that count whenever it is
+//     nonzero. The picture never claims a linearity the floor took away.
 //   - NONEMPTY-ONLY NODES. A lane whose side count is zero draws NO node block
 //     on that side, the same law the book risk map follows. Its axis label
 //     still renders, dimmed, so the 10-lane vocabulary stays complete and an
@@ -15,12 +19,16 @@
 //   - THICKNESS IS LAYOUT; NUMBERS ARE WIRE. Every count a label prints is the
 //     wire's own margin integer (`from_rows[i]` / `to_rows[i]`), never a sum
 //     recomputed here. Floats compute pixel positions only (LAW-4).
-//   - THE CRIT TINT IS THE COMPARATOR'S, NOT THE LANE'S. `crit` rides ONLY a
-//     lane-CHANGED ribbon arriving in a below-1.00 bucket lane on the engine
-//     whose comparator IS its liquidation test (`comparator === "hf_wad"`, the
-//     same `eligibleTint` asymmetry `LabRunBookDetail.tsx` applies). On the
-//     Debt Manager that region is a DISCLOSURE, so its arrivals keep the
-//     neutral emphasis and no verdict is derived from a lane (spec §1.2).
+//   - THE CRIT TINT IS THE COMPARATOR'S, NOT THE LANE'S. On the engine whose
+//     comparator IS its liquidation test (`comparator === "hf_wad"`, the same
+//     `eligibleTint` asymmetry `LabRunBookDetail.tsx` applies), `crit` rides
+//     EVERY ribbon arriving in a below-1.00 bucket lane, held diagonals
+//     included (W-SK-B ruling): a row that stayed below 1.00 is still in the
+//     liquidation set, and a reader using the tint to find that set must see
+//     it. Held keeps its mute and changed keeps its emphasis, so the two stay
+//     distinguishable. On the Debt Manager that region is a DISCLOSURE, so its
+//     arrivals keep the neutral classes and no verdict is derived from a lane
+//     (spec §1.2).
 //   - THE UNMEASURED DIAGONAL IS ITS OWN CLASS. Cell (N+1, N+1) has
 //     `from === to`, but it is NOT a held lane: nothing was measured, so
 //     nothing can be said to have held. It never shares a class with
@@ -69,11 +77,28 @@ export function ribbonKind(ribbon: TransitionRibbon): FlowRibbonKind {
  * `FLOW_RIBBON_MAX`, everything else is proportional, and a cell with at least
  * one row never falls below the `FLOW_RIBBON_MIN` hairline. The floor is a
  * visibility floor on the ink only — the exact `rows` integer rides the label,
- * the hover and the ledger table, never the thickness.
+ * the hover and the ledger table, never the thickness — and every cell the
+ * floor lifts is flagged by `ribbonFloored`, because two floored cells of very
+ * different sizes render identical ink and the panel must say so.
  */
 export function ribbonThickness(rows: number, widestRows: number): number {
   if (rows <= 0 || widestRows <= 0) return 0;
   return Math.max(FLOW_RIBBON_MIN, (rows / widestRows) * FLOW_RIBBON_MAX);
+}
+
+/**
+ * TRUE when the one linear scale would draw this cell THINNER than the
+ * `FLOW_RIBBON_MIN` hairline, so its ink renders at the floor instead of on
+ * the scale. A floored ribbon is the one place the picture and the advertised
+ * scale disagree — with a 10,000-row widest cell, a 1-row cell and a 681-row
+ * cell both render the same 1.5px — so the fact is exposed here rather than
+ * hidden: the layout counts these, each one carries `data-floored`, and the
+ * panel prints the count. A cell with no rows draws nothing and is not
+ * floored; the widest cell never is.
+ */
+export function ribbonFloored(rows: number, widestRows: number): boolean {
+  if (rows <= 0 || widestRows <= 0) return false;
+  return (rows / widestRows) * FLOW_RIBBON_MAX < FLOW_RIBBON_MIN;
 }
 
 export interface FlowNode {
@@ -102,8 +127,14 @@ export interface FlowLaneLabel {
 export interface FlowRibbon {
   ribbon: TransitionRibbon;
   kind: FlowRibbonKind;
-  /** True ONLY on a changed ribbon arriving below 1.00 on the wad engine. */
+  /**
+   * True on EVERY ribbon arriving in a below-1.00 bucket lane on the wad
+   * engine, held diagonals included: that band IS the liquidation set there.
+   * Never true on the Debt Manager, whose same region is a disclosure.
+   */
   crit: boolean;
+  /** True when the visibility floor, not the scale, sets this thickness. */
+  floored: boolean;
   thickness: number;
   x1: number;
   y1: number;
@@ -117,6 +148,8 @@ export interface TransitionFlowLayout {
   nodes: FlowNode[];
   labels: FlowLaneLabel[];
   ribbons: FlowRibbon[];
+  /** How many ribbons the visibility floor lifted off the one linear scale. */
+  flooredCount: number;
 }
 
 /**
@@ -223,7 +256,12 @@ export function transitionFlowLayout(
     return {
       ribbon,
       kind,
-      crit: eligibleTint && kind === "changed" && region.has(ribbon.to),
+      // The W-SK-B ruling: on the wad engine EVERY arrival below 1.00 is crit,
+      // held diagonals included — the reader using the tint to find the
+      // liquidation set must see the rows that were already in it. `region`
+      // holds bucket lanes only, so the unmeasured diagonal can never match.
+      crit: eligibleTint && region.has(ribbon.to),
+      floored: ribbonFloored(ribbon.rows, widest),
       thickness,
       x1: leftNodeX + FLOW_NODE_W,
       y1,
@@ -232,5 +270,12 @@ export function transitionFlowLayout(
     };
   });
 
-  return { width, height, nodes, labels, ribbons: flowRibbons };
+  return {
+    width,
+    height,
+    nodes,
+    labels,
+    ribbons: flowRibbons,
+    flooredCount: flowRibbons.filter((flow) => flow.floored).length,
+  };
 }

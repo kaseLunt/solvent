@@ -27,8 +27,15 @@
 //     lanes left and AFTER lanes right, one ribbon per occupied cell, laid out
 //     by `labTransitionFlow.ts` at the measured frame width. A zero-count side
 //     draws no node block; held ribbons are muted; the unmeasured diagonal is
-//     dashed and never shares a class with held-measured rows; and the crit
-//     tint rides only a changed arrival below 1.00 on the wad engine.
+//     dashed and never shares a class with held-measured rows; and on the wad
+//     engine the crit HUE rides every arrival below 1.00 (W-SK-B ruling) —
+//     changed arrivals at the changed emphasis, held diagonals at the held
+//     mute, because a row that stayed below 1.00 is still in the liquidation
+//     set and the tint is how a reader finds that set.
+//   - THE VISIBILITY FLOOR IS DISCLOSED (W-SK-B). When any ribbon renders at
+//     the hairline floor instead of on the one linear scale, the method line
+//     prints the COMPUTED count of them; when none does, no disclaimer
+//     renders. Each floored ribbon carries `data-floored="true"`.
 //   - The wire's own `note` renders VERBATIM.
 //   - NO CRIT TINT ON THE DEBT MANAGER. Its lanes are the exact rational
 //     maxBorrowLT/borrowings, a disclosure and not a liquidation verdict — the
@@ -51,6 +58,8 @@ import {
   FLOW_FALLBACK_WIDTH,
   FLOW_MAX_WIDTH,
   FLOW_MIN_WIDTH,
+  FLOW_RIBBON_MIN,
+  ribbonFloored,
   transitionFlowLayout,
   type FlowRibbon,
 } from "./labTransitionFlow";
@@ -96,13 +105,14 @@ function TransitionFlow({
     fallback: FLOW_FALLBACK_WIDTH,
   });
   const layout = transitionFlowLayout(transitions, width);
-  // Held is muted (nothing moved), changed carries the story, the unmeasured
-  // diagonal is its own not-a-movement register, and the crit tint rides only
-  // a changed arrival below 1.00 on the engine whose comparator IS its
-  // liquidation test.
+  // Held is muted (nothing moved), changed carries the story, and the
+  // unmeasured diagonal is its own not-a-movement register. On the engine
+  // whose comparator IS its liquidation test, the crit HUE rides every
+  // arrival below 1.00 — a held diagonal there keeps the held MUTE under the
+  // crit hue, because the row never moved and is in the liquidation set both.
   const ribbonClass = (flow: FlowRibbon) => {
     if (flow.kind === "unmeasured") return styles.flowRibbonUnmeasured;
-    if (flow.kind === "held") return styles.flowRibbonHeld;
+    if (flow.kind === "held") return flow.crit ? styles.flowRibbonHeldCrit : styles.flowRibbonHeld;
     return flow.crit ? styles.flowRibbonCrit : styles.flowRibbonChanged;
   };
   return (
@@ -132,6 +142,7 @@ function TransitionFlow({
               data-to={String(flow.ribbon.to)}
               data-kind={flow.kind}
               data-crit={flow.crit ? "true" : "false"}
+              data-floored={flow.floored ? "true" : "false"}
             >
               <title>{ribbonTitle(flow, usdDecimals)}</title>
             </path>
@@ -210,6 +221,12 @@ export function LabRunBookTransition({ engine }: { engine: LabRunBookEngine }) {
   // ONE SCALE for this engine's matrix, taken from its own largest cell. Scaling
   // each ribbon to itself would draw every flow the same width and say nothing.
   const widest = ribbons.reduce((max, ribbon) => (ribbon.rows > max ? ribbon.rows : max), 0);
+  // The cells the visibility floor lifts OFF that scale. Thickness never
+  // depends on the measured width, so this is the same count the layout
+  // flags — and the method line prints it COMPUTED, only when it is nonzero:
+  // a static disclaimer over zero floored ribbons would be noise, and silence
+  // over a nonzero count would be a lie about the scale.
+  const flooredCount = ribbons.filter((ribbon) => ribbonFloored(ribbon.rows, widest)).length;
   // The crit tint is the pool's own liquidation test, and the Debt Manager has
   // none — its lanes are a disclosure. Same asymmetry as the histogram pair.
   const eligibleTint = t.comparator === "hf_wad";
@@ -338,11 +355,16 @@ export function LabRunBookTransition({ engine }: { engine: LabRunBookEngine }) {
             "to its AFTER lane on the right. Its thickness follows that cell's position rows on " +
             "one linear scale across the whole matrix, and the exact rows and debt figures are " +
             "printed in the table below. "}
+        {flooredCount > 0 &&
+          `${String(flooredCount)} ${flooredCount === 1 ? "ribbon is" : "ribbons are"} thinner ` +
+            `than the ${String(FLOW_RIBBON_MIN)}px visibility floor and ` +
+            `${flooredCount === 1 ? "renders" : "render"} at it, off that scale; ` +
+            `${flooredCount === 1 ? "its" : "their"} exact rows are in the table. `}
         &ldquo;Lane changed&rdquo; counts rows whose BAND changed and is not{" "}
         <code>movers_total</code>, not <code>newly_eligible_accounts</code>, and not a crossing
         count of the 1.00 edge — that crossing pair is the two figures above.
         {eligibleTint
-          ? " Arrivals below 1.00 are tinted: on this engine that band IS the liquidation set."
+          ? " Arrivals below 1.00 are tinted, including rows that were already below it before the shock: on this engine that band IS the liquidation set."
           : " Nothing here is tinted: this engine's lanes are the exact rational maxBorrowLT/borrowings, a DISCLOSURE and not its liquidation trigger."}
       </p>
 
