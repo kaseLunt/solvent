@@ -47,6 +47,7 @@ import {
   measuredCount,
   moversDisclosure,
 } from "../../app/lab/labRunBookLines";
+import { readTransitions } from "../../app/lab/labTransition";
 import { RUN_BOOK_ETH, RUN_BOOK_WEETH_BATCH_1 } from "../fixtures/lab-book";
 
 const WAD = "1000000000000000000";
@@ -429,6 +430,148 @@ test("A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the sentence says the cros
   // The honest body still gets its crossings, so this is not a law that
   // refuses everything.
   expect(histogramShiftReadingLine(honest)).toContain("2 rows moved INTO the region");
+});
+
+/**
+ * A refused body whose two histograms are two DIFFERENT censuses.
+ *
+ * The honest base measures 3 rows on both sides with one of them below 1.00.
+ * The after histogram is then replaced wholesale with an 8-row census carrying
+ * 7 rows below 1.00, which is what an older or broken deployment can serve:
+ * the matrix's after margin no longer matches the bars printed beside it, so
+ * the matrix is refused, and the two sides no longer share a denominator.
+ */
+function divergentCensusEngine(): LabRunBookEngine {
+  const honest = engineWith("hf_wad", [
+    [0, 0, 1], // one row below 1.00, and it stays there
+    [4, 0, 1], // one row falls into the region
+    [5, 5, 1],
+  ]);
+  return {
+    ...honest,
+    after: {
+      ...honest.after,
+      hf_histogram: histogramWith(
+        honest.after,
+        "hf_wad",
+        { "< 0.90": 4, "0.90 – 1.00": 3, "1.00 – 1.05": 1 },
+        { refused: 2 },
+      ),
+    },
+  };
+}
+
+test("A REFUSED MATRIX IS TWO CENSUSES: each side is stated against ITS OWN denominator", () => {
+  // THE FALSE ARITHMETIC THIS TEST EXISTS FOR. The fallback used to take the
+  // AFTER side's measured total and print it as the denominator of BOTH halves,
+  // then subtract the two below-1.00 populations across the two different
+  // censuses. On this body that produced "1 of 8 measured rows sat below 1.00
+  // before the shock, 7 after: the below-1.00 population grew by 6" over a
+  // before histogram that measured 3 rows in total. Every number in that
+  // sentence was served; the sentence was still false, because the denominator
+  // belonged to the other side and the difference spanned two books.
+  //
+  // The old test asserted only that the GROSS was withheld, so it passed
+  // throughout. The assertions below pin the arithmetic itself.
+  const broken = divergentCensusEngine();
+
+  // The premise, asserted rather than assumed: this really is the refusal path,
+  // and the two sides really do measure different totals.
+  expect(readTransitions(broken).kind).toBe("contradictory");
+  expect(measuredCount(broken.before)).toBe(3);
+  expect(measuredCount(broken.after)).toBe(8);
+  expect(belowOneCount(broken.before)).toBe(1);
+  expect(belowOneCount(broken.after)).toBe(7);
+
+  const line = histogramShiftReadingLine(broken);
+  // (1) BOTH DENOMINATORS ARE ON THE PAGE, each against its own population.
+  expect(line).toContain("1 of 3 measured rows sat below 1.00 before the shock");
+  expect(line).toContain("7 of 8 measured rows sat below 1.00 after it");
+  // (2) THE FALSE DENOMINATOR IS GONE. The before side never measured 8 rows.
+  expect(line).not.toContain("1 of 8");
+  // (3) NO CROSS-CENSUS SUBTRACTION, in either direction and at any size.
+  expect(line).not.toContain("grew by");
+  expect(line).not.toContain("shrank by");
+  expect(line).not.toContain("grew by 6");
+  expect(line).not.toContain("the below-1.00 population did not change");
+  // (4) AND THE MISSING FACT IS NAMED rather than filled with arithmetic.
+  expect(line).toContain("The two histograms measure different row totals");
+  expect(line).toContain("no net movement is computed here");
+  expect(line).toContain("a difference taken across two censuses is not a population change");
+  // (5) The gross is still withheld, which is the law this path already had.
+  expect(line).toContain("The gross crossings are NOT stated here");
+  expect(line).not.toContain("moved INTO the region");
+});
+
+test("A REFUSED MATRIX IS NOT CITED FOR WHERE THE REFUSED ROWS SIT", () => {
+  // The tail clause used to send the reader to the matrix's final lane in the
+  // same sentence that declares the matrix unusable. The COUNT survives, since
+  // the histogram beside it carries that on its own; the LOCATION does not,
+  // because only the refused matrix could have given it.
+  const broken = divergentCensusEngine();
+  const line = histogramShiftReadingLine(broken);
+  expect(line).toContain("2 more rows are counted refused");
+  expect(line).toContain("outside every measured count above");
+  expect(line).toContain("Where they sit in the matrix is NOT claimed here");
+  expect(line).toContain("the matrix this response served is the one being refused");
+  // THE RETIRED CLAIM.
+  expect(line).not.toContain(`the matrix's "not measured" lane`);
+  expect(line).not.toContain("inside both margins");
+
+  // The singular is a real sentence here too, not "1 rows".
+  const honest = engineWith("hf_wad", [[0, 0, 1]]);
+  const one = histogramShiftReadingLine({
+    ...honest,
+    after: {
+      ...honest.after,
+      hf_histogram: histogramWith(honest.after, "hf_wad", { "< 0.90": 4 }, { refused: 1 }),
+    },
+  });
+  expect(one).toContain("1 more row is counted refused");
+  expect(one).toContain("Where it sits in the matrix is NOT claimed here");
+  expect(one).not.toContain(`the matrix's "not measured" lane`);
+
+  // AND AN OK MATRIX STILL POINTS AT ITS LANE, so this is not a law that
+  // withholds the location everywhere.
+  expect(histogramShiftReadingLine(engineWith("hf_wad", [[0, 0, 1]], 2))).toContain(
+    `they sit in the matrix's "not measured" lane`,
+  );
+});
+
+test("AGREEING TOTALS on a refused matrix keep the net, with the denominator stated once", () => {
+  // The refusal is about the MATRIX, not about the two bars. When both
+  // histograms measure the same book, their difference is still a population
+  // change and withholding it would be its own kind of dishonesty. The
+  // after side here is re-shaped, not re-sized: 3 measured rows either way, so
+  // the matrix's after margin contradicts the bars while the census holds.
+  const honest = engineWith("hf_wad", [
+    [0, 0, 1],
+    [4, 0, 1],
+    [5, 5, 1],
+  ]);
+  const broken: LabRunBookEngine = {
+    ...honest,
+    after: {
+      ...honest.after,
+      hf_histogram: histogramWith(honest.after, "hf_wad", { "< 0.90": 3 }),
+    },
+  };
+  expect(readTransitions(broken).kind).toBe("contradictory");
+  expect(measuredCount(broken.before)).toBe(3);
+  expect(measuredCount(broken.after)).toBe(3);
+
+  const line = histogramShiftReadingLine(broken);
+  expect(line).toContain("1 of 3 measured rows sat below 1.00 before the shock, 3 after");
+  expect(line).toContain("the below-1.00 population grew by 2");
+  // THE SHARED DENOMINATOR IS STATED ONCE, not repeated onto each half: one
+  // census, one "measured rows" clause.
+  expect(line.split("measured rows").length - 1).toBe(1);
+  // And the different-totals refusal must NOT fire on a book that has one book.
+  expect(line).not.toContain("different row totals");
+  expect(line).not.toContain("two censuses");
+  // The gross is still withheld: agreeing totals do not un-refuse the matrix.
+  expect(line).toContain("The gross crossings are NOT stated here");
+  expect(line).not.toContain("moved INTO the region");
 });
 
 // ---------------------------------------------------------------------------

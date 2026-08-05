@@ -82,17 +82,28 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
   const reading = readTransitions(engine);
   const head = "What this shows: how the book's health factors moved under this scenario. ";
 
-  // A MATRIX THIS BODY CONTRADICTS IS NOT READ. The net alone is still honest —
-  // it is a difference of two bars printed on the page — so the sentence falls
-  // back to it and SAYS that the crossings were withheld rather than printing
-  // numbers derived from a matrix the page refuses to draw.
+  // A MATRIX THIS BODY CONTRADICTS IS NOT READ, and the thing lost with it is
+  // the ONE census the two sides share. While the matrix reconciles,
+  // `measured_rows` is a single total both distributions answer to. When it
+  // does not, each side carries its own measured total and the two are not
+  // interchangeable: the before histogram may hold 3 measured rows while the
+  // after holds 8. So the fallback states each side against ITS OWN
+  // denominator, and it subtracts them only when the two totals agree. A
+  // difference taken across two different populations is not a population
+  // change, and printing one as "grew by N" is exactly the computed-looking
+  // wrong answer this refusal path exists to prevent.
   if (reading.kind === "contradictory") {
     return (
       head +
-      netOnlyMovement(belowOneCount(before), belowOneCount(after), measuredCount(after)) +
+      netOnlyMovement(
+        belowOneCount(before),
+        belowOneCount(after),
+        measuredCount(before),
+        measuredCount(after),
+      ) +
       " The gross crossings are NOT stated here: this response's transition matrix disagrees with " +
       "the two distributions beside it, and a crossing count derived from it would not answer to " +
-      `them. ${regionClause(before)}${unmeasuredTail(after)}`
+      `them. ${regionClause(before)}${unmeasuredTail(after, false)}`
     );
   }
 
@@ -104,7 +115,7 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
     return (
       head +
       "This scenario measured no account on this engine, so there is no shift to read." +
-      unmeasuredTail(after)
+      unmeasuredTail(after, true)
     );
   }
 
@@ -129,14 +140,50 @@ export function histogramShiftReadingLine(engine: LabRunBookEngine): string {
     `${entries === 1 ? "row" : "rows"} moved INTO the region and ${String(exits)} ` +
     `${exits === 1 ? "row" : "rows"} moved OUT of it, so the net is what is left after they cancel.`;
 
-  return `${head}${movement}${gross} ${regionClause(before)}${unmeasuredTail(after)}`;
+  return `${head}${movement}${gross} ${regionClause(before)}${unmeasuredTail(after, true)}`;
 }
 
-/** The net-only sentence, used when the matrix cannot be read. */
-function netOnlyMovement(from: number, to: number, measured: number): string {
-  if (measured === 0) {
+/**
+ * The net-only sentence, used when the matrix cannot be read.
+ *
+ * TWO DENOMINATORS, NOT ONE. This function used to take a single `measured` and
+ * print it on both halves of the sentence. That was only ever true because the
+ * matrix reconciled the two sides into one census, which is precisely what has
+ * just failed here. A before histogram of 3 measured rows beside an after
+ * histogram of 8 is two populations, and "1 of 8 measured rows sat below 1.00
+ * before" states a denominator the before side never had.
+ *
+ * The subtraction answers to the same rule. `to - from` is a population change
+ * only while the two populations are the same book; across two censuses it is a
+ * difference of unrelated counts, so no growth and no shrink is claimed and the
+ * sentence says which fact is missing rather than filling it with arithmetic.
+ */
+function netOnlyMovement(
+  from: number,
+  to: number,
+  measuredBefore: number,
+  measuredAfter: number,
+): string {
+  if (measuredBefore === 0 && measuredAfter === 0) {
     return "This scenario measured no account on this engine, so there is no shift to read.";
   }
+  if (measuredBefore !== measuredAfter) {
+    // A side that measured NOTHING says so. "0 of 0 measured rows sat below
+    // 1.00" reads as a finding about a book nobody looked at.
+    const beforeSide =
+      measuredBefore === 0
+        ? "No row was measured before the shock"
+        : `${String(from)} of ${String(measuredBefore)} measured rows sat below 1.00 before the shock`;
+    const afterSide =
+      measuredAfter === 0
+        ? "no row was measured after it"
+        : `${String(to)} of ${String(measuredAfter)} measured rows sat below 1.00 after it`;
+    return (
+      `${beforeSide}; ${afterSide}. The two histograms measure different row totals, so no net ` +
+      "movement is computed here: a difference taken across two censuses is not a population change."
+    );
+  }
+  const measured = measuredBefore;
   if (to === from) {
     return (
       `${String(from)} of ${String(measured)} measured rows sat below 1.00 before the shock ` +
@@ -171,11 +218,26 @@ function regionClause(before: RunBookAggregate): string {
  * last lane, which IS a position in the joint distribution, with both margins
  * carrying them and the cause split beside them. The naming obligation is
  * unchanged; what changed is that there is now somewhere to point.
+ *
+ * CORRECTED AGAIN. The somewhere to point IS the matrix, so the pointing is
+ * licensed only while the matrix is read. A sentence that refuses the matrix in
+ * one clause and cites its final lane in the next is citing a body it has just
+ * declared unusable, which is the same defect in a smaller frame. `matrixRead`
+ * carries that distinction: the refusal variant keeps the COUNT, which the
+ * histogram beside it carries on its own, and drops the LOCATION, which only
+ * the refused matrix could have given.
  */
-function unmeasuredTail(after: RunBookAggregate): string {
+function unmeasuredTail(after: RunBookAggregate, matrixRead: boolean): string {
   const refused = after.hf_histogram.refused_count;
   if (refused === 0) {
     return "";
+  }
+  if (!matrixRead) {
+    return (
+      ` ${String(refused)} more ${refused === 1 ? "row is" : "rows are"} counted refused, outside ` +
+      `every measured count above. Where ${refused === 1 ? "it sits" : "they sit"} in the matrix ` +
+      `is NOT claimed here: the matrix this response served is the one being refused.`
+    );
   }
   return (
     ` ${String(refused)} more ${refused === 1 ? "row is" : "rows are"} counted refused; ` +
