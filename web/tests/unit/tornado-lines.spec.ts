@@ -19,7 +19,24 @@
 
 import { expect, test } from "@playwright/test";
 
-import type { RunBookSetResponse, SetRunOutcome } from "../../lib/runbookSet";
+import type {
+  RunBookSetResponse,
+  SetRunEngineSummary,
+  SetRunOutcome,
+  SetRunScenarioResult,
+} from "../../lib/runbookSet";
+import {
+  batchHeaderLine,
+  resolveBatchCohort,
+  MATRIX_NO_RUN_LINE,
+  MATRIX_SET_RUN_ONLY_LINE,
+} from "../../app/lab/matrixCells";
+import {
+  barLength,
+  heldCauseSentence,
+  setContradiction,
+  tornadoCellState,
+} from "../../app/lab/tornadoCells";
 import {
   deepLinkDecision,
   pinnedElsewhereSentence,
@@ -28,6 +45,7 @@ import {
   tornadoBarGeometry,
   tornadoChargeHint,
   tornadoDefinitionChangedSentence,
+  tornadoFloorSentence,
   tornadoHeaderLine,
   TORNADO_METHOD,
 } from "../../app/lab/tornadoLines";
@@ -403,5 +421,408 @@ test.describe("the cohort and definition sentences, and the fixed copy", () => {
     expect(hint).toContain("charges one rate-limit token per scenario");
     expect(hint).toContain("running 3 charges 3 token(s)");
     expect(hint).toContain("writes nothing");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W-TN-B (Codex round 57). The laws below each name the mutant they kill.
+// ---------------------------------------------------------------------------
+
+/** A minimal membership-only body for the set-level gate. */
+const gateBody = (ids: readonly string[]): RunBookSetResponse =>
+  ({
+    requested_scenario_ids: [...ids],
+    results: ids.map((id) => ({ scenario_id: id })),
+    evaluation: { scenarios_evaluated: ids.length },
+  }) as unknown as RunBookSetResponse;
+
+test.describe("r57 item 1 — the set gate is bound to the DISPATCHED ids", () => {
+  test("set-equal in any order passes; the body's own list alone is never enough", () => {
+    expect(setContradiction(gateBody(["a_one", "b_two"]), ["b_two", "a_one"])).toBeNull();
+  });
+
+  test("the 4-vs-3 mismatch REFUSES, naming the id nobody's body accounts for", () => {
+    // KILLS: the r57-1 defect — a gate that trusts requested_scenario_ids and
+    // never reads what was actually POSTed. A body answering 3 of 4 dispatched
+    // ids was previously coherent by its own account and rendered.
+    const faults = setContradiction(
+      gateBody(["a_one", "b_two", "c_three"]),
+      ["a_one", "b_two", "c_three", "d_four"],
+    );
+    expect(faults).not.toBeNull();
+    expect(faults?.faults.join(" ")).toContain(
+      "d_four was dispatched and is not named in requested_scenario_ids",
+    );
+  });
+
+  test("the inverse mismatch refuses too: a body claiming ids nobody posted", () => {
+    const faults = setContradiction(gateBody(["a_one", "b_two"]), ["a_one"]);
+    expect(faults?.faults.join(" ")).toContain(
+      "b_two is named in requested_scenario_ids and was not dispatched",
+    );
+  });
+});
+
+// A compact result builder for the cell-state laws.
+const cellEngine = (over: Partial<SetRunEngineSummary> = {}): SetRunEngineSummary =>
+  ({
+    engine: "debt_manager",
+    usd_decimals: 6,
+    movement_rule: "eligibility_flipped_false_to_true",
+    accounts: 1,
+    infinite_accounts: 0,
+    movement_excluded_accounts: 0,
+    flipped_to_eligible: 0,
+    hf_dropped_accounts: null,
+    eligible_debt_delta_usd: "0",
+    total_debt_usd_before: "4200000000",
+    market_realization: null,
+    projection: null,
+    ...over,
+  }) as SetRunEngineSummary;
+
+const cellResult = (over: Partial<SetRunScenarioResult> = {}): SetRunScenarioResult =>
+  ({
+    scenario_id: "eth_minus_30",
+    scenario_version: "v1",
+    label: "eth -30",
+    path_assumption: "instantaneous mark at the shocked level",
+    shocks: [],
+    shock_reach: {
+      declared_shocks: 1,
+      declared_shocks_at_identity: 0,
+      reach: "every_mark_moved",
+      applied_shocks: [{}],
+      marks_moved: 1,
+      marks_held_by_declared_factor: 0,
+      marks_held_by_transform: 0,
+      marks_held_by_arithmetic: 0,
+      marks_snapped: 0,
+      marks_base_snapped: 0,
+      marks_cap_bound: 0,
+      held_flat_marks: 0,
+      held_flat_assets: [],
+      note: "",
+    },
+    covered_engines: ["debt_manager"],
+    withheld_engines: [],
+    unmeasurable_engines: [],
+    engines: [cellEngine()],
+    positions_answered: 1,
+    positions_withheld: 0,
+    note: "",
+    ...over,
+  }) as unknown as SetRunScenarioResult;
+
+const LISTED_IDENTITY = { scenarioId: "eth_minus_30", version: "v1", configVersion: "v1" };
+
+test.describe("r57 item 2 — the coverage join, both halves", () => {
+  test("same-version rows with covered_engines ≠ listing engines are COVERAGE SKEW, naming both sets", () => {
+    // KILLS: the r57-2 defect — tornadoCells checked the version and never the
+    // engine set, so a definition re-cut without a version bump rendered bars
+    // against the wrong coverage.
+    const cell = tornadoCellState(
+      cellResult({ covered_engines: ["debt_manager"] }),
+      "v1",
+      LISTED_IDENTITY,
+      ["aave_v3_etherfi", "debt_manager"],
+    );
+    expect(cell.state).toBe("coverage-skew");
+    if (cell.state !== "coverage-skew") return;
+    expect(cell.sentence).toContain("claims coverage of debt_manager");
+    expect(cell.sentence).toContain("covers aave_v3_etherfi and debt_manager");
+    expect(cell.sentence).toContain("without its version moving");
+    expect(cell.sentence).toContain("refused whole");
+  });
+
+  test("a matching coverage under a matching identity still renders bars", () => {
+    const cell = tornadoCellState(cellResult(), "v1", LISTED_IDENTITY, ["debt_manager"]);
+    expect(cell.state).toBe("bars");
+  });
+
+  test("a result whose scenario has NO listing row at all REFUSES as unlisted — never renders", () => {
+    // KILLS: the old `listed === undefined` skip, which rendered full bars for
+    // a result no committed definition identifies.
+    const cell = tornadoCellState(cellResult(), "v1", undefined, undefined);
+    expect(cell.state).toBe("unlisted-result");
+    if (cell.state !== "unlisted-result") return;
+    expect(cell.sentence).toContain("not published by the committed listing");
+    expect(cell.sentence).toContain("no bar, no ledger row, no header count");
+  });
+});
+
+test.describe("r57 item 4 — refused results leave the header's counts and gain their own clause", () => {
+  test("a refused result contributes to NO reach or absence count, and the clause names the classes", () => {
+    // KILLS: the header counting raw response.results — a refused no-reach row
+    // used to ride the "shock did not reach" count while its numbers were
+    // refused everywhere else.
+    const line = tornadoHeaderLine({
+      response: headerResponse("still_newest", 7),
+      drawnScenarioIds: ["a_one"],
+      filteredDeepLinkIds: [],
+      refusals: [
+        { scenarioId: "b_two", why: "definition changed" },
+        { scenarioId: "c_three", why: "coverage skew" },
+      ],
+    });
+    // b_two is the body's only no-reach row and c_three its only declared-hold
+    // row; refused, they count NOWHERE but the refusal clause.
+    expect(line).toContain("shock did not reach: 0");
+    expect(line).toContain("declared no move: 0");
+    expect(line).toContain("engines named absent rather than drawn: 0");
+    expect(line).toContain(
+      "results refused, not read: 2 (coverage skew: 1, definition changed: 1)",
+    );
+  });
+
+  test("no refusals, no clause — the header never carries a standing zero", () => {
+    expect(
+      tornadoHeaderLine({
+        response: headerResponse("still_newest", 7),
+        drawnScenarioIds: [],
+        filteredDeepLinkIds: [],
+        refusals: [],
+      }),
+    ).not.toContain("results refused");
+  });
+});
+
+test.describe("r57 item 5 — a sentence never points at a block the page does not render", () => {
+  test("the projection arm points at the ledger row when the block exists, and names the absence when not", () => {
+    const withBlock = tornadoCellState(
+      cellResult({
+        shock_reach: {
+          ...cellResult().shock_reach,
+          reach: "projection_no_spot_pass",
+        },
+        engines: [cellEngine({ projection: {} as SetRunEngineSummary["projection"] })],
+      }),
+      "v1",
+      LISTED_IDENTITY,
+      ["debt_manager"],
+    );
+    expect(withBlock.state).toBe("projection-no-spot-pass");
+    if (withBlock.state !== "projection-no-spot-pass") return;
+    expect(withBlock.sentence).toContain("projection row in the ledger below is the answer");
+
+    const without = tornadoCellState(
+      cellResult({
+        shock_reach: { ...cellResult().shock_reach, reach: "projection_no_spot_pass" },
+      }),
+      "v1",
+      LISTED_IDENTITY,
+      ["debt_manager"],
+    );
+    if (without.state !== "projection-no-spot-pass") throw new Error(without.state);
+    expect(without.sentence).not.toContain("ledger below is the answer");
+    expect(without.sentence).toContain("contract defect, never a zero");
+  });
+
+  test("the no-shock-declared arm does the same for market realization", () => {
+    const withBlock = tornadoCellState(
+      cellResult({
+        shock_reach: { ...cellResult().shock_reach, reach: "no_shocks_declared" },
+        engines: [
+          cellEngine({ market_realization: {} as SetRunEngineSummary["market_realization"] }),
+        ],
+      }),
+      "v1",
+      LISTED_IDENTITY,
+      ["debt_manager"],
+    );
+    if (withBlock.state !== "no-shock-declared") throw new Error(withBlock.state);
+    expect(withBlock.sentence).toContain("market-realization row in the ledger below");
+
+    const without = tornadoCellState(
+      cellResult({
+        shock_reach: { ...cellResult().shock_reach, reach: "no_shocks_declared" },
+      }),
+      "v1",
+      LISTED_IDENTITY,
+      ["debt_manager"],
+    );
+    if (without.state !== "no-shock-declared") throw new Error(without.state);
+    expect(without.sentence).not.toContain("ledger below");
+    expect(without.sentence).toContain("contract defect, never a zero");
+  });
+});
+
+test.describe("r57 item 6 — the ratio survives 10^400-class Decimals, both ways", () => {
+  const huge = `1${"0".repeat(400)}`;
+
+  test("a tiny delta over a huge book is NONZERO and finite: never a measured zero", () => {
+    // KILLS: `Number("1") / Number(10^400)` → 1/Infinity → 0, which classified
+    // a real nonzero delta as a measured zero.
+    const bar = barLength(cellEngine({ eligible_debt_delta_usd: "1", total_debt_usd_before: huge }));
+    expect(bar.drawn).toBe(true);
+    if (!bar.drawn) return;
+    expect(Number.isFinite(bar.ratio)).toBe(true);
+    expect(bar.ratio).toBeGreaterThan(0);
+    // And the sign survives the same path.
+    const negative = barLength(
+      cellEngine({ eligible_debt_delta_usd: "-1", total_debt_usd_before: huge }),
+    );
+    if (!negative.drawn) return;
+    expect(negative.ratio).toBeLessThan(0);
+  });
+
+  test("huge over huge is the exact quotient, never NaN", () => {
+    // KILLS: Number(huge)/Number(huge) → Infinity/Infinity → NaN geometry.
+    const bar = barLength(
+      cellEngine({ eligible_debt_delta_usd: huge, total_debt_usd_before: `2${"0".repeat(400)}` }),
+    );
+    if (!bar.drawn) return;
+    expect(bar.ratio).toBe(0.5);
+  });
+
+  test("huge over small is finite (clamped), and a TRUE zero stays exactly zero", () => {
+    const bar = barLength(cellEngine({ eligible_debt_delta_usd: huge, total_debt_usd_before: "1" }));
+    if (!bar.drawn) return;
+    expect(Number.isFinite(bar.ratio)).toBe(true);
+    expect(bar.ratio).toBeGreaterThan(0);
+
+    const zero = barLength(
+      cellEngine({ eligible_debt_delta_usd: "0", total_debt_usd_before: huge }),
+    );
+    if (!zero.drawn) return;
+    expect(zero.ratio).toBe(0);
+  });
+
+  test("the geometry over those ratios carries no NaN and no vanished nonzero", () => {
+    const tiny = barLength(cellEngine({ eligible_debt_delta_usd: "1", total_debt_usd_before: huge }));
+    const whole = barLength(
+      cellEngine({ eligible_debt_delta_usd: huge, total_debt_usd_before: huge }),
+    );
+    if (!tiny.drawn || !whole.drawn) return;
+    const geometry = tornadoBarGeometry(
+      [
+        { scenarioId: "tiny", ratio: tiny.ratio },
+        { scenarioId: "whole", ratio: whole.ratio },
+      ],
+      400,
+    );
+    for (const bar of geometry.bars) {
+      expect(Number.isFinite(bar.width)).toBe(true);
+      expect(Number.isFinite(bar.x)).toBe(true);
+      expect(bar.width).toBeGreaterThan(0);
+    }
+  });
+});
+
+test.describe("r57 item 7 — the tornado's own 1.5px floor is flagged and disclosed", () => {
+  test("1e-6 and 1e-12 ratios are both floored AND flagged; the anchor is neither", () => {
+    // KILLS: a geometry that floors the width silently — the flag and count
+    // are what the disclosure sentence and data-floored rects are pinned to.
+    const geometry = tornadoBarGeometry(
+      [
+        { scenarioId: "anchor", ratio: 1 },
+        { scenarioId: "micro", ratio: 0.000001 },
+        { scenarioId: "pico", ratio: 1e-12 },
+      ],
+      400,
+    );
+    const of = (id: string) => geometry.bars.find((bar) => bar.scenarioId === id);
+    expect(of("micro")?.width).toBe(1.5);
+    expect(of("micro")?.floored).toBe(true);
+    expect(of("pico")?.width).toBe(1.5);
+    expect(of("pico")?.floored).toBe(true);
+    expect(of("anchor")?.floored).toBe(false);
+    expect(geometry.flooredCount).toBe(2);
+  });
+
+  test("a TRUE zero is not floored — no ink is not lifted ink", () => {
+    const geometry = tornadoBarGeometry(
+      [
+        { scenarioId: "anchor", ratio: 1 },
+        { scenarioId: "zero", ratio: 0 },
+      ],
+      400,
+    );
+    const zero = geometry.bars.find((bar) => bar.scenarioId === "zero");
+    expect(zero?.width).toBe(0);
+    expect(zero?.floored).toBe(false);
+    expect(geometry.flooredCount).toBe(0);
+  });
+
+  test("the disclosure sentence is computed, singular at one, and ABSENT at zero", () => {
+    expect(tornadoFloorSentence(0)).toBeNull();
+    expect(tornadoFloorSentence(1)).toBe(
+      "1 bar is shorter than the 1.5px visibility floor and renders at it, off that scale; " +
+        "its exact figures are in the table.",
+    );
+    expect(tornadoFloorSentence(2)).toBe(
+      "2 bars are shorter than the 1.5px visibility floor and render at it, off that scale; " +
+        "their exact figures are in the table.",
+    );
+  });
+});
+
+test.describe("r57 item 8 — the drawn count counts RECTS; measured zero gets its own clause", () => {
+  test("the clause is appended right after the drawn clause, only when nonzero", () => {
+    const line = tornadoHeaderLine({
+      response: headerResponse("still_newest", 7),
+      drawnScenarioIds: ["a_one"],
+      filteredDeepLinkIds: [],
+      measuredZeroScenarioIds: ["b_two"],
+    });
+    expect(line).toContain(
+      "bars drawn for 1 of 3 requested scenario(s) · measured zero: 1 · shock did not reach",
+    );
+    const clean = tornadoHeaderLine({
+      response: headerResponse("still_newest", 7),
+      drawnScenarioIds: ["a_one"],
+      filteredDeepLinkIds: [],
+      measuredZeroScenarioIds: [],
+    });
+    expect(clean).not.toContain("measured zero");
+  });
+});
+
+test.describe("r57 item 12b — the cause figures come from the cause counts, never a reach total", () => {
+  test("the asymmetric split prints exactly its three cause figures", () => {
+    // KILLS: a renderer sourcing the cause sentence from len(applied_shocks)
+    // (7), marks_moved (1... distinct), the flag census (2/1/1, sum 4) or
+    // declared_shocks: every confound differs from every cause figure printed.
+    const split = cellResult({
+      shock_reach: {
+        ...cellResult().shock_reach,
+        reach: "some_marks_held",
+        applied_shocks: [{}, {}, {}, {}, {}, {}, {}],
+        marks_moved: 1,
+        marks_held_by_transform: 3,
+        marks_held_by_declared_factor: 2,
+        marks_held_by_arithmetic: 1,
+        marks_snapped: 2,
+        marks_base_snapped: 1,
+        marks_cap_bound: 1,
+      },
+    } as unknown as Partial<SetRunScenarioResult>);
+    expect(heldCauseSentence(split)).toBe(
+      "Of the held marks: 3 pinned by the stable snap, a snapped base or a bound cap, " +
+        "2 held at the factor this scenario declared for them, " +
+        "1 unchanged by exact-integer arithmetic.",
+    );
+    expect(heldCauseSentence(split)).not.toContain("7");
+    expect(heldCauseSentence(split)).not.toContain("4");
+    expect(heldCauseSentence(split)).not.toMatch(/\d+ of \d+ snapped/);
+  });
+});
+
+test.describe("r57 item 3c — the matrix empty state stops lying once a set has run", () => {
+  test("hasSetRun swaps ONLY the no-run arm, and the sentence points at the tornado surface", () => {
+    // KILLS: the header claiming "no run has been issued yet" over a session
+    // whose first action was a set run that settled 200.
+    const cold = resolveBatchCohort(new Map());
+    expect(batchHeaderLine(cold, null, false)).toBe(MATRIX_NO_RUN_LINE);
+    expect(batchHeaderLine(cold, null, true)).toBe(MATRIX_SET_RUN_ONLY_LINE);
+    expect(MATRIX_SET_RUN_ONLY_LINE).toContain("no single-scenario run has been issued yet");
+    expect(MATRIX_SET_RUN_ONLY_LINE).toContain("A set run HAS been issued this session");
+    expect(MATRIX_SET_RUN_ONLY_LINE).toContain("tornado surface below");
+    expect(MATRIX_SET_RUN_ONLY_LINE).toContain("speak only for single-scenario runs");
+    // The swap never leaks into a session that DID issue a single run: with an
+    // anchor on the table, the flag changes nothing.
+    expect(batchHeaderLine(cold, 1, true)).toBe(
+      `${MATRIX_SET_RUN_ONLY_LINE} The loss frontier above reads batch #1.`,
+    );
   });
 });

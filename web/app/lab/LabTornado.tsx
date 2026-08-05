@@ -59,6 +59,8 @@ import {
   barLength,
   heldCauseSentence,
   movementSentence,
+  refusalClassOf,
+  REFUSED_RESULT_STATES,
   setContradiction,
   tornadoCellState,
   type TornadoCellState,
@@ -68,9 +70,11 @@ import {
   tornadoBarGeometry,
   tornadoChargeHint,
   tornadoDefinitionChangedSentence,
+  tornadoFloorSentence,
   tornadoHeaderLine,
   TORNADO_METHOD,
   type TornadoBarInput,
+  type TornadoHeaderRefusal,
 } from "./tornadoLines";
 import styles from "./lab.module.css";
 
@@ -80,10 +84,27 @@ import styles from "./lab.module.css";
 // component only renders it.
 // ---------------------------------------------------------------------------
 
+/**
+ * R57 ITEM 11 — WHAT A DISPATCH WAS, STORED AT DISPATCH TIME. The §9.2 notice
+ * and the header's filtered clause describe the DISPATCH, not whatever the
+ * listing says later: a listing refresh that starts publishing a filtered id
+ * does not un-filter the request that already ran without it. So the filtered
+ * ids and the notice travel INTO the run and are rendered from there; the live
+ * listing drives only the PRE-dispatch notice for a link that has not run yet.
+ */
+export interface TornadoDispatch {
+  /** The deep-link ids filtered BEFORE this dispatch; empty for a manual run. */
+  filteredIds: readonly string[];
+  /** The §9.2 sentence composed at dispatch; null when nothing was filtered. */
+  notice: string | null;
+}
+
+const MANUAL_DISPATCH: TornadoDispatch = { filteredIds: [], notice: null };
+
 export type TornadoRun =
   | { kind: "idle" }
-  | { kind: "running"; ids: readonly string[] }
-  | { kind: "settled"; ids: readonly string[]; outcome: SetRunOutcome };
+  | { kind: "running"; ids: readonly string[]; dispatch: TornadoDispatch }
+  | { kind: "settled"; ids: readonly string[]; dispatch: TornadoDispatch; outcome: SetRunOutcome };
 
 export interface LabTornadoProps {
   /** The committed listing — the pick list, and the identity/coverage source. */
@@ -93,11 +114,13 @@ export interface LabTornadoProps {
   /** The SHARED phase map — the §9.5 cohort rule reads single-run pins off it. */
   phases: ReadonlyMap<string, MatrixPhase>;
   run: TornadoRun;
-  /** §9.2: the conflict / filtered / over-cap sentence, when the URL carries one. */
+  /**
+   * §9.2: the conflict / filtered / over-cap sentence AS THE LIVE LISTING
+   * DERIVES IT. Rendered only while no run has been dispatched (r57 item 11);
+   * once one has, the run's own stored dispatch record speaks for it.
+   */
   deepLinkNotice: string | null;
-  /** §9.2 / §9.6: the deep-link ids filtered before dispatch, for the header. */
-  filteredDeepLinkIds: readonly string[];
-  onRunSet: (ids: readonly string[]) => void;
+  onRunSet: (ids: readonly string[], dispatch?: TornadoDispatch) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +250,7 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
                       data-scenario-id={bar.scenarioId}
                       data-engine={engine}
                       data-negative={bar.negative ? "true" : "false"}
+                      data-floored={bar.floored ? "true" : "false"}
                     />
                   ) : (
                     // A TRUE zero under a reached shock is a real finding about
@@ -249,6 +273,19 @@ function TornadoPanel({ engine, entries }: { engine: string; entries: readonly P
               );
             })}
           </svg>
+          {/* R57 item 7 — THE FLOOR IS DISCLOSED, COMPUTED, ONLY WHEN NONZERO
+              (the W-SK-B remedy, applied to the tornado's own 1.5px floor).
+              The sentence's count is the geometry's own flagged count, so it
+              cannot drift from the `data-floored` rects above it. */}
+          {tornadoFloorSentence(geometry.flooredCount) !== null && (
+            <p
+              className={styles.methodLine}
+              data-testid="tornado-floor-note"
+              data-engine={engine}
+            >
+              {tornadoFloorSentence(geometry.flooredCount)}
+            </p>
+          )}
         </div>
       )}
     </section>
@@ -289,8 +326,13 @@ function TornadoResult({
 
   const rows: RowView[] = response.results.map((result) => {
     const identity = identities.get(result.scenario_id);
-    const cell = tornadoCellState(result, response.scenario_config_version, identity);
     const listed = scenarios.find((scenario) => scenario.id === result.scenario_id);
+    const cell = tornadoCellState(
+      result,
+      response.scenario_config_version,
+      identity,
+      listed?.engines,
+    );
     const phase = phases.get(result.scenario_id) ?? { kind: "idle" as const };
     const pin = anchorBatchOfPhase(phase, listed?.engines, identity);
     const drawableState = cell.state === "bars" || cell.state === "partly-reached";
@@ -302,11 +344,38 @@ function TornadoResult({
     };
   });
 
+  // R57 ITEM 4 — THE REFUSED ROWS, PARTITIONED OUT ONCE. A refused result
+  // (contradictory, coverage skew, definition changed, unlisted) renders its
+  // OWN state sentence and contributes NOTHING else: no ledger row, no header
+  // reach/absence count, no bar. The header carries the refusal clause.
+  const refusedRows = rows.filter((row) => REFUSED_RESULT_STATES.has(row.cell.state));
+  const admittedRows = rows.filter((row) => !REFUSED_RESULT_STATES.has(row.cell.state));
+  const refusals: TornadoHeaderRefusal[] = refusedRows.map((row) => ({
+    scenarioId: row.result.scenario_id,
+    why: refusalClassOf(row.cell.state) ?? row.cell.state,
+  }));
+
   const drawnRows = rows.filter(
     (row) => (row.cell.state === "bars" || row.cell.state === "partly-reached") && !row.leftCohort,
   );
+  // R57 ITEM 8 — "bars drawn" counts scenarios that rendered AT LEAST ONE
+  // RECT. A drawable scenario whose every answerable engine measured exactly
+  // zero renders no rect (a measured-zero marker is not a bar) and moves into
+  // its own header clause instead.
   const drawnScenarioIds = drawnRows
-    .filter((row) => row.result.engines.some((engine) => barLength(engine).drawn))
+    .filter((row) =>
+      row.result.engines.some((engine) => {
+        const bar = barLength(engine);
+        return bar.drawn && bar.ratio !== 0;
+      }),
+    )
+    .map((row) => row.result.scenario_id);
+  const measuredZeroScenarioIds = drawnRows
+    .filter((row) => {
+      const lengths = row.result.engines.map(barLength);
+      const answerable = lengths.filter((bar) => bar.drawn);
+      return answerable.length > 0 && answerable.every((bar) => bar.ratio === 0);
+    })
     .map((row) => row.result.scenario_id);
 
   // Panels: every engine any drawn row answers, in wire order of first
@@ -326,6 +395,19 @@ function TornadoResult({
         : [{ scenarioId: row.result.scenario_id, summary }];
     });
 
+  // R57 ITEM 5 — the per-row out_of_model clause. The set-run wire carries no
+  // out_of_model by design (rev2 §2.4): it is published, verbatim and
+  // versioned, on the listing this page already holds, and the identity join
+  // above makes that join exact for every ADMITTED row.
+  const outOfModelClause = (scenarioId: string): string => {
+    const count =
+      scenarios.find((scenario) => scenario.id === scenarioId)?.out_of_model.length ?? 0;
+    return count === 0
+      ? "none declared"
+      : `read with ${String(count)} committed out-of-model exclusion(s), published verbatim on ` +
+          "the committed definition";
+  };
+
   const freshness = response.evaluation.freshness;
   const rerunDisabled = rerunning || freshness === "none_servable";
 
@@ -333,7 +415,13 @@ function TornadoResult({
     <div data-testid="tornado-result">
       {/* ---- SLOT 3: ANSWER — the ONE composed header line (§9.6). ---- */}
       <p className={styles.answerLine} data-testid="tornado-header">
-        {tornadoHeaderLine({ response, drawnScenarioIds, filteredDeepLinkIds })}
+        {tornadoHeaderLine({
+          response,
+          drawnScenarioIds,
+          filteredDeepLinkIds,
+          refusals,
+          measuredZeroScenarioIds,
+        })}
       </p>
 
       {/* The set-level re-run affordance the header's freshness clause refers
@@ -479,13 +567,39 @@ function TornadoResult({
                 {id}: {tornadoDefinitionChangedSentence(cell.fields)}
               </p>
             );
+          case "coverage-skew":
+            return (
+              <p
+                key={id}
+                className={styles.errorState}
+                data-testid="tornado-state"
+                data-scenario-id={id}
+                data-state="coverage-skew"
+              >
+                <b>COVERAGE SKEW</b> · {id}: {cell.sentence}
+              </p>
+            );
+          case "unlisted-result":
+            return (
+              <p
+                key={id}
+                className={styles.notServed}
+                data-testid="tornado-state"
+                data-scenario-id={id}
+                data-state="unlisted-result"
+              >
+                <b>UNLISTED RESULT</b> · {id}: {cell.sentence}
+              </p>
+            );
         }
       })}
 
-      {/* Engines named ABSENT rather than drawn — per result, open, counted in
-          the header. A withheld engine and an unmeasurable one are different
-          absences and each is named with its own reason. */}
-      {rows.map(({ result }) => {
+      {/* Engines named ABSENT rather than drawn — per ADMITTED result, open,
+          counted in the header. A withheld engine and an unmeasurable one are
+          different absences and each is named with its own reason. A REFUSED
+          result names nothing here: a row this surface declined to read may
+          not contribute absences either (r57 item 4). */}
+      {admittedRows.map(({ result }) => {
         const absences = [
           ...result.withheld_engines.map((engine) => `${engine} (withheld on this batch)`),
           ...result.unmeasurable_engines.map(
@@ -514,10 +628,15 @@ function TornadoResult({
         <TornadoPanel key={engine} engine={engine} entries={panelEntries(engine)} />
       ))}
 
-      {/* ---- SLOT 5: LEDGER — every scenario × engine row's exact strings, so
-              no number lives only in a bar (LAW-5) and nothing is rounded
-              (R5). Rows exist for every ANSWERED engine, drawable or not: the
-              before-side figures of a no-reach row are a true measurement. ---- */}
+      {/* ---- SLOT 5: LEDGER — every ADMITTED scenario × engine row's exact
+              strings, so no number lives only in a bar (LAW-5) and nothing is
+              rounded (R5). Rows exist for every ANSWERED engine, drawable or
+              not: the before-side figures of a no-reach row are a true
+              measurement. A REFUSED result has no row here at all (r57 item
+              4): none of its numbers are read. The projection and
+              market-realization blocks are their OWN rows (r57 item 5),
+              labelled by block, because for their scenarios the block IS the
+              answer and a pointer at an unrendered block would dangle. ---- */}
       <div className={styles.tableWrap}>
         <table className={chart.mapLedgerTable} data-testid="tornado-ledger">
           <thead>
@@ -529,30 +648,97 @@ function TornadoResult({
               <th>movement</th>
               <th>reach</th>
               <th>held causes</th>
+              <th>out of model</th>
             </tr>
           </thead>
           <tbody>
-            {rows.flatMap(({ result }) =>
-              result.engines.map((engine) => (
-                <tr
-                  key={`${result.scenario_id}-${engine.engine}`}
-                  data-testid="tornado-ledger-row"
-                  data-scenario-id={result.scenario_id}
-                  data-engine={engine.engine}
-                >
-                  <td>{result.scenario_id}</td>
-                  <td>{engine.engine}</td>
-                  <td className={chart.mapLedgerNum}>
-                    {renderSignedUsdAmount(engine.eligible_debt_delta_usd, engine.usd_decimals)}
-                  </td>
-                  <td className={chart.mapLedgerNum}>
-                    {renderUsdAmount(engine.total_debt_usd_before, engine.usd_decimals)}
-                  </td>
-                  <td>{movementSentence(engine)}</td>
-                  <td>{result.shock_reach.reach}</td>
-                  <td>{heldCauseSentence(result)}</td>
-                </tr>
-              )),
+            {admittedRows.flatMap(({ result }) =>
+              result.engines.flatMap((engine) => {
+                const numeric = (
+                  <tr
+                    key={`${result.scenario_id}-${engine.engine}`}
+                    data-testid="tornado-ledger-row"
+                    data-scenario-id={result.scenario_id}
+                    data-engine={engine.engine}
+                  >
+                    <td>{result.scenario_id}</td>
+                    <td>{engine.engine}</td>
+                    <td className={chart.mapLedgerNum}>
+                      {renderSignedUsdAmount(engine.eligible_debt_delta_usd, engine.usd_decimals)}
+                    </td>
+                    <td className={chart.mapLedgerNum}>
+                      {renderUsdAmount(engine.total_debt_usd_before, engine.usd_decimals)}
+                    </td>
+                    <td>{movementSentence(engine)}</td>
+                    <td>{result.shock_reach.reach}</td>
+                    <td>{heldCauseSentence(result)}</td>
+                    {/* R57 item 5 — the out_of_model clause, on every row whose
+                        committed definition carries entries. */}
+                    <td data-testid="tornado-out-of-model">
+                      {outOfModelClause(result.scenario_id)}
+                    </td>
+                  </tr>
+                );
+                const blocks = [];
+                if (engine.market_realization !== null) {
+                  const block = engine.market_realization;
+                  blocks.push(
+                    <tr
+                      key={`${result.scenario_id}-${engine.engine}-market-realization`}
+                      data-testid="tornado-ledger-block"
+                      data-block="market-realization"
+                      data-scenario-id={result.scenario_id}
+                      data-engine={engine.engine}
+                    >
+                      <td>{result.scenario_id}</td>
+                      <td>{engine.engine}</td>
+                      <td colSpan={6}>
+                        market_realization · hfs unchanged:{" "}
+                        {block.hfs_unchanged ? "true" : "false"} · execution shortfall{" "}
+                        {renderUsdAmount(block.execution_shortfall_usd, block.usd_decimals)} · bad
+                        debt at liquidation{" "}
+                        {renderUsdAmount(block.bad_debt_at_liquidation_usd, block.usd_decimals)} ·
+                        seizure model: {block.seizure_model}
+                      </td>
+                    </tr>,
+                  );
+                }
+                if (engine.projection !== null) {
+                  const block = engine.projection;
+                  blocks.push(
+                    <tr
+                      key={`${result.scenario_id}-${engine.engine}-projection`}
+                      data-testid="tornado-ledger-block"
+                      data-block="projection"
+                      data-scenario-id={result.scenario_id}
+                      data-engine={engine.engine}
+                    >
+                      <td>{result.scenario_id}</td>
+                      <td>{engine.engine}</td>
+                      <td colSpan={6}>
+                        projection · {block.basis} · {block.annual_delta_bps >= 0 ? "+" : ""}
+                        {String(block.annual_delta_bps)} bps annual · prices held flat:{" "}
+                        {block.prices_held_flat ? "true" : "false"} ·{" "}
+                        {block.horizons
+                          .map(
+                            (h) =>
+                              `horizon ${String(h.horizon_seconds)}s: debt ` +
+                              `${renderUsdAmount(h.debt_usd, engine.usd_decimals)}, projected ` +
+                              `${renderUsdAmount(h.projected_usd, engine.usd_decimals)}, ` +
+                              `additional interest ` +
+                              `${renderUsdAmount(h.additional_interest_usd, engine.usd_decimals)}, ` +
+                              `becomes liquidatable: ` +
+                              (h.becomes_liquidatable === null
+                                ? "not stated"
+                                : String(h.becomes_liquidatable)),
+                          )
+                          .join(" · ")}
+                      </td>
+                    </tr>,
+                  );
+                }
+                return [numeric, ...blocks];
+              }),
             )}
           </tbody>
         </table>
@@ -576,7 +762,6 @@ export function LabTornado({
   phases,
   run,
   deepLinkNotice,
-  filteredDeepLinkIds,
   onRunSet,
 }: LabTornadoProps) {
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
@@ -587,6 +772,13 @@ export function LabTornado({
   const pickedIds = pickedListed.map((scenario) => scenario.id);
   const overCap = pickedIds.length > MAX_SET_RUN_SCENARIOS;
   const running = run.kind === "running";
+
+  // R57 ITEM 11 — once a run has been dispatched, its OWN stored dispatch
+  // record speaks: the notice describes what was actually posted and filtered
+  // at that instant, and a listing refresh that later publishes a filtered id
+  // does not rewrite history. The live listing's derivation renders only while
+  // nothing has run.
+  const notice = run.kind === "idle" ? deepLinkNotice : run.dispatch.notice;
 
   const toggle = (id: string) => {
     setPicked((previous) => {
@@ -607,10 +799,11 @@ export function LabTornado({
       </div>
 
       {/* §9.2 — the deep link's own notices: mutual exclusion, filtered ids,
-          the cap. Named, visible, and nothing runs on a guess. */}
-      {deepLinkNotice !== null && (
+          the cap. Named, visible, and nothing runs on a guess. Once a run is
+          dispatched this is the STORED dispatch-time sentence (r57 item 11). */}
+      {notice !== null && (
         <div className={styles.notServed} data-testid="tornado-deeplink-notice">
-          {deepLinkNotice}
+          {notice}
         </div>
       )}
 
@@ -652,7 +845,9 @@ export function LabTornado({
           data-testid="tornado-run"
           disabled={running || pickedIds.length === 0 || overCap}
           onClick={() => {
-            onRunSet(pickedIds);
+            // A manual dispatch filters nothing: its stored record says so,
+            // replacing any earlier deep-link record (r57 item 11).
+            onRunSet(pickedIds, MANUAL_DISPATCH);
           }}
         >
           {running ? "running…" : `run ${String(pickedIds.length)} as one set`}
@@ -676,7 +871,7 @@ export function LabTornado({
         </p>
       )}
 
-      {run.kind === "settled" && <SettledView run={run} {...{ scenarios, identities, phases, filteredDeepLinkIds, onRunSet }} />}
+      {run.kind === "settled" && <SettledView run={run} {...{ scenarios, identities, phases, onRunSet }} />}
     </section>
   );
 }
@@ -686,15 +881,13 @@ function SettledView({
   scenarios,
   identities,
   phases,
-  filteredDeepLinkIds,
   onRunSet,
 }: {
   run: Extract<TornadoRun, { kind: "settled" }>;
   scenarios: readonly ScenarioDefinition[];
   identities: RowIdentity;
   phases: ReadonlyMap<string, MatrixPhase>;
-  filteredDeepLinkIds: readonly string[];
-  onRunSet: (ids: readonly string[]) => void;
+  onRunSet: (ids: readonly string[], dispatch?: TornadoDispatch) => void;
 }) {
   const outcome = run.outcome;
   const n = String(run.ids.length);
@@ -704,15 +897,17 @@ function SettledView({
 
   switch (outcome.kind) {
     case "ok": {
-      const contradiction = setContradiction(outcome.response);
+      // R57 ITEM 1 — the gate reads the DISPATCHED ids, never only the body's
+      // own account of what was requested.
+      const contradiction = setContradiction(outcome.response, run.ids);
       if (contradiction !== null) {
         return (
           <div className={styles.errorState} data-testid="tornado-contradictory-set">
             <b>refusing to render: the served set contradicts its own membership.</b> The body
-            answers the set two ways, or fails to answer it: {contradiction.faults.join("; ")}. No
-            cell, no pin and no cohort is minted for ANY row this set covers, because a set that
-            cannot state its own membership has no authority over any member. Re-run the set to ask
-            for a body that answers it once.
+            answers the set two ways, fails to answer it, or answers a set this page never
+            dispatched: {contradiction.faults.join("; ")}. No cell, no pin and no cohort is minted
+            for ANY row this set covers, because a set that cannot state its own membership has no
+            authority over any member. Re-run the set to ask for a body that answers it once.
           </div>
         );
       }
@@ -722,9 +917,12 @@ function SettledView({
           scenarios={scenarios}
           identities={identities}
           phases={phases}
-          filteredDeepLinkIds={filteredDeepLinkIds}
+          filteredDeepLinkIds={run.dispatch.filteredIds}
           onRerun={() => {
-            onRunSet(run.ids);
+            // The re-run repeats the SAME dispatch: same ids, same stored
+            // record, because the request it repeats still omitted whatever
+            // the original link filtered (r57 item 11).
+            onRunSet(run.ids, run.dispatch);
           }}
           rerunning={false}
         />

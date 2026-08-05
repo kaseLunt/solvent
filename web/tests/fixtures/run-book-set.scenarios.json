@@ -1,0 +1,228 @@
+{
+  "served_at": "2026-07-29T10:00:05Z",
+  "scenario_config_version": "v1",
+  "scenarios": [
+    {
+      "id": "eth_minus_30",
+      "version": "v1",
+      "label": "ETH -30 percent",
+      "description": "Factor shock on ETH/USD. Every ETH-linked collateral moves jointly because each one's USD price is composed from ETH/USD by construction; weETH additionally carries its redemption rate, held flat here.",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "eth_usd",
+          "factor_num": 70,
+          "factor_den": 100
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "Aave price caps are checked, not assumed: a down-shock leaves them slack, and any cap that did bind is reported per input"
+      ]
+    },
+    {
+      "id": "weeth_market_depeg_oracles_held",
+      "version": "v1",
+      "label": "weETH market depeg to 0.95 (oracles held)",
+      "description": "weETH trades 5 percent below its redemption value while the redemption rate is unchanged. This is EXPLICITLY NOT a health-factor event: neither protocol reads a secondary-market weETH price, so every health factor is bit-identical and no position becomes liquidatable.",
+      "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+      "engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "shocks": [],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "seizure is modeled PRO-RATA over a position's counted collateral; a real liquidator picks a preference order and would take the least-impaired asset first, so this is neutral rather than conservative"
+      ]
+    },
+    {
+      "id": "dm_rate_horizon_plus_200bps",
+      "version": "v1",
+      "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+      "description": "A rate change does not move a spot health factor, so this ships as a closed-form HORIZON PROJECTION, never as a spot shock.",
+      "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "borrow_apy",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "borrower behaviour: no repayment, no top-up, no new borrowing over the horizon",
+        "the Aave engine is excluded (utilization-driven rates over a residual dust book)"
+      ]
+    },
+    {
+      "id": "ethfi_minus_50",
+      "version": "v1",
+      "label": "ETHFI -50 percent",
+      "description": "Idiosyncratic own-ecosystem-token shock. ETHFI collateral is correlated with exactly the stress states in which liquidations happen, and sETHFI is composed from ETHFI, so both move on one axis.",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "asset_usd",
+          "asset": "0xe0080d2F853ecDdbd81A643dC10DA075Df26fD3f",
+          "factor_num": 50,
+          "factor_den": 100
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
+        "the sETHFI/ETHFI accountant rate is held flat; a 50 percent ETHFI drawdown is assumed not to change the staking rate",
+        "reflexivity between the token price and the protocol's own risk parameters"
+      ]
+    },
+    {
+      "id": "stable_depeg_0995_in_band",
+      "version": "v1",
+      "label": "Stable depeg to 0.995 (inside the snap band - a true no-op)",
+      "description": "Every configured Debt Manager stable is marked 0.5 percent below par. 995000 lies STRICTLY INSIDE the snap band (990000, 1010000), so PriceProviderV2 pins it back to exactly 1e6 and nothing moves. This is the no-op half of the snap-band pair.",
+      "path_assumption": "instantaneous mark at the shocked level; single-step, no path, no cascade feedback, no partial closes",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "stable_usd",
+          "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+          "factor_num": 995,
+          "factor_den": 1000
+        },
+        {
+          "axis": "stable_usd",
+          "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+          "factor_num": 995,
+          "factor_den": 1000
+        },
+        {
+          "axis": "stable_usd",
+          "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+          "factor_num": 995,
+          "factor_den": 1000
+        }
+      ],
+      "out_of_model": [
+        "oracle lag and heartbeat behaviour during the move: the shock is applied as an instantaneous mark, while the real feeds update on deviation or heartbeat",
+        "deviation-trigger discreteness (a feed moves in rounds, not continuously)",
+        "liquidator liquidity, gas costs, execution latency and cascade dynamics",
+        "market correlations not mechanically implied by the read paths recorded in recon/derivation-notes.md",
+        "intra-sample price wicks: prices are 60-second point samples and an intra-interval spike is invisible by construction (D-012)",
+        "the Debt Manager's debt leg is USD-NORMALIZED, so a stable depeg re-prices stable COLLATERAL but not outstanding debt - the asymmetry is the point of this scenario",
+        "the Aave-side stables sit behind cap adapters (min(feed, cap)) with no snap; the Aave book is residual dust (about 2.8k USD of debt at the probe pin) so they are excluded here",
+        "this scenario is the CONTROL: it must produce zero change on every position",
+        "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json; the liquidUSD->USDC and eUSD->none bases ARE verified against that pinned read",
+        "liquidUSD is 27.1 percent of book collateral and is COMPOSED over a snapped USDC base, so it moves by snap(1e6 x f)/1e6 rather than by f; the lens rate itself is held flat",
+        "eUSD is verified baseAsset=0 (a direct USD accountant lens, not composed over a stable) and is therefore correctly HELD FLAT by this scenario; it appears in the held-flat disclosure rather than the propagation matrix"
+      ]
+    },
+    {
+      "id": "dm_composition_census",
+      "version": "v1",
+      "label": "DM composition census - previously unclaimed assets, explicitly held",
+      "description": "The accept-r4 tokenconfig_sweep proved the v1 matrices stale against the chain universe: the provider priced eleven assets no scenario named, so every stress run held their TVL flat BY OMISSION (oracle-sentinel R4's named failure). The adjudicated principle is that absent-claim-by-omission is the defect and explicit-claim-or-explicit-decision is the fix. This scenario is that record: every previously unclaimed configured DM asset gets a propagation row whose composition (base_asset, stable flags, axis) is derived mechanically from PriceProviderV2.tokenConfig at the accept-r4 OP pin, and every axis it introduces is shocked by the EXPLICIT factor 1/1 - the disclosed decision to hold each mark, chosen over an invented stress magnitude. weEUR carries no axis of its own: it composes under EURC (a NON-stable base, so no snap) and responds to EURC's axis linearly.",
+      "path_assumption": "no move is asserted: every shock in this census is the explicit factor 1/1, so each named mark is held at its current sample BY DECISION, disclosed in the applied-shock record rather than in the held-flat list",
+      "engines": [
+        "debt_manager"
+      ],
+      "shocks": [
+        {
+          "axis": "asset_usd",
+          "asset": "0x17bC8Ffd82b8a36e737Ca1141C025089589B915e",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0x4200000000000000000000000000000000000042",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0xA519AfBc91986c0e7501d7e34968FEE51CD901aC",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0xDCB612005417Dc906fF72c87DF732e5a90D49e11",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0xE5d3854736e0D513aAE2D8D708Ad94d14Fd56A6a",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0xca5921DF65E2e1b0B98Ae91c0187BA80D4124898",
+          "factor_num": 1,
+          "factor_den": 1
+        },
+        {
+          "axis": "asset_usd",
+          "asset": "0xd83E3d560bA6F05094d9D8B3EB8aaEA571D1864E",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "out_of_model": [
+        "stress magnitudes for the census assets: NO shock is asserted for liquidRWA, OP, eUSD, beHYPE, WHYPE, EURC, weEUR or either liquidRESERVE - the 1/1 factors are the explicit, disclosed decision to hold each mark, adjudicated preferable to an invented magnitude (accept-r4: explicit-claim-or-explicit-decision closes the omission defect; a sized shock for any of these is future scenario work, not a default)",
+        "JUDGMENT (flagged, conservative): beHYPE and WHYPE are economically HYPE-linked, but PriceProviderV2 declares NO shared base for them at the pin (each carries its own push oracle, baseAsset=0x0), so each gets its OWN axis and no joint HYPE/USD axis is claimed - the correlation judgment is recorded here instead of invented",
+        "JUDGMENT (flagged, conservative): eUSD and EURC are claimed exactly as the chain declares them (isStableToken=false, so NEITHER joins the stable_snap set); if governance later flips either to isStableToken, the stable-set weld will catch the drift in both directions (risk-quant R4.1)",
+        "EUR/USD market risk: EURC's axis is effectively EUR/USD and weEUR composes over it; no EUR scenario is asserted",
+        "the two liquidRESERVE deployments share one symbol and one oracle but are DISTINCT tokens; every claim and every axis instance here is keyed by ADDRESS, never symbol (the twin hazard recorded in the accept-r4 adjudication)",
+        "liquidRWA is marked by a push feed with maxStaleness 604800 (7 days) at the pin; RWA marking latency and NAV-vs-market divergence are not modeled",
+        "per-asset base_asset claims are the DEPLOYED composition graph read from PriceProviderV2.tokenConfig(token).baseAsset at the accept-r4 OP pin (block 154938071, hash 0xaf91dd4ba1975fc3b93e411586ce267892406ed8cb7152c5cefe1c368696c6bc, provider 0x44dd2372FE7B97C4B4D6a7d4DeCf72466485BAcB) - a hash-pinned SAMPLE with no continuity claim (chain-truth R3.1), fixture-welded in internal/risk/testdata/tokenconfig_accept_r4.json",
+        "oracle lag and heartbeat behaviour: the census holds marks at their current sample; the real feeds update on deviation or heartbeat"
+      ]
+    }
+  ],
+  "notes": [
+    "this is the COMMITTED set, compiled into the binary — configuration, not batch data. It carries no batch envelope and is servable before any batch exists; a definition here says what WOULD be evaluated, never what the book is.",
+    "the SAME definitions ride on every /v1/address/{addr}/stress response's `scenarios` array, serialized by the same code. That array carries per-address `results` in addition; nothing else differs, so the two surfaces cannot describe different scenarios.",
+    "every `id` here is exactly what POST /v1/scenarios/{id}/run-book accepts. An id absent from this listing is a 404 there, never a silently empty run.",
+    "`engines` is the set of engines a scenario is DEFINED for. An engine missing from it is out of the scenario's model — a property of the definition, and not the same statement as a withheld engine, which is a refusal and is named as one on the surfaces that evaluate.",
+    "shocks are EXACT rationals: -30% is `factor_num` 70 over `factor_den` 100, never 0.7. There are no floats in this pipeline. A shock of 1/1 is a scenario whose information lives on another axis — a projection over time, or a market realization the oracles do not see.",
+    "`out_of_model` is part of the definition, not a footnote: it names what the scenario does NOT model, and a shocked number read without it is a number read wrong.",
+    "`scenario_config_version` versions the set as a whole, so a client caching results has one token to invalidate on. Files that disagree report MIXED(...) rather than a silently chosen version."
+  ]
+}

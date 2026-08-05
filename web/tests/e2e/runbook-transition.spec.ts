@@ -167,6 +167,58 @@ function withAaveWideFall(raw: string): string {
   return JSON.stringify(body);
 }
 
+interface LaneBody {
+  index: number;
+  kind: string;
+  label: string;
+}
+
+interface ReorderableTransitions {
+  lanes: LaneBody[];
+  from_rows: number[];
+  to_rows: number[];
+  outflows: { from: number; cells: { to: number }[] }[];
+}
+
+/**
+ * r57 item 10 — the DM's lane vocabulary REORDERED so the unmeasured lane sits
+ * at index 0 (not 9), margins adjusted consistently (the 0↔9 involution: lane
+ * objects trade places keeping index == position, margins trade entries, every
+ * outflow/cell index remapped — it balances because both swapped lanes tally
+ * 1 row on both sides), and then the one-ended mutant applied against THAT
+ * index: the (0→0) unmeasured diagonal and the balanced (6→6) held diagonal
+ * swapped into (0→6) and (6→0). Neither offending cell touches index 9, so an
+ * index-9-hardcoded reading accepts the body whole.
+ */
+function withOneEndedSwapAtReorderedIndex(raw: string): string {
+  const body = JSON.parse(raw) as { engines: (TransitionEngineBody & { hf_transitions: ReorderableTransitions })[] };
+  const t = engineBodyOf(body, "debt_manager").hf_transitions as unknown as ReorderableTransitions;
+  const remap = (index: number) => (index === 0 ? 9 : index === 9 ? 0 : index);
+  const lanes = [...t.lanes];
+  t.lanes = lanes.map((_, index) => {
+    const source = lanes[remap(index)];
+    if (source === undefined) throw new Error("the fixture lost a lane");
+    return { ...source, index };
+  });
+  const fromRows = [...t.from_rows];
+  const toRows = [...t.to_rows];
+  t.from_rows = fromRows.map((_, index) => fromRows[remap(index)] ?? 0);
+  t.to_rows = toRows.map((_, index) => toRows[remap(index)] ?? 0);
+  t.outflows = t.outflows.map((outflow) => ({
+    ...outflow,
+    from: remap(outflow.from),
+    cells: outflow.cells.map((cell) => ({ ...cell, to: remap(cell.to) })),
+  }));
+  // The one-ended mutant, against the unmeasured lane AT ITS NEW INDEX.
+  for (const outflow of t.outflows) {
+    for (const cell of outflow.cells) {
+      if (outflow.from === 0 && cell.to === 0) cell.to = 6;
+      else if (outflow.from === 6 && cell.to === 6) cell.to = 0;
+    }
+  }
+  return JSON.stringify(body);
+}
+
 /**
  * Codex r56's margin-preserving mutant: the DM's balanced diagonals (0→0 and
  * 9→9, one row each) swapped into 0→9 and 9→0. Every margin, histogram and
@@ -445,9 +497,12 @@ test("the flow draws ONE ribbon per occupied cell, classed by movement", async (
       .evaluateAll((nodes) =>
         nodes.map((node) => ({
           kind: node.getAttribute("data-kind") ?? "",
+          crit: node.getAttribute("data-crit") ?? "",
           d: node.getAttribute("d") ?? "",
           stroke: getComputedStyle(node).stroke,
           strokeWidth: getComputedStyle(node).strokeWidth,
+          strokeDasharray: getComputedStyle(node).strokeDasharray,
+          opacity: parseFloat(getComputedStyle(node).opacity),
         })),
       );
     expect(geometry.length).toBeGreaterThan(0);
@@ -495,6 +550,56 @@ test("the flow draws ONE ribbon per occupied cell, classed by movement", async (
       strokeByKind.set(ribbon.kind, ribbon.stroke);
     }
     expect(new Set(strokeByKind.values()).size).toBe(strokeByKind.size);
+
+    // (d) W-TN-B (r57 item 9): pairwise-distinct is not enough — a FULL
+    // semantic swap (held wearing changed's class and changed wearing held's)
+    // stays pairwise-distinct and passes (c). So each kind is bound to its
+    // INTENDED treatment, with the tokens resolved through getComputedStyle
+    // exactly as the crit law resolves them:
+    //   changed (non-crit)  → the accent token;
+    //   held (non-crit)     → the ink-3 token, at the held mute (opacity 0.4,
+    //                         strictly below changed's emphasis);
+    //   unmeasured          → the warn token AND a dashed stroke pattern —
+    //                         a computed stroke-dasharray that is not "none".
+    const accent = await resolveColor(page, "var(--accent)");
+    const ink3 = await resolveColor(page, "var(--ink-3)");
+    const warn = await resolveColor(page, "var(--warn)");
+    const critToken = await resolveColor(page, "var(--crit)");
+    for (const token of [accent, ink3, warn, critToken]) {
+      expect(token).not.toBe("");
+      expect(token).not.toBe("rgba(0, 0, 0, 0)");
+    }
+    const changedOpacity = geometry.find(
+      (ribbon) => ribbon.kind === "changed" && ribbon.crit === "false",
+    )?.opacity;
+    for (const ribbon of geometry) {
+      if (ribbon.crit === "true") {
+        expect(ribbon.stroke, `crit ${ribbon.kind} ribbon must wear the crit token`).toBe(
+          critToken,
+        );
+        continue;
+      }
+      if (ribbon.kind === "changed") {
+        expect(ribbon.stroke, "a changed ribbon must wear the accent token").toBe(accent);
+      }
+      if (ribbon.kind === "held") {
+        expect(ribbon.stroke, "a held ribbon must wear the ink-3 token").toBe(ink3);
+        expect(Math.abs(ribbon.opacity - 0.4)).toBeLessThanOrEqual(0.01);
+        if (changedOpacity !== undefined) {
+          expect(ribbon.opacity, "held keeps the mute below changed's emphasis").toBeLessThan(
+            changedOpacity,
+          );
+        }
+      }
+      if (ribbon.kind === "unmeasured") {
+        expect(ribbon.stroke, "an unmeasured ribbon must wear the warn token").toBe(warn);
+        expect(
+          ribbon.strokeDasharray,
+          "the unmeasured ribbon must carry the dashed stroke pattern",
+        ).not.toBe("none");
+        expect(ribbon.strokeDasharray).not.toBe("");
+      }
+    }
   }
 });
 
@@ -739,6 +844,40 @@ test("a cell with one end in the unmeasured lane is REFUSED and draws NO SVG", a
   await expect(dm.getByTestId("runbook-transition-cells")).toHaveCount(0);
 
   // And the refusal is per engine: aave's whole matrix still renders.
+  await expect(
+    page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]'),
+  ).toHaveAttribute("data-state", "ok");
+});
+
+test("r57 item 10 — the one-ended law is KIND-KEYED: it fires with the unmeasured lane at index 0", async ({
+  page,
+}) => {
+  // The r56-2 residual. The committed vocabulary always parks the unmeasured
+  // lane at index 9, so an implementation hardcoding 9 (or lanes.length - 1)
+  // passed every existing law. Here the vocabulary is REORDERED — unmeasured
+  // at index 0, margins consistent — and the one-ended cells are (0→6) and
+  // (6→0): neither touches index 9, every margin and histogram tally still
+  // balances, so an index-9 reading accepts the body whole and this test is
+  // what fails it. Only a lane-KIND reading refuses, naming the non-standard
+  // index.
+  await runScenario(
+    page,
+    "eth_minus_30",
+    withOneEndedSwapAtReorderedIndex(fixture("run-book.eth_minus_30.json")),
+  );
+
+  const dm = page.locator('[data-testid="runbook-transition"][data-engine="debt_manager"]');
+  await expect(dm).toHaveAttribute("data-state", "contradictory");
+  const reasons = dm.getByTestId("runbook-transition-reasons");
+  await expect(reasons).toContainText("exactly one end in the unmeasured lane");
+  await expect(reasons).toContainText("lane 0 (not measured) → lane 6 (1.50 – 2.00)");
+  await expect(reasons).toContainText("lane 6 (1.50 – 2.00) → lane 0 (not measured)");
+  await expect(reasons).toContainText("unmeasured on both sides");
+  await expect(reasons).not.toContainText("lane 9");
+  // The refusal REPLACES the picture: no flow SVG, no cell table.
+  await expect(dm.getByTestId("runbook-transition-flow")).toHaveCount(0);
+  await expect(dm.getByTestId("runbook-transition-cells")).toHaveCount(0);
+  // And it stays per engine: aave, untouched by the reorder, still renders.
   await expect(
     page.locator('[data-testid="runbook-transition"][data-engine="aave_v3_etherfi"]'),
   ).toHaveAttribute("data-state", "ok");

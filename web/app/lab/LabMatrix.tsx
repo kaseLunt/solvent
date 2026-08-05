@@ -283,6 +283,14 @@ export interface LabMatrixProps {
   /** Highlighted row (the committed-scenario detail's selection). */
   selectedId: string | null;
   onSelect: (scenarioId: string) => void;
+  /**
+   * R57 ITEM 3 — whether a SET run has been issued this session. A set run
+   * leaves no phase behind (its answer lives on the tornado surface), so
+   * without this flag the empty-state header would claim "no run has been
+   * issued yet" over a session that issued one. Copy only: no cell state
+   * changes on it.
+   */
+  hasSetRun: boolean;
 }
 
 export function LabMatrix({
@@ -296,6 +304,7 @@ export function LabMatrix({
   listingRefreshing,
   selectedId,
   onSelect,
+  hasSetRun,
 }: LabMatrixProps) {
   // THE ANCHOR WATERMARK (Wave R8). The anchor batch id never DECREASES while
   // this panel lives. `MatrixPhase.held` already keeps a running row's evidence
@@ -416,7 +425,7 @@ export function LabMatrix({
       {/* ---- SLOT 3: ANSWER — the composed batch header, promoted out of the
               caption register. It is this grid's own as-of claim. ---- */}
       <p className={styles.answerLine} data-testid="matrix-batch-line">
-        {batchHeaderLine(cohort, frontierBatchId)}
+        {batchHeaderLine(cohort, frontierBatchId, hasSetRun)}
       </p>
 
       {/* ---- SLOT 4 + 5: VISUAL + LEDGER — the grid IS the ledger ---- */}

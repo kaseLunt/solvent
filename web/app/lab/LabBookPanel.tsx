@@ -69,7 +69,7 @@ import {
   type RowIdentity,
   type ScenarioIdentity,
 } from "./matrixCells";
-import { LabTornado, type TornadoRun } from "./LabTornado";
+import { LabTornado, type TornadoDispatch, type TornadoRun } from "./LabTornado";
 import {
   deepLinkDecision,
   setFailureAsRunBookOutcome,
@@ -827,6 +827,29 @@ function bookDekFor(state: BookState): string {
   }
 }
 
+/**
+ * R57 ITEM 3 — what a matrix row becomes when a 200 SET settle hands it back.
+ *
+ * The set's answer never enters a matrix cell, so a successful set leaves the
+ * matrix showing EXACTLY what it showed before the dispatch:
+ *
+ *   - no prior phase, or a prior idle: TRUE idle, `{kind: "idle"}` with no
+ *     attempt stamp — matrixCells' invariant is that idle means no attempt;
+ *   - a prior settled phase (ok or non-ok, with or without a `rerunFailed`
+ *     record): returned AS IS, its own stamp and its own failure record
+ *     untouched — never restamped with the set's attempt;
+ *   - a prior single run still IN FLIGHT at dispatch (its settlement was
+ *     discarded by the sequence bump): whatever evidence THAT phase was
+ *     holding, at that phase's own stamp, or true idle when it held none.
+ */
+function restoredAfterSetSettle(prior: MatrixPhase | undefined): MatrixPhase {
+  if (prior === undefined || prior.kind === "idle") return { kind: "idle" };
+  if (prior.kind === "outcome") return prior;
+  return prior.held === undefined
+    ? { kind: "idle" }
+    : { kind: "outcome", outcome: prior.held, attempt: prior.attempt };
+}
+
 function LabBookPanelInner() {
   const searchParams = useSearchParams();
   const deepLinkId = searchParams.get("scenario");
@@ -963,12 +986,17 @@ function LabBookPanelInner() {
   // depends on what the settlement WAS:
   //
   //   A 200 (valid or not — the set-level gate is the tornado's to render)
-  //   RETURNS EVERY ROW'S HELD EVIDENCE, untouched at its own batch pin. The
-  //   set's answer lives on the tornado surface, never in a matrix cell, so
-  //   the matrix simply shows again what it showed before the dispatch. A row
-  //   that held nothing returns to idle: the matrix speaks for single-run
-  //   phases and the tornado speaks for the set, and neither borrows the
-  //   other's evidence (the R16 lesson, applied before the defect this time).
+  //   RETURNS EVERY ROW'S PRIOR PHASE, EXACTLY (r57 item 3). The set's answer
+  //   lives on the tornado surface, never in a matrix cell, so the matrix
+  //   simply shows again what it showed before the dispatch. A row that held
+  //   nothing returns to TRUE idle — `{kind: "idle"}`, no attempt stamp,
+  //   because matrixCells' invariant is that idle means no attempt — and a
+  //   row that held single-run evidence (ok or non-ok) keeps its prior phase
+  //   AND its prior stamp byte-for-byte: restamping held history with the
+  //   set's attempt would rewrite which request the evidence belongs to, and
+  //   dropping a prior `rerunFailed` record would erase a disclosed failure.
+  //   The prior phases are captured at dispatch, in the same updater that
+  //   overwrites them, because that is the last instant they exist.
   //
   //   A BODYLESS SETTLEMENT (429, the 503 busy arm, the 503 no-batch arm,
   //   network) FAILS ALL N ROWS AT ONCE. A row holding an ok book keeps it —
@@ -984,73 +1012,91 @@ function LabBookPanelInner() {
   // row's `runSeq`, so a single-run settlement that lands after the set
   // dispatched is discarded for that row, and a single run dispatched AFTER
   // the set wins its row back — one map slot, latest request wins, per row.
-  const runSet = useCallback((ids: readonly string[], identity: RowIdentity) => {
-    if (ids.length === 0) return;
-    const mySet = ++setSeq.current;
-    const seqs = new Map<string, number>();
-    const attempts = new Map<string, ScenarioIdentity | undefined>();
-    for (const id of ids) {
-      const seq = (runSeq.current.get(id) ?? 0) + 1;
-      runSeq.current.set(id, seq);
-      seqs.set(id, seq);
-      attempts.set(id, identity.get(id));
-    }
-    setPhases((previous) => {
-      const next = new Map(previous);
+  //
+  // R57 ITEM 11 — the DISPATCH RECORD (the deep-link ids filtered before this
+  // POST, and the notice composed for them) travels into the TornadoRun, so
+  // the settled surface describes the dispatch it renders and never a listing
+  // that changed since.
+  const runSet = useCallback(
+    (
+      ids: readonly string[],
+      identity: RowIdentity,
+      dispatch: TornadoDispatch = { filteredIds: [], notice: null },
+    ) => {
+      if (ids.length === 0) return;
+      const mySet = ++setSeq.current;
+      const seqs = new Map<string, number>();
+      const attempts = new Map<string, ScenarioIdentity | undefined>();
+      // The phases the rows held at the instant of dispatch, keyed by id. A
+      // 200 restores these EXACTLY; captured inside the updater below (the
+      // read is idempotent, so React re-invoking the updater is harmless).
+      const priors = new Map<string, MatrixPhase>();
       for (const id of ids) {
-        const prior = previous.get(id);
-        const held =
-          prior?.kind === "outcome"
-            ? prior.outcome
-            : prior?.kind === "running"
-              ? prior.held
-              : undefined;
-        const attempt = attempts.get(id);
-        next.set(
-          id,
-          held === undefined ? { kind: "running", attempt } : { kind: "running", held, attempt },
-        );
-      }
-      return next;
-    });
-    setTornado({ kind: "running", ids: [...ids] });
-    void runBookSet(solventBaseUrl(), ids).then((outcome: SetRunOutcome) => {
-      // A later set-run owns the tornado surface; this one only settles rows
-      // whose per-row sequence it still holds.
-      if (setSeq.current === mySet) {
-        setTornado({ kind: "settled", ids: [...ids], outcome });
+        const seq = (runSeq.current.get(id) ?? 0) + 1;
+        runSeq.current.set(id, seq);
+        seqs.set(id, seq);
+        attempts.set(id, identity.get(id));
       }
       setPhases((previous) => {
         const next = new Map(previous);
         for (const id of ids) {
-          if (runSeq.current.get(id) !== seqs.get(id)) continue;
           const prior = previous.get(id);
-          const held = prior?.kind === "running" ? prior.held : undefined;
+          if (prior !== undefined) priors.set(id, prior);
+          const held =
+            prior?.kind === "outcome"
+              ? prior.outcome
+              : prior?.kind === "running"
+                ? prior.held
+                : undefined;
           const attempt = attempts.get(id);
-          if (outcome.kind === "ok") {
-            next.set(
-              id,
-              held === undefined ? { kind: "idle" } : { kind: "outcome", outcome: held, attempt },
-            );
-            continue;
-          }
-          const reason = setRunFailureReason(outcome);
           next.set(
             id,
-            held !== undefined && held.kind === "ok"
-              ? {
-                  kind: "outcome",
-                  outcome: held,
-                  rerunFailed: { reason, attempt },
-                  attempt,
-                }
-              : { kind: "outcome", outcome: setFailureAsRunBookOutcome(outcome), attempt },
+            held === undefined ? { kind: "running", attempt } : { kind: "running", held, attempt },
           );
         }
         return next;
       });
-    });
-  }, []);
+      setTornado({ kind: "running", ids: [...ids], dispatch });
+      void runBookSet(solventBaseUrl(), ids).then((outcome: SetRunOutcome) => {
+        // A later set-run owns the tornado surface; this one only settles rows
+        // whose per-row sequence it still holds.
+        if (setSeq.current === mySet) {
+          setTornado({ kind: "settled", ids: [...ids], dispatch, outcome });
+        }
+        setPhases((previous) => {
+          const next = new Map(previous);
+          for (const id of ids) {
+            if (runSeq.current.get(id) !== seqs.get(id)) continue;
+            const prior = previous.get(id);
+            const held = prior?.kind === "running" ? prior.held : undefined;
+            const attempt = attempts.get(id);
+            if (outcome.kind === "ok") {
+              // R57 ITEM 3 — restore what the row held BEFORE the dispatch,
+              // exactly. No restamp, no dropped rerunFailed record, and a row
+              // that held nothing is TRUE idle, never a stamped one.
+              const before = priors.get(id);
+              next.set(id, restoredAfterSetSettle(before));
+              continue;
+            }
+            const reason = setRunFailureReason(outcome);
+            next.set(
+              id,
+              held !== undefined && held.kind === "ok"
+                ? {
+                    kind: "outcome",
+                    outcome: held,
+                    rerunFailed: { reason, attempt },
+                    attempt,
+                  }
+                : { kind: "outcome", outcome: setFailureAsRunBookOutcome(outcome), attempt },
+            );
+          }
+          return next;
+        });
+      });
+    },
+    [],
+  );
 
   // WAVE R12 (Codex round-20 finding 2) — THE LISTING REFRESH.
   //
@@ -1142,9 +1188,14 @@ function LabBookPanelInner() {
           ) {
             autoRanSet.current = wantedSet;
             // Stamped from the same arriving listing, for the same R14 reason.
+            // R57 ITEM 11 — the filtered ids and the notice are STORED with the
+            // run at this instant: they describe THIS dispatch, and a listing
+            // refresh that later publishes a filtered id does not rewrite what
+            // this request omitted.
             runSet(
               decision.runIds,
               rowIdentity(response.scenarios, response.scenario_config_version),
+              { filteredIds: decision.filteredIds, notice: decision.notice },
             );
           }
         },
@@ -1210,9 +1261,13 @@ function LabBookPanelInner() {
       : (scenarios.find((scenario) => scenario.id === deepLinkId) ?? null);
   const selectedId = pickedId ?? deepLinkMember?.id ?? scenarios[0]?.id ?? null;
   // WAVE W-TN — the deep-link decision, re-derived at render from the listing
-  // on screen (never stored), so the notices below cannot outlive the facts
-  // they describe. The DISPATCH half of the same decision runs in the
-  // listing-arrival callback above, from the same pure function.
+  // on screen, for the PRE-dispatch notice only: a link that has not run yet is
+  // described by the listing in hand. R57 ITEM 11 — once a run is dispatched,
+  // the tornado renders the run's OWN stored dispatch record instead: a settled
+  // result's notice and header clause describe the DISPATCH, and a listing
+  // refresh that later publishes a filtered id does not un-filter the request
+  // that already ran without it. The DISPATCH half of the same decision runs in
+  // the listing-arrival callback above, from the same pure function.
   const deepLinkSet =
     listing.phase === "ok"
       ? deepLinkDecision(
@@ -1227,7 +1282,6 @@ function LabBookPanelInner() {
       : deepLinkSet.kind === "set"
         ? deepLinkSet.notice
         : null;
-  const tornadoFilteredIds = deepLinkSet.kind === "set" ? deepLinkSet.filteredIds : [];
   const selected = scenarios.find((scenario) => scenario.id === selectedId) ?? null;
   const waterfall: Waterfall | null = book.phase === "ok" ? book.book.waterfall : null;
   const frontierBatchId = book.phase === "ok" ? book.book.batch.id : null;
@@ -1290,6 +1344,10 @@ function LabBookPanelInner() {
             listingRefreshing={refreshing}
             selectedId={selectedId}
             onSelect={setPickedId}
+            // R57 item 3 — a set run leaves no phase behind, so the matrix is
+            // told a set HAS run and stops claiming this session issued
+            // nothing.
+            hasSetRun={tornado.kind !== "idle"}
           />
 
           {/* WAVE W-TN — the tornado: one batch × N committed scenarios. It
@@ -1301,9 +1359,8 @@ function LabBookPanelInner() {
             phases={phases}
             run={tornado}
             deepLinkNotice={tornadoDeepLinkNotice}
-            filteredDeepLinkIds={tornadoFilteredIds}
-            onRunSet={(ids) => {
-              runSet(ids, identities);
+            onRunSet={(ids, dispatch) => {
+              runSet(ids, identities, dispatch);
             }}
           />
 

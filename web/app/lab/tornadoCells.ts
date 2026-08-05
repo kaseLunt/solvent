@@ -52,11 +52,36 @@ export interface SetContradiction {
  * row it covers. It deliberately does not borrow the single-scenario
  * contradiction register's sentence — "a book named nobody" is a false account
  * of a set that named somebody twice.
+ *
+ * R57 ITEM 1 — the gate takes the DISPATCHED id list, and a body whose
+ * `requested_scenario_ids` is not set-equal to it is refused whole: the body's
+ * own requested list is a claim, never an authority, and a set answering ids
+ * nobody posted has no member this page may read.
  */
-export function setContradiction(response: RunBookSetResponse): SetContradiction | null {
+export function setContradiction(
+  response: RunBookSetResponse,
+  dispatchedIds: readonly string[],
+): SetContradiction | null {
   const faults: string[] = [];
   const seen = new Set<string>();
   const requested = new Set(response.requested_scenario_ids);
+  const dispatched = new Set(dispatchedIds);
+
+  // R57 item 1 — THE BODY IS BOUND TO THE DISPATCH. `requested_scenario_ids`
+  // is the body's own claim about what was asked; trusting it alone lets a
+  // wrong body grade its own membership. The id set this client POSTed is the
+  // only authority on what was asked, so the two must be set-equal before any
+  // row is read.
+  for (const id of dispatchedIds) {
+    if (!requested.has(id)) {
+      faults.push(`${id} was dispatched and is not named in requested_scenario_ids`);
+    }
+  }
+  for (const id of requested) {
+    if (!dispatched.has(id)) {
+      faults.push(`${id} is named in requested_scenario_ids and was not dispatched`);
+    }
+  }
 
   for (const result of response.results) {
     if (seen.has(result.scenario_id)) {
@@ -115,36 +140,126 @@ export type TornadoCellState =
   | { state: "projection-no-spot-pass"; sentence: string }
   | { state: "no-answerable-engine"; sentence: string }
   | { state: "contradictory-result"; faults: readonly string[] }
-  | { state: "definition-changed"; fields: readonly string[] };
+  | { state: "definition-changed"; fields: readonly string[] }
+  /** R57 item 2 — a result whose scenario has NO listing row at all. Never rendered as numbers. */
+  | { state: "unlisted-result"; sentence: string }
+  /**
+   * R57 item 2 / rev2 §4.3 — same identity triple, different engine set: the
+   * definition changed without its version moving. A contract violation,
+   * refused and named, never reconciled in either direction.
+   */
+  | { state: "coverage-skew"; sentence: string };
+
+/**
+ * The cell states that REFUSE a result whole (r57 item 4): they contribute no
+ * bar, no ledger row, no header reach/absence count. The header carries a
+ * refusal clause counting them by class instead.
+ */
+export const REFUSED_RESULT_STATES = new Set<TornadoCellState["state"]>([
+  "contradictory-result",
+  "definition-changed",
+  "coverage-skew",
+  "unlisted-result",
+]);
+
+/** The refusal clause's why-class label for a refused cell state. */
+export function refusalClassOf(state: TornadoCellState["state"]): string | null {
+  switch (state) {
+    case "contradictory-result":
+      return "contradictory result";
+    case "coverage-skew":
+      return "coverage skew";
+    case "definition-changed":
+      return "definition changed";
+    case "unlisted-result":
+      return "unlisted result";
+    default:
+      return null;
+  }
+}
+
+/** "debt_manager" / "aave_v3_etherfi and debt_manager" — the skew sentence's list words. */
+function engineListWords(engines: readonly string[]): string {
+  if (engines.length === 0) return "no engine at all";
+  if (engines.length === 1) return engines[0] ?? "";
+  return `${engines.slice(0, -1).join(", ")} and ${engines[engines.length - 1] ?? ""}`;
+}
 
 /**
  * The cell for one result.
  *
  * Order matters: a contradicting body is refused before its identity is judged,
- * and its identity is judged before any number of its is read.
+ * its identity is judged before its coverage is compared, and its coverage is
+ * compared before any number of its is read.
+ *
+ * R57 ITEM 2 — the identity join is no longer optional. A result whose
+ * scenario has NO listing row cannot be judged against any committed
+ * definition, so it refuses as UNLISTED; a result whose identity agrees while
+ * its `covered_engines` disagrees with the listing's engines is COVERAGE SKEW
+ * (rev2 §4.3): the definition changed without its version moving, and neither
+ * set is silently preferred.
  */
 export function tornadoCellState(
   result: SetRunScenarioResult,
   configVersion: string,
   listed: ScenarioIdentity | undefined,
+  listedEngines: readonly string[] | undefined,
 ): TornadoCellState {
   const faults = resultContradiction(result);
   if (faults.length > 0) return { state: "contradictory-result", faults };
 
-  if (listed !== undefined) {
-    const fields: string[] = [];
-    if (listed.version !== result.scenario_version) fields.push("scenario_version");
-    if (listed.configVersion !== configVersion) fields.push("scenario_config_version");
-    if (fields.length > 0) return { state: "definition-changed", fields };
+  if (listed === undefined) {
+    return {
+      state: "unlisted-result",
+      sentence:
+        `${result.scenario_id} is not published by the committed listing this page is showing, so ` +
+        "there is no definition to judge this result against. Nothing in it is read: no bar, no " +
+        "ledger row, no header count. A result only ever renders against the definition it names.",
+    };
+  }
+
+  const fields: string[] = [];
+  if (listed.version !== result.scenario_version) fields.push("scenario_version");
+  if (listed.configVersion !== configVersion) fields.push("scenario_config_version");
+  if (fields.length > 0) return { state: "definition-changed", fields };
+
+  if (listedEngines !== undefined) {
+    const served = [...result.covered_engines].sort();
+    const committed = [...listedEngines].sort();
+    if (
+      served.length !== committed.length ||
+      served.some((engine, index) => engine !== committed[index])
+    ) {
+      return {
+        state: "coverage-skew",
+        sentence:
+          `This result claims coverage of ${engineListWords(served)} while the ` +
+          `committed definition on this page covers ${engineListWords(committed)}, and the ` +
+          `identity triple agrees (${result.scenario_id} ${result.scenario_version} at ` +
+          `scenario_config_version ${configVersion}). The definition changed without its version ` +
+          "moving, which is a contract violation and not a difference to reconcile: this result " +
+          "is refused whole, no bar and no ledger row, and neither engine set is silently " +
+          "preferred over the other.",
+      };
+    }
   }
 
   switch (result.shock_reach.reach) {
     case "projection_no_spot_pass":
+      // R57 item 5 — the sentence points at a block only when that block will
+      // actually render as its own ledger row; a pointer at a block the page
+      // does not show is a dangling reference, and a missing mandatory block
+      // is named as the defect it is rather than papered over.
       return {
         state: "projection-no-spot-pass",
         sentence:
           "This scenario is a PROJECTION: no spot pass ran, so the three deltas are zero by construction and no bar is " +
-          "drawn. Its declared shocks were not applied to any mark. The projection block is the answer.",
+          "drawn. Its declared shocks were not applied to any mark. " +
+          (result.engines.some((engine) => engine.projection !== null)
+            ? "The projection row in the ledger below is the answer."
+            : "No engine of this result carries the projection block the contract makes mandatory " +
+              "here, so there is no answer to point at: that absence is a contract defect, never " +
+              "a zero."),
       };
     case "no_shocks_declared":
       // The three deltas are zero BY CONSTRUCTION and the scenario's whole
@@ -156,7 +271,12 @@ export function tornadoCellState(
         state: "no-shock-declared",
         sentence:
           "This scenario declares no price shock at all, so the three deltas are zero by construction and say nothing " +
-          "about the book's sensitivity. No bar is drawn. Its information lives in the market-realization block.",
+          "about the book's sensitivity. No bar is drawn. " +
+          (result.engines.some((engine) => engine.market_realization !== null)
+            ? "Its information lives in the market-realization row in the ledger below."
+            : "No engine of this result carries the market-realization block the contract makes " +
+              "mandatory here, so its information is absent: that absence is a contract defect, " +
+              "never a zero."),
       };
     case "all_shocks_declared_at_identity":
       return {
@@ -251,6 +371,22 @@ export type BarLength =
   | { drawn: true; ratio: number }
   | { drawn: false; reason: "no-denominator"; sentence: string };
 
+// R57 item 6 — the layout ratio's exact-arithmetic bounds. `Number(bigint)`
+// on a 10^400-class integer is Infinity, and Infinity/Infinity is NaN, and
+// 1/Infinity is 0 — so the division is done IN BIGINT first, at a fixed scale,
+// and only the small quotient crosses into floats.
+/** 10^9 steps of layout resolution: far finer than any pixel the chart can spend. */
+const RATIO_SCALE = 1_000_000_000n;
+/** |ratio| is clamped here: the layout saturates long before, and Number(10^21) is finite. */
+const RATIO_CEILING = RATIO_SCALE * 1_000_000_000_000n;
+/**
+ * A nonzero exact delta whose scaled quotient truncates to 0 keeps this
+ * epsilon instead: smaller than one scale step, still finite, still signed —
+ * so a nonzero NEVER classifies as a measured zero, and the geometry's own
+ * 1.5px floor (disclosed, item 7) is what makes it visible.
+ */
+const RATIO_EPSILON = 1e-12;
+
 /**
  * THE ONLY SANCTIONED NORMALIZATION. Dimensionless, against the engine's OWN
  * book, and against the BEFORE side — the after side is a different book,
@@ -259,6 +395,11 @@ export type BarLength =
  * The ratio is a LAYOUT quantity. Every printed number stays the engine's own
  * exact decimal string at its own `usd_decimals`, and this is never rounded
  * into a claim.
+ *
+ * R57 item 6 — computed by BOUNDED SCALED DIVISION in bigint: the numerator is
+ * scaled by 10^9, divided exactly, clamped, and only then converted. Any legal
+ * Decimal pair yields a FINITE ratio, a nonzero delta never yields ratio 0,
+ * and no geometry downstream can meet a NaN.
  */
 export function barLength(engine: SetRunEngineSummary): BarLength {
   const denominator = BigInt(engine.total_debt_usd_before);
@@ -272,8 +413,16 @@ export function barLength(engine: SetRunEngineSummary): BarLength {
     };
   }
   const numerator = BigInt(engine.eligible_debt_delta_usd);
-  // Exact integers to a layout fraction, in one place, with the sign preserved.
-  return { drawn: true, ratio: Number(numerator) / Number(denominator) };
+  // Exact bigint division truncates toward zero, so the sign survives; the
+  // clamp keeps the quotient inside float range whatever the operands were.
+  const scaled = (numerator * RATIO_SCALE) / denominator;
+  const clamped =
+    scaled > RATIO_CEILING ? RATIO_CEILING : scaled < -RATIO_CEILING ? -RATIO_CEILING : scaled;
+  const ratio = Number(clamped) / Number(RATIO_SCALE);
+  if (ratio === 0 && numerator !== 0n) {
+    return { drawn: true, ratio: numerator > 0n ? RATIO_EPSILON : -RATIO_EPSILON };
+  }
+  return { drawn: true, ratio };
 }
 
 /**

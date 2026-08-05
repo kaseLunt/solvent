@@ -1679,6 +1679,19 @@ export const MATRIX_NO_RUN_LINE =
   "no run has been issued yet, so every covered cell reads “not run”, which is a " +
   "statement about this session, not about the book.";
 
+/**
+ * R57 ITEM 3 — the same empty state AFTER a set run has been issued this
+ * session. "No run has been issued yet" is then a lie: a set run WAS issued;
+ * it just never writes these cells, because the set's answer lives on the
+ * tornado surface and the matrix speaks only for single-scenario runs. Same
+ * register, and it points the reader at the surface that holds the answer.
+ */
+export const MATRIX_SET_RUN_ONLY_LINE =
+  "no single-scenario run has been issued yet, so every covered cell reads “not run”, " +
+  "which is a statement about this session, not about the book. A set run HAS been issued " +
+  "this session: what it produced is on the tornado surface below, never in these cells, " +
+  "which speak only for single-scenario runs.";
+
 /** "batch #1" / "batches #1 and #3" / "batches #1, #3 and #4". */
 function batchWords(ids: readonly number[]): string {
   const unique = [...new Set(ids)]
@@ -1789,7 +1802,7 @@ function firstResultPendingClause(cohort: BatchCohort): string {
  * In both, no displayed result was measured at the watermark, and the header
  * must not say one was.
  */
-function cohortClause(cohort: BatchCohort): string {
+function cohortClause(cohort: BatchCohort, hasSetRun: boolean): string {
   // R10 finding 1: "no run" is decided by what was ASKED, never by the absence
   // of a batch. The anchor check rides along so a caller-supplied floor with no
   // attempts still falls through to the floor disclosure rather than claiming
@@ -1799,12 +1812,15 @@ function cohortClause(cohort: BatchCohort): string {
   // `attemptedScenarioIds`, but its cells read DEFINITION CHANGED — so a header
   // saying "every covered cell reads not run" above them would be the round-18
   // contradiction arriving through the new door.
+  // R57 item 3: after a SET run this arm must stop claiming "no run has been
+  // issued yet" — a set run leaves no phase behind (its answer lives on the
+  // tornado surface), so the caller passes the fact this map cannot carry.
   if (
     cohort.attemptedScenarioIds.length === 0 &&
     cohort.definitionChangedAttemptScenarioIds.length === 0 &&
     cohort.anchorBatchId === null
   ) {
-    return MATRIX_NO_RUN_LINE;
+    return hasSetRun ? MATRIX_SET_RUN_ONLY_LINE : MATRIX_NO_RUN_LINE;
   }
   if (cohort.anchorBatchId === null) return firstResultPendingClause(cohort);
   const batch = `#${String(cohort.anchorBatchId)}`;
@@ -2043,9 +2059,13 @@ function frontierClause(cohort: BatchCohort, frontierBatchId: number | null): st
  * definition, then what ended under another definition, then the frontier's
  * separate read.
  */
-export function batchHeaderLine(cohort: BatchCohort, frontierBatchId: number | null): string {
+export function batchHeaderLine(
+  cohort: BatchCohort,
+  frontierBatchId: number | null,
+  hasSetRun = false,
+): string {
   return (
-    cohortClause(cohort) +
+    cohortClause(cohort, hasSetRun) +
     heldPinClause(cohort) +
     inFlightClause(cohort) +
     unansweredClause(cohort) +

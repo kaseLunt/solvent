@@ -146,18 +146,46 @@ export function deepLinkDecision(
 // of named sets cannot contradict the cells below it).
 // ---------------------------------------------------------------------------
 
+/** One refused result, for the header's refusal clause (r57 item 4). */
+export interface TornadoHeaderRefusal {
+  scenarioId: string;
+  /** The why-class, from `refusalClassOf`. */
+  why: string;
+}
+
 export interface TornadoHeaderInput {
   response: RunBookSetResponse;
   /**
-   * The scenario ids that actually drew at least one bar, AFTER every gate:
-   * the reach states, the denominator, and the §9.5 cohort rule. Supplied by
-   * the renderer because two of those gates (cohort, denominator) are not
-   * knowable from the response alone.
+   * The scenario ids that actually rendered AT LEAST ONE bar rect, AFTER every
+   * gate: the reach states, the denominator, the §9.5 cohort rule — and, r57
+   * item 8, the measured-zero rule: a scenario whose every answerable engine
+   * measured exactly zero renders no rect and is NOT in this list. Supplied by
+   * the renderer because those gates are not knowable from the response alone.
    */
   drawnScenarioIds: readonly string[];
   /** The §9.2 filtered deep-link ids; empty when the run was not deep-linked. */
   filteredDeepLinkIds: readonly string[];
+  /**
+   * R57 item 4 — the results the cell layer REFUSED (contradictory result,
+   * coverage skew, definition changed, unlisted result). They contribute to NO
+   * other clause of this line: not the reach counts, not the absence count.
+   */
+  refusals?: readonly TornadoHeaderRefusal[];
+  /**
+   * R57 item 8 — drawable, in-cohort scenarios whose every answerable engine
+   * measured exactly zero: zero rects rendered, excluded from the drawn count,
+   * and counted in their own appended clause when nonzero.
+   */
+  measuredZeroScenarioIds?: readonly string[];
 }
+
+/** The refusal clause's fixed class order — grep-stable, never alphabetized per body. */
+const REFUSAL_CLASS_ORDER = [
+  "contradictory result",
+  "coverage skew",
+  "definition changed",
+  "unlisted result",
+] as const;
 
 /**
  * The one header line. Its clauses, in order: the batch id with the freshness
@@ -171,15 +199,22 @@ export interface TornadoHeaderInput {
  */
 export function tornadoHeaderLine(input: TornadoHeaderInput): string {
   const { response, drawnScenarioIds, filteredDeepLinkIds } = input;
-  const noReach = response.results.filter(
+  const refusals = input.refusals ?? [];
+  const measuredZero = input.measuredZeroScenarioIds ?? [];
+  // R57 item 4 — a REFUSED result contributes NOTHING to the reach and absence
+  // counts: a row this surface declined to read may not be counted as a fact
+  // about the book. The refusal clause below is its only appearance here.
+  const refusedIds = new Set(refusals.map((refusal) => refusal.scenarioId));
+  const admitted = response.results.filter((result) => !refusedIds.has(result.scenario_id));
+  const noReach = admitted.filter(
     (result) =>
       result.shock_reach.reach === "no_mark_moved" ||
       result.shock_reach.reach === "no_shock_reached_the_book",
   ).length;
-  const declaredNoMove = response.results.filter(
+  const declaredNoMove = admitted.filter(
     (result) => result.shock_reach.reach === "all_shocks_declared_at_identity",
   ).length;
-  const absentEngines = response.results.reduce(
+  const absentEngines = admitted.reduce(
     (count, result) =>
       count + result.withheld_engines.length + result.unmeasurable_engines.length,
     0,
@@ -188,10 +223,25 @@ export function tornadoHeaderLine(input: TornadoHeaderInput): string {
     freshnessClause(response),
     `bars drawn for ${String(drawnScenarioIds.length)} of ` +
       `${String(response.requested_scenario_ids.length)} requested scenario(s)`,
+  ];
+  // R57 item 8 — the drawn count counts scenarios that rendered at least one
+  // RECT; an all-zero-reached scenario rendered none and gets its own clause,
+  // only when the count is nonzero.
+  if (measuredZero.length > 0) {
+    parts.push(`measured zero: ${String(measuredZero.length)}`);
+  }
+  parts.push(
     `shock did not reach: ${String(noReach)}`,
     `declared no move: ${String(declaredNoMove)}`,
     `engines named absent rather than drawn: ${String(absentEngines)}`,
-  ];
+  );
+  if (refusals.length > 0) {
+    const byClass = REFUSAL_CLASS_ORDER.flatMap((why) => {
+      const count = refusals.filter((refusal) => refusal.why === why).length;
+      return count === 0 ? [] : [`${why}: ${String(count)}`];
+    });
+    parts.push(`results refused, not read: ${String(refusals.length)} (${byClass.join(", ")})`);
+  }
   if (filteredDeepLinkIds.length > 0) {
     parts.push(
       `filtered from the deep link, not published here: ${filteredDeepLinkIds.join(", ")}`,
@@ -337,6 +387,9 @@ export interface TornadoBarInput {
   ratio: number;
 }
 
+/** The tornado's visibility floor, rendered CSS px — the same 1.5 the flow discloses. */
+export const TORNADO_BAR_FLOOR = 1.5;
+
 export interface TornadoBarPlacement {
   scenarioId: string;
   ratio: number;
@@ -346,6 +399,13 @@ export interface TornadoBarPlacement {
   width: number;
   /** True when the delta is negative — the bar extends LEFT of the axis. */
   negative: boolean;
+  /**
+   * R57 item 7 — TRUE when the 1.5px visibility floor, not the panel's scale,
+   * set this width: the one place the picture and the advertised scale
+   * disagree, so it is flagged here, carried as `data-floored` on the rect,
+   * and COUNTED into the panel's disclosure sentence.
+   */
+  floored: boolean;
 }
 
 export interface TornadoGeometry {
@@ -354,6 +414,8 @@ export interface TornadoGeometry {
   /** Sorted by |ratio| descending (the tornado's reading order); ties keep input order. */
   bars: TornadoBarPlacement[];
   maxAbsRatio: number;
+  /** How many bars the visibility floor lifted off the panel's own scale. */
+  flooredCount: number;
 }
 
 /**
@@ -363,7 +425,9 @@ export interface TornadoGeometry {
  *
  * A nonzero never vanishes (the 1.5px floor, the frontier's own doctrine) and
  * a TRUE zero draws no ink at all: width 0, decided here so the renderer
- * cannot floor a measured zero into a fake sliver.
+ * cannot floor a measured zero into a fake sliver. A FLOORED bar is DISCLOSED
+ * (r57 item 7, the W-SK-B remedy): the floor breaks the scale for exactly the
+ * bars it lifts, so each one is flagged and the panel prints the count.
  */
 export function tornadoBarGeometry(
   rows: readonly TornadoBarInput[],
@@ -376,19 +440,47 @@ export function tornadoBarGeometry(
     .sort((a, b) => Math.abs(b.ratio) - Math.abs(a.ratio))
     .map((row) => {
       const negative = row.ratio < 0;
-      const width =
+      const scaledWidth =
         row.ratio === 0 || maxAbsRatio === 0
           ? 0
-          : Math.max((Math.abs(row.ratio) / maxAbsRatio) * halfSpan, 1.5);
+          : (Math.abs(row.ratio) / maxAbsRatio) * halfSpan;
+      const floored = scaledWidth > 0 && scaledWidth < TORNADO_BAR_FLOOR;
+      const width = scaledWidth === 0 ? 0 : Math.max(scaledWidth, TORNADO_BAR_FLOOR);
       return {
         scenarioId: row.scenarioId,
         ratio: row.ratio,
         x: negative ? axisX - width : axisX,
         width,
         negative,
+        floored,
       };
     });
-  return { axisX, bars, maxAbsRatio };
+  return {
+    axisX,
+    bars,
+    maxAbsRatio,
+    flooredCount: bars.filter((bar) => bar.floored).length,
+  };
+}
+
+/**
+ * R57 item 7 — the floor's disclosure, one computed sentence per panel, ONLY
+ * when the count is nonzero: a standing disclaimer over zero floored bars is
+ * noise a reader learns to skip, and silence over a nonzero count is a lie
+ * about the scale. Singular grammar at one.
+ */
+export function tornadoFloorSentence(count: number): string | null {
+  if (count <= 0) return null;
+  if (count === 1) {
+    return (
+      "1 bar is shorter than the 1.5px visibility floor and renders at it, off that scale; " +
+      "its exact figures are in the table."
+    );
+  }
+  return (
+    `${String(count)} bars are shorter than the 1.5px visibility floor and render at it, ` +
+    "off that scale; their exact figures are in the table."
+  );
 }
 
 // ---------------------------------------------------------------------------

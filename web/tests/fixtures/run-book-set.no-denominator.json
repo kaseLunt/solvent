@@ -98,7 +98,7 @@
     "note": "Batch 1 was STILL the newest complete servable batch at `probed_at`. That is what was true when this response was built, never a promise about the reader's present.",
     "probed_at": "2026-07-29T10:00:07Z",
     "resolved_at": "2026-07-29T10:00:05Z",
-    "scenarios_evaluated": 2
+    "scenarios_evaluated": 4
   },
   "excluded_engines": [],
   "notes": [
@@ -110,6 +110,8 @@
   ],
   "requested_scenario_ids": [
     "eth_minus_30",
+    "weeth_market_depeg_oracles_held",
+    "dm_rate_horizon_plus_200bps",
     "ethfi_minus_50"
   ],
   "results": [
@@ -260,6 +262,209 @@
       "withheld_engines": []
     },
     {
+      "scenario_id": "weeth_market_depeg_oracles_held",
+      "scenario_version": "v1",
+      "label": "weETH market depeg to 0.95 (oracles held)",
+      "path_assumption": "oracle marks held exactly; market value is a separate axis applied only to realized proceeds",
+      "shocks": [],
+      "shock_reach": {
+        "declared_shocks": 0,
+        "declared_shocks_at_identity": 0,
+        "reach": "no_shocks_declared",
+        "applied_shocks": [],
+        "marks_moved": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_snapped": 0,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "held_flat_marks": 2,
+        "held_flat_assets": [
+          {
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "chain_id": 10
+          },
+          {
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+            "chain_id": 10
+          }
+        ],
+        "note": "NO SHOCKS DECLARED: this definition asks for no price move at all; its propagation matrix is empty, so every described mark lands in held_flat. The information is in market_realization, which is mandatory on every answered engine of this scenario."
+      },
+      "covered_engines": [
+        "aave_v3_etherfi",
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 1,
+          "after_collateral_at_risk_usd": "0",
+          "after_eligible_accounts": 0,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "0",
+          "before_eligible_accounts": 0,
+          "before_eligible_debt_usd": "0",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "aave_v3_etherfi",
+          "flipped_to_eligible": null,
+          "hf_dropped_accounts": 0,
+          "infinite_accounts": 0,
+          "market_realization": {
+            "hfs_unchanged": true,
+            "execution_shortfall_usd": "84000000000",
+            "bad_debt_at_liquidation_usd": "23100000000",
+            "usd_decimals": 8,
+            "seizure_model": "pro-rata-over-counted-collateral",
+            "note": "DERIVED VARIANT (W-TN-B): market value is not an oracle mark, so no health factor moved; the gap the protocol is not seeing is this block's two figures."
+          },
+          "movement_excluded_accounts": 0,
+          "movement_rule": "hf_strictly_dropped",
+          "note": "DERIVED VARIANT (W-TN-B): no oracle mark moved, so both sides of every figure are equal by construction and the three deltas are structural zeros. The scenario's information content is the market_realization block on this row.",
+          "projection": null,
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "800000000000",
+          "total_collateral_usd_before": "800000000000",
+          "total_debt_usd_after": "600000000000",
+          "total_debt_usd_before": "600000000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 8
+        },
+        {
+          "accounts": 1,
+          "after_collateral_at_risk_usd": "0",
+          "after_eligible_accounts": 0,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "0",
+          "before_eligible_accounts": 0,
+          "before_eligible_debt_usd": "0",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 0,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": {
+            "hfs_unchanged": true,
+            "execution_shortfall_usd": "3100000000",
+            "bad_debt_at_liquidation_usd": "1250000000",
+            "usd_decimals": 6,
+            "seizure_model": "pro-rata-over-counted-collateral",
+            "note": "DERIVED VARIANT (W-TN-B): market value is not an oracle mark, so no eligibility flipped; the gap the protocol is not seeing is this block's two figures."
+          },
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "DERIVED VARIANT (W-TN-B): no oracle mark moved, so both sides of every figure are equal by construction and the three deltas are structural zeros. The scenario's information content is the market_realization block on this row.",
+          "projection": null,
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "4000000000",
+          "total_collateral_usd_before": "4000000000",
+          "total_debt_usd_after": "4200000000",
+          "total_debt_usd_before": "4200000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 2,
+      "positions_withheld": 0,
+      "note": "DERIVED VARIANT (W-TN-B): re-identified byte-for-byte to the committed weeth_market_depeg_oracles_held definition; shortfall figures are documented derivations, asymmetric across engines so a swapped block cannot pass."
+    },
+    {
+      "scenario_id": "dm_rate_horizon_plus_200bps",
+      "scenario_version": "v1",
+      "label": "Debt Manager borrow APY +200bps (PROJECTION)",
+      "path_assumption": "collateral prices held flat at the current sample; the APY steps once, at t=0, and holds for the whole horizon",
+      "shocks": [
+        {
+          "axis": "borrow_apy",
+          "factor_num": 1,
+          "factor_den": 1
+        }
+      ],
+      "shock_reach": {
+        "declared_shocks": 1,
+        "declared_shocks_at_identity": 1,
+        "reach": "projection_no_spot_pass",
+        "applied_shocks": [],
+        "marks_moved": 0,
+        "marks_held_by_declared_factor": 0,
+        "marks_held_by_transform": 0,
+        "marks_held_by_arithmetic": 0,
+        "marks_snapped": 0,
+        "marks_base_snapped": 0,
+        "marks_cap_bound": 0,
+        "held_flat_marks": 0,
+        "held_flat_assets": [],
+        "note": "PROJECTION, NO SPOT PASS: no ApplyScenario pass ran at all, so the after side IS the before side, nothing was applied and nothing was held flat. The declared borrow_apy shock at 1/1 was not applied to any mark; the projection block is the answer."
+      },
+      "covered_engines": [
+        "debt_manager"
+      ],
+      "withheld_engines": [],
+      "unmeasurable_engines": [],
+      "engines": [
+        {
+          "accounts": 1,
+          "after_collateral_at_risk_usd": "0",
+          "after_eligible_accounts": 0,
+          "bad_debt_delta_usd": "0",
+          "before_bad_debt_usd": "0",
+          "before_collateral_at_risk_usd": "0",
+          "before_eligible_accounts": 0,
+          "before_eligible_debt_usd": "0",
+          "eligible_accounts_delta": 0,
+          "eligible_debt_delta_usd": "0",
+          "engine": "debt_manager",
+          "flipped_to_eligible": 0,
+          "hf_dropped_accounts": null,
+          "infinite_accounts": 0,
+          "market_realization": null,
+          "movement_excluded_accounts": 0,
+          "movement_rule": "eligibility_flipped_false_to_true",
+          "note": "DERIVED VARIANT (W-TN-B): the after side IS the before side, so every two-sided figure is equal by construction. The projection block on this row is the answer.",
+          "projection": {
+            "label": "PROJECTION",
+            "basis": "delta-only",
+            "annual_delta_bps": 200,
+            "apy_observed_at_block": 22334455,
+            "prices_held_flat": true,
+            "horizons": [
+              {
+                "horizon_seconds": 86400,
+                "debt_usd": "4200000000",
+                "projected_usd": "4200230136",
+                "additional_interest_usd": "230136",
+                "becomes_liquidatable": false
+              },
+              {
+                "horizon_seconds": 2592000,
+                "debt_usd": "4200000000",
+                "projected_usd": "4206904109",
+                "additional_interest_usd": "6904109",
+                "becomes_liquidatable": null
+              }
+            ],
+            "note": "DERIVED VARIANT (W-TN-B): delta-only over this engine's own 4200000000 book; floor(debt x 200bps x t / year) per horizon. The 30-day becomes_liquidatable is null because it is NOT STATED, which is a different fact from false."
+          },
+          "refused_in_batch_positions": 1,
+          "total_collateral_usd_after": "4000000000",
+          "total_collateral_usd_before": "4000000000",
+          "total_debt_usd_after": "4200000000",
+          "total_debt_usd_before": "4200000000",
+          "unrebuildable_positions": 0,
+          "usd_decimals": 6
+        }
+      ],
+      "positions_answered": 1,
+      "positions_withheld": 0,
+      "note": "DERIVED VARIANT (W-TN-B): re-identified byte-for-byte to the committed dm_rate_horizon_plus_200bps definition; the projection figures are documented derivations in generate-run-book-set.mjs."
+    },
+    {
       "scenario_id": "ethfi_minus_50",
       "scenario_version": "v1",
       "label": "ETHFI -50 percent",
@@ -275,7 +480,7 @@
       "shock_reach": {
         "declared_shocks": 1,
         "declared_shocks_at_identity": 0,
-        "reach": "every_mark_moved",
+        "reach": "some_marks_held",
         "applied_shocks": [
           {
             "after": "1000000",
@@ -288,18 +493,90 @@
             "factor_num": "50",
             "snapped": false,
             "source": "priceproviderv2"
+          },
+          {
+            "after": "1000000",
+            "asset": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+            "base_snapped": false,
+            "before": "1000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000",
+            "factor_num": "995",
+            "snapped": true,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "1000000",
+            "asset": "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+            "base_snapped": true,
+            "before": "1000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000",
+            "factor_num": "995",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "500000",
+            "asset": "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+            "base_snapped": false,
+            "before": "500000",
+            "cap_bound": true,
+            "chain_id": 10,
+            "factor_den": "100",
+            "factor_num": "90",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "1000000",
+            "asset": "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+            "base_snapped": false,
+            "before": "1000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1",
+            "factor_num": "1",
+            "snapped": true,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "4000000",
+            "asset": "0x939778D83b46B456224A33Fb59630B11DEC56663",
+            "base_snapped": false,
+            "before": "4000000",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1",
+            "factor_num": "1",
+            "snapped": false,
+            "source": "priceproviderv2"
+          },
+          {
+            "after": "500",
+            "asset": "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+            "base_snapped": false,
+            "before": "500",
+            "cap_bound": false,
+            "chain_id": 10,
+            "factor_den": "1000000",
+            "factor_num": "1000001",
+            "snapped": false,
+            "source": "priceproviderv2"
           }
         ],
         "marks_moved": 1,
-        "marks_held_by_declared_factor": 0,
-        "marks_held_by_transform": 0,
-        "marks_held_by_arithmetic": 0,
-        "marks_snapped": 0,
-        "marks_base_snapped": 0,
-        "marks_cap_bound": 0,
+        "marks_held_by_declared_factor": 2,
+        "marks_held_by_transform": 3,
+        "marks_held_by_arithmetic": 1,
+        "marks_snapped": 2,
+        "marks_base_snapped": 1,
+        "marks_cap_bound": 1,
         "held_flat_marks": 0,
         "held_flat_assets": [],
-        "note": "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix describes (1 of 1). An all-zero delta under THIS arm is a real finding about the book: the prices moved and the engines' arithmetic did not change these figures."
+        "note": "PARTLY REACHED: 1 of the 7 marks this scenario's matrix describes moved. Of the held marks: 3 pinned by a pricing transform, 2 held at the factor the definition declared, 1 unchanged by exact-integer arithmetic. The counts are a partition; the flag census (2 snapped, 1 base-snapped, 1 cap-bound) attributes no cause."
       },
       "covered_engines": [
         "debt_manager"
@@ -338,7 +615,7 @@
       ],
       "positions_answered": 2,
       "positions_withheld": 0,
-      "note": "DERIVED VARIANT (W-TN): re-identified byte-for-byte to the committed ethfi_minus_50 definition the web listing publishes; the numbers are documented derivations in generate-run-book-set.mjs, chosen asymmetric so the tornado's ordering and sign handling cannot pass by cancellation."
+      "note": "DERIVED VARIANT (W-TN): re-identified byte-for-byte to the committed ethfi_minus_50 definition the web listing publishes; the numbers are documented derivations in generate-run-book-set.mjs, chosen asymmetric so the tornado's ordering, sign handling and cause attribution cannot pass by cancellation."
     }
   ],
   "scenario_config_version": "v1",

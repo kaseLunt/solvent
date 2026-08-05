@@ -263,6 +263,95 @@ test("a measured count the two sides do not support is refused", () => {
   expect(reasonsFor(broken).join(" ")).toContain("while the two sides beside it report");
 });
 
+/**
+ * r57 item 10 — THE LANE VOCABULARY REORDERED so the unmeasured lane sits at a
+ * NON-standard index (0, not 9), margins adjusted consistently.
+ *
+ * The permutation swaps lanes 0 and 9 (an involution): the lane objects trade
+ * places (each keeping `index` == its new position), the two margins trade
+ * entries 0↔9, and every outflow/cell index is remapped. It reads CLEAN on the
+ * committed DM engine because both swapped lanes tally 1 row on both sides —
+ * the '< 0.90' bucket count and the refused count are each 1 — so every
+ * margin-versus-histogram comparison still balances. What changes is ONLY
+ * which KIND sits at which index, which is exactly what an index-hardcoded
+ * implementation cannot see.
+ */
+function withUnmeasuredLaneAtZero(t: RunBookTransitions): RunBookTransitions {
+  const remap = (index: number) => (index === 0 ? 9 : index === 9 ? 0 : index);
+  const lanes = [...t.lanes];
+  const reordered = lanes.map((_, index) => {
+    const source = lanes[remap(index)];
+    if (source === undefined) throw new Error("the fixture lost a lane");
+    return { ...source, index };
+  });
+  return {
+    ...t,
+    lanes: reordered,
+    from_rows: t.from_rows.map((_, index) => t.from_rows[remap(index)] ?? 0),
+    to_rows: t.to_rows.map((_, index) => t.to_rows[remap(index)] ?? 0),
+    outflows: t.outflows.map((outflow) => ({
+      ...outflow,
+      from: remap(outflow.from),
+      cells: outflow.cells.map((cell) => ({ ...cell, to: remap(cell.to) })),
+    })),
+  };
+}
+
+test("r57 item 10 — the reordered vocabulary reads CLEAN: the reorder itself is consistent", () => {
+  // The acceptance half, so the refusal law below cannot pass for the wrong
+  // reason (a margin mismatch introduced by a sloppy permutation).
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const reordered = withMatrix(engine, withUnmeasuredLaneAtZero);
+  expect(reordered.hf_transitions.lanes[0]?.kind).toBe("unmeasured");
+  expect(reordered.hf_transitions.lanes[9]?.kind).toBe("bucket");
+  const reading = readTransitions(reordered);
+  expect(reading.kind, JSON.stringify(reading)).toBe("ok");
+});
+
+test("r57 item 10 — a one-ended cell against the unmeasured lane AT INDEX 0 is refused BY KIND", () => {
+  // KILLS: an implementation that hardcodes the unmeasured lane at index 9 (or
+  // lanes.length - 1). The offending cells here are (0→6) and (6→0) — neither
+  // touches index 9 — so an index-9 reading finds no one-ended cell, every sum
+  // still balances, and the body renders fabricated measured movement. Only
+  // the lane-KIND law can name these two cells.
+  const engine = engineOf(RUN_BOOK_ETH, "debt_manager");
+  const mutated = withMatrix(engine, (t) => {
+    const reordered = withUnmeasuredLaneAtZero(t);
+    return {
+      ...reordered,
+      outflows: reordered.outflows.map((outflow) => {
+        // The unmeasured diagonal now sits at (0→0) and a balanced held bucket
+        // diagonal at (6→6): swap them into (0→6) and (6→0). Both cells hold
+        // 1 row, so every margin and every histogram tally is UNCHANGED.
+        if (outflow.from === 0) {
+          return {
+            ...outflow,
+            cells: outflow.cells.map((cell) => (cell.to === 0 ? { ...cell, to: 6 } : cell)),
+          };
+        }
+        if (outflow.from === 6) {
+          return {
+            ...outflow,
+            cells: outflow.cells.map((cell) => (cell.to === 6 ? { ...cell, to: 0 } : cell)),
+          };
+        }
+        return outflow;
+      }),
+    };
+  });
+  const reasons = reasonsFor(mutated);
+  // Exactly the two one-ended cells, and nothing else fired — proof the mutant
+  // is margin-preserving and the refusal is the kind law's own.
+  expect(reasons).toHaveLength(2);
+  for (const reason of reasons) {
+    expect(reason).toContain("exactly one end in the unmeasured lane");
+    expect(reason).toContain("unmeasured on both sides");
+    expect(reason).not.toContain("lane 9");
+  }
+  expect(reasons.join(" ")).toContain("lane 0 (not measured) → lane 6 (1.50 – 2.00)");
+  expect(reasons.join(" ")).toContain("lane 6 (1.50 – 2.00) → lane 0 (not measured)");
+});
+
 test("a cell with exactly ONE end in the unmeasured lane is refused: the margin-preserving swap", () => {
   // Codex r56's mutant. The Debt Manager's balanced diagonals — (0→0) holds
   // 1 row, (9→9) holds 1 row — swapped into (0→9) and (9→0). EVERY margin is

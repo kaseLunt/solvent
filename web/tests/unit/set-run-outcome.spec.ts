@@ -240,20 +240,24 @@ test.describe("the set-level gate runs first, over the whole body", () => {
       evaluation: { scenarios_evaluated: 2 },
       ...over,
     }) as unknown as RunBookSetResponse;
+  // The ids this page actually POSTed — r57 item 1: the gate's second input.
+  const DISPATCHED = ["a_one", "b_two"];
 
   test("a coherent body passes", () => {
-    expect(setContradiction(body({}))).toBeNull();
+    expect(setContradiction(body({}), DISPATCHED)).toBeNull();
   });
 
   test("an id answered twice, an id never answered, and a disagreeing count are each named", () => {
     const twice = setContradiction(
       body({ results: [result({ scenario_id: "a_one" }), result({ scenario_id: "a_one" })] }),
+      DISPATCHED,
     );
     expect(twice?.faults.join(" ")).toContain("more than one result");
     expect(twice?.faults.join(" ")).toContain("b_two was requested and has no result");
 
     const miscount = setContradiction(
       body({ evaluation: { scenarios_evaluated: 3 } as RunBookSetResponse["evaluation"] }),
+      DISPATCHED,
     );
     expect(miscount?.faults.join(" ")).toContain("scenarios_evaluated is 3");
   });
@@ -261,6 +265,7 @@ test.describe("the set-level gate runs first, over the whole body", () => {
   test("an answer nobody asked for is a fault too", () => {
     const stray = setContradiction(
       body({ results: [result({ scenario_id: "a_one" }), result({ scenario_id: "zzz" })] }),
+      DISPATCHED,
     );
     expect(stray?.faults.join(" ")).toContain("zzz was answered and was not requested");
   });
@@ -284,8 +289,17 @@ test.describe("one result contradicting ITSELF refuses that result only", () => 
 });
 
 test.describe("the axis law's client half", () => {
+  // The listing row each result is judged against — r57 item 2 made the join
+  // mandatory: a result with NO listing row refuses as UNLISTED, so every
+  // reach-arm law below supplies the matching identity and engine set.
+  const listedFor = (r: SetRunScenarioResult) => ({
+    scenarioId: r.scenario_id,
+    version: r.scenario_version,
+    configVersion: "v1",
+  });
+
   test("a shock that did not reach draws NO BAR and names the causes, never the flags", () => {
-    const cell = tornadoCellState(result(), "v1", undefined);
+    const cell = tornadoCellState(result(), "v1", listedFor(result()), ["debt_manager"]);
     expect(cell.state).toBe("shock-did-not-reach");
     if (cell.state !== "shock-did-not-reach") return;
     // THE FORBIDDEN SENTENCE. "3 of 4 snapped" is false under a header claiming
@@ -296,25 +310,22 @@ test.describe("the axis law's client half", () => {
   });
 
   test("the DECLARED HOLD gets its OWN sentence and never borrows the swallowed-move one", () => {
-    const cell = tornadoCellState(
-      result({
-        scenario_id: "dm_composition_census",
-        path_assumption: "no move is asserted",
-        shock_reach: {
-          ...result().shock_reach,
-          reach: "all_shocks_declared_at_identity",
-          declared_shocks: 8,
-          declared_shocks_at_identity: 8,
-          marks_held_by_transform: 0,
-          marks_held_by_declared_factor: 2,
-          marks_snapped: 0,
-          marks_base_snapped: 0,
-          applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
-        },
-      }),
-      "v1",
-      undefined,
-    );
+    const census = result({
+      scenario_id: "dm_composition_census",
+      path_assumption: "no move is asserted",
+      shock_reach: {
+        ...result().shock_reach,
+        reach: "all_shocks_declared_at_identity",
+        declared_shocks: 8,
+        declared_shocks_at_identity: 8,
+        marks_held_by_transform: 0,
+        marks_held_by_declared_factor: 2,
+        marks_snapped: 0,
+        marks_base_snapped: 0,
+        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
+      },
+    });
+    const cell = tornadoCellState(census, "v1", listedFor(census), ["debt_manager"]);
     expect(cell.state).toBe("declared-hold");
     if (cell.state !== "declared-hold") return;
     expect(cell.sentence).toContain("BY DECISION rather than by accident");
@@ -325,35 +336,28 @@ test.describe("the axis law's client half", () => {
   });
 
   test("a projection draws no delta bar and points at its own block", () => {
-    const cell = tornadoCellState(
-      result({ shock_reach: { ...result().shock_reach, reach: "projection_no_spot_pass" } }),
-      "v1",
-      undefined,
-    );
+    const projection = result({
+      shock_reach: { ...result().shock_reach, reach: "projection_no_spot_pass" },
+    });
+    const cell = tornadoCellState(projection, "v1", listedFor(projection), ["debt_manager"]);
     expect(cell.state).toBe("projection-no-spot-pass");
   });
 
   test("a reached scenario draws bars, and a partly-reached one draws them WITH the qualification", () => {
-    const reached = tornadoCellState(
-      result({ shock_reach: { ...result().shock_reach, reach: "every_mark_moved" } }),
-      "v1",
-      undefined,
-    );
+    const moved = result({ shock_reach: { ...result().shock_reach, reach: "every_mark_moved" } });
+    const reached = tornadoCellState(moved, "v1", listedFor(moved), ["debt_manager"]);
     expect(reached.state).toBe("bars");
 
-    const partly = tornadoCellState(
-      result({
-        shock_reach: {
-          ...result().shock_reach,
-          reach: "some_marks_held",
-          marks_moved: 1,
-          marks_held_by_transform: 1,
-          applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
-        },
-      }),
-      "v1",
-      undefined,
-    );
+    const held = result({
+      shock_reach: {
+        ...result().shock_reach,
+        reach: "some_marks_held",
+        marks_moved: 1,
+        marks_held_by_transform: 1,
+        applied_shocks: [{}, {}] as SetRunScenarioResult["shock_reach"]["applied_shocks"],
+      },
+    });
+    const partly = tornadoCellState(held, "v1", listedFor(held), ["debt_manager"]);
     expect(partly.state).toBe("partly-reached");
     if (partly.state !== "partly-reached") return;
     expect(partly.sentence).toContain("1 of 2 marks");
@@ -361,27 +365,29 @@ test.describe("the axis law's client half", () => {
   });
 
   test("a result with no answerable engine is an ABSENCE, not a zero bar", () => {
-    const cell = tornadoCellState(
-      result({
-        covered_engines: ["debt_manager"],
-        withheld_engines: ["debt_manager"],
-        engines: [],
-        shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
-      }),
-      "v1",
-      undefined,
-    );
+    const withheld = result({
+      covered_engines: ["debt_manager"],
+      withheld_engines: ["debt_manager"],
+      engines: [],
+      shock_reach: { ...result().shock_reach, reach: "every_mark_moved" },
+    });
+    const cell = tornadoCellState(withheld, "v1", listedFor(withheld), ["debt_manager"]);
     expect(cell.state).toBe("no-answerable-engine");
     if (cell.state !== "no-answerable-engine") return;
     expect(cell.sentence).toContain("an absence, never a zero");
   });
 
   test("a definition that moved under a stable id refuses the row rather than reconciling it", () => {
-    const cell = tornadoCellState(result(), "v1", {
-      scenarioId: "stable_depeg_0995_in_band",
-      version: "v2",
-      configVersion: "v1",
-    });
+    const cell = tornadoCellState(
+      result(),
+      "v1",
+      {
+        scenarioId: "stable_depeg_0995_in_band",
+        version: "v2",
+        configVersion: "v1",
+      },
+      ["debt_manager"],
+    );
     expect(cell.state).toBe("definition-changed");
   });
 

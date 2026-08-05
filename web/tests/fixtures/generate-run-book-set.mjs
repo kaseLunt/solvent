@@ -1,8 +1,9 @@
-// TORNADO (W-TN) fixture generation + THE PROVENANCE RECORD. Regenerate with:
+// TORNADO (W-TN, extended W-TN-B) fixture generation + THE PROVENANCE RECORD.
+// Regenerate with:
 //
 //   node tests/fixtures/generate-run-book-set.mjs        (from web/)
 //
-// Sibling waves each own their generator; this one writes ONLY the four files
+// Sibling waves each own their generator; this one writes ONLY the five files
 // below. Every fixture here is GENERATED from committed contract artifacts —
 // never hand-shaped wire data. The sanctioned sources, per file:
 //
@@ -72,6 +73,45 @@
 //     state and no bar; and the movement sentences exercise both the plain
 //     and the excluded-population grammar.
 //
+//     W-TN-B (Codex round 57) EXTENDS THE VARIANT with two further results and
+//     one reshaped reach, all re-identified to definitions the committed web
+//     listing publishes:
+//
+//       weeth_market_depeg_oracles_held — the `no_shocks_declared` arm with a
+//         MANDATORY `market_realization` block on BOTH covered engines (r57
+//         item 5): the scenario's whole information content, rendered as its
+//         own ledger rows. All deltas are zero BY CONSTRUCTION and both sides
+//         of every two-sided figure are equal, because no pass moved anything.
+//         Shortfall figures are asymmetric across engines (840/231 USD on
+//         aave at 8dp; 3,100/1,250 USD on the DM at 6dp) so a renderer that
+//         swaps blocks or engines goes red.
+//       dm_rate_horizon_plus_200bps — the `projection_no_spot_pass` arm with
+//         the MANDATORY `projection` block (r57 item 5). Horizon arithmetic is
+//         re-derived below, delta-only over the DM's 4200000000 book:
+//         floor(4200000000 × 200bps × t / year) = 230136 at 86400s and
+//         6904109 at 2592000s; `becomes_liquidatable` exercises false AND
+//         null, because null is "not stated", never false.
+//       ethfi_minus_50 — reshaped from `every_mark_moved` to `some_marks_held`
+//         with a DE-CONFOUNDED cause split (r57 item 12b): 7 applied rows,
+//         1 moved, 3 held by a transform, 2 held at the declared factor
+//         (one of them snapped at 1/1 — the §2.5 partition-order case), 1 held
+//         by exact-integer arithmetic. transform-held (3) ≠ applied length (7)
+//         ≠ marks_moved (1) ≠ the flag census (snapped 2, base 1, cap 1,
+//         sum 4), so a renderer sourcing the cause sentence from any reach
+//         total goes red. The bar still draws: partly reached is a real bar
+//         with a stated qualification.
+//
+//  5. run-book-set.scenarios.json — the committed listing scenarios.json
+//     EXTENDED with the two definitions the contract's own 200 example
+//     answers and the base listing does not publish, each read from its
+//     COMMITTED definition file (`internal/risk/scenarios/<id>.json`, minus
+//     `propagation`, which ScenarioDefinition does not publish — rev2 §2.5).
+//     It exists because r57 item 1 binds the rendered set to the DISPATCHED
+//     ids and item 2 refuses a result with no listing row: the e2e happy path
+//     must be able to DISPATCH the example's own three ids, so the listing it
+//     runs under must publish them. Identity is asserted against the example's
+//     own results, never assumed. No batch, no clock trios.
+//
 // THE CLOCK LAW GUARDS EVERY WRITE. Each emitted body is walked by
 // `clock-law.mjs` (the same module `generate-feed.mjs` and
 // `generate-lab-book.mjs` import); a body stating an age its own stamps do not
@@ -112,6 +152,9 @@ const SET_RUN_CLOCK_TRIOS = {
   "run-book-set.busy.json": 0,
   "run-book-set.superseded.json": 2,
   "run-book-set.no-denominator.json": 2,
+  // A listing: no batch envelope and no age/stamp pair anywhere, so zero trios
+  // — the same count generate-lab-book.mjs's four listings carry.
+  "run-book-set.scenarios.json": 0,
 };
 
 const fail = (message) => {
@@ -263,52 +306,93 @@ Object.assign(ethDmRow, {
 });
 ethResult.positions_answered = 3;
 
-// ethfi_minus_50 replaces the two results the variant does not need, RE-IDENTIFIED
-// byte-for-byte from the committed definition.
+// Pristine per-engine row templates, cloned from the UNMUTATED example so the
+// no-denominator mutation above cannot leak into the new results.
+const pristineEth = example.results.find((result) => result.scenario_id === "eth_minus_30");
+if (pristineEth === undefined) fail("the contract example lost its eth_minus_30 result");
+const pristineAaveRow = pristineEth.engines.find((engine) => engine.engine === "aave_v3_etherfi");
+const pristineDmRow = pristineEth.engines.find((engine) => engine.engine === "debt_manager");
+if (pristineAaveRow === undefined || pristineDmRow === undefined) {
+  fail("the contract example's eth_minus_30 result lost an engine row");
+}
+
+// The (chain 10) asset pool the committed scenarios themselves shock and hold
+// flat, reused so every applied row names an address the committed set names.
+const OP_ASSETS = [
+  "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
+  "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58",
+  "0x80Eede496655FB9047dd39d9f418d5483ED600df",
+  "0x08c6F91e2B681FaF5e17227F2a44C307b3C1364C",
+  "0x939778D83b46B456224A33Fb59630B11DEC56663",
+  "0x5A7fACB970D094B6C7FF1df0eA68D99E6e73CBFF",
+];
+const appliedRow = (asset, factorNum, factorDen, before, after, flags = {}) => ({
+  after,
+  asset,
+  base_snapped: flags.base_snapped ?? false,
+  before,
+  cap_bound: flags.cap_bound ?? false,
+  chain_id: 10,
+  factor_den: String(factorDen),
+  factor_num: String(factorNum),
+  snapped: flags.snapped ?? false,
+  source: "priceproviderv2",
+});
+
+// ethfi_minus_50, RE-IDENTIFIED byte-for-byte from the committed definition —
+// now the `some_marks_held` arm with the DE-CONFOUNDED cause split (r57 12b).
+const ethfiApplied = [
+  // 1 — the definition's own mark, MOVED at its own 50/100 factor.
+  appliedRow(ethfiDefinition.shocks[0].asset, 50, 100, "2000000", "1000000"),
+  // 2..4 — held by a TRANSFORM: non-identity factors carrying a snap, a
+  // snapped base and a bound cap respectively, each back at its before value.
+  appliedRow(OP_ASSETS[0], 995, 1000, "1000000", "1000000", { snapped: true }),
+  appliedRow(OP_ASSETS[1], 995, 1000, "1000000", "1000000", { base_snapped: true }),
+  appliedRow(OP_ASSETS[2], 90, 100, "500000", "500000", { cap_bound: true }),
+  // 5..6 — held at the DECLARED factor 1/1. Row 5 also carries snapped: true,
+  // which is §2.5's partition-order case: a par-marked stable under 1/1 comes
+  // back snapped and unmoved, and its hold is attributed to the DEFINITION,
+  // never to the snap.
+  appliedRow(OP_ASSETS[3], 1, 1, "1000000", "1000000", { snapped: true }),
+  appliedRow(OP_ASSETS[4], 1, 1, "4000000", "4000000"),
+  // 7 — held by EXACT-INTEGER ARITHMETIC: a non-identity factor, no flags,
+  // and floor(500 × 1000001/1000000) = 500.
+  appliedRow(OP_ASSETS[5], 1000001, 1000000, "500", "500"),
+];
+const ethfiReach = {
+  declared_shocks: ethfiDefinition.shocks.length,
+  declared_shocks_at_identity: 0,
+  reach: "some_marks_held",
+  applied_shocks: ethfiApplied,
+  marks_moved: 1,
+  marks_held_by_declared_factor: 2,
+  marks_held_by_transform: 3,
+  marks_held_by_arithmetic: 1,
+  marks_snapped: 2,
+  marks_base_snapped: 1,
+  marks_cap_bound: 1,
+  held_flat_marks: 0,
+  held_flat_assets: [],
+  note:
+    "PARTLY REACHED: 1 of the 7 marks this scenario's matrix describes moved. Of the held " +
+    "marks: 3 pinned by a pricing transform, 2 held at the factor the definition declared, " +
+    "1 unchanged by exact-integer arithmetic. The counts are a partition; the flag census " +
+    "(2 snapped, 1 base-snapped, 1 cap-bound) attributes no cause.",
+};
+
 const ethfiResult = {
   scenario_id: ethfiDefinition.id,
   scenario_version: ethfiDefinition.version,
   label: ethfiDefinition.label,
   path_assumption: ethfiDefinition.path_assumption,
   shocks: structuredClone(ethfiDefinition.shocks),
-  shock_reach: {
-    declared_shocks: ethfiDefinition.shocks.length,
-    declared_shocks_at_identity: 0,
-    reach: "every_mark_moved",
-    applied_shocks: [
-      {
-        after: "1000000",
-        asset: ethfiDefinition.shocks[0].asset,
-        base_snapped: false,
-        before: "2000000",
-        cap_bound: false,
-        chain_id: 10,
-        factor_den: String(ethfiDefinition.shocks[0].factor_den),
-        factor_num: String(ethfiDefinition.shocks[0].factor_num),
-        snapped: false,
-        source: "priceproviderv2",
-      },
-    ],
-    marks_moved: 1,
-    marks_held_by_declared_factor: 0,
-    marks_held_by_transform: 0,
-    marks_held_by_arithmetic: 0,
-    marks_snapped: 0,
-    marks_base_snapped: 0,
-    marks_cap_bound: 0,
-    held_flat_marks: 0,
-    held_flat_assets: [],
-    note:
-      "EVERY MARK MOVED: the shock reached every mark this scenario's propagation matrix " +
-      "describes (1 of 1). An all-zero delta under THIS arm is a real finding about the book: " +
-      "the prices moved and the engines' arithmetic did not change these figures.",
-  },
+  shock_reach: ethfiReach,
   covered_engines: structuredClone(ethfiDefinition.engines),
   withheld_engines: [],
   unmeasurable_engines: [],
   engines: [
     {
-      ...structuredClone(ethDmRow),
+      ...structuredClone(pristineDmRow),
       accounts: 2,
       infinite_accounts: 0,
       movement_excluded_accounts: 0,
@@ -338,13 +422,266 @@ const ethfiResult = {
   note:
     "DERIVED VARIANT (W-TN): re-identified byte-for-byte to the committed ethfi_minus_50 " +
     "definition the web listing publishes; the numbers are documented derivations in " +
-    "generate-run-book-set.mjs, chosen asymmetric so the tornado's ordering and sign handling " +
-    "cannot pass by cancellation.",
+    "generate-run-book-set.mjs, chosen asymmetric so the tornado's ordering, sign handling " +
+    "and cause attribution cannot pass by cancellation.",
 };
 
-variant.requested_scenario_ids = ["eth_minus_30", "ethfi_minus_50"];
-variant.results = [ethResult, ethfiResult];
-variant.evaluation.scenarios_evaluated = 2;
+// THE CAUSE SPLIT IS RE-DERIVED FROM THE APPLIED ROWS, never trusted. Each row
+// is classified by the §2.5 partition order and the result must equal the
+// stated counts, and the de-confound inequalities must actually hold.
+{
+  const rows = ethfiReach.applied_shocks;
+  const identity = (row) => row.factor_num === row.factor_den;
+  const flagged = (row) => row.snapped || row.base_snapped || row.cap_bound;
+  const moved = rows.filter((row) => row.before !== row.after).length;
+  const held = rows.filter((row) => row.before === row.after);
+  const byDeclared = held.filter(identity).length;
+  const byTransform = held.filter((row) => !identity(row) && flagged(row)).length;
+  const byArithmetic = held.filter((row) => !identity(row) && !flagged(row)).length;
+  const census = {
+    marks_moved: moved,
+    marks_held_by_declared_factor: byDeclared,
+    marks_held_by_transform: byTransform,
+    marks_held_by_arithmetic: byArithmetic,
+    marks_snapped: rows.filter((row) => row.snapped).length,
+    marks_base_snapped: rows.filter((row) => row.base_snapped).length,
+    marks_cap_bound: rows.filter((row) => row.cap_bound).length,
+  };
+  for (const [key, derived] of Object.entries(census)) {
+    if (ethfiReach[key] !== derived) {
+      fail(`variant: ethfi's stated ${key} is ${ethfiReach[key]}; its own rows derive ${derived}`);
+    }
+  }
+  if (moved + byDeclared + byTransform + byArithmetic !== rows.length) {
+    fail("variant: ethfi's cause split is not a partition of its applied rows");
+  }
+  // r57 item 12b — the de-confound. The transform-held cause count must equal
+  // NO reach total a lazy renderer could reach for instead.
+  const flagSum = census.marks_snapped + census.marks_base_snapped + census.marks_cap_bound;
+  const confounds = [rows.length, moved, census.marks_snapped, flagSum, ethfiReach.declared_shocks];
+  if (confounds.some((n) => n === byTransform)) {
+    fail("variant: the transform-held count is confounded with a reach total again");
+  }
+  if (rows.length === moved || rows.length === flagSum) {
+    fail("variant: the applied length is confounded with another reach total");
+  }
+}
+
+// weeth_market_depeg_oracles_held — `no_shocks_declared`, whose entire
+// information content is the MANDATORY market_realization block (r57 item 5).
+const weethDefinition = definitionOf("weeth_market_depeg_oracles_held");
+if (
+  JSON.stringify(weethDefinition.engines) !==
+  JSON.stringify(["aave_v3_etherfi", "debt_manager"])
+) {
+  fail("weeth_market_depeg_oracles_held's committed coverage moved; re-derive this variant");
+}
+if (weethDefinition.shocks.length !== 0) {
+  fail("weeth_market_depeg_oracles_held now declares shocks; the no_shocks_declared arm moved");
+}
+const unshockedSides = {
+  before_eligible_accounts: 0,
+  after_eligible_accounts: 0,
+  eligible_accounts_delta: 0,
+  before_eligible_debt_usd: "0",
+  eligible_debt_delta_usd: "0",
+  before_bad_debt_usd: "0",
+  bad_debt_delta_usd: "0",
+  before_collateral_at_risk_usd: "0",
+  after_collateral_at_risk_usd: "0",
+  infinite_accounts: 0,
+  movement_excluded_accounts: 0,
+  accounts: 1,
+};
+const weethResult = {
+  scenario_id: weethDefinition.id,
+  scenario_version: weethDefinition.version,
+  label: weethDefinition.label,
+  path_assumption: weethDefinition.path_assumption,
+  shocks: [],
+  shock_reach: {
+    declared_shocks: 0,
+    declared_shocks_at_identity: 0,
+    reach: "no_shocks_declared",
+    applied_shocks: [],
+    marks_moved: 0,
+    marks_held_by_declared_factor: 0,
+    marks_held_by_transform: 0,
+    marks_held_by_arithmetic: 0,
+    marks_snapped: 0,
+    marks_base_snapped: 0,
+    marks_cap_bound: 0,
+    held_flat_marks: 2,
+    held_flat_assets: [
+      { asset: OP_ASSETS[0], chain_id: 10 },
+      { asset: OP_ASSETS[4], chain_id: 10 },
+    ],
+    note:
+      "NO SHOCKS DECLARED: this definition asks for no price move at all; its propagation " +
+      "matrix is empty, so every described mark lands in held_flat. The information is in " +
+      "market_realization, which is mandatory on every answered engine of this scenario.",
+  },
+  covered_engines: structuredClone(weethDefinition.engines),
+  withheld_engines: [],
+  unmeasurable_engines: [],
+  engines: [
+    {
+      ...structuredClone(pristineAaveRow),
+      ...unshockedSides,
+      hf_dropped_accounts: 0,
+      flipped_to_eligible: null,
+      total_debt_usd_before: "600000000000",
+      total_debt_usd_after: "600000000000",
+      total_collateral_usd_before: "800000000000",
+      total_collateral_usd_after: "800000000000",
+      market_realization: {
+        hfs_unchanged: true,
+        execution_shortfall_usd: "84000000000",
+        bad_debt_at_liquidation_usd: "23100000000",
+        usd_decimals: 8,
+        seizure_model: "pro-rata-over-counted-collateral",
+        note:
+          "DERIVED VARIANT (W-TN-B): market value is not an oracle mark, so no health factor " +
+          "moved; the gap the protocol is not seeing is this block's two figures.",
+      },
+      projection: null,
+      note:
+        "DERIVED VARIANT (W-TN-B): no oracle mark moved, so both sides of every figure are " +
+        "equal by construction and the three deltas are structural zeros. The scenario's " +
+        "information content is the market_realization block on this row.",
+    },
+    {
+      ...structuredClone(pristineDmRow),
+      ...unshockedSides,
+      hf_dropped_accounts: null,
+      flipped_to_eligible: 0,
+      total_debt_usd_before: "4200000000",
+      total_debt_usd_after: "4200000000",
+      total_collateral_usd_before: "4000000000",
+      total_collateral_usd_after: "4000000000",
+      market_realization: {
+        hfs_unchanged: true,
+        execution_shortfall_usd: "3100000000",
+        bad_debt_at_liquidation_usd: "1250000000",
+        usd_decimals: 6,
+        seizure_model: "pro-rata-over-counted-collateral",
+        note:
+          "DERIVED VARIANT (W-TN-B): market value is not an oracle mark, so no eligibility " +
+          "flipped; the gap the protocol is not seeing is this block's two figures.",
+      },
+      projection: null,
+      note:
+        "DERIVED VARIANT (W-TN-B): no oracle mark moved, so both sides of every figure are " +
+        "equal by construction and the three deltas are structural zeros. The scenario's " +
+        "information content is the market_realization block on this row.",
+    },
+  ],
+  positions_answered: 2,
+  positions_withheld: 0,
+  note:
+    "DERIVED VARIANT (W-TN-B): re-identified byte-for-byte to the committed " +
+    "weeth_market_depeg_oracles_held definition; shortfall figures are documented derivations, " +
+    "asymmetric across engines so a swapped block cannot pass.",
+};
+
+// dm_rate_horizon_plus_200bps — `projection_no_spot_pass`, whose answer is the
+// MANDATORY projection block (r57 item 5). Horizon arithmetic re-derived.
+const dmRateDefinition = definitionOf("dm_rate_horizon_plus_200bps");
+if (JSON.stringify(dmRateDefinition.engines) !== JSON.stringify(["debt_manager"])) {
+  fail("dm_rate_horizon_plus_200bps's committed coverage moved; re-derive this variant");
+}
+const DM_RATE_DEBT = 4200000000n;
+const DM_RATE_BPS = 200n;
+const YEAR_SECONDS = 31536000n;
+const horizonInterest = (seconds) =>
+  (DM_RATE_DEBT * DM_RATE_BPS * BigInt(seconds)) / (10000n * YEAR_SECONDS);
+const horizon = (seconds, becomesLiquidatable) => {
+  const interest = horizonInterest(seconds);
+  return {
+    horizon_seconds: seconds,
+    debt_usd: DM_RATE_DEBT.toString(),
+    projected_usd: (DM_RATE_DEBT + interest).toString(),
+    additional_interest_usd: interest.toString(),
+    becomes_liquidatable: becomesLiquidatable,
+  };
+};
+if (horizonInterest(86400).toString() !== "230136" || horizonInterest(2592000).toString() !== "6904109") {
+  fail("variant: the projection's delta-only horizon arithmetic moved; re-derive it");
+}
+const dmRateResult = {
+  scenario_id: dmRateDefinition.id,
+  scenario_version: dmRateDefinition.version,
+  label: dmRateDefinition.label,
+  path_assumption: dmRateDefinition.path_assumption,
+  shocks: structuredClone(dmRateDefinition.shocks),
+  shock_reach: {
+    declared_shocks: dmRateDefinition.shocks.length,
+    declared_shocks_at_identity: dmRateDefinition.shocks.filter(
+      (shock) => shock.factor_num === shock.factor_den,
+    ).length,
+    reach: "projection_no_spot_pass",
+    applied_shocks: [],
+    marks_moved: 0,
+    marks_held_by_declared_factor: 0,
+    marks_held_by_transform: 0,
+    marks_held_by_arithmetic: 0,
+    marks_snapped: 0,
+    marks_base_snapped: 0,
+    marks_cap_bound: 0,
+    held_flat_marks: 0,
+    held_flat_assets: [],
+    note:
+      "PROJECTION, NO SPOT PASS: no ApplyScenario pass ran at all, so the after side IS the " +
+      "before side, nothing was applied and nothing was held flat. The declared borrow_apy " +
+      "shock at 1/1 was not applied to any mark; the projection block is the answer.",
+  },
+  covered_engines: structuredClone(dmRateDefinition.engines),
+  withheld_engines: [],
+  unmeasurable_engines: [],
+  engines: [
+    {
+      ...structuredClone(pristineDmRow),
+      ...unshockedSides,
+      hf_dropped_accounts: null,
+      flipped_to_eligible: 0,
+      total_debt_usd_before: "4200000000",
+      total_debt_usd_after: "4200000000",
+      total_collateral_usd_before: "4000000000",
+      total_collateral_usd_after: "4000000000",
+      market_realization: null,
+      projection: {
+        label: "PROJECTION",
+        basis: "delta-only",
+        annual_delta_bps: 200,
+        apy_observed_at_block: 22334455,
+        prices_held_flat: true,
+        horizons: [horizon(86400, false), horizon(2592000, null)],
+        note:
+          "DERIVED VARIANT (W-TN-B): delta-only over this engine's own 4200000000 book; " +
+          "floor(debt x 200bps x t / year) per horizon. The 30-day becomes_liquidatable is " +
+          "null because it is NOT STATED, which is a different fact from false.",
+      },
+      note:
+        "DERIVED VARIANT (W-TN-B): the after side IS the before side, so every two-sided " +
+        "figure is equal by construction. The projection block on this row is the answer.",
+    },
+  ],
+  positions_answered: 1,
+  positions_withheld: 0,
+  note:
+    "DERIVED VARIANT (W-TN-B): re-identified byte-for-byte to the committed " +
+    "dm_rate_horizon_plus_200bps definition; the projection figures are documented " +
+    "derivations in generate-run-book-set.mjs.",
+};
+
+variant.requested_scenario_ids = [
+  "eth_minus_30",
+  "weeth_market_depeg_oracles_held",
+  "dm_rate_horizon_plus_200bps",
+  "ethfi_minus_50",
+];
+variant.results = [ethResult, weethResult, dmRateResult, ethfiResult];
+variant.evaluation.scenarios_evaluated = 4;
 
 assertMembership("run-book-set.no-denominator.json", variant);
 
@@ -357,3 +694,47 @@ if (ratioOf(ethDmRow) !== -0.25) fail("variant: eth_minus_30's dm ratio is not -
 if (ratioOf(ethfiResult.engines[0]) !== 0.5) fail("variant: ethfi_minus_50's dm ratio is not 0.5");
 
 write("run-book-set.no-denominator.json", variant);
+
+// --- 5: the listing that publishes the example's own three ids ---------------
+
+const scenarioFileOf = (id) => {
+  const file = path.join(repoRoot, "internal", "risk", "scenarios", `${id}.json`);
+  return JSON.parse(readFileSync(file, "utf8"));
+};
+
+const extendedListing = structuredClone(listing);
+for (const id of ["stable_depeg_0995_in_band", "dm_composition_census"]) {
+  if (extendedListing.scenarios.some((scenario) => scenario.id === id)) {
+    fail(`the committed listing now publishes ${id}; drop the extension for it`);
+  }
+  const committed = scenarioFileOf(id);
+  const answered = example.results.find((result) => result.scenario_id === id);
+  if (answered === undefined) {
+    fail(`the contract example no longer answers ${id}; re-derive the extended listing`);
+  }
+  // The identity join the tornado makes is asserted here, against the
+  // committed definition file AND the example's own result: a drifted pair
+  // would make every e2e row read DEFINITION CHANGED or COVERAGE SKEW.
+  if (committed.version !== answered.scenario_version) {
+    fail(`${id}: the committed definition's version disagrees with the example's result`);
+  }
+  if (
+    JSON.stringify([...committed.engines].sort()) !==
+    JSON.stringify([...answered.covered_engines].sort())
+  ) {
+    fail(`${id}: the committed definition's engines disagree with the example's covered set`);
+  }
+  // ScenarioDefinition's exact property set — `propagation` is deliberately
+  // NOT copied: the listing route does not publish it (rev2 §2.5).
+  extendedListing.scenarios.push({
+    id: committed.id,
+    version: committed.version,
+    label: committed.label,
+    description: committed.description,
+    path_assumption: committed.path_assumption,
+    engines: structuredClone(committed.engines),
+    shocks: structuredClone(committed.shocks),
+    out_of_model: structuredClone(committed.out_of_model),
+  });
+}
+write("run-book-set.scenarios.json", extendedListing);
