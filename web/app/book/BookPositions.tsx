@@ -96,7 +96,6 @@ import {
   HEADROOM_NO_DEBT_LABEL,
   HEADROOM_NO_DEBT_TITLE,
   HEADROOM_UNKNOWN_TITLE,
-  WARN_HEADROOM_DISCLOSURE,
 } from "@/lib/headroom";
 import { groupDecimalString, renderEngineAmount } from "@/lib/book-format";
 import { EM_DASH } from "@/lib/format";
@@ -849,9 +848,16 @@ export function BookPositions({ bookFeed, onBatchChange }: BookPositionsProps) {
                   behind a fold on the number it qualifies is the D-013
                   reading this rollout exists to remove. ---- */}
       <div className={styles.stateSlot} data-testid="positions-state">
-        <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
-          <i aria-hidden /> warn = {engine === "debt_manager" ? WARN_HEADROOM_DISCLOSURE : WARN_BAND_DISCLOSURE}
-        </span>
+        {/* W-VR defect 7: for debt_manager this line WAS the risk map's own
+            warn note verbatim, rendered a second time above the ENGINE
+            selector. The risk-map STATE stack keeps the sentence; this slot
+            keeps only the aave variant, whose hf-ratio warn band is a
+            DIFFERENT disclosure no other element on the page carries. */}
+        {engine !== "debt_manager" && (
+          <span className={styles.warnDisclosure} data-testid="positions-warn-disclosure">
+            <i aria-hidden /> warn = {WARN_BAND_DISCLOSURE}
+          </span>
+        )}
         {/* Wave R1 item 1, DEMOTED by W-HR-A: the price-path statement is no
             longer a column, so this line explains the marker and hover that
             now carry it. The words are unchanged; only the clause naming the

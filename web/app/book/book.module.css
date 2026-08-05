@@ -242,8 +242,17 @@
   max-width: 96ch;
 }
 
-/* ANSWER: one computed sentence, 14px, --ink (template slot 3). */
+/* ANSWER: one computed sentence, 14px, --ink (template slot 3).
+ *
+ * W-VR defect 1: this rule declared NO font-family, so the ANSWER inherited
+ * the body's `var(--sans)` — and on hosts where none of that stack's named
+ * faces resolve (Playwright's bare Chromium, minimal fontconfig), the
+ * paragraph fell through to the UA serif default while every sibling slot
+ * pinned `var(--mono)`. The ANSWER now pins the app's own mono token — the
+ * family the whole panel speaks — so it can never fall back to a face the
+ * design does not own. */
 .answerLine {
+  font-family: var(--mono);
   font-size: 14px;
   color: var(--ink);
   max-width: 78ch;

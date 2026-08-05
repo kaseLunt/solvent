@@ -50,9 +50,18 @@ export function useMeasuredWidth<E extends HTMLElement>({
     const node = ref.current;
     if (node === null) return;
     const measure = () => {
-      // clientWidth is the CONTENT box: padding and borders are already out,
-      // so the chart never renders wider than the space it was given.
-      const raw = node.clientWidth;
+      // THE CONTENT BOX, ACTUALLY (W-VR defect 5). `clientWidth` excludes
+      // borders and scrollbars but INCLUDES padding, so a frame with 12px
+      // side padding handed the chart a width 24px larger than the space it
+      // had — and the overflow landed exactly on the right margin, clipping
+      // the marginal Σ-debt bars and growing a scrollbar. Padding is
+      // subtracted here so the rendered SVG fits the frame it was measured
+      // against, margins included.
+      const style = getComputedStyle(node);
+      const raw =
+        node.clientWidth -
+        (Number.parseFloat(style.paddingLeft) || 0) -
+        (Number.parseFloat(style.paddingRight) || 0);
       if (raw <= 0) return;
       setWidth(Math.round(Math.min(Math.max(raw, min), max)));
       setMeasured(true);

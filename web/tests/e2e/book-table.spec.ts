@@ -196,10 +196,12 @@ test("default dust <1: min_value composed from the engine's decimals; disclosure
   ).toBeVisible();
 
   // The risk map discloses the source-side filter and the three-part label.
+  // W-VR defect 7: the threshold carries its unit ("$1"), composed by
+  // dustMapLegend from dustStepUsdLabel — never a bare "1".
   await expect(page.getByTestId("risk-map-dust-legend")).toHaveText(
     "Source filter: a position is excluded only when both its collateral and its debt are " +
-      "below 1. A position with sub-dollar debt stays on this map when its collateral is at " +
-      "or above 1.",
+      "below $1. A position with sub-dollar debt stays on this map when its collateral " +
+      "is at or above $1.",
   );
   // W-HR-A: the map walks the WHOLE filtered book and states it, with the
   // unfiltered on-book count beside it — there is no loaded/qualifying

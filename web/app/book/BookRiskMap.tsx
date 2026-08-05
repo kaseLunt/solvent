@@ -39,10 +39,8 @@ import { headroomBandLabel, WARN_HEADROOM_DISCLOSURE } from "@/lib/headroom";
 import type { PositionsEngine } from "@/lib/positions";
 import { buildRiskBins, usdExponentLabel, xIndexOf, type RiskBinsResult } from "./riskBins";
 import {
-  RISK_MAP_ANSWER_LEAD,
   RISK_MAP_EXACT_DATA,
   RISK_MAP_FORENSICS_SUMMARY,
-  riskMapCalloutOverflowNote,
   riskMapCellDetailLine,
   riskMapCoverageLine,
   riskMapCritStripNote,
@@ -171,18 +169,16 @@ export function BookRiskMap({
 
   const [selected, setSelected] = useState<DensityCell | null>(null);
   const [active, setActive] = useState<DensityCell | null>(null);
-  // R6 / RM-8 / RM-9: two facts the STATE slot must state can only be known
-  // after layout, because both depend on the MEASURED width. They are lifted
-  // here so they render BEFORE the visual they qualify.
+  // R6 / RM-8: facts the STATE slot must state that can only be known after
+  // layout, because they depend on the MEASURED width. They are lifted here
+  // so they render BEFORE the visual they qualify.
   const [geometry, setGeometry] = useState<DensityGeometry>({
-    calloutOverflow: 0,
     critLanes: 1,
     critStacked: 0,
     laneRendered: false,
   });
   const onGeometry = useCallback((next: DensityGeometry) => {
     setGeometry((previous) =>
-      previous.calloutOverflow === next.calloutOverflow &&
       previous.critLanes === next.critLanes &&
       previous.critStacked === next.critStacked &&
       previous.laneRendered === next.laneRendered
@@ -262,7 +258,16 @@ export function BookRiskMap({
       </div>
 
       {/* ---- SLOT 2: STATE — everything that qualifies the visual, BEFORE
-              the visual (R6), and never inside a <details> (R3 / R7) ---- */}
+              the visual (R6), and never inside a <details> (R3 / R7).
+
+              W-VR defect 7 fixes the line ORDER and the stack's one voice:
+              coverage first (R7), then the refusal that qualifies it, then
+              the source filter, then the sub-$1 lane note, then the crit
+              stacking note, and the warn note LAST. The warn note renders
+              here and ONLY here for this engine — the duplicate that sat
+              above the ENGINE selector is gone (BookPositions). Spacing is
+              the stack's own uniform 4px gap; no line carries margin of its
+              own. ---- */}
       <div className={styles.stateSlot} data-testid="risk-map-state">
         {binned !== null && (
           <span data-testid="risk-map-coverage">
@@ -292,11 +297,6 @@ export function BookRiskMap({
         {geometry.critStacked > 0 && (
           <span data-testid="risk-map-crit-strip-note">
             {riskMapCritStripNote(geometry.critStacked)}
-          </span>
-        )}
-        {geometry.calloutOverflow > 0 && (
-          <span data-testid="risk-map-callout-overflow">
-            {riskMapCalloutOverflowNote(geometry.calloutOverflow)}
           </span>
         )}
         <span className={styles.warnDisclosure} data-testid="risk-map-warn-disclosure">
@@ -361,9 +361,10 @@ export function BookRiskMap({
           </div>
         ) : (
           <>
-            {/* ---- SLOT 3: ANSWER — one computed sentence (R4) ---- */}
+            {/* ---- SLOT 3: ANSWER — ONE computed sentence (R4). The dek
+                    above already says what the map shows; coverage is the
+                    STATE coverage line. Nothing here is pre-written. ---- */}
             <p className={styles.answerLine} data-testid="risk-map-answer">
-              {RISK_MAP_ANSWER_LEAD}{" "}
               <span data-testid="risk-map-reading">{riskMapReadingLine(binned)}</span>
             </p>
 

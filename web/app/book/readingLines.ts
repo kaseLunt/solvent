@@ -87,18 +87,23 @@ export function histogramReadingLine(
 }
 
 /**
- * The RISK MAP's reading line (W-HR-A) — COMPUTED from the same bin result
- * the grid renders, never asserted.
+ * The RISK MAP's ANSWER (template slot 3) — ONE computed sentence, from the
+ * same bin result the grid renders, never asserted (R4).
  *
- * It answers the one question the grid's shape cannot: how much DEBT sits
- * inside the warn edge. Counts and areas are the map's own language; the Σ is
- * the reason anyone looks. The aside is stated in the same sentence so the
- * denominator can never be read as the whole book when it is not.
+ * W-VR defect 2 killed the triple statement: the dek already says what the
+ * map shows and how to read it, and coverage lives on the STATE coverage
+ * line ("{plotted} plotted of {book} · {aside} counted aside"). This
+ * sentence holds ONLY the computed finding: how many plotted accounts sit
+ * inside the warn edge, the exact Σ debt they carry, and the plotted book's
+ * exact Σ it is carried out of. Counts take grouped thousands; both Σs go
+ * through the engine-unit renderer — no float ever holds a displayed number.
  */
 export function riskMapReadingLine(result: RiskBinsResult): string {
   let count = 0;
   let debt = 0n;
+  let mappedDebt = 0n;
   for (const marginal of result.bandTotals) {
+    mappedDebt += marginal.debt;
     // Bands 0…3 are breached / 0–2 / 2–5 / 5–10 — everything strictly inside
     // the warn edge. The edge itself lives in lib/headroom; this loop derives
     // its membership from the band vocabulary rather than restating it.
@@ -108,18 +113,16 @@ export function riskMapReadingLine(result: RiskBinsResult): string {
     }
   }
   const plotted = result.total - result.aside.total;
-  const asideClause =
-    result.aside.total === 0
-      ? "every walked row is plotted"
-      : `${String(result.aside.total)} of ${String(result.total)} walked rows are counted aside ` +
-        "and stay out of the plot";
+  const n = (value: number) => value.toLocaleString("en-US");
+  // "mapped here", never "the book's": this Σ spans the PLOTTED accounts only.
+  // The on-book Σ (dust-filtered rows included) is a different, larger number
+  // that the summary cards above already carry; claiming it here would hand
+  // the reader two contradictory "book" totals.
   return (
-    `What this shows: where the book's debt sits by headroom. ${String(count)} of ` +
-    `${String(plotted)} plotted accounts have less than ${String(WARN_HEADROOM_PCT)}% of their ` +
-    `borrowing capacity left. Σ debt ${renderEngineAmount(
-      debt.toString(),
-      result.decimals,
-    )} in the engine's own unit. ${asideClause}.`
+    `${n(count)} of ${n(plotted)} plotted accounts have less than ` +
+    `${String(WARN_HEADROOM_PCT)}% of their borrowing capacity left, carrying Σ debt ` +
+    `${renderEngineAmount(debt.toString(), result.decimals)} of the ` +
+    `${renderEngineAmount(mappedDebt.toString(), result.decimals)} mapped here.`
   );
 }
 
@@ -238,9 +241,10 @@ export const BAD_DEBT_METHOD =
 // reliably the sentence a reader gets — and every string here is pinned.
 // ---------------------------------------------------------------------------
 
-/** The panel's claim, and the ANSWER slot's lead sentence (template slot 3). */
-export const RISK_MAP_ANSWER_LEAD =
-  "Where accounts cluster by debt size and headroom. Row bars show each band's exact total debt.";
+// W-VR defect 2: RISK_MAP_ANSWER_LEAD is DELETED. It restated the dek
+// (`RISK_MAP_DEK` already names both axes and the marginal), so the ANSWER
+// carried the panel's claim three times. The ANSWER is `riskMapReadingLine`
+// alone — one computed sentence, nothing pre-written.
 
 /**
  * RM-1's LANE DISCLOSURE (STATE).
@@ -278,13 +282,9 @@ export function riskMapCritStripNote(stacked: number): string {
   );
 }
 
-/** RM-9's conditional note: callouts the width could not place clear. */
-export function riskMapCalloutOverflowNote(hidden: number): string {
-  return (
-    `${String(hidden)} of the 12 numbered exposures could not be placed clear at this width. ` +
-    `All 12 are listed with full addresses below.`
-  );
-}
+// W-VR defect 4: `riskMapCalloutOverflowNote` is DELETED with the drawn
+// callouts it counted. The ranked exposures live in FORENSICS with full
+// addresses; nothing overflows because nothing is drawn.
 
 /** RM-13's activated-cell sentence, over the already-held full-book vector. */
 export function riskMapCellDetailLine(

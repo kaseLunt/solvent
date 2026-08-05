@@ -45,6 +45,17 @@ export function dustStepAmount(step: ActiveDustStep): string {
 }
 
 /**
+ * The step's USD display ("$1", "$100", "$1k") — the amount WITH the unit it
+ * is denominated in (W-VR defect 7). The risk map's source-filter sentence
+ * said "below 1", and a threshold with no unit reads as a count or a ratio;
+ * the step is dollars, so its prose says dollars. Formatted HERE so no caller
+ * ever retypes the unit.
+ */
+export function dustStepUsdLabel(step: ActiveDustStep): string {
+  return `$${step}`;
+}
+
+/**
  * A step's integer threshold at `decimals` — exact bigint, `step × 10^decimals`.
  * "off" is null: the ABSENCE of a threshold, which is a different statement
  * from a threshold of zero.
@@ -229,7 +240,9 @@ export function emptyFilteredWalk(
  * filter will discount the one part of the axis this wave built.
  */
 export function dustMapLegend(step: ActiveDustStep): string {
-  const amount = dustStepAmount(step);
+  // W-VR defect 7: the threshold renders WITH its unit ("$1", never a bare
+  // "1"), from this module's own formatter — never retyped at a call site.
+  const amount = dustStepUsdLabel(step);
   return (
     `Source filter: a position is excluded only when both its collateral and its debt are ` +
     `below ${amount}. A position with sub-dollar debt stays on this map when its collateral ` +

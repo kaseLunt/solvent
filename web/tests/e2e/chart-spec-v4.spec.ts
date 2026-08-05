@@ -607,13 +607,16 @@ test("AC-20: 20 colliding crit rows take 20 lanes; the strip GROWS to 8 + 20*8",
 });
 
 // ===========================================================================
-// RM-9 — numbered callouts, leaders and the counted overflow
+// W-VR defect 4 — RM-9's drawn callouts are GONE; the exposures live in
+// FORENSICS whole. Nothing is drawn, so nothing can pile up, cross a bar, or
+// overflow.
 // ===========================================================================
 
-test("AC-21/AC-22/AC-23: callouts + overflow === min(12, marks); leaders under data ink; full addresses in FORENSICS", async ({
+test("W-VR/AC-23: NO drawn callouts, NO leader ink, NO overflow note — all 12 exposures ranked in FORENSICS", async ({
   page,
 }) => {
-  // 14 distinct debts across two bands, so the callout packer has real work.
+  // 14 distinct debts across two bands — the load that used to force the
+  // callout packer into leaders and overflow.
   const rows: RowSpec[] = [];
   for (let i = 0; i < 14; i += 1) {
     rows.push({
@@ -624,70 +627,42 @@ test("AC-21/AC-22/AC-23: callouts + overflow === min(12, marks); leaders under d
   }
   await openMap(page, rows, 6);
 
-  const callouts = page.getByTestId("risk-map-callout");
-  const drawn = await callouts.count();
-  const overflow = Number(
-    await page.getByTestId("density-grid").getAttribute("data-callout-overflow"),
-  );
-  // AC-21: nothing is dropped silently — the twelve are drawn or counted.
-  expect(drawn + overflow).toBe(12);
+  // The SVG draws no callout text, no leader line, and publishes no overflow.
+  await expect(page.getByTestId("risk-map-callout")).toHaveCount(0);
+  await expect(page.getByTestId("density-callout-leader")).toHaveCount(0);
+  await expect(page.getByTestId("risk-map-callout-overflow")).toHaveCount(0);
+  const overflowAttr = await page
+    .getByTestId("density-grid")
+    .getAttribute("data-callout-overflow");
+  expect(overflowAttr).toBeNull();
 
-  // AC-21: every callout NUMBER maps to exactly one FORENSICS row.
+  // STRONGER THAN AC-16 NOW: with the callout numbers gone, the ONLY text
+  // nodes inside the SVG are the axis vocabulary — band labels, decade
+  // ticks, the lane label and the axis title. No bare digits float anywhere.
+  const strayText = await page.getByTestId("density-grid").evaluate((node) => {
+    const svg = node as unknown as SVGSVGElement;
+    const allowed = new Set<Element>();
+    svg.querySelectorAll("[data-testid='density-x-tick'] text").forEach((t) => allowed.add(t));
+    svg.querySelectorAll("[data-testid='density-lane-label']").forEach((t) => allowed.add(t));
+    svg.querySelectorAll("[data-testid='density-band-label']").forEach((t) => allowed.add(t));
+    return Array.from(svg.querySelectorAll("text"))
+      .filter((t) => !allowed.has(t))
+      .map((t) => (t.textContent ?? "").trim())
+      .filter((text) => text !== "debt (usd, log)");
+  });
+  expect(strayText).toEqual([]);
+
+  // AC-21's ledger half survives at full strength: all twelve ranked
+  // exposures are in FORENSICS, ranks 1..12, exactly once each.
   await page.getByTestId("risk-map-exact-data").click();
-  const ranks = await callouts.evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute("data-rank")),
-  );
-  for (const rank of ranks) {
-    await expect(page.locator(`[data-testid="risk-map-exposure"][data-rank="${rank ?? ""}"]`)).toHaveCount(
-      1,
-    );
-  }
   await expect(page.getByTestId("risk-map-exposure")).toHaveCount(12);
-
-  // AC-22: a DISPLACED callout draws a leader whose endpoints are the mark
-  // centre and the label anchor, painted BEFORE all data ink.
-  const leaders = page.getByTestId("density-callout-leader");
-  const leaderCount = await leaders.count();
-  if (leaderCount > 0) {
-    const pairs = await page.getByTestId("density-grid").evaluate((node) => {
-      const svg = node as unknown as SVGSVGElement;
-      const children = Array.from(svg.children);
-      const indexOf = (selector: string) =>
-        children.findIndex((child) => child.matches(selector) || child.querySelector(selector) !== null);
-      return {
-        leaderIndex: children.findIndex(
-          (child) => child.getAttribute("data-testid") === "density-callout-leader",
-        ),
-        binIndex: indexOf("[data-testid='risk-bin']"),
-        leaders: Array.from(svg.querySelectorAll("[data-testid='density-callout-leader']")).map(
-          (line) => ({
-            account: line.getAttribute("data-account") ?? "",
-            x1: Number(line.getAttribute("x1")),
-            x2: Number(line.getAttribute("x2")),
-          }),
-        ),
-        callouts: Array.from(svg.querySelectorAll("[data-testid='risk-map-callout']")).map(
-          (text) => ({
-            account: text.getAttribute("data-account") ?? "",
-            x: Number(text.getAttribute("x")),
-            leader: text.getAttribute("data-leader"),
-          }),
-        ),
-      };
-    });
-    // Painted before all data ink.
-    expect(pairs.leaderIndex).toBeLessThan(pairs.binIndex);
-    for (const leader of pairs.leaders) {
-      const label = pairs.callouts.find((callout) => callout.account === leader.account);
-      expect(label?.leader).toBe("true");
-      expect(label?.x).toBeCloseTo(leader.x2, 6);
-      // …and within the 24px reach the spec allows.
-      expect(Math.abs(leader.x2 - leader.x1)).toBeLessThanOrEqual(24);
-    }
+  for (let rank = 1; rank <= 12; rank += 1) {
+    await expect(
+      page.locator(`[data-testid="risk-map-exposure"][data-rank="${String(rank)}"]`),
+    ).toHaveCount(1);
   }
 
-  // AC-23: the FULL untruncated address plus a copy affordance in FORENSICS,
-  // while the VISUAL keeps its truncation (the callout is a number).
+  // AC-23: the FULL untruncated address plus a copy affordance in FORENSICS.
   const first = page.getByTestId("risk-map-exposure").first();
   await expect(first.getByTestId("risk-map-exposure-address")).toHaveText(/^0x[0-9a-f]{40}$/);
   await expect(first.getByRole("button", { name: /^copy address 0x/ })).toHaveCount(1);
@@ -906,7 +881,9 @@ test("AC-31/AC-32: ONE tab stop, ArrowRight moves the selection, Enter opens the
   expect(requestsAfterMount).toBe(0);
 });
 
-test("AC-33: the source-filter copy states the CONJUNCTION", async ({ page }) => {
+test("AC-33 + W-VR: the source-filter copy states the CONJUNCTION, with its unit, in STATE order", async ({
+  page,
+}) => {
   await page.route("**/v1/stream**", (route) => route.abort());
   await page.route("**/v1/book", (route) => fulfillJson(route, BOOK));
   await page.route("**/v1/positions*", (route) =>
@@ -916,6 +893,19 @@ test("AC-33: the source-filter copy states the CONJUNCTION", async ({ page }) =>
   await expect(page.getByTestId("risk-map-dust-legend")).toContainText(
     "only when both its collateral and its debt are below",
   );
+  // W-VR defect 7: the threshold names its UNIT — "$1", never a bare "1".
+  await expect(page.getByTestId("risk-map-dust-legend")).toContainText("below $1");
+  await expect(page.getByTestId("risk-map-dust-legend")).toContainText("at or above $1");
+
+  // W-VR defect 7: STATE line order — coverage first, then the source
+  // filter, then the warn note LAST; every line is a child of the one stack.
+  const order = await page.getByTestId("risk-map-state").evaluate((root) => {
+    const ids = ["risk-map-coverage", "risk-map-dust-legend", "risk-map-warn-disclosure"];
+    const all = Array.from(root.querySelectorAll("*"));
+    return ids.map((id) => all.findIndex((node) => node.getAttribute("data-testid") === id));
+  });
+  expect(order.every((index) => index >= 0)).toBe(true);
+  expect(order).toEqual([...order].sort((a, b) => a - b));
 });
 
 // ===========================================================================

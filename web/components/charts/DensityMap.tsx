@@ -29,11 +29,13 @@
 //   than making a mark unreachable. No jitter (x is quantitative), no cluster
 //   glyph (every mark must be individually hoverable and focusable).
 //
-//   TWELVE ADDRESSES SMEARED INTO ONE (RM-9). Direct mono addresses collided
-//   and were silently dropped. They are NUMBERED CALLOUTS now, packed
-//   deterministically in debt-rank order, with a leader line when displaced
-//   and a counted overflow when not placeable. All twelve are in FORENSICS
-//   with full addresses regardless.
+//   THE CALLOUTS PILED UP AND ARE GONE (W-VR defect 4, superseding RM-9's
+//   drawn form). The numbered callouts collided against the right edge and
+//   their leader lines crossed the marginal bars and each other. The LEDGER
+//   below carries every nonempty bin exactly and FORENSICS carries all twelve
+//   ranked exposures with full addresses, so the SVG now draws NO callout
+//   text and NO leader ink — nothing was deleted, it was relocated to the
+//   registers that already held the exact equivalent.
 //
 //   THE PIXELS WERE NOT PIXELS (LAW-3, RM-11). The chart was authored at 980
 //   user units and scaled by viewBox into whatever container it got. It
@@ -60,8 +62,6 @@ export interface DensityCell {
 
 /** Width-dependent facts the panel must STATE before the visual (R6). */
 export interface DensityGeometry {
-  /** Callouts that could not be placed clear at this width (RM-9). */
-  calloutOverflow: number;
   /** Lanes the crit strip needed — 2 or more means marks were dodged (RM-8). */
   critLanes: number;
   /** Crit marks that were dodged into a lane below the first. */
@@ -107,10 +107,6 @@ const LANE_GAP = 14;
 /** RM-8: 8px lane pitch, 6×6 marks. */
 const CRIT_PITCH = 8;
 const CRIT_SIZE = 6;
-
-/** RM-9: exclusion radius per band, and the leader's reach. */
-const CALLOUT_RADIUS = 16;
-const CALLOUT_OFFSETS = [8, -8, 12, -12, 16, -16, 20, -20, 24, -24];
 
 /** RM-11: the measured-width envelope. */
 export const DENSITY_MIN_WIDTH = 720;
@@ -212,16 +208,14 @@ export function DensityMap({
     critMarks,
     critLanes,
     critStacked,
-    callouts,
-    calloutOverflow,
     marginalPeak,
   } = geometry;
 
   // R6: the panel states these BEFORE the visual, and only this component can
   // know them — they are functions of the measured width.
   useEffect(() => {
-    onGeometry({ calloutOverflow, critLanes, critStacked, laneRendered });
-  }, [onGeometry, calloutOverflow, critLanes, critStacked, laneRendered]);
+    onGeometry({ critLanes, critStacked, laneRendered });
+  }, [onGeometry, critLanes, critStacked, laneRendered]);
 
   // RM-13: ONE tab stop for the whole grid. The selection is an index into the
   // bins array, which is sorted band-then-column, so ArrowRight/ArrowLeft walk
@@ -290,7 +284,6 @@ export function DensityMap({
           data-width={String(width)}
           data-crit-lanes={String(critLanes)}
           data-strip-height={String(bandHeight(HEADROOM_BREACHED_BAND))}
-          data-callout-overflow={String(calloutOverflow)}
           data-lane={laneRendered ? "true" : "false"}
           onFocus={() => {
             setFocused(true);
@@ -401,35 +394,25 @@ export function DensityMap({
             </text>
           )}
 
-          {/* RM-9 LEADERS, painted BEFORE all data ink so a hairline never
-              crosses a mark it points at. */}
-          {callouts
-            .filter((callout) => callout.leader)
-            .map((callout) => (
-              <line
-                key={`leader-${callout.account}`}
-                className={styles.leader}
-                data-testid="density-callout-leader"
-                data-account={callout.account}
-                x1={callout.markX}
-                y1={callout.markY}
-                x2={callout.anchorX}
-                y2={callout.anchorY}
-              />
-            ))}
-
           {/* Bin rects — quantized opacity, exact count and Σ debt in the
-              title, and the exact equivalent of both in the LEDGER below. */}
+              title, and the exact equivalent of both in the LEDGER below.
+              W-VR defect 6: a LANE bin takes the plain quiet fill instead of
+              the stroked count ramp — at a few px per bin, per-cell strokes
+              rendered as stripe noise. Its exact count and Σ stay in the
+              title and the LEDGER. */}
           {result.bins.map((bin) => {
             const rect = geometry.binRect(bin.xIndex);
             const isSelected =
               selected !== null && selected.band === bin.band && selected.xIndex === bin.xIndex;
+            const laneBin = laneRendered && bin.xIndex < 0;
             return (
               <rect
                 key={`bin-${String(bin.band)}-${String(bin.xIndex)}`}
-                className={`${styles.binCell ?? ""} ${STEP_CLASS[bin.step]} ${
-                  isSelected ? (styles.binSelected ?? "") : ""
-                }`}
+                className={`${
+                  laneBin
+                    ? (styles.binLane ?? "")
+                    : `${styles.binCell ?? ""} ${STEP_CLASS[bin.step]}`
+                } ${isSelected ? (styles.binSelected ?? "") : ""}`}
                 data-testid="risk-bin"
                 data-band={String(bin.band)}
                 data-x-index={String(bin.xIndex)}
@@ -467,24 +450,6 @@ export function DensityMap({
             >
               <title>{mark.title}</title>
             </rect>
-          ))}
-
-          {/* RM-9 NUMBERED CALLOUTS. The number is the reader's index into the
-              FORENSICS exposure list, where the full address lives. */}
-          {callouts.map((callout) => (
-            <text
-              key={`callout-${callout.account}`}
-              className={styles.callout}
-              data-testid="risk-map-callout"
-              data-rank={String(callout.rank)}
-              data-account={callout.account}
-              data-leader={callout.leader ? "true" : "false"}
-              x={callout.anchorX}
-              y={callout.anchorY}
-              textAnchor={callout.anchor}
-            >
-              {String(callout.rank)}
-            </text>
           ))}
 
           {/* RM-2 THE BREAK GLYPH, VISIBLE: a dashed hairline across the plot
@@ -624,17 +589,6 @@ interface CritMark {
   lane: number;
 }
 
-interface Callout {
-  account: string;
-  rank: number;
-  markX: number;
-  markY: number;
-  anchorX: number;
-  anchorY: number;
-  anchor: "start" | "end";
-  leader: boolean;
-}
-
 function layout(result: RiskBinsResult, width: number) {
   const plotW = width - MARGIN.left - MARGIN.right;
 
@@ -732,56 +686,25 @@ function layout(result: RiskBinsResult, width: number) {
   // BOTH edges of a lane bin come from `laneX`, never from `px`. The bin's
   // upper edge is an exponent the lane owns even when that exponent is 0, and
   // routing it through `px` put it on the far side of the break glyph.
+  //
+  // W-VR defect 6: lane bins TILE edge to edge (no per-bin inset). With bins
+  // a few px wide, a 1px inset either side turned the lane into alternating
+  // fill/gap stripes; a continuous quiet band is the honest form for a lane
+  // whose horizontal distances are disclosed as not comparable anyway.
   const binRect = (xIndex: number): { x: number; width: number } => {
     const lo = xIndex / 2;
     const hi = (xIndex + 1) / 2;
     if (laneRendered && xIndex < 0) {
       const left = laneX(lo);
       const right = laneX(hi);
-      const rectWidth = Math.max(right - left - 2, 1.5);
-      const clampedX = Math.min(Math.max(left + 1, laneLeft), laneRight - rectWidth);
+      const rectWidth = Math.max(right - left, 1.5);
+      const clampedX = Math.min(Math.max(left, laneLeft), laneRight - rectWidth);
       return { x: clampedX, width: rectWidth };
     }
     const raw1 = px(lo);
     const raw2 = px(hi);
     return { x: raw1 + 1, width: Math.max(raw2 - raw1 - 2, 1.5) };
   };
-
-  // RM-9 CALLOUT PACKING, deterministic and in debt-rank order: the biggest
-  // exposure always keeps the position nearest its mark, and a smaller one
-  // yields to a leader line or to the counted overflow.
-  const critY = new Map(critMarks.map((mark) => [mark.account, mark.y] as const));
-  const placedByBand = new Map<number, number[]>();
-  const callouts: Callout[] = [];
-  let calloutOverflow = 0;
-  for (const outlier of result.outliers) {
-    const markX = px(outlier.x);
-    const markY = critY.get(outlier.account) ?? bandCenter(outlier.band);
-    const taken = placedByBand.get(outlier.band) ?? [];
-    let placed = false;
-    for (const offset of CALLOUT_OFFSETS) {
-      const anchorX = markX + offset;
-      if (anchorX < MARGIN.left + 4 || anchorX > MARGIN.left + plotW - 4) continue;
-      if (taken.some((other) => Math.abs(other - anchorX) < CALLOUT_RADIUS)) continue;
-      taken.push(anchorX);
-      placedByBand.set(outlier.band, taken);
-      callouts.push({
-        account: outlier.account,
-        rank: outlier.rank,
-        markX,
-        markY,
-        anchorX,
-        anchorY: markY - 6,
-        anchor: offset >= 0 ? "start" : "end",
-        // The FIRST offset is the undisplaced position; every other one is a
-        // displacement, and a displaced number must say which mark it names.
-        leader: offset !== CALLOUT_OFFSETS[0],
-      });
-      placed = true;
-      break;
-    }
-    if (!placed) calloutOverflow += 1;
-  }
 
   let marginalPeak = 0n;
   for (const marginal of result.bandTotals) {
@@ -805,8 +728,6 @@ function layout(result: RiskBinsResult, width: number) {
     critMarks,
     critLanes,
     critStacked,
-    callouts,
-    calloutOverflow,
     marginalPeak,
   };
 }

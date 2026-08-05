@@ -34,7 +34,13 @@ import {
   waterfallForensicsSummary,
   WATERFALL_SECTION_NOTE,
 } from "@/lib/book-copy";
-import { buildWaterfallSteps, factorTimesLabel, waterfallEngineAnswer } from "./waterfallView";
+import {
+  buildWaterfallSteps,
+  factorTimesLabel,
+  waterfallAllDustLine,
+  waterfallAllDustRungs,
+  waterfallEngineAnswer,
+} from "./waterfallView";
 import styles from "./book.module.css";
 
 // WAVE W-3L — ON THE SECTION TEMPLATE (chart spec v4 §1).
@@ -136,28 +142,39 @@ export function BookWaterfall({ waterfall }: { waterfall: Waterfall | null }) {
       </div>
 
       <div className={styles.panelGrid}>
-        {engineIds.map((engine) => (
-          <div className={styles.panel} key={engine} data-testid={`book-waterfall-${engine}`}>
-            {/* ---- SLOT 1: panel HEAD ---- */}
-            <div className={styles.panelHead}>
-              <EngineChip engine={engine} />
-              <span className={styles.comparator}>cumulative eligible debt · usd</span>
+        {engineIds.map((engine) => {
+          // W-VR defect 8: the "all dust" fact left the tick labels and
+          // renders as ONE disclosure line per panel, in the method register.
+          // Same wire points, same zero-member gate — relocated, not deleted.
+          const allDust = waterfallAllDustLine(waterfallAllDustRungs(waterfall, engine));
+          return (
+            <div className={styles.panel} key={engine} data-testid={`book-waterfall-${engine}`}>
+              {/* ---- SLOT 1: panel HEAD ---- */}
+              <div className={styles.panelHead}>
+                <EngineChip engine={engine} />
+                <span className={styles.comparator}>cumulative eligible debt · usd</span>
+              </div>
+              <div className={styles.panelBody}>
+                {/* ---- SLOT 3: ANSWER — computed from this engine's own points ---- */}
+                <p className={styles.answerLine} data-testid={`waterfall-answer-${engine}`}>
+                  {waterfallEngineAnswer(waterfall, engine)}
+                </p>
+                {/* ---- SLOT 4 + 5: VISUAL, with its exact money as direct labels ---- */}
+                <WaterfallSteps
+                  label={`liquidation waterfall for ${engine}`}
+                  steps={buildWaterfallSteps(waterfall, engine)}
+                  width={520}
+                  rowHeight={28}
+                />
+                {allDust !== null && (
+                  <p className={styles.methodLine} data-testid={`waterfall-all-dust-${engine}`}>
+                    {allDust}
+                  </p>
+                )}
+              </div>
             </div>
-            <div className={styles.panelBody}>
-              {/* ---- SLOT 3: ANSWER — computed from this engine's own points ---- */}
-              <p className={styles.answerLine} data-testid={`waterfall-answer-${engine}`}>
-                {waterfallEngineAnswer(waterfall, engine)}
-              </p>
-              {/* ---- SLOT 4 + 5: VISUAL, with its exact money as direct labels ---- */}
-              <WaterfallSteps
-                label={`liquidation waterfall for ${engine}`}
-                steps={buildWaterfallSteps(waterfall, engine)}
-                width={520}
-                rowHeight={28}
-              />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ---- SLOT 6: METHOD — the eligible-vs-realized gloss ---- */}

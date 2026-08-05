@@ -21,6 +21,8 @@ import {
   buildWaterfallSteps,
   factorTimesLabel,
   gridPercentLabel,
+  waterfallAllDustLine,
+  waterfallAllDustRungs,
 } from "../../app/book/waterfallView";
 import {
   BAD_DEBT_METHOD,
@@ -33,16 +35,16 @@ import {
   engineStatsWithheldAnswer,
   histogramReadingLine,
   liquidatableCardSub,
-  riskMapCalloutOverflowNote,
   riskMapCellDetailLine,
   riskMapCoverageLine,
   riskMapCritStripNote,
   riskMapLaneDisclosure,
   riskMapMethodLine,
-  RISK_MAP_ANSWER_LEAD,
+  riskMapReadingLine,
   RISK_MAP_EXACT_DATA,
   RISK_MAP_FORENSICS_SUMMARY,
 } from "../../app/book/readingLines";
+import type { RiskBinsResult } from "../../app/book/riskBins";
 import {
   AT_RISK_READER_CAPTION,
   BAD_DEBT_LEGEND,
@@ -70,7 +72,16 @@ function fixtureWaterfall(): Waterfall {
   return BOOK.waterfall;
 }
 
-test.describe("waterfall step grammar (§18)", () => {
+/**
+ * W-VR defect 8 — THE TICK VOCABULARY, AS REGEXES. Every label is single
+ * line: "×0.90 · −10% · 47 acct" / "×1.00 · unshocked · 48 acct" for flows,
+ * "−10% bad debt · 48 insolvent" for residuals. Counts take grouped
+ * thousands; "all dust" never rides a tick label.
+ */
+const FLOW_TICK = /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) · \d{1,3}(,\d{3})* acct$/u;
+const RESIDUAL_TICK = /^(unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
+
+test.describe("waterfall step grammar (§18, single-line ticks per W-VR)", () => {
   test("factor labels pad to two fraction digits: ×0.90, ×1.00", () => {
     const scale = "1000000000000000000";
     expect(factorTimesLabel("1000000000000000000", scale)).toBe("×1.00");
@@ -86,65 +97,78 @@ test.describe("waterfall step grammar (§18)", () => {
     expect(gridPercentLabel("700000000000000000", scale)).toBe("−30%");
   });
 
-  test("DM steps from the fixture: unshocked census, percent flows, insolvent residuals", () => {
+  test("DM steps from the fixture: single-line ticks — census, percent flows, insolvent residuals", () => {
     const steps = buildWaterfallSteps(fixtureWaterfall(), "debt_manager");
     // Point 0: the standing census + its residual annotation.
     expect(steps[0]).toMatchObject({
-      label: "unshocked",
-      sub: "×1.00 · 1 acct",
+      label: "×1.00 · unshocked · 1 acct",
       display: "$4,200",
       kind: "flow",
     });
     expect(steps[1]).toMatchObject({
-      label: "unshocked bad debt",
-      sub: "1 insolvent",
+      label: "unshocked bad debt · 1 insolvent",
       display: "$239.603961", // the exact micro-string, never rounded
       kind: "residual",
     });
-    // Point 1: the −10% projection.
+    // Point 1: the −10% projection keeps its ×factor prefix ALWAYS.
     expect(steps[2]).toMatchObject({
-      label: "−10%",
-      sub: "×0.90 · 1 acct",
+      label: "×0.90 · −10% · 1 acct",
       display: "$4,200",
       kind: "flow",
     });
     expect(steps[3]).toMatchObject({
-      label: "−10% bad debt",
-      sub: "1 insolvent",
+      label: "−10% bad debt · 1 insolvent",
       display: "$635.643565",
       kind: "residual",
     });
   });
 
-  test("aave steps: zero members means NO all-dust suffix — the Σ still renders; a true zero residual draws no step", () => {
+  test("EVERY tick label is single-line, matches the vocabulary, and carries no dust suffix", () => {
+    for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
+      const steps = buildWaterfallSteps(fixtureWaterfall(), engine);
+      expect(steps.length).toBeGreaterThan(0);
+      for (const step of steps) {
+        // Single line: a tick label may never wrap or stack.
+        expect(step.label).not.toContain("\n");
+        // The two-line grammar is DEAD: no step carries a `sub` at all.
+        expect("sub" in step).toBe(false);
+        // The vocabulary regex — a clipped label ("lvent · all dust") or a
+        // lost "×0.90 ·" prefix cannot match either arm.
+        expect(step.label, step.label).toMatch(
+          step.kind === "residual" ? RESIDUAL_TICK : FLOW_TICK,
+        );
+        expect(step.label).not.toContain("all dust");
+      }
+    }
+  });
+
+  test("aave steps: zero members render honestly; a true zero residual draws no step", () => {
     const steps = buildWaterfallSteps(fixtureWaterfall(), "aave_v3_etherfi");
-    // Σ eligible at ×1.00 is "0" over ZERO accounts. The vacuous form is
-    // RULED OUT (W-UX-C micro-ruling 1): "all dust" needs members to
-    // describe, so the suffix is gated on the annotated count while the
-    // exact $0 still prints — an honest zero over a computed class.
+    // Σ eligible at ×1.00 is "0" over ZERO accounts: the $0 prints — an
+    // honest zero over a computed class — and no dust adjective describes it
+    // anywhere (W-UX-C micro-ruling 1, now enforced on the disclosure line).
     expect(steps[0]).toMatchObject({
-      label: "unshocked",
-      sub: "×1.00 · 0 acct",
+      label: "×1.00 · unshocked · 0 acct",
       display: "$0",
       kind: "flow",
     });
-    expect(steps[0]?.sub).not.toContain("all dust");
-    // −10%: real money, no dust suffix.
+    // −10%: real money.
     expect(steps[1]).toMatchObject({
-      label: "−10%",
-      sub: "×0.90 · 1 acct",
+      label: "×0.90 · −10% · 1 acct",
       display: "$6,000",
       kind: "flow",
     });
     // Bad debt is "0" through −20%: NO residual steps exist for those points.
     expect(steps.filter((step) => step.kind === "residual")[0]).toMatchObject({
-      label: "−30% bad debt",
-      sub: "1 insolvent",
+      label: "−30% bad debt · 1 insolvent",
       display: "$666.66666667",
     });
+    // The fixture's classes are not dust, so the disclosure line is NULL —
+    // absence of the fact, not an empty sentence.
+    expect(waterfallAllDustLine(waterfallAllDustRungs(fixtureWaterfall(), "aave_v3_etherfi"))).toBeNull();
   });
 
-  test("dust never hides a step: a provably-dust residual renders in full with the suffix", () => {
+  test("dust never hides a step, and the all-dust fact RELOCATES to the disclosure line", () => {
     const waterfall: Waterfall = {
       scenario_id: "t",
       scenario_version: "v1",
@@ -177,15 +201,62 @@ test.describe("waterfall step grammar (§18)", () => {
     const steps = buildWaterfallSteps(waterfall, "debt_manager");
     expect(steps).toHaveLength(2); // the projection renders IN FULL, always
     expect(steps[0]).toMatchObject({
-      label: "unshocked",
-      sub: "×1.00 · 2 acct · all dust",
+      label: "×1.00 · unshocked · 2 acct",
       display: "$9.999999", // exact, never rounded
     });
     expect(steps[1]).toMatchObject({
-      label: "unshocked bad debt",
-      sub: "2 insolvent · all dust",
+      label: "unshocked bad debt · 2 insolvent",
       display: "$0.000005", // the exact micro-string still prints
     });
+    // The tick labels carry NO dust qualifier…
+    for (const step of steps) expect(step.label).not.toContain("all dust");
+    // …because the panel's disclosure line carries it WHOLE: the same wire
+    // points, the same zero-member gate, every qualifying rung named.
+    expect(waterfallAllDustRungs(waterfall, "debt_manager")).toEqual({
+      eligible: ["unshocked"],
+      badDebt: ["unshocked"],
+    });
+    expect(waterfallAllDustLine(waterfallAllDustRungs(waterfall, "debt_manager"))).toBe(
+      "all dust: every eligible account at unshocked is dust-sized (Σ eligible debt < $10); " +
+        "every insolvent account at unshocked bad debt is dust-sized (Σ bad debt < $10).",
+    );
+  });
+
+  test("the zero-member gate binds the disclosure line: 0 acct is never described as dust", () => {
+    const waterfall: Waterfall = {
+      scenario_id: "t",
+      scenario_version: "v1",
+      axis: "eth_usd",
+      grid_scale: "1000000000000000000",
+      points: [
+        {
+          index: 0,
+          factor: "1000000000000000000",
+          engines: [
+            {
+              engine: "debt_manager",
+              usd_decimals: 6,
+              newly_eligible_accounts: 0,
+              cumulative_eligible_accounts: 0, // ZERO members…
+              cumulative_debt_eligible_usd: "0", // …over a vacuously dust Σ
+              cumulative_collateral_at_risk_usd: "0",
+              insolvent_if_liquidated_accounts: 0,
+              cumulative_bad_debt_usd: "0",
+            },
+          ],
+        },
+      ],
+      held_flat: [],
+      eligibility_note: "",
+      monotonicity: { ok: true },
+      at_risk_note: "",
+      excluded_engines: [],
+    };
+    expect(waterfallAllDustRungs(waterfall, "debt_manager")).toEqual({
+      eligible: [],
+      badDebt: [],
+    });
+    expect(waterfallAllDustLine({ eligible: [], badDebt: [] })).toBeNull();
   });
 });
 
@@ -407,14 +478,79 @@ test.describe("the ruling's copy, pinned verbatim", () => {
 // CHART SPEC v4 — the risk map's FINAL COPY, and CX-5 / CX-6 / CX-8.
 // ---------------------------------------------------------------------------
 
-test.describe("the risk map's FINAL COPY block, verbatim", () => {
-  test("the panel claim and ANSWER lead", () => {
-    expect(RISK_MAP_ANSWER_LEAD).toBe(
-      "Where accounts cluster by debt size and headroom. Row bars show each band's exact " +
-        "total debt.",
+// ---------------------------------------------------------------------------
+// W-VR defect 2 — the risk map's ANSWER is ONE computed sentence: the warn-
+// edge finding over the plotted book, grouped counts, exact Σs through the
+// engine-unit renderer. The dek carries the panel's claim; the STATE coverage
+// line carries coverage; the ANSWER repeats neither.
+// ---------------------------------------------------------------------------
+
+/** A minimal bin result: only the fields the reading line reads. */
+function readingFixture(): RiskBinsResult {
+  const marginal = (band: number, count: number, debt: bigint) => ({
+    band,
+    label: `band-${String(band)}`,
+    count,
+    debt,
+    debtDisplay: "",
+    title: "",
+  });
+  return {
+    bins: [],
+    crit: [],
+    outliers: [],
+    bandTotals: [
+      marginal(0, 4, 100_000000n), // breached — inside the warn edge
+      marginal(1, 0, 0n),
+      marginal(2, 0, 0n),
+      marginal(3, 360, 538_829_784427n), // 5–10% — still inside the warn edge
+      marginal(4, 0, 0n),
+      marginal(5, 8338, 22_230_308_119167n), // outside the warn edge
+      marginal(6, 0, 0n),
+    ],
+    aside: { noDebt: 0, unknown: 0, refused: 1, unplottable: 0, total: 1 },
+    belowOne: { count: 0, debt: 0n },
+    xMinExp: 0,
+    xMaxExp: 1,
+    total: 8703,
+    decimals: 6,
+  };
+}
+
+test.describe("the risk map's ANSWER — computed, single-statement (W-VR)", () => {
+  test("counts are grouped, both Σs are exact, and nothing else rides the sentence", () => {
+    expect(riskMapReadingLine(readingFixture())).toBe(
+      "364 of 8,702 plotted accounts have less than 10% of their borrowing capacity left, " +
+        "carrying Σ debt 538,929.784427 of the 22,769,237.903594 mapped here.",
     );
   });
 
+  test("the dek's claim, the coverage clause and the old lead are all GONE from the ANSWER", () => {
+    const line = riskMapReadingLine(readingFixture());
+    expect(line).not.toContain("What this shows");
+    expect(line).not.toContain("every walked row is plotted");
+    expect(line).not.toContain("counted aside");
+    expect(line).not.toContain("Where accounts cluster");
+    expect(line).not.toContain("in the engine's own unit");
+    // The Σ spans plotted accounts only; "the book's" would hand the reader a
+    // second, contradictory book total (the cards above carry the real one).
+    expect(line).not.toContain("the book's");
+  });
+
+  test("MUTATE the bands and the sentence changes — computed, never hardcoded (R4)", () => {
+    const mutated = readingFixture();
+    const breached = mutated.bandTotals[0];
+    if (breached === undefined) throw new Error("fixture shape drifted");
+    breached.count = 5;
+    breached.debt = 200_000000n;
+    expect(riskMapReadingLine(mutated)).toBe(
+      "365 of 8,702 plotted accounts have less than 10% of their borrowing capacity left, " +
+        "carrying Σ debt 539,029.784427 of the 22,769,337.903594 mapped here.",
+    );
+  });
+});
+
+test.describe("the risk map's FINAL COPY block, verbatim", () => {
   // AC-27 — the lane disclosure computes its own lower bound.
   test("the lane disclosure names the COMPUTED bound and the incomparability", () => {
     expect(riskMapLaneDisclosure(-6)).toBe(
@@ -432,15 +568,13 @@ test.describe("the risk map's FINAL COPY block, verbatim", () => {
     expect(riskMapCoverageLine(2, 2, 0)).toBe("2 plotted of 2 · 0 counted aside");
   });
 
-  test("the conditional notes name the count and where the rest is listed", () => {
+  test("the conditional crit note names the count and where the rest is listed", () => {
     expect(riskMapCritStripNote(20)).toBe(
       "20 liquidatable marks share a debt neighbourhood and are stacked so each stays " +
         "individually reachable. Every one is listed with its exact debt below.",
     );
-    expect(riskMapCalloutOverflowNote(3)).toBe(
-      "3 of the 12 numbered exposures could not be placed clear at this width. All 12 are " +
-        "listed with full addresses below.",
-    );
+    // W-VR defect 4: the callout-overflow note died with the drawn callouts —
+    // nothing is drawn, so nothing can overflow.
   });
 
   test("the activated cell's sentence carries count, Σ, range and band", () => {

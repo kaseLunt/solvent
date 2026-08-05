@@ -74,7 +74,7 @@ export const OPACITY_LEGEND = "1–9 · 10–99 · 100–999 · 1,000+ accounts"
 /** The compressed sub-$1 lane's single axis label (RM-1 / RM-4). */
 export const LANE_AXIS_LABEL = "<$1";
 
-/** How many debt outliers get numbered callouts (RM-9). */
+/** How many debt outliers are ranked into FORENSICS (W-VR: never drawn). */
 export const TOP_OUTLIERS = 12;
 
 /** count → opacity step: thresholds 1 / 10 / 100 / 1,000. */
@@ -188,7 +188,7 @@ export interface RiskOutlier {
   account: string;
   /** The direct mono label: the truncated address. */
   label: string;
-  /** 1-based debt rank — the callout's number (RM-9). */
+  /** 1-based debt rank — the FORENSICS list's number (W-VR: never drawn). */
   rank: number;
   /** log10 USD debt — GEOMETRY ONLY. */
   x: number;
@@ -315,7 +315,7 @@ export function buildRiskBins(rows: readonly PositionRow[]): RiskBinsResult {
   const counts = new Map<string, { xIndex: number; band: number; count: number; debt: bigint }>();
   const crit: RiskCritPoint[] = [];
   const aside: RiskAside = { noDebt: 0, unknown: 0, refused: 0, unplottable: 0, total: 0 };
-  /** Plotted rows (binned + crit) compete for the numbered callouts. */
+  /** Plotted rows (binned + crit) compete for the FORENSICS outlier ranks. */
   const plotted: {
     account: string;
     debt: bigint;

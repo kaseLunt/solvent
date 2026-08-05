@@ -305,6 +305,40 @@ test("the warn-band disclosure is carried at table and legend level", async ({ p
   );
 });
 
+test("W-VR: the headroom warn note renders ONCE — in the risk map's STATE, never above the controls", async ({
+  page,
+}) => {
+  await mockBook(page, BOOK);
+  await mockPositions(page);
+  await openBook(page, "/book?engine=debt_manager");
+
+  // The risk-map STATE stack keeps the sentence…
+  await expect(page.getByTestId("risk-map-warn-disclosure")).toContainText(
+    "presentation band < 10% headroom, set for display and not by the engine",
+  );
+  // …and the duplicate that sat above the ENGINE selector is gone for the
+  // engine whose sentence it repeated.
+  await expect(page.getByTestId("positions-warn-disclosure")).toHaveCount(0);
+  // Exactly ONE occurrence of the sentence on the whole page.
+  const occurrences = await page.evaluate(() => {
+    const needle = "presentation band < 10% headroom, set for display and not by the engine";
+    const text = document.body.innerText;
+    let count = 0;
+    let at = text.indexOf(needle);
+    while (at !== -1) {
+      count += 1;
+      at = text.indexOf(needle, at + needle.length);
+    }
+    return count;
+  });
+  expect(occurrences).toBe(1);
+
+  // The aave table keeps its OWN, different warn-band line (hf ratio): that
+  // one is not a duplicate of anything and must not be lost to the dedupe.
+  await openBook(page);
+  await expect(page.getByTestId("positions-warn-disclosure")).toContainText(WARN_DISCLOSURE);
+});
+
 test("Scenarios (the Lab) rides the PRIMARY nav register (design ruling)", async ({ page }) => {
   await mockBook(page, BOOK);
   await mockPositions(page);

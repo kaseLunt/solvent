@@ -142,13 +142,32 @@
    panel by fill alone — the arithmetic ceiling for ANY colour at 30% over
    #ffffff is 2.16:1 (pure black), and --accent at 0.30 measures 1.488:1 light
    / 1.788:1 dark. So the 3:1 boundary is carried where WCAG 1.4.11 actually
-   asks for it: a 1px hairline on every nonempty cell in --ink-3, measured
-   3.005:1 (light) / 3.392:1 (dark) against --panel. The SELECTED cell replaces
-   that hairline with --ink-2 (5.897 / 6.760), which is why selection still
-   reads as an additional, stronger statement. */
+   asks for it: a 1px hairline on every nonempty cell.
+
+   W-VR defect 3: that hairline was --ink-3 — a GRAY outline around a faint
+   teal wash, and a step-1 cell read as a hollow empty box, so a grid of
+   mostly step-1 cells read as a grid of empty rectangles. The hairline moves
+   to --accent, the fill's own hue, so a light cell reads as a FILLED cell
+   with a crisp edge rather than an empty outline. --accent measures 4.72:1
+   (light) / 7.17:1 (dark) against --panel — above the old --ink-3 boundary
+   in both themes, so nothing regressed to buy the reading. The SELECTED cell
+   still takes --ink-2 (5.897 / 6.760), hue-distinct from every unselected
+   edge. */
 .binCell {
-  stroke: var(--ink-3);
+  stroke: var(--accent);
   stroke-width: 1;
+}
+
+/* W-VR defect 6 — THE SUB-$1 LANE IS A PLAIN SUBTLE FILL. Lane bins are a
+   few px wide; a 1px stroke per bin turned the lane into dense stripe noise.
+   Lane cells drop the stroke and the count ramp and tile edge to edge in a
+   single quiet ink, DELIBERATELY distinct from the main-axis cells: the
+   lane's compression (and its incomparability with the main axis) is
+   disclosed in STATE copy, exact counts and Σs stay in every cell title and
+   in the LEDGER. Selection still outlines via .binSelected. */
+.binLane {
+  fill: var(--ink-2);
+  fill-opacity: 0.35;
 }
 
 .binStep1 {
@@ -187,20 +206,11 @@
   stroke-dasharray: 2 3;
 }
 
-/* RM-9 numbered callouts: 12px mono beside the mark. */
-.callout {
-  font-family: var(--mono);
-  font-size: 12px;
-  fill: var(--ink-2);
-}
-
-/* RM-9 leader line: drawn UNDER all data ink, so a hairline never crosses a
-   mark it is pointing at. */
-.leader {
-  stroke: var(--ink-2);
-  stroke-width: 1;
-  fill: none;
-}
+/* W-VR defect 4: RM-9's numbered callouts and leader lines are GONE from the
+   drawing. They piled up against the right edge and their leaders crossed the
+   marginal bars and each other; the LEDGER carries every bin exactly and the
+   FORENSICS list carries every ranked exposure, so the SVG draws no callout
+   text and no leader ink at all. */
 
 /* Direct mono labels for named exposures. */
 .outlierLabel {

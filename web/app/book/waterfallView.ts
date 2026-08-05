@@ -1,20 +1,28 @@
-// The waterfall's step grammar (solvent-design SUPPLEMENT §18), as a pure
-// builder so the unit specs can pin it without rendering.
+// The waterfall's step grammar (solvent-design SUPPLEMENT §18, re-cut by
+// W-VR defect 8), as a pure builder so the unit specs can pin it without
+// rendering.
 //
-//   flow      — label "−10%" (factorDistancePercent), sub "×0.90 · 46 acct"
-//   unshocked — label "unshocked",                    sub "×1.00 · 9,738 acct"
-//   residual  — label "−20% bad debt",                sub "46 insolvent"
+// SINGLE-LINE TICK LABELS, ALWAYS. The old two-line label/sub pair clipped
+// from the LEFT inside a fixed gutter ("insolvent · all dust" rendered as
+// "lvent · all dust"; the aave panel lost its "×0.60 · N" prefix outright).
+// Every step now carries ONE line that names the whole rung:
 //
-// Dust NEVER hides a step: projections render in full, always; a step whose
-// Σ is provably < $10 gets "· all dust" APPENDED to its sub while the exact
-// micro-string still prints — never rounded, never suppressed.
+//   projection — "×0.90 · −10% · 47 acct"
+//   standing   — "×1.00 · unshocked · 48 acct"
+//   residual   — "−10% bad debt · 48 insolvent"
+//
+// Dust NEVER hides a step: projections render in full, always. The "all
+// dust" qualifier no longer rides a tick label — it is a REAL semantic
+// (every counted account at that rung is dust-sized, Σ provably < $10) and
+// it moves whole to the panel's all-dust disclosure line
+// (`waterfallAllDustLine`), never deleted.
 
 import { formatUnits, parseDecimal, type Waterfall } from "@solvent/client";
 // `import type` on the chart primitive keeps this module pure (no CSS import
 // reaches the unit-spec transpiler).
 import type { WaterfallStep } from "../../components/charts/WaterfallSteps";
 import { factorDistancePercent, groupDecimalString } from "../../lib/book-format";
-import { ALL_DUST_SUFFIX, sumProvablyDust } from "./dust";
+import { sumProvablyDust } from "./dust";
 
 /** Display an exact USD amount: "$4,200" — string surgery, no float. */
 function usd(value: string, decimals: number): string {
@@ -93,17 +101,10 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     const percent =
       point.index === 0 ? "unshocked" : gridPercentLabel(point.factor, waterfall.grid_scale);
     const times = factorTimesLabel(point.factor, waterfall.grid_scale);
-    // Zero-member gate (W-UX-C micro-ruling 1): the suffix renders only when
-    // the counted class HAS members — "0 acct · all dust" described nobody.
-    // The Σ still prints in full, however small.
-    const eligibleDust =
-      at.cumulative_eligible_accounts > 0 &&
-      sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
-        ? ALL_DUST_SUFFIX
-        : "";
     steps.push({
-      label: percent,
-      sub: `${times} · ${groupDecimalString(String(at.cumulative_eligible_accounts))} acct${eligibleDust}`,
+      label:
+        `${times} · ${percent} · ` +
+        `${groupDecimalString(String(at.cumulative_eligible_accounts))} acct`,
       value: geometry(at.cumulative_debt_eligible_usd, at.usd_decimals),
       display: usd(at.cumulative_debt_eligible_usd, at.usd_decimals),
       kind: "flow",
@@ -112,15 +113,10 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     // "0.000000" is still zero, and a floored zero would fabricate a crit
     // residual bar for bad debt that does not exist (design ruling 1).
     if (/[1-9]/.test(at.cumulative_bad_debt_usd)) {
-      // Same zero-member gate on the residual's own count.
-      const badDebtDust =
-        at.insolvent_if_liquidated_accounts > 0 &&
-        sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
-          ? ALL_DUST_SUFFIX
-          : "";
       steps.push({
-        label: `${percent} bad debt`,
-        sub: `${groupDecimalString(String(at.insolvent_if_liquidated_accounts))} insolvent${badDebtDust}`,
+        label:
+          `${percent} bad debt · ` +
+          `${groupDecimalString(String(at.insolvent_if_liquidated_accounts))} insolvent`,
         value: geometry(at.cumulative_bad_debt_usd, at.usd_decimals),
         display: usd(at.cumulative_bad_debt_usd, at.usd_decimals),
         kind: "residual",
@@ -128,4 +124,70 @@ export function buildWaterfallSteps(waterfall: Waterfall, engine: string): Water
     }
   }
   return steps;
+}
+
+// ---------------------------------------------------------------------------
+// W-VR defect 8 — the "all dust" semantic, RELOCATED (never deleted).
+//
+// The zero-member gate (W-UX-C micro-ruling 1) is unchanged: a rung qualifies
+// only when its counted class HAS members AND its Σ is provably < $10
+// ("0 acct · all dust" described nobody). What changed is WHERE the fact
+// renders: it left the tick labels and became one disclosure line per panel,
+// in the method register, naming every qualifying rung.
+// ---------------------------------------------------------------------------
+
+/** The rungs whose counted classes are provably all dust, per class. */
+export interface WaterfallDustRungs {
+  /** Percent labels of flow rungs ("unshocked", "−10%", …). */
+  eligible: string[];
+  /** Percent labels of bad-debt rungs whose insolvent class is all dust. */
+  badDebt: string[];
+}
+
+/** Walk the SAME wire points the bars render and collect the dust rungs. */
+export function waterfallAllDustRungs(waterfall: Waterfall, engine: string): WaterfallDustRungs {
+  const rungs: WaterfallDustRungs = { eligible: [], badDebt: [] };
+  for (const point of waterfall.points) {
+    const at = point.engines.find((candidate) => candidate.engine === engine);
+    if (at === undefined) continue;
+    const percent =
+      point.index === 0 ? "unshocked" : gridPercentLabel(point.factor, waterfall.grid_scale);
+    if (
+      at.cumulative_eligible_accounts > 0 &&
+      sumProvablyDust(at.cumulative_debt_eligible_usd, at.usd_decimals)
+    ) {
+      rungs.eligible.push(percent);
+    }
+    if (
+      /[1-9]/.test(at.cumulative_bad_debt_usd) &&
+      at.insolvent_if_liquidated_accounts > 0 &&
+      sumProvablyDust(at.cumulative_bad_debt_usd, at.usd_decimals)
+    ) {
+      rungs.badDebt.push(percent);
+    }
+  }
+  return rungs;
+}
+
+/**
+ * The panel's all-dust disclosure line, or null when no rung qualifies.
+ * `ALL_DUST_SUFFIX`'s meaning, stated in full where a reader can hold it:
+ * a Σ under $10 proves every member of the summed class is dust-sized.
+ */
+export function waterfallAllDustLine(rungs: WaterfallDustRungs): string | null {
+  const clauses: string[] = [];
+  if (rungs.eligible.length > 0) {
+    clauses.push(
+      `every eligible account at ${rungs.eligible.join(", ")} is dust-sized ` +
+        `(Σ eligible debt < $10)`,
+    );
+  }
+  if (rungs.badDebt.length > 0) {
+    clauses.push(
+      `every insolvent account at ${rungs.badDebt.join(", ")} bad debt is dust-sized ` +
+        `(Σ bad debt < $10)`,
+    );
+  }
+  if (clauses.length === 0) return null;
+  return `all dust: ${clauses.join("; ")}.`;
 }

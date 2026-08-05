@@ -107,13 +107,12 @@ forbidden, and no cluster glyph is used, because every mark must be
 individually hoverable and focusable. Jitter is forbidden: x is quantitative.
 Vertical dodging is lawful because y carries no quantity inside a band row.
 
-**RM-9. Numbered callouts.** Top 12 exposures by exact debt take numbered
-callouts `1`–`12` at 12px mono beside their mark. Deterministic packing in
-debt-rank order at a 16px exclusion radius per band. A callout that cannot be
-placed clear takes a leader line: a 1px `--ink-2` hairline from the mark to the
-nearest free position within 24px, drawn under all data ink. A callout that
-still cannot be placed is not drawn and is counted in the overflow line. Every
-one of the twelve is in FORENSICS regardless.
+**RM-9. Numbered callouts — RETIRED (W-VR, 2026-08-05).** The drawn callouts
+shipped as leader-line spaghetti over the dense right columns and the owner
+rejected them on sight. No callout and no leader line is drawn at all; the top
+12 exposures live in FORENSICS alone, which already carried all twelve. The
+overflow STATE line is retired with them (there is nothing drawn to overflow).
+AC-21/AC-22 now assert the ABSENCE of callouts and leaders.
 
 **RM-10. Exact bin index, no float in semantics (LAW-4).** `riskBins` currently
 decides the semantic bin with `Math.floor(Math.log10(v) * 2)` while its own
@@ -289,7 +288,11 @@ renders against a zero denominator; a percentage above 9,999% renders
 **Risk map**
 
 - Lane axis label: `<$1`
-- Panel claim / ANSWER lead: `Where accounts cluster by debt size and headroom. Row bars show each band's exact total debt.`
+- Panel claim / ANSWER lead — RETIRED (W-VR, 2026-08-05): the pre-written lead
+  restated the dek and shipped as a triple-duplicated ANSWER. The ANSWER is now
+  ONE computed sentence from `riskMapReadingLine` (warn-edge count over plotted,
+  both Σs exact, "mapped here" never "the book's" — the plotted Σ is not the
+  on-book Σ) and carries no pre-written prose.
 - Lane disclosure (STATE): `Sub-$1 debts occupy an order-preserving compressed log lane spanning {lo} to <$1 in this snapshot. Horizontal distances in this lane are not comparable with the main axis.` (`{lo}` computed from `xMinExp` via `usdExponentLabel`.)
 - Coverage line (STATE, always): `{plotted} plotted of {book} · {aside} counted aside`
 - Source filter (STATE): `Source filter: a position is excluded only when both its collateral and its debt are below {step}. A position with sub-dollar debt stays on this map when its collateral is at or above {step}.`
@@ -362,8 +365,8 @@ renders against a zero denominator; a percentage above 9,999% renders
 - **AC-18** Two crit rows at debts 1000 and 1001 render at `y` values differing by at least 8, both with non-empty titles.
 - **AC-19** Crit order is descending exact debt with account tiebreak, stable across input permutation.
 - **AC-20** With 20 crit rows inside one mark width, 20 distinct `y` values render, strip height equals `8 + 20*8`, and no two marks share a bounding box.
-- **AC-21** `count(callouts) + reportedOverflow === min(12, plottedMarks)`; every callout number maps to exactly one FORENSICS row.
-- **AC-22** A callout displaced from its mark renders a leader line whose endpoints are the mark centre and the label anchor, painted before all data ink.
+- **AC-21 (amended by W-VR)** No callout is drawn: `count(callouts) === 0` and no overflow line renders. The 12-rank FORENSICS assertions keep full strength.
+- **AC-22 (amended by W-VR)** No leader line is drawn: `count(leaders) === 0`, and no stray text rides the SVG outside the axis/label vocabulary.
 - **AC-23** FORENSICS exposure rows carry the **full untruncated address** and a copy affordance; the visual keeps truncation.
 
 **Risk map ledger, state and a11y**

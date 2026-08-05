@@ -200,13 +200,48 @@ test("waterfall: percent labels, unshocked census, exact micro-strings, verbatim
   await openBook(page);
 
   const dm = page.getByTestId("book-waterfall-debt_manager");
-  await expect(dm).toContainText("unshocked");
-  await expect(dm).toContainText("×1.00 · 1 acct");
-  await expect(dm).toContainText("−10%");
-  await expect(dm).toContainText("×0.90 · 1 acct");
-  await expect(dm).toContainText("unshocked bad debt");
-  await expect(dm).toContainText("1 insolvent");
+  // W-VR defect 8: SINGLE-LINE tick labels — the ×factor, the percent and the
+  // count on one line, never a two-line label/sub pair that clips.
+  await expect(dm).toContainText("×1.00 · unshocked · 1 acct");
+  await expect(dm).toContainText("×0.90 · −10% · 1 acct");
+  await expect(dm).toContainText("unshocked bad debt · 1 insolvent");
   await expect(dm).toContainText("$239.603961"); // exact, never rounded
+
+  // W-VR defect 8, the left-clip guard: every tick is ONE <text> node whose
+  // rendered box starts INSIDE the SVG and whose text matches the vocabulary.
+  // A left-clipped label ("lvent · all dust") or a lost "×0.90 ·" prefix
+  // fails the regex; a bbox poking past x=0 fails the geometry check.
+  const FLOW_TICK = /^×\d+\.\d{2,} · (unshocked|−\d+(\.\d+)?%) · \d{1,3}(,\d{3})* acct$/u;
+  const RESIDUAL_TICK = /^(unshocked|−\d+(\.\d+)?%) bad debt · \d{1,3}(,\d{3})* insolvent$/u;
+  for (const engine of ["debt_manager", "aave_v3_etherfi"]) {
+    const ticks = await page
+      .getByTestId(`book-waterfall-${engine}`)
+      .getByTestId("waterfall-tick")
+      .evaluateAll((nodes) =>
+        nodes.map((node) => {
+          const text = node as unknown as SVGTextElement;
+          return {
+            label: text.textContent ?? "",
+            bboxX: text.getBBox().x,
+            lines: text.querySelectorAll("tspan").length,
+          };
+        }),
+      );
+    expect(ticks.length).toBeGreaterThan(0);
+    for (const tick of ticks) {
+      expect(tick.bboxX, tick.label).toBeGreaterThanOrEqual(0);
+      expect(tick.lines).toBe(0); // one line — no stacked tspans, ever
+      expect(tick.label).not.toContain("all dust");
+      expect(
+        FLOW_TICK.test(tick.label) || RESIDUAL_TICK.test(tick.label),
+        `tick label out of vocabulary: ${tick.label}`,
+      ).toBe(true);
+    }
+  }
+  // The fixture's classes are not dust, so NO panel renders an all-dust
+  // disclosure line (the relocation target renders only when the fact holds).
+  await expect(page.getByTestId("waterfall-all-dust-debt_manager")).toHaveCount(0);
+  await expect(page.getByTestId("waterfall-all-dust-aave_v3_etherfi")).toHaveCount(0);
 
   // The section note, verbatim; the ProjectionBadge stays where it was.
   await expect(page.getByTestId("waterfall-section-note")).toHaveText(
@@ -440,11 +475,16 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
     "1–9 · 10–99 · 100–999 · 1,000+ accounts",
   );
 
-  // The reading line is COMPUTED from the same bins the grid draws.
+  // The ANSWER is ONE computed sentence (W-VR defect 2): the warn-edge
+  // finding over the plotted book — no "What this shows", no coverage clause
+  // (that is the STATE coverage line's job), no pre-written lead.
   await expect(page.getByTestId("risk-map-reading")).toHaveText(
-    "What this shows: where the book's debt sits by headroom. 1 of 1 plotted accounts have " +
-      "less than 10% of their borrowing capacity left. Σ debt 6,000 in the engine's own unit. " +
-      "1 of 2 walked rows are counted aside and stay out of the plot.",
+    "1 of 1 plotted accounts have less than 10% of their borrowing capacity left, " +
+      "carrying Σ debt 6,000 of the 6,000 mapped here.",
+  );
+  await expect(page.getByTestId("risk-map-answer")).toHaveText(
+    "1 of 1 plotted accounts have less than 10% of their borrowing capacity left, " +
+      "carrying Σ debt 6,000 of the 6,000 mapped here.",
   );
 
   // RM-15 / AC-26: the coverage line renders on EVERY render, outside every
@@ -457,9 +497,11 @@ test("the auto walk: live progress, completed header, and ONE drawing (the Densi
     page.getByTestId("risk-map-forensics").getByTestId("risk-map-refused"),
   ).toHaveCount(0);
 
-  // RM-9: the top exposure takes a NUMBERED callout; its FULL address lives in
+  // W-VR defect 4: NOTHING is drawn as a callout — the SVG carries no callout
+  // text and no leader ink. The top exposure's FULL address lives in
   // FORENSICS, where a truncation would make the panel useless.
-  await expect(page.getByTestId("risk-map-callout")).toHaveText("1");
+  await expect(page.getByTestId("risk-map-callout")).toHaveCount(0);
+  await expect(page.getByTestId("density-callout-leader")).toHaveCount(0);
   await expect(page.getByTestId("risk-map-exposure-address")).toHaveText(
     "0xAAaA000000000000000000000000000000000001",
   );

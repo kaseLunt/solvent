@@ -30,6 +30,7 @@ import {
   dustDisclosureExact,
   dustMapLegend,
   dustStepAmount,
+  dustStepUsdLabel,
   dustThresholdInteger,
   emptyFilteredWalk,
   footerAccountingDust,
@@ -182,21 +183,31 @@ test.describe("dust copy constants — the ruling's strings, verbatim", () => {
   // said dust was "excluded at the source" and left the reader to guess WHICH
   // rows that removes; the natural guess (any sub-dollar debt) is wrong,
   // because the contract's exclusion is a CONJUNCTION over both totals.
-  test("the risk-map source-filter disclosure states the conjunction", () => {
+  //
+  // W-VR defect 7: the threshold carries its UNIT ("below $1", never a bare
+  // "below 1" that reads as a count), formatted by dust.ts itself.
+  test("the risk-map source-filter disclosure states the conjunction, with the unit", () => {
     expect(dustMapLegend("1")).toBe(
       "Source filter: a position is excluded only when both its collateral and its debt are " +
-        "below 1. A position with sub-dollar debt stays on this map when its collateral is at " +
-        "or above 1.",
+        "below $1. A position with sub-dollar debt stays on this map when its collateral is at " +
+        "or above $1.",
     );
     expect(dustMapLegend("1k")).toBe(
       "Source filter: a position is excluded only when both its collateral and its debt are " +
-        "below 1k. A position with sub-dollar debt stays on this map when its collateral is at " +
-        "or above 1k.",
+        "below $1k. A position with sub-dollar debt stays on this map when its collateral is at " +
+        "or above $1k.",
     );
     // AC-33: the clause that makes the conjunction unmistakable.
     expect(dustMapLegend("100")).toContain(
       "only when both its collateral and its debt are below",
     );
+    // The unit is dust.ts's own formatting, never retyped at a call site.
+    expect(dustStepUsdLabel("1")).toBe("$1");
+    expect(dustStepUsdLabel("100")).toBe("$100");
+    expect(dustStepUsdLabel("1k")).toBe("$1k");
+    // A bare, unitless threshold never comes back: both clauses carry the $.
+    expect(dustMapLegend("100")).toContain("below $100");
+    expect(dustMapLegend("100")).toContain("at or above $100");
   });
 });
 
